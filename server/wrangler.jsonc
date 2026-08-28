@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mixtape-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-28",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  }
+  // Secrets (set via `wrangler secret put` / .dev.vars locally):
+  //   DATABASE_URL            — Neon connection string
+  //   BETTER_AUTH_SECRET      — Better Auth signing secret
+  //   ANTHROPIC_API_KEY       — curation engine
+  //   APPLE_MUSICKIT_KEY_*    — MusicKit developer-token signing (added in P1)
+}
