@@ -1,5 +1,5 @@
 {
-  "id": "8d4d190f-5e29-43aa-8dd7-8872e357fc06",
+  "id": "eaa0f4e2-a2fb-47c0-91ae-eec67f624689",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -19,7 +19,7 @@
           "name": "apple_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "isrc": {
           "name": "isrc",
@@ -71,6 +71,22 @@
             }
           ],
           "isUnique": true,
+          "where": "\"tracks\".\"apple_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tracks_isrc_idx": {
+          "name": "tracks_isrc_idx",
+          "columns": [
+            {
+              "expression": "isrc",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
