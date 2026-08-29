@@ -10,6 +10,8 @@ import { workersAiEmbedder } from './enrich/embedder'
 import type { EnrichDeps } from './enrich/pipeline'
 import type { Db } from './db/types'
 import { handleScheduled } from './enrich/scheduled'
+import { anthropicLlm, buildAnthropic } from './dj/llm'
+import type { DjDeps } from './dj/loop'
 
 // Minimal structural stand-in for the platform's ScheduledController — this
 // project's tsconfig doesn't pull in @cloudflare/workers-types, so the real
@@ -24,6 +26,7 @@ type Bindings = {
   ENRICH_ADMIN_TOKEN?: string
   ITUNES_STOREFRONT?: string
   AI?: { run(model: string, input: { text: string[] }): Promise<unknown> }
+  ANTHROPIC_API_KEY?: string
 }
 
 // neon-http (a single fetch() per query) can't run transactions at all — the
@@ -59,6 +62,19 @@ function buildDeps(env: Bindings): EnrichDeps | undefined {
   }
 }
 
+// No ANTHROPIC_API_KEY (or no AI binding, for the intent embedder) → no dj
+// deps. Same fail-loud-by-absence convention as buildDeps/enrich above:
+// createApp only mounts /sessions/* when `dj` is present, so an unconfigured
+// key means the route group 404s instead of every turn burning a request on
+// a client that was never going to construct.
+function buildDjDeps(env: Bindings): DjDeps | undefined {
+  if (!env.ANTHROPIC_API_KEY || !env.AI) return undefined
+  return {
+    llm: anthropicLlm(buildAnthropic(env.ANTHROPIC_API_KEY)),
+    embed: workersAiEmbedder(env.AI),
+  }
+}
+
 export default {
   async fetch(req: Request, env: Bindings, ctx: ExecutionContext) {
     const { db, pool } = buildDb(env)
@@ -73,7 +89,9 @@ export default {
       // are configured. No AI binding → no enrich surface: better a 404 than
       // every track burning 3 'internal: TypeError' attempts.
       const enrich = deps && env.ENRICH_ADMIN_TOKEN ? { adminToken: env.ENRICH_ADMIN_TOKEN, deps } : undefined
-      const app = createApp({ auth, db, enrich })
+      const djDeps = buildDjDeps(env)
+      const dj = djDeps ? { deps: djDeps } : undefined
+      const app = createApp({ auth, db, enrich, dj })
       return await app.fetch(req, env, ctx)
     } finally {
       // Closes the pool's socket(s) after the response is built rather than

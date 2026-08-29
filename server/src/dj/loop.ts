@@ -42,6 +42,8 @@ const MAX_TURNS = 4
 export const FALLBACK_TEXT = "took too many tries — here's where I landed."
 const CURATION_APOLOGY = 'lost my train of thought on that one — try again?'
 const CONFLICT_APOLOGY = 'the queue shifted while I was working on it — try that again?'
+const LLM_APOLOGY = 'the line to the booth dropped — try that again?'
+const INTERNAL_APOLOGY = 'something skipped on my end — try that again?'
 
 // Thrown out of runDjTurn on any turn-ending failure. `message` is always a
 // short, fixed, content-free string — never the LLM's own error text, a
@@ -70,12 +72,17 @@ export class DjError extends Error {
 
 function normalizeError(e: unknown): DjError {
   if (e instanceof DjError) return e
-  if (e instanceof LlmError) {
-    return new DjError('llm', `dj: llm request failed${e.status !== undefined ? ` (status ${e.status})` : ''}`)
-  }
+  // e.status (an HTTP status from the upstream Anthropic call) never rides
+  // the message — djErrorStatus already maps `kind` to a client-facing
+  // status code (502 for 'llm'), so the upstream status is diagnostic noise
+  // a listener-ready chat bubble has no use for. It's dropped rather than
+  // stashed on a separate field: nothing downstream (logTurn logs `kind`
+  // only) currently needs it, and DjError's own class comment already rules
+  // out message-carried diagnostics as a pattern.
+  if (e instanceof LlmError) return new DjError('llm', LLM_APOLOGY)
   if (e instanceof CurationTruncated || e instanceof CurationUnparseable) return new DjError('curation', CURATION_APOLOGY)
   if (e instanceof QueueVersionConflict) return new DjError('conflict', CONFLICT_APOLOGY)
-  return new DjError('internal', 'dj: internal error')
+  return new DjError('internal', INTERNAL_APOLOGY)
 }
 
 // Static across every turn — no volatile content lives in system anymore.
@@ -130,6 +137,13 @@ async function loadHistory(db: Db, sessionId: string, beforeSeq: number): Promis
 
 async function getSessionQueueVersion(db: Db, sessionId: string): Promise<number> {
   const [row] = await db.select({ queueVersion: djSessions.queueVersion }).from(djSessions).where(eq(djSessions.id, sessionId))
+  // Kept as a dev-facing string, unlike every other DjError construction in
+  // this file: it is UNREACHABLE from any client. Every route (sessions.ts)
+  // calls loadOwnedSession first and returns 404 before ever reaching
+  // runDjTurn with a session id — the only way this branch fires is a
+  // caller that skips the route layer entirely (this file's own tests) or a
+  // row deleted in the gap between that check and this read, neither of
+  // which reaches an HTTP response body.
   if (!row) throw new DjError('internal', 'dj: session not found')
   return row.queueVersion
 }

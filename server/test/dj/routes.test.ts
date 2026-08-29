@@ -411,8 +411,14 @@ describe('session routes', () => {
       const app = buildApp(db, { embed: fakeEmbed, llm: failingLlm }, authedAs('u1'))
       const res = await postJson(app, `/sessions/${sessionId}/messages`, { text: 'try again' })
       expect(res.status).toBe(502)
-      const body = (await res.json()) as { error: string }
+      const body = (await res.json()) as { error: string; message: string }
       expect(body.error).toBe('llm')
+      // The message is listener-ready — a P3b chat bubble renders it as-is,
+      // so it must never carry the dev-facing "dj:" prefix or a raw status
+      // code (e.g. from LlmError('boom', 503) above), only the apology copy.
+      expect(body.message).not.toMatch(/dj:/)
+      expect(body.message).not.toMatch(/503/)
+      expect(body.message).toBe('the line to the booth dropped — try that again?')
 
       const getRes = await getJson(app, `/sessions/${sessionId}`)
       const getBody = (await getRes.json()) as { messages: Array<{ role: string; content: string }> }

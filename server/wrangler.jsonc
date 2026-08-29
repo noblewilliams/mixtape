@@ -20,7 +20,8 @@
   //   BETTER_AUTH_URL         — deployed worker origin (http://localhost:8787 locally)
   //   APPLE_BUNDLE_ID         — com.noble.mixtape (Apple idToken audience)
   // ENRICH_ADMIN_TOKEN        — admin guard for /enrich/*; unset disables the route group entirely
+  //   ANTHROPIC_API_KEY       — DJ engine (Sonnet 5 agent loop); unset disables /sessions/* entirely
   // Optional var (not secret):
   //   ITUNES_STOREFRONT       — iTunes storefront code for enrichment lookups (default "ng")
-  // Later phases add: ANTHROPIC_API_KEY (P3 curation), MusicKit developer-token key (P2 catalog).
+  // Later phases add: MusicKit developer-token key (P2 catalog).
 }

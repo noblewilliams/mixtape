@@ -52,9 +52,12 @@ function djErrorStatus(kind: DjError['kind']): 400 | 409 | 502 {
   return 502
 }
 
-// `e.message` is always the loop's own vetted, content-free apology text
-// (see DjError's class comment in dj/loop.ts) — safe to surface verbatim as
-// the client-facing copy, never the underlying error it wraps.
+// `e.message` is always listener-ready: a short, fixed apology a P3b chat
+// bubble can render verbatim as `e.message` with no further formatting —
+// never the LLM's raw error text, a curation parse failure, a "dj:"-prefixed
+// dev string, or any other diagnostic detail (status codes included). `kind`
+// carries the only diagnostic this body needs; see dj/loop.ts's DjError
+// class comment and normalizeError for where each kind's copy is set.
 function djErrorBody(e: DjError, extra: Record<string, unknown> = {}) {
   return { error: e.kind, message: e.message, queue: e.queue, queueVersion: e.queueVersion, ...extra }
 }
