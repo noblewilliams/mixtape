@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/config.dart';
 import '../../data/api/api_client.dart';
@@ -34,7 +35,8 @@ class AuthNotifier extends Notifier<AuthStatus> {
     bool signedIn;
     try {
       signedIn = await ref.read(authRepositoryProvider).isSignedIn();
-    } catch (_) {
+    } catch (e) {
+      debugPrint('auth restore failed: $e');
       signedIn = false; // unreadable keychain == not signed in
     }
     if (!ref.mounted) return;

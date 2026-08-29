@@ -12,6 +12,11 @@ class FakeGateway implements AppleAuthGateway {
   Future<String> getIdentityToken() async => 'apple-id-token';
 }
 
+class CancellingGateway implements AppleAuthGateway {
+  @override
+  Future<String> getIdentityToken() async => throw AppleSignInCancelled();
+}
+
 void main() {
   test('signs in: posts idToken, stores bearer token from header', () async {
     late Map<String, dynamic> sentBody;
@@ -76,6 +81,48 @@ void main() {
       ),
     );
     await repo.signOut();
+    expect(await store.read(), isNull);
+  });
+
+  test('sign-in throws NetworkException on a slow server and stores nothing', () async {
+    final store = InMemoryTokenStore();
+    final inner = MockClient((req) async {
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      return http.Response('{"user":{}}', 200, headers: {'set-auth-token': 'bearer-abc'});
+    });
+    final repo = AuthRepository(
+      tokenStore: store,
+      gateway: FakeGateway(),
+      api: ApiClient(
+        baseUrl: 'http://x',
+        tokenStore: store,
+        inner: inner,
+        timeout: const Duration(milliseconds: 50),
+      ),
+    );
+
+    await expectLater(repo.signInWithApple(), throwsA(isA<NetworkException>()));
+    expect(await store.read(), isNull);
+  });
+
+  test('sign-in rethrows AppleSignInCancelled and makes no HTTP request', () async {
+    final store = InMemoryTokenStore();
+    var requested = false;
+    final repo = AuthRepository(
+      tokenStore: store,
+      gateway: CancellingGateway(),
+      api: ApiClient(
+        baseUrl: 'http://x',
+        tokenStore: store,
+        inner: MockClient((_) async {
+          requested = true;
+          return http.Response('{}', 200);
+        }),
+      ),
+    );
+
+    await expectLater(repo.signInWithApple(), throwsA(isA<AppleSignInCancelled>()));
+    expect(requested, isFalse);
     expect(await store.read(), isNull);
   });
 }
