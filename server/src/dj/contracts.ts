@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import type { LlmToolDef } from './llm'
 
-export const intentSchema = z.object({
+const intentBase = z.object({
   themes: z.string().min(1),
   tempoMin: z.number().int().min(40).max(260).optional(),
   tempoMax: z.number().int().min(40).max(260).optional(),
@@ -12,24 +12,54 @@ export const intentSchema = z.object({
   familiarity: z.enum(['comfort', 'mix', 'adventurous']).default('mix'),
   targetCount: z.number().int().min(3).max(60).default(15),
 })
+
+// Shared by intentSchema and opIntentSchema: an inverted tempo/era window
+// (e.g. tempoMin > tempoMax) is a nonsensical request, not just an
+// out-of-range field, so it's checked cross-field rather than per-property.
+function checkWindowOrdering(
+  data: { tempoMin?: number; tempoMax?: number; eraFrom?: number; eraTo?: number },
+  ctx: z.RefinementCtx,
+) {
+  if (data.tempoMin !== undefined && data.tempoMax !== undefined && data.tempoMin > data.tempoMax) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'tempoMin must be <= tempoMax', path: ['tempoMin'] })
+  }
+  if (data.eraFrom !== undefined && data.eraTo !== undefined && data.eraFrom > data.eraTo) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'eraFrom must be <= eraTo', path: ['eraFrom'] })
+  }
+}
+
+export const intentSchema = intentBase.superRefine(checkWindowOrdering)
 export type Intent = z.infer<typeof intentSchema>
 
-const removeOp = z.object({ op: z.literal('remove'), position: z.number().int().min(0) })
-const moveOp = z.object({
-  op: z.literal('move'),
-  from: z.number().int().min(0),
-  to: z.number().int().min(0),
-})
-const swapOp = z.object({
-  op: z.literal('swap'),
-  position: z.number().int().min(0),
-  intent: intentSchema.optional(),
-})
-const extendOp = z.object({
-  op: z.literal('extend'),
-  count: z.number().int().min(1).max(20),
-  intent: intentSchema.optional(),
-})
+// Used only for swap/extend's replacement intent: targetCount doesn't apply
+// there (swap replaces exactly one track, extend uses its own `count`) — a
+// full intentSchema would let zod inject targetCount:15 onto a 1-track swap,
+// and the agent loop (Task 7) would generate 15 replacements instead of 1.
+export const opIntentSchema = intentBase.omit({ targetCount: true }).superRefine(checkWindowOrdering)
+export type OpIntent = z.infer<typeof opIntentSchema>
+
+const removeOp = z.object({ op: z.literal('remove'), position: z.number().int().min(0) }).strict()
+const moveOp = z
+  .object({
+    op: z.literal('move'),
+    from: z.number().int().min(0),
+    to: z.number().int().min(0),
+  })
+  .strict()
+const swapOp = z
+  .object({
+    op: z.literal('swap'),
+    position: z.number().int().min(0),
+    intent: opIntentSchema.optional(),
+  })
+  .strict()
+const extendOp = z
+  .object({
+    op: z.literal('extend'),
+    count: z.number().int().min(1).max(20),
+    intent: opIntentSchema.optional(),
+  })
+  .strict()
 
 export const queueOpSchema = z.discriminatedUnion('op', [removeOp, moveOp, swapOp, extendOp])
 export type QueueOp = z.infer<typeof queueOpSchema>
@@ -38,9 +68,9 @@ export const queueOpsSchema = z.array(queueOpSchema).min(1).max(20)
 
 // Longhand JSON Schema for the intent fields, shared verbatim between
 // generate_queue's top-level input and edit_queue's swap/extend `intent`
-// field, so the two can't drift from each other — a drift test in
-// contracts.test.ts also checks this against intentSchema itself.
-const intentProperties: Record<string, unknown> = {
+// field, so the two can't drift from each other — an agreement test in
+// contracts.test.ts checks both against their zod counterparts.
+const intentPropertiesBase: Record<string, unknown> = {
   themes: {
     type: 'string',
     minLength: 1,
@@ -51,13 +81,13 @@ const intentProperties: Record<string, unknown> = {
     type: 'integer',
     minimum: 40,
     maximum: 260,
-    description: 'Lower BPM bound, if the listener implied a tempo floor.',
+    description: 'Lower BPM bound, if the listener implied a tempo floor. Must be <= tempoMax when both are set.',
   },
   tempoMax: {
     type: 'integer',
     minimum: 40,
     maximum: 260,
-    description: 'Upper BPM bound, if the listener implied a tempo ceiling.',
+    description: 'Upper BPM bound, if the listener implied a tempo ceiling. Must be >= tempoMin when both are set.',
   },
   energyArc: {
     type: 'string',
@@ -65,8 +95,18 @@ const intentProperties: Record<string, unknown> = {
     description:
       'Shape of energy across the queue: rise (build up), fall (wind down), arc (build then release), steady (flat).',
   },
-  eraFrom: { type: 'integer', minimum: 1900, maximum: 2100, description: 'Earliest release year to include.' },
-  eraTo: { type: 'integer', minimum: 1900, maximum: 2100, description: 'Latest release year to include.' },
+  eraFrom: {
+    type: 'integer',
+    minimum: 1900,
+    maximum: 2100,
+    description: 'Earliest release year to include. Must be <= eraTo when both are set.',
+  },
+  eraTo: {
+    type: 'integer',
+    minimum: 1900,
+    maximum: 2100,
+    description: 'Latest release year to include. Must be >= eraFrom when both are set.',
+  },
   allowExplicit: {
     type: 'boolean',
     description: 'Whether explicit tracks may be included. Defaults to true.',
@@ -77,20 +117,29 @@ const intentProperties: Record<string, unknown> = {
     description:
       'How much to favor the listener\'s most-played tracks vs. deeper cuts. Defaults to "mix".',
   },
-  targetCount: {
-    type: 'integer',
-    minimum: 3,
-    maximum: 60,
-    description:
-      'Number of tracks to queue. Convert any requested duration to a count at ~3.5 minutes per track (e.g. "an hour" is about 17 tracks). Defaults to 15.',
-  },
 }
 
-const intentJsonSchema = {
-  type: 'object' as const,
-  properties: intentProperties,
-  required: ['themes'],
+const targetCountProperty = {
+  type: 'integer' as const,
+  minimum: 3,
+  maximum: 60,
+  description:
+    'Number of tracks to queue. Convert any requested duration to a count at ~3.5 minutes per track (e.g. "an hour" is about 17 tracks). Defaults to 15.',
 }
+
+// generate_queue's full intent, including targetCount.
+const intentJsonSchema = Object.freeze({
+  type: 'object' as const,
+  properties: { ...intentPropertiesBase, targetCount: targetCountProperty },
+  required: ['themes'],
+})
+
+// swap/extend's replacement intent — no targetCount, mirroring opIntentSchema.
+const opIntentJsonSchema = Object.freeze({
+  type: 'object' as const,
+  properties: intentPropertiesBase,
+  required: ['themes'],
+})
 
 export const DJ_TOOLS: LlmToolDef[] = [
   {
@@ -113,6 +162,9 @@ export const DJ_TOOLS: LlmToolDef[] = [
           description:
             'Queue edit operations, applied in order: remove(position), move(from,to), swap(position, intent?), extend(count, intent?).',
           items: {
+            // If live smoke shows malformed ops from the model, the known fix is
+            // flattening to one object (op enum + all fields optional) with zod
+            // enforcing legal combos — see Task 3 review.
             oneOf: [
               {
                 type: 'object',
@@ -121,6 +173,7 @@ export const DJ_TOOLS: LlmToolDef[] = [
                   position: { type: 'integer', minimum: 0, description: 'Zero-based queue position to remove.' },
                 },
                 required: ['op', 'position'],
+                additionalProperties: false,
               },
               {
                 type: 'object',
@@ -130,15 +183,17 @@ export const DJ_TOOLS: LlmToolDef[] = [
                   to: { type: 'integer', minimum: 0, description: 'Zero-based queue position to move to.' },
                 },
                 required: ['op', 'from', 'to'],
+                additionalProperties: false,
               },
               {
                 type: 'object',
                 properties: {
                   op: { type: 'string', enum: ['swap'] },
                   position: { type: 'integer', minimum: 0, description: 'Zero-based queue position to replace.' },
-                  intent: intentJsonSchema,
+                  intent: opIntentJsonSchema,
                 },
                 required: ['op', 'position'],
+                additionalProperties: false,
               },
               {
                 type: 'object',
@@ -150,9 +205,10 @@ export const DJ_TOOLS: LlmToolDef[] = [
                     maximum: 20,
                     description: 'Number of additional tracks to append.',
                   },
-                  intent: intentJsonSchema,
+                  intent: opIntentJsonSchema,
                 },
                 required: ['op', 'count'],
+                additionalProperties: false,
               },
             ],
           },
@@ -162,3 +218,5 @@ export const DJ_TOOLS: LlmToolDef[] = [
     },
   },
 ]
+
+Object.freeze(DJ_TOOLS)
