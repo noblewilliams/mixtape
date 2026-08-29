@@ -48,6 +48,10 @@ class MusicKitBridge: NSObject {
       }
       let catalog = catalogCache
       let page = catalog.dropFirst(offset).prefix(limit)
+      // tracks is a globally shared catalog: the release year must not depend on the
+      // syncing device's timezone, so pin it to UTC rather than the calendar default.
+      var utcCal = Calendar(identifier: .gregorian)
+      utcCal.timeZone = TimeZone(secondsFromGMT: 0)!
       let songs: [[String: Any?]] = page.map { item in
         [
           "appleId": item.playbackStoreID,
@@ -56,7 +60,10 @@ class MusicKitBridge: NSObject {
           "artist": item.artist.flatMap { $0.isEmpty ? nil : $0 } ?? "Unknown",
           "album": item.albumTitle,
           "genre": item.genre,
-          "releaseYear": (item.releaseDate).flatMap { Calendar(identifier: .gregorian).dateComponents([.year], from: $0).year },
+          "releaseYear": item.releaseDate.flatMap { d -> Int? in
+            guard abs(d.timeIntervalSince1970) > 86_400 else { return nil } // epoch sentinel = unknown
+            return utcCal.dateComponents([.year], from: d).year
+          },
           "explicit": item.isExplicitItem,
           "playCount": item.playCount,
           "lastPlayedAt": item.lastPlayedDate.map { Int($0.timeIntervalSince1970 * 1000) },

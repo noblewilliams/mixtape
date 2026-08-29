@@ -12,14 +12,14 @@ const songSchema = z.object({
   artist: z.string().min(1),
   album: z.string().nullable().optional(),
   genre: z.string().nullable().optional(),
-  releaseYear: z.number().int().min(1000).max(3000).nullable().optional(),
+  releaseYear: z.number().int().min(1900).max(3000).nullable().optional(),
   explicit: z.boolean().nullable().optional(),
   playCount: z.number().int().min(0),
   lastPlayedAt: z.number().int().nullable().optional(),
   dateAdded: z.number().int().nullable().optional(),
 })
 
-// load-bearing: keeps bind params well under Postgres's 65535 ceiling (6 params/row)
+// load-bearing: keeps bind params well under Postgres's 65535 ceiling (7 params/row)
 const bodySchema = z.object({ songs: z.array(songSchema).min(1).max(500) })
 
 type Song = z.infer<typeof songSchema>

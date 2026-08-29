@@ -117,7 +117,7 @@ describe('POST /ingest/library', () => {
   it('rejects an out-of-range releaseYear', async () => {
     const db = await createTestDb()
     await seedUser(db)
-    const res = await post(db, { songs: [song({ releaseYear: 99 })] })
+    const res = await post(db, { songs: [song({ releaseYear: 1899 })] })
     expect(res.status).toBe(400)
   })
 
