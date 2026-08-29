@@ -20,5 +20,6 @@ Read before working:
 
 ## Conventions
 
-- TDD; server route tests + client widget/provider tests. Curation engine: golden-set structural assertions, not exact-track assertions.
+- TDD (red first); server route tests + client widget/provider tests. Curation engine: golden-set structural assertions, not exact-track assertions.
 - Docs are part of every change: significant behavior/architecture shifts update the design spec or add a `docs/decisions.md` entry in the same PR.
+- Workflow (house style, no plugin required): specs in `docs/superpowers/specs/`, plans in `docs/superpowers/plans/`, executed task-by-task by fresh implementer agents with a reviewer pass + fix round per task. The superpowers plugin that originated this cadence is retired (2026-08-29) — do not invoke its skills; the conventions above are the surviving contract.
