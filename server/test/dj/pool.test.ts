@@ -312,6 +312,29 @@ describe('buildPool', () => {
     expect(ids).not.toContain(theirs.id)
   })
 
+  it('excludeTrackIds removes given tracks from the pool regardless of how well they score', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const excluded = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY, playCount: 999 }) // would otherwise be top-scored
+    const kept = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY })
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' }), [excluded.id])
+
+    const ids = pool.map((p) => p.trackId)
+    expect(ids).not.toContain(excluded.id)
+    expect(ids).toContain(kept.id)
+  })
+
+  it('an empty excludeTrackIds list excludes nothing', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const t = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY })
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' }), [])
+
+    expect(pool.map((p) => p.trackId)).toContain(t.id)
+  })
+
   it('a track removed from the library (in_library false) is not eligible', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')

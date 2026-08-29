@@ -83,7 +83,13 @@ const num = (v: number | string | null): number | null => (v === null ? null : N
  * restructure as an ANN-inner-CTE (pull top-N by embedding distance first)
  * feeding a scored outer query (see Task 1 review).
  */
-export async function buildPool(db: Db, embed: Embedder, userId: string, intent: Intent): Promise<PoolTrack[]> {
+export async function buildPool(
+  db: Db,
+  embed: Embedder,
+  userId: string,
+  intent: Intent,
+  excludeTrackIds?: string[],
+): Promise<PoolTrack[]> {
   const embedding = await embed(intent.themes)
   // Defensive shape guard before the embedding touches SQL at all — the error
   // deliberately excludes the values themselves (only the length), since a
@@ -171,6 +177,15 @@ export async function buildPool(db: Db, embed: Embedder, userId: string, intent:
   // rows lack a year until re-sync; excluding them would empty pools.
   if (intent.eraFrom !== undefined) filters.push(sql`(t.release_year IS NULL OR t.release_year >= ${intent.eraFrom})`)
   if (intent.eraTo !== undefined) filters.push(sql`(t.release_year IS NULL OR t.release_year <= ${intent.eraTo})`)
+  // Used by the dj loop's swap/extend replacement lookup: a replacement
+  // picked from the pool that's already sitting in the active queue is a
+  // no-op (materialize would just drop it as a duplicate) — excluding the
+  // queue's own tracks up front means the pool's top candidates are actually
+  // usable replacements, not the queue re-selecting itself. Each id is its
+  // own bound parameter (never string-joined into the query text).
+  if (excludeTrackIds && excludeTrackIds.length > 0) {
+    filters.push(sql`t.id NOT IN (${sql.join(excludeTrackIds.map((id) => sql`${id}::uuid`), sql`, `)})`)
+  }
 
   const whereClause = sql.join(filters, sql` AND `)
 
