@@ -42,7 +42,13 @@ export async function fetchLyrics(key: LyricsKey, fetchLike: FetchLike = fetch):
       if (typeof exact.body !== 'object' || exact.body === null) {
         throw new EnrichSourceError('lrclib', 'unexpected body')
       }
-      return toResult(exact.body as LrclibRecord)
+      const record = exact.body as LrclibRecord
+      // Usable signal only — a synced-only record (no plain lyrics, not
+      // flagged instrumental) tells us nothing; fall through to search
+      // rather than accepting it and stalling the meaning stage forever.
+      if (record.plainLyrics != null || record.instrumental === true) {
+        return toResult(record)
+      }
     }
   }
 

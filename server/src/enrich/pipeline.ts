@@ -98,14 +98,16 @@ export async function enrichTrack(
         if (isrc) {
           await db.update(tracks).set({ isrc }).where(and(eq(tracks.id, track.id), isNull(tracks.isrc)))
         }
-        // Spotify-side duration, ±2s of Apple's; feeds LRCLIB exact-gets and P3;
-        // iTunes can't provide it from Workers (Apple IP-blocks).
+        // Spotify-side duration from an exact-title+artist match; unverified against
+        // Apple's copy (the ±5s gate doesn't run when the track had no duration), but
+        // good enough to key LRCLIB exact-gets and P3 pacing.
         if (matchedDurationMs != null && track.durationMs == null) {
           await db
             .update(tracks)
             .set({ durationMs: matchedDurationMs })
             .where(and(eq(tracks.id, track.id), isNull(tracks.durationMs)))
         }
+        durationMs = durationMs ?? matchedDurationMs
         await clearFailure(db, track.id, 'features')
         featuresOutcome = 'ok'
       } else {

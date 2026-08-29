@@ -141,6 +141,22 @@ describe('enrichTrack', () => {
     expect(row.durationMs).toBe(201000)
   })
 
+  it('threads the reccobeats-matched duration into the same pass lyrics lookup', async () => {
+    const db = await createTestDb()
+    const t = await seed(db)
+    let lyricsDuration: number | null = -1
+    await enrichTrack(
+      db,
+      deps({
+        itunes: async () => null,
+        features: async () => ({ ...FEATURES, matchedDurationMs: 201000 }),
+        lyrics: async (k) => { lyricsDuration = k.durationMs; return { lyrics: 'x', instrumental: false } },
+      }),
+      t,
+    )
+    expect(lyricsDuration).toBe(201000)
+  })
+
   it('does not overwrite an existing duration with the reccobeats match', async () => {
     const db = await createTestDb()
     const [t] = await db

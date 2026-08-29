@@ -37,6 +37,37 @@ describe('fetchLyrics', () => {
     expect(r?.lyrics).toBe('Found via search')
   })
 
+  it('falls through to search when the exact get 200s with no usable signal', async () => {
+    let searchCalled = false
+    const fetchLike: FetchLike = async (url) => {
+      const u = String(url)
+      if (u.includes('/api/get')) {
+        return new Response(JSON.stringify({ plainLyrics: null, instrumental: false }), { status: 200 })
+      }
+      searchCalled = true
+      expect(u).toContain('/api/search')
+      return new Response(
+        JSON.stringify([{ plainLyrics: 'Found via search', instrumental: false, artistName: 'Radiohead' }]),
+        { status: 200 },
+      )
+    }
+    const r = await fetchLyrics({ title: 'Nude', artist: 'Radiohead', album: null, durationMs: 255386 }, fetchLike)
+    expect(searchCalled).toBe(true)
+    expect(r?.lyrics).toBe('Found via search')
+  })
+
+  it('returns null when the exact get 200s with no usable signal and search also has nothing usable', async () => {
+    const fetchLike: FetchLike = async (url) => {
+      const u = String(url)
+      if (u.includes('/api/get')) {
+        return new Response(JSON.stringify({ plainLyrics: null, instrumental: false }), { status: 200 })
+      }
+      return new Response(JSON.stringify([]), { status: 200 })
+    }
+    const r = await fetchLyrics({ title: 'Nude', artist: 'Radiohead', album: null, durationMs: 255386 }, fetchLike)
+    expect(r).toBeNull()
+  })
+
   it('rejects a search hit that is synced-only (no plain lyrics, not instrumental)', async () => {
     const fetchLike: FetchLike = async (url) => {
       const u = String(url)
