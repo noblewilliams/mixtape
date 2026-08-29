@@ -2,6 +2,9 @@
 
 Short ADR-style log. Newest first. Each entry: decision, why, and what would reopen it.
 
+## 2026-08-29 — P2 backfill coverage report (4,689 tracks, ~5.5h wall incl. machine naps)
+**Meanings 94.8%** (4,327 embeddings + 120 instrumentals) — the semantic axis is near-total. **Features 59.9%** (2,809; +ISRC/duration on each) — BELOW the 80% gate ⇒ **P2.5 (local preview analysis on the founder's Mac) is triggered** per the ReccoBeats-only decision's reopen clause. Failure mix: 1,770 genuine no-match, ~110 transient (429/timeout — reset and retried same day). Recommended sequencing: finish P3 first (the engine treats missing features as unscored-not-excluded by design; 95% meaning coverage carries curation), then P2.5 lifts the feature axis. Steady-state cron continues for new syncs.
+
 ## 2026-08-29 — P3 reshaped: conversation-first DJ, hand-off playback
 Founder decisions: refinement moves INTO the session conversation (chat with inline queue widgets; manual drag/swipe posts the same edit ops), playback hands off to the Apple Music app (no in-app player in P3), save-as-playlist pulled forward from P4, per-track "why" on tap, queue length prompt-parsed with ~15 default. P4 slims to taste-signal learning + polish. Spec: `docs/superpowers/specs/2026-08-29-p3-dj-conversation-design.md`. **Reopens if:** hand-off UX proves clunky → in-app player returns to the roadmap.
 
