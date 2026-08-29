@@ -1768,4 +1768,6 @@ git add -A && git commit -m "chore: p1 complete"
 - Enrichment waterfall, embeddings, curation engine (P2/P3)
 - Recently-played / recommendations ingestion beyond the library (P2)
 - Token refresh / 401 auto-sign-out polish, incremental (diff) sync — P2 alongside real usage
+- `in_library` reconciliation (marking removed tracks false) — P2; until then `in_library` over-counts and must not be read as authoritative
+- Single-CTE atomic ingest rewrite (atomicity + halved neon-http round trips) — tracked follow-up
 - Any playback (P3)
