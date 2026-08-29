@@ -1770,5 +1770,6 @@ git add -A && git commit -m "chore: p1 complete"
 - Token refresh / 401 auto-sign-out polish, incremental (diff) sync — P2 alongside real usage
 - `in_library` reconciliation (marking removed tracks false) — P2; until then `in_library` over-counts and must not be read as authoritative
 - Single-CTE atomic ingest rewrite (atomicity + halved neon-http round trips) — tracked follow-up
-- Auth lifecycle cluster (P2, with the 401 handling): clear stale keychain token on fresh install (keychain survives app uninstall on iOS — first-launch flag + tokenStore.clear()), in-memory token cache invalidated on write/clear (avoids a keychain round trip per request)
+- Auth lifecycle cluster (P2, with the 401 handling): clear stale keychain token on fresh install (keychain survives app uninstall on iOS — first-launch flag + tokenStore.clear()), in-memory token cache invalidated on write/clear (avoids a keychain round trip per request), server-side session revocation on sign-out (signOut currently only clears the keychain; the Neon session row lives until expiry — best-effort POST /api/auth/sign-out before clearing)
+- Field-wise in-batch dedupe (P2 data-quality nit): dedupe() keeps the whole higher-playCount record, possibly discarding a newer lastPlayedAt from the losing duplicate, while the SQL upsert merges per-field via greatest()
 - Any playback (P3)

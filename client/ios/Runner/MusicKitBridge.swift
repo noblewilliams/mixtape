@@ -51,9 +51,9 @@ class MusicKitBridge: NSObject {
       let songs: [[String: Any?]] = page.map { item in
         [
           "appleId": item.playbackStoreID,
-          // Sentinel required: the server rejects empty title/artist (zod min(1)); nil here would 400 the whole 200-song chunk.
-          "title": item.title ?? "Unknown",
-          "artist": item.artist ?? "Unknown",
+          // Sentinel required: the server rejects empty title/artist (zod min(1)); nil OR "" here would 400 the whole 200-song chunk.
+          "title": item.title.flatMap { $0.isEmpty ? nil : $0 } ?? "Unknown",
+          "artist": item.artist.flatMap { $0.isEmpty ? nil : $0 } ?? "Unknown",
           "album": item.albumTitle,
           "genre": item.genre,
           "playCount": item.playCount,
