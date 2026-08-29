@@ -18,7 +18,7 @@
 - `POST /sessions/:id/queue-ops {ops, expectedVersion}` → `{queueVersion, requested, added, removed, queue}`; **409** `{error:'stale', queue, queueVersion}`; manual ops are remove/move ONLY (`{op:'remove',position}`, `{op:'move',from,to}` — 0-based); swap/extend → 400 `{error:'dj_required', message}`.
 - `PATCH /sessions/:id {status}` → archive/unarchive.
 - **409 rule:** trust the body's queue/queueVersion when present, else refetch `GET /:id`.
-- **Two 400 shapes:** zod-default `{success:false,error:{...}}` AND `{error,message}` — parse both, prefer `message`, fall back to a generic string.
+- **Two 400 shapes:** zod-default `{success:false, error:{name:'ZodError', message:'<serialized blob — never render>'}}` → kind `'invalid'`, always the generic fallback message (the blob is an internal diagnostic, not listener-ready copy); `{error,message}` (e.g. `dj_required`, `invalid_ops`) → kind keeps the server's `error` string verbatim (providers branch on it, e.g. `'dj_required'`), message preferred from `message`, falling back to a generic string only if it's missing.
 - **Failed turns leave a user message with no dj reply** (and a retry can duplicate it) — transcript renders this state plainly (no dedup magic in v1; consecutive identical user bubbles are acceptable).
 - **Latency envelope:** turns run 20–40s. DJ endpoints use a 120s timeout (NOT ApiClient's 30s default). Typing indicator throughout; composer disabled while in flight.
 - QueueTrack: `{position, trackId, appleId, title, artist, reason, durationMs}` — `appleId` drives playback/playlists; `reason` shows on tap.

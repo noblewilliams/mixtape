@@ -48,6 +48,7 @@ class StaleQueueException implements Exception {
 const _genericDjErrorMessage = 'The DJ ran into a problem — please try again.';
 const _genericInvalidMessage = 'That request was invalid.';
 const _genericStaleMessage = 'The queue changed — showing the latest.';
+const _genericMalformedResponseMessage = 'Got an unexpected response — please try again.';
 
 /// Typed client for the P3a DJ session API (sessions, transcript, queue).
 ///
@@ -57,6 +58,13 @@ const _genericStaleMessage = 'The queue changed — showing the latest.';
 /// the whole app, [DjApi] owns its OWN [ApiClient] instance, over the same
 /// [TokenStore], with a 120s timeout: [ApiClient]'s public surface and
 /// default stay exactly as they are for every non-DJ caller.
+///
+/// [DjApi] has exactly four exit types: [DjApiException] (a DJ-domain error
+/// body, or a 200 whose body didn't parse), [StaleQueueException] (a
+/// queue-ops version conflict), [ApiException] (any status this class
+/// doesn't specially interpret — 401/403/404/500/... — passed through
+/// unchanged), and [NetworkException] (transport-level failure, from
+/// [ApiClient] itself). Nothing else escapes a call.
 class DjApi {
   DjApi({
     required String baseUrl,
@@ -65,7 +73,18 @@ class DjApi {
     Duration timeout = const Duration(seconds: 120),
   }) : _client = ApiClient(baseUrl: baseUrl, tokenStore: tokenStore, inner: inner, timeout: timeout);
 
+  /// Builds a [DjApi] over the SAME baseUrl/tokenStore as an existing
+  /// [ApiClient] (typically the app's shared one) — structural sharing so
+  /// the pairing can't drift out of sync — but with its own longer-timeout
+  /// [ApiClient] underneath, per this class's doc comment. [inner] is an
+  /// optional override (e.g. a test's MockClient); it is NOT taken from
+  /// [base] (which doesn't expose its own).
+  factory DjApi.from(ApiClient base, {http.Client? inner, Duration timeout = const Duration(seconds: 120)}) =>
+      DjApi(baseUrl: base.baseUrl, tokenStore: base.tokenStore, inner: inner, timeout: timeout);
+
   final ApiClient _client;
+
+  Duration get timeout => _client.timeout;
 
   Future<SessionDetail> createSession(String prompt) =>
       _call(() => _client.postJson('/sessions', {'prompt': prompt}), SessionDetail.fromJson);
@@ -111,7 +130,17 @@ class DjApi {
     } on ApiException catch (e) {
       throw _translate(e);
     }
-    return parse(jsonDecode(res.body) as Map<String, dynamic>);
+    // A 200 body that isn't valid JSON, isn't a JSON object, or is missing a
+    // key `parse` needs is a server/client drift bug, not a DJ-domain
+    // error — surfaced as its own typed exit rather than an uncaught
+    // FormatException or type-cast error reaching the UI layer.
+    try {
+      final decoded = jsonDecode(res.body);
+      if (decoded is Map<String, dynamic>) return parse(decoded);
+    } catch (_) {
+      // fall through to the typed exit below
+    }
+    throw DjApiException(kind: 'malformed_response', message: _genericMalformedResponseMessage);
   }
 
   Exception _translate(ApiException e) {
@@ -138,8 +167,11 @@ class DjApi {
           queueVersion: decoded['queueVersion'] as int,
         );
       } catch (_) {
-        // Malformed 'stale' body — fall through to a generic message rather
-        // than throw a secondary parse error.
+        // Malformed 'stale' body (missing/bad queue or queueVersion) — never
+        // a secondary parse error. Degrades to a plain error bubble in the
+        // transcript; kind is still 'stale', so a caller that would rather
+        // recover than show an error can instead treat this kind as a signal
+        // to refetch the session (GET /:id) for a fresh queue.
         return DjApiException(kind: 'stale', message: _genericStaleMessage);
       }
     }
@@ -178,44 +210,29 @@ class DjApi {
     );
   }
 
-  /// Both known 400 shapes collapse to one plain, always-'invalid' exception
-  /// (per contract): zod's default validator failure
-  /// `{success:false, error:{issues:[...]}}` has its issues serialized into
-  /// one readable string; the hand-written `{error, message}` shape (e.g.
-  /// `dj_required`, `invalid_ops`) uses `message` when present. A malformed
-  /// or unrecognized body never throws a secondary parse error — it falls
-  /// back to a generic message.
+  /// The two known 400 shapes are told apart by whether `error` is a plain
+  /// string:
+  ///  - `{error, message}` (hand-written: `dj_required`, `invalid_ops`, ...)
+  ///    — `kind` keeps the server's `error` string verbatim (Task 2's
+  ///    providers branch on it, e.g. 'dj_required'), `message` preferred,
+  ///    falling back to a generic string only if `message` is missing.
+  ///  - zod's default validator failure, actually
+  ///    `{success:false, error:{name:'ZodError', message:'<serialized
+  ///    issues blob>'}}` — `error` is a Map here, not a string, and its
+  ///    `message` is an internal diagnostic blob, NEVER fit to render.
+  ///    Always `kind: 'invalid'` with the generic fallback message.
+  /// A malformed or otherwise-unrecognized body never throws a secondary
+  /// parse error — it falls back to `kind: 'invalid'` + a generic message.
   DjApiException _translate400(String body) {
     final decoded = _tryDecode(body);
     if (decoded == null) return DjApiException(kind: 'invalid', message: _genericInvalidMessage);
 
-    if (decoded['message'] is String) {
-      return DjApiException(kind: 'invalid', message: decoded['message'] as String);
-    }
-    if (decoded['success'] == false && decoded['error'] != null) {
-      final issues = _readableZodIssues(decoded['error']);
-      if (issues.isNotEmpty) return DjApiException(kind: 'invalid', message: issues);
+    final errorField = decoded['error'];
+    if (errorField is String) {
+      final message = decoded['message'] is String ? decoded['message'] as String : _genericInvalidMessage;
+      return DjApiException(kind: errorField, message: message);
     }
     return DjApiException(kind: 'invalid', message: _genericInvalidMessage);
-  }
-
-  String _readableZodIssues(Object? error) {
-    try {
-      if (error is Map<String, dynamic>) {
-        final issues = error['issues'];
-        if (issues is List && issues.isNotEmpty) {
-          return issues.map((raw) {
-            final issue = raw as Map<String, dynamic>;
-            final path = issue['path'] is List ? (issue['path'] as List).join('.') : '';
-            final msg = issue['message'] as String? ?? 'invalid value';
-            return path.isEmpty ? msg : '$path: $msg';
-          }).join('; ');
-        }
-      }
-    } catch (_) {
-      // fall through to caller's generic fallback
-    }
-    return '';
   }
 
   Map<String, dynamic>? _tryDecode(String body) {

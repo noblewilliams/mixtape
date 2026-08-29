@@ -106,14 +106,16 @@ void main() {
       }
     });
 
-    test('400 zod-default shape -> readable message', () async {
+    test('400 zod-default shape (error is a Map, not a string) -> kind invalid, '
+        'generic message (the serialized blob is never rendered)', () async {
       final inner = MockClient((_) async => http.Response(
             jsonEncode({
               'success': false,
               'error': {
-                'issues': [
-                  {'path': ['prompt'], 'message': 'String must contain at least 1 character(s)'},
-                ],
+                'name': 'ZodError',
+                // zod@4's real serialization: a JSON-stringified issues blob,
+                // not a structured {issues:[...]} object. Never fit to render.
+                'message': '[{"code":"too_small","minimum":1,"path":["prompt"],"message":"Too small"}]',
               },
             }),
             400,
@@ -124,8 +126,8 @@ void main() {
         fail('expected DjApiException');
       } on DjApiException catch (e) {
         expect(e.kind, 'invalid');
-        expect(e.message, contains('String must contain at least 1 character'));
-        expect(e.message, contains('prompt'));
+        expect(e.message, isNot(contains('ZodError')));
+        expect(e.message, isNot(contains('too_small')));
       }
     });
   });
@@ -209,7 +211,7 @@ void main() {
       }
     });
 
-    test('{error,message} 400 shape -> message used verbatim', () async {
+    test('{error,message} 400 shape -> kind keeps the server\'s error code, message verbatim', () async {
       final inner = MockClient((_) async => http.Response(
             jsonEncode({'error': 'too_long', 'message': 'keep it under 2000 characters'}),
             400,
@@ -219,7 +221,7 @@ void main() {
         await _api(inner: inner).sendMessage('s1', 'x' * 2001);
         fail('expected DjApiException');
       } on DjApiException catch (e) {
-        expect(e.kind, 'invalid');
+        expect(e.kind, 'too_long');
         expect(e.message, 'keep it under 2000 characters');
       }
     });
@@ -302,7 +304,8 @@ void main() {
       }
     });
 
-    test('400 dj_required (swap/extend attempted) -> DjApiException with the hint message', () async {
+    test('400 dj_required (swap/extend attempted) -> DjApiException keeps kind dj_required '
+        'with the hint message', () async {
       final inner = MockClient((_) async => http.Response(
             jsonEncode({'error': 'dj_required', 'message': 'swap/extend require the DJ - send a message instead'}),
             400,
@@ -312,19 +315,20 @@ void main() {
         await _api(inner: inner).applyQueueOps('s1', [const QueueOp.remove(0)], 2);
         fail('expected DjApiException');
       } on DjApiException catch (e) {
-        expect(e.kind, 'invalid');
+        expect(e.kind, 'dj_required');
         expect(e.message, contains('send a message instead'));
       }
     });
 
-    test('400 with no message and no zod shape -> generic message, no secondary parse error', () async {
+    test('400 invalid_ops with no message -> DjApiException keeps kind invalid_ops, '
+        'falls back to a generic message', () async {
       final inner = MockClient((_) async => http.Response(jsonEncode({'error': 'invalid_ops'}), 400));
 
       try {
         await _api(inner: inner).applyQueueOps('s1', [const QueueOp.remove(0)], 2);
         fail('expected DjApiException');
       } on DjApiException catch (e) {
-        expect(e.kind, 'invalid');
+        expect(e.kind, 'invalid_ops');
         expect(e.message, isNotEmpty);
       }
     });
@@ -363,7 +367,66 @@ void main() {
     });
   });
 
+  group('malformed 200 response (typed exit)', () {
+    test('non-JSON 200 body -> DjApiException(kind: malformed_response)', () async {
+      final inner = MockClient((_) async => http.Response('not json at all', 200));
+
+      try {
+        await _api(inner: inner).listSessions();
+        fail('expected DjApiException');
+      } on DjApiException catch (e) {
+        expect(e.kind, 'malformed_response');
+        expect(e.message, isNotEmpty);
+      }
+    });
+
+    test('200 body missing a required key -> DjApiException(kind: malformed_response)', () async {
+      // 'sessions' is the key listSessions() reads — a body that omits it
+      // (e.g. server/client drift) must not surface as an uncaught
+      // NoSuchMethodError/type-cast error.
+      final inner = MockClient((_) async => http.Response(jsonEncode({'oops': true}), 200));
+
+      try {
+        await _api(inner: inner).listSessions();
+        fail('expected DjApiException');
+      } on DjApiException catch (e) {
+        expect(e.kind, 'malformed_response');
+        expect(e.message, isNotEmpty);
+      }
+    });
+  });
+
+  group('DjApi.from', () {
+    test('shares the base ApiClient\'s baseUrl and tokenStore, keeps its own 120s timeout', () async {
+      final store = InMemoryTokenStore();
+      await store.write('shared-tok');
+      Uri? seenUrl;
+      String? seenAuth;
+      final inner = MockClient((req) async {
+        seenUrl = req.url;
+        seenAuth = req.headers['Authorization'];
+        return http.Response(jsonEncode({'sessions': []}), 200);
+      });
+      final base = ApiClient(baseUrl: 'http://shared', tokenStore: store, inner: inner);
+
+      // inner isn't read off `base` (ApiClient doesn't expose it) — passed
+      // again here so this test can observe what DjApi.from's derived
+      // client actually sends, over the baseUrl/tokenStore it DID inherit.
+      final dj = DjApi.from(base, inner: inner);
+      await dj.listSessions();
+
+      expect(seenUrl.toString(), 'http://shared/sessions');
+      expect(seenAuth, 'Bearer shared-tok');
+      expect(dj.timeout, const Duration(seconds: 120));
+    });
+  });
+
   group('timeout configuration', () {
+    test('the default-constructed instance reports a 120s timeout', () {
+      final dj = DjApi(baseUrl: 'http://x', tokenStore: InMemoryTokenStore());
+      expect(dj.timeout, const Duration(seconds: 120));
+    });
+
     test('a response within the configured DJ timeout does not throw', () async {
       final inner = MockClient((_) async {
         await Future.delayed(const Duration(milliseconds: 200));
