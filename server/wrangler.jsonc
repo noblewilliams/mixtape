@@ -6,6 +6,9 @@
   "compatibility_flags": ["nodejs_compat"],
   "observability": {
     "enabled": true
+  },
+  "ai": {
+    "binding": "AI"
   }
   // Secrets required at runtime (set via `wrangler secret put` / .dev.vars locally) —
   // createAuth fails fast if any is missing:
@@ -13,5 +16,8 @@
   //   BETTER_AUTH_SECRET      — Better Auth signing secret (min 32 chars)
   //   BETTER_AUTH_URL         — deployed worker origin (http://localhost:8787 locally)
   //   APPLE_BUNDLE_ID         — com.noble.mixtape (Apple idToken audience)
+  // ENRICH_ADMIN_TOKEN        — admin guard for /enrich/*; unset disables the route group entirely
+  // Optional var (not secret):
+  //   ITUNES_STOREFRONT       — iTunes storefront code for enrichment lookups (default "ng")
   // Later phases add: ANTHROPIC_API_KEY (P3 curation), MusicKit developer-token key (P2 catalog).
 }

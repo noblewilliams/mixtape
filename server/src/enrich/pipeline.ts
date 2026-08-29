@@ -16,7 +16,7 @@ export type EnrichDeps = {
 }
 
 export type TrackRow = typeof tracks.$inferSelect
-export type StageOutcome = 'ok' | 'miss' | 'error'
+export type StageOutcome = 'ok' | 'miss' | 'error' | 'skipped'
 export type EnrichResult = { features: StageOutcome; meaning: StageOutcome }
 export type EnrichSkip = { features?: boolean; meaning?: boolean }
 
@@ -55,11 +55,13 @@ export async function enrichTrack(
 ): Promise<EnrichResult> {
   // Stage 0: iTunes metadata (duration/genre backfill; duration improves the
   // ReccoBeats and LRCLIB matches below). Best-effort — a miss is not fatal.
-  // iTunes duration is authoritative on first fill: once known, later re-runs
-  // skip this stage entirely, so a repeat pass never re-calls iTunes and never
-  // clobbers a duration that later stages have already keyed off of.
+  // Runs again whenever either duration or genre is still unknown — "duration
+  // known" alone must never stand in for "iTunes already ran", since a client
+  // can start syncing durations independently of any iTunes lookup, which
+  // would otherwise strand tracks without a genre forever. Once both are
+  // known, later re-runs skip this stage entirely.
   let durationMs = track.durationMs
-  if (track.appleId && track.durationMs == null) {
+  if (track.appleId && (track.durationMs == null || track.genre == null)) {
     try {
       const hit = await deps.itunes(track.appleId, deps.storefront)
       if (hit) {
@@ -83,7 +85,7 @@ export async function enrichTrack(
   // retry (e.g. after a meaning-stage failure) never re-embeds lyrics.
   let featuresOutcome: StageOutcome
   if (skip.features) {
-    featuresOutcome = 'ok'
+    featuresOutcome = 'skipped'
   } else {
     try {
       const feats = await deps.features({ title: track.title, artist: track.artist, durationMs })
@@ -113,7 +115,7 @@ export async function enrichTrack(
   // a meaning row exists, so embed is never called on a features-only retry.
   let meaningOutcome: StageOutcome
   if (skip.meaning) {
-    meaningOutcome = 'ok'
+    meaningOutcome = 'skipped'
   } else {
     try {
       const lyr = await deps.lyrics({ title: track.title, artist: track.artist, album: track.album, durationMs })

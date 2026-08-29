@@ -197,7 +197,7 @@ describe('enrichTrack', () => {
       t,
       { features: true },
     )
-    expect(result.features).toBe('ok')
+    expect(result.features).toBe('skipped')
     expect(await db.select().from(trackFeatures)).toHaveLength(0)
   })
 
@@ -214,9 +214,38 @@ describe('enrichTrack', () => {
       t,
       { meaning: true },
     )
-    expect(result.meaning).toBe('ok')
+    expect(result.meaning).toBe('skipped')
     expect(embedCalled).toBe(false)
     expect(await db.select().from(trackMeanings)).toHaveLength(0)
+  })
+
+  it('itunes runs when duration is known but genre is missing (genre backfill)', async () => {
+    const db = await createTestDb()
+    const [t] = await db
+      .insert(tracks)
+      .values({ appleId: 'a3', title: 'T', artist: 'A', durationMs: 200000, genre: null })
+      .returning()
+    let itunesCalls = 0
+    const result = await enrichTrack(
+      db,
+      deps({ itunes: async () => { itunesCalls++; return { trackName: 'T', artistName: 'A', previewUrl: null, durationMs: 200000, genre: 'Pop' } } }),
+      t,
+    )
+    expect(itunesCalls).toBe(1)
+    expect(result).toEqual({ features: 'ok', meaning: 'ok' })
+    const [row] = await db.select().from(tracks).where(eq(tracks.id, t.id))
+    expect(row.genre).toBe('Pop')
+  })
+
+  it('itunes does not run when both duration and genre are already known', async () => {
+    const db = await createTestDb()
+    const [t] = await db
+      .insert(tracks)
+      .values({ appleId: 'a4', title: 'T', artist: 'A', durationMs: 200000, genre: 'Pop' })
+      .returning()
+    let itunesCalls = 0
+    await enrichTrack(db, deps({ itunes: async () => { itunesCalls++; return null } }), t)
+    expect(itunesCalls).toBe(0)
   })
 
   it('classifies a non-source error down to name only, never storing raw error text', async () => {

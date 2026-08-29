@@ -4,12 +4,20 @@ import { drizzle } from 'drizzle-orm/neon-http'
 import * as schema from './db/schema'
 import { createAuth } from './auth/create-auth'
 import { createApp } from './app'
+import { lookupItunes } from './enrich/itunes'
+import { resolveAndFetchFeatures } from './enrich/reccobeats'
+import { fetchLyrics } from './enrich/lrclib'
+import { workersAiEmbedder } from './enrich/embedder'
+import type { EnrichDeps } from './enrich/pipeline'
 
 type Bindings = {
   DATABASE_URL: string
   BETTER_AUTH_SECRET: string
   BETTER_AUTH_URL: string
   APPLE_BUNDLE_ID: string
+  ENRICH_ADMIN_TOKEN?: string
+  ITUNES_STOREFRONT?: string
+  AI: { run(model: string, input: { text: string[] }): Promise<unknown> }
 }
 
 export default {
@@ -17,7 +25,21 @@ export default {
     if (!env.DATABASE_URL) throw new Error('DATABASE_URL is required')
     const db = drizzle(neon(env.DATABASE_URL), { schema })
     const auth = createAuth(db, env)
-    const app = createApp({ auth, db })
+    // /enrich/* is only mounted when an admin token is configured — no token
+    // set means the P2 enrichment surface stays entirely off.
+    const enrich = env.ENRICH_ADMIN_TOKEN
+      ? {
+          adminToken: env.ENRICH_ADMIN_TOKEN,
+          deps: {
+            storefront: env.ITUNES_STOREFRONT ?? 'ng',
+            itunes: lookupItunes,
+            features: resolveAndFetchFeatures,
+            lyrics: fetchLyrics,
+            embed: workersAiEmbedder(env.AI),
+          } satisfies EnrichDeps,
+        }
+      : undefined
+    const app = createApp({ auth, db, enrich })
     return app.fetch(req, env, ctx)
   },
 }
