@@ -12,6 +12,7 @@
     "auth:generate": "npx @better-auth/cli@latest generate --config src/auth/cli-config.ts --output src/db/auth-schema.ts -y"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.122.0",
     "@hono/zod-validator": "^0.9.0",
     "@neondatabase/serverless": "^1.1.0",
     "better-auth": "^1.7.2",
