@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { lookupItunes, type FetchLike } from '../../src/enrich/itunes'
+import { EnrichSourceError } from '../../src/enrich/types'
 
 const ok = (body: unknown): FetchLike => async (url) => {
   expect(String(url)).toContain('itunes.apple.com/lookup')
@@ -35,7 +36,8 @@ describe('lookupItunes', () => {
 
   it('throws EnrichSourceError on non-200', async () => {
     const bad: FetchLike = async () => new Response('nope', { status: 503 })
-    await expect(lookupItunes('1', 'ng', bad)).rejects.toThrow('itunes')
+    await expect(lookupItunes('1', 'ng', bad)).rejects.toThrow(EnrichSourceError)
+    await expect(lookupItunes('1', 'ng', bad)).rejects.toMatchObject({ status: 503 })
   })
 
   it('sends the injected storefront and the encoded apple id', async () => {
@@ -55,6 +57,6 @@ describe('lookupItunes', () => {
 
   it('throws EnrichSourceError on malformed JSON', async () => {
     const bad: FetchLike = async () => new Response('not json', { status: 200 })
-    await expect(lookupItunes('1', 'ng', bad)).rejects.toThrow('itunes')
+    await expect(lookupItunes('1', 'ng', bad)).rejects.toThrow(EnrichSourceError)
   })
 })
