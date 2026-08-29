@@ -299,6 +299,11 @@ const generateQueueRows: Row[] = [
   { label: 'inverted era window is invalid', sample: { themes: 'x', eraFrom: 2000, eraTo: 1990 } },
   { label: 'invalid energyArc enum value', sample: { themes: 'x', energyArc: 'sideways' } },
   { label: 'out-of-range targetCount is invalid', sample: { themes: 'x', targetCount: 61 } },
+  { label: 'tempoMin one below the floor is invalid', sample: { themes: 'x', tempoMin: 39 } },
+  { label: 'tempoMax one above the ceiling is invalid', sample: { themes: 'x', tempoMax: 261 } },
+  { label: 'eraFrom one before the floor is invalid', sample: { themes: 'x', eraFrom: 1899 } },
+  { label: 'eraTo one after the ceiling is invalid', sample: { themes: 'x', eraTo: 2101 } },
+  { label: 'invalid familiarity enum value', sample: { themes: 'x', familiarity: 'chaotic' } },
 ]
 
 describe('generate_queue: zod and its longhand JSON schema agree', () => {
@@ -354,6 +359,10 @@ const editQueueRows: OpsRow[] = [
   {
     label: 'swap intent with an inverted tempo window is invalid',
     sample: { ops: [{ op: 'swap', position: 0, intent: { themes: 'x', tempoMin: 200, tempoMax: 100 } }] },
+  },
+  {
+    label: 'remove op with position -1 is invalid',
+    sample: { ops: [{ op: 'remove', position: -1 }] },
   },
 ]
 
