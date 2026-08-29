@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -42,5 +44,107 @@ void main() {
       client.getJson('/me'),
       throwsA(isA<ApiException>().having((e) => e.statusCode, 'statusCode', 401)),
     );
+  });
+
+  test('content-type set on POST but absent on GET', () async {
+    String? postContentType = 'unset';
+    String? getContentType = 'unset';
+    final inner = MockClient((req) async {
+      if (req.method == 'POST') {
+        postContentType = req.headers['content-type'];
+      } else {
+        getContentType = req.headers['content-type'];
+      }
+      return http.Response('{}', 200);
+    });
+    final client =
+        ApiClient(baseUrl: 'http://x', tokenStore: InMemoryTokenStore(), inner: inner);
+
+    await client.postJson('/a', {'x': 1});
+    await client.getJson('/b');
+
+    expect(postContentType, 'application/json');
+    expect(getContentType, isNull);
+  });
+
+  test('POST body is real JSON', () async {
+    Map<String, dynamic>? decoded;
+    final inner = MockClient((req) async {
+      decoded = jsonDecode(req.body) as Map<String, dynamic>;
+      return http.Response('{}', 200);
+    });
+    final client =
+        ApiClient(baseUrl: 'http://x', tokenStore: InMemoryTokenStore(), inner: inner);
+
+    await client.postJson('/ingest/library', {'songs': ['a', 'b']});
+
+    expect(decoded, {'songs': ['a', 'b']});
+  });
+
+  test('URL is composed from base + path', () async {
+    Uri? seenUrl;
+    final inner = MockClient((req) async {
+      seenUrl = req.url;
+      return http.Response('{}', 200);
+    });
+    final client = ApiClient(
+        baseUrl: 'http://example.com', tokenStore: InMemoryTokenStore(), inner: inner);
+
+    await client.getJson('/ingest/library');
+
+    expect(seenUrl.toString(), 'http://example.com/ingest/library');
+  });
+
+  test('2xx response is returned with headers readable by the caller', () async {
+    final inner = MockClient((req) async {
+      return http.Response('{"ok":true}', 200,
+          headers: {'set-auth-token': 'new-tok-456'});
+    });
+    final client =
+        ApiClient(baseUrl: 'http://x', tokenStore: InMemoryTokenStore(), inner: inner);
+
+    final res = await client.getJson('/me');
+
+    expect(res.headers['set-auth-token'], 'new-tok-456');
+    expect(res.body, '{"ok":true}');
+  });
+
+  test('ApiException.body carries the payload', () async {
+    final client = ApiClient(
+      baseUrl: 'http://x',
+      tokenStore: InMemoryTokenStore(),
+      inner: MockClient((_) async => http.Response('{"error":"nope"}', 400)),
+    );
+
+    try {
+      await client.getJson('/me');
+      fail('expected ApiException');
+    } on ApiException catch (e) {
+      expect(e.body, '{"error":"nope"}');
+    }
+  });
+
+  test('throws NetworkException when the transport throws http.ClientException', () async {
+    final client = ApiClient(
+      baseUrl: 'http://x',
+      tokenStore: InMemoryTokenStore(),
+      inner: MockClient((_) async => throw http.ClientException('boom')),
+    );
+
+    await expectLater(
+      client.getJson('/me'),
+      throwsA(isA<NetworkException>()),
+    );
+  });
+
+  test('InMemoryTokenStore write -> read -> clear -> read round-trip', () async {
+    final store = InMemoryTokenStore();
+    expect(await store.read(), isNull);
+
+    await store.write('tok-abc');
+    expect(await store.read(), 'tok-abc');
+
+    await store.clear();
+    expect(await store.read(), isNull);
   });
 }
