@@ -1,34 +1,26 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
+import '../api/api_client.dart';
 import 'apple_auth_gateway.dart';
 import 'token_store.dart';
 
 class AuthRepository {
   AuthRepository({
-    required this.baseUrl,
     required this.tokenStore,
     required this.gateway,
-    http.Client? inner,
-  }) : _inner = inner ?? http.Client();
+    required this.api,
+  });
 
-  final String baseUrl;
   final TokenStore tokenStore;
   final AppleAuthGateway gateway;
-  final http.Client _inner;
+  final ApiClient api;
 
   Future<void> signInWithApple() async {
     final idToken = await gateway.getIdentityToken();
-    final res = await _inner.post(
-      Uri.parse(baseUrl).resolve('/api/auth/sign-in/social'),
-      headers: {'content-type': 'application/json'},
-      body: jsonEncode({
-        'provider': 'apple',
-        'idToken': {'token': idToken},
-      }),
-    );
-    if (res.statusCode >= 400) {
-      throw StateError('Sign-in failed (${res.statusCode}): ${res.body}');
-    }
+    // ApiClient attaches a stale bearer header if one exists from a previous
+    // session; harmless here since sign-in doesn't require authentication.
+    final res = await api.postJson('/api/auth/sign-in/social', {
+      'provider': 'apple',
+      'idToken': {'token': idToken},
+    });
     final token = res.headers['set-auth-token'];
     if (token == null) throw StateError('No set-auth-token header in response');
     await tokenStore.write(token);

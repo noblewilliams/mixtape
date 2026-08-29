@@ -7,16 +7,18 @@ import '../../data/auth/token_store.dart';
 
 final tokenStoreProvider = Provider<TokenStore>((ref) => SecureTokenStore());
 
-final authRepositoryProvider = Provider<AuthRepository>((ref) {
-  return AuthRepository(
-    baseUrl: AppConfig.apiBaseUrl,
-    tokenStore: ref.watch(tokenStoreProvider),
-    gateway: RealAppleAuthGateway(),
-  );
+final apiClientProvider = Provider<ApiClient>((ref) {
+  final client = ApiClient(baseUrl: AppConfig.apiBaseUrl, tokenStore: ref.watch(tokenStoreProvider));
+  ref.onDispose(client.close);
+  return client;
 });
 
-final apiClientProvider = Provider<ApiClient>((ref) {
-  return ApiClient(baseUrl: AppConfig.apiBaseUrl, tokenStore: ref.watch(tokenStoreProvider));
+final authRepositoryProvider = Provider<AuthRepository>((ref) {
+  return AuthRepository(
+    tokenStore: ref.watch(tokenStoreProvider),
+    gateway: RealAppleAuthGateway(),
+    api: ref.watch(apiClientProvider),
+  );
 });
 
 enum AuthStatus { unknown, signedOut, signedIn }
@@ -29,7 +31,13 @@ class AuthNotifier extends Notifier<AuthStatus> {
   }
 
   Future<void> _restore() async {
-    final signedIn = await ref.read(authRepositoryProvider).isSignedIn();
+    bool signedIn;
+    try {
+      signedIn = await ref.read(authRepositoryProvider).isSignedIn();
+    } catch (_) {
+      signedIn = false; // unreadable keychain == not signed in
+    }
+    if (!ref.mounted) return;
     state = signedIn ? AuthStatus.signedIn : AuthStatus.signedOut;
   }
 

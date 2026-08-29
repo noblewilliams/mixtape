@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:mixtape/data/api/api_client.dart';
 import 'package:mixtape/data/auth/apple_auth_gateway.dart';
 import 'package:mixtape/data/auth/auth_repository.dart';
 import 'package:mixtape/data/auth/token_store.dart';
@@ -21,10 +22,9 @@ void main() {
     });
     final store = InMemoryTokenStore();
     final repo = AuthRepository(
-      baseUrl: 'http://x',
       tokenStore: store,
       gateway: FakeGateway(),
-      inner: inner,
+      api: ApiClient(baseUrl: 'http://x', tokenStore: store, inner: inner),
     );
 
     await repo.signInWithApple();
@@ -35,11 +35,15 @@ void main() {
   });
 
   test('throws when the server omits set-auth-token', () async {
+    final store = InMemoryTokenStore();
     final repo = AuthRepository(
-      baseUrl: 'http://x',
-      tokenStore: InMemoryTokenStore(),
+      tokenStore: store,
       gateway: FakeGateway(),
-      inner: MockClient((_) async => http.Response('{"user":{}}', 200)),
+      api: ApiClient(
+        baseUrl: 'http://x',
+        tokenStore: store,
+        inner: MockClient((_) async => http.Response('{"user":{}}', 200)),
+      ),
     );
     await expectLater(repo.signInWithApple(), throwsA(isA<StateError>()));
   });
@@ -47,12 +51,15 @@ void main() {
   test('surfaces server rejection without storing a token', () async {
     final store = InMemoryTokenStore();
     final repo = AuthRepository(
-      baseUrl: 'http://x',
       tokenStore: store,
       gateway: FakeGateway(),
-      inner: MockClient((_) async => http.Response('{"error":"bad token"}', 401)),
+      api: ApiClient(
+        baseUrl: 'http://x',
+        tokenStore: store,
+        inner: MockClient((_) async => http.Response('{"error":"bad token"}', 401)),
+      ),
     );
-    await expectLater(repo.signInWithApple(), throwsA(anything));
+    await expectLater(repo.signInWithApple(), throwsA(isA<ApiException>()));
     expect(await store.read(), isNull);
   });
 
@@ -60,10 +67,13 @@ void main() {
     final store = InMemoryTokenStore();
     await store.write('t');
     final repo = AuthRepository(
-      baseUrl: 'http://x',
       tokenStore: store,
       gateway: FakeGateway(),
-      inner: MockClient((_) async => http.Response('{}', 200)),
+      api: ApiClient(
+        baseUrl: 'http://x',
+        tokenStore: store,
+        inner: MockClient((_) async => http.Response('{}', 200)),
+      ),
     );
     await repo.signOut();
     expect(await store.read(), isNull);
