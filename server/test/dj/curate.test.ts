@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { curate, CurationTruncated } from '../../src/dj/curate'
+import { curate, CurationTruncated, CurationUnparseable } from '../../src/dj/curate'
 import { intentSchema, type Intent } from '../../src/dj/contracts'
 import type { LlmClient, LlmRequest, LlmTurn } from '../../src/dj/llm'
 import type { PoolTrack } from '../../src/dj/pool'
@@ -214,19 +214,99 @@ describe('curate', () => {
     expect(requests).toHaveLength(2)
   })
 
-  it('falls back to pure pool order, count honored, on malformed non-JSON output (no throw)', async () => {
+  it('throws CurationUnparseable — not a silent pool-order fallback — when zero valid picks are found in malformed non-JSON output', async () => {
     const pool = makePool(8)
     const { llm } = scriptedLlm([{ text: 'sorry, I cannot comply with that request today!', stopReason: 'end_turn' }])
 
-    const result = await curate(llm, pool, intent({ themes: 'x', targetCount: 4 }))
+    await expect(curate(llm, pool, intent({ themes: 'x', targetCount: 4 }))).rejects.toThrow(CurationUnparseable)
+  })
 
-    expect(result).toHaveLength(4)
-    expect(result.map((r) => r.trackId)).toEqual(pool.slice(0, 4).map((t) => t.trackId))
-    expect(result.every((r) => r.reason === '')).toBe(true)
+  it('caps the truncation retry at MAX_TOKENS_CAP instead of doubling past it', async () => {
+    // targetCount 200 bypasses intentSchema's max (60) so the FIRST call is
+    // already saturated at the 16000 cap — a naive doubling on retry would
+    // ask for 32000, which is what this test guards against.
+    const pool = makePool(10)
+    const bigIntent: Intent = { ...intent({ themes: 'x' }), targetCount: 200 }
+    const picks = [{ id: pool[0].trackId, reason: 'ok' }]
+    const { llm, requests } = scriptedLlm([textTurn(picks, 'max_tokens'), textTurn(picks, 'end_turn')])
 
-    // deterministic: calling again with the same malformed output gives the same result
-    const { llm: llm2 } = scriptedLlm([{ text: 'sorry, I cannot comply with that request today!', stopReason: 'end_turn' }])
-    const result2 = await curate(llm2, pool, intent({ themes: 'x', targetCount: 4 }))
-    expect(result2).toEqual(result)
+    await curate(llm, pool, bigIntent)
+
+    expect(requests[0].maxTokens).toBe(16000)
+    expect(requests[1].maxTokens).toBe(16000)
+  })
+
+  it('system prompt is byte-identical across calls with different targetCount and energyArc (static prefix stays cacheable)', async () => {
+    const pool = makePool(5)
+    const { llm: llmA, requests: reqA } = scriptedLlm([textTurn([{ id: pool[0].trackId }])])
+    const { llm: llmB, requests: reqB } = scriptedLlm([textTurn([{ id: pool[0].trackId }])])
+
+    await curate(llmA, pool, intent({ themes: 'rainy drive', targetCount: 3, energyArc: 'rise' }))
+    await curate(llmB, pool, intent({ themes: 'sunny hike', targetCount: 45, energyArc: 'fall' }))
+
+    expect(reqA[0].system).toBe(reqB[0].system)
+    // the volatile bits (count, arc) must live in the intent block, not the system prompt
+    expect(reqA[0].system).not.toContain('3')
+    expect(reqA[0].system).not.toContain('45')
+  })
+
+  it('pool block opens with the legend and includes a fully-populated per-track line', async () => {
+    const pool = makePool(5)
+    pool[0] = { ...pool[0], playCount: 42, tempo: 128, energy: 0.73, valence: 0.21, releaseYear: 1994 }
+    const { llm, requests } = scriptedLlm([textTurn([{ id: pool[0].trackId }])])
+
+    await curate(llm, pool, intent({ themes: 'x', targetCount: 3 }))
+
+    const message = requests[0].messages[0]
+    if (message.role !== 'user' || typeof message.content === 'string') throw new Error('expected content blocks')
+    const blocks = message.content as Array<{ type: string; text?: string }>
+    const poolText = blocks[0].text ?? ''
+    expect(poolText).toContain(
+      'id | title — artist | play count | bpm | energy 0-1 | valence 0-1 (bleak→bright) | release year',
+    )
+    expect(poolText).toContain(`${pool[0].trackId} | ${pool[0].title} — ${pool[0].artist} | 42 | 128 | 0.73 | 0.21 | 1994`)
+  })
+
+  describe('parser probes', () => {
+    it('parses picks from a fenced JSON response', async () => {
+      const pool = makePool(3)
+      const picks = [{ id: pool[0].trackId, reason: 'ok' }]
+      const text = '```json\n' + JSON.stringify(picks) + '\n```'
+      const { llm } = scriptedLlm([{ text, stopReason: 'end_turn' }])
+
+      const result = await curate(llm, pool, intent({ themes: 'x', targetCount: 3 }))
+
+      expect(result[0]).toEqual({ trackId: pool[0].trackId, reason: 'ok' })
+    })
+
+    it('skips a false-lead bracket in prose and still finds the real fenced JSON array', async () => {
+      const pool = makePool(3)
+      const picks = [{ id: pool[0].trackId, reason: 'ok' }]
+      const text = 'Per your request [1], here is the queue:\n```json\n' + JSON.stringify(picks) + '\n```'
+      const { llm } = scriptedLlm([{ text, stopReason: 'end_turn' }])
+
+      const result = await curate(llm, pool, intent({ themes: 'x', targetCount: 3 }))
+
+      expect(result[0]).toEqual({ trackId: pool[0].trackId, reason: 'ok' })
+    })
+
+    it('skips a leading [1]-shaped array and finds the real picks array later in the text', async () => {
+      const pool = makePool(3)
+      const picks = [{ id: pool[0].trackId, reason: 'ok' }]
+      const text = `Footnote [1] applies here. Actual picks: ${JSON.stringify(picks)}`
+      const { llm } = scriptedLlm([{ text, stopReason: 'end_turn' }])
+
+      const result = await curate(llm, pool, intent({ themes: 'x', targetCount: 3 }))
+
+      expect(result[0]).toEqual({ trackId: pool[0].trackId, reason: 'ok' })
+    })
+
+    it('throws CurationUnparseable when the only bracket in the text is a wrong-shaped one (no real picks array exists)', async () => {
+      const pool = makePool(3)
+      const text = 'Footnote [1] is the only bracket here, sorry.'
+      const { llm } = scriptedLlm([{ text, stopReason: 'end_turn' }])
+
+      await expect(curate(llm, pool, intent({ themes: 'x', targetCount: 3 }))).rejects.toThrow(CurationUnparseable)
+    })
   })
 })
