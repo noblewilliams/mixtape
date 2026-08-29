@@ -285,6 +285,7 @@ Write the JSON schemas out longhand (they're small); a test asserts each tool's 
 - [ ] **Step 2: red**, then implement `curate(llm, pool, intent, sessionContext): Promise<Array<{trackId, reason}>>`:
   - One LLM call, NO tools: system = curation instructions (sequence for the intent's arc, respect targetCount, one short reason per track, output STRICT JSON `[{"id":"...","reason":"..."}]` and nothing else); user content = [poolBlock (one line per track: id | title — artist | plays | bpm | energy | valence | year, with `cache_control: {type:'ephemeral'}`), intentBlock].
   - Parse defensively (extract first JSON array; validate ids against pool; truncate/backfill to targetCount).
+  - **Truncation is a failure, not parse noise**: when `turn.stopReason === 'max_tokens'`, do NOT silently backfill — retry once with `maxTokens` doubled; if still truncated, throw a typed CurationTruncated error (the loop surfaces it as a DJ apology rather than shipping a silently-uncurated queue). Test: fake returning stopReason 'max_tokens' first call, ok second → succeeds with one retry; 'max_tokens' twice → throws.
 - [ ] **Step 3:** green + typecheck. **Commit** `feat(server): curation pass`.
 
 ---
