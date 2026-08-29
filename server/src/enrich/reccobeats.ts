@@ -36,6 +36,10 @@ export async function resolveAndFetchFeatures(
   track: TrackKey,
   fetchLike: FetchLike = fetch,
 ): Promise<AudioFeatures | null> {
+  const titleNorm = norm(track.title)
+  const artistNorm = norm(track.artist)
+  if (!artistNorm || !titleNorm) return null
+
   // Title only: artist terms in searchText break ReccoBeats matching (probed live).
   const searchUrl = new URL(`${BASE}/track/search`)
   searchUrl.searchParams.set('searchText', track.title)
@@ -45,10 +49,6 @@ export async function resolveAndFetchFeatures(
     throw new EnrichSourceError('reccobeats', 'malformed search JSON')
   })) as { content?: Candidate[] }
   const content = Array.isArray(searchBody?.content) ? searchBody.content : []
-
-  const titleNorm = norm(track.title)
-  const artistNorm = norm(track.artist)
-  if (!artistNorm || !titleNorm) return null
 
   const artistOk = (c: Candidate) =>
     Array.isArray(c.artists) &&
@@ -62,10 +62,14 @@ export async function resolveAndFetchFeatures(
     return Math.abs(c.durationMs - track.durationMs) <= DURATION_TOLERANCE_MS
   }
   const exactTitle = content.filter((c) => norm(c.trackTitle ?? '') === titleNorm)
-  // Exact-title candidates always preferred. Without a known duration, exact title
-  // is REQUIRED (title-only search happily returns live/remix cuts otherwise).
-  const pool = exactTitle.length ? exactTitle : track.durationMs != null ? content : []
-  const match = pool.find((c) => artistOk(c) && durationOk(c))
+  // Exact-title candidates preferred, but not exclusive: a cover carrying the plain
+  // title shouldn't monopolize the pool and hide a real non-exact match (e.g. an
+  // "(Album Version)" track) that the artist+duration gate can still vouch for.
+  // Without a known duration, exact title is REQUIRED (title-only search happily
+  // returns live/remix cuts otherwise).
+  const match =
+    exactTitle.find((c) => artistOk(c) && durationOk(c)) ??
+    (track.durationMs != null ? content.find((c) => artistOk(c) && durationOk(c)) : undefined)
   if (!match) return null
 
   const featRes = await fetchLike(`${BASE}/track/${match.id}/audio-features`, {

@@ -151,4 +151,28 @@ describe('resolveAndFetchFeatures', () => {
     )
     expect(result?.tempo).toBeNull()
   })
+
+  it('falls back to a non-exact-title candidate when the exact-title match is a different-artist cover', async () => {
+    const fetchLike: FetchLike = async (url) => {
+      const u = String(url)
+      if (u.includes('/track/search')) {
+        return new Response(
+          JSON.stringify({
+            content: [
+              candidate({ id: 'rb-cover', artists: [{ name: 'Some Cover Band' }] }),
+              candidate({ id: 'rb-album', trackTitle: 'Nude (Album Version)', durationMs: 255386 }),
+            ],
+          }),
+          { status: 200 },
+        )
+      }
+      expect(u).toContain('/track/rb-album/audio-features')
+      return new Response(JSON.stringify(features), { status: 200 })
+    }
+    const result = await resolveAndFetchFeatures(
+      { title: 'Nude', artist: 'Radiohead', durationMs: 255000 },
+      fetchLike,
+    )
+    expect(result?.isrc).toBe('GBSTK0700003')
+  })
 })
