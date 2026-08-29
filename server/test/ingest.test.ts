@@ -94,6 +94,33 @@ describe('POST /ingest/library', () => {
     expect(res.status).toBe(400)
   })
 
+  it('stores releaseYear and explicit on the track row', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    const res = await post(db, { songs: [song({ releaseYear: 2011, explicit: true })] })
+    expect(res.status).toBe(200)
+    const [track] = await db.select().from(tracks)
+    expect(track.releaseYear).toBe(2011)
+    expect(track.explicit).toBe(true)
+  })
+
+  it('does not clobber releaseYear/explicit on re-sync with nulls', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    await post(db, { songs: [song({ releaseYear: 2011, explicit: true })] })
+    await post(db, { songs: [song({ releaseYear: null, explicit: null })] })
+    const [track] = await db.select().from(tracks)
+    expect(track.releaseYear).toBe(2011)
+    expect(track.explicit).toBe(true)
+  })
+
+  it('rejects an out-of-range releaseYear', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    const res = await post(db, { songs: [song({ releaseYear: 99 })] })
+    expect(res.status).toBe(400)
+  })
+
   it('merges cross-page duplicates monotonically (playCount and lastPlayedAt never regress, even to null)', async () => {
     const db = await createTestDb()
     await seedUser(db)

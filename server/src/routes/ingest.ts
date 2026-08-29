@@ -12,6 +12,8 @@ const songSchema = z.object({
   artist: z.string().min(1),
   album: z.string().nullable().optional(),
   genre: z.string().nullable().optional(),
+  releaseYear: z.number().int().min(1000).max(3000).nullable().optional(),
+  explicit: z.boolean().nullable().optional(),
   playCount: z.number().int().min(0),
   lastPlayedAt: z.number().int().nullable().optional(),
   dateAdded: z.number().int().nullable().optional(),
@@ -59,6 +61,8 @@ export function ingestRoutes(db: Db) {
           artist: s.artist,
           album: s.album ?? null,
           genre: s.genre ?? null,
+          releaseYear: s.releaseYear ?? null,
+          explicit: s.explicit ?? null,
         })),
       )
       .onConflictDoUpdate({
@@ -71,6 +75,8 @@ export function ingestRoutes(db: Db) {
           // never blank out an existing value with an unknown one.
           album: sql`coalesce(excluded.album, ${tracks.album})`,
           genre: sql`coalesce(excluded.genre, ${tracks.genre})`,
+          releaseYear: sql`coalesce(excluded.release_year, ${tracks.releaseYear})`,
+          explicit: sql`coalesce(excluded.explicit, ${tracks.explicit})`,
         },
       })
       .returning({ id: tracks.id, appleId: tracks.appleId })

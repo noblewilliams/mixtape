@@ -27,6 +27,8 @@ export const tracks = pgTable(
     album: text('album'),
     genre: text('genre'),
     durationMs: integer('duration_ms'),
+    releaseYear: integer('release_year'),
+    explicit: boolean('explicit'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

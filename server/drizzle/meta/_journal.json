@@ -29,6 +29,13 @@
       "when": 1788002063154,
       "tag": "0003_stiff_meltdown",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788012310601,
+      "tag": "0004_loose_sunfire",
+      "breakpoints": true
     }
   ]
 }

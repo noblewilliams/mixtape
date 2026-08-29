@@ -42,6 +42,8 @@ type CandidateRow = {
   album: string | null
   genre: string | null
   duration_ms: number | null
+  release_year: number | null
+  explicit: boolean | null
   created_at: string
   skip_features: boolean
   skip_meaning: boolean
@@ -57,6 +59,8 @@ function toTrackRow(r: CandidateRow): TrackRow {
     album: r.album,
     genre: r.genre,
     durationMs: r.duration_ms,
+    releaseYear: r.release_year,
+    explicit: r.explicit,
     // Raw SQL hands back created_at as a string, not a Date, despite the
     // schema type — a type-only accommodation. Nothing below does date
     // arithmetic on it, so this cast is safe as long as that stays true.
