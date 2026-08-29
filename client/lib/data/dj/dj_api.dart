@@ -196,7 +196,13 @@ class DjApi {
     // Independent of the try/catch below: the body can legitimately carry
     // `queue` without `queueVersion` (or vice versa) — e.g. a create-session
     // failure's queue snapshot with no version concept attached — and that's
-    // not the asymmetry this method guards against.
+    // not the asymmetry this method guards against. A queue without a
+    // version is preserved here at the API layer (the server may
+    // legitimately omit one), but it's never adopted into ChatState —
+    // position-based ops (remove/move) need a version to target against, so
+    // dj_providers.dart's _atomicQueueSnapshot requires both together before
+    // adopting either. Today the server always sends both together, so this
+    // asymmetry is currently theoretical, not observed.
     var queueVersion = decoded['queueVersion'] is int ? decoded['queueVersion'] as int : null;
     try {
       final rawQueue = decoded['queue'];

@@ -34,7 +34,13 @@ const _staleTransientMessage = 'queue was updated — showing the latest';
 /// worse than adopting neither, since it can silently mismatch a queue the
 /// caller already has cached under a different version (a stale queue
 /// paired with a fresh version number can make a position-based op like
-/// remove/move target the wrong track entirely).
+/// remove/move target the wrong track entirely). This is stricter than
+/// dj_api.dart's parsing: a queue without a version is preserved at the API
+/// layer (DjApiException.queue can be non-null with queueVersion null — the
+/// server may legitimately omit a version), but it's never adopted into
+/// ChatState, since position-based ops need a version to target against.
+/// Today the server always sends both together, so the two layers agree in
+/// practice even though only this one enforces it.
 ({List<QueueTrack>? queue, int? queueVersion}) _atomicQueueSnapshot(
   List<QueueTrack>? queue,
   int? queueVersion,

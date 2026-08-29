@@ -27,6 +27,13 @@ class FakeBridge implements MusicKitBridge {
     }
     return LibraryPage(songs: page, total: all.length);
   }
+
+  @override
+  Future<bool> playQueue(List<String> appleIds) async => true;
+
+  @override
+  Future<({int added, int failed})> createPlaylist(String name, List<String> appleIds) async =>
+      (added: appleIds.length, failed: 0);
 }
 
 class DeniedBridge implements MusicKitBridge {
@@ -34,6 +41,11 @@ class DeniedBridge implements MusicKitBridge {
   Future<bool> requestAuthorization() async => false;
   @override
   Future<LibraryPage> fetchLibrarySongs({required int offset, required int limit}) =>
+      throw UnimplementedError();
+  @override
+  Future<bool> playQueue(List<String> appleIds) => throw UnimplementedError();
+  @override
+  Future<({int added, int failed})> createPlaylist(String name, List<String> appleIds) =>
       throw UnimplementedError();
 }
 
@@ -52,6 +64,13 @@ class BoomBridge implements MusicKitBridge {
     if (_calls > 1) throw MusicKitException('boom');
     return LibraryPage(songs: all.skip(offset).take(limit).toList(), total: all.length);
   }
+
+  @override
+  Future<bool> playQueue(List<String> appleIds) async => true;
+
+  @override
+  Future<({int added, int failed})> createPlaylist(String name, List<String> appleIds) async =>
+      (added: appleIds.length, failed: 0);
 }
 
 LibrarySong song(int i) =>

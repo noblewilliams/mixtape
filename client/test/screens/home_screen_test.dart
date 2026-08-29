@@ -28,6 +28,13 @@ class _PausableBridge implements MusicKitBridge {
     await gate.future;
     return LibraryPage(songs: all, total: all.length);
   }
+
+  @override
+  Future<bool> playQueue(List<String> appleIds) async => true;
+
+  @override
+  Future<({int added, int failed})> createPlaylist(String name, List<String> appleIds) async =>
+      (added: appleIds.length, failed: 0);
 }
 
 /// Settles synchronously on signedIn — mirrors how the real app only ever

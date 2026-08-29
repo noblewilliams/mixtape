@@ -18,8 +18,92 @@ class MusicKitBridge: NSObject {
         let offset = max(0, args["offset"] as? Int ?? 0)
         let limit = max(0, args["limit"] as? Int ?? 200)
         fetchLibrarySongs(offset: offset, limit: limit, result: result)
+      case "playQueue":
+        let args = call.arguments as? [String: Any] ?? [:]
+        let appleIds = args["appleIds"] as? [String] ?? []
+        playQueue(appleIds: appleIds, result: result)
+      case "createPlaylist":
+        let args = call.arguments as? [String: Any] ?? [:]
+        let name = args["name"] as? String ?? ""
+        let appleIds = args["appleIds"] as? [String] ?? []
+        createPlaylist(name: name, appleIds: appleIds, result: result)
       default:
         result(FlutterMethodNotImplemented)
+      }
+    }
+  }
+
+  // MARK: - Playback hand-off
+  //
+  // Hand-off: once we call play(), playback lives in the Music app via the
+  // system player — it survives our app closing. MPMusicPlayerController is
+  // main-thread-only (unlike the library-read path above), so this runs
+  // entirely on the main thread rather than the serial `queue` used for
+  // fetchLibrarySongs.
+  private static func playQueue(appleIds: [String], result: @escaping FlutterResult) {
+    guard !appleIds.isEmpty else {
+      result(FlutterError(code: "empty_queue", message: "cannot play an empty queue", details: nil))
+      return
+    }
+    DispatchQueue.main.async {
+      let player = MPMusicPlayerController.systemMusicPlayer
+      player.setQueue(with: appleIds)
+      player.prepareToPlay { error in
+        DispatchQueue.main.async {
+          guard error == nil else {
+            result(FlutterError(code: "play_failed", message: "could not start playback", details: nil))
+            return
+          }
+          player.play()
+          result(true)
+        }
+      }
+    }
+  }
+
+  // MARK: - Playlist creation
+
+  private static func createPlaylist(name: String, appleIds: [String], result: @escaping FlutterResult) {
+    guard !name.isEmpty, !appleIds.isEmpty else {
+      result(FlutterError(code: "empty_playlist", message: "name and tracks are required", details: nil))
+      return
+    }
+    DispatchQueue.main.async {
+      let metadata = MPMediaPlaylistCreationMetadata(name: name)
+      MPMediaLibrary.default().getPlaylist(with: UUID(), creationMetadata: metadata) { playlist, error in
+        DispatchQueue.main.async {
+          guard let playlist = playlist, error == nil else {
+            result(FlutterError(code: "playlist_failed", message: "could not create playlist", details: nil))
+            return
+          }
+          addItems(appleIds, to: playlist, index: 0, added: 0, failed: 0, result: result)
+        }
+      }
+    }
+  }
+
+  /// Adds `appleIds[index...]` to `playlist` one at a time via a recursive
+  /// completion chain — NOT a DispatchGroup, which would deadlock waiting
+  /// for N completions to all signal back to the main thread while each
+  /// completion itself hops back to main. A per-item failure is counted and
+  /// the chain continues; it never aborts the whole batch.
+  private static func addItems(
+    _ appleIds: [String],
+    to playlist: MPMediaPlaylist,
+    index: Int,
+    added: Int,
+    failed: Int,
+    result: @escaping FlutterResult
+  ) {
+    guard index < appleIds.count else {
+      result(["added": added, "failed": failed])
+      return
+    }
+    playlist.addItem(withProductID: appleIds[index]) { error in
+      DispatchQueue.main.async {
+        let nextAdded = added + (error == nil ? 1 : 0)
+        let nextFailed = failed + (error == nil ? 0 : 1)
+        addItems(appleIds, to: playlist, index: index + 1, added: nextAdded, failed: nextFailed, result: result)
       }
     }
   }

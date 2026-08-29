@@ -99,4 +99,53 @@ class MusicKitBridge {
       throw MusicKitException('MusicKit bridge not registered');
     }
   }
+
+  /// Hands playback off to the Music app: `setQueue` + `play()` over
+  /// `MPMusicPlayerController.systemMusicPlayer` on the native side.
+  /// Playback then lives in the Music app and survives this app closing —
+  /// this call only starts it. Guards against an empty [appleIds] BEFORE
+  /// touching the channel, since the native side has nothing meaningful to
+  /// queue and would otherwise have to invent its own "empty" error code.
+  Future<bool> playQueue(List<String> appleIds) async {
+    if (appleIds.isEmpty) {
+      throw MusicKitException('cannot play an empty queue');
+    }
+    try {
+      return await _channel.invokeMethod<bool>('playQueue', {'appleIds': appleIds}) ?? false;
+    } on PlatformException catch (e) {
+      throw MusicKitException(e.message ?? e.code);
+    } on MissingPluginException {
+      throw MusicKitException('MusicKit bridge not registered');
+    }
+  }
+
+  /// Creates a new library playlist named [name] and adds [appleIds] to it.
+  /// Per-track add failures are counted, not fatal — the native side keeps
+  /// going and reports `added`/`failed` counts rather than aborting on the
+  /// first bad id. Guards against an empty [name] or [appleIds] BEFORE
+  /// touching the channel — there is no such thing as an empty-named or
+  /// empty playlist worth creating.
+  Future<({int added, int failed})> createPlaylist(String name, List<String> appleIds) async {
+    if (name.isEmpty) {
+      throw MusicKitException('playlist name cannot be empty');
+    }
+    if (appleIds.isEmpty) {
+      throw MusicKitException('cannot create a playlist with no tracks');
+    }
+    try {
+      final raw = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+        'createPlaylist',
+        {'name': name, 'appleIds': appleIds},
+      );
+      // Parsed defensively: any shape drift from the platform side degrades
+      // to 0 rather than a type-cast crash reaching the UI layer.
+      final added = raw?['added'] as int? ?? 0;
+      final failed = raw?['failed'] as int? ?? 0;
+      return (added: added, failed: failed);
+    } on PlatformException catch (e) {
+      throw MusicKitException(e.message ?? e.code);
+    } on MissingPluginException {
+      throw MusicKitException('MusicKit bridge not registered');
+    }
+  }
 }

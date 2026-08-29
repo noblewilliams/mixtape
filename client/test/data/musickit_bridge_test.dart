@@ -138,4 +138,139 @@ void main() {
     };
     expect(LibrarySong.fromMap(map).toJson(), map);
   });
+
+  group('playQueue', () {
+    test('sends appleIds and decodes a true result', () async {
+      MethodCall? captured;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        captured = call;
+        return true;
+      });
+
+      final result = await MusicKitBridge().playQueue(['111', '222']);
+
+      expect(result, isTrue);
+      expect(captured?.method, 'playQueue');
+      expect(captured?.arguments, {
+        'appleIds': ['111', '222'],
+      });
+    });
+
+    test('decodes a false result', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async => false);
+      expect(await MusicKitBridge().playQueue(['111']), isFalse);
+    });
+
+    test('treats a null result as false', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async => null);
+      expect(await MusicKitBridge().playQueue(['111']), isFalse);
+    });
+
+    test('wraps a PlatformException in MusicKitException', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        throw PlatformException(code: 'play_failed', message: 'could not play');
+      });
+      await expectLater(
+        MusicKitBridge().playQueue(['111']),
+        throwsA(isA<MusicKitException>()),
+      );
+    });
+
+    test('rejects an empty queue without invoking the channel', () async {
+      var invoked = false;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        invoked = true;
+        return true;
+      });
+
+      await expectLater(
+        MusicKitBridge().playQueue(const []),
+        throwsA(isA<MusicKitException>()),
+      );
+      expect(invoked, isFalse);
+    });
+  });
+
+  group('createPlaylist', () {
+    test('sends name and appleIds and decodes the added/failed record', () async {
+      MethodCall? captured;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        captured = call;
+        return {'added': 2, 'failed': 1};
+      });
+
+      final result = await MusicKitBridge().createPlaylist('My Tape', ['111', '222', '333']);
+
+      expect(captured?.method, 'createPlaylist');
+      expect(captured?.arguments, {
+        'name': 'My Tape',
+        'appleIds': ['111', '222', '333'],
+      });
+      expect(result.added, 2);
+      expect(result.failed, 1);
+    });
+
+    test('defensively decodes a missing added/failed as 0', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async => <String, dynamic>{});
+      final result = await MusicKitBridge().createPlaylist('My Tape', ['111']);
+      expect(result.added, 0);
+      expect(result.failed, 0);
+    });
+
+    test('defensively decodes a null result as 0/0', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async => null);
+      final result = await MusicKitBridge().createPlaylist('My Tape', ['111']);
+      expect(result.added, 0);
+      expect(result.failed, 0);
+    });
+
+    test('wraps a PlatformException in MusicKitException', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        throw PlatformException(code: 'x');
+      });
+      await expectLater(
+        MusicKitBridge().createPlaylist('My Tape', ['111']),
+        throwsA(isA<MusicKitException>()),
+      );
+    });
+
+    test('rejects an empty name without invoking the channel', () async {
+      var invoked = false;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        invoked = true;
+        return {'added': 0, 'failed': 0};
+      });
+
+      await expectLater(
+        MusicKitBridge().createPlaylist('', ['111']),
+        throwsA(isA<MusicKitException>()),
+      );
+      expect(invoked, isFalse);
+    });
+
+    test('rejects an empty track list without invoking the channel', () async {
+      var invoked = false;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        invoked = true;
+        return {'added': 0, 'failed': 0};
+      });
+
+      await expectLater(
+        MusicKitBridge().createPlaylist('My Tape', const []),
+        throwsA(isA<MusicKitException>()),
+      );
+      expect(invoked, isFalse);
+    });
+  });
 }
