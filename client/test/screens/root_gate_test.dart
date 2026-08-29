@@ -115,6 +115,58 @@ void main() {
   });
 
   testWidgets(
+      "an idle sign-out doesn't latch a cancellation that blocks the next user's sync",
+      (tester) async {
+    final store = InMemoryTokenStore();
+    await store.write('tok-a');
+    final service = LibrarySyncService(
+      bridge: FakeBridge([song(1), song(2), song(3)]),
+      api: await apiWith(MockClient((_) async => http.Response('{"ingested": 0}', 200))),
+    );
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        tokenStoreProvider.overrideWithValue(store),
+        librarySyncServiceProvider.overrideWithValue(service),
+      ],
+      child: const MixtapeApp(),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.byType(HomeScreen), findsOneWidget);
+
+    // User A syncs to completion.
+    await tester.tap(find.byKey(const Key('sync-library')));
+    await tester.pumpAndSettle();
+    expect(
+      find.byWidgetPredicate(
+          (w) => w is Text && (w.data?.contains('Synced 3 songs') ?? false)),
+      findsOneWidget,
+    );
+
+    // Sign out with nothing running — this still disposes the notifier and
+    // fires cancel() on the (idle) shared service.
+    await tester.tap(find.byIcon(Icons.logout));
+    await tester.pumpAndSettle();
+    expect(find.byType(SignInScreen), findsOneWidget);
+
+    // User B signs in on the same device.
+    await store.write('tok-b');
+    final container = ProviderScope.containerOf(tester.element(find.byType(MixtapeApp)));
+    container.invalidate(authProvider);
+    await tester.pumpAndSettle();
+    expect(find.byType(HomeScreen), findsOneWidget);
+    expect(find.byKey(const Key('sync-library')), findsOneWidget);
+
+    // User B's first sync must actually run, not silently no-op back to idle.
+    await tester.tap(find.byKey(const Key('sync-library')));
+    await tester.pumpAndSettle();
+    expect(
+      find.byWidgetPredicate(
+          (w) => w is Text && (w.data?.contains('Synced 3 songs') ?? false)),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
       'sign-out mid-POST on a NON-final page cancels cleanly for the next user',
       (tester) async {
     final gate = Completer<void>();

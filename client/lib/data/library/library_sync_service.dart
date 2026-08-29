@@ -20,7 +20,9 @@ class LibrarySyncService {
 
   /// Requests that the in-flight run stop at its next loop iteration,
   /// throwing [SyncCancelled]. No-op if nothing is running.
-  void cancel() => _cancelRequested = true;
+  void cancel() {
+    if (_inFlight != null) _cancelRequested = true;
+  }
 
   /// Full library sync: pages the native snapshot (always starting at offset 0)
   /// and posts each page to /ingest/library. Returns the number of songs found.
