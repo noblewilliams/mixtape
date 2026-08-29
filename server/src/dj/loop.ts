@@ -8,6 +8,7 @@ import { LlmError } from './llm'
 import { intentSchema, opIntentSchema, queueOpsSchema, DJ_TOOLS, type Intent, type OpIntent } from './contracts'
 import { buildPool } from './pool'
 import { curate, CurationTruncated, CurationUnparseable } from './curate'
+import { sanitizeForPrompt } from './sanitize'
 import {
   applyOps,
   getActiveQueue,
@@ -30,19 +31,6 @@ export type DjTurnResult = {
   djMessage: typeof djMessages.$inferSelect
   queue: QueueTrackView[]
   queueVersion: number
-}
-
-// A track title/artist is user-controlled data (synced from the listener's
-// own library) that gets woven verbatim into an LLM prompt — this strips
-// control characters (including newlines, so a crafted title can't fake a
-// turn boundary or an instruction-like line break) and caps length so one
-// oversized field can't dominate the context block. Applied at every point
-// a track title/artist is rendered into context (buildSessionContext below);
-// NOT applied inside curate.ts's own pool listing, which is a pre-existing
-// gap outside this fix's scope (flagged separately).
-const MAX_CONTEXT_FIELD_LENGTH = 80
-function sanitizeForPrompt(text: string): string {
-  return text.replace(/\p{C}+/gu, ' ').slice(0, MAX_CONTEXT_FIELD_LENGTH).trim()
 }
 
 // Bounds the number of tool-use round trips in a single turn. A round is one

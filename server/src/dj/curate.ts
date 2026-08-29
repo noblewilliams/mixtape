@@ -1,6 +1,7 @@
 import type { LlmClient, LlmMessage, LlmRequest } from './llm'
 import type { PoolTrack } from './pool'
 import type { Intent } from './contracts'
+import { sanitizeForPrompt } from './sanitize'
 
 export type CuratedTrack = { trackId: string; reason: string }
 
@@ -58,9 +59,15 @@ const POOL_LEGEND =
   '"-" means unknown. Unknown is not a disqualifier.\n'
 
 function poolLine(t: PoolTrack): string {
+  // title/artist are user-controlled data synced from the listener's own
+  // library (routes/ingest.ts) and get woven straight into the curation
+  // prompt — sanitized the same way loop.ts's session context is (control
+  // chars/newlines stripped, length capped), so a crafted title can't inject
+  // a fake instruction or break the one-track-per-line shape this prompt
+  // depends on.
   return [
     t.trackId,
-    `${t.title} — ${t.artist}`,
+    `${sanitizeForPrompt(t.title)} — ${sanitizeForPrompt(t.artist)}`,
     String(t.playCount),
     fmt(t.tempo === null ? null : Math.round(t.tempo)),
     fmt(t.energy, 2),
