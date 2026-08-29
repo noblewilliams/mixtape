@@ -1,19 +1,22 @@
-import { Hono } from 'hono'
+import type { ExecutionContext } from 'hono'
+import { neon } from '@neondatabase/serverless'
+import { drizzle } from 'drizzle-orm/neon-http'
+import * as schema from './db/schema'
+import { createAuth } from './auth/create-auth'
+import { createApp } from './app'
 
 type Bindings = {
   DATABASE_URL: string
   BETTER_AUTH_SECRET: string
-  ANTHROPIC_API_KEY: string
+  BETTER_AUTH_URL: string
+  APPLE_BUNDLE_ID: string
 }
 
-const app = new Hono<{ Bindings: Bindings }>()
-
-app.get('/health', (c) => c.json({ ok: true, service: 'mixtape-api' }))
-
-// Route groups land per the v1 design spec (docs/superpowers/specs/2026-08-29-mixtape-v1-design.md):
-//   /auth/*     — Better Auth (Sign in with Apple)        [P1]
-//   /ingest/*   — library / play counts / recents intake  [P1]
-//   /enrich/*   — enrichment waterfall internals          [P2]
-//   /sessions/* — prompt → queue, refine, history, convert [P3–P4]
-
-export default app
+export default {
+  fetch(req: Request, env: Bindings, ctx: ExecutionContext) {
+    const db = drizzle(neon(env.DATABASE_URL), { schema })
+    const auth = createAuth(db, env)
+    const app = createApp({ auth })
+    return app.fetch(req, env, ctx)
+  },
+}
