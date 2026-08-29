@@ -101,6 +101,29 @@ describe('queue-store', () => {
       expect(updatedSession.queueVersion).toBe(1)
     })
 
+    it('dedupes picks by trackId, keeping the first occurrence', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const session = await seedSession(db, 'u1')
+      const trackList = await seedTracks(db, 2)
+      const picks: ReplacementPick[] = [
+        { trackId: trackList[0].id, reason: 'first' },
+        { trackId: trackList[1].id, reason: 'middle' },
+        { trackId: trackList[0].id, reason: 'duplicate-should-be-dropped' },
+      ]
+
+      await replaceQueue(db, session.id, picks, 'dj')
+
+      const rows = await db
+        .select()
+        .from(queueTracks)
+        .where(eq(queueTracks.sessionId, session.id))
+        .orderBy(queueTracks.position)
+      expect(rows).toHaveLength(2)
+      expect(rows.map((r) => r.trackId)).toEqual([trackList[0].id, trackList[1].id])
+      expect(rows[0].reason).toBe('first') // first occurrence wins, not the later duplicate
+    })
+
     it('hard-deletes prior rows on a second replace — no history survives', async () => {
       const db = await createTestDb()
       await seedUser(db, 'u1')
@@ -478,6 +501,34 @@ describe('queue-store', () => {
       expect(view.map((v) => v.trackId)).toEqual(trackList.map((t) => t.id))
       const [sessionRow] = await db.select().from(djSessions).where(eq(djSessions.id, session.id))
       expect(sessionRow.queueVersion).toBe(1)
+    })
+
+    it('throws QueueVersionConflict — and applies nothing — when the queue is mutated by another write DURING the provider call (phase 1 -> phase 2 race window)', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const session = await seedSession(db, 'u1')
+      const trackList = await seedTracks(db, 2)
+      await replaceQueue(db, session.id, picksFrom(trackList), 'dj') // version 1
+      const [extra] = await seedTracks(db, 1)
+
+      // Simulates a second write landing while THIS call's provider (an LLM
+      // round trip) is still in flight — phase 1 has no lock to prevent it.
+      const provider: ReplacementsProvider = async () => {
+        await applyOps(db, session.id, [{ op: 'remove', position: 0 }], 'user') // bumps version to 2 mid-call
+        return [{ trackId: extra.id, reason: 'should never land' }]
+      }
+
+      await expect(applyOps(db, session.id, [{ op: 'extend', count: 1 }], 'dj', provider)).rejects.toThrow(
+        QueueVersionConflict,
+      )
+
+      // The interloping remove (version 2) is the only change that took —
+      // this call's own extend never wrote anything.
+      const view = await getActiveQueue(db, session.id)
+      expect(view.map((v) => v.trackId)).toEqual([trackList[1].id])
+      expect(view.map((v) => v.trackId)).not.toContain(extra.id)
+      const [sessionRow] = await db.select().from(djSessions).where(eq(djSessions.id, session.id))
+      expect(sessionRow.queueVersion).toBe(2)
     })
 
     it('succeeds when expectedVersion matches the current version', async () => {

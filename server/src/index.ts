@@ -34,7 +34,13 @@ type Bindings = {
 // stashing a live connection on a global would leak it across them.
 function buildDb(env: Bindings): { db: Db; pool: Pool } {
   if (!env.DATABASE_URL) throw new Error('DATABASE_URL is required')
-  const pool = new Pool({ connectionString: env.DATABASE_URL })
+  // A single request needs at most two concurrent connections at once — its
+  // own transaction (queue store's SELECT ... FOR UPDATE) plus one more
+  // concurrent query (e.g. the dj loop's buildPool running alongside
+  // something else) — so cap the pool at 2 rather than the client default,
+  // which would let one Worker invocation hold far more sockets than it can
+  // ever actually use concurrently.
+  const pool = new Pool({ connectionString: env.DATABASE_URL, max: 2 })
   return { db: drizzle(pool, { schema }), pool }
 }
 
@@ -56,26 +62,35 @@ function buildDeps(env: Bindings): EnrichDeps | undefined {
 export default {
   async fetch(req: Request, env: Bindings, ctx: ExecutionContext) {
     const { db, pool } = buildDb(env)
-    const auth = createAuth(db, env)
-    const deps = buildDeps(env)
-    // /enrich/* is only mounted when both an admin token and the AI binding
-    // are configured. No AI binding → no enrich surface: better a 404 than
-    // every track burning 3 'internal: TypeError' attempts.
-    const enrich = deps && env.ENRICH_ADMIN_TOKEN ? { adminToken: env.ENRICH_ADMIN_TOKEN, deps } : undefined
-    const app = createApp({ auth, db, enrich })
-    const res = await app.fetch(req, env, ctx)
-    // Closes the pool's socket(s) after the response is built rather than
-    // blocking on it — waitUntil keeps the isolate alive just long enough to
-    // flush the close, without holding up the response itself.
-    ctx.waitUntil(pool.end())
-    return res
+    // try/finally rather than a bare sequential call: buildDeps/createAuth/
+    // createApp or app.fetch itself throwing must still close the pool —
+    // otherwise a bad request (or a misconfigured binding) leaks a socket on
+    // every failure instead of just the happy path.
+    try {
+      const auth = createAuth(db, env)
+      const deps = buildDeps(env)
+      // /enrich/* is only mounted when both an admin token and the AI binding
+      // are configured. No AI binding → no enrich surface: better a 404 than
+      // every track burning 3 'internal: TypeError' attempts.
+      const enrich = deps && env.ENRICH_ADMIN_TOKEN ? { adminToken: env.ENRICH_ADMIN_TOKEN, deps } : undefined
+      const app = createApp({ auth, db, enrich })
+      return await app.fetch(req, env, ctx)
+    } finally {
+      // Closes the pool's socket(s) after the response is built rather than
+      // blocking on it — waitUntil keeps the isolate alive just long enough to
+      // flush the close, without holding up the response itself.
+      ctx.waitUntil(pool.end())
+    }
   },
   async scheduled(_event: ScheduledController, env: Bindings, ctx: ExecutionContext) {
     const deps = buildDeps(env)
     if (!deps) return // no AI binding: nothing to enrich with
     const { db, pool } = buildDb(env)
-    // Counts only — no track data, no lyric/embedding content.
-    console.log('enrich cron', JSON.stringify(await handleScheduled(db, deps)))
-    ctx.waitUntil(pool.end())
+    try {
+      // Counts only — no track data, no lyric/embedding content.
+      console.log('enrich cron', JSON.stringify(await handleScheduled(db, deps)))
+    } finally {
+      ctx.waitUntil(pool.end())
+    }
   },
 }

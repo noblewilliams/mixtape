@@ -39,12 +39,23 @@ describe('anthropicLlm', () => {
     const fakeCreate = async () => ({
       content: [{ type: 'text', text: 'truncated' }] as Anthropic.ContentBlock[],
       stop_reason: 'max_tokens',
-      usage: { input_tokens: 4096, output_tokens: 16000 },
+      usage: { input_tokens: 4096, output_tokens: 16000, cache_read_input_tokens: 2048 },
     })
     const llm = anthropicLlm({ messages: { create: fakeCreate } })
     const turn = await llm(baseReq)
     expect(turn.stopReason).toBe('max_tokens')
-    expect(turn.usage).toEqual({ inputTokens: 4096, outputTokens: 16000 })
+    expect(turn.usage).toEqual({ inputTokens: 4096, outputTokens: 16000, cacheReadInputTokens: 2048 })
+  })
+
+  it('defaults cacheReadInputTokens to null when the SDK response omits it', async () => {
+    const fakeCreate = async () => ({
+      content: [{ type: 'text', text: 'ok' }] as Anthropic.ContentBlock[],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 1, output_tokens: 1 },
+    })
+    const llm = anthropicLlm({ messages: { create: fakeCreate } })
+    const turn = await llm(baseReq)
+    expect(turn.usage).toEqual({ inputTokens: 1, outputTokens: 1, cacheReadInputTokens: null })
   })
 
   it('carries a thinking block through raw, excluded from text and toolCalls', async () => {

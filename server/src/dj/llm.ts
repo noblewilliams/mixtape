@@ -35,7 +35,11 @@ export type LlmTurn = {
   toolCalls: LlmToolCall[]
   raw: LlmAssistantBlock[] // full assistant content, for verbatim replay (includes thinking blocks)
   stopReason: string | null // 'max_tokens' must be detectable (curation truncation)
-  usage: { inputTokens: number; outputTokens: number } | null
+  // cacheReadInputTokens is null whenever the response carries no usage at
+  // all (see `usage` itself going null below) — kept separate from `0` so a
+  // caller logging cache effectiveness (Task 10) can distinguish "no usage
+  // reported" from "usage reported, cache missed entirely".
+  usage: { inputTokens: number; outputTokens: number; cacheReadInputTokens: number | null } | null
 }
 export type LlmClient = (req: LlmRequest) => Promise<LlmTurn>
 
@@ -62,7 +66,7 @@ type AnthropicClient = {
     create(body: Anthropic.MessageCreateParamsNonStreaming): Promise<{
       content: Anthropic.ContentBlock[]
       stop_reason: string | null
-      usage: { input_tokens: number; output_tokens: number }
+      usage: { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number | null }
     }>
   }
 }
@@ -98,7 +102,13 @@ export function anthropicLlm(client: AnthropicClient): LlmClient {
       toolCalls,
       raw,
       stopReason: res.stop_reason,
-      usage: res.usage ? { inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens } : null,
+      usage: res.usage
+        ? {
+            inputTokens: res.usage.input_tokens,
+            outputTokens: res.usage.output_tokens,
+            cacheReadInputTokens: res.usage.cache_read_input_tokens ?? null,
+          }
+        : null,
     }
   }
 }

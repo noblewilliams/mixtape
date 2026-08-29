@@ -54,11 +54,33 @@ export type ApplyOpsResult = {
   removed: number // rows marked removed (unconditional `remove`s + resolved swaps)
 }
 
+// A duplicate trackId in `picks` (the curator picking the same track twice,
+// or a caller-assembled list that overlaps) would violate the "no duplicate
+// active track in a queue" invariant this store enforces everywhere else
+// (see materialize's active-set guard below) — dedupe here too, keeping only
+// the FIRST occurrence so the picks' own ordering (e.g. curation's sequencing)
+// decides which position a repeated track keeps.
+function dedupeByTrackId(picks: ReplacementPick[]): ReplacementPick[] {
+  const seen = new Set<string>()
+  const out: ReplacementPick[] = []
+  for (const p of picks) {
+    if (seen.has(p.trackId)) continue
+    seen.add(p.trackId)
+    out.push(p)
+  }
+  return out
+}
+
 /**
  * Replaces a session's entire queue: hard-deletes every existing queue_tracks
  * row (active AND removed — history for a discarded queue lives in
  * dj_messages, not queue rows) and inserts `picks` at positions 0..n-1.
  * Bumps queueVersion once. Returns the new version.
+ *
+ * `picks` is deduped by trackId first (keeping the first occurrence) — the
+ * same "no duplicate active track" invariant applyOps enforces via
+ * materialize's active-set guard, restated here since replaceQueue never
+ * goes through that path.
  *
  * Unlike applyOps below, this never calls out to a replacementsProvider —
  * there's nothing here that can run long enough to make holding the session
@@ -70,15 +92,16 @@ export async function replaceQueue(
   picks: ReplacementPick[],
   addedBy: 'dj' | 'user',
 ): Promise<number> {
+  const deduped = dedupeByTrackId(picks)
   return db.transaction(async (tx) => {
     const [session] = await tx.select().from(djSessions).where(eq(djSessions.id, sessionId)).for('update')
     if (!session) throw new Error('queue-store: session not found')
 
     await tx.delete(queueTracks).where(eq(queueTracks.sessionId, sessionId))
 
-    if (picks.length > 0) {
+    if (deduped.length > 0) {
       await tx.insert(queueTracks).values(
-        picks.map((p, i) => ({
+        deduped.map((p, i) => ({
           sessionId,
           position: i,
           trackId: p.trackId,
