@@ -148,4 +148,89 @@ describe('enrichTrack', () => {
     expect(fails[0].stage).toBe('meaning')
     expect(fails[0].error).not.toContain('secret')
   })
+
+  it('re-enrichment idempotence: a second full pass skips iTunes (duration now known) with no duplicate rows or failures', async () => {
+    const db = await createTestDb()
+    const t = await seed(db)
+    await enrichTrack(db, deps(), t)
+    const [t2] = await db.select().from(tracks).where(eq(tracks.id, t.id))
+    let itunesCalls = 0
+    const result = await enrichTrack(
+      db,
+      deps({ itunes: async () => { itunesCalls++; return null } }),
+      t2,
+    )
+    expect(result).toEqual({ features: 'ok', meaning: 'ok' })
+    expect(itunesCalls).toBe(0)
+    expect(await db.select().from(trackFeatures)).toHaveLength(1)
+    expect(await db.select().from(trackMeanings)).toHaveLength(1)
+    expect(await db.select().from(enrichmentFailures)).toHaveLength(0)
+  })
+
+  it('lyrics null and not instrumental is a miss, not a bare ok', async () => {
+    const db = await createTestDb()
+    const t = await seed(db)
+    const result = await enrichTrack(db, deps({ lyrics: async () => ({ lyrics: null, instrumental: false }) }), t)
+    expect(result.meaning).toBe('miss')
+    expect(await db.select().from(trackMeanings)).toHaveLength(0)
+    const fails = await db.select().from(enrichmentFailures)
+    expect(fails).toEqual([expect.objectContaining({ stage: 'meaning' })])
+  })
+
+  it('a later instrumental re-run preserves an existing embedding', async () => {
+    const db = await createTestDb()
+    const t = await seed(db)
+    await enrichTrack(db, deps(), t)
+    const [t2] = await db.select().from(tracks).where(eq(tracks.id, t.id))
+    await enrichTrack(db, deps({ lyrics: async () => ({ lyrics: null, instrumental: true }) }), t2)
+    const [meaning] = await db.select().from(trackMeanings)
+    expect(meaning.embedding).toHaveLength(1024)
+    expect(meaning.instrumental).toBe(true)
+  })
+
+  it('skip.features bypasses the features stage entirely', async () => {
+    const db = await createTestDb()
+    const t = await seed(db)
+    const result = await enrichTrack(
+      db,
+      deps({ features: async () => { throw new Error('features dep should not be called') } }),
+      t,
+      { features: true },
+    )
+    expect(result.features).toBe('ok')
+    expect(await db.select().from(trackFeatures)).toHaveLength(0)
+  })
+
+  it('skip.meaning bypasses the meaning stage entirely (embed never called)', async () => {
+    const db = await createTestDb()
+    const t = await seed(db)
+    let embedCalled = false
+    const result = await enrichTrack(
+      db,
+      deps({
+        lyrics: async () => { throw new Error('lyrics dep should not be called') },
+        embed: async () => { embedCalled = true; return [] },
+      }),
+      t,
+      { meaning: true },
+    )
+    expect(result.meaning).toBe('ok')
+    expect(embedCalled).toBe(false)
+    expect(await db.select().from(trackMeanings)).toHaveLength(0)
+  })
+
+  it('classifies a non-source error down to name only, never storing raw error text', async () => {
+    const db = await createTestDb()
+    const t = await seed(db)
+    const result = await enrichTrack(
+      db,
+      deps({ embed: async () => { throw new Error('Failed query: insert into "track_meanings" (...) values (...)') } }),
+      t,
+    )
+    expect(result.meaning).toBe('error')
+    const fails = await db.select().from(enrichmentFailures)
+    const meaningFail = fails.find((f) => f.stage === 'meaning')
+    expect(meaningFail?.error).toBe('internal: Error')
+    expect(meaningFail?.error).not.toContain('insert into')
+  })
 })

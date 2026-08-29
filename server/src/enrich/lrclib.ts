@@ -53,6 +53,10 @@ export async function fetchLyrics(key: LyricsKey, fetchLike: FetchLike = fetch):
   if (!searched.ok || !Array.isArray(searched.body) || !searched.body.length) return null
   // Verify the artist on this path: a wrong-song embedding would be silent,
   // permanent, and unauditable, whereas a miss here is visible and retryable.
-  const hit = (searched.body as LrclibRecord[]).find((h) => norm(h.artistName ?? '') === artistNorm)
+  // Also require usable signal — a synced-only record (no plain lyrics, not
+  // flagged instrumental) tells us nothing and isn't worth accepting.
+  const hit = (searched.body as LrclibRecord[]).find(
+    (h) => norm(h.artistName ?? '') === artistNorm && (h.plainLyrics != null || h.instrumental === true),
+  )
   return hit ? toResult(hit) : null
 }

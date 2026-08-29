@@ -37,6 +37,19 @@ describe('fetchLyrics', () => {
     expect(r?.lyrics).toBe('Found via search')
   })
 
+  it('rejects a search hit that is synced-only (no plain lyrics, not instrumental)', async () => {
+    const fetchLike: FetchLike = async (url) => {
+      const u = String(url)
+      if (u.includes('/api/get')) return new Response('', { status: 404 })
+      return new Response(
+        JSON.stringify([{ plainLyrics: null, instrumental: false, artistName: 'Radiohead' }]),
+        { status: 200 },
+      )
+    }
+    const r = await fetchLyrics({ title: 'Nude', artist: 'Radiohead', album: null, durationMs: null }, fetchLike)
+    expect(r).toBeNull()
+  })
+
   it('rejects search hits whose artist does not match', async () => {
     const fetchLike: FetchLike = async (url) => {
       const u = String(url)
