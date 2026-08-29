@@ -9,6 +9,9 @@
   },
   "ai": {
     "binding": "AI"
+  },
+  "triggers": {
+    "crons": ["*/5 * * * *"]
   }
   // Secrets required at runtime (set via `wrangler secret put` / .dev.vars locally) —
   // createAuth fails fast if any is missing:

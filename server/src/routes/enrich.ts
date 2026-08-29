@@ -14,8 +14,10 @@ export function enrichRoutes(db: Db, deps: EnrichDeps) {
   app.post('/run', async (c) => {
     // Floor before clamping so a fractional ?limit (e.g. 2.5) can never reach
     // the raw SQL LIMIT clause, which rejects non-integer parameters outright.
+    // Clamp up to 1 afterward too — a limit like 0.5 floors to 0, which would
+    // otherwise reach LIMIT 0 as a silent no-op.
     const raw = Number(c.req.query('limit') ?? MAX_BATCH)
-    const limit = Number.isFinite(raw) && raw > 0 ? Math.min(MAX_BATCH, Math.floor(raw)) : MAX_BATCH
+    const limit = Number.isFinite(raw) && raw > 0 ? Math.min(MAX_BATCH, Math.max(1, Math.floor(raw))) : MAX_BATCH
     const result = await runEnrichmentBatch(db, deps, limit)
     return c.json(result)
   })
