@@ -90,13 +90,21 @@ export async function enrichTrack(
     try {
       const feats = await deps.features({ title: track.title, artist: track.artist, durationMs })
       if (feats) {
-        const { isrc, ...cols } = feats
+        const { isrc, matchedDurationMs, ...cols } = feats
         await db
           .insert(trackFeatures)
           .values({ trackId: track.id, ...cols, source: 'reccobeats' })
           .onConflictDoUpdate({ target: trackFeatures.trackId, set: { ...cols, source: 'reccobeats', fetchedAt: sql`now()` } })
         if (isrc) {
           await db.update(tracks).set({ isrc }).where(and(eq(tracks.id, track.id), isNull(tracks.isrc)))
+        }
+        // Spotify-side duration, ±2s of Apple's; feeds LRCLIB exact-gets and P3;
+        // iTunes can't provide it from Workers (Apple IP-blocks).
+        if (matchedDurationMs != null && track.durationMs == null) {
+          await db
+            .update(tracks)
+            .set({ durationMs: matchedDurationMs })
+            .where(and(eq(tracks.id, track.id), isNull(tracks.durationMs)))
         }
         await clearFailure(db, track.id, 'features')
         featuresOutcome = 'ok'

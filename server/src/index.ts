@@ -4,7 +4,6 @@ import { drizzle } from 'drizzle-orm/neon-http'
 import * as schema from './db/schema'
 import { createAuth } from './auth/create-auth'
 import { createApp } from './app'
-import { lookupItunes } from './enrich/itunes'
 import { resolveAndFetchFeatures } from './enrich/reccobeats'
 import { fetchLyrics } from './enrich/lrclib'
 import { workersAiEmbedder } from './enrich/embedder'
@@ -37,7 +36,10 @@ function buildDeps(env: Bindings): EnrichDeps | undefined {
   if (!env.AI) return undefined
   return {
     storefront: env.ITUNES_STOREFRONT ?? 'ng',
-    itunes: lookupItunes,
+    // Apple 403s iTunes API calls from Cloudflare IPs (verified live, UA-independent).
+    // Duration comes from the ReccoBeats match writeback; genre arrives with the
+    // library sync. lookupItunes stays for local/P2.5 use.
+    itunes: async () => null,
     features: resolveAndFetchFeatures,
     lyrics: fetchLyrics,
     embed: workersAiEmbedder(env.AI),

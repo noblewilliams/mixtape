@@ -50,6 +50,7 @@ describe('resolveAndFetchFeatures', () => {
       speechiness: 0.0342,
       loudness: -9.785,
       isrc: 'GBSTK0700003',
+      matchedDurationMs: 255386,
     })
   })
 

@@ -7,7 +7,7 @@ import { eq } from 'drizzle-orm'
 const FEATURES = {
   tempo: 128, key: 4, mode: 1, energy: 0.3, danceability: 0.5, valence: 0.2,
   acousticness: 0.8, instrumentalness: 0.6, liveness: 0.1, speechiness: 0.03,
-  loudness: -9.8, isrc: 'ISRC123',
+  loudness: -9.8, isrc: 'ISRC123', matchedDurationMs: null,
 }
 
 function deps(over: Partial<EnrichDeps> = {}): EnrichDeps {
@@ -123,6 +123,41 @@ describe('enrichTrack', () => {
     expect(seenDuration).toBeNull()
     const fails = await db.select().from(enrichmentFailures)
     expect(fails).toEqual([expect.objectContaining({ stage: 'itunes' })])
+  })
+
+  it('backfills duration from the reccobeats match when the track has none', async () => {
+    const db = await createTestDb()
+    const t = await seed(db)
+    const result = await enrichTrack(
+      db,
+      deps({
+        itunes: async () => null,
+        features: async () => ({ ...FEATURES, matchedDurationMs: 201000 }),
+      }),
+      t,
+    )
+    expect(result.features).toBe('ok')
+    const [row] = await db.select().from(tracks).where(eq(tracks.id, t.id))
+    expect(row.durationMs).toBe(201000)
+  })
+
+  it('does not overwrite an existing duration with the reccobeats match', async () => {
+    const db = await createTestDb()
+    const [t] = await db
+      .insert(tracks)
+      .values({ appleId: 'a6', title: 'T', artist: 'A', durationMs: 100000, genre: 'Pop' })
+      .returning()
+    const result = await enrichTrack(
+      db,
+      deps({
+        itunes: async () => null,
+        features: async () => ({ ...FEATURES, matchedDurationMs: 201000 }),
+      }),
+      t,
+    )
+    expect(result.features).toBe('ok')
+    const [row] = await db.select().from(tracks).where(eq(tracks.id, t.id))
+    expect(row.durationMs).toBe(100000)
   })
 
   it('does not clobber existing genre or isrc', async () => {

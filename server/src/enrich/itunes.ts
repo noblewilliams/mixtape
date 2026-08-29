@@ -19,7 +19,11 @@ export async function lookupItunes(
   const u = new URL('https://itunes.apple.com/lookup')
   u.searchParams.set('id', appleId)
   u.searchParams.set('country', storefront)
-  const res = await fetchLike(u, { signal: AbortSignal.timeout(SOURCE_TIMEOUT_MS) })
+  const res = await fetchLike(u, {
+    // Sent for politeness; note Apple 403s Cloudflare-IP requests regardless (see index.ts buildDeps).
+    headers: { 'User-Agent': 'mixtape/0.1 (personal project; enrichment)' },
+    signal: AbortSignal.timeout(SOURCE_TIMEOUT_MS),
+  })
   if (!res.ok) throw new EnrichSourceError('itunes', `HTTP ${res.status}`, res.status)
   const body = (await res.json().catch(() => {
     throw new EnrichSourceError('itunes', 'malformed JSON')

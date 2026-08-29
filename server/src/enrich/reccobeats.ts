@@ -18,6 +18,7 @@ export type AudioFeatures = {
   speechiness: number | null
   loudness: number | null
   isrc: string | null
+  matchedDurationMs: number | null
 }
 
 type Candidate = {
@@ -101,5 +102,6 @@ export async function resolveAndFetchFeatures(
     speechiness: num(f.speechiness),
     loudness: num(f.loudness),
     isrc: typeof f.isrc === 'string' ? f.isrc : (match.isrc ?? null),
+    matchedDurationMs: num(match.durationMs),
   }
 }
