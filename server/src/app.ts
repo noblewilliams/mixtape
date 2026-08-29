@@ -21,7 +21,7 @@ export function createApp({ auth }: { auth: AuthLike }) {
 
   app.get('/health', (c) => c.json({ ok: true, service: 'mixtape-api' }))
   // Route groups land per docs/superpowers/specs/2026-08-29-mixtape-v1-design.md:
-  //   /api/auth/* [P1]  /ingest/* [P1]  /enrich/* [P2]  /sessions/* [P3-P4]
+  //   /api/auth/* [P1]  /me [P1]  /ingest/* [P1]  /enrich/* [P2]  /sessions/* [P3-P4]
   app.all('/api/auth/*', (c) => auth.handler(c.req.raw))
   app.get('/me', requireSession(auth), (c) => c.json({ user: c.get('user') }))
 
