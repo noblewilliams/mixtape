@@ -62,7 +62,8 @@ class LibrarySyncNotifier extends Notifier<SyncState> {
         state = const SyncFailed('Music library access was denied. Enable it in Settings.');
       }
     } on SyncCancelled {
-      // auth changed; disposed notifier — nothing to render
+      // auth changed mid-run: fall back to idle so the screen stays actionable
+      if (ref.mounted) state = const SyncIdle();
     } on NetworkException {
       if (ref.mounted) {
         state = const SyncFailed("Couldn't reach mixtape. Check your connection.");

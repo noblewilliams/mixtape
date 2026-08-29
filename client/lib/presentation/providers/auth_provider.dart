@@ -26,6 +26,8 @@ final authRepositoryProvider = Provider<AuthRepository>((ref) {
 
 enum AuthStatus { unknown, signedOut, signedIn }
 
+// Invalidating authProvider rebuilds user-scoped providers and cancels their
+// in-flight work (e.g. a running library sync) — recoverable but lossy.
 class AuthNotifier extends Notifier<AuthStatus> {
   @override
   AuthStatus build() {

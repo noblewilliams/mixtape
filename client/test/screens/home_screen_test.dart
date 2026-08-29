@@ -30,6 +30,15 @@ class _PausableBridge implements MusicKitBridge {
   }
 }
 
+/// Settles synchronously on signedIn — mirrors how the real app only ever
+/// mounts HomeScreen once auth has already resolved, so these tests don't
+/// see the transient unknown->signedIn transition (which would otherwise
+/// dispose-and-cancel the freshly built LibrarySyncNotifier before it's used).
+class _SignedInAuthNotifier extends AuthNotifier {
+  @override
+  AuthStatus build() => AuthStatus.signedIn;
+}
+
 Future<void> _pump(
   WidgetTester tester, {
   required LibrarySyncService service,
@@ -39,6 +48,7 @@ Future<void> _pump(
   await tester.pumpWidget(ProviderScope(
     overrides: [
       tokenStoreProvider.overrideWithValue(store),
+      authProvider.overrideWith(_SignedInAuthNotifier.new),
       librarySyncServiceProvider.overrideWithValue(service),
     ],
     child: const MaterialApp(home: HomeScreen()),

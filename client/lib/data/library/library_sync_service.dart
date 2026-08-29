@@ -31,23 +31,28 @@ class LibrarySyncService {
   /// is shared and can't support concurrent syncs).
   /// Concurrent calls join the in-flight run; the joiner's [onProgress] is ignored.
   Future<int> sync({void Function(double progress)? onProgress}) =>
-      _inFlight ??= _run(onProgress).whenComplete(() => _inFlight = null);
+      _inFlight ??= _run(onProgress).whenComplete(() {
+        _inFlight = null;
+        _cancelRequested = false;
+      });
 
   Future<int> _run(void Function(double progress)? onProgress) async {
-    _cancelRequested = false;
     final authorized = await bridge.requestAuthorization();
     if (!authorized) throw LibraryAccessDenied();
 
     var offset = 0;
     var total = 0;
+    // DISCIPLINE: any new await added to this loop needs a _cancelRequested check right after it.
     while (true) {
       if (_cancelRequested) throw SyncCancelled();
       final page = await bridge.fetchLibrarySongs(offset: offset, limit: chunkSize);
+      if (_cancelRequested) throw SyncCancelled();
       total = page.total;
       if (page.songs.isEmpty) break;
       await api.postJson('/ingest/library', {
         'songs': page.songs.map((s) => s.toJson()).toList(),
       });
+      if (_cancelRequested) throw SyncCancelled();
       offset += page.songs.length;
       onProgress?.call(total == 0 ? 1.0 : (offset / total).clamp(0.0, 1.0));
       if (offset >= total) break;
