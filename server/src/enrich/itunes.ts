@@ -1,7 +1,7 @@
 export { EnrichSourceError } from './types'
 export type { FetchLike } from './types'
 
-import { EnrichSourceError, type FetchLike } from './types'
+import { EnrichSourceError, SOURCE_TIMEOUT_MS, type FetchLike } from './types'
 
 export type ItunesHit = {
   trackName: string | null
@@ -19,7 +19,7 @@ export async function lookupItunes(
   const u = new URL('https://itunes.apple.com/lookup')
   u.searchParams.set('id', appleId)
   u.searchParams.set('country', storefront)
-  const res = await fetchLike(u, { signal: AbortSignal.timeout(5000) })
+  const res = await fetchLike(u, { signal: AbortSignal.timeout(SOURCE_TIMEOUT_MS) })
   if (!res.ok) throw new EnrichSourceError('itunes', `HTTP ${res.status}`, res.status)
   const body = (await res.json().catch(() => {
     throw new EnrichSourceError('itunes', 'malformed JSON')
