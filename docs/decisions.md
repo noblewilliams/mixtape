@@ -2,6 +2,24 @@
 
 Short ADR-style log. Newest first. Each entry: decision, why, and what would reopen it.
 
+## 2026-08-29 — P2 enrichment: ReccoBeats-only waterfall, GetSongBPM dropped
+ReccoBeats (probed live) provides the full 11-field feature set + ISRC backfill, keyless. GetSongBPM adds only BPM+key, needs an API key, and requires a visible getsongbpm.com backlink in the UI. **Reopens if:** Task 8 coverage report shows features coverage < 80% — then P2.5 adds the local preview-analysis leg first, GetSongBPM second.
+
+## 2026-08-29 — ReccoBeats matching contract (probed live)
+Search is TITLE-ONLY (`searchText` with artist terms returns zero results); we filter candidates ourselves by normalized artist equality + duration within 5s. Features endpoint keyed by their UUID.
+
+## 2026-08-29 — iTunes storefront is config (default ng)
+Founder's apple_ids resolve only on the Nigerian storefront (`country=ng`; US/GB return 0 — verified). `ITUNES_STOREFRONT` var, default `ng`. iTunes lookup doubles as duration/genre backfill + preview URLs.
+
+## 2026-08-29 — Enrichment driven by cron + admin-token endpoint, not Cloudflare Queues
+Queues needs the paid Workers plan; a 5-min cron (batch 8) covers steady state and `POST /enrich/run` + `scripts/backfill.sh` covers backfill. `/enrich/*` is guarded by `ENRICH_ADMIN_TOKEN` (enrichment is global per-track work, not user data — a user session would be the wrong shape). **Reopens if:** multi-user scale makes batch-8-per-5-min insufficient.
+
+## 2026-08-29 — Embeddings: Workers AI @cf/baai/bge-m3 (1024-dim, pgvector on Neon)
+Zero new accounts/keys, 10k free neurons/day, 8k-token context comfortably fits lyrics. Vector index deferred to P3 (no similarity queries exist yet). **Reopens if:** embedding quality disappoints in P3 matching — then Voyage.
+
+## 2026-08-29 — Lyrics in P2: embeddings only, tags deferred
+`track_meanings` stores embedding + instrumental flag, no text column (enforces the derive-don't-display stance structurally). Theme tags need the P3 curation prompt design to be useful — deferred.
+
 ## 2026-08-29 — Name: mixtape
 Working name chosen by founder (over selector/resident/crates). Central metaphor: a personal DJ hand-making a tape for you.
 
