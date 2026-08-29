@@ -93,4 +93,44 @@ describe('POST /ingest/library', () => {
     const res = await post(db, { songs: [] })
     expect(res.status).toBe(400)
   })
+
+  it('merges cross-page duplicates monotonically (playCount and lastPlayedAt never regress, even to null)', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    await post(db, { songs: [song({ playCount: 50, lastPlayedAt: 1724900000000 })] })
+    await post(db, { songs: [song({ playCount: 0, lastPlayedAt: null })] })
+    const uts = await db.select().from(userTracks)
+    expect(uts).toHaveLength(1)
+    expect(uts[0].playCount).toBe(50)
+    expect(uts[0].lastPlayedAt?.getTime()).toBe(1724900000000)
+  })
+
+  it('shares one catalog track across users, with separate user_tracks rows', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    await db.insert(user).values({
+      id: 'user-2',
+      name: 'Test Two',
+      email: 't2@example.com',
+      emailVerified: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+    const authedTwo: AuthLike = {
+      handler: () => new Response('ok'),
+      api: { getSession: async () => ({ user: { id: 'user-2' } }) },
+    }
+    await post(db, { songs: [song()] })
+    await post(db, { songs: [song()] }, authedTwo)
+    expect(await db.select().from(tracks)).toHaveLength(1)
+    expect(await db.select().from(userTracks)).toHaveLength(2)
+  })
+
+  it('rejects a batch over 500 songs', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    const songs = Array.from({ length: 501 }, (_, i) => song({ appleId: `a${i}` }))
+    const res = await post(db, { songs })
+    expect(res.status).toBe(400)
+  })
 })
