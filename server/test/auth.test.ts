@@ -6,7 +6,7 @@ import { createApp } from '../src/app'
 const testEnv = {
   BETTER_AUTH_SECRET: 'test-secret-test-secret-test-secret',
   BETTER_AUTH_URL: 'http://localhost:8787',
-  APPLE_BUNDLE_ID: 'com.mixtape.mixtape',
+  APPLE_BUNDLE_ID: 'com.noble.mixtape',
 }
 
 describe('auth mounting', () => {

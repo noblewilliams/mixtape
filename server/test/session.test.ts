@@ -30,7 +30,7 @@ describe('session middleware', () => {
     const auth = createAuth(db, {
       BETTER_AUTH_SECRET: 'test-secret-test-secret-test-secret',
       BETTER_AUTH_URL: 'http://localhost:8787',
-      APPLE_BUNDLE_ID: 'com.mixtape.mixtape',
+      APPLE_BUNDLE_ID: 'com.noble.mixtape',
     })
     const ctx = await auth.$context
     const u = await ctx.internalAdapter.createUser(

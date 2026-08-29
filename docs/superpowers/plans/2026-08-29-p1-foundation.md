@@ -15,13 +15,13 @@
 ## Founder setup (manual, before or during execution)
 
 - [ ] **Neon**: create project `mixtape`, copy the pooled connection string → `server/.dev.vars` as `DATABASE_URL`.
-- [ ] **Apple**: in the Apple Developer portal, ensure App ID `com.mixtape.mixtape` exists with **Sign in with Apple** capability. In Xcode (`client/ios/Runner.xcworkspace` or `.xcodeproj`): Signing & Capabilities → add **Sign in with Apple** to the Runner target, set your team.
+- [ ] **Apple**: in the Apple Developer portal, ensure App ID `com.noble.mixtape` exists with **Sign in with Apple** capability. In Xcode (`client/ios/Runner.xcworkspace` or `.xcodeproj`): Signing & Capabilities → add **Sign in with Apple** to the Runner target, set your team.
 - [ ] **`server/.dev.vars`** (git-ignored):
   ```
   DATABASE_URL=postgres://...neon.tech/neondb?sslmode=require
   BETTER_AUTH_SECRET=<openssl rand -hex 32>
   BETTER_AUTH_URL=http://localhost:8787
-  APPLE_BUNDLE_ID=com.mixtape.mixtape
+  APPLE_BUNDLE_ID=com.noble.mixtape
   ```
   (No Apple client secret needed for the native idToken flow; that's web-flow-only.)
 
@@ -365,7 +365,7 @@ import { createApp } from '../src/app'
 const testEnv = {
   BETTER_AUTH_SECRET: 'test-secret-test-secret-test-secret',
   BETTER_AUTH_URL: 'http://localhost:8787',
-  APPLE_BUNDLE_ID: 'com.mixtape.mixtape',
+  APPLE_BUNDLE_ID: 'com.noble.mixtape',
 }
 
 describe('auth mounting', () => {

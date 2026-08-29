@@ -12,6 +12,6 @@
   //   DATABASE_URL            — Neon connection string
   //   BETTER_AUTH_SECRET      — Better Auth signing secret (min 32 chars)
   //   BETTER_AUTH_URL         — deployed worker origin (http://localhost:8787 locally)
-  //   APPLE_BUNDLE_ID         — com.mixtape.mixtape (Apple idToken audience)
+  //   APPLE_BUNDLE_ID         — com.noble.mixtape (Apple idToken audience)
   // Later phases add: ANTHROPIC_API_KEY (P3 curation), MusicKit developer-token key (P2 catalog).
 }

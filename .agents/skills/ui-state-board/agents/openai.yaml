@@ -1,0 +1,4 @@
+interface:
+  display_name: "UI State Board"
+  short_description: "Design complete UI states before implementation"
+  default_prompt: "Use $ui-state-board to design this interface before implementation."
