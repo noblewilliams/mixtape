@@ -32,6 +32,9 @@ export function createAuth(db: object, env: AuthEnv) {
     },
     // memory storage is per-isolate on Workers — real KV/DO storage is a P2 item
     rateLimit: { enabled: true, window: 10, max: 100 },
+    // Without this, Better Auth can't resolve a client IP on Workers and rate
+    // limiting collapses into one shared per-path bucket for ALL users.
+    advanced: { ipAddress: { ipAddressHeaders: ['cf-connecting-ip'] } },
     plugins: [bearer()],
   })
 }
