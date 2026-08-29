@@ -1,12 +1,12 @@
 CREATE TABLE "user_tracks" (
-	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"user_id" text NOT NULL,
 	"track_id" uuid NOT NULL,
 	"play_count" integer DEFAULT 0 NOT NULL,
 	"last_played_at" timestamp with time zone,
 	"date_added" timestamp with time zone,
 	"in_library" boolean DEFAULT true NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "user_tracks_user_id_track_id_pk" PRIMARY KEY("user_id","track_id")
 );
 --> statement-breakpoint
 CREATE TABLE "account" (
@@ -61,7 +61,7 @@ ALTER TABLE "user_tracks" ADD CONSTRAINT "user_tracks_user_id_user_id_fk" FOREIG
 ALTER TABLE "user_tracks" ADD CONSTRAINT "user_tracks_track_id_tracks_id_fk" FOREIGN KEY ("track_id") REFERENCES "public"."tracks"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-CREATE UNIQUE INDEX "user_tracks_user_track_idx" ON "user_tracks" USING btree ("user_id","track_id");--> statement-breakpoint
+CREATE INDEX "user_tracks_track_idx" ON "user_tracks" USING btree ("track_id");--> statement-breakpoint
 CREATE INDEX "account_userId_idx" ON "account" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "session_userId_idx" ON "session" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "verification_identifier_idx" ON "verification" USING btree ("identifier");

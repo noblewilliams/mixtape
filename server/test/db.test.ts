@@ -37,6 +37,38 @@ describe('db schema', () => {
       .returning()
     await db.insert(userTracks).values({ userId: 'user-1', trackId: track.id, playCount: 42 })
     const rows = await db.select().from(userTracks)
+    expect(rows).toHaveLength(1)
     expect(rows[0].playCount).toBe(42)
+  })
+
+  it('rejects a user_track for an unknown user', async () => {
+    const db = await createTestDb()
+    const [track] = await db
+      .insert(tracks)
+      .values({ appleId: 'x1', title: 'T', artist: 'A' })
+      .returning()
+    await expect(
+      db.insert(userTracks).values({ userId: 'nope', trackId: track.id }),
+    ).rejects.toThrow()
+  })
+
+  it('rejects a duplicate (user, track) pair', async () => {
+    const db = await createTestDb()
+    await db.insert(user).values({
+      id: 'u1',
+      name: 'T',
+      email: 'u1@example.com',
+      emailVerified: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+    const [track] = await db
+      .insert(tracks)
+      .values({ appleId: 'x2', title: 'T', artist: 'A' })
+      .returning()
+    await db.insert(userTracks).values({ userId: 'u1', trackId: track.id })
+    await expect(
+      db.insert(userTracks).values({ userId: 'u1', trackId: track.id }),
+    ).rejects.toThrow()
   })
 })

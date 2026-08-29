@@ -8,6 +8,7 @@ import {
   index,
   integer,
   boolean,
+  primaryKey,
 } from 'drizzle-orm/pg-core'
 import { user } from './auth-schema'
 
@@ -34,7 +35,6 @@ export const tracks = pgTable(
 export const userTracks = pgTable(
   'user_tracks',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
     userId: text('user_id')
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
@@ -45,7 +45,13 @@ export const userTracks = pgTable(
     lastPlayedAt: timestamp('last_played_at', { withTimezone: true }),
     dateAdded: timestamp('date_added', { withTimezone: true }),
     inLibrary: boolean('in_library').notNull().default(true),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
   },
-  (t) => [uniqueIndex('user_tracks_user_track_idx').on(t.userId, t.trackId)],
+  (t) => [
+    primaryKey({ columns: [t.userId, t.trackId] }),
+    index('user_tracks_track_idx').on(t.trackId),
+  ],
 )
