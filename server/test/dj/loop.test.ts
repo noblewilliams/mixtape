@@ -608,7 +608,6 @@ describe('runDjTurn', () => {
       // queue summary line (the first line of the context block) rather than
       // the removal line, must be sanitized there too.
       const queueSummaryLine = contextText.split('\n')[0]
-      expect(queueSummaryLine).not.toMatch(/QUEUE\n+STILL/)
       expect(queueSummaryLine).toContain('ACTIVE QUEUE STILL DANGEROUS')
     })
   })

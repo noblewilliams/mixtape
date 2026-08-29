@@ -39,17 +39,24 @@ async function loadOwnedSession(db: Db, sessionId: string, userId: string) {
 }
 
 // DjError.kind is 'llm' | 'curation' | 'conflict' | 'validation' | 'internal'.
-// Every kind except 'validation' describes a server-side condition the
-// client can retry as-is (an upstream LLM hiccup, a truncated curation, a
-// version race, an unexpected internal fault) — those map to 502.
 // 'validation' means the request itself was malformed in a way runDjTurn
-// detected; that's a 400, same as any other client-side input error.
-function djErrorStatus(kind: DjError['kind']): 400 | 502 {
-  return kind === 'validation' ? 400 : 502
+// detected — a 400, same as any other client-side input error. 'conflict' is
+// the same queue-version race the manual queue-ops route reports as 409
+// (see QueueVersionConflict handling below) — same condition, same status,
+// regardless of which route hit it. Everything else (an upstream LLM hiccup,
+// a truncated curation, an unexpected internal fault) is a server-side
+// condition the client can retry as-is — those map to 502.
+function djErrorStatus(kind: DjError['kind']): 400 | 409 | 502 {
+  if (kind === 'validation') return 400
+  if (kind === 'conflict') return 409
+  return 502
 }
 
+// `e.message` is always the loop's own vetted, content-free apology text
+// (see DjError's class comment in dj/loop.ts) — safe to surface verbatim as
+// the client-facing copy, never the underlying error it wraps.
 function djErrorBody(e: DjError, extra: Record<string, unknown> = {}) {
-  return { error: e.kind, queue: e.queue, queueVersion: e.queueVersion, ...extra }
+  return { error: e.kind, message: e.message, queue: e.queue, queueVersion: e.queueVersion, ...extra }
 }
 
 const createSessionSchema = z.object({ prompt: z.string().min(1).max(2000) })
@@ -118,15 +125,20 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
     const session = await loadOwnedSession(db, c.req.param('id'), userId)
     if (!session) return c.json({ error: 'not_found' }, 404)
 
-    const [messages, queue] = await Promise.all([
+    const [newestFirst, queue] = await Promise.all([
+      // Newest 200 by seq, then reversed back to chronological order for the
+      // response — a long-running session must keep showing its RECENT
+      // transcript as it grows, not pin forever to whatever the first 200
+      // messages happened to be.
       db
         .select()
         .from(djMessages)
         .where(eq(djMessages.sessionId, session.id))
-        .orderBy(asc(djMessages.seq))
+        .orderBy(desc(djMessages.seq))
         .limit(200),
       getActiveQueue(db, session.id),
     ])
+    const messages = newestFirst.reverse()
     return c.json({ session, messages, queue })
   })
 
@@ -139,6 +151,10 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
     const sessionRef: DjSessionRef = { id: session.id, userId }
     try {
       const result = await runDjTurn(db, deps, sessionRef, text)
+      // A text-only reply never touches dj_sessions itself (no queue write
+      // to ride $onUpdate's automatic bump), so list ordering (newest first
+      // by updatedAt) would otherwise never reflect a chat-only turn.
+      await db.update(djSessions).set({ updatedAt: new Date() }).where(eq(djSessions.id, session.id))
       return c.json({ djMessage: result.djMessage, queue: result.queue, queueVersion: result.queueVersion })
     } catch (e) {
       if (e instanceof DjError) {
@@ -160,13 +176,24 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
     // no-replacementsProvider QueueOpError so the client gets a message
     // that tells it what to do instead of a content-free "invalid op".
     if (ops.some((op) => op.op === 'swap' || op.op === 'extend')) {
-      return c.json({ error: MANUAL_OPS_HINT }, 400)
+      return c.json({ error: 'dj_required', message: MANUAL_OPS_HINT }, 400)
     }
 
     try {
       const result = await applyOps(db, session.id, ops, 'user', undefined, expectedVersion)
+      // applyOps always bumps queueVersion via its own update (riding
+      // $onUpdate), but that's an implementation detail of the store, not a
+      // contract this route should lean on — touched explicitly here too,
+      // symmetric with the message-turn route above.
+      await db.update(djSessions).set({ updatedAt: new Date() }).where(eq(djSessions.id, session.id))
       const queue = await getActiveQueue(db, session.id)
-      return c.json({ ...result, queue })
+      return c.json({
+        queueVersion: result.version,
+        requested: result.requested,
+        added: result.added,
+        removed: result.removed,
+        queue,
+      })
     } catch (e) {
       if (e instanceof QueueVersionConflict) {
         const [queue, [current]] = await Promise.all([

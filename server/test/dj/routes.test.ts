@@ -5,8 +5,9 @@ import type { DjDeps } from '../../src/dj/loop'
 import type { LlmClient, LlmRequest, LlmTurn, LlmAssistantBlock, LlmToolCall } from '../../src/dj/llm'
 import { LlmError } from '../../src/dj/llm'
 import type { Embedder } from '../../src/enrich/embedder'
-import { tracks, trackMeanings, userTracks, user, djSessions } from '../../src/db/schema'
+import { tracks, trackMeanings, userTracks, user, djSessions, djMessages } from '../../src/db/schema'
 import { eq } from 'drizzle-orm'
+import { replaceQueue, applyOps } from '../../src/dj/queue-store'
 
 const DIMS = 1024
 
@@ -296,6 +297,35 @@ describe('session routes', () => {
       expect(body.messages).toHaveLength(2)
       expect(body.queue).toHaveLength(3)
     })
+
+    it('returns the LAST 200 messages (newest window), in ascending order — not the first 200', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const { llm } = makeFakeLlm([{ text: 'hi' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+      const createRes = await postJson(app, '/sessions', { prompt: 'start' })
+      const { session } = (await createRes.json()) as { session: { id: string } }
+
+      // Bulk-insert well past the 200 cap directly (cheap — no LLM turns
+      // needed to pad the transcript).
+      const rows = Array.from({ length: 250 }, (_, i) => ({
+        sessionId: session.id,
+        role: (i % 2 === 0 ? 'user' : 'dj') as 'user' | 'dj',
+        content: `padding ${i}`,
+      }))
+      await db.insert(djMessages).values(rows)
+      await db.insert(djMessages).values({ sessionId: session.id, role: 'user', content: 'the newest message' })
+
+      const res = await getJson(app, `/sessions/${session.id}`)
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { messages: Array<{ content: string; seq: number }> }
+      expect(body.messages).toHaveLength(200)
+      // The very newest message is present...
+      expect(body.messages[body.messages.length - 1].content).toBe('the newest message')
+      // ...and the window is in ascending (chronological) order, not reversed.
+      const seqs = body.messages.map((m) => m.seq)
+      expect(seqs).toEqual([...seqs].sort((a, b) => a - b))
+    })
   })
 
   describe('POST /sessions/:id/messages', () => {
@@ -326,6 +356,24 @@ describe('session routes', () => {
       expect(body.queue).toHaveLength(3)
       expect(body.queueVersion).toBe(1)
       expect(trackList).toHaveLength(3)
+    })
+
+    it('bumps dj_sessions.updatedAt on a text-only turn (no queue write to ride $onUpdate otherwise)', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const { llm: setupLlm } = makeFakeLlm([{ text: 'ready.' }])
+      const sessionId = await createSession(db, authedAs('u1'), { embed: fakeEmbed, llm: setupLlm })
+
+      const stale = new Date(Date.now() - 60_000)
+      await db.update(djSessions).set({ updatedAt: stale }).where(eq(djSessions.id, sessionId))
+
+      const { llm } = makeFakeLlm([{ text: 'just chatting, no queue changes.' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+      const res = await postJson(app, `/sessions/${sessionId}/messages`, { text: 'how are you' })
+      expect(res.status).toBe(200)
+
+      const [row] = await db.select({ updatedAt: djSessions.updatedAt }).from(djSessions).where(eq(djSessions.id, sessionId))
+      expect(row.updatedAt.getTime()).toBeGreaterThan(stale.getTime())
     })
 
     it('rejects empty text with 400', async () => {
@@ -374,6 +422,53 @@ describe('session routes', () => {
       expect(getBody.messages[2]).toMatchObject({ role: 'user', content: 'try again' })
     })
 
+    it('a persistent queue-version race (DjError kind "conflict") surfaces as 409 with the fresh queue state — same status as queue-ops staleness', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      // 2 tracks go in the queue; a 3rd stays OUTSIDE it so the extend op's
+      // replacementsProvider (buildPool, excluding the active queue) has a
+      // real candidate to hand back — otherwise buildPool comes back empty
+      // and the provider short-circuits to [] before ever calling curate(),
+      // and the manufactured race below would never get a chance to fire.
+      const trackList = await seedLibrary(db, 'u1', 2)
+      await seedLibraryTrack(db, 'u1', { embedding: MATCHING_DIRECTION })
+      const { llm: setupLlm } = makeFakeLlm([{ text: 'ready.' }])
+      const sessionId = await createSession(db, authedAs('u1'), { embed: fakeEmbed, llm: setupLlm })
+      await replaceQueue(
+        db,
+        sessionId,
+        trackList.map((t) => ({ trackId: t.id, reason: '' })),
+        'dj',
+      )
+
+      // Same manufactured race as test/dj/loop.test.ts's "QueueVersionConflict
+      // retry contract": every curate call (tools: []) performs a concurrent
+      // write, so the phase-1/phase-2 version check in applyOps never lines
+      // up — even across the loop's one retry — and runDjTurn's own retry
+      // logic gives up as DjError kind 'conflict'.
+      const llm: LlmClient = async (req) => {
+        if (req.tools.length === 0) {
+          await applyOps(db, sessionId, [{ op: 'move', from: 0, to: 1 }], 'user')
+          return curateFakeResponseFromRequest(req)
+        }
+        return {
+          text: '',
+          toolCalls: [toolCall('c1', 'edit_queue', { ops: [{ op: 'extend', count: 1 }] })],
+          raw: [{ type: 'tool_use', id: 'c1', name: 'edit_queue', input: { ops: [{ op: 'extend', count: 1 }] } }],
+          stopReason: 'tool_use',
+          usage: null,
+        }
+      }
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+      const res = await postJson(app, `/sessions/${sessionId}/messages`, { text: 'stretch this out' })
+      expect(res.status).toBe(409)
+      const body = (await res.json()) as { error: string; message: string; queue: unknown[]; queueVersion: number }
+      expect(body.error).toBe('conflict')
+      expect(typeof body.message).toBe('string')
+      expect(body.queue.length).toBeGreaterThan(0)
+    })
+
     it('401s without a session', async () => {
       const db = await createTestDb()
       await seedUser(db, 'u1')
@@ -411,8 +506,8 @@ describe('session routes', () => {
         expectedVersion: queueVersion,
       })
       expect(res.status).toBe(200)
-      const body = (await res.json()) as { version: number; requested: number; added: number; removed: number; queue: unknown[] }
-      expect(body.version).toBe(queueVersion + 1)
+      const body = (await res.json()) as { queueVersion: number; requested: number; added: number; removed: number; queue: unknown[] }
+      expect(body.queueVersion).toBe(queueVersion + 1)
       expect(body.removed).toBe(1)
       expect(body.requested).toBe(0)
       expect(body.added).toBe(0)
@@ -430,8 +525,9 @@ describe('session routes', () => {
 
       const res = await postJson(app, `/sessions/${sessionId}/queue-ops`, { ops: [{ op: 'swap', position: 0 }] })
       expect(res.status).toBe(400)
-      const body = (await res.json()) as { error: string }
-      expect(body.error).toContain('swap/extend require the DJ')
+      const body = (await res.json()) as { error: string; message: string }
+      expect(body.error).toBe('dj_required')
+      expect(body.message).toContain('swap/extend require the DJ')
       expect(calls).toBe(0)
     })
 
@@ -444,8 +540,9 @@ describe('session routes', () => {
 
       const res = await postJson(app, `/sessions/${sessionId}/queue-ops`, { ops: [{ op: 'extend', count: 1 }] })
       expect(res.status).toBe(400)
-      const body = (await res.json()) as { error: string }
-      expect(body.error).toContain('swap/extend require the DJ')
+      const body = (await res.json()) as { error: string; message: string }
+      expect(body.error).toBe('dj_required')
+      expect(body.message).toContain('swap/extend require the DJ')
     })
 
     it('a stale expectedVersion returns 409 with the fresh queue/version', async () => {
