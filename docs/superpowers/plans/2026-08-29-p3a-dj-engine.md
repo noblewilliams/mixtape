@@ -115,50 +115,120 @@ it('adapts anthropic responses into LlmTurn', async () => {
 })
 ```
 
-- [ ] **Step 2: red**, then create `server/src/dj/llm.ts`:
+- [ ] **Step 2: red**, then create `server/src/dj/llm.ts` — **amended shape** (post-review; thinking-aware + replayable + bounded client, no `as never` in tests):
 
 ```ts
 import Anthropic from '@anthropic-ai/sdk'
 
-export type LlmToolDef = { name: string; description: string; input_schema: Record<string, unknown> }
+export type LlmToolDef = {
+  name: string
+  description: string
+  input_schema: { type: 'object'; properties: Record<string, unknown>; required?: string[] }
+}
+
+// Assistant content blocks. `thinking` is opaque — Sonnet 5 runs adaptive thinking by
+// default and thinking blocks must be replayed back to the API verbatim (never
+// reconstructed) when continuing on the same model, so we don't parse its shape here.
+export type LlmAssistantBlock =
+  | { type: 'text'; text: string }
+  | { type: 'tool_use'; id: string; name: string; input: unknown }
+  | { type: 'thinking'; [k: string]: unknown }
+
 export type LlmMessage =
   | { role: 'user' | 'assistant'; content: string }
   | { role: 'user'; content: Array<{ type: 'tool_result'; tool_use_id: string; content: string }> }
-  | { role: 'assistant'; content: Array<{ type: 'text'; text: string } | { type: 'tool_use'; id: string; name: string; input: unknown }> }
-export type LlmRequest = { system: string; messages: LlmMessage[]; tools: LlmToolDef[] }
+  | { role: 'assistant'; content: LlmAssistantBlock[] }
+
+export type LlmRequest = {
+  system: string
+  messages: LlmMessage[]
+  tools: LlmToolDef[]
+  maxTokens?: number
+  effort?: 'low' | 'medium' | 'high'
+}
 export type LlmToolCall = { id: string; name: string; input: unknown }
-export type LlmTurn = { text: string; toolCalls: LlmToolCall[]; raw: unknown }
+export type LlmTurn = {
+  text: string
+  toolCalls: LlmToolCall[]
+  raw: LlmAssistantBlock[] // full assistant content, for verbatim replay (includes thinking blocks)
+  stopReason: string | null // 'max_tokens' must be detectable (curation truncation)
+  usage: { inputTokens: number; outputTokens: number } | null
+}
 export type LlmClient = (req: LlmRequest) => Promise<LlmTurn>
 
 export const DJ_MODEL = 'claude-sonnet-5'
+const DEFAULT_MAX_TOKENS = 16000
 
-export function anthropicLlm(client: Anthropic): LlmClient {
+// Thrown by anthropicLlm on any SDK failure. Callers (the agent loop) classify on
+// this type alone and never import the SDK — deliberately excludes the SDK's own
+// error message, which can echo request content (system prompt, user text, tool input).
+export class LlmError extends Error {
+  constructor(
+    readonly detail: string,
+    readonly status?: number,
+  ) {
+    super(`anthropic: ${detail}`)
+    this.name = 'LlmError'
+  }
+}
+
+// Structural surface of the real SDK client — a fake `{ messages: { create } }` in
+// tests satisfies this directly, no `as never` needed in either direction.
+type AnthropicClient = {
+  messages: {
+    create(body: Anthropic.MessageCreateParamsNonStreaming): Promise<{
+      content: Anthropic.ContentBlock[]
+      stop_reason: string | null
+      usage: { input_tokens: number; output_tokens: number }
+    }>
+  }
+}
+
+export function anthropicLlm(client: AnthropicClient): LlmClient {
   return async (req) => {
-    const res = await client.messages.create({
-      model: DJ_MODEL,
-      max_tokens: 4096,
-      system: req.system,
-      messages: req.messages as never,
-      tools: req.tools as never,
-    })
-    const text = res.content
+    let res: Awaited<ReturnType<AnthropicClient['messages']['create']>>
+    try {
+      res = await client.messages.create({
+        model: DJ_MODEL,
+        max_tokens: req.maxTokens ?? DEFAULT_MAX_TOKENS,
+        system: req.system,
+        messages: req.messages as Anthropic.MessageParam[],
+        tools: req.tools,
+        ...(req.effort ? { output_config: { effort: req.effort } } : {}),
+      })
+    } catch (e) {
+      throw new LlmError(
+        e instanceof Anthropic.APIError ? `HTTP ${e.status ?? 'unknown'}` : e instanceof Error ? e.name : typeof e,
+        e instanceof Anthropic.APIError ? e.status : undefined,
+      )
+    }
+    const raw = res.content as LlmAssistantBlock[]
+    const text = raw
       .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
       .map((b) => b.text)
       .join('\n')
-    const toolCalls = res.content
+    const toolCalls = raw
       .filter((b): b is { type: 'tool_use'; id: string; name: string; input: unknown } => b.type === 'tool_use')
       .map((b) => ({ id: b.id, name: b.name, input: b.input }))
-    return { text, toolCalls, raw: res.content }
+    return {
+      text,
+      toolCalls,
+      raw,
+      stopReason: res.stop_reason,
+      usage: res.usage ? { inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens } : null,
+    }
   }
 }
 
 export function buildAnthropic(apiKey: string): Anthropic {
-  return new Anthropic({ apiKey })
+  // Chat turns run inside a Worker request — fail fast instead of the SDK default
+  // (10 min timeout × up to 3 attempts), which would tie up the whole request.
+  return new Anthropic({ apiKey, timeout: 60_000, maxRetries: 1 })
 }
 ```
 
-(If the installed SDK's types fight the `as never` casts, resolve properly against the real types — no `any`. Report SDK version used.)
-- [ ] **Step 3:** tests + typecheck green. **Commit** `feat(server): llm client seam`.
+(Installed SDK `@anthropic-ai/sdk` 0.122.0. The real client types (`Anthropic.MessageParam`, `Anthropic.ContentBlock`, `Anthropic.MessageCreateParamsNonStreaming`) resolved cleanly against the seam's own types with a single `as` cast each — no `as never` and no `any` needed anywhere, including in the tests, once `AnthropicClient` was narrowed to a structural `{ messages: { create } }` shape. SDK error base class is `Anthropic.APIError` — it carries `status`, `error` (raw JSON body — may echo request content, never surfaced), and `requestID`; `LlmError` deliberately drops everything but `status`.)
+- [ ] **Step 3:** tests + typecheck green. **Commit** `feat(server): llm client seam`. **Amendment commit** `fix(server): replayable llm turns + bounded client`.
 
 ---
 
@@ -242,7 +312,7 @@ Write the JSON schemas out longhand (they're small); a test asserts each tool's 
   - invalid tool input (zod fails) → tool_result carries the validation error text, loop continues (model can correct)
 - [ ] **Step 2: red**, then implement `runDjTurn(db, deps: DjDeps, session, userText): Promise<DjTurnResult>` where `DjDeps = { llm: LlmClient; embed: Embedder }`:
   - Build system prompt: DJ persona (warm, brief, music-literate; NEVER invent tracks — queues come only from tools; convert durations to counts; when the listener manually removed tracks since last turn, acknowledge and adapt), plus compact session context (current queue summary line + last removals with removedBy=user since previous dj message).
-  - History window: last 12 messages, text-only reconstruction.
+  - History window: last 12 messages — replay assistant turns via turn.raw verbatim (includes thinking blocks); never reconstruct from text.
   - Tool execution: generate_queue → intentSchema.parse → buildPool → curate → replaceQueue; edit_queue → queueOpsSchema.parse → for swap/extend with intent: pool+curate for the replacement count; then applyOps.
   - Persist user message first, dj message on success (content = final text, queueVersion when changed).
 - [ ] **Step 3:** green + typecheck. **Commit** `feat(server): dj agent loop`.
