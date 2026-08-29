@@ -10,6 +10,8 @@ Founder decisions: refinement moves INTO the session conversation (chat with inl
 
 Known accepted risk: tracks.title/artist are globally shared and last-ingester-wins (ingest.ts overwrites); DJ context renders them sanitized (control-chars stripped, capped) and never at system altitude. Revisit if multi-user title poisoning is observed.
 
+**P3a spec deviations, recorded:** replace_range op dropped (edit ops cover it via remove+extend; revisit if the model fumbles multi-op rewrites); thin-pool widen-once deferred to P3b/P4 (only exactly-empty pools message the model today — thin pools silently backfill); session archiving shipped as PATCH /sessions/:id status (spec listed it without an endpoint). Queue removed-rows retention: replaceQueue preserves state='removed' rows as P4 taste signals.
+
 ## 2026-08-29 — iTunes lookup disabled on Workers (Apple IP-blocks datacenter ranges)
 Verified live during Task 8: itunes.apple.com/lookup returns 403 to Cloudflare Workers regardless of headers, while working from residential IPs. The deployed pipeline runs `itunes: async () => null`; track duration comes from the matched ReccoBeats candidate (written back to `tracks.duration_ms` and threaded into the same pass's LRCLIB exact-get), genre comes from the library sync. `lookupItunes` stays tested for local/P2.5 use (preview downloads run from the founder's Mac anyway). **Reopens if:** Apple unblocks, or P2.5's local analyzer wants richer metadata.
 

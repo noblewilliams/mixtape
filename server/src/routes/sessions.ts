@@ -68,8 +68,21 @@ const queueOpsBodySchema = z.object({
   ops: queueOpsSchema,
   expectedVersion: z.number().int().min(0).optional(),
 })
+const patchSessionSchema = z.object({ status: z.union([z.literal('active'), z.literal('archived')]) })
 
 const MANUAL_OPS_HINT = 'swap/extend require the DJ — send a message instead'
+
+// The list-row shape: what GET /sessions returns per row, and what POST /
+// and PATCH /:id echo back for the ONE session they touched — one shape
+// everywhere a session is summarized, rather than three routes each
+// inventing their own subset of its columns.
+const sessionListColumns = {
+  id: djSessions.id,
+  title: djSessions.title,
+  status: djSessions.status,
+  queueVersion: djSessions.queueVersion,
+  updatedAt: djSessions.updatedAt,
+}
 
 export function sessionRoutes(db: Db, deps: DjDeps) {
   const app = new Hono<{ Variables: AppVars }>()
@@ -88,13 +101,22 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
 
     try {
       const result = await runDjTurn(db, deps, sessionRef, prompt)
+      // A text-only first turn never touches dj_sessions itself (no queue
+      // write to ride $onUpdate's automatic bump) — bumped explicitly, same
+      // as the message-turn route below, so list ordering (newest first by
+      // updatedAt) reflects even a chat-only first turn.
+      const [sessionRow] = await db
+        .update(djSessions)
+        .set({ updatedAt: new Date() })
+        .where(eq(djSessions.id, session.id))
+        .returning(sessionListColumns)
       const messages = await db
         .select()
         .from(djMessages)
         .where(eq(djMessages.sessionId, session.id))
         .orderBy(asc(djMessages.seq))
       return c.json({
-        session: { id: session.id, title: session.title, queueVersion: result.queueVersion },
+        session: sessionRow,
         messages,
         queue: result.queue,
       })
@@ -108,14 +130,11 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
 
   app.get('/', async (c) => {
     const userId = c.get('user').id
+    // Archived sessions are included here on purpose — the client filters
+    // by `status` for its default view; this is the one list endpoint, not
+    // two.
     const sessions = await db
-      .select({
-        id: djSessions.id,
-        title: djSessions.title,
-        status: djSessions.status,
-        queueVersion: djSessions.queueVersion,
-        updatedAt: djSessions.updatedAt,
-      })
+      .select(sessionListColumns)
       .from(djSessions)
       .where(eq(djSessions.userId, userId))
       .orderBy(desc(djSessions.updatedAt))
@@ -143,6 +162,24 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
     ])
     const messages = newestFirst.reverse()
     return c.json({ session, messages, queue })
+  })
+
+  // Archiving is client-side-only bookkeeping — no queue/message side
+  // effects, no LLM call, just the `status` column. GET /sessions still
+  // returns archived rows (the client filters); this route only changes
+  // which bucket a session sits in.
+  app.patch('/:id', zValidator('json', patchSessionSchema), async (c) => {
+    const userId = c.get('user').id
+    const session = await loadOwnedSession(db, c.req.param('id'), userId)
+    if (!session) return c.json({ error: 'not_found' }, 404)
+
+    const { status } = c.req.valid('json')
+    const [updated] = await db
+      .update(djSessions)
+      .set({ status })
+      .where(eq(djSessions.id, session.id))
+      .returning(sessionListColumns)
+    return c.json({ session: updated })
   })
 
   app.post('/:id/messages', zValidator('json', messageSchema), async (c) => {

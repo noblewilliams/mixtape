@@ -72,9 +72,13 @@ function dedupeByTrackId(picks: ReplacementPick[]): ReplacementPick[] {
 }
 
 /**
- * Replaces a session's entire queue: hard-deletes every existing queue_tracks
- * row (active AND removed — history for a discarded queue lives in
- * dj_messages, not queue rows) and inserts `picks` at positions 0..n-1.
+ * Replaces a session's entire ACTIVE queue: hard-deletes only the rows
+ * still in state='active' and inserts `picks` at positions 0..n-1. Rows
+ * already in state='removed' are left untouched — they're P4's taste
+ * signals (a listener manually taking a track out is exactly the kind of
+ * evidence a "took these out, give me more upbeat" regenerate would
+ * otherwise destroy), and their positions are already meaningless once
+ * removed, so there's nothing for a fresh replace to preserve them AGAINST.
  * Bumps queueVersion once. Returns the new version.
  *
  * `picks` is deduped by trackId first (keeping the first occurrence) — the
@@ -97,7 +101,7 @@ export async function replaceQueue(
     const [session] = await tx.select().from(djSessions).where(eq(djSessions.id, sessionId)).for('update')
     if (!session) throw new Error('queue-store: session not found')
 
-    await tx.delete(queueTracks).where(eq(queueTracks.sessionId, sessionId))
+    await tx.delete(queueTracks).where(and(eq(queueTracks.sessionId, sessionId), eq(queueTracks.state, 'active')))
 
     if (deduped.length > 0) {
       await tx.insert(queueTracks).values(

@@ -130,6 +130,14 @@ function getJson(app: ReturnType<typeof buildApp>, path: string) {
   return app.request(`http://x${path}`)
 }
 
+function patchJson(app: ReturnType<typeof buildApp>, path: string, body: unknown) {
+  return app.request(`http://x${path}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
 describe('session routes', () => {
   describe('POST /sessions', () => {
     it('creates a session, runs the first turn, and returns session/messages/queue with a truncated sanitized title', async () => {
@@ -606,6 +614,68 @@ describe('session routes', () => {
 
       const res = await postJson(app, `/sessions/${sessionId}/queue-ops`, { ops: [{ op: 'remove', position: 0 }] })
       expect(res.status).toBe(401)
+    })
+  })
+
+  describe('PATCH /sessions/:id', () => {
+    async function createPlainSession(db: TestDb, userId: string) {
+      const { llm } = makeFakeLlm([{ text: 'hi' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs(userId))
+      const res = await postJson(app, '/sessions', { prompt: 'a session' })
+      const body = (await res.json()) as { session: { id: string } }
+      return body.session.id
+    }
+
+    it('archives then reactivates a session — round trip, returning the list-row shape', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const sessionId = await createPlainSession(db, 'u1')
+      const { llm } = makeFakeLlm([{ text: 'n/a' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+      const archiveRes = await patchJson(app, `/sessions/${sessionId}`, { status: 'archived' })
+      expect(archiveRes.status).toBe(200)
+      const archiveBody = (await archiveRes.json()) as {
+        session: { id: string; title: string; status: string; queueVersion: number; updatedAt: string }
+      }
+      expect(archiveBody.session.id).toBe(sessionId)
+      expect(archiveBody.session.status).toBe('archived')
+      expect(archiveBody.session.queueVersion).toBe(0)
+      expect(archiveBody.session.title).toBeTruthy()
+      expect(archiveBody.session.updatedAt).toBeTruthy()
+
+      const reactivateRes = await patchJson(app, `/sessions/${sessionId}`, { status: 'active' })
+      expect(reactivateRes.status).toBe(200)
+      const reactivateBody = (await reactivateRes.json()) as { session: { status: string } }
+      expect(reactivateBody.session.status).toBe('active')
+    })
+
+    it('404s for another user’s session id (no existence leak)', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      await seedUser(db, 'u2')
+      const sessionId = await createPlainSession(db, 'u1')
+      const { llm } = makeFakeLlm([{ text: 'n/a' }])
+      const appU2 = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u2'))
+
+      const res = await patchJson(appU2, `/sessions/${sessionId}`, { status: 'archived' })
+      expect(res.status).toBe(404)
+    })
+
+    it('GET /sessions still returns an archived session — the client filters it out, not the server', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const sessionId = await createPlainSession(db, 'u1')
+      const { llm } = makeFakeLlm([{ text: 'n/a' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+      await patchJson(app, `/sessions/${sessionId}`, { status: 'archived' })
+
+      const res = await getJson(app, '/sessions')
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { sessions: Array<{ id: string; status: string }> }
+      const row = body.sessions.find((s) => s.id === sessionId)
+      expect(row).toBeDefined()
+      expect(row!.status).toBe('archived')
     })
   })
 })

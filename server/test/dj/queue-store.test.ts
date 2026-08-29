@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import {
   replaceQueue,
@@ -124,7 +124,7 @@ describe('queue-store', () => {
       expect(rows[0].reason).toBe('first') // first occurrence wins, not the later duplicate
     })
 
-    it('hard-deletes prior rows on a second replace — no history survives', async () => {
+    it('hard-deletes only ACTIVE rows on a second replace — a removed row survives as a P4 taste signal', async () => {
       const db = await createTestDb()
       await seedUser(db, 'u1')
       const session = await seedSession(db, 'u1')
@@ -132,17 +132,34 @@ describe('queue-store', () => {
       const secondTracks = await seedTracks(db, 2)
 
       const v1 = await replaceQueue(db, session.id, picksFrom(firstTracks), 'dj')
-      // Remove one via ops so a 'removed' row exists in history before the second replace.
+      // Remove one via ops so a 'removed' row exists before the second replace.
       await applyOps(db, session.id, [{ op: 'remove', position: 0 }], 'user')
+      const [removedRow] = await db
+        .select()
+        .from(queueTracks)
+        .where(and(eq(queueTracks.sessionId, session.id), eq(queueTracks.state, 'removed')))
 
       const v2 = await replaceQueue(db, session.id, picksFrom(secondTracks), 'dj')
 
       expect(v1).toBe(1)
       expect(v2).toBe(3) // v1 (replace) -> 2 (the intervening remove) -> 3 (this replace)
+
       const rows = await db.select().from(queueTracks).where(eq(queueTracks.sessionId, session.id))
-      expect(rows).toHaveLength(2)
-      expect(rows.map((r) => r.trackId).sort()).toEqual(secondTracks.map((t) => t.id).sort())
-      expect(rows.every((r) => r.state === 'active')).toBe(true)
+      // The pre-existing removed row survives untouched, alongside the 2
+      // freshly-inserted active rows — only the active row this replace
+      // superseded was deleted.
+      expect(rows).toHaveLength(3)
+      const removed = rows.filter((r) => r.state === 'removed')
+      expect(removed).toHaveLength(1)
+      expect(removed[0].id).toBe(removedRow.id)
+      const active = rows.filter((r) => r.state === 'active')
+      expect(active.map((r) => r.trackId).sort()).toEqual(secondTracks.map((t) => t.id).sort())
+
+      // getActiveQueue itself is unaffected — it only ever looked at
+      // state='active' rows, same as before this change.
+      const activeQueue = await getActiveQueue(db, session.id)
+      expect(activeQueue).toHaveLength(2)
+      expect(activeQueue.map((r) => r.trackId).sort()).toEqual(secondTracks.map((t) => t.id).sort())
     })
   })
 

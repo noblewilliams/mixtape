@@ -45,6 +45,24 @@ const CONFLICT_APOLOGY = 'the queue shifted while I was working on it — try th
 const LLM_APOLOGY = 'the line to the booth dropped — try that again?'
 const INTERNAL_APOLOGY = 'something skipped on my end — try that again?'
 
+// Bounds the number of curate() calls (an LLM round trip apiece, sometimes
+// two under curate's own max_tokens-truncation retry) a SINGLE TURN can
+// spend. Nothing else bounds this: one generate_queue costs exactly one,
+// but an edit_queue batch fans out to one curate() call per swap/extend
+// request it plans (queue-store's planOps/computeRequests) — a 20-op swap
+// batch would otherwise mean 20 sequential curation round trips before the
+// turn ever returns. Shared across the WHOLE turn (every generate_queue and
+// every edit_queue batch this turn makes), not per tool call, so a model
+// spreading the same cost across several smaller edit_queue calls in one
+// turn is bounded exactly the same as one big batch.
+//
+// Latency envelope at the cap: MAX_CURATIONS_PER_TURN (6) curations × up to
+// 2 LLM calls each (curate's own truncation retry) + MAX_TURNS (4)
+// conversation rounds themselves = at most 16 LLM round trips in the worst
+// case for one turn — comfortably inside any reasonable client request
+// timeout, even before Task 10's real latency numbers are in.
+const MAX_CURATIONS_PER_TURN = 6
+
 // Thrown out of runDjTurn on any turn-ending failure. `message` is always a
 // short, fixed, content-free string — never the LLM's own error text, a
 // curation parse failure, or anything else that could echo request content
@@ -103,6 +121,27 @@ function normalizeError(e: unknown): DjError {
   return new DjError('internal', INTERNAL_APOLOGY)
 }
 
+// Counts curate() invocations across a single attemptTurn call and throws
+// (as a ready-to-surface DjError, not something normalizeError needs to
+// translate) the moment the next one would exceed MAX_CURATIONS_PER_TURN.
+// Deliberately NOT concerned with rolling anything back: whatever committed
+// THIS TURN before the budget tripped (an earlier generate_queue, or an
+// earlier edit_queue batch — replaceQueue/applyOps are atomic per call, not
+// per turn) stands, exactly like any other turn-ending failure; runDjTurn's
+// own catch already attaches that post-mutation state the same way for
+// every DjError, this one included.
+class CurationBudget {
+  private spent = 0
+  consume(): void {
+    this.spent += 1
+    if (this.spent > MAX_CURATIONS_PER_TURN) {
+      const err = new DjError('internal', INTERNAL_APOLOGY)
+      err.detail = 'curation budget'
+      throw err
+    }
+  }
+}
+
 // Static across every turn — no volatile content lives in system anymore.
 // The queue summary + removal acknowledgments used to be appended here as a
 // suffix; they're now a leading USER turn instead (see attemptTurn) because
@@ -124,11 +163,15 @@ const PERSONA_PROMPT = [
 ].join('\n')
 
 // Formats the failure of a zod safeParse into tool_result text: issue paths
-// and messages only, never the offending input value itself (a malformed
-// tool call could carry anything — echoing it back would be an injection
-// vector into the model's own context on the very next turn).
+// and CODES only, never `issue.message` and never the offending input value
+// itself (a malformed tool call could carry anything — echoing it back
+// would be an injection vector into the model's own context on the very
+// next turn). `.message` is NOT safe for this — zod's own enum/literal
+// "invalid_value" messages embed the actual received value inline (e.g.
+// "Invalid option: expected one of ..., received 'foo'"), so path+message
+// would leak exactly the input this function exists to keep out.
 function formatZodIssues(prefix: string, error: z.ZodError): string {
-  const issues = error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ')
+  const issues = error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.code}`).join('; ')
   return `${prefix}: ${issues}`
 }
 
@@ -238,6 +281,7 @@ async function executeGenerateQueue(
   session: DjSessionRef,
   rawInput: unknown,
   sessionContext: string,
+  budget: CurationBudget,
 ): Promise<GenerateOutcome> {
   const parsed = intentSchema.safeParse(rawInput)
   if (!parsed.success) {
@@ -250,6 +294,7 @@ async function executeGenerateQueue(
     // voice, that nothing matched.
     return { resultText: 'no tracks in the library match those constraints', queueChanged: false, intent }
   }
+  budget.consume()
   const picks = await curate(deps.llm, pool, intent, sessionContext)
   const version = await replaceQueue(
     db,
@@ -279,6 +324,7 @@ async function executeEditQueue(
   userText: string,
   lastGenerateIntent: Intent | undefined,
   sessionContext: string,
+  budget: CurationBudget,
 ): Promise<EditOutcome> {
   const parsed = editQueueInputSchema.safeParse(rawInput)
   if (!parsed.success) {
@@ -320,6 +366,7 @@ async function executeEditQueue(
     const activeQueue = await getActiveQueue(db, session.id)
     const pool = await buildPool(db, deps.embed, session.userId, fullIntent, activeQueue.map((t) => t.trackId))
     if (pool.length === 0) return [] // shortfall — queue-store leaves the original track(s) in place
+    budget.consume()
     const picks = await curate(deps.llm, pool, fullIntent, sessionContext)
     return picks.map((p) => ({ trackId: p.trackId, reason: p.reason }))
   }
@@ -411,6 +458,12 @@ async function attemptTurn(db: Db, deps: DjDeps, session: DjSessionRef, userText
     }
     const countedDeps: DjDeps = { ...deps, llm: counted }
 
+    // Fresh per attempt, same as everything else this function reads/builds
+    // from scratch — a conflict retry (attemptWithConflictRetry) calling
+    // this function a second time gets a full new budget, not whatever was
+    // left of the failed attempt's.
+    const budget = new CurationBudget()
+
     // Session context (queue summary + removal acks) is user-controlled data
     // (track titles/artists) and must NEVER sit at system altitude — it's a
     // leading USER turn instead, ahead of history and the current message.
@@ -438,12 +491,12 @@ async function attemptTurn(db: Db, deps: DjDeps, session: DjSessionRef, userText
         stats.toolCalls += 1
         let resultText: string
         if (call.name === 'generate_queue') {
-          const outcome = await executeGenerateQueue(db, countedDeps, session, call.input, sessionContext)
+          const outcome = await executeGenerateQueue(db, countedDeps, session, call.input, sessionContext, budget)
           resultText = outcome.resultText
           if (outcome.intent) lastGenerateIntent = outcome.intent
           if (outcome.queueChanged) currentVersion = outcome.newVersion!
         } else if (call.name === 'edit_queue') {
-          const outcome = await executeEditQueue(db, countedDeps, session, call.input, userText, lastGenerateIntent, sessionContext)
+          const outcome = await executeEditQueue(db, countedDeps, session, call.input, userText, lastGenerateIntent, sessionContext, budget)
           resultText = outcome.resultText
           if (outcome.queueChanged) currentVersion = outcome.newVersion!
         } else {

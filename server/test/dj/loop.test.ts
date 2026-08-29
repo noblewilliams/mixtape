@@ -3,7 +3,7 @@ import { asc, eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { runDjTurn, DjError, FALLBACK_TEXT, type DjDeps, type DjSessionRef } from '../../src/dj/loop'
 import { LlmError, type LlmClient, type LlmRequest, type LlmTurn, type LlmAssistantBlock, type LlmToolCall } from '../../src/dj/llm'
-import { replaceQueue, applyOps } from '../../src/dj/queue-store'
+import { replaceQueue, applyOps, getActiveQueue } from '../../src/dj/queue-store'
 import { djMessages, djSessions, tracks, trackMeanings, userTracks, user } from '../../src/db/schema'
 import type { Embedder } from '../../src/enrich/embedder'
 
@@ -883,6 +883,56 @@ describe('runDjTurn', () => {
       const intentTexts = curateIntentBlocks(requests)
       expect(intentTexts).toHaveLength(1)
       expect(intentTexts[0]).toContain('more of the same')
+    })
+  })
+
+  describe('curation budget', () => {
+    it('an edit batch inducing more than MAX_CURATIONS_PER_TURN provider requests throws a DjError — prior committed state intact', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const session = await seedSession(db, 'u1')
+      const queued = await seedLibrary(db, 'u1', 7) // becomes the 7-track active queue
+      // A replacement candidate kept OUT of the queue, so every swap request's
+      // pool (which excludes the active queue) stays non-empty and actually
+      // reaches curate() — the budget is about curate() invocations, not
+      // about a request that short-circuits to [] on an empty pool.
+      await seedLibraryTrack(db, 'u1', { embedding: MATCHING_DIRECTION })
+      const v1 = await replaceQueue(
+        db,
+        session.id,
+        queued.map((t) => ({ trackId: t.id, reason: '' })),
+        'dj',
+      )
+      const sessionRef: DjSessionRef = { id: session.id, userId: 'u1' }
+
+      // 7 swaps in one batch — planOps generates one provider (curate) call
+      // per swap position, one more than MAX_CURATIONS_PER_TURN (6).
+      const ops = Array.from({ length: 7 }, (_, i) => ({ op: 'swap' as const, position: i }))
+      const { llm } = makeFakeLlm([{ toolCalls: [toolCall('c1', 'edit_queue', { ops })] }])
+      const deps: DjDeps = { embed: fakeEmbed, llm }
+
+      let error: unknown
+      try {
+        await runDjTurn(db, deps, sessionRef, 'swap everything out')
+        throw new Error('expected runDjTurn to reject')
+      } catch (e) {
+        error = e
+      }
+
+      expect(error).toBeInstanceOf(DjError)
+      const djError = error as DjError
+      expect(djError.kind).toBe('internal')
+      expect(djError.message).toBe('something skipped on my end — try that again?')
+      expect(djError.detail).toBe('curation budget')
+
+      // Nothing from the offending batch committed — applyOps's phase 1
+      // (where the provider runs) threw before its phase-2 transaction ever
+      // opened, so the queue is exactly what the direct replaceQueue above
+      // left it as.
+      const finalQueue = await getActiveQueue(db, session.id)
+      expect(finalQueue.map((t) => t.trackId).sort()).toEqual(queued.map((t) => t.id).sort())
+      const [finalSession] = await db.select().from(djSessions).where(eq(djSessions.id, session.id))
+      expect(finalSession.queueVersion).toBe(v1)
     })
   })
 
