@@ -81,15 +81,21 @@ export const trackFeatures = pgTable('track_features', {
 })
 
 // Lyric MEANING only — never lyric text (docs/decisions.md → lyrics stance).
-export const trackMeanings = pgTable('track_meanings', {
-  trackId: uuid('track_id')
-    .primaryKey()
-    .references(() => tracks.id, { onDelete: 'cascade' }),
-  embedding: vector('embedding', { dimensions: 1024 }),
-  lyricsSource: text('lyrics_source'),
-  instrumental: boolean('instrumental').notNull().default(false),
-  embeddedAt: timestamp('embedded_at', { withTimezone: true }).notNull().defaultNow(),
-})
+export const trackMeanings = pgTable(
+  'track_meanings',
+  {
+    trackId: uuid('track_id')
+      .primaryKey()
+      .references(() => tracks.id, { onDelete: 'cascade' }),
+    embedding: vector('embedding', { dimensions: 1024 }),
+    lyricsSource: text('lyrics_source'),
+    instrumental: boolean('instrumental').notNull().default(false),
+    embeddedAt: timestamp('embedded_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('track_meanings_embedding_hnsw_idx').using('hnsw', t.embedding.op('vector_cosine_ops')),
+  ],
+)
 
 export const enrichmentFailures = pgTable(
   'enrichment_failures',
@@ -103,4 +109,62 @@ export const enrichmentFailures = pgTable(
     lastAt: timestamp('last_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.trackId, t.stage] })],
+)
+
+export const djSessions = pgTable(
+  'dj_sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    status: text('status', { enum: ['active', 'archived'] }).notNull().default('active'),
+    queueVersion: integer('queue_version').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [index('dj_sessions_user_idx').on(t.userId, t.createdAt)],
+)
+
+export const djMessages = pgTable(
+  'dj_messages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => djSessions.id, { onDelete: 'cascade' }),
+    role: text('role', { enum: ['user', 'dj'] }).notNull(),
+    content: text('content').notNull(),
+    queueVersion: integer('queue_version'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('dj_messages_session_idx').on(t.sessionId, t.createdAt)],
+)
+
+export const queueTracks = pgTable(
+  'queue_tracks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => djSessions.id, { onDelete: 'cascade' }),
+    position: integer('position').notNull(),
+    trackId: uuid('track_id')
+      .notNull()
+      .references(() => tracks.id, { onDelete: 'cascade' }),
+    reason: text('reason'),
+    state: text('state', { enum: ['active', 'removed'] }).notNull().default('active'),
+    addedBy: text('added_by', { enum: ['dj', 'user'] }).notNull(),
+    removedBy: text('removed_by', { enum: ['dj', 'user'] }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [index('queue_tracks_session_idx').on(t.sessionId, t.state, t.position)],
 )

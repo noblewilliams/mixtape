@@ -1,6 +1,17 @@
 import { describe, it, expect } from 'vitest'
+import { eq } from 'drizzle-orm'
 import { createTestDb } from './helpers/db'
-import { tracks, user, userTracks, trackFeatures, trackMeanings, enrichmentFailures } from '../src/db/schema'
+import {
+  tracks,
+  user,
+  userTracks,
+  trackFeatures,
+  trackMeanings,
+  enrichmentFailures,
+  djSessions,
+  djMessages,
+  queueTracks,
+} from '../src/db/schema'
 
 describe('db schema', () => {
   it('round-trips a track', async () => {
@@ -131,5 +142,27 @@ describe('db schema', () => {
     await expect(
       db.insert(trackMeanings).values({ trackId: track.id, embedding: Array.from({ length: 768 }, () => 0) }),
     ).rejects.toThrow()
+  })
+
+  it('round-trips a dj session with messages and queue tracks', async () => {
+    const db = await createTestDb()
+    await db.insert(user).values({ id: 'u1', name: 'T', email: 'dj@example.com', emailVerified: false, createdAt: new Date(), updatedAt: new Date() })
+    const [s] = await db.insert(djSessions).values({ userId: 'u1', title: 'rainy drive' }).returning()
+    expect(s.status).toBe('active')
+    expect(s.queueVersion).toBe(0)
+    await db.insert(djMessages).values({ sessionId: s.id, role: 'user', content: 'rainy night drive' })
+    const [track] = await db.insert(tracks).values({ appleId: 'q1', title: 'T', artist: 'A' }).returning()
+    await db.insert(queueTracks).values({ sessionId: s.id, position: 0, trackId: track.id, reason: 'moody', addedBy: 'dj' })
+    const rows = await db.select().from(queueTracks)
+    expect(rows[0].state).toBe('active')
+  })
+
+  it('cascades session deletion to messages and queue', async () => {
+    const db = await createTestDb()
+    await db.insert(user).values({ id: 'u2', name: 'T', email: 'dj2@example.com', emailVerified: false, createdAt: new Date(), updatedAt: new Date() })
+    const [s] = await db.insert(djSessions).values({ userId: 'u2', title: 't' }).returning()
+    await db.insert(djMessages).values({ sessionId: s.id, role: 'dj', content: 'hi' })
+    await db.delete(djSessions).where(eq(djSessions.id, s.id))
+    expect(await db.select().from(djMessages)).toHaveLength(0)
   })
 })
