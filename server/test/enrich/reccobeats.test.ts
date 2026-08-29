@@ -176,6 +176,14 @@ describe('resolveAndFetchFeatures', () => {
     expect(result?.isrc).toBe('GBSTK0700003')
   })
 
+  it('accepts a plain candidate title when the query title carries a suffix (bidirectional containment)', async () => {
+    const result = await resolveAndFetchFeatures(
+      { title: 'Nude - Remastered 2011', artist: 'Radiohead', durationMs: 255000 },
+      fetchScript({ content: [candidate({ trackTitle: 'Nude', durationMs: 255386 })] }),
+    )
+    expect(result).not.toBeNull()
+  })
+
   it('makes zero fetch calls when the title is blank', async () => {
     let calls = 0
     const spy: FetchLike = async () => {

@@ -28,6 +28,9 @@ async function getJson(url: URL, fetchLike: FetchLike): Promise<Fetched> {
 }
 
 export async function fetchLyrics(key: LyricsKey, fetchLike: FetchLike = fetch): Promise<LyricsResult | null> {
+  const artistNorm = norm(key.artist)
+  if (!artistNorm) return null
+
   if (key.durationMs != null) {
     const getUrl = new URL('https://lrclib.net/api/get')
     getUrl.searchParams.set('artist_name', key.artist)
@@ -50,7 +53,6 @@ export async function fetchLyrics(key: LyricsKey, fetchLike: FetchLike = fetch):
   if (!searched.ok || !Array.isArray(searched.body) || !searched.body.length) return null
   // Verify the artist on this path: a wrong-song embedding would be silent,
   // permanent, and unauditable, whereas a miss here is visible and retryable.
-  const artistNorm = norm(key.artist)
   const hit = (searched.body as LrclibRecord[]).find((h) => norm(h.artistName ?? '') === artistNorm)
   return hit ? toResult(hit) : null
 }

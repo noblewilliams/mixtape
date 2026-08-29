@@ -82,6 +82,17 @@ describe('fetchLyrics', () => {
     ).rejects.toThrow(EnrichSourceError)
   })
 
+  it('returns null with zero fetch calls when the artist normalizes to empty', async () => {
+    let calls = 0
+    const fetchLike: FetchLike = async () => {
+      calls++
+      return new Response(JSON.stringify([]), { status: 200 })
+    }
+    const r = await fetchLyrics({ title: 'X', artist: '!!!', album: null, durationMs: 1000 }, fetchLike)
+    expect(r).toBeNull()
+    expect(calls).toBe(0)
+  })
+
   it('skips the get call entirely when there is no duration (search only)', async () => {
     const urls: string[] = []
     const fetchLike: FetchLike = async (url) => {

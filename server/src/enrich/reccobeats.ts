@@ -71,7 +71,10 @@ export async function resolveAndFetchFeatures(
   const match =
     exactTitle.find((c) => artistOk(c) && durationOk(c)) ??
     (track.durationMs != null
-      ? content.find((c) => norm(c.trackTitle ?? '').includes(titleNorm) && artistOk(c) && durationOk(c))
+      ? content.find((c) => {
+          const t = norm(c.trackTitle ?? '')
+          return t !== '' && (t.includes(titleNorm) || titleNorm.includes(t)) && artistOk(c) && durationOk(c)
+        })
       : undefined)
   if (!match) return null
 
