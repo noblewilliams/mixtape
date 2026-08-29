@@ -14,6 +14,7 @@ type Bindings = {
 
 export default {
   fetch(req: Request, env: Bindings, ctx: ExecutionContext) {
+    if (!env.DATABASE_URL) throw new Error('DATABASE_URL is required')
     const db = drizzle(neon(env.DATABASE_URL), { schema })
     const auth = createAuth(db, env)
     const app = createApp({ auth })

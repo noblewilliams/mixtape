@@ -15,6 +15,7 @@ Read before working:
 - Curation LLM is Sonnet 5 (`claude-sonnet-5`); escalate only the sequencing pass to Opus 5 (`claude-opus-5`) and only with evidence. Embeddings use a dedicated embedding model, never a chat model.
 - New iOS Swift files need pbxproj target-membership (recurring lesson from goalympics).
 - GetSongBPM data requires a visible backlink to getsongbpm.com wherever we ship UI that uses it.
+- Workers has no NODE_ENV: any library default gated on "production" (Better Auth's secret guard, rate limiting) is silently OFF — configure such things explicitly and fail fast on missing env.
 
 ## Conventions
 
