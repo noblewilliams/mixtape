@@ -21,6 +21,7 @@ class LibrarySyncService {
   /// Re-entrant safe: a call made while a sync is already running joins that
   /// same in-flight sync instead of starting a second one (the native snapshot
   /// is shared and can't support concurrent syncs).
+  /// Concurrent calls join the in-flight run; the joiner's [onProgress] is ignored.
   Future<int> sync({void Function(double progress)? onProgress}) =>
       _inFlight ??= _run(onProgress).whenComplete(() => _inFlight = null);
 
