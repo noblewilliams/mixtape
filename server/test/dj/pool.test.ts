@@ -95,6 +95,20 @@ function intent(partial: Partial<Intent> & { themes: string }): Intent {
 }
 
 describe('buildPool', () => {
+  it("calls embed with intent.themes verbatim", async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    let seenText: string | undefined
+    const spyEmbed: Embedder = async (text) => {
+      seenText = text
+      return QUERY_DIRECTION
+    }
+
+    await buildPool(db, spyEmbed, 'u1', intent({ themes: 'rainy drive at midnight' }))
+
+    expect(seenText).toBe('rainy drive at midnight')
+  })
+
   it('hard filters: tempo window excludes out-of-range tracks', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')

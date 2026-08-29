@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import Anthropic from '@anthropic-ai/sdk'
-import { anthropicLlm, LlmError, type LlmTurn, type LlmRequest } from '../../src/dj/llm'
+import { anthropicLlm, LlmError, type LlmTurn, type LlmRequest, type LlmMessage } from '../../src/dj/llm'
 
 const baseReq: LlmRequest = { system: 's', messages: [], tools: [] }
 
@@ -127,6 +127,36 @@ describe('anthropicLlm', () => {
     await llm({ ...baseReq, maxTokens: 500, effort: 'low' })
     expect(captured?.max_tokens).toBe(500)
     expect(captured?.output_config).toEqual({ effort: 'low' })
+  })
+
+  it('passes a user message built from cacheable text content blocks straight through to the SDK', async () => {
+    let captured: Anthropic.MessageCreateParamsNonStreaming | undefined
+    const fakeCreate = async (body: Anthropic.MessageCreateParamsNonStreaming) => {
+      captured = body
+      return {
+        content: [{ type: 'text', text: 'ok' }] as Anthropic.ContentBlock[],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }
+    }
+    const llm = anthropicLlm({ messages: { create: fakeCreate } })
+    const userMsg: LlmMessage = {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'pool block', cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: 'intent block' },
+      ],
+    }
+    await llm({ ...baseReq, messages: [userMsg] })
+    expect(captured?.messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'pool block', cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: 'intent block' },
+        ],
+      },
+    ])
   })
 
   it('defaults maxTokens and omits output_config when effort is unset', async () => {

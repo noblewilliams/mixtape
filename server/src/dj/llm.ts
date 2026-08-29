@@ -17,6 +17,9 @@ export type LlmAssistantBlock =
 export type LlmMessage =
   | { role: 'user' | 'assistant'; content: string }
   | { role: 'user'; content: Array<{ type: 'tool_result'; tool_use_id: string; content: string }> }
+  // Cacheable text blocks — used by curation's pool block (see dj/curate.ts) to
+  // pin an ephemeral cache breakpoint under a large, otherwise-plain user turn.
+  | { role: 'user'; content: Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }> }
   | { role: 'assistant'; content: LlmAssistantBlock[] }
 
 export type LlmRequest = {

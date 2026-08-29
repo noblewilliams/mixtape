@@ -88,7 +88,7 @@ export const trackMeanings = pgTable(
     trackId: uuid('track_id')
       .primaryKey()
       .references(() => tracks.id, { onDelete: 'cascade' }),
-    embedding: vector('embedding', { dimensions: 1024 }),
+    embedding: vector('embedding', { dimensions: 1024 }), // bge-m3 width — see EMBEDDING_DIMENSIONS in enrich/embedder.ts
     lyricsSource: text('lyrics_source'),
     instrumental: boolean('instrumental').notNull().default(false),
     embeddedAt: timestamp('embedded_at', { withTimezone: true }).notNull().defaultNow(),

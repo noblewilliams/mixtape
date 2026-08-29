@@ -1,6 +1,6 @@
 import { sql, type SQL } from 'drizzle-orm'
 import type { Db } from '../db/types'
-import type { Embedder } from '../enrich/embedder'
+import { EMBEDDING_DIMENSIONS, type Embedder } from '../enrich/embedder'
 import type { Intent } from './contracts'
 
 export type PoolTrack = {
@@ -88,7 +88,7 @@ export async function buildPool(db: Db, embed: Embedder, userId: string, intent:
   // Defensive shape guard before the embedding touches SQL at all — the error
   // deliberately excludes the values themselves (only the length), since a
   // malformed embedding could in principle carry unexpected content.
-  if (embedding.length !== 1024 || !embedding.every(Number.isFinite)) {
+  if (embedding.length !== EMBEDDING_DIMENSIONS || !embedding.every(Number.isFinite)) {
     throw new Error(`pool: bad embedding (len ${embedding.length})`)
   }
   // Bound as a STRING literal parameter, cast to ::vector in SQL below — the
@@ -110,17 +110,18 @@ export async function buildPool(db: Db, embed: Embedder, userId: string, intent:
   //    with a default half-width (DEFAULT_TEMPO_HALF_WIDTH).
   // Either way, tempoCenter/tempoHalfWidth below drive the feature-fit term
   // the same way; only the WHERE clause treats the two shapes differently.
-  const hasTempoWindow = intent.tempoMin !== undefined && intent.tempoMax !== undefined
+  const { tempoMin, tempoMax } = intent
+  const hasTempoWindow = tempoMin !== undefined && tempoMax !== undefined
   let tempoCenter: number | null = null
   let tempoHalfWidth: number | null = null
-  if (hasTempoWindow) {
-    tempoCenter = (intent.tempoMin! + intent.tempoMax!) / 2
-    tempoHalfWidth = Math.max(1, (intent.tempoMax! - intent.tempoMin!) / 2)
-  } else if (intent.tempoMin !== undefined) {
-    tempoCenter = intent.tempoMin
+  if (tempoMin !== undefined && tempoMax !== undefined) {
+    tempoCenter = (tempoMin + tempoMax) / 2
+    tempoHalfWidth = Math.max(1, (tempoMax - tempoMin) / 2)
+  } else if (tempoMin !== undefined) {
+    tempoCenter = tempoMin
     tempoHalfWidth = DEFAULT_TEMPO_HALF_WIDTH
-  } else if (intent.tempoMax !== undefined) {
-    tempoCenter = intent.tempoMax
+  } else if (tempoMax !== undefined) {
+    tempoCenter = tempoMax
     tempoHalfWidth = DEFAULT_TEMPO_HALF_WIDTH
   }
 
@@ -162,8 +163,8 @@ export async function buildPool(db: Db, embed: Embedder, userId: string, intent:
   // is not the same as out-of-window, and excluding it would just mean this
   // track never had a chance to compete on its other signals.
   if (hasTempoWindow) {
-    filters.push(sql`(f.tempo IS NULL OR f.tempo >= ${intent.tempoMin})`)
-    filters.push(sql`(f.tempo IS NULL OR f.tempo <= ${intent.tempoMax})`)
+    filters.push(sql`(f.tempo IS NULL OR f.tempo >= ${tempoMin})`)
+    filters.push(sql`(f.tempo IS NULL OR f.tempo <= ${tempoMax})`)
   }
   if (intent.allowExplicit === false) filters.push(sql`COALESCE(t.explicit, false) = false`)
   // NULL release_year passes an era filter rather than being excluded — most
