@@ -154,6 +154,38 @@ void main() {
     );
   });
 
+  test('patchJson sends PATCH with bearer + json body, throws on 4xx/5xx', () async {
+    String? seenMethod;
+    String? seenContentType;
+    Map<String, dynamic>? decoded;
+    final inner = MockClient((req) async {
+      seenMethod = req.method;
+      seenContentType = req.headers['content-type'];
+      decoded = jsonDecode(req.body) as Map<String, dynamic>;
+      return http.Response('{"ok":true}', 200);
+    });
+    final store = InMemoryTokenStore();
+    await store.write('tok-999');
+    final client = ApiClient(baseUrl: 'http://x', tokenStore: store, inner: inner);
+
+    final res = await client.patchJson('/sessions/abc', {'status': 'archived'});
+
+    expect(seenMethod, 'PATCH');
+    expect(seenContentType, 'application/json');
+    expect(decoded, {'status': 'archived'});
+    expect(res.body, '{"ok":true}');
+
+    final failing = ApiClient(
+      baseUrl: 'http://x',
+      tokenStore: InMemoryTokenStore(),
+      inner: MockClient((_) async => http.Response('{"error":"nope"}', 409)),
+    );
+    await expectLater(
+      failing.patchJson('/sessions/abc', {'status': 'archived'}),
+      throwsA(isA<ApiException>().having((e) => e.statusCode, 'statusCode', 409)),
+    );
+  });
+
   test('InMemoryTokenStore write -> read -> clear -> read round-trip', () async {
     final store = InMemoryTokenStore();
     expect(await store.read(), isNull);
