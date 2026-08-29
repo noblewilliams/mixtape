@@ -2,6 +2,9 @@
 
 Short ADR-style log. Newest first. Each entry: decision, why, and what would reopen it.
 
+## 2026-08-29 — iTunes lookup disabled on Workers (Apple IP-blocks datacenter ranges)
+Verified live during Task 8: itunes.apple.com/lookup returns 403 to Cloudflare Workers regardless of headers, while working from residential IPs. The deployed pipeline runs `itunes: async () => null`; track duration comes from the matched ReccoBeats candidate (written back to `tracks.duration_ms` and threaded into the same pass's LRCLIB exact-get), genre comes from the library sync. `lookupItunes` stays tested for local/P2.5 use (preview downloads run from the founder's Mac anyway). **Reopens if:** Apple unblocks, or P2.5's local analyzer wants richer metadata.
+
 ## 2026-08-29 — P2 enrichment: ReccoBeats-only waterfall, GetSongBPM dropped
 ReccoBeats (probed live) provides the full 11-field feature set + ISRC backfill, keyless. GetSongBPM adds only BPM+key, needs an API key, and requires a visible getsongbpm.com backlink in the UI. **Reopens if:** Task 8 coverage report shows features coverage < 80% — then P2.5 adds the local preview-analysis leg first, GetSongBPM second.
 
