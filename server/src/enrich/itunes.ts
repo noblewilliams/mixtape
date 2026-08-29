@@ -1,14 +1,11 @@
-export type FetchLike = (url: string | URL, init?: RequestInit) => Promise<Response>
+export { EnrichSourceError } from './types'
+export type { FetchLike } from './types'
 
-export class EnrichSourceError extends Error {
-  constructor(source: string, detail: string) {
-    super(`${source}: ${detail}`)
-  }
-}
+import { EnrichSourceError, type FetchLike } from './types'
 
 export type ItunesHit = {
-  trackName: string
-  artistName: string
+  trackName: string | null
+  artistName: string | null
   previewUrl: string | null
   durationMs: number | null
   genre: string | null
@@ -19,10 +16,14 @@ export async function lookupItunes(
   storefront: string,
   fetchLike: FetchLike = fetch,
 ): Promise<ItunesHit | null> {
-  const url = `https://itunes.apple.com/lookup?id=${encodeURIComponent(appleId)}&country=${storefront}`
-  const res = await fetchLike(url)
-  if (!res.ok) throw new EnrichSourceError('itunes', `HTTP ${res.status}`)
-  const body = (await res.json()) as {
+  const u = new URL('https://itunes.apple.com/lookup')
+  u.searchParams.set('id', appleId)
+  u.searchParams.set('country', storefront)
+  const res = await fetchLike(u, { signal: AbortSignal.timeout(5000) })
+  if (!res.ok) throw new EnrichSourceError('itunes', `HTTP ${res.status}`, res.status)
+  const body = (await res.json().catch(() => {
+    throw new EnrichSourceError('itunes', 'malformed JSON')
+  })) as {
     resultCount: number
     results: Array<{
       trackName?: string
@@ -32,11 +33,11 @@ export async function lookupItunes(
       primaryGenreName?: string
     }>
   }
-  if (!body.resultCount || !body.results.length) return null
+  if (!body?.resultCount || !Array.isArray(body.results) || !body.results.length) return null
   const r = body.results[0]
   return {
-    trackName: r.trackName ?? '',
-    artistName: r.artistName ?? '',
+    trackName: r.trackName ?? null,
+    artistName: r.artistName ?? null,
     previewUrl: r.previewUrl ?? null,
     durationMs: r.trackTimeMillis ?? null,
     genre: r.primaryGenreName ?? null,

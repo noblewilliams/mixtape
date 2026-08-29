@@ -37,4 +37,24 @@ describe('lookupItunes', () => {
     const bad: FetchLike = async () => new Response('nope', { status: 503 })
     await expect(lookupItunes('1', 'ng', bad)).rejects.toThrow('itunes')
   })
+
+  it('sends the injected storefront and the encoded apple id', async () => {
+    let seen = ''
+    const spy: FetchLike = async (url) => {
+      seen = String(url)
+      return new Response(JSON.stringify({ resultCount: 0, results: [] }), { status: 200 })
+    }
+    await lookupItunes('12 34', 'us', spy)
+    expect(seen).toBe('https://itunes.apple.com/lookup?id=12+34&country=us')
+  })
+
+  it('maps absent optional fields to null', async () => {
+    const hit = await lookupItunes('1', 'ng', ok({ resultCount: 1, results: [{ trackName: 'X' }] }))
+    expect(hit).toEqual({ trackName: 'X', artistName: null, previewUrl: null, durationMs: null, genre: null })
+  })
+
+  it('throws EnrichSourceError on malformed JSON', async () => {
+    const bad: FetchLike = async () => new Response('not json', { status: 200 })
+    await expect(lookupItunes('1', 'ng', bad)).rejects.toThrow('itunes')
+  })
 })
