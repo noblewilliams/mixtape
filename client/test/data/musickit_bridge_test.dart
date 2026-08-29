@@ -88,4 +88,18 @@ void main() {
     };
     expect(LibrarySong.fromMap(map).toJson(), map);
   });
+
+  test('LibrarySong.fromMap(map).toJson() round-trips null album/genre', () {
+    final map = {
+      'appleId': '222',
+      'title': 'Two',
+      'artist': 'B',
+      'album': null,
+      'genre': null,
+      'playCount': 0,
+      'lastPlayedAt': null,
+      'dateAdded': 1700000000000,
+    };
+    expect(LibrarySong.fromMap(map).toJson(), map);
+  });
 }

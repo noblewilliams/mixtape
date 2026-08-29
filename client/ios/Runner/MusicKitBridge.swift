@@ -38,6 +38,13 @@ class MusicKitBridge: NSObject {
         let all = MPMediaQuery.songs().items ?? []
         // Only songs with an Apple Music catalog identity; local-only rips have "0"/empty.
         catalogCache = all.filter { !$0.playbackStoreID.isEmpty && $0.playbackStoreID != "0" }
+      } else if catalogCache.isEmpty {
+        // Cold start at offset > 0: there's no snapshot to page from. Without this guard we'd
+        // silently return an empty/zero page that reads as "sync complete" to the caller.
+        DispatchQueue.main.async {
+          result(FlutterError(code: "no_snapshot", message: "fetchLibrarySongs must start at offset 0", details: nil))
+        }
+        return
       }
       let catalog = catalogCache
       let page = catalog.dropFirst(offset).prefix(limit)
@@ -53,6 +60,10 @@ class MusicKitBridge: NSObject {
           "lastPlayedAt": item.lastPlayedDate.map { Int($0.timeIntervalSince1970 * 1000) },
           "dateAdded": Int(item.dateAdded.timeIntervalSince1970 * 1000),
         ]
+      }
+      if offset + songs.count >= catalog.count && offset > 0 {
+        // Last page of a multi-page sync: release the ~10k MPMediaItem refs held by the snapshot.
+        catalogCache = []
       }
       DispatchQueue.main.async {
         result(["songs": songs, "total": catalog.count])

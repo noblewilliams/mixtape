@@ -72,6 +72,7 @@ class MusicKitBridge {
     }
   }
 
+  /// Pages from a native snapshot taken at offset 0 — always start a sync at offset 0.
   Future<LibraryPage> fetchLibrarySongs({required int offset, required int limit}) async {
     final clampedLimit = limit.clamp(1, 500); // server batch ceiling
     try {
