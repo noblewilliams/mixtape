@@ -1,5 +1,7 @@
 import { Hono } from 'hono'
 import { requireSession } from './middleware/require-session'
+import { ingestRoutes } from './routes/ingest'
+import type { Db } from './db/types'
 
 // Minimal structural type so tests can stub auth
 export type AuthLike = {
@@ -11,7 +13,7 @@ export type AuthLike = {
 
 export type AppVars = { user: { id: string } }
 
-export function createApp({ auth }: { auth: AuthLike }) {
+export function createApp({ auth, db }: { auth: AuthLike; db?: Db }) {
   const app = new Hono<{ Variables: AppVars }>()
 
   app.onError((err, c) => {
@@ -24,6 +26,11 @@ export function createApp({ auth }: { auth: AuthLike }) {
   //   /api/auth/* [P1]  /me [P1]  /ingest/* [P1]  /enrich/* [P2]  /sessions/* [P3-P4]
   app.all('/api/auth/*', (c) => auth.handler(c.req.raw))
   app.get('/me', requireSession(auth), (c) => c.json({ user: c.get('user') }))
+
+  if (db) {
+    app.use('/ingest/*', requireSession(auth))
+    app.route('/ingest', ingestRoutes(db))
+  }
 
   return app
 }

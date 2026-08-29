@@ -1,0 +1,96 @@
+import { describe, it, expect } from 'vitest'
+import { createTestDb, type TestDb } from './helpers/db'
+import { createApp, type AuthLike } from '../src/app'
+import { tracks, userTracks, user } from '../src/db/schema'
+
+const authed: AuthLike = {
+  handler: () => new Response('ok'),
+  api: { getSession: async () => ({ user: { id: 'user-1' } }) },
+}
+
+const song = (over: Record<string, unknown> = {}) => ({
+  appleId: 'a1',
+  title: 'Song',
+  artist: 'Artist',
+  album: 'Album',
+  genre: 'Pop',
+  playCount: 7,
+  lastPlayedAt: 1724900000000,
+  dateAdded: 1700000000000,
+  ...over,
+})
+
+async function seedUser(db: TestDb) {
+  await db.insert(user).values({
+    id: 'user-1',
+    name: 'Test',
+    email: 't@example.com',
+    emailVerified: false,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  })
+}
+
+function post(db: TestDb, body: unknown, auth: AuthLike = authed) {
+  return createApp({ auth, db }).request('http://x/ingest/library', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
+describe('POST /ingest/library', () => {
+  it('requires auth', async () => {
+    const db = await createTestDb()
+    const res = await post(db, { songs: [song()] }, { ...authed, api: { getSession: async () => null } })
+    expect(res.status).toBe(401)
+  })
+
+  it('inserts tracks and user_tracks', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    const res = await post(db, { songs: [song(), song({ appleId: 'a2', title: 'Two' })] })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ingested: 2 })
+    expect(await db.select().from(tracks)).toHaveLength(2)
+    const uts = await db.select().from(userTracks)
+    expect(uts).toHaveLength(2)
+    expect(uts.find((u) => u.playCount === 7)).toBeTruthy()
+    expect(uts.find((u) => u.lastPlayedAt?.getTime() === 1724900000000)).toBeTruthy()
+  })
+
+  it('upserts on re-sync (play count updates, no duplicates)', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    await post(db, { songs: [song()] })
+    await post(db, { songs: [song({ playCount: 9 })] })
+    expect(await db.select().from(tracks)).toHaveLength(1)
+    const uts = await db.select().from(userTracks)
+    expect(uts).toHaveLength(1)
+    expect(uts[0].playCount).toBe(9)
+  })
+
+  it('dedupes repeated appleIds within one batch, keeping the max play count', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    const res = await post(db, { songs: [song({ playCount: 3 }), song({ playCount: 11 })] })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ingested: 1 })
+    const uts = await db.select().from(userTracks)
+    expect(uts).toHaveLength(1)
+    expect(uts[0].playCount).toBe(11)
+  })
+
+  it('rejects malformed payloads', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    const res = await post(db, { songs: [{ title: 'no appleId' }] })
+    expect(res.status).toBe(400)
+  })
+
+  it('rejects an empty batch', async () => {
+    const db = await createTestDb()
+    const res = await post(db, { songs: [] })
+    expect(res.status).toBe(400)
+  })
+})

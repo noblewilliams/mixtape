@@ -17,7 +17,7 @@ export default {
     if (!env.DATABASE_URL) throw new Error('DATABASE_URL is required')
     const db = drizzle(neon(env.DATABASE_URL), { schema })
     const auth = createAuth(db, env)
-    const app = createApp({ auth })
+    const app = createApp({ auth, db })
     return app.fetch(req, env, ctx)
   },
 }
