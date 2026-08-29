@@ -95,7 +95,7 @@ export const enrichmentFailures = pgTable(
     trackId: uuid('track_id')
       .notNull()
       .references(() => tracks.id, { onDelete: 'cascade' }),
-    stage: text('stage').notNull(), // 'itunes' | 'features' | 'meaning'
+    stage: text('stage', { enum: ['itunes', 'features', 'meaning'] }).notNull(),
     error: text('error').notNull(),
     attempts: integer('attempts').notNull().default(1),
     lastAt: timestamp('last_at', { withTimezone: true }).notNull().defaultNow(),

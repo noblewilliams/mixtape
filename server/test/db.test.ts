@@ -115,4 +115,21 @@ describe('db schema', () => {
     const rows = await db.select().from(enrichmentFailures)
     expect(rows[0].attempts).toBe(1)
   })
+
+  it('stores a null embedding for instrumentals', async () => {
+    const db = await createTestDb()
+    const [track] = await db.insert(tracks).values({ appleId: 'e3', title: 'S', artist: 'A' }).returning()
+    await db.insert(trackMeanings).values({ trackId: track.id, embedding: null, lyricsSource: 'lrclib', instrumental: true })
+    const [m] = await db.select().from(trackMeanings)
+    expect(m.embedding).toBeNull()
+    expect(m.instrumental).toBe(true)
+  })
+
+  it('rejects an embedding of the wrong dimension', async () => {
+    const db = await createTestDb()
+    const [track] = await db.insert(tracks).values({ appleId: 'e4', title: 'S', artist: 'A' }).returning()
+    await expect(
+      db.insert(trackMeanings).values({ trackId: track.id, embedding: Array.from({ length: 768 }, () => 0) }),
+    ).rejects.toThrow()
+  })
 })
