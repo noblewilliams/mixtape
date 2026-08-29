@@ -11,4 +11,4 @@ Your personal DJ. Tell it what you want to hear — a mood, a moment, a memory �
 
 ## Status
 
-Pre-P1: repo scaffolded, design under review. Build phases are listed at the end of the design spec.
+P1 code-complete and deployed: `mixtape-api` live on workers.dev, migrations applied to Neon (server 22 tests, client 51 tests, final review passed). Remaining before P2: Sign in with Apple capability in Xcode + on-device smoke (sign in → sync library → verify rows in Neon). Build phases are listed at the end of the design spec.
