@@ -38,14 +38,14 @@ async function loadOwnedSession(db: Db, sessionId: string, userId: string) {
   return row ?? null
 }
 
-// DjError.kind is 'llm' | 'curation' | 'conflict' | 'validation' | 'internal'.
-// 'validation' means the request itself was malformed in a way runDjTurn
-// detected — a 400, same as any other client-side input error. 'conflict' is
-// the same queue-version race the manual queue-ops route reports as 409
-// (see QueueVersionConflict handling below) — same condition, same status,
-// regardless of which route hit it. Everything else (an upstream LLM hiccup,
-// a truncated curation, an unexpected internal fault) is a server-side
-// condition the client can retry as-is — those map to 502.
+// 'conflict' is the same queue-version race the manual queue-ops route
+// reports as 409 (see QueueVersionConflict handling below) — same
+// condition, same status, regardless of which route hit it. 'validation'
+// (reserved, no construction site yet — see DjError's kind comment in
+// dj/loop.ts) maps to 400 like any client-side input error. Everything else
+// (an upstream LLM hiccup, a truncated curation, an unexpected internal
+// fault) is a server-side condition the client can retry as-is — those map
+// to 502.
 function djErrorStatus(kind: DjError['kind']): 400 | 409 | 502 {
   if (kind === 'validation') return 400
   if (kind === 'conflict') return 409

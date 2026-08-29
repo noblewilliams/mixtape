@@ -419,6 +419,10 @@ describe('session routes', () => {
       expect(body.message).not.toMatch(/dj:/)
       expect(body.message).not.toMatch(/503/)
       expect(body.message).toBe('the line to the booth dropped — try that again?')
+      // DjError.detail (the upstream status/error name, for server-side
+      // observability only) is never in djErrorBody's whitelist — confirm
+      // it can't leak into the client-facing body.
+      expect(body).not.toHaveProperty('detail')
 
       const getRes = await getJson(app, `/sessions/${sessionId}`)
       const getBody = (await getRes.json()) as { messages: Array<{ role: string; content: string }> }

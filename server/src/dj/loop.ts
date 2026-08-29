@@ -61,7 +61,19 @@ export class DjError extends Error {
   queue?: QueueTrackView[]
   queueVersion?: number
 
+  // Upstream diagnostic detail, for server-side observability (logTurn)
+  // only — set by normalizeError from LlmError.detail ('llm') or the
+  // curation error's own class name ('curation'), both content-free by
+  // construction (numbers/codes, never request content). NEVER part of
+  // djErrorBody's client-facing whitelist (sessions.ts) — a listener-ready
+  // chat bubble has no use for it, so it's simply never spread in.
+  detail?: string
+
   constructor(
+    // 'validation' is reserved for P3b client-input mapping (a request the
+    // CLIENT sent that runDjTurn itself detected as malformed) — no server
+    // construction site exists yet; djErrorStatus already maps it to 400
+    // so nothing else needs to change when one lands.
     readonly kind: 'llm' | 'curation' | 'conflict' | 'validation' | 'internal',
     message: string,
   ) {
@@ -75,12 +87,18 @@ function normalizeError(e: unknown): DjError {
   // e.status (an HTTP status from the upstream Anthropic call) never rides
   // the message — djErrorStatus already maps `kind` to a client-facing
   // status code (502 for 'llm'), so the upstream status is diagnostic noise
-  // a listener-ready chat bubble has no use for. It's dropped rather than
-  // stashed on a separate field: nothing downstream (logTurn logs `kind`
-  // only) currently needs it, and DjError's own class comment already rules
-  // out message-carried diagnostics as a pattern.
-  if (e instanceof LlmError) return new DjError('llm', LLM_APOLOGY)
-  if (e instanceof CurationTruncated || e instanceof CurationUnparseable) return new DjError('curation', CURATION_APOLOGY)
+  // a listener-ready chat bubble has no use for. It rides `detail` instead
+  // (observability only, see the field's comment above), never the message.
+  if (e instanceof LlmError) {
+    const err = new DjError('llm', LLM_APOLOGY)
+    err.detail = e.detail
+    return err
+  }
+  if (e instanceof CurationTruncated || e instanceof CurationUnparseable) {
+    const err = new DjError('curation', CURATION_APOLOGY)
+    err.detail = e.name
+    return err
+  }
   if (e instanceof QueueVersionConflict) return new DjError('conflict', CONFLICT_APOLOGY)
   return new DjError('internal', INTERNAL_APOLOGY)
 }
@@ -137,14 +155,14 @@ async function loadHistory(db: Db, sessionId: string, beforeSeq: number): Promis
 
 async function getSessionQueueVersion(db: Db, sessionId: string): Promise<number> {
   const [row] = await db.select({ queueVersion: djSessions.queueVersion }).from(djSessions).where(eq(djSessions.id, sessionId))
-  // Kept as a dev-facing string, unlike every other DjError construction in
-  // this file: it is UNREACHABLE from any client. Every route (sessions.ts)
-  // calls loadOwnedSession first and returns 404 before ever reaching
-  // runDjTurn with a session id — the only way this branch fires is a
-  // caller that skips the route layer entirely (this file's own tests) or a
-  // row deleted in the gap between that check and this read, neither of
-  // which reaches an HTTP response body.
-  if (!row) throw new DjError('internal', 'dj: session not found')
+  // Defense-in-depth, not unreachable: sessions.ts's loadOwnedSession
+  // checks existence before calling runDjTurn, but that check and this read
+  // aren't atomic — a session deleted in the gap (or a caller that skips
+  // the route layer, e.g. this file's own tests) still lands here, and this
+  // DOES reach a client: it surfaces as an ordinary 502 via djErrorBody, so
+  // its message must be the same listener-ready apology every other
+  // DjError uses, not a dev string.
+  if (!row) throw new DjError('internal', INTERNAL_APOLOGY)
   return row.queueVersion
 }
 
@@ -467,9 +485,11 @@ async function attemptWithConflictRetry(
   }
 }
 
-function logTurn(sessionId: string, stats: AttemptStats | null, errorKind: DjError['kind'] | null): void {
-  // Counts only — no message content, no track/tool payloads.
-  console.log('dj turn', JSON.stringify({ sessionId, ...(stats ?? {}), error: errorKind }))
+function logTurn(sessionId: string, stats: AttemptStats | null, errorKind: DjError['kind'] | null, detail?: string): void {
+  // Counts and codes only — no message content, no track/tool payloads.
+  // `detail` (when present) is already content-free by construction — see
+  // DjError.detail's comment — so it's safe alongside the rest of this line.
+  console.log('dj turn', JSON.stringify({ sessionId, ...(stats ?? {}), error: errorKind, detail }))
 }
 
 export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, userText: string): Promise<DjTurnResult> {
@@ -495,17 +515,25 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
   } catch (e) {
     const failure = e instanceof AttemptTurnFailure ? e : null
     const djError = normalizeError(failure ? failure.originalError : e)
-    logTurn(session.id, failure?.stats ?? null, djError.kind)
+    logTurn(session.id, failure?.stats ?? null, djError.kind, djError.detail)
 
     // An earlier tool call THIS TURN (generate_queue, or an edit_queue batch)
     // may have already committed before a LATER failure ended the turn —
     // replaceQueue/applyOps are atomic per call, not per turn, so that
     // mutation stands. Attach the post-mutation state to the error rather
-    // than silently discarding it behind a bare failure.
-    const currentVersion = await getSessionQueueVersion(db, session.id)
-    if (currentVersion !== startingVersion) {
-      djError.queue = await getActiveQueue(db, session.id)
-      djError.queueVersion = currentVersion
+    // than silently discarding it behind a bare failure. Best-effort: these
+    // reads are diagnostic extras on top of an already-decided failure, so a
+    // throw here (a concurrent session delete, a transient connection blip)
+    // must never shadow the original djError — swallowed, and djError is
+    // rethrown bare instead.
+    try {
+      const currentVersion = await getSessionQueueVersion(db, session.id)
+      if (currentVersion !== startingVersion) {
+        djError.queue = await getActiveQueue(db, session.id)
+        djError.queueVersion = currentVersion
+      }
+    } catch {
+      // swallow — see comment above
     }
     throw djError
   }
