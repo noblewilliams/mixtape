@@ -1,6 +1,6 @@
 import type { ExecutionContext } from 'hono'
-import { neon } from '@neondatabase/serverless'
-import { drizzle } from 'drizzle-orm/neon-http'
+import { Pool } from '@neondatabase/serverless'
+import { drizzle } from 'drizzle-orm/neon-serverless'
 import * as schema from './db/schema'
 import { createAuth } from './auth/create-auth'
 import { createApp } from './app'
@@ -26,9 +26,16 @@ type Bindings = {
   AI?: { run(model: string, input: { text: string[] }): Promise<unknown> }
 }
 
-function buildDb(env: Bindings): Db {
+// neon-http (a single fetch() per query) can't run transactions at all — the
+// queue store's SELECT ... FOR UPDATE needs a real session-scoped connection,
+// so this switched to neon-serverless's Pool (a real libpq-over-WebSocket
+// connection). The pool is per-request/per-invocation, not module-scoped: a
+// Worker isolate can be reused across otherwise-unrelated requests, and
+// stashing a live connection on a global would leak it across them.
+function buildDb(env: Bindings): { db: Db; pool: Pool } {
   if (!env.DATABASE_URL) throw new Error('DATABASE_URL is required')
-  return drizzle(neon(env.DATABASE_URL), { schema })
+  const pool = new Pool({ connectionString: env.DATABASE_URL })
+  return { db: drizzle(pool, { schema }), pool }
 }
 
 // No AI binding → no deps to enrich with, for either surface (route or cron).
@@ -47,8 +54,8 @@ function buildDeps(env: Bindings): EnrichDeps | undefined {
 }
 
 export default {
-  fetch(req: Request, env: Bindings, ctx: ExecutionContext) {
-    const db = buildDb(env)
+  async fetch(req: Request, env: Bindings, ctx: ExecutionContext) {
+    const { db, pool } = buildDb(env)
     const auth = createAuth(db, env)
     const deps = buildDeps(env)
     // /enrich/* is only mounted when both an admin token and the AI binding
@@ -56,12 +63,19 @@ export default {
     // every track burning 3 'internal: TypeError' attempts.
     const enrich = deps && env.ENRICH_ADMIN_TOKEN ? { adminToken: env.ENRICH_ADMIN_TOKEN, deps } : undefined
     const app = createApp({ auth, db, enrich })
-    return app.fetch(req, env, ctx)
+    const res = await app.fetch(req, env, ctx)
+    // Closes the pool's socket(s) after the response is built rather than
+    // blocking on it — waitUntil keeps the isolate alive just long enough to
+    // flush the close, without holding up the response itself.
+    ctx.waitUntil(pool.end())
+    return res
   },
-  async scheduled(_event: ScheduledController, env: Bindings, _ctx: ExecutionContext) {
+  async scheduled(_event: ScheduledController, env: Bindings, ctx: ExecutionContext) {
     const deps = buildDeps(env)
     if (!deps) return // no AI binding: nothing to enrich with
+    const { db, pool } = buildDb(env)
     // Counts only — no track data, no lyric/embedding content.
-    console.log('enrich cron', JSON.stringify(await handleScheduled(buildDb(env), deps)))
+    console.log('enrich cron', JSON.stringify(await handleScheduled(db, deps)))
+    ctx.waitUntil(pool.end())
   },
 }

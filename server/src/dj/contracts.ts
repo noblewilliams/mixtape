@@ -153,7 +153,7 @@ export const DJ_TOOLS: LlmToolDef[] = [
   {
     name: 'edit_queue',
     description:
-      "Modify the current queue in place. ops run in order. Use swap/extend with an intent when the listener asked for a different flavour; omit intent to stay on the session's current vibe.",
+      "Modify the current queue in place. ops run in order, and each op sees the queue exactly as the PRECEDING ops left it — positions are working-relative, not fixed to the queue you started with. A remove shifts every later track down one position; if you want to remove several tracks, list them in DESCENDING position order (e.g. remove 5 then remove 2, never the reverse) so earlier removals don't shift the positions you listed later. Use swap/extend with an intent when the listener asked for a different flavour; omit intent to stay on the session's current vibe.",
     input_schema: {
       type: 'object',
       properties: {
@@ -162,7 +162,8 @@ export const DJ_TOOLS: LlmToolDef[] = [
           minItems: 1,
           maxItems: 20,
           description:
-            'Queue edit operations, applied in order: remove(position), move(from,to), swap(position, intent?), extend(count, intent?).',
+            'Queue edit operations, applied in order: remove(position), move(from,to), swap(position, intent?), extend(count, intent?). ' +
+              'Positions are working-relative — each op sees the list as the ones before it left it. List multiple removes in descending position order.',
           items: {
             // If live smoke shows malformed ops from the model, the known fix is
             // flattening to one object (op enum + all fields optional) with zod
