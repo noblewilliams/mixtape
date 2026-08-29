@@ -61,8 +61,9 @@ class MusicKitBridge: NSObject {
           "dateAdded": Int(item.dateAdded.timeIntervalSince1970 * 1000),
         ]
       }
-      if offset + songs.count >= catalog.count && offset > 0 {
-        // Last page of a multi-page sync: release the ~10k MPMediaItem refs held by the snapshot.
+      if offset + songs.count >= catalog.count {
+        // Last page of the sync (including a single-page sync that covers the whole
+        // catalog): release the ~10k MPMediaItem refs held by the snapshot.
         catalogCache = []
       }
       DispatchQueue.main.async {

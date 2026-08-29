@@ -4,16 +4,27 @@ import '../musickit/musickit_bridge.dart';
 class LibraryAccessDenied implements Exception {}
 
 class LibrarySyncService {
-  LibrarySyncService({required this.bridge, required this.api, this.chunkSize = 200});
+  LibrarySyncService({required this.bridge, required this.api, this.chunkSize = 200}) {
+    assert(chunkSize > 0);
+  }
 
   final MusicKitBridge bridge;
   final ApiClient api;
   final int chunkSize;
 
+  Future<int>? _inFlight;
+
   /// Full library sync: pages the native snapshot (always starting at offset 0)
   /// and posts each page to /ingest/library. Returns the number of songs found.
   /// Throws [LibraryAccessDenied], [ApiException], [NetworkException], [MusicKitException].
-  Future<int> sync({void Function(double progress)? onProgress}) async {
+  ///
+  /// Re-entrant safe: a call made while a sync is already running joins that
+  /// same in-flight sync instead of starting a second one (the native snapshot
+  /// is shared and can't support concurrent syncs).
+  Future<int> sync({void Function(double progress)? onProgress}) =>
+      _inFlight ??= _run(onProgress).whenComplete(() => _inFlight = null);
+
+  Future<int> _run(void Function(double progress)? onProgress) async {
     final authorized = await bridge.requestAuthorization();
     if (!authorized) throw LibraryAccessDenied();
 
