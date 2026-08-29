@@ -7,8 +7,9 @@ import UIKit
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    let controller = window?.rootViewController as! FlutterViewController
-    MusicKitBridge.register(with: controller.binaryMessenger)
+    if let controller = window?.rootViewController as? FlutterViewController {
+      MusicKitBridge.register(with: controller.binaryMessenger)
+    }
     GeneratedPluginRegistrant.register(with: self)
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }

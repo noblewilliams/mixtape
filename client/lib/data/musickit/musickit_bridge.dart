@@ -50,20 +50,44 @@ class LibraryPage {
   final int total;
 }
 
+/// Thrown for any failure talking to the native MusicKit bridge: a platform-side
+/// error, the bridge not being registered, or a malformed/absent response.
+class MusicKitException implements Exception {
+  MusicKitException(this.message);
+  final String message;
+  @override
+  String toString() => 'MusicKitException: $message';
+}
+
 class MusicKitBridge {
   static const _channel = MethodChannel('mixtape/musickit');
 
-  Future<bool> requestAuthorization() async =>
-      await _channel.invokeMethod<bool>('requestAuthorization') ?? false;
+  Future<bool> requestAuthorization() async {
+    try {
+      return await _channel.invokeMethod<bool>('requestAuthorization') ?? false;
+    } on PlatformException catch (e) {
+      throw MusicKitException(e.message ?? e.code);
+    } on MissingPluginException {
+      throw MusicKitException('MusicKit bridge not registered');
+    }
+  }
 
   Future<LibraryPage> fetchLibrarySongs({required int offset, required int limit}) async {
-    final raw = await _channel.invokeMethod<Map<dynamic, dynamic>>(
-      'fetchLibrarySongs',
-      {'offset': offset, 'limit': limit},
-    );
-    final songs = (raw!['songs'] as List)
-        .map((s) => LibrarySong.fromMap(s as Map<dynamic, dynamic>))
-        .toList();
-    return LibraryPage(songs: songs, total: raw['total'] as int);
+    final clampedLimit = limit.clamp(1, 500); // server batch ceiling
+    try {
+      final raw = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+        'fetchLibrarySongs',
+        {'offset': offset, 'limit': clampedLimit},
+      );
+      if (raw == null) throw MusicKitException('null payload from platform');
+      final songs = (raw['songs'] as List)
+          .map((s) => LibrarySong.fromMap(s as Map<dynamic, dynamic>))
+          .toList();
+      return LibraryPage(songs: songs, total: raw['total'] as int);
+    } on PlatformException catch (e) {
+      throw MusicKitException(e.message ?? e.code);
+    } on MissingPluginException {
+      throw MusicKitException('MusicKit bridge not registered');
+    }
   }
 }

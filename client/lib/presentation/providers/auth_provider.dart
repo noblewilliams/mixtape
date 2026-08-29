@@ -36,7 +36,7 @@ class AuthNotifier extends Notifier<AuthStatus> {
     try {
       signedIn = await ref.read(authRepositoryProvider).isSignedIn();
     } catch (e) {
-      debugPrint('auth restore failed: $e');
+      if (kDebugMode) debugPrint('auth restore failed: $e');
       signedIn = false; // unreadable keychain == not signed in
     }
     if (!ref.mounted) return;
