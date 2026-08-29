@@ -1,5 +1,5 @@
 {
-  "id": "e8c2d0e1-e359-4027-bfc0-68d1fc6953d6",
+  "id": "44cc311c-6d0c-4590-a267-1b2a66a33052",
   "prevId": "f109fd10-1f99-4720-b6e3-af45db7b2b83",
   "version": "7",
   "dialect": "postgresql",
@@ -39,6 +39,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "seq": {
+          "name": "seq",
+          "type": "bigserial",
+          "primaryKey": false,
+          "notNull": true
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -58,7 +64,7 @@
               "nulls": "last"
             },
             {
-              "expression": "created_at",
+              "expression": "seq",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

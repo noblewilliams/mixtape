@@ -7,6 +7,7 @@ import {
   uniqueIndex,
   index,
   integer,
+  bigserial,
   boolean,
   primaryKey,
   doublePrecision,
@@ -140,11 +141,17 @@ export const djMessages = pgTable(
     role: text('role', { enum: ['user', 'dj'] }).notNull(),
     content: text('content').notNull(),
     queueVersion: integer('queue_version'),
+    // now() is transaction-scoped: a user+dj pair written in one transaction gets
+    // identical created_at, so transcript order must come from seq, not the timestamp.
+    seq: bigserial('seq', { mode: 'number' }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('dj_messages_session_idx').on(t.sessionId, t.createdAt)],
+  (t) => [index('dj_messages_session_idx').on(t.sessionId, t.seq)],
 )
 
+// No unique index on (session, position): renumbering would collide mid-shuffle against it.
+// The queue store enforces the invariant under a per-session row lock (SELECT ... FOR UPDATE
+// on dj_sessions) — see dj/queue-store.ts.
 export const queueTracks = pgTable(
   'queue_tracks',
   {
