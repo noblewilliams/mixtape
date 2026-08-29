@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 
 class LibrarySong {
@@ -68,7 +70,16 @@ class MusicKitException implements Exception {
 }
 
 class MusicKitBridge {
+  /// [callTimeout] guards `playQueue`/`createPlaylist`'s native round trips
+  /// (see each method's doc). Injectable (not just a hardcoded literal)
+  /// purely so tests can exercise a real "the native completion never
+  /// fires" path with a tiny duration instead of actually waiting out the
+  /// 20s production default.
+  MusicKitBridge({Duration callTimeout = const Duration(seconds: 20)})
+    : _callTimeout = callTimeout;
+
   static const _channel = MethodChannel('mixtape/musickit');
+  final Duration _callTimeout;
 
   Future<bool> requestAuthorization() async {
     try {
@@ -111,11 +122,22 @@ class MusicKitBridge {
       throw MusicKitException('cannot play an empty queue');
     }
     try {
-      return await _channel.invokeMethod<bool>('playQueue', {'appleIds': appleIds}) ?? false;
+      // Decoded via `dynamic` (not `invokeMethod<bool>`) so a wrong-typed
+      // platform result degrades to false rather than a type-cast
+      // TypeError escaping uncaught — the same same-shape-guard idiom as
+      // createPlaylist's added/failed below.
+      final result = await _channel
+          .invokeMethod<dynamic>('playQueue', {'appleIds': appleIds})
+          .timeout(_callTimeout);
+      return result is bool ? result : false;
     } on PlatformException catch (e) {
       throw MusicKitException(e.message ?? e.code);
     } on MissingPluginException {
       throw MusicKitException('MusicKit bridge not registered');
+    } on TimeoutException {
+      // A native completion that never fires (e.g. prepareToPlay hangs)
+      // must not leave this Future unresolved forever.
+      throw MusicKitException('timed out waiting for the Music app');
     }
   }
 
@@ -133,19 +155,28 @@ class MusicKitBridge {
       throw MusicKitException('cannot create a playlist with no tracks');
     }
     try {
-      final raw = await _channel.invokeMethod<Map<dynamic, dynamic>>(
-        'createPlaylist',
-        {'name': name, 'appleIds': appleIds},
-      );
-      // Parsed defensively: any shape drift from the platform side degrades
-      // to 0 rather than a type-cast crash reaching the UI layer.
-      final added = raw?['added'] as int? ?? 0;
-      final failed = raw?['failed'] as int? ?? 0;
+      final raw = await _channel
+          .invokeMethod<Map<dynamic, dynamic>>(
+            'createPlaylist',
+            {'name': name, 'appleIds': appleIds},
+          )
+          .timeout(_callTimeout);
+      // Parsed defensively: any shape drift from the platform side — a
+      // missing key OR a wrong-typed value — degrades to 0 rather than a
+      // type-cast crash reaching the UI layer.
+      final rawAdded = raw?['added'];
+      final rawFailed = raw?['failed'];
+      final added = rawAdded is int ? rawAdded : 0;
+      final failed = rawFailed is int ? rawFailed : 0;
       return (added: added, failed: failed);
     } on PlatformException catch (e) {
       throw MusicKitException(e.message ?? e.code);
     } on MissingPluginException {
       throw MusicKitException('MusicKit bridge not registered');
+    } on TimeoutException {
+      // A native completion that never fires (e.g. a stuck getPlaylist/
+      // addItem chain) must not leave this Future unresolved forever.
+      throw MusicKitException('timed out waiting for the Music app');
     }
   }
 }

@@ -51,7 +51,11 @@ class MusicKitBridge: NSObject {
       player.prepareToPlay { error in
         DispatchQueue.main.async {
           guard error == nil else {
-            result(FlutterError(code: "play_failed", message: "could not start playback", details: nil))
+            result(FlutterError(
+              code: "play_failed",
+              message: "could not start playback",
+              details: error?.localizedDescription
+            ))
             return
           }
           player.play()
@@ -73,7 +77,11 @@ class MusicKitBridge: NSObject {
       MPMediaLibrary.default().getPlaylist(with: UUID(), creationMetadata: metadata) { playlist, error in
         DispatchQueue.main.async {
           guard let playlist = playlist, error == nil else {
-            result(FlutterError(code: "playlist_failed", message: "could not create playlist", details: nil))
+            result(FlutterError(
+              code: "playlist_failed",
+              message: "could not create playlist",
+              details: error?.localizedDescription
+            ))
             return
           }
           addItems(appleIds, to: playlist, index: 0, added: 0, failed: 0, result: result)
@@ -83,10 +91,16 @@ class MusicKitBridge: NSObject {
   }
 
   /// Adds `appleIds[index...]` to `playlist` one at a time via a recursive
-  /// completion chain — NOT a DispatchGroup, which would deadlock waiting
-  /// for N completions to all signal back to the main thread while each
-  /// completion itself hops back to main. A per-item failure is counted and
-  /// the chain continues; it never aborts the whole batch.
+  /// completion chain — NOT a DispatchGroup. The real reason isn't
+  /// deadlock-avoidance (a DispatchGroup's `enter`/`leave`/`notify` doesn't
+  /// deadlock here); it's ORDER: a DispatchGroup would fire every
+  /// `addItem(withProductID:)` call at once and let them race, so tracks
+  /// would land in the playlist in whatever order the async completions
+  /// happen to return — not the queue's order. This chain only starts item
+  /// N+1's `addItem` once item N's completion has landed, which is what
+  /// preserves the queue's track order in the created playlist. A per-item
+  /// failure is counted and the chain continues; it never aborts the whole
+  /// batch.
   private static func addItems(
     _ appleIds: [String],
     to playlist: MPMediaPlaylist,

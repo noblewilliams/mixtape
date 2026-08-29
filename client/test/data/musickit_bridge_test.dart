@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/musickit/musickit_bridge.dart';
@@ -194,6 +196,25 @@ void main() {
       );
       expect(invoked, isFalse);
     });
+
+    test('a wrong-typed (non-bool) platform result degrades to false rather '
+        'than a type-cast crash', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async => 'not-a-bool');
+      expect(await MusicKitBridge().playQueue(['111']), isFalse);
+    });
+
+    test('a native completion that never fires times out into a '
+        'MusicKitException rather than hanging forever', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) => Completer<bool>().future);
+      await expectLater(
+        MusicKitBridge(
+          callTimeout: const Duration(milliseconds: 50),
+        ).playQueue(['111']),
+        throwsA(isA<MusicKitException>()),
+      );
+    });
   });
 
   group('createPlaylist', () {
@@ -271,6 +292,33 @@ void main() {
         throwsA(isA<MusicKitException>()),
       );
       expect(invoked, isFalse);
+    });
+
+    test('wrong-typed (non-int) added/failed degrade to 0 rather than a '
+        'type-cast crash', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+        channel,
+        (call) async => {'added': 'two', 'failed': null},
+      );
+      final result = await MusicKitBridge().createPlaylist('My Tape', ['111']);
+      expect(result.added, 0);
+      expect(result.failed, 0);
+    });
+
+    test('a native completion that never fires times out into a '
+        'MusicKitException rather than hanging forever', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+        channel,
+        (call) => Completer<Map<dynamic, dynamic>>().future,
+      );
+      await expectLater(
+        MusicKitBridge(
+          callTimeout: const Duration(milliseconds: 50),
+        ).createPlaylist('My Tape', ['111']),
+        throwsA(isA<MusicKitException>()),
+      );
     });
   });
 }
