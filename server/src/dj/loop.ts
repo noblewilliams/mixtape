@@ -209,10 +209,38 @@ async function getSessionQueueVersion(db: Db, sessionId: string): Promise<number
   return row.queueVersion
 }
 
-// Builds the per-turn context block: a one-line queue summary, plus an
+// Caps the numbered queue listing (both in session context and in tool
+// results) at 60 lines — a queue that long is already far outside normal
+// use, and an unbounded listing would blow up prompt size for no benefit;
+// the model only ever needs to reason about positions within reach of the
+// listener's own request.
+const MAX_LISTING_LINES = 60
+
+// Renders the active queue as a numbered, 0-based listing — one line per
+// track, `[i] Title — Artist`, titles/artists sanitized so a crafted track
+// title can't inject prompt content. Shared between buildSessionContext
+// (so the model can translate "the Portishead" / a 1-based "track 5" into
+// the right 0-based position) and the generate/edit tool results (so the
+// model can verify what actually happened before describing it to the
+// listener, rather than assuming). Capped at MAX_LISTING_LINES with a
+// truncation note — see that constant's comment.
+function formatQueueListing(queue: QueueTrackView[]): string {
+  const lines = queue
+    .slice(0, MAX_LISTING_LINES)
+    .map((t, i) => `[${i}] ${sanitizeForPrompt(t.title)} — ${sanitizeForPrompt(t.artist)}`)
+  if (queue.length > MAX_LISTING_LINES) {
+    lines.push(`(+ ${queue.length - MAX_LISTING_LINES} more tracks not shown)`)
+  }
+  return lines.join('\n')
+}
+
+// Builds the per-turn context block: a full numbered queue listing, plus an
 // acknowledgment line for any track the LISTENER (not the dj) removed since
 // the dj's own last message — so the model can react to it instead of acting
-// like nothing happened. "Since" is the last dj message's createdAt; with no
+// like nothing happened. The numbered listing (not just a count/first/last
+// summary) is what lets the model translate "the Portishead" or the
+// listener's own 1-based "track 5" into the correct 0-based op position,
+// instead of guessing. "Since" is the last dj message's createdAt; with no
 // prior dj message at all (a brand new session, or one whose queue was only
 // ever touched via the manual queue-ops route), everything counts as "since"
 // — there's no earlier dj turn to bound it against. Sent as a leading USER
@@ -223,9 +251,10 @@ async function buildSessionContext(db: Db, sessionId: string): Promise<string> {
   const queueLine =
     queue.length === 0
       ? 'Current queue: empty.'
-      : queue.length === 1
-        ? `Current queue: 1 track — "${sanitizeForPrompt(queue[0].title)}".`
-        : `Current queue: ${queue.length} tracks, from "${sanitizeForPrompt(queue[0].title)}" to "${sanitizeForPrompt(queue[queue.length - 1].title)}".`
+      : [
+          'Current queue (positions are 0-based; the listener may say "track 1" meaning position 0):',
+          formatQueueListing(queue),
+        ].join('\n')
 
   const [lastDj] = await db
     .select({ createdAt: djMessages.createdAt })
@@ -302,8 +331,16 @@ async function executeGenerateQueue(
     picks.map((p) => ({ trackId: p.trackId, reason: p.reason })),
     'dj',
   )
+  // The model must describe results from THIS listing, never from
+  // assumption — accounting numbers alone ("3 added") don't tell it what
+  // actually landed where, or in what order.
+  const updatedQueue = await getActiveQueue(db, session.id)
   return {
-    resultText: `queue generated: ${picks.length} tracks (now version ${version})`,
+    resultText: [
+      `queue generated: ${picks.length} tracks (now version ${version})`,
+      'Updated queue (positions are 0-based):',
+      formatQueueListing(updatedQueue),
+    ].join('\n'),
     queueChanged: true,
     newVersion: version,
     intent,
@@ -373,8 +410,16 @@ async function executeEditQueue(
 
   try {
     const result = await applyOps(db, session.id, ops, 'dj', provider)
+    // Same rationale as executeGenerateQueue: the accounting line alone
+    // can't tell the model which position actually moved/dropped/swapped —
+    // the model must describe results from this listing, never assumption.
+    const updatedQueue = await getActiveQueue(db, session.id)
     return {
-      resultText: `queue edited — requested ${result.requested}, added ${result.added}, removed ${result.removed} (now version ${result.version})`,
+      resultText: [
+        `queue edited — requested ${result.requested}, added ${result.added}, removed ${result.removed} (now version ${result.version})`,
+        'Updated queue (positions are 0-based):',
+        formatQueueListing(updatedQueue),
+      ].join('\n'),
       queueChanged: true,
       newVersion: result.version,
     }

@@ -163,7 +163,8 @@ export const DJ_TOOLS: LlmToolDef[] = [
           maxItems: 20,
           description:
             'Queue edit operations, applied in order: remove(position), move(from,to), swap(position, intent?), extend(count, intent?). ' +
-              'Positions are working-relative — each op sees the list as the ones before it left it. List multiple removes in descending position order.',
+              'Positions are working-relative — each op sees the list as the ones before it left it. List multiple removes in descending position order. ' +
+              'Positions are 0-based indices into the current queue listing shown in context; listeners speak 1-based ("track 5" = position 4) — translate carefully.',
           items: {
             // If live smoke shows malformed ops from the model, the known fix is
             // flattening to one object (op enum + all fields optional) with zod
