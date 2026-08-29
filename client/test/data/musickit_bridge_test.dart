@@ -24,6 +24,8 @@ void main() {
             'artist': 'A',
             'album': null,
             'genre': 'Pop',
+            'releaseYear': 2011,
+            'explicit': true,
             'playCount': 3,
             'lastPlayedAt': 1724900000000,
             'dateAdded': 1700000000000,
@@ -39,6 +41,36 @@ void main() {
     expect(page.songs.single.appleId, '111');
     expect(page.songs.single.playCount, 3);
     expect(page.songs.single.album, isNull);
+    expect(page.songs.single.releaseYear, 2011);
+    expect(page.songs.single.explicit, isTrue);
+  });
+
+  test('fetchLibrarySongs decodes a null releaseYear/explicit', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      return {
+        'songs': [
+          {
+            'appleId': '112',
+            'title': 'One',
+            'artist': 'A',
+            'album': null,
+            'genre': null,
+            'releaseYear': null,
+            'explicit': null,
+            'playCount': 0,
+            'lastPlayedAt': null,
+            'dateAdded': null,
+          },
+        ],
+        'total': 1,
+      };
+    });
+
+    final bridge = MusicKitBridge();
+    final page = await bridge.fetchLibrarySongs(offset: 0, limit: 2);
+    expect(page.songs.single.releaseYear, isNull);
+    expect(page.songs.single.explicit, isNull);
   });
 
   test('requestAuthorization returns the platform bool', () async {
@@ -82,6 +114,8 @@ void main() {
       'artist': 'A',
       'album': 'The Album',
       'genre': 'Pop',
+      'releaseYear': 2011,
+      'explicit': true,
       'playCount': 3,
       'lastPlayedAt': 1724900000000,
       'dateAdded': 1700000000000,
@@ -89,13 +123,15 @@ void main() {
     expect(LibrarySong.fromMap(map).toJson(), map);
   });
 
-  test('LibrarySong.fromMap(map).toJson() round-trips null album/genre', () {
+  test('LibrarySong.fromMap(map).toJson() round-trips null album/genre/releaseYear/explicit', () {
     final map = {
       'appleId': '222',
       'title': 'Two',
       'artist': 'B',
       'album': null,
       'genre': null,
+      'releaseYear': null,
+      'explicit': null,
       'playCount': 0,
       'lastPlayedAt': null,
       'dateAdded': 1700000000000,

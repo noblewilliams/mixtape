@@ -8,6 +8,8 @@ class LibrarySong {
     required this.playCount,
     this.album,
     this.genre,
+    this.releaseYear,
+    this.explicit,
     this.lastPlayedAt,
     this.dateAdded,
   });
@@ -18,6 +20,8 @@ class LibrarySong {
   final int playCount;
   final String? album;
   final String? genre;
+  final int? releaseYear;
+  final bool? explicit;
   final int? lastPlayedAt; // epoch ms
   final int? dateAdded; // epoch ms
 
@@ -28,6 +32,8 @@ class LibrarySong {
         playCount: m['playCount'] as int,
         album: m['album'] as String?,
         genre: m['genre'] as String?,
+        releaseYear: m['releaseYear'] as int?,
+        explicit: m['explicit'] as bool?,
         lastPlayedAt: m['lastPlayedAt'] as int?,
         dateAdded: m['dateAdded'] as int?,
       );
@@ -38,6 +44,8 @@ class LibrarySong {
         'artist': artist,
         'album': album,
         'genre': genre,
+        'releaseYear': releaseYear,
+        'explicit': explicit,
         'playCount': playCount,
         'lastPlayedAt': lastPlayedAt,
         'dateAdded': dateAdded,

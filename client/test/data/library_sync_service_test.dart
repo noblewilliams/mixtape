@@ -67,6 +67,8 @@ void main() {
       'artist': 'A',
       'album': null,
       'genre': null,
+      'releaseYear': null,
+      'explicit': null,
       'playCount': 5,
       'lastPlayedAt': null,
       'dateAdded': null,

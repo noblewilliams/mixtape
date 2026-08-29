@@ -56,6 +56,8 @@ class MusicKitBridge: NSObject {
           "artist": item.artist.flatMap { $0.isEmpty ? nil : $0 } ?? "Unknown",
           "album": item.albumTitle,
           "genre": item.genre,
+          "releaseYear": (item.releaseDate).flatMap { Calendar(identifier: .gregorian).dateComponents([.year], from: $0).year },
+          "explicit": item.isExplicitItem,
           "playCount": item.playCount,
           "lastPlayedAt": item.lastPlayedDate.map { Int($0.timeIntervalSince1970 * 1000) },
           "dateAdded": Int(item.dateAdded.timeIntervalSince1970 * 1000),
