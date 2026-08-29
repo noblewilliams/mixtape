@@ -35,7 +35,10 @@ describe('auth mounting', () => {
   it('drizzle adapter round-trips the user table', async () => {
     const auth = createAuth(await createTestDb(), testEnv)
     const ctx = await auth.$context
-    await (ctx.internalAdapter.createUser as any)({ email: 'a@b.com', name: 'A', emailVerified: true })
+    await ctx.internalAdapter.createUser(
+      { email: 'a@b.com', name: 'A', emailVerified: true },
+      { method: 'oauth' },
+    )
     expect(await ctx.internalAdapter.findUserByEmail('a@b.com')).toBeTruthy()
   })
 
