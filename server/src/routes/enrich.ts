@@ -12,9 +12,10 @@ export function enrichRoutes(db: Db, deps: EnrichDeps) {
   const app = new Hono()
 
   app.post('/run', async (c) => {
-    const raw = Number(c.req.query('limit'))
-    const requested = Number.isFinite(raw) && raw > 0 ? raw : MAX_BATCH
-    const limit = Math.min(MAX_BATCH, Math.max(1, requested))
+    // Floor before clamping so a fractional ?limit (e.g. 2.5) can never reach
+    // the raw SQL LIMIT clause, which rejects non-integer parameters outright.
+    const raw = Number(c.req.query('limit') ?? MAX_BATCH)
+    const limit = Number.isFinite(raw) && raw > 0 ? Math.min(MAX_BATCH, Math.floor(raw)) : MAX_BATCH
     const result = await runEnrichmentBatch(db, deps, limit)
     return c.json(result)
   })

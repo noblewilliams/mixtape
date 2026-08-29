@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
+import { eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { okDeps, OK_FEATURES } from '../helpers/enrich-fixtures'
-import { runEnrichmentBatch, enrichmentStatus } from '../../src/enrich/runner'
+import { runEnrichmentBatch, enrichmentStatus, MAX_ATTEMPTS } from '../../src/enrich/runner'
 import { tracks, trackFeatures, trackMeanings, enrichmentFailures } from '../../src/db/schema'
 
 async function seedTracks(db: TestDb, n: number) {
@@ -68,11 +69,45 @@ describe('runEnrichmentBatch', () => {
     expect(r.remaining).toBe(0)
   })
 
+  it('does not retry a stage that has exhausted its attempts, even when the track is selected via the other stage', async () => {
+    const db = await createTestDb()
+    await seedTracks(db, 1)
+    const [t] = await db.select().from(tracks)
+    // features is exhausted; meaning is still missing, so the track is still
+    // a candidate — but only the meaning stage should actually run.
+    await db.insert(enrichmentFailures).values({ trackId: t.id, stage: 'features', error: 'x', attempts: MAX_ATTEMPTS })
+    let featureCalls = 0
+    const counting = {
+      ...okDeps,
+      features: async () => { featureCalls++; return OK_FEATURES },
+    }
+    const r = await runEnrichmentBatch(db, counting, 5)
+    expect(featureCalls).toBe(0)
+    expect(r.meaning).toBe(1)
+    expect(await db.select().from(trackMeanings)).toHaveLength(1)
+    const [failure] = await db
+      .select()
+      .from(enrichmentFailures)
+      .where(eq(enrichmentFailures.stage, 'features'))
+    expect(failure.attempts).toBe(MAX_ATTEMPTS)
+  })
+
   it('status reports coverage', async () => {
     const db = await createTestDb()
     await seedTracks(db, 4)
     await runEnrichmentBatch(db, okDeps, 2)
     const s = await enrichmentStatus(db)
     expect(s).toMatchObject({ tracks: 4, withFeatures: 2, withMeaning: 2, withEmbedding: 2, exhausted: 0 })
+  })
+
+  it('status counts exhausted tracks, not exhausted failure rows', async () => {
+    const db = await createTestDb()
+    await seedTracks(db, 1)
+    const [t] = await db.select().from(tracks)
+    // Same track exhausted on two stages — should count as ONE exhausted track.
+    await db.insert(enrichmentFailures).values({ trackId: t.id, stage: 'features', error: 'x', attempts: MAX_ATTEMPTS })
+    await db.insert(enrichmentFailures).values({ trackId: t.id, stage: 'meaning', error: 'x', attempts: MAX_ATTEMPTS })
+    const s = await enrichmentStatus(db)
+    expect(s.exhausted).toBe(1)
   })
 })

@@ -17,7 +17,7 @@ type Bindings = {
   APPLE_BUNDLE_ID: string
   ENRICH_ADMIN_TOKEN?: string
   ITUNES_STOREFRONT?: string
-  AI: { run(model: string, input: { text: string[] }): Promise<unknown> }
+  AI?: { run(model: string, input: { text: string[] }): Promise<unknown> }
 }
 
 export default {
@@ -25,9 +25,10 @@ export default {
     if (!env.DATABASE_URL) throw new Error('DATABASE_URL is required')
     const db = drizzle(neon(env.DATABASE_URL), { schema })
     const auth = createAuth(db, env)
-    // /enrich/* is only mounted when an admin token is configured — no token
-    // set means the P2 enrichment surface stays entirely off.
-    const enrich = env.ENRICH_ADMIN_TOKEN
+    // /enrich/* is only mounted when both an admin token and the AI binding
+    // are configured. No AI binding → no enrich surface: better a 404 than
+    // every track burning 3 'internal: TypeError' attempts.
+    const enrich = env.ENRICH_ADMIN_TOKEN && env.AI
       ? {
           adminToken: env.ENRICH_ADMIN_TOKEN,
           deps: {

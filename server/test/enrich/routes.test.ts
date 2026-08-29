@@ -41,6 +41,18 @@ describe('/enrich routes', () => {
     expect(((await run.json()) as { processed: number }).processed).toBe(8)
   })
 
+  it('clamps a fractional limit down to an integer', async () => {
+    const db = await createTestDb()
+    for (let i = 0; i < 3; i++) await db.insert(tracks).values({ appleId: `f${i}`, title: 'T', artist: 'A' })
+    const app = createApp({ auth, db, enrich: { deps: okDeps, adminToken: 'secret' } })
+    const run = await app.request('http://x/enrich/run?limit=2.5', {
+      method: 'POST',
+      headers: { 'X-Admin-Token': 'secret' },
+    })
+    expect(run.status).toBe(200)
+    expect(((await run.json()) as { processed: number }).processed).toBe(2)
+  })
+
   it('enrich routes absent when wiring not provided', async () => {
     const db = await createTestDb()
     const app = createApp({ auth, db })

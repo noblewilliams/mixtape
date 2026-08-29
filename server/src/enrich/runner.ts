@@ -28,6 +28,11 @@ function normalizeRows(res: unknown): Record<string, unknown>[] {
   return Array.isArray(rows) ? (rows as Record<string, unknown>[]) : []
 }
 
+// A raw boolean column can come back as a real JS boolean (pglite, neon-http
+// as observed) or as Postgres's wire-protocol 't'/'f' text under some driver
+// configs — never trust plain JS truthiness on it directly.
+const truthy = (v: unknown): boolean => v === true || v === 't' || v === 'true'
+
 type CandidateRow = {
   id: string
   apple_id: string | null
@@ -38,8 +43,8 @@ type CandidateRow = {
   genre: string | null
   duration_ms: number | null
   created_at: string
-  has_features: boolean
-  has_meaning: boolean
+  skip_features: boolean
+  skip_meaning: boolean
 }
 
 function toTrackRow(r: CandidateRow): TrackRow {
@@ -62,10 +67,15 @@ function toTrackRow(r: CandidateRow): TrackRow {
 export type RunResult = { processed: number; features: number; meaning: number; remaining: number }
 
 export async function runEnrichmentBatch(db: Db, deps: EnrichDeps, limit: number): Promise<RunResult> {
+  // skip_* is computed in SQL, not just from row-existence, so a stage that's
+  // already burned through MAX_ATTEMPTS is never retried just because the
+  // *other* stage is what made this track a candidate.
   const selectRes = await db.execute(sql`
-    SELECT t.*, (f.track_id IS NOT NULL) AS has_features, (m.track_id IS NOT NULL) AS has_meaning
+    SELECT t.*,
+      (f.track_id IS NOT NULL OR COALESCE(ff.attempts, 0) >= ${MAX_ATTEMPTS}) AS skip_features,
+      (m.track_id IS NOT NULL OR COALESCE(fm.attempts, 0) >= ${MAX_ATTEMPTS}) AS skip_meaning
     ${CANDIDATE_FROM_WHERE}
-    ORDER BY t.created_at
+    ORDER BY t.created_at, t.id
     LIMIT ${limit}
   `)
   const rows = normalizeRows(selectRes) as unknown as CandidateRow[]
@@ -75,8 +85,8 @@ export async function runEnrichmentBatch(db: Db, deps: EnrichDeps, limit: number
   for (const row of rows) {
     const track = toTrackRow(row)
     const outcome = await enrichTrack(db, deps, track, {
-      features: !!row.has_features,
-      meaning: !!row.has_meaning,
+      features: truthy(row.skip_features),
+      meaning: truthy(row.skip_meaning),
     })
     if (outcome.features === 'ok') features++
     if (outcome.meaning === 'ok') meaning++
@@ -104,7 +114,7 @@ export async function enrichmentStatus(db: Db): Promise<EnrichmentStatus> {
       (SELECT COUNT(*) FROM track_features) AS with_features,
       (SELECT COUNT(*) FROM track_meanings) AS with_meaning,
       (SELECT COUNT(*) FROM track_meanings WHERE embedding IS NOT NULL) AS with_embedding,
-      (SELECT COUNT(*) FROM enrichment_failures WHERE attempts >= ${MAX_ATTEMPTS}) AS exhausted
+      (SELECT COUNT(DISTINCT track_id) FROM enrichment_failures WHERE attempts >= ${MAX_ATTEMPTS} AND stage <> 'itunes') AS exhausted
   `)
   const [row] = normalizeRows(res)
   return {
