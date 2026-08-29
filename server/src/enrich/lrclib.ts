@@ -1,4 +1,4 @@
-import { EnrichSourceError, SOURCE_TIMEOUT_MS, type FetchLike } from './types'
+import { EnrichSourceError, norm, SOURCE_TIMEOUT_MS, type FetchLike } from './types'
 
 const UA = { 'User-Agent': 'mixtape/0.1 (personal project; enrichment)' }
 
@@ -6,17 +6,25 @@ export type LyricsKey = { title: string; artist: string; album: string | null; d
 // Lyric text passes through transiently — callers must never persist or log it.
 export type LyricsResult = { lyrics: string | null; instrumental: boolean }
 
-type LrclibRecord = { plainLyrics: string | null; instrumental: boolean }
+type LrclibRecord = {
+  plainLyrics: string | null
+  instrumental: boolean
+  trackName?: string
+  artistName?: string
+}
 
 const toResult = (r: LrclibRecord): LyricsResult => ({ lyrics: r.plainLyrics ?? null, instrumental: !!r.instrumental })
 
-async function getJson(url: URL, fetchLike: FetchLike): Promise<unknown | '404'> {
+type Fetched = { ok: true; body: unknown } | { ok: false }
+
+async function getJson(url: URL, fetchLike: FetchLike): Promise<Fetched> {
   const res = await fetchLike(url, { headers: UA, signal: AbortSignal.timeout(SOURCE_TIMEOUT_MS) })
-  if (res.status === 404) return '404'
+  if (res.status === 404) return { ok: false }
   if (!res.ok) throw new EnrichSourceError('lrclib', `HTTP ${res.status}`, res.status)
-  return res.json().catch(() => {
+  const body = await res.json().catch(() => {
     throw new EnrichSourceError('lrclib', 'malformed JSON')
   })
+  return { ok: true, body }
 }
 
 export async function fetchLyrics(key: LyricsKey, fetchLike: FetchLike = fetch): Promise<LyricsResult | null> {
@@ -27,13 +35,22 @@ export async function fetchLyrics(key: LyricsKey, fetchLike: FetchLike = fetch):
     if (key.album) getUrl.searchParams.set('album_name', key.album)
     getUrl.searchParams.set('duration', String(Math.round(key.durationMs / 1000)))
     const exact = await getJson(getUrl, fetchLike)
-    if (exact !== '404') return toResult(exact as LrclibRecord)
+    if (exact.ok) {
+      if (typeof exact.body !== 'object' || exact.body === null) {
+        throw new EnrichSourceError('lrclib', 'unexpected body')
+      }
+      return toResult(exact.body as LrclibRecord)
+    }
   }
 
   const searchUrl = new URL('https://lrclib.net/api/search')
   searchUrl.searchParams.set('track_name', key.title)
   searchUrl.searchParams.set('artist_name', key.artist)
-  const hits = await getJson(searchUrl, fetchLike)
-  if (hits === '404' || !Array.isArray(hits) || !hits.length) return null
-  return toResult(hits[0] as LrclibRecord)
+  const searched = await getJson(searchUrl, fetchLike)
+  if (!searched.ok || !Array.isArray(searched.body) || !searched.body.length) return null
+  // Verify the artist on this path: a wrong-song embedding would be silent,
+  // permanent, and unauditable, whereas a miss here is visible and retryable.
+  const artistNorm = norm(key.artist)
+  const hit = (searched.body as LrclibRecord[]).find((h) => norm(h.artistName ?? '') === artistNorm)
+  return hit ? toResult(hit) : null
 }

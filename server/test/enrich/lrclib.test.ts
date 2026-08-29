@@ -23,17 +23,31 @@ describe('fetchLyrics', () => {
   })
 
   it('falls back to search when exact get 404s', async () => {
-    const fetchLike: FetchLike = async (url) => {
+    const fetchLike: FetchLike = async (url, init) => {
       const u = String(url)
       if (u.includes('/api/get')) return new Response('', { status: 404 })
       expect(u).toContain('/api/search')
+      expect((init?.headers as Record<string, string>)['User-Agent']).toContain('mixtape')
       return new Response(
-        JSON.stringify([{ plainLyrics: 'Found via search', instrumental: false }]),
+        JSON.stringify([{ plainLyrics: 'Found via search', instrumental: false, artistName: 'Radiohead' }]),
         { status: 200 },
       )
     }
     const r = await fetchLyrics({ title: 'Nude', artist: 'Radiohead', album: null, durationMs: null }, fetchLike)
     expect(r?.lyrics).toBe('Found via search')
+  })
+
+  it('rejects search hits whose artist does not match', async () => {
+    const fetchLike: FetchLike = async (url) => {
+      const u = String(url)
+      if (u.includes('/api/get')) return new Response('', { status: 404 })
+      return new Response(
+        JSON.stringify([{ plainLyrics: 'Wrong song', instrumental: false, artistName: 'Some Cover Band' }]),
+        { status: 200 },
+      )
+    }
+    const r = await fetchLyrics({ title: 'Nude', artist: 'Radiohead', album: null, durationMs: null }, fetchLike)
+    expect(r).toBeNull()
   })
 
   it('flags instrumentals', async () => {

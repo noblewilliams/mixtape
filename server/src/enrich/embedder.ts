@@ -5,8 +5,12 @@ type AiBinding = { run(model: string, input: { text: string[] }): Promise<unknow
 
 export function workersAiEmbedder(ai: AiBinding): Embedder {
   return async (text) => {
-    const out = (await ai.run('@cf/baai/bge-m3', { text: [text.slice(0, 6000)] })) as {
-      data?: number[][]
+    let out: { data?: number[][] }
+    try {
+      out = (await ai.run('@cf/baai/bge-m3', { text: [text.slice(0, 6000)] })) as { data?: number[][] }
+    } catch (e) {
+      // Never rethrow the binding's error verbatim — it may echo the input payload.
+      throw new Error(`embedder: AI binding failed (${e instanceof Error ? e.name : typeof e})`)
     }
     const vec = out?.data?.[0]
     // Error text deliberately excludes the input — never leak lyrics into logs.

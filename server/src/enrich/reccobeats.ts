@@ -1,4 +1,4 @@
-import { EnrichSourceError, SOURCE_TIMEOUT_MS, type FetchLike } from './types'
+import { EnrichSourceError, norm, SOURCE_TIMEOUT_MS, type FetchLike } from './types'
 
 const BASE = 'https://api.reccobeats.com/v1'
 const DURATION_TOLERANCE_MS = 5000
@@ -27,8 +27,6 @@ type Candidate = {
   durationMs: number
   isrc: string | null
 }
-
-const norm = (s: string) => s.toLowerCase().normalize('NFKD').replace(/[^\p{L}\p{N} ]/gu, '').trim()
 
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
 
@@ -65,11 +63,16 @@ export async function resolveAndFetchFeatures(
   // Exact-title candidates preferred, but not exclusive: a cover carrying the plain
   // title shouldn't monopolize the pool and hide a real non-exact match (e.g. an
   // "(Album Version)" track) that the artist+duration gate can still vouch for.
+  // The fallback still requires the candidate title to CONTAIN the query title
+  // (keeps "(Album Version)"/"- Remaster" variants, excludes a same-artist,
+  // different-song false positive that happens to land within duration tolerance).
   // Without a known duration, exact title is REQUIRED (title-only search happily
   // returns live/remix cuts otherwise).
   const match =
     exactTitle.find((c) => artistOk(c) && durationOk(c)) ??
-    (track.durationMs != null ? content.find((c) => artistOk(c) && durationOk(c)) : undefined)
+    (track.durationMs != null
+      ? content.find((c) => norm(c.trackTitle ?? '').includes(titleNorm) && artistOk(c) && durationOk(c))
+      : undefined)
   if (!match) return null
 
   const featRes = await fetchLike(`${BASE}/track/${match.id}/audio-features`, {

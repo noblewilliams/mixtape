@@ -175,4 +175,15 @@ describe('resolveAndFetchFeatures', () => {
     )
     expect(result?.isrc).toBe('GBSTK0700003')
   })
+
+  it('makes zero fetch calls when the title is blank', async () => {
+    let calls = 0
+    const spy: FetchLike = async () => {
+      calls++
+      return new Response(JSON.stringify({ content: [] }), { status: 200 })
+    }
+    const result = await resolveAndFetchFeatures({ title: '', artist: 'X', durationMs: null }, spy)
+    expect(result).toBeNull()
+    expect(calls).toBe(0)
+  })
 })
