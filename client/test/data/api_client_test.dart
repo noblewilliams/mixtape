@@ -137,6 +137,23 @@ void main() {
     );
   });
 
+  test('throws NetworkException on transport timeout', () async {
+    final client = ApiClient(
+      baseUrl: 'http://x',
+      tokenStore: InMemoryTokenStore(),
+      timeout: const Duration(milliseconds: 50),
+      inner: MockClient((_) async {
+        await Future.delayed(const Duration(milliseconds: 200));
+        return http.Response('{}', 200);
+      }),
+    );
+
+    await expectLater(
+      client.getJson('/me'),
+      throwsA(isA<NetworkException>()),
+    );
+  });
+
   test('InMemoryTokenStore write -> read -> clear -> read round-trip', () async {
     final store = InMemoryTokenStore();
     expect(await store.read(), isNull);
