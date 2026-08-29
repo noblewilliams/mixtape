@@ -42,6 +42,25 @@ describe('auth mounting', () => {
     expect(await ctx.internalAdapter.findUserByEmail('a@b.com')).toBeTruthy()
   })
 
+  it('drizzle adapter can write an account row (social sign-in link path)', async () => {
+    const auth = createAuth(await createTestDb(), testEnv)
+    const ctx = await auth.$context
+    const u = await ctx.internalAdapter.createUser(
+      { email: 'c@d.com', name: 'C', emailVerified: true },
+      { method: 'oauth' },
+    )
+    // Regression: @better-auth/core 1.7.x requires account.issuer; a schema
+    // missing it makes every real social sign-in 302 to internal_server_error
+    // while user/session tests stay green.
+    const linked = await ctx.internalAdapter.createAccount({
+      userId: u.id,
+      providerId: 'apple',
+      issuer: 'https://appleid.apple.com',
+      accountId: 'apple-sub-123',
+    })
+    expect(linked.userId).toBe(u.id)
+  })
+
   it('bearer path rejects a bogus token without erroring', async () => {
     const auth = createAuth(await createTestDb(), testEnv)
     const res = await auth.handler(new Request('http://localhost:8787/api/auth/get-session', {

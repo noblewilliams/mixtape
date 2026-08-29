@@ -15,6 +15,13 @@
       "when": 1787961937609,
       "tag": "0001_round_shadow_king",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788000271284,
+      "tag": "0002_lush_paper_doll",
+      "breakpoints": true
     }
   ]
 }

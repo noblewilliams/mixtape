@@ -1,5 +1,10 @@
+// HAND-MAINTAINED against @better-auth/core 1.7.2. The Better Auth CLI
+// (latest = 1.5.x core) lags the runtime and omits account.issuer — running
+// `auth:generate` would silently drop it and break every social sign-in with
+// a 302 → internal_server_error. Diff against
+// node_modules/@better-auth/core/dist/db/schema/*.mjs when upgrading better-auth.
 import { relations } from "drizzle-orm";
-import { pgTable, text, timestamp, boolean, index } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, boolean, index, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -39,6 +44,7 @@ export const account = pgTable(
     id: text("id").primaryKey(),
     accountId: text("account_id").notNull(),
     providerId: text("provider_id").notNull(),
+    issuer: text("issuer").notNull(),
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
@@ -54,7 +60,10 @@ export const account = pgTable(
       .$onUpdate(() => /* @__PURE__ */ new Date())
       .notNull(),
   },
-  (table) => [index("account_userId_idx").on(table.userId)],
+  (table) => [
+    index("account_userId_idx").on(table.userId),
+    uniqueIndex("account_issuer_account_id_idx").on(table.issuer, table.accountId),
+  ],
 );
 
 export const verification = pgTable(
