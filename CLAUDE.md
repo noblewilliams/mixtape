@@ -16,6 +16,7 @@ Read before working:
 - New iOS Swift files need pbxproj target-membership (recurring lesson from goalympics).
 - GetSongBPM data requires a visible backlink to getsongbpm.com wherever we ship UI that uses it.
 - Workers has no NODE_ENV: any library default gated on "production" (Better Auth's secret guard, rate limiting) is silently OFF — configure such things explicitly and fail fast on missing env.
+- User-scoped providers (anything caching per-account state) must ref.watch(authProvider) in build() so auth transitions reset them; long-running services they own must cancel via ref.onDispose. Revisit container-reset-on-sign-out (goalympics pattern) if these multiply.
 
 ## Conventions
 

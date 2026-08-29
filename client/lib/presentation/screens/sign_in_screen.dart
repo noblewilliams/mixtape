@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/auth/apple_auth_gateway.dart';
@@ -25,9 +26,10 @@ class SignInScreen extends ConsumerWidget {
                 } on AppleSignInCancelled {
                   // User dismissed the Apple sheet — not an error.
                 } catch (e) {
+                  if (kDebugMode) debugPrint('sign-in failed: $e');
                   if (context.mounted) {
                     ScaffoldMessenger.of(context)
-                        .showSnackBar(SnackBar(content: Text('Sign-in failed: $e')));
+                        .showSnackBar(const SnackBar(content: Text('Sign-in failed. Try again.')));
                   }
                 }
               },

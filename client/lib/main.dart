@@ -17,6 +17,11 @@ class MixtapeApp extends ConsumerWidget {
     return MaterialApp(
       title: 'mixtape',
       theme: ThemeData(colorSchemeSeed: Colors.deepPurple, useMaterial3: true),
+      darkTheme: ThemeData(
+        colorSchemeSeed: Colors.deepPurple,
+        useMaterial3: true,
+        brightness: Brightness.dark,
+      ),
       home: switch (auth) {
         AuthStatus.unknown => const Scaffold(body: Center(child: CircularProgressIndicator())),
         AuthStatus.signedOut => const SignInScreen(),

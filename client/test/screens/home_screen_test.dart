@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -5,10 +7,28 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/library/library_sync_service.dart';
+import 'package:mixtape/data/musickit/musickit_bridge.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/library_sync_provider.dart';
 import 'package:mixtape/presentation/screens/home_screen.dart';
 import '../helpers/fake_bridge.dart';
+
+/// Blocks every fetchLibrarySongs call on [gate] so a test can inspect the
+/// SyncRunning state before the page resolves.
+class _PausableBridge implements MusicKitBridge {
+  _PausableBridge(this.all, this.gate);
+  final List<LibrarySong> all;
+  final Completer<void> gate;
+
+  @override
+  Future<bool> requestAuthorization() async => true;
+
+  @override
+  Future<LibraryPage> fetchLibrarySongs({required int offset, required int limit}) async {
+    await gate.future;
+    return LibraryPage(songs: all, total: all.length);
+  }
+}
 
 Future<void> _pump(
   WidgetTester tester, {
@@ -70,6 +90,43 @@ void main() {
 
     expect(
       find.byWidgetPredicate((w) => _textContains(w, 'Music library access was denied')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('sync-retry')), findsOneWidget);
+  });
+
+  testWidgets('running state shows the progress indicator and "Syncing…" label',
+      (tester) async {
+    final gate = Completer<void>();
+    final service = LibrarySyncService(
+      bridge: _PausableBridge([song(1), song(2)], gate),
+      api: await apiWith(MockClient((_) async => http.Response('{"ingested": 0}', 200))),
+    );
+    await _pump(tester, service: service);
+
+    await tester.tap(find.byKey(const Key('sync-library')));
+    await tester.pump();
+
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+    expect(find.text('Syncing…'), findsOneWidget);
+
+    gate.complete();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('a mid-sync bridge failure shows the generic failure message and retry',
+      (tester) async {
+    final service = LibrarySyncService(
+      bridge: BoomBridge(List.generate(250, song)),
+      api: await apiWith(MockClient((_) async => http.Response('{"ingested": 0}', 200))),
+    );
+    await _pump(tester, service: service);
+
+    await tester.tap(find.byKey(const Key('sync-library')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byWidgetPredicate((w) => _textContains(w, 'Sync failed. Try again.')),
       findsOneWidget,
     );
     expect(find.byKey(const Key('sync-retry')), findsOneWidget);

@@ -33,10 +33,24 @@ class HomeScreen extends ConsumerWidget {
                 children: [
                   LinearProgressIndicator(value: progress == 0 ? null : progress),
                   const SizedBox(height: 16),
-                  Text('Syncing… ${(progress * 100).round()}%'),
+                  Text(progress == 0 ? 'Syncing…' : 'Syncing… ${(progress * 100).round()}%'),
                 ],
               ),
-            SyncDone(:final total) => Text('Synced $total songs. The DJ is listening.'),
+            SyncDone(:final total) => Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    'Synced $total ${total == 1 ? 'song' : 'songs'}. The DJ is listening.',
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  TextButton(
+                    key: const Key('sync-again'),
+                    onPressed: () => ref.read(librarySyncProvider.notifier).sync(),
+                    child: const Text('Sync again'),
+                  ),
+                ],
+              ),
             SyncFailed(:final message) => Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [

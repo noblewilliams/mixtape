@@ -3,6 +3,9 @@ import '../musickit/musickit_bridge.dart';
 
 class LibraryAccessDenied implements Exception {}
 
+/// Thrown when [LibrarySyncService.cancel] interrupts a run in progress.
+class SyncCancelled implements Exception {}
+
 class LibrarySyncService {
   LibrarySyncService({required this.bridge, required this.api, this.chunkSize = 200}) {
     assert(chunkSize > 0);
@@ -13,6 +16,11 @@ class LibrarySyncService {
   final int chunkSize;
 
   Future<int>? _inFlight;
+  bool _cancelRequested = false;
+
+  /// Requests that the in-flight run stop at its next loop iteration,
+  /// throwing [SyncCancelled]. No-op if nothing is running.
+  void cancel() => _cancelRequested = true;
 
   /// Full library sync: pages the native snapshot (always starting at offset 0)
   /// and posts each page to /ingest/library. Returns the number of songs found.
@@ -26,12 +34,14 @@ class LibrarySyncService {
       _inFlight ??= _run(onProgress).whenComplete(() => _inFlight = null);
 
   Future<int> _run(void Function(double progress)? onProgress) async {
+    _cancelRequested = false;
     final authorized = await bridge.requestAuthorization();
     if (!authorized) throw LibraryAccessDenied();
 
     var offset = 0;
     var total = 0;
     while (true) {
+      if (_cancelRequested) throw SyncCancelled();
       final page = await bridge.fetchLibrarySongs(offset: offset, limit: chunkSize);
       total = page.total;
       if (page.songs.isEmpty) break;

@@ -14,10 +14,12 @@ final apiClientProvider = Provider<ApiClient>((ref) {
   return client;
 });
 
+final appleAuthGatewayProvider = Provider<AppleAuthGateway>((ref) => RealAppleAuthGateway());
+
 final authRepositoryProvider = Provider<AuthRepository>((ref) {
   return AuthRepository(
     tokenStore: ref.watch(tokenStoreProvider),
-    gateway: RealAppleAuthGateway(),
+    gateway: ref.watch(appleAuthGatewayProvider),
     api: ref.watch(apiClientProvider),
   );
 });
