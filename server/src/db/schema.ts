@@ -9,6 +9,8 @@ import {
   integer,
   boolean,
   primaryKey,
+  doublePrecision,
+  vector,
 } from 'drizzle-orm/pg-core'
 import { user } from './auth-schema'
 
@@ -24,6 +26,7 @@ export const tracks = pgTable(
     artist: text('artist').notNull(),
     album: text('album'),
     genre: text('genre'),
+    durationMs: integer('duration_ms'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -54,4 +57,48 @@ export const userTracks = pgTable(
     primaryKey({ columns: [t.userId, t.trackId] }),
     index('user_tracks_track_idx').on(t.trackId),
   ],
+)
+
+export const trackFeatures = pgTable('track_features', {
+  trackId: uuid('track_id')
+    .primaryKey()
+    .references(() => tracks.id, { onDelete: 'cascade' }),
+  tempo: doublePrecision('tempo'),
+  key: integer('key'),
+  mode: integer('mode'),
+  energy: doublePrecision('energy'),
+  danceability: doublePrecision('danceability'),
+  valence: doublePrecision('valence'),
+  acousticness: doublePrecision('acousticness'),
+  instrumentalness: doublePrecision('instrumentalness'),
+  liveness: doublePrecision('liveness'),
+  speechiness: doublePrecision('speechiness'),
+  loudness: doublePrecision('loudness'),
+  source: text('source').notNull(),
+  fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+// Lyric MEANING only — never lyric text (docs/decisions.md → lyrics stance).
+export const trackMeanings = pgTable('track_meanings', {
+  trackId: uuid('track_id')
+    .primaryKey()
+    .references(() => tracks.id, { onDelete: 'cascade' }),
+  embedding: vector('embedding', { dimensions: 1024 }),
+  lyricsSource: text('lyrics_source'),
+  instrumental: boolean('instrumental').notNull().default(false),
+  embeddedAt: timestamp('embedded_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const enrichmentFailures = pgTable(
+  'enrichment_failures',
+  {
+    trackId: uuid('track_id')
+      .notNull()
+      .references(() => tracks.id, { onDelete: 'cascade' }),
+    stage: text('stage').notNull(), // 'itunes' | 'features' | 'meaning'
+    error: text('error').notNull(),
+    attempts: integer('attempts').notNull().default(1),
+    lastAt: timestamp('last_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.trackId, t.stage] })],
 )

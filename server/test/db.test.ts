@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createTestDb } from './helpers/db'
-import { tracks, user, userTracks } from '../src/db/schema'
+import { tracks, user, userTracks, trackFeatures, trackMeanings, enrichmentFailures } from '../src/db/schema'
 
 describe('db schema', () => {
   it('round-trips a track', async () => {
@@ -70,5 +70,49 @@ describe('db schema', () => {
     await expect(
       db.insert(userTracks).values({ userId: 'u1', trackId: track.id }),
     ).rejects.toThrow()
+  })
+
+  it('stores audio features and a 1024-dim embedding for a track', async () => {
+    const db = await createTestDb()
+    const [track] = await db
+      .insert(tracks)
+      .values({ appleId: 'e1', title: 'Song', artist: 'Artist' })
+      .returning()
+    await db.insert(trackFeatures).values({
+      trackId: track.id,
+      tempo: 128.4,
+      key: 4,
+      mode: 1,
+      energy: 0.342,
+      danceability: 0.516,
+      valence: 0.167,
+      acousticness: 0.832,
+      instrumentalness: 0.579,
+      liveness: 0.0857,
+      speechiness: 0.0342,
+      loudness: -9.785,
+      source: 'reccobeats',
+    })
+    await db.insert(trackMeanings).values({
+      trackId: track.id,
+      embedding: Array.from({ length: 1024 }, (_, i) => i / 1024),
+      lyricsSource: 'lrclib',
+      instrumental: false,
+    })
+    const feats = await db.select().from(trackFeatures)
+    expect(feats[0].tempo).toBeCloseTo(128.4)
+    const meanings = await db.select().from(trackMeanings)
+    expect(meanings[0].embedding).toHaveLength(1024)
+  })
+
+  it('records enrichment failures with attempt counts', async () => {
+    const db = await createTestDb()
+    const [track] = await db
+      .insert(tracks)
+      .values({ appleId: 'e2', title: 'S', artist: 'A' })
+      .returning()
+    await db.insert(enrichmentFailures).values({ trackId: track.id, stage: 'features', error: 'no match' })
+    const rows = await db.select().from(enrichmentFailures)
+    expect(rows[0].attempts).toBe(1)
   })
 })

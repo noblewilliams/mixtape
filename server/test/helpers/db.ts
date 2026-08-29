@@ -1,4 +1,5 @@
 import { PGlite } from '@electric-sql/pglite'
+import { vector } from '@electric-sql/pglite-pgvector'
 import { drizzle } from 'drizzle-orm/pglite'
 import { migrate } from 'drizzle-orm/pglite/migrator'
 import { onTestFinished } from 'vitest'
@@ -13,12 +14,12 @@ export type TestDb = Awaited<ReturnType<typeof createTestDb>>
 
 export async function createTestDb() {
   if (!template) {
-    const seed = new PGlite()
+    const seed = new PGlite({ extensions: { vector } })
     await migrate(drizzle(seed, { schema }), { migrationsFolder: MIGRATIONS_DIR })
     template = await seed.dumpDataDir('none')
     await seed.close()
   }
-  const client = await PGlite.create({ loadDataDir: template })
+  const client = await PGlite.create({ loadDataDir: template, extensions: { vector } })
   onTestFinished(() => client.close())
   return drizzle(client, { schema })
 }
