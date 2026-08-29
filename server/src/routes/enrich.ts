@@ -3,10 +3,10 @@ import { runEnrichmentBatch, enrichmentStatus } from '../enrich/runner'
 import type { EnrichDeps } from '../enrich/pipeline'
 import type { Db } from '../db/types'
 
-// Each enriched track costs roughly 5 subrequests (itunes + features +
-// lyrics + embed, plus DB round trips) — keep a single batch well under a
-// Workers invocation's subrequest ceiling.
-export const MAX_BATCH = 8
+// Free-plan Workers ceiling is 50 subrequests/invocation; each track costs
+// ~13 worst-case (external calls + every neon-http query). 3×13+2 batch
+// queries ≈ 41. On a paid plan (1000/invocation) this can be raised to ~8.
+export const MAX_BATCH = 3
 
 export function enrichRoutes(db: Db, deps: EnrichDeps) {
   const app = new Hono()

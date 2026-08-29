@@ -12,6 +12,11 @@ import type { EnrichDeps } from './enrich/pipeline'
 import type { Db } from './db/types'
 import { handleScheduled } from './enrich/scheduled'
 
+// Minimal structural stand-in for the platform's ScheduledController — this
+// project's tsconfig doesn't pull in @cloudflare/workers-types, so the real
+// global type isn't available; only the two fields used below are declared.
+type ScheduledController = { cron: string; scheduledTime: number }
+
 type Bindings = {
   DATABASE_URL: string
   BETTER_AUTH_SECRET: string
@@ -51,9 +56,10 @@ export default {
     const app = createApp({ auth, db, enrich })
     return app.fetch(req, env, ctx)
   },
-  async scheduled(_event: unknown, env: Bindings, _ctx: ExecutionContext) {
+  async scheduled(_event: ScheduledController, env: Bindings, _ctx: ExecutionContext) {
     const deps = buildDeps(env)
     if (!deps) return // no AI binding: nothing to enrich with
-    await handleScheduled(buildDb(env), deps)
+    // Counts only — no track data, no lyric/embedding content.
+    console.log('enrich cron', JSON.stringify(await handleScheduled(buildDb(env), deps)))
   },
 }

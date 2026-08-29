@@ -38,7 +38,7 @@ describe('/enrich routes', () => {
       method: 'POST',
       headers: { 'X-Admin-Token': 'secret' },
     })
-    expect(((await run.json()) as { processed: number }).processed).toBe(8)
+    expect(((await run.json()) as { processed: number }).processed).toBe(3)
   })
 
   it('clamps a fractional limit down to an integer', async () => {
