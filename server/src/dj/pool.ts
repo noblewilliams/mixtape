@@ -20,13 +20,23 @@ export type PoolTrack = {
 // Score weights per familiarity preset — v1, hand-set by feel rather than fit
 // to any data; P4 tunes these against real skip/favorite signal once it
 // exists. `sim` weighs meaning (lyric) similarity to the requested themes,
-// `feat` weighs tempo/energy fit, `fam` weighs how well-known the track
-// already is to this listener (play count).
+// `feat` weighs tempo fit, `fam` weighs how well-known the track already is
+// to this listener (play count). Each term is normalized to [0,1] (see below)
+// so these weights are a true convex combination — the preset actually
+// changes which candidate wins, not just the score's magnitude.
 const FAMILIARITY_WEIGHTS: Record<Intent['familiarity'], { sim: number; feat: number; fam: number }> = {
   comfort: { sim: 0.35, feat: 0.2, fam: 0.45 },
   mix: { sim: 0.45, feat: 0.25, fam: 0.3 },
   adventurous: { sim: 0.55, feat: 0.3, fam: 0.15 },
 }
+
+// Play counts have no ceiling, so LN(1+plays) alone is unbounded — at ANY
+// familiarity weight a hot-enough track would eventually swamp similarity,
+// making the dial meaningless. Normalize against a heavy-rotation reference
+// (200 plays) so the familiarity term saturates at 1 — P4 tunes this
+// reference alongside the weights once real play-count distributions exist.
+const FAM_REFERENCE_PLAYS = 200
+const FAM_REFERENCE_LN = Math.log(1 + FAM_REFERENCE_PLAYS)
 
 // A lone tempo bound (only tempoMin or only tempoMax given) is treated as a
 // soft target at that bound rather than a hard edge — this is the half-width
@@ -75,6 +85,12 @@ const num = (v: number | string | null): number | null => (v === null ? null : N
  */
 export async function buildPool(db: Db, embed: Embedder, userId: string, intent: Intent): Promise<PoolTrack[]> {
   const embedding = await embed(intent.themes)
+  // Defensive shape guard before the embedding touches SQL at all — the error
+  // deliberately excludes the values themselves (only the length), since a
+  // malformed embedding could in principle carry unexpected content.
+  if (embedding.length !== 1024 || !embedding.every(Number.isFinite)) {
+    throw new Error(`pool: bad embedding (len ${embedding.length})`)
+  }
   // Bound as a STRING literal parameter, cast to ::vector in SQL below — the
   // themes text itself never reaches SQL at all (it only ever reaches the
   // embedder, above); only the resulting vector's numeric text touches the
@@ -85,11 +101,21 @@ export async function buildPool(db: Db, embed: Embedder, userId: string, intent:
   const weights = FAMILIARITY_WEIGHTS[intent.familiarity]
   const poolSize = Math.min(POOL_MULTIPLE * intent.targetCount, MAX_POOL_SIZE)
 
+  // Tempo has two distinct shapes, not one:
+  //  - TWO bounds (a real window, e.g. "120-140bpm"): a HARD filter below,
+  //    plus proximity-to-centre scoring here.
+  //  - ONE bound (an implied direction, e.g. "upbeat" -> tempoMin only): NOT a
+  //    hard filter at all — a track just under the bound is still a fine
+  //    candidate, so this is scoring-only, via a soft target at that bound
+  //    with a default half-width (DEFAULT_TEMPO_HALF_WIDTH).
+  // Either way, tempoCenter/tempoHalfWidth below drive the feature-fit term
+  // the same way; only the WHERE clause treats the two shapes differently.
+  const hasTempoWindow = intent.tempoMin !== undefined && intent.tempoMax !== undefined
   let tempoCenter: number | null = null
   let tempoHalfWidth: number | null = null
-  if (intent.tempoMin !== undefined && intent.tempoMax !== undefined) {
-    tempoCenter = (intent.tempoMin + intent.tempoMax) / 2
-    tempoHalfWidth = Math.max(1, (intent.tempoMax - intent.tempoMin) / 2)
+  if (hasTempoWindow) {
+    tempoCenter = (intent.tempoMin! + intent.tempoMax!) / 2
+    tempoHalfWidth = Math.max(1, (intent.tempoMax! - intent.tempoMin!) / 2)
   } else if (intent.tempoMin !== undefined) {
     tempoCenter = intent.tempoMin
     tempoHalfWidth = DEFAULT_TEMPO_HALF_WIDTH
@@ -98,36 +124,47 @@ export async function buildPool(db: Db, embed: Embedder, userId: string, intent:
     tempoHalfWidth = DEFAULT_TEMPO_HALF_WIDTH
   }
 
-  // Feature-fit: a simple, documented v1 (P4 tunes it) — averages two
-  // [0,1] terms:
-  //  - tempo proximity to the requested window's centre. Only scored when the
-  //    intent actually specifies a tempo window AND the track has a measured
-  //    tempo; otherwise this term is 0 — "missing dimensions contribute 0,
-  //    never exclude" (a track is never dropped just for lacking this signal).
-  //  - a flat presence credit for having a measured energy value at all. There
-  //    is no per-track energy target in the intent (energyArc describes the
-  //    queue's overall shape across positions, not a per-track filter — P4's
-  //    job, not this query's), so "was energy ever measured" is the only
-  //    signal available here: 1.0 if present, 0.5 (neutral, not a penalty)
-  //    if not.
-  const tempoTerm: SQL =
+  // Feature-fit: a simple, documented v1 (P4 tunes it).
+  //  - When the intent gives a tempo target (one or two bounds), this is
+  //    proximity-to-centre: 1 - LEAST(1, |tempo - centre| / halfWidth). A
+  //    track with no measured tempo (NULL, via the LEFT JOIN) COALESCEs to 0
+  //    — it floors out at the same score as a track sitting right on the
+  //    window's edge, which is an acceptable v1 tie rather than a dedicated
+  //    "unknown" tier.
+  //  - When the intent gives NO tempo target at all, this term is a CONSTANT
+  //    0.5. A constant can't affect ordering — it exists only so the formula
+  //    doesn't special-case away the term. There used to be an energy
+  //    presence bonus here; removed, because "was this track's audio ever
+  //    successfully re-enriched" must never itself be a ranking thumb.
+  const featureFit: SQL =
     tempoCenter !== null && tempoHalfWidth !== null
       ? sql`COALESCE(1 - LEAST(1, ABS(f.tempo - ${tempoCenter}) / ${tempoHalfWidth}), 0)`
-      : sql`0`
-  const energyTerm = sql`(CASE WHEN f.energy IS NOT NULL THEN 1.0 ELSE 0.5 END)`
-  const featureFit = sql`((${tempoTerm} + ${energyTerm}) / 2)`
+      : sql`0.5`
 
-  // Meaning similarity: `<=>` is cosine DISTANCE (0 = identical direction, 1 =
-  // orthogonal), so similarity = 1 - distance. NULL (no track_meanings row at
-  // all, via the LEFT JOIN) is COALESCEd to 0 — scores neutrally low rather
-  // than excluding the track or poisoning the sum with NULL.
-  const simFit = sql`COALESCE(1 - (tm.embedding <=> ${vecLiteral}::vector), 0)`
+  // Meaning similarity: `<=>` is cosine DISTANCE, ranging [0, 2] (0 =
+  // identical direction, 1 = orthogonal, 2 = exactly opposite), so
+  // `1 - distance` alone can go negative for anti-correlated tracks —
+  // GREATEST(0, ...) clamps it back into [0,1]. NULL (no track_meanings row
+  // at all, via the LEFT JOIN) is COALESCEd to 0 — scores neutrally low
+  // rather than excluding the track or poisoning the sum with NULL.
+  const simFit = sql`COALESCE(GREATEST(0, 1 - (tm.embedding <=> ${vecLiteral}::vector)), 0)`
 
-  const scoreExpr = sql`(${weights.sim} * ${simFit} + ${weights.feat} * ${featureFit} + ${weights.fam} * LN(1 + ut.play_count))`
+  // Familiarity: LN(1+plays) normalized against a heavy-rotation reference so
+  // it saturates at 1 (see FAM_REFERENCE_PLAYS above) — a true [0,1] term,
+  // not an unbounded one.
+  const famFit = sql`LEAST(1, LN(1 + ut.play_count) / ${FAM_REFERENCE_LN})`
+
+  const scoreExpr = sql`(${weights.sim} * ${simFit} + ${weights.feat} * ${featureFit} + ${weights.fam} * ${famFit})`
 
   const filters: SQL[] = [sql`ut.user_id = ${userId}`, sql`ut.in_library = true`]
-  if (intent.tempoMin !== undefined) filters.push(sql`f.tempo >= ${intent.tempoMin}`)
-  if (intent.tempoMax !== undefined) filters.push(sql`f.tempo <= ${intent.tempoMax}`)
+  // Only a real two-bound window hard-filters — see the tempo comment above.
+  // NULL tempo PASSES (consistent with releaseYear/explicit below): unknown
+  // is not the same as out-of-window, and excluding it would just mean this
+  // track never had a chance to compete on its other signals.
+  if (hasTempoWindow) {
+    filters.push(sql`(f.tempo IS NULL OR f.tempo >= ${intent.tempoMin})`)
+    filters.push(sql`(f.tempo IS NULL OR f.tempo <= ${intent.tempoMax})`)
+  }
   if (intent.allowExplicit === false) filters.push(sql`COALESCE(t.explicit, false) = false`)
   // NULL release_year passes an era filter rather than being excluded — most
   // rows lack a year until re-sync; excluding them would empty pools.
@@ -154,7 +191,7 @@ export async function buildPool(db: Db, embed: Embedder, userId: string, intent:
     LEFT JOIN track_features f ON f.track_id = t.id
     LEFT JOIN track_meanings tm ON tm.track_id = t.id
     WHERE ${whereClause}
-    ORDER BY score DESC
+    ORDER BY score DESC, t.id
     LIMIT ${poolSize}
   `)
 

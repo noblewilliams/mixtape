@@ -81,13 +81,15 @@ const intentPropertiesBase: Record<string, unknown> = {
     type: 'integer',
     minimum: 40,
     maximum: 260,
-    description: 'Lower BPM bound, if the listener implied a tempo floor. Must be <= tempoMax when both are set.',
+    description:
+      'Preferred BPM range floor, if the listener implied a tempo. Must be <= tempoMax when both are set. Given alone (no tempoMax), this expresses a direction ("upbeat"), not a cutoff — unknown-BPM tracks and tracks just below it may still appear, ranked lower.',
   },
   tempoMax: {
     type: 'integer',
     minimum: 40,
     maximum: 260,
-    description: 'Upper BPM bound, if the listener implied a tempo ceiling. Must be >= tempoMin when both are set.',
+    description:
+      'Preferred BPM range ceiling, if the listener implied a tempo. Must be >= tempoMin when both are set. Given alone (no tempoMin), this expresses a direction ("chill"), not a cutoff — unknown-BPM tracks and tracks just above it may still appear, ranked lower.',
   },
   energyArc: {
     type: 'string',

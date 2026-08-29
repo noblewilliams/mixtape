@@ -146,6 +146,64 @@ describe('buildPool', () => {
     expect(pool.map((p) => p.trackId)).toContain(noYear.id)
   })
 
+  it('two-bound tempo window: a NULL-tempo track passes the filter but scores lower than an in-window match', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const centerMatch = await seedTrack(db, 'u1', { tempo: 120, embedding: SAME_AS_QUERY })
+    const unknownTempo = await seedTrack(db, 'u1', { noFeatures: true, embedding: SAME_AS_QUERY })
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', tempoMin: 100, tempoMax: 140 }))
+
+    const ids = pool.map((p) => p.trackId)
+    expect(ids).toContain(centerMatch.id)
+    expect(ids).toContain(unknownTempo.id) // NULL tempo passes a window filter, unlike a known out-of-window tempo
+
+    const byId = (id: string) => pool.find((p) => p.trackId === id)!
+    expect(byId(centerMatch.id).score).toBeGreaterThan(byId(unknownTempo.id).score)
+  })
+
+  it('tempo-proximity gradient: centre-of-window outranks edge-of-window, all else equal', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const center = await seedTrack(db, 'u1', { tempo: 120, embedding: SAME_AS_QUERY })
+    const edge = await seedTrack(db, 'u1', { tempo: 140, embedding: SAME_AS_QUERY })
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', tempoMin: 100, tempoMax: 140 }))
+
+    const byId = (id: string) => pool.find((p) => p.trackId === id)!
+    expect(byId(center.id).score).toBeGreaterThan(byId(edge.id).score)
+  })
+
+  it('single tempo bound: does not exclude an out-of-range track, but ranks it lower (direction, not cutoff)', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const atBound = await seedTrack(db, 'u1', { tempo: 140, embedding: SAME_AS_QUERY })
+    const wellBelow = await seedTrack(db, 'u1', { tempo: 60, embedding: SAME_AS_QUERY })
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', tempoMin: 140 }))
+
+    const ids = pool.map((p) => p.trackId)
+    expect(ids).toContain(atBound.id)
+    expect(ids).toContain(wellBelow.id) // a single bound never hard-excludes
+
+    const byId = (id: string) => pool.find((p) => p.trackId === id)!
+    expect(byId(atBound.id).score).toBeGreaterThan(byId(wellBelow.id).score)
+  })
+
+  it('DEFAULT_TEMPO_HALF_WIDTH (60bpm): a single bound treats +/-60bpm as the soft window, clamped beyond that', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const atBound = await seedTrack(db, 'u1', { tempo: 140, embedding: SAME_AS_QUERY })
+    const atHalfWidth = await seedTrack(db, 'u1', { tempo: 80, embedding: SAME_AS_QUERY }) // 140 - 60
+    const beyondHalfWidth = await seedTrack(db, 'u1', { tempo: 20, embedding: SAME_AS_QUERY }) // 140 - 120, clamps same as atHalfWidth
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', tempoMin: 140 }))
+    const byId = (id: string) => pool.find((p) => p.trackId === id)!
+
+    expect(byId(atBound.id).score).toBeGreaterThan(byId(atHalfWidth.id).score)
+    expect(byId(atHalfWidth.id).score).toBeCloseTo(byId(beyondHalfWidth.id).score, 10)
+  })
+
   it('a track with no features row still appears via meaning similarity alone', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')
@@ -166,21 +224,16 @@ describe('buildPool', () => {
     expect(pool.map((p) => p.trackId)).toContain(noMeaning.id)
   })
 
-  it("familiarity 'comfort' ranks a high-play-count track above an otherwise-identical low-play track, and 'adventurous' flattens the gap", async () => {
+  // This is the dial's real contract: changing familiarity must be able to
+  // change WHICH track wins, not just shrink the margin — the whole point of
+  // normalizing the familiarity term (see FAM_REFERENCE_PLAYS in pool.ts) is
+  // that at unbounded play counts a fixed-weight combination could otherwise
+  // never flip the winner regardless of preset.
+  it("familiarity dial flips the winner: 'comfort' favors a popular-but-irrelevant track, 'adventurous' favors a relevant-but-unknown one — same two tracks, opposite winner", async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')
-    const highPlay = await seedTrack(db, 'u1', {
-      tempo: 120,
-      energy: 0.5,
-      embedding: SAME_AS_QUERY,
-      playCount: 500,
-    })
-    const lowPlay = await seedTrack(db, 'u1', {
-      tempo: 120,
-      energy: 0.5,
-      embedding: SAME_AS_QUERY,
-      playCount: 1,
-    })
+    const popularButIrrelevant = await seedTrack(db, 'u1', { embedding: ORTHOGONAL_TO_QUERY, playCount: 220 })
+    const relevantButUnknown = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY, playCount: 0 })
 
     const comfortPool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', familiarity: 'comfort' }))
     const adventurousPool = await buildPool(
@@ -189,20 +242,14 @@ describe('buildPool', () => {
       'u1',
       intent({ themes: 'x', familiarity: 'adventurous' }),
     )
-
     const byId = (pool: typeof comfortPool, id: string) => pool.find((p) => p.trackId === id)!
 
-    const comfortHigh = byId(comfortPool, highPlay.id)
-    const comfortLow = byId(comfortPool, lowPlay.id)
-    const adventurousHigh = byId(adventurousPool, highPlay.id)
-    const adventurousLow = byId(adventurousPool, lowPlay.id)
-
-    expect(comfortHigh.score).toBeGreaterThan(comfortLow.score)
-    expect(adventurousHigh.score).toBeGreaterThan(adventurousLow.score)
-
-    const comfortGap = comfortHigh.score - comfortLow.score
-    const adventurousGap = adventurousHigh.score - adventurousLow.score
-    expect(adventurousGap).toBeLessThan(comfortGap)
+    expect(byId(comfortPool, popularButIrrelevant.id).score).toBeGreaterThan(
+      byId(comfortPool, relevantButUnknown.id).score,
+    )
+    expect(byId(adventurousPool, relevantButUnknown.id).score).toBeGreaterThan(
+      byId(adventurousPool, popularButIrrelevant.id).score,
+    )
   })
 
   it('pool size is min(15 * targetCount, 300, available)', async () => {
@@ -219,6 +266,22 @@ describe('buildPool', () => {
 
     const capped = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', targetCount: 4 }))
     expect(capped).toHaveLength(50) // min(60, 300, 50) -> capped by availability
+  })
+
+  it('pool size is hard-capped at MAX_POOL_SIZE (300) even when 15x targetCount and availability both exceed it', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const N = 305
+    // Minimal columns, batch-inserted, for speed — this test only needs
+    // volume, not scoring signal.
+    const trackRows = await db
+      .insert(tracks)
+      .values(Array.from({ length: N }, (_, i) => ({ appleId: `cap-${i}`, title: `cap-${i}`, artist: 'Artist' })))
+      .returning({ id: tracks.id })
+    await db.insert(userTracks).values(trackRows.map((t) => ({ userId: 'u1', trackId: t.id, playCount: 0 })))
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', targetCount: 60 }))
+    expect(pool).toHaveLength(300) // min(900, 300, 305)
   })
 
   it("only the requesting user's library is eligible", async () => {
@@ -245,25 +308,58 @@ describe('buildPool', () => {
     expect(pool.map((p) => p.trackId)).not.toContain(removed.id)
   })
 
-  it('a malicious themes string only ever reaches the embedder, never the SQL', async () => {
+  it('a userId containing SQL metacharacters is just a non-matching value, not a route into the query', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')
-    const track = await seedTrack(db, 'u1', { tempo: 120, embedding: SAME_AS_QUERY })
+    await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY })
 
-    const payload = "x'; DROP TABLE tracks; --"
-    let seenByEmbedder: string | undefined
-    const spyEmbed: Embedder = async (text) => {
-      seenByEmbedder = text
-      return QUERY_DIRECTION
+    const maliciousUserId = "u1' OR '1'='1"
+    const pool = await buildPool(db, fakeEmbed, maliciousUserId, intent({ themes: 'x' }))
+
+    expect(pool).toEqual([]) // matches no real user_tracks row; no error, no leaked rows
+
+    // the real user's own data is untouched and still queries normally
+    const stillThere = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' }))
+    expect(stillThere.length).toBeGreaterThan(0)
+  })
+
+  it('rejects a malformed embedding before it ever reaches SQL, without leaking its values', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+
+    const wrongLength: Embedder = async () => [1, 2, 3]
+    await expect(buildPool(db, wrongLength, 'u1', intent({ themes: 'x' }))).rejects.toThrow('bad embedding (len 3)')
+
+    const nonFinite: Embedder = async () => {
+      const v = new Array(DIMS).fill(0)
+      v[3] = Number.NaN
+      return v
     }
+    let error: unknown
+    try {
+      await buildPool(db, nonFinite, 'u1', intent({ themes: 'x' }))
+      throw new Error('expected buildPool to reject')
+    } catch (e) {
+      error = e
+    }
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toMatch(/^pool: bad embedding \(len \d+\)$/)
+  })
 
-    const pool = await buildPool(db, spyEmbed, 'u1', intent({ themes: payload }))
+  it('an anti-correlated (opposite-direction) meaning clamps to the same 0 floor as an orthogonal one, never negative', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const opposite = vec({ 0: -1 })
+    const orthogonal = await seedTrack(db, 'u1', { embedding: ORTHOGONAL_TO_QUERY, playCount: 10 })
+    const antiCorrelated = await seedTrack(db, 'u1', { embedding: opposite, playCount: 10 })
 
-    expect(seenByEmbedder).toBe(payload)
-    expect(pool.map((p) => p.trackId)).toContain(track.id)
-    // proves the table survived: buildPool still works and the row is still there
-    const rows = await db.select().from(tracks)
-    expect(rows.some((r) => r.id === track.id)).toBe(true)
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' }))
+    const byId = (id: string) => pool.find((p) => p.trackId === id)!
+
+    // Without GREATEST(0, ...), the anti-correlated track's sim term would be
+    // negative (distance ~2 -> 1 - 2 = -1) and it would score BELOW the
+    // orthogonal track. Clamped, the two are equal — both floor at 0.
+    expect(byId(antiCorrelated.id).score).toBeCloseTo(byId(orthogonal.id).score, 10)
   })
 
   it('orthogonal meaning contributes ~0 similarity while identical meaning contributes ~1', async () => {
