@@ -11,4 +11,4 @@ Your personal DJ. Tell it what you want to hear — a mood, a moment, a memory �
 
 ## Status
 
-P2 enrichment complete: 4,689 tracks live-enriched (meanings 94.8%, features 59.9% — P2.5 local analysis queued after P3). P3a engine in build. Build phases are listed at the end of the design spec.
+P3a DJ engine deployed (304 tests, fable-reviewed): conversational agent loop + retrieval engine + session API live — /sessions dark pending ANTHROPIC_API_KEY. P3b (chat UI) next. Build phases are listed at the end of the design spec.
