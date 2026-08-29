@@ -542,54 +542,282 @@ void main() {
   });
 
   group('sessionStarterProvider', () {
-    test(
-      'returns the new session id and refreshes the sessions list',
-      () async {
-        final api = FakeDjApi();
-        api.onCreateSession = (prompt) async => SessionDetail(
-          session: _session(id: 'new-1'),
-          messages: [_msg('m1', 'user', prompt)],
+    test('returns the new session id with no extra round-trip; invalidates the '
+        'sessions list lazily rather than refetching eagerly', () async {
+      final api = FakeDjApi();
+      api.onCreateSession = (prompt) async => SessionDetail(
+        session: _session(id: 'new-1'),
+        messages: [_msg('m1', 'user', prompt)],
+        queue: [],
+      );
+      api.onListSessions = () async => [_session(id: 'new-1')];
+      final container = _makeContainer(api);
+      // Simulate Home already having the sessions list loaded before the
+      // user starts a new session.
+      await container.read(sessionsProvider.future);
+      expect(api.listSessionsCallCount, 1);
+
+      final id = await container.read(sessionStarterProvider)(
+        'play something upbeat',
+      );
+
+      expect(id, 'new-1');
+      // No eager refetch before returning — invalidate() only marks the
+      // list dirty, it doesn't fetch anything itself.
+      expect(api.listSessionsCallCount, 1);
+
+      // Only a later read (e.g. Home rebuilding after navigating back)
+      // actually triggers the refetch.
+      final refreshed = await container.read(sessionsProvider.future);
+      expect(refreshed.map((s) => s.id), ['new-1']);
+      expect(api.listSessionsCallCount, 2);
+    });
+
+    test('rethrows DjApiException on failure; still invalidates the sessions '
+        'list lazily (no extra round-trip before the throw)', () async {
+      final api = FakeDjApi();
+      api.onCreateSession = (prompt) async => throw DjApiException(
+        kind: 'unknown',
+        message: 'the DJ is out sick',
+        sessionId: 'partial-1',
+      );
+      api.onListSessions = () async => [_session(id: 'partial-1')];
+      final container = _makeContainer(api);
+      await container.read(sessionsProvider.future);
+      expect(api.listSessionsCallCount, 1);
+
+      await expectLater(
+        () => container.read(sessionStarterProvider)('play something upbeat'),
+        throwsA(
+          isA<DjApiException>().having(
+            (e) => e.sessionId,
+            'sessionId',
+            'partial-1',
+          ),
+        ),
+      );
+      expect(api.listSessionsCallCount, 1);
+
+      final refreshed = await container.read(sessionsProvider.future);
+      expect(refreshed.map((s) => s.id), ['partial-1']);
+      expect(api.listSessionsCallCount, 2);
+    });
+  });
+
+  group('chatProvider resilience (review round 2)', () {
+    test('ApiException (e.g. 500) during send: composer recovers — sending '
+        'false, error bubble shown, and a subsequent send works', () async {
+      var sendCall = 0;
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(), messages: [], queue: []);
+      api.onSendMessage = (id, text) async {
+        sendCall++;
+        if (sendCall == 1) throw ApiException(500, 'internal server error');
+        return TurnResult(
+          djMessage: _msg('m2', 'dj', 'sorted, here you go'),
           queue: [],
+          queueVersion: 1,
         );
-        api.onListSessions = () async => [_session(id: 'new-1')];
-        final container = _makeContainer(api);
+      };
+      final container = _makeContainer(api);
+      await container.read(chatProvider('s1').future);
+      final notifier = container.read(chatProvider('s1').notifier);
 
-        final id = await container.read(sessionStarterProvider)(
-          'play something upbeat',
-        );
+      await notifier.send('play jazz');
 
-        expect(id, 'new-1');
-        // sessionsProvider.notifier's first read triggers its own initial
-        // build() (one listSessions() call), then refresh() makes a second.
-        expect(api.listSessionsCallCount, 2);
-      },
-    );
+      var state = container.read(chatProvider('s1')).value!;
+      expect(state.sending, isFalse);
+      expect(state.messages, hasLength(2));
+      expect(state.messages[0].isError, isFalse); // user bubble persists
+      expect(state.messages[1].isError, isTrue);
+      expect(
+        state.messages[1].message.content,
+        'something went wrong on our end — try again',
+      );
+
+      // The composer isn't bricked: sending is false, so a second send
+      // actually goes through this time.
+      await notifier.send('try again');
+
+      state = container.read(chatProvider('s1')).value!;
+      expect(state.sending, isFalse);
+      expect(sendCall, 2);
+      expect(state.messages, hasLength(4));
+      expect(state.messages[3].isError, isFalse);
+      expect(state.messages[3].message.content, 'sorted, here you go');
+    });
+
+    test('applyOps offline (NetworkException) sets a friendly transientError '
+        'with no unhandled error', () async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(queueVersion: 1),
+        messages: [],
+        queue: [_track(0)],
+      );
+      api.onApplyQueueOps = (id, ops, expectedVersion) async =>
+          throw NetworkException('no route to host');
+      final container = _makeContainer(api);
+      await container.read(chatProvider('s1').future);
+
+      // Would surface as an unhandled async error / test failure if
+      // NetworkException weren't caught.
+      await container.read(chatProvider('s1').notifier).applyOps([
+        const QueueOp.remove(0),
+      ]);
+
+      final state = container.read(chatProvider('s1')).value!;
+      expect(state.transientError, contains('check your connection'));
+      expect(state.queue, hasLength(1)); // unchanged
+      expect(state.queueVersion, 1); // unchanged
+    });
+
+    test('DjApiException carrying a queueVersion but no queue adopts neither '
+        '(atomic snapshot, never split-brain)', () async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(queueVersion: 1),
+        messages: [],
+        queue: [_track(0)],
+      );
+      api.onSendMessage = (id, text) async => throw DjApiException(
+        kind: 'conflict',
+        message: 'try again',
+        queueVersion: 9, // no queue attached
+      );
+      final container = _makeContainer(api);
+      await container.read(chatProvider('s1').future);
+
+      await container.read(chatProvider('s1').notifier).send('play jazz');
+
+      final state = container.read(chatProvider('s1')).value!;
+      // Neither field moved — a bare version with no matching queue is
+      // worthless (and dangerous: it could silently mismatch the queue
+      // the client already has cached).
+      expect(state.queue, hasLength(1));
+      expect(state.queue.single.trackId, 't0');
+      expect(state.queueVersion, 1);
+    });
 
     test(
-      'rethrows DjApiException on failure but still refreshes the sessions list',
+      'interleaved send() then applyOps() (applyOps resolves last): both '
+      'bubbles land, final queue/version reflect applyOps\' response',
       () async {
+        final sendCompleter = Completer<TurnResult>();
+        final opsCompleter = Completer<QueueOpsResult>();
         final api = FakeDjApi();
-        api.onCreateSession = (prompt) async => throw DjApiException(
-          kind: 'unknown',
-          message: 'the DJ is out sick',
-          sessionId: 'partial-1',
+        api.onGetSession = (_) async => SessionDetail(
+          session: _session(queueVersion: 1),
+          messages: [],
+          queue: [_track(0)],
         );
-        api.onListSessions = () async => [_session(id: 'partial-1')];
+        api.onSendMessage = (id, text) => sendCompleter.future;
+        api.onApplyQueueOps = (id, ops, expectedVersion) => opsCompleter.future;
         final container = _makeContainer(api);
+        await container.read(chatProvider('s1').future);
+        final notifier = container.read(chatProvider('s1').notifier);
 
-        await expectLater(
-          () => container.read(sessionStarterProvider)('play something upbeat'),
-          throwsA(
-            isA<DjApiException>().having(
-              (e) => e.sessionId,
-              'sessionId',
-              'partial-1',
-            ),
+        final sendFuture = notifier.send('play jazz');
+        final opsFuture = notifier.applyOps([const QueueOp.remove(0)]);
+
+        sendCompleter.complete(
+          TurnResult(
+            djMessage: _msg('m2', 'dj', 'here you go'),
+            queue: [_track(0), _track(1)],
+            queueVersion: 2,
           ),
         );
-        // Same accounting as the success case: initial build() + refresh().
-        expect(api.listSessionsCallCount, 2);
+        await sendFuture;
+        opsCompleter.complete(
+          QueueOpsResult(
+            queueVersion: 3,
+            requested: 1,
+            added: 0,
+            removed: 1,
+            queue: [_track(5)],
+          ),
+        );
+        await opsFuture;
+
+        final state = container.read(chatProvider('s1')).value!;
+        expect(state.messages, hasLength(2)); // user + dj reply, preserved
+        expect(state.messages[0].message.role, 'user');
+        expect(state.messages[1].message.role, 'dj');
+        expect(state.queue.map((t) => t.trackId), ['t5']); // applyOps wins
+        expect(state.queueVersion, 3);
       },
     );
+
+    test('interleaved applyOps() then send() (send resolves last): both '
+        'bubbles land, final queue/version reflect send\'s response', () async {
+      final sendCompleter = Completer<TurnResult>();
+      final opsCompleter = Completer<QueueOpsResult>();
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(queueVersion: 1),
+        messages: [],
+        queue: [_track(0)],
+      );
+      api.onSendMessage = (id, text) => sendCompleter.future;
+      api.onApplyQueueOps = (id, ops, expectedVersion) => opsCompleter.future;
+      final container = _makeContainer(api);
+      await container.read(chatProvider('s1').future);
+      final notifier = container.read(chatProvider('s1').notifier);
+
+      final opsFuture = notifier.applyOps([const QueueOp.remove(0)]);
+      final sendFuture = notifier.send('play jazz');
+
+      opsCompleter.complete(
+        QueueOpsResult(
+          queueVersion: 2,
+          requested: 1,
+          added: 0,
+          removed: 1,
+          queue: [_track(5)],
+        ),
+      );
+      await opsFuture;
+      sendCompleter.complete(
+        TurnResult(
+          djMessage: _msg('m2', 'dj', 'here you go'),
+          queue: [_track(0), _track(1)],
+          queueVersion: 3,
+        ),
+      );
+      await sendFuture;
+
+      final state = container.read(chatProvider('s1')).value!;
+      expect(state.messages, hasLength(2));
+      expect(state.messages[0].message.role, 'user');
+      expect(state.messages[1].message.role, 'dj');
+      expect(state.queue.map((t) => t.trackId), ['t0', 't1']); // send wins
+      expect(state.queueVersion, 3);
+    });
+
+    test('chatProvider is autoDispose: after the last listener drops, a later '
+        're-read rebuilds from scratch', () async {
+      final api = FakeDjApi();
+      api.onGetSession = (id) async => SessionDetail(
+        session: _session(id: id),
+        messages: [],
+        queue: [],
+      );
+      final container = _makeContainer(api);
+
+      final sub1 = container.listen(chatProvider('s1'), (_, __) {});
+      await container.read(chatProvider('s1').future);
+      expect(api.getSessionCallCount, 1);
+      sub1.close();
+
+      // Let autoDispose's post-listener-removal scheduling run.
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      final sub2 = container.listen(chatProvider('s1'), (_, __) {});
+      await container.read(chatProvider('s1').future);
+      expect(api.getSessionCallCount, 2); // rebuilt, not cached
+      sub2.close();
+    });
   });
 }

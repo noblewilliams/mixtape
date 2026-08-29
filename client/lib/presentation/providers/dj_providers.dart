@@ -2,6 +2,12 @@
 // machine, over [DjApi] (see `docs/superpowers/plans/2026-08-29-p3b-dj-client.md`
 // Task 2). Server-canonical: every mutation replaces local queue/version
 // state from the response rather than optimistically editing it.
+//
+// Auth-transition safety: never `await provider.future` on these across an
+// auth transition (e.g. in a test, or any code that also drives sign-out) —
+// watch the AsyncValue instead. A captured `.future` is a snapshot of ONE
+// build; if auth flips mid-load the provider is invalidated/rebuilt and that
+// captured future can be left never completing.
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/api/api_client.dart';
 import '../../data/dj/dj_api.dart';
@@ -17,6 +23,24 @@ final djApiProvider = Provider<DjApi>((ref) {
   ref.onDispose(api.close);
   return api;
 });
+
+const _genericApiErrorMessage = 'something went wrong on our end — try again';
+const _offlineErrorMessage =
+    "couldn't reach the DJ — check your connection and try again";
+const _staleTransientMessage = 'queue was updated — showing the latest';
+
+/// Never adopt a queueVersion without its matching queue, or vice versa — a
+/// version whose queue is unknown (or a queue with an unknown version) is
+/// worse than adopting neither, since it can silently mismatch a queue the
+/// caller already has cached under a different version (a stale queue
+/// paired with a fresh version number can make a position-based op like
+/// remove/move target the wrong track entirely).
+({List<QueueTrack>? queue, int? queueVersion}) _atomicQueueSnapshot(
+  List<QueueTrack>? queue,
+  int? queueVersion,
+) => (queue != null && queueVersion != null)
+    ? (queue: queue, queueVersion: queueVersion)
+    : (queue: null, queueVersion: null);
 
 // ---------------------------------------------------------------------------
 // Sessions list
@@ -77,10 +101,6 @@ class ChatMessage {
   final bool isError;
 }
 
-const _offlineErrorMessage =
-    "couldn't reach the DJ — check your connection and try again";
-const _staleTransientMessage = 'queue was updated — showing the latest';
-
 /// `session.queueVersion` is the single source of truth for the current
 /// queue version — no separately-tracked version field to drift out of sync
 /// with it. [queueVersion] is a convenience getter over that.
@@ -105,6 +125,13 @@ class ChatState {
 
   int get queueVersion => session.queueVersion;
 
+  /// If both [session] and [queueVersion] are passed, [session] wins outright
+  /// — its own `queueVersion` is used as-is and the [queueVersion] param is
+  /// silently ignored (the two are never combined/added). In practice every
+  /// caller passes at most one of the two: [queueVersion] alone for a bare
+  /// version bump (a turn result or queue-ops response bumping the existing
+  /// session in place), [session] alone when replacing wholesale (a fresh
+  /// getSession snapshot, whose own queueVersion is already correct).
   ChatState copyWith({
     DjSession? session,
     List<ChatMessage>? messages,
@@ -114,6 +141,11 @@ class ChatState {
     String? transientError,
     bool clearTransientError = false,
   }) {
+    assert(
+      session == null || queueVersion == null,
+      'copyWith: pass session OR queueVersion, not both — session wins and '
+      'the queueVersion param would silently be dropped',
+    );
     final resolvedSession =
         session ??
         (queueVersion != null
@@ -131,6 +163,14 @@ class ChatState {
   }
 }
 
+/// Bumps only the queue version, carrying every other session field —
+/// including [DjSession.title] and [DjSession.updatedAt] — over verbatim.
+/// Those two go stale the instant this runs: [updatedAt] reflects the last
+/// full getSession/create/message turn, not "the queue last moved", and
+/// title obviously doesn't change on a queue edit. That's an accepted v1
+/// tradeoff, not a bug — the version itself is always accurate, staleness
+/// is confined to display-only fields, and the next full session load
+/// (getSession) replaces them wholesale anyway.
 DjSession _withQueueVersion(DjSession session, int queueVersion) => DjSession(
   id: session.id,
   title: session.title,
@@ -174,72 +214,104 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     createdAt: DateTime.now(),
   );
 
+  /// Reads whatever [state] is RIGHT NOW (not a snapshot captured before an
+  /// `await`) and applies [update] on top of it, then writes the result
+  /// back. A turn (send) and a queue edit (applyOps) both run over a real
+  /// 20-40s round trip and can legitimately interleave — always merging onto
+  /// the current state (rather than onto a pre-await snapshot) means
+  /// whichever call finishes second doesn't clobber changes the other one
+  /// already landed. No-ops if the provider was disposed or never built.
+  void _mergeCurrent(ChatState Function(ChatState current) update) {
+    if (!ref.mounted) return;
+    final current = state.value;
+    if (current == null) return;
+    state = AsyncData(update(current));
+  }
+
   /// Appends the user's bubble immediately (the server persists it
   /// regardless of how the turn resolves) then posts the turn. A no-op
   /// while a previous [send] is still in flight, guarding double-taps on
-  /// the send button.
+  /// the send button. `sending` is restored in a `finally` so it can NEVER
+  /// stick at true — not even for an [ApiException] or an entirely
+  /// unforeseen exception — which would otherwise brick the composer.
   Future<void> send(String text) async {
-    final current = state.value;
-    if (current == null || current.sending) return;
+    final base = state.value;
+    if (base == null || base.sending) return;
 
-    final withUserBubble = current.copyWith(
-      messages: [...current.messages, ChatMessage(_localMessage('user', text))],
-      sending: true,
+    final userMessage = ChatMessage(_localMessage('user', text));
+    state = AsyncData(
+      base.copyWith(messages: [...base.messages, userMessage], sending: true),
     );
-    state = AsyncData(withUserBubble);
 
     try {
       final result = await ref.read(djApiProvider).sendMessage(sessionId, text);
-      if (!ref.mounted) return;
-      state = AsyncData(
-        withUserBubble.copyWith(
-          messages: [...withUserBubble.messages, ChatMessage(result.djMessage)],
+      _mergeCurrent(
+        (c) => c.copyWith(
+          messages: [...c.messages, ChatMessage(result.djMessage)],
           queue: result.queue,
           queueVersion: result.queueVersion,
-          sending: false,
         ),
       );
     } on DjApiException catch (e) {
-      if (!ref.mounted) return;
       if (e.kind == 'stale') {
         // Degraded 409 fallback (see dj_api.dart's _translate409): a
         // malformed 'stale' body couldn't be parsed into a
         // StaleQueueException, but the kind still signals "the queue moved
-        // under you" — recover by refetching the session rather than
-        // showing an error bubble the user can't act on.
+        // under you" — recover by refetching the session (a wholesale
+        // canonical replace, not a merge — there's nothing local worth
+        // preserving over the server's fresh view) rather than showing an
+        // error bubble the user can't act on.
         await _refetchAfterFailedTurn();
         return;
       }
-      state = AsyncData(
-        withUserBubble.copyWith(
+      final adopted = _atomicQueueSnapshot(e.queue, e.queueVersion);
+      _mergeCurrent(
+        (c) => c.copyWith(
           messages: [
-            ...withUserBubble.messages,
+            ...c.messages,
             ChatMessage(_localMessage('dj', e.message), isError: true),
           ],
-          queue: e.queue,
-          queueVersion: e.queueVersion,
-          sending: false,
+          queue: adopted.queue,
+          queueVersion: adopted.queueVersion,
+        ),
+      );
+    } on ApiException {
+      // 401/403/404/500/... — not part of the DJ error taxonomy, but still
+      // has to resolve into SOMETHING visible rather than an unhandled
+      // exception and a permanently-stuck composer.
+      _mergeCurrent(
+        (c) => c.copyWith(
+          messages: [
+            ...c.messages,
+            ChatMessage(
+              _localMessage('dj', _genericApiErrorMessage),
+              isError: true,
+            ),
+          ],
         ),
       );
     } on NetworkException {
-      if (!ref.mounted) return;
       // Transport failure before any response — unlike the DjApiException
       // branch above, the server never saw this turn at all, so the user
       // bubble above is client-local only (no persisted duplicate risk, but
       // also no server-side record). Acceptable for v1: a retry may or may
       // not duplicate depending on whether the request actually landed.
-      state = AsyncData(
-        withUserBubble.copyWith(
+      _mergeCurrent(
+        (c) => c.copyWith(
           messages: [
-            ...withUserBubble.messages,
+            ...c.messages,
             ChatMessage(
               _localMessage('dj', _offlineErrorMessage),
               isError: true,
             ),
           ],
-          sending: false,
         ),
       );
+    } finally {
+      // Always restored exactly once, on top of whatever is current at this
+      // point (including anything the branches above just wrote) — a no-op
+      // if some other path (e.g. the stale refetch) already cleared it.
+      _mergeCurrent((c) => c.sending ? c.copyWith(sending: false) : c);
     }
   }
 
@@ -251,32 +323,29 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     } catch (_) {
       // Refetch itself failed — fall back to just clearing the sending flag
       // rather than losing the in-flight state entirely.
-      if (!ref.mounted) return;
-      final current = state.value;
-      if (current != null) state = AsyncData(current.copyWith(sending: false));
+      _mergeCurrent((c) => c.copyWith(sending: false));
     }
   }
 
   /// Server-canonical: always posts against the current known
   /// [ChatState.queueVersion] and replaces queue+version from the response.
+  /// Merges onto whatever is current when the response lands (see
+  /// [_mergeCurrent]) rather than a pre-await snapshot, so an interleaved
+  /// [send] landing first (or second) composes correctly either way.
   Future<void> applyOps(List<QueueOp> ops) async {
-    final current = state.value;
-    if (current == null) return;
+    final base = state.value;
+    if (base == null) return;
     try {
       final result = await ref
           .read(djApiProvider)
-          .applyQueueOps(sessionId, ops, current.queueVersion);
-      if (!ref.mounted) return;
-      state = AsyncData(
-        current.copyWith(
-          queue: result.queue,
-          queueVersion: result.queueVersion,
-        ),
+          .applyQueueOps(sessionId, ops, base.queueVersion);
+      _mergeCurrent(
+        (c) =>
+            c.copyWith(queue: result.queue, queueVersion: result.queueVersion),
       );
     } on StaleQueueException catch (e) {
-      if (!ref.mounted) return;
-      state = AsyncData(
-        current.copyWith(
+      _mergeCurrent(
+        (c) => c.copyWith(
           queue: e.queue,
           queueVersion: e.queueVersion,
           transientError: _staleTransientMessage,
@@ -285,8 +354,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     } on DjApiException catch (e) {
       // e.g. kind 'dj_required' for a manual swap/extend — no queue change,
       // just surface the server's message (transient, one-shot).
-      if (!ref.mounted) return;
-      state = AsyncData(current.copyWith(transientError: e.message));
+      _mergeCurrent((c) => c.copyWith(transientError: e.message));
+    } on ApiException {
+      _mergeCurrent((c) => c.copyWith(transientError: _genericApiErrorMessage));
+    } on NetworkException {
+      _mergeCurrent((c) => c.copyWith(transientError: _offlineErrorMessage));
     }
   }
 
@@ -297,29 +369,40 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   }
 }
 
-final chatProvider =
-    AsyncNotifierProvider.family<ChatNotifier, ChatState, String>(
-      ChatNotifier.new,
-    );
+/// autoDispose: a session's transcript is only worth keeping in memory while
+/// something (the chat screen) is actually watching it — otherwise visiting
+/// many sessions over a run would grow an unbounded cache of every
+/// transcript ever opened. Screens that want it kept warm across a brief
+/// unmount should watch it (a plain read doesn't count as a listener).
+final chatProvider = AsyncNotifierProvider.autoDispose
+    .family<ChatNotifier, ChatState, String>(ChatNotifier.new);
 
 // ---------------------------------------------------------------------------
 // New-session flow
 // ---------------------------------------------------------------------------
 
 /// A plain callable (not a stateful notifier) that starts a new session and
-/// returns its id. Refreshes [sessionsProvider] on both outcomes, since a
+/// returns its id. Invalidates [sessionsProvider] on both outcomes, since a
 /// failed create can still have persisted a session row (the server echoes
 /// `sessionId` on the error body) — the Home screen still needs it in the
 /// list even though it's about to handle the rethrown exception.
+///
+/// Deliberately does NOT await a refetch of the sessions list before
+/// returning: `invalidate` (rather than an eager `refresh()`) is the correct
+/// primitive here — it supersedes any list build already in flight (instead
+/// of racing it with a second concurrent fetch) and defers the actual
+/// re-fetch to whenever something next reads [sessionsProvider] (e.g. the
+/// Home screen after navigating back), so returning the new id — and
+/// navigating to it — isn't held up by an extra round trip.
 final sessionStarterProvider = Provider<Future<String> Function(String prompt)>(
   (ref) {
     return (String prompt) async {
       try {
         final detail = await ref.read(djApiProvider).createSession(prompt);
-        await ref.read(sessionsProvider.notifier).refresh();
+        ref.invalidate(sessionsProvider);
         return detail.session.id;
       } on DjApiException {
-        await ref.read(sessionsProvider.notifier).refresh();
+        ref.invalidate(sessionsProvider);
         rethrow;
       }
     };

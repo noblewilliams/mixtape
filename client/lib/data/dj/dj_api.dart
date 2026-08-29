@@ -193,13 +193,22 @@ class DjApi {
     final kind = decoded['error'] is String ? decoded['error'] as String : 'unknown';
     final message = decoded['message'] is String ? decoded['message'] as String : fallback;
     List<QueueTrack>? queue;
+    // Independent of the try/catch below: the body can legitimately carry
+    // `queue` without `queueVersion` (or vice versa) — e.g. a create-session
+    // failure's queue snapshot with no version concept attached — and that's
+    // not the asymmetry this method guards against.
+    var queueVersion = decoded['queueVersion'] is int ? decoded['queueVersion'] as int : null;
     try {
       final rawQueue = decoded['queue'];
       if (rawQueue != null) queue = queueTracksFromJson(rawQueue);
     } catch (_) {
+      // A queue blob that fails to parse must not leave a queueVersion
+      // dangling without it — a version paired with garbage-in-place-of-a-
+      // queue is worse than having neither (same rule the providers apply
+      // to adoption; see dj_providers.dart's atomic queue-snapshot helper).
       queue = null;
+      queueVersion = null;
     }
-    final queueVersion = decoded['queueVersion'] is int ? decoded['queueVersion'] as int : null;
     final sessionId = decoded['sessionId'] is String ? decoded['sessionId'] as String : null;
     return DjApiException(
       kind: kind,
