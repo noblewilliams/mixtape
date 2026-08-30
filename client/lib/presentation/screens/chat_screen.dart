@@ -90,15 +90,19 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       final state = next.value;
       if (state == null) return;
 
-      // Guarded on being the top route: QueueScreen watches the same
-      // provider and runs the same listener, so with the queue pushed over
-      // this screen one error would otherwise queue two identical
-      // snackbars — the second surfacing seconds later, out of context.
-      if (state.transientError != null &&
-          ModalRoute.of(context)?.isCurrent == true) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(state.transientError!)));
+      // Display guarded on being the top route: QueueScreen watches the
+      // same provider and runs the same listener, so with the queue pushed
+      // over this screen one error would otherwise queue two identical
+      // snackbars. Clearing is unconditional — a transientError left in
+      // state gets carried forward by copyWith and would surface later
+      // against an unrelated event. Both listeners see the same captured
+      // `state`, so either clearing first can't hide it from the other.
+      if (state.transientError != null) {
+        if (ModalRoute.of(context)?.isCurrent == true) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(state.transientError!)));
+        }
         ref.read(chatProvider(widget.sessionId).notifier).clearTransientError();
       }
 
