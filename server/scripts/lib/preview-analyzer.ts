@@ -23,6 +23,7 @@
 import { execFile } from 'node:child_process'
 import { promises as fs } from 'node:fs'
 import { createRequire } from 'node:module'
+import { resolve as resolvePath } from 'node:path'
 import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
@@ -60,6 +61,19 @@ const PITCH_CLASS: Record<string, number> = {
   B: 11,
 }
 
+/**
+ * Maps essentia's KeyExtractor pitch-class name to our 0-11 numbering.
+ * Throws a fixed-string error on an unrecognized name rather than silently
+ * coercing it to C=0 — a garbled key must fail loudly (and become
+ * analysis_failed/retryable) rather than masquerade as a real analyzed value
+ * (fabrication rule, see plan).
+ */
+export function pitchClassOf(name: string): number {
+  const pc = PITCH_CLASS[name]
+  if (pc === undefined) throw new Error('unrecognized key name from essentia')
+  return pc
+}
+
 /** True when the stock macOS `afconvert` binary is on PATH. */
 export async function isAfconvertAvailable(): Promise<boolean> {
   try {
@@ -79,9 +93,24 @@ export async function isAfconvertAvailable(): Promise<boolean> {
  * logs (same lesson as the credential-leak guard in scripts/retitle-sessions.ts).
  */
 export async function decodeToWav(inputPath: string, outPath: string): Promise<void> {
+  // path.resolve() before handing paths to execFile: a caller-supplied
+  // filename starting with "-" (e.g. from an untrusted download name) would
+  // otherwise be parsed by afconvert as a flag rather than a path. Resolving
+  // against cwd first means the argument afconvert sees never starts with
+  // "-".
+  const resolvedIn = resolvePath(inputPath)
+  const resolvedOut = resolvePath(outPath)
   try {
-    await execFileAsync('afconvert', ['-f', 'WAVE', '-d', 'LEI16@44100', '-c', '1', inputPath, outPath])
+    await execFileAsync(
+      'afconvert',
+      ['-f', 'WAVE', '-d', 'LEI16@44100', '-c', '1', resolvedIn, resolvedOut],
+      { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 },
+    )
   } catch {
+    // afconvert can leave a truncated file behind when it dies partway
+    // through encoding (or times out) — clean it up so a caller never
+    // mistakes a partial write for a successful decode.
+    await fs.unlink(resolvedOut).catch(() => {})
     throw new Error('afconvert failed')
   }
 }
@@ -92,6 +121,8 @@ export async function decodeToWav(inputPath: string, outPath: string): Promise<v
 // analyzePreview() once per track, potentially thousands of times).
 let essentiaSingleton: EssentiaInstance | null = null
 
+type EssentiaVector = { delete(): void }
+
 type EssentiaInstance = {
   arrayToVector(arr: Float32Array): EssentiaVector
   RhythmExtractor2013(
@@ -99,14 +130,17 @@ type EssentiaInstance = {
     maxTempo: number,
     method: string,
     minTempo: number,
-  ): { bpm: number }
+  ): {
+    bpm: number
+    confidence: number
+    ticks: EssentiaVector
+    estimates: EssentiaVector
+    bpmIntervals: EssentiaVector
+  }
   KeyExtractor(signal: EssentiaVector): { key: string; scale: string }
   RMS(signal: EssentiaVector): { rms: number }
-  Danceability(signal: EssentiaVector): { danceability: number }
-  ReplayGain(signal: EssentiaVector): { replayGain: number }
+  Danceability(signal: EssentiaVector): { danceability: number; dfa: EssentiaVector }
 }
-
-type EssentiaVector = { delete(): void }
 
 function loadEssentia(): EssentiaInstance {
   if (essentiaSingleton) return essentiaSingleton
@@ -130,17 +164,21 @@ function clamp01(x: number): number {
   return Math.min(1, Math.max(0, x))
 }
 
-// RhythmExtractor2013 can lock onto half- or double-time on strongly
-// periodic material (click tracks, four-on-the-floor kicks) — a well-known
-// "octave error" in tempo estimation. Standard practice is to fold the
-// estimate by octave (×2 / ÷2) into the perceptually-typical 70-180 BPM
-// walking-tempo band before reporting, which is what we do here.
-function normalizeTempoOctave(bpm: number): number {
-  let t = bpm
-  while (t > 0 && t < 70) t *= 2
-  while (t > 180) t /= 2
-  return t
+function clampDb(x: number): number {
+  if (!Number.isFinite(x)) return -60
+  return Math.min(0, Math.max(-60, x))
 }
+
+// Below this RMS, essentia's extractors are operating on effective silence:
+// RhythmExtractor2013 fabricates a plausible-looking-but-meaningless tempo
+// (probed live: silence yields a raw 738 BPM, octave-collapsed by 'degara'
+// itself down to 92 — a confident-looking number with no basis in the
+// audio). We gate on it before running any extractor rather than let a
+// fabricated value flow through.
+const RMS_FLOOR = 1e-4
+const MIN_TEMPO = 40
+const MAX_TEMPO = 250
+const DEGENERATE_AUDIO_ERROR = 'degenerate audio — no analysis'
 
 /**
  * Extract the honesty-rule-approved feature subset from a decoded WAV file.
@@ -159,48 +197,82 @@ export async function analyzePreview(wavPath: string): Promise<PreviewFeatures> 
   if (!samples || samples.length === 0) {
     throw new Error('empty audio decoded from wav')
   }
+  // Every extractor below assumes 44.1kHz mono input — RhythmExtractor2013's
+  // tempo math in particular is directly tied to sample rate, so a 48kHz
+  // input would silently skew the reported tempo by ~8.8% rather than fail.
+  // decodeToWav always produces 44.1kHz, so this only trips on a
+  // hand-supplied or malformed wav.
+  if (decoded.sampleRate !== 44100) {
+    throw new Error('unsupported sample rate — expected 44100Hz mono wav')
+  }
 
   const signal = essentia.arrayToVector(samples)
+  let rhythm: ReturnType<EssentiaInstance['RhythmExtractor2013']> | null = null
+  let dance: ReturnType<EssentiaInstance['Danceability']> | null = null
   try {
-    // Explicit method + fixed tempo bounds: essentia.js's default
-    // 'multifeature' ensemble method carries internal algorithm state across
-    // calls on a shared Essentia instance and was observed to return
-    // different BPMs for byte-identical repeat calls (non-deterministic —
-    // violates the plan's determinism requirement). 'degara' is a single
-    // deterministic beat tracker and was stable across dozens of repeat and
-    // interleaved calls during Task 1's spike.
-    const tempo = normalizeTempoOctave(essentia.RhythmExtractor2013(signal, 208, 'degara', 40).bpm)
+    const rms = essentia.RMS(signal).rms
+    if (rms < RMS_FLOOR) throw new Error(DEGENERATE_AUDIO_ERROR)
+
+    // Explicit method + fixed tempo bounds: 'degara' is a single
+    // deterministic beat tracker, chosen for simplicity and verified
+    // determinism across repeated and interleaved calls on a shared
+    // Essentia instance (see the interleaved-call determinism test) — not
+    // because the default 'multifeature' ensemble method was proven
+    // non-deterministic.
+    rhythm = essentia.RhythmExtractor2013(signal, 208, 'degara', 40)
+    const rawBpm = rhythm.bpm
+    if (!Number.isFinite(rawBpm) || rawBpm < MIN_TEMPO || rawBpm > MAX_TEMPO) {
+      throw new Error(DEGENERATE_AUDIO_ERROR)
+    }
+    // 'degara' already collapses octave errors internally (probed live: it
+    // never corrected a genuine tempo estimate, only laundered a
+    // silence-artifact 738 BPM down to a plausible-looking 92) — we report
+    // its output as-is rather than re-fold it. A true ~190 BPM track may
+    // therefore read ~95: a known estimator limitation, not something we
+    // launder on top of, and folding again would also confine every
+    // analyzed tempo into a narrow perceptual band, breaking
+    // mixed-source comparability.
+    const tempo = rawBpm
 
     const keyResult = essentia.KeyExtractor(signal)
-    const key = PITCH_CLASS[keyResult.key] ?? 0
+    const key = pitchClassOf(keyResult.key)
     const mode: 0 | 1 = keyResult.scale === 'major' ? 1 : 0
 
-    const rms = essentia.RMS(signal).rms
-    const energy = clamp01(rms)
+    const rmsDbfs = 20 * Math.log10(rms)
 
+    // Calibrated against real mastered-music loudness (roughly -30 to -5
+    // dBFS RMS) rather than raw [0,1] RMS, which compresses real tracks into
+    // the bottom third of the range and would read the whole analyzed
+    // cohort as uniformly low-energy to the curation LLM. -30 dBFS -> 0,
+    // -5 dBFS -> 1. (Calibration window; docs/decisions.md entry lands in
+    // Task 4 per plan.)
+    const energy = clamp01((rmsDbfs - -30) / (-5 - -30))
+
+    dance = essentia.Danceability(signal)
     // Danceability's DFA-derived output isn't natively bounded — Essentia's
     // docs describe a typical real-music range of roughly 0-3 — so we scale
     // linearly against that ceiling and clamp, rather than write an
     // unbounded value into a [0,1] column (ReccoBeats-comparability
     // requirement from the plan).
-    const danceRaw = essentia.Danceability(signal).danceability
-    const danceability = clamp01(danceRaw / 3)
+    const danceability = clamp01(dance.danceability / 3)
 
-    // ReplayGain's internal reference blows up (large positive) on
-    // near-silent input, so we don't trust it below an RMS floor and report
-    // a fixed very-quiet loudness instead.
-    let loudness: number
-    if (rms < 1e-4) {
-      loudness = -70
-    } else {
-      const rg = essentia.ReplayGain(signal).replayGain
-      loudness = Number.isFinite(rg) ? Math.min(rg, 0) : -70
-    }
+    // Loudness is a dBFS approximation (NOT true ReplayGain/EBU R128
+    // perceptual loudness): ReplayGain returns gain-to-APPLY, which is
+    // negative for loud audio and positive for quiet audio — the inverse of
+    // what a "loudness" column should read — and its internal reference
+    // blows up to large positive values on near-silent input. We drop it
+    // entirely and report a straightforward dBFS reading of the signal's
+    // RMS instead, clamped to a plausible loudness range.
+    const loudness = clampDb(rmsDbfs)
 
     return { tempo, key, mode, energy, danceability, loudness }
   } finally {
     // Embind vectors live on the WASM heap and are not garbage-collected by
     // V8 — free explicitly so a long-running batch (Task 3) doesn't leak.
     signal.delete()
+    rhythm?.ticks.delete()
+    rhythm?.estimates.delete()
+    rhythm?.bpmIntervals.delete()
+    dance?.dfa.delete()
   }
 }

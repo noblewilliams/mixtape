@@ -96,12 +96,12 @@ async function main() {
 
   console.log("type a prompt to start (or /sessions to resume one), /quit to exit\n")
   for (;;) {
-    const line = (await rl.question(sessionId ? 'you> ' : 'new session> ')).trim()
+    const line: string = (await rl.question(sessionId ? 'you> ' : 'new session> ')).trim()
     if (!line) continue
     if (line === '/quit') break
     if (line === '/sessions') { await listSessions(); continue }
     if (line.startsWith('/open ')) {
-      const n = Number(line.slice(6)) - 1
+      const n: number = Number(line.slice(6)) - 1
       if (!lastList[n]) { console.log('  run /sessions first, then /open <n>'); continue }
       sessionId = lastList[n].id
       const { json } = await api(token, 'GET', `/sessions/${sessionId}`)

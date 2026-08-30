@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,6 +8,7 @@ import {
   decodeToWav,
   isAfconvertAvailable,
   isAnalyzerAvailable,
+  pitchClassOf,
 } from '../../scripts/lib/preview-analyzer'
 
 const require = createRequire(import.meta.url)
@@ -86,9 +87,12 @@ describe('decodeToWav', () => {
     // We don't have a committed m4a fixture (no binaries), but afconvert
     // reads WAV containers too — feeding it a stereo/48kHz source and
     // asserting the mono/44.1kHz output analyzes cleanly exercises the same
-    // child_process path decodeToWav uses for real m4a previews.
+    // child_process path decodeToWav uses for real m4a previews. Uses a
+    // click track (not a bare tone) so the decoded output has real
+    // rhythmic content to analyze — a toneless signal now correctly fails
+    // the degenerate-audio gate instead of returning a fabricated tempo.
     const sourcePath = join(workDir, 'source.wav')
-    const stereo48k = tone(440, 1)
+    const stereo48k = clickTrack(120, 10)
     const nodeWav = require('node-wav') as {
       encode(channelData: Float32Array[], opts: { sampleRate: number; bitDepth: number }): Buffer
     }
@@ -97,8 +101,13 @@ describe('decodeToWav', () => {
     const outPath = join(workDir, 'decoded.wav')
     await decodeToWav(sourcePath, outPath)
 
+    // Real afconvert resampling (48kHz stereo -> 44.1kHz mono) can shift
+    // transient timing slightly, so this only checks the pipeline produces
+    // a plausible tempo, not tight accuracy (that's covered by the
+    // dedicated tempo test against a fixture authored directly at 44.1kHz).
     const features = await analyzePreview(outPath)
-    expect(features.energy).toBeGreaterThan(0)
+    expect(features.tempo).toBeGreaterThanOrEqual(40)
+    expect(features.tempo).toBeLessThanOrEqual(250)
   })
 
   it.skipIf(!afconvertAvailable)('throws a fixed-string error, never interpolating afconvert stderr', async () => {
@@ -106,10 +115,18 @@ describe('decodeToWav', () => {
       'afconvert failed',
     )
   })
+
+  it.skipIf(!afconvertAvailable)('removes a partial output file left behind by a failed afconvert run', async () => {
+    const outPath = join(workDir, 'partial-out.wav')
+    await writeFile(outPath, 'stale partial data from a previous truncated run')
+
+    await expect(decodeToWav(join(workDir, 'does-not-exist-2.m4a'), outPath)).rejects.toThrow('afconvert failed')
+    await expect(access(outPath)).rejects.toThrow()
+  })
 })
 
 describe('analyzePreview', () => {
-  it.skipIf(!analyzerAvailable)('detects tempo within ±3 BPM of a 120 BPM click track (octave-normalized)', async () => {
+  it.skipIf(!analyzerAvailable)('detects tempo within ±3 BPM of a 120 BPM click track', async () => {
     const path = join(workDir, 'click-120.wav')
     await writeWavFile(path, clickTrack(120, 10))
 
@@ -120,23 +137,54 @@ describe('analyzePreview', () => {
     expect(Math.abs(features.tempo - 120)).toBeLessThanOrEqual(3)
   })
 
-  it.skipIf(!analyzerAvailable)('orders energy: a 440Hz tone above silence, both within [0,1]', async () => {
-    const tonePath = join(workDir, 'tone.wav')
-    const silencePath = join(workDir, 'silence.wav')
-    await writeWavFile(tonePath, tone(440, 3))
-    await writeWavFile(silencePath, silence(3))
+  it.skipIf(!analyzerAvailable)(
+    'throws a fixed-string error on degenerate (silent) audio rather than fabricating a tempo',
+    async () => {
+      const path = join(workDir, 'silence-degenerate.wav')
+      await writeWavFile(path, silence(5))
 
-    const toneFeatures = await analyzePreview(tonePath)
-    const silenceFeatures = await analyzePreview(silencePath)
+      await expect(analyzePreview(path)).rejects.toThrow('degenerate audio — no analysis')
+    },
+  )
 
-    expect(toneFeatures.energy).toBeGreaterThan(silenceFeatures.energy)
-    expect(toneFeatures.energy).toBeGreaterThanOrEqual(0)
-    expect(toneFeatures.energy).toBeLessThanOrEqual(1)
-    expect(silenceFeatures.energy).toBeGreaterThanOrEqual(0)
-    expect(silenceFeatures.energy).toBeLessThanOrEqual(1)
-  })
+  it.skipIf(!analyzerAvailable)(
+    'loudness: a loud sine reads closer to 0 dBFS than a quiet one, both negative and well separated',
+    async () => {
+      const loudPath = join(workDir, 'loud.wav')
+      const quietPath = join(workDir, 'quiet.wav')
+      await writeWavFile(loudPath, tone(440, 3, 0.9))
+      await writeWavFile(quietPath, tone(440, 3, 0.03))
 
-  it.skipIf(!analyzerAvailable)('reports danceability and loudness in the ReccoBeats-comparable ranges', async () => {
+      const loud = await analyzePreview(loudPath)
+      const quiet = await analyzePreview(quietPath)
+
+      expect(loud.loudness).toBeLessThan(0)
+      expect(quiet.loudness).toBeLessThan(0)
+      expect(loud.loudness).toBeGreaterThan(quiet.loudness)
+      // "well below" — not just ordered, but by a real, non-trivial margin.
+      expect(quiet.loudness).toBeLessThan(loud.loudness - 10)
+    },
+  )
+
+  it.skipIf(!analyzerAvailable)(
+    'energy: calibrated to a real mastered-music dBFS window — loud maps near the top, quiet-but-audible maps low but nonzero',
+    async () => {
+      const loudPath = join(workDir, 'loud-energy.wav')
+      const quietPath = join(workDir, 'quiet-energy.wav')
+      await writeWavFile(loudPath, tone(440, 3, 0.9))
+      await writeWavFile(quietPath, tone(440, 3, 0.1))
+
+      const loud = await analyzePreview(loudPath)
+      const quiet = await analyzePreview(quietPath)
+
+      expect(loud.energy).toBeGreaterThan(0.7)
+      expect(loud.energy).toBeLessThanOrEqual(1)
+      expect(quiet.energy).toBeGreaterThan(0)
+      expect(quiet.energy).toBeLessThan(loud.energy)
+    },
+  )
+
+  it.skipIf(!analyzerAvailable)('reports danceability in the ReccoBeats-comparable [0,1] range', async () => {
     const path = join(workDir, 'click-120-range.wav')
     await writeWavFile(path, clickTrack(120, 10))
 
@@ -144,7 +192,6 @@ describe('analyzePreview', () => {
 
     expect(features.danceability).toBeGreaterThanOrEqual(0)
     expect(features.danceability).toBeLessThanOrEqual(1)
-    expect(features.loudness).toBeLessThanOrEqual(0)
   })
 
   it.skipIf(!analyzerAvailable)('reports key/mode within valid shape (0-11, 0|1) on a synthesized A-minor triad', async () => {
@@ -165,13 +212,43 @@ describe('analyzePreview', () => {
     expect([0, 1]).toContain(features.mode)
   })
 
-  it.skipIf(!analyzerAvailable)('is deterministic for the same file', async () => {
-    const path = join(workDir, 'determinism.wav')
-    await writeWavFile(path, clickTrack(128, 6))
+  it.skipIf(!analyzerAvailable)(
+    'throws a fixed-string error on a non-44100Hz input rather than silently skewing tempo',
+    async () => {
+      const path = join(workDir, 'wrong-rate.wav')
+      await writeWavFile(path, tone(440, 2, 0.5), 48000)
 
-    const a = await analyzePreview(path)
-    const b = await analyzePreview(path)
+      await expect(analyzePreview(path)).rejects.toThrow('unsupported sample rate — expected 44100Hz mono wav')
+    },
+  )
 
-    expect(a).toEqual(b)
+  it.skipIf(!analyzerAvailable)(
+    'is deterministic for the same file across interleaved calls with a different file in between',
+    async () => {
+      const pathA = join(workDir, 'determinism-a.wav')
+      const pathB = join(workDir, 'determinism-b.wav')
+      await writeWavFile(pathA, clickTrack(128, 6))
+      await writeWavFile(pathB, clickTrack(96, 6))
+
+      const a1 = await analyzePreview(pathA)
+      const b = await analyzePreview(pathB)
+      const a2 = await analyzePreview(pathA)
+
+      expect(a1).toStrictEqual(a2)
+      expect(a1).not.toStrictEqual(b)
+    },
+  )
+})
+
+describe('pitchClassOf', () => {
+  it('maps known pitch-class names to the 0-11 (C=0) convention', () => {
+    expect(pitchClassOf('C')).toBe(0)
+    expect(pitchClassOf('C#')).toBe(1)
+    expect(pitchClassOf('Db')).toBe(1)
+    expect(pitchClassOf('B')).toBe(11)
+  })
+
+  it('throws a fixed-string error on an unrecognized key name rather than fabricating C=0', () => {
+    expect(() => pitchClassOf('H')).toThrow('unrecognized key name from essentia')
   })
 })
