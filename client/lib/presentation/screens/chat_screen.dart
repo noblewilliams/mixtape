@@ -90,7 +90,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       final state = next.value;
       if (state == null) return;
 
-      if (state.transientError != null) {
+      // Guarded on being the top route: QueueScreen watches the same
+      // provider and runs the same listener, so with the queue pushed over
+      // this screen one error would otherwise queue two identical
+      // snackbars — the second surfacing seconds later, out of context.
+      if (state.transientError != null &&
+          ModalRoute.of(context)?.isCurrent == true) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(state.transientError!)));

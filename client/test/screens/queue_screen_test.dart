@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixtape/data/api/api_client.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/dj/dj_api.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
@@ -10,6 +11,7 @@ import 'package:mixtape/data/musickit/musickit_bridge.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/dj_providers.dart';
 import 'package:mixtape/presentation/providers/library_sync_provider.dart';
+import 'package:mixtape/presentation/screens/chat_screen.dart';
 import 'package:mixtape/presentation/screens/queue_screen.dart';
 
 /// Mirrors chat_screen_test.dart's FakeDjApi: implements DjApi's public
@@ -136,6 +138,57 @@ QueueTrack _track(int position, {Object? appleId = _sentinel, String? reason, in
 
 const _sentinel = Object();
 
+QueueTrack _renumbered(QueueTrack track, int position) => QueueTrack(
+      position: position,
+      trackId: track.trackId,
+      appleId: track.appleId,
+      title: track.title,
+      artist: track.artist,
+      reason: track.reason,
+      durationMs: track.durationMs,
+    );
+
+/// A tiny stand-in for the server's queue table: holds the canonical
+/// queue+version, applies remove/move with the SAME semantics the real
+/// endpoint uses (0-based positions; move = splice-out then splice-in),
+/// enforces the strict version check (409 → [StaleQueueException]), and
+/// bumps the version on every successful call. Lets a test assert what a
+/// sequence of ops actually does to the queue instead of hand-stubbing
+/// each response.
+class _QueueSim {
+  _QueueSim(this.tracks, this.version);
+
+  List<QueueTrack> tracks;
+  int version;
+
+  QueueOpsResult apply(List<QueueOp> ops, int? expectedVersion) {
+    if (expectedVersion != null && expectedVersion != version) {
+      throw StaleQueueException(queue: tracks, queueVersion: version);
+    }
+    final next = [...tracks];
+    var removed = 0;
+    for (final op in ops) {
+      final json = op.toJson();
+      if (json['op'] == 'remove') {
+        next.removeAt(json['position'] as int);
+        removed += 1;
+      } else {
+        final moved = next.removeAt(json['from'] as int);
+        next.insert(json['to'] as int, moved);
+      }
+    }
+    tracks = [for (var i = 0; i < next.length; i++) _renumbered(next[i], i)];
+    version += 1;
+    return QueueOpsResult(
+      queueVersion: version,
+      requested: ops.length,
+      added: 0,
+      removed: removed,
+      queue: tracks,
+    );
+  }
+}
+
 ProviderContainer _makeContainer(FakeDjApi api, {FakeBridge? bridge}) {
   final container = ProviderContainer(
     overrides: [
@@ -199,23 +252,17 @@ void main() {
     expect(capturedVersion, 4);
   });
 
-  testWidgets('dragging a row down sends a move op, with newIndex adjusted by -1', (tester) async {
+  testWidgets('dragging a row down sends a move op whose target is the raw newIndex minus one', (
+    tester,
+  ) async {
     final api = FakeDjApi();
-    api.onGetSession = (_) async => SessionDetail(
-      session: _session(queueVersion: 2),
-      messages: [],
-      queue: [_track(0), _track(1), _track(2)],
-    );
+    final sim = _QueueSim([_track(0), _track(1), _track(2), _track(3)], 2);
+    api.onGetSession = (_) async =>
+        SessionDetail(session: _session(queueVersion: 2), messages: [], queue: [...sim.tracks]);
     List<QueueOp>? capturedOps;
     api.onApplyQueueOps = (id, ops, expectedVersion) async {
       capturedOps = ops;
-      return QueueOpsResult(
-        queueVersion: 3,
-        requested: 1,
-        added: 0,
-        removed: 0,
-        queue: [_track(1), _track(2), _track(0)],
-      );
+      return sim.apply(ops, expectedVersion);
     };
     final container = _makeContainer(api);
     await _pump(tester, container);
@@ -223,10 +270,12 @@ void main() {
     final rowHeight = tester.getSize(find.byKey(const Key('dismissible-t0'))).height;
     final handle = find.byKey(const Key('drag-handle-t0'));
 
-    // Drags the top row (index 0) down past both other rows — Flutter's
-    // raw newIndex for a downward drag overshoots by one (it's computed
-    // before the dragged item is removed from the list), which is exactly
-    // the off-by-one QueueScreen's onReorder handler corrects for.
+    // Drags the top row (index 0) downward. Flutter's raw newIndex for a
+    // downward drag overshoots by one — it's computed before the dragged
+    // item is taken out of the list — so this deterministic gesture reports
+    // 2 and the op must carry the corrected 1. Four rows, so BOTH the
+    // corrected target and the raw one are valid in-range positions and the
+    // assertion below can actually tell them apart.
     final gesture = await tester.startGesture(tester.getCenter(handle));
     await tester.pump(const Duration(milliseconds: 50));
     await gesture.moveBy(Offset(0, rowHeight * 2.5));
@@ -235,14 +284,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(capturedOps, isNotNull);
-    final op = capturedOps!.single.toJson();
-    expect(op['op'], 'move');
-    expect(op['from'], 0);
-    // Moving down: whatever raw newIndex the framework reports, the op's
-    // target must already be adjusted (-1 from the raw value) — asserted
-    // indirectly here by requiring the corrected target to land AFTER the
-    // dragged item's original slot, never equal to the unadjusted overshoot.
-    expect(op['to'], greaterThan(0));
+    // Pinned to the EXACT target, not just "somewhere after 0": dropping the
+    // decrement would send move(0, 2) here, which this assertion catches.
+    expect(capturedOps!.single.toJson(), {'op': 'move', 'from': 0, 'to': 1});
+    expect(sim.tracks.map((t) => t.trackId).toList(), ['t1', 't0', 't2', 't3']);
   });
 
   testWidgets('a stale queue-ops response rebuilds the list and shows a snackbar', (tester) async {
@@ -416,5 +461,170 @@ void main() {
     await _pump(tester, container);
 
     expect(find.text('ask the DJ for a tape'), findsOneWidget);
+  });
+
+  testWidgets('a failed (non-stale) removal un-hides the swiped row instead of losing it', (
+    tester,
+  ) async {
+    final api = FakeDjApi();
+    api.onGetSession = (_) async =>
+        SessionDetail(session: _session(queueVersion: 4), messages: [], queue: [_track(0), _track(1)]);
+    final gate = Completer<void>();
+    api.onApplyQueueOps = (id, ops, expectedVersion) async {
+      await gate.future;
+      throw NetworkException('offline');
+    };
+    final container = _makeContainer(api);
+    await _pump(tester, container);
+
+    await tester.drag(find.byKey(const Key('dismissible-t1')), const Offset(-500, 0));
+    await tester.pumpAndSettle();
+
+    // Hidden while the op is in flight (Dismissible requires that)...
+    expect(find.text('Title 1'), findsNothing);
+
+    gate.complete();
+    await tester.pumpAndSettle();
+
+    // ...and back the moment the op settles as a failure. The version never
+    // moved here, so nothing but settle-based un-hiding can recover it.
+    expect(find.text('Title 1'), findsOneWidget);
+    expect(find.textContaining('check your connection'), findsOneWidget);
+  });
+
+  testWidgets('two rapid dismissals both land — the second resolves against the fresh queue and version', (
+    tester,
+  ) async {
+    final sim = _QueueSim([_track(0), _track(1), _track(2)], 4);
+    final api = FakeDjApi();
+    api.onGetSession = (_) async =>
+        SessionDetail(session: _session(queueVersion: 4), messages: [], queue: [...sim.tracks]);
+    final calls = <({List<Map<String, dynamic>> ops, int? version})>[];
+    final gate = Completer<void>();
+    api.onApplyQueueOps = (id, ops, expectedVersion) async {
+      calls.add((ops: [for (final o in ops) o.toJson()], version: expectedVersion));
+      if (calls.length == 1) await gate.future;
+      return sim.apply(ops, expectedVersion);
+    };
+    final container = _makeContainer(api);
+    await _pump(tester, container);
+
+    await tester.drag(find.byKey(const Key('dismissible-t1')), const Offset(-500, 0));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byKey(const Key('dismissible-t2')), const Offset(-500, 0));
+    await tester.pumpAndSettle();
+
+    // Strictly one in flight at a time — the second swipe is queued, not fired.
+    expect(calls.length, 1);
+
+    gate.complete();
+    await tester.pumpAndSettle();
+
+    expect(calls.length, 2);
+    expect(calls[0].ops.single, {'op': 'remove', 'position': 1});
+    expect(calls[0].version, 4);
+    // t2 sits at index 1 once t1 is gone, and the op is posted against the
+    // version the FIRST op produced — no 409, nothing silently discarded.
+    expect(calls[1].ops.single, {'op': 'remove', 'position': 1});
+    expect(calls[1].version, 5);
+    expect(sim.tracks.map((t) => t.trackId).toList(), ['t0']);
+    expect(find.text('Title 0'), findsOneWidget);
+    expect(find.text('Title 1'), findsNothing);
+    expect(find.text('Title 2'), findsNothing);
+  });
+
+  testWidgets('a row pending removal is excluded from the ids handed to Apple Music', (tester) async {
+    final api = FakeDjApi();
+    api.onGetSession = (_) async => SessionDetail(
+      session: _session(),
+      messages: [],
+      queue: [_track(0), _track(1), _track(2)],
+    );
+    final gate = Completer<void>();
+    api.onApplyQueueOps = (id, ops, expectedVersion) async {
+      await gate.future;
+      throw NetworkException('offline');
+    };
+    final bridge = FakeBridge();
+    final container = _makeContainer(api, bridge: bridge);
+    await _pump(tester, container);
+
+    await tester.drag(find.byKey(const Key('dismissible-t1')), const Offset(-500, 0));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('play-button')));
+    await tester.pumpAndSettle();
+
+    expect(bridge.playCalls.single, ['apple-0', 'apple-2']);
+
+    gate.complete();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('a MusicKit failure while playing shows a friendly snackbar', (tester) async {
+    final api = FakeDjApi();
+    api.onGetSession = (_) async => SessionDetail(session: _session(), messages: [], queue: [_track(0)]);
+    final bridge = FakeBridge();
+    bridge.onPlayQueue = (_) async => throw MusicKitException('boom');
+    final container = _makeContainer(api, bridge: bridge);
+    await _pump(tester, container);
+
+    await tester.tap(find.byKey(const Key('play-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text("couldn't reach Apple Music — try again"), findsOneWidget);
+  });
+
+  testWidgets('a partially-failed save reports the failure count', (tester) async {
+    final api = FakeDjApi();
+    api.onGetSession = (_) async =>
+        SessionDetail(session: _session(), messages: [], queue: [_track(0), _track(1)]);
+    final bridge = FakeBridge();
+    bridge.onCreatePlaylist = (name, ids) async => (added: 1, failed: 1);
+    final container = _makeContainer(api, bridge: bridge);
+    await _pump(tester, container);
+
+    await tester.tap(find.byKey(const Key('save-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('save-confirm-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('saved 1 songs to Apple Music (1 failed)'), findsOneWidget);
+  });
+
+  testWidgets('with the queue screen stacked over the chat screen, only the top route shows the snackbar', (
+    tester,
+  ) async {
+    final api = FakeDjApi();
+    api.onGetSession = (_) async =>
+        SessionDetail(session: _session(queueVersion: 1), messages: [], queue: [_track(0)]);
+    api.onApplyQueueOps = (id, ops, expectedVersion) async =>
+        throw StaleQueueException(queue: [_track(0)], queueVersion: 9);
+    final container = _makeContainer(api);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: ChatScreen(sessionId: 's1')),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    tester.state<NavigatorState>(find.byType(Navigator)).push(
+      MaterialPageRoute<void>(builder: (_) => const QueueScreen(sessionId: 's1')),
+    );
+    await tester.pumpAndSettle();
+
+    await container.read(chatProvider('s1').notifier).applyOps([const QueueOp.remove(0)]);
+    await tester.pumpAndSettle();
+
+    expect(find.text('queue was updated — showing the latest'), findsOneWidget);
+
+    // Both screens' listeners fired; only the top route may show/clear the
+    // one-shot error. If the covered ChatScreen showed one too, a SECOND
+    // snackbar would be queued behind this one and surface as it expires.
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pumpAndSettle();
+    expect(find.text('queue was updated — showing the latest'), findsNothing);
   });
 }

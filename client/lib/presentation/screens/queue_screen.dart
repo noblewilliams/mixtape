@@ -12,6 +12,12 @@ import '../providers/library_sync_provider.dart';
 /// [QueueCard] already watch. Server-canonical, like every other queue
 /// mutation in this app: reorder/remove post an op and re-render from the
 /// response rather than editing local state optimistically.
+///
+/// Every mutation goes through one FIFO of [_QueueIntent]s rather than
+/// firing straight at the provider — see [_QueueScreenState._enqueue] for
+/// the invariants that buys (one op in flight at a time, positions resolved
+/// against the queue as it stands when the op is posted, and rows un-hidden
+/// when their own op settles rather than on a version change).
 class QueueScreen extends ConsumerStatefulWidget {
   const QueueScreen({super.key, required this.sessionId});
 
@@ -24,17 +30,28 @@ class QueueScreen extends ConsumerStatefulWidget {
 class _QueueScreenState extends ConsumerState<QueueScreen> {
   final Set<String> _expandedTrackIds = {};
 
-  /// Filters a just-swiped row out of the render immediately. [Dismissible]
-  /// requires the item to be gone from the underlying list by the very next
-  /// build or it asserts ("A dismissed Dismissible widget is still part of
-  /// the tree") — but this screen is server-canonical (no optimistic data
-  /// edits), so the REAL removal only lands once the queue-ops response
-  /// comes back. This set is a pure rendering patch, not a data mutation:
-  /// it's cleared the moment [ChatState.queueVersion] actually changes
-  /// (success or a stale-replacement both bump it), so a failed/no-op
-  /// removal naturally un-hides the row instead of silently losing it.
+  /// Rows filtered out of the render even though the server still has them.
+  /// [Dismissible] requires a swiped item to be gone from the underlying
+  /// list by the very next build or it asserts ("A dismissed Dismissible
+  /// widget is still part of the tree") — but this screen is
+  /// server-canonical (no optimistic data edits), so the REAL removal only
+  /// lands once the queue-ops response comes back.
+  ///
+  /// Entries are per-track and SETTLE-BASED: one is added when a gesture
+  /// enqueues an intent and removed in that intent's `finally`, whatever
+  /// the outcome. Never cleared wholesale on a version change — a version
+  /// bump from an unrelated source (a concurrent DJ turn) would otherwise
+  /// resurrect a just-dismissed row in the same frame it was dismissed,
+  /// tripping exactly the assertion above; and a non-stale applyOps failure
+  /// leaves the version UNCHANGED, so version-triggered clearing would
+  /// strand the row invisible forever while it still exists server-side.
   final Set<String> _hiddenTrackIds = {};
-  int? _lastSeenVersion;
+
+  /// Serialized queue mutations, oldest first. See [_enqueue] for why they
+  /// run strictly one at a time and why they're expressed as intents
+  /// (track ids) rather than as ready-made positional ops.
+  final List<_QueueIntent> _intents = [];
+  bool _draining = false;
 
   bool _playing = false;
   bool _saving = false;
@@ -45,24 +62,94 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     });
   }
 
+  /// Queue mutation invariants, all of which fall out of running intents
+  /// through a single FIFO:
+  ///
+  /// * **One in flight at a time.** A second gesture never posts against a
+  ///   version the first gesture is about to bump, so rapid swipes can't
+  ///   409 and be silently discarded — the later intent simply waits and
+  ///   uses the fresh version.
+  /// * **Positions resolve at EXECUTION time, from the provider's current
+  ///   queue** — never from the visible list at gesture time, which omits
+  ///   hidden rows and would therefore point a 0-based server position at
+  ///   the wrong track. If the intent's track is gone by then (a DJ turn
+  ///   removed it, say), the intent is skipped rather than mis-targeted.
+  /// * **Hiding is settle-based.** The gesture hides its row immediately
+  ///   (Dismissible's hard requirement) and the intent un-hides that
+  ///   specific id when it settles, so a failed removal reappears.
+  void _enqueue(_QueueIntent intent) {
+    _intents.add(intent);
+    if (!_draining) _drain();
+  }
+
+  Future<void> _drain() async {
+    _draining = true;
+    try {
+      while (_intents.isNotEmpty && mounted) {
+        // Unforeseen-exception guard, same shape as ChatScreen's `_send`:
+        // [ChatNotifier.applyOps] resolves every error it knows about into
+        // a transientError and never rethrows, so this catch exists purely
+        // so an entirely unanticipated one can't become an unhandled async
+        // error that also strands every intent still queued behind it.
+        try {
+          await _run(_intents.removeAt(0));
+        } catch (_) {
+          if (mounted) _showSnack(context, 'something unexpected happened');
+        }
+      }
+    } finally {
+      _draining = false;
+    }
+  }
+
+  Future<void> _run(_QueueIntent intent) async {
+    try {
+      final queue = ref.read(chatProvider(widget.sessionId)).value?.queue;
+      if (queue == null) return;
+      final op = intent.resolve(queue);
+      if (op == null) return; // the intent no longer means anything — drop it
+      await ref.read(chatProvider(widget.sessionId).notifier).applyOps([op]);
+    } finally {
+      // Runs on success, failure, and the skipped-intent paths above: the
+      // row this intent owned is either genuinely gone from the queue now
+      // (so un-hiding is a harmless no-op) or was never removed, in which
+      // case it has to come back rather than stay stuck invisible.
+      if (mounted) {
+        setState(() => _hiddenTrackIds.remove(intent.trackId));
+      }
+    }
+  }
+
   void _handleDismiss(QueueTrack track) {
     setState(() => _hiddenTrackIds.add(track.trackId));
-    ref
-        .read(chatProvider(widget.sessionId).notifier)
-        .applyOps([QueueOp.remove(track.position)]);
+    _enqueue(_RemoveIntent(track.trackId));
   }
 
   /// [newIndex] arrives in [ReorderableListView]'s own pre-removal indexing:
   /// moving an item DOWN reports an index one past where it actually lands
   /// once the dragged item is taken out of the list, so it's decremented by
-  /// one in that case before becoming the op's target position.
-  void _handleReorder(int oldIndex, int newIndex) {
+  /// one in that case.
+  ///
+  /// The result is turned into an ANCHOR (the id of the row the dragged one
+  /// should land in front of, or null for "at the end") rather than a bare
+  /// index, because [visible] is the on-screen list — which omits any row
+  /// hidden by an intent that hasn't settled yet — while the op needs a
+  /// position in the server's full queue. [_MoveIntent] re-derives that
+  /// position from the current queue when it runs.
+  void _handleReorder(List<QueueTrack> visible, int oldIndex, int newIndex) {
     var adjusted = newIndex;
     if (adjusted > oldIndex) adjusted -= 1;
     if (adjusted == oldIndex) return;
-    ref
-        .read(chatProvider(widget.sessionId).notifier)
-        .applyOps([QueueOp.move(oldIndex, adjusted)]);
+    final rest = [
+      for (var i = 0; i < visible.length; i++)
+        if (i != oldIndex) visible[i].trackId,
+    ];
+    _enqueue(
+      _MoveIntent(
+        visible[oldIndex].trackId,
+        beforeTrackId: adjusted < rest.length ? rest[adjusted] : null,
+      ),
+    );
   }
 
   Future<void> _handlePlay(BuildContext screenContext, List<QueueTrack> queue) async {
@@ -161,17 +248,23 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
       final state = next.value;
       if (state == null) return;
 
-      // Any real version bump (success or a stale-replacement) means the
-      // server's view has moved on — a locally-hidden row is either
-      // genuinely gone now (the fresh queue just won't contain it) or was
-      // never actually removed (a failed/no-op call), in which case it
-      // must reappear rather than stay stuck invisible.
-      if (_lastSeenVersion != null && state.queueVersion != _lastSeenVersion) {
-        _hiddenTrackIds.clear();
-      }
-      _lastSeenVersion = state.queueVersion;
+      // Drop expansion state for tracks that have left the queue, so a
+      // trackId can't accumulate here forever (and can't silently
+      // re-expand if the DJ ever re-adds the same track later). Mutated
+      // without setState deliberately: the very provider change that
+      // triggered this listener also rebuilds this widget via ref.watch,
+      // and setState from a listener can land mid-build.
+      final liveIds = {for (final t in state.queue) t.trackId};
+      _expandedTrackIds.removeWhere((id) => !liveIds.contains(id));
 
-      if (state.transientError != null) {
+      // ChatScreen keeps its own transientError listener and is still
+      // mounted underneath this route, so both would fire for one error and
+      // queue two identical snackbars. Only the route actually on top shows
+      // (and clears) it. Tradeoff: an error landing while this screen's own
+      // save dialog is up belongs to no top route and is dropped — it's a
+      // one-shot toast, and the queue itself is already correct.
+      final isTopRoute = ModalRoute.of(context)?.isCurrent == true;
+      if (state.transientError != null && isTopRoute) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(state.transientError!)));
@@ -195,10 +288,14 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     }
 
     final state = chatAsync.value!;
-    _lastSeenVersion ??= state.queueVersion;
 
+    // [visibleQueue] — not state.queue — drives EVERY surface on this
+    // screen: the list, the empty state, whether Play/Save are actionable,
+    // and the ids handed to Apple Music. A row the user has just swiped
+    // away shouldn't play or be saved into a playlist just because its
+    // removal hasn't round-tripped yet.
     final visibleQueue = state.queue.where((t) => !_hiddenTrackIds.contains(t.trackId)).toList();
-    final disabledReason = _actionsDisabledReason(state.queue);
+    final disabledReason = _actionsDisabledReason(visibleQueue);
 
     return Scaffold(
       appBar: AppBar(
@@ -208,7 +305,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
             key: const Key('play-button'),
             tooltip: disabledReason ?? 'Play in Apple Music',
             onPressed: (disabledReason == null && !_playing)
-                ? () => _handlePlay(context, state.queue)
+                ? () => _handlePlay(context, visibleQueue)
                 : null,
             icon: const Icon(Icons.play_circle),
           ),
@@ -216,7 +313,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
             key: const Key('save-button'),
             tooltip: disabledReason ?? 'Save as playlist',
             onPressed: (disabledReason == null && !_saving)
-                ? () => _openSaveDialog(context, state.queue, state.session.title)
+                ? () => _openSaveDialog(context, visibleQueue, state.session.title)
                 : null,
             icon: const Icon(Icons.playlist_add),
           ),
@@ -228,7 +325,12 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
             : ReorderableListView.builder(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 itemCount: visibleQueue.length,
-                onReorder: _handleReorder,
+                // Each row supplies its own ReorderableDragStartListener on
+                // the drag handle — the default handles would add a second,
+                // duplicate one on every row.
+                buildDefaultDragHandles: false,
+                onReorder: (oldIndex, newIndex) =>
+                    _handleReorder(visibleQueue, oldIndex, newIndex),
                 itemBuilder: (context, index) {
                   final track = visibleQueue[index];
                   return _QueueRow(
@@ -243,6 +345,65 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
               ),
       ),
     );
+  }
+}
+
+/// One queued queue-mutation, held in terms of TRACK IDS rather than
+/// positions. The gesture that creates it knows what the user meant ("drop
+/// this track", "put this track in front of that one"); the 0-based server
+/// position that expresses it is only correct against the queue as it
+/// stands when the op is actually posted, which is what [resolve] computes.
+sealed class _QueueIntent {
+  const _QueueIntent(this.trackId);
+
+  /// The track this intent acts on — and the id un-hidden once it settles.
+  final String trackId;
+
+  /// The op to post against [queue] (the provider's current, canonical
+  /// queue, in server order), or null if the intent no longer means
+  /// anything and should be skipped.
+  QueueOp? resolve(List<QueueTrack> queue);
+}
+
+class _RemoveIntent extends _QueueIntent {
+  const _RemoveIntent(super.trackId);
+
+  @override
+  QueueOp? resolve(List<QueueTrack> queue) {
+    final from = queue.indexWhere((t) => t.trackId == trackId);
+    // Already gone (a DJ turn dropped it first) — removing "its" position
+    // now would delete whichever track has since moved into that slot.
+    return from < 0 ? null : QueueOp.remove(from);
+  }
+}
+
+class _MoveIntent extends _QueueIntent {
+  const _MoveIntent(super.trackId, {required this.beforeTrackId});
+
+  /// The track the dragged one should land in front of; null means "at the
+  /// end of the queue".
+  final String? beforeTrackId;
+
+  @override
+  QueueOp? resolve(List<QueueTrack> queue) {
+    final from = queue.indexWhere((t) => t.trackId == trackId);
+    if (from < 0) return null;
+    // The server applies move as splice-out-then-splice-in, so `to` indexes
+    // the queue WITHOUT the dragged track — build that list and locate the
+    // anchor in it.
+    final rest = [
+      for (final t in queue)
+        if (t.trackId != trackId) t.trackId,
+    ];
+    final int to;
+    if (beforeTrackId == null) {
+      to = rest.length;
+    } else {
+      final anchor = rest.indexOf(beforeTrackId!);
+      if (anchor < 0) return null; // the landing spot itself is gone
+      to = anchor;
+    }
+    return from == to ? null : QueueOp.move(from, to);
   }
 }
 
