@@ -177,11 +177,23 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     if (_saving) return;
     setState(() => _saving = true);
     try {
+      // Author prefill: the name typed on this device last time wins, then
+      // the account's display name (GET /me — read non-blocking: the fetch
+      // was started by build()'s watch, and a still-loading/absent value
+      // just means an empty field; per dj_providers' warning we never await
+      // a provider future across auth transitions). Blank falls back to
+      // 'mixtape' on save.
+      final storedAuthor = await ref.read(authorStoreProvider).read();
+      if (!screenContext.mounted) return;
+      final accountName = ref.read(accountNameProvider).value;
       await showDialog<void>(
         context: screenContext,
         builder: (dialogContext) => _SaveDialog(
           defaultName: defaultName,
-          onConfirm: (name) => _confirmSave(screenContext, dialogContext, queue, name, defaultName),
+          defaultAuthor:
+              (storedAuthor != null && storedAuthor.isNotEmpty ? storedAuthor : accountName) ?? '',
+          onConfirm: (name, author) =>
+              _confirmSave(screenContext, dialogContext, queue, name, defaultName, author),
         ),
       );
     } finally {
@@ -201,19 +213,25 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     List<QueueTrack> queue,
     String rawName,
     String defaultName,
+    String rawAuthor,
   ) async {
     final trimmed = rawName.trim();
     final name = trimmed.isEmpty ? defaultName : trimmed;
+    // Attribution: without an explicit author Apple shows the Xcode product
+    // name ("Runner"). The user's typed name wins; blank falls back to the
+    // app name. Remembered (even if the save then fails) so the next
+    // dialog prefills it — it's the user's name, not per-playlist data.
+    final trimmedAuthor = rawAuthor.trim();
+    final author = trimmedAuthor.isEmpty ? 'mixtape' : trimmedAuthor;
+    if (trimmedAuthor.isNotEmpty) {
+      await ref.read(authorStoreProvider).write(trimmedAuthor);
+    }
     final ids = [for (final t in queue) if (t.appleId != null) t.appleId!];
     try {
-      // Attribution: without an explicit author Apple shows the Xcode
-      // product name ("Runner"). The account has no stored display name yet
-      // (Apple only releases it on first-ever sign-in) — when a profile
-      // name exists, pass it here instead of the app name.
       final result = await ref.read(musicKitBridgeProvider).createPlaylist(
             name,
             ids,
-            author: 'mixtape',
+            author: author,
             description: 'made by mixtape',
           );
       if (dialogContext.mounted) Navigator.of(dialogContext).pop();
@@ -255,6 +273,10 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
   @override
   Widget build(BuildContext context) {
     final chatAsync = ref.watch(chatProvider(widget.sessionId));
+    // Kick off the /me fetch as soon as the screen opens so the account
+    // name is (usually) resolved by the time the save dialog reads it
+    // non-blocking — see _openSaveDialog.
+    ref.watch(accountNameProvider);
 
     ref.listen(chatProvider(widget.sessionId), (previous, next) {
       final state = next.value;
@@ -569,10 +591,15 @@ class _QueueRow extends StatelessWidget {
 }
 
 class _SaveDialog extends StatefulWidget {
-  const _SaveDialog({required this.defaultName, required this.onConfirm});
+  const _SaveDialog({
+    required this.defaultName,
+    required this.defaultAuthor,
+    required this.onConfirm,
+  });
 
   final String defaultName;
-  final Future<void> Function(String name) onConfirm;
+  final String defaultAuthor;
+  final Future<void> Function(String name, String author) onConfirm;
 
   @override
   State<_SaveDialog> createState() => _SaveDialogState();
@@ -580,18 +607,21 @@ class _SaveDialog extends StatefulWidget {
 
 class _SaveDialogState extends State<_SaveDialog> {
   late final TextEditingController _controller = TextEditingController(text: widget.defaultName);
+  late final TextEditingController _authorController =
+      TextEditingController(text: widget.defaultAuthor);
   bool _submitting = false;
 
   @override
   void dispose() {
     _controller.dispose();
+    _authorController.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
     if (_submitting) return; // guards a double-tap: each tap would otherwise create a NEW playlist
     setState(() => _submitting = true);
-    await widget.onConfirm(_controller.text);
+    await widget.onConfirm(_controller.text, _authorController.text);
     // widget.onConfirm always pops this dialog itself (success or failure)
     // before returning, so in practice this widget is already gone by the
     // time control reaches here and the line below never runs — kept only
@@ -603,12 +633,27 @@ class _SaveDialogState extends State<_SaveDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('Save as playlist'),
-      content: TextField(
-        key: const Key('playlist-name-field'),
-        controller: _controller,
-        autofocus: true,
-        enabled: !_submitting,
-        decoration: const InputDecoration(labelText: 'Playlist name'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            key: const Key('playlist-name-field'),
+            controller: _controller,
+            autofocus: true,
+            enabled: !_submitting,
+            decoration: const InputDecoration(labelText: 'Playlist name'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const Key('playlist-author-field'),
+            controller: _authorController,
+            enabled: !_submitting,
+            decoration: const InputDecoration(
+              labelText: 'Your name',
+              helperText: 'shown under the playlist in Apple Music',
+            ),
+          ),
+        ],
       ),
       actions: [
         TextButton(

@@ -1,11 +1,39 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/api/api_client.dart';
 import '../../data/library/library_sync_service.dart';
 import '../../data/musickit/musickit_bridge.dart';
+import '../../data/settings/author_store.dart';
 import 'auth_provider.dart';
 
 final musicKitBridgeProvider = Provider<MusicKitBridge>((ref) => MusicKitBridge());
+
+/// Device-local "by &lt;author&gt;" name stamped on saved playlists (see
+/// QueueScreen's save dialog). Not user-scoped on purpose: it's a device
+/// preference, not account data, so it survives sign-out like the rest of
+/// local settings would.
+final authorStoreProvider = Provider<AuthorStore>((ref) => SecureAuthorStore());
+
+/// The account's display name from `GET /me` (Better Auth user.name), or
+/// null when unset/unreachable — the save dialog uses it as the author
+/// default when nothing was typed on this device yet. Attribution nicety
+/// only: any failure resolves to null rather than surfacing, so a flaky
+/// network can never block saving a playlist.
+final accountNameProvider = FutureProvider<String?>((ref) async {
+  ref.watch(authProvider); // user-scoped: refetch on every auth transition
+  final api = ref.watch(apiClientProvider);
+  try {
+    final res = await api.getJson('/me');
+    if (res.statusCode != 200) return null;
+    final user = (jsonDecode(res.body) as Map<String, dynamic>)['user'];
+    final name = user is Map<String, dynamic> ? (user['name'] as String?)?.trim() : null;
+    return (name == null || name.isEmpty) ? null : name;
+  } catch (_) {
+    return null;
+  }
+});
 
 final librarySyncServiceProvider = Provider<LibrarySyncService>((ref) {
   return LibrarySyncService(

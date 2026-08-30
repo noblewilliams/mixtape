@@ -8,6 +8,7 @@ import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/dj/dj_api.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
 import 'package:mixtape/data/musickit/musickit_bridge.dart';
+import 'package:mixtape/data/settings/author_store.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/dj_providers.dart';
 import 'package:mixtape/presentation/providers/library_sync_provider.dart';
@@ -195,13 +196,23 @@ class _QueueSim {
   }
 }
 
-ProviderContainer _makeContainer(FakeDjApi api, {FakeBridge? bridge}) {
+ProviderContainer _makeContainer(
+  FakeDjApi api, {
+  FakeBridge? bridge,
+  AuthorStore? authorStore,
+  String? accountName,
+}) {
   final container = ProviderContainer(
     overrides: [
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
       djApiProvider.overrideWithValue(api),
       authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.signedIn)),
       musicKitBridgeProvider.overrideWithValue(bridge ?? FakeBridge()),
+      // The real store hits the keychain platform channel, which doesn't
+      // exist under testWidgets.
+      authorStoreProvider.overrideWithValue(authorStore ?? InMemoryAuthorStore()),
+      // The real provider hits GET /me over the network.
+      accountNameProvider.overrideWith((ref) async => accountName),
     ],
   );
   addTearDown(container.dispose);
@@ -397,6 +408,89 @@ void main() {
     expect(bridge.createCalls.single.author, 'mixtape');
     expect(bridge.createCalls.single.description, 'made by mixtape');
     expect(find.text('saved 2 songs to Apple Music'), findsOneWidget);
+  });
+
+  testWidgets('a typed author is stamped on the playlist and remembered for the next save', (
+    tester,
+  ) async {
+    final api = FakeDjApi();
+    api.onGetSession = (_) async =>
+        SessionDetail(session: _session(title: 'Road Trip'), messages: [], queue: [_track(0)]);
+    final bridge = FakeBridge();
+    final store = InMemoryAuthorStore();
+    final container = _makeContainer(api, bridge: bridge, authorStore: store);
+    await _pump(tester, container);
+
+    await tester.tap(find.byKey(const Key('save-button')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('playlist-author-field')), '  Noble  ');
+    await tester.tap(find.byKey(const Key('save-confirm-button')));
+    await tester.pumpAndSettle();
+
+    expect(bridge.createCalls.single.author, 'Noble');
+    expect(await store.read(), 'Noble');
+
+    // Reopening the dialog prefills the remembered name.
+    await tester.tap(find.byKey(const Key('save-button')));
+    await tester.pumpAndSettle();
+    final authorField = tester.widget<TextField>(find.byKey(const Key('playlist-author-field')));
+    expect(authorField.controller!.text, 'Noble');
+  });
+
+  testWidgets('with nothing typed on this device, the account name is the author default', (
+    tester,
+  ) async {
+    final api = FakeDjApi();
+    api.onGetSession = (_) async => SessionDetail(session: _session(), messages: [], queue: [_track(0)]);
+    final bridge = FakeBridge();
+    final container = _makeContainer(api, bridge: bridge, accountName: 'Noble');
+    await _pump(tester, container);
+
+    await tester.tap(find.byKey(const Key('save-button')));
+    await tester.pumpAndSettle();
+    final authorField = tester.widget<TextField>(find.byKey(const Key('playlist-author-field')));
+    expect(authorField.controller!.text, 'Noble');
+
+    await tester.tap(find.byKey(const Key('save-confirm-button')));
+    await tester.pumpAndSettle();
+    expect(bridge.createCalls.single.author, 'Noble');
+  });
+
+  testWidgets('a device-typed author beats the account name', (tester) async {
+    final api = FakeDjApi();
+    api.onGetSession = (_) async => SessionDetail(session: _session(), messages: [], queue: [_track(0)]);
+    final bridge = FakeBridge();
+    final container = _makeContainer(
+      api,
+      bridge: bridge,
+      authorStore: InMemoryAuthorStore('DJ Noble'),
+      accountName: 'Noble',
+    );
+    await _pump(tester, container);
+
+    await tester.tap(find.byKey(const Key('save-button')));
+    await tester.pumpAndSettle();
+    final authorField = tester.widget<TextField>(find.byKey(const Key('playlist-author-field')));
+    expect(authorField.controller!.text, 'DJ Noble');
+  });
+
+  testWidgets('a stored author prefills the dialog and rides the save unchanged', (tester) async {
+    final api = FakeDjApi();
+    api.onGetSession = (_) async => SessionDetail(session: _session(), messages: [], queue: [_track(0)]);
+    final bridge = FakeBridge();
+    final container = _makeContainer(
+      api,
+      bridge: bridge,
+      authorStore: InMemoryAuthorStore('Noble'),
+    );
+    await _pump(tester, container);
+
+    await tester.tap(find.byKey(const Key('save-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('save-confirm-button')));
+    await tester.pumpAndSettle();
+
+    expect(bridge.createCalls.single.author, 'Noble');
   });
 
   testWidgets('a whitespace-only playlist name falls back to the session title', (tester) async {
