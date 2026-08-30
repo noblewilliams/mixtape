@@ -161,9 +161,9 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
       await ref.read(musicKitBridgeProvider).playQueue(ids);
       if (!screenContext.mounted) return;
       _showSnack(screenContext, _playSuccessMessage(skipped));
-    } on MusicKitException {
+    } on MusicKitException catch (e) {
       if (!screenContext.mounted) return;
-      _showSnack(screenContext, "couldn't reach Apple Music — try again");
+      _showSnack(screenContext, "couldn't play — ${e.message}");
     } finally {
       if (mounted) setState(() => _playing = false);
     }
@@ -210,10 +210,13 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
       if (dialogContext.mounted) Navigator.of(dialogContext).pop();
       if (!screenContext.mounted) return;
       _showSnack(screenContext, _saveSuccessMessage(result.added, result.failed));
-    } on MusicKitException {
+    } on MusicKitException catch (e) {
       if (dialogContext.mounted) Navigator.of(dialogContext).pop();
       if (!screenContext.mounted) return;
-      _showSnack(screenContext, "couldn't save the playlist — try again");
+      // The bridge's message carries Apple's actual failure reason (see
+      // MusicKitBridge._fromPlatform) — hiding it behind a generic string
+      // made real device failures undiagnosable.
+      _showSnack(screenContext, "couldn't save the playlist — ${e.message}");
     }
   }
 

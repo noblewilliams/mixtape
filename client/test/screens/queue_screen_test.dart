@@ -561,7 +561,7 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('a MusicKit failure while playing shows a friendly snackbar', (tester) async {
+  testWidgets('a MusicKit failure while playing shows a snackbar carrying the real reason', (tester) async {
     final api = FakeDjApi();
     api.onGetSession = (_) async => SessionDetail(session: _session(), messages: [], queue: [_track(0)]);
     final bridge = FakeBridge();
@@ -572,7 +572,9 @@ void main() {
     await tester.tap(find.byKey(const Key('play-button')));
     await tester.pumpAndSettle();
 
-    expect(find.text("couldn't reach Apple Music — try again"), findsOneWidget);
+    // The bridge message (Apple's actual failure reason) must reach the
+    // user — a generic string made device failures undiagnosable.
+    expect(find.text("couldn't play — boom"), findsOneWidget);
   });
 
   testWidgets('a partially-failed save reports the failure count', (tester) async {

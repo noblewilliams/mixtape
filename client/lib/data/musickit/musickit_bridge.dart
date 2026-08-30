@@ -74,18 +74,42 @@ class MusicKitBridge {
   /// (see each method's doc). Injectable (not just a hardcoded literal)
   /// purely so tests can exercise a real "the native completion never
   /// fires" path with a tiny duration instead of actually waiting out the
-  /// 20s production default.
-  MusicKitBridge({Duration callTimeout = const Duration(seconds: 20)})
-    : _callTimeout = callTimeout;
+  /// 20s production default. `createPlaylist` additionally scales its
+  /// timeout by track count — see [perTrackTimeout].
+  MusicKitBridge({
+    Duration callTimeout = const Duration(seconds: 20),
+    Duration perTrackTimeout = const Duration(seconds: 3),
+  }) : _callTimeout = callTimeout,
+       _perTrackTimeout = perTrackTimeout;
 
   static const _channel = MethodChannel('mixtape/musickit');
   final Duration _callTimeout;
+
+  /// Extra timeout budget per track for `createPlaylist`: the native side
+  /// adds tracks ONE AT A TIME (each `addItem(withProductID:)` is its own
+  /// network round trip, sequenced to preserve queue order), so a flat 20s
+  /// cap can expire mid-save on a healthy 10+ track queue — the Dart side
+  /// would report failure while the native chain keeps going and the
+  /// playlist quietly appears anyway.
+  final Duration _perTrackTimeout;
+
+  /// Prefers the platform-side `details` (Apple's actual
+  /// localizedDescription, e.g. why getPlaylist refused) over the bridge's
+  /// static message — without it every native failure collapses into an
+  /// undiagnosable generic string.
+  static MusicKitException _fromPlatform(PlatformException e) {
+    final base = e.message ?? e.code;
+    final detail = e.details;
+    return MusicKitException(
+      detail is String && detail.isNotEmpty ? '$base ($detail)' : base,
+    );
+  }
 
   Future<bool> requestAuthorization() async {
     try {
       return await _channel.invokeMethod<bool>('requestAuthorization') ?? false;
     } on PlatformException catch (e) {
-      throw MusicKitException(e.message ?? e.code);
+      throw _fromPlatform(e);
     } on MissingPluginException {
       throw MusicKitException('MusicKit bridge not registered');
     }
@@ -105,7 +129,7 @@ class MusicKitBridge {
           .toList();
       return LibraryPage(songs: songs, total: raw['total'] as int);
     } on PlatformException catch (e) {
-      throw MusicKitException(e.message ?? e.code);
+      throw _fromPlatform(e);
     } on MissingPluginException {
       throw MusicKitException('MusicKit bridge not registered');
     }
@@ -131,7 +155,7 @@ class MusicKitBridge {
           .timeout(_callTimeout);
       return result is bool ? result : false;
     } on PlatformException catch (e) {
-      throw MusicKitException(e.message ?? e.code);
+      throw _fromPlatform(e);
     } on MissingPluginException {
       throw MusicKitException('MusicKit bridge not registered');
     } on TimeoutException {
@@ -160,7 +184,7 @@ class MusicKitBridge {
             'createPlaylist',
             {'name': name, 'appleIds': appleIds},
           )
-          .timeout(_callTimeout);
+          .timeout(_callTimeout + _perTrackTimeout * appleIds.length);
       // Parsed defensively: any shape drift from the platform side — a
       // missing key OR a wrong-typed value — degrades to 0 rather than a
       // type-cast crash reaching the UI layer.
@@ -170,7 +194,7 @@ class MusicKitBridge {
       final failed = rawFailed is int ? rawFailed : 0;
       return (added: added, failed: failed);
     } on PlatformException catch (e) {
-      throw MusicKitException(e.message ?? e.code);
+      throw _fromPlatform(e);
     } on MissingPluginException {
       throw MusicKitException('MusicKit bridge not registered');
     } on TimeoutException {

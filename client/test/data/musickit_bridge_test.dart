@@ -264,6 +264,28 @@ void main() {
       );
     });
 
+    test('a PlatformException with details carries the native reason in the '
+        'message (not just the static bridge string)', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        throw PlatformException(
+          code: 'playlist_failed',
+          message: 'could not create playlist',
+          details: 'The operation couldn’t be completed',
+        );
+      });
+      await expectLater(
+        MusicKitBridge().createPlaylist('My Tape', ['111']),
+        throwsA(
+          isA<MusicKitException>().having(
+            (e) => e.message,
+            'message',
+            'could not create playlist (The operation couldn’t be completed)',
+          ),
+        ),
+      );
+    });
+
     test('rejects an empty name without invoking the channel', () async {
       var invoked = false;
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
