@@ -9,9 +9,18 @@ import '../widgets/queue_card.dart';
 /// `docs/superpowers/plans/2026-08-29-p3b-dj-client.md` Task 4): transcript
 /// + inline queue card + composer, over [chatProvider].
 class ChatScreen extends ConsumerStatefulWidget {
-  const ChatScreen({super.key, required this.sessionId});
+  const ChatScreen({super.key, required this.sessionId, this.initialError});
 
   final String sessionId;
+
+  /// Set only when Home navigates here after a create-session failure that
+  /// still persisted a session row (see `dj_providers.dart`'s
+  /// `sessionStarterProvider` doc comment) — the server's error message,
+  /// which never made it into the transcript itself. Seeded once, as a
+  /// synthetic error bubble, right after the initial load (see
+  /// [_ChatScreenState.build]'s `ref.listen`). Does not change the
+  /// screen's contract otherwise: every other caller passes null.
+  final String? initialError;
 
   @override
   ConsumerState<ChatScreen> createState() => _ChatScreenState();
@@ -24,6 +33,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   int _lastMessageCount = -1;
   Timer? _listeningTimer;
   bool _showListeningCaption = false;
+  bool _seededInitialError = false;
 
   @override
   void dispose() {
@@ -104,6 +114,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           ).showSnackBar(SnackBar(content: Text(state.transientError!)));
         }
         ref.read(chatProvider(widget.sessionId).notifier).clearTransientError();
+      }
+
+      // One-shot: fires on the first state this listener ever sees with a
+      // value (i.e. right after the initial load resolves), guarded by
+      // _seededInitialError so a later rebuild (background refresh, a sent
+      // turn, ...) can never re-seed a duplicate bubble.
+      if (!_seededInitialError && widget.initialError != null) {
+        _seededInitialError = true;
+        ref
+            .read(chatProvider(widget.sessionId).notifier)
+            .seedInitialError(widget.initialError!);
       }
 
       final wasSending = previous?.value?.sending ?? false;

@@ -76,14 +76,32 @@ class SessionsNotifier extends AsyncNotifier<List<DjSession>> {
     );
   }
 
-  Future<void> archive(String id) async {
-    await ref.read(djApiProvider).setStatus(id, 'archived');
+  /// Returns whether the status change actually landed. [setStatus] is the
+  /// only fallible step here — it can throw any of [DjApi]'s exit types
+  /// (DjApiException, ApiException, NetworkException) and, uncaught, that
+  /// would both surface as an unhandled async error AND silently no-op the
+  /// row (nothing else would signal the failure back to the UI). Caught here
+  /// so the row simply stays as-is and the caller can show a retry snackbar.
+  /// [refresh] never needs the same treatment — it's already
+  /// [AsyncValue.guard]-wrapped and can't throw.
+  Future<bool> archive(String id) async {
+    try {
+      await ref.read(djApiProvider).setStatus(id, 'archived');
+    } catch (_) {
+      return false;
+    }
     await refresh();
+    return true;
   }
 
-  Future<void> unarchive(String id) async {
-    await ref.read(djApiProvider).setStatus(id, 'active');
+  Future<bool> unarchive(String id) async {
+    try {
+      await ref.read(djApiProvider).setStatus(id, 'active');
+    } catch (_) {
+      return false;
+    }
     await refresh();
+    return true;
   }
 }
 
@@ -366,6 +384,26 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     } on NetworkException {
       _mergeCurrent((c) => c.copyWith(transientError: _offlineErrorMessage));
     }
+  }
+
+  /// Seeds a synthetic error bubble into the just-loaded transcript — used
+  /// when Home navigates here after a create-session failure that still
+  /// persisted a session row (see [sessionStarterProvider]'s doc comment):
+  /// the server's error message never became part of the transcript itself
+  /// (the row was created, but the turn failed), so [ChatScreen] calls this
+  /// once, right after the initial load, to surface it locally. Reuses the
+  /// same error-bubble shape [send]'s failure branches produce, so the
+  /// existing retry affordance (resend against the nearest preceding user
+  /// turn) works unchanged.
+  void seedInitialError(String message) {
+    _mergeCurrent(
+      (c) => c.copyWith(
+        messages: [
+          ...c.messages,
+          ChatMessage(_localMessage('dj', message), isError: true),
+        ],
+      ),
+    );
   }
 
   void clearTransientError() {

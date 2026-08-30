@@ -8,6 +8,9 @@ import '../providers/dj_providers.dart';
 import '../providers/library_sync_provider.dart';
 import 'chat_screen.dart';
 
+const _archiveFailedMessage = "couldn't archive — try again";
+const _unarchiveFailedMessage = "couldn't unarchive — try again";
+
 const _genericStartErrorMessage = 'something went wrong on our end — try again';
 const _offlineStartErrorMessage =
     "couldn't reach the DJ — check your connection and try again";
@@ -58,12 +61,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       final sessionId = e.sessionId;
       if (sessionId != null) {
         // The session row persisted despite the turn failing — Home's job
-        // is done; ChatScreen owns showing the error/retry affordance.
+        // is done; ChatScreen owns showing the error/retry affordance
+        // (seeded from e.message via initialError, since the failed turn
+        // never made it into the transcript itself).
         _promptController.clear();
-        _navigateToChat(sessionId);
+        _navigateToChat(sessionId, initialError: e.message);
       } else {
         setState(() => _error = e.message);
       }
+    } on StaleQueueException {
+      // Defensive only: DjApi's doc comment lists this among its four exit
+      // types, but createSession can never actually throw it in practice
+      // (only queue-ops does) — kept for symmetry with the other three,
+      // mapped to the same generic message as a plain ApiException.
+      if (!mounted) return;
+      setState(() => _error = _genericStartErrorMessage);
     } on NetworkException {
       if (!mounted) return;
       setState(() => _error = _offlineStartErrorMessage);
@@ -75,10 +87,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
   }
 
-  void _navigateToChat(String sessionId) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => ChatScreen(sessionId: sessionId)),
-    );
+  void _navigateToChat(String sessionId, {String? initialError}) {
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute(
+            builder: (_) =>
+                ChatScreen(sessionId: sessionId, initialError: initialError),
+          ),
+        )
+        // Sessions can change while ChatScreen owns the screen (a fresh
+        // session just created, an archive/status change on the way in) —
+        // refresh on return rather than leaving the list stale until some
+        // unrelated rebuild happens to refetch it.
+        .then((_) {
+          if (!mounted) return;
+          ref.read(sessionsProvider.notifier).refresh();
+        });
   }
 
   void _openSyncSheet() {
@@ -111,6 +135,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             onPressed: _openSyncSheet,
           ),
           IconButton(
+            // Sign-out is only reachable from here — Home is the sole
+            // screen that pushes ChatScreen/QueueScreen, and those pushed
+            // routes are never popped on an auth transition (only the
+            // ProviderScope container gets rebuilt/reset — see
+            // dj_providers.dart's auth-transition-safety note). That makes
+            // "sign-out only happens from Home" a load-bearing invariant:
+            // adding a sign-out entry point from a pushed screen would need
+            // its own route-popping story first.
             icon: const Icon(Icons.logout),
             onPressed: () => ref.read(authProvider.notifier).signOut(),
           ),
@@ -130,6 +162,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     enabled: !_starting,
                     minLines: 1,
                     maxLines: 3,
+                    maxLength: 2000, // matches the server cap and ChatScreen's composer
                     textInputAction: TextInputAction.send,
                     onSubmitted: (_) => _submit(),
                     decoration: const InputDecoration(
@@ -163,20 +196,71 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ),
             ),
             const Divider(height: 1),
-            Expanded(
-              child: switch (sessionsAsync) {
-                AsyncData(:final value) => _SessionsList(
-                    sessions: value,
-                    showArchived: _showArchived,
-                    onToggleArchived: () =>
-                        setState(() => _showArchived = !_showArchived),
-                    onTapSession: _navigateToChat,
-                  ),
-                AsyncError() => const Center(
-                    child: Text("couldn't load your sessions"),
-                  ),
-                _ => const Center(child: CircularProgressIndicator()),
-              },
+            Expanded(child: _buildSessionsBody(sessionsAsync)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Mirrors ChatScreen's `hasError && !hasValue` pattern (see
+  /// chat_screen.dart's build() comment): only fall back to the full-screen
+  /// error+retry state when there's truly nothing else to show. A failed
+  /// background refresh with a previously-good list on hand keeps showing
+  /// that list rather than blanking it out — the RefreshIndicator wrapping
+  /// it gives manual pull-to-refresh, and refresh() itself never throws
+  /// (AsyncValue.guard-wrapped), so this never leaks an unhandled error.
+  Widget _buildSessionsBody(AsyncValue<List<DjSession>> sessionsAsync) {
+    if (sessionsAsync.hasError && !sessionsAsync.hasValue) {
+      // invalidate (not refresh()) here specifically: reaching this branch
+      // means build() itself just failed, which per chat_screen.dart's
+      // build() comment leaves Riverpod's own retry backoff scheduled on
+      // this element. invalidate() replaces the element outright, so that
+      // pending backoff Timer is cancelled rather than left dangling —
+      // refresh() would instead race it (and, in tests, trip the
+      // pending-timer-at-teardown invariant).
+      return _SessionsErrorState(onRetry: () => ref.invalidate(sessionsProvider));
+    }
+    if (!sessionsAsync.hasValue) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    return RefreshIndicator(
+      onRefresh: () => ref.read(sessionsProvider.notifier).refresh(),
+      child: _SessionsList(
+        sessions: sessionsAsync.value!,
+        showArchived: _showArchived,
+        onToggleArchived: () => setState(() => _showArchived = !_showArchived),
+        onTapSession: _navigateToChat,
+      ),
+    );
+  }
+}
+
+class _SessionsErrorState extends StatelessWidget {
+  const _SessionsErrorState({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.cloud_off,
+              size: 48,
+              color: Theme.of(context).colorScheme.error,
+            ),
+            const SizedBox(height: 16),
+            const Text("couldn't load your sessions", textAlign: TextAlign.center),
+            const SizedBox(height: 16),
+            FilledButton(
+              key: const Key('sessions-retry'),
+              onPressed: onRetry,
+              child: const Text('Try again'),
             ),
           ],
         ),
@@ -231,22 +315,52 @@ class _SessionsList extends ConsumerWidget {
           );
         }
         final session = visible[index - (hasToggle ? 1 : 0)];
+        final isArchived = session.status == 'archived';
+        final theme = Theme.of(context);
         return ListTile(
           key: Key('session-${session.id}'),
-          title: Text(session.title),
-          subtitle: Text(_relativeTime(session.updatedAt)),
+          title: Text(
+            session.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            // Subtle dim on archived rows — the trailing action and the
+            // "Archived · " subtitle prefix below carry the rest of the
+            // distinction, this just keeps it visually de-emphasized in a
+            // mixed (toggled-open) list.
+            style: isArchived
+                ? TextStyle(color: theme.colorScheme.onSurfaceVariant)
+                : null,
+          ),
+          subtitle: Text(
+            isArchived
+                ? 'Archived · ${_relativeTime(session.updatedAt)}'
+                : _relativeTime(session.updatedAt),
+          ),
           onTap: () => onTapSession(session.id),
-          trailing: session.status == 'archived'
-              ? null
-              : IconButton(
-                  key: Key('archive-${session.id}'),
-                  tooltip: 'Archive',
-                  icon: const Icon(Icons.archive_outlined),
-                  onPressed: () => ref.read(sessionsProvider.notifier).archive(session.id),
-                ),
+          trailing: IconButton(
+            key: Key(isArchived ? 'unarchive-${session.id}' : 'archive-${session.id}'),
+            tooltip: isArchived ? 'Unarchive' : 'Archive',
+            icon: Icon(isArchived ? Icons.unarchive_outlined : Icons.archive_outlined),
+            onPressed: () => _setArchived(context, ref, session.id, archived: !isArchived),
+          ),
         );
       },
     );
+  }
+
+  Future<void> _setArchived(
+    BuildContext context,
+    WidgetRef ref,
+    String id, {
+    required bool archived,
+  }) async {
+    final notifier = ref.read(sessionsProvider.notifier);
+    final ok = archived ? await notifier.archive(id) : await notifier.unarchive(id);
+    if (!ok && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(archived ? _archiveFailedMessage : _unarchiveFailedMessage)),
+      );
+    }
   }
 }
 
@@ -256,7 +370,8 @@ String _relativeTime(DateTime dt) {
   if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
   if (diff.inHours < 24) return '${diff.inHours}h ago';
   if (diff.inDays < 7) return '${diff.inDays}d ago';
-  return '${dt.month}/${dt.day}/${dt.year}';
+  final local = dt.toLocal();
+  return '${local.month}/${local.day}/${local.year}';
 }
 
 /// The P1 library-sync UI (unchanged), now presented from a bottom sheet

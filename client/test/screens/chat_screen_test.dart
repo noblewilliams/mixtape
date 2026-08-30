@@ -632,6 +632,83 @@ void main() {
     expect((bar.decoration as BoxDecoration).color, theme.colorScheme.primary);
   });
 
+  testWidgets('an initialError seeds a synthetic error bubble after the initial load, with a '
+      "working retry that resends the last user turn's prompt", (tester) async {
+    var sendCall = 0;
+    final api = FakeDjApi();
+    // Simulates Home navigating here after a create-session failure whose
+    // session row (and the user's original prompt) still persisted despite
+    // the turn itself failing — see dj_providers.dart's
+    // sessionStarterProvider doc comment.
+    api.onGetSession = (_) async => SessionDetail(
+      session: _session(),
+      messages: [_msg('m1', 'user', 'play jazz')],
+      queue: [],
+    );
+    api.onSendMessage = (id, text) async {
+      sendCall++;
+      return TurnResult(djMessage: _msg('m2', 'dj', 'sorted, here you go'), queue: [], queueVersion: 1);
+    };
+    final container = _makeContainer(api);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: ChatScreen(sessionId: 's1', initialError: 'the DJ hiccupped'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('play jazz'), findsOneWidget);
+    expect(find.byKey(const Key('error-bubble')), findsOneWidget);
+    expect(find.text('the DJ hiccupped'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('retry-message')));
+    await tester.pumpAndSettle();
+
+    expect(sendCall, 1);
+    expect(find.text('play jazz'), findsNWidgets(2)); // original + resend
+    expect(find.text('sorted, here you go'), findsOneWidget);
+  });
+
+  testWidgets('initialError seeds only once — a later unrelated state emission (e.g. a '
+      "queue-ops transientError) never duplicates the bubble", (tester) async {
+    final api = FakeDjApi();
+    api.onGetSession = (_) async =>
+        SessionDetail(session: _session(), messages: [_msg('m1', 'user', 'play jazz')], queue: []);
+    api.onApplyQueueOps = (id, ops, expectedVersion) async =>
+        throw DjApiException(kind: 'dj_required', message: 'needs the DJ');
+    final container = _makeContainer(api);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: ChatScreen(sessionId: 's1', initialError: 'the DJ hiccupped'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('error-bubble')), findsOneWidget);
+
+    // Triggers a second state emission via _mergeCurrent (a transientError
+    // update on top of the CURRENT state, not a rebuild through build()) —
+    // exactly the kind of later rebuild that must not re-seed a duplicate.
+    await container.read(chatProvider('s1').notifier).applyOps([const QueueOp.remove(0)]);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('error-bubble')), findsOneWidget); // still exactly one
+  });
+
+  testWidgets('a null initialError (every other caller) seeds nothing', (tester) async {
+    final api = FakeDjApi();
+    api.onGetSession = (_) async => SessionDetail(session: _session(), messages: [], queue: []);
+    final container = _makeContainer(api);
+    await _pump(tester, container);
+
+    expect(find.byKey(const Key('error-bubble')), findsNothing);
+  });
+
   testWidgets('error bubbles keep errorContainer but also gain an error-tinted accent bar', (tester) async {
     final api = FakeDjApi();
     api.onGetSession = (_) async => SessionDetail(session: _session(), messages: [], queue: []);
