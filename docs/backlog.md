@@ -14,7 +14,9 @@ P4 built v2's foundation (taste term + memory). What remains, in ascending diffi
 2. **Anticipatory sessions ("your usual Friday wind-down?").** Data already exists — sessions carry timestamps + prompts. A pattern job spots time-of-day/mood habits; Home offers a one-tap suggested session instead of a blank prompt.
 3. **Automatic playback feedback (skips/repeats/completions).** Hardest + most valuable. CONSTRAINT: playback hands off to the Music app, so skips are currently invisible to us. Options: observe `systemMusicPlayer` state while the app is alive (partial signal), or build in-app playback via `ApplicationMusicPlayer` (vision explicitly allows both) so the whole session is observed and every skip becomes a free taste signal. Deserves its own spec — in-app playback also changes the product feel (the tape plays inside mixtape).
 
-Then **v3 — web + reach**: MusicKit-JS web companion (no play counts on web; same backend), App Store release, licensed-lyrics deal when revenue justifies (see vision.md milestone 3).
+**Earlier-than-v2 candidate (compounds with time — consider starting soon):** the per-day listening ledger (vision.md "Deeper history"): snapshot per-song play counts on every sync and store the diffs — Apple never exposes per-day history, so the ledger only exists from the day sampling starts. Cheap to begin (a snapshots table + diff on ingest), pays into recency-aware taste, "on this day" sessions, and the v4 social layer. Related v1 gap: playlist memberships aren't synced — the user's own playlists are the strongest explicit taste signal we don't yet ingest.
+
+Then **v3 — web + reach**: MusicKit-JS web companion (no play counts on web; same backend), App Store release, licensed-lyrics deal when revenue justifies (see vision.md milestone 3). Then **v4 — social taste layer** (added 2026-08-30): blend sessions from multiple people's taste graphs, taste-twin similarity matching over user embedding vectors, catalog discovery beyond the library — see vision.md v4 + Deeper history sections; needs v3's user base + an opt-in privacy model first.
 
 ## Next candidates (unordered, founder picks)
 
