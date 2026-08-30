@@ -307,6 +307,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
     try {
       final result = await ref.read(djApiProvider).sendMessage(sessionId, text);
+      final newTitle = result.sessionTitle;
       _mergeCurrent((c) {
         // First bump queue+version via the `queueVersion` param (never
         // `session`, per copyWith's own session-XOR-queueVersion contract —
@@ -316,7 +317,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           queue: result.queue,
           queueVersion: result.queueVersion,
         );
-        final newTitle = result.sessionTitle;
         if (newTitle == null) return withQueue;
         // A same-turn rename (rename_session): a SECOND copyWith call, this
         // time passing `session` (never `queueVersion`, same contract) —
@@ -329,8 +329,13 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       // the new title next time it's read — same "invalidate, don't refetch
       // now" discipline as sessionStarterProvider above; a turn's own
       // 20-40s round trip shouldn't be held up by a second list fetch it
-      // doesn't need.
-      if (result.sessionTitle != null) {
+      // doesn't need. Guarded by `ref.mounted`: this provider is
+      // autoDispose'd (chatProvider), and navigating away mid-turn can
+      // dispose it before this await returns — `ref.invalidate` on a
+      // disposed ref throws a StateError (unlike `_mergeCurrent`'s own
+      // internal guard above), which would otherwise silently swallow this
+      // invalidation instead of just skipping it.
+      if (newTitle != null && ref.mounted) {
         ref.invalidate(sessionsProvider);
       }
     } on DjApiException catch (e) {

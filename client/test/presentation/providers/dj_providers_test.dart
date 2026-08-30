@@ -424,6 +424,48 @@ void main() {
       },
     );
 
+    test(
+      'a same-turn rename that resolves AFTER the chat screen is navigated away '
+      'from (chatProvider disposed mid-turn) does not throw — the invalidate is '
+      'skipped, not swallowed by an unrelated catch',
+      () async {
+        final sendCompleter = Completer<TurnResult>();
+        final api = FakeDjApi();
+        api.onGetSession = (_) async =>
+            SessionDetail(session: _session(queueVersion: 1), messages: [], queue: []);
+        api.onSendMessage = (id, text) => sendCompleter.future;
+        api.onListSessions = () async => [_session(id: 's1')];
+        final container = _makeContainer(api);
+
+        final sub = container.listen(chatProvider('s1'), (_, __) {});
+        await container.read(chatProvider('s1').future);
+        final sendFuture = container
+            .read(chatProvider('s1').notifier)
+            .send('call this tape Lagos Nights');
+
+        // Drop the last listener and let autoDispose's post-listener-removal
+        // scheduling run BEFORE the turn resolves — the same timing as a user
+        // navigating away from the chat screen while a message is in flight.
+        sub.close();
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+
+        sendCompleter.complete(
+          TurnResult(
+            djMessage: _msg('m2', 'dj', 'renamed.'),
+            queue: [],
+            queueVersion: 2,
+            sessionTitle: 'Lagos Nights',
+          ),
+        );
+
+        // Must resolve cleanly with no unhandled exception — before the
+        // `ref.mounted` guard, `ref.invalidate` on the now-disposed
+        // provider's ref threw a StateError here instead.
+        await sendFuture;
+      },
+    );
+
     test('send with no sessionTitle in the response leaves the cached title untouched', () async {
       final api = FakeDjApi();
       api.onGetSession = (_) async => SessionDetail(

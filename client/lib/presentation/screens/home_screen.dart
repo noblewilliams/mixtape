@@ -475,7 +475,7 @@ class _RenameDialogState extends State<_RenameDialog> {
             key: const Key('rename-field'),
             controller: _controller,
             autofocus: true,
-            maxLength: 120,
+            maxLength: 60, // matches the server's display cap (dj/sanitize.ts's sanitizeTitleText)
             decoration: const InputDecoration(hintText: 'Session name'),
           ),
           actions: [
