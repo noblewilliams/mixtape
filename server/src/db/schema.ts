@@ -149,6 +149,19 @@ export const djMessages = pgTable(
   (t) => [index('dj_messages_session_idx').on(t.sessionId, t.seq)],
 )
 
+export const sessionEvents = pgTable(
+  'session_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => djSessions.id, { onDelete: 'cascade' }),
+    type: text('type', { enum: ['played', 'saved_playlist'] }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('session_events_session_idx').on(t.sessionId, t.createdAt)],
+)
+
 // No unique index on (session, position): renumbering would collide mid-shuffle against it.
 // The queue store enforces the invariant under a per-session row lock (SELECT ... FOR UPDATE
 // on dj_sessions) — see dj/queue-store.ts.

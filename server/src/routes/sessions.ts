@@ -4,7 +4,7 @@ import { zValidator } from '@hono/zod-validator'
 import { and, asc, desc, eq } from 'drizzle-orm'
 import type { AppVars } from '../app'
 import type { Db } from '../db/types'
-import { djSessions, djMessages } from '../db/schema'
+import { djSessions, djMessages, sessionEvents } from '../db/schema'
 import { runDjTurn, DjError, type DjDeps, type DjSessionRef } from '../dj/loop'
 import { applyOps, getActiveQueue, QueueOpError, QueueVersionConflict } from '../dj/queue-store'
 import { queueOpsSchema } from '../dj/contracts'
@@ -73,6 +73,7 @@ const queueOpsBodySchema = z.object({
   expectedVersion: z.number().int().min(0).optional(),
 })
 const patchSessionSchema = z.object({ status: z.union([z.literal('active'), z.literal('archived')]) })
+const sessionEventSchema = z.object({ type: z.union([z.literal('played'), z.literal('saved_playlist')]) })
 
 const MANUAL_OPS_HINT = 'swap/extend require the DJ — send a message instead'
 
@@ -212,6 +213,19 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
       .where(eq(djSessions.id, session.id))
       .returning(sessionListColumns)
     return c.json({ session: updated })
+  })
+
+  // Raw listen/save signals from the client — fire-and-forget on its side
+  // (P4 Task 1). No dedupe: multiple plays of the same session are multiple
+  // taste signals, intentionally counted more than once downstream.
+  app.post('/:id/events', zValidator('json', sessionEventSchema), async (c) => {
+    const userId = c.get('user').id
+    const session = await loadOwnedSession(db, c.req.param('id'), userId)
+    if (!session) return c.json({ error: 'not_found' }, 404)
+
+    const { type } = c.req.valid('json')
+    await db.insert(sessionEvents).values({ sessionId: session.id, type })
+    return c.json({ ok: true })
   })
 
   app.post('/:id/messages', zValidator('json', messageSchema), async (c) => {

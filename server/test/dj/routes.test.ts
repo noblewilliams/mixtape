@@ -5,7 +5,7 @@ import type { DjDeps } from '../../src/dj/loop'
 import type { LlmClient, LlmComplete, LlmRequest, LlmTurn, LlmAssistantBlock, LlmToolCall } from '../../src/dj/llm'
 import { LlmError } from '../../src/dj/llm'
 import type { Embedder } from '../../src/enrich/embedder'
-import { tracks, trackMeanings, userTracks, user, djSessions, djMessages } from '../../src/db/schema'
+import { tracks, trackMeanings, userTracks, user, djSessions, djMessages, sessionEvents } from '../../src/db/schema'
 import { eq } from 'drizzle-orm'
 import { replaceQueue, applyOps } from '../../src/dj/queue-store'
 
@@ -706,6 +706,114 @@ describe('session routes', () => {
 
       const res = await postJson(app, `/sessions/${sessionId}/queue-ops`, { ops: [{ op: 'remove', position: 0 }] })
       expect(res.status).toBe(401)
+    })
+  })
+
+  describe('POST /sessions/:id/events', () => {
+    async function createPlainSession(db: TestDb, userId: string) {
+      const { llm } = makeFakeLlm([{ text: 'hi' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs(userId))
+      const res = await postJson(app, '/sessions', { prompt: 'a session' })
+      const body = (await res.json()) as { session: { id: string } }
+      return body.session.id
+    }
+
+    it.each(['played', 'saved_playlist'] as const)('persists a %s event row and responds {ok: true}', async (type) => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const sessionId = await createPlainSession(db, 'u1')
+      const { llm } = makeFakeLlm([{ text: 'n/a' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+      const res = await postJson(app, `/sessions/${sessionId}/events`, { type })
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ ok: true })
+
+      const rows = await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, sessionId))
+      expect(rows).toHaveLength(1)
+      expect(rows[0].type).toBe(type)
+    })
+
+    it('allows multiple play events for the same session — no dedupe', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const sessionId = await createPlainSession(db, 'u1')
+      const { llm } = makeFakeLlm([{ text: 'n/a' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+      await postJson(app, `/sessions/${sessionId}/events`, { type: 'played' })
+      await postJson(app, `/sessions/${sessionId}/events`, { type: 'played' })
+
+      const rows = await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, sessionId))
+      expect(rows).toHaveLength(2)
+    })
+
+    it('404s when the session belongs to another user, and writes no row', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      await seedUser(db, 'u2')
+      const sessionId = await createPlainSession(db, 'u1')
+      const { llm } = makeFakeLlm([{ text: 'n/a' }])
+      const appU2 = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u2'))
+
+      const res = await postJson(appU2, `/sessions/${sessionId}/events`, { type: 'played' })
+      expect(res.status).toBe(404)
+
+      const rows = await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, sessionId))
+      expect(rows).toHaveLength(0)
+    })
+
+    it('404s for a well-formed but missing/unknown session id', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const { llm } = makeFakeLlm([{ text: 'n/a' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+      const res = await postJson(app, '/sessions/00000000-0000-0000-0000-000000000000/events', { type: 'played' })
+      expect(res.status).toBe(404)
+    })
+
+    it('rejects an invalid type with 400 in the established zod-validator shape', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const sessionId = await createPlainSession(db, 'u1')
+      const { llm } = makeFakeLlm([{ text: 'n/a' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+      const res = await postJson(app, `/sessions/${sessionId}/events`, { type: 'liked' })
+      expect(res.status).toBe(400)
+      const body = (await res.json()) as { success: boolean; error: unknown }
+      expect(body.success).toBe(false)
+      expect(body.error).toBeTruthy()
+
+      const rows = await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, sessionId))
+      expect(rows).toHaveLength(0)
+    })
+
+    it('401s without a session', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const sessionId = await createPlainSession(db, 'u1')
+      const { llm } = makeFakeLlm([{ text: 'n/a' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, unauthed)
+
+      const res = await postJson(app, `/sessions/${sessionId}/events`, { type: 'played' })
+      expect(res.status).toBe(401)
+    })
+
+    it('cascades on session delete — removing a session removes its events', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const sessionId = await createPlainSession(db, 'u1')
+      const { llm } = makeFakeLlm([{ text: 'n/a' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+      await postJson(app, `/sessions/${sessionId}/events`, { type: 'played' })
+      await postJson(app, `/sessions/${sessionId}/events`, { type: 'saved_playlist' })
+
+      await db.delete(djSessions).where(eq(djSessions.id, sessionId))
+
+      const rows = await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, sessionId))
+      expect(rows).toHaveLength(0)
     })
   })
 

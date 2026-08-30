@@ -43,6 +43,13 @@
       "when": 1788018471375,
       "tag": "0005_demonic_wrecking_crew",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788107237439,
+      "tag": "0006_lowly_wallflower",
+      "breakpoints": true
     }
   ]
 }
