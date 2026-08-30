@@ -201,13 +201,13 @@ export const DJ_TOOLS: LlmToolDef[] = [
   {
     name: 'generate_queue',
     description:
-      "Create a fresh queue for this session from the listener's request. Replaces any existing queue. Convert requested durations to a track count (~3.5 min per track). themes: a rich free-text description of mood, meaning and vibe used for semantic matching against lyric meaning.",
+      "Create a fresh queue for this session from the listener's request. DESTRUCTIVE: replaces the ENTIRE existing queue — never use it to remove/swap/adjust individual tracks (that's edit_queue). Only for a brand-new brief or an explicit start-over. Convert requested durations to a track count (~3.5 min per track). themes: a rich free-text description of mood, meaning and vibe used for semantic matching against lyric meaning.",
     input_schema: intentJsonSchema,
   },
   {
     name: 'edit_queue',
     description:
-      "Modify the current queue in place. ops run in order, and each op sees the queue exactly as the PRECEDING ops left it — positions are working-relative, not fixed to the queue you started with. A remove shifts every later track down one position; if you want to remove several tracks, list them in DESCENDING position order (e.g. remove 5 then remove 2, never the reverse) so earlier removals don't shift the positions you listed later. Use swap/extend with an intent when the listener asked for a different flavour; omit intent to stay on the session's current vibe.",
+      "THE tool for any change to an existing queue — removals, swaps, reorders, extensions. Prefer this over generate_queue whenever a queue exists: the listener has been shaping it, so make the smallest change that satisfies the request and leave everything else in place. Modify the current queue in place. ops run in order, and each op sees the queue exactly as the PRECEDING ops left it — positions are working-relative, not fixed to the queue you started with. A remove shifts every later track down one position; if you want to remove several tracks, list them in DESCENDING position order (e.g. remove 5 then remove 2, never the reverse) so earlier removals don't shift the positions you listed later. Use swap/extend with an intent when the listener asked for a different flavour; omit intent to stay on the session's current vibe.",
     input_schema: {
       type: 'object',
       properties: {
