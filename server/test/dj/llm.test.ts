@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import Anthropic from '@anthropic-ai/sdk'
-import { anthropicLlm, LlmError, type LlmTurn, type LlmRequest, type LlmMessage } from '../../src/dj/llm'
+import { anthropicLlm, anthropicComplete, LlmError, type LlmTurn, type LlmRequest, type LlmMessage } from '../../src/dj/llm'
 
 const baseReq: LlmRequest = { system: 's', messages: [], tools: [] }
 
@@ -184,5 +184,70 @@ describe('anthropicLlm', () => {
     await llm(baseReq)
     expect(captured?.max_tokens).toBe(16000)
     expect(captured?.output_config).toBeUndefined()
+  })
+})
+
+describe('anthropicComplete', () => {
+  it('joins text blocks into a single string and omits tools from the request body', async () => {
+    let captured: Anthropic.MessageCreateParamsNonStreaming | undefined
+    const fakeCreate = async (body: Anthropic.MessageCreateParamsNonStreaming) => {
+      captured = body
+      return {
+        content: [
+          { type: 'text', text: 'first line' },
+          { type: 'text', text: 'second line' },
+        ] as Anthropic.ContentBlock[],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }
+    }
+    const complete = anthropicComplete({ messages: { create: fakeCreate } })
+    const text = await complete({ system: 's', prompt: 'p', model: 'm' })
+    expect(text).toBe('first line\nsecond line')
+    expect(captured).not.toHaveProperty('tools')
+  })
+
+  it('forwards timeoutMs as a per-request timeout option to the SDK call, actually bounding the upstream request', async () => {
+    let capturedOptions: { timeout?: number } | undefined
+    const fakeCreate = async (_body: Anthropic.MessageCreateParamsNonStreaming, options?: { timeout?: number }) => {
+      capturedOptions = options
+      return {
+        content: [{ type: 'text', text: 'ok' }] as Anthropic.ContentBlock[],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }
+    }
+    const complete = anthropicComplete({ messages: { create: fakeCreate } })
+    await complete({ system: 's', prompt: 'p', model: 'm', timeoutMs: 5000 })
+    expect(capturedOptions).toEqual({ timeout: 5000 })
+  })
+
+  it('omits the timeout option entirely when timeoutMs is not passed', async () => {
+    let capturedOptions: { timeout?: number } | undefined
+    const fakeCreate = async (_body: Anthropic.MessageCreateParamsNonStreaming, options?: { timeout?: number }) => {
+      capturedOptions = options
+      return {
+        content: [{ type: 'text', text: 'ok' }] as Anthropic.ContentBlock[],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }
+    }
+    const complete = anthropicComplete({ messages: { create: fakeCreate } })
+    await complete({ system: 's', prompt: 'p', model: 'm' })
+    expect(capturedOptions).toBeUndefined()
+  })
+
+  it('wraps a thrown error into LlmError, excluding the SDK error message', async () => {
+    const fakeCreate = async () => {
+      throw new Error('boom: leaked system prompt text')
+    }
+    const complete = anthropicComplete({ messages: { create: fakeCreate } })
+    expect.assertions(2)
+    try {
+      await complete({ system: 's', prompt: 'p', model: 'm' })
+    } catch (e) {
+      expect(e).toBeInstanceOf(LlmError)
+      expect((e as LlmError).message).not.toContain('leaked system prompt text')
+    }
   })
 })

@@ -63,6 +63,22 @@ describe('generateSessionTitle', () => {
     expect(title).toBe('A'.repeat(60))
   })
 
+  it('preserves a leading apostrophe with no matching closing quote (legitimate title shape)', async () => {
+    const complete: LlmComplete = async () => "'Round Midnight"
+    const title = await generateSessionTitle(complete, 'x', FALLBACK)
+    expect(title).toBe("'Round Midnight")
+  })
+
+  it('passes a 5s timeout to the completion seam so a stalled title call cannot stall the turn', async () => {
+    let capturedTimeoutMs: number | undefined
+    const complete: LlmComplete = async (opts) => {
+      capturedTimeoutMs = opts.timeoutMs
+      return 'Fine'
+    }
+    await generateSessionTitle(complete, 'x', FALLBACK)
+    expect(capturedTimeoutMs).toBe(5000)
+  })
+
   it('ignores maxTokens/system content — treats output as opaque display text', async () => {
     let capturedSystem: string | undefined
     const complete: LlmComplete = async (opts) => {

@@ -26,7 +26,21 @@ function devVars(): Record<string, string> {
   const out: Record<string, string> = {}
   for (const line of readFileSync(new URL('../.dev.vars', import.meta.url), 'utf8').split('\n')) {
     const i = line.indexOf('=')
-    if (i > 0 && !line.startsWith('#')) out[line.slice(0, i)] = line.slice(i + 1).trim()
+    if (i > 0 && !line.startsWith('#')) {
+      const key = line.slice(0, i)
+      let value = line.slice(i + 1).trim()
+      // Strip a single layer of matching surrounding quotes — a quoted
+      // DATABASE_URL would otherwise reach neon() with the quote characters
+      // still attached, which throws with the full connection string
+      // (credentials included) embedded in the error message.
+      if (
+        value.length >= 2 &&
+        ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))
+      ) {
+        value = value.slice(1, -1)
+      }
+      out[key] = value
+    }
   }
   return out
 }

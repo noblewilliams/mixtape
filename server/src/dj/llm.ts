@@ -74,13 +74,26 @@ function toLlmError(e: unknown): LlmError {
 // and a plain-text no-tools request never collides with curate()'s own
 // no-tools convention (see dj/curate.ts, dj/loop.ts's makeFakeLlm fakes),
 // which a caller sharing LlmClient for both would.
-export type LlmComplete = (opts: { system: string; prompt: string; model: string; maxTokens?: number }) => Promise<string>
+export type LlmComplete = (opts: {
+  system: string
+  prompt: string
+  model: string
+  maxTokens?: number
+  // Forwarded to the SDK as a per-request timeout so a stalled upstream call
+  // is actually cancelled rather than riding the client's default (60s ×
+  // maxRetries 1, see buildAnthropic) — a caller racing this against other
+  // work (see dj/title.ts, sessions.ts) needs a bound tighter than that.
+  timeoutMs?: number
+}) => Promise<string>
 
 // Structural surface of the real SDK client — a fake `{ messages: { create } }` in
 // tests satisfies this directly, no `as never` needed in either direction.
 type AnthropicClient = {
   messages: {
-    create(body: Anthropic.MessageCreateParamsNonStreaming): Promise<{
+    create(
+      body: Anthropic.MessageCreateParamsNonStreaming,
+      options?: { timeout?: number },
+    ): Promise<{
       content: Anthropic.ContentBlock[]
       stop_reason: string | null
       usage: { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number | null }
@@ -135,13 +148,18 @@ export function anthropicComplete(client: AnthropicClient): LlmComplete {
   return async (opts) => {
     let res: Awaited<ReturnType<AnthropicClient['messages']['create']>>
     try {
-      res = await client.messages.create({
-        model: opts.model,
-        max_tokens: opts.maxTokens ?? 300,
-        system: opts.system,
-        messages: [{ role: 'user', content: opts.prompt }],
-        tools: [],
-      })
+      res = await client.messages.create(
+        {
+          model: opts.model,
+          max_tokens: opts.maxTokens ?? 300,
+          system: opts.system,
+          messages: [{ role: 'user', content: opts.prompt }],
+        },
+        // Actually cancels the upstream call at opts.timeoutMs rather than
+        // letting it ride buildAnthropic's client-level default (60s ×
+        // maxRetries 1) — see the LlmComplete type comment above.
+        opts.timeoutMs !== undefined ? { timeout: opts.timeoutMs } : undefined,
+      )
     } catch (e) {
       throw toLlmError(e)
     }

@@ -106,46 +106,58 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
     const sessionRef: DjSessionRef = { id: session.id, userId }
 
     // A naming call, not curation (see dj/title.ts) — run CONCURRENTLY with
-    // the DJ turn so it adds zero latency to session creation.
-    // generateSessionTitle never throws and always resolves to at least
-    // fallbackTitle, so this can never fail or delay the turn below; no
-    // deps.titleComplete wired (e.g. a caller that only set up the tool-loop
-    // LlmClient) degrades the same way, via the same fallback.
+    // the DJ turn, bounded to a 5s worst case via generateSessionTitle's
+    // timeoutMs (dj/title.ts), so it adds at most that much to session
+    // creation rather than the turn's own latency. generateSessionTitle
+    // never throws and always resolves to at least fallbackTitle, so this
+    // can never fail the turn below; no deps.titleComplete wired (e.g. a
+    // caller that only set up the tool-loop LlmClient) degrades the same
+    // way, via the same fallback.
     const titlePromise = deps.titleComplete
       ? generateSessionTitle(deps.titleComplete, prompt, fallbackTitle)
       : Promise.resolve(fallbackTitle)
 
-    try {
-      const [result, title] = await Promise.all([runDjTurn(db, deps, sessionRef, prompt), titlePromise])
-      // A text-only first turn never touches dj_sessions itself (no queue
-      // write to ride $onUpdate's automatic bump) — bumped explicitly, same
-      // as the message-turn route below, so list ordering (newest first by
-      // updatedAt) reflects even a chat-only first turn. The generated title
-      // rides this same UPDATE (one write, not two) — it only ever runs
-      // AFTER runDjTurn (and any queue writes inside it) has settled, so it
-      // can't race or clobber the turn's own dj_sessions.queueVersion write
-      // (dj/queue-store.ts) — this UPDATE only ever touches updatedAt/title.
-      const [sessionRow] = await db
-        .update(djSessions)
-        .set({ updatedAt: new Date(), title })
-        .where(eq(djSessions.id, session.id))
-        .returning(sessionListColumns)
-      const messages = await db
-        .select()
-        .from(djMessages)
-        .where(eq(djMessages.sessionId, session.id))
-        .orderBy(asc(djMessages.seq))
-      return c.json({
-        session: sessionRow,
-        messages,
-        queue: result.queue,
-      })
-    } catch (e) {
+    // allSettled, not all: the title must land on the row even when the DJ
+    // turn itself fails — that's exactly when the listener will reopen the
+    // session and retry, and the row must not still be showing the
+    // truncated fallback. titlePromise itself never rejects (see above), but
+    // allSettled keeps that guarantee explicit rather than relying on it.
+    const [turnResult, titleResult] = await Promise.allSettled([runDjTurn(db, deps, sessionRef, prompt), titlePromise])
+    const title = titleResult.status === 'fulfilled' ? titleResult.value : fallbackTitle
+
+    // A text-only first turn never touches dj_sessions itself (no queue
+    // write to ride $onUpdate's automatic bump) — bumped explicitly, same as
+    // the message-turn route below, so list ordering (newest first by
+    // updatedAt) reflects even a chat-only first turn. The generated title
+    // rides this same UPDATE (one write, not two), written UNCONDITIONALLY —
+    // both promises have already settled by this point, so whatever queue
+    // writes runDjTurn made (or didn't, on failure) are done: this UPDATE
+    // (touching only updatedAt/title) can't race dj/queue-store.ts's
+    // queueVersion write either way.
+    const [sessionRow] = await db
+      .update(djSessions)
+      .set({ updatedAt: new Date(), title })
+      .where(eq(djSessions.id, session.id))
+      .returning(sessionListColumns)
+
+    if (turnResult.status === 'rejected') {
+      const e = turnResult.reason
       if (e instanceof DjError) {
         return c.json(djErrorBody(e, { sessionId: session.id }), djErrorStatus(e.kind))
       }
       throw e
     }
+
+    const messages = await db
+      .select()
+      .from(djMessages)
+      .where(eq(djMessages.sessionId, session.id))
+      .orderBy(asc(djMessages.seq))
+    return c.json({
+      session: sessionRow,
+      messages,
+      queue: turnResult.value.queue,
+    })
   })
 
   app.get('/', async (c) => {

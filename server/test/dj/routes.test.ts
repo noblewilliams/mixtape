@@ -278,6 +278,25 @@ describe('session routes', () => {
       expect(longPrompt.startsWith(body.session.title.replace(/\s+$/, ''))).toBe(true)
     })
 
+    it('lands the generated title on the row even when the DJ turn itself fails', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const llm: LlmClient = async () => {
+        throw new LlmError('boom', 500)
+      }
+      const titleComplete: LlmComplete = async () => 'Rainy Night Drive'
+      const app = buildApp(db, { embed: fakeEmbed, llm, titleComplete }, authedAs('u1'))
+
+      const res = await postJson(app, '/sessions', { prompt: 'play me something' })
+      expect(res.status).toBe(502)
+      const body = (await res.json()) as { error: string; message: string; sessionId: string }
+      expect(body.error).toBe('llm')
+      expect(body.sessionId).toBeTruthy()
+
+      const [row] = await db.select().from(djSessions).where(eq(djSessions.id, body.sessionId))
+      expect(row.title).toBe('Rainy Night Drive')
+    })
+
     it('with no titleComplete wired at all, behaves exactly as before (truncated-prompt title)', async () => {
       const db = await createTestDb()
       await seedUser(db, 'u1')
