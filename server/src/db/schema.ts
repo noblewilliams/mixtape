@@ -149,6 +149,23 @@ export const djMessages = pgTable(
   (t) => [index('dj_messages_session_idx').on(t.sessionId, t.seq)],
 )
 
+// One durable "the listener said this lasts" note, saved live by the DJ's
+// remember_preference tool (see dj/loop.ts) — never behaviorally distilled
+// in v1. User-scoped, not session-scoped: a preference stated in one
+// session should be respected in every later one.
+export const djMemories = pgTable(
+  'dj_memories',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    note: text('note').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('dj_memories_user_idx').on(t.userId, t.createdAt)],
+)
+
 export const sessionEvents = pgTable(
   'session_events',
   {

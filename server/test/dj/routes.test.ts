@@ -5,7 +5,7 @@ import type { DjDeps } from '../../src/dj/loop'
 import type { LlmClient, LlmComplete, LlmRequest, LlmTurn, LlmAssistantBlock, LlmToolCall } from '../../src/dj/llm'
 import { LlmError } from '../../src/dj/llm'
 import type { Embedder } from '../../src/enrich/embedder'
-import { tracks, trackMeanings, userTracks, user, djSessions, djMessages, sessionEvents } from '../../src/db/schema'
+import { tracks, trackMeanings, userTracks, user, djSessions, djMessages, sessionEvents, djMemories } from '../../src/db/schema'
 import { eq } from 'drizzle-orm'
 import { replaceQueue, applyOps } from '../../src/dj/queue-store'
 
@@ -814,6 +814,47 @@ describe('session routes', () => {
 
       const rows = await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, sessionId))
       expect(rows).toHaveLength(0)
+    })
+  })
+
+  describe('remember_preference tool — works in both the first turn and a later reply turn', () => {
+    it('persists a note from POST /sessions\'s own first turn', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const { llm } = makeFakeLlm([
+        { toolCalls: [toolCall('c1', 'remember_preference', { note: 'never play explicit tracks' })] },
+        { text: 'got it, noted for next time.' },
+      ])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+      const res = await postJson(app, '/sessions', { prompt: 'i never want explicit tracks, ever' })
+      expect(res.status).toBe(200)
+
+      const rows = await db.select().from(djMemories).where(eq(djMemories.userId, 'u1'))
+      expect(rows).toHaveLength(1)
+      expect(rows[0].note).toBe('never play explicit tracks')
+    })
+
+    it('persists a second note from a later POST /sessions/:id/messages reply turn', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const { llm: firstLlm } = makeFakeLlm([{ text: 'hi there.' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm: firstLlm }, authedAs('u1'))
+      const createRes = await postJson(app, '/sessions', { prompt: 'hey' })
+      const { session } = (await createRes.json()) as { session: { id: string } }
+
+      const { llm: replyLlm } = makeFakeLlm([
+        { toolCalls: [toolCall('c1', 'remember_preference', { note: 'always keep the energy up' })] },
+        { text: 'noted, will do.' },
+      ])
+      const replyApp = buildApp(db, { embed: fakeEmbed, llm: replyLlm }, authedAs('u1'))
+
+      const res = await postJson(replyApp, `/sessions/${session.id}/messages`, { text: 'always keep the energy up, ok?' })
+      expect(res.status).toBe(200)
+
+      const rows = await db.select().from(djMemories).where(eq(djMemories.userId, 'u1'))
+      expect(rows).toHaveLength(1)
+      expect(rows[0].note).toBe('always keep the energy up')
     })
   })
 

@@ -66,6 +66,13 @@ export type QueueOp = z.infer<typeof queueOpSchema>
 
 export const queueOpsSchema = z.array(queueOpSchema).min(1).max(20)
 
+// remember_preference's tool input — validated raw (pre-trim) length, mirroring
+// createSessionSchema/messageSchema's own min/max-on-the-raw-string style
+// (routes/sessions.ts). The loop trims before storing, but the bound itself
+// applies to what the model actually sent.
+export const rememberPreferenceInputSchema = z.object({ note: z.string().min(1).max(200) })
+export type RememberPreferenceInput = z.infer<typeof rememberPreferenceInputSchema>
+
 // Longhand JSON Schema for the intent fields, shared verbatim between
 // generate_queue's top-level input and edit_queue's swap/extend `intent`
 // field, so the two can't drift from each other — an agreement test in
@@ -141,6 +148,25 @@ const opIntentJsonSchema = Object.freeze({
   type: 'object' as const,
   properties: intentPropertiesBase,
   required: ['themes'],
+})
+
+// remember_preference's longhand JSON Schema — mirrors rememberPreferenceInputSchema
+// (an agreement test in contracts.test.ts checks both against each other, same as
+// the intent schemas above).
+const rememberPreferenceJsonSchema = Object.freeze({
+  type: 'object' as const,
+  properties: {
+    note: {
+      type: 'string',
+      minLength: 1,
+      maxLength: 200,
+      description:
+        "A short, durable listening preference in the listener's own words — a lasting like/dislike, a " +
+        'favorite or avoided artist/genre, or a hard rule ("never play explicit", "always include a Wizkid ' +
+        'track on party mixes"). Not a one-off request for just this session.',
+    },
+  },
+  required: ['note'],
 })
 
 export const DJ_TOOLS: LlmToolDef[] = [
@@ -220,6 +246,16 @@ export const DJ_TOOLS: LlmToolDef[] = [
       },
       required: ['ops'],
     },
+  },
+  {
+    name: 'remember_preference',
+    description:
+      "Save a durable listening preference the listener EXPLICITLY STATES as lasting — not a one-off request " +
+      "for this session alone. Use it for things like a favorite or avoided artist/genre, or a hard rule " +
+      '("never play explicit", "always include a Wizkid track on party mixes"). Skip it for ordinary in-the-moment ' +
+      'requests ("play something upbeat right now") — those go through generate_queue/edit_queue instead, not ' +
+      'this tool.',
+    input_schema: rememberPreferenceJsonSchema,
   },
 ]
 

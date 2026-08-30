@@ -4,6 +4,7 @@ import { requireAdmin } from './middleware/require-admin'
 import { ingestRoutes } from './routes/ingest'
 import { enrichRoutes } from './routes/enrich'
 import { sessionRoutes } from './routes/sessions'
+import { memoriesRoutes } from './routes/memories'
 import type { Db } from './db/types'
 import type { EnrichDeps } from './enrich/pipeline'
 import type { DjDeps } from './dj/loop'
@@ -32,12 +33,16 @@ export function createApp({ auth, db, enrich, dj }: { auth: AuthLike; db?: Db; e
   app.get('/health', (c) => c.json({ ok: true, service: 'mixtape-api' }))
   // Route groups land per docs/superpowers/specs/2026-08-29-mixtape-v1-design.md:
   //   /api/auth/* [P1]  /me [P1]  /ingest/* [P1]  /enrich/* [P2 live]  /sessions/* [P3 live]
+  //   /me/memories/* [P4 live]
   app.all('/api/auth/*', (c) => auth.handler(c.req.raw))
   app.get('/me', requireSession(auth), (c) => c.json({ user: c.get('user') }))
 
   if (db) {
     app.use('/ingest/*', requireSession(auth))
     app.route('/ingest', ingestRoutes(db))
+
+    app.use('/me/memories/*', requireSession(auth))
+    app.route('/me/memories', memoriesRoutes(db))
 
     if (enrich) {
       app.use('/enrich/*', requireAdmin(enrich.adminToken))

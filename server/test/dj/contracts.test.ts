@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { intentSchema, opIntentSchema, queueOpSchema, queueOpsSchema, DJ_TOOLS } from '../../src/dj/contracts'
+import {
+  intentSchema,
+  opIntentSchema,
+  queueOpSchema,
+  queueOpsSchema,
+  rememberPreferenceInputSchema,
+  DJ_TOOLS,
+} from '../../src/dj/contracts'
 
 describe('intentSchema', () => {
   it('parses a valid intent, applying defaults', () => {
@@ -236,6 +243,7 @@ function matchesJsonSchema(schema: any, value: unknown): boolean {
     case 'string': {
       if (typeof value !== 'string') return false
       if (schema.minLength !== undefined && value.length < schema.minLength) return false
+      if (schema.maxLength !== undefined && value.length > schema.maxLength) return false
       if (schema.enum && !schema.enum.includes(value)) return false
       return true
     }
@@ -253,8 +261,8 @@ function matchesJsonSchema(schema: any, value: unknown): boolean {
 }
 
 describe('DJ_TOOLS', () => {
-  it('defines exactly generate_queue and edit_queue', () => {
-    expect(DJ_TOOLS.map((t) => t.name).sort()).toEqual(['edit_queue', 'generate_queue'])
+  it('defines exactly generate_queue, edit_queue, and remember_preference', () => {
+    expect(DJ_TOOLS.map((t) => t.name).sort()).toEqual(['edit_queue', 'generate_queue', 'remember_preference'])
   })
 
   it('is frozen, along with its intent schema objects', () => {
@@ -265,6 +273,8 @@ describe('DJ_TOOLS', () => {
     const opsSchema = editQueue.input_schema.properties.ops as { items: { oneOf: unknown[] } }
     const swapIntent = (opsSchema.items.oneOf[2] as { properties: { intent: unknown } }).properties.intent
     expect(Object.isFrozen(swapIntent)).toBe(true)
+    const rememberPreference = DJ_TOOLS.find((t) => t.name === 'remember_preference')!
+    expect(Object.isFrozen(rememberPreference.input_schema)).toBe(true)
   })
 })
 
@@ -371,6 +381,33 @@ describe('edit_queue: zod and its longhand JSON schema agree', () => {
   const results = editQueueRows.map((row) => ({
     label: row.label,
     zod: queueOpsSchema.safeParse(row.sample.ops).success,
+    json: matchesJsonSchema(schema, row.sample),
+  }))
+
+  it.each(results)('$label', ({ zod, json }) => {
+    expect(json).toBe(zod)
+  })
+
+  it('the table actually exercises both valid and invalid samples', () => {
+    expect(results.some((r) => r.zod)).toBe(true)
+    expect(results.some((r) => !r.zod)).toBe(true)
+  })
+})
+
+const rememberPreferenceRows: Row[] = [
+  { label: 'minimal valid note', sample: { note: 'x' } },
+  { label: 'a 200-char note is valid (at the ceiling)', sample: { note: 'x'.repeat(200) } },
+  { label: 'a 201-char note is invalid (one over the ceiling)', sample: { note: 'x'.repeat(201) } },
+  { label: 'an empty note is invalid', sample: { note: '' } },
+  { label: 'missing note is invalid', sample: {} },
+  { label: 'a non-string note is invalid', sample: { note: 42 } },
+]
+
+describe('remember_preference: zod and its longhand JSON schema agree', () => {
+  const schema = DJ_TOOLS.find((t) => t.name === 'remember_preference')!.input_schema
+  const results = rememberPreferenceRows.map((row) => ({
+    label: row.label,
+    zod: rememberPreferenceInputSchema.safeParse(row.sample).success,
     json: matchesJsonSchema(schema, row.sample),
   }))
 
