@@ -26,8 +26,13 @@ class FakeDjApi implements DjApi {
   )?
   onApplyQueueOps;
   Future<DjSession> Function(String id, String status)? onSetStatus;
+  Future<void> Function(String sessionId, String type)? onPostSessionEvent;
+  Future<List<DjMemory>> Function()? onListMemories;
+  Future<void> Function(String id)? onDeleteMemory;
 
   int listSessionsCallCount = 0;
+  int listMemoriesCallCount = 0;
+  String? lastDeletedMemoryId;
   int getSessionCallCount = 0;
   int sendMessageCallCount = 0;
   List<QueueOp>? lastOps;
@@ -87,6 +92,29 @@ class FakeDjApi implements DjApi {
     final impl = onSetStatus;
     if (impl == null) throw UnimplementedError('onSetStatus not wired');
     return impl(id, status);
+  }
+
+  @override
+  Future<void> postSessionEvent(String sessionId, String type) {
+    final impl = onPostSessionEvent;
+    if (impl == null) throw UnimplementedError('onPostSessionEvent not wired');
+    return impl(sessionId, type);
+  }
+
+  @override
+  Future<List<DjMemory>> listMemories() {
+    listMemoriesCallCount++;
+    final impl = onListMemories;
+    if (impl == null) throw UnimplementedError('onListMemories not wired');
+    return impl();
+  }
+
+  @override
+  Future<void> deleteMemory(String id) {
+    lastDeletedMemoryId = id;
+    final impl = onDeleteMemory;
+    if (impl == null) throw UnimplementedError('onDeleteMemory not wired');
+    return impl(id);
   }
 
   @override
@@ -818,6 +846,92 @@ void main() {
       await container.read(chatProvider('s1').future);
       expect(api.getSessionCallCount, 2); // rebuilt, not cached
       sub2.close();
+    });
+  });
+
+  group('memoriesProvider', () {
+    test('loads on build, newest-first as the server sent them', () async {
+      final api = FakeDjApi()
+        ..onListMemories = () async => [
+              DjMemory(id: 'm2', note: 'always Wizkid on party tapes', createdAt: DateTime(2026, 8, 30)),
+              DjMemory(id: 'm1', note: 'no sad songs before noon', createdAt: DateTime(2026, 8, 29)),
+            ];
+      final container = _makeContainer(api);
+
+      final memories = await container.read(memoriesProvider.future);
+
+      expect(memories.map((m) => m.id), ['m2', 'm1']);
+      expect(api.listMemoriesCallCount, 1);
+    });
+
+    test('refresh() replaces state and reports success', () async {
+      var call = 0;
+      final api = FakeDjApi();
+      api.onListMemories = () async {
+        call++;
+        return [DjMemory(id: 'm$call', note: 'note $call', createdAt: DateTime(2026, 1, call))];
+      };
+      final container = _makeContainer(api);
+      await container.read(memoriesProvider.future);
+
+      final ok = await container.read(memoriesProvider.notifier).refresh();
+
+      expect(ok, isTrue);
+      expect(container.read(memoriesProvider).value!.single.id, 'm2');
+    });
+
+    test('forget() deletes server-side then drops the note locally', () async {
+      final api = FakeDjApi();
+      api.onListMemories = () async => [
+            DjMemory(id: 'm1', note: 'note 1', createdAt: DateTime(2026, 1, 1)),
+            DjMemory(id: 'm2', note: 'note 2', createdAt: DateTime(2026, 1, 2)),
+          ];
+      api.onDeleteMemory = (id) async {};
+      final container = _makeContainer(api);
+      await container.read(memoriesProvider.future);
+
+      final ok = await container.read(memoriesProvider.notifier).forget('m1');
+
+      expect(ok, isTrue);
+      expect(api.lastDeletedMemoryId, 'm1');
+      expect(container.read(memoriesProvider).value!.map((m) => m.id), ['m2']);
+    });
+
+    test('forget() leaves state untouched and returns false on failure', () async {
+      final api = FakeDjApi();
+      api.onListMemories = () async => [
+            DjMemory(id: 'm1', note: 'note 1', createdAt: DateTime(2026, 1, 1)),
+          ];
+      api.onDeleteMemory = (id) async => throw ApiException(500, 'boom');
+      final container = _makeContainer(api);
+      await container.read(memoriesProvider.future);
+
+      final ok = await container.read(memoriesProvider.notifier).forget('m1');
+
+      expect(ok, isFalse);
+      expect(container.read(memoriesProvider).value!.map((m) => m.id), ['m1']);
+    });
+
+    test('auth transition rebuilds and reloads the memories list', () async {
+      final testAuth = TestAuthNotifier(AuthStatus.signedIn);
+      final api = FakeDjApi();
+      api.onListMemories = () async => [DjMemory(id: 'm1', note: 'note 1', createdAt: DateTime(2026, 1, 1))];
+      final container = ProviderContainer(
+        overrides: [
+          tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
+          djApiProvider.overrideWithValue(api),
+          authProvider.overrideWith(() => testAuth),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(memoriesProvider.future);
+      expect(api.listMemoriesCallCount, 1);
+
+      testAuth.set(AuthStatus.signedOut);
+      await container.read(memoriesProvider.future);
+
+      expect(api.listMemoriesCallCount, 2);
     });
   });
 }

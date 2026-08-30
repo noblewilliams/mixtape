@@ -186,6 +186,35 @@ void main() {
     );
   });
 
+  test('deleteJson sends DELETE with bearer, no body, throws on 4xx/5xx', () async {
+    String? seenMethod;
+    String? seenAuth;
+    final inner = MockClient((req) async {
+      seenMethod = req.method;
+      seenAuth = req.headers['Authorization'];
+      return http.Response('{"ok":true}', 200);
+    });
+    final store = InMemoryTokenStore();
+    await store.write('tok-777');
+    final client = ApiClient(baseUrl: 'http://x', tokenStore: store, inner: inner);
+
+    final res = await client.deleteJson('/me/memories/m1');
+
+    expect(seenMethod, 'DELETE');
+    expect(seenAuth, 'Bearer tok-777');
+    expect(res.body, '{"ok":true}');
+
+    final failing = ApiClient(
+      baseUrl: 'http://x',
+      tokenStore: InMemoryTokenStore(),
+      inner: MockClient((_) async => http.Response('{"error":"not_found"}', 404)),
+    );
+    await expectLater(
+      failing.deleteJson('/me/memories/m1'),
+      throwsA(isA<ApiException>().having((e) => e.statusCode, 'statusCode', 404)),
+    );
+  });
+
   test('InMemoryTokenStore write -> read -> clear -> read round-trip', () async {
     final store = InMemoryTokenStore();
     expect(await store.read(), isNull);

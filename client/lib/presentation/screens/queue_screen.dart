@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/dj/dj_models.dart';
@@ -152,6 +154,23 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     );
   }
 
+  /// Fire-and-forget `POST /sessions/:id/events` — see
+  /// `docs/superpowers/plans/2026-08-30-p4-taste-learning.md` Task 4. Posted
+  /// exactly once per SUCCESSFUL play/save (never on failure, never on a
+  /// rebuild — both call sites fire this only from their success branch, not
+  /// from build()), and any failure here is swallowed silently: the server
+  /// endpoint is purely a taste-learning signal, never allowed to degrade
+  /// the Play/Save UX that already succeeded on the user's device.
+  void _postEvent(String type) {
+    unawaited(() async {
+      try {
+        await ref.read(djApiProvider).postSessionEvent(widget.sessionId, type);
+      } catch (_) {
+        // Silent by design — no retry, no surfaced error.
+      }
+    }());
+  }
+
   Future<void> _handlePlay(BuildContext screenContext, List<QueueTrack> queue) async {
     if (_playing) return;
     setState(() => _playing = true);
@@ -159,6 +178,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
       final ids = [for (final t in queue) if (t.appleId != null) t.appleId!];
       final skipped = queue.length - ids.length;
       await ref.read(musicKitBridgeProvider).playQueue(ids);
+      _postEvent('played');
       if (!screenContext.mounted) return;
       _showSnack(screenContext, _playSuccessMessage(skipped));
     } on MusicKitException catch (e) {
@@ -234,6 +254,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
             author: author,
             description: 'made by mixtape',
           );
+      _postEvent('saved_playlist');
       if (dialogContext.mounted) Navigator.of(dialogContext).pop();
       if (!screenContext.mounted) return;
       _showSnack(screenContext, _saveSuccessMessage(result.added, result.failed));

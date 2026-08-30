@@ -460,3 +460,56 @@ final sessionStarterProvider = Provider<Future<String> Function(String prompt)>(
     };
   },
 );
+
+// ---------------------------------------------------------------------------
+// "What the DJ knows" memory notes (P4 Task 4)
+// ---------------------------------------------------------------------------
+
+/// Mirrors [SessionsNotifier]'s shape: loads `GET /me/memories` (already
+/// newest-first server-side, so no client-side sort needed), reloads/resets
+/// on every auth transition. Unlike sessions, there's no archive/unarchive —
+/// just [forget], a hard delete with no server-side restore.
+class MemoriesNotifier extends AsyncNotifier<List<DjMemory>> {
+  @override
+  Future<List<DjMemory>> build() async {
+    ref.watch(
+      authProvider,
+    ); // user-scoped: reload/reset on every auth transition
+    final api = ref.watch(djApiProvider);
+    return api.listMemories();
+  }
+
+  /// Same contract as [SessionsNotifier.refresh]: returns whether the
+  /// refetch actually succeeded (state itself keeps showing the previously-
+  /// good list on failure via copyWithPrevious, so callers must check the
+  /// return value to surface a failure).
+  Future<bool> refresh() async {
+    final next = await AsyncValue.guard(
+      () => ref.read(djApiProvider).listMemories(),
+    );
+    state = next;
+    return !next.hasError;
+  }
+
+  /// Deletes the note server-side and, only on success, drops it from local
+  /// state. The undo-window bookkeeping (optimistic hide, the 5s deferred
+  /// commit, restoring the row on failure) is owned by MemoryScreen itself —
+  /// this method is the single point where the server call actually fires,
+  /// called only once the undo window has closed without an undo.
+  Future<bool> forget(String id) async {
+    try {
+      await ref.read(djApiProvider).deleteMemory(id);
+    } catch (_) {
+      return false;
+    }
+    final current = state.value;
+    if (current != null) {
+      state = AsyncData([for (final m in current) if (m.id != id) m]);
+    }
+    return true;
+  }
+}
+
+final memoriesProvider = AsyncNotifierProvider<MemoriesNotifier, List<DjMemory>>(
+  MemoriesNotifier.new,
+);

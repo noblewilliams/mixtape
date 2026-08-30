@@ -3,10 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/api/api_client.dart';
 import '../../data/dj/dj_api.dart';
 import '../../data/dj/dj_models.dart';
+import '../format/relative_time.dart';
 import '../providers/auth_provider.dart';
 import '../providers/dj_providers.dart';
 import '../providers/library_sync_provider.dart';
 import 'chat_screen.dart';
+import 'memory_screen.dart';
 
 const _archiveFailedMessage = "couldn't archive — try again";
 const _unarchiveFailedMessage = "couldn't unarchive — try again";
@@ -123,6 +125,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       appBar: AppBar(
         title: const Text('mixtape'),
         actions: [
+          IconButton(
+            key: const Key('memories-action'),
+            tooltip: 'What the DJ knows',
+            icon: const Icon(Icons.psychology_outlined),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const MemoryScreen()),
+            ),
+          ),
           IconButton(
             key: const Key('sync-action'),
             tooltip: 'Sync library',
@@ -362,8 +372,8 @@ class _SessionsList extends ConsumerWidget {
           ),
           subtitle: Text(
             isArchived
-                ? 'Archived · ${_relativeTime(session.updatedAt)}'
-                : _relativeTime(session.updatedAt),
+                ? 'Archived · ${relativeTime(session.updatedAt)}'
+                : relativeTime(session.updatedAt),
           ),
           onTap: () => onTapSession(session.id),
           trailing: IconButton(
@@ -391,16 +401,6 @@ class _SessionsList extends ConsumerWidget {
       );
     }
   }
-}
-
-String _relativeTime(DateTime dt) {
-  final diff = DateTime.now().difference(dt);
-  if (diff.inMinutes < 1) return 'just now';
-  if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-  if (diff.inHours < 24) return '${diff.inHours}h ago';
-  if (diff.inDays < 7) return '${diff.inDays}d ago';
-  final local = dt.toLocal();
-  return '${local.month}/${local.day}/${local.year}';
 }
 
 /// The P1 library-sync UI (unchanged), now presented from a bottom sheet

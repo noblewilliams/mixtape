@@ -143,6 +143,24 @@ class QueueOpsResult {
       );
 }
 
+/// A durable per-user taste note the DJ saved via `remember_preference` (see
+/// `docs/superpowers/plans/2026-08-30-p4-taste-learning.md` Task 2/4).
+/// `GET /me/memories` returns these newest-first; DELETE is hard — a
+/// forgotten note is gone for good, there's no restore server-side.
+class DjMemory {
+  const DjMemory({required this.id, required this.note, required this.createdAt});
+
+  final String id;
+  final String note;
+  final DateTime createdAt;
+
+  factory DjMemory.fromJson(Map<String, dynamic> json) => DjMemory(
+        id: json['id'] as String,
+        note: json['note'] as String,
+        createdAt: DateTime.parse(json['createdAt'] as String),
+      );
+}
+
 /// Manual queue-ops are remove/move only (0-based positions) — swap/extend
 /// need the DJ and are rejected by the server with a 400 `dj_required`.
 sealed class QueueOp {

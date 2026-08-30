@@ -45,6 +45,15 @@ class _FakeDjApi implements DjApi {
   Future<DjSession> setStatus(String id, String status) => throw UnimplementedError();
 
   @override
+  Future<void> postSessionEvent(String sessionId, String type) => throw UnimplementedError();
+
+  @override
+  Future<List<DjMemory>> listMemories() => throw UnimplementedError();
+
+  @override
+  Future<void> deleteMemory(String id) => throw UnimplementedError();
+
+  @override
   void close() {}
 }
 

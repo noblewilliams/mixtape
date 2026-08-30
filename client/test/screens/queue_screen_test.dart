@@ -27,6 +27,13 @@ class FakeDjApi implements DjApi {
   Future<QueueOpsResult> Function(String id, List<QueueOp> ops, int? expectedVersion)?
   onApplyQueueOps;
   Future<DjSession> Function(String id, String status)? onSetStatus;
+  Future<void> Function(String sessionId, String type)? onPostSessionEvent;
+  Future<List<DjMemory>> Function()? onListMemories;
+  Future<void> Function(String id)? onDeleteMemory;
+
+  /// Every session event posted, in order — most tests just want the count
+  /// and type, so this captures both rather than wiring a callback per test.
+  final List<({String sessionId, String type})> postedEvents = [];
 
   @override
   Duration get timeout => const Duration(seconds: 120);
@@ -71,6 +78,27 @@ class FakeDjApi implements DjApi {
     final impl = onSetStatus;
     if (impl == null) throw UnimplementedError('onSetStatus not wired');
     return impl(id, status);
+  }
+
+  @override
+  Future<void> postSessionEvent(String sessionId, String type) {
+    postedEvents.add((sessionId: sessionId, type: type));
+    final impl = onPostSessionEvent;
+    return impl == null ? Future.value() : impl(sessionId, type);
+  }
+
+  @override
+  Future<List<DjMemory>> listMemories() {
+    final impl = onListMemories;
+    if (impl == null) throw UnimplementedError('onListMemories not wired');
+    return impl();
+  }
+
+  @override
+  Future<void> deleteMemory(String id) {
+    final impl = onDeleteMemory;
+    if (impl == null) throw UnimplementedError('onDeleteMemory not wired');
+    return impl(id);
   }
 
   @override
@@ -696,6 +724,90 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('saved 1 songs to Apple Music (1 failed)'), findsOneWidget);
+  });
+
+  group('session events (P4 Task 4)', () {
+    testWidgets('a successful play posts exactly one "played" event for this session', (tester) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(),
+        messages: [],
+        queue: [_track(0), _track(1)],
+      );
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+
+      await tester.tap(find.byKey(const Key('play-button')));
+      await tester.pumpAndSettle();
+
+      expect(api.postedEvents, [(sessionId: 's1', type: 'played')]);
+    });
+
+    testWidgets('a successful save posts exactly one "saved_playlist" event for this session', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(title: 'Road Trip'), messages: [], queue: [_track(0)]);
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+
+      await tester.tap(find.byKey(const Key('save-button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('save-confirm-button')));
+      await tester.pumpAndSettle();
+
+      expect(api.postedEvents, [(sessionId: 's1', type: 'saved_playlist')]);
+    });
+
+    testWidgets('a MusicKit failure while playing posts NO event at all', (tester) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(session: _session(), messages: [], queue: [_track(0)]);
+      final bridge = FakeBridge();
+      bridge.onPlayQueue = (_) async => throw MusicKitException('boom');
+      final container = _makeContainer(api, bridge: bridge);
+      await _pump(tester, container);
+
+      await tester.tap(find.byKey(const Key('play-button')));
+      await tester.pumpAndSettle();
+
+      expect(api.postedEvents, isEmpty);
+    });
+
+    testWidgets('a failing event post never surfaces — the success snackbar still shows', (tester) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(session: _session(), messages: [], queue: [_track(0)]);
+      api.onPostSessionEvent = (id, type) async => throw NetworkException('offline');
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+
+      await tester.tap(find.byKey(const Key('play-button')));
+      await tester.pumpAndSettle();
+
+      // The event post failed (silently — never awaited by the UI), but the
+      // bridge succeeded, so the normal success snackbar must still show.
+      expect(find.text('playing in Apple Music'), findsOneWidget);
+      // Nothing unhandled — pumpAndSettle above would have surfaced a
+      // FlutterError from an uncaught async exception otherwise.
+    });
+
+    testWidgets('rebuilding the screen (no new play/save) posts no additional events', (tester) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(session: _session(), messages: [], queue: [_track(0)]);
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+
+      await tester.tap(find.byKey(const Key('play-button')));
+      await tester.pumpAndSettle();
+      expect(api.postedEvents, hasLength(1));
+
+      // Force a few rebuilds unrelated to play/save.
+      await tester.pump();
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(api.postedEvents, hasLength(1));
+    });
   });
 
   testWidgets('with the queue screen stacked over the chat screen, only the top route shows the snackbar', (

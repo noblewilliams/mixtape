@@ -91,6 +91,14 @@ class ApiClient {
     return res;
   }
 
+  Future<http.Response> deleteJson(String path) async {
+    final headers = await _headers();
+    final res = await _guard(
+        () => _inner.delete(Uri.parse(baseUrl).resolve(path), headers: headers));
+    if (res.statusCode >= 400) throw ApiException(res.statusCode, res.body);
+    return res;
+  }
+
   void close() {
     if (_ownsInner) _inner.close();
   }

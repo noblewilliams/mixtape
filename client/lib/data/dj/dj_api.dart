@@ -118,6 +118,28 @@ class DjApi {
         (json) => DjSession.fromJson(json['session'] as Map<String, dynamic>),
       );
 
+  /// Fire-and-forget from the caller's perspective (see queue_screen.dart's
+  /// post-play/post-save wiring) — but NOT from this method's: it throws the
+  /// normal exit taxonomy like every other call here ([DjApiException],
+  /// [ApiException], [NetworkException]). Swallowing failures is the
+  /// caller's job, deliberately, so this class stays uniform.
+  Future<void> postSessionEvent(String sessionId, String type) =>
+      _call(() => _client.postJson('/sessions/$sessionId/events', {'type': type}), (_) {});
+
+  /// `GET /me/memories` — newest-first, capped at 50 server-side.
+  Future<List<DjMemory>> listMemories() => _call(
+        () => _client.getJson('/me/memories'),
+        (json) => (json['memories'] as List)
+            .map((m) => DjMemory.fromJson(m as Map<String, dynamic>))
+            .toList(),
+      );
+
+  /// `DELETE /me/memories/:id` — hard delete, owner-scoped server-side (a
+  /// 404 on someone else's id surfaces as a plain [ApiException], not part
+  /// of the DJ error taxonomy).
+  Future<void> deleteMemory(String id) =>
+      _call(() => _client.deleteJson('/me/memories/$id'), (_) {});
+
   void close() => _client.close();
 
   Future<T> _call<T>(

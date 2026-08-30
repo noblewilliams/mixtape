@@ -459,4 +459,109 @@ void main() {
       expect(const QueueOp.move(1, 4).toJson(), {'op': 'move', 'from': 1, 'to': 4});
     });
   });
+
+  group('postSessionEvent', () {
+    test('POSTs {type} to /sessions/:id/events, resolves void on {ok:true}', () async {
+      String? seenMethod;
+      Uri? seenUrl;
+      Map<String, dynamic>? seenBody;
+      final inner = MockClient((req) async {
+        seenMethod = req.method;
+        seenUrl = req.url;
+        seenBody = jsonDecode(req.body) as Map<String, dynamic>;
+        return http.Response(jsonEncode({'ok': true}), 200);
+      });
+
+      await _api(inner: inner).postSessionEvent('s1', 'played');
+
+      expect(seenMethod, 'POST');
+      expect(seenUrl.toString(), 'http://x/sessions/s1/events');
+      expect(seenBody, {'type': 'played'});
+    });
+
+    test('a 404 (unknown session) passes through as ApiException, not DjApiException', () async {
+      final inner = MockClient((_) async => http.Response(jsonEncode({'error': 'not_found'}), 404));
+
+      await expectLater(
+        _api(inner: inner).postSessionEvent('missing', 'saved_playlist'),
+        throwsA(isA<ApiException>().having((e) => e.statusCode, 'statusCode', 404)),
+      );
+    });
+
+    test('a 400 (bad type) surfaces as DjApiException with the server\'s kind', () async {
+      final inner = MockClient((_) async => http.Response(
+            jsonEncode({'error': 'invalid', 'message': 'unknown event type'}),
+            400,
+          ));
+
+      try {
+        await _api(inner: inner).postSessionEvent('s1', 'bogus');
+        fail('expected DjApiException');
+      } on DjApiException catch (e) {
+        expect(e.kind, 'invalid');
+        expect(e.message, 'unknown event type');
+      }
+    });
+  });
+
+  group('listMemories', () {
+    test('GETs /me/memories and parses newest-first DjMemory list', () async {
+      Uri? seenUrl;
+      final inner = MockClient((req) async {
+        seenUrl = req.url;
+        return http.Response(
+          jsonEncode({
+            'memories': [
+              {'id': 'm2', 'note': 'always play Wizkid on party tapes', 'createdAt': '2026-08-30T10:00:00.000Z'},
+              {'id': 'm1', 'note': 'no sad songs before noon', 'createdAt': '2026-08-29T09:00:00.000Z'},
+            ],
+          }),
+          200,
+        );
+      });
+
+      final memories = await _api(inner: inner).listMemories();
+
+      expect(seenUrl.toString(), 'http://x/me/memories');
+      expect(memories, hasLength(2));
+      expect(memories[0].id, 'm2');
+      expect(memories[0].note, 'always play Wizkid on party tapes');
+      expect(memories[0].createdAt, DateTime.parse('2026-08-30T10:00:00.000Z'));
+      expect(memories[1].id, 'm1');
+    });
+
+    test('an empty list parses to an empty list', () async {
+      final inner = MockClient((_) async => http.Response(jsonEncode({'memories': []}), 200));
+
+      final memories = await _api(inner: inner).listMemories();
+
+      expect(memories, isEmpty);
+    });
+  });
+
+  group('deleteMemory', () {
+    test('DELETEs /me/memories/:id, resolves void on {ok:true}', () async {
+      String? seenMethod;
+      Uri? seenUrl;
+      final inner = MockClient((req) async {
+        seenMethod = req.method;
+        seenUrl = req.url;
+        return http.Response(jsonEncode({'ok': true}), 200);
+      });
+
+      await _api(inner: inner).deleteMemory('m1');
+
+      expect(seenMethod, 'DELETE');
+      expect(seenUrl.toString(), 'http://x/me/memories/m1');
+    });
+
+    test('a 404 (not_found, e.g. someone else\'s note) passes through as ApiException', () async {
+      final inner = MockClient((_) async => http.Response(jsonEncode({'error': 'not_found'}), 404));
+
+      await expectLater(
+        _api(inner: inner).deleteMemory('not-mine'),
+        throwsA(isA<ApiException>().having((e) => e.statusCode, 'statusCode', 404)),
+      );
+    });
+  });
 }

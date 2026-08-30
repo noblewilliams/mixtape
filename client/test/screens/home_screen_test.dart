@@ -29,6 +29,9 @@ class FakeDjApi implements DjApi {
   Future<QueueOpsResult> Function(String id, List<QueueOp> ops, int? expectedVersion)?
   onApplyQueueOps;
   Future<DjSession> Function(String id, String status)? onSetStatus;
+  Future<void> Function(String sessionId, String type)? onPostSessionEvent;
+  Future<List<DjMemory>> Function()? onListMemories;
+  Future<void> Function(String id)? onDeleteMemory;
 
   @override
   Duration get timeout => const Duration(seconds: 120);
@@ -73,6 +76,27 @@ class FakeDjApi implements DjApi {
     final impl = onSetStatus;
     if (impl == null) throw UnimplementedError('onSetStatus not wired');
     return impl(id, status);
+  }
+
+  @override
+  Future<void> postSessionEvent(String sessionId, String type) {
+    final impl = onPostSessionEvent;
+    if (impl == null) throw UnimplementedError('onPostSessionEvent not wired');
+    return impl(sessionId, type);
+  }
+
+  @override
+  Future<List<DjMemory>> listMemories() {
+    final impl = onListMemories;
+    if (impl == null) throw UnimplementedError('onListMemories not wired');
+    return impl();
+  }
+
+  @override
+  Future<void> deleteMemory(String id) {
+    final impl = onDeleteMemory;
+    if (impl == null) throw UnimplementedError('onDeleteMemory not wired');
+    return impl(id);
   }
 
   @override
@@ -579,6 +603,23 @@ void main() {
         find.byWidgetPredicate((w) => w is Text && (w.data?.contains('Synced 3 songs') ?? false)),
         findsOneWidget,
       );
+    });
+  });
+
+  group('memories entry (P4 Task 4)', () {
+    testWidgets('the AppBar memories action navigates to "What the DJ knows"', (tester) async {
+      final api = FakeDjApi();
+      api.onListSessions = () async => [];
+      api.onListMemories = () async => [];
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+
+      expect(find.byKey(const Key('memories-action')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('memories-action')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('What the DJ knows'), findsOneWidget);
     });
   });
 }
