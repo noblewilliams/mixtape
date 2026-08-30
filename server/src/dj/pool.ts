@@ -44,11 +44,13 @@ const FAMILIARITY_WEIGHTS: Record<Intent['familiarity'], { sim: number; feat: nu
 // (session_events/queue_tracks carry no user column of their own):
 //   - PENALTY: a queue_tracks row the USER removed (state='removed' AND
 //     removed_by='user') — a DJ swap (removed_by='dj') is routine curation,
-//     not taste signal, and contributes nothing.
+//     not taste signal, and contributes nothing. Full weight (1x) — this is
+//     an ACTIVE signal, the user reaching in and rejecting a specific pick.
 //   - BOOST: a queue_tracks row KEPT (state='active') in a session that has
 //     at least one 'played' or 'saved_playlist' event — the session_events
 //     type column has no DB-level CHECK, so unknown event types are filtered
-//     out explicitly rather than trusted.
+//     out explicitly rather than trusted. Weighted at KEEP_WEIGHT (0.25x,
+//     below) — this is only a PASSIVE signal, see the asymmetry note there.
 // Both signals are aggregated per DISTINCT SESSION, never per event/row
 // count directly: the client posts session events fire-and-forget, so a
 // client bug retrying the same POST must never multiply its influence (a
@@ -58,11 +60,53 @@ const FAMILIARITY_WEIGHTS: Record<Intent['familiarity'], { sim: number; feat: nu
 // removal_events collapses to one row per (artist, session_id) pair (MAX(updated_at)
 // as its timestamp) — so even multiple user-removals of the same artist within
 // one session count as a single penalty for that session.
+//
+// In-session dominance: a removal always wins over a same-session keep of the
+// same artist. If the user removed an ArtistX track from a session AND
+// another ArtistX track survived to that session's end, keep_events excludes
+// that (artist, session) pair outright (it's already present in
+// removal_events) — it contributes NO boost, only the removal's penalty
+// counts. Without this, one removal + one surviving same-artist track in a
+// played session nets to roughly zero (a full-weight penalty largely
+// cancelling a KEEP_WEIGHT-scaled boost), silently erasing a signal the user
+// just went out of their way to give. An active edit beats passive survival,
+// full stop, within the session where they conflict.
+//
+// Active-vs-passive asymmetry (KEEP_WEIGHT) and its saturation shape: a
+// "kept" track was never actually chosen by the user — the DJ picked it and
+// the user merely didn't remove it, which is a far weaker signal than an
+// active removal. At full weight this also self-reinforces with no
+// counterweight: the DJ keeps picking an artist -> the user doesn't bother
+// removing it -> that counts as a full +1 boost per played session -> the
+// artist's taste score rises -> the DJ picks it even more. And it saturates
+// fast: TANH(0.3 * net) is already past 90% of its way to the ceiling by
+// net = +/-5, so as few as ~5 played sessions of passive keeps (at full
+// weight) would nearly max out an artist's score on nothing but the DJ's own
+// repeated picks, before the user ever actively chose anything. KEEP_WEIGHT
+// = 0.25 makes a kept-and-played session worth a quarter of a removal, so
+// reaching that same saturated boost purely from keeps now takes ~4x as many
+// qualifying sessions (net = +2 needs 8 sessions of keeps, not 2) — an active
+// "stop picking this" still moves the score 4x faster than silent
+// acceptance, which is the point: removal is a deliberate signal, a keep is
+// just the absence of one.
+//
 // Recency decay: exponential half-life of 90 days on the signal timestamp
 // (a removal row's updated_at; a kept-session's latest qualifying event's
 // created_at) — a 200-day-old signal has decayed far more than a 5-day-old one.
+//
+// v1 known limitation, recorded rather than fixed: artist matching is
+// exact-string equality on tracks.artist (no artist entity exists to join
+// on). 'Wizkid', 'Wizkid & Ayra Starr', and 'Wizkid feat. Tems' are three
+// unrelated strings to this query even though they share a performer — on a
+// collab-dense library this fragments one artist's real signal across
+// several disjoint taste rows instead of pooling it. Accepted for v1;
+// revisit if/when tracks gain a real artist entity to join on.
 const TASTE_HALF_LIFE_DAYS = 90
 const TASTE_DECAY_RATE_PER_DAY = Math.LN2 / TASTE_HALF_LIFE_DAYS
+
+// See "Active-vs-passive asymmetry" above: a kept-and-played session earns
+// its artist only a quarter of a full removal's weight toward the boost sum.
+const KEEP_WEIGHT = 0.25
 
 // Squash net signal (recency-weighted boosts minus penalties, roughly one
 // unit of full-strength weight per qualifying session) into [0,1] around a
@@ -261,12 +305,23 @@ export async function buildPool(
         AND se.type IN ('played', 'saved_playlist')
       GROUP BY se.session_id
     ),
+    -- Note: replaceQueue deletes a session's active queue_tracks rows outright
+    -- on regenerate (see dj/loop.ts), so a played-then-regenerated session
+    -- only ever has the FINAL regenerated queue's rows left to read as
+    -- "kept" here — last state wins, intentionally.
     keep_events AS (
       SELECT DISTINCT t.artist AS artist, qt.session_id AS session_id
       FROM queue_tracks qt
       JOIN tracks t ON t.id = qt.track_id
       WHERE qt.state = 'active'
         AND qt.session_id IN (SELECT session_id FROM qualifying_sessions)
+        -- In-session dominance (see comment above KEEP_WEIGHT): a same-
+        -- session, same-artist removal wins outright, so a surviving track
+        -- of that artist contributes no boost at all here.
+        AND NOT EXISTS (
+          SELECT 1 FROM removal_events re
+          WHERE re.artist = t.artist AND re.session_id = qt.session_id
+        )
     ),
     taste_signals AS (
       SELECT
@@ -278,7 +333,7 @@ export async function buildPool(
       SELECT
         ke.artist AS artist,
         'boost' AS kind,
-        EXP(-${TASTE_DECAY_RATE_PER_DAY}::float8 * (EXTRACT(EPOCH FROM (NOW() - qs.ts)) / 86400.0)) AS weight
+        ${KEEP_WEIGHT}::float8 * EXP(-${TASTE_DECAY_RATE_PER_DAY}::float8 * (EXTRACT(EPOCH FROM (NOW() - qs.ts)) / 86400.0)) AS weight
       FROM keep_events ke
       JOIN qualifying_sessions qs ON qs.session_id = ke.session_id
     ),

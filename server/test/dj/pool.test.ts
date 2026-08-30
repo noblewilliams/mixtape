@@ -478,19 +478,26 @@ describe('buildPool taste term', () => {
     expect(byId(track.id).score).toBeCloseTo(NEUTRAL_MIX_SCORE, 5)
   })
 
-  it("winner-flip: a heavily user-removed artist's track loses to a near-tied artist kept in played sessions", async () => {
+  // Genuine near-tie: ArtistB's track has a WORSE raw similarity than
+  // ArtistA's (0.8 vs 1.0 — vec({0:0.8,1:0.6}) is an exact-unit-length
+  // cosine-0.8 direction from QUERY_DIRECTION), so on sim alone A wins. Taste
+  // signal (5 user-removal sessions for A vs. 8 kept+played sessions for B)
+  // is strong enough to flip the ranking anyway — this is the dial actually
+  // doing something, not just nudging a score that was never in question.
+  it("winner-flip: taste overturns a genuine near-tie (worse-sim artist wins on taste alone)", async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')
     const trackA = await seedTrack(db, 'u1', { artist: 'ArtistA', embedding: SAME_AS_QUERY, playCount: 0 })
-    const trackB = await seedTrack(db, 'u1', { artist: 'ArtistB', embedding: SAME_AS_QUERY, playCount: 0 })
+    const trackB = await seedTrack(db, 'u1', { artist: 'ArtistB', embedding: vec({ 0: 0.8, 1: 0.6 }), playCount: 0 })
 
-    // ArtistA: user-removed across 3 distinct sessions.
-    for (let i = 0; i < 3; i++) {
+    // ArtistA: user-removed across 5 distinct sessions (strong penalty).
+    for (let i = 0; i < 5; i++) {
       const s = await seedSession(db, 'u1')
       await seedQueueTrack(db, s.id, trackA.id, { state: 'removed', removedBy: 'user' })
     }
-    // ArtistB: kept (active) in 2 distinct sessions, each with a 'played' event.
-    for (let i = 0; i < 2; i++) {
+    // ArtistB: kept (active) in 8 distinct sessions, each with a 'played'
+    // event — needed at KEEP_WEIGHT=0.25 to match the strength of A's penalty.
+    for (let i = 0; i < 8; i++) {
       const s = await seedSession(db, 'u1')
       await seedQueueTrack(db, s.id, trackB.id, { state: 'active' })
       await seedSessionEvent(db, s.id, 'played')
@@ -499,7 +506,62 @@ describe('buildPool taste term', () => {
     const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', familiarity: 'mix' }))
     const byId = (id: string) => pool.find((p) => p.trackId === id)!
 
+    // Without taste, A (sim 1.0) would beat B (sim 0.8) — taste flips it.
     expect(byId(trackB.id).score).toBeGreaterThan(byId(trackA.id).score)
+  })
+
+  // Companion to the flip above: the SAME taste signals, but now B's sim gap
+  // is large (orthogonal, sim 0 vs A's sim 1) rather than small. Taste is
+  // bounded (the tanh squash caps how far it can move a score — see TASTE_K),
+  // so it must NOT be enough to overturn a big enough similarity gap.
+  it('winner-flip is bounded: the same taste signals do NOT flip a large sim gap', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const trackA = await seedTrack(db, 'u1', { artist: 'ArtistA', embedding: SAME_AS_QUERY, playCount: 0 })
+    const trackB = await seedTrack(db, 'u1', { artist: 'ArtistB', embedding: ORTHOGONAL_TO_QUERY, playCount: 0 })
+
+    for (let i = 0; i < 5; i++) {
+      const s = await seedSession(db, 'u1')
+      await seedQueueTrack(db, s.id, trackA.id, { state: 'removed', removedBy: 'user' })
+    }
+    for (let i = 0; i < 8; i++) {
+      const s = await seedSession(db, 'u1')
+      await seedQueueTrack(db, s.id, trackB.id, { state: 'active' })
+      await seedSessionEvent(db, s.id, 'played')
+    }
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', familiarity: 'mix' }))
+    const byId = (id: string) => pool.find((p) => p.trackId === id)!
+
+    expect(byId(trackA.id).score).toBeGreaterThan(byId(trackB.id).score)
+  })
+
+  it('in-session dominance: a same-session removal beats a surviving same-artist keep — net score lands BELOW neutral, not at it', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    // Two tracks by the same artist in the SAME session: one removed by the
+    // user, the other survives (active) and the session is played. Without
+    // in-session dominance these would roughly cancel (a full-weight penalty
+    // vs. a KEEP_WEIGHT-scaled boost) and land back near neutral — that would
+    // silently erase the removal signal the user just gave.
+    const removedTrack = await seedTrack(db, 'u1', { artist: 'DominantArtist', embedding: SAME_AS_QUERY, playCount: 0 })
+    const survivingTrack = await seedTrack(db, 'u1', {
+      artist: 'DominantArtist',
+      embedding: SAME_AS_QUERY,
+      playCount: 0,
+    })
+    const s = await seedSession(db, 'u1')
+    await seedQueueTrack(db, s.id, removedTrack.id, { state: 'removed', removedBy: 'user' })
+    await seedQueueTrack(db, s.id, survivingTrack.id, { state: 'active' })
+    await seedSessionEvent(db, s.id, 'played')
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', familiarity: 'mix' }))
+    const byId = (id: string) => pool.find((p) => p.trackId === id)!
+
+    // Both tracks share the artist, so both carry the same (penalized) taste
+    // score — assert against the surviving track since that's the one whose
+    // score a naive cancellation would have restored to neutral.
+    expect(byId(survivingTrack.id).score).toBeLessThan(NEUTRAL_MIX_SCORE)
   })
 
   it("a DJ removal (removed_by='dj') contributes nothing — score stays neutral", async () => {
@@ -548,13 +610,20 @@ describe('buildPool taste term', () => {
     const trackDup = await seedTrack(db, 'u1', { artist: 'DupEventArtist', embedding: SAME_AS_QUERY, playCount: 0 })
     const trackSingle = await seedTrack(db, 'u1', { artist: 'SingleEventArtist', embedding: SAME_AS_QUERY, playCount: 0 })
 
+    // Same explicit timestamp on every event in both branches: the taste
+    // signal's decay is keyed off qualifying_sessions' MAX(created_at), so
+    // pinning it exactly (rather than letting each insert take whatever
+    // `NOW()` happens to be) makes the two branches' decay factors IDENTICAL
+    // rather than merely close within a ~ms-scale insertion-order window.
+    const fixedTs = new Date('2026-01-01T00:00:00Z')
+
     const sDup = await seedSession(db, 'u1')
     await seedQueueTrack(db, sDup.id, trackDup.id, { state: 'active' })
-    for (let i = 0; i < 5; i++) await seedSessionEvent(db, sDup.id, 'played')
+    for (let i = 0; i < 5; i++) await seedSessionEvent(db, sDup.id, 'played', fixedTs)
 
     const sSingle = await seedSession(db, 'u1')
     await seedQueueTrack(db, sSingle.id, trackSingle.id, { state: 'active' })
-    await seedSessionEvent(db, sSingle.id, 'played')
+    await seedSessionEvent(db, sSingle.id, 'played', fixedTs)
 
     const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', familiarity: 'mix' }))
     const byId = (id: string) => pool.find((p) => p.trackId === id)!
@@ -600,5 +669,31 @@ describe('buildPool taste term', () => {
     const byId = (id: string) => pool.find((p) => p.trackId === id)!
 
     expect(byId(mine.id).score).toBeCloseTo(NEUTRAL_MIX_SCORE, 5)
+  })
+
+  it('taste cannot rescue a track past a hard filter: a saturated boost does not pull a tempo-window-excluded track back into the pool', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    // Outside the tempo window below (90-110bpm) — a hard filter, unlike the
+    // taste term, which only ever affects `score`, never `filters` (the
+    // WHERE clause has no idea artist_taste exists).
+    const excluded = await seedTrack(db, 'u1', {
+      artist: 'SaturatedBoostArtist',
+      tempo: 200,
+      embedding: SAME_AS_QUERY,
+      playCount: 0,
+    })
+
+    // Saturate this artist's boost near the tanh ceiling — many played,
+    // kept sessions.
+    for (let i = 0; i < 20; i++) {
+      const s = await seedSession(db, 'u1')
+      await seedQueueTrack(db, s.id, excluded.id, { state: 'active' })
+      await seedSessionEvent(db, s.id, 'played')
+    }
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', tempoMin: 90, tempoMax: 110 }))
+
+    expect(pool.map((p) => p.trackId)).not.toContain(excluded.id)
   })
 })
