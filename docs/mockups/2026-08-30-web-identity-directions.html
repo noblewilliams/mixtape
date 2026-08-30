@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mixtape — Web identity directions</title>
+  <style>
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: #101114; color: #f4f4f1; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    button, input, textarea { font: inherit; }
+    button { cursor: pointer; }
+    .board-nav { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 14px max(24px, calc((100vw - 1440px) / 2)); background: rgba(16,17,20,.94); border-bottom: 1px solid #33363d; backdrop-filter: blur(18px); }
+    .board-nav strong { letter-spacing: -.02em; }
+    .board-nav small { color: #a8abb3; }
+    .board-links { display: flex; gap: 6px; flex-wrap: wrap; }
+    .board-links a { color: #d5d6da; text-decoration: none; padding: 8px 11px; border-radius: 999px; font-size: 12px; border: 1px solid #33363d; }
+    .board-links a:hover, .board-links a:focus-visible { background: #292c32; outline: 2px solid #fff; outline-offset: 2px; }
+    .intro { max-width: 1440px; margin: 0 auto; padding: 72px 28px 52px; display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(280px, .7fr); gap: 64px; }
+    .intro .eyebrow, .concept-head .eyebrow { color: #9ba0aa; text-transform: uppercase; letter-spacing: .16em; font-size: 11px; font-weight: 750; }
+    .intro h1 { max-width: 920px; margin: 14px 0 20px; font-size: clamp(44px, 7vw, 92px); line-height: .93; letter-spacing: -.065em; }
+    .intro p { max-width: 750px; margin: 0; color: #bfc2c9; font-size: 18px; line-height: 1.6; }
+    .brief { align-self: end; border-left: 1px solid #3b3e45; padding-left: 24px; }
+    .brief dt { color: #858a94; font-size: 11px; text-transform: uppercase; letter-spacing: .12em; margin-top: 16px; }
+    .brief dd { margin: 5px 0 0; color: #e2e3e6; line-height: 1.45; }
+    .concept { --accent: #fff; --accent2: #bbb; --ink: #111; --muted: #666; --paper: #fff; --panel: #eee; --line: #ccc; --danger: #b33; --radius: 16px; --display: Georgia, serif; --body: Arial, sans-serif; --utility: ui-monospace, monospace; padding: 72px 28px 92px; border-top: 1px solid #2b2e34; }
+    .concept-inner { max-width: 1440px; margin: 0 auto; }
+    .concept-head { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr); gap: 60px; align-items: end; margin-bottom: 34px; }
+    .concept-number { display: inline-grid; place-items: center; width: 34px; height: 34px; margin-right: 12px; border: 1px solid currentColor; border-radius: 50%; font-size: 12px; vertical-align: middle; }
+    .concept-head h2 { margin: 12px 0 10px; font-family: var(--display); font-size: clamp(42px, 6vw, 76px); line-height: .95; letter-spacing: -.045em; }
+    .concept-head p { max-width: 800px; margin: 0; color: #babdc5; font-size: 17px; line-height: 1.6; }
+    .tradeoff { border: 1px solid #393c43; padding: 18px 20px; }
+    .tradeoff strong { display: block; margin-bottom: 8px; font-size: 13px; }
+    .tradeoff span { color: #aeb2ba; font-size: 13px; line-height: 1.5; }
+    .identity-strip { display: grid; grid-template-columns: 1.15fr 1.25fr 1fr 1fr; gap: 1px; background: #2f3238; border: 1px solid #2f3238; margin-bottom: 18px; }
+    .identity-cell { min-height: 176px; padding: 22px; background: #17191d; }
+    .cell-label { display: block; margin-bottom: 18px; color: #8d929c; font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+    .logo-preview { color: var(--paper); min-height: 76px; display: flex; align-items: center; }
+    .logo-word { font-family: var(--display); font-size: 36px; letter-spacing: -.04em; }
+    .reel-mark { width: 42px; height: 28px; margin-right: 12px; border: 2px solid var(--accent); border-radius: 7px; position: relative; }
+    .reel-mark::before, .reel-mark::after { content: ""; position: absolute; top: 7px; width: 9px; height: 9px; border: 2px solid var(--accent); border-radius: 50%; }
+    .reel-mark::before { left: 6px; } .reel-mark::after { right: 6px; }
+    .swatches { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
+    .swatch { height: 48px; padding: 7px; display: flex; align-items: end; font-family: var(--utility); font-size: 9px; border: 1px solid rgba(255,255,255,.13); color: white; text-shadow: 0 1px 3px rgba(0,0,0,.8); }
+    .type-sample .display { font: 34px/.95 var(--display); color: var(--paper); }
+    .type-sample .body { margin-top: 12px; color: #bec1c8; font: 13px/1.5 var(--body); }
+    .type-sample .utility { margin-top: 10px; color: var(--accent); font: 10px var(--utility); text-transform: uppercase; letter-spacing: .1em; }
+    .button-stack { display: grid; gap: 9px; }
+    .demo-button { min-height: 42px; border: 1px solid transparent; border-radius: var(--radius); font: 700 12px var(--body); letter-spacing: .01em; padding: 0 16px; }
+    .demo-button.primary { background: var(--accent); color: var(--ink); }
+    .demo-button.secondary { background: transparent; color: var(--paper); border-color: var(--line); }
+    .demo-button:focus-visible { outline: 3px solid var(--accent2); outline-offset: 3px; }
+    .app-comparison { display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 18px; align-items: start; }
+    .app-frame { overflow: hidden; background: var(--paper); color: var(--ink); border-radius: calc(var(--radius) + 4px); border: 1px solid var(--line); font-family: var(--body); box-shadow: 0 30px 80px rgba(0,0,0,.32); }
+    .browser-chrome { height: 38px; display: flex; align-items: center; gap: 6px; padding: 0 14px; background: var(--panel); border-bottom: 1px solid var(--line); }
+    .browser-chrome i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); opacity: .55; }
+    .browser-chrome span { margin-left: 10px; color: var(--muted); font: 10px var(--utility); }
+    .app-shell { display: grid; grid-template-columns: 220px minmax(360px, 1fr) minmax(280px, .82fr); height: 680px; }
+    .side { padding: 22px 17px; background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; }
+    .brand { display: flex; align-items: center; gap: 8px; font: 23px var(--display); letter-spacing: -.04em; margin-bottom: 30px; }
+    .brand .mini-reel { width: 27px; height: 18px; border: 1.5px solid var(--accent); border-radius: calc(var(--radius) / 3); position: relative; flex: 0 0 auto; }
+    .brand .mini-reel::before, .brand .mini-reel::after { content: ""; position: absolute; width: 5px; height: 5px; top: 5px; border: 1px solid var(--accent); border-radius: 50%; }
+    .brand .mini-reel::before { left: 4px; } .brand .mini-reel::after { right: 4px; }
+    .side-label { margin: 16px 9px 8px; color: var(--muted); font: 9px var(--utility); letter-spacing: .13em; text-transform: uppercase; }
+    .nav-item { width: 100%; min-height: 42px; border: 0; color: var(--muted); background: transparent; text-align: left; padding: 10px 11px; border-radius: calc(var(--radius) / 2); font-size: 12px; }
+    .nav-item.active { color: var(--ink); background: color-mix(in srgb, var(--accent) 18%, transparent); font-weight: 700; }
+    .nav-item small { display: block; margin-top: 4px; color: var(--muted); font: 9px var(--utility); }
+    .side-user { margin-top: auto; padding: 12px 10px 0; border-top: 1px solid var(--line); font-size: 11px; }
+    .side-user span { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+    .conversation { display: grid; grid-template-rows: auto 1fr auto; min-width: 0; background: var(--paper); }
+    .session-head { min-height: 74px; display: flex; justify-content: space-between; align-items: center; gap: 18px; padding: 14px 22px; border-bottom: 1px solid var(--line); }
+    .session-head h3 { margin: 0; font: 24px/1.1 var(--display); letter-spacing: -.03em; }
+    .session-head p { margin: 5px 0 0; color: var(--muted); font: 9px var(--utility); text-transform: uppercase; letter-spacing: .08em; }
+    .head-action { border: 1px solid var(--line); background: transparent; color: var(--muted); min-height: 44px; padding: 0 12px; border-radius: calc(var(--radius) / 2); font-size: 11px; }
+    .messages { padding: 24px max(20px, 7%); overflow: hidden; }
+    .bubble { max-width: 82%; margin: 0 0 18px; padding: 13px 15px; border-radius: var(--radius); font-size: 13px; line-height: 1.5; }
+    .bubble.user { margin-left: auto; background: var(--accent); color: var(--ink); border-bottom-right-radius: calc(var(--radius) / 4); }
+    .bubble.dj { background: var(--panel); border: 1px solid var(--line); border-bottom-left-radius: calc(var(--radius) / 4); }
+    .speaker { display: block; margin-bottom: 7px; color: var(--muted); font: 8px var(--utility); letter-spacing: .12em; text-transform: uppercase; }
+    .bubble.dj .speaker { color: var(--accent2); }
+    .thinking { display: flex; align-items: center; gap: 8px; color: var(--muted); font: 10px var(--utility); }
+    .thinking-dots { display: flex; gap: 4px; }
+    .thinking-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s infinite ease-in-out; }
+    .thinking-dots i:nth-child(2) { animation-delay: .16s; } .thinking-dots i:nth-child(3) { animation-delay: .32s; }
+    @keyframes pulse { 0%, 70%, 100% { opacity: .25; transform: translateY(0); } 35% { opacity: 1; transform: translateY(-3px); } }
+    .composer { display: flex; gap: 9px; padding: 14px 18px 18px; border-top: 1px solid var(--line); }
+    .composer input { width: 100%; min-height: 44px; padding: 0 14px; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); outline: none; }
+    .composer input:focus { border-color: var(--accent2); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent2) 25%, transparent); }
+    .send { flex: 0 0 44px; min-height: 44px; border: 0; border-radius: var(--radius); background: var(--accent); color: var(--ink); font-weight: 800; }
+    .queue { background: var(--panel); border-left: 1px solid var(--line); padding: 20px; overflow: hidden; }
+    .queue-top { display: flex; align-items: start; justify-content: space-between; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+    .queue h4 { margin: 0; font: 22px var(--display); letter-spacing: -.025em; }
+    .queue-meta { margin-top: 4px; color: var(--muted); font: 9px var(--utility); text-transform: uppercase; letter-spacing: .08em; }
+    .play { min-height: 44px; border: 0; border-radius: var(--radius); padding: 0 14px; background: var(--accent); color: var(--ink); font-size: 11px; font-weight: 750; white-space: nowrap; }
+    .track { display: grid; grid-template-columns: 24px minmax(0,1fr) 18px; gap: 9px; align-items: center; padding: 15px 2px; border-bottom: 1px solid var(--line); }
+    .track-no { color: var(--accent2); font: 10px var(--utility); }
+    .track strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+    .track span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 4px; color: var(--muted); font-size: 10px; }
+    .track .handle { color: var(--muted); letter-spacing: -2px; font-size: 12px; }
+    .queue-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 18px; }
+    .queue-actions button { min-height: 44px; border: 1px solid var(--line); background: transparent; color: var(--ink); border-radius: var(--radius); font-size: 10px; }
+    .status-note { margin-top: 14px; padding: 11px 12px; border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--line)); background: color-mix(in srgb, var(--danger) 10%, transparent); color: var(--ink); border-radius: calc(var(--radius) / 2); font-size: 10px; line-height: 1.4; }
+    .mobile { width: 310px; height: 680px; margin: 0 auto; border: 1px solid var(--line); border-radius: 28px; overflow: hidden; background: var(--paper); color: var(--ink); font-family: var(--body); box-shadow: 0 30px 80px rgba(0,0,0,.3); }
+    .mobile-top { height: 25px; display: flex; justify-content: center; align-items: center; background: var(--panel); }
+    .mobile-top i { width: 74px; height: 5px; border-radius: 9px; background: var(--line); }
+    .mobile-head { padding: 20px 18px 12px; display: flex; justify-content: space-between; align-items: center; }
+    .mobile-head b { font: 23px var(--display); }
+    .mobile-head span { color: var(--muted); font: 11px var(--utility); }
+    .mobile-body { padding: 12px 16px; }
+    .mobile-body h3 { margin: 14px 0 8px; font: 34px/1 var(--display); letter-spacing: -.04em; }
+    .mobile-body > p { margin: 0 0 22px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .moment-box { padding: 15px; min-height: 124px; border: 1px solid var(--line); background: var(--panel); border-radius: var(--radius); }
+    .moment-box span { color: var(--muted); font: 9px var(--utility); text-transform: uppercase; letter-spacing: .1em; }
+    .moment-box p { margin: 14px 0 18px; font-size: 13px; }
+    .moment-box button { width: 100%; min-height: 44px; border: 0; border-radius: var(--radius); background: var(--accent); color: var(--ink); font-size: 11px; font-weight: 750; }
+    .recent-label { margin: 28px 0 9px; color: var(--muted); font: 9px var(--utility); text-transform: uppercase; letter-spacing: .12em; }
+    .recent-card { padding: 14px 0; border-top: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .recent-card strong { display: block; font-size: 12px; }
+    .recent-card small { display: block; margin-top: 4px; color: var(--muted); font-size: 9px; }
+    .recent-card em { color: var(--accent2); font: normal 16px var(--utility); }
+    .a11y { max-width: 1440px; margin: 18px auto 0; display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px; border: 1px solid #2f3238; background: #2f3238; }
+    .a11y > div { padding: 16px; background: #17191d; color: #aeb2ba; font-size: 11px; line-height: 1.5; }
+    .a11y b { display: block; margin-bottom: 4px; color: #eff0f2; }
+
+    /* A — Listening Room */
+    .listening { --accent: #d9a441; --accent2: #9e5748; --ink: #211b18; --muted: #786b61; --paper: #f0e6d2; --panel: #e4d5ba; --line: #c7b89f; --danger: #a64236; --radius: 15px; --display: Georgia, "Times New Roman", serif; --body: "Avenir Next", Avenir, system-ui, sans-serif; --utility: "SFMono-Regular", Consolas, monospace; background: #241d1a; }
+    .listening .logo-preview { color: #f0e6d2; }
+    .listening .logo-word { font-style: italic; }
+    .listening .app-frame { box-shadow: 0 34px 90px rgba(0,0,0,.42), 0 0 0 8px #352925; }
+    .listening .queue { background-image: repeating-linear-gradient(0deg, transparent, transparent 31px, rgba(120,90,62,.04) 32px); }
+    .listening .bubble.dj { border-left: 3px solid var(--accent2); }
+    .listening .demo-button.primary, .listening .play, .listening .send, .listening .moment-box button { box-shadow: inset 0 -2px 0 rgba(82,46,26,.28); }
+
+    /* B — Signal Desk */
+    .signal { --accent: #ff6a35; --accent2: #b9e8ee; --ink: #e9f0ef; --muted: #829397; --paper: #101a1e; --panel: #18262b; --line: #34464c; --danger: #ff495f; --radius: 4px; --display: "Arial Narrow", "Roboto Condensed", Impact, sans-serif; --body: "Helvetica Neue", Arial, sans-serif; --utility: "SFMono-Regular", Consolas, monospace; background: #0b1215; }
+    .signal .concept-head h2, .signal .logo-word { text-transform: uppercase; letter-spacing: -.02em; }
+    .signal .logo-preview { color: #e9f0ef; }
+    .signal .logo-word::after { content: " / 01"; color: var(--accent); font: 12px var(--utility); letter-spacing: .08em; }
+    .signal .reel-mark, .signal .mini-reel { border-radius: 2px; }
+    .signal .app-frame, .signal .mobile { box-shadow: 0 0 0 2px #26383e, 0 35px 90px rgba(0,0,0,.5); }
+    .signal .browser-chrome { background: #0c1518; }
+    .signal .session-head h3, .signal .queue h4 { text-transform: uppercase; letter-spacing: .02em; }
+    .signal .bubble { border-radius: 3px; }
+    .signal .bubble.user { color: #101a1e; }
+    .signal .bubble.dj { border-left: 2px solid var(--accent2); }
+    .signal .track { position: relative; }
+    .signal .track::after { content: ""; position: absolute; right: 0; bottom: 0; height: 2px; width: var(--meter, 62%); background: var(--accent); opacity: .6; }
+    .signal .track:nth-child(3)::after { --meter: 38%; } .signal .track:nth-child(4)::after { --meter: 78%; }
+    .signal .demo-button, .signal .play, .signal .moment-box button { text-transform: uppercase; letter-spacing: .08em; }
+    .signal .demo-button.primary, .signal .play, .signal .send, .signal .moment-box button { color: #101a1e; }
+    .signal .demo-button.secondary { color: #e9f0ef; }
+
+    /* C — Nocturne */
+    .nocturne { --accent: #ed95ff; --accent2: #69d9d4; --ink: #f6f0fb; --muted: #aaa3bb; --paper: #17152e; --panel: #24203d; --line: #443d5f; --danger: #ff697f; --radius: 24px; --display: Palatino, "Book Antiqua", Georgia, serif; --body: "Avenir Next", Avenir, system-ui, sans-serif; --utility: "SFMono-Regular", Consolas, monospace; background: #131126; }
+    .nocturne .concept-head h2, .nocturne .logo-word { font-style: italic; font-weight: 400; }
+    .nocturne .logo-preview { color: #f6f0fb; }
+    .nocturne .logo-preview { position: relative; }
+    .nocturne .logo-preview::after { content: ""; position: absolute; left: 15px; right: 25px; bottom: 31px; height: 24px; border-bottom: 1px solid var(--accent2); border-radius: 50%; transform: rotate(-4deg); opacity: .8; }
+    .nocturne .app-frame, .nocturne .mobile { box-shadow: 0 0 90px rgba(237,149,255,.13), 0 34px 90px rgba(0,0,0,.48); }
+    .nocturne .side { background: #121127; }
+    .nocturne .bubble.user { background: #e8c4ff; color: #21172c; }
+    .nocturne .bubble.dj { border-color: #51466f; box-shadow: 0 10px 30px rgba(0,0,0,.16); }
+    .nocturne .queue { background: radial-gradient(circle at 100% 0%, rgba(105,217,212,.12), transparent 38%), var(--panel); }
+    .nocturne .track-no { width: 20px; height: 20px; display: grid; place-items: center; border: 1px solid var(--accent2); border-radius: 50%; }
+    .nocturne .demo-button.primary, .nocturne .play, .nocturne .send, .nocturne .moment-box button { background: #e8c4ff; color: #21172c; }
+    .nocturne .demo-button.secondary { color: #f6f0fb; }
+
+    /* D — Field Index */
+    .field { --accent: #d65536; --accent2: #315f8f; --ink: #1d2a27; --muted: #66706b; --paper: #e4e7dd; --panel: #d4d9cf; --line: #a9b2a8; --danger: #a83131; --radius: 0px; --display: "Arial Narrow", "Roboto Condensed", Arial, sans-serif; --body: Arial, Helvetica, sans-serif; --utility: "Courier New", Courier, monospace; background: #1c2825; }
+    .field .logo-preview { color: #e4e7dd; }
+    .field .logo-word { font: 700 30px var(--utility); letter-spacing: .1em; border: 2px solid currentColor; padding: 8px 10px; transform: rotate(-1deg); }
+    .field .reel-mark { display: none; }
+    .field .app-frame, .field .mobile { box-shadow: 12px 12px 0 #0d1714, 0 34px 80px rgba(0,0,0,.32); }
+    .field .brand { font-family: var(--utility); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .field .mini-reel { border-radius: 0; transform: rotate(-2deg); }
+    .field .session-head { border-bottom: 2px solid var(--ink); }
+    .field .session-head h3 { text-transform: uppercase; font-weight: 800; letter-spacing: -.02em; }
+    .field .bubble { border: 1px solid var(--ink); box-shadow: 3px 3px 0 color-mix(in srgb, var(--ink) 15%, transparent); }
+    .field .bubble.user { background: #e5b9a7; }
+    .field .bubble.dj { border-left: 5px solid var(--accent2); }
+    .field .track { border-bottom: 1px dashed var(--muted); }
+    .field .track-no { color: var(--paper); background: var(--accent2); padding: 4px; text-align: center; }
+    .field .status-note { border-left: 6px solid var(--danger); }
+    .field .nav-item.active { border-left: 5px solid var(--accent); }
+    .field .demo-button.primary, .field .play, .field .send, .field .moment-box button { background: var(--accent2); color: #fff; }
+
+    .board-footer { max-width: 1440px; margin: 0 auto; padding: 58px 28px 90px; }
+    .board-footer h2 { margin: 0 0 18px; font-size: 36px; letter-spacing: -.04em; }
+    .decision-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    .decision-card { padding: 20px; border: 1px solid #34373e; background: #17191d; }
+    .decision-card.recommended { border-color: #d9a441; }
+    .decision-card small { color: #8f949e; text-transform: uppercase; letter-spacing: .1em; }
+    .decision-card h3 { margin: 10px 0 8px; }
+    .decision-card p { color: #afb3bb; font-size: 13px; line-height: 1.5; }
+    @media (max-width: 1050px) {
+      .intro, .concept-head { grid-template-columns: 1fr; gap: 28px; }
+      .identity-strip { grid-template-columns: 1fr 1fr; }
+      .app-comparison { grid-template-columns: 1fr; }
+      .app-shell { grid-template-columns: 180px 1fr; }
+      .queue { display: none; }
+      .a11y, .decision-grid { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 680px) {
+      .board-nav { align-items: flex-start; }
+      .board-nav small, .board-links a span { display: none; }
+      .intro, .concept { padding-left: 18px; padding-right: 18px; }
+      .identity-strip { grid-template-columns: 1fr; }
+      .app-frame { display: none; }
+      .a11y, .decision-grid { grid-template-columns: 1fr; }
+      .mobile { width: min(100%, 340px); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .thinking-dots i { animation: none; opacity: .8; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="board-nav" aria-label="Design directions">
+    <div><strong>mixtape / identity study</strong><br><small>Web product UI · 30 Aug 2026</small></div>
+    <div class="board-links">
+      <a href="#listening">A <span>Listening Room</span></a>
+      <a href="#signal">B <span>Signal Desk</span></a>
+      <a href="#nocturne">C <span>Nocturne</span></a>
+      <a href="#field">D <span>Field Index</span></a>
+    </div>
+  </nav>
+
+  <header class="intro">
+    <div>
+      <span class="eyebrow">Approval board · visual identity exploration</span>
+      <h1>Four ways a personal DJ could feel.</h1>
+      <p>Every direction uses the same real product: start from a moment, talk with the DJ, shape the current queue, hand playback to Apple Music, and keep previous sessions. The decision here is the emotional world—not the feature set.</p>
+    </div>
+    <dl class="brief">
+      <dt>Audience</dt><dd>A music lover who wants the right queue without building it by hand.</dd>
+      <dt>Single job</dt><dd>Turn one honest sentence into a queue that feels personally selected.</dd>
+      <dt>Constant across concepts</dt><dd>Sessions-first structure, no album art assumption, long-turn state, errors, responsive layout.</dd>
+      <dt>Decision requested</dt><dd>Choose one identity or name specific elements to combine.</dd>
+    </dl>
+  </header>
+
+  <main>
+    <!-- Concept A -->
+    <section class="concept listening" id="listening">
+      <div class="concept-inner">
+        <header class="concept-head">
+          <div>
+            <span class="eyebrow"><span class="concept-number">A</span> Warm · considered · human</span>
+            <h2>Listening Room</h2>
+            <p>A quiet room, a handwritten liner note, and a DJ who has time for the whole record. The interface feels collected rather than generated: warm paper surfaces, walnut shadows, amber controls, and literary titles.</p>
+          </div>
+          <div class="tradeoff"><strong>Recommended starting point</strong><span>Best match for “personal DJ” and the mixtape name. It carries warmth without relying on album artwork, but needs disciplined typography to avoid becoming nostalgic or overly precious.</span></div>
+        </header>
+        <div class="identity-strip">
+          <div class="identity-cell"><span class="cell-label">Logo idea · tape + handwritten title</span><div class="logo-preview"><span class="reel-mark"></span><span class="logo-word">mixtape</span></div></div>
+          <div class="identity-cell"><span class="cell-label">Core palette</span><div class="swatches"><span class="swatch" style="background:#211b18">Ink</span><span class="swatch" style="background:#f0e6d2;color:#211b18;text-shadow:none">Paper</span><span class="swatch" style="background:#d9a441">Amber</span><span class="swatch" style="background:#9e5748">Clay</span><span class="swatch" style="background:#786b61">Taupe</span><span class="swatch" style="background:#a64236">Error</span></div></div>
+          <div class="identity-cell type-sample"><span class="cell-label">Typography</span><div class="display">Blue hour,<br><i>windows down.</i></div><div class="body">Quietly conversational body copy with room to breathe.</div><div class="utility">15 tracks · about 54 min</div></div>
+          <div class="identity-cell"><span class="cell-label">Button language</span><div class="button-stack"><button class="demo-button primary">Start the tape</button><button class="demo-button secondary">Save as playlist</button></div></div>
+        </div>
+        <div class="app-comparison">
+          <div class="app-frame">
+            <div class="browser-chrome"><i></i><i></i><i></i><span>mixtape / blue-hour-windows-down</span></div>
+            <div class="app-shell">
+              <aside class="side"><div class="brand"><span class="mini-reel"></span>mixtape</div><button class="nav-item active">Blue hour, windows down<small>just now · 15 tracks</small></button><button class="nav-item">Sunday kitchen radio<small>yesterday · 22 tracks</small></button><button class="nav-item">Soft landing after work<small>3 days ago · 13 tracks</small></button><div class="side-label">Library</div><button class="nav-item">Archived sessions</button><button class="nav-item">Sync music</button><div class="side-user">Noble<span>Apple Music connected</span></div></aside>
+              <section class="conversation"><header class="session-head"><div><h3>Blue hour, windows down</h3><p>Active tape · version 3</p></div><button class="head-action">Archive</button></header><div class="messages"><div class="bubble user"><span class="speaker">You</span>Night drive through Abuja. Familiar, warm, but nothing that feels sleepy.</div><div class="bubble dj"><span class="speaker">Your DJ</span>I kept the first stretch familiar, then let it open up after track five. Warm all the way through—no ballads.</div><div class="bubble user"><span class="speaker">You</span>Give the middle a little more movement.</div><div class="thinking"><span class="thinking-dots"><i></i><i></i><i></i></span>The DJ is listening…</div></div><div class="composer"><input aria-label="Message your DJ" value="More like track six, but older"><button class="send" aria-label="Send message">↑</button></div></section>
+              <aside class="queue"><div class="queue-top"><div><h4>The tape</h4><div class="queue-meta">15 tracks · about 54 min</div></div><button class="play">Play in Music</button></div><div class="track"><span class="track-no">01</span><div><strong>Sweetest Taboo</strong><span>Sade · chosen for the low-lit opening</span></div><span class="handle">••</span></div><div class="track"><span class="track-no">02</span><div><strong>Essence</strong><span>Wizkid feat. Tems · warm, familiar lift</span></div><span class="handle">••</span></div><div class="track"><span class="track-no">03</span><div><strong>Anybody</strong><span>Burna Boy · adds motion without rushing</span></div><span class="handle">••</span></div><div class="track"><span class="track-no">04</span><div><strong>Woman</strong><span>Rema · carries the rhythm forward</span></div><span class="handle">••</span></div><div class="queue-actions"><button>Save playlist</button><button>Open queue</button></div><div class="status-note"><strong>Queue updated.</strong> The middle now carries more movement. Screen reader announcement: “Queue updated, version 3.”</div></aside>
+            </div>
+          </div>
+          <div class="mobile"><div class="mobile-top"><i></i></div><div class="mobile-head"><b>mixtape</b><span>SYNCED</span></div><div class="mobile-body"><h3>What’s the<br><i>moment?</i></h3><p>The details do not have to be musical. Tell the DJ where you are and how it should feel.</p><div class="moment-box"><span>Start a new tape</span><p>Late dinner, friends I haven’t seen in a while…</p><button>Start the tape</button></div><div class="recent-label">Recent sessions</div><div class="recent-card"><div><strong>Blue hour, windows down</strong><small>15 tracks · just now</small></div><em>→</em></div><div class="recent-card"><div><strong>Sunday kitchen radio</strong><small>22 tracks · yesterday</small></div><em>→</em></div></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Concept B -->
+    <section class="concept signal" id="signal">
+      <div class="concept-inner">
+        <header class="concept-head"><div><span class="eyebrow"><span class="concept-number">B</span> Precise · active · engineered</span><h2>Signal Desk</h2><p>The DJ booth as a control surface. Hard edges, channel labels, signal orange, level meters, and factual type make the system feel responsive and capable. Every change reads like a live adjustment to the mix.</p></div><div class="tradeoff"><strong>Strongest interaction language</strong><span>Excellent for queues, controls, and transparent system state. The risk is emotional distance: it can feel like production software unless the writing stays warm.</span></div></header>
+        <div class="identity-strip"><div class="identity-cell"><span class="cell-label">Logo idea · channel plate</span><div class="logo-preview"><span class="reel-mark"></span><span class="logo-word">MIX/TAPE</span></div></div><div class="identity-cell"><span class="cell-label">Core palette</span><div class="swatches"><span class="swatch" style="background:#101a1e">Black steel</span><span class="swatch" style="background:#18262b">Console</span><span class="swatch" style="background:#ff6a35">Signal</span><span class="swatch" style="background:#b9e8ee;color:#101a1e;text-shadow:none">Ice</span><span class="swatch" style="background:#829397">Meter</span><span class="swatch" style="background:#ff495f">Fault</span></div></div><div class="identity-cell type-sample"><span class="cell-label">Typography</span><div class="display">BLUE HOUR<br>WINDOWS DOWN</div><div class="body">Condensed headings create the feel of equipment labels.</div><div class="utility">CH 03 / 15 · 54:08</div></div><div class="identity-cell"><span class="cell-label">Button language</span><div class="button-stack"><button class="demo-button primary">ENGAGE DJ</button><button class="demo-button secondary">EXPORT PLAYLIST</button></div></div></div>
+        <div class="app-comparison"><div class="app-frame"><div class="browser-chrome"><i></i><i></i><i></i><span>CONTROL ROOM / ACTIVE SESSION 03</span></div><div class="app-shell"><aside class="side"><div class="brand"><span class="mini-reel"></span>MIX/TAPE</div><div class="side-label">Live channels</div><button class="nav-item active">CH 01 · BLUE HOUR<small>LIVE / QV-03</small></button><button class="nav-item">CH 02 · KITCHEN RADIO<small>22 TRACKS / 1D</small></button><button class="nav-item">CH 03 · SOFT LANDING<small>13 TRACKS / 3D</small></button><div class="side-label">System</div><button class="nav-item">SESSION ARCHIVE</button><button class="nav-item">LIBRARY INPUT</button><div class="side-user">OPERATOR / NOBLE<span>APPLE MUSIC · ONLINE</span></div></aside><section class="conversation"><header class="session-head"><div><h3>BLUE HOUR / WINDOWS DOWN</h3><p>Signal live · queue version 03</p></div><button class="head-action">ARCHIVE</button></header><div class="messages"><div class="bubble user"><span class="speaker">INPUT / YOU</span>Night drive through Abuja. Familiar, warm, but nothing that feels sleepy.</div><div class="bubble dj"><span class="speaker">OUTPUT / DJ</span>I kept the first stretch familiar, then raised the energy after track five. No ballads in the signal path.</div><div class="bubble user"><span class="speaker">INPUT / YOU</span>Give the middle a little more movement.</div><div class="thinking"><span class="thinking-dots"><i></i><i></i><i></i></span>PROCESSING QUEUE / 00:18</div></div><div class="composer"><input aria-label="Message your DJ" value="More like channel six, but older"><button class="send" aria-label="Send message">TX</button></div></section><aside class="queue"><div class="queue-top"><div><h4>ACTIVE QUEUE</h4><div class="queue-meta">15 CH · 54:08 · QV-03</div></div><button class="play">PLAY OUTPUT</button></div><div class="track"><span class="track-no">01</span><div><strong>SWEETEST TABOO</strong><span>SADE · 64% ENERGY</span></div><span class="handle">••</span></div><div class="track"><span class="track-no">02</span><div><strong>ESSENCE</strong><span>WIZKID / TEMS · 72% ENERGY</span></div><span class="handle">••</span></div><div class="track"><span class="track-no">03</span><div><strong>ANYBODY</strong><span>BURNA BOY · 81% ENERGY</span></div><span class="handle">••</span></div><div class="track"><span class="track-no">04</span><div><strong>WOMAN</strong><span>REMA · 76% ENERGY</span></div><span class="handle">••</span></div><div class="queue-actions"><button>EXPORT</button><button>EXPAND</button></div><div class="status-note"><strong>SYNC CONFLICT / RESOLVED</strong><br>Queue changed on another screen. Latest version loaded.</div></aside></div></div><div class="mobile"><div class="mobile-top"><i></i></div><div class="mobile-head"><b>MIX/TAPE</b><span>ONLINE</span></div><div class="mobile-body"><h3>SET THE<br>INPUT.</h3><p>Describe the room, the movement, or the memory. The DJ handles the music.</p><div class="moment-box"><span>NEW SESSION / INPUT</span><p>Late dinner, friends I haven’t seen in a while…</p><button>ENGAGE DJ</button></div><div class="recent-label">SESSION LOG</div><div class="recent-card"><div><strong>BLUE HOUR / WINDOWS DOWN</strong><small>15 CH · LIVE</small></div><em>↗</em></div><div class="recent-card"><div><strong>SUNDAY KITCHEN RADIO</strong><small>22 CH · 1D</small></div><em>↗</em></div></div></div></div>
+      </div>
+    </section>
+
+    <!-- Concept C -->
+    <section class="concept nocturne" id="nocturne">
+      <div class="concept-inner"><header class="concept-head"><div><span class="eyebrow"><span class="concept-number">C</span> Cinematic · fluid · emotional</span><h2>Nocturne</h2><p>A session feels like entering a scene. Deep violet fields, moonlit cyan, generous curves, and an orbital track marker make mood—not machinery—the organising principle.</p></div><div class="tradeoff"><strong>Most emotionally expressive</strong><span>Strongest fit for night drives, heartbreak, focus, and memory prompts. It is less neutral across daytime contexts and must avoid becoming a generic neon streaming app.</span></div></header>
+        <div class="identity-strip"><div class="identity-cell"><span class="cell-label">Logo idea · wordmark + sound orbit</span><div class="logo-preview"><span class="logo-word">mixtape</span></div></div><div class="identity-cell"><span class="cell-label">Core palette</span><div class="swatches"><span class="swatch" style="background:#17152e">Midnight</span><span class="swatch" style="background:#24203d">Dusk</span><span class="swatch" style="background:#ed95ff;color:#21172c;text-shadow:none">Orchid</span><span class="swatch" style="background:#69d9d4;color:#17152e;text-shadow:none">Moon</span><span class="swatch" style="background:#aaa3bb">Haze</span><span class="swatch" style="background:#ff697f">Flare</span></div></div><div class="identity-cell type-sample"><span class="cell-label">Typography</span><div class="display">Blue hour,<br><i>windows down.</i></div><div class="body">A poised serif carries emotion; quiet sans keeps controls clear.</div><div class="utility">NOW FORMING · 15 TRACKS</div></div><div class="identity-cell"><span class="cell-label">Button language</span><div class="button-stack"><button class="demo-button primary">Begin the session</button><button class="demo-button secondary">Keep this as a playlist</button></div></div></div>
+        <div class="app-comparison"><div class="app-frame"><div class="browser-chrome"><i></i><i></i><i></i><span>mixtape — blue hour, windows down</span></div><div class="app-shell"><aside class="side"><div class="brand">mixtape</div><div class="side-label">In this light</div><button class="nav-item active">Blue hour, windows down<small>playing now · 15 tracks</small></button><button class="nav-item">Sunday kitchen radio<small>yesterday · 22 tracks</small></button><button class="nav-item">Soft landing after work<small>3 days ago · 13 tracks</small></button><div class="side-label">Past scenes</div><button class="nav-item">Archived sessions</button><button class="nav-item">Music library</button><div class="side-user">Noble<span>Apple Music is connected</span></div></aside><section class="conversation"><header class="session-head"><div><h3>Blue hour, windows down</h3><p>The mood is still taking shape</p></div><button class="head-action">Archive</button></header><div class="messages"><div class="bubble user"><span class="speaker">You</span>Night drive through Abuja. Familiar, warm, but nothing that feels sleepy.</div><div class="bubble dj"><span class="speaker">Your DJ</span>I’m opening softly, then letting the rhythm find the road. It stays warm without dropping into a ballad.</div><div class="bubble user"><span class="speaker">You</span>Give the middle a little more movement.</div><div class="thinking"><span class="thinking-dots"><i></i><i></i><i></i></span>The next shape is coming into focus…</div></div><div class="composer"><input aria-label="Message your DJ" value="More like track six, but older"><button class="send" aria-label="Send message">↑</button></div></section><aside class="queue"><div class="queue-top"><div><h4>Tonight’s arc</h4><div class="queue-meta">15 tracks · 54 minutes</div></div><button class="play">Play in Music</button></div><div class="track"><span class="track-no">1</span><div><strong>Sweetest Taboo</strong><span>Sade · a low-lit opening</span></div><span class="handle">••</span></div><div class="track"><span class="track-no">2</span><div><strong>Essence</strong><span>Wizkid feat. Tems · warm lift</span></div><span class="handle">••</span></div><div class="track"><span class="track-no">3</span><div><strong>Anybody</strong><span>Burna Boy · the road opens</span></div><span class="handle">••</span></div><div class="track"><span class="track-no">4</span><div><strong>Woman</strong><span>Rema · holds the movement</span></div><span class="handle">••</span></div><div class="queue-actions"><button>Save this</button><button>See the arc</button></div><div class="status-note"><strong>The queue shifted.</strong> The latest version is here. Nothing you wrote was lost.</div></aside></div></div><div class="mobile"><div class="mobile-top"><i></i></div><div class="mobile-head"><b><i>mixtape</i></b><span>YOUR MUSIC</span></div><div class="mobile-body"><h3>Where are<br>you going?</h3><p>Give the DJ the feeling. A place, a memory, or one sentence is enough.</p><div class="moment-box"><span>Set the scene</span><p>Late dinner, friends I haven’t seen in a while…</p><button>Begin the session</button></div><div class="recent-label">Return to a feeling</div><div class="recent-card"><div><strong>Blue hour, windows down</strong><small>15 tracks · moments ago</small></div><em>↗</em></div><div class="recent-card"><div><strong>Sunday kitchen radio</strong><small>22 tracks · yesterday</small></div><em>↗</em></div></div></div></div>
+      </div>
+    </section>
+
+    <!-- Concept D -->
+    <section class="concept field" id="field">
+      <div class="concept-inner"><header class="concept-head"><div><span class="eyebrow"><span class="concept-number">D</span> Archival · tactile · direct</span><h2>Field Index</h2><p>A working music collection: catalog cards, stamped session labels, blue index numbers, red action tabs, and visible structure. The metaphor is crate-digging and handwritten classification—not a retro cassette player.</p></div><div class="tradeoff"><strong>Most distinctive system</strong><span>Highly ownable and excellent for session history. Its deliberate roughness is less luxurious, and responsive implementation needs precision so dense details remain calm.</span></div></header>
+        <div class="identity-strip"><div class="identity-cell"><span class="cell-label">Logo idea · catalog stamp</span><div class="logo-preview"><span class="logo-word">MIXTAPE</span></div></div><div class="identity-cell"><span class="cell-label">Core palette</span><div class="swatches"><span class="swatch" style="background:#1d2a27">Archive ink</span><span class="swatch" style="background:#e4e7dd;color:#1d2a27;text-shadow:none">Stock</span><span class="swatch" style="background:#d65536">Tab red</span><span class="swatch" style="background:#315f8f">Index blue</span><span class="swatch" style="background:#66706b">Pencil</span><span class="swatch" style="background:#a83131">Correction</span></div></div><div class="identity-cell type-sample"><span class="cell-label">Typography</span><div class="display"><b>BLUE HOUR,<br>WINDOWS DOWN</b></div><div class="body">Plainspoken labels, stamped headings, and catalog metadata.</div><div class="utility">FILE MX-0826 / 15 CUTS</div></div><div class="identity-cell"><span class="cell-label">Button language</span><div class="button-stack"><button class="demo-button primary">FILE A NEW TAPE</button><button class="demo-button secondary">ADD TO MUSIC LIBRARY</button></div></div></div>
+        <div class="app-comparison"><div class="app-frame"><div class="browser-chrome"><i></i><i></i><i></i><span>CATALOG / MX-0826-04 / ACTIVE</span></div><div class="app-shell"><aside class="side"><div class="brand"><span class="mini-reel"></span>MIXTAPE</div><div class="side-label">Active files</div><button class="nav-item active">MX-04 BLUE HOUR<small>15 CUTS / UPDATED NOW</small></button><button class="nav-item">MX-03 KITCHEN RADIO<small>22 CUTS / 29 AUG</small></button><button class="nav-item">MX-02 SOFT LANDING<small>13 CUTS / 27 AUG</small></button><div class="side-label">Storage</div><button class="nav-item">ARCHIVED FILES</button><button class="nav-item">UPDATE CATALOG</button><div class="side-user">FILED FOR NOBLE<span>APPLE MUSIC / CONNECTED</span></div></aside><section class="conversation"><header class="session-head"><div><h3>BLUE HOUR, WINDOWS DOWN</h3><p>File MX-0826-04 · revision 03</p></div><button class="head-action">ARCHIVE FILE</button></header><div class="messages"><div class="bubble user"><span class="speaker">Listener note</span>Night drive through Abuja. Familiar, warm, but nothing that feels sleepy.</div><div class="bubble dj"><span class="speaker">DJ note</span>Filed the opening under familiar and warm. The middle steps up in rhythm; no ballads included.</div><div class="bubble user"><span class="speaker">Revision request</span>Give the middle a little more movement.</div><div class="thinking"><span class="thinking-dots"><i></i><i></i><i></i></span>REVISING INDEX · KEEP THIS WINDOW OPEN</div></div><div class="composer"><input aria-label="Message your DJ" value="More like cut six, but older"><button class="send" aria-label="Send message">ADD</button></div></section><aside class="queue"><div class="queue-top"><div><h4>CUT LIST / 15</h4><div class="queue-meta">Approx. 54 min · rev 03</div></div><button class="play">PLAY FILE</button></div><div class="track"><span class="track-no">01</span><div><strong>SWEETEST TABOO</strong><span>Sade / low-lit opening</span></div><span class="handle">••</span></div><div class="track"><span class="track-no">02</span><div><strong>ESSENCE</strong><span>Wizkid feat. Tems / warm lift</span></div><span class="handle">••</span></div><div class="track"><span class="track-no">03</span><div><strong>ANYBODY</strong><span>Burna Boy / adds movement</span></div><span class="handle">••</span></div><div class="track"><span class="track-no">04</span><div><strong>WOMAN</strong><span>Rema / holds rhythm</span></div><span class="handle">••</span></div><div class="queue-actions"><button>FILE PLAYLIST</button><button>FULL CUT LIST</button></div><div class="status-note"><strong>REVISION CONFLICT</strong><br>Another screen changed this file. Revision 03 is now shown.</div></aside></div></div><div class="mobile"><div class="mobile-top"><i></i></div><div class="mobile-head"><b>MIXTAPE</b><span>MX / HOME</span></div><div class="mobile-body"><h3>FILE THE<br>NEXT MOMENT.</h3><p>Write where you are and what the music needs to do. The DJ will classify the rest.</p><div class="moment-box"><span>New listener note</span><p>Late dinner, friends I haven’t seen in a while…</p><button>FILE A NEW TAPE</button></div><div class="recent-label">Active files</div><div class="recent-card"><div><strong>MX-04 / BLUE HOUR</strong><small>15 CUTS · ACTIVE</small></div><em>↗</em></div><div class="recent-card"><div><strong>MX-03 / KITCHEN RADIO</strong><small>22 CUTS · 29 AUG</small></div><em>↗</em></div></div></div></div>
+      </div>
+    </section>
+  </main>
+
+  <section class="a11y" aria-label="Shared accessibility contract">
+    <div><b>Keyboard and focus</b>Every control has a visible focus ring. Reorder also needs Move up / Move down actions, not drag alone.</div>
+    <div><b>Long DJ turns</b>Known labels and controls stay in place. After 10 seconds, a plain-language status appears without claiming false progress.</div>
+    <div><b>Motion and sound</b>Thinking dots become static under reduced motion. No meaning relies on animation, colour, or audio alone.</div>
+    <div><b>Responsive and large text</b>The queue becomes a dedicated view below tablet width. Text can grow without hiding playback or recovery actions.</div>
+    <div style="font-size:18px"><b>Large-text reading</b>“The DJ is listening…” wraps naturally; the 44px action remains directly below it.</div>
+  </section>
+
+  <footer class="board-footer">
+    <h2>Decision guide</h2>
+    <div class="decision-grid">
+      <article class="decision-card recommended"><small>Recommended</small><h3>A · Listening Room</h3><p>The strongest overall balance of personal, musical, trustworthy, and durable across both web and mobile.</p></article>
+      <article class="decision-card"><small>Control-forward</small><h3>B · Signal Desk</h3><p>Choose this if queue manipulation and visible system response should define the brand.</p></article>
+      <article class="decision-card"><small>Mood-forward</small><h3>C · Nocturne</h3><p>Choose this if emotional atmosphere should arrive before utility or collection.</p></article>
+      <article class="decision-card"><small>System-forward</small><h3>D · Field Index</h3><p>Choose this for the most ownable history, taxonomy, and crate-digging identity.</p></article>
+    </div>
+  </footer>
+</body>
+</html>

@@ -1,6 +1,6 @@
 # mixtape
 
-Personal-DJ app: prompt → perfect Apple Music queue for the moment. Flutter client (`client/`) + Hono API on Cloudflare Workers (`server/`) + Neon Postgres (Drizzle) + Better Auth. `web/` is a pending placeholder.
+Personal-DJ app: prompt → perfect Apple Music queue for the moment. Flutter client (`client/`) + Hono API on Cloudflare Workers (`server/`) + Neon Postgres (Drizzle) + Better Auth. `web/` contains the React/Vite/TypeScript UI foundation; API and MusicKit JS integration are pending.
 
 Read before working:
 - `docs/product/vision.md` — what this is and the endgame

@@ -47,7 +47,7 @@ Milestones toward that:
 
 1. **v1 — Personal tool (now):** iOS + Apple Music, TestFlight for founder + friends. Prompt → queue → refine → play → optionally save. Full enrichment pipeline. Daily-usable.
 2. **v2 — The DJ learns:** skips/repeats/time-of-day feed back automatically; anticipatory sessions ("your usual Friday wind-down?"); richer arcs (warm-up → peak → cool-down).
-3. **v3 — Web + reach:** web companion (MusicKit JS — no play counts on web, shares the same backend), App Store release, Sign in with Apple polish, licensed lyrics deal when revenue justifies.
+3. **v3 — Web + reach:** web companion integration (the React UI foundation now exists; MusicKit JS and shared-backend wiring remain, with no play counts on web), App Store release, Sign in with Apple polish, licensed lyrics deal when revenue justifies.
 4. **v4 — Social: the taste graph meets other people** (added 2026-08-30):
    - **Blend sessions/playlists**: one tape mixed from multiple people's histories and preferences — "DJ for the room", but grounded in everyone's real taste graphs, not a lowest-common-denominator shuffle.
    - **Taste twins**: find the users whose music taste is most similar to yours, and take actions from there (blend with them, borrow their discoveries, compare libraries). The enrichment corpus makes this computable: a user's taste vector is their play-count-weighted track/meaning embeddings, and similarity is a nearest-neighbor query over user vectors.

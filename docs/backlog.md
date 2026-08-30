@@ -24,7 +24,7 @@ Then **v3 — web + reach**: MusicKit-JS web companion (no play counts on web; s
 - **Git remote** — the repo has NO remote; it exists only on this machine. Push somewhere before it matters.
 - **Behavioral memory distillation** — a periodic job that turns swipe/keep patterns into memory notes (founder deferred at P4 design time; the live `remember_preference` tool shipped instead).
 - **Profile name** — account `name` was set manually via SQL for the founder; a real profile field would feed playlist attribution (see queue_screen save dialog) and any future social surface. Apple only discloses the name at first-ever sign-in, so capture it at sign-up for future users.
-- **Web app** — `web/` is still a placeholder.
+- **Web integration** — the approved React/Vite/TypeScript UI milestone is implemented. Wire Better Auth, `/sessions`, `/me/memories`, MusicKit JS playback, and Apple Music playlist creation; web still cannot contribute native iOS per-song play counts.
 
 ## Deferred polish (recorded during reviews; none are gates)
 

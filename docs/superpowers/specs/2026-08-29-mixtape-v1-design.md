@@ -17,7 +17,7 @@ v1 is a **personal tool**: founder + friends on TestFlight, iOS only, Apple Musi
 | Auth | Better Auth self-hosted in the Hono worker, users in Neon | Neon's managed auth lacks Sign in with Apple; Better Auth (same engine) supports Apple natively and stays portable |
 | Curation LLM | Claude Sonnet 5 (`claude-sonnet-5`) | ~5–8¢ per generated queue; escalate only the final sequencing pass to Opus 5 if ordering feels generic |
 | Embeddings | Voyage or Workers AI (bge) | Lyric-meaning + prompt vectors; pennies per million tokens, one-time per track |
-| Web | Pending — placeholder only in v1 | MusicKit JS makes it possible later (no play counts on web); shares this backend |
+| Web | React + Vite + TypeScript UI foundation | Approved tape-and-glass interface now implemented; Better Auth, shared API, and MusicKit JS integration remain (no play counts on web) |
 
 ## Platform constraints (researched 2026-08)
 
@@ -116,6 +116,6 @@ Derive-don't-display. Lyric text is never stored, cached, or shown; only embeddi
 2. **P2 Enrichment** — tracks/features schema, waterfall workers, embeddings, backfill founder's library.
 3. **P3 Curation + Session UX** — intent → pool → score → curate; session screen with playback (radio mode).
 4. **P4 Refinement + Conversion** — edit ops, taste signals, save-as-playlist, send-to-Music.
-5. **P5 Web (pending)** — placeholder only.
+5. **P5 Web (in progress)** — approved responsive UI foundation complete; Better Auth, shared API, and MusicKit JS integration pending.
 
 Each phase gets its own implementation plan (writing-plans flow) before code.

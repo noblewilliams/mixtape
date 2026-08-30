@@ -2,6 +2,9 @@
 
 Short ADR-style log. Newest first. Each entry: decision, why, and what would reopen it.
 
+## 2026-08-30 — Web foundation: React + Vite + TypeScript, UI-first integration
+The approved tape-and-glass identity is now implemented as the first web milestone in `web/`. The UI uses typed local fixtures that mirror the live Hono session/message/queue contracts, keeping visual implementation separate from authentication and MusicKit JS debugging. The production shell includes the flat three-zone conversation, cassette-derived controls, single-shelf Closet, accurate cassette asset, full-screen preparation motion, and responsive queue behavior. **Next boundary:** replace the local state seam with Better Auth + `/sessions` + `/me/memories`, then add MusicKit JS playback and playlist writes. Web still cannot supply native iOS per-song play counts. **Reopens if:** an integration constraint proves the current client-side domain shapes do not match the live API contract.
+
 ## 2026-08-29 — P2 backfill coverage report (4,689 tracks, ~5.5h wall incl. machine naps)
 **Meanings 94.8%** (4,327 embeddings + 120 instrumentals) — the semantic axis is near-total. **Features 59.9%** (2,809; +ISRC/duration on each) — BELOW the 80% gate ⇒ **P2.5 (local preview analysis on the founder's Mac) is triggered** per the ReccoBeats-only decision's reopen clause. Failure mix: 1,770 genuine no-match, ~110 transient (429/timeout — reset and retried same day). Recommended sequencing: finish P3 first (the engine treats missing features as unscored-not-excluded by design; 95% meaning coverage carries curation), then P2.5 lifts the feature axis. Steady-state cron continues for new syncs.
 
