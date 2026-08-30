@@ -240,4 +240,178 @@ void main() {
 
     expect(find.text('note one'), findsOneWidget);
   });
+
+  group('fix round: pending-forget lifecycle', () {
+    testWidgets(
+      'popping the route while an undo window is open still fires exactly one delete, no thrown errors',
+      (tester) async {
+        final api = FakeDjApi();
+        api.onListMemories = () async => [_memory(id: 'm1', note: 'note one')];
+        api.onDeleteMemory = (id) async {};
+        final container = _makeContainer(api);
+
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: MaterialApp(
+              home: Builder(
+                builder: (context) => Scaffold(
+                  body: Center(
+                    child: ElevatedButton(
+                      key: const Key('open-memories'),
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(builder: (_) => const MemoryScreen()),
+                      ),
+                      child: const Text('open'),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.byKey(const Key('open-memories')));
+        await tester.pumpAndSettle();
+
+        await tester.drag(find.byKey(const Key('dismissible-memory-m1')), const Offset(-500, 0));
+        await tester.pumpAndSettle(const Duration(milliseconds: 100));
+        expect(find.text('Undo'), findsOneWidget);
+
+        // Pop the route while the undo window is still open — the
+        // ScaffoldMessenger that owns the snackbar is app-scoped (above the
+        // Navigator), not route-scoped, so its `closed` future keeps running
+        // past this screen's dispose().
+        Navigator.of(tester.element(find.byType(MemoryScreen))).pop();
+        await tester.pumpAndSettle();
+
+        // Let the undo window elapse. If the fix regressed, this would
+        // surface as an unhandled riverpod StateError — pumpAndSettle turns
+        // any unhandled async error into a failing FlutterError here.
+        await tester.pump(const Duration(seconds: 6));
+        await tester.pumpAndSettle();
+
+        expect(api.deleteCalls, ['m1']);
+      },
+    );
+
+    testWidgets(
+      'two rapid swipes: the first commits immediately on the second swipe, the second keeps its own window',
+      (tester) async {
+        final api = FakeDjApi();
+        api.onListMemories = () async => [
+              _memory(id: 'm1', note: 'note one'),
+              _memory(id: 'm2', note: 'note two'),
+            ];
+        api.onDeleteMemory = (id) async {};
+        final container = _makeContainer(api);
+        await _pump(tester, container);
+
+        await tester.drag(find.byKey(const Key('dismissible-memory-m1')), const Offset(-500, 0));
+        await tester.pumpAndSettle(const Duration(milliseconds: 100));
+        expect(api.deleteCalls, isEmpty);
+
+        // Second swipe, well within the first's 5s window.
+        await tester.drag(find.byKey(const Key('dismissible-memory-m2')), const Offset(-500, 0));
+        await tester.pumpAndSettle();
+
+        // The first was finalized right on the second swipe — it never
+        // waits out its own window.
+        expect(api.deleteCalls, ['m1']);
+
+        // The second still has its own live undo window.
+        expect(find.text('Undo'), findsOneWidget);
+        await tester.tap(find.text('Undo'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('note two'), findsOneWidget);
+        expect(api.deleteCalls, ['m1']);
+
+        // Letting time pass must not resurrect the second delete either —
+        // it was undone, not deferred.
+        await tester.pump(const Duration(seconds: 6));
+        await tester.pumpAndSettle();
+        expect(api.deleteCalls, ['m1']);
+      },
+    );
+
+    testWidgets('three rapid swipes leave no stranded hidden rows once everything settles', (tester) async {
+      final api = FakeDjApi();
+      api.onListMemories = () async => [
+            _memory(id: 'm1', note: 'note one'),
+            _memory(id: 'm2', note: 'note two'),
+            _memory(id: 'm3', note: 'note three'),
+            _memory(id: 'm4', note: 'note four'),
+          ];
+      api.onDeleteMemory = (id) async {};
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+
+      await tester.drag(find.byKey(const Key('dismissible-memory-m1')), const Offset(-500, 0));
+      await tester.pumpAndSettle(const Duration(milliseconds: 50));
+      await tester.drag(find.byKey(const Key('dismissible-memory-m2')), const Offset(-500, 0));
+      await tester.pumpAndSettle(const Duration(milliseconds: 50));
+      await tester.drag(find.byKey(const Key('dismissible-memory-m3')), const Offset(-500, 0));
+      await tester.pumpAndSettle();
+
+      // m1 and m2 were superseded and finalized immediately; only m3 still
+      // has a live undo window. The never-touched m4 stays visible
+      // throughout.
+      expect(api.deleteCalls, ['m1', 'm2']);
+      expect(find.text('note four'), findsOneWidget);
+
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpAndSettle();
+
+      expect(api.deleteCalls, ['m1', 'm2', 'm3']);
+      expect(find.text('note one'), findsNothing);
+      expect(find.text('note two'), findsNothing);
+      expect(find.text('note three'), findsNothing);
+      expect(find.text('note four'), findsOneWidget);
+    });
+  });
+
+  group('fix round: refetch on open', () {
+    testWidgets(
+      'a post-frame refresh on open picks up a note that appeared right as the screen opened',
+      (tester) async {
+        var calls = 0;
+        final api = FakeDjApi();
+        api.onListMemories = () async {
+          calls++;
+          if (calls == 1) return [_memory(id: 'm1', note: 'note one')];
+          return [
+            _memory(id: 'm2', note: 'note two', createdAt: DateTime.now()),
+            _memory(id: 'm1', note: 'note one'),
+          ];
+        };
+        final container = _makeContainer(api);
+        await _pump(tester, container);
+
+        expect(calls, 2, reason: 'build() plus the initState post-frame refresh');
+        expect(find.text('note two'), findsOneWidget);
+        expect(find.text('note one'), findsOneWidget);
+      },
+    );
+
+    testWidgets('a failed pull-to-refresh keeps the list and says so', (tester) async {
+      var calls = 0;
+      final api = FakeDjApi();
+      api.onListMemories = () async {
+        calls++;
+        if (calls > 2) throw ApiException(500, 'boom');
+        return [_memory(id: 'm1', note: 'note one')];
+      };
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+      expect(calls, 2, reason: 'build() plus the initState post-frame refresh');
+
+      await tester.fling(find.byKey(const Key('memories-list')), const Offset(0, 300), 1000);
+      await tester.pumpAndSettle();
+
+      expect(calls, 3, reason: 'the pull must actually refetch');
+      expect(find.text('note one'), findsOneWidget);
+      expect(find.text("couldn't refresh — showing what we had"), findsOneWidget);
+    });
+  });
 }

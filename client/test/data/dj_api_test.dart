@@ -502,6 +502,20 @@ void main() {
         expect(e.message, 'unknown event type');
       }
     });
+
+    test('an empty 200 body resolves (void) instead of throwing malformed_response', () async {
+      final inner = MockClient((_) async => http.Response('', 200));
+
+      // Must complete with no error at all — a void call has nothing this
+      // class needs to read out of the body.
+      await _api(inner: inner).postSessionEvent('s1', 'played');
+    });
+
+    test('a non-object 200 body (e.g. bare "true") also resolves as void', () async {
+      final inner = MockClient((_) async => http.Response('true', 200));
+
+      await _api(inner: inner).postSessionEvent('s1', 'played');
+    });
   });
 
   group('listMemories', () {
@@ -562,6 +576,12 @@ void main() {
         _api(inner: inner).deleteMemory('not-mine'),
         throwsA(isA<ApiException>().having((e) => e.statusCode, 'statusCode', 404)),
       );
+    });
+
+    test('an empty 200 body resolves (void) instead of throwing malformed_response', () async {
+      final inner = MockClient((_) async => http.Response('', 200));
+
+      await _api(inner: inner).deleteMemory('m1');
     });
   });
 }

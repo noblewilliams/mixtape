@@ -912,6 +912,21 @@ void main() {
       expect(container.read(memoriesProvider).value!.map((m) => m.id), ['m1']);
     });
 
+    test('forget() treats a 404 as success — the note is already gone, no restore', () async {
+      final api = FakeDjApi();
+      api.onListMemories = () async => [
+            DjMemory(id: 'm1', note: 'note 1', createdAt: DateTime(2026, 1, 1)),
+          ];
+      api.onDeleteMemory = (id) async => throw ApiException(404, 'not_found');
+      final container = _makeContainer(api);
+      await container.read(memoriesProvider.future);
+
+      final ok = await container.read(memoriesProvider.notifier).forget('m1');
+
+      expect(ok, isTrue);
+      expect(container.read(memoriesProvider).value, isEmpty);
+    });
+
     test('auth transition rebuilds and reloads the memories list', () async {
       final testAuth = TestAuthNotifier(AuthStatus.signedIn);
       final api = FakeDjApi();

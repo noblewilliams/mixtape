@@ -492,13 +492,34 @@ class MemoriesNotifier extends AsyncNotifier<List<DjMemory>> {
   }
 
   /// Deletes the note server-side and, only on success, drops it from local
-  /// state. The undo-window bookkeeping (optimistic hide, the 5s deferred
+  /// state. The undo-window bookkeeping (optimistic hide, the deferred
   /// commit, restoring the row on failure) is owned by MemoryScreen itself —
   /// this method is the single point where the server call actually fires,
-  /// called only once the undo window has closed without an undo.
+  /// called only once the undo window has closed without an undo (or a
+  /// later swipe superseded this one — see MemoryScreen's pending-forget
+  /// doc comment).
+  ///
+  /// A 404 is treated as success, not failure: it means the note is already
+  /// gone server-side (e.g. deleted from another device, or a race with
+  /// itself), and the caller's intent — this row should not exist — is
+  /// already satisfied. Surfacing that as a failure would restore a row the
+  /// user was told was forgotten, which is worse than silently dropping it.
+  ///
+  /// Deliberately diverges from [SessionsNotifier], which always follows a
+  /// mutation with a full [refresh] (re-fetching the canonical list):
+  /// [forget] instead drops the row from local state directly, with no
+  /// refetch. That's safe here specifically because a hard delete's local
+  /// view (the list minus this one id) can never be wrong the way a
+  /// status-change's local view could be — there's no server-side field this
+  /// row's absence could get wrong. If memories ever grow a softer/partial
+  /// delete, revisit this shortcut and refetch like [SessionsNotifier] does.
   Future<bool> forget(String id) async {
     try {
       await ref.read(djApiProvider).deleteMemory(id);
+    } on ApiException catch (e) {
+      if (e.statusCode != 404) return false;
+      // Already gone — fall through to the same local drop as a real
+      // success, below.
     } catch (_) {
       return false;
     }

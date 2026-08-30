@@ -124,7 +124,7 @@ class DjApi {
   /// [ApiException], [NetworkException]). Swallowing failures is the
   /// caller's job, deliberately, so this class stays uniform.
   Future<void> postSessionEvent(String sessionId, String type) =>
-      _call(() => _client.postJson('/sessions/$sessionId/events', {'type': type}), (_) {});
+      _callVoid(() => _client.postJson('/sessions/$sessionId/events', {'type': type}));
 
   /// `GET /me/memories` — newest-first, capped at 50 server-side.
   Future<List<DjMemory>> listMemories() => _call(
@@ -138,7 +138,7 @@ class DjApi {
   /// 404 on someone else's id surfaces as a plain [ApiException], not part
   /// of the DJ error taxonomy).
   Future<void> deleteMemory(String id) =>
-      _call(() => _client.deleteJson('/me/memories/$id'), (_) {});
+      _callVoid(() => _client.deleteJson('/me/memories/$id'));
 
   void close() => _client.close();
 
@@ -163,6 +163,22 @@ class DjApi {
       // fall through to the typed exit below
     }
     throw DjApiException(kind: 'malformed_response', message: _genericMalformedResponseMessage);
+  }
+
+  /// Same success/error-status handling as [_call], but for endpoints whose
+  /// caller never reads the 200 body (`postSessionEvent`, `deleteMemory`) —
+  /// both are documented server-side as returning `{ok:true}`, but nothing
+  /// here actually depends on that shape. [_call] would wrongly manufacture
+  /// a `malformed_response` [DjApiException] for a call that otherwise
+  /// succeeded if the body were ever empty or non-JSON (e.g. a bare 200 with
+  /// no body, which some proxies/edge runtimes produce for a void response) —
+  /// this path tolerates any 200 body content, or none at all, as success.
+  Future<void> _callVoid(Future<http.Response> Function() request) async {
+    try {
+      await request();
+    } on ApiException catch (e) {
+      throw _translate(e);
+    }
   }
 
   Exception _translate(ApiException e) {

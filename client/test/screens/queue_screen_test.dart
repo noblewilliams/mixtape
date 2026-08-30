@@ -760,6 +760,24 @@ void main() {
       expect(api.postedEvents, [(sessionId: 's1', type: 'saved_playlist')]);
     });
 
+    testWidgets('a save that added zero tracks posts NO event — a false taste signal', (tester) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(title: 'Road Trip'), messages: [], queue: [_track(0)]);
+      final bridge = FakeBridge();
+      bridge.onCreatePlaylist = (name, ids) async => (added: 0, failed: 1);
+      final container = _makeContainer(api, bridge: bridge);
+      await _pump(tester, container);
+
+      await tester.tap(find.byKey(const Key('save-button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('save-confirm-button')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('saved 0 songs to Apple Music (1 failed)'), findsOneWidget);
+      expect(api.postedEvents, isEmpty);
+    });
+
     testWidgets('a MusicKit failure while playing posts NO event at all', (tester) async {
       final api = FakeDjApi();
       api.onGetSession = (_) async => SessionDetail(session: _session(), messages: [], queue: [_track(0)]);

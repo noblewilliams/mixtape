@@ -160,7 +160,10 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
   /// rebuild — both call sites fire this only from their success branch, not
   /// from build()), and any failure here is swallowed silently: the server
   /// endpoint is purely a taste-learning signal, never allowed to degrade
-  /// the Play/Save UX that already succeeded on the user's device.
+  /// the Play/Save UX that already succeeded on the user's device. The save
+  /// call site additionally only fires this when `result.added > 0` (see
+  /// [_confirmSave]) — a save that added zero tracks isn't evidence the
+  /// user liked anything in this queue, and would be a false taste signal.
   void _postEvent(String type) {
     unawaited(() async {
       try {
@@ -254,7 +257,9 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
             author: author,
             description: 'made by mixtape',
           );
-      _postEvent('saved_playlist');
+      // A zero-added save is a false taste signal, not evidence of a like —
+      // see _postEvent's doc comment.
+      if (result.added > 0) _postEvent('saved_playlist');
       if (dialogContext.mounted) Navigator.of(dialogContext).pop();
       if (!screenContext.mounted) return;
       _showSnack(screenContext, _saveSuccessMessage(result.added, result.failed));
