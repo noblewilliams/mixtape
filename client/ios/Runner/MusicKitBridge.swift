@@ -26,7 +26,11 @@ class MusicKitBridge: NSObject {
         let args = call.arguments as? [String: Any] ?? [:]
         let name = args["name"] as? String ?? ""
         let appleIds = args["appleIds"] as? [String] ?? []
-        createPlaylist(name: name, appleIds: appleIds, result: result)
+        let author = args["author"] as? String
+        let description = args["description"] as? String
+        createPlaylist(
+          name: name, appleIds: appleIds, author: author,
+          description: description, result: result)
       default:
         result(FlutterMethodNotImplemented)
       }
@@ -67,13 +71,20 @@ class MusicKitBridge: NSObject {
 
   // MARK: - Playlist creation
 
-  private static func createPlaylist(name: String, appleIds: [String], result: @escaping FlutterResult) {
+  private static func createPlaylist(
+    name: String, appleIds: [String], author: String?, description: String?,
+    result: @escaping FlutterResult
+  ) {
     guard !name.isEmpty, !appleIds.isEmpty else {
       result(FlutterError(code: "empty_playlist", message: "name and tracks are required", details: nil))
       return
     }
     DispatchQueue.main.async {
       let metadata = MPMediaPlaylistCreationMetadata(name: name)
+      // Without an explicit author Apple attributes the playlist to the
+      // Xcode product name ("Runner"), not even the display name.
+      if let author, !author.isEmpty { metadata.authorDisplayName = author }
+      if let description, !description.isEmpty { metadata.descriptionText = description }
       MPMediaLibrary.default().getPlaylist(with: UUID(), creationMetadata: metadata) { playlist, error in
         DispatchQueue.main.async {
           guard let playlist = playlist, error == nil else {

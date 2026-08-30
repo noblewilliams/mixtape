@@ -87,7 +87,8 @@ class FakeBridge implements MusicKitBridge {
   onCreatePlaylist;
 
   final List<List<String>> playCalls = [];
-  final List<({String name, List<String> ids})> createCalls = [];
+  final List<({String name, List<String> ids, String? author, String? description})> createCalls =
+      [];
 
   @override
   Future<bool> requestAuthorization() => throw UnimplementedError();
@@ -104,8 +105,13 @@ class FakeBridge implements MusicKitBridge {
   }
 
   @override
-  Future<({int added, int failed})> createPlaylist(String name, List<String> appleIds) {
-    createCalls.add((name: name, ids: appleIds));
+  Future<({int added, int failed})> createPlaylist(
+    String name,
+    List<String> appleIds, {
+    String? author,
+    String? description,
+  }) {
+    createCalls.add((name: name, ids: appleIds, author: author, description: description));
     final impl = onCreatePlaylist;
     return impl == null ? Future.value((added: appleIds.length, failed: 0)) : impl(name, appleIds);
   }
@@ -386,6 +392,10 @@ void main() {
 
     expect(bridge.createCalls.single.name, 'My Mix');
     expect(bridge.createCalls.single.ids, ['apple-0', 'apple-1']);
+    // Attribution metadata: without an explicit author Apple stamps the
+    // playlist with the Xcode product name ("Runner").
+    expect(bridge.createCalls.single.author, 'mixtape');
+    expect(bridge.createCalls.single.description, 'made by mixtape');
     expect(find.text('saved 2 songs to Apple Music'), findsOneWidget);
   });
 

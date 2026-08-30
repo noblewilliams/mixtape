@@ -32,7 +32,12 @@ class FakeBridge implements MusicKitBridge {
   Future<bool> playQueue(List<String> appleIds) async => true;
 
   @override
-  Future<({int added, int failed})> createPlaylist(String name, List<String> appleIds) async =>
+  Future<({int added, int failed})> createPlaylist(
+    String name,
+    List<String> appleIds, {
+    String? author,
+    String? description,
+  }) async =>
       (added: appleIds.length, failed: 0);
 }
 
@@ -45,7 +50,12 @@ class DeniedBridge implements MusicKitBridge {
   @override
   Future<bool> playQueue(List<String> appleIds) => throw UnimplementedError();
   @override
-  Future<({int added, int failed})> createPlaylist(String name, List<String> appleIds) =>
+  Future<({int added, int failed})> createPlaylist(
+    String name,
+    List<String> appleIds, {
+    String? author,
+    String? description,
+  }) =>
       throw UnimplementedError();
 }
 
@@ -69,7 +79,12 @@ class BoomBridge implements MusicKitBridge {
   Future<bool> playQueue(List<String> appleIds) async => true;
 
   @override
-  Future<({int added, int failed})> createPlaylist(String name, List<String> appleIds) async =>
+  Future<({int added, int failed})> createPlaylist(
+    String name,
+    List<String> appleIds, {
+    String? author,
+    String? description,
+  }) async =>
       (added: appleIds.length, failed: 0);
 }
 

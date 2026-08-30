@@ -171,7 +171,16 @@ class MusicKitBridge {
   /// first bad id. Guards against an empty [name] or [appleIds] BEFORE
   /// touching the channel — there is no such thing as an empty-named or
   /// empty playlist worth creating.
-  Future<({int added, int failed})> createPlaylist(String name, List<String> appleIds) async {
+  /// [author]/[description] land on the playlist's creation metadata —
+  /// without an explicit author, Apple attributes the playlist to the Xcode
+  /// product name ("Runner"). Omitted (null) keys are simply absent from
+  /// the channel payload.
+  Future<({int added, int failed})> createPlaylist(
+    String name,
+    List<String> appleIds, {
+    String? author,
+    String? description,
+  }) async {
     if (name.isEmpty) {
       throw MusicKitException('playlist name cannot be empty');
     }
@@ -182,7 +191,12 @@ class MusicKitBridge {
       final raw = await _channel
           .invokeMethod<Map<dynamic, dynamic>>(
             'createPlaylist',
-            {'name': name, 'appleIds': appleIds},
+            {
+              'name': name,
+              'appleIds': appleIds,
+              if (author != null) 'author': author,
+              if (description != null) 'description': description,
+            },
           )
           .timeout(_callTimeout + _perTrackTimeout * appleIds.length);
       // Parsed defensively: any shape drift from the platform side — a

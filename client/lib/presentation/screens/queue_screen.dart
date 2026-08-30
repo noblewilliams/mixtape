@@ -206,7 +206,16 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     final name = trimmed.isEmpty ? defaultName : trimmed;
     final ids = [for (final t in queue) if (t.appleId != null) t.appleId!];
     try {
-      final result = await ref.read(musicKitBridgeProvider).createPlaylist(name, ids);
+      // Attribution: without an explicit author Apple shows the Xcode
+      // product name ("Runner"). The account has no stored display name yet
+      // (Apple only releases it on first-ever sign-in) — when a profile
+      // name exists, pass it here instead of the app name.
+      final result = await ref.read(musicKitBridgeProvider).createPlaylist(
+            name,
+            ids,
+            author: 'mixtape',
+            description: 'made by mixtape',
+          );
       if (dialogContext.mounted) Navigator.of(dialogContext).pop();
       if (!screenContext.mounted) return;
       _showSnack(screenContext, _saveSuccessMessage(result.added, result.failed));

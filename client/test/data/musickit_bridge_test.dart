@@ -229,12 +229,37 @@ void main() {
       final result = await MusicKitBridge().createPlaylist('My Tape', ['111', '222', '333']);
 
       expect(captured?.method, 'createPlaylist');
+      // No author/description passed → keys absent entirely, so the native
+      // side keeps its own defaults rather than seeing empty strings.
       expect(captured?.arguments, {
         'name': 'My Tape',
         'appleIds': ['111', '222', '333'],
       });
       expect(result.added, 2);
       expect(result.failed, 1);
+    });
+
+    test('author and description ride the payload when provided', () async {
+      MethodCall? captured;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        captured = call;
+        return {'added': 1, 'failed': 0};
+      });
+
+      await MusicKitBridge().createPlaylist(
+        'My Tape',
+        ['111'],
+        author: 'mixtape',
+        description: 'made by mixtape',
+      );
+
+      expect(captured?.arguments, {
+        'name': 'My Tape',
+        'appleIds': ['111'],
+        'author': 'mixtape',
+        'description': 'made by mixtape',
+      });
     });
 
     test('defensively decodes a missing added/failed as 0', () async {
