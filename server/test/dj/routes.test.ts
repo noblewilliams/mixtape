@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { createApp, type AuthLike } from '../../src/app'
 import type { DjDeps } from '../../src/dj/loop'
-import type { LlmClient, LlmRequest, LlmTurn, LlmAssistantBlock, LlmToolCall } from '../../src/dj/llm'
+import type { LlmClient, LlmComplete, LlmRequest, LlmTurn, LlmAssistantBlock, LlmToolCall } from '../../src/dj/llm'
 import { LlmError } from '../../src/dj/llm'
 import type { Embedder } from '../../src/enrich/embedder'
 import { tracks, trackMeanings, userTracks, user, djSessions, djMessages } from '../../src/db/schema'
@@ -215,6 +215,79 @@ describe('session routes', () => {
 
       const res = await postJson(app, '/sessions', { prompt: 'hello' })
       expect(res.status).toBe(401)
+    })
+
+    it('names the session from a concurrently-run Haiku title call, landing in both the response and the row', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const { llm } = makeFakeLlm([{ text: 'here you go.' }])
+      const titleComplete: LlmComplete = async () => 'Rainy Night Drive'
+      const app = buildApp(db, { embed: fakeEmbed, llm, titleComplete }, authedAs('u1'))
+
+      const res = await postJson(app, '/sessions', { prompt: 'rainy night drive — moody, keep it flowing' })
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { session: { id: string; title: string } }
+      expect(body.session.title).toBe('Rainy Night Drive')
+
+      const [row] = await db.select().from(djSessions).where(eq(djSessions.id, body.session.id))
+      expect(row.title).toBe('Rainy Night Drive')
+    })
+
+    it('sanitizes a quoted/multi-line Haiku title before it ever reaches the row', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const { llm } = makeFakeLlm([{ text: 'here you go.' }])
+      const titleComplete: LlmComplete = async () => '"Rainy\nNight Drive"  '
+      const app = buildApp(db, { embed: fakeEmbed, llm, titleComplete }, authedAs('u1'))
+
+      const res = await postJson(app, '/sessions', { prompt: 'rainy night drive' })
+      const body = (await res.json()) as { session: { title: string } }
+      expect(body.session.title).toBe('Rainy Night Drive')
+    })
+
+    it('falls back to the truncated-prompt title — and the session still succeeds — when the title call throws', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const longPrompt = 'a moody rainy-day driving playlist that keeps things flowing for about ten songs please'
+      const { llm } = makeFakeLlm([{ text: 'here you go.' }])
+      const titleComplete: LlmComplete = async () => {
+        throw new LlmError('boom', 500)
+      }
+      const app = buildApp(db, { embed: fakeEmbed, llm, titleComplete }, authedAs('u1'))
+
+      const res = await postJson(app, '/sessions', { prompt: longPrompt })
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { session: { id: string; title: string } }
+      expect(longPrompt.startsWith(body.session.title.replace(/\s+$/, ''))).toBe(true)
+
+      const [row] = await db.select().from(djSessions).where(eq(djSessions.id, body.session.id))
+      expect(row.title).toBe(body.session.title)
+    })
+
+    it('falls back to the truncated-prompt title when the title call resolves empty/garbage', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const longPrompt = 'a moody rainy-day driving playlist that keeps things flowing for about ten songs please'
+      const { llm } = makeFakeLlm([{ text: 'here you go.' }])
+      const titleComplete: LlmComplete = async () => '   ""   '
+      const app = buildApp(db, { embed: fakeEmbed, llm, titleComplete }, authedAs('u1'))
+
+      const res = await postJson(app, '/sessions', { prompt: longPrompt })
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { session: { title: string } }
+      expect(longPrompt.startsWith(body.session.title.replace(/\s+$/, ''))).toBe(true)
+    })
+
+    it('with no titleComplete wired at all, behaves exactly as before (truncated-prompt title)', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const { llm } = makeFakeLlm([{ text: 'here you go.' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+      const res = await postJson(app, '/sessions', { prompt: 'no title llm configured' })
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { session: { title: string } }
+      expect(body.session.title).toBe('no title llm configured')
     })
   })
 

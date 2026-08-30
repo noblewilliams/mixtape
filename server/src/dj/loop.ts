@@ -3,7 +3,7 @@ import { and, desc, eq, gt, lt } from 'drizzle-orm'
 import type { Db } from '../db/types'
 import type { Embedder } from '../enrich/embedder'
 import { djMessages, djSessions, queueTracks, tracks } from '../db/schema'
-import type { LlmClient, LlmMessage } from './llm'
+import type { LlmClient, LlmComplete, LlmMessage } from './llm'
 import { LlmError } from './llm'
 import { intentSchema, opIntentSchema, queueOpsSchema, DJ_TOOLS, type Intent, type OpIntent } from './contracts'
 import { buildPool } from './pool'
@@ -19,7 +19,11 @@ import {
   type ReplacementsProvider,
 } from './queue-store'
 
-export type DjDeps = { llm: LlmClient; embed: Embedder }
+// titleComplete is optional: session titling (routes/sessions.ts) degrades to
+// its truncated-prompt fallback with no titleComplete wired, same as any
+// other title-generation failure — callers that only need the tool-use loop
+// (most tests) can omit it.
+export type DjDeps = { llm: LlmClient; embed: Embedder; titleComplete?: LlmComplete }
 
 // The only session fields the loop actually needs — callers (the session
 // routes, Task 8) already have the full dj_sessions row and can pass it

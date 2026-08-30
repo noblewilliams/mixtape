@@ -8,6 +8,7 @@ import { djSessions, djMessages } from '../db/schema'
 import { runDjTurn, DjError, type DjDeps, type DjSessionRef } from '../dj/loop'
 import { applyOps, getActiveQueue, QueueOpError, QueueVersionConflict } from '../dj/queue-store'
 import { queueOpsSchema } from '../dj/contracts'
+import { generateSessionTitle } from '../dj/title'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -24,7 +25,10 @@ function isUuid(value: string): boolean {
 // otherwise fake a multi-line title) and caps length, mirroring
 // dj/sanitize.ts's treatment of track titles before they reach an LLM
 // prompt — applied here to the session's own display title instead.
-function titleFromPrompt(prompt: string): string {
+// Exported for scripts/retitle-sessions.ts, which needs the exact same
+// transform to recognize a session whose title is still this fallback
+// (never overwritten by a generated title) as a backfill candidate.
+export function titleFromPrompt(prompt: string): string {
   const cleaned = prompt.replace(/\p{C}+/gu, ' ').trim()
   return (cleaned.slice(0, 60) || 'new session').trim()
 }
@@ -90,24 +94,40 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
   app.post('/', zValidator('json', createSessionSchema), async (c) => {
     const { prompt } = c.req.valid('json')
     const userId = c.get('user').id
-    const title = titleFromPrompt(prompt)
+    const fallbackTitle = titleFromPrompt(prompt)
 
     // Persist-first: the session row (and, inside runDjTurn, the user's own
     // message) exist before the first turn runs — a failure below still
     // leaves the listener with a session they can reopen and retry, rather
-    // than losing their prompt to an LLM hiccup.
-    const [session] = await db.insert(djSessions).values({ userId, title }).returning()
+    // than losing their prompt to an LLM hiccup. Starts with the durable
+    // truncated-prompt title; replaced below only once the Haiku-generated
+    // name (run concurrently with the turn) resolves.
+    const [session] = await db.insert(djSessions).values({ userId, title: fallbackTitle }).returning()
     const sessionRef: DjSessionRef = { id: session.id, userId }
 
+    // A naming call, not curation (see dj/title.ts) — run CONCURRENTLY with
+    // the DJ turn so it adds zero latency to session creation.
+    // generateSessionTitle never throws and always resolves to at least
+    // fallbackTitle, so this can never fail or delay the turn below; no
+    // deps.titleComplete wired (e.g. a caller that only set up the tool-loop
+    // LlmClient) degrades the same way, via the same fallback.
+    const titlePromise = deps.titleComplete
+      ? generateSessionTitle(deps.titleComplete, prompt, fallbackTitle)
+      : Promise.resolve(fallbackTitle)
+
     try {
-      const result = await runDjTurn(db, deps, sessionRef, prompt)
+      const [result, title] = await Promise.all([runDjTurn(db, deps, sessionRef, prompt), titlePromise])
       // A text-only first turn never touches dj_sessions itself (no queue
       // write to ride $onUpdate's automatic bump) — bumped explicitly, same
       // as the message-turn route below, so list ordering (newest first by
-      // updatedAt) reflects even a chat-only first turn.
+      // updatedAt) reflects even a chat-only first turn. The generated title
+      // rides this same UPDATE (one write, not two) — it only ever runs
+      // AFTER runDjTurn (and any queue writes inside it) has settled, so it
+      // can't race or clobber the turn's own dj_sessions.queueVersion write
+      // (dj/queue-store.ts) — this UPDATE only ever touches updatedAt/title.
       const [sessionRow] = await db
         .update(djSessions)
-        .set({ updatedAt: new Date() })
+        .set({ updatedAt: new Date(), title })
         .where(eq(djSessions.id, session.id))
         .returning(sessionListColumns)
       const messages = await db

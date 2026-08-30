@@ -62,3 +62,6 @@ Store only embeddings + theme tags; never store or show lyric text; no lyrics-ba
 
 ## 2026-08-29 — v1 audience: personal tool
 Founder + friends via TestFlight. App Store polish (onboarding, review-proofing) deferred to v3 (see vision milestones).
+
+## 2026-08-30 — Session titles: Haiku-generated, not the truncated prompt
+`POST /sessions` names each session with a short 2–5 word title from `claude-haiku-4-5-20251001`, run concurrently with the DJ turn so it adds no latency; falls back to the truncated-prompt title on any failure/empty/garbage output — a title must never fail or delay a session. This is a naming call, not curation, so it doesn't touch the Sonnet-only curation rule above.

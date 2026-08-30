@@ -10,7 +10,7 @@ import { workersAiEmbedder } from './enrich/embedder'
 import type { EnrichDeps } from './enrich/pipeline'
 import type { Db } from './db/types'
 import { handleScheduled } from './enrich/scheduled'
-import { anthropicLlm, buildAnthropic } from './dj/llm'
+import { anthropicLlm, anthropicComplete, buildAnthropic } from './dj/llm'
 import type { DjDeps } from './dj/loop'
 
 // Minimal structural stand-in for the platform's ScheduledController — this
@@ -69,9 +69,14 @@ function buildDeps(env: Bindings): EnrichDeps | undefined {
 // a client that was never going to construct.
 function buildDjDeps(env: Bindings): DjDeps | undefined {
   if (!env.ANTHROPIC_API_KEY || !env.AI) return undefined
+  const anthropic = buildAnthropic(env.ANTHROPIC_API_KEY)
   return {
-    llm: anthropicLlm(buildAnthropic(env.ANTHROPIC_API_KEY)),
+    llm: anthropicLlm(anthropic),
     embed: workersAiEmbedder(env.AI),
+    // Same client, same env var — session titling (dj/title.ts) is gated on
+    // the same ANTHROPIC_API_KEY the DJ loop already requires, no separate
+    // config to fail-fast on.
+    titleComplete: anthropicComplete(anthropic),
   }
 }
 

@@ -59,6 +59,23 @@ export class LlmError extends Error {
   }
 }
 
+// Shared by anthropicLlm and anthropicComplete — deliberately excludes the SDK's
+// own error message (see LlmError's comment above).
+function toLlmError(e: unknown): LlmError {
+  return new LlmError(
+    e instanceof Anthropic.APIError ? `HTTP ${e.status ?? 'unknown'}` : e instanceof Error ? e.name : typeof e,
+    e instanceof Anthropic.APIError ? e.status : undefined,
+  )
+}
+
+// A minimal, tools-less "ask the model one thing, get text back" seam —
+// deliberately separate from LlmClient/DJ_MODEL: callers that need a
+// different model (e.g. session titling, see dj/title.ts) pass it per call,
+// and a plain-text no-tools request never collides with curate()'s own
+// no-tools convention (see dj/curate.ts, dj/loop.ts's makeFakeLlm fakes),
+// which a caller sharing LlmClient for both would.
+export type LlmComplete = (opts: { system: string; prompt: string; model: string; maxTokens?: number }) => Promise<string>
+
 // Structural surface of the real SDK client — a fake `{ messages: { create } }` in
 // tests satisfies this directly, no `as never` needed in either direction.
 type AnthropicClient = {
@@ -84,10 +101,7 @@ export function anthropicLlm(client: AnthropicClient): LlmClient {
         ...(req.effort ? { output_config: { effort: req.effort } } : {}),
       })
     } catch (e) {
-      throw new LlmError(
-        e instanceof Anthropic.APIError ? `HTTP ${e.status ?? 'unknown'}` : e instanceof Error ? e.name : typeof e,
-        e instanceof Anthropic.APIError ? e.status : undefined,
-      )
+      throw toLlmError(e)
     }
     const raw = res.content as LlmAssistantBlock[]
     const text = raw
@@ -110,6 +124,31 @@ export function anthropicLlm(client: AnthropicClient): LlmClient {
           }
         : null,
     }
+  }
+}
+
+// Text-only counterpart to anthropicLlm — no tools, no tool-loop bookkeeping,
+// just `system` + a single user-turn prompt in, joined text blocks out. Same
+// AnthropicClient structural type (and the same toLlmError wrapping), so it
+// carries no separate credentials or client wiring.
+export function anthropicComplete(client: AnthropicClient): LlmComplete {
+  return async (opts) => {
+    let res: Awaited<ReturnType<AnthropicClient['messages']['create']>>
+    try {
+      res = await client.messages.create({
+        model: opts.model,
+        max_tokens: opts.maxTokens ?? 300,
+        system: opts.system,
+        messages: [{ role: 'user', content: opts.prompt }],
+        tools: [],
+      })
+    } catch (e) {
+      throw toLlmError(e)
+    }
+    return (res.content as LlmAssistantBlock[])
+      .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+      .map((b) => b.text)
+      .join('\n')
   }
 }
 
