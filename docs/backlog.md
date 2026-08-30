@@ -6,6 +6,16 @@ Single consolidated list. Detail lives in `decisions.md` (rationale) and the pla
 
 - **P4 founder device smoke** (the only open gate): rebuild the app, then run the script in `superpowers/plans/2026-08-30-p4-taste-learning.md` §Task 5 — state a durable preference → note appears in "What the DJ knows" → new session honors it; swipe an artist away in 2 sessions → rarer next queue; forget → reverts.
 
+## Next big phase: v2 — "The DJ learns" (vision.md milestone 2)
+
+P4 built v2's foundation (taste term + memory). What remains, in ascending difficulty — recommended sequencing: smoke P4 → TestFlight → ~2 weeks of daily use → spec v2 starting with arcs:
+
+1. **Richer arcs (warm-up → peak → cool-down).** Queues engineered as an energy journey, not just well-ordered picks. Pure server-side sequencing work over the already-scored pool (features now 100%). This is THE designated evidence case for the Opus-escalation contingency (CLAUDE.md): if Sonnet's arc ordering disappoints, escalate only the sequencing pass. Cheapest pillar, felt in every tape.
+2. **Anticipatory sessions ("your usual Friday wind-down?").** Data already exists — sessions carry timestamps + prompts. A pattern job spots time-of-day/mood habits; Home offers a one-tap suggested session instead of a blank prompt.
+3. **Automatic playback feedback (skips/repeats/completions).** Hardest + most valuable. CONSTRAINT: playback hands off to the Music app, so skips are currently invisible to us. Options: observe `systemMusicPlayer` state while the app is alive (partial signal), or build in-app playback via `ApplicationMusicPlayer` (vision explicitly allows both) so the whole session is observed and every skip becomes a free taste signal. Deserves its own spec — in-app playback also changes the product feel (the tape plays inside mixtape).
+
+Then **v3 — web + reach**: MusicKit-JS web companion (no play counts on web; same backend), App Store release, licensed-lyrics deal when revenue justifies (see vision.md milestone 3).
+
 ## Next candidates (unordered, founder picks)
 
 - **TestFlight upload / release install** — debug builds only run tethered to `flutter run`; daily use wants `flutter run --release` or TestFlight (which was always the v1 distribution plan).
