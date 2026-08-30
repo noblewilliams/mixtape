@@ -588,6 +588,41 @@ describe('session routes', () => {
       const res = await postJson(app, `/sessions/${sessionId}/messages`, { text: 'hi' })
       expect(res.status).toBe(401)
     })
+
+    it('a rename followed by a LATER failure this same turn still carries sessionTitle in the DjError body — self-healing but must not show a stale AppBar first', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const { llm: setupLlm } = makeFakeLlm([{ text: 'ready.' }])
+      const sessionId = await createSession(db, authedAs('u1'), { embed: fakeEmbed, llm: setupLlm })
+
+      // Round 1 renames (the write lands immediately); round 2 — the SAME
+      // turn — then throws, ending it. The rename must still ride the
+      // resulting DjError body, not just the DB row.
+      let call = 0
+      const llm: LlmClient = async () => {
+        call += 1
+        if (call === 1) {
+          return {
+            text: '',
+            toolCalls: [toolCall('c1', 'rename_session', { title: 'Lagos Nights' })],
+            raw: [{ type: 'tool_use', id: 'c1', name: 'rename_session', input: { title: 'Lagos Nights' } }],
+            stopReason: 'tool_use',
+            usage: null,
+          }
+        }
+        throw new LlmError('boom', 503)
+      }
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+      const res = await postJson(app, `/sessions/${sessionId}/messages`, { text: 'call this tape Lagos Nights then break' })
+      expect(res.status).toBe(502)
+      const body = (await res.json()) as { error: string; sessionTitle?: string }
+      expect(body.error).toBe('llm')
+      expect(body.sessionTitle).toBe('Lagos Nights')
+
+      const [row] = await db.select().from(djSessions).where(eq(djSessions.id, sessionId))
+      expect(row.title).toBe('Lagos Nights')
+    })
   })
 
   describe('POST /sessions/:id/queue-ops', () => {
@@ -905,6 +940,116 @@ describe('session routes', () => {
       expect(row.title).toBe('Lagos Nights')
     })
 
+    it('POST /sessions: a rename that survives a QueueVersionConflict retry still carries sessionTitle in the response and wins the row over the Haiku title', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      // A small library so the extend op below has a real replacement
+      // candidate to pick (buildPool must come back non-empty for
+      // executeEditQueue's provider to ever call curate()).
+      await seedLibrary(db, 'u1', 2)
+
+      let convCall = 0
+      let curateCall = 0
+      const llm: LlmClient = async (req) => {
+        if (req.tools.length === 0) {
+          curateCall += 1
+          if (curateCall === 1) {
+            // Simulates a concurrent write landing between applyOps' phase-1
+            // snapshot and its phase-2 locked re-check (same race as
+            // test/dj/loop.test.ts's "QueueVersionConflict retry contract")
+            // by bumping queueVersion directly — there's no existing queue
+            // row to move via a queue op, since this is the session's very
+            // first turn and the queue starts empty.
+            const [s] = await db.select({ id: djSessions.id, queueVersion: djSessions.queueVersion }).from(djSessions)
+            await db.update(djSessions).set({ queueVersion: s.queueVersion + 1 }).where(eq(djSessions.id, s.id))
+          }
+          return curateFakeResponseFromRequest(req)
+        }
+        convCall += 1
+        if (convCall === 1) {
+          // Attempt 1's only round: renames AND kicks off the extend that's
+          // about to conflict — both land in the SAME round, same as the
+          // real listener bundling a rename with another request.
+          return {
+            text: '',
+            toolCalls: [
+              toolCall('c1', 'rename_session', { title: 'Lagos Nights' }),
+              toolCall('c2', 'edit_queue', { ops: [{ op: 'extend', count: 1 }] }),
+            ],
+            raw: [
+              { type: 'tool_use', id: 'c1', name: 'rename_session', input: { title: 'Lagos Nights' } },
+              { type: 'tool_use', id: 'c2', name: 'edit_queue', input: { ops: [{ op: 'extend', count: 1 }] } },
+            ],
+            stopReason: 'tool_use',
+            usage: null,
+          }
+        }
+        if (convCall === 2) {
+          // The retry's round 1 — does NOT rename again, only finishes the
+          // extend (the interloper fired only once, so this one succeeds).
+          return {
+            text: '',
+            toolCalls: [toolCall('c3', 'edit_queue', { ops: [{ op: 'extend', count: 1 }] })],
+            raw: [{ type: 'tool_use', id: 'c3', name: 'edit_queue', input: { ops: [{ op: 'extend', count: 1 }] } }],
+            stopReason: 'tool_use',
+            usage: null,
+          }
+        }
+        return {
+          text: 'stretched it out and renamed it.',
+          toolCalls: [],
+          raw: [{ type: 'text', text: 'stretched it out and renamed it.' }],
+          stopReason: 'end_turn',
+          usage: null,
+        }
+      }
+      const titleComplete: LlmComplete = async () => 'Some Auto Title'
+      const app = buildApp(db, { embed: fakeEmbed, llm, titleComplete }, authedAs('u1'))
+
+      const res = await postJson(app, '/sessions', { prompt: 'call this tape Lagos Nights and stretch it out' })
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { session: { id: string; title: string }; sessionTitle?: string }
+      expect(body.sessionTitle).toBe('Lagos Nights')
+      expect(body.session.title).toBe('Lagos Nights')
+
+      const [row] = await db.select().from(djSessions).where(eq(djSessions.id, body.session.id))
+      expect(row.title).toBe('Lagos Nights') // NOT 'Some Auto Title'
+    })
+
+    it('POST /sessions: a rename on a first turn that ultimately FAILS still keeps the rename on the row, not the Haiku title', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+
+      // Round 1 renames; round 2 — the SAME turn — throws, ending it with no
+      // retry (LlmError isn't a QueueVersionConflict). The rename's DB write
+      // already landed in round 1, and must survive the write below.
+      let call = 0
+      const llm: LlmClient = async () => {
+        call += 1
+        if (call === 1) {
+          return {
+            text: '',
+            toolCalls: [toolCall('c1', 'rename_session', { title: 'Lagos Nights' })],
+            raw: [{ type: 'tool_use', id: 'c1', name: 'rename_session', input: { title: 'Lagos Nights' } }],
+            stopReason: 'tool_use',
+            usage: null,
+          }
+        }
+        throw new LlmError('boom', 503)
+      }
+      const titleComplete: LlmComplete = async () => 'Some Auto Title'
+      const app = buildApp(db, { embed: fakeEmbed, llm, titleComplete }, authedAs('u1'))
+
+      const res = await postJson(app, '/sessions', { prompt: 'call this tape Lagos Nights then break' })
+      expect(res.status).toBe(502)
+      const body = (await res.json()) as { error: string; sessionId: string; sessionTitle?: string }
+      expect(body.error).toBe('llm')
+      expect(body.sessionTitle).toBe('Lagos Nights')
+
+      const [row] = await db.select().from(djSessions).where(eq(djSessions.id, body.sessionId))
+      expect(row.title).toBe('Lagos Nights') // NOT 'Some Auto Title'
+    })
+
     it('POST /sessions omits sessionTitle on an ordinary (no-rename) first turn', async () => {
       const db = await createTestDb()
       await seedUser(db, 'u1')
@@ -1027,6 +1172,17 @@ describe('session routes', () => {
       expect(res.status).toBe(200)
       const body = (await res.json()) as { session: { title: string } }
       expect(body.session.title).toBe('a'.repeat(60))
+    })
+
+    it('rejects a title over the raw 120-char zod bound with 400, before it ever reaches sanitize', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const sessionId = await createPlainSession(db, 'u1')
+      const { llm } = makeFakeLlm([{ text: 'n/a' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+      const res = await patchJson(app, `/sessions/${sessionId}`, { title: 'a'.repeat(121) })
+      expect(res.status).toBe(400)
     })
 
     it('404s a rename for another user\'s session id (no existence leak)', async () => {

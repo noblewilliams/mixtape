@@ -97,6 +97,15 @@ export class DjError extends Error {
   queue?: QueueTrackView[]
   queueVersion?: number
 
+  // Set by runDjTurn's catch from the SAME hoisted rename tracker attemptTurn
+  // writes into (see runDjTurn) — a rename_session call's DB write lands
+  // immediately, before the turn's outcome is known, so a rename followed by
+  // a later failure THIS TURN (a conflict that persists through the retry, a
+  // curation error, ...) must still surface here rather than silently
+  // dropping the rename from the client-visible result. Absent whenever
+  // rename_session never fired this turn.
+  sessionTitle?: string
+
   // Upstream diagnostic detail, for server-side observability (logTurn)
   // only — set by normalizeError from LlmError.detail ('llm') or the
   // curation error's own class name ('curation'), both content-free by
@@ -608,6 +617,9 @@ async function executeRenameSession(
   }
 
   try {
+    // Also bumps updatedAt via djSessions' own $onUpdate (db/schema.ts) —
+    // a documented side effect, not a bug: a rename reorders the session to
+    // the top of Home's newest-first list, same as any other write to it.
     await db.update(djSessions).set({ title: sanitized }).where(eq(djSessions.id, session.id))
     return { resultText: RENAME_OK, newTitle: sanitized }
   } catch {
@@ -628,12 +640,20 @@ type AttemptStats = {
 type AttemptResult = {
   text: string
   queueVersion: number
-  // Present ONLY when rename_session fired (and its write landed) at some
-  // point during THIS attempt — see DjTurnResult's own comment for how this
-  // rides up to the route response.
-  sessionTitle?: string
   stats: AttemptStats
 }
+
+// Shared by BOTH calls attemptWithConflictRetry can make (the original
+// attempt and, on a QueueVersionConflict, the single retry) — created ONCE
+// by runDjTurn and threaded through as a plain mutable box rather than
+// returned from attemptTurn, specifically so a rename that lands during an
+// attempt that's LATER retried or that ultimately fails still survives: the
+// DB write (executeRenameSession) already happened, so the box just has to
+// outlive whichever attempt made it. Last successful rename_session call
+// across every attempt this turn makes wins (a later attempt's own rename
+// overwrites an earlier one's), matching "last rename wins" for a turn that
+// renames more than once.
+type RenameTracker = { title?: string }
 
 // Thrown out of attemptTurn on ANY failure, wrapping whatever actually broke
 // (LlmError, CurationTruncated/Unparseable, QueueVersionConflict, or
@@ -659,8 +679,18 @@ class AttemptTurnFailure extends Error {
 // attemptWithConflictRetry ("retry the turn once from a fresh snapshot")
 // correct: a second call to this function naturally picks up whatever the
 // racing writer left behind, with no stale state carried over from the
-// failed attempt.
-async function attemptTurn(db: Db, deps: DjDeps, session: DjSessionRef, userText: string, userRowSeq: number): Promise<AttemptResult> {
+// failed attempt. `renameState` is the ONE exception to "no stale state
+// carried over" — it's the caller's shared box (see RenameTracker), written
+// into directly rather than returned, so it survives exactly this attempt
+// throwing or being retried.
+async function attemptTurn(
+  db: Db,
+  deps: DjDeps,
+  session: DjSessionRef,
+  userText: string,
+  userRowSeq: number,
+  renameState: RenameTracker,
+): Promise<AttemptResult> {
   const stats: AttemptStats = { llmCalls: 0, toolCalls: 0, inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0 }
   try {
     const [history, sessionContext, startVersion] = await Promise.all([
@@ -704,7 +734,6 @@ async function attemptTurn(db: Db, deps: DjDeps, session: DjSessionRef, userText
     let lastGenerateIntent: Intent | undefined
     let currentVersion = startVersion
     let finalText: string | null = null
-    let renamedTitle: string | undefined
 
     for (let round = 0; round < MAX_TURNS && finalText === null; round++) {
       const turn = await counted({ system: PERSONA_PROMPT, messages: [...baseMessages, ...liveMessages], tools: DJ_TOOLS })
@@ -756,7 +785,11 @@ async function attemptTurn(db: Db, deps: DjDeps, session: DjSessionRef, userText
           // executeRenameSession's own comment.
           const outcome = await executeRenameSession(db, session, call.input)
           resultText = outcome.resultText
-          if (outcome.newTitle) renamedTitle = outcome.newTitle
+          // Written straight into the caller's shared box (see RenameTracker)
+          // rather than a local var — the write must survive even if a LATER
+          // tool call this same round (or a later round) throws and this
+          // whole attempt gets discarded.
+          if (outcome.newTitle) renameState.title = outcome.newTitle
         } else {
           resultText = `unknown tool: ${call.name}`
         }
@@ -765,7 +798,7 @@ async function attemptTurn(db: Db, deps: DjDeps, session: DjSessionRef, userText
       liveMessages.push({ role: 'user', content: toolResultBlocks })
     }
 
-    return { text: finalText ?? FALLBACK_TEXT, queueVersion: currentVersion, sessionTitle: renamedTitle, stats }
+    return { text: finalText ?? FALLBACK_TEXT, queueVersion: currentVersion, stats }
   } catch (e) {
     throw new AttemptTurnFailure(e, stats)
   }
@@ -777,9 +810,10 @@ async function attemptWithConflictRetry(
   session: DjSessionRef,
   userText: string,
   userRowSeq: number,
+  renameState: RenameTracker,
 ): Promise<AttemptResult> {
   try {
-    return await attemptTurn(db, deps, session, userText, userRowSeq)
+    return await attemptTurn(db, deps, session, userText, userRowSeq, renameState)
   } catch (e) {
     if (e instanceof AttemptTurnFailure && e.originalError instanceof QueueVersionConflict) {
       // Exactly one retry, from a fresh snapshot (attemptTurn re-reads
@@ -790,7 +824,10 @@ async function attemptWithConflictRetry(
       // — this retry re-pays that cost rather than trying to resume
       // mid-attempt. Acceptable at the one-user-per-session request rates
       // this app runs at; would need revisiting under real concurrent load.
-      return attemptTurn(db, deps, session, userText, userRowSeq)
+      // `renameState` is the SAME box passed to the first attempt — a rename
+      // that landed there before the conflict surfaced survives into this
+      // retry untouched, and a rename this retry itself makes overwrites it.
+      return attemptTurn(db, deps, session, userText, userRowSeq, renameState)
     }
     throw e
   }
@@ -820,13 +857,29 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
     .values({ sessionId: session.id, role: 'user', content: userText })
     .returning({ seq: djMessages.seq })
 
+  // Hoisted OUT of attemptTurn (and shared across a QueueVersionConflict
+  // retry) for exactly one reason: executeRenameSession's DB write lands
+  // immediately, before this turn's overall outcome is known, so a rename
+  // that fires during an attempt that's later retried — or that fires and is
+  // then followed by a LATER failure this same attempt — must not vanish
+  // just because the attempt that made it isn't the one that ultimately
+  // returns (or throws). See RenameTracker's own comment for the "last
+  // rename wins" contract across attempts.
+  const renameState: RenameTracker = {}
+
   let attempt: AttemptResult
   try {
-    attempt = await attemptWithConflictRetry(db, deps, session, userText, userRow.seq)
+    attempt = await attemptWithConflictRetry(db, deps, session, userText, userRow.seq, renameState)
   } catch (e) {
     const failure = e instanceof AttemptTurnFailure ? e : null
     const djError = normalizeError(failure ? failure.originalError : e)
     logTurn(session.id, failure?.stats ?? null, djError.kind, djError.detail)
+
+    // Same rationale as the queue/queueVersion attachment below: a rename
+    // that already landed in the DB this turn must ride the error out to the
+    // caller rather than disappear because the turn itself failed — see
+    // DjError.sessionTitle's own comment.
+    if (renameState.title) djError.sessionTitle = renameState.title
 
     // An earlier tool call THIS TURN (generate_queue, or an edit_queue batch)
     // may have already committed before a LATER failure ended the turn —
@@ -870,5 +923,10 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
 
   const queue = await getActiveQueue(db, session.id)
   logTurn(session.id, attempt.stats, null)
-  return { djMessage: djMessageRow, queue, queueVersion: attempt.queueVersion, sessionTitle: attempt.sessionTitle }
+  // sessionTitle comes from the hoisted renameState, NOT from `attempt`
+  // itself — the attempt that finally succeeds may not be the one that
+  // called rename_session (e.g. it renamed on a first try that then hit a
+  // conflict, and the retry never renames again); renameState is the one
+  // value that's guaranteed to reflect every rename this WHOLE turn made.
+  return { djMessage: djMessageRow, queue, queueVersion: attempt.queueVersion, sessionTitle: renameState.title }
 }

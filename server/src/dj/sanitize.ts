@@ -30,6 +30,14 @@ export function sanitizeForPrompt(text: string, maxLength: number = DEFAULT_MAX_
 // own sanitizeTitle, tuned for an LLM's raw completion, which might wrap its
 // answer in quotes) — a user- or DJ-supplied title is free-form text, and
 // stripping a leading/trailing quote from it would be actively wrong.
+// Collapses internal whitespace runs to a single space (matching dj/title.ts's
+// own sanitizeTitle discipline) so a title padded with tabs/repeated spaces
+// doesn't display that way verbatim.
 export function sanitizeTitleText(text: string, maxLength = 60): string {
-  return text.replace(/\p{C}+/gu, ' ').trim().slice(0, maxLength).trim()
+  return text
+    .replace(/\p{C}+/gu, ' ')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .slice(0, maxLength)
+    .trim()
 }

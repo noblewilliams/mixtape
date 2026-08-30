@@ -63,7 +63,13 @@ function djErrorStatus(kind: DjError['kind']): 400 | 409 | 502 {
 // carries the only diagnostic this body needs; see dj/loop.ts's DjError
 // class comment and normalizeError for where each kind's copy is set.
 function djErrorBody(e: DjError, extra: Record<string, unknown> = {}) {
-  return { error: e.kind, message: e.message, queue: e.queue, queueVersion: e.queueVersion, ...extra }
+  // sessionTitle rides this body the same way queue/queueVersion do — absent
+  // (dropped by JSON.stringify) unless a rename_session call landed earlier
+  // this turn before the failure that produced `e`. Without it, a client
+  // whose turn renamed the session and then failed would keep showing the
+  // stale AppBar title until its next unrelated fetch self-heals it — see
+  // dj/loop.ts's DjError.sessionTitle comment.
+  return { error: e.kind, message: e.message, queue: e.queue, queueVersion: e.queueVersion, sessionTitle: e.sessionTitle, ...extra }
 }
 
 const createSessionSchema = z.object({ prompt: z.string().min(1).max(2000) })
@@ -142,8 +148,17 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
     // listener COULD open with "call this tape Lagos Nights") wins over the
     // concurrently-generated Haiku title — an explicit rename is a stronger
     // signal than the auto-naming pass, and the auto-generated title must
-    // never clobber it on the write below.
-    const renamedTitle = turnResult.status === 'fulfilled' ? turnResult.value.sessionTitle : undefined
+    // never clobber it on the write below. Checked on the REJECTED branch
+    // too (DjError.sessionTitle, dj/loop.ts) — the rename's DB write already
+    // landed before whatever later failed this turn (a conflict that
+    // persisted through the retry, a curation error, ...), so a failed turn
+    // must never overwrite that persisted rename with the Haiku title here.
+    const renamedTitle =
+      turnResult.status === 'fulfilled'
+        ? turnResult.value.sessionTitle
+        : turnResult.reason instanceof DjError
+          ? turnResult.reason.sessionTitle
+          : undefined
     const title = renamedTitle ?? (titleResult.status === 'fulfilled' ? titleResult.value : fallbackTitle)
 
     // A text-only first turn never touches dj_sessions itself (no queue
@@ -244,6 +259,9 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
       if (!sanitized) return c.json({ error: 'invalid_title', message: 'title cannot be empty' }, 400)
       updates.title = sanitized
     }
+    // Also bumps updatedAt via djSessions' own $onUpdate (db/schema.ts) even
+    // for a title-only PATCH — a documented side effect: a manual rename
+    // reorders the session to the top of GET /sessions' newest-first list.
     const [updated] = await db
       .update(djSessions)
       .set(updates)

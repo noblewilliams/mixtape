@@ -84,6 +84,10 @@ async function main() {
         .limit(1)
       if (!firstUserMessage) continue // no messages at all — nothing to name from
 
+      // Coupled to titleFromPrompt's CURRENT trim/cap/collapse order — if that
+      // function's sanitize discipline ever changes, an old row's stored
+      // fallback title can stop matching a freshly-recomputed one even though
+      // nothing about the row itself changed, silently excluding it here.
       const expectedFallback = titleFromPrompt(firstUserMessage.content)
       if (session.title !== expectedFallback) continue // already renamed (generated or hand-edited) — leave it alone
 
