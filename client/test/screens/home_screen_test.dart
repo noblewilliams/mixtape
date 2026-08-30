@@ -501,6 +501,56 @@ void main() {
 
       container.dispose();
     });
+
+    testWidgets('a failed pull-to-refresh keeps the list AND says so — never a silent '
+        'spinner retract', (tester) async {
+      var calls = 0;
+      final api = FakeDjApi();
+      api.onListSessions = () async {
+        calls += 1;
+        if (calls > 1) throw NetworkException('refresh boom');
+        return [_session(id: 's1', title: 'Test Session')];
+      };
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+      expect(find.text('Test Session'), findsOneWidget);
+
+      await tester.fling(
+        find.byKey(const Key('sessions-list')),
+        const Offset(0, 300),
+        1000,
+      );
+      await tester.pumpAndSettle();
+
+      expect(calls, 2, reason: 'the pull must actually refetch');
+      expect(find.text('Test Session'), findsOneWidget);
+      expect(
+        find.text("couldn't refresh — showing what we had"),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('pull-to-refresh still works from the empty state', (tester) async {
+      var calls = 0;
+      final api = FakeDjApi();
+      api.onListSessions = () async {
+        calls += 1;
+        return calls > 1 ? [_session(id: 's1', title: 'Fresh Session')] : <DjSession>[];
+      };
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+      expect(find.byKey(const Key('sessions-empty')), findsOneWidget);
+
+      await tester.fling(
+        find.byKey(const Key('sessions-empty')),
+        const Offset(0, 300),
+        1000,
+      );
+      await tester.pumpAndSettle();
+
+      expect(calls, 2, reason: 'the empty state must still hook the RefreshIndicator');
+      expect(find.text('Fresh Session'), findsOneWidget);
+    });
   });
 
   group('library sync relocation', () {

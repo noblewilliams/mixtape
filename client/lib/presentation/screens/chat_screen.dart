@@ -116,17 +116,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         ref.read(chatProvider(widget.sessionId).notifier).clearTransientError();
       }
 
-      // One-shot: fires on the first state this listener ever sees with a
-      // value (i.e. right after the initial load resolves), guarded by
-      // _seededInitialError so a later rebuild (background refresh, a sent
-      // turn, ...) can never re-seed a duplicate bubble.
-      if (!_seededInitialError && widget.initialError != null) {
-        _seededInitialError = true;
-        ref
-            .read(chatProvider(widget.sessionId).notifier)
-            .seedInitialError(widget.initialError!);
-      }
-
       final wasSending = previous?.value?.sending ?? false;
       if (state.sending && !wasSending) {
         _startListeningTimer();
@@ -139,6 +128,28 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         _scrollToBottom();
       }
     });
+
+    // One-shot initialError seeding, done from build() rather than the
+    // listener above: ref.listen only fires on CHANGES, so if the provider
+    // were already warm at mount (a live listener elsewhere kept it alive)
+    // a listener-based seed would sit dormant and then land on the next
+    // unrelated emission — appending the error bubble out of order, after
+    // turns it doesn't belong to. build() sees the current state on the
+    // very first frame, so the seed lands right after the loaded transcript
+    // no matter how the value arrived. Post-frame because mutating a
+    // provider during build is illegal; the flag flips synchronously first,
+    // so re-entrant rebuilds can never schedule a duplicate.
+    if (!_seededInitialError &&
+        widget.initialError != null &&
+        chatAsync.hasValue) {
+      _seededInitialError = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref
+            .read(chatProvider(widget.sessionId).notifier)
+            .seedInitialError(widget.initialError!);
+      });
+    }
 
     // Riverpod 3 retries a throwing build() with backoff; during that
     // retry the state is technically AsyncLoading but still carries the

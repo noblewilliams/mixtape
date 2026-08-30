@@ -10,6 +10,7 @@ import 'chat_screen.dart';
 
 const _archiveFailedMessage = "couldn't archive — try again";
 const _unarchiveFailedMessage = "couldn't unarchive — try again";
+const _refreshFailedMessage = "couldn't refresh — showing what we had";
 
 const _genericStartErrorMessage = 'something went wrong on our end — try again';
 const _offlineStartErrorMessage =
@@ -156,21 +157,31 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  TextField(
-                    key: const Key('prompt-field'),
-                    controller: _promptController,
-                    enabled: !_starting,
-                    minLines: 1,
-                    maxLines: 3,
-                    maxLength: 2000, // matches the server cap and ChatScreen's composer
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: (_) => _submit(),
-                    decoration: const InputDecoration(
-                      hintText: "what's the moment?",
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.all(Radius.circular(16)),
-                      ),
-                    ),
+                  ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: _promptController,
+                    builder: (context, value, _) {
+                      // Same treatment as ChatScreen's composer: cap at the
+                      // server's 2000, but only surface the counter once the
+                      // draft is close enough (>1800) for it to matter.
+                      final showCounter = value.text.length > 1800;
+                      return TextField(
+                        key: const Key('prompt-field'),
+                        controller: _promptController,
+                        enabled: !_starting,
+                        minLines: 1,
+                        maxLines: 3,
+                        maxLength: 2000,
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: (_) => _submit(),
+                        decoration: InputDecoration(
+                          hintText: "what's the moment?",
+                          counterText: showCounter ? null : '',
+                          border: const OutlineInputBorder(
+                            borderRadius: BorderRadius.all(Radius.circular(16)),
+                          ),
+                        ),
+                      );
+                    },
                   ),
                   const SizedBox(height: 8),
                   FilledButton(
@@ -225,7 +236,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       return const Center(child: CircularProgressIndicator());
     }
     return RefreshIndicator(
-      onRefresh: () => ref.read(sessionsProvider.notifier).refresh(),
+      // A failed refetch keeps the previous list (copyWithPrevious), so
+      // without the snackbar the spinner would retract indistinguishably
+      // from "refreshed, nothing changed" — the one thing the user pulled
+      // to find out.
+      onRefresh: () async {
+        final ok = await ref.read(sessionsProvider.notifier).refresh();
+        if (!ok && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text(_refreshFailedMessage)),
+          );
+        }
+      },
       child: _SessionsList(
         sessions: sessionsAsync.value!,
         showArchived: _showArchived,
@@ -289,15 +311,22 @@ class _SessionsList extends ConsumerWidget {
     final hasToggle = archived.isNotEmpty;
 
     if (visible.isEmpty && !hasToggle) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(
-            'No sessions yet — tell the DJ what you want to hear.',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyMedium,
+      // A scrollable (not a bare Center) so the enclosing RefreshIndicator
+      // still hooks pull-to-refresh — a user whose list came back empty
+      // needs a manual way to refetch too.
+      return ListView(
+        key: const Key('sessions-empty'),
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(48),
+            child: Text(
+              'No sessions yet — tell the DJ what you want to hear.',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
           ),
-        ),
+        ],
       );
     }
 

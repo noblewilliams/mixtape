@@ -70,10 +70,18 @@ class SessionsNotifier extends AsyncNotifier<List<DjSession>> {
     return api.listSessions();
   }
 
-  Future<void> refresh() async {
-    state = await AsyncValue.guard(
+  /// Returns whether the refetch actually succeeded. On failure the state
+  /// assignment applies copyWithPrevious (a previously-good list keeps
+  /// showing), which also means callers can't detect the failure from
+  /// state alone — hasValue stays true — so user-initiated refreshes
+  /// (pull-to-refresh) must check this result and surface the failure
+  /// themselves rather than letting the spinner retract silently.
+  Future<bool> refresh() async {
+    final next = await AsyncValue.guard(
       () => ref.read(djApiProvider).listSessions(),
     );
+    state = next;
+    return !next.hasError;
   }
 
   /// Returns whether the status change actually landed. [setStatus] is the
