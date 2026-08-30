@@ -1262,6 +1262,86 @@ describe('runDjTurn', () => {
         expect(contextText).toContain('never play tracks by Artist X')
         expect(contextText).toContain('hard rule')
       })
+
+      // Every other memory test above inspects a CONVERSATIONAL request
+      // (tools.length > 0) — none of them prove the note actually reaches
+      // track selection. It does so ONLY by riding sessionContext into
+      // curate() (see the comment at the tool-dispatch call sites in
+      // loop.ts) — curate.ts's buildIntentBlock appends sessionContext
+      // verbatim as a trailing "Session context: ..." line. This asserts the
+      // hard-rule note is present in THAT block (a tools.length === 0
+      // request), not just in what the model sees while chatting.
+      it('rides sessionContext into the CURATE request intent block, not just the conversational turn', async () => {
+        const db = await createTestDb()
+        await seedUser(db, 'u1')
+        const session = await seedSession(db, 'u1')
+        await seedLibrary(db, 'u1', 3)
+        await db.insert(djMemories).values({ userId: 'u1', note: 'never play tracks by Artist X' })
+
+        const sessionRef: DjSessionRef = { id: session.id, userId: 'u1' }
+        const { llm, requests } = makeFakeLlm([
+          { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'upbeat', targetCount: 3 })] },
+          { text: 'here you go.' },
+        ])
+        const deps: DjDeps = { embed: fakeEmbed, llm }
+
+        await runDjTurn(db, deps, sessionRef, 'play me something upbeat')
+
+        const intentTexts = curateIntentBlocks(requests)
+        expect(intentTexts).toHaveLength(1)
+        expect(intentTexts[0]).toContain('never play tracks by Artist X')
+        expect(intentTexts[0]).toContain('hard rule')
+      })
+    })
+
+    describe('DB-failure isolation', () => {
+      it('a DB blip on the memory save does not fail the turn — queue stays intact, tool result is a content-free {ok:false}', async () => {
+        const db = await createTestDb()
+        await seedUser(db, 'u1')
+        const session = await seedSession(db, 'u1')
+        const trackList = await seedLibrary(db, 'u1', 2)
+        await replaceQueue(
+          db,
+          session.id,
+          trackList.map((t) => ({ trackId: t.id, reason: '' })),
+          'dj',
+        )
+        const sessionRef: DjSessionRef = { id: session.id, userId: 'u1' }
+        const { llm, requests } = makeFakeLlm([
+          { toolCalls: [toolCall('c1', 'remember_preference', { note: 'never play Artist X' })] },
+          { text: 'ok, though I hit a snag saving that.' },
+        ])
+
+        // Wrap the REAL test db so only an insert targeting dj_memories
+        // throws — every other query (messages, queue reads/writes) goes
+        // through untouched. Proves executeRememberPreference's own
+        // try/catch, not a lucky harness quirk, is what keeps this turn from
+        // failing outright on a DB blip.
+        const originalInsert = db.insert.bind(db)
+        const throwingDb = new Proxy(db, {
+          get(target, prop, receiver) {
+            if (prop === 'insert') {
+              return (table: unknown) => {
+                if (table === djMemories) throw new Error('db blip')
+                return originalInsert(table as never)
+              }
+            }
+            return Reflect.get(target, prop, receiver)
+          },
+        }) as unknown as TestDb
+        const deps: DjDeps = { embed: fakeEmbed, llm }
+
+        const result = await runDjTurn(throwingDb, deps, sessionRef, 'never play Artist X again')
+
+        expect(result.djMessage.content).toBe('ok, though I hit a snag saving that.')
+        expect(result.queue).toHaveLength(2) // untouched by the failed save
+
+        const notes = await db.select().from(djMemories).where(eq(djMemories.userId, 'u1'))
+        expect(notes).toHaveLength(0)
+
+        const convo = conversationRequests(requests)
+        expect(toolResultTextFrom(convo[1])).toBe('{"ok":false}')
+      })
     })
   })
 })

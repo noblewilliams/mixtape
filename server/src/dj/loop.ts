@@ -253,23 +253,12 @@ function formatQueueListing(queue: QueueTrackView[]): string {
   return lines.join('\n')
 }
 
-// Builds the per-turn context block: a full numbered queue listing, plus an
-// acknowledgment line for any track the LISTENER (not the dj) removed since
-// the dj's own last message — so the model can react to it instead of acting
-// like nothing happened. The numbered listing (not just a count/first/last
-// summary) is what lets the model translate "the Portishead" or the
-// listener's own 1-based "track 5" into the correct 0-based op position,
-// instead of guessing. "Since" is the last dj message's createdAt; with no
-// prior dj message at all (a brand new session, or one whose queue was only
-// ever touched via the manual queue-ops route), everything counts as "since"
-// — there's no earlier dj turn to bound it against. Sent as a leading USER
-// message by attemptTurn, never folded into `system` — see the PERSONA_PROMPT
-// comment above for why.
 // Hard cap on active notes per user — enforced both here (context load) and
-// by executeRememberPreference (insert refusal) below, and by GET /me/memories
-// (routes/memories.ts). One constant, three call sites, so the three never
-// quietly drift apart.
-const MAX_MEMORY_NOTES = 50
+// by executeRememberPreference (insert refusal, advisory only under
+// concurrency — see that function's comment) below. Exported so
+// routes/memories.ts's GET /me/memories can share the exact same number
+// instead of a second hardcoded literal that could drift from this one.
+export const MAX_MEMORY_NOTES = 50
 
 // Newest-first, capped — matches GET /me/memories' own ordering, so what the
 // model sees in context and what the "What the DJ knows" screen shows are the
@@ -308,6 +297,18 @@ function formatMemoryBlock(notes: string[]): string | null {
   ].join('\n')
 }
 
+// Builds the per-turn context block: a full numbered queue listing, plus an
+// acknowledgment line for any track the LISTENER (not the dj) removed since
+// the dj's own last message — so the model can react to it instead of acting
+// like nothing happened. The numbered listing (not just a count/first/last
+// summary) is what lets the model translate "the Portishead" or the
+// listener's own 1-based "track 5" into the correct 0-based op position,
+// instead of guessing. "Since" is the last dj message's createdAt; with no
+// prior dj message at all (a brand new session, or one whose queue was only
+// ever touched via the manual queue-ops route), everything counts as "since"
+// — there's no earlier dj turn to bound it against. Sent as a leading USER
+// message by attemptTurn, never folded into `system` — see the PERSONA_PROMPT
+// comment above for why.
 async function buildSessionContext(db: Db, sessionId: string, userId: string): Promise<string> {
   const queue = await getActiveQueue(db, sessionId)
   const queueLine =
@@ -512,10 +513,11 @@ const REMEMBER_REFUSED = JSON.stringify({ ok: false })
 // Executed inline by the tool-call loop below, deliberately WITHOUT touching
 // `budget` — remember_preference never calls curate() (no LLM round trip of
 // its own), so it isn't part of what MAX_CURATIONS_PER_TURN bounds. Refusal
-// (cap reached, or an exact duplicate already on file) is a silent no-op:
-// the note set doesn't change, but nothing THROWS — a bad/duplicate save
-// attempt is exactly as recoverable as an out-of-range edit_queue op, not a
-// turn-ending failure.
+// (cap reached, an exact duplicate already on file, or a DB error — see the
+// try/catch below) is a silent no-op: the note set doesn't change (or
+// doesn't change further), but THIS FUNCTION ITSELF never throws — a
+// bad/duplicate/DB-error save attempt is exactly as recoverable as an
+// out-of-range edit_queue op, never a turn-ending failure.
 async function executeRememberPreference(db: Db, session: DjSessionRef, rawInput: unknown): Promise<{ resultText: string }> {
   const parsed = rememberPreferenceInputSchema.safeParse(rawInput)
   if (!parsed.success) {
@@ -526,20 +528,38 @@ async function executeRememberPreference(db: Db, session: DjSessionRef, rawInput
     return { resultText: REMEMBER_REFUSED }
   }
 
-  // One query covers both the cap and the exact-duplicate check — the note
-  // count this needs to bound is already capped at MAX_MEMORY_NOTES by this
-  // same function's own refusal, so an unlimited select here never actually
-  // reads more than that many rows.
-  const existing = await db.select({ note: djMemories.note }).from(djMemories).where(eq(djMemories.userId, session.userId))
-  if (existing.length >= MAX_MEMORY_NOTES) {
-    return { resultText: REMEMBER_REFUSED }
-  }
-  if (existing.some((r) => r.note === note)) {
-    return { resultText: REMEMBER_REFUSED }
-  }
+  try {
+    // The cap check and the insert below aren't atomic with each other, so
+    // two concurrent remember_preference calls for the same user can both
+    // pass this count and both insert — under real concurrency the cap is
+    // advisory, not a hard guarantee, and can be exceeded by a small margin.
+    // Acceptable at the one-user-per-session request rates this app runs at.
+    const existing = await db.select({ note: djMemories.note }).from(djMemories).where(eq(djMemories.userId, session.userId))
+    if (existing.length >= MAX_MEMORY_NOTES) {
+      return { resultText: REMEMBER_REFUSED }
+    }
 
-  await db.insert(djMemories).values({ userId: session.userId, note })
-  return { resultText: REMEMBER_OK }
+    // onConflictDoNothing (backed by dj_memories' unique (user_id, note)
+    // index) is the REAL dupe guard, unlike the cap check above — a plain
+    // select-then-insert dupe check only ever sees its own read snapshot, so
+    // two concurrent saves of the identical note could both pass a read
+    // check and both insert. A conflict here returns no row, which is
+    // treated exactly like the cap refusal above.
+    const [inserted] = await db
+      .insert(djMemories)
+      .values({ userId: session.userId, note })
+      .onConflictDoNothing({ target: [djMemories.userId, djMemories.note] })
+      .returning({ id: djMemories.id })
+    if (!inserted) {
+      return { resultText: REMEMBER_REFUSED }
+    }
+    return { resultText: REMEMBER_OK }
+  } catch {
+    // A DB blip on this one tool call (connection error, timeout, ...) must
+    // never take down an otherwise-healthy curation turn — refuse the save,
+    // same as a cap/duplicate refusal, and let the turn carry on.
+    return { resultText: REMEMBER_REFUSED }
+  }
 }
 
 type AttemptStats = {
@@ -640,6 +660,22 @@ async function attemptTurn(db: Db, deps: DjDeps, session: DjSessionRef, userText
       for (const call of turn.toolCalls) {
         stats.toolCalls += 1
         let resultText: string
+        // sessionContext (built once above by buildSessionContext, and already
+        // including the memory block from formatMemoryBlock/loadMemoryNotes —
+        // see those functions) is threaded straight through to curate() here.
+        // curate.ts's buildIntentBlock appends it verbatim as a trailing
+        // "Session context: ..." line in the intent block of every curate
+        // request. This is the ONLY channel through which a saved
+        // remember_preference note actually reaches track SELECTION: the
+        // model never gets to act on a note directly (it only ever sees
+        // sessionContext in its own conversational turn, at USER altitude —
+        // see buildSessionContext's comment), it can merely ask for a queue,
+        // and curate is what reads the note and picks accordingly. Skipping
+        // this argument on either call below would make saved preferences
+        // silently stop affecting curation while still LOOKING wired up
+        // (the model still sees them in conversation) — worth remembering
+        // since nothing else about this design is visible from either
+        // function's own signature.
         if (call.name === 'generate_queue') {
           const outcome = await executeGenerateQueue(db, countedDeps, session, call.input, sessionContext, budget)
           resultText = outcome.resultText

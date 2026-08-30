@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm'
 import { createApp, type AuthLike } from '../src/app'
 import { createTestDb, type TestDb } from './helpers/db'
 import { djMemories, user } from '../src/db/schema'
+import { MAX_MEMORY_NOTES } from '../src/dj/loop'
 
 async function seedUser(db: TestDb, id: string) {
   await db.insert(user).values({ id, name: id, email: `${id}@example.com`, emailVerified: false, createdAt: new Date(), updatedAt: new Date() })
@@ -54,6 +55,23 @@ describe('GET /me/memories', () => {
     const app = createApp({ auth: unauthed, db })
     const res = await app.request('http://x/me/memories')
     expect(res.status).toBe(401)
+  })
+
+  // Pins the route's own cap to the SAME constant the dj loop enforces at
+  // save time and at context-injection time (dj/loop.ts) — a hardcoded
+  // second literal here could silently drift from that one; seeding exactly
+  // one row over the shared cap and asserting the response stays capped at
+  // it is what would catch that drift.
+  it("caps the listing at MAX_MEMORY_NOTES, the same constant the dj loop injects with", async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await db.insert(djMemories).values(Array.from({ length: MAX_MEMORY_NOTES + 1 }, (_, i) => ({ userId: 'u1', note: `note ${i}` })))
+    const app = createApp({ auth: authedAs('u1'), db })
+
+    const res = await app.request('http://x/me/memories')
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { memories: unknown[] }
+    expect(body.memories).toHaveLength(MAX_MEMORY_NOTES)
   })
 })
 

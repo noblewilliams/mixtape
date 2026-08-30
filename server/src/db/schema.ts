@@ -163,7 +163,14 @@ export const djMemories = pgTable(
     note: text('note').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('dj_memories_user_idx').on(t.userId, t.createdAt)],
+  (t) => [
+    index('dj_memories_user_idx').on(t.userId, t.createdAt),
+    // Backs executeRememberPreference's onConflictDoNothing dupe guard
+    // (dj/loop.ts) — a plain select-then-insert check alone can't stop two
+    // concurrent saves of the identical note from both landing, so the real
+    // guarantee lives here at the DB level, not in application code.
+    uniqueIndex('dj_memories_user_note_idx').on(t.userId, t.note),
+  ],
 )
 
 export const sessionEvents = pgTable(

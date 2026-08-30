@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "dj_memories_user_note_idx" ON "dj_memories" USING btree ("user_id","note");

@@ -3,6 +3,7 @@ import { and, desc, eq } from 'drizzle-orm'
 import type { AppVars } from '../app'
 import type { Db } from '../db/types'
 import { djMemories } from '../db/schema'
+import { MAX_MEMORY_NOTES } from '../dj/loop'
 
 // dj_memories.id is a uuid column — a malformed path segment would otherwise
 // surface as a Postgres "invalid input syntax for type uuid" 500, same
@@ -18,7 +19,10 @@ export function memoriesRoutes(db: Db) {
   const app = new Hono<{ Variables: AppVars }>()
 
   // Newest-first, capped at the same MAX_MEMORY_NOTES the dj loop enforces —
-  // the note set this endpoint lists can never actually exceed that bound.
+  // imported (not a second hardcoded literal) so the two can never quietly
+  // drift apart. The note set this endpoint lists can never actually exceed
+  // that bound outside a brief concurrent-write window — see
+  // executeRememberPreference's own comment on why the cap is advisory.
   app.get('/', async (c) => {
     const userId = c.get('user').id
     const rows = await db
@@ -26,7 +30,7 @@ export function memoriesRoutes(db: Db) {
       .from(djMemories)
       .where(eq(djMemories.userId, userId))
       .orderBy(desc(djMemories.createdAt))
-      .limit(50)
+      .limit(MAX_MEMORY_NOTES)
     return c.json({ memories: rows })
   })
 
