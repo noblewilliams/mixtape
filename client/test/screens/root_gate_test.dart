@@ -7,13 +7,46 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:mixtape/data/api/api_client.dart';
 import 'package:mixtape/data/auth/token_store.dart';
+import 'package:mixtape/data/dj/dj_api.dart';
+import 'package:mixtape/data/dj/dj_models.dart';
 import 'package:mixtape/data/library/library_sync_service.dart';
 import 'package:mixtape/main.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
+import 'package:mixtape/presentation/providers/dj_providers.dart';
 import 'package:mixtape/presentation/providers/library_sync_provider.dart';
 import 'package:mixtape/presentation/screens/home_screen.dart';
 import 'package:mixtape/presentation/screens/sign_in_screen.dart';
 import '../helpers/fake_bridge.dart' show FakeBridge, song, apiWith;
+
+/// Home now watches sessionsProvider on every build (sessions-first Home,
+/// Task 6) — a bare FakeDjApi with an empty session list keeps these
+/// sign-in/sign-out/sync gate tests from making a real network call.
+class _FakeDjApi implements DjApi {
+  @override
+  Duration get timeout => const Duration(seconds: 120);
+
+  @override
+  Future<List<DjSession>> listSessions() async => [];
+
+  @override
+  Future<SessionDetail> createSession(String prompt) => throw UnimplementedError();
+
+  @override
+  Future<SessionDetail> getSession(String id) => throw UnimplementedError();
+
+  @override
+  Future<TurnResult> sendMessage(String id, String text) => throw UnimplementedError();
+
+  @override
+  Future<QueueOpsResult> applyQueueOps(String id, List<QueueOp> ops, int? expectedVersion) =>
+      throw UnimplementedError();
+
+  @override
+  Future<DjSession> setStatus(String id, String status) => throw UnimplementedError();
+
+  @override
+  void close() {}
+}
 
 /// An ApiClient whose postJson calls block on [gate] until it's completed —
 /// lets a test freeze a sync mid-POST to control exactly when a cancellation lands.
@@ -33,6 +66,13 @@ Future<ApiClient> _pausableApi(Completer<void> gate) async {
 bool _containsText(Widget w, String substring) =>
     w is Text && (w.data?.contains(substring) ?? false);
 
+/// Opens the AppBar's sync bottom sheet — library sync moved out of Home's
+/// body behind this action (Task 6); the sheet hosts the unchanged P1 UI.
+Future<void> _openSyncSheet(WidgetTester tester) async {
+  await tester.tap(find.byKey(const Key('sync-action')));
+  await tester.pumpAndSettle();
+}
+
 void main() {
   testWidgets('shows sign-in when signed out', (tester) async {
     await tester.pumpWidget(ProviderScope(
@@ -47,7 +87,10 @@ void main() {
     final store = InMemoryTokenStore();
     await store.write('tok');
     await tester.pumpWidget(ProviderScope(
-      overrides: [tokenStoreProvider.overrideWithValue(store)],
+      overrides: [
+        tokenStoreProvider.overrideWithValue(store),
+        djApiProvider.overrideWithValue(_FakeDjApi()),
+      ],
       child: const MixtapeApp(),
     ));
     await tester.pumpAndSettle();
@@ -58,7 +101,10 @@ void main() {
     final store = InMemoryTokenStore();
     await store.write('tok');
     await tester.pumpWidget(ProviderScope(
-      overrides: [tokenStoreProvider.overrideWithValue(store)],
+      overrides: [
+        tokenStoreProvider.overrideWithValue(store),
+        djApiProvider.overrideWithValue(_FakeDjApi()),
+      ],
       child: const MixtapeApp(),
     ));
     await tester.pumpAndSettle();
@@ -80,6 +126,7 @@ void main() {
     await tester.pumpWidget(ProviderScope(
       overrides: [
         tokenStoreProvider.overrideWithValue(store),
+        djApiProvider.overrideWithValue(_FakeDjApi()),
         librarySyncServiceProvider.overrideWithValue(service),
       ],
       child: const MixtapeApp(),
@@ -87,6 +134,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(HomeScreen), findsOneWidget);
 
+    await _openSyncSheet(tester);
     await tester.tap(find.byKey(const Key('sync-library')));
     await tester.pumpAndSettle();
     expect(
@@ -94,6 +142,10 @@ void main() {
           (w) => w is Text && (w.data?.contains('Synced 3 songs') ?? false)),
       findsOneWidget,
     );
+
+    // Close the sheet before signing out so the next assertions look at Home/SignIn.
+    Navigator.of(tester.element(find.byType(HomeScreen))).pop();
+    await tester.pumpAndSettle();
 
     await tester.tap(find.byIcon(Icons.logout));
     await tester.pumpAndSettle();
@@ -106,6 +158,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(HomeScreen), findsOneWidget);
+    await _openSyncSheet(tester);
     expect(find.byKey(const Key('sync-library')), findsOneWidget);
     expect(
       find.byWidgetPredicate(
@@ -126,6 +179,7 @@ void main() {
     await tester.pumpWidget(ProviderScope(
       overrides: [
         tokenStoreProvider.overrideWithValue(store),
+        djApiProvider.overrideWithValue(_FakeDjApi()),
         librarySyncServiceProvider.overrideWithValue(service),
       ],
       child: const MixtapeApp(),
@@ -134,6 +188,7 @@ void main() {
     expect(find.byType(HomeScreen), findsOneWidget);
 
     // User A syncs to completion.
+    await _openSyncSheet(tester);
     await tester.tap(find.byKey(const Key('sync-library')));
     await tester.pumpAndSettle();
     expect(
@@ -141,6 +196,8 @@ void main() {
           (w) => w is Text && (w.data?.contains('Synced 3 songs') ?? false)),
       findsOneWidget,
     );
+    Navigator.of(tester.element(find.byType(HomeScreen))).pop();
+    await tester.pumpAndSettle();
 
     // Sign out with nothing running — this still disposes the notifier and
     // fires cancel() on the (idle) shared service.
@@ -154,6 +211,7 @@ void main() {
     container.invalidate(authProvider);
     await tester.pumpAndSettle();
     expect(find.byType(HomeScreen), findsOneWidget);
+    await _openSyncSheet(tester);
     expect(find.byKey(const Key('sync-library')), findsOneWidget);
 
     // User B's first sync must actually run, not silently no-op back to idle.
@@ -181,15 +239,24 @@ void main() {
     await tester.pumpWidget(ProviderScope(
       overrides: [
         tokenStoreProvider.overrideWithValue(store),
+        djApiProvider.overrideWithValue(_FakeDjApi()),
         librarySyncServiceProvider.overrideWithValue(service),
       ],
       child: const MixtapeApp(),
     ));
     await tester.pumpAndSettle();
 
+    await _openSyncSheet(tester);
     await tester.tap(find.byKey(const Key('sync-library')));
     await tester.pump();
     await tester.pump();
+
+    // Close the sheet — the sync itself lives in the provider, not the
+    // sheet, and keeps running — so the AppBar's logout action underneath
+    // it is reachable again. Not pumpAndSettle: the running state's
+    // indeterminate LinearProgressIndicator animates forever.
+    Navigator.of(tester.element(find.byType(HomeScreen))).pop();
+    await tester.pump(const Duration(milliseconds: 400));
 
     // Sign out while the first chunk's POST is still in flight.
     await tester.tap(find.byIcon(Icons.logout));
@@ -209,6 +276,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(HomeScreen), findsOneWidget);
+    await _openSyncSheet(tester);
     expect(find.byKey(const Key('sync-library')), findsOneWidget);
     expect(find.byType(LinearProgressIndicator), findsNothing);
     expect(find.byWidgetPredicate((w) => _containsText(w, 'Synced')), findsNothing);
@@ -228,15 +296,22 @@ void main() {
     await tester.pumpWidget(ProviderScope(
       overrides: [
         tokenStoreProvider.overrideWithValue(store),
+        djApiProvider.overrideWithValue(_FakeDjApi()),
         librarySyncServiceProvider.overrideWithValue(service),
       ],
       child: const MixtapeApp(),
     ));
     await tester.pumpAndSettle();
 
+    await _openSyncSheet(tester);
     await tester.tap(find.byKey(const Key('sync-library')));
     await tester.pump();
     await tester.pump();
+
+    // Close the sheet before reaching the logout action underneath it — see
+    // the NON-final test's comment above for why this isn't pumpAndSettle.
+    Navigator.of(tester.element(find.byType(HomeScreen))).pop();
+    await tester.pump(const Duration(milliseconds: 400));
 
     // Sign out while the only (and final) chunk's POST is still in flight.
     await tester.tap(find.byIcon(Icons.logout));
@@ -256,6 +331,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(HomeScreen), findsOneWidget);
+    await _openSyncSheet(tester);
     expect(find.byKey(const Key('sync-library')), findsOneWidget);
     expect(find.byType(LinearProgressIndicator), findsNothing);
     expect(find.byWidgetPredicate((w) => _containsText(w, 'Synced')), findsNothing);
