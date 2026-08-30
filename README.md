@@ -11,4 +11,4 @@ Your personal DJ. Tell it what you want to hear — a mood, a moment, a memory �
 
 ## Status
 
-P3a DJ engine deployed (304 tests, fable-reviewed): conversational agent loop + retrieval engine + session API live — /sessions dark pending ANTHROPIC_API_KEY. P3b (chat UI) next. Build phases are listed at the end of the design spec.
+P3 complete (2026-08-30, device-verified end-to-end): conversational DJ engine + session API live in prod, Flutter client shipping chat, queue (reorder/swipe/play/save-as-playlist), sessions-first home, and Haiku-named sessions. 328 server + 179 client tests. Next: P2.5 (local preview audio analysis to lift feature coverage), then P4 (taste-signal learning). Build phases are listed at the end of the design spec.
