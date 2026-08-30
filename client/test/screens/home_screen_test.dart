@@ -29,6 +29,7 @@ class FakeDjApi implements DjApi {
   Future<QueueOpsResult> Function(String id, List<QueueOp> ops, int? expectedVersion)?
   onApplyQueueOps;
   Future<DjSession> Function(String id, String status)? onSetStatus;
+  Future<DjSession> Function(String id, String title)? onRenameSession;
   Future<void> Function(String sessionId, String type)? onPostSessionEvent;
   Future<List<DjMemory>> Function()? onListMemories;
   Future<void> Function(String id)? onDeleteMemory;
@@ -76,6 +77,13 @@ class FakeDjApi implements DjApi {
     final impl = onSetStatus;
     if (impl == null) throw UnimplementedError('onSetStatus not wired');
     return impl(id, status);
+  }
+
+  @override
+  Future<DjSession> renameSession(String id, String title) {
+    final impl = onRenameSession;
+    if (impl == null) throw UnimplementedError('onRenameSession not wired');
+    return impl(id, title);
   }
 
   @override
@@ -475,6 +483,104 @@ void main() {
       expect(find.text('Old One'), findsOneWidget);
       expect(find.byKey(const Key('toggle-archived')), findsNothing);
       expect(find.byKey(const Key('archive-s1')), findsOneWidget);
+    });
+  });
+
+  group('manual rename (long-press)', () {
+    testWidgets(
+      'long-pressing a row opens a dialog prefilled with the current title; '
+      'confirming renames and refreshes the list',
+      (tester) async {
+        var title = 'Sunset Drive';
+        final api = FakeDjApi();
+        api.onListSessions = () async => [_session(id: 's1', title: title)];
+        api.onRenameSession = (id, newTitle) async {
+          title = newTitle;
+          return _session(id: id, title: newTitle);
+        };
+        final container = _makeContainer(api);
+        await _pump(tester, container);
+
+        await tester.longPress(find.text('Sunset Drive'));
+        await tester.pumpAndSettle();
+
+        final field = tester.widget<TextField>(find.byKey(const Key('rename-field')));
+        expect(field.controller!.text, 'Sunset Drive');
+
+        await tester.enterText(find.byKey(const Key('rename-field')), 'Lagos Nights');
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('rename-confirm')));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Lagos Nights'), findsOneWidget);
+        expect(find.text('Sunset Drive'), findsNothing);
+      },
+    );
+
+    testWidgets('the confirm button is disabled while the field is empty or whitespace-only', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onListSessions = () async => [_session(id: 's1', title: 'Sunset Drive')];
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+
+      await tester.longPress(find.text('Sunset Drive'));
+      await tester.pumpAndSettle();
+
+      FilledButton confirmButton() =>
+          tester.widget<FilledButton>(find.byKey(const Key('rename-confirm')));
+      expect(confirmButton().onPressed, isNotNull); // prefilled with a non-empty title
+
+      await tester.enterText(find.byKey(const Key('rename-field')), '   ');
+      await tester.pump();
+      expect(confirmButton().onPressed, isNull);
+
+      await tester.enterText(find.byKey(const Key('rename-field')), 'Lagos Nights');
+      await tester.pump();
+      expect(confirmButton().onPressed, isNotNull);
+
+      // Dismiss before the test ends — an autofocus TextField left inside a
+      // still-open dialog when the tree tears down can corrupt focus state
+      // for whichever test in this file happens to run next.
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('a failed rename shows a snackbar and leaves the title unchanged', (tester) async {
+      final api = FakeDjApi();
+      api.onListSessions = () async => [_session(id: 's1', title: 'Sunset Drive')];
+      api.onRenameSession = (id, title) async => throw ApiException(500, 'boom');
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+
+      await tester.longPress(find.text('Sunset Drive'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('rename-field')), 'Lagos Nights');
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('rename-confirm')));
+      await tester.pumpAndSettle();
+
+      expect(find.text("couldn't rename — try again"), findsOneWidget);
+      expect(find.text('Sunset Drive'), findsOneWidget);
+      expect(find.text('Lagos Nights'), findsNothing);
+    });
+
+    testWidgets('cancelling the dialog makes no call and leaves the title unchanged', (tester) async {
+      final api = FakeDjApi();
+      api.onListSessions = () async => [_session(id: 's1', title: 'Sunset Drive')];
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+
+      await tester.longPress(find.text('Sunset Drive'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('rename-field')), 'Lagos Nights');
+      await tester.pump();
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Sunset Drive'), findsOneWidget);
+      expect(find.text('Lagos Nights'), findsNothing);
     });
   });
 

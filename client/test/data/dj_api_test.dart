@@ -367,6 +367,42 @@ void main() {
     });
   });
 
+  group('renameSession', () {
+    test('PATCHes {title} to /sessions/:id and parses the returned session', () async {
+      Uri? seenUrl;
+      String? seenMethod;
+      Map<String, dynamic>? seenBody;
+      final inner = MockClient((req) async {
+        seenUrl = req.url;
+        seenMethod = req.method;
+        seenBody = jsonDecode(req.body) as Map<String, dynamic>;
+        return http.Response(jsonEncode({'session': _session(title: 'Lagos Nights')}), 200);
+      });
+
+      final session = await _api(inner: inner).renameSession('s1', 'Lagos Nights');
+
+      expect(seenMethod, 'PATCH');
+      expect(seenUrl.toString(), 'http://x/sessions/s1');
+      expect(seenBody, {'title': 'Lagos Nights'});
+      expect(session.title, 'Lagos Nights');
+    });
+
+    test('400 invalid_title -> DjApiException(kind: invalid_title)', () async {
+      final inner = MockClient((_) async => http.Response(
+            jsonEncode({'error': 'invalid_title', 'message': 'title cannot be empty'}),
+            400,
+          ));
+
+      try {
+        await _api(inner: inner).renameSession('s1', '   ');
+        fail('expected DjApiException');
+      } on DjApiException catch (e) {
+        expect(e.kind, 'invalid_title');
+        expect(e.message, 'title cannot be empty');
+      }
+    });
+  });
+
   group('malformed 200 response (typed exit)', () {
     test('non-JSON 200 body -> DjApiException(kind: malformed_response)', () async {
       final inner = MockClient((_) async => http.Response('not json at all', 200));

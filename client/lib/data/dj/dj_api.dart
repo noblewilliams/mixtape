@@ -118,6 +118,17 @@ class DjApi {
         (json) => DjSession.fromJson(json['session'] as Map<String, dynamic>),
       );
 
+  /// PATCH `/sessions/:id` with `{title}` — the server trims/sanitizes and
+  /// caps it at 60 characters for display (same discipline as a
+  /// DJ-driven rename via `rename_session`); a title that's empty or
+  /// whitespace-only after that sanitize step comes back as a 400
+  /// `invalid_title` [DjApiException]. Mirrors [setStatus]'s shape, echoing
+  /// the updated session row.
+  Future<DjSession> renameSession(String id, String title) => _call(
+        () => _client.patchJson('/sessions/$id', {'title': title}),
+        (json) => DjSession.fromJson(json['session'] as Map<String, dynamic>),
+      );
+
   /// Fire-and-forget from the caller's perspective (see queue_screen.dart's
   /// post-play/post-save wiring) — but NOT from this method's: it throws the
   /// normal exit taxonomy like every other call here ([DjApiException],

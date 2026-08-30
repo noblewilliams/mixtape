@@ -26,6 +26,7 @@ class FakeDjApi implements DjApi {
   )?
   onApplyQueueOps;
   Future<DjSession> Function(String id, String status)? onSetStatus;
+  Future<DjSession> Function(String id, String title)? onRenameSession;
   Future<void> Function(String sessionId, String type)? onPostSessionEvent;
   Future<List<DjMemory>> Function()? onListMemories;
   Future<void> Function(String id)? onDeleteMemory;
@@ -38,6 +39,7 @@ class FakeDjApi implements DjApi {
   List<QueueOp>? lastOps;
   int? lastExpectedVersion;
   ({String id, String status})? lastStatusCall;
+  ({String id, String title})? lastRenameCall;
 
   @override
   Duration get timeout => const Duration(seconds: 120);
@@ -92,6 +94,14 @@ class FakeDjApi implements DjApi {
     final impl = onSetStatus;
     if (impl == null) throw UnimplementedError('onSetStatus not wired');
     return impl(id, status);
+  }
+
+  @override
+  Future<DjSession> renameSession(String id, String title) {
+    lastRenameCall = (id: id, title: title);
+    final impl = onRenameSession;
+    if (impl == null) throw UnimplementedError('onRenameSession not wired');
+    return impl(id, title);
   }
 
   @override
@@ -243,6 +253,41 @@ void main() {
       expect(container.read(sessionsProvider).value!.single.status, 'active');
     });
 
+    test('rename calls renameSession then refreshes the list, mirroring archive/unarchive', () async {
+      var listCall = 0;
+      final api = FakeDjApi();
+      api.onListSessions = () async {
+        listCall++;
+        return [_session(id: 's1')];
+      };
+      api.onRenameSession = (id, title) async => _session(id: id);
+      final container = _makeContainer(api);
+      await container.read(sessionsProvider.future);
+
+      final ok = await container.read(sessionsProvider.notifier).rename('s1', 'Lagos Nights');
+
+      expect(ok, isTrue);
+      expect(api.lastRenameCall, (id: 's1', title: 'Lagos Nights'));
+      expect(listCall, 2); // build's own load + the post-rename refresh
+    });
+
+    test('a failed rename returns false and leaves the list untouched (no refresh)', () async {
+      var listCall = 0;
+      final api = FakeDjApi();
+      api.onListSessions = () async {
+        listCall++;
+        return [_session(id: 's1')];
+      };
+      api.onRenameSession = (id, title) async => throw ApiException(500, 'boom');
+      final container = _makeContainer(api);
+      await container.read(sessionsProvider.future);
+
+      final ok = await container.read(sessionsProvider.notifier).rename('s1', 'Lagos Nights');
+
+      expect(ok, isFalse);
+      expect(listCall, 1); // no refresh on failure
+    });
+
     test('auth transition rebuilds and reloads the sessions list', () async {
       final testAuth = TestAuthNotifier(AuthStatus.signedIn);
       final api = FakeDjApi();
@@ -318,6 +363,88 @@ void main() {
         expect(state.sending, isFalse);
       },
     );
+
+    test(
+      'send adopts a same-turn sessionTitle into state.session, carrying BOTH the new title '
+      'and the turn\'s fresh queueVersion (copyWith session-XOR-queueVersion contract respected)',
+      () async {
+        final api = FakeDjApi();
+        api.onGetSession = (_) async => SessionDetail(
+          session: _session(queueVersion: 1),
+          messages: [],
+          queue: [],
+        );
+        api.onSendMessage = (id, text) async => TurnResult(
+          djMessage: _msg('m2', 'dj', 'there you go, Lagos Nights it is.'),
+          queue: [_track(0)],
+          queueVersion: 2,
+          sessionTitle: 'Lagos Nights',
+        );
+        api.onListSessions = () async => [_session(id: 's1')];
+        final container = _makeContainer(api);
+        await container.read(chatProvider('s1').future);
+
+        await container.read(chatProvider('s1').notifier).send('call this tape Lagos Nights');
+
+        final state = container.read(chatProvider('s1')).value!;
+        expect(state.session.title, 'Lagos Nights');
+        expect(state.session.queueVersion, 2); // both landed together, not just the title
+        expect(state.queueVersion, 2);
+        expect(state.queue, hasLength(1));
+      },
+    );
+
+    test(
+      'a same-turn rename invalidates the sessions list lazily — no eager refetch before send() returns',
+      () async {
+        final api = FakeDjApi();
+        api.onGetSession = (_) async =>
+            SessionDetail(session: _session(queueVersion: 1), messages: [], queue: []);
+        api.onSendMessage = (id, text) async => TurnResult(
+          djMessage: _msg('m2', 'dj', 'renamed.'),
+          queue: [],
+          queueVersion: 2,
+          sessionTitle: 'Lagos Nights',
+        );
+        api.onListSessions = () async => [_session(id: 's1')];
+        final container = _makeContainer(api);
+        // Home already has the sessions list loaded before the rename.
+        await container.read(sessionsProvider.future);
+        expect(api.listSessionsCallCount, 1);
+        await container.read(chatProvider('s1').future);
+
+        await container.read(chatProvider('s1').notifier).send('call this tape Lagos Nights');
+
+        // invalidate() alone doesn't refetch anything.
+        expect(api.listSessionsCallCount, 1);
+
+        final refreshed = await container.read(sessionsProvider.future);
+        expect(refreshed.single.id, 's1');
+        expect(api.listSessionsCallCount, 2);
+      },
+    );
+
+    test('send with no sessionTitle in the response leaves the cached title untouched', () async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(queueVersion: 1),
+        messages: [],
+        queue: [],
+      );
+      api.onSendMessage = (id, text) async => TurnResult(
+        djMessage: _msg('m2', 'dj', 'here you go'),
+        queue: [_track(0)],
+        queueVersion: 2,
+      );
+      final container = _makeContainer(api);
+      await container.read(chatProvider('s1').future);
+
+      await container.read(chatProvider('s1').notifier).send('play jazz');
+
+      final state = container.read(chatProvider('s1')).value!;
+      expect(state.session.title, 'Test Session'); // unchanged
+      expect(state.queueVersion, 2);
+    });
 
     test('send() while already sending is a no-op', () async {
       final completer = Completer<TurnResult>();

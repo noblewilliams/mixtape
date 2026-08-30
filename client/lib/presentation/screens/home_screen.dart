@@ -13,6 +13,7 @@ import 'memory_screen.dart';
 const _archiveFailedMessage = "couldn't archive — try again";
 const _unarchiveFailedMessage = "couldn't unarchive — try again";
 const _refreshFailedMessage = "couldn't refresh — showing what we had";
+const _renameFailedMessage = "couldn't rename — try again";
 
 const _genericStartErrorMessage = 'something went wrong on our end — try again';
 const _offlineStartErrorMessage =
@@ -376,6 +377,7 @@ class _SessionsList extends ConsumerWidget {
                 : relativeTime(session.updatedAt),
           ),
           onTap: () => onTapSession(session.id),
+          onLongPress: () => _showRenameDialog(context, ref, session),
           trailing: IconButton(
             key: Key(isArchived ? 'unarchive-${session.id}' : 'archive-${session.id}'),
             tooltip: isArchived ? 'Unarchive' : 'Archive',
@@ -385,6 +387,33 @@ class _SessionsList extends ConsumerWidget {
         );
       },
     );
+  }
+
+  /// Long-press affordance for a manual rename: a dialog prefilled with the
+  /// row's current title, disabled while empty/whitespace-only (trimmed
+  /// before both the disabled-check and the actual call), calling
+  /// [SessionsNotifier.rename] on confirm. A failure leaves the row's title
+  /// untouched and shows a retry snackbar — same hardening as
+  /// [_setArchived] below. The dialog's own [TextEditingController] is owned
+  /// by [_RenameDialog]'s State (see its doc comment) — NOT disposed here —
+  /// so it stays alive through the dialog's exit transition.
+  Future<void> _showRenameDialog(
+    BuildContext context,
+    WidgetRef ref,
+    DjSession session,
+  ) async {
+    final newTitle = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => _RenameDialog(initialTitle: session.title),
+    );
+    if (newTitle == null || !context.mounted) return;
+
+    final ok = await ref.read(sessionsProvider.notifier).rename(session.id, newTitle);
+    if (!ok && context.mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text(_renameFailedMessage)));
+    }
   }
 
   Future<void> _setArchived(
@@ -400,6 +429,71 @@ class _SessionsList extends ConsumerWidget {
         SnackBar(content: Text(archived ? _archiveFailedMessage : _unarchiveFailedMessage)),
       );
     }
+  }
+}
+
+/// The rename dialog's own content, as a dedicated [StatefulWidget] so its
+/// [TextEditingController] is owned by ITS State — created in [initState],
+/// disposed in [dispose] — rather than a local variable [_showRenameDialog]
+/// disposes manually right after `showDialog`'s Future resolves. That manual
+/// pattern races the dialog ROUTE's own exit transition: `showDialog`
+/// resolves as soon as `Navigator.pop` is called, but the closing dialog's
+/// widget tree (fade-out) is still rebuilding for a few more frames after
+/// that — disposing the controller immediately throws "A TextEditingController
+/// was used after being disposed." Tying disposal to this widget's own
+/// lifecycle instead means Flutter only disposes it once the dialog element
+/// is well and truly gone.
+class _RenameDialog extends StatefulWidget {
+  const _RenameDialog({required this.initialTitle});
+
+  final String initialTitle;
+
+  @override
+  State<_RenameDialog> createState() => _RenameDialogState();
+}
+
+class _RenameDialogState extends State<_RenameDialog> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.initialTitle,
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: _controller,
+      builder: (context, value, _) {
+        final canConfirm = value.text.trim().isNotEmpty;
+        return AlertDialog(
+          title: const Text('Rename session'),
+          content: TextField(
+            key: const Key('rename-field'),
+            controller: _controller,
+            autofocus: true,
+            maxLength: 120,
+            decoration: const InputDecoration(hintText: 'Session name'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              key: const Key('rename-confirm'),
+              onPressed: canConfirm
+                  ? () => Navigator.of(context).pop(_controller.text.trim())
+                  : null,
+              child: const Text('Rename'),
+            ),
+          ],
+        );
+      },
+    );
   }
 }
 

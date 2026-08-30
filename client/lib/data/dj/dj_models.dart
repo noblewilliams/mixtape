@@ -90,11 +90,22 @@ List<QueueTrack> queueTracksFromJson(Object? json) =>
     (json as List).map((q) => QueueTrack.fromJson(q as Map<String, dynamic>)).toList();
 
 class SessionDetail {
-  const SessionDetail({required this.session, required this.messages, required this.queue});
+  const SessionDetail({
+    required this.session,
+    required this.messages,
+    required this.queue,
+    this.sessionTitle,
+  });
 
   final DjSession session;
   final List<DjMessage> messages;
   final List<QueueTrack> queue;
+
+  /// Present only on a create-session response whose very first turn called
+  /// `rename_session` (see the server's routes/sessions.ts) — [session.title]
+  /// already reflects this same value in that case, so most callers have no
+  /// need of this field; it exists for parity with [TurnResult]'s own.
+  final String? sessionTitle;
 
   factory SessionDetail.fromJson(Map<String, dynamic> json) => SessionDetail(
         session: DjSession.fromJson(json['session'] as Map<String, dynamic>),
@@ -102,20 +113,32 @@ class SessionDetail {
             .map((m) => DjMessage.fromJson(m as Map<String, dynamic>))
             .toList(),
         queue: queueTracksFromJson(json['queue']),
+        sessionTitle: json['sessionTitle'] as String?,
       );
 }
 
 class TurnResult {
-  const TurnResult({required this.djMessage, required this.queue, required this.queueVersion});
+  const TurnResult({
+    required this.djMessage,
+    required this.queue,
+    required this.queueVersion,
+    this.sessionTitle,
+  });
 
   final DjMessage djMessage;
   final List<QueueTrack> queue;
   final int queueVersion;
 
+  /// Present ONLY when the DJ renamed the session (via the `rename_session`
+  /// tool) during this very turn — see `dj_providers.dart`'s ChatNotifier,
+  /// which adopts it into the cached session title without a refetch.
+  final String? sessionTitle;
+
   factory TurnResult.fromJson(Map<String, dynamic> json) => TurnResult(
         djMessage: DjMessage.fromJson(json['djMessage'] as Map<String, dynamic>),
         queue: queueTracksFromJson(json['queue']),
         queueVersion: json['queueVersion'] as int,
+        sessionTitle: json['sessionTitle'] as String?,
       );
 }
 

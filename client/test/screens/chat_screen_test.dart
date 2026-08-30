@@ -25,6 +25,7 @@ class FakeDjApi implements DjApi {
   Future<QueueOpsResult> Function(String id, List<QueueOp> ops, int? expectedVersion)?
   onApplyQueueOps;
   Future<DjSession> Function(String id, String status)? onSetStatus;
+  Future<DjSession> Function(String id, String title)? onRenameSession;
   Future<void> Function(String sessionId, String type)? onPostSessionEvent;
   Future<List<DjMemory>> Function()? onListMemories;
   Future<void> Function(String id)? onDeleteMemory;
@@ -72,6 +73,13 @@ class FakeDjApi implements DjApi {
     final impl = onSetStatus;
     if (impl == null) throw UnimplementedError('onSetStatus not wired');
     return impl(id, status);
+  }
+
+  @override
+  Future<DjSession> renameSession(String id, String title) {
+    final impl = onRenameSession;
+    if (impl == null) throw UnimplementedError('onRenameSession not wired');
+    return impl(id, title);
   }
 
   @override
@@ -184,6 +192,45 @@ void main() {
     );
     expect(djAlign.alignment, Alignment.centerLeft);
     expect(find.byKey(const Key('error-bubble')), findsNothing);
+  });
+
+  testWidgets('a turn response carrying sessionTitle updates the AppBar title', (tester) async {
+    final api = FakeDjApi();
+    api.onGetSession = (_) async => SessionDetail(session: _session(), messages: [], queue: []);
+    api.onSendMessage = (id, text) async => TurnResult(
+      djMessage: _msg('m2', 'dj', 'there you go, Lagos Nights it is.'),
+      queue: [],
+      queueVersion: 1,
+      sessionTitle: 'Lagos Nights',
+    );
+    final container = _makeContainer(api);
+    await _pump(tester, container);
+
+    expect(find.text('Test Session'), findsOneWidget); // the original AppBar title
+
+    await tester.enterText(find.byKey(const Key('composer-field')), 'call this tape Lagos Nights');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('send-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.widgetWithText(AppBar, 'Lagos Nights'), findsOneWidget);
+    expect(find.text('Test Session'), findsNothing);
+  });
+
+  testWidgets('a turn response with no sessionTitle leaves the AppBar title unchanged', (tester) async {
+    final api = FakeDjApi();
+    api.onGetSession = (_) async => SessionDetail(session: _session(), messages: [], queue: []);
+    api.onSendMessage = (id, text) async =>
+        TurnResult(djMessage: _msg('m2', 'dj', 'here you go'), queue: [], queueVersion: 1);
+    final container = _makeContainer(api);
+    await _pump(tester, container);
+
+    await tester.enterText(find.byKey(const Key('composer-field')), 'play jazz');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('send-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.widgetWithText(AppBar, 'Test Session'), findsOneWidget);
   });
 
   testWidgets('send shows a typing indicator while in flight, then the dj reply', (tester) async {

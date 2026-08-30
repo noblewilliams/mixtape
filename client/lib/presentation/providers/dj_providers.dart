@@ -111,6 +111,21 @@ class SessionsNotifier extends AsyncNotifier<List<DjSession>> {
     await refresh();
     return true;
   }
+
+  /// Manual rename from Home (long-press a session row) — mirrors
+  /// [archive]/[unarchive]'s own hardening exactly: [DjApi.renameSession] is
+  /// the only fallible step, caught so a failed rename simply leaves the
+  /// row's title as-is and the caller can show a retry snackbar, followed by
+  /// the same unconditional [refresh] on success.
+  Future<bool> rename(String id, String title) async {
+    try {
+      await ref.read(djApiProvider).renameSession(id, title);
+    } catch (_) {
+      return false;
+    }
+    await refresh();
+    return true;
+  }
 }
 
 final sessionsProvider =
@@ -211,6 +226,21 @@ DjSession _withQueueVersion(DjSession session, int queueVersion) => DjSession(
   updatedAt: session.updatedAt,
 );
 
+/// Bumps only the title, carrying every other field over verbatim — the
+/// counterpart to [_withQueueVersion] above, used by [ChatNotifier.send] to
+/// adopt a same-turn `rename_session` without a refetch. Called AFTER
+/// [_withQueueVersion] has already landed the turn's fresh queueVersion onto
+/// `session` (via a first `copyWith(queueVersion: ...)`), so the session this
+/// wraps already carries the right version — this step only ever changes the
+/// title on top of that.
+DjSession _withTitle(DjSession session, String title) => DjSession(
+  id: session.id,
+  title: title,
+  status: session.status,
+  queueVersion: session.queueVersion,
+  updatedAt: session.updatedAt,
+);
+
 class ChatNotifier extends AsyncNotifier<ChatState> {
   ChatNotifier(this.sessionId);
 
@@ -277,13 +307,32 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
     try {
       final result = await ref.read(djApiProvider).sendMessage(sessionId, text);
-      _mergeCurrent(
-        (c) => c.copyWith(
+      _mergeCurrent((c) {
+        // First bump queue+version via the `queueVersion` param (never
+        // `session`, per copyWith's own session-XOR-queueVersion contract —
+        // see ChatState.copyWith's doc comment).
+        final withQueue = c.copyWith(
           messages: [...c.messages, ChatMessage(result.djMessage)],
           queue: result.queue,
           queueVersion: result.queueVersion,
-        ),
-      );
+        );
+        final newTitle = result.sessionTitle;
+        if (newTitle == null) return withQueue;
+        // A same-turn rename (rename_session): a SECOND copyWith call, this
+        // time passing `session` (never `queueVersion`, same contract) —
+        // built from withQueue.session, whose queueVersion already reflects
+        // the bump above, so the resulting DjSession carries BOTH the new
+        // title and the turn's fresh queueVersion at once.
+        return withQueue.copyWith(session: _withTitle(withQueue.session, newTitle));
+      });
+      // Lazily invalidate (never an eager refresh) so Home's list picks up
+      // the new title next time it's read — same "invalidate, don't refetch
+      // now" discipline as sessionStarterProvider above; a turn's own
+      // 20-40s round trip shouldn't be held up by a second list fetch it
+      // doesn't need.
+      if (result.sessionTitle != null) {
+        ref.invalidate(sessionsProvider);
+      }
     } on DjApiException catch (e) {
       if (e.kind == 'stale') {
         // Degraded 409 fallback (see dj_api.dart's _translate409): a
