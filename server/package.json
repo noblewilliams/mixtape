@@ -11,7 +11,8 @@
     "db:migrate": "drizzle-kit migrate",
     "auth:generate": "npx @better-auth/cli@latest generate --config src/auth/cli-config.ts --output src/db/auth-schema.ts -y",
     "dj": "tsx scripts/dj-chat.ts",
-    "retitle-sessions": "tsx scripts/retitle-sessions.ts"
+    "retitle-sessions": "tsx scripts/retitle-sessions.ts",
+    "analyze-previews": "tsx scripts/analyze-previews.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",
