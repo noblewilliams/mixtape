@@ -6,6 +6,7 @@ Read before working:
 - `docs/product/vision.md` — what this is and the endgame
 - `docs/superpowers/specs/2026-08-29-mixtape-v1-design.md` — v1 architecture, build phases
 - `docs/decisions.md` — locked decisions with rationale; append here when a decision lands, don't relitigate silently
+- `docs/backlog.md` — consolidated open items, deferred polish, reopen clauses (keep current)
 
 ## Ground rules
 

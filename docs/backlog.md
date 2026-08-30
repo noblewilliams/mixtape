@@ -1,0 +1,38 @@
+# Backlog & open items
+
+Single consolidated list. Detail lives in `decisions.md` (rationale) and the plan files under `superpowers/plans/` (specs). Last updated 2026-08-30 — v1 phases P1/P2/P2.5/P3/P4 are all code-complete and deployed.
+
+## Owed right now
+
+- **P4 founder device smoke** (the only open gate): rebuild the app, then run the script in `superpowers/plans/2026-08-30-p4-taste-learning.md` §Task 5 — state a durable preference → note appears in "What the DJ knows" → new session honors it; swipe an artist away in 2 sessions → rarer next queue; forget → reverts.
+
+## Next candidates (unordered, founder picks)
+
+- **TestFlight upload / release install** — debug builds only run tethered to `flutter run`; daily use wants `flutter run --release` or TestFlight (which was always the v1 distribution plan).
+- **Git remote** — the repo has NO remote; it exists only on this machine. Push somewhere before it matters.
+- **Behavioral memory distillation** — a periodic job that turns swipe/keep patterns into memory notes (founder deferred at P4 design time; the live `remember_preference` tool shipped instead).
+- **Profile name** — account `name` was set manually via SQL for the founder; a real profile field would feed playlist attribution (see queue_screen save dialog) and any future social surface. Apple only discloses the name at first-ever sign-in, so capture it at sign-up for future users.
+- **Web app** — `web/` is still a placeholder.
+
+## Deferred polish (recorded during reviews; none are gates)
+
+Client:
+- Undo/confirmDismiss on queue-screen swipe-remove (P3b Task 5 review, finding 10).
+- Sync terminal-state notice when the sync sheet is closed mid-sync (SyncDone/SyncFailed invisible from the AppBar icon).
+- Auth-lifecycle cluster: sign-out token revocation, stale keychain on reinstall, in-memory token cache.
+- Queue-intent FIFO could be hoisted into a provider so pop-mid-drain doesn't drop trailing intents (rare).
+
+Server / DJ:
+- Memory-note paraphrase bloat: dupes are exact-match only ("No jazz" ≠ "no jazz"); watch the 50-cap, revisit similarity dedupe if it bites.
+- Taste artist matching is exact-string: 'Wizkid' vs 'Wizkid & Ayra Starr' are unrelated artists — fragments signal on collab-dense libraries; a real artist entity would fix it.
+- Keep-boost saturates around ~8 played sessions (documented in pool.ts); revisit normalization if fam+taste over-anchor comfort picks.
+- `analyze-previews` front-loads all downloads before analysis (operator UX); interleaving fetch/analyze chunks recorded as deferred (P2.5 Task 3 review).
+- Opus-for-sequencing escalation stays a contingency: only with evidence of Sonnet ordering poorly (see CLAUDE.md).
+
+## Reopen clauses (from decisions.md — conditions, not tasks)
+
+- Spotify support if their API access policy changes (schema already platform-agnostic).
+- Neon managed auth if it ships Sign in with Apple.
+- GetSongBPM leg of the enrichment waterfall — currently NOT needed (features at 100%); reopens only if coverage regresses (requires visible getsongbpm.com backlink in UI).
+- Musixmatch licensed-lyrics deal at scale (lyrics stay derive-don't-display until then).
+- iTunes lookup from Workers if Apple unblocks datacenter IPs (currently residential-only; local scripts use it).
