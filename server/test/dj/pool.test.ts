@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest'
+import { sql } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { buildPool } from '../../src/dj/pool'
 import { intentSchema, type Intent } from '../../src/dj/contracts'
-import { tracks, trackFeatures, trackMeanings, userTracks, user } from '../../src/db/schema'
+import { tracks, trackFeatures, trackMeanings, userTracks, user, djSessions, queueTracks, sessionEvents } from '../../src/db/schema'
 import type { Embedder } from '../../src/enrich/embedder'
 
 const DIMS = 1024
@@ -44,6 +45,7 @@ type SeedOpts = {
   inLibrary?: boolean
   durationMs?: number
   noFeatures?: boolean // when true, no track_features row at all
+  artist?: string
 }
 
 let counter = 0
@@ -59,7 +61,7 @@ async function seedTrack(db: TestDb, userId: string, opts: SeedOpts = {}) {
     .values({
       appleId,
       title: appleId,
-      artist: 'Artist',
+      artist: opts.artist ?? 'Artist',
       durationMs: opts.durationMs ?? 200000,
       releaseYear: opts.releaseYear === undefined ? null : opts.releaseYear,
       explicit: opts.explicit ?? null,
@@ -93,6 +95,58 @@ async function seedTrack(db: TestDb, userId: string, opts: SeedOpts = {}) {
 function intent(partial: Partial<Intent> & { themes: string }): Intent {
   return intentSchema.parse(partial)
 }
+
+// --- Taste-signal seeding helpers (Task 3) -------------------------------
+
+async function seedSession(db: TestDb, userId: string, title = 'session') {
+  const [s] = await db.insert(djSessions).values({ userId, title }).returning()
+  return s
+}
+
+// Inserts a queue_tracks row for the given track/session, optionally
+// overriding updatedAt for decay tests (the taste CTE keys removal recency
+// off this column, not createdAt).
+async function seedQueueTrack(
+  db: TestDb,
+  sessionId: string,
+  trackId: string,
+  opts: { state: 'active' | 'removed'; removedBy?: 'dj' | 'user'; updatedAt?: Date },
+) {
+  const [row] = await db
+    .insert(queueTracks)
+    .values({
+      sessionId,
+      trackId,
+      position: 0,
+      addedBy: 'dj',
+      state: opts.state,
+      removedBy: opts.removedBy,
+      updatedAt: opts.updatedAt,
+    })
+    .returning()
+  return row
+}
+
+async function seedSessionEvent(db: TestDb, sessionId: string, type: 'played' | 'saved_playlist', createdAt?: Date) {
+  const [row] = await db.insert(sessionEvents).values({ sessionId, type, createdAt }).returning()
+  return row
+}
+
+// The `type` enum has no DB-level CHECK (per the plan's binding facts), so an
+// "unknown event type ignored" test needs a raw insert to get a row past
+// drizzle's own type narrowing.
+async function seedRawSessionEvent(db: TestDb, sessionId: string, type: string) {
+  await db.execute(sql`INSERT INTO session_events (session_id, type) VALUES (${sessionId}, ${type})`)
+}
+
+const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 60 * 60 * 1000)
+
+// Hand-computed neutral-signal score for a track seeded with `embedding:
+// SAME_AS_QUERY, playCount: 0` and no tempo intent, under familiarity 'mix' —
+// mirrors the FAMILIARITY_WEIGHTS['mix'] convex combination in pool.ts with
+// taste's neutral 0.5: 0.396*1 (sim) + 0.22*0.5 (feat, no tempo target) +
+// 0.264*0 (fam, 0 plays) + 0.12*0.5 (taste, no signal) = 0.566.
+const NEUTRAL_MIX_SCORE = 0.45 * 0.88 * 1 + 0.25 * 0.88 * 0.5 + 0.3 * 0.88 * 0 + 0.12 * 0.5
 
 describe('buildPool', () => {
   it("calls embed with intent.themes verbatim", async () => {
@@ -409,5 +463,142 @@ describe('buildPool', () => {
 
     const byId = (id: string) => pool.find((p) => p.trackId === id)!
     expect(byId(identical.id).score).toBeGreaterThan(byId(orthogonal.id).score)
+  })
+})
+
+describe('buildPool taste term', () => {
+  it('neutral when no signal: score equals the hand-computed convex combo with taste=0.5', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const track = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY, playCount: 0 })
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', familiarity: 'mix' }))
+
+    const byId = (id: string) => pool.find((p) => p.trackId === id)!
+    expect(byId(track.id).score).toBeCloseTo(NEUTRAL_MIX_SCORE, 5)
+  })
+
+  it("winner-flip: a heavily user-removed artist's track loses to a near-tied artist kept in played sessions", async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const trackA = await seedTrack(db, 'u1', { artist: 'ArtistA', embedding: SAME_AS_QUERY, playCount: 0 })
+    const trackB = await seedTrack(db, 'u1', { artist: 'ArtistB', embedding: SAME_AS_QUERY, playCount: 0 })
+
+    // ArtistA: user-removed across 3 distinct sessions.
+    for (let i = 0; i < 3; i++) {
+      const s = await seedSession(db, 'u1')
+      await seedQueueTrack(db, s.id, trackA.id, { state: 'removed', removedBy: 'user' })
+    }
+    // ArtistB: kept (active) in 2 distinct sessions, each with a 'played' event.
+    for (let i = 0; i < 2; i++) {
+      const s = await seedSession(db, 'u1')
+      await seedQueueTrack(db, s.id, trackB.id, { state: 'active' })
+      await seedSessionEvent(db, s.id, 'played')
+    }
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', familiarity: 'mix' }))
+    const byId = (id: string) => pool.find((p) => p.trackId === id)!
+
+    expect(byId(trackB.id).score).toBeGreaterThan(byId(trackA.id).score)
+  })
+
+  it("a DJ removal (removed_by='dj') contributes nothing — score stays neutral", async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const track = await seedTrack(db, 'u1', { artist: 'DjRemovedArtist', embedding: SAME_AS_QUERY, playCount: 0 })
+    const s = await seedSession(db, 'u1')
+    await seedQueueTrack(db, s.id, track.id, { state: 'removed', removedBy: 'dj' })
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', familiarity: 'mix' }))
+    const byId = (id: string) => pool.find((p) => p.trackId === id)!
+
+    expect(byId(track.id).score).toBeCloseTo(NEUTRAL_MIX_SCORE, 5)
+  })
+
+  it('a kept track in a session with no played/saved_playlist event contributes nothing', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const track = await seedTrack(db, 'u1', { artist: 'UnplayedArtist', embedding: SAME_AS_QUERY, playCount: 0 })
+    const s = await seedSession(db, 'u1')
+    await seedQueueTrack(db, s.id, track.id, { state: 'active' }) // no session_events row at all
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', familiarity: 'mix' }))
+    const byId = (id: string) => pool.find((p) => p.trackId === id)!
+
+    expect(byId(track.id).score).toBeCloseTo(NEUTRAL_MIX_SCORE, 5)
+  })
+
+  it('an unknown session_events type is ignored — a kept track in that session stays neutral', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const track = await seedTrack(db, 'u1', { artist: 'UnknownEventArtist', embedding: SAME_AS_QUERY, playCount: 0 })
+    const s = await seedSession(db, 'u1')
+    await seedQueueTrack(db, s.id, track.id, { state: 'active' })
+    await seedRawSessionEvent(db, s.id, 'skipped') // not 'played' or 'saved_playlist'
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', familiarity: 'mix' }))
+    const byId = (id: string) => pool.find((p) => p.trackId === id)!
+
+    expect(byId(track.id).score).toBeCloseTo(NEUTRAL_MIX_SCORE, 5)
+  })
+
+  it('5 duplicate played events on one session count the same as 1 (distinct-session pin)', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const trackDup = await seedTrack(db, 'u1', { artist: 'DupEventArtist', embedding: SAME_AS_QUERY, playCount: 0 })
+    const trackSingle = await seedTrack(db, 'u1', { artist: 'SingleEventArtist', embedding: SAME_AS_QUERY, playCount: 0 })
+
+    const sDup = await seedSession(db, 'u1')
+    await seedQueueTrack(db, sDup.id, trackDup.id, { state: 'active' })
+    for (let i = 0; i < 5; i++) await seedSessionEvent(db, sDup.id, 'played')
+
+    const sSingle = await seedSession(db, 'u1')
+    await seedQueueTrack(db, sSingle.id, trackSingle.id, { state: 'active' })
+    await seedSessionEvent(db, sSingle.id, 'played')
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', familiarity: 'mix' }))
+    const byId = (id: string) => pool.find((p) => p.trackId === id)!
+
+    expect(byId(trackDup.id).score).toBeCloseTo(byId(trackSingle.id).score, 10)
+  })
+
+  it('decay: a 200-day-old removal moves the score less than a 5-day-old one', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const oldTrack = await seedTrack(db, 'u1', { artist: 'OldRemovalArtist', embedding: SAME_AS_QUERY, playCount: 0 })
+    const newTrack = await seedTrack(db, 'u1', { artist: 'NewRemovalArtist', embedding: SAME_AS_QUERY, playCount: 0 })
+
+    const sOld = await seedSession(db, 'u1')
+    await seedQueueTrack(db, sOld.id, oldTrack.id, { state: 'removed', removedBy: 'user', updatedAt: daysAgo(200) })
+
+    const sNew = await seedSession(db, 'u1')
+    await seedQueueTrack(db, sNew.id, newTrack.id, { state: 'removed', removedBy: 'user', updatedAt: daysAgo(5) })
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', familiarity: 'mix' }))
+    const byId = (id: string) => pool.find((p) => p.trackId === id)!
+
+    // Both penalized, but the older removal has decayed further toward
+    // neutral, so it scores HIGHER (closer to 0.5) than the fresh one.
+    expect(byId(oldTrack.id).score).toBeGreaterThan(byId(newTrack.id).score)
+    expect(byId(oldTrack.id).score).toBeLessThan(NEUTRAL_MIX_SCORE) // still penalized, just less so
+  })
+
+  it("cross-user isolation: another user's removals for the same artist name don't touch this user's score", async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedUser(db, 'u2')
+    const mine = await seedTrack(db, 'u1', { artist: 'SharedArtistName', embedding: SAME_AS_QUERY, playCount: 0 })
+    const theirs = await seedTrack(db, 'u2', { artist: 'SharedArtistName', embedding: SAME_AS_QUERY, playCount: 0 })
+
+    // u2 heavily removes 'SharedArtistName' across 3 sessions.
+    for (let i = 0; i < 3; i++) {
+      const s = await seedSession(db, 'u2')
+      await seedQueueTrack(db, s.id, theirs.id, { state: 'removed', removedBy: 'user' })
+    }
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', familiarity: 'mix' }))
+    const byId = (id: string) => pool.find((p) => p.trackId === id)!
+
+    expect(byId(mine.id).score).toBeCloseTo(NEUTRAL_MIX_SCORE, 5)
   })
 })

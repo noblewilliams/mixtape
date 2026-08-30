@@ -21,14 +21,60 @@ export type PoolTrack = {
 // to any data; P4 tunes these against real skip/favorite signal once it
 // exists. `sim` weighs meaning (lyric) similarity to the requested themes,
 // `feat` weighs tempo fit, `fam` weighs how well-known the track already is
-// to this listener (play count). Each term is normalized to [0,1] (see below)
-// so these weights are a true convex combination — the preset actually
-// changes which candidate wins, not just the score's magnitude.
-const FAMILIARITY_WEIGHTS: Record<Intent['familiarity'], { sim: number; feat: number; fam: number }> = {
-  comfort: { sim: 0.35, feat: 0.2, fam: 0.45 },
-  mix: { sim: 0.45, feat: 0.25, fam: 0.3 },
-  adventurous: { sim: 0.55, feat: 0.3, fam: 0.15 },
+// to this listener (play count), `taste` weighs this listener's learned
+// per-artist affinity from DJ-session behavior (see TASTE_* below). Each term
+// is normalized to [0,1] so these weights are a true convex combination — the
+// preset actually changes which candidate wins, not just the score's
+// magnitude. `taste` sits at a flat 0.12 across all three presets (within the
+// P4 plan's 0.10-0.15 band) and is carved out by scaling the PRE-P4 sim/feat/
+// fam weights by (1 - 0.12) — a uniform scale preserves their relative ratios
+// (the actual "preset" character) while making room for taste, and the four
+// terms still sum to exactly 1.
+const TASTE_WEIGHT = 0.12
+const PRE_TASTE_SCALE = 1 - TASTE_WEIGHT
+const FAMILIARITY_WEIGHTS: Record<Intent['familiarity'], { sim: number; feat: number; fam: number; taste: number }> = {
+  comfort: { sim: 0.35 * PRE_TASTE_SCALE, feat: 0.2 * PRE_TASTE_SCALE, fam: 0.45 * PRE_TASTE_SCALE, taste: TASTE_WEIGHT },
+  mix: { sim: 0.45 * PRE_TASTE_SCALE, feat: 0.25 * PRE_TASTE_SCALE, fam: 0.3 * PRE_TASTE_SCALE, taste: TASTE_WEIGHT },
+  adventurous: { sim: 0.55 * PRE_TASTE_SCALE, feat: 0.3 * PRE_TASTE_SCALE, fam: 0.15 * PRE_TASTE_SCALE, taste: TASTE_WEIGHT },
 }
+
+// Taste term: per-ARTIST (not per-track — too sparse at one user's library
+// scale, see plan) learned affinity in [0,1], 0.5 = neutral/no-signal.
+// Signals, both scoped to the requesting user via dj_sessions.user_id
+// (session_events/queue_tracks carry no user column of their own):
+//   - PENALTY: a queue_tracks row the USER removed (state='removed' AND
+//     removed_by='user') — a DJ swap (removed_by='dj') is routine curation,
+//     not taste signal, and contributes nothing.
+//   - BOOST: a queue_tracks row KEPT (state='active') in a session that has
+//     at least one 'played' or 'saved_playlist' event — the session_events
+//     type column has no DB-level CHECK, so unknown event types are filtered
+//     out explicitly rather than trusted.
+// Both signals are aggregated per DISTINCT SESSION, never per event/row
+// count directly: the client posts session events fire-and-forget, so a
+// client bug retrying the same POST must never multiply its influence (a
+// session with 5 duplicate 'played' events counts exactly once). Concretely:
+// qualifying_sessions collapses events to one row per session_id (MAX(created_at)
+// picks the latest qualifying event as that session's signal timestamp), and
+// removal_events collapses to one row per (artist, session_id) pair (MAX(updated_at)
+// as its timestamp) — so even multiple user-removals of the same artist within
+// one session count as a single penalty for that session.
+// Recency decay: exponential half-life of 90 days on the signal timestamp
+// (a removal row's updated_at; a kept-session's latest qualifying event's
+// created_at) — a 200-day-old signal has decayed far more than a 5-day-old one.
+const TASTE_HALF_LIFE_DAYS = 90
+const TASTE_DECAY_RATE_PER_DAY = Math.LN2 / TASTE_HALF_LIFE_DAYS
+
+// Squash net signal (recency-weighted boosts minus penalties, roughly one
+// unit of full-strength weight per qualifying session) into [0,1] around a
+// neutral 0.5: score = 0.5 + 0.5*tanh(k * net). tanh is bounded (never
+// cratering an artist to 0 or blowing past 1) and monotonic (more signal
+// always moves the score further from neutral, in the signalled direction).
+// k = 0.3 is chosen so a SINGLE full-strength removal only nudges an artist
+// to ~0.35 (a subtle rerank, matching the plan's "a single removal must not
+// crater an artist"), while sustained removals across several sessions (net
+// penalty ~3) push it down near ~0.14 — meaningfully below neutral once the
+// signal is sustained rather than a one-off.
+const TASTE_K = 0.3
 
 // Play counts have no ceiling, so LN(1+plays) alone is unbounded — at ANY
 // familiarity weight a hot-enough track would eventually swamp similarity,
@@ -161,7 +207,14 @@ export async function buildPool(
   // not an unbounded one.
   const famFit = sql`LEAST(1, LN(1 + ut.play_count) / ${FAM_REFERENCE_LN})`
 
-  const scoreExpr = sql`(${weights.sim} * ${simFit} + ${weights.feat} * ${featureFit} + ${weights.fam} * ${famFit})`
+  // Taste: COALESCE inside the expression (not wrapped around it) so a track
+  // whose artist has no row in artist_taste at all (LEFT JOIN miss — no
+  // signal ever recorded for that artist) evaluates boosts/penalties to 0,
+  // TANH(k*0) = 0, landing exactly on the neutral 0.5 floor — never boosted
+  // or punished for silence.
+  const tasteFit = sql`(0.5 + 0.5 * TANH(${TASTE_K}::float8 * (COALESCE(at.boosts, 0) - COALESCE(at.penalties, 0))))`
+
+  const scoreExpr = sql`(${weights.sim} * ${simFit} + ${weights.feat} * ${featureFit} + ${weights.fam} * ${famFit} + ${weights.taste} * ${tasteFit})`
 
   const filters: SQL[] = [sql`ut.user_id = ${userId}`, sql`ut.in_library = true`]
   // Only a real two-bound window hard-filters — see the tempo comment above.
@@ -190,6 +243,53 @@ export async function buildPool(
   const whereClause = sql.join(filters, sql` AND `)
 
   const res = await db.execute(sql`
+    WITH removal_events AS (
+      SELECT t.artist AS artist, qt.session_id AS session_id, MAX(qt.updated_at) AS ts
+      FROM queue_tracks qt
+      JOIN dj_sessions ds ON ds.id = qt.session_id
+      JOIN tracks t ON t.id = qt.track_id
+      WHERE ds.user_id = ${userId}
+        AND qt.state = 'removed'
+        AND qt.removed_by = 'user'
+      GROUP BY t.artist, qt.session_id
+    ),
+    qualifying_sessions AS (
+      SELECT se.session_id AS session_id, MAX(se.created_at) AS ts
+      FROM session_events se
+      JOIN dj_sessions ds ON ds.id = se.session_id
+      WHERE ds.user_id = ${userId}
+        AND se.type IN ('played', 'saved_playlist')
+      GROUP BY se.session_id
+    ),
+    keep_events AS (
+      SELECT DISTINCT t.artist AS artist, qt.session_id AS session_id
+      FROM queue_tracks qt
+      JOIN tracks t ON t.id = qt.track_id
+      WHERE qt.state = 'active'
+        AND qt.session_id IN (SELECT session_id FROM qualifying_sessions)
+    ),
+    taste_signals AS (
+      SELECT
+        artist,
+        'penalty' AS kind,
+        EXP(-${TASTE_DECAY_RATE_PER_DAY}::float8 * (EXTRACT(EPOCH FROM (NOW() - ts)) / 86400.0)) AS weight
+      FROM removal_events
+      UNION ALL
+      SELECT
+        ke.artist AS artist,
+        'boost' AS kind,
+        EXP(-${TASTE_DECAY_RATE_PER_DAY}::float8 * (EXTRACT(EPOCH FROM (NOW() - qs.ts)) / 86400.0)) AS weight
+      FROM keep_events ke
+      JOIN qualifying_sessions qs ON qs.session_id = ke.session_id
+    ),
+    artist_taste AS (
+      SELECT
+        artist,
+        SUM(CASE WHEN kind = 'boost' THEN weight ELSE 0 END) AS boosts,
+        SUM(CASE WHEN kind = 'penalty' THEN weight ELSE 0 END) AS penalties
+      FROM taste_signals
+      GROUP BY artist
+    )
     SELECT
       t.id AS track_id,
       t.apple_id AS apple_id,
@@ -206,6 +306,7 @@ export async function buildPool(
     JOIN tracks t ON t.id = ut.track_id
     LEFT JOIN track_features f ON f.track_id = t.id
     LEFT JOIN track_meanings tm ON tm.track_id = t.id
+    LEFT JOIN artist_taste at ON at.artist = t.artist
     WHERE ${whereClause}
     ORDER BY score DESC, t.id
     LIMIT ${poolSize}
