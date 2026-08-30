@@ -5,6 +5,7 @@ import {
   queueOpSchema,
   queueOpsSchema,
   rememberPreferenceInputSchema,
+  renameSessionInputSchema,
   DJ_TOOLS,
 } from '../../src/dj/contracts'
 
@@ -261,8 +262,13 @@ function matchesJsonSchema(schema: any, value: unknown): boolean {
 }
 
 describe('DJ_TOOLS', () => {
-  it('defines exactly generate_queue, edit_queue, and remember_preference', () => {
-    expect(DJ_TOOLS.map((t) => t.name).sort()).toEqual(['edit_queue', 'generate_queue', 'remember_preference'])
+  it('defines exactly generate_queue, edit_queue, remember_preference, and rename_session', () => {
+    expect(DJ_TOOLS.map((t) => t.name).sort()).toEqual([
+      'edit_queue',
+      'generate_queue',
+      'remember_preference',
+      'rename_session',
+    ])
   })
 
   it('is frozen, along with its intent schema objects', () => {
@@ -275,6 +281,8 @@ describe('DJ_TOOLS', () => {
     expect(Object.isFrozen(swapIntent)).toBe(true)
     const rememberPreference = DJ_TOOLS.find((t) => t.name === 'remember_preference')!
     expect(Object.isFrozen(rememberPreference.input_schema)).toBe(true)
+    const renameSession = DJ_TOOLS.find((t) => t.name === 'rename_session')!
+    expect(Object.isFrozen(renameSession.input_schema)).toBe(true)
   })
 })
 
@@ -408,6 +416,33 @@ describe('remember_preference: zod and its longhand JSON schema agree', () => {
   const results = rememberPreferenceRows.map((row) => ({
     label: row.label,
     zod: rememberPreferenceInputSchema.safeParse(row.sample).success,
+    json: matchesJsonSchema(schema, row.sample),
+  }))
+
+  it.each(results)('$label', ({ zod, json }) => {
+    expect(json).toBe(zod)
+  })
+
+  it('the table actually exercises both valid and invalid samples', () => {
+    expect(results.some((r) => r.zod)).toBe(true)
+    expect(results.some((r) => !r.zod)).toBe(true)
+  })
+})
+
+const renameSessionRows: Row[] = [
+  { label: 'minimal valid title', sample: { title: 'x' } },
+  { label: 'a 120-char title is valid (at the ceiling)', sample: { title: 'x'.repeat(120) } },
+  { label: 'a 121-char title is invalid (one over the ceiling)', sample: { title: 'x'.repeat(121) } },
+  { label: 'an empty title is invalid', sample: { title: '' } },
+  { label: 'missing title is invalid', sample: {} },
+  { label: 'a non-string title is invalid', sample: { title: 42 } },
+]
+
+describe('rename_session: zod and its longhand JSON schema agree', () => {
+  const schema = DJ_TOOLS.find((t) => t.name === 'rename_session')!.input_schema
+  const results = renameSessionRows.map((row) => ({
+    label: row.label,
+    zod: renameSessionInputSchema.safeParse(row.sample).success,
     json: matchesJsonSchema(schema, row.sample),
   }))
 

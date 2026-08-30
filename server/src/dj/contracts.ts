@@ -73,6 +73,16 @@ export const queueOpsSchema = z.array(queueOpSchema).min(1).max(20)
 export const rememberPreferenceInputSchema = z.object({ note: z.string().min(1).max(200) })
 export type RememberPreferenceInput = z.infer<typeof rememberPreferenceInputSchema>
 
+// rename_session's tool input — validated raw (pre-sanitize) length, same
+// style as rememberPreferenceInputSchema above. 1..120 rather than the
+// display cap of 60: loop.ts's executeRenameSession sanitizes (control-char
+// strip + 60-cap, dj/sanitize.ts's sanitizeTitleText) AFTER this bound, same
+// two-step discipline as PATCH /sessions/:id's own `title` field
+// (routes/sessions.ts) — so a title between 61 and 120 raw characters is
+// accepted here and capped on write, not rejected outright.
+export const renameSessionInputSchema = z.object({ title: z.string().min(1).max(120) })
+export type RenameSessionInput = z.infer<typeof renameSessionInputSchema>
+
 // Longhand JSON Schema for the intent fields, shared verbatim between
 // generate_queue's top-level input and edit_queue's swap/extend `intent`
 // field, so the two can't drift from each other — an agreement test in
@@ -169,6 +179,24 @@ const rememberPreferenceJsonSchema = Object.freeze({
   required: ['note'],
 })
 
+// rename_session's longhand JSON Schema — mirrors renameSessionInputSchema
+// (an agreement test in contracts.test.ts checks both against each other,
+// same as the other tools above).
+const renameSessionJsonSchema = Object.freeze({
+  type: 'object' as const,
+  properties: {
+    title: {
+      type: 'string',
+      minLength: 1,
+      maxLength: 120,
+      description:
+        'The new name for this listening session, in the listener\'s own words — e.g. "Lagos Nights". ' +
+        'Sanitized and capped to 60 characters for display; no need to keep it short yourself.',
+    },
+  },
+  required: ['title'],
+})
+
 export const DJ_TOOLS: LlmToolDef[] = [
   {
     name: 'generate_queue',
@@ -256,6 +284,14 @@ export const DJ_TOOLS: LlmToolDef[] = [
       'requests ("play something upbeat right now") — those go through generate_queue/edit_queue instead, not ' +
       'this tool.',
     input_schema: rememberPreferenceJsonSchema,
+  },
+  {
+    name: 'rename_session',
+    description:
+      'Rename this listening session to a new title — e.g. "call this tape Lagos Nights" or "rename this to ' +
+      'Sunday Chill". Use ONLY when the listener explicitly asks for a name change; never call this on your own ' +
+      'initiative, and never as a side effect of any other request.',
+    input_schema: renameSessionJsonSchema,
   },
 ]
 

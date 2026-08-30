@@ -9,6 +9,7 @@ import { runDjTurn, DjError, type DjDeps, type DjSessionRef } from '../dj/loop'
 import { applyOps, getActiveQueue, QueueOpError, QueueVersionConflict } from '../dj/queue-store'
 import { queueOpsSchema } from '../dj/contracts'
 import { generateSessionTitle } from '../dj/title'
+import { sanitizeTitleText } from '../dj/sanitize'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -21,16 +22,15 @@ function isUuid(value: string): boolean {
   return UUID_RE.test(value)
 }
 
-// Strips control characters (including newlines — a crafted prompt could
-// otherwise fake a multi-line title) and caps length, mirroring
-// dj/sanitize.ts's treatment of track titles before they reach an LLM
-// prompt — applied here to the session's own display title instead.
-// Exported for scripts/retitle-sessions.ts, which needs the exact same
-// transform to recognize a session whose title is still this fallback
-// (never overwritten by a generated title) as a backfill candidate.
+// Thin wrapper over sanitizeTitleText (dj/sanitize.ts) with a non-empty
+// fallback — the one thing that step doesn't itself decide, since PATCH
+// /sessions/:id and the rename_session tool both want a REJECTION on an
+// empty-after-sanitize title instead of a silent fallback. Exported for
+// scripts/retitle-sessions.ts, which needs the exact same transform to
+// recognize a session whose title is still this fallback (never overwritten
+// by a generated title) as a backfill candidate.
 export function titleFromPrompt(prompt: string): string {
-  const cleaned = prompt.replace(/\p{C}+/gu, ' ').trim()
-  return (cleaned.slice(0, 60) || 'new session').trim()
+  return sanitizeTitleText(prompt) || 'new session'
 }
 
 async function loadOwnedSession(db: Db, sessionId: string, userId: string) {
@@ -72,7 +72,20 @@ const queueOpsBodySchema = z.object({
   ops: queueOpsSchema,
   expectedVersion: z.number().int().min(0).optional(),
 })
-const patchSessionSchema = z.object({ status: z.union([z.literal('active'), z.literal('archived')]) })
+// `title` is bounded 1..120 raw (mirrors rename_session's own tool-input
+// bound in dj/contracts.ts) — the actual DISPLAY cap (60, sanitized) is
+// applied in the handler via sanitizeTitleText, same discipline as
+// titleFromPrompt. Either field, or both, may be sent; the refine below
+// rejects a body carrying neither (an empty PATCH is a client bug, not a
+// silent no-op).
+const patchSessionSchema = z
+  .object({
+    status: z.union([z.literal('active'), z.literal('archived')]).optional(),
+    title: z.string().min(1).max(120).optional(),
+  })
+  .refine((data) => data.status !== undefined || data.title !== undefined, {
+    message: 'at least one of status or title is required',
+  })
 const sessionEventSchema = z.object({ type: z.union([z.literal('played'), z.literal('saved_playlist')]) })
 
 const MANUAL_OPS_HINT = 'swap/extend require the DJ — send a message instead'
@@ -124,17 +137,24 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
     // truncated fallback. titlePromise itself never rejects (see above), but
     // allSettled keeps that guarantee explicit rather than relying on it.
     const [turnResult, titleResult] = await Promise.allSettled([runDjTurn(db, deps, sessionRef, prompt), titlePromise])
-    const title = titleResult.status === 'fulfilled' ? titleResult.value : fallbackTitle
+
+    // A rename_session call within this very first turn (unusual, but the
+    // listener COULD open with "call this tape Lagos Nights") wins over the
+    // concurrently-generated Haiku title — an explicit rename is a stronger
+    // signal than the auto-naming pass, and the auto-generated title must
+    // never clobber it on the write below.
+    const renamedTitle = turnResult.status === 'fulfilled' ? turnResult.value.sessionTitle : undefined
+    const title = renamedTitle ?? (titleResult.status === 'fulfilled' ? titleResult.value : fallbackTitle)
 
     // A text-only first turn never touches dj_sessions itself (no queue
     // write to ride $onUpdate's automatic bump) — bumped explicitly, same as
     // the message-turn route below, so list ordering (newest first by
-    // updatedAt) reflects even a chat-only first turn. The generated title
-    // rides this same UPDATE (one write, not two), written UNCONDITIONALLY —
-    // both promises have already settled by this point, so whatever queue
-    // writes runDjTurn made (or didn't, on failure) are done: this UPDATE
-    // (touching only updatedAt/title) can't race dj/queue-store.ts's
-    // queueVersion write either way.
+    // updatedAt) reflects even a chat-only first turn. The generated (or
+    // renamed) title rides this same UPDATE (one write, not two), written
+    // UNCONDITIONALLY — both promises have already settled by this point, so
+    // whatever queue writes runDjTurn made (or didn't, on failure) are done:
+    // this UPDATE (touching only updatedAt/title) can't race
+    // dj/queue-store.ts's queueVersion write either way.
     const [sessionRow] = await db
       .update(djSessions)
       .set({ updatedAt: new Date(), title })
@@ -158,6 +178,11 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
       session: sessionRow,
       messages,
       queue: turnResult.value.queue,
+      // Present ONLY when rename_session actually fired this turn — lets the
+      // client adopt the new title without a refetch (see
+      // dj_providers.dart's ChatNotifier). Omitted entirely on a no-rename
+      // turn, never sent as null.
+      ...(renamedTitle ? { sessionTitle: renamedTitle } : {}),
     })
   })
 
@@ -200,16 +225,28 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
   // Archiving is client-side-only bookkeeping — no queue/message side
   // effects, no LLM call, just the `status` column. GET /sessions still
   // returns archived rows (the client filters); this route only changes
-  // which bucket a session sits in.
+  // which bucket a session sits in. A `title` rename rides the same PATCH —
+  // manual (from Home) rather than the DJ's own rename_session tool
+  // (dj/loop.ts), but both land on the identical sanitize-then-write step.
   app.patch('/:id', zValidator('json', patchSessionSchema), async (c) => {
     const userId = c.get('user').id
     const session = await loadOwnedSession(db, c.req.param('id'), userId)
     if (!session) return c.json({ error: 'not_found' }, 404)
 
-    const { status } = c.req.valid('json')
+    const { status, title } = c.req.valid('json')
+    const updates: { status?: 'active' | 'archived'; title?: string } = {}
+    if (status !== undefined) updates.status = status
+    if (title !== undefined) {
+      // min(1) above only rejects a literally-empty string — a
+      // whitespace-only title (or one that sanitizes down to nothing, e.g.
+      // all control characters) still needs its own rejection here.
+      const sanitized = sanitizeTitleText(title)
+      if (!sanitized) return c.json({ error: 'invalid_title', message: 'title cannot be empty' }, 400)
+      updates.title = sanitized
+    }
     const [updated] = await db
       .update(djSessions)
-      .set({ status })
+      .set(updates)
       .where(eq(djSessions.id, session.id))
       .returning(sessionListColumns)
     return c.json({ session: updated })
@@ -241,7 +278,14 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
       // to ride $onUpdate's automatic bump), so list ordering (newest first
       // by updatedAt) would otherwise never reflect a chat-only turn.
       await db.update(djSessions).set({ updatedAt: new Date() }).where(eq(djSessions.id, session.id))
-      return c.json({ djMessage: result.djMessage, queue: result.queue, queueVersion: result.queueVersion })
+      return c.json({
+        djMessage: result.djMessage,
+        queue: result.queue,
+        queueVersion: result.queueVersion,
+        // Same contract as POST /sessions above: present ONLY when
+        // rename_session fired this turn.
+        ...(result.sessionTitle ? { sessionTitle: result.sessionTitle } : {}),
+      })
     } catch (e) {
       if (e instanceof DjError) {
         return c.json(djErrorBody(e), djErrorStatus(e.kind))

@@ -858,6 +858,66 @@ describe('session routes', () => {
     })
   })
 
+  describe('rename_session tool — turn responses carry sessionTitle', () => {
+    it('POST /sessions/:id/messages includes sessionTitle only when rename_session fired this turn', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const { llm: setupLlm } = makeFakeLlm([{ text: 'hi there.' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm: setupLlm }, authedAs('u1'))
+      const createRes = await postJson(app, '/sessions', { prompt: 'hey' })
+      const { session } = (await createRes.json()) as { session: { id: string } }
+
+      const { llm: renameLlm } = makeFakeLlm([
+        { toolCalls: [toolCall('c1', 'rename_session', { title: 'Lagos Nights' })] },
+        { text: 'there you go.' },
+      ])
+      const renameApp = buildApp(db, { embed: fakeEmbed, llm: renameLlm }, authedAs('u1'))
+      const renameRes = await postJson(renameApp, `/sessions/${session.id}/messages`, { text: 'call this tape Lagos Nights' })
+      expect(renameRes.status).toBe(200)
+      const renameBody = (await renameRes.json()) as { sessionTitle?: string }
+      expect(renameBody.sessionTitle).toBe('Lagos Nights')
+
+      // A later, unrelated turn on the SAME session omits the field entirely.
+      const { llm: plainLlm } = makeFakeLlm([{ text: 'sure thing.' }])
+      const plainApp = buildApp(db, { embed: fakeEmbed, llm: plainLlm }, authedAs('u1'))
+      const plainRes = await postJson(plainApp, `/sessions/${session.id}/messages`, { text: 'play something else' })
+      const plainBody = (await plainRes.json()) as { sessionTitle?: string }
+      expect(plainBody).not.toHaveProperty('sessionTitle')
+    })
+
+    it('POST /sessions includes sessionTitle when the very first turn renames — and it wins over the concurrently-generated title', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const { llm } = makeFakeLlm([
+        { toolCalls: [toolCall('c1', 'rename_session', { title: 'Lagos Nights' })] },
+        { text: 'there you go.' },
+      ])
+      const titleComplete: LlmComplete = async () => 'Some Auto Title'
+      const app = buildApp(db, { embed: fakeEmbed, llm, titleComplete }, authedAs('u1'))
+
+      const res = await postJson(app, '/sessions', { prompt: 'call this tape Lagos Nights' })
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { session: { id: string; title: string }; sessionTitle?: string }
+      expect(body.sessionTitle).toBe('Lagos Nights')
+      expect(body.session.title).toBe('Lagos Nights')
+
+      const [row] = await db.select().from(djSessions).where(eq(djSessions.id, body.session.id))
+      expect(row.title).toBe('Lagos Nights')
+    })
+
+    it('POST /sessions omits sessionTitle on an ordinary (no-rename) first turn', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const { llm } = makeFakeLlm([{ text: 'here you go.' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+      const res = await postJson(app, '/sessions', { prompt: 'play something chill' })
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { sessionTitle?: string }
+      expect(body).not.toHaveProperty('sessionTitle')
+    })
+  })
+
   describe('PATCH /sessions/:id', () => {
     async function createPlainSession(db: TestDb, userId: string) {
       const { llm } = makeFakeLlm([{ text: 'hi' }])
@@ -917,6 +977,93 @@ describe('session routes', () => {
       const row = body.sessions.find((s) => s.id === sessionId)
       expect(row).toBeDefined()
       expect(row!.status).toBe('archived')
+    })
+
+    it('renames a session — persists the sanitized title and returns it in the list-row shape', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const sessionId = await createPlainSession(db, 'u1')
+      const { llm } = makeFakeLlm([{ text: 'n/a' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+      const res = await patchJson(app, `/sessions/${sessionId}`, { title: 'Lagos Nights' })
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { session: { id: string; title: string } }
+      expect(body.session.id).toBe(sessionId)
+      expect(body.session.title).toBe('Lagos Nights')
+
+      const [row] = await db.select().from(djSessions).where(eq(djSessions.id, sessionId))
+      expect(row.title).toBe('Lagos Nights')
+    })
+
+    it('rejects an empty or whitespace-only title with 400', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const sessionId = await createPlainSession(db, 'u1')
+      const { llm } = makeFakeLlm([{ text: 'n/a' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+      // '' fails the raw zod min(1) bound...
+      const emptyRes = await patchJson(app, `/sessions/${sessionId}`, { title: '' })
+      expect(emptyRes.status).toBe(400)
+
+      // ...while a whitespace-only string passes that raw bound but sanitizes
+      // down to nothing, so the HANDLER's own rejection has to catch it.
+      const wsRes = await patchJson(app, `/sessions/${sessionId}`, { title: '   ' })
+      expect(wsRes.status).toBe(400)
+      const wsBody = (await wsRes.json()) as { error: string }
+      expect(wsBody.error).toBe('invalid_title')
+    })
+
+    it('caps an over-60-char title at 60 (display cap), matching titleFromPrompt\'s discipline', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const sessionId = await createPlainSession(db, 'u1')
+      const { llm } = makeFakeLlm([{ text: 'n/a' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+      const longTitle = 'a'.repeat(90)
+
+      const res = await patchJson(app, `/sessions/${sessionId}`, { title: longTitle })
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { session: { title: string } }
+      expect(body.session.title).toBe('a'.repeat(60))
+    })
+
+    it('404s a rename for another user\'s session id (no existence leak)', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      await seedUser(db, 'u2')
+      const sessionId = await createPlainSession(db, 'u1')
+      const { llm } = makeFakeLlm([{ text: 'n/a' }])
+      const appU2 = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u2'))
+
+      const res = await patchJson(appU2, `/sessions/${sessionId}`, { title: 'hijacked' })
+      expect(res.status).toBe(404)
+    })
+
+    it('accepts status and title together in one PATCH', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const sessionId = await createPlainSession(db, 'u1')
+      const { llm } = makeFakeLlm([{ text: 'n/a' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+      const res = await patchJson(app, `/sessions/${sessionId}`, { status: 'archived', title: 'Lagos Nights' })
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { session: { title: string; status: string } }
+      expect(body.session.status).toBe('archived')
+      expect(body.session.title).toBe('Lagos Nights')
+    })
+
+    it('rejects a body with neither status nor title', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const sessionId = await createPlainSession(db, 'u1')
+      const { llm } = makeFakeLlm([{ text: 'n/a' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+      const res = await patchJson(app, `/sessions/${sessionId}`, {})
+      expect(res.status).toBe(400)
     })
   })
 })

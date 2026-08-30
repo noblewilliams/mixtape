@@ -10,13 +10,14 @@ import {
   opIntentSchema,
   queueOpsSchema,
   rememberPreferenceInputSchema,
+  renameSessionInputSchema,
   DJ_TOOLS,
   type Intent,
   type OpIntent,
 } from './contracts'
 import { buildPool } from './pool'
 import { curate, CurationTruncated, CurationUnparseable } from './curate'
-import { sanitizeForPrompt } from './sanitize'
+import { sanitizeForPrompt, sanitizeTitleText } from './sanitize'
 import {
   applyOps,
   getActiveQueue,
@@ -43,6 +44,11 @@ export type DjTurnResult = {
   djMessage: typeof djMessages.$inferSelect
   queue: QueueTrackView[]
   queueVersion: number
+  // Present ONLY when rename_session actually fired (and its write landed)
+  // during this turn — see executeRenameSession below. routes/sessions.ts
+  // spreads this onto the turn response's own `sessionTitle` field ONLY when
+  // set, so a no-rename turn omits it entirely rather than sending null.
+  sessionTitle?: string
 }
 
 // Bounds the number of tool-use round trips in a single turn. A round is one
@@ -178,6 +184,9 @@ const PERSONA_PROMPT = [
     '("play something upbeat right now") — that goes through generate_queue/edit_queue instead. Respect any ' +
     'saved preferences already listed in the session context: treat a "never"/"always" note as a hard rule, ' +
     "and don't ask to save one that's already listed there.",
+  'Call rename_session ONLY when the listener explicitly asks to rename or retitle this session (e.g. "call ' +
+    'this tape Lagos Nights", "rename this to Sunday Chill") — never on your own initiative, and never as a ' +
+    'reaction to anything else.',
   'Keep spoken replies SHORT — a sentence or two, like a text from a friend who runs the board.',
 ].join('\n')
 
@@ -562,6 +571,47 @@ async function executeRememberPreference(db: Db, session: DjSessionRef, rawInput
   }
 }
 
+// Content-free by design, same rationale as remember_preference above: the
+// model gets only {ok:true}/{ok:false} back, never the sanitized title
+// echoed — PERSONA_PROMPT already tells it when to call this, and it can
+// confirm the rename in its own words ("there you go, Lagos Nights it is")
+// from the CALL it just made, not from a tool result it has to parse.
+const RENAME_OK = JSON.stringify({ ok: true })
+const RENAME_REFUSED = JSON.stringify({ ok: false })
+
+// Executed inline by the tool-call loop below, mirroring
+// executeRememberPreference EXACTLY: no budget.consume() (no curate() call,
+// so it isn't part of what MAX_CURATIONS_PER_TURN bounds), never throws (a
+// bad input, a title that sanitizes to nothing, or a DB blip all refuse
+// silently rather than ending the turn), and the write is sanitized with the
+// identical sanitizeTitleText step PATCH /sessions/:id uses (dj/sanitize.ts)
+// — this is display text a client renders verbatim, never fed back into any
+// prompt, but it still gets the same control-char-strip + 60-cap discipline
+// every other session title on this row does.
+async function executeRenameSession(
+  db: Db,
+  session: DjSessionRef,
+  rawInput: unknown,
+): Promise<{ resultText: string; newTitle?: string }> {
+  const parsed = renameSessionInputSchema.safeParse(rawInput)
+  if (!parsed.success) {
+    return { resultText: formatZodIssues('invalid rename_session input', parsed.error) }
+  }
+  const sanitized = sanitizeTitleText(parsed.data.title)
+  if (!sanitized) {
+    return { resultText: RENAME_REFUSED }
+  }
+
+  try {
+    await db.update(djSessions).set({ title: sanitized }).where(eq(djSessions.id, session.id))
+    return { resultText: RENAME_OK, newTitle: sanitized }
+  } catch {
+    // Same isolation as executeRememberPreference: a DB blip on this one tool
+    // call must never take down an otherwise-healthy turn.
+    return { resultText: RENAME_REFUSED }
+  }
+}
+
 type AttemptStats = {
   llmCalls: number
   toolCalls: number
@@ -573,6 +623,10 @@ type AttemptStats = {
 type AttemptResult = {
   text: string
   queueVersion: number
+  // Present ONLY when rename_session fired (and its write landed) at some
+  // point during THIS attempt — see DjTurnResult's own comment for how this
+  // rides up to the route response.
+  sessionTitle?: string
   stats: AttemptStats
 }
 
@@ -645,6 +699,7 @@ async function attemptTurn(db: Db, deps: DjDeps, session: DjSessionRef, userText
     let lastGenerateIntent: Intent | undefined
     let currentVersion = startVersion
     let finalText: string | null = null
+    let renamedTitle: string | undefined
 
     for (let round = 0; round < MAX_TURNS && finalText === null; round++) {
       const turn = await counted({ system: PERSONA_PROMPT, messages: [...baseMessages, ...liveMessages], tools: DJ_TOOLS })
@@ -691,6 +746,12 @@ async function attemptTurn(db: Db, deps: DjDeps, session: DjSessionRef, userText
           // MAX_CURATIONS_PER_TURN bounds.
           const outcome = await executeRememberPreference(db, session, call.input)
           resultText = outcome.resultText
+        } else if (call.name === 'rename_session') {
+          // No budget.consume() here either — same rationale, see
+          // executeRenameSession's own comment.
+          const outcome = await executeRenameSession(db, session, call.input)
+          resultText = outcome.resultText
+          if (outcome.newTitle) renamedTitle = outcome.newTitle
         } else {
           resultText = `unknown tool: ${call.name}`
         }
@@ -699,7 +760,7 @@ async function attemptTurn(db: Db, deps: DjDeps, session: DjSessionRef, userText
       liveMessages.push({ role: 'user', content: toolResultBlocks })
     }
 
-    return { text: finalText ?? FALLBACK_TEXT, queueVersion: currentVersion, stats }
+    return { text: finalText ?? FALLBACK_TEXT, queueVersion: currentVersion, sessionTitle: renamedTitle, stats }
   } catch (e) {
     throw new AttemptTurnFailure(e, stats)
   }
@@ -804,5 +865,5 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
 
   const queue = await getActiveQueue(db, session.id)
   logTurn(session.id, attempt.stats, null)
-  return { djMessage: djMessageRow, queue, queueVersion: attempt.queueVersion }
+  return { djMessage: djMessageRow, queue, queueVersion: attempt.queueVersion, sessionTitle: attempt.sessionTitle }
 }
