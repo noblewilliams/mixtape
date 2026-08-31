@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Cassette } from './Cassette'
-import { CloseIcon } from './Icons'
+import { CloseIcon, ErrorCircleIcon, SuccessCircleIcon } from './Icons'
 
 type NewTapeDialogProps = {
   busy?: boolean
@@ -53,12 +53,14 @@ export function NewTapeDialog({ busy = false, onClose, onCreate }: NewTapeDialog
 }
 
 type SaveDialogProps = {
+  busy?: boolean
+  error?: string
   defaultName: string
   onClose: () => void
   onSave: (name: string) => void
 }
 
-export function SaveDialog({ defaultName, onClose, onSave }: SaveDialogProps) {
+export function SaveDialog({ busy = false, error = '', defaultName, onClose, onSave }: SaveDialogProps) {
   const [name, setName] = useState(defaultName)
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -70,21 +72,33 @@ export function SaveDialog({ defaultName, onClose, onSave }: SaveDialogProps) {
   return (
     <div className="overlay" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className="dialog" role="dialog" aria-modal="true" aria-labelledby="save-playlist-title">
-        <button className="dialog-close" type="button" onClick={onClose} aria-label="Close playlist dialog">
+        <button className="dialog-close" type="button" onClick={onClose} aria-label="Close playlist dialog" disabled={busy}>
           <CloseIcon />
         </button>
         <p className="quiet-kicker">Apple Music</p>
-        <h2 id="save-playlist-title">Save as a playlist</h2>
-        <p>The tape stays in Mixtape. This creates a separate Apple Music playlist you can keep.</p>
+        <h2 id="save-playlist-title">Create playlist</h2>
+        <p>The mix stays in Mixtape. This creates a separate Apple Music playlist you can keep.</p>
         <form onSubmit={submit}>
           <label htmlFor="playlist-name">Playlist name</label>
-          <input id="playlist-name" value={name} onChange={(event) => setName(event.target.value)} maxLength={80} />
+          <input
+            id="playlist-name"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            maxLength={80}
+            disabled={busy}
+          />
+          {error ? <p className="dialog-error" role="alert">{error}</p> : null}
           <div className="dialog-actions">
-            <button className="dialog-cancel" type="button" onClick={onClose}>
+            <button className="dialog-cancel" type="button" onClick={onClose} disabled={busy}>
               Cancel
             </button>
-            <button className="dialog-confirm" type="submit" aria-label="Confirm save playlist" disabled={!name.trim()}>
-              Save playlist
+            <button
+              className="dialog-confirm"
+              type="submit"
+              aria-label="Confirm create playlist"
+              disabled={!name.trim() || busy}
+            >
+              {busy ? 'Creating playlist…' : 'Create playlist'}
             </button>
           </div>
         </form>
@@ -113,10 +127,11 @@ export function SyncOverlay({ onClose }: { onClose: () => void }) {
   )
 }
 
-export function Toast({ message }: { message: string }) {
+export function Toast({ message, tone }: { message: string; tone: 'success' | 'error' }) {
   return (
-    <div className="toast" role="status">
-      {message}
+    <div className={`toast toast--${tone}`} role={tone === 'error' ? 'alert' : 'status'}>
+      {tone === 'success' ? <SuccessCircleIcon /> : <ErrorCircleIcon />}
+      <span>{message}</span>
     </div>
   )
 }

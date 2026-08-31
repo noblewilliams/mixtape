@@ -14,12 +14,45 @@ export function PlayButton({ playing, disabled = false, onClick }: PlayButtonPro
       type="button"
       disabled={disabled}
       onClick={onClick}
-      aria-label={playing ? 'Pause tape' : 'Play tape'}
+      aria-label={playing ? 'Pause' : 'Play now'}
     >
       <span className="transport-reel" aria-hidden="true">
         <PlayIcon paused={playing} />
       </span>
-      <span>{playing ? 'Pause tape' : 'Play tape'}</span>
+      <span>{playing ? 'Pause' : 'Play now'}</span>
+      <span className="transport-meter" aria-hidden="true" />
+    </button>
+  )
+}
+
+type ConnectMusicButtonProps = {
+  state: 'disconnected' | 'connecting' | 'retry'
+  onClick: () => void
+}
+
+export function ConnectMusicButton({ state, onClick }: ConnectMusicButtonProps) {
+  const connecting = state === 'connecting'
+  const retrying = state === 'retry'
+  const label = connecting ? 'Connecting Apple Music…' : retrying ? 'Try Apple Music again' : 'Connect Apple Music'
+  const detail = connecting
+    ? 'Authorization is handled by Apple'
+    : retrying
+      ? 'A subscription is required for full playback'
+      : 'Apple will ask for music access'
+
+  return (
+    <button
+      className={`connect-music-button ${connecting ? 'is-connecting' : ''}`}
+      type="button"
+      aria-label={label}
+      disabled={connecting}
+      onClick={onClick}
+    >
+      <span className="connect-music-reel" aria-hidden="true" />
+      <span>
+        {label}
+        <small>{detail}</small>
+      </span>
       <span className="transport-meter" aria-hidden="true" />
     </button>
   )

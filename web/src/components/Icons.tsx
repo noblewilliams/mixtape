@@ -85,6 +85,24 @@ export function MoreIcon(props: IconProps) {
   )
 }
 
+export function SuccessCircleIcon(props: IconProps) {
+  return (
+    <svg {...iconDefaults} {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="m7.8 12.2 2.8 2.8 5.8-6.1" />
+    </svg>
+  )
+}
+
+export function ErrorCircleIcon(props: IconProps) {
+  return (
+    <svg {...iconDefaults} {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7.5v6M12 17h.01" />
+    </svg>
+  )
+}
+
 export function PlayIcon({ paused = false, ...props }: IconProps & { paused?: boolean }) {
   return (
     <svg {...iconDefaults} {...props}>

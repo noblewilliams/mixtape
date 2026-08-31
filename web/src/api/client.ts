@@ -48,11 +48,17 @@ export type SendMessageResponse = {
   sessionTitle?: string
 }
 
+export type MusicKitTokenResponse = {
+  developerToken: string
+  expiresAt: number
+}
+
 export type MixtapeApi = {
   listSessions: () => Promise<{ sessions: ApiSessionSummary[] }>
   getSession: (sessionId: string) => Promise<SessionDetailResponse>
   createSession: (prompt: string) => Promise<CreateSessionResponse>
   sendMessage: (sessionId: string, text: string) => Promise<SendMessageResponse>
+  getMusicKitToken: () => Promise<MusicKitTokenResponse>
   recordSessionEvent: (sessionId: string, type: 'played' | 'saved_playlist') => Promise<{ ok: true }>
 }
 
@@ -118,6 +124,7 @@ export function createMixtapeApi(baseUrl: string): MixtapeApi {
         method: 'POST',
         body: JSON.stringify({ text }),
       }),
+    getMusicKitToken: () => request('/musickit/token'),
     recordSessionEvent: (sessionId, type) =>
       request(`/sessions/${encodeURIComponent(sessionId)}/events`, {
         method: 'POST',

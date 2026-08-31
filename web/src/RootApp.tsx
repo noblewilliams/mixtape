@@ -3,8 +3,10 @@ import { App } from './App'
 import { AuthGate } from './components/AuthGate'
 import { API_URL } from './config'
 import { browserAuth } from './lib/auth-client'
+import { createMusicKitClient } from './musickit/client'
 
 const api = createMixtapeApi(API_URL)
+const musicKit = createMusicKitClient({ getDeveloperToken: api.getMusicKitToken })
 
 function signOut() {
   void browserAuth.signOut()
@@ -13,7 +15,7 @@ function signOut() {
 export function RootApp() {
   return (
     <AuthGate auth={browserAuth}>
-      {(user) => <App api={api} user={user} onSignOut={signOut} />}
+      {(user) => <App api={api} musicKit={musicKit} user={user} onSignOut={signOut} />}
     </AuthGate>
   )
 }

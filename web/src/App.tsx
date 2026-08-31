@@ -9,11 +9,15 @@ import { NewTapeDialog, SaveDialog, SyncOverlay, Toast } from './components/Over
 import { QueuePanel } from './components/QueuePanel'
 import { Sidebar } from './components/Sidebar'
 import type { AppView, CollectionView, DjMessage, DjSession, QueueTrack } from './domain'
+import type { MusicKitClient } from './musickit/client'
 
 type DialogState = 'new-tape' | 'save-playlist' | 'sync' | null
+type MusicConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
+type ToastState = { message: string; tone: 'success' | 'error' }
 
 type AppProps = {
   api: MixtapeApi
+  musicKit: MusicKitClient
   user: AuthUser
   onSignOut: () => void
 }
@@ -32,7 +36,7 @@ function detailToState(detail: SessionDetailResponse) {
   }
 }
 
-export function App({ api, user, onSignOut }: AppProps) {
+export function App({ api, musicKit, user, onSignOut }: AppProps) {
   const [sessions, setSessions] = useState<DjSession[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [activeView, setActiveView] = useState<AppView>('home')
@@ -46,8 +50,12 @@ export function App({ api, user, onSignOut }: AppProps) {
   const [dialog, setDialog] = useState<DialogState>(null)
   const [queueOpen, setQueueOpen] = useState(false)
   const [playing, setPlaying] = useState(false)
+  const [playbackBusy, setPlaybackBusy] = useState(false)
+  const [playlistBusy, setPlaylistBusy] = useState(false)
+  const [playlistError, setPlaylistError] = useState('')
+  const [musicConnection, setMusicConnection] = useState<MusicConnectionState>('disconnected')
   const [error, setError] = useState('')
-  const [toast, setToast] = useState('')
+  const [toast, setToast] = useState<ToastState | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const activeSession = useMemo(
@@ -96,10 +104,19 @@ export function App({ api, user, onSignOut }: AppProps) {
     [],
   )
 
-  function announce(message: string) {
-    setToast(message)
+  function announce(message: string, tone: ToastState['tone'] = 'success') {
+    setToast({ message, tone })
     if (toastTimer.current) clearTimeout(toastTimer.current)
-    toastTimer.current = setTimeout(() => setToast(''), 2800)
+    toastTimer.current = setTimeout(() => setToast(null), 2800)
+  }
+
+  function activeAppleIds(): string[] | null {
+    const ids = activeQueue.flatMap((track) => (track.appleId ? [track.appleId] : []))
+    if (ids.length !== activeQueue.length) {
+      announce('This mix still has unmatched songs. Ask the DJ to refresh it, then try again.', 'error')
+      return null
+    }
+    return ids
   }
 
   async function loadSession(sessionId: string, isCancelled: () => boolean = () => false) {
@@ -127,6 +144,17 @@ export function App({ api, user, onSignOut }: AppProps) {
     setQueueOpen(false)
     setPlaying(false)
     void loadSession(id)
+  }
+
+  async function connectAppleMusic() {
+    if (musicConnection === 'connecting') return
+    setMusicConnection('connecting')
+    try {
+      await musicKit.connect()
+      setMusicConnection('connected')
+    } catch {
+      setMusicConnection('error')
+    }
   }
 
   async function createTape(prompt: string) {
@@ -205,17 +233,47 @@ export function App({ api, user, onSignOut }: AppProps) {
     }
   }
 
-  function togglePlayback() {
-    if (!activeSession) return
-    const nextPlaying = !playing
-    setPlaying(nextPlaying)
-    announce(nextPlaying ? 'Playback controls are ready for MusicKit.' : 'Tape paused')
+  async function togglePlayback() {
+    if (!activeSession || playbackBusy) return
+    const sessionId = activeSession.id
+    const ids = activeAppleIds()
+    if (!ids) return
+
+    setPlaybackBusy(true)
+    try {
+      if (playing) {
+        await musicKit.pause()
+        setPlaying(false)
+      } else {
+        await musicKit.play(ids)
+        setPlaying(true)
+        void api.recordSessionEvent(sessionId, 'played').catch(() => undefined)
+      }
+    } catch {
+      announce(`Apple Music couldn’t ${playing ? 'pause' : 'play'} this mix. Try again in a moment.`, 'error')
+    } finally {
+      setPlaybackBusy(false)
+    }
   }
 
-  function savePlaylist(name: string) {
+  async function savePlaylist(name: string) {
     if (!activeSession) return
-    setDialog(null)
-    announce(`“${name}” is ready for MusicKit export.`)
+    const sessionId = activeSession.id
+    const ids = activeAppleIds()
+    if (!ids) return
+
+    setPlaylistBusy(true)
+    setPlaylistError('')
+    try {
+      await musicKit.createPlaylist(name, ids)
+      setDialog(null)
+      announce(`“${name}” is now in Apple Music.`)
+      void api.recordSessionEvent(sessionId, 'saved_playlist').catch(() => undefined)
+    } catch {
+      setPlaylistError('Apple Music couldn’t create this playlist. Check your subscription and try again.')
+    } finally {
+      setPlaylistBusy(false)
+    }
   }
 
   if (loadingCollection) {
@@ -266,9 +324,15 @@ export function App({ api, user, onSignOut }: AppProps) {
             session={activeSession}
             tracks={activeQueue}
             playing={playing}
+            playbackBusy={playbackBusy}
+            musicConnection={musicConnection}
             open={queueOpen}
-            onTogglePlay={togglePlayback}
-            onSave={() => setDialog('save-playlist')}
+            onConnect={() => void connectAppleMusic()}
+            onTogglePlay={() => void togglePlayback()}
+            onSave={() => {
+              setPlaylistError('')
+              setDialog('save-playlist')
+            }}
             onClose={() => setQueueOpen(false)}
           />
         </>
@@ -279,10 +343,16 @@ export function App({ api, user, onSignOut }: AppProps) {
         <NewTapeDialog busy={creatingTape} onClose={() => setDialog(null)} onCreate={(prompt) => void createTape(prompt)} />
       ) : null}
       {dialog === 'save-playlist' && activeSession ? (
-        <SaveDialog defaultName={activeSession.title} onClose={() => setDialog(null)} onSave={savePlaylist} />
+        <SaveDialog
+          busy={playlistBusy}
+          error={playlistError}
+          defaultName={activeSession.title}
+          onClose={() => setDialog(null)}
+          onSave={(name) => void savePlaylist(name)}
+        />
       ) : null}
       {dialog === 'sync' ? <SyncOverlay onClose={() => setDialog(null)} /> : null}
-      {toast ? <Toast message={toast} /> : null}
+      {toast ? <Toast message={toast.message} tone={toast.tone} /> : null}
     </div>
   )
 }

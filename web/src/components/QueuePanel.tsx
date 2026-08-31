@@ -1,13 +1,18 @@
 import { useMemo, useState } from 'react'
 import type { DjSession, QueueTrack } from '../domain'
-import { CloseIcon, MoreIcon } from './Icons'
-import { LabelButton, PlayButton } from './TapeActions'
+import { CloseIcon, ErrorCircleIcon, MoreIcon, SuccessCircleIcon } from './Icons'
+import { ConnectMusicButton, LabelButton, PlayButton } from './TapeActions'
+
+export type MusicConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
 
 type QueuePanelProps = {
   session: DjSession
   tracks: QueueTrack[]
   playing: boolean
+  playbackBusy: boolean
+  musicConnection: MusicConnectionState
   open: boolean
+  onConnect: () => void
   onTogglePlay: () => void
   onSave: () => void
   onClose: () => void
@@ -23,7 +28,10 @@ export function QueuePanel({
   session,
   tracks,
   playing,
+  playbackBusy,
+  musicConnection,
   open,
+  onConnect,
   onTogglePlay,
   onSave,
   onClose,
@@ -35,10 +43,10 @@ export function QueuePanel({
   )
 
   return (
-    <aside className={`queue-panel ${open ? 'is-open' : ''}`} aria-label="Your tape">
+    <aside className={`queue-panel ${open ? 'is-open' : ''}`} aria-label="Your mix">
       <header className="queue-header">
         <div>
-          <p>Your tape</p>
+          <p>Your mix</p>
           <span>Side A</span>
         </div>
         <button className="queue-close" type="button" onClick={onClose} aria-label="Close your tape queue">
@@ -86,12 +94,43 @@ export function QueuePanel({
         </ol>
       )}
 
-      <div className="queue-actions">
-        <PlayButton playing={playing} disabled={tracks.length === 0} onClick={onTogglePlay} />
-        <LabelButton onClick={onSave} disabled={tracks.length === 0} ariaLabel="Save playlist">
-          Save playlist
-        </LabelButton>
-      </div>
+      {tracks.length > 0 ? (
+        <div className="music-actions">
+          {musicConnection === 'connected' ? (
+            <>
+              <p className="connection-note connection-note--success" role="status">
+                <SuccessCircleIcon />
+                <span>Apple Music connected. Ready to play.</span>
+              </p>
+              <div className="queue-actions">
+                <PlayButton playing={playing} disabled={playbackBusy} onClick={onTogglePlay} />
+                <LabelButton onClick={onSave} ariaLabel="Create playlist">
+                  Create playlist
+                </LabelButton>
+              </div>
+            </>
+          ) : musicConnection === 'error' ? (
+            <>
+              <p className="connection-note connection-note--error" role="alert">
+                <ErrorCircleIcon />
+                <span>
+                  <strong>Apple Music didn’t connect.</strong> Try again or keep shaping the mix.
+                </span>
+              </p>
+              <ConnectMusicButton state="retry" onClick={onConnect} />
+            </>
+          ) : (
+            <>
+              <p className="connect-copy" role={musicConnection === 'connecting' ? 'status' : undefined}>
+                {musicConnection === 'connecting'
+                  ? 'Waiting for Apple Music. Keep this window open.'
+                  : 'Connect Apple Music to play this mix or create it as a playlist. Your Mixtape account is already signed in.'}
+              </p>
+              <ConnectMusicButton state={musicConnection} onClick={onConnect} />
+            </>
+          )}
+        </div>
+      ) : null}
     </aside>
   )
 }

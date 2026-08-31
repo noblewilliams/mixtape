@@ -62,6 +62,7 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): MixtapeApi {
       queue: demoQueue.map((track) => ({ ...track })),
       queueVersion: 4,
     }),
+    getMusicKitToken: async () => ({ developerToken: 'fake-developer-token', expiresAt: 1_788_138_000 }),
     recordSessionEvent: async () => ({ ok: true }),
   }
 

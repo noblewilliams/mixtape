@@ -71,6 +71,25 @@ describe('Mixtape API client', () => {
     )
   })
 
+  it('loads a short-lived MusicKit token with the signed-in browser session', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ developerToken: 'developer-token', expiresAt: 1_788_138_000 }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const api = createMixtapeApi('https://api.mixtape.test')
+    const result = await api.getMusicKitToken()
+
+    expect(result).toEqual({ developerToken: 'developer-token', expiresAt: 1_788_138_000 })
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.mixtape.test/musickit/token',
+      expect.objectContaining({ credentials: 'include' }),
+    )
+  })
+
   it('marks an expired browser session as unauthorized', async () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ error: 'unauthorized' }), {
