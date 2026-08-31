@@ -29,6 +29,10 @@ export type ApiQueueTrack = {
   artist: string
   reason?: string | null
   durationMs?: number | null
+  artworkUrl: string | null
+  artworkWidth: number | null
+  artworkHeight: number | null
+  artworkBgColor: string | null
 }
 
 export type SessionDetailResponse = {

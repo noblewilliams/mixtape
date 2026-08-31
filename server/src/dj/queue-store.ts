@@ -11,6 +11,10 @@ export type QueueTrackView = {
   artist: string
   reason: string | null
   durationMs: number | null
+  artworkUrl: string | null
+  artworkWidth: number | null
+  artworkHeight: number | null
+  artworkBgColor: string | null
 }
 
 // Thrown when an op batch fails validation against the CURRENT queue state
@@ -131,6 +135,10 @@ export async function getActiveQueue(db: Db, sessionId: string): Promise<QueueTr
       artist: tracks.artist,
       reason: queueTracks.reason,
       durationMs: tracks.durationMs,
+      artworkUrl: tracks.artworkUrlTemplate,
+      artworkWidth: tracks.artworkWidth,
+      artworkHeight: tracks.artworkHeight,
+      artworkBgColor: tracks.artworkBgColor,
     })
     .from(queueTracks)
     .innerJoin(tracks, eq(tracks.id, queueTracks.trackId))

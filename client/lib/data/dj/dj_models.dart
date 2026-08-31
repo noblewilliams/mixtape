@@ -60,6 +60,10 @@ class QueueTrack {
     required this.artist,
     this.reason,
     this.durationMs,
+    this.artworkUrl,
+    this.artworkWidth,
+    this.artworkHeight,
+    this.artworkBgColor,
   });
 
   final int position;
@@ -72,6 +76,10 @@ class QueueTrack {
   final String artist;
   final String? reason;
   final int? durationMs;
+  final String? artworkUrl;
+  final int? artworkWidth;
+  final int? artworkHeight;
+  final String? artworkBgColor;
 
   factory QueueTrack.fromJson(Map<String, dynamic> json) => QueueTrack(
         position: json['position'] as int,
@@ -81,6 +89,10 @@ class QueueTrack {
         artist: json['artist'] as String,
         reason: json['reason'] as String?,
         durationMs: json['durationMs'] as int?,
+        artworkUrl: json['artworkUrl'] as String?,
+        artworkWidth: json['artworkWidth'] as int?,
+        artworkHeight: json['artworkHeight'] as int?,
+        artworkBgColor: json['artworkBgColor'] as String?,
       );
 }
 

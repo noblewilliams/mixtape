@@ -23,8 +23,20 @@ function messagesFor(sessionId: string): ApiMessage[] {
   return makeConversationFor(session).map((message) => ({ ...message }))
 }
 
+function apiTrack(track: (typeof demoQueue)[number]): ApiQueueTrack {
+  return {
+    ...track,
+    reason: track.reason ?? null,
+    durationMs: track.durationMs ?? null,
+    artworkUrl: track.artworkUrl ?? null,
+    artworkWidth: track.artworkWidth ?? null,
+    artworkHeight: track.artworkHeight ?? null,
+    artworkBgColor: track.artworkBgColor ?? null,
+  }
+}
+
 function queueFor(sessionId: string): ApiQueueTrack[] {
-  return sessionId === demoSessions[0].id ? demoQueue.map((track) => ({ ...track })) : []
+  return sessionId === demoSessions[0].id ? demoQueue.map(apiTrack) : []
 }
 
 export function createFakeApi(overrides: Partial<MixtapeApi> = {}): MixtapeApi {
@@ -59,7 +71,7 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): MixtapeApi {
         queueVersion: 4,
         createdAt: new Date().toISOString(),
       },
-      queue: demoQueue.map((track) => ({ ...track })),
+      queue: demoQueue.map(apiTrack),
       queueVersion: 4,
     }),
     getMusicKitToken: async () => ({ developerToken: 'fake-developer-token', expiresAt: 1_788_138_000 }),

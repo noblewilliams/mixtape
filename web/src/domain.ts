@@ -29,6 +29,10 @@ export type QueueTrack = {
   artist: string
   reason?: string
   durationMs?: number
+  artworkUrl?: string
+  artworkWidth?: number
+  artworkHeight?: number
+  artworkBgColor?: string
 }
 
 export type SessionDetail = {

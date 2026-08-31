@@ -72,5 +72,9 @@ export function toQueueTrack(track: ApiQueueTrack): QueueTrack {
     ...track,
     reason: track.reason ?? undefined,
     durationMs: track.durationMs ?? undefined,
+    artworkUrl: track.artworkUrl ?? undefined,
+    artworkWidth: track.artworkWidth ?? undefined,
+    artworkHeight: track.artworkHeight ?? undefined,
+    artworkBgColor: track.artworkBgColor ?? undefined,
   }
 }

@@ -36,7 +36,18 @@ async function seedSession(db: TestDb, userId: string, title = 'session') {
 
 let trackCounter = 0
 
-async function seedTrack(db: TestDb, opts: { durationMs?: number } = {}) {
+async function seedTrack(
+  db: TestDb,
+  opts: {
+    durationMs?: number
+    artwork?: {
+      url: string
+      width: number
+      height: number
+      bgColor: string
+    }
+  } = {},
+) {
   trackCounter += 1
   const label = `T${trackCounter}`
   const [t] = await db
@@ -46,6 +57,11 @@ async function seedTrack(db: TestDb, opts: { durationMs?: number } = {}) {
       title: label,
       artist: 'Artist',
       durationMs: opts.durationMs ?? 200_000,
+      artworkUrlTemplate: opts.artwork?.url,
+      artworkWidth: opts.artwork?.width,
+      artworkHeight: opts.artwork?.height,
+      artworkBgColor: opts.artwork?.bgColor,
+      artworkFetchedAt: opts.artwork ? new Date('2026-08-31T12:00:00Z') : undefined,
     })
     .returning()
   return t
@@ -164,6 +180,37 @@ describe('queue-store', () => {
   })
 
   describe('getActiveQueue', () => {
+    it('returns explicit artwork values and explicit nulls in the queue contract', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'artwork-user')
+      const session = await seedSession(db, 'artwork-user')
+      const withArtwork = await seedTrack(db, {
+        artwork: {
+          url: 'https://is1-ssl.mzstatic.com/image/thumb/cover/{w}x{h}.{f}',
+          width: 3000,
+          height: 3000,
+          bgColor: '1a2b3c',
+        },
+      })
+      const withoutArtwork = await seedTrack(db)
+      await replaceQueue(db, session.id, picksFrom([withArtwork, withoutArtwork]), 'dj')
+
+      const view = await getActiveQueue(db, session.id)
+
+      expect(view[0]).toMatchObject({
+        artworkUrl: 'https://is1-ssl.mzstatic.com/image/thumb/cover/{w}x{h}.{f}',
+        artworkWidth: 3000,
+        artworkHeight: 3000,
+        artworkBgColor: '1a2b3c',
+      })
+      expect(view[1]).toMatchObject({
+        artworkUrl: null,
+        artworkWidth: null,
+        artworkHeight: null,
+        artworkBgColor: null,
+      })
+    })
+
     it('returns active rows ordered by position with joined track fields', async () => {
       const db = await createTestDb()
       await seedUser(db, 'u1')

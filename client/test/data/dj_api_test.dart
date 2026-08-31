@@ -35,7 +35,14 @@ Map<String, dynamic> _djMessage({
       'createdAt': createdAt,
     };
 
-Map<String, dynamic> _track({int position = 0, String? appleId = 'apple-1'}) => {
+Map<String, dynamic> _track({
+  int position = 0,
+  String? appleId = 'apple-1',
+  Object? artworkUrl = 'https://is1-ssl.mzstatic.com/image/thumb/cover/{w}x{h}.{f}',
+  Object? artworkWidth = 3000,
+  Object? artworkHeight = 3000,
+  Object? artworkBgColor = '1a2b3c',
+}) => {
       'position': position,
       'trackId': 'track-$position',
       'appleId': appleId,
@@ -43,6 +50,10 @@ Map<String, dynamic> _track({int position = 0, String? appleId = 'apple-1'}) => 
       'artist': 'Artist $position',
       'reason': 'fits the vibe',
       'durationMs': 200000,
+      'artworkUrl': artworkUrl,
+      'artworkWidth': artworkWidth,
+      'artworkHeight': artworkHeight,
+      'artworkBgColor': artworkBgColor,
     };
 
 DjApi _api({required http.Client inner, Duration timeout = const Duration(seconds: 120)}) => DjApi(
@@ -81,6 +92,58 @@ void main() {
       expect(detail.messages, hasLength(1));
       expect(detail.queue, hasLength(1));
       expect(detail.queue.first.appleId, 'apple-1');
+      expect(detail.queue.first.artworkUrl,
+          'https://is1-ssl.mzstatic.com/image/thumb/cover/{w}x{h}.{f}');
+      expect(detail.queue.first.artworkWidth, 3000);
+      expect(detail.queue.first.artworkHeight, 3000);
+      expect(detail.queue.first.artworkBgColor, '1a2b3c');
+    });
+
+    test('parses explicit null artwork without affecting the queue', () async {
+      final inner = MockClient((_) async => http.Response(
+            jsonEncode({
+              'session': _session(),
+              'messages': [_djMessage()],
+              'queue': [
+                _track(
+                  artworkUrl: null,
+                  artworkWidth: null,
+                  artworkHeight: null,
+                  artworkBgColor: null,
+                ),
+              ],
+            }),
+            200,
+          ));
+
+      final detail = await _api(inner: inner).createSession('anything');
+
+      expect(detail.queue.single.artworkUrl, isNull);
+      expect(detail.queue.single.artworkWidth, isNull);
+      expect(detail.queue.single.artworkHeight, isNull);
+      expect(detail.queue.single.artworkBgColor, isNull);
+    });
+
+    test('rejects malformed optional artwork types through the typed API exit', () async {
+      final inner = MockClient((_) async => http.Response(
+            jsonEncode({
+              'session': _session(),
+              'messages': [_djMessage()],
+              'queue': [_track(artworkWidth: '3000')],
+            }),
+            200,
+          ));
+
+      await expectLater(
+        _api(inner: inner).createSession('anything'),
+        throwsA(
+          isA<DjApiException>().having(
+            (error) => error.kind,
+            'kind',
+            'malformed_response',
+          ),
+        ),
+      );
     });
 
     test('502 with message+queue -> DjApiException carrying both', () async {
