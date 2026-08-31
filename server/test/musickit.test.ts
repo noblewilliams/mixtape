@@ -1,6 +1,7 @@
 import { exportPKCS8, generateKeyPair, jwtVerify } from 'jose'
 import { describe, expect, it, vi } from 'vitest'
 import { createApp, type AuthLike } from '../src/app'
+import { buildMusicKit } from '../src/index'
 import { generateMusicKitDeveloperToken } from '../src/musickit/token'
 
 function stubAuth(session: { user: { id: string } } | null): AuthLike {
@@ -35,6 +36,41 @@ describe('MusicKit developer token', () => {
       origin: ['https://mixtape.example.com'],
     })
     expect(result.expiresAt).toBe(1_788_138_000)
+  })
+
+  it('signs a server token without exposing a browser origin claim', async () => {
+    const { privateKey, publicKey } = await generateKeyPair('ES256', { extractable: true })
+    const privateKeyPem = await exportPKCS8(privateKey)
+    const result = await generateMusicKitDeveloperToken({
+      teamId: 'TEAM123456',
+      keyId: 'MUSIC12345',
+      privateKey: privateKeyPem,
+      nowSeconds: 1_788_134_400,
+      ttlSeconds: 3_600,
+    })
+
+    const verified = await jwtVerify(result.developerToken, publicKey, {
+      issuer: 'TEAM123456',
+      currentDate: new Date(1_788_134_400 * 1_000),
+    })
+    expect(verified.payload).toMatchObject({
+      iss: 'TEAM123456',
+      iat: 1_788_134_400,
+      exp: 1_788_138_000,
+    })
+    expect(verified.payload).not.toHaveProperty('origin')
+  })
+
+  it('fails fast when MusicKit key configuration is partial', () => {
+    expect(() =>
+      buildMusicKit(
+        {
+          APPLE_TEAM_ID: 'TEAM123456',
+          MUSICKIT_KEY_ID: 'MUSIC12345',
+        },
+        ['https://mixtape.example.com'],
+      ),
+    ).toThrow('MUSICKIT_KEY_ID and MUSICKIT_PRIVATE_KEY must be configured together')
   })
 })
 
@@ -84,5 +120,19 @@ describe('GET /musickit/token', () => {
     expect(response.headers.get('cache-control')).toBe('private, no-store')
     expect(await response.json()).toEqual({ developerToken: 'signed-token', expiresAt: 1_788_138_000 })
     expect(issueDeveloperToken).toHaveBeenCalledWith(origin)
+  })
+
+  it('never exposes the internal server token issuer as a route', async () => {
+    const app = createApp({
+      auth: stubAuth({ user: { id: 'user-1' } }),
+      musicKit: {
+        allowedOrigins: [origin],
+        issueDeveloperToken: vi.fn(async () => ({ developerToken: 'browser-token', expiresAt: 1_788_138_000 })),
+      },
+    })
+
+    const response = await app.request('http://x/musickit/server-token', { headers: { Origin: origin } })
+
+    expect(response.status).toBe(404)
   })
 })

@@ -13,6 +13,7 @@ import { handleScheduled } from './enrich/scheduled'
 import { anthropicLlm, anthropicComplete, buildAnthropic } from './dj/llm'
 import type { DjDeps } from './dj/loop'
 import { generateMusicKitDeveloperToken } from './musickit/token'
+import { createAppleCatalogClient, type AppleCatalogClient, type FetchLike } from './musickit/catalog'
 import type { MusicKitWiring } from './app'
 
 // Minimal structural stand-in for the platform's ScheduledController — this
@@ -89,7 +90,15 @@ function buildDjDeps(env: Bindings): DjDeps | undefined {
   }
 }
 
-function buildMusicKit(env: Bindings, allowedOrigins: string[]): MusicKitWiring | undefined {
+export function buildMusicKit(
+  env: {
+    APPLE_TEAM_ID: string
+    MUSICKIT_KEY_ID?: string
+    MUSICKIT_PRIVATE_KEY?: string
+  },
+  allowedOrigins: string[],
+  fetchLike: FetchLike = fetch,
+): (MusicKitWiring & { catalog: AppleCatalogClient }) | undefined {
   const keyId = env.MUSICKIT_KEY_ID
   const privateKey = env.MUSICKIT_PRIVATE_KEY
 
@@ -97,6 +106,13 @@ function buildMusicKit(env: Bindings, allowedOrigins: string[]): MusicKitWiring 
   if (!keyId || !privateKey) {
     throw new Error('MUSICKIT_KEY_ID and MUSICKIT_PRIVATE_KEY must be configured together')
   }
+
+  const issueServerToken = () =>
+    generateMusicKitDeveloperToken({
+      teamId: env.APPLE_TEAM_ID,
+      keyId,
+      privateKey,
+    })
 
   return {
     allowedOrigins,
@@ -107,6 +123,7 @@ function buildMusicKit(env: Bindings, allowedOrigins: string[]): MusicKitWiring 
         privateKey,
         origin,
       }),
+    catalog: createAppleCatalogClient({ fetchLike, issueServerToken }),
   }
 }
 
