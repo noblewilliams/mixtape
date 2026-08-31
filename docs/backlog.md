@@ -1,16 +1,16 @@
 # Backlog & open items
 
-Single consolidated list. Detail lives in `decisions.md` (rationale) and the plan files under `superpowers/plans/` (specs). Last updated 2026-08-30 — v1 phases P1/P2/P2.5/P3/P4 are all code-complete and deployed.
+Single consolidated list. Detail lives in `decisions.md` (rationale) and the plan files under `superpowers/plans/` (specs). Last updated 2026-08-31 — v1 phases P1/P2/P2.5/P3/P4 are complete and founder-verified; artwork Phase 1 is deployed.
 
 ## Owed right now
 
-- **P4 founder device smoke** (the only open gate): rebuild the app, then run the script in `superpowers/plans/2026-08-30-p4-taste-learning.md` §Task 5 — state a durable preference → note appears in "What the DJ knows" → new session honors it; swipe an artist away in 2 sessions → rarer next queue; forget → reverts.
+- **Playlist intelligence Phase 2 plan:** specify deletion-safe playlist snapshots, native paging, per-user storefront persistence, and browse APIs from the locked design. Artwork is no longer a gate.
 
 ## Selected next phase — artwork + playlist intelligence
 
 Founder direction is locked in `docs/superpowers/specs/2026-08-31-artwork-playlist-intelligence-design.md`: pull Apple artwork URL templates/dimensions/background colours; sync ordered playlists for browse and bounded taste scoring; support playlist-inspired mixes; then let a listener open a playlist and talk through an exact draft. The founder-device probe rejected exact rebuild for both the current Mixtape-created and Music-created disposable playlists, so the first apply contract is append-only only where that narrower operation is separately verified, and revised-copy for insertion/removal/reordering. Exact in-place rebuild is deferred until a `MusicLibrary.createPlaylist` path passes a separate device probe.
 
-The iOS minimum is locked to 16 before playlist sync ships; no iOS 13–15 fallback. Execution order: (0) Cloudflare-runtime catalog + iPhone playlist-ownership spikes, (1) artwork metadata, (2) deletion-safe playlist sync and browse APIs, (3) playlist taste/seeds, (4) conversational drafts + catalog discovery, (5) native apply + approved UI state board. Phase 0–1 execution plan: `docs/superpowers/plans/2026-08-31-artwork-capability-spikes.md`. Each phase gets a separate task plan and adversarial review/fix round.
+The iOS minimum is locked to 16 before playlist sync ships; no iOS 13–15 fallback. Execution order: (0) Cloudflare-runtime catalog + iPhone playlist-ownership spikes, (1) artwork metadata, (2) deletion-safe playlist sync and browse APIs, (3) playlist taste/seeds, (4) conversational drafts + catalog discovery, (5) native apply + approved UI state board. Phase 0–1 is complete in production: 4,686/4,689 tracks have valid artwork and background colours, three are scheduled 30-day catalog no-match retries, and zero failed. Phase 2 is next and needs its own task plan plus adversarial review/fix round.
 
 ## Next big phase: v2 — "The DJ learns" (vision.md milestone 2)
 
