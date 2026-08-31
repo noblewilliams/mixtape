@@ -40,6 +40,40 @@ describe('Mixtape API client', () => {
     )
   })
 
+  it('authenticates direct API requests with the current session token', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ sessions: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const api = createMixtapeApi('https://api.mixtape.test', () => 'session-token')
+    await api.listSessions()
+
+    const request = fetchMock.mock.calls[0][1]
+    const headers = new Headers(request?.headers)
+    expect(headers.get('authorization')).toBe('Bearer session-token')
+  })
+
+  it('omits the authorization header before a session is available', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ sessions: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const api = createMixtapeApi('https://api.mixtape.test', () => null)
+    await api.listSessions()
+
+    const request = fetchMock.mock.calls[0][1]
+    const headers = new Headers(request?.headers)
+    expect(headers.has('authorization')).toBe(false)
+  })
+
   it('posts a DJ message as JSON', async () => {
     fetchMock.mockResolvedValue(
       new Response(

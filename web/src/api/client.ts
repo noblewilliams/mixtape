@@ -97,13 +97,17 @@ async function readPayload(response: Response): Promise<unknown> {
   return response.json()
 }
 
-export function createMixtapeApi(baseUrl: string): MixtapeApi {
+type AccessTokenProvider = () => string | null
+
+export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenProvider = () => null): MixtapeApi {
   const root = normalizeBaseUrl(baseUrl)
 
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const headers = new Headers(init.headers)
     headers.set('accept', 'application/json')
     if (init.body !== undefined) headers.set('content-type', 'application/json')
+    const accessToken = getAccessToken()
+    if (accessToken) headers.set('authorization', `Bearer ${accessToken}`)
 
     const response = await fetch(`${root}${path}`, {
       ...init,

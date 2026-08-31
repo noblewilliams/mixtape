@@ -1,15 +1,20 @@
 import { createAuthClient } from 'better-auth/react'
-import { API_URL } from '../config'
+import { AUTH_URL } from '../config'
 import type { AuthBridge } from '../components/AuthGate'
+import { sessionTokenStore } from './session-token'
 
 export const authClient = createAuthClient({
-  baseURL: API_URL,
+  baseURL: AUTH_URL,
   fetchOptions: { credentials: 'include' },
 })
 
 export const browserAuth: AuthBridge = {
   useSession: () => {
     const session = authClient.useSession()
+    const token = session.data?.session.token
+    if (token) sessionTokenStore.write(token)
+    else sessionTokenStore.clear()
+
     return {
       data: session.data
         ? {
@@ -38,5 +43,8 @@ export const browserAuth: AuthBridge = {
       return { error: 'Apple sign-in did not finish.' }
     }
   },
-  signOut: () => authClient.signOut(),
+  signOut: () => {
+    sessionTokenStore.clear()
+    return authClient.signOut()
+  },
 }

@@ -1,0 +1,2 @@
+/api/auth/* https://mixtape-api.goalympics.workers.dev/api/auth/:splat 200!
+/* /index.html 200

@@ -2,6 +2,17 @@
 
 Short ADR-style log. Newest first. Each entry: decision, why, and what would reopen it.
 
+## 2026-08-31 — Web auth is same-origin; application API stays direct
+Production Better Auth traffic stays on the deployed web origin at `/api/auth/*`, with Netlify proxying
+only those requests to the Cloudflare Worker. Direct cross-site auth calls from `netlify.app` to
+`workers.dev` were rejected by browser third-party-cookie protection: a live callback replay reproduced
+`state_mismatch` without Better Auth's state cookie and passed state validation with the cookie present.
+The authenticated web app reads the Better Auth session token into memory and sends it as a bearer token
+on direct Worker API requests. This preserves first-party auth cookies without routing 20–40 second DJ
+turns through Netlify's 26-second external-proxy ceiling. The token is never persisted in browser storage.
+**Reopens if:** the web and Worker move onto subdomains of one registrable custom domain and same-site
+cookie behavior is verified end-to-end.
+
 ## 2026-08-31 — Artwork Phase 1 deployed at 99.94% coverage
 Migrations 0009–0010 and reviewed commit `89ecbfc` were deployed to production from a clean worktree. Starting from 4,689 eligible tracks, the operator processed 4,389 in 15 calls over 36.3 seconds while the enabled schedule processed the other 300 concurrently. Final measured coverage: 4,686 matched with Apple artwork (99.94%), three were classified `no_match`, and zero failed. Every matched row has a URL, positive dimensions, normalized six-digit `artwork_bg_color`, and `artwork_fetched_at`; integrity checks found zero partial/invalid rows, and a metadata-free three-image sample rendered 3/3 JPEGs. Existing enrichment remained unchanged at 4,689 feature rows, 4,447 meaning rows, and 4,327 embeddings. A reviewed hardening pass then applied migration 0011 and deployed commit `b636677` as Worker version `41135e7f-3f98-4fa9-b2ba-207a7f7585ad`; live health/auth checks passed, the same coverage counts remained intact, the runner lock schema verified, and a fresh three-image sample rendered 3/3 JPEGs. The three no-matches remain retryable after the pinned 30-day window rather than being permanently exhausted. **Reopens if:** coverage materially regresses, sampled Apple URLs stop rendering, or production begins returning persistent catalog authorization/upstream failures.
 

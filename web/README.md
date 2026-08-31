@@ -21,6 +21,11 @@ npm run build
 
 `VITE_API_URL` is the Hono API origin. It defaults to `http://localhost:8787` for local development.
 
+Production Better Auth requests use the deployed web origin at `/api/auth/*`, which Netlify proxies
+to the Hono Worker using `public/_redirects`. This keeps authentication cookies first-party. Regular
+application requests continue directly to `VITE_API_URL` with Better Auth's in-memory bearer session
+token so long DJ operations are not constrained by Netlify's external proxy timeout.
+
 Apple's real browser callback must be tested on the deployed HTTPS origin; Apple does not accept localhost return URLs.
 
 ## Current boundary
