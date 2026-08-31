@@ -8,7 +8,7 @@ npm run dev
 ```
 
 `createAuth` fails fast unless `.dev.vars` contains the database, Better Auth,
-and both Apple client configurations:
+Apple, and Google client configurations:
 
 ```txt
 DATABASE_URL=
@@ -19,6 +19,8 @@ APPLE_WEB_CLIENT_ID=
 APPLE_TEAM_ID=
 APPLE_KEY_ID=
 APPLE_PRIVATE_KEY=
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
 MUSICKIT_KEY_ID=
 MUSICKIT_PRIVATE_KEY=
 WEB_ORIGINS=http://localhost:4176
@@ -26,10 +28,12 @@ WEB_ORIGINS=http://localhost:4176
 
 `APPLE_BUNDLE_ID` remains the native iOS token audience.
 `APPLE_WEB_CLIENT_ID` is the separate Apple Services ID used by the browser
-redirect flow. The Apple Service must register the production callback as
-`https://<api-origin>/api/auth/callback/apple`. Apple does not accept localhost
-or non-HTTPS callback URLs, so the complete browser flow is tested on the
-deployed HTTPS origin.
+redirect flow. Production auth is proxied through the first-party web origin,
+so Apple and Google register `https://<web-origin>/api/auth/callback/apple` and
+`https://<web-origin>/api/auth/callback/google`. Apple does not accept localhost
+or non-HTTPS callback URLs, so its complete browser flow is tested on the
+deployed HTTPS origin. Google may additionally register
+`http://localhost:8787/api/auth/callback/google` for local development.
 
 `MUSICKIT_KEY_ID` and `MUSICKIT_PRIVATE_KEY` are a separate Apple Music key
 pair. Keep them separate from the Sign in with Apple key so either credential
@@ -42,6 +46,8 @@ Store private keys as Worker secrets rather than checked-in vars:
 
 ```txt
 npx wrangler secret put APPLE_PRIVATE_KEY
+npx wrangler secret put GOOGLE_CLIENT_ID
+npx wrangler secret put GOOGLE_CLIENT_SECRET
 npx wrangler secret put MUSICKIT_PRIVATE_KEY
 ```
 

@@ -13,6 +13,8 @@ export type AuthEnv = {
   APPLE_TEAM_ID: string
   APPLE_KEY_ID: string
   APPLE_PRIVATE_KEY: string
+  GOOGLE_CLIENT_ID: string
+  GOOGLE_CLIENT_SECRET: string
   WEB_ORIGINS: string
 }
 
@@ -73,6 +75,8 @@ export function createAuth(db: object, env: AuthEnv) {
   if (!env.APPLE_TEAM_ID) throw new Error('APPLE_TEAM_ID is required')
   if (!env.APPLE_KEY_ID) throw new Error('APPLE_KEY_ID is required')
   if (!env.APPLE_PRIVATE_KEY) throw new Error('APPLE_PRIVATE_KEY is required')
+  if (!env.GOOGLE_CLIENT_ID) throw new Error('GOOGLE_CLIENT_ID is required')
+  if (!env.GOOGLE_CLIENT_SECRET) throw new Error('GOOGLE_CLIENT_SECRET is required')
 
   const webOrigins = parseWebOrigins(env.WEB_ORIGINS)
 
@@ -93,6 +97,20 @@ export function createAuth(db: object, env: AuthEnv) {
         // web redirect flow above uses the Services ID.
         appBundleIdentifier: env.APPLE_BUNDLE_ID,
       }),
+      google: {
+        clientId: env.GOOGLE_CLIENT_ID,
+        clientSecret: env.GOOGLE_CLIENT_SECRET,
+      },
+    },
+    account: {
+      accountLinking: {
+        // A matching provider email is not consent to merge two identities.
+        // Linking is available only through the signed-in /link-social flow.
+        disableImplicitLinking: true,
+        // Apple private-relay and Google addresses often differ. The existing
+        // signed-in session plus the provider OAuth challenge is the proof.
+        allowDifferentEmails: true,
+      },
     },
     trustedOrigins: [...webOrigins, APPLE_ORIGIN],
     // memory storage is per-isolate on Workers — real KV/DO storage is a P2 item

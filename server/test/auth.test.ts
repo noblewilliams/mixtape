@@ -56,7 +56,15 @@ describe('auth mounting', () => {
     expect(() => createAuth(db, { ...testEnv, BETTER_AUTH_SECRET: 'short' })).toThrow()
   })
 
-  it.each(['APPLE_WEB_CLIENT_ID', 'APPLE_TEAM_ID', 'APPLE_KEY_ID', 'APPLE_PRIVATE_KEY', 'WEB_ORIGINS'] as const)(
+  it.each([
+    'APPLE_WEB_CLIENT_ID',
+    'APPLE_TEAM_ID',
+    'APPLE_KEY_ID',
+    'APPLE_PRIVATE_KEY',
+    'GOOGLE_CLIENT_ID',
+    'GOOGLE_CLIENT_SECRET',
+    'WEB_ORIGINS',
+  ] as const)(
     'throws when %s is missing',
     async (key) => {
       const db = await createTestDb()
@@ -141,6 +149,29 @@ describe('auth mounting', () => {
       accountId: 'apple-sub-123',
     })
     expect(linked.userId).toBe(u.id)
+  })
+
+  it('offers Google as a social sign-in provider', async () => {
+    const auth = createAuth(await createTestDb(), testEnv)
+    const response = await auth.handler(new Request('http://localhost:8787/api/auth/sign-in/social', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'http://localhost:4176' },
+      body: JSON.stringify({ provider: 'google', callbackURL: 'http://localhost:4176' }),
+    }))
+
+    expect(response.status).toBe(200)
+    const body = await response.json() as { redirect: boolean; url: string }
+    expect(body).toMatchObject({ redirect: true })
+    expect(body.url).toContain('accounts.google.com')
+  })
+
+  it('requires explicit account linking while allowing verified provider emails to differ', async () => {
+    const auth = createAuth(await createTestDb(), testEnv)
+
+    expect(auth.options.account?.accountLinking).toMatchObject({
+      disableImplicitLinking: true,
+      allowDifferentEmails: true,
+    })
   })
 
   it('bearer path rejects a bogus token without erroring', async () => {

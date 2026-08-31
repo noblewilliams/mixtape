@@ -1,6 +1,8 @@
 import { createAuthClient } from 'better-auth/react'
 import { AUTH_URL } from '../config'
 import type { AuthBridge } from '../components/AuthGate'
+import type { AccountBridge } from '../components/AccountDialog'
+import type { AuthProvider } from './auth-provider'
 import { sessionTokenStore } from './session-token'
 
 export const authClient = createAuthClient({
@@ -8,7 +10,11 @@ export const authClient = createAuthClient({
   fetchOptions: { credentials: 'include' },
 })
 
-export const browserAuth: AuthBridge = {
+function providerLabel(provider: AuthProvider): string {
+  return provider === 'apple' ? 'Apple' : 'Google'
+}
+
+export const browserAuth: AuthBridge & AccountBridge = {
   useSession: () => {
     const session = authClient.useSession()
     const token = session.data?.session.token
@@ -31,16 +37,41 @@ export const browserAuth: AuthBridge = {
       refetch: session.refetch,
     }
   },
-  signInWithApple: async () => {
+  signIn: async (provider) => {
     try {
       const result = await authClient.signIn.social({
-        provider: 'apple',
+        provider,
         callbackURL: window.location.origin,
-        errorCallbackURL: `${window.location.origin}/?auth_error=apple`,
+        errorCallbackURL: `${window.location.origin}/?auth_error=${provider}`,
       })
-      return result.error ? { error: result.error.message || 'Apple sign-in did not finish.' } : {}
+      return result.error ? { error: result.error.message || `${providerLabel(provider)} sign-in did not finish.` } : {}
     } catch {
-      return { error: 'Apple sign-in did not finish.' }
+      return { error: `${providerLabel(provider)} sign-in did not finish.` }
+    }
+  },
+  listAccounts: async () => {
+    const result = await authClient.listAccounts()
+    if (result.error) throw new Error('Could not load linked accounts')
+    return (result.data ?? []).map(({ id, providerId }) => ({ id, providerId }))
+  },
+  linkProvider: async (provider) => {
+    try {
+      const result = await authClient.linkSocial({
+        provider,
+        callbackURL: `${window.location.origin}/?account=linked&provider=${provider}`,
+        errorCallbackURL: `${window.location.origin}/?account_error=${provider}`,
+      })
+      return result.error ? { error: result.error.message || `Could not link ${providerLabel(provider)}.` } : {}
+    } catch {
+      return { error: `Could not link ${providerLabel(provider)}.` }
+    }
+  },
+  unlinkAccount: async (accountId) => {
+    try {
+      const result = await authClient.unlinkAccount({ accountId })
+      return result.error ? { error: result.error.message || 'Could not remove that sign-in method.' } : {}
+    } catch {
+      return { error: 'Could not remove that sign-in method.' }
     }
   },
   signOut: () => {

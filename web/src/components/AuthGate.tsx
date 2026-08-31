@@ -1,5 +1,12 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import {
+  authErrorFromSearch,
+  browserAuthPreferences,
+  type AuthPreferenceStore,
+  type AuthProvider,
+} from '../lib/auth-provider'
 import { Cassette } from './Cassette'
+import { AppleMark, GoogleMark } from './ProviderMarks'
 
 export type AuthUser = {
   id: string
@@ -17,48 +24,61 @@ export type AuthSessionState = {
 
 export type AuthBridge = {
   useSession: () => AuthSessionState
-  signInWithApple: () => Promise<{ error?: string }>
+  signIn: (provider: AuthProvider) => Promise<{ error?: string }>
   signOut: () => Promise<unknown>
 }
 
 type AuthGateProps = {
   auth: AuthBridge
-  children: (user: AuthUser) => ReactNode
+  preferences?: AuthPreferenceStore
+  children: (user: AuthUser, lastUsed: AuthProvider | null) => ReactNode
 }
 
-function AppleMark() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M16.71 12.74c.02 2.15 1.89 2.87 1.91 2.88-.02.05-.3 1.02-.98 2.03-.59.87-1.21 1.73-2.18 1.75-.95.02-1.26-.57-2.35-.57s-1.43.55-2.33.59c-.94.03-1.65-.94-2.25-1.8-1.22-1.77-2.15-5-0.9-7.18a3.5 3.5 0 0 1 2.98-1.81c.93-.02 1.81.63 2.35.63.54 0 1.56-.78 2.63-.66.45.02 1.71.18 2.52 1.37-.07.04-1.5.88-1.4 2.77ZM14.89 7.47c.49-.6.83-1.43.74-2.26-.72.03-1.59.48-2.1 1.08-.46.53-.86 1.38-.75 2.19.8.06 1.62-.41 2.11-1.01Z"
-      />
-    </svg>
-  )
+function label(provider: AuthProvider): string {
+  return provider === 'apple' ? 'Apple' : 'Google'
 }
 
-export function AuthGate({ auth, children }: AuthGateProps) {
+export function AuthGate({ auth, preferences = browserAuthPreferences, children }: AuthGateProps) {
   const session = auth.useSession()
-  const [redirecting, setRedirecting] = useState(false)
-  const [signInError, setSignInError] = useState('')
+  const [redirecting, setRedirecting] = useState<AuthProvider | null>(null)
+  const [lastUsed, setLastUsed] = useState<AuthProvider | null>(() => preferences.lastUsed())
+  const [signInError, setSignInError] = useState(() => authErrorFromSearch(window.location.search))
 
-  if (session.data?.user) return children(session.data.user)
+  useEffect(() => {
+    if (!signInError) return
+    preferences.clearPending()
+    const url = new URL(window.location.href)
+    url.searchParams.delete('auth_error')
+    url.searchParams.delete('error')
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
+  }, [preferences, signInError])
 
-  const waiting = session.isPending || redirecting
+  useEffect(() => {
+    if (!session.data?.user) return
+    const promoted = preferences.promotePending()
+    if (promoted) setLastUsed(promoted)
+  }, [preferences, session.data?.user?.id])
+
+  if (session.data?.user) return children(session.data.user, lastUsed)
+
+  const waiting = session.isPending || redirecting !== null
   const errorMessage = signInError || (session.error ? 'We could not check your session. Please try again.' : '')
 
-  async function startAppleSignIn() {
+  async function startSignIn(provider: AuthProvider) {
     setSignInError('')
-    setRedirecting(true)
+    setRedirecting(provider)
+    preferences.begin(provider)
     try {
-      const result = await auth.signInWithApple()
+      const result = await auth.signIn(provider)
       if (result.error) {
         setSignInError(result.error)
-        setRedirecting(false)
+        setRedirecting(null)
+        preferences.clearPending()
       }
     } catch {
-      setSignInError('Apple sign-in did not finish.')
-      setRedirecting(false)
+      setSignInError(`${label(provider)} sign-in did not finish.`)
+      setRedirecting(null)
+      preferences.clearPending()
     }
   }
 
@@ -78,7 +98,7 @@ export function AuthGate({ auth, children }: AuthGateProps) {
           <div className="auth-control">
             {redirecting ? (
               <p className="auth-status" role="status">
-                Opening Apple sign-in
+                Opening {label(redirecting)} sign-in
               </p>
             ) : session.isPending ? (
               <p className="auth-status" role="status">
@@ -87,15 +107,27 @@ export function AuthGate({ auth, children }: AuthGateProps) {
             ) : (
               <p className="auth-status">Sign in to find your tapes and keep listening.</p>
             )}
-            <button
-              className="apple-sign-in"
-              type="button"
-              onClick={() => void startAppleSignIn()}
-              disabled={waiting}
-            >
-              <AppleMark />
-              <span>{redirecting ? 'Opening Apple…' : 'Continue with Apple'}</span>
-            </button>
+            <div className="auth-provider-row">
+              {(['apple', 'google'] as const).map((provider) => {
+                const isLastUsed = lastUsed === provider
+                const lastUsedId = `last-used-${provider}`
+                return (
+                  <div className="auth-provider-choice" key={provider}>
+                    <button
+                      className={`provider-sign-in provider-sign-in--${provider}`}
+                      type="button"
+                      aria-describedby={isLastUsed ? lastUsedId : undefined}
+                      onClick={() => void startSignIn(provider)}
+                      disabled={waiting}
+                    >
+                      {provider === 'apple' ? <AppleMark /> : <GoogleMark />}
+                      <span>{redirecting === provider ? `Opening ${label(provider)}…` : `Continue with ${label(provider)}`}</span>
+                    </button>
+                    {isLastUsed ? <span className="auth-last-used" id={lastUsedId}>last used</span> : null}
+                  </div>
+                )
+              })}
+            </div>
             <p className={`auth-error ${errorMessage ? 'is-visible' : ''}`} role={errorMessage ? 'alert' : undefined}>
               {errorMessage || '\u00a0'}
             </p>

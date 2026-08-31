@@ -13,5 +13,7 @@ export const testAuthEnv: AuthEnv = {
   APPLE_TEAM_ID: 'TEAM123456',
   APPLE_KEY_ID: 'KEY1234567',
   APPLE_PRIVATE_KEY: testApplePrivateKey,
+  GOOGLE_CLIENT_ID: 'google-client-id.apps.googleusercontent.com',
+  GOOGLE_CLIENT_SECRET: 'google-client-secret',
   WEB_ORIGINS: 'http://localhost:4176, https://mixtape.example.com',
 }

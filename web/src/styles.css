@@ -262,10 +262,28 @@ input:focus-visible {
 .sidebar-footer {
   padding: 13px 4px 0;
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) 34px 34px;
+  grid-template-columns: minmax(0, 1fr) 34px 34px;
   gap: 8px;
   align-items: center;
   border-top: 1px solid var(--hairline);
+}
+
+.sidebar-account {
+  min-width: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  text-align: left;
+}
+
+.sidebar-account:hover .account-copy strong,
+.sidebar-account:focus-visible .account-copy strong {
+  color: var(--plum);
 }
 
 .avatar {
@@ -2035,21 +2053,32 @@ input:focus-visible {
   text-align: center;
 }
 
-.apple-sign-in {
+.auth-provider-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 10px;
+}
+
+.auth-provider-choice {
+  min-width: 0;
+  position: relative;
+  padding-bottom: 16px;
+  display: grid;
+  justify-items: center;
+}
+
+.provider-sign-in {
   min-height: 44px;
-  padding: 0 18px;
+  padding: 0 17px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  color: #fff;
-  background: #111114;
-  border: 1px solid rgba(0, 0, 0, 0.75);
   border-radius: 999px;
   box-shadow: 0 5px 12px rgba(39, 32, 39, 0.16);
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
   font-size: 12px;
-  font-weight: 590;
+  font-weight: 620;
   letter-spacing: -0.01em;
   transition:
     transform 0.16s ease,
@@ -2057,24 +2086,230 @@ input:focus-visible {
     box-shadow 0.16s ease;
 }
 
-.apple-sign-in:hover:not(:disabled) {
-  background: #252329;
+.provider-sign-in--apple {
+  color: #fff;
+  background: #111114;
+  border: 1px solid rgba(0, 0, 0, 0.75);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+}
+
+.provider-sign-in--google {
+  color: #3d3a3e;
+  background: rgba(250, 249, 246, 0.92);
+  border: 1px solid rgba(61, 58, 62, 0.12);
+}
+
+.provider-sign-in:hover:not(:disabled) {
   box-shadow: 0 7px 16px rgba(39, 32, 39, 0.2);
   transform: translateY(-1px);
 }
 
-.apple-sign-in:active:not(:disabled) {
+.provider-sign-in--apple:hover:not(:disabled) {
+  background: #252329;
+}
+
+.provider-sign-in--google:hover:not(:disabled) {
+  background: #fff;
+}
+
+.provider-sign-in:active:not(:disabled) {
   transform: translateY(0);
 }
 
-.apple-sign-in:disabled {
+.provider-sign-in:disabled {
   opacity: 0.66;
 }
 
-.apple-sign-in svg {
+.provider-sign-in svg {
   width: 16px;
   height: 16px;
   flex: 0 0 auto;
+}
+
+.auth-last-used {
+  position: absolute;
+  top: 50px;
+  color: #66505e;
+  font: italic 560 11px/1.2 var(--marker);
+  letter-spacing: -0.025em;
+  transform: rotate(-2deg);
+}
+
+.account-overlay {
+  background: rgba(27, 24, 28, 0.48);
+}
+
+.account-dialog {
+  width: min(520px, calc(100vw - 32px));
+  padding: 28px;
+  color: #423d44;
+  background: rgba(244, 241, 237, 0.96);
+  border-radius: 28px;
+  box-shadow: 0 26px 80px rgba(19, 17, 22, 0.3);
+}
+
+.account-dialog-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.account-kicker {
+  margin: 0 0 4px;
+  color: #7c747c;
+  font: 700 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.account-dialog h2 {
+  margin: 0;
+  color: var(--plum);
+  font: italic 470 31px/1.2 var(--marker);
+  letter-spacing: -0.035em;
+}
+
+.account-dialog-close {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  color: #645e65;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  font-size: 21px;
+}
+
+.account-dialog-close:hover:not(:disabled) {
+  color: var(--plum);
+}
+
+.account-intro {
+  max-width: 400px;
+  margin: 8px 0 22px;
+  color: #777078;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.account-provider-list {
+  overflow: hidden;
+  border-block: 1px solid var(--hairline);
+}
+
+.account-provider-row {
+  min-height: 76px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.account-provider-row + .account-provider-row {
+  border-top: 1px solid var(--hairline);
+}
+
+.account-provider-icon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: #111114;
+  border-radius: 50%;
+}
+
+.account-provider-icon--google {
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: inset 0 0 0 1px rgba(61, 58, 62, 0.1);
+}
+
+.account-provider-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.account-provider-copy,
+.account-provider-copy strong,
+.account-provider-copy small {
+  min-width: 0;
+  display: block;
+}
+
+.account-provider-copy strong {
+  font-size: 12px;
+}
+
+.account-provider-copy small {
+  margin-top: 3px;
+  overflow: hidden;
+  color: #7f7880;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-provider-copy em {
+  margin-left: 5px;
+  color: #72596a;
+  font: italic 550 11px var(--marker);
+}
+
+.account-provider-action,
+.account-provider-status {
+  min-height: 36px;
+  padding: 0 13px;
+  display: inline-flex;
+  align-items: center;
+  color: #fff;
+  background: var(--plum);
+  border: 0;
+  border-radius: 999px;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.account-provider-action--quiet,
+.account-provider-status {
+  color: #645d65;
+  background: rgba(255, 255, 255, 0.68);
+  box-shadow: inset 0 0 0 1px rgba(70, 62, 69, 0.1);
+}
+
+.account-provider-action:disabled {
+  opacity: 0.62;
+}
+
+.account-note,
+.account-notice,
+.account-error {
+  margin: 17px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.account-note {
+  color: #7e767e;
+}
+
+.account-notice {
+  padding: 10px 12px;
+  color: #35624b;
+  background: rgba(107, 166, 127, 0.12);
+  border-radius: 14px;
+  font-weight: 650;
+}
+
+.account-notice--error {
+  color: #844553;
+  background: rgba(182, 91, 113, 0.1);
+}
+
+.account-error {
+  color: #844553;
 }
 
 .auth-error {
@@ -2132,6 +2367,50 @@ input:focus-visible {
 
   .auth-cassette {
     width: min(88vw, 350px);
+  }
+
+  .auth-control,
+  .auth-provider-row,
+  .auth-provider-choice,
+  .provider-sign-in {
+    width: 100%;
+  }
+
+  .auth-provider-row {
+    width: min(280px, 100%);
+    display: grid;
+    gap: 6px;
+  }
+
+  .auth-provider-choice {
+    padding-bottom: 0;
+  }
+
+  .auth-last-used {
+    top: 50%;
+    right: 14px;
+    color: #655563;
+    font-size: 10px;
+    transform: translateY(-50%) rotate(-2deg);
+  }
+
+  .provider-sign-in--apple + .auth-last-used {
+    color: rgba(255, 255, 255, 0.72);
+  }
+
+  .account-dialog {
+    padding: 25px 22px;
+  }
+
+  .account-provider-row {
+    grid-template-columns: 34px minmax(0, 1fr);
+    padding-block: 12px;
+  }
+
+  .account-provider-action,
+  .account-provider-status {
+    grid-column: 2;
+    justify-self: start;
   }
 }
 

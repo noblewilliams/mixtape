@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
+import type { AccountBridge } from './components/AccountDialog'
 import type { MusicKitClient } from './musickit/client'
 import { createFakeApi } from './test/fake-api'
 
@@ -16,11 +17,33 @@ function createFakeMusicKit(overrides: Partial<MusicKitClient> = {}): MusicKitCl
   }
 }
 
-function renderApp(options: { api?: ReturnType<typeof createFakeApi>; musicKit?: MusicKitClient } = {}) {
+function createFakeAccountAuth(): AccountBridge {
+  return {
+    listAccounts: vi.fn(async () => [{ id: 'apple-account', providerId: 'apple' }]),
+    linkProvider: vi.fn(async () => ({})),
+    unlinkAccount: vi.fn(async () => ({})),
+  }
+}
+
+function renderApp(options: {
+  api?: ReturnType<typeof createFakeApi>
+  accountAuth?: AccountBridge
+  musicKit?: MusicKitClient
+} = {}) {
   const api = options.api ?? createFakeApi()
+  const accountAuth = options.accountAuth ?? createFakeAccountAuth()
   const musicKit = options.musicKit ?? createFakeMusicKit()
-  render(<App api={api} musicKit={musicKit} user={user} onSignOut={vi.fn()} />)
-  return { api, musicKit }
+  render(
+    <App
+      api={api}
+      accountAuth={accountAuth}
+      lastSignInProvider="apple"
+      musicKit={musicKit}
+      user={user}
+      onSignOut={vi.fn()}
+    />,
+  )
+  return { api, accountAuth, musicKit }
 }
 
 describe('Mixtape web shell', () => {
@@ -34,6 +57,15 @@ describe('Mixtape web shell', () => {
     expect(screen.getByRole('complementary', { name: 'Your mix' })).toBeInTheDocument()
     expect(screen.queryByText(/^DJ$/)).not.toBeInTheDocument()
     expect(screen.queryByText(/^You$/)).not.toBeInTheDocument()
+  })
+
+  it('opens account settings from the signed-in identity area', async () => {
+    renderApp()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open account settings' }))
+
+    expect(await screen.findByRole('dialog', { name: 'Ways to sign in' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Close account settings' })).toHaveClass('account-dialog-close')
   })
 
   it('renders the Closet as one tightly packed shelf of text-only spines', async () => {

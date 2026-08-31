@@ -23,6 +23,8 @@
   //   APPLE_TEAM_ID           — Apple Developer team ID
   //   APPLE_KEY_ID            — Sign in with Apple key ID
   //   APPLE_PRIVATE_KEY       — downloaded .p8 key (multiline or escaped newlines)
+  //   GOOGLE_CLIENT_ID        — Google OAuth web client ID
+  //   GOOGLE_CLIENT_SECRET    — Google OAuth web client secret
   //   WEB_ORIGINS             — exact comma-separated web origins allowed to use cookies/CORS
   //   MUSICKIT_KEY_ID         — Apple Music private-key ID; set with MUSICKIT_PRIVATE_KEY to enable /musickit/*
   //   MUSICKIT_PRIVATE_KEY    — Apple Music .p8 key; never reuse or commit the downloaded key file

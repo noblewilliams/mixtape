@@ -56,6 +56,8 @@ async function mintToken(): Promise<string> {
     APPLE_TEAM_ID: env.APPLE_TEAM_ID,
     APPLE_KEY_ID: env.APPLE_KEY_ID,
     APPLE_PRIVATE_KEY: env.APPLE_PRIVATE_KEY,
+    GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET: env.GOOGLE_CLIENT_SECRET,
     WEB_ORIGINS: env.WEB_ORIGINS,
   })
   const ctx = await (auth as { $context: Promise<{ internalAdapter: { createSession(userId: string, req: undefined): Promise<{ token: string }> } }> }).$context

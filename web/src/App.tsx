@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ApiError, type MixtapeApi, type SessionDetailResponse } from './api/client'
 import { toDjMessage, toDjSession, toQueueTrack } from './api/mappers'
 import type { AuthUser } from './components/AuthGate'
+import { AccountDialog, type AccountBridge } from './components/AccountDialog'
 import { Cassette } from './components/Cassette'
 import { Conversation } from './components/Conversation'
 import { Home } from './components/Home'
@@ -10,16 +11,32 @@ import { QueuePanel } from './components/QueuePanel'
 import { Sidebar } from './components/Sidebar'
 import type { AppView, CollectionView, DjMessage, DjSession, QueueTrack } from './domain'
 import type { MusicKitClient } from './musickit/client'
+import type { AuthProvider } from './lib/auth-provider'
 
-type DialogState = 'new-tape' | 'save-playlist' | 'sync' | null
+type DialogState = 'new-tape' | 'save-playlist' | 'sync' | 'account' | null
 type MusicConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
 type ToastState = { message: string; tone: 'success' | 'error' }
 
 type AppProps = {
   api: MixtapeApi
+  accountAuth: AccountBridge
+  lastSignInProvider: AuthProvider | null
   musicKit: MusicKitClient
   user: AuthUser
   onSignOut: () => void
+}
+
+function accountCallback(): { dialog: boolean; message: string; tone: 'success' | 'error' } {
+  const params = new URLSearchParams(window.location.search)
+  const callbackProvider = params.get('provider') ?? params.get('account_error')
+  const provider = callbackProvider === 'apple' ? 'Apple' : 'Google'
+  if (params.get('account') === 'linked') {
+    return { dialog: true, message: `${provider} is now another way into this Mixtape account.`, tone: 'success' }
+  }
+  if (params.get('account_error')) {
+    return { dialog: true, message: `${provider} could not be linked. Nothing changed.`, tone: 'error' }
+  }
+  return { dialog: false, message: '', tone: 'success' }
 }
 
 function errorCopy(error: unknown): string {
@@ -36,7 +53,8 @@ function detailToState(detail: SessionDetailResponse) {
   }
 }
 
-export function App({ api, musicKit, user, onSignOut }: AppProps) {
+export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSignOut }: AppProps) {
+  const callback = useMemo(accountCallback, [])
   const [sessions, setSessions] = useState<DjSession[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [activeView, setActiveView] = useState<AppView>('home')
@@ -47,7 +65,7 @@ export function App({ api, musicKit, user, onSignOut }: AppProps) {
   const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null)
   const [thinkingSessionId, setThinkingSessionId] = useState<string | null>(null)
   const [creatingTape, setCreatingTape] = useState(false)
-  const [dialog, setDialog] = useState<DialogState>(null)
+  const [dialog, setDialog] = useState<DialogState>(callback.dialog ? 'account' : null)
   const [queueOpen, setQueueOpen] = useState(false)
   const [playing, setPlaying] = useState(false)
   const [playbackBusy, setPlaybackBusy] = useState(false)
@@ -103,6 +121,16 @@ export function App({ api, musicKit, user, onSignOut }: AppProps) {
     },
     [],
   )
+
+  useEffect(() => {
+    if (!callback.dialog) return
+    const url = new URL(window.location.href)
+    url.searchParams.delete('account')
+    url.searchParams.delete('account_error')
+    url.searchParams.delete('provider')
+    url.searchParams.delete('error')
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
+  }, [callback.dialog])
 
   function announce(message: string, tone: ToastState['tone'] = 'success') {
     setToast({ message, tone })
@@ -298,8 +326,10 @@ export function App({ api, musicKit, user, onSignOut }: AppProps) {
         onOpenSession={openSession}
         onOpenHome={() => setActiveView('home')}
         onNewTape={() => setDialog('new-tape')}
+        onOpenAccount={() => setDialog('account')}
         onSync={() => setDialog('sync')}
         onSignOut={onSignOut}
+        signInMethod={lastSignInProvider}
       />
 
       {activeView === 'home' || !activeSession ? (
@@ -352,6 +382,15 @@ export function App({ api, musicKit, user, onSignOut }: AppProps) {
         />
       ) : null}
       {dialog === 'sync' ? <SyncOverlay onClose={() => setDialog(null)} /> : null}
+      {dialog === 'account' ? (
+        <AccountDialog
+          auth={accountAuth}
+          lastUsed={lastSignInProvider}
+          notice={callback.message}
+          noticeTone={callback.tone}
+          onClose={() => setDialog(null)}
+        />
+      ) : null}
       {toast ? <Toast message={toast.message} tone={toast.tone} /> : null}
     </div>
   )

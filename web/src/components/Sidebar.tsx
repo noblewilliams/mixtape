@@ -1,4 +1,5 @@
 import type { AppView, DjSession } from '../domain'
+import type { AuthProvider } from '../lib/auth-provider'
 import { Cassette } from './Cassette'
 import { HomeIcon, PlusIcon, SignOutIcon, SyncIcon } from './Icons'
 
@@ -7,9 +8,11 @@ type SidebarProps = {
   activeSessionId: string | null
   activeView: AppView
   userName: string
+  signInMethod: AuthProvider | null
   onOpenSession: (id: string) => void
   onOpenHome: () => void
   onNewTape: () => void
+  onOpenAccount: () => void
   onSync: () => void
   onSignOut: () => void
 }
@@ -19,9 +22,11 @@ export function Sidebar({
   activeSessionId,
   activeView,
   userName,
+  signInMethod,
   onOpenSession,
   onOpenHome,
   onNewTape,
+  onOpenAccount,
   onSync,
   onSignOut,
 }: SidebarProps) {
@@ -78,13 +83,15 @@ export function Sidebar({
       </nav>
 
       <div className="sidebar-footer">
-        <span className="avatar" aria-hidden="true">
-          {userName.trim().charAt(0).toUpperCase() || 'M'}
-        </span>
-        <span className="account-copy">
-          <strong>{userName}</strong>
-          <small>Signed in with Apple</small>
-        </span>
+        <button className="sidebar-account" type="button" onClick={onOpenAccount} aria-label="Open account settings">
+          <span className="avatar" aria-hidden="true">
+            {userName.trim().charAt(0).toUpperCase() || 'M'}
+          </span>
+          <span className="account-copy">
+            <strong>{userName}</strong>
+            <small>{signInMethod ? `Signed in with ${signInMethod === 'apple' ? 'Apple' : 'Google'}` : 'Mixtape account'}</small>
+          </span>
+        </button>
         <button className="sync-button" type="button" onClick={onSync} aria-label="Sync music library">
           <SyncIcon />
         </button>

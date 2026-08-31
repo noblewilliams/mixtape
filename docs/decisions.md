@@ -2,6 +2,17 @@
 
 Short ADR-style log. Newest first. Each entry: decision, why, and what would reopen it.
 
+## 2026-08-31 — Account sign-in is separate from Apple Music authorization
+Mixtape accepts Apple or Google as equal Better Auth login methods; Apple Music remains a separate
+MusicKit authorization requested only when a listener syncs, plays, or creates a playlist. Better Auth
+implicit account linking is disabled: a matching email never merges identities silently. A signed-in
+listener may explicitly link a second provider from Account, including an Apple private-relay address and
+a different Google address after both OAuth challenges succeed, and may remove one only while another
+login remains. The web remembers only the successfully-used provider name (`apple` or `google`) in local
+storage so it can label the usual choice; pending attempts stay in session storage and email/profile/token
+data is never persisted for this hint. **Reopens if:** provider-linking abuse is observed, Google stops
+returning verified emails, or a future passkey/credential flow needs a different recovery model.
+
 ## 2026-08-31 — Web auth is same-origin; application API stays direct
 Production Better Auth traffic stays on the deployed web origin at `/api/auth/*`, with Netlify proxying
 only those requests to the Cloudflare Worker. Direct cross-site auth calls from `netlify.app` to

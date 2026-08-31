@@ -36,6 +36,8 @@ type Bindings = {
   APPLE_TEAM_ID: string
   APPLE_KEY_ID: string
   APPLE_PRIVATE_KEY: string
+  GOOGLE_CLIENT_ID: string
+  GOOGLE_CLIENT_SECRET: string
   MUSICKIT_KEY_ID?: string
   MUSICKIT_PRIVATE_KEY?: string
   WEB_ORIGINS: string

@@ -16,7 +16,16 @@ function signOut() {
 export function RootApp() {
   return (
     <AuthGate auth={browserAuth}>
-      {(user) => <App api={api} musicKit={musicKit} user={user} onSignOut={signOut} />}
+      {(user, lastSignInProvider) => (
+        <App
+          api={api}
+          accountAuth={browserAuth}
+          lastSignInProvider={lastSignInProvider}
+          musicKit={musicKit}
+          user={user}
+          onSignOut={signOut}
+        />
+      )}
     </AuthGate>
   )
 }
