@@ -37,7 +37,8 @@
 import { readFileSync } from 'node:fs'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { and, eq, gte, isNotNull, isNull, sql } from 'drizzle-orm'
 import { neon } from '@neondatabase/serverless'
 import { drizzle } from 'drizzle-orm/neon-http'
@@ -380,7 +381,9 @@ async function main() {
   }
 }
 
-main().catch((e) => {
-  console.error('analyze-previews failed:', e instanceof Error ? e.message : e)
-  process.exit(1)
-})
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  main().catch((e) => {
+    console.error('analyze-previews failed:', e instanceof Error ? e.message : e)
+    process.exit(1)
+  })
+}
