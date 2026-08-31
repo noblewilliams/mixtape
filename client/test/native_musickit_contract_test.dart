@@ -10,7 +10,7 @@ void main() {
     expect(source, contains('isSupportedAppleSongID'));
     expect(
       source,
-      contains('isSupportedAppleSongID($0.playbackStoreID)'),
+      contains(r'isSupportedAppleSongID($0.playbackStoreID)'),
     );
   });
 }

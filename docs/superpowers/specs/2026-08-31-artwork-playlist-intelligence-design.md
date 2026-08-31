@@ -74,9 +74,9 @@ Authoritative Apple references:
 
 ### iOS availability decision — locked
 
-The Flutter target currently declares iOS 13. The installed Apple SDK marks the playlist APIs this design depends on—`MusicLibraryRequest` and `MusicLibrary`—as iOS 16 or newer.
+The Flutter target now declares iOS 16 consistently. The installed Apple SDK marks the playlist APIs this design depends on—`MusicLibraryRequest` and `MusicLibrary`—as iOS 16 or newer.
 
-Mixtape's minimum deployment target will rise to **iOS 16** before playlist sync ships. This matches the founder/friends distribution, keeps one honest playlist contract, and avoids building a second MediaPlayer-only browse path that still cannot deliver exact conversational editing. iOS 13–15 compatibility and its degraded playlist fallback are out of scope.
+Mixtape's minimum deployment target is **iOS 16** before playlist sync ships. This matches the founder/friends distribution, keeps one honest playlist contract, and avoids building a second MediaPlayer-only browse path that still cannot deliver exact conversational editing. iOS 13–15 compatibility and its degraded playlist fallback are out of scope.
 
 ### Required capability spikes
 
