@@ -3,6 +3,7 @@
 *Status: founder-approved 2026-08-31 · iOS 16 minimum locked · Phase 0–1 production-complete*
 *Companion docs: [vision](../../product/vision.md) · [v1 design](2026-08-29-mixtape-v1-design.md) · [decisions](../../decisions.md) · [backlog](../../backlog.md)*
 *Phase 0–1 plan: [capability spikes + artwork metadata](../plans/2026-08-31-artwork-capability-spikes.md)*
+*Phase 2 plan: [read-only playlist sync + browse](../plans/2026-08-31-playlist-sync-browse.md)*
 
 ## Summary
 
@@ -85,7 +86,7 @@ Before the implementation plan is finalized, run two thin, device-backed spikes:
 1. **Catalog from Workers:** use a server-scoped developer token to call `GET /v1/catalog/{storefront}/songs?ids=...` from the deployed Worker and verify Nigerian-storefront artwork responses. This must not use the blocked iTunes endpoint.
 2. **Playlist ownership:** create a playlist through the current `MPMediaLibrary.getPlaylist` bridge, refetch it through MusicKit for Swift, and verify whether `MusicLibrary.edit(...items:)` recognizes it as app-created. Also attempt the same operation against a playlist created in Music to pin the failure shape.
 
-Observed on the founder's iPhone on 2026-08-31: both disposable candidates were found and their non-empty ordered entries resolved, but `MusicLibrary.shared.edit(...items:)` rejected the same-order rebuild for both the current Mixtape-created playlist and the playlist created directly in Music. Already-created Mixtape playlists may still be marked owned from trusted create-confirmation provenance, but ownership does not grant `rebuild`. The first implementation must use `append` only after that narrower operation is separately verified and `revised_copy` for insertion, removal, or reordering.
+Observed on the founder's iPhone on 2026-08-31: both disposable candidates were found and their non-empty ordered entries resolved, but `MusicLibrary.shared.edit(...items:)` rejected the same-order rebuild for both the current Mixtape-created playlist and the playlist created directly in Music. The founder later reported that the current ordering looked intact but was unsure whether the Music-created candidate had lost one song; no pre-probe snapshot exists to resolve that possible side effect. Treat the manual no-op verification as inconclusive, run no further mutation probe in Phase 2, and use the new read-only snapshot pipeline to establish future baselines. Already-created Mixtape playlists may still be marked owned from trusted create-confirmation provenance, but ownership does not grant `rebuild`. The first implementation must use `append` only after that narrower operation is separately verified and `revised_copy` for insertion, removal, or reordering.
 
 ## Architecture
 

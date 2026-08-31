@@ -4,14 +4,14 @@ Single consolidated list. Detail lives in `decisions.md` (rationale) and the pla
 
 ## Owed right now
 
-- **Playlist intelligence Phase 2 plan:** specify deletion-safe playlist snapshots, native paging, per-user storefront persistence, and browse APIs from the locked design. Artwork is no longer a gate.
-- **Playlist probe visual confirmation:** confirm the two disposable playlists used by the rejected exact-rebuild probe still retain the same ordered tracks. The API capability result is locked, but this manual Task 4 follow-up remains unconfirmed.
+- **Execute playlist intelligence Phase 2:** implement the read-only native snapshot, deletion-safe staged sync, per-user storefront persistence, browse APIs, and client data contracts from `docs/superpowers/plans/2026-08-31-playlist-sync-browse.md`. Artwork is no longer a gate.
+- **Playlist probe side effect is inconclusive:** the founder reported that both disposable playlists currently looked ordered, but the Music-created candidate may have lost one song. There is no pre-probe snapshot to resolve it. Run no further mutation probe in Phase 2; the new read-only snapshot becomes the baseline for future conflict detection.
 
 ## Selected next phase — artwork + playlist intelligence
 
 Founder direction is locked in `docs/superpowers/specs/2026-08-31-artwork-playlist-intelligence-design.md`: pull Apple artwork URL templates/dimensions/background colours; sync ordered playlists for browse and bounded taste scoring; support playlist-inspired mixes; then let a listener open a playlist and talk through an exact draft. The founder-device probe rejected exact rebuild for both the current Mixtape-created and Music-created disposable playlists, so the first apply contract is append-only only where that narrower operation is separately verified, and revised-copy for insertion/removal/reordering. Exact in-place rebuild is deferred until a `MusicLibrary.createPlaylist` path passes a separate device probe.
 
-The iOS minimum is locked to 16 before playlist sync ships; no iOS 13–15 fallback. Execution order: (0) Cloudflare-runtime catalog + iPhone playlist-ownership spikes, (1) artwork metadata, (2) deletion-safe playlist sync and browse APIs, (3) playlist taste/seeds, (4) conversational drafts + catalog discovery, (5) native apply + approved UI state board. Phase 0–1 is complete in production: 4,686/4,689 tracks have valid artwork and background colours, three are scheduled 30-day catalog no-match retries, and zero failed. Phase 2 is next and needs its own task plan plus adversarial review/fix round.
+The iOS minimum is locked to 16 before playlist sync ships; no iOS 13–15 fallback. Execution order: (0) Cloudflare-runtime catalog + iPhone playlist-ownership spikes, (1) artwork metadata, (2) deletion-safe playlist sync and browse APIs, (3) playlist taste/seeds, (4) conversational drafts + catalog discovery, (5) native apply + approved UI state board. Phase 0–1 is complete in production: 4,686/4,689 tracks have valid artwork and background colours, three are scheduled 30-day catalog no-match retries, and zero failed. The Phase 2 execution plan is now written; implementation starts with a read-only device contract check, then schema/native/server/client slices with an adversarial review/fix round for each.
 
 ## Next big phase: v2 — "The DJ learns" (vision.md milestone 2)
 
