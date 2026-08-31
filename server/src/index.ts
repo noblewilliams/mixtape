@@ -15,6 +15,7 @@ import type { DjDeps } from './dj/loop'
 import { generateMusicKitDeveloperToken } from './musickit/token'
 import { createAppleCatalogClient, type AppleCatalogClient, type FetchLike } from './musickit/catalog'
 import type { MusicKitWiring } from './app'
+import type { ArtworkDeps } from './artwork/runner'
 
 // Minimal structural stand-in for the platform's ScheduledController — this
 // project's tsconfig doesn't pull in @cloudflare/workers-types, so the real
@@ -127,6 +128,17 @@ export function buildMusicKit(
   }
 }
 
+function buildArtworkDeps(
+  env: Pick<Bindings, 'ITUNES_STOREFRONT'>,
+  musicKit: (MusicKitWiring & { catalog: AppleCatalogClient }) | undefined,
+): ArtworkDeps | undefined {
+  if (!musicKit) return undefined
+  return {
+    storefront: env.ITUNES_STOREFRONT ?? 'ng',
+    catalog: musicKit.catalog,
+  }
+}
+
 export default {
   async fetch(req: Request, env: Bindings, ctx: ExecutionContext) {
     const { db, pool } = buildDb(env)
@@ -138,13 +150,13 @@ export default {
       const auth = createAuth(db, env)
       const allowedOrigins = parseWebOrigins(env.WEB_ORIGINS)
       const deps = buildDeps(env)
-      // /enrich/* is only mounted when both an admin token and the AI binding
-      // are configured. No AI binding → no enrich surface: better a 404 than
-      // every track burning 3 'internal: TypeError' attempts.
-      const enrich = deps && env.ENRICH_ADMIN_TOKEN ? { adminToken: env.ENRICH_ADMIN_TOKEN, deps } : undefined
       const djDeps = buildDjDeps(env)
       const dj = djDeps ? { deps: djDeps } : undefined
       const musicKit = buildMusicKit(env, allowedOrigins)
+      const artwork = buildArtworkDeps(env, musicKit)
+      const enrich = env.ENRICH_ADMIN_TOKEN && (deps || artwork)
+        ? { adminToken: env.ENRICH_ADMIN_TOKEN, deps, artwork }
+        : undefined
       const app = createApp({ auth, db, enrich, dj, musicKit, allowedOrigins })
       return await app.fetch(req, env, ctx)
     } finally {
@@ -156,11 +168,14 @@ export default {
   },
   async scheduled(_event: ScheduledController, env: Bindings, ctx: ExecutionContext) {
     const deps = buildDeps(env)
-    if (!deps) return // no AI binding: nothing to enrich with
+    const musicKit = buildMusicKit(env, [])
+    const artwork = buildArtworkDeps(env, musicKit)
+    if (!deps && !artwork) return
     const { db, pool } = buildDb(env)
     try {
-      // Counts only — no track data, no lyric/embedding content.
-      console.log('enrich cron', JSON.stringify(await handleScheduled(db, deps)))
+      // Counts and fixed failure markers only — no track data, Apple payloads,
+      // lyric/embedding content, tokens, or exception messages.
+      console.log('enrich cron', JSON.stringify(await handleScheduled(db, { enrichment: deps, artwork })))
     } finally {
       ctx.waitUntil(pool.end())
     }

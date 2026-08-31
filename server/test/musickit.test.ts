@@ -72,6 +72,15 @@ describe('MusicKit developer token', () => {
       ),
     ).toThrow('MUSICKIT_KEY_ID and MUSICKIT_PRIVATE_KEY must be configured together')
   })
+
+  it('leaves MusicKit and artwork catalog wiring disabled when both key values are absent', () => {
+    expect(
+      buildMusicKit(
+        { APPLE_TEAM_ID: 'TEAM123456' },
+        ['https://mixtape.example.com'],
+      ),
+    ).toBeUndefined()
+  })
 })
 
 describe('GET /musickit/token', () => {

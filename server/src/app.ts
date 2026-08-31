@@ -9,6 +9,7 @@ import { memoriesRoutes } from './routes/memories'
 import { musicKitRoutes } from './routes/musickit'
 import type { Db } from './db/types'
 import type { EnrichDeps } from './enrich/pipeline'
+import type { ArtworkDeps } from './artwork/runner'
 import type { DjDeps } from './dj/loop'
 
 // Minimal structural type so tests can stub auth
@@ -21,7 +22,7 @@ export type AuthLike = {
 
 export type AppVars = { user: { id: string } }
 
-export type EnrichWiring = { deps: EnrichDeps; adminToken: string }
+export type EnrichWiring = { deps?: EnrichDeps; artwork?: ArtworkDeps; adminToken: string }
 export type DjWiring = { deps: DjDeps }
 export type MusicKitWiring = {
   allowedOrigins: string[]
@@ -82,9 +83,9 @@ export function createApp({
     app.use('/me/memories/*', requireSession(auth))
     app.route('/me/memories', memoriesRoutes(db))
 
-    if (enrich) {
+    if (enrich && (enrich.deps || enrich.artwork)) {
       app.use('/enrich/*', requireAdmin(enrich.adminToken))
-      app.route('/enrich', enrichRoutes(db, enrich.deps))
+      app.route('/enrich', enrichRoutes(db, enrich))
     }
 
     if (dj) {

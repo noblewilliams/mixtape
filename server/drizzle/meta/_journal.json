@@ -71,6 +71,13 @@
       "when": 1788175582764,
       "tag": "0009_ordinary_anthem",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788176373371,
+      "tag": "0010_happy_thunderbolts",
+      "breakpoints": true
     }
   ]
 }

@@ -2,30 +2,66 @@ import { Hono } from 'hono'
 import { runEnrichmentBatch, enrichmentStatus } from '../enrich/runner'
 import type { EnrichDeps } from '../enrich/pipeline'
 import type { Db } from '../db/types'
+import {
+  artworkStatus,
+  MAX_ARTWORK_BATCH,
+  runArtworkBatch,
+  type ArtworkDeps,
+} from '../artwork/runner'
 
 // Free-plan Workers ceiling is 50 subrequests/invocation; each track costs
 // ~13 worst-case (external calls + every neon-http query). 3×13+2 batch
 // queries ≈ 41. On a paid plan (1000/invocation) this can be raised to ~8.
 export const MAX_BATCH = 3
 
-export function enrichRoutes(db: Db, deps: EnrichDeps) {
+export type EnrichRouteDeps = {
+  deps?: EnrichDeps
+  artwork?: ArtworkDeps
+}
+
+function requestedLimit(value: string | undefined, ceiling: number): number {
+  const raw = Number(value ?? ceiling)
+  return Number.isFinite(raw) && raw > 0
+    ? Math.min(ceiling, Math.max(1, Math.floor(raw)))
+    : ceiling
+}
+
+export function enrichRoutes(db: Db, wiring: EnrichRouteDeps) {
   const app = new Hono()
+  const enrichmentDeps = wiring.deps
+  const artworkDeps = wiring.artwork
 
-  app.post('/run', async (c) => {
-    // Floor before clamping so a fractional ?limit (e.g. 2.5) can never reach
-    // the raw SQL LIMIT clause, which rejects non-integer parameters outright.
-    // Clamp up to 1 afterward too — a limit like 0.5 floors to 0, which would
-    // otherwise reach LIMIT 0 as a silent no-op.
-    const raw = Number(c.req.query('limit') ?? MAX_BATCH)
-    const limit = Number.isFinite(raw) && raw > 0 ? Math.min(MAX_BATCH, Math.max(1, Math.floor(raw))) : MAX_BATCH
-    const result = await runEnrichmentBatch(db, deps, limit)
-    return c.json(result)
-  })
+  if (enrichmentDeps) {
+    app.post('/run', async (c) => {
+      const result = await runEnrichmentBatch(
+        db,
+        enrichmentDeps,
+        requestedLimit(c.req.query('limit'), MAX_BATCH),
+      )
+      return c.json(result)
+    })
 
-  app.get('/status', async (c) => {
-    const status = await enrichmentStatus(db)
-    return c.json(status)
-  })
+    app.get('/status', async (c) => {
+      const status = await enrichmentStatus(db)
+      return c.json(status)
+    })
+  }
+
+  if (artworkDeps) {
+    app.post('/artwork/run', async (c) => {
+      const result = await runArtworkBatch(
+        db,
+        artworkDeps,
+        requestedLimit(c.req.query('limit'), MAX_ARTWORK_BATCH),
+      )
+      return c.json(result)
+    })
+
+    app.get('/artwork/status', async (c) => {
+      const status = await artworkStatus(db, artworkDeps.now?.() ?? new Date())
+      return c.json(status)
+    })
+  }
 
   return app
 }

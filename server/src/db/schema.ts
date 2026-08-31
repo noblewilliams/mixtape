@@ -130,6 +130,27 @@ export const enrichmentFailures = pgTable(
   (t) => [primaryKey({ columns: [t.trackId, t.stage] })],
 )
 
+export const trackArtworkStatus = pgTable(
+  'track_artwork_status',
+  {
+    trackId: uuid('track_id')
+      .primaryKey()
+      .references(() => tracks.id, { onDelete: 'cascade' }),
+    attempts: integer('attempts').notNull().default(1),
+    lastCategory: text('last_category').notNull(),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check('track_artwork_status_attempts_positive_check', sql`${t.attempts} > 0`),
+    check(
+      'track_artwork_status_category_check',
+      sql`${t.lastCategory} IN ('no_match', 'rate_limit', 'upstream', 'timeout', 'malformed', 'authorization', 'network', 'internal')`,
+    ),
+    index('track_artwork_status_retry_idx').on(t.nextAttemptAt),
+  ],
+)
+
 export const djSessions = pgTable(
   'dj_sessions',
   {

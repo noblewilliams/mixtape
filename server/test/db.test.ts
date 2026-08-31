@@ -8,6 +8,7 @@ import {
   trackFeatures,
   trackMeanings,
   enrichmentFailures,
+  trackArtworkStatus,
   djSessions,
   djMessages,
   queueTracks,
@@ -185,6 +186,50 @@ describe('db schema', () => {
     await db.insert(enrichmentFailures).values({ trackId: track.id, stage: 'features', error: 'no match' })
     const rows = await db.select().from(enrichmentFailures)
     expect(rows[0].attempts).toBe(1)
+  })
+
+  it('stores artwork retry state independently and cascades it with the track', async () => {
+    const db = await createTestDb()
+    const [track] = await db
+      .insert(tracks)
+      .values({ appleId: 'art-retry', title: 'S', artist: 'A' })
+      .returning()
+    await db.insert(trackArtworkStatus).values({
+      trackId: track.id,
+      lastCategory: 'no_match',
+      nextAttemptAt: new Date('2026-09-30T00:00:00Z'),
+    })
+    expect(await db.select().from(trackArtworkStatus)).toMatchObject([
+      { trackId: track.id, attempts: 1, lastCategory: 'no_match' },
+    ])
+
+    await db.delete(tracks).where(eq(tracks.id, track.id))
+    expect(await db.select().from(trackArtworkStatus)).toEqual([])
+  })
+
+  it('rejects invalid artwork retry attempts and categories', async () => {
+    const db = await createTestDb()
+    const [track] = await db
+      .insert(tracks)
+      .values({ appleId: 'art-invalid-retry', title: 'S', artist: 'A' })
+      .returning()
+    const nextAttemptAt = new Date('2026-09-30T00:00:00Z')
+
+    await expect(
+      db.insert(trackArtworkStatus).values({
+        trackId: track.id,
+        attempts: 0,
+        lastCategory: 'upstream',
+        nextAttemptAt,
+      }),
+    ).rejects.toThrow()
+    await expect(
+      db.insert(trackArtworkStatus).values({
+        trackId: track.id,
+        lastCategory: 'raw secret error',
+        nextAttemptAt,
+      }),
+    ).rejects.toThrow()
   })
 
   it('stores a null embedding for instrumentals', async () => {
