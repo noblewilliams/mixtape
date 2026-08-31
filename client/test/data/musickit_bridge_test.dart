@@ -368,4 +368,229 @@ void main() {
       );
     });
   });
+
+  group('playlist snapshots', () {
+    test('begins and defensively decodes a snapshot header', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            expect(call.method, 'beginPlaylistSnapshot');
+            return {
+              'snapshotId': 'snapshot-1',
+              'storefront': 'ng',
+              'totalPlaylists': 2,
+              'totalEntries': 3,
+            };
+          });
+
+      final header = await MusicKitBridge().beginPlaylistSnapshot();
+
+      expect(header.snapshotId, 'snapshot-1');
+      expect(header.storefront, 'ng');
+      expect(header.totalPlaylists, 2);
+      expect(header.totalEntries, 3);
+    });
+
+    test('rejects a malformed snapshot header', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+            channel,
+            (call) async => {
+              'snapshotId': '',
+              'storefront': 'NG',
+              'totalPlaylists': -1,
+              'totalEntries': 0,
+            },
+          );
+
+      await expectLater(
+        MusicKitBridge().beginPlaylistSnapshot(),
+        throwsA(isA<MusicKitException>()),
+      );
+    });
+
+    test('times out begin and cancels native materialization', () async {
+      final calls = <String>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            calls.add(call.method);
+            if (call.method == 'beginPlaylistSnapshot') {
+              return Completer<Map<dynamic, dynamic>>().future;
+            }
+            return true;
+          });
+
+      await expectLater(
+        MusicKitBridge(
+          snapshotTimeout: const Duration(milliseconds: 40),
+        ).beginPlaylistSnapshot(),
+        throwsA(isA<MusicKitException>()),
+      );
+      expect(calls, ['beginPlaylistSnapshot', 'cancelPlaylistSnapshot']);
+    });
+
+    test('fetches a bounded playlist page with nullable artwork', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            expect(call.method, 'fetchPlaylistSnapshotPage');
+            expect(call.arguments, {
+              'snapshotId': 'snapshot-1',
+              'offset': 0,
+              'limit': 50,
+            });
+            return {
+              'playlists': [
+                {
+                  'appleLibraryId': 'library-playlist-1',
+                  'appleCatalogId': null,
+                  'name': 'Evening',
+                  'description': null,
+                  'curatorName': null,
+                  'artworkUrlTemplate': null,
+                  'artworkWidth': null,
+                  'artworkHeight': null,
+                  'artworkBgColor': 'a1b2c3',
+                  'kind': 'user_shared',
+                  'canEdit': false,
+                  'appleDateAdded': null,
+                  'appleLastModifiedAt': 1788200000000,
+                  'sourceFingerprint': List.filled(64, 'a').join(),
+                  'entryCount': 2,
+                },
+              ],
+              'total': 1,
+            };
+          });
+
+      final page = await MusicKitBridge().fetchPlaylistSnapshotPage(
+        snapshotId: 'snapshot-1',
+        offset: 0,
+        limit: 500,
+      );
+
+      expect(page.total, 1);
+      expect(page.playlists.single.artworkUrlTemplate, isNull);
+      expect(page.playlists.single.artworkBgColor, 'a1b2c3');
+      expect(page.playlists.single.entryCount, 2);
+    });
+
+    test('fetches a bounded duplicate-preserving entry page', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            expect(call.method, 'fetchPlaylistEntryPage');
+            expect(call.arguments, {
+              'snapshotId': 'snapshot-1',
+              'playlistAppleId': 'library-playlist-1',
+              'offset': 0,
+              'limit': 200,
+            });
+            return {
+              'entries': [
+                {
+                  'position': 0,
+                  'appleLibraryEntryId': 'entry-1',
+                  'appleLibraryTrackId': 'library-track-1',
+                  'appleCatalogId': null,
+                  'isrcSnapshot': null,
+                  'titleSnapshot': 'Song',
+                  'artistSnapshot': 'Artist',
+                  'albumSnapshot': null,
+                  'durationMsSnapshot': 123000,
+                  'artworkUrlTemplateSnapshot': null,
+                  'artworkWidthSnapshot': null,
+                  'artworkHeightSnapshot': null,
+                  'artworkBgColorSnapshot': '010203',
+                },
+                {
+                  'position': 1,
+                  'appleLibraryEntryId': 'entry-2',
+                  'appleLibraryTrackId': 'library-track-1',
+                  'appleCatalogId': null,
+                  'isrcSnapshot': null,
+                  'titleSnapshot': 'Song',
+                  'artistSnapshot': 'Artist',
+                  'albumSnapshot': null,
+                  'durationMsSnapshot': 123000,
+                  'artworkUrlTemplateSnapshot': null,
+                  'artworkWidthSnapshot': null,
+                  'artworkHeightSnapshot': null,
+                  'artworkBgColorSnapshot': '010203',
+                },
+              ],
+              'total': 2,
+            };
+          });
+
+      final page = await MusicKitBridge().fetchPlaylistEntryPage(
+        snapshotId: 'snapshot-1',
+        playlistAppleId: 'library-playlist-1',
+        offset: 0,
+        limit: 999,
+      );
+
+      expect(page.total, 2);
+      expect(page.entries.map((entry) => entry.position), [0, 1]);
+      expect(page.entries.map((entry) => entry.appleLibraryTrackId), [
+        'library-track-1',
+        'library-track-1',
+      ]);
+      expect(page.entries.map((entry) => entry.appleLibraryEntryId), [
+        'entry-1',
+        'entry-2',
+      ]);
+    });
+
+    test(
+      'rejects invalid page arguments before invoking native code',
+      () async {
+        var invoked = false;
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, (call) async {
+              invoked = true;
+              return null;
+            });
+        final bridge = MusicKitBridge();
+
+        await expectLater(
+          bridge.fetchPlaylistSnapshotPage(snapshotId: '', offset: 0, limit: 1),
+          throwsA(isA<MusicKitException>()),
+        );
+        await expectLater(
+          bridge.fetchPlaylistEntryPage(
+            snapshotId: 'snapshot-1',
+            playlistAppleId: '',
+            offset: 0,
+            limit: 1,
+          ),
+          throwsA(isA<MusicKitException>()),
+        );
+        await expectLater(
+          bridge.fetchPlaylistSnapshotPage(
+            snapshotId: 'snapshot-1',
+            offset: -1,
+            limit: 1,
+          ),
+          throwsA(isA<MusicKitException>()),
+        );
+        expect(invoked, isFalse);
+      },
+    );
+
+    test('cancel and release use fixed channel contracts', () async {
+      final calls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            calls.add(call);
+            return true;
+          });
+      final bridge = MusicKitBridge();
+
+      expect(await bridge.cancelPlaylistSnapshot(), isTrue);
+      expect(await bridge.releasePlaylistSnapshot('snapshot-1'), isTrue);
+      expect(calls.map((call) => call.method), [
+        'cancelPlaylistSnapshot',
+        'releasePlaylistSnapshot',
+      ]);
+      expect(calls.last.arguments, {'snapshotId': 'snapshot-1'});
+    });
+  });
 }

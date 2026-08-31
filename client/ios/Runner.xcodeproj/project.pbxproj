@@ -16,6 +16,7 @@
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
 		97CF2C53F40174A4FB66C4D3 /* Pods_Runner.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C6FF8B44DE0BA39294DBD98C /* Pods_Runner.framework */; };
 		A39E4A9ECCFCB38F1F4CEA6E /* MusicKitBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9718ED24A02A38F981E2CC2 /* MusicKitBridge.swift */; };
+		C13A91D6B75A4B64A69E4132 /* PlaylistSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D42BBF2CC65E4767A06B2C03 /* PlaylistSnapshotStore.swift */; };
 		B119CA61BBE1B22BDB4C88BE /* Pods_RunnerTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8A2AAD254C7D047A87598351 /* Pods_RunnerTests.framework */; };
 /* End PBXBuildFile section */
 
@@ -68,6 +69,7 @@
 		B81ADE42F9D24D8E6499A09A /* Pods-Runner.profile.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.profile.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.profile.xcconfig"; sourceTree = "<group>"; };
 		BFB2C5C7262526906FFD2E41 /* Pods-Runner.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.debug.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"; sourceTree = "<group>"; };
 		C6FF8B44DE0BA39294DBD98C /* Pods_Runner.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_Runner.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		D42BBF2CC65E4767A06B2C03 /* PlaylistSnapshotStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PlaylistSnapshotStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -165,6 +167,7 @@
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
 				A9718ED24A02A38F981E2CC2 /* MusicKitBridge.swift */,
+				D42BBF2CC65E4767A06B2C03 /* PlaylistSnapshotStore.swift */,
 			);
 			path = Runner;
 			sourceTree = "<group>";
@@ -384,6 +387,7 @@
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
 				A39E4A9ECCFCB38F1F4CEA6E /* MusicKitBridge.swift in Sources */,
+				C13A91D6B75A4B64A69E4132 /* PlaylistSnapshotStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

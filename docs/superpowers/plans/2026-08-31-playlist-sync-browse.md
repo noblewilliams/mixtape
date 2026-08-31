@@ -141,8 +141,8 @@ These refine the approved system design without changing its product behavior:
 - Modify: `client/test/native_musickit_contract_test.dart`
 - Modify: `client/test/helpers/fake_bridge.dart` and any bridge fakes
 
-- [ ] **Step 1: Write failing Dart/native-source contract tests.** Pin method names, defensive decoding, page limits, snapshot-ID requirements, release behavior, and exact Swift/server artwork/ID validation parity where applicable.
-- [ ] **Step 2: Define the small native interface.** Recommended channel surface:
+- [x] **Step 1: Write failing Dart/native-source contract tests.** Pin method names, defensive decoding, page limits, snapshot-ID requirements, release behavior, and exact Swift/server artwork/ID validation parity where applicable.
+- [x] **Step 2: Define the small native interface.** Recommended channel surface:
 
   ```text
   beginPlaylistSnapshot()
@@ -161,17 +161,19 @@ These refine the approved system design without changing its product behavior:
     -> true
   ```
 
-- [ ] **Step 3: Implement `PlaylistSnapshotStore` as an actor.** It owns one active materialization task or immutable snapshot. A new begin cancels/replaces the old one; `cancelPlaylistSnapshot` cancels an in-progress MusicKit task even before a snapshot ID is returned; mismatched IDs and cold nonzero pages fail with fixed `no_snapshot`/`snapshot_mismatch` categories.
-- [ ] **Step 4: Materialize playlists with bounded MusicKit paging.** Page playlists and each entries relationship until `hasNextBatch` is false. Reject repeated playlist IDs, inconsistent counts, duplicate normalized positions, non-progressing pagination, or hard safety ceilings; never silently truncate.
-- [ ] **Step 5: Normalize entry order from collection enumeration.** Send zero-based contiguous positions from the materialized collection. Keep Apple's reported `entry.position` only as a validation signal determined in Task 1, not as an unchecked database position.
-- [ ] **Step 6: Map identifiers conservatively.** Always send bounded playlist ID and entry ID. Send ISRC when valid. Send `appleCatalogId` only under the Task 1 proven rule; otherwise null. Preserve music-video/local/unresolved entries as snapshots instead of dropping them.
-- [ ] **Step 7: Map artwork safely.** Request a fixed browse source size, retain only positive maximum dimensions, convert `CGColor` through sRGB into lowercase six-digit hex, and allow any unrepresentable colour/URL to become null. Preserve a valid background colour even when URL/dimensions are absent; this was the dominant founder-device shape. The server revalidates every value.
-- [ ] **Step 8: Compute `sourceFingerprint` with CryptoKit.** Pin a versioned, length-prefixed canonical byte serialization of playlist library ID, last-modified milliseconds, and every ordered entry's stable identifiers/fallback snapshot fields. Do not hash locale-dependent descriptions or Swift `String(describing:)` output.
-- [ ] **Step 9: Bound time/memory and release deterministically.** Check Swift task cancellation between every page/playlist, give Dart begin a dedicated bounded timeout, and cancel/release on success, error, cancellation, auth transition, or a new begin. A snapshot-too-large condition fails before any server sync begins.
-- [ ] **Step 10: Add the new Swift file to the Runner target** and compile Debug/Profile/Release through the workspace.
-- [ ] **Step 11: Run Flutter tests and unsigned iOS build.** No device mutation is involved.
-- [ ] **Step 12: Adversarial review.** Cover empty playlists, duplicates, music videos, missing item, local import, null artwork, playlist mutation during materialization, wrong snapshot ID, page-after-release, and completion called twice.
-- [ ] **Step 13: Commit.** Headline: `feat(client): Read Apple Music playlists`.
+- [x] **Step 3: Implement `PlaylistSnapshotStore` as an actor.** It owns one active materialization task or immutable snapshot. A new begin cancels/replaces the old one; `cancelPlaylistSnapshot` cancels an in-progress MusicKit task even before a snapshot ID is returned; mismatched IDs and cold nonzero pages fail with fixed `no_snapshot`/`snapshot_mismatch` categories.
+- [x] **Step 4: Materialize playlists with bounded MusicKit paging.** Page playlists and each entries relationship until `hasNextBatch` is false. Reject repeated playlist IDs, inconsistent counts, duplicate normalized positions, non-progressing pagination, or hard safety ceilings; never silently truncate.
+- [x] **Step 5: Normalize entry order from collection enumeration.** Send zero-based contiguous positions from the materialized collection. Keep Apple's reported `entry.position` only as a validation signal determined in Task 1, not as an unchecked database position.
+- [x] **Step 6: Map identifiers conservatively.** Always send bounded playlist ID and entry ID. Send ISRC when valid. Send `appleCatalogId` only under the Task 1 proven rule; otherwise null. Preserve music-video/local/unresolved entries as snapshots instead of dropping them.
+- [x] **Step 7: Map artwork safely.** Request a fixed browse source size, retain only positive maximum dimensions, convert `CGColor` through sRGB into lowercase six-digit hex, and allow any unrepresentable colour/URL to become null. Preserve a valid background colour even when URL/dimensions are absent; this was the dominant founder-device shape. The server revalidates every value.
+- [x] **Step 8: Compute `sourceFingerprint` with CryptoKit.** Pin a versioned, length-prefixed canonical byte serialization of playlist library ID, last-modified milliseconds, and every ordered entry's stable identifiers/fallback snapshot fields. Do not hash locale-dependent descriptions or Swift `String(describing:)` output.
+- [x] **Step 9: Bound time/memory and release deterministically.** Check Swift task cancellation between every page/playlist, give Dart begin a dedicated bounded timeout, and cancel/release on success, error, cancellation, auth transition, or a new begin. A snapshot-too-large condition fails before any server sync begins.
+- [x] **Step 10: Add the new Swift file to the Runner target** and compile Debug/Profile/Release through the workspace.
+- [x] **Step 11: Run Flutter tests and unsigned iOS build.** No device mutation is involved.
+- [x] **Step 12: Adversarial review.** Cover empty playlists, duplicates, music videos, missing item, local import, null artwork, playlist mutation during materialization, wrong snapshot ID, page-after-release, and completion called twice.
+- [x] **Step 13: Commit.** Headline: `feat(client): Read Apple Music playlists`.
+
+**Evidence:** 241 Flutter tests and `flutter analyze` pass. The standard unsigned Flutter build remains blocked before compilation by the known broken CocoaPods CLI; direct workspace builds compile successfully in Debug, Profile, and Release. The actor re-reads playlist metadata plus ordered entry IDs/counts before publishing a snapshot, and exposes no mutation or private logging surface.
 
 ## Task 4: Add the staged sync store and authenticated ingest routes
 

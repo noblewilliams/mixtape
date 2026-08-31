@@ -6,6 +6,7 @@ import MediaPlayer
 class MusicKitBridge: NSObject {
   private static let queue = DispatchQueue(label: "mixtape.musickit.bridge")
   private static var catalogCache: [MPMediaItem] = []
+  private static let playlistSnapshots = PlaylistSnapshotStore()
 
   /// MusicKit declares playbackStoreID as opaque. Keep a bounded set of URL-
   /// safe, comma-free characters that matches the server/catalog contract.
@@ -27,6 +28,19 @@ class MusicKitBridge: NSObject {
         let offset = max(0, args["offset"] as? Int ?? 0)
         let limit = max(0, args["limit"] as? Int ?? 200)
         fetchLibrarySongs(offset: offset, limit: limit, result: result)
+      case "beginPlaylistSnapshot":
+        beginPlaylistSnapshot(result: result)
+      case "fetchPlaylistSnapshotPage":
+        let args = call.arguments as? [String: Any] ?? [:]
+        fetchPlaylistSnapshotPage(args: args, result: result)
+      case "fetchPlaylistEntryPage":
+        let args = call.arguments as? [String: Any] ?? [:]
+        fetchPlaylistEntryPage(args: args, result: result)
+      case "cancelPlaylistSnapshot":
+        cancelPlaylistSnapshot(result: result)
+      case "releasePlaylistSnapshot":
+        let args = call.arguments as? [String: Any] ?? [:]
+        releasePlaylistSnapshot(args: args, result: result)
       case "playQueue":
         let args = call.arguments as? [String: Any] ?? [:]
         let appleIds = args["appleIds"] as? [String] ?? []
@@ -146,6 +160,156 @@ class MusicKitBridge: NSObject {
     MPMediaLibrary.requestAuthorization { status in
       DispatchQueue.main.async { result(status == .authorized) }
     }
+  }
+
+  // MARK: - Immutable playlist snapshot
+
+  private static func beginPlaylistSnapshot(result: @escaping FlutterResult) {
+    Task {
+      do {
+        let header = try await playlistSnapshots.begin()
+        completeOnMain(result, value: [
+          "snapshotId": header.snapshotId,
+          "storefront": header.storefront,
+          "totalPlaylists": header.totalPlaylists,
+          "totalEntries": header.totalEntries,
+        ])
+      } catch {
+        completeSnapshotError(result, error: error)
+      }
+    }
+  }
+
+  private static func fetchPlaylistSnapshotPage(
+    args: [String: Any], result: @escaping FlutterResult
+  ) {
+    guard
+      let snapshotId = args["snapshotId"] as? String, !snapshotId.isEmpty,
+      let offset = args["offset"] as? Int, offset >= 0,
+      let requestedLimit = args["limit"] as? Int
+    else {
+      completeSnapshotError(result, code: "invalid_arguments")
+      return
+    }
+    let limit = min(50, max(1, requestedLimit))
+    Task {
+      do {
+        let page = try await playlistSnapshots.playlistPage(
+          snapshotId: snapshotId, offset: offset, limit: limit)
+        let values: [[String: Any?]] = page.values.map { playlist in
+          [
+            "appleLibraryId": playlist.appleLibraryId,
+            "appleCatalogId": playlist.appleCatalogId,
+            "name": playlist.name,
+            "description": playlist.description,
+            "curatorName": playlist.curatorName,
+            "artworkUrlTemplate": playlist.artworkUrlTemplate,
+            "artworkWidth": playlist.artworkWidth,
+            "artworkHeight": playlist.artworkHeight,
+            "artworkBgColor": playlist.artworkBgColor,
+            "kind": playlist.kind,
+            "canEdit": playlist.canEdit,
+            "appleDateAdded": playlist.appleDateAdded,
+            "appleLastModifiedAt": playlist.appleLastModifiedAt,
+            "sourceFingerprint": playlist.sourceFingerprint,
+            "entryCount": playlist.entries.count,
+          ]
+        }
+        completeOnMain(result, value: ["playlists": values, "total": page.total])
+      } catch {
+        completeSnapshotError(result, error: error)
+      }
+    }
+  }
+
+  private static func fetchPlaylistEntryPage(
+    args: [String: Any], result: @escaping FlutterResult
+  ) {
+    guard
+      let snapshotId = args["snapshotId"] as? String, !snapshotId.isEmpty,
+      let playlistId = args["playlistAppleId"] as? String, !playlistId.isEmpty,
+      let offset = args["offset"] as? Int, offset >= 0,
+      let requestedLimit = args["limit"] as? Int
+    else {
+      completeSnapshotError(result, code: "invalid_arguments")
+      return
+    }
+    let limit = min(200, max(1, requestedLimit))
+    Task {
+      do {
+        let page = try await playlistSnapshots.entryPage(
+          snapshotId: snapshotId, playlistId: playlistId, offset: offset, limit: limit)
+        let values: [[String: Any?]] = page.values.map { entry in
+          [
+            "position": entry.position,
+            "appleLibraryEntryId": entry.appleLibraryEntryId,
+            "appleLibraryTrackId": entry.appleLibraryTrackId,
+            "appleCatalogId": entry.appleCatalogId,
+            "isrcSnapshot": entry.isrcSnapshot,
+            "titleSnapshot": entry.titleSnapshot,
+            "artistSnapshot": entry.artistSnapshot,
+            "albumSnapshot": entry.albumSnapshot,
+            "durationMsSnapshot": entry.durationMsSnapshot,
+            "artworkUrlTemplateSnapshot": entry.artworkUrlTemplateSnapshot,
+            "artworkWidthSnapshot": entry.artworkWidthSnapshot,
+            "artworkHeightSnapshot": entry.artworkHeightSnapshot,
+            "artworkBgColorSnapshot": entry.artworkBgColorSnapshot,
+          ]
+        }
+        completeOnMain(result, value: ["entries": values, "total": page.total])
+      } catch {
+        completeSnapshotError(result, error: error)
+      }
+    }
+  }
+
+  private static func cancelPlaylistSnapshot(result: @escaping FlutterResult) {
+    Task {
+      let cancelled = await playlistSnapshots.cancel()
+      completeOnMain(result, value: cancelled)
+    }
+  }
+
+  private static func releasePlaylistSnapshot(
+    args: [String: Any], result: @escaping FlutterResult
+  ) {
+    guard let snapshotId = args["snapshotId"] as? String, !snapshotId.isEmpty else {
+      completeSnapshotError(result, code: "invalid_arguments")
+      return
+    }
+    Task {
+      do {
+        let released = try await playlistSnapshots.release(snapshotId: snapshotId)
+        completeOnMain(result, value: released)
+      } catch {
+        completeSnapshotError(result, error: error)
+      }
+    }
+  }
+
+  private static func completeSnapshotError(
+    _ result: @escaping FlutterResult, error: Error
+  ) {
+    if let storeError = error as? PlaylistSnapshotStore.StoreError {
+      completeSnapshotError(result, code: storeError.rawValue)
+    } else if error is CancellationError {
+      completeSnapshotError(result, code: "snapshot_cancelled")
+    } else {
+      completeSnapshotError(result, code: "snapshot_failed")
+    }
+  }
+
+  private static func completeSnapshotError(
+    _ result: @escaping FlutterResult, code: String
+  ) {
+    completeOnMain(
+      result,
+      value: FlutterError(code: code, message: "playlist snapshot failed", details: nil)
+    )
+  }
+
+  private static func completeOnMain(_ result: @escaping FlutterResult, value: Any?) {
+    DispatchQueue.main.async { result(value) }
   }
 
   private static func fetchLibrarySongs(offset: Int, limit: Int, result: @escaping FlutterResult) {

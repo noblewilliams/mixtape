@@ -60,6 +60,279 @@ class LibraryPage {
   final int total;
 }
 
+class PlaylistSnapshotHeader {
+  const PlaylistSnapshotHeader({
+    required this.snapshotId,
+    required this.storefront,
+    required this.totalPlaylists,
+    required this.totalEntries,
+  });
+
+  final String snapshotId;
+  final String storefront;
+  final int totalPlaylists;
+  final int totalEntries;
+
+  factory PlaylistSnapshotHeader.fromMap(Map<dynamic, dynamic> map) {
+    final snapshotId = _requiredString(map, 'snapshotId');
+    final storefront = _requiredString(map, 'storefront');
+    final totalPlaylists = _nonnegativeInt(map, 'totalPlaylists');
+    final totalEntries = _nonnegativeInt(map, 'totalEntries');
+    if (!RegExp(r'^[a-z]{2}$').hasMatch(storefront)) {
+      throw MusicKitException('malformed playlist snapshot header');
+    }
+    return PlaylistSnapshotHeader(
+      snapshotId: snapshotId,
+      storefront: storefront,
+      totalPlaylists: totalPlaylists,
+      totalEntries: totalEntries,
+    );
+  }
+}
+
+class PlaylistSnapshotPlaylist {
+  const PlaylistSnapshotPlaylist({
+    required this.appleLibraryId,
+    required this.name,
+    required this.kind,
+    required this.canEdit,
+    required this.sourceFingerprint,
+    required this.entryCount,
+    this.appleCatalogId,
+    this.description,
+    this.curatorName,
+    this.artworkUrlTemplate,
+    this.artworkWidth,
+    this.artworkHeight,
+    this.artworkBgColor,
+    this.appleDateAdded,
+    this.appleLastModifiedAt,
+  });
+
+  static const _kinds = {
+    'user',
+    'editorial',
+    'external',
+    'personal_mix',
+    'replay',
+    'user_shared',
+    'unknown',
+  };
+
+  final String appleLibraryId;
+  final String? appleCatalogId;
+  final String name;
+  final String? description;
+  final String? curatorName;
+  final String? artworkUrlTemplate;
+  final int? artworkWidth;
+  final int? artworkHeight;
+  final String? artworkBgColor;
+  final String kind;
+  final bool canEdit;
+  final int? appleDateAdded;
+  final int? appleLastModifiedAt;
+  final String sourceFingerprint;
+  final int entryCount;
+
+  factory PlaylistSnapshotPlaylist.fromMap(Map<dynamic, dynamic> map) {
+    final kind = _requiredString(map, 'kind');
+    final fingerprint = _requiredString(map, 'sourceFingerprint');
+    if (!_kinds.contains(kind) ||
+        !RegExp(r'^[0-9a-f]{64}$').hasMatch(fingerprint)) {
+      throw MusicKitException('malformed playlist snapshot payload');
+    }
+    return PlaylistSnapshotPlaylist(
+      appleLibraryId: _requiredString(map, 'appleLibraryId'),
+      appleCatalogId: _nullableString(map, 'appleCatalogId'),
+      name: _requiredString(map, 'name'),
+      description: _nullableString(map, 'description', allowEmpty: true),
+      curatorName: _nullableString(map, 'curatorName', allowEmpty: true),
+      artworkUrlTemplate: _nullableString(map, 'artworkUrlTemplate'),
+      artworkWidth: _positiveNullableInt(map, 'artworkWidth'),
+      artworkHeight: _positiveNullableInt(map, 'artworkHeight'),
+      artworkBgColor: _artworkColor(map, 'artworkBgColor'),
+      kind: kind,
+      canEdit: _requiredBool(map, 'canEdit'),
+      appleDateAdded: _nullableInt(map, 'appleDateAdded'),
+      appleLastModifiedAt: _nullableInt(map, 'appleLastModifiedAt'),
+      sourceFingerprint: fingerprint,
+      entryCount: _nonnegativeInt(map, 'entryCount'),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'appleLibraryId': appleLibraryId,
+    'appleCatalogId': appleCatalogId,
+    'name': name,
+    'description': description,
+    'curatorName': curatorName,
+    'artworkUrlTemplate': artworkUrlTemplate,
+    'artworkWidth': artworkWidth,
+    'artworkHeight': artworkHeight,
+    'artworkBgColor': artworkBgColor,
+    'kind': kind,
+    'canEdit': canEdit,
+    'appleDateAdded': appleDateAdded,
+    'appleLastModifiedAt': appleLastModifiedAt,
+    'sourceFingerprint': sourceFingerprint,
+    'entryCount': entryCount,
+  };
+}
+
+class PlaylistSnapshotEntry {
+  const PlaylistSnapshotEntry({
+    required this.position,
+    required this.appleLibraryEntryId,
+    required this.titleSnapshot,
+    required this.artistSnapshot,
+    this.appleLibraryTrackId,
+    this.appleCatalogId,
+    this.isrcSnapshot,
+    this.albumSnapshot,
+    this.durationMsSnapshot,
+    this.artworkUrlTemplateSnapshot,
+    this.artworkWidthSnapshot,
+    this.artworkHeightSnapshot,
+    this.artworkBgColorSnapshot,
+  });
+
+  final int position;
+  final String appleLibraryEntryId;
+  final String? appleLibraryTrackId;
+  final String? appleCatalogId;
+  final String? isrcSnapshot;
+  final String titleSnapshot;
+  final String artistSnapshot;
+  final String? albumSnapshot;
+  final int? durationMsSnapshot;
+  final String? artworkUrlTemplateSnapshot;
+  final int? artworkWidthSnapshot;
+  final int? artworkHeightSnapshot;
+  final String? artworkBgColorSnapshot;
+
+  factory PlaylistSnapshotEntry.fromMap(Map<dynamic, dynamic> map) =>
+      PlaylistSnapshotEntry(
+        position: _nonnegativeInt(map, 'position'),
+        appleLibraryEntryId: _requiredString(map, 'appleLibraryEntryId'),
+        appleLibraryTrackId: _nullableString(map, 'appleLibraryTrackId'),
+        appleCatalogId: _nullableString(map, 'appleCatalogId'),
+        isrcSnapshot: _nullableString(map, 'isrcSnapshot'),
+        titleSnapshot: _requiredString(map, 'titleSnapshot'),
+        artistSnapshot: _requiredString(map, 'artistSnapshot'),
+        albumSnapshot: _nullableString(map, 'albumSnapshot', allowEmpty: true),
+        durationMsSnapshot: _nonnegativeNullableInt(map, 'durationMsSnapshot'),
+        artworkUrlTemplateSnapshot: _nullableString(
+          map,
+          'artworkUrlTemplateSnapshot',
+        ),
+        artworkWidthSnapshot: _positiveNullableInt(map, 'artworkWidthSnapshot'),
+        artworkHeightSnapshot: _positiveNullableInt(
+          map,
+          'artworkHeightSnapshot',
+        ),
+        artworkBgColorSnapshot: _artworkColor(map, 'artworkBgColorSnapshot'),
+      );
+
+  Map<String, dynamic> toJson() => {
+    'position': position,
+    'appleLibraryEntryId': appleLibraryEntryId,
+    'appleLibraryTrackId': appleLibraryTrackId,
+    'appleCatalogId': appleCatalogId,
+    'isrcSnapshot': isrcSnapshot,
+    'titleSnapshot': titleSnapshot,
+    'artistSnapshot': artistSnapshot,
+    'albumSnapshot': albumSnapshot,
+    'durationMsSnapshot': durationMsSnapshot,
+    'artworkUrlTemplateSnapshot': artworkUrlTemplateSnapshot,
+    'artworkWidthSnapshot': artworkWidthSnapshot,
+    'artworkHeightSnapshot': artworkHeightSnapshot,
+    'artworkBgColorSnapshot': artworkBgColorSnapshot,
+  };
+}
+
+class PlaylistSnapshotPage {
+  const PlaylistSnapshotPage({required this.playlists, required this.total});
+  final List<PlaylistSnapshotPlaylist> playlists;
+  final int total;
+}
+
+class PlaylistEntryPage {
+  const PlaylistEntryPage({required this.entries, required this.total});
+  final List<PlaylistSnapshotEntry> entries;
+  final int total;
+}
+
+String _requiredString(Map<dynamic, dynamic> map, String key) {
+  final value = map[key];
+  if (value is! String || value.isEmpty) {
+    throw MusicKitException('malformed playlist snapshot payload');
+  }
+  return value;
+}
+
+String? _nullableString(
+  Map<dynamic, dynamic> map,
+  String key, {
+  bool allowEmpty = false,
+}) {
+  final value = map[key];
+  if (value == null) return null;
+  if (value is! String || (!allowEmpty && value.isEmpty)) {
+    throw MusicKitException('malformed playlist snapshot payload');
+  }
+  return value;
+}
+
+int _nonnegativeInt(Map<dynamic, dynamic> map, String key) {
+  final value = map[key];
+  if (value is! int || value < 0) {
+    throw MusicKitException('malformed playlist snapshot payload');
+  }
+  return value;
+}
+
+int? _nullableInt(Map<dynamic, dynamic> map, String key) {
+  final value = map[key];
+  if (value == null) return null;
+  if (value is! int) {
+    throw MusicKitException('malformed playlist snapshot payload');
+  }
+  return value;
+}
+
+int? _nonnegativeNullableInt(Map<dynamic, dynamic> map, String key) {
+  final value = _nullableInt(map, key);
+  if (value != null && value < 0) {
+    throw MusicKitException('malformed playlist snapshot payload');
+  }
+  return value;
+}
+
+int? _positiveNullableInt(Map<dynamic, dynamic> map, String key) {
+  final value = _nullableInt(map, key);
+  if (value != null && value <= 0) {
+    throw MusicKitException('malformed playlist snapshot payload');
+  }
+  return value;
+}
+
+bool _requiredBool(Map<dynamic, dynamic> map, String key) {
+  final value = map[key];
+  if (value is! bool) {
+    throw MusicKitException('malformed playlist snapshot payload');
+  }
+  return value;
+}
+
+String? _artworkColor(Map<dynamic, dynamic> map, String key) {
+  final value = _nullableString(map, key);
+  if (value != null && !RegExp(r'^[0-9a-f]{6}$').hasMatch(value)) {
+    throw MusicKitException('malformed playlist snapshot payload');
+  }
+  return value;
+}
+
 /// Thrown for any failure talking to the native MusicKit bridge: a platform-side
 /// error, the bridge not being registered, or a malformed/absent response.
 class MusicKitException implements Exception {
@@ -79,11 +352,14 @@ class MusicKitBridge {
   MusicKitBridge({
     Duration callTimeout = const Duration(seconds: 20),
     Duration perTrackTimeout = const Duration(seconds: 3),
+    Duration snapshotTimeout = const Duration(minutes: 2),
   }) : _callTimeout = callTimeout,
-       _perTrackTimeout = perTrackTimeout;
+       _perTrackTimeout = perTrackTimeout,
+       _snapshotTimeout = snapshotTimeout;
 
   static const _channel = MethodChannel('mixtape/musickit');
   final Duration _callTimeout;
+  final Duration _snapshotTimeout;
 
   /// Extra timeout budget per track for `createPlaylist`: the native side
   /// adds tracks ONE AT A TIME (each `addItem(withProductID:)` is its own
@@ -104,6 +380,9 @@ class MusicKitBridge {
       detail is String && detail.isNotEmpty ? '$base ($detail)' : base,
     );
   }
+
+  static MusicKitException _fromSnapshotPlatform(PlatformException e) =>
+      MusicKitException(e.code.isEmpty ? 'playlist_snapshot_failed' : e.code);
 
   Future<bool> requestAuthorization() async {
     try {
@@ -132,6 +411,157 @@ class MusicKitBridge {
       throw _fromPlatform(e);
     } on MissingPluginException {
       throw MusicKitException('MusicKit bridge not registered');
+    }
+  }
+
+  Future<PlaylistSnapshotHeader> beginPlaylistSnapshot() async {
+    try {
+      final raw = await _channel
+          .invokeMethod<Map<dynamic, dynamic>>('beginPlaylistSnapshot')
+          .timeout(_snapshotTimeout);
+      if (raw == null) {
+        throw MusicKitException('malformed playlist snapshot header');
+      }
+      return PlaylistSnapshotHeader.fromMap(raw);
+    } on PlatformException catch (e) {
+      throw _fromSnapshotPlatform(e);
+    } on MissingPluginException {
+      throw MusicKitException('MusicKit bridge not registered');
+    } on TimeoutException {
+      try {
+        await cancelPlaylistSnapshot();
+      } catch (_) {
+        // The original timeout is the useful fixed failure category.
+      }
+      throw MusicKitException('playlist snapshot timed out');
+    }
+  }
+
+  Future<PlaylistSnapshotPage> fetchPlaylistSnapshotPage({
+    required String snapshotId,
+    required int offset,
+    required int limit,
+  }) async {
+    _validatePageArguments(snapshotId: snapshotId, offset: offset);
+    try {
+      final raw = await _channel
+          .invokeMethod<Map<dynamic, dynamic>>('fetchPlaylistSnapshotPage', {
+            'snapshotId': snapshotId,
+            'offset': offset,
+            'limit': limit.clamp(1, 50),
+          })
+          .timeout(_callTimeout);
+      if (raw == null || raw['playlists'] is! List) {
+        throw MusicKitException('malformed playlist snapshot page');
+      }
+      final playlists = (raw['playlists'] as List)
+          .map((value) {
+            if (value is! Map) {
+              throw MusicKitException('malformed playlist snapshot page');
+            }
+            return PlaylistSnapshotPlaylist.fromMap(value);
+          })
+          .toList(growable: false);
+      return PlaylistSnapshotPage(
+        playlists: playlists,
+        total: _nonnegativeInt(raw, 'total'),
+      );
+    } on PlatformException catch (e) {
+      throw _fromSnapshotPlatform(e);
+    } on MissingPluginException {
+      throw MusicKitException('MusicKit bridge not registered');
+    } on TimeoutException {
+      throw MusicKitException('playlist snapshot page timed out');
+    }
+  }
+
+  Future<PlaylistEntryPage> fetchPlaylistEntryPage({
+    required String snapshotId,
+    required String playlistAppleId,
+    required int offset,
+    required int limit,
+  }) async {
+    _validatePageArguments(snapshotId: snapshotId, offset: offset);
+    if (playlistAppleId.isEmpty) {
+      throw MusicKitException('playlist id is required');
+    }
+    try {
+      final raw = await _channel
+          .invokeMethod<Map<dynamic, dynamic>>('fetchPlaylistEntryPage', {
+            'snapshotId': snapshotId,
+            'playlistAppleId': playlistAppleId,
+            'offset': offset,
+            'limit': limit.clamp(1, 200),
+          })
+          .timeout(_callTimeout);
+      if (raw == null || raw['entries'] is! List) {
+        throw MusicKitException('malformed playlist entry page');
+      }
+      final entries = (raw['entries'] as List)
+          .map((value) {
+            if (value is! Map) {
+              throw MusicKitException('malformed playlist entry page');
+            }
+            return PlaylistSnapshotEntry.fromMap(value);
+          })
+          .toList(growable: false);
+      return PlaylistEntryPage(
+        entries: entries,
+        total: _nonnegativeInt(raw, 'total'),
+      );
+    } on PlatformException catch (e) {
+      throw _fromSnapshotPlatform(e);
+    } on MissingPluginException {
+      throw MusicKitException('MusicKit bridge not registered');
+    } on TimeoutException {
+      throw MusicKitException('playlist entry page timed out');
+    }
+  }
+
+  Future<bool> cancelPlaylistSnapshot() async {
+    try {
+      final raw = await _channel
+          .invokeMethod<dynamic>('cancelPlaylistSnapshot')
+          .timeout(_callTimeout);
+      return raw is bool && raw;
+    } on PlatformException catch (e) {
+      throw _fromSnapshotPlatform(e);
+    } on MissingPluginException {
+      throw MusicKitException('MusicKit bridge not registered');
+    } on TimeoutException {
+      throw MusicKitException('playlist snapshot cancel timed out');
+    }
+  }
+
+  Future<bool> releasePlaylistSnapshot(String snapshotId) async {
+    if (snapshotId.isEmpty) {
+      throw MusicKitException('snapshot id is required');
+    }
+    try {
+      final raw = await _channel
+          .invokeMethod<dynamic>('releasePlaylistSnapshot', {
+            'snapshotId': snapshotId,
+          })
+          .timeout(_callTimeout);
+      return raw is bool && raw;
+    } on PlatformException catch (e) {
+      throw _fromSnapshotPlatform(e);
+    } on MissingPluginException {
+      throw MusicKitException('MusicKit bridge not registered');
+    } on TimeoutException {
+      throw MusicKitException('playlist snapshot release timed out');
+    }
+  }
+
+  static void _validatePageArguments({
+    required String snapshotId,
+    required int offset,
+  }) {
+    if (snapshotId.isEmpty) {
+      throw MusicKitException('snapshot id is required');
+    }
+    if (offset < 0) {
+      throw MusicKitException('playlist snapshot offset must be nonnegative');
     }
   }
 

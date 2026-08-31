@@ -130,6 +130,30 @@ class FakeBridge implements MusicKitBridge {
       throw UnimplementedError();
 
   @override
+  Future<PlaylistSnapshotHeader> beginPlaylistSnapshot() => throw UnimplementedError();
+
+  @override
+  Future<PlaylistSnapshotPage> fetchPlaylistSnapshotPage({
+    required String snapshotId,
+    required int offset,
+    required int limit,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<PlaylistEntryPage> fetchPlaylistEntryPage({
+    required String snapshotId,
+    required String playlistAppleId,
+    required int offset,
+    required int limit,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<bool> cancelPlaylistSnapshot() => throw UnimplementedError();
+
+  @override
+  Future<bool> releasePlaylistSnapshot(String snapshotId) => throw UnimplementedError();
+
+  @override
   Future<bool> playQueue(List<String> appleIds) {
     playCalls.add(appleIds);
     final impl = onPlayQueue;

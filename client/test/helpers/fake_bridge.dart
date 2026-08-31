@@ -3,10 +3,18 @@ import 'package:mixtape/data/api/api_client.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/musickit/musickit_bridge.dart';
 
+mixin NoPlaylistSnapshots {
+  Future<PlaylistSnapshotHeader> beginPlaylistSnapshot() => throw UnimplementedError();
+  Future<PlaylistSnapshotPage> fetchPlaylistSnapshotPage({required String snapshotId, required int offset, required int limit}) => throw UnimplementedError();
+  Future<PlaylistEntryPage> fetchPlaylistEntryPage({required String snapshotId, required String playlistAppleId, required int offset, required int limit}) => throw UnimplementedError();
+  Future<bool> cancelPlaylistSnapshot() => throw UnimplementedError();
+  Future<bool> releasePlaylistSnapshot(String snapshotId) => throw UnimplementedError();
+}
+
 /// Mirrors the native contract enforced by MusicKitBridge.swift: offset 0 (re)builds
 /// the snapshot, and serving the last page clears it. A further offset > 0 call
 /// without a fresh offset-0 call throws just like the real bridge would.
-class FakeBridge implements MusicKitBridge {
+class FakeBridge with NoPlaylistSnapshots implements MusicKitBridge {
   FakeBridge(this.all);
   final List<LibrarySong> all;
   bool _lastPageServed = false;
@@ -41,7 +49,7 @@ class FakeBridge implements MusicKitBridge {
       (added: appleIds.length, failed: 0);
 }
 
-class DeniedBridge implements MusicKitBridge {
+class DeniedBridge with NoPlaylistSnapshots implements MusicKitBridge {
   @override
   Future<bool> requestAuthorization() async => false;
   @override
@@ -60,7 +68,7 @@ class DeniedBridge implements MusicKitBridge {
 }
 
 /// Serves one page successfully, then fails — simulates a mid-sync platform error.
-class BoomBridge implements MusicKitBridge {
+class BoomBridge with NoPlaylistSnapshots implements MusicKitBridge {
   BoomBridge(this.all);
   final List<LibrarySong> all;
   var _calls = 0;
