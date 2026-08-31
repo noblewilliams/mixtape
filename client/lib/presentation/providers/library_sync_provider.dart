@@ -56,8 +56,8 @@ class SyncRunning extends SyncState {
 }
 
 class SyncDone extends SyncState {
-  const SyncDone(this.total);
-  final int total;
+  const SyncDone(this.summary);
+  final LibrarySyncSummary summary;
 }
 
 class SyncFailed extends SyncState {
@@ -81,10 +81,10 @@ class LibrarySyncNotifier extends Notifier<SyncState> {
     if (state is SyncRunning) return;
     state = const SyncRunning(0);
     try {
-      final total = await _service.sync(onProgress: (p) {
+      final summary = await _service.sync(onProgress: (p) {
         if (ref.mounted) state = SyncRunning(p);
       });
-      if (ref.mounted) state = SyncDone(total);
+      if (ref.mounted) state = SyncDone(summary);
     } on LibraryAccessDenied {
       if (ref.mounted) {
         state = const SyncFailed('Music library access was denied. Enable it in Settings.');

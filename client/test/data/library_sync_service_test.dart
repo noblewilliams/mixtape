@@ -12,6 +12,9 @@ void main() {
     final postedCounts = <int>[];
     final postedPaths = <String>[];
     final inner = MockClient((req) async {
+      if (req.url.path != '/ingest/library') {
+        return emptyPlaylistResponse(req);
+      }
       postedPaths.add(req.url.path);
       final body = jsonDecode(req.body) as Map<String, dynamic>;
       postedCounts.add((body['songs'] as List).length);
@@ -24,17 +27,21 @@ void main() {
     );
 
     final progress = <double>[];
-    final total = await service.sync(onProgress: progress.add);
+    final summary = await service.sync(onProgress: progress.add);
 
-    expect(total, 450);
+    expect(summary.songs, 450);
+    expect(summary.playlists, 0);
     expect(postedCounts, [200, 200, 50]);
     expect(postedPaths.toSet(), {'/ingest/library'});
-    expect(progress, [200 / 450, 400 / 450, 1.0]);
+    expect(progress, [0.6 * 200 / 450, 0.6 * 400 / 450, 0.6, 0.95, 1.0]);
   });
 
   test('posts an exact multiple of the chunk size without an extra page fetch', () async {
     final postedCounts = <int>[];
     final inner = MockClient((req) async {
+      if (req.url.path != '/ingest/library') {
+        return emptyPlaylistResponse(req);
+      }
       final body = jsonDecode(req.body) as Map<String, dynamic>;
       postedCounts.add((body['songs'] as List).length);
       return http.Response('{"ingested": 0}', 200);
@@ -45,15 +52,18 @@ void main() {
       chunkSize: 200,
     );
 
-    final total = await service.sync();
+    final summary = await service.sync();
 
-    expect(total, 400);
+    expect(summary.songs, 400);
     expect(postedCounts, [200, 200]);
   });
 
   test('posts wire-format songs (toJson shape)', () async {
     late Map<String, dynamic> firstSong;
     final inner = MockClient((req) async {
+      if (req.url.path != '/ingest/library') {
+        return emptyPlaylistResponse(req);
+      }
       final body = jsonDecode(req.body) as Map<String, dynamic>;
       firstSong = (body['songs'] as List).first as Map<String, dynamic>;
       return http.Response('{"ingested": 1}', 200);
@@ -84,17 +94,19 @@ void main() {
   });
 
   test('handles an empty library (progress 1.0, zero posts)', () async {
-    var posts = 0;
-    final inner = MockClient((_) async {
-      posts++;
-      return http.Response('{"ingested": 0}', 200);
+    var songPosts = 0;
+    final inner = MockClient((req) async {
+      if (req.url.path == '/ingest/library') {
+        songPosts++;
+      }
+      return emptyPlaylistResponse(req);
     });
     final service =
         LibrarySyncService(bridge: FakeBridge([]), api: await apiWith(inner));
     final progress = <double>[];
-    final total = await service.sync(onProgress: progress.add);
-    expect(total, 0);
-    expect(posts, 0);
+    final summary = await service.sync(onProgress: progress.add);
+    expect(summary.songs, 0);
+    expect(songPosts, 0);
     expect(progress.last, 1.0);
   });
 
@@ -130,10 +142,13 @@ void main() {
 
   test('re-entrant sync calls join the in-flight run, then reset for the next call',
       () async {
-    var posts = 0;
-    final inner = MockClient((_) async {
-      posts++;
-      return http.Response('{"ingested": 0}', 200);
+    var songPosts = 0;
+    final inner = MockClient((req) async {
+      if (req.url.path == '/ingest/library') {
+        songPosts++;
+        return http.Response('{"ingested": 0}', 200);
+      }
+      return emptyPlaylistResponse(req);
     });
     final service = LibrarySyncService(
       bridge: FakeBridge(List.generate(450, song)),
@@ -145,11 +160,27 @@ void main() {
     final b = service.sync();
     final results = await Future.wait([a, b]);
 
-    expect(results, [450, 450]);
-    expect(posts, 3);
+    expect(results.map((result) => result.songs), [450, 450]);
+    expect(songPosts, 3);
 
     final c = await service.sync();
-    expect(c, 450);
-    expect(posts, 6);
+    expect(c.songs, 450);
+    expect(songPosts, 6);
   });
+}
+
+http.Response emptyPlaylistResponse(http.Request request) {
+  if (request.url.path == '/ingest/playlists/syncs') {
+    return http.Response(
+      '{"syncId":"empty-sync","expiresAt":1788203600000}',
+      201,
+    );
+  }
+  if (request.url.path.endsWith('/complete')) {
+    return http.Response(
+      '{"playlists":0,"entries":0,"resolvedEntries":0,"unresolvedEntries":0}',
+      200,
+    );
+  }
+  return http.Response('{"accepted":0}', 200);
 }

@@ -83,6 +83,18 @@ class ApiClient {
     return res;
   }
 
+  Future<http.Response> putJson(String path, Object body) async {
+    final headers = await _headers();
+    headers['content-type'] = 'application/json';
+    final res = await _guard(() => _inner.put(
+          Uri.parse(baseUrl).resolve(path),
+          headers: headers,
+          body: jsonEncode(body),
+        ));
+    if (res.statusCode >= 400) throw ApiException(res.statusCode, res.body);
+    return res;
+  }
+
   Future<http.Response> getJson(String path) async {
     final headers = await _headers();
     final res = await _guard(

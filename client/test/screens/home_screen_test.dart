@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:mixtape/data/api/api_client.dart';
 import 'package:mixtape/data/auth/token_store.dart';
@@ -689,7 +688,9 @@ void main() {
       api.onListSessions = () async => [];
       final service = LibrarySyncService(
         bridge: FakeBridge([song(1), song(2), song(3)]),
-        api: await apiWith(MockClient((_) async => http.Response('{"ingested": 0}', 200))),
+        api: await apiWith(
+          MockClient((request) async => emptyPlaylistSyncResponse(request)),
+        ),
       );
       final container = _makeContainer(api, syncService: service);
       await _pump(tester, container);
@@ -709,6 +710,7 @@ void main() {
         find.byWidgetPredicate((w) => w is Text && (w.data?.contains('Synced 3 songs') ?? false)),
         findsOneWidget,
       );
+      expect(find.textContaining('and 0 playlists'), findsOneWidget);
     });
   });
 

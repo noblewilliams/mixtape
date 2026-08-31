@@ -522,13 +522,24 @@ class _LibrarySyncSheet extends ConsumerWidget {
                 Text(progress == 0 ? 'Syncing…' : 'Syncing… ${(progress * 100).round()}%'),
               ],
             ),
-          SyncDone(:final total) => Column(
+          SyncDone(:final summary) => Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'Synced $total ${total == 1 ? 'song' : 'songs'}. The DJ is listening.',
+                  'Synced ${summary.songs} ${summary.songs == 1 ? 'song' : 'songs'} and '
+                  '${summary.playlists} ${summary.playlists == 1 ? 'playlist' : 'playlists'}. '
+                  'The DJ is listening.',
                   textAlign: TextAlign.center,
                 ),
+                if (summary.unresolvedEntries > 0) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    '${summary.unresolvedEntries} playlist '
+                    '${summary.unresolvedEntries == 1 ? 'entry is' : 'entries are'} '
+                    'still unmatched.',
+                    textAlign: TextAlign.center,
+                  ),
+                ],
                 const SizedBox(height: 16),
                 TextButton(
                   key: const Key('sync-again'),

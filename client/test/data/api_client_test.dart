@@ -186,6 +186,40 @@ void main() {
     );
   });
 
+  test('putJson sends PUT with bearer + json body, throws on 4xx/5xx', () async {
+    String? seenMethod;
+    String? seenAuth;
+    Map<String, dynamic>? decoded;
+    final inner = MockClient((req) async {
+      seenMethod = req.method;
+      seenAuth = req.headers['Authorization'];
+      decoded = jsonDecode(req.body) as Map<String, dynamic>;
+      return http.Response('{"accepted":1}', 200);
+    });
+    final store = InMemoryTokenStore();
+    await store.write('tok-put');
+    final client = ApiClient(baseUrl: 'http://x', tokenStore: store, inner: inner);
+
+    final res = await client.putJson('/ingest/playlists/syncs/s1/playlists', {
+      'playlists': ['p1'],
+    });
+
+    expect(seenMethod, 'PUT');
+    expect(seenAuth, 'Bearer tok-put');
+    expect(decoded, {'playlists': ['p1']});
+    expect(res.body, '{"accepted":1}');
+
+    final failing = ApiClient(
+      baseUrl: 'http://x',
+      tokenStore: InMemoryTokenStore(),
+      inner: MockClient((_) async => http.Response('{"error":"conflict"}', 409)),
+    );
+    await expectLater(
+      failing.putJson('/ingest/playlists/syncs/s1/playlists', const {}),
+      throwsA(isA<ApiException>().having((e) => e.statusCode, 'statusCode', 409)),
+    );
+  });
+
   test('deleteJson sends DELETE with bearer, no body, throws on 4xx/5xx', () async {
     String? seenMethod;
     String? seenAuth;

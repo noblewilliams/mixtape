@@ -16,7 +16,8 @@ import 'package:mixtape/presentation/providers/dj_providers.dart';
 import 'package:mixtape/presentation/providers/library_sync_provider.dart';
 import 'package:mixtape/presentation/screens/home_screen.dart';
 import 'package:mixtape/presentation/screens/sign_in_screen.dart';
-import '../helpers/fake_bridge.dart' show FakeBridge, song, apiWith;
+import '../helpers/fake_bridge.dart'
+    show FakeBridge, song, apiWith, emptyPlaylistSyncResponse;
 
 /// Home now watches sessionsProvider on every build (sessions-first Home,
 /// Task 6) — a bare FakeDjApi with an empty session list keeps these
@@ -133,7 +134,9 @@ void main() {
     await store.write('tok-a');
     final service = LibrarySyncService(
       bridge: FakeBridge([song(1), song(2), song(3)]),
-      api: await apiWith(MockClient((_) async => http.Response('{"ingested": 0}', 200))),
+      api: await apiWith(
+        MockClient((request) async => emptyPlaylistSyncResponse(request)),
+      ),
     );
     await tester.pumpWidget(ProviderScope(
       overrides: [
@@ -186,7 +189,9 @@ void main() {
     await store.write('tok-a');
     final service = LibrarySyncService(
       bridge: FakeBridge([song(1), song(2), song(3)]),
-      api: await apiWith(MockClient((_) async => http.Response('{"ingested": 0}', 200))),
+      api: await apiWith(
+        MockClient((request) async => emptyPlaylistSyncResponse(request)),
+      ),
     );
     await tester.pumpWidget(ProviderScope(
       overrides: [

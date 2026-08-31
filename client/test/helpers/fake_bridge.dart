@@ -1,14 +1,30 @@
+import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:mixtape/data/api/api_client.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/musickit/musickit_bridge.dart';
 
 mixin NoPlaylistSnapshots {
-  Future<PlaylistSnapshotHeader> beginPlaylistSnapshot() => throw UnimplementedError();
-  Future<PlaylistSnapshotPage> fetchPlaylistSnapshotPage({required String snapshotId, required int offset, required int limit}) => throw UnimplementedError();
-  Future<PlaylistEntryPage> fetchPlaylistEntryPage({required String snapshotId, required String playlistAppleId, required int offset, required int limit}) => throw UnimplementedError();
-  Future<bool> cancelPlaylistSnapshot() => throw UnimplementedError();
-  Future<bool> releasePlaylistSnapshot(String snapshotId) => throw UnimplementedError();
+  Future<PlaylistSnapshotHeader> beginPlaylistSnapshot() async =>
+      const PlaylistSnapshotHeader(
+        snapshotId: 'empty-snapshot',
+        storefront: 'ng',
+        totalPlaylists: 0,
+        totalEntries: 0,
+      );
+  Future<PlaylistSnapshotPage> fetchPlaylistSnapshotPage({
+    required String snapshotId,
+    required int offset,
+    required int limit,
+  }) async => const PlaylistSnapshotPage(playlists: [], total: 0);
+  Future<PlaylistEntryPage> fetchPlaylistEntryPage({
+    required String snapshotId,
+    required String playlistAppleId,
+    required int offset,
+    required int limit,
+  }) async => const PlaylistEntryPage(entries: [], total: 0);
+  Future<bool> cancelPlaylistSnapshot() async => true;
+  Future<bool> releasePlaylistSnapshot(String snapshotId) async => true;
 }
 
 /// Mirrors the native contract enforced by MusicKitBridge.swift: offset 0 (re)builds
@@ -103,4 +119,23 @@ Future<ApiClient> apiWith(MockClient inner) async {
   final store = InMemoryTokenStore();
   await store.write('t');
   return ApiClient(baseUrl: 'http://x', tokenStore: store, inner: inner);
+}
+
+http.Response emptyPlaylistSyncResponse(http.Request request) {
+  if (request.url.path == '/ingest/playlists/syncs') {
+    return http.Response(
+      '{"syncId":"empty-sync","expiresAt":1788203600000}',
+      201,
+    );
+  }
+  if (request.url.path.endsWith('/complete')) {
+    return http.Response(
+      '{"playlists":0,"entries":0,"resolvedEntries":0,"unresolvedEntries":0}',
+      200,
+    );
+  }
+  if (request.url.path == '/ingest/library') {
+    return http.Response('{"ingested":0}', 200);
+  }
+  return http.Response('{"accepted":0}', 200);
 }
