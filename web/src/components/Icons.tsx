@@ -33,7 +33,7 @@ export function PlusIcon(props: IconProps) {
 export function SendIcon(props: IconProps) {
   return (
     <svg {...iconDefaults} {...props}>
-      <path d="m5 12 7-7 7 7M12 5v14" />
+      <path d="M12 19V5M8 9l4-4 4 4" />
     </svg>
   )
 }

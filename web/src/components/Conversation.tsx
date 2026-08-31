@@ -98,7 +98,9 @@ export function Conversation({ session, messages, loading = false, thinking, onS
             maxLength={2000}
           />
           <button className="send-button" type="submit" disabled={!draft.trim() || thinking || loading} aria-label="Send message">
-            <SendIcon />
+            <span className="send-button-surface" aria-hidden="true">
+              <SendIcon />
+            </span>
           </button>
         </form>
         <p>Nothing is added to Apple Music until you ask.</p>
