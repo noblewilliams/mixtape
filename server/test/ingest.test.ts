@@ -88,10 +88,21 @@ describe('POST /ingest/library', () => {
     expect(res.status).toBe(400)
   })
 
+  it('accepts a bounded opaque Apple catalog ID', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+
+    const res = await post(db, { songs: [song({ appleId: 'i.safe-ID_123~' })] })
+
+    expect(res.status).toBe(200)
+    expect(await db.select().from(tracks)).toMatchObject([{ appleId: 'i.safe-ID_123~' }])
+  })
+
   it.each([
-    ['unsafe characters', '123/../../catalog'],
-    ['non-numeric characters', '12abc34'],
-    ['an overlong value', '1'.repeat(33)],
+    ['unsafe path characters', '123/../../catalog'],
+    ['a comma delimiter', '123,456'],
+    ['spaces', '12 34'],
+    ['an overlong value', '1'.repeat(129)],
   ])('rejects an Apple catalog ID containing %s', async (_case, appleId) => {
     const db = await createTestDb()
     await seedUser(db)

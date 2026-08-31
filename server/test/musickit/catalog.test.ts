@@ -99,12 +99,12 @@ describe('Apple catalog client', () => {
       nowSeconds: () => 1_788_134_400,
     })
 
-    await catalog.getSongs('ng', ['1', 'bad id', 'x'.repeat(129), '2', '', '1'])
+    await catalog.getSongs('ng', ['1', 'opaque.ID_2~', 'bad id', 'x'.repeat(129), '1'])
     await catalog.getSongs('ng', ['bad,id', 'has/slash', 'x'.repeat(129)])
 
     expect(fetchLike).toHaveBeenCalledOnce()
     const [input] = fetchLike.mock.calls[0]
-    expect(new URL(input).searchParams.get('ids')).toBe('1,2')
+    expect(new URL(input).searchParams.get('ids')).toBe('1,opaque.ID_2~')
     expect(issueServerToken).toHaveBeenCalledOnce()
   })
 

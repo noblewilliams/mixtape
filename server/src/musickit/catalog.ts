@@ -2,6 +2,7 @@ import {
   parseArtworkMetadata,
   type ArtworkMetadata,
 } from '../artwork/normalize'
+import { isAppleSongId } from './apple-id'
 
 export { parseArtworkMetadata } from '../artwork/normalize'
 export type { ArtworkMetadata } from '../artwork/normalize'
@@ -58,7 +59,6 @@ const MAX_IDS_PER_REQUEST = 300
 const DEFAULT_TIMEOUT_MS = 5000
 const DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 const TOKEN_REFRESH_MARGIN_SECONDS = 60
-const APPLE_SONG_ID_PATTERN = /^[0-9]{1,32}$/
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -191,7 +191,7 @@ export function createAppleCatalogClient({
 
   return {
     async getSongs(storefront, appleIds) {
-      const requestedIds = [...new Set(appleIds.filter((id) => APPLE_SONG_ID_PATTERN.test(id)))]
+      const requestedIds = [...new Set(appleIds.filter(isAppleSongId))]
       const requested = new Set(requestedIds)
       const songs = new Map<string, CatalogSong>()
 

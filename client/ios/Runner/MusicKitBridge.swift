@@ -7,6 +7,15 @@ class MusicKitBridge: NSObject {
   private static let queue = DispatchQueue(label: "mixtape.musickit.bridge")
   private static var catalogCache: [MPMediaItem] = []
 
+  /// MusicKit declares playbackStoreID as opaque. Keep a bounded set of URL-
+  /// safe, comma-free characters that matches the server/catalog contract.
+  private static func isSupportedAppleSongID(_ value: String) -> Bool {
+    value.range(
+      of: #"^[A-Za-z0-9._~-]{1,128}$"#,
+      options: .regularExpression
+    ) != nil
+  }
+
   static func register(with messenger: FlutterBinaryMessenger) {
     let channel = FlutterMethodChannel(name: "mixtape/musickit", binaryMessenger: messenger)
     channel.setMethodCallHandler { call, result in
@@ -145,8 +154,11 @@ class MusicKitBridge: NSObject {
       // library mutation mid-sync can't shift offsets and drop songs. Serial queue = no concurrent rebuilds.
       if offset == 0 {
         let all = MPMediaQuery.songs().items ?? []
-        // Only songs with an Apple Music catalog identity; local-only rips have "0"/empty.
-        catalogCache = all.filter { !$0.playbackStoreID.isEmpty && $0.playbackStoreID != "0" }
+        // Only supported Apple catalog identities; local-only rips use "0"/empty,
+        // and filtering here keeps one malformed opaque ID from rejecting a page.
+        catalogCache = all.filter {
+          $0.playbackStoreID != "0" && isSupportedAppleSongID($0.playbackStoreID)
+        }
       } else if catalogCache.isEmpty {
         // Cold start at offset > 0: there's no snapshot to page from. Without this guard we'd
         // silently return an empty/zero page that reads as "sync complete" to the caller.

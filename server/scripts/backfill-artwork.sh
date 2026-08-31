@@ -104,7 +104,10 @@ fi
 BASE=${BASE%/}
 
 BODY_FILE=$(mktemp "${TMPDIR:-/tmp}/mixtape-artwork.XXXXXX")
-trap 'rm -f "$BODY_FILE"' EXIT HUP INT TERM
+HEADER_FILE=$(mktemp "${TMPDIR:-/tmp}/mixtape-artwork-header.XXXXXX")
+chmod 600 "$HEADER_FILE"
+printf 'X-Admin-Token: %s\n' "$TOKEN" > "$HEADER_FILE"
+trap 'rm -f "$BODY_FILE" "$HEADER_FILE"' EXIT HUP INT TERM
 
 request() {
   method=$1
@@ -120,7 +123,7 @@ request() {
       --connect-timeout 10 \
       --max-time 120 \
       --request "$method" \
-      --header "X-Admin-Token: $TOKEN" \
+      --header "@$HEADER_FILE" \
       "$BASE$path" 2>/dev/null)
     curl_status=$?
     set -e

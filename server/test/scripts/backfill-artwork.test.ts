@@ -29,7 +29,15 @@ while [ "$#" -gt 0 ]; do
     --output) out="$2"; shift 2 ;;
     --request) method="$2"; shift 2 ;;
     --write-out) shift 2 ;;
-    --header|--connect-timeout|--max-time) shift 2 ;;
+    --header)
+      header_arg="$2"
+      if [ -n "\${HEADER_CAPTURE_FILE:-}" ] && [[ "$header_arg" == @* ]]; then
+        header_path="\${header_arg#@}"
+        cp "$header_path" "$HEADER_CAPTURE_FILE"
+      fi
+      shift 2
+      ;;
+    --connect-timeout|--max-time) shift 2 ;;
     --silent|--show-error) shift ;;
     http://*|https://*) url="$1"; shift ;;
     *) shift ;;
@@ -51,6 +59,7 @@ printf '%s' "\${HTTP_STATUS:-200}"
     directory,
     stateFile: join(directory, 'state'),
     captureFile: join(directory, 'args'),
+    headerCaptureFile: join(directory, 'header'),
     env: {
       ...process.env,
       PATH: `${bin}:${process.env.PATH ?? ''}`,
@@ -107,6 +116,7 @@ describe('backfill-artwork.sh', () => {
       ARTWORK_API_BASE: '',
       DEV_VARS_FILE: devVars,
       CAPTURE_FILE: test.captureFile,
+      HEADER_CAPTURE_FILE: test.headerCaptureFile,
       HTTP_STATUS: '500',
       STATUS_BODY: '{"secret":"upstream-secret-body"}',
     }
@@ -121,7 +131,8 @@ describe('backfill-artwork.sh', () => {
     expect(error.stderr).not.toContain('upstream-secret-body')
     const args = await readFile(test.captureFile, 'utf8')
     expect(args).toContain('https://quoted.example.test/enrich/artwork/status')
-    expect(args).toContain('X-Admin-Token: quoted-token')
+    expect(args).not.toContain('quoted-token')
+    expect(await readFile(test.headerCaptureFile, 'utf8')).toBe('X-Admin-Token: quoted-token\n')
   })
 
   it('allows explicit loopback HTTP for local operator use', async () => {

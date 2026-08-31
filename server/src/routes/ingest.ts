@@ -5,12 +5,12 @@ import { sql } from 'drizzle-orm'
 import { tracks, userTracks } from '../db/schema'
 import type { AppVars } from '../app'
 import type { Db } from '../db/types'
+import { isAppleSongId } from '../musickit/apple-id'
 
 const songSchema = z.object({
-  // Apple Music catalog song IDs are decimal identifiers. Keeping this
-  // boundary deliberately narrow prevents path/query delimiters and
-  // unbounded identifiers from entering the shared catalog table.
-  appleId: z.string().regex(/^[0-9]{1,32}$/),
+  // MusicKit declares catalog IDs as opaque. Bound them to URL-safe,
+  // comma-free characters without assuming that every future ID is numeric.
+  appleId: z.string().refine(isAppleSongId),
   title: z.string().min(1),
   artist: z.string().min(1),
   album: z.string().nullable().optional(),

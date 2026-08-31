@@ -5,6 +5,7 @@ Single consolidated list. Detail lives in `decisions.md` (rationale) and the pla
 ## Owed right now
 
 - **Playlist intelligence Phase 2 plan:** specify deletion-safe playlist snapshots, native paging, per-user storefront persistence, and browse APIs from the locked design. Artwork is no longer a gate.
+- **Playlist probe visual confirmation:** confirm the two disposable playlists used by the rejected exact-rebuild probe still retain the same ordered tracks. The API capability result is locked, but this manual Task 4 follow-up remains unconfirmed.
 
 ## Selected next phase — artwork + playlist intelligence
 
