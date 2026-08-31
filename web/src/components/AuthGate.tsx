@@ -68,7 +68,6 @@ export function AuthGate({ auth, children }: AuthGateProps) {
         <div className="auth-intro">
           <span className="auth-wordmark">mixtape</span>
           <div className="auth-copy">
-            <p className="quiet-kicker">Your personal DJ</p>
             <h1 id="auth-title">A tape for right now.</h1>
             <p>Start with a mood, a memory, or one song. The DJ will shape the rest from music you already love.</p>
           </div>

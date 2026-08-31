@@ -1945,8 +1945,8 @@ input:focus-visible {
 }
 
 .auth-surface {
-  width: min(1060px, 100%);
-  min-height: 550px;
+  width: min(1160px, 100%);
+  min-height: 600px;
   display: grid;
   grid-template-columns: minmax(0, 44fr) minmax(0, 56fr);
   overflow: hidden;
@@ -1958,11 +1958,9 @@ input:focus-visible {
     #e9dfd8 76%,
     #f0dfe4 100%
   );
-  border: 1px solid rgba(255, 255, 255, 0.56);
+  border: 0;
   border-radius: 38px;
-  box-shadow:
-    0 38px 100px rgba(0, 0, 0, 0.33),
-    inset 0 1px 0 rgba(255, 255, 255, 0.56);
+  box-shadow: 0 38px 100px rgba(0, 0, 0, 0.33);
 }
 
 .auth-intro,
@@ -1988,13 +1986,9 @@ input:focus-visible {
   margin: auto 0;
 }
 
-.auth-copy .quiet-kicker {
-  color: rgba(52, 63, 72, 0.66);
-}
-
 .auth-copy h1 {
   max-width: 430px;
-  margin: 11px 0 20px;
+  margin: 0 0 20px;
   color: #4c4853;
   font: italic 470 clamp(48px, 5vw, 68px)/0.94 var(--marker);
   letter-spacing: -0.055em;

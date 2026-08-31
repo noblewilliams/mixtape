@@ -18,6 +18,7 @@ describe('Apple authentication gate', () => {
     render(<AuthGate auth={bridge()}>{() => <p>Signed in</p>}</AuthGate>)
 
     expect(screen.getByRole('heading', { name: 'A tape for right now.' })).toBeInTheDocument()
+    expect(screen.queryByText('Your personal DJ')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Continue with Apple' })).toBeInTheDocument()
     expect(screen.queryByText('Signed in')).not.toBeInTheDocument()
   })
