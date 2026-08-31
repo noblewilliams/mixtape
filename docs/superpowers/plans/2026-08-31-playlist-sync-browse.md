@@ -100,13 +100,13 @@ These refine the approved system design without changing its product behavior:
 - Modify: `server/test/db.test.ts`
 - Create: `server/test/playlists/schema.test.ts` if separation keeps `db.test.ts` focused
 
-- [ ] **Step 1: Write failing schema tests** before adding tables. Cover nullable metadata, artwork checks, nonnegative counts/positions/durations, playlist duplicates at different positions, user-scoped uniqueness, foreign-key cascades, and soft removal.
-- [ ] **Step 2: Add `user_music_profiles`.** Exact fields:
+- [x] **Step 1: Write failing schema tests** before adding tables. Cover nullable metadata, artwork checks, nonnegative counts/positions/durations, playlist duplicates at different positions, user-scoped uniqueness, foreign-key cascades, and soft removal.
+- [x] **Step 2: Add `user_music_profiles`.** Exact fields:
   - `user_id text primary key` → Better Auth user, cascade delete;
   - `apple_storefront text not null` with `^[a-z]{2}$` check;
   - nullable `library_synced_at`, `playlists_synced_at` timestamptz;
   - `created_at`, `updated_at` timestamptz.
-- [ ] **Step 3: Add canonical `user_playlists`.** Preserve the approved metadata and add no inferred capability:
+- [x] **Step 3: Add canonical `user_playlists`.** Preserve the approved metadata and add no inferred capability:
   - internal UUID primary key;
   - `user_id`, `apple_library_id`, nullable proven `apple_catalog_id`;
   - name/description/curator snapshots;
@@ -115,19 +115,19 @@ These refine the approved system design without changing its product behavior:
   - `can_edit boolean not null default false` and `is_mixtape_owned boolean not null default false`;
   - Apple dates, source fingerprint, `in_library`, created/updated timestamps;
   - unique `(user_id, apple_library_id)`.
-- [ ] **Step 4: Add canonical `playlist_entries`.** Include position, nullable resolved `track_id`, Apple library entry ID, nullable proven catalog ID, nullable `isrc_snapshot`, title/artist/album/duration/artwork snapshots, and timestamps. Unique `(playlist_id, position)` preserves duplicates while preventing two entries in one slot.
-- [ ] **Step 5: Add `playlist_sync_runs`.** Store user, status (`open | completed | failed | expired`), expected and received counts, storefront, start/expiry/completion timestamps, and the final summary needed for idempotent completion responses. Add a partial unique index for one `open` run per user.
-- [ ] **Step 6: Add typed staging tables.** `playlist_sync_playlists` is keyed by `(sync_id, apple_library_id)` with a unique `(sync_id, ordinal)`; `playlist_sync_entries` is keyed by `(sync_id, apple_playlist_id, position)` and has a composite foreign key back to the staged playlist. Mirror only normalized wire fields and include each playlist's declared entry count.
-- [ ] **Step 7: Index every foreign key and actual query shape.** Required indexes include:
+- [x] **Step 4: Add canonical `playlist_entries`.** Include position, nullable resolved `track_id`, Apple library entry ID, nullable proven catalog ID, nullable `isrc_snapshot`, title/artist/album/duration/artwork snapshots, and timestamps. Unique `(playlist_id, position)` preserves duplicates while preventing two entries in one slot.
+- [x] **Step 5: Add `playlist_sync_runs`.** Store user, status (`open | completed | failed | expired`), expected and received counts, storefront, start/expiry/completion timestamps, and the final summary needed for idempotent completion responses. Add a partial unique index for one `open` run per user.
+- [x] **Step 6: Add typed staging tables.** `playlist_sync_playlists` is keyed by `(sync_id, apple_library_id)` with a unique `(sync_id, ordinal)`; `playlist_sync_entries` is keyed by `(sync_id, apple_playlist_id, position)` and has a composite foreign key back to the staged playlist. Mirror only normalized wire fields and include each playlist's declared entry count.
+- [x] **Step 7: Index every foreign key and actual query shape.** Required indexes include:
   - active browse expression/keyset index on user plus `coalesce(apple_last_modified_at, updated_at)` and ID;
   - canonical entries `(playlist_id, position)`;
   - optional resolved `track_id` index;
   - sync runs `(user_id, status, started_at)`;
   - staging entry lookup `(sync_id, apple_playlist_id, position)`.
-- [ ] **Step 8: Generate and inspect migration 0012.** It must be expand-only: new tables/checks/indexes only. No rewrite or drop of artwork, tracks, user tracks, sessions, or auth schema.
-- [ ] **Step 9: Run focused and authoritative checks.** Run schema tests, typecheck, then `npx vitest run --no-file-parallelism`.
-- [ ] **Step 10: Adversarial review.** Try cross-user duplicate Apple IDs, duplicate positions, empty playlists, 0-playlist snapshots, invalid colours, missing FK indexes, and cascade cleanup of staging/canonical rows.
-- [ ] **Step 11: Commit.** Headline: `feat(server): Add playlist snapshot schema`.
+- [x] **Step 8: Generate and inspect migration 0012.** It must be expand-only: new tables/checks/indexes only. No rewrite or drop of artwork, tracks, user tracks, sessions, or auth schema.
+- [x] **Step 9: Run focused and authoritative checks.** Run schema tests, typecheck, then `npx vitest run --no-file-parallelism`.
+- [x] **Step 10: Adversarial review.** Try cross-user duplicate Apple IDs, duplicate positions, empty playlists, 0-playlist snapshots, invalid colours, missing FK indexes, and cascade cleanup of staging/canonical rows.
+- [x] **Step 11: Commit.** Headline: `feat(server): Add playlist snapshot schema`.
 
 ## Task 3: Implement the native immutable playlist snapshot module
 
