@@ -88,6 +88,21 @@ Before the implementation plan is finalized, run two thin, device-backed spikes:
 
 Observed on the founder's iPhone on 2026-08-31: both disposable candidates were found and their non-empty ordered entries resolved, but `MusicLibrary.shared.edit(...items:)` rejected the same-order rebuild for both the current Mixtape-created playlist and the playlist created directly in Music. The founder later reported that the current ordering looked intact but was unsure whether the Music-created candidate had lost one song; no pre-probe snapshot exists to resolve that possible side effect. Treat the manual no-op verification as inconclusive, run no further mutation probe in Phase 2, and use the new read-only snapshot pipeline to establish future baselines. Already-created Mixtape playlists may still be marked owned from trusted create-confirmation provenance, but ownership does not grant `rebuild`. The first implementation must use `append` only after that narrower operation is separately verified and `revised_copy` for insertion, removal, or reordering.
 
+### Read-only playlist contract — founder iPhone, 2026-08-31
+
+The approved aggregate-only probe enumerated **36 playlists and 1,333 entries** through `MusicLibraryRequest<Playlist>` plus `playlist.with(.entries, preferredSource: .library)`. All playlist IDs were non-empty and unique. Every entry exposed an underlying song item; 16 repeated underlying-song groups used distinct entry IDs, confirming that duplicate playlist occurrences must remain separate rows.
+
+The contract is deliberately conservative:
+
+- Storefront resolution succeeded and produced a valid lowercase two-letter country code.
+- Enumeration order is canonical. Thirty-five playlists reported clean zero-based positions, but one playlist contained 91 repeated/non-increasing position values. Persist `enumerated()` index as `position`; retain Apple's raw position only as optional diagnostics if ever needed, never as the canonical key.
+- Observed kinds were 23 `userShared`, 6 `editorial`, 2 `external`, and 5 nil. Nil remains `unknown`; do not infer user curation or editability from a missing kind.
+- Every underlying item ID differed from its playlist-entry ID, but no entry exposed an ISRC and the probe did not prove that the item ID was a catalog ID. Store it as an opaque library item ID. Keep `apple_catalog_id` and `track_id` null until an exact, evidence-backed resolver succeeds.
+- Typed MusicKit returned artwork objects for all 36 playlists and all 1,333 entries. All reported zero maximum dimensions, and a fixed 512×512 `Artwork.url(width:height:)` request returned no HTTPS URL. Background colour remained available for 1,363 of 1,369 artwork objects. Therefore `artwork_bg_color` is first-class while playlist/entry artwork URL and dimensions remain nullable.
+- Apple's documented `GET /v1/me/library/playlists` response can include artwork URL templates, `canEdit`, `hasCatalog`, and a global playlist ID. A local `MusicDataRequest` attempt failed before yielding a usable response body on this app setup. Phase 2 does not depend on that route, does not forward a Music User Token to the Worker, and defaults edit/catalog capability conservatively. Reopen the raw route only with a separate authenticated-client test and the same no-token/no-private-log constraints.
+
+The temporary probe, probe-only Profile compilation flag, aggregate result file, and method-channel entry point were removed after the run.
+
 ## Architecture
 
 ```text
@@ -116,7 +131,7 @@ Neon playlist snapshot                  │
 ### Responsibility split
 
 - **MediaPlayer remains the song/play-count source.** The current native query provides real per-song play counts and stable catalog IDs for eligible tracks.
-- **MusicKit for Swift becomes the playlist read/mutation source.** It provides playlist resources, artwork, entries, and automatic user-token handling on iOS.
+- **MusicKit for Swift becomes the playlist read/mutation source.** It provides playlist resources, ordered entry collections, artwork background colours, and automatic user-token handling on iOS. Typed library artwork URLs are nullable because the founder-device contract returned no usable URL or dimensions.
 - **The Worker owns catalog metadata and curation.** It uses only a developer token for public catalog calls and never receives or stores the listener's Music User Token.
 - **Neon owns the synchronized snapshot and edit drafts.** Apple Music remains the external durable source; the database is a queryable mirror plus Mixtape workflow state.
 - **The client applies Apple mutations.** It refetches immediately before apply, detects conflicts, performs the supported mutation, then confirms the resulting Apple identifiers and fingerprint to the server.
@@ -190,8 +205,8 @@ user_playlists
   artwork_width integer
   artwork_height integer
   artwork_bg_color text
-  kind text                         -- user, editorial, personal_mix, replay, unknown
-  can_edit boolean not null
+  kind text                         -- user, editorial, external, personal_mix, replay, user_shared, unknown
+  can_edit boolean not null default false
   is_mixtape_owned boolean not null default false
   apple_date_added timestamptz
   apple_last_modified_at timestamptz
@@ -205,6 +220,8 @@ index(user_id, in_library, updated_at)
 ```
 
 `is_mixtape_owned` is not inferred from the playlist name, author string, description, or `can_edit`. It is set only by a successful Mixtape create-confirmation or another trusted creation record. It is provenance for product behavior and taste-loop prevention, not proof of exact-rebuild capability. The founder-device spike rejected rebuild for the current `MPMediaLibrary` creation flow.
+
+`can_edit` defaults to false because the typed MusicKit surface used by Phase 2 exposes no editability flag and the authenticated raw endpoint was not proven on-device. `artwork_url_template`, width, and height are nullable independently of `artwork_bg_color`; a valid colour must not be discarded merely because the image URL is absent.
 
 `source_fingerprint` is an opaque client-produced SHA-256 value. The native bridge hashes a version hash when Apple exposes one; otherwise it hashes a documented canonical serialization of playlist ID, last-modified time, and the ordered entry identifiers. The same native function produces the sync fingerprint and the pre-apply fingerprint so server/client JSON serialization differences cannot create false conflicts.
 
@@ -349,16 +366,18 @@ The artwork job is separate from ReccoBeats/lyrics enrichment. An artwork failur
 
 ### Native snapshot
 
-The Swift bridge adds a paged playlist surface backed by MusicKit for Swift:
+The Swift bridge exposes an immutable, fully materialized playlist snapshot backed by MusicKit for Swift:
 
 ```text
-requestMusicAuthorization()
-fetchLibraryPlaylists(offset, limit)
-fetchPlaylistEntries(playlistId, offset, limit)
-fetchPlaylistFingerprint(playlistId)
+beginPlaylistSnapshot()
+  -> { snapshotId, storefront, totalPlaylists, totalEntries }
+fetchPlaylistSnapshotPage(snapshotId, offset, limit)
+releasePlaylistSnapshot(snapshotId)
 ```
 
-The bridge returns catalog IDs when Apple provides them and library IDs for unresolved/local entries. Playlist artwork uses MusicKit's requested-size URL/template data; it does not render a `UIImage` into a Flutter payload.
+The native snapshot follows every MusicKit entry page before exposing the snapshot to Flutter. It assigns canonical zero-based positions from enumeration order, preserves duplicates by entry ID, and treats playlist/item IDs as opaque library IDs. It returns a catalog ID only when a documented field or exact cross-source match proves that identity; the founder-device read proved none, so null is the correct initial value.
+
+Playlist and entry artwork carry `artwork_bg_color` whenever MusicKit supplies it. URL and dimension fields remain null when `Artwork.url(width:height:)` or maximum dimensions are unavailable; the bridge does not render a `UIImage` into a Flutter payload or invent a URL from an opaque ID.
 
 The native layer holds a per-run snapshot or opaque snapshot token so a library mutation cannot shift offsets mid-sync. As with the existing song bridge, a cold fetch at a nonzero offset fails loudly.
 

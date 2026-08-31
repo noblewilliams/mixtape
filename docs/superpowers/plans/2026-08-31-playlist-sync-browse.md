@@ -17,14 +17,14 @@
 - [`Playlist`](https://developer.apple.com/documentation/musickit/playlist) exposes an ID, kind, artwork, last-modified date, and entries relationship.
 - [`Playlist.Entry`](https://developer.apple.com/documentation/musickit/playlist/entry) exposes an entry ID, position, ISRC, snapshots, artwork, and optional underlying item.
 - [`MusicDataRequest.currentCountryCode`](https://developer.apple.com/documentation/musickit/musicdatarequest/currentcountrycode) returns the Apple Music account storefront.
-- [`Artwork`](https://developer.apple.com/documentation/musickit/artwork) exposes maximum dimensions, background colour, and concrete requested-size URLs.
+- [`Artwork`](https://developer.apple.com/documentation/musickit/artwork) exposes maximum dimensions, background colour, and a requested-size URL function; the founder-device read proved that URL/dimensions may still be unavailable for library playlist artwork.
 
 ## Scope and safety boundary
 
 - This phase adds collection, storage, browse APIs, and client data contracts. It does **not** add playlist taste scoring, playlist-inspired mix generation, conversational drafts, a playlist browse screen, or Apple Music writes.
 - The existing sync sheet may report song/playlist totals. A new browse screen is a substantial UI change and remains behind its required approval state board in Phase 5.
 - The exact-rebuild probe remains a rejection result. The founder later reported that the current order looked intact but was unsure whether the Music-created disposable playlist lost one song. There is no pre-probe snapshot capable of resolving that uncertainty. Do not run another mutation probe in Phase 2 and do not record the visual check as conclusively passed.
-- The installed SDK exposes no public playlist `canEdit` flag and no version hash. Phase 2 therefore stores raw observable metadata and reports direct-write capability conservatively as unavailable. It never infers editability from name, description, curator, or playlist kind.
+- The installed typed SDK exposes no public playlist `canEdit` flag and no version hash. Apple's raw library-playlist REST response documents `canEdit`, artwork templates, and global IDs, but the local `MusicDataRequest` probe did not yield a usable body. Phase 2 therefore stores typed observable metadata and reports direct-write capability conservatively as unavailable. It never infers editability from name, description, curator, or playlist kind.
 - `Playlist.Kind == nil` is not automatically classified as user-curated until the read-only device evidence in Task 1 confirms the observed shape. Unknown stays unknown; uncertain playlists do not become taste signals later by accident.
 - A MusicKit item ID is opaque. Apple library playlist/entry IDs are bounded for storage but are not passed through the catalog-song ID validator and are never interpolated into Apple URLs.
 - A catalog ID is populated only when a documented MusicKit surface or device evidence proves that identity. Do not relabel `Playlist.Entry.id` or `Playlist.Entry.Item.id` as a catalog ID merely because it looks numeric.
@@ -37,7 +37,7 @@
 These refine the approved system design without changing its product behavior:
 
 1. **One deep native snapshot module.** `PlaylistSnapshotStore` owns MusicKit requests, bounded pagination, entry ordering, artwork conversion, SHA-256 fingerprints, and memory release. `MusicKitBridge` remains a thin method-channel adapter.
-2. **Materialize before upload.** The native module finishes reading every playlist and entry before returning a snapshot ID. Flutter pages only from that cached immutable value, so mutations after materialization cannot shift offsets. MusicKit offers no database-style transaction while materializing; duplicate IDs, invalid positions, and changing counts fail the run instead of publishing a suspect snapshot.
+2. **Materialize before upload.** The native module finishes reading every playlist and entry before returning a snapshot ID. Flutter pages only from that cached immutable value, so mutations after materialization cannot shift offsets. MusicKit offers no database-style transaction while materializing; duplicate IDs, non-progressing pagination, and changing counts fail the run instead of publishing a suspect snapshot. Apple's reported entry position is diagnostic only because the founder-device probe found 91 repeated values in one otherwise enumerable playlist.
 3. **Typed relational staging.** Replace the design sketch's JSONB staging payloads with typed staging columns that mirror the validated wire contract. This gives database constraints to positions/counts/colours, makes completion an `INSERT … SELECT`-style publish, and avoids reparsing untrusted JSON inside the transaction.
 4. **Exact retry semantics.** Re-uploading the same staging key with byte-equivalent normalized values succeeds. Reusing a key with different values returns `409 sync_conflict`; it never silently rewrites a supposedly immutable snapshot.
 5. **Short publish transaction.** All Apple reads and HTTP uploads finish outside the transaction. Completion locks the user's music-profile row, validates staged counts, publishes canonical rows, soft-removes absent playlists, and commits. No network call occurs while a lock is held.
@@ -66,8 +66,8 @@ These refine the approved system design without changing its product behavior:
 - Modify after evidence, once its owner releases it: `docs/decisions.md`
 - Remove all probe-only source before commit
 
-- [ ] **Step 1: Write a temporary DEBUG-only read probe.** Use `MusicLibraryRequest<Playlist>` and `playlist.with(.entries, preferredSource: .library)`. It must not call `MusicLibrary.add`, `createPlaylist`, `edit`, `MPMediaPlaylist.addItem`, or any REST mutation.
-- [ ] **Step 2: Return fixed categories and counts only.** Capture:
+- [x] **Step 1: Write a temporary DEBUG-only read probe.** Use `MusicLibraryRequest<Playlist>` and `playlist.with(.entries, preferredSource: .library)`. It must not call `MusicLibrary.add`, `createPlaylist`, `edit`, `MPMediaPlaylist.addItem`, or any REST mutation.
+- [x] **Step 2: Return fixed categories and counts only.** Capture:
   - storefront present and normalized to two lowercase ASCII letters;
   - total playlists and entries;
   - observed `Playlist.Kind` counts, including nil/unknown;
@@ -78,16 +78,18 @@ These refine the approved system design without changing its product behavior:
   - ISRC presence count;
   - whether item IDs differ from entry IDs and whether any known catalog identity can be proven without inference;
   - valid artwork URL/dimension/background-colour counts.
-- [ ] **Step 3: Keep private data out of output.** Do not return or print playlist names, descriptions, curator names, IDs, track titles, artists, ISRCs, artwork URLs/colours, token data, or localized Apple errors.
-- [ ] **Step 4: Compile before device access.** Run `cd client && flutter test`, then the unsigned iOS build. If CocoaPods remains unavailable, use the already-established direct `xcodebuild` workspace command and record that boundary honestly.
-- [ ] **Step 5: Ask for action-time approval** immediately before reading the device playlist library through the probe.
-- [ ] **Step 6: Run once on the unlocked founder iPhone.** Capture only the fixed aggregate contract. This is read-only; no modified timestamp or playlist entry should change.
-- [ ] **Step 7: Remove the probe completely.** Search for its flag/method names and verify zero matches. Rebuild after removal.
-- [ ] **Step 8: Update the design contract.** Pin observed position normalization, kind mapping, identifier posture, and storefront behavior. If a catalog identity cannot be proven, keep `appleCatalogId` null and use ISRC-only exact resolution.
-- [ ] **Step 9: Adversarial review.** Confirm no mutation method is reachable, private strings cannot appear in logs, and the probe did not create a permanent debug endpoint.
-- [ ] **Step 10: Commit documentation only.** Headline: `docs: Record playlist read contract`.
+- [x] **Step 3: Keep private data out of output.** Do not return or print playlist names, descriptions, curator names, IDs, track titles, artists, ISRCs, artwork URLs/colours, token data, or localized Apple errors.
+- [x] **Step 4: Compile before device access.** Run `cd client && flutter test`, then the unsigned iOS build. If CocoaPods remains unavailable, use the already-established direct `xcodebuild` workspace command and record that boundary honestly.
+- [x] **Step 5: Ask for action-time approval** immediately before reading the device playlist library through the probe.
+- [x] **Step 6: Run once on the unlocked founder iPhone.** Capture only the fixed aggregate contract. This is read-only; no modified timestamp or playlist entry should change.
+- [x] **Step 7: Remove the probe completely.** Search for its flag/method names and verify zero matches. Rebuild after removal.
+- [x] **Step 8: Update the design contract.** Pin observed position normalization, kind mapping, identifier posture, and storefront behavior. If a catalog identity cannot be proven, keep `appleCatalogId` null and use ISRC-only exact resolution.
+- [x] **Step 9: Adversarial review.** Confirm no mutation method is reachable, private strings cannot appear in logs, and the probe did not create a permanent debug endpoint.
+- [x] **Step 10: Commit documentation only.** Headline: `docs: Record playlist read contract`.
 
 **Gate:** Stop before schema implementation if user playlists cannot be enumerated with ordered entries or if MusicKit access changes playlist contents during a read-only run.
+
+**Evidence:** 36 playlists and 1,333 song entries enumerated; IDs complete/unique; 16 duplicate-song groups preserved by distinct entry IDs; storefront valid; 35 playlists reported clean zero-based positions and one reported 91 repeated/non-increasing values, so enumeration index is canonical. Typed artwork exposed 1,363 background colours but no usable dimensions or URL across 1,369 artwork objects. No ISRC or proven catalog identity was observed. The documented raw playlist REST metadata route did not produce a usable body through `MusicDataRequest` and is not a Phase 2 dependency.
 
 ## Task 2: Add canonical and staging playlist schema
 
@@ -163,7 +165,7 @@ These refine the approved system design without changing its product behavior:
 - [ ] **Step 4: Materialize playlists with bounded MusicKit paging.** Page playlists and each entries relationship until `hasNextBatch` is false. Reject repeated playlist IDs, inconsistent counts, duplicate normalized positions, non-progressing pagination, or hard safety ceilings; never silently truncate.
 - [ ] **Step 5: Normalize entry order from collection enumeration.** Send zero-based contiguous positions from the materialized collection. Keep Apple's reported `entry.position` only as a validation signal determined in Task 1, not as an unchecked database position.
 - [ ] **Step 6: Map identifiers conservatively.** Always send bounded playlist ID and entry ID. Send ISRC when valid. Send `appleCatalogId` only under the Task 1 proven rule; otherwise null. Preserve music-video/local/unresolved entries as snapshots instead of dropping them.
-- [ ] **Step 7: Map artwork safely.** Request a fixed browse source size, retain maximum dimensions, convert `CGColor` through sRGB into lowercase six-digit hex, and allow any unrepresentable colour/URL to become null. The server revalidates every value.
+- [ ] **Step 7: Map artwork safely.** Request a fixed browse source size, retain only positive maximum dimensions, convert `CGColor` through sRGB into lowercase six-digit hex, and allow any unrepresentable colour/URL to become null. Preserve a valid background colour even when URL/dimensions are absent; this was the dominant founder-device shape. The server revalidates every value.
 - [ ] **Step 8: Compute `sourceFingerprint` with CryptoKit.** Pin a versioned, length-prefixed canonical byte serialization of playlist library ID, last-modified milliseconds, and every ordered entry's stable identifiers/fallback snapshot fields. Do not hash locale-dependent descriptions or Swift `String(describing:)` output.
 - [ ] **Step 9: Bound time/memory and release deterministically.** Check Swift task cancellation between every page/playlist, give Dart begin a dedicated bounded timeout, and cancel/release on success, error, cancellation, auth transition, or a new begin. A snapshot-too-large condition fails before any server sync begins.
 - [ ] **Step 10: Add the new Swift file to the Runner target** and compile Debug/Profile/Release through the workspace.
