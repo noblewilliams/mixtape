@@ -57,8 +57,9 @@ Apple exposes three materially different operations:
 
 | Target | Read | Append | Exact rebuild / reorder | Mixtape behavior |
 |---|---:|---:|---:|---|
-| Mixtape-owned editable playlist | Yes | Yes | Yes, pending device verification | Apply the exact draft |
-| User playlist created outside Mixtape | Yes | Usually, when Apple reports editable | No public guarantee; MusicKit documents rebuilds as app-created only | Append only when the desired result is append-only; otherwise create a revised copy |
+| Current Mixtape-created playlist (`MPMediaLibrary`) | Yes, device-verified | Pending append verification | No, device-rejected | Append only after separate verification; otherwise create a revised copy |
+| User playlist created outside Mixtape | Yes, device-verified | Usually, when Apple reports editable; still requires device verification | No, device-rejected | Append only when the desired result is append-only and verified; otherwise create a revised copy |
+| Future MusicKit-created playlist | Expected | Expected | Unverified | Never return `rebuild` until this creation path passes a separate device probe |
 | Apple editorial/personalized/non-editable playlist | Yes | No | No | Browse/use as context; create a new playlist from a desired revision |
 
 Apple's REST `POST /v1/me/library/playlists/{id}/tracks` adds tracks only to the end. MusicKit for Swift exposes a full `edit(...items:)` rebuild, but documents that it fails for a playlist another app created. These constraints are product behavior, not errors to hide.
@@ -84,7 +85,7 @@ Before the implementation plan is finalized, run two thin, device-backed spikes:
 1. **Catalog from Workers:** use a server-scoped developer token to call `GET /v1/catalog/{storefront}/songs?ids=...` from the deployed Worker and verify Nigerian-storefront artwork responses. This must not use the blocked iTunes endpoint.
 2. **Playlist ownership:** create a playlist through the current `MPMediaLibrary.getPlaylist` bridge, refetch it through MusicKit for Swift, and verify whether `MusicLibrary.edit(...items:)` recognizes it as app-created. Also attempt the same operation against a playlist created in Music to pin the failure shape.
 
-The second spike decides whether already-created Mixtape playlists can be marked owned automatically. Until verified, only playlists whose create-confirmation is recorded after this feature ships are guaranteed `is_mixtape_owned = true`.
+Observed on the founder's iPhone on 2026-08-31: both disposable candidates were found and their non-empty ordered entries resolved, but `MusicLibrary.shared.edit(...items:)` rejected the same-order rebuild for both the current Mixtape-created playlist and the playlist created directly in Music. Already-created Mixtape playlists may still be marked owned from trusted create-confirmation provenance, but ownership does not grant `rebuild`. The first implementation must use `append` only after that narrower operation is separately verified and `revised_copy` for insertion, removal, or reordering.
 
 ## Architecture
 
@@ -202,7 +203,7 @@ unique(user_id, apple_library_id)
 index(user_id, in_library, updated_at)
 ```
 
-`is_mixtape_owned` is not inferred from the playlist name, author string, description, or `can_edit`. It is set only by a successful Mixtape create-confirmation or a one-time verified ownership migration backed by the device spike.
+`is_mixtape_owned` is not inferred from the playlist name, author string, description, or `can_edit`. It is set only by a successful Mixtape create-confirmation or another trusted creation record. It is provenance for product behavior and taste-loop prevention, not proof of exact-rebuild capability. The founder-device spike rejected rebuild for the current `MPMediaLibrary` creation flow.
 
 `source_fingerprint` is an opaque client-produced SHA-256 value. The native bridge hashes a version hash when Apple exposes one; otherwise it hashes a documented canonical serialization of playlist ID, last-modified time, and the ordered entry identifiers. The same native function produces the sync fingerprint and the pre-apply fingerprint so server/client JSON serialization differences cannot create false conflicts.
 
@@ -533,7 +534,7 @@ POST /playlist-drafts/:id/prepare-apply
 
 The server verifies ownership, active status, draft version, and base fingerprint. It returns a short-lived apply plan containing the desired ordered Apple library/catalog IDs and one mode:
 
-- `rebuild`: replace the entries of a verified Mixtape-owned playlist;
+- `rebuild`: reserved for a future playlist creation path that separately passes an exact-rebuild device probe; the current implementation never returns this mode;
 - `append`: add only a trailing suffix to an editable external playlist;
 - `revised_copy`: create a new playlist with the complete desired order.
 
@@ -644,9 +645,8 @@ Authoritative full suite remains `npx vitest run --no-file-parallelism`.
 - Paged playlist and entry snapshots preserve duplicates/order.
 - Local imports carry a library ID when Apple exposes one.
 - Artwork URL and background colour mapping.
-- Current Mixtape-created playlist ownership spike.
 - External playlist append.
-- Mixtape-owned exact rebuild with middle insertion and reorder.
+- MusicKit-created playlist exact-rebuild re-spike before enabling `rebuild`.
 - Revised-copy creation preserving the desired order.
 - Device smoke: browse playlist → ask for two Daniel Caesar tracks → review positions → apply → verify exact result in Music.
 
@@ -698,7 +698,8 @@ Each rollout phase receives its own task-by-task implementation plan and adversa
 - Selecting a playlist allows a new mix to use its sound/taste profile.
 - Opening a playlist and asking for two Daniel Caesar songs produces exactly two nonduplicate eligible additions at deterministic proposed positions.
 - No Apple playlist changes before review/apply.
-- Mixtape-owned playlists receive the exact approved order when the capability spike validates rebuild support.
+- Current `MPMediaLibrary`-created and externally-created playlists never receive a `rebuild` apply plan.
+- A future MusicKit-created playlist receives the exact approved order only after that creation path passes a separate device probe.
 - External playlists use append only when the approved result is truly append-only; otherwise a revised copy is created and the source stays untouched.
 - A playlist changed on another device cannot be overwritten without an explicit rebase.
 - No Music User Token or lyric text is stored or logged.
@@ -707,9 +708,12 @@ Each rollout phase receives its own task-by-task implementation plan and adversa
 
 Resolved 2026-08-31: Apple catalog access works from Cloudflare's remote Worker runtime. A server-only token successfully queried the Nigerian storefront for an existing catalog ID and returned valid artwork plus a six-digit background colour. The unknown-ID path returned zero matches without upstream content, and the admin guard rejected an invalid token before making a catalog request. This approves the server-side artwork enrichment path.
 
-Still to resolve on the founder's iPhone:
+Resolved 2026-08-31: the current `MPMediaLibrary.getPlaylist` creation flow is not editable through MusicKit's full rebuild API. The Mixtape-created and Music-created disposable playlists were both found with resolvable non-empty ordered entries, and the same-order `MusicLibrary.edit(...items:)` call was rejected for each. This removes `rebuild` from the current apply contract; trusted Mixtape ownership remains useful provenance but does not confer write capability.
 
-- Whether playlists created through the current `MPMediaLibrary.getPlaylist` implementation are editable through MusicKit's full rebuild API.
+Still to resolve during playlist sync/apply planning:
+
+- Whether append-only mutation is reliable for the current Mixtape-created and editable external playlist classes.
+- Whether a future `MusicLibrary.createPlaylist` flow is exact-rebuildable and can replace the legacy creation bridge.
 - The exact stable identifier/fingerprint fields MusicKit exposes for user playlists and entries on the deployment iOS target.
 - Whether every local/imported entry needed for a rebuild can be resolved back to a MusicKit playlist-addable item.
 
