@@ -151,6 +151,14 @@ export const trackArtworkStatus = pgTable(
   ],
 )
 
+// A single row serializes artwork catalog runs across cron and admin requests.
+// Holding its row lock inside the batch transaction prevents duplicate Apple
+// requests and stale late-arriving writes without permanently claiming tracks.
+export const artworkRunLocks = pgTable('artwork_run_locks', {
+  name: text('name').primaryKey(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 export const djSessions = pgTable(
   'dj_sessions',
   {

@@ -110,6 +110,74 @@ describe('runArtworkBatch', () => {
     expect(result.remaining).toBe(5)
   })
 
+  it('serializes concurrent runs so they cannot fetch the same candidate', async () => {
+    const db = await createTestDb()
+    await seed(db, 'one', { createdAt: new Date('2026-01-01T00:00:00Z') })
+    await seed(db, 'two', { createdAt: new Date('2026-01-02T00:00:00Z') })
+    let releaseFirst!: () => void
+    const firstMayFinish = new Promise<void>((resolve) => { releaseFirst = resolve })
+    let firstStarted!: () => void
+    const firstDidStart = new Promise<void>((resolve) => { firstStarted = resolve })
+    const requested: string[][] = []
+
+    const firstRun = runArtworkBatch(
+      db,
+      deps(async (_storefront, ids) => {
+        requested.push([...ids])
+        firstStarted()
+        await firstMayFinish
+        return new Map(ids.map((id) => [id, song(id)]))
+      }),
+      1,
+    )
+    await firstDidStart
+    const secondRun = runArtworkBatch(
+      db,
+      deps(async (_storefront, ids) => {
+        requested.push([...ids])
+        return new Map(ids.map((id) => [id, song(id)]))
+      }),
+      1,
+    )
+    releaseFirst()
+
+    const results = await Promise.all([firstRun, secondRun])
+
+    expect(requested).toEqual([['one'], ['two']])
+    expect(results.map((result) => result.matched)).toEqual([1, 1])
+  })
+
+  it('prevents a late concurrent failure from recreating retry state after success', async () => {
+    const db = await createTestDb()
+    await seed(db, 'one')
+    let releaseSuccess!: () => void
+    const successMayFinish = new Promise<void>((resolve) => { releaseSuccess = resolve })
+    let successStarted!: () => void
+    const successDidStart = new Promise<void>((resolve) => { successStarted = resolve })
+    const lateFailure = vi.fn(async () => {
+      throw new AppleCatalogError('upstream', 503)
+    })
+
+    const successfulRun = runArtworkBatch(
+      db,
+      deps(async (_storefront, ids) => {
+        successStarted()
+        await successMayFinish
+        return new Map(ids.map((id) => [id, song(id)]))
+      }),
+      1,
+    )
+    await successDidStart
+    const overlappingRun = runArtworkBatch(db, deps(lateFailure), 1)
+    releaseSuccess()
+
+    const [, second] = await Promise.all([successfulRun, overlappingRun])
+
+    expect(second).toEqual({ processed: 0, matched: 0, missing: 0, failed: 0, remaining: 0 })
+    expect(lateFailure).not.toHaveBeenCalled()
+    expect(await db.select().from(trackArtworkStatus)).toEqual([])
+  })
+
   it('updates valid artwork and clears prior retry state', async () => {
     const db = await createTestDb()
     const track = await seed(db, 'one')
@@ -158,6 +226,31 @@ describe('runArtworkBatch', () => {
     expect(await db.select().from(trackArtworkStatus)).toMatchObject([
       { trackId: track.id, attempts: 1, lastCategory: 'malformed' },
     ])
+  })
+
+  it('does not erase known optional metadata during a valid artwork refresh', async () => {
+    const db = await createTestDb()
+    const track = await seed(db, 'one', { artwork: true })
+    const refreshed = song('one')
+    refreshed.artwork = {
+      ...refreshed.artwork!,
+      height: null,
+      bgColor: null,
+    }
+
+    const result = await runArtworkBatch(
+      db,
+      deps(async () => new Map([['one', refreshed]])),
+      10,
+    )
+
+    const [updated] = await db.select().from(tracks).where(eq(tracks.id, track.id))
+    expect(updated.artworkUrlTemplate).toContain('/one/')
+    expect(updated.artworkWidth).toBe(3000)
+    expect(updated.artworkHeight).toBe(1000)
+    expect(updated.artworkBgColor).toBe('abcdef')
+    expect(updated.artworkFetchedAt).toEqual(NOW)
+    expect(result).toMatchObject({ processed: 1, matched: 1, missing: 0, failed: 0 })
   })
 
   it('ignores an unrequested response ID', async () => {

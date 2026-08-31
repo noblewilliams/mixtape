@@ -82,10 +82,25 @@ if [ -z "$BASE" ]; then
   printf '%s\n' 'error: API base is required via --base, ARTWORK_API_BASE, or BETTER_AUTH_URL' >&2
   exit 2
 fi
-case "$BASE" in
-  http://*|https://*) ;;
-  *) printf '%s\n' 'error: API base must be an HTTP(S) URL' >&2; exit 2 ;;
-esac
+if ! node -e '
+  try {
+    const raw = process.argv[1];
+    const url = new URL(raw);
+    const loopback = url.hostname === "localhost" ||
+      url.hostname === "127.0.0.1" ||
+      url.hostname === "[::1]";
+    const safeTransport = url.protocol === "https:" ||
+      (url.protocol === "http:" && loopback);
+    const hasCredentials = url.username !== "" || url.password !== "";
+    const hasQueryOrFragment = raw.includes("?") || raw.includes("#");
+    if (!safeTransport || hasCredentials || hasQueryOrFragment) process.exit(1);
+  } catch {
+    process.exit(1);
+  }
+' "$BASE" 2>/dev/null; then
+  printf '%s\n' 'error: API base must use HTTPS or explicit loopback HTTP without credentials, query, or fragment' >&2
+  exit 2
+fi
 BASE=${BASE%/}
 
 BODY_FILE=$(mktemp "${TMPDIR:-/tmp}/mixtape-artwork.XXXXXX")

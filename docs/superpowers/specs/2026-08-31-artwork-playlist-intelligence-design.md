@@ -1,6 +1,6 @@
 # Artwork + Playlist Intelligence — System Design
 
-*Status: founder-approved 2026-08-31 · iOS 16 minimum locked · Phase 0–1 plan written*
+*Status: founder-approved 2026-08-31 · iOS 16 minimum locked · Phase 0–1 production-complete*
 *Companion docs: [vision](../../product/vision.md) · [v1 design](2026-08-29-mixtape-v1-design.md) · [decisions](../../decisions.md) · [backlog](../../backlog.md)*
 *Phase 0–1 plan: [capability spikes + artwork metadata](../plans/2026-08-31-artwork-capability-spikes.md)*
 

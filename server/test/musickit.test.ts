@@ -81,6 +81,27 @@ describe('MusicKit developer token', () => {
       ),
     ).toBeUndefined()
   })
+
+  it('shares the server catalog token across separately built Worker wiring', async () => {
+    const { privateKey } = await generateKeyPair('ES256', { extractable: true })
+    const privateKeyPem = await exportPKCS8(privateKey)
+    const authorizationHeaders: string[] = []
+    const fetchLike = vi.fn(async (_input: string | URL, init?: RequestInit) => {
+      authorizationHeaders.push(new Headers(init?.headers).get('authorization') ?? '')
+      return new Response('{"data":[]}', { status: 200 })
+    })
+    const env = {
+      APPLE_TEAM_ID: 'CACHE_TEAM',
+      MUSICKIT_KEY_ID: 'CACHE_KEY',
+      MUSICKIT_PRIVATE_KEY: privateKeyPem,
+    }
+
+    await buildMusicKit(env, [], fetchLike)?.catalog.getSongs('ng', ['1'])
+    await buildMusicKit(env, [], fetchLike)?.catalog.getSongs('ng', ['2'])
+
+    expect(authorizationHeaders).toHaveLength(2)
+    expect(authorizationHeaders[1]).toBe(authorizationHeaders[0])
+  })
 })
 
 describe('GET /musickit/token', () => {

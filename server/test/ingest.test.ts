@@ -9,7 +9,7 @@ const authed: AuthLike = {
 }
 
 const song = (over: Record<string, unknown> = {}) => ({
-  appleId: 'a1',
+  appleId: '1001',
   title: 'Song',
   artist: 'Artist',
   album: 'Album',
@@ -49,7 +49,7 @@ describe('POST /ingest/library', () => {
   it('inserts tracks and user_tracks', async () => {
     const db = await createTestDb()
     await seedUser(db)
-    const res = await post(db, { songs: [song(), song({ appleId: 'a2', title: 'Two' })] })
+    const res = await post(db, { songs: [song(), song({ appleId: '1002', title: 'Two' })] })
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ ingested: 2 })
     expect(await db.select().from(tracks)).toHaveLength(2)
@@ -86,6 +86,20 @@ describe('POST /ingest/library', () => {
     await seedUser(db)
     const res = await post(db, { songs: [{ title: 'no appleId' }] })
     expect(res.status).toBe(400)
+  })
+
+  it.each([
+    ['unsafe characters', '123/../../catalog'],
+    ['non-numeric characters', '12abc34'],
+    ['an overlong value', '1'.repeat(33)],
+  ])('rejects an Apple catalog ID containing %s', async (_case, appleId) => {
+    const db = await createTestDb()
+    await seedUser(db)
+
+    const res = await post(db, { songs: [song({ appleId })] })
+
+    expect(res.status).toBe(400)
+    expect(await db.select().from(tracks)).toEqual([])
   })
 
   it('rejects an empty batch', async () => {
@@ -156,7 +170,7 @@ describe('POST /ingest/library', () => {
   it('rejects a batch over 500 songs', async () => {
     const db = await createTestDb()
     await seedUser(db)
-    const songs = Array.from({ length: 501 }, (_, i) => song({ appleId: `a${i}` }))
+    const songs = Array.from({ length: 501 }, (_, i) => song({ appleId: String(100000 + i) }))
     const res = await post(db, { songs })
     expect(res.status).toBe(400)
   })

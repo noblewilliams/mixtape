@@ -13,7 +13,12 @@ import { handleScheduled } from './enrich/scheduled'
 import { anthropicLlm, anthropicComplete, buildAnthropic } from './dj/llm'
 import type { DjDeps } from './dj/loop'
 import { generateMusicKitDeveloperToken } from './musickit/token'
-import { createAppleCatalogClient, type AppleCatalogClient, type FetchLike } from './musickit/catalog'
+import {
+  createAppleCatalogClient,
+  createAppleCatalogTokenCache,
+  type AppleCatalogClient,
+  type FetchLike,
+} from './musickit/catalog'
 import type { MusicKitWiring } from './app'
 import type { ArtworkDeps } from './artwork/runner'
 
@@ -39,6 +44,11 @@ type Bindings = {
   AI?: { run(model: string, input: { text: string[] }): Promise<unknown> }
   ANTHROPIC_API_KEY?: string
 }
+
+// This cache holds signed server tokens only. The key is the non-secret Apple
+// team/key identity, so separately constructed request/cron wiring can reuse a
+// still-valid token without retaining the private key or any request data.
+const serverCatalogTokenCache = createAppleCatalogTokenCache()
 
 // neon-http (a single fetch() per query) can't run transactions at all — the
 // queue store's SELECT ... FOR UPDATE needs a real session-scoped connection,
@@ -124,7 +134,12 @@ export function buildMusicKit(
         privateKey,
         origin,
       }),
-    catalog: createAppleCatalogClient({ fetchLike, issueServerToken }),
+    catalog: createAppleCatalogClient({
+      fetchLike,
+      issueServerToken,
+      tokenCache: serverCatalogTokenCache,
+      tokenCacheKey: `${env.APPLE_TEAM_ID}:${keyId}`,
+    }),
   }
 }
 

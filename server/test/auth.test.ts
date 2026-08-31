@@ -1,11 +1,15 @@
 import { decodeJwt, decodeProtectedHeader } from 'jose'
-import { describe, it, expect } from 'vitest'
+import { afterEach, describe, it, expect, vi } from 'vitest'
 import { createTestDb } from './helpers/db'
 import { testApplePrivateKey, testAuthEnv } from './helpers/auth'
 import { createAuth, generateAppleClientSecret, parseWebOrigins } from '../src/auth/create-auth'
 import { createApp } from '../src/app'
 
 const testEnv = testAuthEnv
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 describe('auth mounting', () => {
   it('serves better-auth endpoints', async () => {
@@ -22,6 +26,28 @@ describe('auth mounting', () => {
     const app = createApp({ auth })
     const res = await app.request('http://localhost:8787/health')
     expect(res.status).toBe(200)
+  })
+
+  it('logs only a fixed marker when a request handler throws', async () => {
+    const sensitiveSentinel = 'private-upstream-body-sentinel'
+    const error = new Error(sensitiveSentinel)
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const app = createApp({
+      auth: {
+        handler: () => {
+          throw error
+        },
+        api: { getSession: async () => null },
+      },
+    })
+
+    const res = await app.request('http://localhost:8787/api/auth/fail')
+
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'internal' })
+    expect(logged).toHaveBeenCalledOnce()
+    expect(logged).toHaveBeenCalledWith('app request failed')
+    expect(JSON.stringify(logged.mock.calls)).not.toContain(sensitiveSentinel)
   })
 
   it('throws on missing or short secret', async () => {

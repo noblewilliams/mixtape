@@ -37,13 +37,24 @@ function artworkDeps(): ArtworkDeps {
 }
 
 describe('/enrich routes', () => {
-  it('rejects without or with a wrong admin token', async () => {
+  it('rejects a missing admin token', async () => {
     const db = await createTestDb()
     const app = createApp({ auth, db, enrich: { deps: okDeps, adminToken: 'secret' } })
     expect((await app.request('http://x/enrich/status')).status).toBe(401)
-    expect((await app.request('http://x/enrich/status', { headers: { 'X-Admin-Token': 'wrong' } })).status).toBe(401)
     expect((await app.request('http://x/enrich/run', { method: 'POST' })).status).toBe(401)
   })
+
+  it.each(['wrong!', 'different-length-token'])(
+    'rejects a wrong admin token regardless of input length',
+    async (provided) => {
+      const db = await createTestDb()
+      const app = createApp({ auth, db, enrich: { deps: okDeps, adminToken: 'secret' } })
+      const res = await app.request('http://x/enrich/status', {
+        headers: { 'X-Admin-Token': provided },
+      })
+      expect(res.status).toBe(401)
+    },
+  )
 
   it('runs a batch and reports status with the token', async () => {
     const db = await createTestDb()

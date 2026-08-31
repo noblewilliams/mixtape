@@ -123,4 +123,42 @@ describe('backfill-artwork.sh', () => {
     expect(args).toContain('https://quoted.example.test/enrich/artwork/status')
     expect(args).toContain('X-Admin-Token: quoted-token')
   })
+
+  it('allows explicit loopback HTTP for local operator use', async () => {
+    const test = await harness()
+    const env = {
+      ...test.env,
+      ARTWORK_API_BASE: 'http://127.0.0.1:8787',
+      CAPTURE_FILE: test.captureFile,
+    }
+
+    await execFileAsync('bash', [SCRIPT], { env })
+
+    expect(await readFile(test.captureFile, 'utf8')).toContain(
+      'http://127.0.0.1:8787/enrich/artwork/status',
+    )
+  })
+
+  it.each([
+    ['non-loopback HTTP', 'http://mixtape.example.test'],
+    ['lookalike loopback host', 'http://localhost.example.test'],
+    ['embedded credentials', 'https://operator:secret@mixtape.example.test'],
+    ['query string', 'https://mixtape.example.test?target=other'],
+    ['fragment', 'https://mixtape.example.test#other'],
+  ])('rejects an unsafe API base with %s', async (_label, base) => {
+    const test = await harness()
+    const env = {
+      ...test.env,
+      ARTWORK_API_BASE: base,
+      CAPTURE_FILE: test.captureFile,
+    }
+
+    const error = await execFileAsync('bash', [SCRIPT], { env }).catch(
+      (caught: unknown) => caught as { stdout: string; stderr: string },
+    )
+
+    expect(error.stderr).toContain('API base must use HTTPS or explicit loopback HTTP')
+    expect(error.stderr).not.toContain(base)
+    await expect(readFile(test.captureFile, 'utf8')).rejects.toThrow()
+  })
 })

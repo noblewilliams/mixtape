@@ -30,5 +30,5 @@
   //   ANTHROPIC_API_KEY       — DJ engine (Sonnet 5 agent loop); unset disables /sessions/* entirely
   // Optional var (not secret):
   //   ITUNES_STOREFRONT       — iTunes storefront code for enrichment lookups (default "ng")
-  // Later phases add: MusicKit developer-token key (P2 catalog).
+  // MusicKit keys also enable the server-only Apple catalog client used by artwork enrichment.
 }

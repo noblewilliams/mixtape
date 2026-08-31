@@ -39,12 +39,26 @@ export class AppleCatalogError extends Error {
   }
 }
 
-type TokenResult = { developerToken: string; expiresAt: number }
+export type AppleCatalogToken = { developerToken: string; expiresAt: number }
+export type AppleCatalogTokenCache = {
+  get(key: string): AppleCatalogToken | undefined
+  set(key: string, token: AppleCatalogToken): void
+}
+
+export function createAppleCatalogTokenCache(): AppleCatalogTokenCache {
+  const tokens = new Map<string, AppleCatalogToken>()
+  return {
+    get: (key) => tokens.get(key),
+    set: (key, token) => tokens.set(key, token),
+  }
+}
 
 const API_ROOT = 'https://api.music.apple.com'
 const MAX_IDS_PER_REQUEST = 300
 const DEFAULT_TIMEOUT_MS = 5000
+const DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 const TOKEN_REFRESH_MARGIN_SECONDS = 60
+const APPLE_SONG_ID_PATTERN = /^[0-9]{1,32}$/
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -71,22 +85,66 @@ function categoryForStatus(status: number): AppleCatalogErrorCategory {
   return 'upstream'
 }
 
+async function parseBoundedJson(response: Response, maxBytes: number): Promise<unknown> {
+  if (!response.body) throw new AppleCatalogError('response', response.status)
+
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let totalBytes = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      totalBytes += value.byteLength
+      if (totalBytes > maxBytes) {
+        await reader.cancel()
+        throw new AppleCatalogError('response', response.status)
+      }
+      chunks.push(value)
+    }
+  } catch (error) {
+    if (error instanceof AppleCatalogError) throw error
+    try {
+      await reader.cancel()
+    } catch {
+      // Cancellation is best-effort after an upstream stream error.
+    }
+    throw error
+  } finally {
+    reader.releaseLock()
+  }
+
+  const bytes = new Uint8Array(totalBytes)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return JSON.parse(new TextDecoder().decode(bytes))
+}
+
 export function createAppleCatalogClient({
   fetchLike,
   issueServerToken,
   nowSeconds = () => Math.floor(Date.now() / 1000),
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  maxResponseBytes = DEFAULT_MAX_RESPONSE_BYTES,
+  tokenCache = createAppleCatalogTokenCache(),
+  tokenCacheKey = 'client',
 }: {
   fetchLike: FetchLike
-  issueServerToken: () => Promise<TokenResult>
+  issueServerToken: () => Promise<AppleCatalogToken>
   nowSeconds?: () => number
   timeoutMs?: number
+  maxResponseBytes?: number
+  tokenCache?: AppleCatalogTokenCache
+  tokenCacheKey?: string
 }): AppleCatalogClient {
-  let cachedToken: TokenResult | undefined
-
   async function token(): Promise<string> {
+    let cachedToken = tokenCache.get(tokenCacheKey)
     if (!cachedToken || cachedToken.expiresAt - TOKEN_REFRESH_MARGIN_SECONDS <= nowSeconds()) {
       cachedToken = await issueServerToken()
+      tokenCache.set(tokenCacheKey, cachedToken)
     }
     return cachedToken.developerToken
   }
@@ -96,31 +154,44 @@ export function createAppleCatalogClient({
     url.pathname = `/v1/catalog/${encodeURIComponent(storefront)}/songs`
     url.searchParams.set('ids', ids.join(','))
 
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), timeoutMs)
-    let response: Response
+    let developerToken: string
     try {
-      response = await fetchLike(url, {
-        headers: { Authorization: `Bearer ${await token()}` },
-        signal: controller.signal,
-      })
+      developerToken = await token()
     } catch {
-      throw new AppleCatalogError(controller.signal.aborted ? 'timeout' : 'network')
-    } finally {
-      clearTimeout(timeout)
+      throw new AppleCatalogError('authorization')
     }
 
-    if (!response.ok) throw new AppleCatalogError(categoryForStatus(response.status), response.status)
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), timeoutMs)
+    let phase: 'fetch' | 'response' = 'fetch'
     try {
-      return await response.json()
-    } catch {
-      throw new AppleCatalogError('response', response.status)
+      const response = await fetchLike(url, {
+        headers: { Authorization: `Bearer ${developerToken}` },
+        signal: controller.signal,
+      })
+      phase = 'response'
+
+      if (!response.ok) {
+        try {
+          await response.body?.cancel()
+        } catch {
+          // The typed HTTP category is authoritative even if cancellation fails.
+        }
+        throw new AppleCatalogError(categoryForStatus(response.status), response.status)
+      }
+      return await parseBoundedJson(response, maxResponseBytes)
+    } catch (error) {
+      if (error instanceof AppleCatalogError) throw error
+      if (controller.signal.aborted) throw new AppleCatalogError('timeout')
+      throw new AppleCatalogError(phase === 'fetch' ? 'network' : 'response', phase === 'response' ? 200 : undefined)
+    } finally {
+      clearTimeout(timeout)
     }
   }
 
   return {
     async getSongs(storefront, appleIds) {
-      const requestedIds = [...new Set(appleIds.filter((id) => id.length > 0))]
+      const requestedIds = [...new Set(appleIds.filter((id) => APPLE_SONG_ID_PATTERN.test(id)))]
       const requested = new Set(requestedIds)
       const songs = new Map<string, CatalogSong>()
 

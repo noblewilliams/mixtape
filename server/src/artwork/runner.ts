@@ -1,5 +1,5 @@
-import { inArray, sql, type SQL } from 'drizzle-orm'
-import { trackArtworkStatus, tracks } from '../db/schema'
+import { eq, inArray, sql, type SQL } from 'drizzle-orm'
+import { artworkRunLocks, trackArtworkStatus, tracks } from '../db/schema'
 import type { Db } from '../db/types'
 import {
   AppleCatalogError,
@@ -97,64 +97,62 @@ type Failure = { trackId: string; category: ArtworkFailureCategory }
 type Match = { trackId: string; artwork: ArtworkMetadata }
 
 async function persistResults(db: Db, matches: Match[], failures: Failure[], now: Date) {
-  await db.transaction(async (tx) => {
-    if (matches.length > 0) {
-      const payload = JSON.stringify(
-        matches.map(({ trackId, artwork }) => ({
-          track_id: trackId,
-          url: artwork.url,
-          width: artwork.width,
-          height: artwork.height,
-          bg_color: artwork.bgColor,
+  if (matches.length > 0) {
+    const payload = JSON.stringify(
+      matches.map(({ trackId, artwork }) => ({
+        track_id: trackId,
+        url: artwork.url,
+        width: artwork.width,
+        height: artwork.height,
+        bg_color: artwork.bgColor,
+      })),
+    )
+    await db.execute(sql`
+      UPDATE tracks AS t
+      SET artwork_url_template = a.url,
+          artwork_width = COALESCE(a.width, t.artwork_width),
+          artwork_height = COALESCE(a.height, t.artwork_height),
+          artwork_bg_color = COALESCE(a.bg_color, t.artwork_bg_color),
+          artwork_fetched_at = ${now}
+      FROM jsonb_to_recordset(${payload}::jsonb) AS a(
+        track_id uuid,
+        url text,
+        width integer,
+        height integer,
+        bg_color text
+      )
+      WHERE t.id = a.track_id
+    `)
+    await db
+      .delete(trackArtworkStatus)
+      .where(inArray(trackArtworkStatus.trackId, matches.map((match) => match.trackId)))
+  }
+
+  if (failures.length > 0) {
+    await db
+      .insert(trackArtworkStatus)
+      .values(
+        failures.map(({ trackId, category }) => ({
+          trackId,
+          attempts: 1,
+          lastCategory: category,
+          nextAttemptAt: new Date(now.getTime() + retryMs(category)),
+          updatedAt: now,
         })),
       )
-      await tx.execute(sql`
-        UPDATE tracks AS t
-        SET artwork_url_template = a.url,
-            artwork_width = a.width,
-            artwork_height = a.height,
-            artwork_bg_color = a.bg_color,
-            artwork_fetched_at = ${now}
-        FROM jsonb_to_recordset(${payload}::jsonb) AS a(
-          track_id uuid,
-          url text,
-          width integer,
-          height integer,
-          bg_color text
-        )
-        WHERE t.id = a.track_id
-      `)
-      await tx
-        .delete(trackArtworkStatus)
-        .where(inArray(trackArtworkStatus.trackId, matches.map((match) => match.trackId)))
-    }
-
-    if (failures.length > 0) {
-      await tx
-        .insert(trackArtworkStatus)
-        .values(
-          failures.map(({ trackId, category }) => ({
-            trackId,
-            attempts: 1,
-            lastCategory: category,
-            nextAttemptAt: new Date(now.getTime() + retryMs(category)),
-            updatedAt: now,
-          })),
-        )
-        .onConflictDoUpdate({
-          target: trackArtworkStatus.trackId,
-          set: {
-            attempts: sql`${trackArtworkStatus.attempts} + 1`,
-            lastCategory: sql`excluded.last_category`,
-            nextAttemptAt: sql`excluded.next_attempt_at`,
-            updatedAt: now,
-          },
-        })
-    }
-  })
+      .onConflictDoUpdate({
+        target: trackArtworkStatus.trackId,
+        set: {
+          attempts: sql`${trackArtworkStatus.attempts} + 1`,
+          lastCategory: sql`excluded.last_category`,
+          nextAttemptAt: sql`excluded.next_attempt_at`,
+          updatedAt: now,
+        },
+      })
+  }
 }
 
-export async function runArtworkBatch(
+async function runLockedArtworkBatch(
   db: Db,
   deps: ArtworkDeps,
   requestedLimit: number,
@@ -209,6 +207,33 @@ export async function runArtworkBatch(
     failed: failures.length - missing,
     remaining,
   }
+}
+
+export async function runArtworkBatch(
+  db: Db,
+  deps: ArtworkDeps,
+  requestedLimit: number,
+): Promise<ArtworkRunResult> {
+  return db.transaction(async (tx) => {
+    const now = deps.now?.() ?? new Date()
+    await tx
+      .insert(artworkRunLocks)
+      .values({ name: 'catalog', updatedAt: now })
+      .onConflictDoNothing()
+    await tx.execute(sql`
+      SELECT name
+      FROM artwork_run_locks
+      WHERE name = 'catalog'
+      FOR UPDATE
+    `)
+
+    const result = await runLockedArtworkBatch(tx as unknown as Db, deps, requestedLimit)
+    await tx
+      .update(artworkRunLocks)
+      .set({ updatedAt: now })
+      .where(eq(artworkRunLocks.name, 'catalog'))
+    return result
+  })
 }
 
 export type ArtworkStatus = {

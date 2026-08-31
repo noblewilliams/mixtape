@@ -7,7 +7,10 @@ import type { AppVars } from '../app'
 import type { Db } from '../db/types'
 
 const songSchema = z.object({
-  appleId: z.string().min(1),
+  // Apple Music catalog song IDs are decimal identifiers. Keeping this
+  // boundary deliberately narrow prevents path/query delimiters and
+  // unbounded identifiers from entering the shared catalog table.
+  appleId: z.string().regex(/^[0-9]{1,32}$/),
   title: z.string().min(1),
   artist: z.string().min(1),
   album: z.string().nullable().optional(),

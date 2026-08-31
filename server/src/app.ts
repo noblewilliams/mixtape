@@ -46,8 +46,11 @@ export function createApp({
 }) {
   const app = new Hono<{ Variables: AppVars }>()
 
-  app.onError((err, c) => {
-    console.error(err)
+  app.onError((_err, c) => {
+    // Request errors may wrap upstream response bodies, user input, or
+    // credentials. Keep production logs useful as a failure signal without
+    // serializing the error object itself.
+    console.error('app request failed')
     return c.json({ error: 'internal' }, 500)
   })
 
