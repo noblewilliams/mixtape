@@ -1,11 +1,12 @@
-export type FetchLike = (url: string | URL, init?: RequestInit) => Promise<Response>
+import {
+  parseArtworkMetadata,
+  type ArtworkMetadata,
+} from '../artwork/normalize'
 
-export type ArtworkMetadata = {
-  url: string
-  width: number | null
-  height: number | null
-  bgColor: string | null
-}
+export { parseArtworkMetadata } from '../artwork/normalize'
+export type { ArtworkMetadata } from '../artwork/normalize'
+
+export type FetchLike = (url: string | URL, init?: RequestInit) => Promise<Response>
 
 export type CatalogSong = {
   appleId: string
@@ -42,45 +43,11 @@ type TokenResult = { developerToken: string; expiresAt: number }
 
 const API_ROOT = 'https://api.music.apple.com'
 const MAX_IDS_PER_REQUEST = 300
-const MAX_ARTWORK_URL_LENGTH = 2048
 const DEFAULT_TIMEOUT_MS = 5000
 const TOKEN_REFRESH_MARGIN_SECONDS = 60
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function optionalPositiveInteger(value: unknown): number | null | undefined {
-  if (value === undefined || value === null) return null
-  if (!Number.isInteger(value) || (value as number) <= 0) return undefined
-  return value as number
-}
-
-function optionalBackgroundColor(value: unknown): string | null | undefined {
-  if (value === undefined || value === null) return null
-  if (typeof value !== 'string' || !/^[0-9a-fA-F]{6}$/.test(value)) return undefined
-  return value.toLowerCase()
-}
-
-export function parseArtworkMetadata(value: unknown): ArtworkMetadata | null {
-  if (!isRecord(value) || typeof value.url !== 'string' || value.url.length > MAX_ARTWORK_URL_LENGTH) return null
-
-  let url: URL
-  try {
-    url = new URL(value.url)
-  } catch {
-    return null
-  }
-  if (url.protocol !== 'https:' || (url.hostname !== 'mzstatic.com' && !url.hostname.endsWith('.mzstatic.com'))) {
-    return null
-  }
-
-  const width = optionalPositiveInteger(value.width)
-  const height = optionalPositiveInteger(value.height)
-  const bgColor = optionalBackgroundColor(value.bgColor)
-  if (width === undefined || height === undefined || bgColor === undefined) return null
-
-  return { url: value.url, width, height, bgColor }
 }
 
 function parseSong(value: unknown): CatalogSong | null {

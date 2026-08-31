@@ -32,6 +32,66 @@ describe('db schema', () => {
     ).rejects.toThrow()
   })
 
+  it('round-trips nullable artwork metadata on a track', async () => {
+    const db = await createTestDb()
+    const fetchedAt = new Date('2026-08-31T10:00:00.000Z')
+    await db.insert(tracks).values({
+      appleId: 'art-1',
+      title: 'Song',
+      artist: 'Artist',
+      artworkUrlTemplate: 'https://is1-ssl.mzstatic.com/image/thumb/{w}x{h}bb.{f}',
+      artworkWidth: 3000,
+      artworkHeight: 3000,
+      artworkBgColor: 'a1b2c3',
+      artworkFetchedAt: fetchedAt,
+    })
+
+    const [track] = await db.select().from(tracks)
+    expect(track).toMatchObject({
+      artworkUrlTemplate: 'https://is1-ssl.mzstatic.com/image/thumb/{w}x{h}bb.{f}',
+      artworkWidth: 3000,
+      artworkHeight: 3000,
+      artworkBgColor: 'a1b2c3',
+      artworkFetchedAt: fetchedAt,
+    })
+  })
+
+  it('keeps artwork metadata nullable for existing tracks', async () => {
+    const db = await createTestDb()
+    const [track] = await db
+      .insert(tracks)
+      .values({ appleId: 'art-null', title: 'Song', artist: 'Artist' })
+      .returning()
+
+    expect(track.artworkUrlTemplate).toBeNull()
+    expect(track.artworkWidth).toBeNull()
+    expect(track.artworkHeight).toBeNull()
+    expect(track.artworkBgColor).toBeNull()
+    expect(track.artworkFetchedAt).toBeNull()
+  })
+
+  it.each(['A1B2C3', '#a1b2c3', ' a1b2c3', 'a1b2c', 'a1b2xz'])(
+    'rejects invalid database artwork colour %j',
+    async (artworkBgColor) => {
+      const db = await createTestDb()
+      await expect(
+        db.insert(tracks).values({ title: 'Song', artist: 'Artist', artworkBgColor }),
+      ).rejects.toThrow()
+    },
+  )
+
+  it.each([
+    { artworkWidth: 0 },
+    { artworkWidth: -1 },
+    { artworkHeight: 0 },
+    { artworkHeight: -1 },
+  ])('rejects non-positive database artwork dimensions: %j', async (dimensions) => {
+    const db = await createTestDb()
+    await expect(
+      db.insert(tracks).values({ title: 'Song', artist: 'Artist', ...dimensions }),
+    ).rejects.toThrow()
+  })
+
   it('links a user to a track with play count', async () => {
     const db = await createTestDb()
     await db.insert(user).values({

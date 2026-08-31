@@ -44,6 +44,11 @@ type CandidateRow = {
   duration_ms: number | null
   release_year: number | null
   explicit: boolean | null
+  artwork_url_template: string | null
+  artwork_width: number | null
+  artwork_height: number | null
+  artwork_bg_color: string | null
+  artwork_fetched_at: string | null
   created_at: string
   skip_features: boolean
   skip_meaning: boolean
@@ -61,6 +66,12 @@ function toTrackRow(r: CandidateRow): TrackRow {
     durationMs: r.duration_ms,
     releaseYear: r.release_year,
     explicit: r.explicit,
+    artworkUrlTemplate: r.artwork_url_template,
+    artworkWidth: r.artwork_width,
+    artworkHeight: r.artwork_height,
+    artworkBgColor: r.artwork_bg_color,
+    artworkFetchedAt:
+      r.artwork_fetched_at === null ? null : new Date(r.artwork_fetched_at),
     // Raw SQL hands back created_at as a string, not a Date, despite the
     // schema type — a type-only accommodation. Nothing below does date
     // arithmetic on it, so this cast is safe as long as that stays true.

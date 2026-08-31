@@ -12,6 +12,7 @@ import {
   primaryKey,
   doublePrecision,
   vector,
+  check,
 } from 'drizzle-orm/pg-core'
 import { user } from './auth-schema'
 
@@ -30,11 +31,28 @@ export const tracks = pgTable(
     durationMs: integer('duration_ms'),
     releaseYear: integer('release_year'),
     explicit: boolean('explicit'),
+    artworkUrlTemplate: text('artwork_url_template'),
+    artworkWidth: integer('artwork_width'),
+    artworkHeight: integer('artwork_height'),
+    artworkBgColor: text('artwork_bg_color'),
+    artworkFetchedAt: timestamp('artwork_fetched_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     uniqueIndex('tracks_apple_id_idx').on(t.appleId).where(sql`${t.appleId} IS NOT NULL`),
     index('tracks_isrc_idx').on(t.isrc),
+    check(
+      'tracks_artwork_bg_color_check',
+      sql`${t.artworkBgColor} IS NULL OR ${t.artworkBgColor} ~ '^[0-9a-f]{6}$'`,
+    ),
+    check(
+      'tracks_artwork_width_positive_check',
+      sql`${t.artworkWidth} IS NULL OR ${t.artworkWidth} > 0`,
+    ),
+    check(
+      'tracks_artwork_height_positive_check',
+      sql`${t.artworkHeight} IS NULL OR ${t.artworkHeight} > 0`,
+    ),
   ],
 )
 
