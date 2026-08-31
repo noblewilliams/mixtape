@@ -12,6 +12,8 @@ import type { Db } from './db/types'
 import { handleScheduled } from './enrich/scheduled'
 import { anthropicLlm, anthropicComplete, buildAnthropic } from './dj/llm'
 import type { DjDeps } from './dj/loop'
+import { generateMusicKitDeveloperToken } from './musickit/token'
+import type { MusicKitWiring } from './app'
 
 // Minimal structural stand-in for the platform's ScheduledController — this
 // project's tsconfig doesn't pull in @cloudflare/workers-types, so the real
@@ -27,6 +29,8 @@ type Bindings = {
   APPLE_TEAM_ID: string
   APPLE_KEY_ID: string
   APPLE_PRIVATE_KEY: string
+  MUSICKIT_KEY_ID?: string
+  MUSICKIT_PRIVATE_KEY?: string
   WEB_ORIGINS: string
   ENRICH_ADMIN_TOKEN?: string
   ITUNES_STOREFRONT?: string
@@ -85,6 +89,27 @@ function buildDjDeps(env: Bindings): DjDeps | undefined {
   }
 }
 
+function buildMusicKit(env: Bindings, allowedOrigins: string[]): MusicKitWiring | undefined {
+  const keyId = env.MUSICKIT_KEY_ID
+  const privateKey = env.MUSICKIT_PRIVATE_KEY
+
+  if (!keyId && !privateKey) return undefined
+  if (!keyId || !privateKey) {
+    throw new Error('MUSICKIT_KEY_ID and MUSICKIT_PRIVATE_KEY must be configured together')
+  }
+
+  return {
+    allowedOrigins,
+    issueDeveloperToken: (origin) =>
+      generateMusicKitDeveloperToken({
+        teamId: env.APPLE_TEAM_ID,
+        keyId,
+        privateKey,
+        origin,
+      }),
+  }
+}
+
 export default {
   async fetch(req: Request, env: Bindings, ctx: ExecutionContext) {
     const { db, pool } = buildDb(env)
@@ -94,6 +119,7 @@ export default {
     // every failure instead of just the happy path.
     try {
       const auth = createAuth(db, env)
+      const allowedOrigins = parseWebOrigins(env.WEB_ORIGINS)
       const deps = buildDeps(env)
       // /enrich/* is only mounted when both an admin token and the AI binding
       // are configured. No AI binding → no enrich surface: better a 404 than
@@ -101,7 +127,8 @@ export default {
       const enrich = deps && env.ENRICH_ADMIN_TOKEN ? { adminToken: env.ENRICH_ADMIN_TOKEN, deps } : undefined
       const djDeps = buildDjDeps(env)
       const dj = djDeps ? { deps: djDeps } : undefined
-      const app = createApp({ auth, db, enrich, dj, allowedOrigins: parseWebOrigins(env.WEB_ORIGINS) })
+      const musicKit = buildMusicKit(env, allowedOrigins)
+      const app = createApp({ auth, db, enrich, dj, musicKit, allowedOrigins })
       return await app.fetch(req, env, ctx)
     } finally {
       // Closes the pool's socket(s) after the response is built rather than

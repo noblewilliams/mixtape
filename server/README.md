@@ -19,6 +19,8 @@ APPLE_WEB_CLIENT_ID=
 APPLE_TEAM_ID=
 APPLE_KEY_ID=
 APPLE_PRIVATE_KEY=
+MUSICKIT_KEY_ID=
+MUSICKIT_PRIVATE_KEY=
 WEB_ORIGINS=http://localhost:4176
 ```
 
@@ -28,6 +30,20 @@ redirect flow. The Apple Service must register the production callback as
 `https://<api-origin>/api/auth/callback/apple`. Apple does not accept localhost
 or non-HTTPS callback URLs, so the complete browser flow is tested on the
 deployed HTTPS origin.
+
+`MUSICKIT_KEY_ID` and `MUSICKIT_PRIVATE_KEY` are a separate Apple Music key
+pair. Keep them separate from the Sign in with Apple key so either credential
+can be rotated or revoked without breaking the other flow. When both values are
+present, the authenticated `GET /musickit/token` route issues a one-hour
+developer token for the request's exact allowed web origin. A partial MusicKit
+configuration fails at startup; omitting both values disables the route.
+
+Store private keys as Worker secrets rather than checked-in vars:
+
+```txt
+npx wrangler secret put APPLE_PRIVATE_KEY
+npx wrangler secret put MUSICKIT_PRIVATE_KEY
+```
 
 ```txt
 npm run deploy

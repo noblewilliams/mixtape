@@ -6,6 +6,7 @@ import { ingestRoutes } from './routes/ingest'
 import { enrichRoutes } from './routes/enrich'
 import { sessionRoutes } from './routes/sessions'
 import { memoriesRoutes } from './routes/memories'
+import { musicKitRoutes } from './routes/musickit'
 import type { Db } from './db/types'
 import type { EnrichDeps } from './enrich/pipeline'
 import type { DjDeps } from './dj/loop'
@@ -22,18 +23,24 @@ export type AppVars = { user: { id: string } }
 
 export type EnrichWiring = { deps: EnrichDeps; adminToken: string }
 export type DjWiring = { deps: DjDeps }
+export type MusicKitWiring = {
+  allowedOrigins: string[]
+  issueDeveloperToken: (origin: string) => Promise<{ developerToken: string; expiresAt: number }>
+}
 
 export function createApp({
   auth,
   db,
   enrich,
   dj,
+  musicKit,
   allowedOrigins = [],
 }: {
   auth: AuthLike
   db?: Db
   enrich?: EnrichWiring
   dj?: DjWiring
+  musicKit?: MusicKitWiring
   allowedOrigins?: string[]
 }) {
   const app = new Hono<{ Variables: AppVars }>()
@@ -62,6 +69,11 @@ export function createApp({
   //   /me/memories/* [P4 live]
   app.all('/api/auth/*', (c) => auth.handler(c.req.raw))
   app.get('/me', requireSession(auth), (c) => c.json({ user: c.get('user') }))
+
+  if (musicKit) {
+    app.use('/musickit/*', requireSession(auth))
+    app.route('/musickit', musicKitRoutes(musicKit))
+  }
 
   if (db) {
     app.use('/ingest/*', requireSession(auth))
