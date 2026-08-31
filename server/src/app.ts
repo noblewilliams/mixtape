@@ -3,6 +3,7 @@ import { cors } from 'hono/cors'
 import { requireSession } from './middleware/require-session'
 import { requireAdmin } from './middleware/require-admin'
 import { ingestRoutes } from './routes/ingest'
+import { playlistIngestRoutes } from './routes/playlist-ingest'
 import { enrichRoutes } from './routes/enrich'
 import { sessionRoutes } from './routes/sessions'
 import { memoriesRoutes } from './routes/memories'
@@ -60,7 +61,7 @@ export function createApp({
       cors({
         origin: allowedOrigins,
         allowHeaders: ['Authorization', 'Content-Type'],
-        allowMethods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+        allowMethods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
         credentials: true,
         maxAge: 600,
       }),
@@ -82,6 +83,7 @@ export function createApp({
   if (db) {
     app.use('/ingest/*', requireSession(auth))
     app.route('/ingest', ingestRoutes(db))
+    app.route('/ingest', playlistIngestRoutes(db))
 
     app.use('/me/memories/*', requireSession(auth))
     app.route('/me/memories', memoriesRoutes(db))
