@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { createApp, type AuthLike } from '../src/app'
 import { createTestDb } from './helpers/db'
+import { testAuthEnv } from './helpers/auth'
 import { createAuth } from '../src/auth/create-auth'
 
 function stubAuth(session: { user: { id: string } } | null): AuthLike {
@@ -27,11 +28,7 @@ describe('session middleware', () => {
 
   it('authenticates a real bearer session end-to-end', async () => {
     const db = await createTestDb()
-    const auth = createAuth(db, {
-      BETTER_AUTH_SECRET: 'test-secret-test-secret-test-secret',
-      BETTER_AUTH_URL: 'http://localhost:8787',
-      APPLE_BUNDLE_ID: 'com.noble.mixtape',
-    })
+    const auth = createAuth(db, testAuthEnv)
     const ctx = await auth.$context
     const u = await ctx.internalAdapter.createUser(
       { email: 'b@b.com', name: 'B', emailVerified: true },

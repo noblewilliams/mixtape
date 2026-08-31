@@ -3,11 +3,12 @@ import { Cassette } from './Cassette'
 import { CloseIcon } from './Icons'
 
 type NewTapeDialogProps = {
+  busy?: boolean
   onClose: () => void
   onCreate: (title: string) => void
 }
 
-export function NewTapeDialog({ onClose, onCreate }: NewTapeDialogProps) {
+export function NewTapeDialog({ busy = false, onClose, onCreate }: NewTapeDialogProps) {
   const [title, setTitle] = useState('')
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -20,12 +21,12 @@ export function NewTapeDialog({ onClose, onCreate }: NewTapeDialogProps) {
   return (
     <div className="overlay" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className="dialog" role="dialog" aria-modal="true" aria-labelledby="new-tape-title">
-        <button className="dialog-close" type="button" onClick={onClose} aria-label="Close new tape dialog">
+        <button className="dialog-close" type="button" onClick={onClose} aria-label="Close new tape dialog" disabled={busy}>
           <CloseIcon />
         </button>
         <p className="quiet-kicker">Side A</p>
         <h2 id="new-tape-title">Make a new tape</h2>
-        <p>Name the moment. Your first message will tell the DJ what belongs on it.</p>
+        <p>Describe the moment. This becomes your first message to the DJ.</p>
         <form onSubmit={submit}>
           <label htmlFor="new-tape-name">What should this tape feel like?</label>
           <input
@@ -35,13 +36,14 @@ export function NewTapeDialog({ onClose, onCreate }: NewTapeDialogProps) {
             onChange={(event) => setTitle(event.target.value)}
             placeholder="Late dinner with old friends"
             maxLength={80}
+            disabled={busy}
           />
           <div className="dialog-actions">
-            <button className="dialog-cancel" type="button" onClick={onClose}>
+            <button className="dialog-cancel" type="button" onClick={onClose} disabled={busy}>
               Cancel
             </button>
-            <button className="dialog-confirm" type="submit" disabled={!title.trim()}>
-              Start tape
+            <button className="dialog-confirm" type="submit" disabled={!title.trim() || busy}>
+              {busy ? 'Making tape…' : 'Start tape'}
             </button>
           </div>
         </form>

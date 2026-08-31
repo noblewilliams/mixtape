@@ -1,0 +1,69 @@
+import type {
+  ApiMessage,
+  ApiQueueTrack,
+  ApiSessionSummary,
+  CreateSessionResponse,
+  MixtapeApi,
+  SessionDetailResponse,
+} from '../api/client'
+import { demoQueue, demoSessions, makeConversationFor } from '../data/demo'
+
+const summaries: ApiSessionSummary[] = demoSessions.map((session) => ({
+  id: session.id,
+  title: session.title,
+  status: session.status,
+  queueVersion: session.queueVersion,
+  updatedAt: session.updatedAt,
+  trackCount: session.trackCount,
+  durationMs: Math.max(0, Number.parseInt(session.durationLabel, 10)) * 60_000,
+}))
+
+function messagesFor(sessionId: string): ApiMessage[] {
+  const session = demoSessions.find((item) => item.id === sessionId) ?? demoSessions[0]
+  return makeConversationFor(session).map((message) => ({ ...message }))
+}
+
+function queueFor(sessionId: string): ApiQueueTrack[] {
+  return sessionId === demoSessions[0].id ? demoQueue.map((track) => ({ ...track })) : []
+}
+
+export function createFakeApi(overrides: Partial<MixtapeApi> = {}): MixtapeApi {
+  const api: MixtapeApi = {
+    listSessions: async () => ({ sessions: summaries.map((session) => ({ ...session })) }),
+    getSession: async (sessionId): Promise<SessionDetailResponse> => {
+      const session = summaries.find((item) => item.id === sessionId) ?? summaries[0]
+      return { session: { ...session }, messages: messagesFor(sessionId), queue: queueFor(sessionId) }
+    },
+    createSession: async (prompt): Promise<CreateSessionResponse> => {
+      const createdAt = new Date().toISOString()
+      return {
+        session: {
+          id: 'created-session',
+          title: prompt,
+          status: 'active',
+          queueVersion: 1,
+          updatedAt: createdAt,
+        },
+        messages: [
+          { id: 'created-user', role: 'user', content: prompt, createdAt },
+          { id: 'created-dj', role: 'dj', content: 'I made a first pass for this moment.', queueVersion: 1, createdAt },
+        ],
+        queue: [],
+      }
+    },
+    sendMessage: async (_sessionId, _text) => ({
+      djMessage: {
+        id: 'reply-message',
+        role: 'dj',
+        content: 'I kept the opening intact, then reshaped the middle around that feeling.',
+        queueVersion: 4,
+        createdAt: new Date().toISOString(),
+      },
+      queue: demoQueue.map((track) => ({ ...track })),
+      queueVersion: 4,
+    }),
+    recordSessionEvent: async () => ({ ok: true }),
+  }
+
+  return { ...api, ...overrides }
+}

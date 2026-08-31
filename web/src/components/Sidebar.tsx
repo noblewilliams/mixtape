@@ -1,25 +1,29 @@
 import type { AppView, DjSession } from '../domain'
 import { Cassette } from './Cassette'
-import { HomeIcon, PlusIcon, SyncIcon } from './Icons'
+import { HomeIcon, PlusIcon, SignOutIcon, SyncIcon } from './Icons'
 
 type SidebarProps = {
   sessions: DjSession[]
-  activeSessionId: string
+  activeSessionId: string | null
   activeView: AppView
+  userName: string
   onOpenSession: (id: string) => void
   onOpenHome: () => void
   onNewTape: () => void
   onSync: () => void
+  onSignOut: () => void
 }
 
 export function Sidebar({
   sessions,
   activeSessionId,
   activeView,
+  userName,
   onOpenSession,
   onOpenHome,
   onNewTape,
   onSync,
+  onSignOut,
 }: SidebarProps) {
   return (
     <aside className="sidebar" aria-label="Mixtape navigation">
@@ -75,14 +79,17 @@ export function Sidebar({
 
       <div className="sidebar-footer">
         <span className="avatar" aria-hidden="true">
-          N
+          {userName.trim().charAt(0).toUpperCase() || 'M'}
         </span>
         <span className="account-copy">
-          <strong>Noble</strong>
-          <small>Apple Music connected</small>
+          <strong>{userName}</strong>
+          <small>Signed in with Apple</small>
         </span>
         <button className="sync-button" type="button" onClick={onSync} aria-label="Sync music library">
           <SyncIcon />
+        </button>
+        <button className="sync-button" type="button" onClick={onSignOut} aria-label="Sign out">
+          <SignOutIcon />
         </button>
       </div>
     </aside>

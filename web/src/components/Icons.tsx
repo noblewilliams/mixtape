@@ -58,6 +58,15 @@ export function SyncIcon(props: IconProps) {
   )
 }
 
+export function SignOutIcon(props: IconProps) {
+  return (
+    <svg {...iconDefaults} {...props}>
+      <path d="M10 5H5.5A1.5 1.5 0 0 0 4 6.5v11A1.5 1.5 0 0 0 5.5 19H10" />
+      <path d="m14 8 4 4-4 4M18 12H9" />
+    </svg>
+  )
+}
+
 export function CloseIcon(props: IconProps) {
   return (
     <svg {...iconDefaults} {...props}>

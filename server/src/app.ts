@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { cors } from 'hono/cors'
 import { requireSession } from './middleware/require-session'
 import { requireAdmin } from './middleware/require-admin'
 import { ingestRoutes } from './routes/ingest'
@@ -22,13 +23,38 @@ export type AppVars = { user: { id: string } }
 export type EnrichWiring = { deps: EnrichDeps; adminToken: string }
 export type DjWiring = { deps: DjDeps }
 
-export function createApp({ auth, db, enrich, dj }: { auth: AuthLike; db?: Db; enrich?: EnrichWiring; dj?: DjWiring }) {
+export function createApp({
+  auth,
+  db,
+  enrich,
+  dj,
+  allowedOrigins = [],
+}: {
+  auth: AuthLike
+  db?: Db
+  enrich?: EnrichWiring
+  dj?: DjWiring
+  allowedOrigins?: string[]
+}) {
   const app = new Hono<{ Variables: AppVars }>()
 
   app.onError((err, c) => {
     console.error(err)
     return c.json({ error: 'internal' }, 500)
   })
+
+  if (allowedOrigins.length > 0) {
+    app.use(
+      '*',
+      cors({
+        origin: allowedOrigins,
+        allowHeaders: ['Authorization', 'Content-Type'],
+        allowMethods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+        credentials: true,
+        maxAge: 600,
+      }),
+    )
+  }
 
   app.get('/health', (c) => c.json({ ok: true, service: 'mixtape-api' }))
   // Route groups land per docs/superpowers/specs/2026-08-29-mixtape-v1-design.md:

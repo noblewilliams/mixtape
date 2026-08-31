@@ -52,6 +52,11 @@ async function mintToken(): Promise<string> {
     BETTER_AUTH_SECRET: env.BETTER_AUTH_SECRET,
     BETTER_AUTH_URL: BASE,
     APPLE_BUNDLE_ID: env.APPLE_BUNDLE_ID,
+    APPLE_WEB_CLIENT_ID: env.APPLE_WEB_CLIENT_ID,
+    APPLE_TEAM_ID: env.APPLE_TEAM_ID,
+    APPLE_KEY_ID: env.APPLE_KEY_ID,
+    APPLE_PRIVATE_KEY: env.APPLE_PRIVATE_KEY,
+    WEB_ORIGINS: env.WEB_ORIGINS,
   })
   const ctx = await (auth as { $context: Promise<{ internalAdapter: { createSession(userId: string, req: undefined): Promise<{ token: string }> } }> }).$context
   const [founder] = await db.select().from(schema.user)

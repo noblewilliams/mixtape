@@ -1,11 +1,12 @@
 # mixtape web
 
-React, Vite, and TypeScript implementation of the approved tape-and-glass identity. This first milestone is intentionally UI-complete and integration-light: it uses typed local fixtures that mirror the existing Hono session, message, and queue contracts.
+React, Vite, and TypeScript implementation of the approved tape-and-glass identity. The production entry point uses Better Auth for Apple sign-in and reads sessions, messages, and tape queues from the Hono API.
 
 ## Run it
 
 ```bash
 npm install
+cp .env.example .env.local
 npm run dev
 ```
 
@@ -16,9 +17,15 @@ npm test
 npm run build
 ```
 
+## Environment
+
+`VITE_API_URL` is the Hono API origin. It defaults to `http://localhost:8787` for local development.
+
+Apple's real browser callback must be tested on the deployed HTTPS origin; Apple does not accept localhost return URLs.
+
 ## Current boundary
 
-- Implemented: responsive conversation shell, session rail, queue, tape list, single-shelf Closet, new-tape and save-playlist dialogs, local playback state, DJ response state, and animated cassette preparation state.
-- Next: Better Auth session wiring, the existing `/sessions` and `/me/memories` API routes, MusicKit JS playback, and real Apple Music playlist creation.
+- Implemented: Better Auth browser session gate, Apple redirect states, credentialed `/sessions` integration, responsive conversation shell, server-backed session creation/chat, queue, tape list, single-shelf Closet, and animated cassette loading states.
+- Next: MusicKit JS authorization and playback, real Apple Music playlist creation, and the `/me/memories` UI.
 - Platform constraint: web does not provide the native iOS per-song play counts used during library ingest.
 - Product rule: never display or persist lyric text.

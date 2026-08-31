@@ -1,45 +1,96 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { ApiError, type MixtapeApi, type SessionDetailResponse } from './api/client'
+import { toDjMessage, toDjSession, toQueueTrack } from './api/mappers'
+import type { AuthUser } from './components/AuthGate'
+import { Cassette } from './components/Cassette'
 import { Conversation } from './components/Conversation'
 import { Home } from './components/Home'
 import { NewTapeDialog, SaveDialog, SyncOverlay, Toast } from './components/Overlays'
 import { QueuePanel } from './components/QueuePanel'
 import { Sidebar } from './components/Sidebar'
-import { demoQueue, demoSessions, makeConversationFor } from './data/demo'
 import type { AppView, CollectionView, DjMessage, DjSession, QueueTrack } from './domain'
 
 type DialogState = 'new-tape' | 'save-playlist' | 'sync' | null
 
-const DJ_REPLY_DELAY_MS = 800
+type AppProps = {
+  api: MixtapeApi
+  user: AuthUser
+  onSignOut: () => void
+}
 
-export function App() {
-  const [sessions, setSessions] = useState<DjSession[]>(demoSessions)
-  const [activeSessionId, setActiveSessionId] = useState(demoSessions[0].id)
-  const [activeView, setActiveView] = useState<AppView>('session')
+function errorCopy(error: unknown): string {
+  if (error instanceof ApiError && error.status === 401) return 'Your session has ended. Sign in again to keep listening.'
+  if (error instanceof ApiError && error.message && !error.message.startsWith('Request failed')) return error.message
+  return 'Something interrupted the connection. Please try again.'
+}
+
+function detailToState(detail: SessionDetailResponse) {
+  return {
+    session: toDjSession(detail.session, detail.queue),
+    messages: detail.messages.map(toDjMessage),
+    queue: detail.queue.map(toQueueTrack),
+  }
+}
+
+export function App({ api, user, onSignOut }: AppProps) {
+  const [sessions, setSessions] = useState<DjSession[]>([])
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const [activeView, setActiveView] = useState<AppView>('home')
   const [collectionView, setCollectionView] = useState<CollectionView>('list')
-  const [messagesBySession, setMessagesBySession] = useState<Record<string, DjMessage[]>>(() => ({
-    [demoSessions[0].id]: makeConversationFor(demoSessions[0]),
-  }))
-  const [queuesBySession, setQueuesBySession] = useState<Record<string, QueueTrack[]>>(() => ({
-    [demoSessions[0].id]: demoQueue,
-  }))
+  const [messagesBySession, setMessagesBySession] = useState<Record<string, DjMessage[]>>({})
+  const [queuesBySession, setQueuesBySession] = useState<Record<string, QueueTrack[]>>({})
+  const [loadingCollection, setLoadingCollection] = useState(true)
+  const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null)
   const [thinkingSessionId, setThinkingSessionId] = useState<string | null>(null)
+  const [creatingTape, setCreatingTape] = useState(false)
   const [dialog, setDialog] = useState<DialogState>(null)
   const [queueOpen, setQueueOpen] = useState(false)
   const [playing, setPlaying] = useState(false)
+  const [error, setError] = useState('')
   const [toast, setToast] = useState('')
-  const replyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const activeSession = useMemo(
-    () => sessions.find((session) => session.id === activeSessionId) ?? sessions[0],
+    () => sessions.find((session) => session.id === activeSessionId) ?? null,
     [activeSessionId, sessions],
   )
-  const activeMessages = messagesBySession[activeSession.id] ?? makeConversationFor(activeSession)
-  const activeQueue = queuesBySession[activeSession.id] ?? (activeSession.trackCount > 0 ? demoQueue : [])
+  const activeMessages = activeSession ? messagesBySession[activeSession.id] ?? [] : []
+  const activeQueue = activeSession ? queuesBySession[activeSession.id] ?? [] : []
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadCollection() {
+      setLoadingCollection(true)
+      try {
+        const result = await api.listSessions()
+        if (cancelled) return
+        const active = result.sessions
+          .filter((session) => session.status === 'active')
+          .map((session) => toDjSession(session))
+        setSessions(active)
+        setError('')
+        if (active.length > 0) {
+          setActiveSessionId(active[0].id)
+          setActiveView('session')
+          void loadSession(active[0].id, () => cancelled)
+        }
+      } catch (requestError) {
+        if (!cancelled) setError(errorCopy(requestError))
+        if (requestError instanceof ApiError && requestError.status === 401 && !cancelled) onSignOut()
+      } finally {
+        if (!cancelled) setLoadingCollection(false)
+      }
+    }
+
+    void loadCollection()
+    return () => {
+      cancelled = true
+    }
+  }, [api, onSignOut])
 
   useEffect(
     () => () => {
-      if (replyTimer.current) clearTimeout(replyTimer.current)
       if (toastTimer.current) clearTimeout(toastTimer.current)
     },
     [],
@@ -51,40 +102,59 @@ export function App() {
     toastTimer.current = setTimeout(() => setToast(''), 2800)
   }
 
+  async function loadSession(sessionId: string, isCancelled: () => boolean = () => false) {
+    if (messagesBySession[sessionId] && queuesBySession[sessionId]) return
+    setLoadingSessionId(sessionId)
+    try {
+      const detail = await api.getSession(sessionId)
+      if (isCancelled()) return
+      const mapped = detailToState(detail)
+      setSessions((current) => current.map((session) => (session.id === sessionId ? mapped.session : session)))
+      setMessagesBySession((current) => ({ ...current, [sessionId]: mapped.messages }))
+      setQueuesBySession((current) => ({ ...current, [sessionId]: mapped.queue }))
+      setError('')
+    } catch (requestError) {
+      if (!isCancelled()) setError(errorCopy(requestError))
+      if (requestError instanceof ApiError && requestError.status === 401 && !isCancelled()) onSignOut()
+    } finally {
+      if (!isCancelled()) setLoadingSessionId(null)
+    }
+  }
+
   function openSession(id: string) {
     setActiveSessionId(id)
     setActiveView('session')
     setQueueOpen(false)
     setPlaying(false)
+    void loadSession(id)
   }
 
-  function createTape(title: string) {
-    const id = `local-${Date.now()}`
-    const session: DjSession = {
-      id,
-      title,
-      status: 'active',
-      queueVersion: 0,
-      updatedAt: new Date().toISOString(),
-      ageLabel: 'just now',
-      trackCount: 0,
-      durationLabel: '0 min',
-      caseColor: '#596454',
-      stockColor: '#f2ede2',
+  async function createTape(prompt: string) {
+    setCreatingTape(true)
+    try {
+      const response = await api.createSession(prompt)
+      const mapped = detailToState(response)
+      setSessions((current) => [mapped.session, ...current.filter((session) => session.id !== mapped.session.id)])
+      setMessagesBySession((current) => ({ ...current, [mapped.session.id]: mapped.messages }))
+      setQueuesBySession((current) => ({ ...current, [mapped.session.id]: mapped.queue }))
+      setActiveSessionId(mapped.session.id)
+      setActiveView('session')
+      setDialog(null)
+      setError('')
+      announce('Your new tape is ready.')
+    } catch (requestError) {
+      setError(errorCopy(requestError))
+      if (requestError instanceof ApiError && requestError.status === 401) onSignOut()
+    } finally {
+      setCreatingTape(false)
     }
-    setSessions((current) => [session, ...current])
-    setMessagesBySession((current) => ({ ...current, [id]: [] }))
-    setQueuesBySession((current) => ({ ...current, [id]: [] }))
-    setActiveSessionId(id)
-    setActiveView('session')
-    setDialog(null)
-    announce('Blank tape ready. Tell the DJ what belongs on it.')
   }
 
-  function sendMessage(text: string) {
+  async function sendMessage(text: string) {
+    if (!activeSession) return
     const sessionId = activeSession.id
     const userMessage: DjMessage = {
-      id: `${sessionId}-user-${Date.now()}`,
+      id: `${sessionId}-pending-${Date.now()}`,
       role: 'user',
       content: text,
       createdAt: new Date().toISOString(),
@@ -92,53 +162,89 @@ export function App() {
 
     setMessagesBySession((current) => ({
       ...current,
-      [sessionId]: [...(current[sessionId] ?? makeConversationFor(activeSession)), userMessage],
+      [sessionId]: [...(current[sessionId] ?? []), userMessage],
     }))
     setThinkingSessionId(sessionId)
+    setError('')
 
-    if (replyTimer.current) clearTimeout(replyTimer.current)
-    replyTimer.current = setTimeout(() => {
-      const reply: DjMessage = {
-        id: `${sessionId}-dj-${Date.now()}`,
-        role: 'dj',
-        content:
-          'I hear the change. I would keep the opening intact, then reshape the middle around that feeling before the tape settles again.',
-        queueVersion: activeSession.queueVersion,
-        createdAt: new Date().toISOString(),
-      }
+    try {
+      const response = await api.sendMessage(sessionId, text)
+      const queue = response.queue.map(toQueueTrack)
       setMessagesBySession((current) => ({
         ...current,
-        [sessionId]: [...(current[sessionId] ?? []), reply],
+        [sessionId]: [...(current[sessionId] ?? []), toDjMessage(response.djMessage)],
       }))
+      setQueuesBySession((current) => ({ ...current, [sessionId]: queue }))
+      setSessions((current) =>
+        current.map((session) =>
+          session.id === sessionId
+            ? toDjSession(
+                {
+                  ...session,
+                  title: response.sessionTitle ?? session.title,
+                  queueVersion: response.queueVersion,
+                  updatedAt: new Date().toISOString(),
+                },
+                response.queue,
+              )
+            : session,
+        ),
+      )
+    } catch (requestError) {
+      const message = errorCopy(requestError)
+      setMessagesBySession((current) => ({
+        ...current,
+        [sessionId]: [
+          ...(current[sessionId] ?? []),
+          { id: `${sessionId}-error-${Date.now()}`, role: 'dj', content: message, createdAt: new Date().toISOString() },
+        ],
+      }))
+      if (requestError instanceof ApiError && requestError.status === 401) onSignOut()
+    } finally {
       setThinkingSessionId(null)
-    }, DJ_REPLY_DELAY_MS)
+    }
   }
 
   function togglePlayback() {
+    if (!activeSession) return
     const nextPlaying = !playing
     setPlaying(nextPlaying)
-    announce(nextPlaying ? 'Tape playing locally for this prototype' : 'Tape paused')
+    announce(nextPlaying ? 'Playback controls are ready for MusicKit.' : 'Tape paused')
   }
 
   function savePlaylist(name: string) {
+    if (!activeSession) return
     setDialog(null)
-    announce('Playlist ready for Apple Music')
-    void name
+    announce(`“${name}” is ready for MusicKit export.`)
+  }
+
+  if (loadingCollection) {
+    return (
+      <main className="app-loading" aria-live="polite">
+        <div>
+          <Cassette loading labelled={false} />
+          <p className="quiet-kicker">Your collection</p>
+          <span>Opening your tapes…</span>
+        </div>
+      </main>
+    )
   }
 
   return (
-    <div className={`app-shell ${activeView === 'home' ? 'app-shell--home' : ''}`}>
+    <div className={`app-shell ${activeView === 'home' || !activeSession ? 'app-shell--home' : ''}`}>
       <Sidebar
         sessions={sessions}
-        activeSessionId={activeSession.id}
+        activeSessionId={activeSession?.id ?? null}
         activeView={activeView}
+        userName={user.name}
         onOpenSession={openSession}
         onOpenHome={() => setActiveView('home')}
         onNewTape={() => setDialog('new-tape')}
         onSync={() => setDialog('sync')}
+        onSignOut={onSignOut}
       />
 
-      {activeView === 'home' ? (
+      {activeView === 'home' || !activeSession ? (
         <Home
           sessions={sessions}
           collectionView={collectionView}
@@ -151,6 +257,7 @@ export function App() {
           <Conversation
             session={activeSession}
             messages={activeMessages}
+            loading={loadingSessionId === activeSession.id}
             thinking={thinkingSessionId === activeSession.id}
             onSend={sendMessage}
             onOpenQueue={() => setQueueOpen(true)}
@@ -167,8 +274,11 @@ export function App() {
         </>
       )}
 
-      {dialog === 'new-tape' ? <NewTapeDialog onClose={() => setDialog(null)} onCreate={createTape} /> : null}
-      {dialog === 'save-playlist' ? (
+      {error ? <p className="app-error" role="alert">{error}</p> : null}
+      {dialog === 'new-tape' ? (
+        <NewTapeDialog busy={creatingTape} onClose={() => setDialog(null)} onCreate={(prompt) => void createTape(prompt)} />
+      ) : null}
+      {dialog === 'save-playlist' && activeSession ? (
         <SaveDialog defaultName={activeSession.title} onClose={() => setDialog(null)} onSave={savePlaylist} />
       ) : null}
       {dialog === 'sync' ? <SyncOverlay onClose={() => setDialog(null)} /> : null}

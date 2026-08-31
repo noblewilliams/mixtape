@@ -18,7 +18,12 @@
   //   DATABASE_URL            — Neon connection string
   //   BETTER_AUTH_SECRET      — Better Auth signing secret (min 32 chars)
   //   BETTER_AUTH_URL         — deployed worker origin (http://localhost:8787 locally)
-  //   APPLE_BUNDLE_ID         — com.noble.mixtape (Apple idToken audience)
+  //   APPLE_BUNDLE_ID         — native app ID / Apple idToken audience
+  //   APPLE_WEB_CLIENT_ID     — Sign in with Apple Services ID for web
+  //   APPLE_TEAM_ID           — Apple Developer team ID
+  //   APPLE_KEY_ID            — Sign in with Apple key ID
+  //   APPLE_PRIVATE_KEY       — downloaded .p8 key (multiline or escaped newlines)
+  //   WEB_ORIGINS             — exact comma-separated web origins allowed to use cookies/CORS
   // ENRICH_ADMIN_TOKEN        — admin guard for /enrich/*; unset disables the route group entirely
   //   ANTHROPIC_API_KEY       — DJ engine (Sonnet 5 agent loop); unset disables /sessions/* entirely
   // Optional var (not secret):

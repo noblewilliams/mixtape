@@ -343,6 +343,27 @@ describe('session routes', () => {
       const res = await getJson(app, '/sessions')
       expect(res.status).toBe(401)
     })
+
+    it('includes active track count and duration for collection views', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      await seedLibrary(db, 'u1', 3)
+      const { llm } = makeFakeLlm([
+        { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'evening', targetCount: 3 })] },
+        { text: 'ready.' },
+      ])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+      const created = await postJson(app, '/sessions', { prompt: 'an easy evening tape' })
+      const createdBody = (await created.json()) as { session: { id: string } }
+
+      const res = await getJson(app, '/sessions')
+      const body = (await res.json()) as {
+        sessions: Array<{ id: string; trackCount: number; durationMs: number }>
+      }
+      const row = body.sessions.find((session) => session.id === createdBody.session.id)
+
+      expect(row).toMatchObject({ trackCount: 3, durationMs: 600_000 })
+    })
   })
 
   describe('GET /sessions/:id', () => {

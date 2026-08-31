@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import type { DjMessage, DjSession } from '../domain'
+import { Cassette } from './Cassette'
 import { MoreIcon, QueueIcon, SendIcon } from './Icons'
 
 type ConversationProps = {
   session: DjSession
   messages: DjMessage[]
+  loading?: boolean
   thinking: boolean
   onSend: (text: string) => void
   onOpenQueue: () => void
 }
 
-export function Conversation({ session, messages, thinking, onSend, onOpenQueue }: ConversationProps) {
+export function Conversation({ session, messages, loading = false, thinking, onSend, onOpenQueue }: ConversationProps) {
   const [draft, setDraft] = useState('')
   const conversationRef = useRef<HTMLDivElement>(null)
 
@@ -50,7 +52,12 @@ export function Conversation({ session, messages, thinking, onSend, onOpenQueue 
       </header>
 
       <div className="conversation-scroll" ref={conversationRef} aria-live="polite">
-        {messages.length === 0 ? (
+        {loading ? (
+          <div className="conversation-loading" role="status">
+            <Cassette loading labelled={false} />
+            <span>Opening this tape…</span>
+          </div>
+        ) : messages.length === 0 ? (
           <div className="blank-conversation">
             <span>Blank tape</span>
             <h2>What should this moment sound like?</h2>
@@ -90,7 +97,7 @@ export function Conversation({ session, messages, thinking, onSend, onOpenQueue 
             placeholder="Tell the DJ what to change…"
             maxLength={2000}
           />
-          <button className="send-button" type="submit" disabled={!draft.trim() || thinking} aria-label="Send message">
+          <button className="send-button" type="submit" disabled={!draft.trim() || thinking || loading} aria-label="Send message">
             <SendIcon />
           </button>
         </form>

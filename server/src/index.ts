@@ -2,7 +2,7 @@ import type { ExecutionContext } from 'hono'
 import { Pool } from '@neondatabase/serverless'
 import { drizzle } from 'drizzle-orm/neon-serverless'
 import * as schema from './db/schema'
-import { createAuth } from './auth/create-auth'
+import { createAuth, parseWebOrigins } from './auth/create-auth'
 import { createApp } from './app'
 import { resolveAndFetchFeatures } from './enrich/reccobeats'
 import { fetchLyrics } from './enrich/lrclib'
@@ -23,6 +23,11 @@ type Bindings = {
   BETTER_AUTH_SECRET: string
   BETTER_AUTH_URL: string
   APPLE_BUNDLE_ID: string
+  APPLE_WEB_CLIENT_ID: string
+  APPLE_TEAM_ID: string
+  APPLE_KEY_ID: string
+  APPLE_PRIVATE_KEY: string
+  WEB_ORIGINS: string
   ENRICH_ADMIN_TOKEN?: string
   ITUNES_STOREFRONT?: string
   AI?: { run(model: string, input: { text: string[] }): Promise<unknown> }
@@ -96,7 +101,7 @@ export default {
       const enrich = deps && env.ENRICH_ADMIN_TOKEN ? { adminToken: env.ENRICH_ADMIN_TOKEN, deps } : undefined
       const djDeps = buildDjDeps(env)
       const dj = djDeps ? { deps: djDeps } : undefined
-      const app = createApp({ auth, db, enrich, dj })
+      const app = createApp({ auth, db, enrich, dj, allowedOrigins: parseWebOrigins(env.WEB_ORIGINS) })
       return await app.fetch(req, env, ctx)
     } finally {
       // Closes the pool's socket(s) after the response is built rather than

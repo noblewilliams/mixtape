@@ -262,7 +262,7 @@ input:focus-visible {
 .sidebar-footer {
   padding: 13px 4px 0;
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) 40px;
+  grid-template-columns: 30px minmax(0, 1fr) 34px 34px;
   gap: 8px;
   align-items: center;
   border-top: 1px solid var(--hairline);
@@ -302,8 +302,8 @@ input:focus-visible {
 }
 
 .sync-button {
-  width: 40px;
-  height: 40px;
+  width: 34px;
+  height: 34px;
   border-radius: 12px;
 }
 
@@ -486,6 +486,22 @@ input:focus-visible {
   display: grid;
   place-content: center;
   text-align: center;
+}
+
+.conversation-loading {
+  min-height: 100%;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 16px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.conversation-loading .cassette {
+  width: 150px;
+  transform: rotate(-2deg);
 }
 
 .blank-conversation > span {
@@ -1677,5 +1693,277 @@ input:focus-visible {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* Approved Apple authentication surface. It is one continuous field: the
+   layout creates two reading zones, but the gradient never turns them into
+   separate panels. */
+.app-loading {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  color: #ddd8dc;
+  background: #111116;
+}
+
+.app-loading > div {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.app-loading .cassette {
+  width: 180px;
+  margin-bottom: 12px;
+  transform: rotate(-2deg);
+}
+
+.app-loading span {
+  font: italic 450 24px/1.1 var(--marker);
+}
+
+.app-error {
+  max-width: min(520px, calc(100% - 32px));
+  margin: 0;
+  padding: 10px 14px;
+  position: fixed;
+  z-index: 60;
+  top: 28px;
+  left: 50%;
+  color: #733d4a;
+  background: rgba(250, 237, 239, 0.94);
+  border: 1px solid rgba(132, 69, 83, 0.2);
+  border-radius: 12px;
+  box-shadow: 0 12px 30px rgba(48, 34, 42, 0.16);
+  font-size: 11px;
+  font-weight: 650;
+  text-align: center;
+  transform: translateX(-50%);
+}
+
+.auth-page {
+  min-height: 100dvh;
+  padding: 24px;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  color: #31353b;
+  background:
+    radial-gradient(circle at 18% 20%, rgba(112, 151, 174, 0.17), transparent 31%),
+    radial-gradient(circle at 82% 83%, rgba(201, 104, 127, 0.12), transparent 28%),
+    #111116;
+}
+
+.auth-surface {
+  width: min(1060px, 100%);
+  min-height: 550px;
+  display: grid;
+  grid-template-columns: minmax(0, 44fr) minmax(0, 56fr);
+  overflow: hidden;
+  background: linear-gradient(
+    112deg,
+    #b7ccd4 0%,
+    #c5d5d8 35%,
+    #d2dcda 60%,
+    #e9dfd8 76%,
+    #f0dfe4 100%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.56);
+  border-radius: 38px;
+  box-shadow:
+    0 38px 100px rgba(0, 0, 0, 0.33),
+    inset 0 1px 0 rgba(255, 255, 255, 0.56);
+}
+
+.auth-intro,
+.auth-action {
+  min-width: 0;
+  padding: clamp(40px, 5vw, 72px);
+}
+
+.auth-intro {
+  display: flex;
+  flex-direction: column;
+}
+
+.auth-wordmark {
+  color: #42515e;
+  font: italic 500 28px/1 var(--marker);
+  letter-spacing: -0.045em;
+  transform: rotate(-2deg);
+  transform-origin: left center;
+}
+
+.auth-copy {
+  margin: auto 0;
+}
+
+.auth-copy .quiet-kicker {
+  color: rgba(52, 63, 72, 0.66);
+}
+
+.auth-copy h1 {
+  max-width: 430px;
+  margin: 11px 0 20px;
+  color: #4c4853;
+  font: italic 470 clamp(48px, 5vw, 68px)/0.94 var(--marker);
+  letter-spacing: -0.055em;
+  text-wrap: balance;
+  transform: rotate(-0.6deg);
+  transform-origin: left center;
+}
+
+.auth-copy > p:last-child {
+  max-width: 390px;
+  margin: 0;
+  color: rgba(47, 56, 63, 0.75);
+  font-size: 13px;
+  font-weight: 560;
+  line-height: 1.65;
+}
+
+.auth-action {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 32px;
+}
+
+.auth-cassette {
+  width: min(100%, 370px);
+  filter: drop-shadow(0 15px 20px rgba(47, 42, 48, 0.16));
+  transform: rotate(4deg);
+}
+
+.auth-control {
+  min-height: 112px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.auth-status {
+  margin: 0 0 14px;
+  color: rgba(67, 57, 66, 0.7);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.apple-sign-in {
+  min-height: 44px;
+  padding: 0 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #fff;
+  background: #111114;
+  border: 1px solid rgba(0, 0, 0, 0.75);
+  border-radius: 999px;
+  box-shadow: 0 5px 12px rgba(39, 32, 39, 0.16);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  font-size: 12px;
+  font-weight: 590;
+  letter-spacing: -0.01em;
+  transition:
+    transform 0.16s ease,
+    background 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.apple-sign-in:hover:not(:disabled) {
+  background: #252329;
+  box-shadow: 0 7px 16px rgba(39, 32, 39, 0.2);
+  transform: translateY(-1px);
+}
+
+.apple-sign-in:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.apple-sign-in:disabled {
+  opacity: 0.66;
+}
+
+.apple-sign-in svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.auth-error {
+  min-height: 17px;
+  margin: 9px 0 0;
+  color: #844553;
+  font-size: 10px;
+  font-weight: 650;
+  opacity: 0;
+  text-align: center;
+}
+
+.auth-error.is-visible {
+  opacity: 1;
+}
+
+@media (max-width: 760px) {
+  .auth-page {
+    padding: 0;
+  }
+
+  .auth-surface {
+    width: 100%;
+    min-height: 100dvh;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+    background: linear-gradient(145deg, #b7ccd4 0%, #c9d8da 43%, #d5deda 60%, #eadfd8 79%, #f0dfe4 100%);
+    border: 0;
+    border-radius: 0;
+  }
+
+  .auth-intro,
+  .auth-action {
+    padding: 32px clamp(24px, 8vw, 48px);
+  }
+
+  .auth-intro {
+    padding-bottom: 10px;
+  }
+
+  .auth-copy {
+    margin: 56px 0 0;
+  }
+
+  .auth-copy h1 {
+    max-width: 340px;
+    font-size: clamp(44px, 14vw, 62px);
+  }
+
+  .auth-action {
+    padding-top: 18px;
+    align-content: start;
+    gap: 24px;
+  }
+
+  .auth-cassette {
+    width: min(88vw, 350px);
+  }
+}
+
+@media (max-width: 380px) {
+  .auth-copy {
+    margin-top: 32px;
+  }
+
+  .auth-copy h1 {
+    margin-bottom: 14px;
+    font-size: 42px;
+  }
+
+  .auth-action {
+    gap: 16px;
   }
 }

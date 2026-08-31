@@ -1,10 +1,10 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { zValidator } from '@hono/zod-validator'
-import { and, asc, desc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq, sql } from 'drizzle-orm'
 import type { AppVars } from '../app'
 import type { Db } from '../db/types'
-import { djSessions, djMessages, sessionEvents } from '../db/schema'
+import { djSessions, djMessages, queueTracks, sessionEvents, tracks } from '../db/schema'
 import { runDjTurn, DjError, type DjDeps, type DjSessionRef } from '../dj/loop'
 import { applyOps, getActiveQueue, QueueOpError, QueueVersionConflict } from '../dj/queue-store'
 import { queueOpsSchema } from '../dj/contracts'
@@ -207,9 +207,21 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
     // by `status` for its default view; this is the one list endpoint, not
     // two.
     const sessions = await db
-      .select(sessionListColumns)
+      .select({
+        ...sessionListColumns,
+        // Only active queue entries count: removed songs are history, not
+        // part of the tape a listener sees in the collection.
+        trackCount: sql<number>`count(${queueTracks.id})::int`,
+        durationMs: sql<number>`coalesce(sum(${tracks.durationMs}), 0)::int`,
+      })
       .from(djSessions)
+      .leftJoin(
+        queueTracks,
+        and(eq(queueTracks.sessionId, djSessions.id), eq(queueTracks.state, 'active')),
+      )
+      .leftJoin(tracks, eq(tracks.id, queueTracks.trackId))
       .where(eq(djSessions.userId, userId))
+      .groupBy(djSessions.id)
       .orderBy(desc(djSessions.updatedAt))
       .limit(50)
     return c.json({ sessions })
