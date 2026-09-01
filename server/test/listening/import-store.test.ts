@@ -20,12 +20,14 @@ import type {
 import {
   createListeningImportStore,
   ListeningImportError,
+  type ListeningImportStore,
 } from '../../src/listening/import-store'
 import { createTestDb, type TestDb } from '../helpers/db'
 
 const now = new Date('2026-09-01T12:00:00.000Z')
 const SPOTIFY_A = '4uLU6hMCjMI75M1A2tKUQC'
 const SPOTIFY_B = '7ouMYWpwJ422jRcDASZB7P'
+const APPLE_A = '1440935467'
 const UNKNOWN_IMPORT = '00000000-0000-4000-8000-000000000000'
 
 const begin = (over: Partial<BeginListeningImport> = {}): BeginListeningImport => ({
@@ -508,6 +510,182 @@ describe('ListeningImportStore', () => {
         .rejects.toMatchObject({ category: 'conflict' })
       await expect(store.putArtists('u1', importId, [artist({ ordinal: 2, name: 'Third' })]))
         .rejects.toMatchObject({ category: 'count_mismatch' })
+    })
+  })
+
+  describe('field conflicts', () => {
+    // Stage one row, then re-send it with exactly one field changed and the
+    // ordinal held fixed, so the rejection comes from the field comparison
+    // (or, for natural-key fields, from the ordinal and key rows diverging).
+    type Change<T> = { change: string; before?: Partial<T>; after: Partial<T> }
+
+    const trackChanges: Change<ListeningTrackSnapshot>[] = [
+      { change: 'platformId', after: { platformId: SPOTIFY_B } },
+      { change: 'title', after: { title: 'Changed' } },
+      { change: 'artist', after: { artist: 'Other' } },
+      { change: 'album', after: { album: 'Other' } },
+      { change: 'album to null', after: { album: null } },
+      { change: 'album from null', before: { album: null }, after: { album: 'Album' } },
+      { change: 'durationMs', after: { durationMs: 200_001 } },
+      { change: 'durationMs to null', after: { durationMs: null } },
+      { change: 'durationMs from null', before: { durationMs: null }, after: { durationMs: 200_000 } },
+    ]
+
+    it.each(trackChanges)('rejects a track re-send that changes $change', async ({ before, after }) => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const store = createListeningImportStore(db, { now: () => now })
+      const { importId } = await store.begin('u1', begin())
+
+      await store.putTracks('u1', importId, [track(before)])
+      await expect(store.putTracks('u1', importId, [track({ ...before, ...after })]))
+        .rejects.toMatchObject({ category: 'conflict' })
+      expect((await runRow(db, importId)).receivedTracks).toBe(1)
+      expect(await db.select().from(listeningImportTracks)).toMatchObject([track(before)])
+    })
+
+    const dayChanges: Change<ListeningDaySnapshot>[] = [
+      { change: 'platformId', after: { platformId: SPOTIFY_B } },
+      { change: 'day', after: { day: '2026-08-31' } },
+      { change: 'plays', after: { plays: 4 } },
+      { change: 'skips', after: { skips: 2 } },
+      { change: 'skips from 0 to null', before: { skips: 0 }, after: { skips: null } },
+      { change: 'skips from null to 0', before: { skips: null }, after: { skips: 0 } },
+      { change: 'completes', after: { completes: 3 } },
+      { change: 'completes from 0 to null', before: { completes: 0 }, after: { completes: null } },
+      { change: 'completes from null to 0', before: { completes: null }, after: { completes: 0 } },
+      { change: 'msPlayed', after: { msPlayed: 600_001 } },
+      { change: 'hoursMask', after: { hoursMask: 1 } },
+      { change: 'hoursMask from 1 to null', before: { hoursMask: 1 }, after: { hoursMask: null } },
+      { change: 'hoursMask from null to 1', before: { hoursMask: null }, after: { hoursMask: 1 } },
+    ]
+
+    it.each(dayChanges)('rejects a day re-send that changes $change', async ({ before, after }) => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const store = createListeningImportStore(db, { now: () => now })
+      const { importId } = await store.begin('u1', begin())
+
+      await store.putDays('u1', importId, [day(before)])
+      await expect(store.putDays('u1', importId, [day({ ...before, ...after })]))
+        .rejects.toMatchObject({ category: 'conflict' })
+      expect((await runRow(db, importId)).receivedDays).toBe(1)
+      expect(await db.select().from(listeningImportDays)).toMatchObject([day(before)])
+    })
+
+    const libraryChanges: Change<ListeningLibrarySnapshot>[] = [
+      { change: 'platformId', after: { platformId: SPOTIFY_B } },
+      { change: 'playCount', before: { playCount: 9 }, after: { playCount: 10 } },
+      { change: 'playCount from 0 to null', before: { playCount: 0 }, after: { playCount: null } },
+      { change: 'playCount from null to 0', after: { playCount: 0 } },
+      { change: 'skipCount', before: { skipCount: 2 }, after: { skipCount: 3 } },
+      { change: 'skipCount from 0 to null', before: { skipCount: 0 }, after: { skipCount: null } },
+      { change: 'skipCount from null to 0', after: { skipCount: 0 } },
+      {
+        change: 'lastPlayedAt',
+        before: { lastPlayedAt: 1_720_000_000_000 },
+        after: { lastPlayedAt: 1_720_000_000_001 },
+      },
+      { change: 'lastPlayedAt to null', before: { lastPlayedAt: 1_720_000_000_000 }, after: { lastPlayedAt: null } },
+      { change: 'lastPlayedAt from null', after: { lastPlayedAt: 1_720_000_000_000 } },
+      { change: 'dateAdded', after: { dateAdded: 1_700_000_000_001 } },
+      { change: 'dateAdded to null', after: { dateAdded: null } },
+      { change: 'dateAdded from null', before: { dateAdded: null }, after: { dateAdded: 1_700_000_000_000 } },
+      { change: 'likeRating', before: { likeRating: 1 }, after: { likeRating: -1 } },
+      { change: 'likeRating from 1 to null', before: { likeRating: 1 }, after: { likeRating: null } },
+      { change: 'likeRating from null to 1', after: { likeRating: 1 } },
+    ]
+
+    it.each(libraryChanges)('rejects a library re-send that changes $change', async ({ before, after }) => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const store = createListeningImportStore(db, { now: () => now })
+      const { importId } = await store.begin('u1', accountBegin())
+
+      await store.putLibrary('u1', importId, [libraryRow(before)])
+      await expect(store.putLibrary('u1', importId, [libraryRow({ ...before, ...after })]))
+        .rejects.toMatchObject({ category: 'conflict' })
+      expect((await runRow(db, importId)).receivedLibraryTracks).toBe(1)
+      expect(await db.select().from(listeningImportLibrary)).toHaveLength(1)
+    })
+
+    const artistChanges: Change<ListeningArtistSnapshot>[] = [
+      { change: 'name', after: { name: 'Other' } },
+      { change: 'spotifyId', after: { spotifyId: SPOTIFY_A } },
+      { change: 'spotifyId to null', after: { spotifyId: null } },
+      { change: 'spotifyId from null', before: { spotifyId: null }, after: { spotifyId: SPOTIFY_B } },
+    ]
+
+    it.each(artistChanges)('rejects an artist re-send that changes $change', async ({ before, after }) => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const store = createListeningImportStore(db, { now: () => now })
+      const { importId } = await store.begin('u1', accountBegin())
+
+      await store.putArtists('u1', importId, [artist(before)])
+      await expect(store.putArtists('u1', importId, [artist({ ...before, ...after })]))
+        .rejects.toMatchObject({ category: 'conflict' })
+      expect((await runRow(db, importId)).receivedArtists).toBe(1)
+      expect(await db.select().from(listeningImportArtists)).toMatchObject([artist(before)])
+    })
+  })
+
+  describe('tenancy', () => {
+    // Every put resolves the run by (id, user) before gating, id validation, or
+    // staging, so another user's chunk is not_found even when the run is open
+    // and carries that chunk type. Apple ids on the Apple package; artists only
+    // ship with the account package.
+    const puts: {
+      name: string
+      input: BeginListeningImport
+      put: (store: ListeningImportStore, userId: string, importId: string) => Promise<void>
+    }[] = [
+      {
+        name: 'putTracks',
+        input: appleBegin(),
+        put: (store, userId, importId) =>
+          store.putTracks(userId, importId, [track({ platformId: APPLE_A })]),
+      },
+      {
+        name: 'putDays',
+        input: appleBegin(),
+        put: (store, userId, importId) =>
+          store.putDays(userId, importId, [day({ platformId: APPLE_A })]),
+      },
+      {
+        name: 'putLibrary',
+        input: appleBegin(),
+        put: (store, userId, importId) =>
+          store.putLibrary(userId, importId, [libraryRow({ platformId: APPLE_A })]),
+      },
+      {
+        name: 'putArtists',
+        input: accountBegin(),
+        put: (store, userId, importId) => store.putArtists(userId, importId, [artist()]),
+      },
+    ]
+
+    it.each(puts)("$name reports another user's open run as not_found", async ({ input, put }) => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      await seedUser(db, 'u2')
+      const store = createListeningImportStore(db, { now: () => now })
+      const { importId } = await store.begin('u1', input)
+
+      await expect(put(store, 'u2', importId)).rejects.toMatchObject({ category: 'not_found' })
+      expect(await runRow(db, importId)).toMatchObject({
+        status: 'open',
+        receivedTracks: 0,
+        receivedDays: 0,
+        receivedLibraryTracks: 0,
+        receivedArtists: 0,
+      })
+      expect(await db.select().from(listeningImportTracks)).toEqual([])
+      expect(await db.select().from(listeningImportDays)).toEqual([])
+      expect(await db.select().from(listeningImportLibrary)).toEqual([])
+      expect(await db.select().from(listeningImportArtists)).toEqual([])
+      // The same chunk stages for the owner, so the rejection was tenancy alone.
+      await expect(put(store, 'u1', importId)).resolves.toBeUndefined()
     })
   })
 
