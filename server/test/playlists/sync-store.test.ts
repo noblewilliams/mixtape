@@ -98,6 +98,16 @@ describe('PlaylistSyncStore', () => {
     expect(savedEntries.map((row) => row.appleLibraryEntryId)).toEqual(['entry-1', 'entry-2'])
   })
 
+  it('records the client capability source on the sync run', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const store = createPlaylistSyncStore(db, { now: () => now })
+    const { syncId } = await store.begin('u1', 'ng', 0, 0, 'web_musickit')
+
+    expect(await db.select({ source: playlistSyncRuns.source }).from(playlistSyncRuns)
+      .where(eq(playlistSyncRuns.id, syncId))).toEqual([{ source: 'web_musickit' }])
+  })
+
   it('accepts exact retries but rejects changed playlist and entry retries', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')

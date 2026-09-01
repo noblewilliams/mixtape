@@ -11,6 +11,14 @@ const user = { id: 'user-1', name: 'Noble', email: 'noble@example.com' }
 function createFakeMusicKit(overrides: Partial<MusicKitClient> = {}): MusicKitClient {
   return {
     connect: vi.fn(async () => undefined),
+    snapshot: vi.fn(async () => ({
+      storefront: 'ng',
+      songs: [],
+      playlists: [],
+      playlistEntries: [],
+      recentCatalogIds: [],
+      excludedLibrarySongs: 0,
+    })),
     play: vi.fn(async () => undefined),
     pause: vi.fn(async () => undefined),
     createPlaylist: vi.fn(async () => undefined),

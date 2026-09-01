@@ -1,3 +1,9 @@
+import {
+  fetchMusicSnapshot,
+  type MusicSnapshot,
+  type MusicSnapshotProgress,
+} from './library'
+
 export type MusicKitToken = {
   developerToken: string
   expiresAt: number
@@ -21,6 +27,10 @@ export type MusicKitGlobal = {
 
 export type MusicKitClient = {
   connect: () => Promise<void>
+  snapshot: (options: {
+    signal: AbortSignal
+    onProgress: (progress: MusicSnapshotProgress) => void
+  }) => Promise<MusicSnapshot>
   play: (appleIds: string[]) => Promise<void>
   pause: () => Promise<void>
   createPlaylist: (name: string, appleIds: string[]) => Promise<void>
@@ -35,6 +45,7 @@ export type MusicKitClientErrorCode =
   | 'empty_queue'
   | 'playback_failed'
   | 'playlist_failed'
+  | 'library_failed'
 
 export class MusicKitClientError extends Error {
   readonly code: MusicKitClientErrorCode
@@ -50,6 +61,7 @@ export class MusicKitClientError extends Error {
 
 const MUSICKIT_SCRIPT_URL = 'https://js-cdn.music.apple.com/musickit/v3/musickit.js'
 const PLAYLIST_URL = 'https://api.music.apple.com/v1/me/library/playlists'
+const APPLE_API_ORIGIN = 'https://api.music.apple.com'
 const TOKEN_REFRESH_MARGIN_SECONDS = 30
 
 let musicKitLoadPromise: Promise<MusicKitGlobal> | null = null
@@ -193,8 +205,52 @@ export function createMusicKitClient({
     return current
   }
 
+  function appleApiUrl(path: string) {
+    const url = new URL(path, APPLE_API_ORIGIN)
+    if (url.origin !== APPLE_API_ORIGIN || !url.pathname.startsWith('/v1/')) {
+      throw new MusicKitClientError('library_failed', 'Apple Music returned an unsafe page link.')
+    }
+    return url.toString()
+  }
+
+  async function requestApple(path: string, signal: AbortSignal) {
+    const current = await requireConnection()
+    const response = await fetchImpl(appleApiUrl(path), {
+      headers: {
+        Authorization: `Bearer ${current.developerToken}`,
+        'Music-User-Token': musicUserToken!,
+      },
+      signal,
+    })
+    if (response.status === 401 || response.status === 403) {
+      musicUserToken = null
+      throw new MusicKitClientError(
+        'authorization_failed',
+        'Apple Music authorization has expired.',
+      )
+    }
+    if (!response.ok) throw new Error(`Apple Music returned ${response.status}`)
+    const value: unknown = await response.json()
+    if (!value || typeof value !== 'object' || !Array.isArray((value as { data?: unknown }).data)) {
+      throw new Error('Apple Music returned a malformed response.')
+    }
+    return value as { data: unknown[]; next?: string; meta?: { total?: number } }
+  }
+
   return {
     connect,
+    async snapshot(options) {
+      await requireConnection()
+      try {
+        return await fetchMusicSnapshot({
+          request: requestApple,
+          signal: options.signal,
+          onProgress: options.onProgress,
+        })
+      } catch (error) {
+        throw asClientError(error, 'library_failed', 'Apple Music could not read this library.')
+      }
+    },
     async play(appleIds) {
       if (appleIds.length === 0) throw new MusicKitClientError('empty_queue', 'This mix has no Apple Music tracks.')
       const { instance } = await requireConnection()

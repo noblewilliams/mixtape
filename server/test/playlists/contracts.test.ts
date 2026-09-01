@@ -45,10 +45,13 @@ const entry = (over: Record<string, unknown> = {}) => ({
 describe('playlist ingest contracts', () => {
   it('accepts zero-count syncs and normalized playlist shapes', () => {
     expect(beginPlaylistSyncSchema.parse({
+      source: 'web_musickit',
       storefront: 'ng',
       expectedPlaylists: 0,
       expectedEntries: 0,
-    })).toEqual({ storefront: 'ng', expectedPlaylists: 0, expectedEntries: 0 })
+    })).toEqual({
+      source: 'web_musickit', storefront: 'ng', expectedPlaylists: 0, expectedEntries: 0,
+    })
     expect(playlistChunkSchema.parse({ playlists: [playlist()] }).playlists).toHaveLength(1)
     expect(playlistEntryChunkSchema.parse({
       playlistAppleId: 'library-playlist-1',

@@ -4,20 +4,20 @@ import { zValidator } from '@hono/zod-validator'
 import type { AppVars } from '../app'
 import type { Db } from '../db/types'
 import {
-  beginPlaylistSyncSchema,
-  playlistChunkSchema,
-  playlistEntryChunkSchema,
-} from '../playlists/contracts'
+  beginLibrarySyncSchema,
+  libraryRecentTrackChunkSchema,
+  librarySongChunkSchema,
+} from '../library/contracts'
 import {
-  createPlaylistSyncStore,
-  PlaylistSyncError,
-  type PlaylistSyncStore,
-} from '../playlists/sync-store'
+  createLibrarySyncStore,
+  LibrarySyncError,
+  type LibrarySyncStore,
+} from '../library/sync-store'
 
 const syncParamSchema = z.object({ syncId: z.string().uuid() })
 
 function errorResponse(c: Context<{ Variables: AppVars }>, error: unknown) {
-  if (!(error instanceof PlaylistSyncError)) throw error
+  if (!(error instanceof LibrarySyncError)) throw error
   switch (error.category) {
     case 'not_found': return c.json({ error: 'not_found' }, 404)
     case 'conflict': return c.json({ error: 'sync_conflict' }, 409)
@@ -27,38 +27,37 @@ function errorResponse(c: Context<{ Variables: AppVars }>, error: unknown) {
   }
 }
 
-export function playlistIngestRoutes(
+export function libraryIngestRoutes(
   db: Db,
-  store: PlaylistSyncStore = createPlaylistSyncStore(db),
+  store: LibrarySyncStore = createLibrarySyncStore(db),
 ) {
   const app = new Hono<{ Variables: AppVars }>()
 
-  app.post('/playlists/syncs', zValidator('json', beginPlaylistSyncSchema), async (c) => {
+  app.post('/library/syncs', zValidator('json', beginLibrarySyncSchema), async (c) => {
     try {
       const body = c.req.valid('json')
-      const result = await store.begin(
+      return c.json(await store.begin(
         c.get('user').id,
-        body.storefront,
-        body.expectedPlaylists,
-        body.expectedEntries,
         body.source,
-      )
-      return c.json(result, 201)
+        body.storefront,
+        body.expectedSongs,
+        body.expectedRecentTracks,
+      ), 201)
     } catch (error) {
       return errorResponse(c, error)
     }
   })
 
   app.put(
-    '/playlists/syncs/:syncId/playlists',
+    '/library/syncs/:syncId/songs',
     zValidator('param', syncParamSchema),
-    zValidator('json', playlistChunkSchema),
+    zValidator('json', librarySongChunkSchema),
     async (c) => {
       try {
         const { syncId } = c.req.valid('param')
-        const { playlists } = c.req.valid('json')
-        await store.putPlaylists(c.get('user').id, syncId, playlists)
-        return c.json({ accepted: playlists.length })
+        const { songs } = c.req.valid('json')
+        await store.putSongs(c.get('user').id, syncId, songs)
+        return c.json({ accepted: songs.length })
       } catch (error) {
         return errorResponse(c, error)
       }
@@ -66,15 +65,15 @@ export function playlistIngestRoutes(
   )
 
   app.put(
-    '/playlists/syncs/:syncId/entries',
+    '/library/syncs/:syncId/recent-tracks',
     zValidator('param', syncParamSchema),
-    zValidator('json', playlistEntryChunkSchema),
+    zValidator('json', libraryRecentTrackChunkSchema),
     async (c) => {
       try {
         const { syncId } = c.req.valid('param')
-        const { playlistAppleId, entries } = c.req.valid('json')
-        await store.putEntries(c.get('user').id, syncId, playlistAppleId, entries)
-        return c.json({ accepted: entries.length })
+        const { catalogIds } = c.req.valid('json')
+        await store.putRecentTracks(c.get('user').id, syncId, catalogIds)
+        return c.json({ accepted: catalogIds.length })
       } catch (error) {
         return errorResponse(c, error)
       }
@@ -82,7 +81,7 @@ export function playlistIngestRoutes(
   )
 
   app.post(
-    '/playlists/syncs/:syncId/complete',
+    '/library/syncs/:syncId/complete',
     zValidator('param', syncParamSchema),
     async (c) => {
       try {

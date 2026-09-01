@@ -8,7 +8,7 @@ export type PoolTrack = {
   appleId: string | null
   title: string
   artist: string
-  playCount: number
+  playCount: number | null
   tempo: number | null
   energy: number | null
   valence: number | null
@@ -151,7 +151,7 @@ type PoolRow = {
   apple_id: string | null
   title: string
   artist: string
-  play_count: number | string
+  play_count: number | string | null
   tempo: number | string | null
   energy: number | string | null
   valence: number | string | null
@@ -246,10 +246,22 @@ export async function buildPool(
   // rather than excluding the track or poisoning the sum with NULL.
   const simFit = sql`COALESCE(GREATEST(0, 1 - (tm.embedding <=> ${vecLiteral}::vector)), 0)`
 
-  // Familiarity: LN(1+plays) normalized against a heavy-rotation reference so
-  // it saturates at 1 (see FAM_REFERENCE_PLAYS above) — a true [0,1] term,
-  // not an unbounded one.
-  const famFit = sql`LEAST(1, LN(1 + ut.play_count) / ${FAM_REFERENCE_LN})`
+  // Familiarity is capability-aware. Native syncs use observed lifetime play
+  // counts. Web MusicKit cannot supply that number, so web-only rows use the
+  // strongest honest signal available: bounded recent-play rank or deliberate
+  // playlist membership. Missing stays missing; it never becomes a fake zero.
+  const observedPlayCountFit = sql`LEAST(1, LN(1 + ut.play_count) / ${FAM_REFERENCE_LN})`
+  const recentFit = sql`COALESCE(1 - (rs.rank::float8 / 30.0), 0)`
+  // PostgreSQL LEAST ignores NULL operands, so COALESCE(LEAST(0.8, NULL), 0)
+  // would incorrectly return 0.8. Branch before LEAST to keep no signal at 0.
+  const playlistFit = sql`CASE
+    WHEN ps.playlist_count IS NULL THEN 0
+    ELSE LEAST(0.8, LN(1 + ps.playlist_count) / LN(6))
+  END`
+  const famFit = sql`CASE
+    WHEN ut.play_count_observed THEN ${observedPlayCountFit}
+    ELSE GREATEST(${recentFit}, ${playlistFit})
+  END`
 
   // Taste: COALESCE inside the expression (not wrapped around it) so a track
   // whose artist has no row in artist_taste at all (LEFT JOIN miss — no
@@ -344,13 +356,28 @@ export async function buildPool(
         SUM(CASE WHEN kind = 'penalty' THEN weight ELSE 0 END) AS penalties
       FROM taste_signals
       GROUP BY artist
+    ),
+    recent_signal AS (
+      SELECT track_id, MIN(rank) AS rank
+      FROM user_recent_track_observations
+      WHERE user_id = ${userId} AND source = 'web_musickit'
+      GROUP BY track_id
+    ),
+    playlist_signal AS (
+      SELECT pe.track_id, COUNT(DISTINCT pe.playlist_id)::int AS playlist_count
+      FROM playlist_entries pe
+      JOIN user_playlists up ON up.id = pe.playlist_id
+      WHERE up.user_id = ${userId}
+        AND up.in_library = true
+        AND pe.track_id IS NOT NULL
+      GROUP BY pe.track_id
     )
     SELECT
       t.id AS track_id,
       t.apple_id AS apple_id,
       t.title AS title,
       t.artist AS artist,
-      ut.play_count AS play_count,
+      CASE WHEN ut.play_count_observed THEN ut.play_count ELSE NULL END AS play_count,
       f.tempo AS tempo,
       f.energy AS energy,
       f.valence AS valence,
@@ -362,6 +389,8 @@ export async function buildPool(
     LEFT JOIN track_features f ON f.track_id = t.id
     LEFT JOIN track_meanings tm ON tm.track_id = t.id
     LEFT JOIN artist_taste at ON at.artist = t.artist
+    LEFT JOIN recent_signal rs ON rs.track_id = t.id
+    LEFT JOIN playlist_signal ps ON ps.track_id = t.id
     WHERE ${whereClause}
     ORDER BY score DESC, t.id
     LIMIT ${poolSize}
@@ -373,7 +402,7 @@ export async function buildPool(
     appleId: r.apple_id,
     title: r.title,
     artist: r.artist,
-    playCount: Number(r.play_count),
+    playCount: num(r.play_count),
     tempo: num(r.tempo),
     energy: num(r.energy),
     valence: num(r.valence),

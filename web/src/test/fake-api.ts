@@ -106,6 +106,34 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): MixtapeApi {
     },
     getMusicKitToken: async () => ({ developerToken: 'fake-developer-token', expiresAt: 1_788_138_000 }),
     recordSessionEvent: async () => ({ ok: true }),
+    updateSession: async (sessionId, updates) => {
+      const session = summaries.find((item) => item.id === sessionId) ?? summaries[0]
+      return { session: { ...session, ...updates } }
+    },
+    listMemories: async () => ({ memories: [] }),
+    deleteMemory: async () => ({ ok: true }),
+    listPlaylists: async () => ({ playlists: [], nextCursor: null }),
+    getPlaylist: async () => {
+      throw new Error('fake playlist detail not configured')
+    },
+    beginLibrarySync: async () => ({ syncId: 'library-sync', expiresAt: Date.now() + 60_000 }),
+    putLibrarySongs: async (_syncId, songs) => ({ accepted: songs.length }),
+    putLibraryRecentTracks: async (_syncId, catalogIds) => ({ accepted: catalogIds.length }),
+    completeLibrarySync: async () => ({
+      songs: 0,
+      catalogResolved: 0,
+      playCountsObserved: 0,
+      recentTracks: 0,
+    }),
+    beginPlaylistSync: async () => ({ syncId: 'playlist-sync', expiresAt: Date.now() + 60_000 }),
+    putPlaylists: async (_syncId, playlists) => ({ accepted: playlists.length }),
+    putPlaylistEntries: async (_syncId, _playlistAppleId, entries) => ({ accepted: entries.length }),
+    completePlaylistSync: async () => ({
+      playlists: 0,
+      entries: 0,
+      resolvedEntries: 0,
+      unresolvedEntries: 0,
+    }),
   }
 
   return { ...api, ...overrides }

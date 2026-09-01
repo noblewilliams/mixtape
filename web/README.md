@@ -1,6 +1,6 @@
 # mixtape web
 
-React, Vite, and TypeScript implementation of the approved tape-and-glass identity. The production entry point uses Better Auth for Apple and Google sign-in and reads sessions, messages, and tape queues from the Hono API.
+React, Vite, and TypeScript implementation of the approved tape-and-glass identity. The production entry point uses Better Auth for Apple and Google sign-in, reads sessions and mixes from the Hono API, and uses MusicKit on the Web for Apple Music authorization and playback.
 
 ## Run it
 
@@ -30,7 +30,7 @@ Apple's real browser callback must be tested on the deployed HTTPS origin; Apple
 
 ## Current boundary
 
-- Implemented: Better Auth browser session gate with Apple + Google, remembered last-used provider, explicit account linking, credentialed `/sessions` integration, MusicKit JS playback and playlist creation, responsive conversation shell, server-backed session creation/chat, the artwork-led mix rail with versioned reorder and swipe-remove Undo, tape list, single-shelf Closet, and animated cassette loading states.
-- Next: the `/me/memories` UI.
-- Platform constraint: web does not provide the native iOS per-song play counts used during library ingest.
+- Implemented foundations: Better Auth browser session gate with Apple + Google, remembered last-used provider, explicit account linking, credentialed session/memory/playlist APIs, MusicKit playback and playlist creation, paged MusicKit library/playlist/recent reads, deletion-safe staged upload, responsive conversation shell, server-backed session creation/chat, and the artwork-led mix rail.
+- Next approval/implementation: the dedicated `Your music` flow in `docs/mockups/2026-09-01-web-sync-playlist-states.html`, including real progress, playlist browse/detail, memories, and rename/archive controls.
+- Platform constraint: MusicKit on the Web does not expose native iOS per-song play counts. Mixtape preserves that as unknown and uses bounded recent order, playlist membership, and in-app behavior instead.
 - Product rule: never display or persist lyric text.

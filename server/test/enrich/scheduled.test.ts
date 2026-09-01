@@ -46,6 +46,7 @@ describe('handleScheduled', () => {
     expect(result).toEqual({
       enrichment: { error: 'failed' },
       artwork: artworkResult,
+      libraryCleanup: expect.objectContaining({ touchedRuns: 0 }),
       playlistCleanup: expect.objectContaining({ touchedRuns: 0 }),
     })
   })
@@ -67,6 +68,7 @@ describe('handleScheduled', () => {
     expect(result).toEqual({
       enrichment: enrichmentResult,
       artwork: { error: 'failed' },
+      libraryCleanup: expect.objectContaining({ touchedRuns: 0 }),
       playlistCleanup: expect.objectContaining({ touchedRuns: 0 }),
     })
   })
@@ -87,6 +89,42 @@ describe('handleScheduled', () => {
     expect(result.playlistCleanup).toMatchObject({ touchedRuns: 0 })
   })
 
+  it('runs library cleanup even without enrichment or artwork dependencies', async () => {
+    const db = await createTestDb()
+    const libraryCleanup = vi.fn(async () => ({
+      touchedRuns: 1,
+      expiredRuns: 1,
+      deletedSongs: 0,
+      deletedRecentTracks: 0,
+      purgedRuns: 0,
+    }))
+
+    const result = await handleScheduled(db, {}, { libraryCleanup })
+
+    expect(libraryCleanup).toHaveBeenCalledOnce()
+    expect(result.libraryCleanup).toMatchObject({ expiredRuns: 1 })
+  })
+
+  it('keeps playlist cleanup independent from library cleanup failure', async () => {
+    const db = await createTestDb()
+    const libraryCleanup = vi.fn(async () => { throw new Error('secret library cleanup failure') })
+    const playlistCleanup = vi.fn(async () => ({
+      touchedRuns: 0,
+      expiredRuns: 0,
+      deletedEntries: 0,
+      deletedPlaylists: 0,
+      purgedRuns: 0,
+    }))
+
+    const result = await handleScheduled(db, {}, { libraryCleanup, playlistCleanup })
+
+    expect(playlistCleanup).toHaveBeenCalledOnce()
+    expect(result).toEqual({
+      libraryCleanup: { error: 'failed' },
+      playlistCleanup: expect.objectContaining({ touchedRuns: 0 }),
+    })
+  })
+
   it('keeps playlist cleanup independent from enrichment failure', async () => {
     const db = await createTestDb()
     const enrichment = vi.fn(async () => { throw new Error('secret feature failure') })
@@ -105,6 +143,7 @@ describe('handleScheduled', () => {
 
     expect(result).toEqual({
       enrichment: { error: 'failed' },
+      libraryCleanup: expect.objectContaining({ touchedRuns: 0 }),
       playlistCleanup: expect.objectContaining({ expiredRuns: 1 }),
     })
   })
@@ -122,6 +161,7 @@ describe('handleScheduled', () => {
 
     expect(result).toEqual({
       enrichment: enrichmentResult,
+      libraryCleanup: expect.objectContaining({ touchedRuns: 0 }),
       playlistCleanup: { error: 'failed' },
     })
   })

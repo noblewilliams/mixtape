@@ -7,6 +7,7 @@ import {
   userMusicProfiles,
 } from '../db/schema'
 import type { PlaylistEntrySnapshot, PlaylistSnapshot } from './contracts'
+import type { LibrarySyncSource } from '../library/contracts'
 
 export type PlaylistSyncErrorCategory =
   | 'not_found'
@@ -35,6 +36,7 @@ export type PlaylistSyncStore = {
     storefront: string,
     expectedPlaylists: number,
     expectedEntries: number,
+    source?: LibrarySyncSource,
   ): Promise<{ syncId: string; expiresAt: number }>
   putPlaylists(userId: string, syncId: string, playlists: PlaylistSnapshot[]): Promise<void>
   putEntries(
@@ -166,7 +168,7 @@ export function createPlaylistSyncStore(db: Db, deps: StoreDeps = {}): PlaylistS
   }
 
   return {
-    async begin(userId, storefront, expectedPlaylists, expectedEntries) {
+    async begin(userId, storefront, expectedPlaylists, expectedEntries, source = 'ios_native') {
       return db.transaction(async (rawTx) => {
         const tx = rawTx as unknown as Db
         const now = currentTime()
@@ -186,6 +188,7 @@ export function createPlaylistSyncStore(db: Db, deps: StoreDeps = {}): PlaylistS
           .where(and(eq(playlistSyncRuns.userId, userId), eq(playlistSyncRuns.status, 'open')))
         const [run] = await tx.insert(playlistSyncRuns).values({
           userId,
+          source,
           status: 'open',
           appleStorefront: storefront,
           expectedPlaylists,

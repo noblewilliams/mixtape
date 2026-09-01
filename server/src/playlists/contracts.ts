@@ -41,6 +41,7 @@ const nullableNonnegativeInteger = postgresInteger.nonnegative().nullable()
 const nullableArtworkColor = z.string().regex(/^[0-9a-f]{6}$/).nullable()
 
 export const beginPlaylistSyncSchema = z.object({
+  source: z.enum(['ios_native', 'web_musickit']).default('ios_native'),
   storefront: z.string().regex(/^[a-z]{2}$/),
   expectedPlaylists: z.number().int().min(0).max(PLAYLIST_SYNC_MAX_PLAYLISTS),
   expectedEntries: z.number().int().min(0).max(PLAYLIST_SYNC_MAX_ENTRIES),

@@ -1,3 +1,9 @@
+import type {
+  LibrarySongSnapshot,
+  PlaylistEntrySnapshot,
+  PlaylistSnapshot,
+} from '../musickit/library'
+
 export type ApiSessionStatus = 'active' | 'archived'
 
 export type ApiSession = {
@@ -69,6 +75,55 @@ export type MusicKitTokenResponse = {
   expiresAt: number
 }
 
+export type ApiPlaylistSummary = {
+  id: string
+  name: string
+  curatorName: string | null
+  kind: string
+  artworkUrlTemplate: string | null
+  artworkWidth: number | null
+  artworkHeight: number | null
+  artworkBgColor: string | null
+  entryCount: number
+  knownDurationMs: number | null
+  lastModifiedAt: string | null
+  syncedAt: string | null
+  inLibrary: boolean
+  capability: 'copy_only'
+}
+
+export type ApiPlaylistEntry = {
+  id: string
+  position: number
+  trackId: string | null
+  appleCatalogId: string | null
+  title: string
+  artist: string
+  album: string | null
+  durationMs: number | null
+  artworkUrlTemplate: string | null
+  artworkWidth: number | null
+  artworkHeight: number | null
+  artworkBgColor: string | null
+  resolved: boolean
+}
+
+export type ApiMemory = { id: string; note: string; createdAt: string }
+
+export type StagedSyncStart = { syncId: string; expiresAt: number }
+export type LibrarySyncSummary = {
+  songs: number
+  catalogResolved: number
+  playCountsObserved: number
+  recentTracks: number
+}
+export type PlaylistSyncSummary = {
+  playlists: number
+  entries: number
+  resolvedEntries: number
+  unresolvedEntries: number
+}
+
 export type MixtapeApi = {
   listSessions: () => Promise<{ sessions: ApiSessionSummary[] }>
   getSession: (sessionId: string) => Promise<SessionDetailResponse>
@@ -77,6 +132,61 @@ export type MixtapeApi = {
   applyQueueOps: (sessionId: string, ops: QueueOp[], expectedVersion?: number) => Promise<QueueOpsResponse>
   getMusicKitToken: () => Promise<MusicKitTokenResponse>
   recordSessionEvent: (sessionId: string, type: 'played' | 'saved_playlist') => Promise<{ ok: true }>
+  updateSession: (
+    sessionId: string,
+    updates: { title?: string; status?: ApiSessionStatus },
+  ) => Promise<{ session: ApiSession }>
+  listMemories: () => Promise<{ memories: ApiMemory[] }>
+  deleteMemory: (memoryId: string) => Promise<{ ok: true }>
+  listPlaylists: (options?: {
+    status?: 'active' | 'all'
+    q?: string
+    limit?: number
+    cursor?: string
+  }) => Promise<{ playlists: ApiPlaylistSummary[]; nextCursor: string | null }>
+  getPlaylist: (
+    playlistId: string,
+    options?: { entryLimit?: number; entryCursor?: string },
+  ) => Promise<{
+    playlist: ApiPlaylistSummary
+    entries: ApiPlaylistEntry[]
+    nextEntryCursor: string | null
+  }>
+  beginLibrarySync: (input: {
+    source: 'ios_native' | 'web_musickit'
+    storefront: string
+    expectedSongs: number
+    expectedRecentTracks: number
+  }, signal?: AbortSignal) => Promise<StagedSyncStart>
+  putLibrarySongs: (
+    syncId: string,
+    songs: LibrarySongSnapshot[],
+    signal?: AbortSignal,
+  ) => Promise<{ accepted: number }>
+  putLibraryRecentTracks: (
+    syncId: string,
+    catalogIds: string[],
+    signal?: AbortSignal,
+  ) => Promise<{ accepted: number }>
+  completeLibrarySync: (syncId: string, signal?: AbortSignal) => Promise<LibrarySyncSummary>
+  beginPlaylistSync: (input: {
+    source: 'ios_native' | 'web_musickit'
+    storefront: string
+    expectedPlaylists: number
+    expectedEntries: number
+  }, signal?: AbortSignal) => Promise<StagedSyncStart>
+  putPlaylists: (
+    syncId: string,
+    playlists: PlaylistSnapshot[],
+    signal?: AbortSignal,
+  ) => Promise<{ accepted: number }>
+  putPlaylistEntries: (
+    syncId: string,
+    playlistAppleId: string,
+    entries: Omit<PlaylistEntrySnapshot, 'playlistAppleId'>[],
+    signal?: AbortSignal,
+  ) => Promise<{ accepted: number }>
+  completePlaylistSync: (syncId: string, signal?: AbortSignal) => Promise<PlaylistSyncSummary>
 }
 
 export class ApiError extends Error {
@@ -155,6 +265,74 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
       request(`/sessions/${encodeURIComponent(sessionId)}/events`, {
         method: 'POST',
         body: JSON.stringify({ type }),
+      }),
+    updateSession: (sessionId, updates) =>
+      request(`/sessions/${encodeURIComponent(sessionId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(updates),
+      }),
+    listMemories: () => request('/me/memories'),
+    deleteMemory: (memoryId) =>
+      request(`/me/memories/${encodeURIComponent(memoryId)}`, { method: 'DELETE' }),
+    listPlaylists: (options = {}) => {
+      const params = new URLSearchParams()
+      params.set('status', options.status ?? 'active')
+      params.set('limit', String(options.limit ?? 30))
+      if (options.q) params.set('q', options.q)
+      if (options.cursor) params.set('cursor', options.cursor)
+      return request(`/playlists?${params.toString()}`)
+    },
+    getPlaylist: (playlistId, options = {}) => {
+      const params = new URLSearchParams()
+      params.set('entryLimit', String(options.entryLimit ?? 200))
+      if (options.entryCursor) params.set('entryCursor', options.entryCursor)
+      return request(`/playlists/${encodeURIComponent(playlistId)}?${params.toString()}`)
+    },
+    beginLibrarySync: (input, signal) =>
+      request('/ingest/library/syncs', {
+        method: 'POST',
+        body: JSON.stringify(input),
+        signal,
+      }),
+    putLibrarySongs: (syncId, songs, signal) =>
+      request(`/ingest/library/syncs/${encodeURIComponent(syncId)}/songs`, {
+        method: 'PUT',
+        body: JSON.stringify({ songs }),
+        signal,
+      }),
+    putLibraryRecentTracks: (syncId, catalogIds, signal) =>
+      request(`/ingest/library/syncs/${encodeURIComponent(syncId)}/recent-tracks`, {
+        method: 'PUT',
+        body: JSON.stringify({ catalogIds }),
+        signal,
+      }),
+    completeLibrarySync: (syncId, signal) =>
+      request(`/ingest/library/syncs/${encodeURIComponent(syncId)}/complete`, {
+        method: 'POST',
+        signal,
+      }),
+    beginPlaylistSync: (input, signal) =>
+      request('/ingest/playlists/syncs', {
+        method: 'POST',
+        body: JSON.stringify(input),
+        signal,
+      }),
+    putPlaylists: (syncId, playlists, signal) =>
+      request(`/ingest/playlists/syncs/${encodeURIComponent(syncId)}/playlists`, {
+        method: 'PUT',
+        body: JSON.stringify({ playlists }),
+        signal,
+      }),
+    putPlaylistEntries: (syncId, playlistAppleId, entries, signal) =>
+      request(`/ingest/playlists/syncs/${encodeURIComponent(syncId)}/entries`, {
+        method: 'PUT',
+        body: JSON.stringify({ playlistAppleId, entries }),
+        signal,
+      }),
+    completePlaylistSync: (syncId, signal) =>
+      request(`/ingest/playlists/syncs/${encodeURIComponent(syncId)}/complete`, {
+        method: 'POST',
+        signal,
       }),
   }
 }

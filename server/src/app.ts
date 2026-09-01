@@ -3,6 +3,7 @@ import { cors } from 'hono/cors'
 import { requireSession } from './middleware/require-session'
 import { requireAdmin } from './middleware/require-admin'
 import { ingestRoutes } from './routes/ingest'
+import { libraryIngestRoutes } from './routes/library-ingest'
 import { playlistIngestRoutes } from './routes/playlist-ingest'
 import { playlistsRoutes } from './routes/playlists'
 import { enrichRoutes } from './routes/enrich'
@@ -84,6 +85,7 @@ export function createApp({
   if (db) {
     app.use('/ingest/*', requireSession(auth))
     app.route('/ingest', ingestRoutes(db))
+    app.route('/ingest', libraryIngestRoutes(db))
     app.route('/ingest', playlistIngestRoutes(db))
 
     app.use('/playlists', requireSession(auth))

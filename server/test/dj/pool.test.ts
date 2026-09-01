@@ -3,7 +3,19 @@ import { sql } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { buildPool } from '../../src/dj/pool'
 import { intentSchema, type Intent } from '../../src/dj/contracts'
-import { tracks, trackFeatures, trackMeanings, userTracks, user, djSessions, queueTracks, sessionEvents } from '../../src/db/schema'
+import {
+  tracks,
+  trackFeatures,
+  trackMeanings,
+  userTracks,
+  user,
+  djSessions,
+  queueTracks,
+  sessionEvents,
+  userRecentTrackObservations,
+  userPlaylists,
+  playlistEntries,
+} from '../../src/db/schema'
 import type { Embedder } from '../../src/enrich/embedder'
 
 const DIMS = 1024
@@ -42,6 +54,7 @@ type SeedOpts = {
   explicit?: boolean | null
   embedding?: number[]
   playCount?: number
+  playCountObserved?: boolean
   inLibrary?: boolean
   durationMs?: number
   noFeatures?: boolean // when true, no track_features row at all
@@ -86,6 +99,7 @@ async function seedTrack(db: TestDb, userId: string, opts: SeedOpts = {}) {
     userId,
     trackId: t.id,
     playCount: opts.playCount ?? 0,
+    playCountObserved: opts.playCountObserved ?? true,
     inLibrary: opts.inLibrary ?? true,
   })
 
@@ -318,6 +332,43 @@ describe('buildPool', () => {
     expect(byId(adventurousPool, relevantButUnknown.id).score).toBeGreaterThan(
       byId(adventurousPool, popularButIrrelevant.id).score,
     )
+  })
+
+  it('uses recent rank and playlist membership when web play counts are unavailable', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const recent = await seedTrack(db, 'u1', {
+      embedding: SAME_AS_QUERY, playCountObserved: false,
+    })
+    const playlisted = await seedTrack(db, 'u1', {
+      embedding: SAME_AS_QUERY, playCountObserved: false,
+    })
+    const noSignal = await seedTrack(db, 'u1', {
+      embedding: SAME_AS_QUERY, playCountObserved: false,
+    })
+    await db.insert(userRecentTrackObservations).values({
+      userId: 'u1', trackId: recent.id, source: 'web_musickit', rank: 0, observedAt: new Date(),
+    })
+    const [playlist] = await db.insert(userPlaylists).values({
+      userId: 'u1', appleLibraryId: 'p-web', name: 'Saved', kind: 'user',
+      sourceFingerprint: 'a'.repeat(64), inLibrary: true,
+    }).returning()
+    await db.insert(playlistEntries).values({
+      playlistId: playlist.id,
+      position: 0,
+      trackId: playlisted.id,
+      appleLibraryEntryId: 'entry-1',
+      titleSnapshot: 'Playlisted',
+      artistSnapshot: 'Artist',
+    })
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', familiarity: 'comfort' }))
+    const byId = (id: string) => pool.find((item) => item.trackId === id)!
+    expect(byId(recent.id).playCount).toBeNull()
+    expect(byId(playlisted.id).playCount).toBeNull()
+    expect(byId(noSignal.id).playCount).toBeNull()
+    expect(byId(recent.id).score).toBeGreaterThan(byId(noSignal.id).score)
+    expect(byId(playlisted.id).score).toBeGreaterThan(byId(noSignal.id).score)
   })
 
   it('pool size is min(15 * targetCount, 300, available)', async () => {

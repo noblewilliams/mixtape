@@ -13,6 +13,19 @@ uses opaque surfaces. Approval: `docs/mockups/approved/2026-09-01-web-shared-con
 **Reopens if:** real-device testing shows the motion distracts from reading, browser rendering makes the
 session color unstable, or translucent chrome cannot hold contrast over supported paints.
 
+## 2026-09-01 — Web is a first-class Apple Music client
+The web is a first-class sync and listening client for anyone who cannot or chooses not to use the native
+iOS app; Android listeners are a launch-critical audience, not a platform-specific product boundary. The
+web is not limited to browsing an iPhone-produced snapshot. MusicKit on the Web reads library songs,
+playlists, playlist entries, and recent tracks, then uploads normalized snapshots through the same private
+Mixtape API without sending or storing the Music User Token. Web-derived taste intentionally lacks native
+play counts: missing counts stay unknown and playlist membership, recent order, and Mixtape behavior carry
+more of the ranking load. The existing playlist staging work remains valid and gains a browser adapter;
+song-library ingestion gains its own deletion-safe staged completion protocol. Design:
+`docs/superpowers/specs/2026-09-01-web-sync-consumption-design.md`. **Reopens if:** Apple removes web library
+or playback access, the supported browser matrix cannot preserve playlist order/duplicates, or web launch
+expands beyond Apple Music subscribers.
+
 ## 2026-09-01 — Web removal Undo delays the server mutation
 The web removes a swiped track from local queue state immediately, but does not send the versioned `remove`
 operation until the approved three-second Undo window expires. Undo therefore restores the local row without

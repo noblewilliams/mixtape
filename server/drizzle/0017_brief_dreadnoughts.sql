@@ -1,0 +1,2 @@
+ALTER TABLE "playlist_sync_runs" ADD COLUMN "source" text DEFAULT 'ios_native' NOT NULL;--> statement-breakpoint
+ALTER TABLE "playlist_sync_runs" ADD CONSTRAINT "playlist_sync_runs_source_check" CHECK ("playlist_sync_runs"."source" IN ('ios_native', 'web_musickit'));

@@ -68,7 +68,7 @@ function poolLine(t: PoolTrack): string {
   return [
     t.trackId,
     `${sanitizeForPrompt(t.title)} — ${sanitizeForPrompt(t.artist)}`,
-    String(t.playCount),
+    fmt(t.playCount),
     fmt(t.tempo === null ? null : Math.round(t.tempo)),
     fmt(t.energy, 2),
     fmt(t.valence, 2),

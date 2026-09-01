@@ -67,6 +67,9 @@ export const userTracks = pgTable(
       .notNull()
       .references(() => tracks.id, { onDelete: 'cascade' }),
     playCount: integer('play_count').notNull().default(0),
+    // Web MusicKit cannot observe lifetime play counts. Keeping an explicit
+    // quality bit prevents "unknown" from becoming false zero-play evidence.
+    playCountObserved: boolean('play_count_observed').notNull().default(true),
     lastPlayedAt: timestamp('last_played_at', { withTimezone: true }),
     dateAdded: timestamp('date_added', { withTimezone: true }),
     inLibrary: boolean('in_library').notNull().default(true),
@@ -78,6 +81,28 @@ export const userTracks = pgTable(
   (t) => [
     primaryKey({ columns: [t.userId, t.trackId] }),
     index('user_tracks_track_idx').on(t.trackId),
+  ],
+)
+
+export const userRecentTrackObservations = pgTable(
+  'user_recent_track_observations',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    source: text('source', { enum: ['web_musickit'] }).notNull(),
+    trackId: uuid('track_id')
+      .notNull()
+      .references(() => tracks.id, { onDelete: 'cascade' }),
+    rank: integer('rank').notNull(),
+    observedAt: timestamp('observed_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.source, t.trackId] }),
+    uniqueIndex('user_recent_tracks_source_rank_idx').on(t.userId, t.source, t.rank),
+    index('user_recent_tracks_track_idx').on(t.trackId),
+    check('user_recent_tracks_source_check', sql`${t.source} = 'web_musickit'`),
+    check('user_recent_tracks_rank_check', sql`${t.rank} BETWEEN 0 AND 29`),
   ],
 )
 
@@ -287,6 +312,127 @@ export const userMusicProfiles = pgTable(
   ],
 )
 
+export const librarySyncRuns = pgTable(
+  'library_sync_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    source: text('source', { enum: ['ios_native', 'web_musickit'] }).notNull(),
+    status: text('status', { enum: ['open', 'completed', 'failed', 'expired'] }).notNull(),
+    appleStorefront: text('apple_storefront').notNull(),
+    expectedSongs: integer('expected_songs').notNull(),
+    receivedSongs: integer('received_songs').notNull().default(0),
+    expectedRecentTracks: integer('expected_recent_tracks').notNull().default(0),
+    receivedRecentTracks: integer('received_recent_tracks').notNull().default(0),
+    resultSongs: integer('result_songs'),
+    resultCatalogResolved: integer('result_catalog_resolved'),
+    resultPlayCountsObserved: integer('result_play_counts_observed'),
+    resultRecentTracks: integer('result_recent_tracks'),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('library_sync_runs_one_open_user_idx')
+      .on(t.userId)
+      .where(sql`${t.status} = 'open'`),
+    index('library_sync_runs_user_status_started_idx').on(t.userId, t.status, t.startedAt),
+    index('library_sync_runs_open_cleanup_idx')
+      .on(t.startedAt, t.id)
+      .where(sql`${t.status} = 'open'`),
+    index('library_sync_runs_expired_cleanup_idx')
+      .on(t.expiresAt, t.id)
+      .where(sql`${t.status} = 'expired'`),
+    index('library_sync_runs_completed_cleanup_idx')
+      .on(t.completedAt, t.id)
+      .where(sql`${t.status} = 'completed'`),
+    check(
+      'library_sync_runs_source_check',
+      sql`${t.source} IN ('ios_native', 'web_musickit')`,
+    ),
+    check(
+      'library_sync_runs_status_check',
+      sql`${t.status} IN ('open', 'completed', 'failed', 'expired')`,
+    ),
+    check('library_sync_runs_storefront_check', sql`${t.appleStorefront} ~ '^[a-z]{2}$'`),
+    check('library_sync_runs_expected_songs_check', sql`${t.expectedSongs} >= 0`),
+    check('library_sync_runs_received_songs_check', sql`${t.receivedSongs} >= 0`),
+    check(
+      'library_sync_runs_expected_recent_check',
+      sql`${t.expectedRecentTracks} BETWEEN 0 AND 30`,
+    ),
+    check(
+      'library_sync_runs_received_recent_check',
+      sql`${t.receivedRecentTracks} BETWEEN 0 AND 30`,
+    ),
+    check('library_sync_runs_result_songs_check', nonnegativeOrNullSql(t.resultSongs)),
+    check(
+      'library_sync_runs_result_catalog_check',
+      nonnegativeOrNullSql(t.resultCatalogResolved),
+    ),
+    check(
+      'library_sync_runs_result_play_counts_check',
+      nonnegativeOrNullSql(t.resultPlayCountsObserved),
+    ),
+    check(
+      'library_sync_runs_result_recent_check',
+      nonnegativeOrNullSql(t.resultRecentTracks),
+    ),
+  ],
+)
+
+export const librarySyncSongs = pgTable(
+  'library_sync_songs',
+  {
+    syncId: uuid('sync_id')
+      .notNull()
+      .references(() => librarySyncRuns.id, { onDelete: 'cascade' }),
+    ordinal: integer('ordinal').notNull(),
+    appleLibraryId: text('apple_library_id'),
+    appleCatalogId: text('apple_catalog_id').notNull(),
+    title: text('title').notNull(),
+    artist: text('artist').notNull(),
+    album: text('album'),
+    genre: text('genre'),
+    releaseYear: integer('release_year'),
+    explicit: boolean('explicit'),
+    playCount: integer('play_count'),
+    lastPlayedAt: timestamp('last_played_at', { withTimezone: true }),
+    dateAdded: timestamp('date_added', { withTimezone: true }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.syncId, t.ordinal] }),
+    uniqueIndex('library_sync_songs_sync_catalog_idx').on(t.syncId, t.appleCatalogId),
+    uniqueIndex('library_sync_songs_sync_library_idx')
+      .on(t.syncId, t.appleLibraryId)
+      .where(sql`${t.appleLibraryId} IS NOT NULL`),
+    check('library_sync_songs_ordinal_check', sql`${t.ordinal} >= 0`),
+    check('library_sync_songs_play_count_check', nonnegativeOrNullSql(t.playCount)),
+    check(
+      'library_sync_songs_release_year_check',
+      sql`${t.releaseYear} IS NULL OR ${t.releaseYear} BETWEEN 1900 AND 3000`,
+    ),
+  ],
+)
+
+export const librarySyncRecentTracks = pgTable(
+  'library_sync_recent_tracks',
+  {
+    syncId: uuid('sync_id')
+      .notNull()
+      .references(() => librarySyncRuns.id, { onDelete: 'cascade' }),
+    rank: integer('rank').notNull(),
+    appleCatalogId: text('apple_catalog_id').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.syncId, t.rank] }),
+    uniqueIndex('library_sync_recent_sync_catalog_idx').on(t.syncId, t.appleCatalogId),
+    check('library_sync_recent_rank_check', sql`${t.rank} BETWEEN 0 AND 29`),
+  ],
+)
+
 export const userPlaylists = pgTable(
   'user_playlists',
   {
@@ -393,6 +539,9 @@ export const playlistSyncRuns = pgTable(
     userId: text('user_id')
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
+    source: text('source', { enum: ['ios_native', 'web_musickit'] })
+      .notNull()
+      .default('ios_native'),
     status: text('status', { enum: ['open', 'completed', 'failed', 'expired'] }).notNull(),
     appleStorefront: text('apple_storefront').notNull(),
     expectedPlaylists: integer('expected_playlists').notNull(),
@@ -424,6 +573,10 @@ export const playlistSyncRuns = pgTable(
     check(
       'playlist_sync_runs_status_check',
       sql`${t.status} IN ('open', 'completed', 'failed', 'expired')`,
+    ),
+    check(
+      'playlist_sync_runs_source_check',
+      sql`${t.source} IN ('ios_native', 'web_musickit')`,
     ),
     check('playlist_sync_runs_storefront_check', sql`${t.appleStorefront} ~ '^[a-z]{2}$'`),
     check('playlist_sync_runs_expected_playlists_check', sql`${t.expectedPlaylists} >= 0`),
