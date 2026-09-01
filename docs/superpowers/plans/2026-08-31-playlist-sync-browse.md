@@ -323,18 +323,18 @@ These refine the approved system design without changing its product behavior:
 - Modify after evidence: `docs/backlog.md`
 - Modify after collision release: `docs/decisions.md`
 
-- [ ] **Step 1: Run all local gates at committed HEAD:**
+- [x] **Step 1: Run all local gates at committed HEAD:**
   - `cd server && npx vitest run --no-file-parallelism && npm run typecheck`;
   - `cd client && flutter test`;
   - unsigned iOS workspace build;
   - `git diff --check`;
   - search for probe flags/mutation methods introduced by Phase 2; expected: no probe and no new write path.
-- [ ] **Step 2: Run an independent plan/app/security review and fix every actionable finding.** Re-run the affected focused suites plus all authoritative gates after fixes.
-- [ ] **Step 3: Create a clean deployment worktree** from the exact reviewed commit and verify it is clean.
-- [ ] **Step 4: Ask separately for action-time approval** before production migrations 0012–0014, Worker deployment, and the first private playlist upload.
-- [ ] **Step 5: Apply migrations 0012–0014 from the clean worktree.** Verify all six tables, checks, unique constraints (including stable playlist-entry identity), foreign-key indexes, active-run partial index, browse keyset index, and bounded-cleanup indexes before deploying code.
-- [ ] **Step 6: Deploy the exact reviewed Worker.** Verify `/health` 200, `/me` 401, existing enrichment/artwork status counts unchanged, unauthorized playlist routes 401, and no missing-secret/startup regression.
-- [ ] **Step 7: Run the founder sync from the iPhone.** It is read-only toward Apple Music. Record only total playlists, total entries, resolved/unresolved counts, duration, and fixed failure category.
+- [x] **Step 2: Run an independent plan/app/security review and fix every actionable finding.** Re-run the affected focused suites plus all authoritative gates after fixes.
+- [x] **Step 3: Create a clean deployment worktree** from the exact reviewed commit and verify it is clean.
+- [x] **Step 4: Ask separately for action-time approval** before production migrations 0012–0014, Worker deployment, and the first private playlist upload.
+- [x] **Step 5: Apply migrations 0012–0014 from the clean worktree.** Verify all six tables, checks, unique constraints (including stable playlist-entry identity), foreign-key indexes, active-run partial index, browse keyset index, and bounded-cleanup indexes before deploying code.
+- [x] **Step 6: Deploy the exact reviewed Worker.** Verify `/health` 200, `/me` 401, existing enrichment/artwork status counts unchanged, unauthorized playlist routes 401, and no missing-secret/startup regression.
+- [x] **Step 7: Run the founder sync from the iPhone.** It is read-only toward Apple Music. Record only total playlists, total entries, resolved/unresolved counts, duration, and fixed failure category.
 - [ ] **Step 8: Compare the published snapshot to Apple Music.** Founder-approved manual checks:
   - total playlist count matches the library view within a documented Apple-generated exclusion rule;
   - both disposable playlists appear;
@@ -342,10 +342,20 @@ These refine the approved system design without changing its product behavior:
   - an empty playlist stays empty;
   - a local/unresolved entry stays visible;
   - three cover URLs render and background colours are valid when present.
-- [ ] **Step 9: Prove deletion safety without mutating Apple.** In production, do not manufacture an interrupted sync. Rely on the transaction tests and query that only completed-run data is canonical. A later natural retry must keep stable internal playlist IDs.
-- [ ] **Step 10: Record exact rollout evidence.** State plainly that collection/browse contracts are shipped while taste, conversational editing, mutation, and browse UI remain deferred.
-- [ ] **Step 11: Remove the clean worktree** only after confirming it has no unique changes.
+- [x] **Step 9: Prove deletion safety without mutating Apple.** In production, do not manufacture an interrupted sync. Rely on the transaction tests and query that only completed-run data is canonical. A later natural retry must keep stable internal playlist IDs.
+- [x] **Step 10: Record exact rollout evidence.** State plainly that collection/browse contracts are shipped while taste, conversational editing, mutation, and browse UI remain deferred.
+- [x] **Step 11: Remove the clean worktree** only after confirming it has no unique changes.
 - [ ] **Step 12: Commit rollout documentation.** Headline: `docs: Record playlist sync rollout`.
+
+### Production rollout evidence — 2026-09-01
+
+- Migrations `0012`–`0014` applied and all six playlist tables plus their constraints/indexes verified before deploy.
+- Reviewed commit `f9d5e91` deployed as Worker version `e35b134c-c045-4267-92b6-31c42c918159`; health/auth smoke checks passed and artwork remained 4,686 present / 3 missing.
+- The first client attempt staged 36 playlist headers and 958/1,333 entries, then failed. Canonical tables stayed at zero, proving a real interrupted upload could not leak partial state.
+- The natural retry expired that open run and completed in 15 seconds: 36 playlists and 1,333 entries published, with both disposable playlists present, zero ordering gaps, and 16 repeated-song occurrences preserved across three playlists.
+- This founder library had no empty playlist, so the production empty-playlist observation remains unexercised; transaction and route tests cover it.
+- MusicKit returned background colours for all 36 playlists and 1,329 entries but no usable playlist/entry artwork URLs. Nullable browse contracts behaved as designed; album artwork remains independently populated on canonical tracks.
+- All 1,333 entries carried library-track IDs, but none carried a catalog ID or ISRC, so resolved/unresolved was 0/1,333. Collection and browsing are shipped; an on-device library-song-to-catalog crosswalk is required before Phase 3 can use membership as a canonical-track taste signal.
 
 ---
 
