@@ -1,0 +1,595 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mixtape — artwork mix rail final candidate</title>
+  <style>
+    :root {
+      color: #38333a;
+      background: #111116;
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-synthesis: none;
+      --marker: "Noteworthy", "Segoe Print", "Bradley Hand", cursive;
+      --graphite: #38333a;
+      --plum: #544451;
+      --slate: #45596d;
+      --smoke: #746d75;
+      --muted: #8a838b;
+      --warm: #eee9e3;
+      --cool: #e7e9e6;
+      --hairline: rgba(66, 58, 65, .12);
+      --pink: #c9687f;
+      --orange: #d18a65;
+      --yellow: #d2c76f;
+      --green: #709778;
+      --blue: #688fa8;
+      --danger: #d35f64;
+      --stripe: linear-gradient(180deg, var(--pink), var(--orange), var(--yellow), var(--green), var(--blue));
+    }
+
+    * { box-sizing: border-box; }
+    html { min-width: 320px; scroll-behavior: smooth; }
+    body {
+      min-width: 320px;
+      min-height: 100vh;
+      margin: 0;
+      background:
+        radial-gradient(circle at 12% 5%, rgba(104, 143, 168, .17), transparent 29%),
+        radial-gradient(circle at 88% 92%, rgba(201, 104, 127, .11), transparent 31%),
+        #111116;
+    }
+    button { font: inherit; cursor: pointer; }
+    button:focus-visible, [tabindex="0"]:focus-visible {
+      outline: 3px solid rgba(112, 169, 205, .86);
+      outline-offset: 3px;
+    }
+    .sr-only {
+      width: 1px;
+      height: 1px;
+      position: absolute;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .board { width: min(1540px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 80px; }
+    .board-head { margin-bottom: 24px; display: flex; align-items: flex-end; justify-content: space-between; gap: 30px; color: #f1edf1; }
+    .eyebrow, .state-label { color: #aaa3ab; font: 700 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .13em; text-transform: uppercase; }
+    .board-head h1 { max-width: 780px; margin: 8px 0 0; font-size: clamp(27px, 3.4vw, 44px); letter-spacing: -.045em; line-height: 1.02; }
+    .board-head p { max-width: 760px; margin: 11px 0 0; color: #aaa4ac; font-size: 13px; line-height: 1.6; }
+    .status-pill { padding: 8px 11px; color: #b8d2bd; background: rgba(112, 151, 120, .11); border: 1px solid rgba(112, 151, 120, .25); border-radius: 10px; font: 700 9px ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
+    .decision-note { margin-bottom: 28px; padding: 17px 19px; display: grid; grid-template-columns: auto minmax(0,1fr); gap: 14px; color: #c4bec5; background: rgba(255,255,255,.043); border: 1px solid rgba(255,255,255,.085); border-radius: 16px; font-size: 11px; line-height: 1.58; }
+    .decision-note strong { color: #f0ecf0; }
+    .decision-mark { width: 12px; height: 12px; margin-top: 3px; background: linear-gradient(135deg,var(--blue),var(--pink)); border-radius: 3px; transform: rotate(9deg); }
+
+    .candidate { min-width: 0; padding: 20px; color: #ddd8dd; background: rgba(255,255,255,.032); border: 1px solid rgba(112,151,120,.3); border-radius: 24px; }
+    .candidate-head { margin: 1px 3px 16px; display: grid; grid-template-columns: minmax(0,1fr) minmax(280px,460px); gap: 28px; align-items: end; }
+    .candidate-head h2 { margin: 7px 0 0; color: #f2eef1; font-size: 21px; letter-spacing: -.025em; }
+    .candidate-head p { margin: 0; color: #a9a3aa; font-size: 11px; line-height: 1.55; }
+    .frame-scroll { min-width: 0; max-width: 100%; }
+
+    .app-frame {
+      width: 100%;
+      height: 730px;
+      display: grid;
+      grid-template-columns: 218px minmax(0,1fr) 468px;
+      overflow: hidden;
+      color: var(--graphite);
+      background: linear-gradient(125deg,var(--cool),var(--warm));
+      border: 1px solid rgba(255,255,255,.72);
+      border-radius: 29px;
+      box-shadow: 0 26px 80px rgba(0,0,0,.31);
+      isolation: isolate;
+    }
+
+    .sidebar { min-width: 0; padding: 18px 13px 14px; display: grid; grid-template-rows: auto auto auto minmax(0,1fr) auto; background: rgba(244,246,244,.47); border-right: 1px solid rgba(255,255,255,.72); backdrop-filter: blur(30px) saturate(135%); overflow: hidden; }
+    .sidebar-top { min-height: 42px; padding: 0 5px 12px; display: flex; align-items: center; justify-content: space-between; }
+    .wordmark { color: var(--plum); font: italic 500 25px/1 var(--marker); letter-spacing: -.04em; transform: rotate(-2deg); }
+    .icon-button, .close-button { width: 40px; height: 40px; display: grid; place-items: center; color: var(--smoke); background: transparent; border: 0; border-radius: 11px; }
+    .icon-button svg, .close-button svg, .remove-button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .new-button { min-height: 50px; padding: 0 10px 0 8px; display: grid; grid-template-columns: 27px 1fr 20px; gap: 8px; align-items: center; color: #f5f0f2; background: #4d404b; border: 1px solid #3b3039; border-radius: 9px 9px 13px 13px; box-shadow: 0 4px 0 #2d272e, inset 0 1px 0 rgba(255,255,255,.14); font-size: 10px; font-weight: 750; text-align: left; }
+    .reel { width: 26px; aspect-ratio: 1; background: radial-gradient(circle,#4d404b 0 20%,transparent 21%), repeating-conic-gradient(#dedbd6 0 23deg,transparent 23deg 45deg), #262329; border: 3px solid #262329; border-radius: 50%; }
+    .sidebar-label { padding: 23px 8px 8px; display: flex; justify-content: space-between; color: var(--muted); font: 700 8px ui-monospace,monospace; letter-spacing: .12em; text-transform: uppercase; }
+    .session-list { min-height: 0; overflow: hidden; }
+    .session { min-height: 55px; padding: 6px 7px; display: grid; grid-template-columns: 43px minmax(0,1fr); gap: 9px; align-items: center; border-radius: 11px; }
+    .session.active { background: rgba(255,255,255,.58); box-shadow: inset 0 0 0 1px rgba(68,59,66,.07); }
+    .mini-tape { width: 43px; height: 28px; position: relative; background: #45515b; border: 2px solid #29272b; border-radius: 4px; }
+    .mini-tape::before { content:""; position:absolute; inset:5px 4px 7px; background:linear-gradient(#f1ece2 0 36%,var(--pink) 36% 44%,var(--orange) 44% 52%,var(--yellow) 52% 60%,var(--green) 60% 68%,var(--blue) 68% 76%,#1c1a1d 76%); border-radius:2px; }
+    .mini-tape::after { content:""; width:7px; height:7px; position:absolute; top:14px; left:9px; background:#eeeae4; border:2px solid #29272b; border-radius:50%; box-shadow:18px 0 0 -2px #eeeae4,18px 0 0 0 #29272b; }
+    .session strong,.session small { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+    .session strong { color:var(--plum); font:italic 450 13px/1.05 var(--marker); }
+    .session small { margin-top:4px; color:var(--muted); font-size:8px; }
+    .account { padding:12px 4px 0; display:grid; grid-template-columns:30px minmax(0,1fr) 34px; gap:8px; align-items:center; border-top:1px solid var(--hairline); }
+    .avatar { width:30px; height:30px; display:grid; place-items:center; color:white; background:var(--plum); border-radius:50%; font:500 12px var(--marker); }
+    .account strong,.account small { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+    .account strong { font-size:10px; }
+    .account small { margin-top:2px; color:#627c68; font-size:7.5px; }
+
+    .conversation { min-width:0; display:grid; grid-template-rows:auto minmax(0,1fr) auto; overflow:hidden; }
+    .conversation-head { min-height:96px; padding:23px 34px 17px; display:flex; align-items:flex-start; justify-content:space-between; gap:20px; border-bottom:1px solid rgba(72,64,71,.08); }
+    .kicker { margin:0 0 7px; color:var(--muted); font:700 8px ui-monospace,monospace; letter-spacing:.14em; text-transform:uppercase; }
+    .conversation-head h3 { margin:0; color:var(--plum); font:italic 450 25px/1.02 var(--marker); letter-spacing:-.025em; }
+    .conversation-head small { display:block; margin-top:7px; color:var(--muted); font-size:9px; }
+    .turns { width:min(100%,680px); min-height:0; margin:0 auto; padding:34px 38px 24px; overflow:hidden; }
+    .turn { margin:0 0 31px; line-height:1.58; }
+    .turn.dj { max-width:91%; color:transparent; background:linear-gradient(105deg,#3e5368,#715062 74%); background-clip:text; font-size:15.5px; font-weight:590; }
+    .turn.user { max-width:60%; margin-left:auto; color:#716a73; font-size:13px; font-weight:590; text-align:right; }
+    .queue-event { margin:-10px 0 30px; display:flex; align-items:center; gap:9px; color:var(--muted); font:700 8px ui-monospace,monospace; letter-spacing:.06em; text-transform:uppercase; }
+    .queue-event::after { content:""; width:28px; height:3px; background:linear-gradient(90deg,var(--pink),var(--orange),var(--yellow),var(--green),var(--blue)); border-radius:2px; }
+    .composer-wrap { padding:0 30px 19px; }
+    .composer { width:min(100%,610px); min-height:48px; margin:0 auto; padding:4px 5px 4px 17px; position:relative; display:grid; grid-template-columns:minmax(0,1fr) 40px; align-items:center; background:rgba(255,255,255,.5); border:1px solid rgba(74,66,73,.15); border-radius:11px 11px 16px 16px; box-shadow:0 8px 24px rgba(61,53,60,.08),inset 0 1px 0 rgba(255,255,255,.9); }
+    .composer::before { content:""; width:4px; height:29px; position:absolute; left:7px; background:var(--stripe); border-radius:2px; }
+    .composer span { margin-left:9px; color:#938c94; font-size:12px; }
+    .send { width:40px; height:40px; display:grid; place-items:center; color:white; background:var(--plum); border:0; border-radius:7px 7px 11px 11px; box-shadow:0 3px 0 #342c35; font-size:18px; }
+
+    .cover { width:50px; height:50px; position:relative; flex:0 0 50px; overflow:hidden; background-color:#c7c2bc; border-radius:7px; box-shadow:inset 0 0 0 1px rgba(32,28,32,.12),0 3px 8px rgba(45,39,44,.12); }
+    .cover::after { content:""; position:absolute; inset:0; border:1px solid rgba(255,255,255,.2); border-radius:inherit; }
+    .art-1 { background:radial-gradient(circle at 70% 29%,#f5d3bd 0 13%,transparent 14%),linear-gradient(145deg,transparent 0 47%,rgba(251,210,137,.7) 48% 53%,transparent 54%),linear-gradient(135deg,#392d53,#b9536f 58%,#e9996d); }
+    .art-2 { background:radial-gradient(circle at 48% 44%,#f2c27c 0 20%,transparent 21%),linear-gradient(180deg,#96c6cf 0 46%,#475a75 47% 63%,#17283b 64%); }
+    .art-3 { background:repeating-linear-gradient(125deg,transparent 0 12px,rgba(255,255,255,.14) 12px 15px),linear-gradient(145deg,#bd682e,#e3b85b 48%,#566b50 49%); }
+    .art-4 { background:radial-gradient(circle at 33% 36%,#cfddcb 0 6%,transparent 7%),radial-gradient(circle at 68% 60%,#dba9b3 0 12%,transparent 13%),linear-gradient(135deg,#263e3d,#6f8e70); }
+    .art-5 { background:linear-gradient(35deg,transparent 38%,#e9d6bd 39% 44%,transparent 45%),radial-gradient(circle at 55% 53%,#f0aa8c 0 17%,transparent 18%),#7b3f52; }
+    .art-6 { background:repeating-radial-gradient(circle at 12% 86%,#d4cb8d 0 5px,#5c5f88 6px 11px,#c16f75 12px 17px); }
+    .art-7 { background:linear-gradient(155deg,transparent 0 38%,#f1b889 39% 55%,transparent 56%),radial-gradient(circle at 35% 31%,#f2dfbf 0 10%,transparent 11%),linear-gradient(135deg,#17374d,#5d7e8f); }
+
+    .mix-rail { min-width:0; display:grid; grid-template-rows:auto auto minmax(0,1fr) auto; background:rgba(239,242,239,.64); border-left:1px solid rgba(255,255,255,.78); backdrop-filter:blur(34px) saturate(135%); overflow:hidden; }
+    .mix-head { min-height:77px; padding:18px 17px 13px; display:flex; align-items:flex-start; justify-content:space-between; gap:14px; }
+    .mix-head h4 { margin:0; color:var(--plum); font:italic 450 23px/1 var(--marker); }
+    .mix-head p { margin:7px 0 0; color:var(--muted); font-size:9px; }
+    .mix-summary { padding:9px 18px 12px; display:flex; align-items:center; justify-content:space-between; color:var(--muted); border-top:1px solid rgba(255,255,255,.35); border-bottom:1px solid var(--hairline); font-size:9px; }
+    .mix-summary strong { color:var(--graphite); font-size:10px; }
+    .queue-list { min-height:0; margin:0; padding:0 11px; overflow-y:auto; overflow-x:hidden; list-style:none; scrollbar-width:none; }
+    .queue-row { --row-bg:rgba(239,242,239,.98); min-height:76px; position:relative; overflow:hidden; background:var(--row-bg); border-bottom:1px solid var(--hairline); }
+    .row-content { min-height:76px; position:relative; z-index:2; padding:8px 4px; display:grid; grid-template-columns:50px minmax(0,1fr) 44px; gap:10px; align-items:center; background:var(--row-bg); transition:transform .22s cubic-bezier(.2,.7,.2,1),background .16s,box-shadow .16s; touch-action:pan-y; }
+    .track-copy { min-width:0; }
+    .track-copy strong,.track-copy small,.track-copy em { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+    .track-copy strong { color:var(--graphite); font-size:11px; }
+    .track-copy small { margin-top:3px; color:var(--muted); font-size:8.5px; }
+    .track-copy em { min-height:12px; margin-top:4px; color:var(--slate); font-size:8px; font-style:normal; opacity:0; transform:translateY(2px); transition:opacity .14s,transform .14s; }
+    .queue-row:hover,.queue-row:focus-within,.queue-row.hover-demo { --row-bg:#f7f8f5; }
+    .queue-row:hover .track-copy em,.queue-row:focus-within .track-copy em,.queue-row.hover-demo .track-copy em { opacity:1; transform:translateY(0); }
+
+    .reorder-handle { width:44px; height:44px; display:grid; place-items:center; color:var(--muted); background:transparent; border:0; border-radius:11px; cursor:grab; touch-action:none; }
+    .reorder-handle:active { cursor:grabbing; }
+    .line-grip { width:18px; display:grid; gap:3px; }
+    .line-grip i { width:18px; height:2px; display:block; border-radius:2px; opacity:.48; }
+    .line-grip i:nth-child(1) { background:var(--blue); }
+    .line-grip i:nth-child(2) { background:var(--green); }
+    .line-grip i:nth-child(3) { background:var(--pink); }
+    .reorder-handle:hover .line-grip i,.reorder-handle:focus-visible .line-grip i { opacity:.85; }
+
+    .remove-button { width:var(--remove-width,42px); height:42px; position:absolute; z-index:1; top:50%; right:6px; display:grid; place-items:center; color:white; background:var(--danger); border:0; border-radius:999px; opacity:0; pointer-events:none; scale:.72; transform:translateY(-50%); transition:opacity .1s,width .04s linear,background .12s; }
+    .remove-button svg { width:13px; height:13px; transition:scale .12s; }
+    .queue-row.is-swiped .row-content { transform:translateX(-54px); box-shadow:none; }
+    .queue-row.is-swiped .remove-button { opacity:1; pointer-events:auto; scale:1; animation:remove-pop .42s cubic-bezier(.2,.8,.25,1) both; }
+    .queue-row.is-swiping .row-content { box-shadow:none; transition:none; }
+    .queue-row.is-swiping .remove-button { opacity:1; pointer-events:none; scale:1; animation:none; }
+    .queue-row.will-remove .remove-button { background:#c74f58; }
+    .queue-row.will-remove .remove-button svg { scale:1.18; }
+    @keyframes remove-pop {
+      0% { opacity:0; scale:.72; }
+      55% { opacity:1; scale:1.12; }
+      78% { scale:.95; }
+      100% { opacity:1; scale:1; }
+    }
+    .queue-row.is-dragging { z-index:6; overflow:visible; border:0; }
+    .queue-row.is-dragging .row-content { background:#f7f5f1; border:1px solid rgba(84,68,81,.18); border-radius:11px; box-shadow:0 16px 35px rgba(42,35,41,.22); transform:translateX(-14px) rotate(-.25deg); }
+    .queue-row.drop-before::before { content:"Drop here"; height:3px; position:absolute; z-index:8; top:-2px; right:8px; left:8px; color:transparent; background:linear-gradient(90deg,var(--pink),var(--orange),var(--yellow),var(--green),var(--blue)); border-radius:2px; }
+    .queue-row.drop-before::after { content:""; width:8px; height:8px; position:absolute; z-index:9; top:-5px; left:5px; background:var(--blue); border:2px solid #f2f1ed; border-radius:50%; }
+
+    .mix-actions { padding:12px 15px 15px; display:grid; grid-template-columns:1fr 1fr; gap:8px; background:rgba(255,255,255,.28); border-top:1px solid var(--hairline); }
+    .action-button { min-height:47px; padding:0 11px; display:flex; align-items:center; justify-content:center; gap:7px; color:var(--plum); background:rgba(247,244,239,.58); border:1px solid rgba(73,64,72,.2); border-radius:8px 8px 12px 12px; font-size:9px; font-weight:780; }
+    .action-button.primary { color:white; background:#4d404b; border-color:#3b3039; box-shadow:0 3px 0 #29242a; }
+    .action-button .reel { width:24px; flex:0 0 24px; }
+    .rail-toast { width:min(310px,calc(100% - 28px)); min-height:38px; padding:4px 9px 4px 12px; position:absolute; z-index:20; right:14px; bottom:78px; display:none; grid-template-columns:minmax(0,1fr) auto; gap:10px; align-items:center; color:#365d43; background:#e4f0e7; border:1px solid rgba(72,117,82,.16); border-radius:12px; box-shadow:0 12px 28px rgba(45,38,44,.16); overflow:hidden; font-size:9px; }
+    .rail-toast.show { display:grid; animation:toast-in .18s ease-out both; }
+    .rail-toast.confirmed { grid-template-columns:1fr; }
+    .rail-toast.confirmed .undo-button { display:none; }
+    .toast-message { min-width:0; line-height:1.35; }
+    .undo-button { min-height:28px; padding:0 3px; display:flex; align-items:center; justify-content:center; gap:5px; color:#365d43; background:transparent; border:0; border-radius:0; font-size:9px; font-weight:780; }
+    .undo-button svg { width:13px; height:13px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+    .undo-button:hover { color:#27482f; }
+    @keyframes toast-in { from { opacity:0; translate:0 7px; } to { opacity:1; translate:0 0; } }
+
+    .behavior-grid { margin-top:14px; display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+    .behavior { min-height:92px; padding:14px 15px; color:#a9a3aa; background:rgba(255,255,255,.035); border:1px solid rgba(255,255,255,.07); border-radius:13px; font-size:10px; line-height:1.5; }
+    .behavior strong { display:block; margin-bottom:5px; color:#e7e2e6; font-size:11px; }
+
+    .states { margin-top:38px; padding:24px; color:#ded9de; background:rgba(255,255,255,.032); border:1px solid rgba(255,255,255,.075); border-radius:24px; }
+    .states-head { margin-bottom:18px; display:flex; align-items:end; justify-content:space-between; gap:28px; }
+    .states-head h2 { margin:7px 0 0; color:#f2eef1; font-size:21px; }
+    .states-head p { max-width:650px; margin:0; color:#aaa4ac; font-size:11px; line-height:1.55; }
+    .state-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+    .state-card { min-width:0; min-height:220px; padding:16px; color:var(--graphite); background:linear-gradient(135deg,var(--cool),var(--warm)); border:1px solid rgba(255,255,255,.78); border-radius:18px; box-shadow:0 16px 42px rgba(0,0,0,.18); overflow:hidden; }
+    .state-card .state-label { color:var(--muted); }
+    .mini-queue-row { --mini-row-bg:rgba(255,255,255,.56); min-height:76px; margin-top:14px; position:relative; overflow:hidden; background:var(--mini-row-bg); border-radius:11px; }
+    .mini-content { min-height:76px; position:relative; z-index:2; padding:8px; display:grid; grid-template-columns:50px minmax(0,1fr) 40px; gap:8px; align-items:center; background:var(--mini-row-bg); border:0; border-radius:11px; }
+    .mini-content .cover { width:50px; height:50px; }
+    .mini-content strong,.mini-content small,.mini-content em { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+    .mini-content strong { font-size:10px; }
+    .mini-content small { margin-top:3px; color:var(--muted); font-size:8px; }
+    .mini-content em { margin-top:4px; color:var(--slate); font-size:8px; font-style:normal; }
+    .mini-content.dragging { box-shadow:0 15px 30px rgba(44,37,43,.22); transform:translateX(-8px) rotate(-.4deg); }
+    .mini-remove { width:42px; height:42px; position:absolute; top:50%; right:6px; display:grid; place-items:center; color:white; background:var(--danger); border:0; border-radius:50%; transform:translateY(-50%); }
+    .mini-remove svg { width:13px; height:13px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; }
+    .mini-queue-row.swiped .mini-content { transform:translateX(-54px); box-shadow:none; }
+    .mini-queue-row.swiping .mini-content { transform:translateX(-42%); box-shadow:none; }
+    .mini-queue-row.swiping .mini-remove { width:calc(42% - 12px); border-radius:999px; }
+    .mini-queue-row.armed .mini-content { transform:translateX(-68%); box-shadow:none; }
+    .mini-queue-row.armed .mini-remove { width:65%; background:#c74f58; border-radius:999px; }
+    .mini-grip { width:16px; margin:auto; display:grid; gap:3px; }
+    .mini-grip i { width:16px; height:2px; border-radius:2px; opacity:.55; }
+    .mini-grip i:nth-child(1){background:var(--blue)}
+    .mini-grip i:nth-child(2){background:var(--green)}
+    .mini-grip i:nth-child(3){background:var(--pink)}
+    .state-note { margin:12px 0 0; color:var(--muted); font-size:9px; line-height:1.5; }
+    .state-note.success { padding:9px 10px; color:#365d43; background:#e4f0e7; border-radius:9px; }
+    .mini-toast { min-height:44px; margin-top:14px; padding:5px 10px; position:relative; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; align-items:center; color:#365d43; background:#e4f0e7; border-radius:11px; overflow:hidden; font-size:9px; }
+    .mini-toast strong,.mini-toast small { display:block; }
+    .mini-toast small { margin-top:3px; opacity:.72; }
+    .mini-undo { display:flex; align-items:center; gap:5px; color:#365d43; font-weight:780; }
+    .mini-undo svg { width:13px; height:13px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+
+    .mobile-row { margin-top:16px; display:grid; grid-template-columns:390px minmax(0,1fr); gap:18px; }
+    .mobile-frame { height:600px; position:relative; overflow:hidden; color:var(--graphite); background:linear-gradient(145deg,var(--cool),var(--warm)); border-radius:28px; box-shadow:0 22px 60px rgba(0,0,0,.25); }
+    .mobile-bar { height:66px; padding:10px 14px; display:flex; align-items:center; justify-content:space-between; background:rgba(244,246,244,.55); border-bottom:1px solid rgba(255,255,255,.72); }
+    .mobile-bar .wordmark { font-size:21px; }
+    .mix-count { min-width:56px; height:44px; display:flex; align-items:center; justify-content:center; gap:6px; color:var(--plum); background:rgba(255,255,255,.68); border:1px solid var(--hairline); border-radius:12px; font-size:9px; font-weight:760; }
+    .mix-count b { min-width:18px; height:18px; display:grid; place-items:center; color:white; background:var(--plum); border-radius:9px; font-size:8px; }
+    .mobile-sheet { position:absolute; inset:78px 9px 9px; display:grid; grid-template-rows:auto auto minmax(0,1fr) auto; background:rgba(241,242,238,.97); border:1px solid rgba(255,255,255,.84); border-radius:21px; box-shadow:0 20px 50px rgba(41,34,40,.22); overflow:hidden; }
+    .mobile-sheet .mix-head { min-height:68px; padding:14px 15px 10px; }
+    .mobile-sheet .mix-summary { padding:8px 15px 10px; }
+    .mobile-list { min-height:0; margin:0; padding:0 9px; overflow:hidden; list-style:none; }
+    .mobile-list .queue-row,.mobile-list .row-content { min-height:70px; }
+    .mobile-list .row-content { grid-template-columns:46px minmax(0,1fr) 44px; gap:8px; }
+    .mobile-list .cover { width:46px; height:46px; }
+    .mobile-list .track-copy em { display:none; }
+    .mobile-sheet .mix-actions { padding:10px 12px 13px; }
+    .mobile-notes { padding:18px; display:grid; align-content:start; gap:12px; color:#aca6ad; background:rgba(255,255,255,.035); border:1px solid rgba(255,255,255,.075); border-radius:18px; font-size:11px; line-height:1.58; }
+    .mobile-notes strong { color:#eee9ed; }
+    .mobile-notes div { padding:12px 13px; background:rgba(255,255,255,.035); border-radius:10px; }
+    .approval { margin-top:24px; padding:18px 19px; color:#b0aab1; background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.085); border-radius:15px; font-size:11px; line-height:1.6; }
+    .approval strong { color:#eee9ed; }
+
+    @media (max-width:1120px) {
+      .state-grid { grid-template-columns:1fr 1fr; }
+    }
+    @media (max-width:790px) {
+      .board { width:min(100% - 20px,1540px); }
+      .board-head,.candidate-head,.states-head { display:block; }
+      .status-pill { width:fit-content; margin-top:16px; }
+      .candidate-head p,.states-head p { margin-top:10px; }
+      .candidate,.states { padding:12px; }
+      .frame-scroll { overflow-x:auto; padding-bottom:10px; }
+      .app-frame { width:1160px; height:690px; }
+      .behavior-grid,.state-grid,.mobile-row { grid-template-columns:1fr; }
+      .mobile-frame { width:min(390px,100%); margin-inline:auto; }
+    }
+    @media (prefers-reduced-motion:reduce) {
+      html { scroll-behavior:auto; }
+      *,*::before,*::after { animation:none !important; transition:none !important; }
+      .queue-row.is-dragging .row-content,.mini-content.dragging { transform:none; }
+    }
+  </style>
+</head>
+<body>
+  <svg class="sr-only" aria-hidden="true">
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3.5 10 8.5-7 8.5 7v10.5h-6v-6h-5v6h-6z"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 7h12M8 12h12M8 17h12"/><circle cx="4" cy="7" r=".8" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r=".8" fill="currentColor" stroke="none"/><circle cx="4" cy="17" r=".8" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 7H4V2M4.5 7A9 9 0 1 1 3 14"/></symbol>
+  </svg>
+
+  <main class="board">
+    <header class="board-head"><div><span class="eyebrow">Approved direction · artwork mix rail</span><h1>Arrange the mix directly where it lives.</h1><p>One persistent desktop rail. Artwork identifies the music, the subtle three-line handle changes order, swipe-left reveals removal, and the DJ’s reason appears on hover or focus.</p></div><span class="status-pill">Approved · 1 Sep 2026</span></header>
+    <section class="decision-note"><span class="decision-mark"></span><div><strong>Interaction split:</strong> drag only from the three-line handle; swipe only from the row body. That separation prevents a reorder gesture from accidentally revealing Remove. The inactive ellipsis is gone.</div></section>
+
+    <article class="candidate">
+      <header class="candidate-head"><div><span class="eyebrow">Desktop · populated · hover + swipe shown</span><h2>A 468px artwork rail beside the conversation</h2></div><p>The rail is intentionally wider than the current 326px implementation. The first highlighted row demonstrates hover-reason behavior; the fourth row demonstrates the swipe-to-reveal state.</p></header>
+      <div class="frame-scroll">
+        <div class="app-frame">
+          <aside class="sidebar" aria-label="Mixtape navigation preview"><div class="sidebar-top"><span class="wordmark">mixtape</span><button class="icon-button" aria-label="Home"><svg><use href="#i-home"/></svg></button></div><button class="new-button"><span class="reel"></span><span>Make a new tape</span><b>+</b></button><div class="sidebar-label"><span>Your tapes</span><span>19</span></div><div class="session-list"><div class="session active"><span class="mini-tape"></span><span><strong>Blue hour, windows down</strong><small>15 tracks · just now</small></span></div><div class="session"><span class="mini-tape" style="background:#76584f"></span><span><strong>Sunday kitchen radio</strong><small>22 tracks · yesterday</small></span></div><div class="session"><span class="mini-tape" style="background:#596454"></span><span><strong>Soft landing after work</strong><small>13 tracks · 3 days ago</small></span></div></div><div class="account"><span class="avatar">N</span><span><strong>Noble</strong><small>Apple Music connected</small></span><button class="icon-button" aria-label="Account options">•••</button></div></aside>
+          <section class="conversation"><header class="conversation-head"><div><p class="kicker">Current tape</p><h3>Blue hour, windows down</h3><small>Tape version 3 · just now</small></div><button class="icon-button" aria-label="Tape options">•••</button></header><div class="turns"><p class="turn user">Night drive through Abuja. Familiar and warm, but nothing that feels sleepy.</p><p class="turn dj">I kept the opening close to songs you already know, then let the rhythm find the road after track five. It stays warm all the way through—no ballads.</p><p class="queue-event">Mix revised · version 2</p><p class="turn user">Give the middle a little more movement.</p><p class="turn dj">I moved the slower stretch earlier and brought three brighter tracks into the middle. The opening and landing are unchanged.</p></div><div class="composer-wrap"><div class="composer"><span>Tell the DJ what to change…</span><button class="send" aria-label="Send message">↑</button></div></div></section>
+          <aside class="mix-rail" aria-label="Your mix">
+            <header class="mix-head"><div><h4>Your mix</h4><p>version 3 · drag to rearrange</p></div></header>
+            <div class="mix-summary"><strong>15 tracks</strong><span>about 54 min</span></div>
+            <ol class="queue-list" aria-label="Blue hour, windows down track order" aria-describedby="interaction-help">
+              <li class="queue-row hover-demo" data-title="Sweetest Taboo"><div class="row-content" tabindex="0" aria-label="Sweetest Taboo by Sade, track 1"><span class="cover art-1"></span><span class="track-copy"><strong>Sweetest Taboo</strong><small>Sade · 3:58</small><em>A low-lit opening that keeps forward motion.</em></span><button class="reorder-handle" draggable="true" aria-label="Move Sweetest Taboo, track 1"><span class="line-grip"><i></i><i></i><i></i></span></button></div><button class="remove-button" aria-label="Remove Sweetest Taboo" tabindex="-1"><svg><use href="#i-close"/></svg></button></li>
+              <li class="queue-row" data-title="Essence"><div class="row-content" tabindex="0" aria-label="Essence by Wizkid featuring Tems, track 2"><span class="cover art-2"></span><span class="track-copy"><strong>Essence</strong><small>Wizkid feat. Tems · 4:09</small><em>A familiar lift without breaking the warmth.</em></span><button class="reorder-handle" draggable="true" aria-label="Move Essence, track 2"><span class="line-grip"><i></i><i></i><i></i></span></button></div><button class="remove-button" aria-label="Remove Essence" tabindex="-1"><svg><use href="#i-close"/></svg></button></li>
+              <li class="queue-row" data-title="Anybody"><div class="row-content" tabindex="0" aria-label="Anybody by Burna Boy, track 3"><span class="cover art-3"></span><span class="track-copy"><strong>Anybody</strong><small>Burna Boy · 3:28</small><em>The first real step onto the road.</em></span><button class="reorder-handle" draggable="true" aria-label="Move Anybody, track 3"><span class="line-grip"><i></i><i></i><i></i></span></button></div><button class="remove-button" aria-label="Remove Anybody" tabindex="-1"><svg><use href="#i-close"/></svg></button></li>
+              <li class="queue-row is-swiped" data-title="Woman"><div class="row-content" tabindex="0" aria-label="Woman by Rema, track 4"><span class="cover art-4"></span><span class="track-copy"><strong>Woman</strong><small>Rema · 3:52</small><em>Keeps the middle loose and rhythmic.</em></span><button class="reorder-handle" draggable="true" aria-label="Move Woman, track 4"><span class="line-grip"><i></i><i></i><i></i></span></button></div><button class="remove-button" aria-label="Remove Woman"><svg><use href="#i-close"/></svg></button></li>
+              <li class="queue-row" data-title="Energy"><div class="row-content" tabindex="0" aria-label="Energy by Sampa the Great, track 5"><span class="cover art-5"></span><span class="track-copy"><strong>Energy</strong><small>Sampa the Great · 4:14</small><em>A brighter centre without turning frantic.</em></span><button class="reorder-handle" draggable="true" aria-label="Move Energy, track 5"><span class="line-grip"><i></i><i></i><i></i></span></button></div><button class="remove-button" aria-label="Remove Energy" tabindex="-1"><svg><use href="#i-close"/></svg></button></li>
+              <li class="queue-row" data-title="Doyin"><div class="row-content" tabindex="0" aria-label="Doyin by Mr Eazi featuring Simi, track 6"><span class="cover art-6"></span><span class="track-copy"><strong>Doyin</strong><small>Mr Eazi feat. Simi · 3:36</small><em>A gentle release after the brighter stretch.</em></span><button class="reorder-handle" draggable="true" aria-label="Move Doyin, track 6"><span class="line-grip"><i></i><i></i><i></i></span></button></div><button class="remove-button" aria-label="Remove Doyin" tabindex="-1"><svg><use href="#i-close"/></svg></button></li>
+              <li class="queue-row" data-title="Free Mind"><div class="row-content" tabindex="0" aria-label="Free Mind by Tems, track 7"><span class="cover art-7"></span><span class="track-copy"><strong>Free Mind</strong><small>Tems · 4:07</small><em>Lets the mix land without feeling sleepy.</em></span><button class="reorder-handle" draggable="true" aria-label="Move Free Mind, track 7"><span class="line-grip"><i></i><i></i><i></i></span></button></div><button class="remove-button" aria-label="Remove Free Mind" tabindex="-1"><svg><use href="#i-close"/></svg></button></li>
+            </ol>
+            <div class="mix-actions"><button class="action-button primary"><span class="reel"></span><span>Play now</span></button><button class="action-button">Create playlist</button></div>
+            <div class="rail-toast"><span class="toast-message" role="status" aria-live="polite"></span><button class="undo-button"><svg aria-hidden="true"><use href="#i-undo"/></svg><span>Undo</span></button></div>
+          </aside>
+        </div>
+      </div>
+      <p id="interaction-help" class="sr-only">Use the three-line handle to reorder. Swipe left with one finger on touch or two fingers on a trackpad. The remove button appears and stretches during the gesture. Release past 65 percent to remove. Every reorder or removal has a three-second Undo. Hover or focus a row to hear why it belongs.</p>
+      <div class="behavior-grid"><div class="behavior"><strong>Three-line handle</strong>Always on the far right, with three equal bars lightly tinted in Mixtape’s blue, green, and pink. It strengthens on hover and focus.</div><div class="behavior"><strong>Live swipe</strong>The X appears under the pointer and its coral surface stretches with distance. Release past 65% to remove; shorter swipes settle open.</div><div class="behavior"><strong>Two-finger trackpad</strong>Horizontal wheel input mirrors the touch gesture, so two fingers are enough. Vertical scrolling remains untouched.</div><div class="behavior"><strong>Undo for 3 seconds</strong>Removal and reorder show a flush icon-and-text Undo action. It quietly disappears after three seconds with no progress indicator.</div><div class="behavior"><strong>Reason on hover</strong>A third line fades in inside reserved space, so adjacent rows and actions do not jump.</div></div>
+    </article>
+
+    <section class="states" id="gesture-states">
+      <header class="states-head"><div><span class="eyebrow">Interaction states</span><h2>One row, six clear readings</h2></div><p>Pointer, touch, trackpad, and keyboard users receive the same destination and result. Color supports the state but never carries it alone.</p></header>
+      <div class="state-grid">
+        <article class="state-card"><span class="state-label">Resting</span><div class="mini-queue-row"><div class="mini-content"><span class="cover art-2"></span><span><strong>Essence</strong><small>Wizkid feat. Tems · 4:09</small><em>&nbsp;</em></span><span class="mini-grip"><i></i><i></i><i></i></span></div></div><p class="state-note">Artwork and order stay dominant. The reason remains hidden.</p></article>
+        <article class="state-card"><span class="state-label">Hover or focus</span><div class="mini-queue-row"><div class="mini-content"><span class="cover art-2"></span><span><strong>Essence</strong><small>Wizkid feat. Tems · 4:09</small><em>A familiar lift without breaking the warmth.</em></span><span class="mini-grip"><i></i><i></i><i></i></span></div></div><p class="state-note">Reason appears without changing row height.</p></article>
+        <article class="state-card"><span class="state-label">Dragging</span><div class="mini-queue-row"><div class="mini-content dragging"><span class="cover art-5"></span><span><strong>Energy</strong><small>Moving track 05 of 15</small><em>Drop before track 04</em></span><span class="mini-grip"><i></i><i></i><i></i></span></div></div><p class="state-note">Lift, label, and insertion line identify the moving row and destination.</p></article>
+        <article class="state-card"><span class="state-label">Live swipe · 42%</span><div class="mini-queue-row swiping"><div class="mini-content"><span class="cover art-4"></span><span><strong>Woman</strong><small>Rema · 3:52</small><em>&nbsp;</em></span><span class="mini-grip"><i></i><i></i><i></i></span></div><span class="mini-remove" aria-label="Remove Woman"><svg><use href="#i-close"/></svg></span></div><p class="state-note">The X is already visible and its surface follows the gesture.</p></article>
+        <article class="state-card"><span class="state-label">Armed · 68%</span><div class="mini-queue-row armed"><div class="mini-content"><span class="cover art-4"></span><span><strong>Woman</strong><small>Release now to remove</small><em>&nbsp;</em></span><span class="mini-grip"><i></i><i></i><i></i></span></div><span class="mini-remove" aria-label="Remove Woman"><svg><use href="#i-close"/></svg></span></div><p class="state-note">Crossing 65% arms removal. Reversing the gesture disarms it.</p></article>
+        <article class="state-card"><span class="state-label">Undo window</span><div class="mini-toast"><span><strong>Woman removed</strong><small>Mix version 4 saved</small></span><span class="mini-undo"><svg aria-hidden="true"><use href="#i-undo"/></svg>Undo</span></div><p class="state-note">The last reorder or removal remains reversible for three seconds without a visible timer.</p></article>
+      </div>
+
+      <div class="mobile-row">
+        <article class="mobile-frame"><header class="mobile-bar"><span class="wordmark">mixtape</span><button class="mix-count" aria-label="Your mix, 15 tracks"><svg width="18" height="18"><use href="#i-list"/></svg><b>15</b></button></header><section class="mobile-sheet" aria-label="Your mix mobile sheet"><header class="mix-head"><div><h4>Your mix</h4><p>version 3 · arrange</p></div><button class="close-button" aria-label="Close your mix"><svg><use href="#i-close"/></svg></button></header><div class="mix-summary"><strong>15 tracks</strong><span>about 54 min</span></div><ol class="mobile-list"><li class="queue-row"><div class="row-content"><span class="cover art-1"></span><span class="track-copy"><strong>Sweetest Taboo</strong><small>Sade · 3:58</small></span><button class="reorder-handle" aria-label="Move Sweetest Taboo, track 1"><span class="line-grip"><i></i><i></i><i></i></span></button></div></li><li class="queue-row is-swiped"><div class="row-content"><span class="cover art-2"></span><span class="track-copy"><strong>Essence</strong><small>Wizkid feat. Tems · 4:09</small></span><button class="reorder-handle" aria-label="Move Essence, track 2"><span class="line-grip"><i></i><i></i><i></i></span></button></div><button class="remove-button" aria-label="Remove Essence"><svg><use href="#i-close"/></svg></button></li><li class="queue-row"><div class="row-content"><span class="cover art-3"></span><span class="track-copy"><strong>Anybody</strong><small>Burna Boy · 3:28</small></span><button class="reorder-handle" aria-label="Move Anybody, track 3"><span class="line-grip"><i></i><i></i><i></i></span></button></div></li><li class="queue-row"><div class="row-content"><span class="cover art-4"></span><span class="track-copy"><strong>Woman</strong><small>Rema · 3:52</small></span><button class="reorder-handle" aria-label="Move Woman, track 4"><span class="line-grip"><i></i><i></i><i></i></span></button></div></li></ol><div class="mix-actions"><button class="action-button primary">Play now</button><button class="action-button">Create playlist</button></div></section></article>
+        <aside class="mobile-notes"><strong>Responsive and accessible behavior</strong><div><b>Desktop ≥1020px</b><br>The 468px rail stays persistent. One-finger pointer drag and two-finger trackpad swipe share the same 65% threshold.</div><div><b>Tablet and mobile</b><br>The same rail becomes a nearly full-height sheet. Swipe and reorder handles remain separate 44px targets.</div><div><b>Keyboard</b><br>Arrow keys on the handle reorder. Delete on a focused row reveals the X; Escape closes it. Status text announces versioned results.</div><div><b>Undo result</b><br>Reorder and removal can be reversed for three seconds. The flush icon-and-text action quietly expires without a progress bar.</div></aside>
+      </div>
+      <div class="approval"><strong>Approval boundary:</strong> this locks the right rail width, artwork-led rows, three-line handle, hover/focus reason, live proportional swipe, 65% release-to-remove, one-finger touch and two-finger trackpad input, three-second single-level Undo, sticky playback actions, stale-order recovery, and mobile-sheet behavior. Track menus remain outside this approval.</div>
+    </section>
+  </main>
+
+  <script>
+    const list = document.querySelector('.queue-list')
+    const liveToast = document.querySelector('.rail-toast')
+    const toastMessage = liveToast.querySelector('.toast-message')
+    const undoButton = liveToast.querySelector('.undo-button')
+    let draggedRow = null
+    let draggedFromIndex = -1
+    let swipeRow = null
+    let startX = 0
+    let deltaX = 0
+    let wheelRow = null
+    let wheelDelta = 0
+    let wheelTimer = null
+    let undoTimer = null
+    let pendingUndo = null
+
+    const rowIndex = (row) => [...list.children].indexOf(row)
+
+    const placeAt = (row, index) => {
+      const rows = [...list.children].filter((item) => item !== row)
+      const target = rows[index]
+      if (target) list.insertBefore(row, target)
+      else list.appendChild(row)
+    }
+
+    const syncOrder = () => {
+      ;[...list.children].forEach((row, index) => {
+        row.querySelector('.reorder-handle')?.setAttribute('aria-label', `Move ${row.dataset.title}, track ${index + 1}`)
+        row.querySelector('.row-content')?.setAttribute('aria-label', `${row.dataset.title}, track ${index + 1}`)
+      })
+    }
+
+    const hideUndo = () => {
+      clearTimeout(undoTimer)
+      pendingUndo = null
+      liveToast.classList.remove('show', 'confirmed')
+    }
+
+    const showUndo = (message, undoAction) => {
+      clearTimeout(undoTimer)
+      pendingUndo = undoAction
+      toastMessage.textContent = message
+      liveToast.classList.remove('show', 'confirmed')
+      void liveToast.offsetWidth
+      liveToast.classList.add('show')
+      undoTimer = setTimeout(hideUndo, 3000)
+    }
+
+    undoButton.addEventListener('click', () => {
+      if (!pendingUndo) return
+      const undoAction = pendingUndo
+      pendingUndo = null
+      clearTimeout(undoTimer)
+      undoAction()
+      toastMessage.textContent = 'Update undone.'
+      liveToast.classList.add('confirmed')
+      setTimeout(() => liveToast.classList.remove('show', 'confirmed'), 900)
+    })
+
+    const clearSwipeVisual = (row) => {
+      row.classList.remove('is-swiping', 'will-remove')
+      row.style.removeProperty('--remove-width')
+      row.removeAttribute('data-swipe-progress')
+      row.querySelector('.row-content')?.style.removeProperty('transform')
+      row.querySelector('.remove-button')?.setAttribute('aria-label', `Remove ${row.dataset.title}`)
+    }
+
+    const setSwiped = (row, open) => {
+      document.querySelectorAll('.queue-list .queue-row.is-swiped').forEach((other) => {
+        if (other !== row) {
+          other.classList.remove('is-swiped')
+          const otherButton = other.querySelector('.remove-button')
+          otherButton?.setAttribute('tabindex', '-1')
+          otherButton?.setAttribute('aria-hidden', 'true')
+        }
+      })
+      clearSwipeVisual(row)
+      row.classList.toggle('is-swiped', open)
+      const button = row.querySelector('.remove-button')
+      button?.setAttribute('tabindex', open ? '0' : '-1')
+      button?.setAttribute('aria-hidden', open ? 'false' : 'true')
+    }
+
+    const commitMove = (row, fromIndex) => {
+      const toIndex = rowIndex(row)
+      syncOrder()
+      if (fromIndex === toIndex) return
+      const title = row.dataset.title
+      showUndo(`${title} moved to track ${toIndex + 1}.`, () => {
+        placeAt(row, fromIndex)
+        syncOrder()
+      })
+    }
+
+    const commitRemoval = (row) => {
+      const title = row.dataset.title
+      const index = rowIndex(row)
+      clearSwipeVisual(row)
+      row.classList.remove('is-swiped')
+      row.remove()
+      syncOrder()
+      showUndo(`${title} removed from the mix.`, () => {
+        placeAt(row, index)
+        setSwiped(row, false)
+        syncOrder()
+      })
+    }
+
+    const paintSwipe = (row, offset) => {
+      const width = row.getBoundingClientRect().width
+      const distance = Math.min(width * .92, Math.max(0, Math.abs(offset)))
+      const progress = distance / width
+      const content = row.querySelector('.row-content')
+      const remove = row.querySelector('.remove-button')
+
+      row.classList.toggle('is-swiping', distance > 2)
+      row.classList.toggle('will-remove', progress >= .65)
+      row.style.setProperty('--remove-width', `${Math.max(42, distance - 12)}px`)
+      row.dataset.swipeProgress = String(Math.round(progress * 100))
+      content.style.transform = `translateX(${-distance}px)`
+      remove.setAttribute('aria-hidden', distance > 2 ? 'false' : 'true')
+      remove.setAttribute('aria-label', progress >= .65 ? `Release to remove ${row.dataset.title}` : `Remove ${row.dataset.title}`)
+    }
+
+    const finishSwipe = (row, offset) => {
+      const width = row.getBoundingClientRect().width
+      const distance = Math.abs(offset)
+      const shouldRemove = distance / width >= .65
+      const shouldOpen = distance >= 42
+      clearSwipeVisual(row)
+      if (shouldRemove) commitRemoval(row)
+      else setSwiped(row, shouldOpen)
+    }
+
+    list.querySelectorAll('.queue-row').forEach((row) => {
+      const content = row.querySelector('.row-content')
+      const handle = row.querySelector('.reorder-handle')
+      const remove = row.querySelector('.remove-button')
+
+      const initiallyOpen = row.classList.contains('is-swiped')
+      remove.setAttribute('tabindex', initiallyOpen ? '0' : '-1')
+      remove.setAttribute('aria-hidden', initiallyOpen ? 'false' : 'true')
+
+      handle.addEventListener('dragstart', (event) => {
+        document.querySelectorAll('.is-dragging,.drop-before').forEach((item) => item.classList.remove('is-dragging','drop-before'))
+        setSwiped(row, false)
+        draggedRow = row
+        draggedFromIndex = rowIndex(row)
+        row.classList.add('is-dragging')
+        event.dataTransfer.effectAllowed = 'move'
+        event.dataTransfer.setData('text/plain', row.dataset.title)
+      })
+
+      handle.addEventListener('dragend', () => {
+        if (!draggedRow) return
+        const movedRow = draggedRow
+        const fromIndex = draggedFromIndex
+        document.querySelectorAll('.drop-before').forEach((item) => item.classList.remove('drop-before'))
+        movedRow.classList.remove('is-dragging')
+        draggedRow = null
+        draggedFromIndex = -1
+        commitMove(movedRow, fromIndex)
+      })
+
+      handle.addEventListener('keydown', (event) => {
+        if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+        event.preventDefault()
+        const sibling = event.key === 'ArrowUp' ? row.previousElementSibling : row.nextElementSibling
+        if (!sibling) return
+        const fromIndex = rowIndex(row)
+        if (event.key === 'ArrowUp') list.insertBefore(row, sibling)
+        else list.insertBefore(sibling, row)
+        commitMove(row, fromIndex)
+        handle.focus()
+      })
+
+      content.addEventListener('keydown', (event) => {
+        if (event.key === 'Delete' || event.key === 'Backspace') {
+          event.preventDefault()
+          setSwiped(row, true)
+          remove.focus()
+        } else if (event.key === 'Escape') {
+          setSwiped(row, false)
+          content.focus()
+        }
+      })
+
+      content.addEventListener('pointerdown', (event) => {
+        if (event.target.closest('.reorder-handle')) return
+        if (event.pointerType === 'mouse' && event.button !== 0) return
+        setSwiped(row, false)
+        swipeRow = row
+        startX = event.clientX
+        deltaX = 0
+        content.setPointerCapture(event.pointerId)
+      })
+
+      content.addEventListener('pointermove', (event) => {
+        if (swipeRow !== row) return
+        const maxDistance = row.getBoundingClientRect().width * .92
+        deltaX = Math.min(0, Math.max(-maxDistance, event.clientX - startX))
+        paintSwipe(row, deltaX)
+      })
+
+      content.addEventListener('pointerup', () => {
+        if (swipeRow !== row) return
+        finishSwipe(row, deltaX)
+        swipeRow = null
+      })
+
+      content.addEventListener('pointercancel', () => {
+        if (swipeRow !== row) return
+        clearSwipeVisual(row)
+        setSwiped(row, false)
+        swipeRow = null
+      })
+
+      content.addEventListener('wheel', (event) => {
+        if (Math.abs(event.deltaX) < 3 || Math.abs(event.deltaX) <= Math.abs(event.deltaY)) return
+        event.preventDefault()
+        if (wheelRow !== row) {
+          if (wheelRow?.isConnected) finishSwipe(wheelRow, wheelDelta)
+          setSwiped(row, false)
+          wheelRow = row
+          wheelDelta = 0
+        }
+        const maxDistance = row.getBoundingClientRect().width * .92
+        wheelDelta = Math.min(0, Math.max(-maxDistance, wheelDelta - event.deltaX))
+        paintSwipe(row, wheelDelta)
+        clearTimeout(wheelTimer)
+        wheelTimer = setTimeout(() => {
+          if (wheelRow?.isConnected) finishSwipe(wheelRow, wheelDelta)
+          wheelRow = null
+          wheelDelta = 0
+        }, 150)
+      }, { passive:false })
+
+      remove.addEventListener('click', () => {
+        commitRemoval(row)
+      })
+    })
+
+    list.addEventListener('dragover', (event) => {
+      if (!draggedRow) return
+      event.preventDefault()
+      const candidates = [...list.querySelectorAll('.queue-row:not(.is-dragging)')]
+      const after = candidates.find((row) => {
+        const rect = row.getBoundingClientRect()
+        return event.clientY < rect.top + rect.height / 2
+      })
+      candidates.forEach((row) => row.classList.remove('drop-before'))
+      if (after) {
+        after.classList.add('drop-before')
+        list.insertBefore(draggedRow, after)
+      } else list.appendChild(draggedRow)
+    })
+  </script>
+</body>
+</html>

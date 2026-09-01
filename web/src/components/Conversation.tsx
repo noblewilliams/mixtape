@@ -41,7 +41,7 @@ export function Conversation({ session, messages, loading = false, thinking, onS
           </p>
         </div>
         <div className="conversation-header-actions">
-          <button className="queue-toggle" type="button" onClick={onOpenQueue} aria-label="Open your tape queue">
+          <button className="queue-toggle" type="button" onClick={onOpenQueue} aria-label="Open your mix">
             <QueueIcon />
             <span>{session.trackCount}</span>
           </button>

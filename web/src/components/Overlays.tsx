@@ -24,7 +24,6 @@ export function NewTapeDialog({ busy = false, onClose, onCreate }: NewTapeDialog
         <button className="dialog-close" type="button" onClick={onClose} aria-label="Close new tape dialog" disabled={busy}>
           <CloseIcon />
         </button>
-        <p className="quiet-kicker">Side A</p>
         <h2 id="new-tape-title">Make a new tape</h2>
         <p>Describe the moment. This becomes your first message to the DJ.</p>
         <form onSubmit={submit}>

@@ -52,6 +52,18 @@ export type SendMessageResponse = {
   sessionTitle?: string
 }
 
+export type QueueOp =
+  | { op: 'remove'; position: number }
+  | { op: 'move'; from: number; to: number }
+
+export type QueueOpsResponse = {
+  queueVersion: number
+  requested: number
+  added: number
+  removed: number
+  queue: ApiQueueTrack[]
+}
+
 export type MusicKitTokenResponse = {
   developerToken: string
   expiresAt: number
@@ -62,6 +74,7 @@ export type MixtapeApi = {
   getSession: (sessionId: string) => Promise<SessionDetailResponse>
   createSession: (prompt: string) => Promise<CreateSessionResponse>
   sendMessage: (sessionId: string, text: string) => Promise<SendMessageResponse>
+  applyQueueOps: (sessionId: string, ops: QueueOp[], expectedVersion?: number) => Promise<QueueOpsResponse>
   getMusicKitToken: () => Promise<MusicKitTokenResponse>
   recordSessionEvent: (sessionId: string, type: 'played' | 'saved_playlist') => Promise<{ ok: true }>
 }
@@ -131,6 +144,11 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
       request(`/sessions/${encodeURIComponent(sessionId)}/messages`, {
         method: 'POST',
         body: JSON.stringify({ text }),
+      }),
+    applyQueueOps: (sessionId, ops, expectedVersion) =>
+      request(`/sessions/${encodeURIComponent(sessionId)}/queue-ops`, {
+        method: 'POST',
+        body: JSON.stringify({ ops, ...(expectedVersion === undefined ? {} : { expectedVersion }) }),
       }),
     getMusicKitToken: () => request('/musickit/token'),
     recordSessionEvent: (sessionId, type) =>

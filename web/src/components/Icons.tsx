@@ -85,6 +85,14 @@ export function MoreIcon(props: IconProps) {
   )
 }
 
+export function UndoIcon(props: IconProps) {
+  return (
+    <svg {...iconDefaults} {...props}>
+      <path d="M9 7H4V2M4.5 7A9 9 0 1 1 3 14" />
+    </svg>
+  )
+}
+
 export function SuccessCircleIcon(props: IconProps) {
   return (
     <svg {...iconDefaults} {...props}>

@@ -30,8 +30,14 @@ describe('authentication gate', () => {
   it('shows the approved compact signed-out state', () => {
     render(<AuthGate auth={bridge()}>{() => <p>Signed in</p>}</AuthGate>)
 
-    expect(screen.getByRole('heading', { name: 'A tape for right now.' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Your music, mixed for right now.' })).toBeInTheDocument()
+    expect(
+      screen.getByText('Start with a mood, a memory, or one song. Mixtape builds a mix from music you already love.'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Sign in to start a mix and keep your taste in sync.')).toBeInTheDocument()
     expect(screen.queryByText('Your personal DJ')).not.toBeInTheDocument()
+    expect(screen.queryByText('A tape for right now.')).not.toBeInTheDocument()
+    expect(screen.queryByText('Sign in to find your tapes and keep listening.')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Continue with Apple' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Continue with Google' })).toBeInTheDocument()
     expect(screen.queryByText('Signed in')).not.toBeInTheDocument()

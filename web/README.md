@@ -30,7 +30,7 @@ Apple's real browser callback must be tested on the deployed HTTPS origin; Apple
 
 ## Current boundary
 
-- Implemented: Better Auth browser session gate with Apple + Google, remembered last-used provider, explicit account linking, credentialed `/sessions` integration, MusicKit JS playback and playlist creation, responsive conversation shell, server-backed session creation/chat, queue, tape list, single-shelf Closet, and animated cassette loading states.
+- Implemented: Better Auth browser session gate with Apple + Google, remembered last-used provider, explicit account linking, credentialed `/sessions` integration, MusicKit JS playback and playlist creation, responsive conversation shell, server-backed session creation/chat, the artwork-led mix rail with versioned reorder and swipe-remove Undo, tape list, single-shelf Closet, and animated cassette loading states.
 - Next: the `/me/memories` UI.
 - Platform constraint: web does not provide the native iOS per-song play counts used during library ingest.
 - Product rule: never display or persist lyric text.

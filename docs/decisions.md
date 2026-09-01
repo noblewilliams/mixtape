@@ -2,6 +2,48 @@
 
 Short ADR-style log. Newest first. Each entry: decision, why, and what would reopen it.
 
+## 2026-09-01 — Web glass is one session-painted content plane
+Primary web views own one subtle animated background plane; navigation, the mix rail, and mobile top chrome
+sit above it as translucent neutral glass and never animate independently. An open mix uses the stable
+cassette color already derived from its session ID, while Home uses the slate house paint, so renames and
+queue refinements cannot cause color jumps. The plane follows a 10-second multi-direction path with no hue
+cycling or moving blur. Dark mode uses the same paint identity as a low-light reflection over graphite;
+authentication and dialogs remain neutral. Reduced motion freezes a balanced frame, and reduced transparency
+uses opaque surfaces. Approval: `docs/mockups/approved/2026-09-01-web-shared-content-plane-liquid-glass.md`.
+**Reopens if:** real-device testing shows the motion distracts from reading, browser rendering makes the
+session color unstable, or translucent chrome cannot hold contrast over supported paints.
+
+## 2026-09-01 — Web removal Undo delays the server mutation
+The web removes a swiped track from local queue state immediately, but does not send the versioned `remove`
+operation until the approved three-second Undo window expires. Undo therefore restores the local row without
+needing a new server restore contract. Reorders persist immediately; their Undo submits the inverse versioned
+move. Queue operations are serialized per session, and starting a newer mutation finalizes any older pending
+removal before enqueueing the new operation so server positions continue to match the visible order. A 409
+replaces optimistic state with the authoritative queue returned by the server. **Reopens if:** navigation or
+multi-tab testing shows that delayed removal can be lost, or product requirements need removal to be durable
+before the Undo window closes.
+
+## 2026-09-01 — Web mix Undo uses a compact flush toast
+The approved web mix rail keeps its three-second single-level Undo, but presents it in a compact 38px toast
+with 4px vertical padding. Undo is a transparent icon-and-text action with no separate visible container,
+countdown, or progress bar; expiry is quiet. This supersedes only the Undo-toast presentation in the original
+mix-rail approval. Approval: `docs/mockups/approved/2026-09-01-web-artwork-mix-rail-undo-toast.md`.
+**Reopens if:** implementation cannot preserve a comfortably clickable Undo target without visibly increasing
+the toast height, or usability testing shows that quiet expiry makes the recovery window unclear.
+
+## 2026-08-31 — Web mix arrangement lives in a persistent artwork rail
+The web keeps mix arrangement in a 468px right rail beside the DJ conversation rather than a floating
+widget or separate Talk/Mix workspace. Artwork-led rows expose the song reason on hover/focus and use a
+three-line handle for reorder. A row-body swipe reveals and proportionally stretches a flush muted-coral
+X while moving; releasing at or beyond 65% removes the track, with one-finger pointer/touch and two-finger
+horizontal trackpad input sharing the threshold. Reorder and removal both have a single-level three-second
+Undo, keyboard parity, live announcements, and a reduced-motion reading; below 1020px the same rail becomes
+a sheet. Approval: `docs/mockups/approved/2026-08-31-web-artwork-mix-rail.md`. The current manual queue-ops
+API supports move/remove but not restore, so implementation must either delay removal persistence for the
+Undo window or add a versioned restore op without changing the approved UI. **Reopens if:** device testing
+shows the 65% threshold causes accidental removals, horizontal wheel handling interferes with vertical
+scroll, or the 468px rail materially harms the conversation at supported desktop widths.
+
 ## 2026-08-31 — Account sign-in is separate from Apple Music authorization
 Mixtape accepts Apple or Google as equal Better Auth login methods; Apple Music remains a separate
 MusicKit authorization requested only when a listener syncs, plays, or creates a playlist. Better Auth

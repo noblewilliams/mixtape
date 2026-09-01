@@ -1,5 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { ApiError, type MixtapeApi, type SessionDetailResponse } from './api/client'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import {
+  ApiError,
+  type ApiQueueTrack,
+  type MixtapeApi,
+  type QueueOp,
+  type QueueOpsResponse,
+  type SessionDetailResponse,
+} from './api/client'
 import { toDjMessage, toDjSession, toQueueTrack } from './api/mappers'
 import type { AuthUser } from './components/AuthGate'
 import { AccountDialog, type AccountBridge } from './components/AccountDialog'
@@ -53,6 +60,27 @@ function detailToState(detail: SessionDetailResponse) {
   }
 }
 
+function durationLabel(tracks: QueueTrack[]) {
+  const minutes = Math.max(0, Math.round(tracks.reduce((sum, track) => sum + (track.durationMs ?? 0), 0) / 60_000))
+  return `${minutes} min`
+}
+
+function paintChannels(hex: string) {
+  const value = hex.replace('#', '')
+  return [value.slice(0, 2), value.slice(2, 4), value.slice(4, 6)]
+    .map((channel) => Number.parseInt(channel, 16))
+    .join(', ')
+}
+
+function conflictSnapshot(error: unknown): { queue: ApiQueueTrack[]; queueVersion: number } | null {
+  if (!(error instanceof ApiError) || error.status !== 409 || typeof error.payload !== 'object' || !error.payload) {
+    return null
+  }
+  const payload = error.payload as Record<string, unknown>
+  if (!Array.isArray(payload.queue) || typeof payload.queueVersion !== 'number') return null
+  return { queue: payload.queue as ApiQueueTrack[], queueVersion: payload.queueVersion }
+}
+
 export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSignOut }: AppProps) {
   const callback = useMemo(accountCallback, [])
   const [sessions, setSessions] = useState<DjSession[]>([])
@@ -75,6 +103,8 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
   const [error, setError] = useState('')
   const [toast, setToast] = useState<ToastState | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const queueVersions = useRef<Record<string, number>>({})
+  const queueMutationChains = useRef<Record<string, Promise<void>>>({})
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId) ?? null,
@@ -82,6 +112,15 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
   )
   const activeMessages = activeSession ? messagesBySession[activeSession.id] ?? [] : []
   const activeQueue = activeSession ? queuesBySession[activeSession.id] ?? [] : []
+  const contentPaint = activeView === 'session' && activeSession ? activeSession.caseColor : '#45596d'
+  const shellStyle = {
+    '--content-paint': contentPaint,
+    '--content-paint-rgb': paintChannels(contentPaint),
+  } as CSSProperties
+
+  useEffect(() => {
+    for (const session of sessions) queueVersions.current[session.id] = session.queueVersion
+  }, [sessions])
 
   useEffect(() => {
     let cancelled = false
@@ -261,6 +300,73 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
     }
   }
 
+  function previewQueue(sessionId: string, nextTracks: QueueTrack[]) {
+    const normalized = nextTracks.map((track, position) => ({ ...track, position }))
+    setQueuesBySession((current) => ({ ...current, [sessionId]: normalized }))
+    setSessions((current) =>
+      current.map((session) =>
+        session.id === sessionId
+          ? { ...session, trackCount: normalized.length, durationLabel: durationLabel(normalized) }
+          : session,
+      ),
+    )
+  }
+
+  function applyQueueSnapshot(sessionId: string, queueVersion: number, queue: ApiQueueTrack[]) {
+    const mappedQueue = queue.map(toQueueTrack)
+    queueVersions.current[sessionId] = queueVersion
+    setQueuesBySession((current) => ({ ...current, [sessionId]: mappedQueue }))
+    setSessions((current) =>
+      current.map((session) =>
+        session.id === sessionId
+          ? toDjSession(
+              {
+                id: session.id,
+                title: session.title,
+                status: session.status,
+                queueVersion,
+                updatedAt: new Date().toISOString(),
+              },
+              queue,
+            )
+          : session,
+      ),
+    )
+  }
+
+  async function refreshQueueAfterFailure(sessionId: string, error: unknown) {
+    const conflict = conflictSnapshot(error)
+    if (conflict) {
+      applyQueueSnapshot(sessionId, conflict.queueVersion, conflict.queue)
+      return
+    }
+    try {
+      const detail = await api.getSession(sessionId)
+      applyQueueSnapshot(sessionId, detail.session.queueVersion, detail.queue)
+    } catch (refreshError) {
+      setError(errorCopy(refreshError))
+      if (refreshError instanceof ApiError && refreshError.status === 401) onSignOut()
+    }
+  }
+
+  function commitQueueOp(sessionId: string, op: QueueOp): Promise<void> {
+    const previous = queueMutationChains.current[sessionId] ?? Promise.resolve()
+    const operation = previous.catch(() => undefined).then(async () => {
+      const expectedVersion = queueVersions.current[sessionId]
+      try {
+        const response: QueueOpsResponse = await api.applyQueueOps(sessionId, [op], expectedVersion)
+        applyQueueSnapshot(sessionId, response.queueVersion, response.queue)
+        setError('')
+      } catch (requestError) {
+        await refreshQueueAfterFailure(sessionId, requestError)
+        if (requestError instanceof ApiError && requestError.status === 401) onSignOut()
+        throw requestError
+      }
+    })
+    queueMutationChains.current[sessionId] = operation.catch(() => undefined)
+    return operation
+  }
+
   async function togglePlayback() {
     if (!activeSession || playbackBusy) return
     const sessionId = activeSession.id
@@ -317,7 +423,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
   }
 
   return (
-    <div className={`app-shell ${activeView === 'home' || !activeSession ? 'app-shell--home' : ''}`}>
+    <div className={`app-shell ${activeView === 'home' || !activeSession ? 'app-shell--home' : ''}`} style={shellStyle}>
       <Sidebar
         sessions={sessions}
         activeSessionId={activeSession?.id ?? null}
@@ -364,6 +470,8 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
               setDialog('save-playlist')
             }}
             onClose={() => setQueueOpen(false)}
+            onPreviewTracks={(tracks) => previewQueue(activeSession.id, tracks)}
+            onCommitQueueOp={(op) => commitQueueOp(activeSession.id, op)}
           />
         </>
       )}

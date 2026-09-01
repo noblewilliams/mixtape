@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
+import type { QueueOpsResponse } from './api/client'
 import type { AccountBridge } from './components/AccountDialog'
 import type { MusicKitClient } from './musickit/client'
 import { createFakeApi } from './test/fake-api'
@@ -59,6 +60,30 @@ describe('Mixtape web shell', () => {
     expect(screen.queryByText(/^You$/)).not.toBeInTheDocument()
   })
 
+  it('uses a stable session paint and the house slate on Home', async () => {
+    renderApp()
+
+    await screen.findByRole('heading', { name: 'Blue hour, windows down' })
+    const shell = document.querySelector('.app-shell') as HTMLElement
+    const sessionPaint = shell.style.getPropertyValue('--content-paint')
+    expect(sessionPaint).toMatch(/^#[0-9a-f]{6}$/i)
+    expect(shell.style.getPropertyValue('--content-paint-rgb')).toMatch(/^\d+, \d+, \d+$/)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Home' }))
+
+    expect(shell.style.getPropertyValue('--content-paint')).toBe('#45596d')
+    expect(sessionPaint).not.toBe('#45596d')
+  })
+
+  it('does not label mixes or new-mix dialogs as Side A', async () => {
+    renderApp()
+
+    expect(await screen.findByRole('complementary', { name: 'Your mix' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Make a new tape' }))
+
+    expect(screen.queryByText(/side a/i)).not.toBeInTheDocument()
+  })
+
   it('opens account settings from the signed-in identity area', async () => {
     renderApp()
 
@@ -109,6 +134,26 @@ describe('Mixtape web shell', () => {
     expect(screen.getByRole('button', { name: 'Connect Apple Music' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Play now' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Create playlist' })).not.toBeInTheDocument()
+  })
+
+  it('optimistically reorders the mix and submits the current queue version', async () => {
+    const applyQueueOps = vi.fn(() => new Promise<QueueOpsResponse>(() => undefined))
+    const api = createFakeApi({ applyQueueOps })
+    renderApp({ api })
+
+    fireEvent.keyDown(await screen.findByRole('button', { name: 'Move Sweetest Taboo, track 1' }), {
+      key: 'ArrowDown',
+    })
+
+    await waitFor(() => {
+      expect(applyQueueOps).toHaveBeenCalledWith(
+        'blue-hour',
+        [{ op: 'move', from: 0, to: 1 }],
+        3,
+      )
+    })
+    const titles = [...document.querySelectorAll('.track-row .track-copy strong')].map((element) => element.textContent)
+    expect(titles.slice(0, 2)).toEqual(['Essence', 'Sweetest Taboo'])
   })
 
   it('holds the action footprint while Apple authorizes, then reveals playback controls', async () => {

@@ -62,7 +62,7 @@ export function AuthGate({ auth, preferences = browserAuthPreferences, children 
   if (session.data?.user) return children(session.data.user, lastUsed)
 
   const waiting = session.isPending || redirecting !== null
-  const errorMessage = signInError || (session.error ? 'We could not check your session. Please try again.' : '')
+  const errorMessage = signInError || (session.error ? 'We couldn’t check your session. Try again.' : '')
 
   async function startSignIn(provider: AuthProvider) {
     setSignInError('')
@@ -88,8 +88,8 @@ export function AuthGate({ auth, preferences = browserAuthPreferences, children 
         <div className="auth-intro">
           <span className="auth-wordmark">mixtape</span>
           <div className="auth-copy">
-            <h1 id="auth-title">A tape for right now.</h1>
-            <p>Start with a mood, a memory, or one song. The DJ will shape the rest from music you already love.</p>
+            <h1 id="auth-title">Your music, mixed for right now.</h1>
+            <p>Start with a mood, a memory, or one song. Mixtape builds a mix from music you already love.</p>
           </div>
         </div>
 
@@ -105,7 +105,7 @@ export function AuthGate({ auth, preferences = browserAuthPreferences, children 
                 Checking your session
               </p>
             ) : (
-              <p className="auth-status">Sign in to find your tapes and keep listening.</p>
+              <p className="auth-status">Sign in to start a mix and keep your taste in sync.</p>
             )}
             <div className="auth-provider-row">
               {(['apple', 'google'] as const).map((provider) => {

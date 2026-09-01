@@ -52,3 +52,35 @@ describe('approved composer treatment', () => {
     expect(stylesheet).toMatch(/\.send-button:focus-visible \.send-button-surface\s*{[^}]*background:\s*rgba\(84, 68, 81, 0\.09\);/s)
   })
 })
+
+describe('approved artwork mix rail', () => {
+  it('keeps the desktop rail wide and turns it into a sheet below 1020px', () => {
+    expect(stylesheet).toMatch(/\.app-shell\s*{[^}]*grid-template-columns:\s*238px minmax\(0, 1fr\) 468px;/s)
+    expect(stylesheet).toMatch(/@media \(max-width:\s*1020px\)[\s\S]*?\.queue-panel\s*{[^}]*width:\s*min\(468px, calc\(100vw - 32px\)\);/)
+  })
+
+  it('keeps the swipe reveal flush and the Undo treatment compact', () => {
+    expect(stylesheet).toMatch(/\.track-row\s*{[^}]*--swipe-reveal:\s*0px;[^}]*background:\s*transparent;[^}]*border:\s*0;/s)
+    expect(stylesheet).toMatch(/\.track-remove\s*{[^}]*border:\s*0;[^}]*box-shadow:\s*none;/s)
+    expect(stylesheet).toMatch(/\.queue-undo-toast\s*{[^}]*min-height:\s*38px;[^}]*padding:\s*4px 9px 4px 12px;/s)
+    expect(stylesheet).toMatch(/\.queue-undo-action\s*{[^}]*background:\s*transparent;[^}]*border:\s*0;[^}]*border-radius:\s*0;/s)
+    expect(stylesheet).not.toMatch(/\.queue-undo-(?:progress|countdown)/)
+  })
+})
+
+describe('approved shared content-plane glass', () => {
+  it('gives the shell one dynamic paint plane while chrome remains stationary', () => {
+    expect(stylesheet).toMatch(/\.app-shell\s*{[^}]*--content-paint:\s*#45596d;[^}]*animation:\s*content-plane-drift 10s ease-in-out infinite;/s)
+    expect(stylesheet).toMatch(/@keyframes content-plane-drift\s*{[\s\S]*?26%[\s\S]*?53%[\s\S]*?78%/)
+    expect(stylesheet).toMatch(/\.sidebar\s*{[^}]*background:\s*rgba\(248, 247, 246, 0\.62\);[^}]*animation:\s*none;/s)
+    expect(stylesheet).toMatch(/\.queue-panel\s*{[^}]*background:\s*rgba\(248, 247, 246, 0\.62\);[^}]*animation:\s*none;/s)
+  })
+
+  it('ships purpose-built dark and static accessibility readings', () => {
+    expect(stylesheet).toMatch(/@media \(prefers-color-scheme:\s*dark\)[\s\S]*?\.app-shell\s*{[^}]*#151518;/)
+    expect(stylesheet).toMatch(/rgba\(var\(--content-paint-rgb\), 0\.34\)/)
+    expect(stylesheet).not.toMatch(/color-mix\(in srgb, color-mix\(/)
+    expect(stylesheet).toMatch(/@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.app-shell\s*{[^}]*animation:\s*none !important;/)
+    expect(stylesheet).toMatch(/@media \(prefers-reduced-transparency:\s*reduce\)[\s\S]*?\.sidebar,[\s\S]*?\.queue-panel[\s\S]*?backdrop-filter:\s*none !important;/)
+  })
+})

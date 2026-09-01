@@ -40,11 +40,19 @@ function queueFor(sessionId: string): ApiQueueTrack[] {
 }
 
 export function createFakeApi(overrides: Partial<MixtapeApi> = {}): MixtapeApi {
+  const queueState = new Map<string, ApiQueueTrack[]>()
+  const currentQueue = (sessionId: string) => {
+    const existing = queueState.get(sessionId)
+    if (existing) return existing.map((track) => ({ ...track }))
+    const initial = queueFor(sessionId)
+    queueState.set(sessionId, initial)
+    return initial.map((track) => ({ ...track }))
+  }
   const api: MixtapeApi = {
     listSessions: async () => ({ sessions: summaries.map((session) => ({ ...session })) }),
     getSession: async (sessionId): Promise<SessionDetailResponse> => {
       const session = summaries.find((item) => item.id === sessionId) ?? summaries[0]
-      return { session: { ...session }, messages: messagesFor(sessionId), queue: queueFor(sessionId) }
+      return { session: { ...session }, messages: messagesFor(sessionId), queue: currentQueue(sessionId) }
     },
     createSession: async (prompt): Promise<CreateSessionResponse> => {
       const createdAt = new Date().toISOString()
@@ -74,6 +82,28 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): MixtapeApi {
       queue: demoQueue.map(apiTrack),
       queueVersion: 4,
     }),
+    applyQueueOps: async (sessionId, ops, expectedVersion = 3) => {
+      const queue = currentQueue(sessionId)
+      for (const op of ops) {
+        if (op.op === 'remove') {
+          queue.splice(op.position, 1)
+        } else {
+          const [moved] = queue.splice(op.from, 1)
+          queue.splice(op.to, 0, moved)
+        }
+      }
+      queue.forEach((track, position) => {
+        track.position = position
+      })
+      queueState.set(sessionId, queue.map((track) => ({ ...track })))
+      return {
+        queueVersion: expectedVersion + 1,
+        requested: 0,
+        added: 0,
+        removed: ops.filter((op) => op.op === 'remove').length,
+        queue,
+      }
+    },
     getMusicKitToken: async () => ({ developerToken: 'fake-developer-token', expiresAt: 1_788_138_000 }),
     recordSessionEvent: async () => ({ ok: true }),
   }
