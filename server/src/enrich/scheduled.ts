@@ -14,6 +14,10 @@ import {
   cleanupLibrarySyncStaging,
   type LibrarySyncCleanupResult,
 } from '../library/cleanup'
+import {
+  cleanupListeningImportStaging,
+  type ListeningImportCleanupResult,
+} from '../listening/cleanup'
 
 // Same subrequest budget as MAX_BATCH (see routes/enrich.ts); small batches
 // also keep runs well inside the 5-min cadence so overlapping crons stay rare.
@@ -31,6 +35,7 @@ export type ScheduledResult = {
   artwork?: ArtworkRunResult | FailedRun
   playlistCleanup: PlaylistSyncCleanupResult | FailedRun
   libraryCleanup: LibrarySyncCleanupResult | FailedRun
+  listeningCleanup: ListeningImportCleanupResult | FailedRun
 }
 
 type ScheduledRunners = {
@@ -38,6 +43,7 @@ type ScheduledRunners = {
   artwork: typeof runArtworkBatch
   playlistCleanup: typeof cleanupPlaylistSyncStaging
   libraryCleanup: typeof cleanupLibrarySyncStaging
+  listeningCleanup: typeof cleanupListeningImportStaging
 }
 
 export async function handleScheduled(
@@ -50,11 +56,18 @@ export async function handleScheduled(
   const runArtwork = runners.artwork ?? runArtworkBatch
   const runPlaylistCleanup = runners.playlistCleanup ?? cleanupPlaylistSyncStaging
   const runLibraryCleanup = runners.libraryCleanup ?? cleanupLibrarySyncStaging
+  const runListeningCleanup = runners.listeningCleanup ?? cleanupListeningImportStaging
 
   try {
     result.libraryCleanup = await runLibraryCleanup(db)
   } catch {
     result.libraryCleanup = { error: 'failed' }
+  }
+
+  try {
+    result.listeningCleanup = await runListeningCleanup(db)
+  } catch {
+    result.listeningCleanup = { error: 'failed' }
   }
 
   try {
