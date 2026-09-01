@@ -52,7 +52,7 @@ Milestones toward that:
    - **Blend sessions/playlists**: one tape mixed from multiple people's histories and preferences — "DJ for the room", but grounded in everyone's real taste graphs, not a lowest-common-denominator shuffle.
    - **Taste twins**: find the users whose music taste is most similar to yours, and take actions from there (blend with them, borrow their discoveries, compare libraries). The enrichment corpus makes this computable: a user's taste vector is their play-count-weighted track/meaning embeddings, and similarity is a nearest-neighbor query over user vectors.
    - Requires a real multi-user base first (v3's App Store reach), plus a privacy model (taste sharing is opt-in; libraries are never exposed raw).
-5. **Someday:** Spotify support if/when their API posture allows a new app (currently requires a 250k-MAU business for meaningful access), multi-platform households.
+5. **Spotify via the listener's own data export** (spec 2026-09-01): Spotify's API is closed to new apps, so Spotify listeners bring their Account data and Extended streaming history exports; the same importer gives Apple listeners an optional deeper history. Multi-platform households remain someday.
 
 ## Deeper history (added 2026-08-30)
 
@@ -64,4 +64,4 @@ Two upgrades to the taste graph's raw material, both feeding every milestone abo
 
 ## Platform reality (why Apple Music first)
 
-Researched 2026-08: Spotify removed Audio Features, Recommendations, and Audio Analysis for all new apps (Nov 2024) and gates extended API access behind a registered business with 250k+ MAU (May 2025). Dev mode caps at ~25 allowlisted users. Apple Music, via MusicKit, offers library + playlist read/write, real per-song play counts (native iOS only), recommendations, recently played, and full in-app playback for subscribers — everything v1 needs, with no approval gauntlet. Full comparison lives in the design spec.
+Researched 2026-08, updated 2026-09-01: Spotify removed Audio Features, Recommendations, and Audio Analysis for all new apps (Nov 2024) and gates extended API access behind a registered business with 250k+ MAU (May 2025). Since February 2026 Development Mode is capped at 5 authorized users per app, requires the developer to hold Premium, and lost the batch track endpoint. Apple Music, via MusicKit, offers library + playlist read/write, real per-song play counts (native iOS only), recommendations, recently played, and full in-app playback for subscribers — everything v1 needs, with no approval gauntlet. Full comparison lives in the design spec.

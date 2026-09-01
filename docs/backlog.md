@@ -4,6 +4,7 @@ Single consolidated list. Detail lives in `decisions.md` (rationale) and the pla
 
 ## Owed right now
 
+- **Listening-export import, phase 1 (server):** spec `superpowers/specs/2026-09-01-listening-export-import-design.md` (rev 3), plan `superpowers/plans/2026-09-01-listening-export-p1-server.md`. Spotify listeners bring their Account data + Extended streaming history exports; Apple export is an optional "go deeper" step. Phase 1 is the schema, staged import protocol, day ledger, derivations, play-derived pool candidates with ISRC dedupe, corpus mode behind the interview, seeds, funnel events, and enrichment priority. Phases 2–5 (parsers + UI on iOS and web, enrichment by id, relay/embed probes, Apple adapter) follow phase by phase; the founder's own exports were requested 2026-09-01 and seed the fixtures.
 - **Ship web sync and consumption:** source-aware, deletion-safe song sync; web MusicKit pagination/normalization; playlist upload; honest recent/playlist familiarity; bounded staging cleanup; and the web browse/memory/session API client are code-complete locally. The approval board is `docs/mockups/2026-09-01-web-sync-playlist-states.html`. Next: approve the dedicated `Your music` product flow, implement those UI states, and run authorized probes across the launch browser matrix for duplicate playlist identity and playback behavior, with Android Chrome as a launch-critical target. Do not deploy or read the founder library until the normal reviewed migration/deploy and action-time privacy gates.
 - **Roll out playlist intelligence Phase 2:** the read-only native snapshot, deletion-safe staged sync, per-user storefront persistence, browse APIs, defensive client contracts, and bounded staging cleanup are code-complete locally. Next: apply migrations 0012–0014 from a clean worktree, deploy the exact reviewed Worker, run the first private founder sync, and compare counts/order/artwork against Apple Music. Taste scoring, conversational editing, mutation, and browse UI remain later phases.
 - **Playlist probe side effect is inconclusive:** the founder reported that both disposable playlists currently looked ordered, but the Music-created candidate may have lost one song. There is no pre-probe snapshot to resolve it. Run no further mutation probe in Phase 2; the new read-only snapshot becomes the baseline for future conflict detection.
@@ -51,10 +52,12 @@ Server / DJ:
 - Keep-boost saturates around ~8 played sessions (documented in pool.ts); revisit normalization if fam+taste over-anchor comfort picks.
 - `analyze-previews` front-loads all downloads before analysis (operator UX); interleaving fetch/analyze chunks recorded as deferred (P2.5 Task 3 review).
 - Opus-for-sequencing escalation stays a contingency: only with evidence of Sonnet ordering poorly (see CLAUDE.md).
+- Playlist tables and contracts keep Apple-flavored column names (`apple_library_id`, `apple_library_entry_id`) while carrying opaque Spotify fingerprint keys; rename to `source_*` when the tables are next touched for another reason (listening-export spec, naming debt).
+- Listening-export re-import cannot lower a play count (`GREATEST` merge); delete-import is the reset. A removed Apple library song with three plays in the last two years re-enters the pool; session removals still penalize it. Both accepted 2026-09-01.
 
 ## Reopen clauses (from decisions.md — conditions, not tasks)
 
-- Spotify support if their API access policy changes (schema already platform-agnostic).
+- Spotify Web API integration if their access policy changes; the export path ships regardless (decisions.md 2026-09-01).
 - Neon managed auth if it ships Sign in with Apple.
 - GetSongBPM leg of the enrichment waterfall — currently NOT needed (features at 100%); reopens only if coverage regresses (requires visible getsongbpm.com backlink in UI).
 - Musixmatch licensed-lyrics deal at scale (lyrics stay derive-don't-display until then).

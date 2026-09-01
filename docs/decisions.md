@@ -184,3 +184,18 @@ Founder device smoke: memory save (with scoping + one-track veto folded in) ✓,
 
 ## 2026-08-30 — Regen-on-small-edit bug FIXED + verified; deploy discipline lesson
 Fix `5b41a91`: PERSONA_PROMPT gained a "standing mix is precious" rule (edit_queue with smallest ops for removals/swaps — even bundled in a message doing something else; generate_queue only for a new brief or explicit start-over) + both tool descriptions hardened (generate_queue marked DESTRUCTIVE). Live-verified against prod: "drop track 3 and change nothing else" removed exactly one track, order preserved ("Dropped Morocco — rest of the mix stays untouched"). Session rename (chat tool + PATCH + long-press, `32099f0`/`16abd42`) is deployed server-side; the client half rides the next app rebuild. INCIDENT + RULE: a `wrangler deploy` from the working tree bundled a PARALLEL agent's uncommitted src changes (auth WIP requiring an unset env var) → ~3-minute prod 500 outage, recovered by redeploying from a clean `git worktree` at HEAD. Rule going forward: while any parallel session may have uncommitted changes, ALWAYS deploy from a clean worktree of the committed state, never the working tree.
+
+## 2026-09-01 — Listening-export import: Spotify via the listener's own export; Apple export as "go deeper" (founder)
+Spec: `docs/superpowers/specs/2026-09-01-listening-export-import-design.md` (rev 3). Eleven decisions approved together:
+1. Spotify support ships via the listener's own data export (Account data + Extended streaming history), never the Web API (Feb 2026: 5 users/app, Premium required, batch track endpoint removed). **Reopens if:** Spotify's API policy changes.
+2. Apple's Media Services export is an optional "go deeper" step; iOS live sync stays the primary Apple path.
+3. Export parsing happens on the listener's device; archives and personal-data files never reach Mixtape. No server endpoint accepts a file.
+4. The listening ledger is per track per day (`listening_days`); per-play rows only when a feature needs play order or exact timestamps.
+5. `spotify_id` joins `apple_id` as a peer identity column; rows for one recording link by ISRC, the pool dedupes on it, and a physical merge is deferred.
+6. A play is 30 seconds or more. Pool candidates are library, seeded, or three counted plays in the last 730 days.
+7. Private-session (incognito) plays are excluded unless the listener opts in at the inventory step.
+8. A mix before any data requires the DJ interview and at least 25 seed-matched corpus tracks across 3 artists, and is labeled "not personal yet".
+9. iOS and web parsers share one contract and one fixture suite; the Spotify import ships on each surface as soon as it is ready; the Apple adapter is web-first.
+10. An export is backfill; a scrobble relay (ListenBrainz or Last.fm) is the intended live feed, pending the phase-4 probe.
+11. Connected music sources are a set per listener (`user_music_sources`), not a single platform column.
+Accepted edges recorded in the backlog: a re-import cannot lower a play count (delete-import is the reset); a removed Apple library song with three recent plays re-enters the pool.
