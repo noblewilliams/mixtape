@@ -83,7 +83,7 @@ Read the spec first. These are the facts an implementer must not drift from.
 - Commit `feat(server): Play-derived candidates and corpus mode`.
 
 ### Task 6: seeds, interview, funnel
-- `server/src/enrich/reccobeats-by-id.ts`: `fetchTracksBySpotifyIds(ids, fetchLike)` against `GET /v1/track?ids=` in batches (probe the maximum live first with real ids; use the largest that returns 200, capped at 40), returning `{ spotifyId, title, artists, isrc, durationMs }` per hit and the missing ids. Same timeout and error discipline as `reccobeats.ts`.
+- `server/src/enrich/reccobeats-by-id.ts`: `fetchTracksBySpotifyIds(ids, fetchLike)` against `GET /v1/track?ids=` in batches of at most 40 (verified 2026-09-01: 41 ids returns HTTP 400), returning `{ spotifyId, title, artists, isrc, durationMs }` per hit and the missing ids. Same timeout and error discipline as `reccobeats.ts`.
 - Routes under session middleware: `GET /me/artist-seeds`; `PUT /me/artist-seeds { names[] }` replacing the user's `interview`-sourced seeds; `POST /me/seed-tracks { spotifyIds[] }` (max 200) resolving through ReccoBeats, inserting `tracks` rows (`spotify_id`, `artist_source = 'reccobeats'`, `isrc`, `duration_ms`, `enrich_priority >= 1`) and `user_tracks` with `seeded = true`, and a `pasted` artist seed per credited artist; responds `{ resolved, unresolved }`; `GET /me/seed-tracks`; `DELETE /me/seed-tracks/:trackId` clearing `seeded` and deleting the row when nothing else keeps it.
 - `POST /me/interview { neverSkip: string[], playsMost, listensWhen, neverWants, era }`: seeds from `neverSkip` (replace `interview` seeds), one memory note per non-empty answer with a fixed prefix (`Never skips: …`, `Plays most: …`, `Listens when: …`, `Never wants: …`, `Era: …`), inserted through the same cap, dedupe, and length rules as the DJ's `remember_preference` (refactor that insert into a shared helper rather than duplicating it), then a `funnel_events` row `interview_completed`.
 - `POST /me/funnel-events { type, surface }`; `server/scripts/funnel-report.ts` (read-only, neon-http, `.dev.vars` loader) printing per-step counts, step-to-step conversion, and median days from `marked_requested` to `import_completed`.
@@ -104,7 +104,7 @@ Read the spec first. These are the facts an implementer must not drift from.
 
 ### Task 9: verification, docs, migration gate
 - `npx vitest run --no-file-parallelism` and `npm run typecheck` green in `server/`; record counts in this plan's "Current verification".
-- `docs/backlog.md` and this plan's status updated; the spec's "Open implementation facts" updated with the ReccoBeats batch limit found in Task 6.
+- `docs/backlog.md` and this plan's status updated; the spec's "Open implementation facts" already records the ReccoBeats batch limit (40).
 - Migration apply and Worker deploy happen from a clean worktree of committed HEAD and only with the founder's go at action time. Nothing in this phase changes behavior for existing listeners until a client sends the new endpoints, so deploy can wait for phase 2 if the founder prefers.
 
 ## Out of scope (resist)

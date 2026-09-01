@@ -374,7 +374,7 @@ No scoring change beyond that in this delivery. Skip rate, completion, like rati
 
 **By-id stage** ahead of the existing ReccoBeats title search, taken only when `spotify_id` is set:
 
-1. ReccoBeats track and audio-features by Spotify id, in batches (limit to be probed; docs indicate 40). Backfill `isrc` and `duration_ms`. Overwrite `tracks.artist` with the credited artists ReccoBeats returns and set `artist_source = 'reccobeats'`, because the export supplied the album artist.
+1. ReccoBeats track and audio-features by Spotify id, in batches of at most 40 (verified limit). Backfill `isrc` and `duration_ms`. Overwrite `tracks.artist` with the credited artists ReccoBeats returns and set `artist_source = 'reccobeats'`, because the export supplied the album artist.
 2. With an ISRC, query the Apple catalog through the existing client. If exactly one match and no other row holds that `apple_id`, set it and let artwork, genre, release year, and explicit backfills run unchanged. Otherwise leave `apple_id` null; the ISRC link is enough for the pool's dedupe.
 3. Rows with no Apple match get artwork from Spotify oEmbed; the artwork normalizer must accept a fixed URL.
 4. LRCLIB and the embedding stage run unchanged. Lyric text still never persists.
@@ -416,7 +416,7 @@ Apple export rows already carry a catalog id and need nothing new.
 - Whether Daily Tracks' `Track Identifier` is the catalog id, and how often it is present.
 - Whether current `Playlist*.json` files carry playlist URIs; the fingerprint key stands in until they do.
 - Whether Apple's nested archive is stored or deflated, which decides whether random access reaches inside it.
-- ReccoBeats batch size and rate limits for the id endpoints.
+- ReccoBeats by-id batch limit is 40 (probed 2026-09-01: 41 ids returns HTTP 400 "size must be between 1 and 40"). Rate limits are still unknown.
 - Which storefront to use for Apple catalog lookups on behalf of a Spotify listener.
 - oEmbed behavior from datacenter IPs at batch volume.
 - Relay probe: ListenBrainz's Spotify import latency and completeness, its API terms for a commercial app, Last.fm's commercial terms, and how well name-only listens resolve to our tracks.
