@@ -1,4 +1,8 @@
 import { z } from 'zod'
+import {
+  MAX_ARTWORK_URL_LENGTH,
+  parseNullableArtworkMetadata,
+} from '../artwork/normalize'
 import { isAppleSongId } from '../musickit/apple-id'
 
 export const PLAYLIST_SYNC_MAX_PLAYLISTS = 2_000
@@ -6,11 +10,29 @@ export const PLAYLIST_SYNC_MAX_ENTRIES = 100_000
 export const PLAYLIST_CHUNK_MAX = 50
 export const PLAYLIST_ENTRY_CHUNK_MAX = 200
 
-const opaqueLibraryId = z.string().min(1).max(512).refine((value) => !value.includes('\0'))
+function hasValidUnicodeScalars(value: string) {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index)
+    if (code >= 0xd800 && code <= 0xdbff) {
+      if (index + 1 >= value.length) return false
+      const next = value.charCodeAt(index + 1)
+      if (next < 0xdc00 || next > 0xdfff) return false
+      index += 1
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      return false
+    }
+  }
+  return true
+}
+
+const safeString = (schema: z.ZodString) => schema.refine(
+  (value) => !value.includes('\0') && hasValidUnicodeScalars(value),
+)
+const opaqueLibraryId = safeString(z.string().min(1).max(512))
 const textSnapshot = (max: number) =>
-  z.string().min(1).max(max).refine((value) => !value.includes('\0'))
+  safeString(z.string().min(1).max(max))
 const nullableTextSnapshot = (max: number) =>
-  z.string().max(max).refine((value) => !value.includes('\0')).nullable()
+  safeString(z.string().max(max)).nullable()
 const nullableAppleId = z.string().refine(isAppleSongId).nullable()
 const postgresInteger = z.number().int().max(2_147_483_647)
 const nullableTimestamp = z.number().int().min(0).max(8_640_000_000_000_000).nullable()
@@ -24,14 +46,14 @@ export const beginPlaylistSyncSchema = z.object({
   expectedEntries: z.number().int().min(0).max(PLAYLIST_SYNC_MAX_ENTRIES),
 }).strict()
 
-export const playlistSnapshotSchema = z.object({
+const playlistSnapshotObject = z.object({
   ordinal: z.number().int().min(0).max(PLAYLIST_SYNC_MAX_PLAYLISTS - 1),
   appleLibraryId: opaqueLibraryId,
   appleCatalogId: nullableAppleId,
   name: textSnapshot(500),
   description: nullableTextSnapshot(10_000),
   curatorName: nullableTextSnapshot(500),
-  artworkUrlTemplate: nullableTextSnapshot(4_096),
+  artworkUrlTemplate: nullableTextSnapshot(MAX_ARTWORK_URL_LENGTH),
   artworkWidth: nullablePositiveInteger,
   artworkHeight: nullablePositiveInteger,
   artworkBgColor: nullableArtworkColor,
@@ -51,7 +73,17 @@ export const playlistSnapshotSchema = z.object({
   entryCount: z.number().int().nonnegative().max(PLAYLIST_SYNC_MAX_ENTRIES),
 }).strict()
 
-export const playlistEntrySnapshotSchema = z.object({
+export const playlistSnapshotSchema = playlistSnapshotObject.superRefine((value, context) => {
+  const artwork = parseNullableArtworkMetadata({
+    url: value.artworkUrlTemplate,
+    width: value.artworkWidth,
+    height: value.artworkHeight,
+    bgColor: value.artworkBgColor,
+  })
+  if (!artwork) context.addIssue({ code: 'custom', message: 'Invalid artwork metadata' })
+})
+
+const playlistEntrySnapshotObject = z.object({
   position: z.number().int().min(0).max(PLAYLIST_SYNC_MAX_ENTRIES - 1),
   appleLibraryEntryId: opaqueLibraryId,
   appleLibraryTrackId: opaqueLibraryId.nullable(),
@@ -61,11 +93,23 @@ export const playlistEntrySnapshotSchema = z.object({
   artistSnapshot: textSnapshot(1_000),
   albumSnapshot: nullableTextSnapshot(1_000),
   durationMsSnapshot: nullableNonnegativeInteger,
-  artworkUrlTemplateSnapshot: nullableTextSnapshot(4_096),
+  artworkUrlTemplateSnapshot: nullableTextSnapshot(MAX_ARTWORK_URL_LENGTH),
   artworkWidthSnapshot: nullablePositiveInteger,
   artworkHeightSnapshot: nullablePositiveInteger,
   artworkBgColorSnapshot: nullableArtworkColor,
 }).strict()
+
+export const playlistEntrySnapshotSchema = playlistEntrySnapshotObject.superRefine(
+  (value, context) => {
+    const artwork = parseNullableArtworkMetadata({
+      url: value.artworkUrlTemplateSnapshot,
+      width: value.artworkWidthSnapshot,
+      height: value.artworkHeightSnapshot,
+      bgColor: value.artworkBgColorSnapshot,
+    })
+    if (!artwork) context.addIssue({ code: 'custom', message: 'Invalid artwork metadata' })
+  },
+)
 
 export const playlistChunkSchema = z.object({
   playlists: z.array(playlistSnapshotSchema).min(1).max(PLAYLIST_CHUNK_MAX),

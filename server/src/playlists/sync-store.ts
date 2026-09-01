@@ -53,6 +53,7 @@ type StoreDeps = {
 }
 
 const DEFAULT_TTL_MS = 60 * 60 * 1_000
+const POSITION_REORDER_OFFSET = 100_001
 const toDate = (value: number | null) => value == null ? null : new Date(value)
 
 function normalizeRows(value: unknown): Record<string, unknown>[] {
@@ -387,15 +388,50 @@ export function createPlaylistSyncStore(db: Db, deps: StoreDeps = {}): PlaylistS
               WHERE sp.sync_id = ${syncId} AND sp.apple_library_id = up.apple_library_id
             )
         `)
+        // Move current positions into a disjoint range so rows can be reordered
+        // without transiently colliding with the canonical position constraint.
         await tx.execute(sql`
-          DELETE FROM playlist_entries pe
-          USING user_playlists up
+          UPDATE playlist_entries pe
+          SET position = pe.position + ${POSITION_REORDER_OFFSET}, updated_at = ${now}
+          FROM user_playlists up
           WHERE pe.playlist_id = up.id
             AND up.user_id = ${userId}
             AND EXISTS (
               SELECT 1 FROM playlist_sync_playlists sp
               WHERE sp.sync_id = ${syncId} AND sp.apple_library_id = up.apple_library_id
             )
+        `)
+        await tx.execute(sql`
+          UPDATE playlist_entries pe
+          SET
+            position = se.position,
+            track_id = coalesce(catalog_track.id, unique_isrc.id),
+            apple_library_track_id = se.apple_library_track_id,
+            apple_catalog_id = se.apple_catalog_id,
+            isrc_snapshot = se.isrc_snapshot,
+            title_snapshot = se.title_snapshot,
+            artist_snapshot = se.artist_snapshot,
+            album_snapshot = se.album_snapshot,
+            duration_ms_snapshot = se.duration_ms_snapshot,
+            artwork_url_template_snapshot = se.artwork_url_template_snapshot,
+            artwork_width_snapshot = se.artwork_width_snapshot,
+            artwork_height_snapshot = se.artwork_height_snapshot,
+            artwork_bg_color_snapshot = se.artwork_bg_color_snapshot,
+            updated_at = ${now}
+          FROM playlist_sync_entries se
+          JOIN user_playlists up
+            ON up.user_id = ${userId} AND up.apple_library_id = se.apple_playlist_id
+          LEFT JOIN tracks catalog_track ON catalog_track.apple_id = se.apple_catalog_id
+          LEFT JOIN (
+            SELECT isrc, min(id::text)::uuid AS id
+            FROM tracks
+            WHERE isrc IS NOT NULL
+            GROUP BY isrc
+            HAVING count(*) = 1
+          ) unique_isrc ON catalog_track.id IS NULL AND unique_isrc.isrc = se.isrc_snapshot
+          WHERE se.sync_id = ${syncId}
+            AND pe.playlist_id = up.id
+            AND pe.apple_library_entry_id = se.apple_library_entry_id
         `)
         await tx.execute(sql`
           INSERT INTO playlist_entries (
@@ -434,7 +470,28 @@ export function createPlaylistSyncStore(db: Db, deps: StoreDeps = {}): PlaylistS
             HAVING count(*) = 1
           ) unique_isrc ON catalog_track.id IS NULL AND unique_isrc.isrc = se.isrc_snapshot
           WHERE se.sync_id = ${syncId}
+            AND NOT EXISTS (
+              SELECT 1 FROM playlist_entries pe
+              WHERE pe.playlist_id = up.id
+                AND pe.apple_library_entry_id = se.apple_library_entry_id
+            )
           ORDER BY se.apple_playlist_id, se.position
+        `)
+        await tx.execute(sql`
+          DELETE FROM playlist_entries pe
+          USING user_playlists up
+          WHERE pe.playlist_id = up.id
+            AND up.user_id = ${userId}
+            AND EXISTS (
+              SELECT 1 FROM playlist_sync_playlists sp
+              WHERE sp.sync_id = ${syncId} AND sp.apple_library_id = up.apple_library_id
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM playlist_sync_entries se
+              WHERE se.sync_id = ${syncId}
+                AND se.apple_playlist_id = up.apple_library_id
+                AND se.apple_library_entry_id = pe.apple_library_entry_id
+            )
         `)
         const result = normalizeRows(await tx.execute(sql`
           SELECT count(*)::int AS entries,

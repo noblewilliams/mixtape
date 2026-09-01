@@ -31,6 +31,12 @@ void main() {
     expect(store, contains('artworkBgColor'));
     expect(store, contains('maxPlaylists'));
     expect(store, contains('maxEntries'));
+    expect(store, contains('maxOpaqueIdLength = 512'));
+    expect(store, contains('maxArtworkUrlLength = 2_048'));
+    expect(store, contains('validOpaqueId'));
+    expect(store, contains('boundedRequiredText'));
+    expect(store, contains('normalizedISRC'));
+    expect(store, contains('validArtworkURL'));
     expect(store, isNot(contains('MusicLibrary.shared.add')));
     expect(store, isNot(contains('createPlaylist')));
     expect(store, isNot(contains('MusicLibrary.shared.edit')));

@@ -42,7 +42,7 @@ These refine the approved system design without changing its product behavior:
 4. **Exact retry semantics.** Re-uploading the same staging key with byte-equivalent normalized values succeeds. Reusing a key with different values returns `409 sync_conflict`; it never silently rewrites a supposedly immutable snapshot.
 5. **Short publish transaction.** All Apple reads and HTTP uploads finish outside the transaction. Completion locks the user's music-profile row, validates staged counts, publishes canonical rows, soft-removes absent playlists, and commits. No network call occurs while a lock is held.
 6. **Conservative identity resolution.** Link an entry to `tracks` by a proven catalog ID first. Otherwise use ISRC only when it resolves to exactly one global track. Never fuzzy-match title/artist during sync.
-7. **Stable canonical IDs.** Upsert playlists by `(user_id, apple_library_id)` so their internal UUIDs survive future snapshots. Preserve entry duplicates by position; never deduplicate a playlist.
+7. **Stable canonical IDs.** Upsert playlists by `(user_id, apple_library_id)` and entries by `(playlist_id, apple_library_entry_id)` so both internal UUIDs survive future snapshots and reorders. Preserve duplicate songs as their distinct Apple entry IDs; never deduplicate a playlist by track identity.
 8. **Keyset browse cursors.** Playlist pages use `(sort_at, id)` and entry pages use `(position, id)`. Do not use deep SQL `OFFSET` pagination.
 
 ## Collision boundary
@@ -115,7 +115,7 @@ These refine the approved system design without changing its product behavior:
   - `can_edit boolean not null default false` and `is_mixtape_owned boolean not null default false`;
   - Apple dates, source fingerprint, `in_library`, created/updated timestamps;
   - unique `(user_id, apple_library_id)`.
-- [x] **Step 4: Add canonical `playlist_entries`.** Include position, nullable resolved `track_id`, Apple library entry ID, nullable proven catalog ID, nullable `isrc_snapshot`, title/artist/album/duration/artwork snapshots, and timestamps. Unique `(playlist_id, position)` preserves duplicates while preventing two entries in one slot.
+- [x] **Step 4: Add canonical `playlist_entries`.** Include position, nullable resolved `track_id`, Apple library entry ID, nullable proven catalog ID, nullable `isrc_snapshot`, title/artist/album/duration/artwork snapshots, and timestamps. Unique `(playlist_id, position)` prevents two entries in one slot; unique `(playlist_id, apple_library_entry_id)` preserves stable internal entry UUIDs across reorders while distinct Apple entry IDs preserve duplicate songs.
 - [x] **Step 5: Add `playlist_sync_runs`.** Store user, status (`open | completed | failed | expired`), expected and received counts, storefront, start/expiry/completion timestamps, and the final summary needed for idempotent completion responses. Add a partial unique index for one `open` run per user.
 - [x] **Step 6: Add typed staging tables.** `playlist_sync_playlists` is keyed by `(sync_id, apple_library_id)` with a unique `(sync_id, ordinal)`; `playlist_sync_entries` is keyed by `(sync_id, apple_playlist_id, position)` and has a composite foreign key back to the staged playlist. Mirror only normalized wire fields and include each playlist's declared entry count.
 - [x] **Step 7: Index every foreign key and actual query shape.** Required indexes include:
@@ -186,9 +186,9 @@ These refine the approved system design without changing its product behavior:
 - Create: `server/test/playlists/sync-store.test.ts`
 - Create: `server/test/playlists/ingest-routes.test.ts`
 
-- [ ] **Step 1: Write failing contract/route tests.** Cover authentication, cross-tenant 404s, chunk ceilings, invalid IDs/positions/colours, zero-playlist completion, duplicate occurrences, exact idempotent retry, conflicting retry, invalid state, and count mismatch.
-- [ ] **Step 2: Define normalized wire contracts.** Bound user-derived strings and IDs by length, reject NUL/invalid scalar data while preserving valid Unicode and description line breaks, use the shared artwork normalizer, and cap playlist chunks at 50 and entry chunks at 200. Do not sanitize-for-prompt here; preserve valid display text and sanitize only when later rendered into a prompt.
-- [ ] **Step 3: Implement the deep `PlaylistSyncStore` interface:**
+- [x] **Step 1: Write failing contract/route tests.** Cover authentication, cross-tenant 404s, chunk ceilings, invalid IDs/positions/colours, zero-playlist completion, duplicate occurrences, exact idempotent retry, conflicting retry, invalid state, and count mismatch.
+- [x] **Step 2: Define normalized wire contracts.** Bound user-derived strings and IDs by length, reject NUL/invalid scalar data while preserving valid Unicode and description line breaks, use the shared artwork normalizer, and cap playlist chunks at 50 and entry chunks at 200. Do not sanitize-for-prompt here; preserve valid display text and sanitize only when later rendered into a prompt.
+- [x] **Step 3: Implement the deep `PlaylistSyncStore` interface:**
 
   ```ts
   begin(userId, storefront, expectedPlaylists, expectedEntries)
@@ -198,18 +198,18 @@ These refine the approved system design without changing its product behavior:
   ```
 
   Routes/tests cross this seam; transaction details remain private.
-- [ ] **Step 4: Serialize starts per user.** Upsert and lock `user_music_profiles`, expire any prior open run, then create one new run. Two simultaneous starts must converge without leaving two open runs.
-- [ ] **Step 5: Make chunk writes exactly idempotent.** Sort multi-row writes by stable key to prevent deadlocks. A repeated normalized row succeeds only if every persisted value matches; a changed retry returns a fixed conflict without exposing stored private data.
-- [ ] **Step 6: Publish in one short transaction.** Lock profile then run in the same consistent order; verify run state, expected totals, per-playlist declared entry counts, and staged foreign references. Then:
+- [x] **Step 4: Serialize starts per user.** Upsert and lock `user_music_profiles`, expire any prior open run, then create one new run. Two simultaneous starts must converge without leaving two open runs.
+- [x] **Step 5: Make chunk writes exactly idempotent.** Sort multi-row writes by stable key to prevent deadlocks. A repeated normalized row succeeds only if every persisted value matches; a changed retry returns a fixed conflict without exposing stored private data.
+- [x] **Step 6: Publish in one short transaction.** Lock profile then run in the same consistent order; verify run state, expected totals, per-playlist declared entry counts, and staged foreign references. Then:
   1. upsert canonical playlists while preserving trusted `is_mixtape_owned`;
   2. resolve `track_id` by proven catalog ID or unique exact ISRC only;
-  3. delete/reinsert entries only for staged playlists in deterministic playlist/position order;
+  3. merge entries by `(playlist_id, apple_library_entry_id)`, preserving internal UUIDs while safely reordering, inserting new occurrences, and deleting stale occurrences;
   4. mark previously active but absent playlists `in_library = false` without deleting their last snapshot;
   5. update `playlists_synced_at` and received counts;
   6. mark the run completed and return its stored summary.
-- [ ] **Step 7: Keep publish set-based.** Use staged `INSERT … SELECT`/update/delete statements in deterministic order instead of loading the entire library into Worker memory or constructing one giant bind-parameter list.
-- [ ] **Step 8: Keep completion retry-safe.** A second completion of the same completed run returns the stored summary. It does not republish or create new canonical IDs.
-- [ ] **Step 9: Add authenticated endpoints:**
+- [x] **Step 7: Keep publish set-based.** Use staged `INSERT … SELECT`/update/delete statements in deterministic order instead of loading the entire library into Worker memory or constructing one giant bind-parameter list.
+- [x] **Step 8: Keep completion retry-safe.** A second completion of the same completed run returns the stored summary. It does not republish or create new canonical IDs.
+- [x] **Step 9: Add authenticated endpoints:**
 
   ```text
   POST /ingest/playlists/syncs
@@ -225,11 +225,11 @@ These refine the approved system design without changing its product behavior:
     -> { playlists, entries, resolvedEntries, unresolvedEntries }
   ```
 
-- [ ] **Step 10: Add `PUT` to allowed CORS methods.** Preserve current auth/header behavior.
-- [ ] **Step 11: Test atomicity with PGlite.** Inject a failure immediately before publish completion and prove canonical playlists/entries/profile timestamp remain unchanged.
-- [ ] **Step 12: Run focused tests, typecheck, and authoritative suite.**
-- [ ] **Step 13: Adversarial review.** Attempt cross-user sync IDs, conflicting parallel completion, stale open runs, malformed Apple text, duplicate catalog/ISRC mappings, missing profile row, 500-entry attack, and logs containing fixture names.
-- [ ] **Step 14: Commit.** Headline: `feat(server): Stage playlist snapshots`.
+- [x] **Step 10: Add `PUT` to allowed CORS methods.** Preserve current auth/header behavior.
+- [x] **Step 11: Test atomicity with PGlite.** Inject a failure immediately before publish completion and prove canonical playlists/entries/profile timestamp remain unchanged.
+- [x] **Step 12: Run focused tests, typecheck, and authoritative suite.**
+- [x] **Step 13: Adversarial review.** Attempt cross-user sync IDs, conflicting parallel completion, stale open runs, malformed Apple text, duplicate catalog/ISRC mappings, missing profile row, 500-entry attack, and logs containing fixture names.
+- [x] **Step 14: Commit.** Headline: `feat(server): Stage playlist snapshots`.
 
 ## Task 5: Extend Flutter sync from songs to complete playlist snapshots
 
@@ -243,19 +243,19 @@ These refine the approved system design without changing its product behavior:
 - Modify: `client/test/data/library_sync_service_test.dart`
 - Modify: provider/screen tests and bridge fakes
 
-- [ ] **Step 1: Write failing API/sync tests.** Pin `PUT` auth/JSON behavior and the full order: authorize → song pages → native playlist snapshot → server begin → playlist chunks → entry chunks → complete → native release.
-- [ ] **Step 2: Replace the scalar result with a summary.** `LibrarySyncSummary` contains `songs`, `playlists`, `entries`, `resolvedEntries`, and `unresolvedEntries`. Update `SyncDone` and the existing sync sheet copy without adding a browse screen.
-- [ ] **Step 3: Add `ApiClient.putJson`.** Match post/patch error and timeout behavior; no new auth mechanism.
-- [ ] **Step 4: Keep songs first.** Existing song pages finish before `beginPlaylistSnapshot`, maximizing exact track resolution during server completion.
-- [ ] **Step 5: Upload the immutable snapshot.** Begin the server run with native totals/storefront, page every playlist, page every playlist's entries including empty lists, and call complete only after uploaded counts exactly equal native totals.
-- [ ] **Step 6: Preserve cancellation discipline.** Check cancellation after every await. Cancellation or any error skips complete. If native materialization is still running, call `cancelPlaylistSnapshot`; a `finally` block releases any completed native snapshot. An open server run remains harmless and is expired by the next begin/cleanup.
-- [ ] **Step 7: Keep re-entrant behavior.** Concurrent sync taps join one run. Auth transitions cancel the owner and rebuild the user-scoped provider as today.
-- [ ] **Step 8: Define progress by completed work.** Use monotonic stage weights across song upload and playlist/entry upload; hold at the native-stage boundary while MusicKit materializes because the framework exposes no per-request progress callback. Never report 100% before server completion succeeds.
-- [ ] **Step 9: Update existing sync UI minimally.** Success reports song and playlist counts; unresolved entries are an informational count only when nonzero. Failure copy remains private and fixed-category.
-- [ ] **Step 10: Test interruption at every boundary.** Especially: song failure means no playlist begin; playlist upload failure means no complete; cancellation after final upload but before complete means no publish; release happens once on success/failure/cancel.
-- [ ] **Step 11: Run full Flutter tests and unsigned iOS build.**
-- [ ] **Step 12: Adversarial review.** Check progress regression, division by zero, snapshot leaks, second-user auth transition, huge empty playlists, and an API error body reaching debug/user output.
-- [ ] **Step 13: Commit.** Headline: `feat(client): Sync playlist snapshots`.
+- [x] **Step 1: Write failing API/sync tests.** Pin `PUT` auth/JSON behavior and the full order: authorize → song pages → native playlist snapshot → server begin → playlist chunks → entry chunks → complete → native release.
+- [x] **Step 2: Replace the scalar result with a summary.** `LibrarySyncSummary` contains `songs`, `playlists`, `entries`, `resolvedEntries`, and `unresolvedEntries`. Update `SyncDone` and the existing sync sheet copy without adding a browse screen.
+- [x] **Step 3: Add `ApiClient.putJson`.** Match post/patch error and timeout behavior; no new auth mechanism.
+- [x] **Step 4: Keep songs first.** Existing song pages finish before `beginPlaylistSnapshot`, maximizing exact track resolution during server completion.
+- [x] **Step 5: Upload the immutable snapshot.** Begin the server run with native totals/storefront, page every playlist, page every playlist's entries including empty lists, and call complete only after uploaded counts exactly equal native totals.
+- [x] **Step 6: Preserve cancellation discipline.** Check cancellation after every await. Cancellation or any error skips complete. If native materialization is still running, call `cancelPlaylistSnapshot`; a `finally` block releases any completed native snapshot. An open server run remains harmless and is expired by the next begin/cleanup.
+- [x] **Step 7: Keep re-entrant behavior.** Concurrent sync taps join one run. Auth transitions cancel the owner and rebuild the user-scoped provider as today.
+- [x] **Step 8: Define progress by completed work.** Use monotonic stage weights across song upload and playlist/entry upload; hold at the native-stage boundary while MusicKit materializes because the framework exposes no per-request progress callback. Never report 100% before server completion succeeds.
+- [x] **Step 9: Update existing sync UI minimally.** Success reports song and playlist counts; unresolved entries are an informational count only when nonzero. Failure copy remains private and fixed-category.
+- [x] **Step 10: Test interruption at every boundary.** Especially: song failure means no playlist begin; playlist upload failure means no complete; cancellation after final upload but before complete means no publish; release happens once on success/failure/cancel.
+- [x] **Step 11: Run full Flutter tests and unsigned iOS build.**
+- [x] **Step 12: Adversarial review.** Check progress regression, division by zero, snapshot leaks, second-user auth transition, huge empty playlists, and an API error body reaching debug/user output.
+- [x] **Step 13: Commit.** Headline: `feat(client): Sync playlist snapshots`.
 
 ## Task 6: Add private playlist browse APIs and client data contracts
 
@@ -269,8 +269,8 @@ These refine the approved system design without changing its product behavior:
 - Create: `client/lib/data/playlists/playlist_api.dart`
 - Create: `client/test/data/playlist_api_test.dart`
 
-- [ ] **Step 1: Write failing browse tests.** Cover auth, tenant isolation, active/all status, case-insensitive name search, stable ordering, cursor tampering, empty result, null artwork, unresolved entries, duplicate entries, and soft-removed detail behavior.
-- [ ] **Step 2: Define the summary endpoint:**
+- [x] **Step 1: Write failing browse tests.** Cover auth, tenant isolation, active/all status, case-insensitive name search, stable ordering, cursor tampering, empty result, null artwork, unresolved entries, duplicate entries, and soft-removed detail behavior.
+- [x] **Step 2: Define the summary endpoint:**
 
   ```text
   GET /playlists?status=active&q=&limit=30&cursor=
@@ -278,7 +278,7 @@ These refine the approved system design without changing its product behavior:
   ```
 
   Each summary includes internal ID, name, curator, kind, artwork, entry count, known duration, last-modified/synced timestamps, and conservative capability (`copy_only` in Phase 2). It does not expose Apple library IDs.
-- [ ] **Step 3: Define paged detail:**
+- [x] **Step 3: Define paged detail:**
 
   ```text
   GET /playlists/:id?entryLimit=200&entryCursor=
@@ -286,14 +286,14 @@ These refine the approved system design without changing its product behavior:
   ```
 
   Entries include internal entry ID, zero-based position, nullable resolved track ID/catalog ID, title/artist/album/duration/artwork snapshots, and `resolved`. Library-only identifiers remain server-internal until a later apply plan needs them.
-- [ ] **Step 4: Use keyset cursors.** Base64url-encode a versioned JSON tuple, validate shape/length, and use parameterized comparisons. Playlist order is `coalesce(apple_last_modified_at, updated_at) DESC, id DESC`; entries are `position ASC, id ASC`.
-- [ ] **Step 5: Avoid N+1 queries.** Fetch page summaries and their count/duration aggregates in one bounded query. Fetch detail metadata and one entry page in at most two queries.
-- [ ] **Step 6: Enforce ownership in every store query.** Join/filter by `user_id`; another user's UUID and malformed UUID both return the same 404 response.
-- [ ] **Step 7: Make nulls explicit and consistent.** Artwork fields and unresolved track fields use explicit nulls across server and Dart models.
-- [ ] **Step 8: Add defensive Dart models/API.** Parse malformed optional fields with the existing tolerant conventions, but fail fixed-category on missing required playlist/entry identity or display fields. Do not add Riverpod providers/screens yet.
-- [ ] **Step 9: Run server focused/full checks and full Flutter tests.**
-- [ ] **Step 10: Adversarial review.** Try cursor replay after a newer sync, Unicode/case search, `%`/`_` wildcard input, another user's UUID, a 10,000-entry playlist, and null/local entries.
-- [ ] **Step 11: Commit.** Headline: `feat: Add playlist browse contracts`.
+- [x] **Step 4: Use keyset cursors.** Base64url-encode a versioned JSON tuple, validate shape/length, and use parameterized comparisons. Playlist order is `coalesce(apple_last_modified_at, updated_at) DESC, id DESC`; entries are `position ASC, id ASC`.
+- [x] **Step 5: Avoid N+1 queries.** Fetch page summaries and their count/duration aggregates in one bounded query. Fetch detail metadata and one entry page in at most two queries.
+- [x] **Step 6: Enforce ownership in every store query.** Join/filter by `user_id`; another user's UUID and malformed UUID both return the same 404 response.
+- [x] **Step 7: Make nulls explicit and consistent.** Artwork fields and unresolved track fields use explicit nulls across server and Dart models.
+- [x] **Step 8: Add defensive Dart models/API.** Parse malformed optional fields with the existing tolerant conventions, but fail fixed-category on missing required playlist/entry identity or display fields. Do not add Riverpod providers/screens yet.
+- [x] **Step 9: Run server focused/full checks and full Flutter tests.**
+- [x] **Step 10: Adversarial review.** Try cursor replay after a newer sync, Unicode/case search, `%`/`_` wildcard input, another user's UUID, a 10,000-entry playlist, and null/local entries.
+- [x] **Step 11: Commit.** Headline: `feat: Add playlist browse contracts`.
 
 ## Task 7: Expire abandoned staging safely and finalize operational docs
 
@@ -307,13 +307,13 @@ These refine the approved system design without changing its product behavior:
 - Modify: `docs/backlog.md`
 - Modify only after collision release: `docs/decisions.md`
 
-- [ ] **Step 1: Write failing cleanup tests.** Runs older than 24 hours in `open` become `expired`; staging for expired runs older than the retention window is deleted in bounded batches. Completed runs retain their summary but may shed staging rows.
-- [ ] **Step 2: Implement bounded cleanup.** One cron invocation touches at most 25 runs, orders oldest first, and returns counts only. It must not log user IDs, playlist data, or errors.
-- [ ] **Step 3: Keep maintenance independent.** Playlist cleanup still runs if feature/artwork dependencies are absent; its failure does not suppress enrichment/artwork and vice versa.
-- [ ] **Step 4: Run focused, authoritative, and type checks.**
-- [ ] **Step 5: Adversarial review.** Check cleanup racing an active upload/complete, cascade cost, unindexed age/status query, and long transaction scope.
-- [ ] **Step 6: Update docs.** Record the observed read contract, typed-staging refinement, conservative capability posture, and the inconclusive possible probe side effect. Do not claim playlist taste or editing has shipped.
-- [ ] **Step 7: Commit.** Headline: `fix(server): Expire playlist sync staging`.
+- [x] **Step 1: Write failing cleanup tests.** Runs older than 24 hours in `open` become `expired`; staging for expired runs older than the retention window is deleted in bounded batches. Completed runs retain their summary but may shed staging rows.
+- [x] **Step 2: Implement bounded cleanup.** One cron invocation touches at most 25 runs, orders oldest first, and returns counts only. It must not log user IDs, playlist data, or errors.
+- [x] **Step 3: Keep maintenance independent.** Playlist cleanup still runs if feature/artwork dependencies are absent; its failure does not suppress enrichment/artwork and vice versa.
+- [x] **Step 4: Run focused, authoritative, and type checks.**
+- [x] **Step 5: Adversarial review.** Check cleanup racing an active upload/complete, cascade cost, unindexed age/status query, and long transaction scope.
+- [x] **Step 6: Update docs.** Record the observed read contract, typed-staging refinement, conservative capability posture, and the inconclusive possible probe side effect. Do not claim playlist taste or editing has shipped.
+- [x] **Step 7: Commit.** Headline: `fix(server): Expire playlist sync staging`.
 
 ## Task 8: Migrate, deploy, and run the first read-only founder sync
 
@@ -331,8 +331,8 @@ These refine the approved system design without changing its product behavior:
   - search for probe flags/mutation methods introduced by Phase 2; expected: no probe and no new write path.
 - [ ] **Step 2: Run an independent plan/app/security review and fix every actionable finding.** Re-run the affected focused suites plus all authoritative gates after fixes.
 - [ ] **Step 3: Create a clean deployment worktree** from the exact reviewed commit and verify it is clean.
-- [ ] **Step 4: Ask separately for action-time approval** before production migration 0012, Worker deployment, and the first private playlist upload.
-- [ ] **Step 5: Apply migration 0012 from the clean worktree.** Verify all six tables, checks, unique constraints, foreign-key indexes, active-run partial index, and browse keyset index before deploying code.
+- [ ] **Step 4: Ask separately for action-time approval** before production migrations 0012–0014, Worker deployment, and the first private playlist upload.
+- [ ] **Step 5: Apply migrations 0012–0014 from the clean worktree.** Verify all six tables, checks, unique constraints (including stable playlist-entry identity), foreign-key indexes, active-run partial index, browse keyset index, and bounded-cleanup indexes before deploying code.
 - [ ] **Step 6: Deploy the exact reviewed Worker.** Verify `/health` 200, `/me` 401, existing enrichment/artwork status counts unchanged, unauthorized playlist routes 401, and no missing-secret/startup regression.
 - [ ] **Step 7: Run the founder sync from the iPhone.** It is read-only toward Apple Music. Record only total playlists, total entries, resolved/unresolved counts, duration, and fixed failure category.
 - [ ] **Step 8: Compare the published snapshot to Apple Music.** Founder-approved manual checks:

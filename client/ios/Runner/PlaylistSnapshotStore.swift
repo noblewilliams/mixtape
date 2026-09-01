@@ -9,6 +9,10 @@ import MusicKit
 actor PlaylistSnapshotStore {
   static let maxPlaylists = 2_000
   static let maxEntries = 100_000
+  static let maxOpaqueIdLength = 512
+  static let maxArtworkUrlLength = 2_048
+  static let maxPostgresInteger = 2_147_483_647
+  static let maxTimestampMilliseconds = 8_640_000_000_000_000
 
   enum StoreError: String, Error {
     case invalidStorefront = "invalid_storefront"
@@ -20,6 +24,7 @@ actor PlaylistSnapshotStore {
     case noSnapshot = "no_snapshot"
     case snapshotMismatch = "snapshot_mismatch"
     case playlistNotFound = "playlist_not_found"
+    case invalidPayload = "invalid_payload"
   }
 
   struct Header: Sendable {
@@ -173,7 +178,7 @@ actor PlaylistSnapshotStore {
 
     for playlist in sourcePlaylists {
       try Task.checkCancellation()
-      let playlistId = playlist.id.rawValue
+      let playlistId = try requiredOpaqueId(playlist.id.rawValue)
       guard playlistIndex[playlistId] == nil else { throw StoreError.duplicatePlaylist }
 
       let detailed = try await playlist.with(.entries, preferredSource: .library)
@@ -184,9 +189,9 @@ actor PlaylistSnapshotStore {
       var seenEntryIds = Set<String>()
       let entries = try sourceEntries.enumerated().map { position, entry in
         try Task.checkCancellation()
-        let entryId = entry.id.rawValue
+        let entryId = try requiredOpaqueId(entry.id.rawValue)
         guard seenEntryIds.insert(entryId).inserted else { throw StoreError.duplicateEntry }
-        return makeEntry(entry, position: position)
+        return try makeEntry(entry, position: position)
       }
       let artwork = artworkValue(playlist.artwork)
       let lastModifiedAt = epochMilliseconds(playlist.lastModifiedDate)
@@ -198,9 +203,10 @@ actor PlaylistSnapshotStore {
       let value = PlaylistValue(
         appleLibraryId: playlistId,
         appleCatalogId: nil,
-        name: nonempty(playlist.name) ?? "Untitled Playlist",
-        description: nonempty(playlist.standardDescription) ?? nonempty(playlist.shortDescription),
-        curatorName: nonempty(playlist.curatorName),
+        name: boundedRequiredText(playlist.name, fallback: "Untitled Playlist", max: 500),
+        description: boundedOptionalText(playlist.standardDescription, max: 10_000)
+          ?? boundedOptionalText(playlist.shortDescription, max: 10_000),
+        curatorName: boundedOptionalText(playlist.curatorName, max: 500),
         artworkUrlTemplate: artwork.url,
         artworkWidth: artwork.width,
         artworkHeight: artwork.height,
@@ -292,18 +298,21 @@ actor PlaylistSnapshotStore {
     return values
   }
 
-  private static func makeEntry(_ entry: Playlist.Entry, position: Int) -> EntryValue {
+  private static func makeEntry(_ entry: Playlist.Entry, position: Int) throws -> EntryValue {
     let item = entry.item
     let artwork = artworkValue(entry.artwork ?? item?.artwork)
     return EntryValue(
       position: position,
-      appleLibraryEntryId: entry.id.rawValue,
-      appleLibraryTrackId: item?.id.rawValue,
+      appleLibraryEntryId: try requiredOpaqueId(entry.id.rawValue),
+      appleLibraryTrackId: validOpaqueId(item?.id.rawValue),
       appleCatalogId: nil,
-      isrcSnapshot: nonempty(entry.isrc),
-      titleSnapshot: nonempty(entry.title) ?? nonempty(item?.title) ?? "Unknown",
-      artistSnapshot: nonempty(entry.artistName) ?? nonempty(item?.artistName) ?? "Unknown",
-      albumSnapshot: nonempty(entry.albumTitle) ?? nonempty(item?.albumTitle),
+      isrcSnapshot: normalizedISRC(entry.isrc),
+      titleSnapshot: boundedOptionalText(entry.title, max: 1_000)
+        ?? boundedRequiredText(item?.title, fallback: "Unknown", max: 1_000),
+      artistSnapshot: boundedOptionalText(entry.artistName, max: 1_000)
+        ?? boundedRequiredText(item?.artistName, fallback: "Unknown", max: 1_000),
+      albumSnapshot: boundedOptionalText(entry.albumTitle, max: 1_000)
+        ?? boundedOptionalText(item?.albumTitle, max: 1_000),
       durationMsSnapshot: durationMilliseconds(entry.duration ?? item?.duration),
       artworkUrlTemplateSnapshot: artwork.url,
       artworkWidthSnapshot: artwork.width,
@@ -317,11 +326,10 @@ actor PlaylistSnapshotStore {
       return ArtworkValue(url: nil, width: nil, height: nil, backgroundColor: nil)
     }
     let requestedUrl = artwork.url(width: 512, height: 512)
-    let url = requestedUrl?.scheme?.lowercased() == "https" ? requestedUrl?.absoluteString : nil
     return ArtworkValue(
-      url: url,
-      width: artwork.maximumWidth > 0 ? artwork.maximumWidth : nil,
-      height: artwork.maximumHeight > 0 ? artwork.maximumHeight : nil,
+      url: validArtworkURL(requestedUrl),
+      width: positivePostgresInteger(artwork.maximumWidth),
+      height: positivePostgresInteger(artwork.maximumHeight),
       backgroundColor: hexColor(artwork.backgroundColor)
     )
   }
@@ -361,7 +369,7 @@ actor PlaylistSnapshotStore {
   private static func signatures(_ playlists: [Playlist]) -> [String: PlaylistSignature]? {
     var values: [String: PlaylistSignature] = [:]
     for playlist in playlists {
-      let id = playlist.id.rawValue
+      guard let id = validOpaqueId(playlist.id.rawValue) else { return nil }
       guard values[id] == nil else { return nil }
       values[id] = PlaylistSignature(lastModifiedAt: epochMilliseconds(playlist.lastModifiedDate))
     }
@@ -378,7 +386,10 @@ actor PlaylistSnapshotStore {
 
     for playlist in playlists {
       try Task.checkCancellation()
-      guard let expectedPlaylist = expected[playlist.id.rawValue] else {
+      guard
+        let playlistId = validOpaqueId(playlist.id.rawValue),
+        let expectedPlaylist = expected[playlistId]
+      else {
         throw StoreError.libraryChanged
       }
       let detailed = try await playlist.with(.entries, preferredSource: .library)
@@ -392,8 +403,8 @@ actor PlaylistSnapshotStore {
       for (position, entry) in sourceEntries.enumerated() {
         let previous = expectedPlaylist.entries[position]
         guard
-          entry.id.rawValue == previous.appleLibraryEntryId,
-          entry.item?.id.rawValue == previous.appleLibraryTrackId
+          validOpaqueId(entry.id.rawValue) == previous.appleLibraryEntryId,
+          validOpaqueId(entry.item?.id.rawValue) == previous.appleLibraryTrackId
         else {
           throw StoreError.libraryChanged
         }
@@ -406,20 +417,88 @@ actor PlaylistSnapshotStore {
   private static func epochMilliseconds(_ date: Date?) -> Int? {
     guard let date else { return nil }
     let value = date.timeIntervalSince1970 * 1_000
-    guard value.isFinite, value >= Double(Int.min), value <= Double(Int.max) else { return nil }
+    guard value.isFinite, value >= 0, value <= Double(maxTimestampMilliseconds) else { return nil }
     return Int(value.rounded())
   }
 
   private static func durationMilliseconds(_ duration: TimeInterval?) -> Int? {
     guard let duration, duration.isFinite, duration >= 0 else { return nil }
     let value = duration * 1_000
-    guard value <= Double(Int.max) else { return nil }
+    guard value <= Double(maxPostgresInteger) else { return nil }
     return Int(value.rounded())
   }
 
-  private static func nonempty(_ value: String?) -> String? {
-    guard let value, !value.isEmpty else { return nil }
+  private static func validOpaqueId(_ value: String?) -> String? {
+    guard
+      let value,
+      !value.isEmpty,
+      value.utf16.count <= maxOpaqueIdLength,
+      !value.contains("\0")
+    else { return nil }
     return value
+  }
+
+  private static func requiredOpaqueId(_ value: String) throws -> String {
+    guard let value = validOpaqueId(value) else { throw StoreError.invalidPayload }
+    return value
+  }
+
+  private static func boundedRequiredText(_ value: String?, fallback: String, max: Int) -> String {
+    boundedOptionalText(value, max: max) ?? fallback
+  }
+
+  private static func boundedOptionalText(_ value: String?, max: Int) -> String? {
+    guard let value else { return nil }
+    let clean = value.replacingOccurrences(of: "\0", with: "")
+    guard !clean.isEmpty else { return nil }
+    if clean.utf16.count <= max { return clean }
+
+    var result = ""
+    var length = 0
+    for character in clean {
+      let next = String(character)
+      let nextLength = next.utf16.count
+      if length + nextLength > max { break }
+      result.append(character)
+      length += nextLength
+    }
+    return result.isEmpty ? nil : result
+  }
+
+  private static func normalizedISRC(_ value: String?) -> String? {
+    guard
+      let value,
+      value.utf16.count == 12,
+      !value.contains("\0")
+    else { return nil }
+    let normalized = value.uppercased()
+    return normalized.range(
+      of: "^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$",
+      options: .regularExpression
+    ) == nil
+      ? nil
+      : normalized
+  }
+
+  private static func validArtworkURL(_ value: URL?) -> String? {
+    guard
+      let value,
+      let scheme = value.scheme?.lowercased(), scheme == "https",
+      let host = value.host?.lowercased(),
+      host == "mzstatic.com" || host.hasSuffix(".mzstatic.com"),
+      value.user == nil,
+      value.password == nil,
+      value.port == nil
+    else { return nil }
+    let absolute = value.absoluteString
+    guard absolute.utf16.count <= maxArtworkUrlLength else { return nil }
+    let hasWidthToken = absolute.contains("{w}")
+    let hasHeightToken = absolute.contains("{h}")
+    return hasWidthToken == hasHeightToken ? absolute : nil
+  }
+
+  private static func positivePostgresInteger(_ value: Int) -> Int? {
+    value > 0 && value <= maxPostgresInteger ? value : nil
   }
 
   private static func fingerprint(

@@ -20,7 +20,7 @@ function errorResponse(c: Context<{ Variables: AppVars }>, error: unknown) {
   if (!(error instanceof PlaylistSyncError)) throw error
   switch (error.category) {
     case 'not_found': return c.json({ error: 'not_found' }, 404)
-    case 'conflict': return c.json({ error: 'conflict' }, 409)
+    case 'conflict': return c.json({ error: 'sync_conflict' }, 409)
     case 'invalid_state': return c.json({ error: 'invalid_state' }, 409)
     case 'count_mismatch': return c.json({ error: 'count_mismatch' }, 409)
     case 'internal': throw error

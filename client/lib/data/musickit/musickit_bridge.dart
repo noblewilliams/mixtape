@@ -417,12 +417,21 @@ class MusicKitBridge {
   Future<PlaylistSnapshotHeader> beginPlaylistSnapshot() async {
     try {
       final raw = await _channel
-          .invokeMethod<Map<dynamic, dynamic>>('beginPlaylistSnapshot')
+          .invokeMethod<dynamic>('beginPlaylistSnapshot')
           .timeout(_snapshotTimeout);
-      if (raw == null) {
+      try {
+        if (raw is! Map) {
+          throw MusicKitException('malformed playlist snapshot header');
+        }
+        return PlaylistSnapshotHeader.fromMap(raw);
+      } catch (_) {
+        try {
+          await cancelPlaylistSnapshot();
+        } catch (_) {
+          // Preserve the malformed-header category if native cleanup also fails.
+        }
         throw MusicKitException('malformed playlist snapshot header');
       }
-      return PlaylistSnapshotHeader.fromMap(raw);
     } on PlatformException catch (e) {
       throw _fromSnapshotPlatform(e);
     } on MissingPluginException {

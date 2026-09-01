@@ -363,6 +363,8 @@ export const playlistEntries = pgTable(
   },
   (t) => [
     uniqueIndex('playlist_entries_playlist_position_idx').on(t.playlistId, t.position),
+    uniqueIndex('playlist_entries_playlist_library_entry_idx')
+      .on(t.playlistId, t.appleLibraryEntryId),
     index('playlist_entries_track_idx').on(t.trackId).where(sql`${t.trackId} IS NOT NULL`),
     check('playlist_entries_position_nonnegative_check', sql`${t.position} >= 0`),
     check(

@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "playlist_entries_playlist_library_entry_idx" ON "playlist_entries" USING btree ("playlist_id","apple_library_entry_id");

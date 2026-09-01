@@ -4,7 +4,7 @@ Single consolidated list. Detail lives in `decisions.md` (rationale) and the pla
 
 ## Owed right now
 
-- **Roll out playlist intelligence Phase 2:** the read-only native snapshot, deletion-safe staged sync, per-user storefront persistence, browse APIs, defensive client contracts, and bounded staging cleanup are code-complete locally. Next: apply migrations 0012–0013 from a clean worktree, deploy the exact reviewed Worker, run the first private founder sync, and compare counts/order/artwork against Apple Music. Taste scoring, conversational editing, mutation, and browse UI remain later phases.
+- **Roll out playlist intelligence Phase 2:** the read-only native snapshot, deletion-safe staged sync, per-user storefront persistence, browse APIs, defensive client contracts, and bounded staging cleanup are code-complete locally. Next: apply migrations 0012–0014 from a clean worktree, deploy the exact reviewed Worker, run the first private founder sync, and compare counts/order/artwork against Apple Music. Taste scoring, conversational editing, mutation, and browse UI remain later phases.
 - **Playlist probe side effect is inconclusive:** the founder reported that both disposable playlists currently looked ordered, but the Music-created candidate may have lost one song. There is no pre-probe snapshot to resolve it. Run no further mutation probe in Phase 2; the new read-only snapshot becomes the baseline for future conflict detection.
 
 ## Selected next phase — artwork + playlist intelligence

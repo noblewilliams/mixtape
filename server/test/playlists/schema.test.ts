@@ -139,7 +139,7 @@ describe('playlist snapshot schema', () => {
     })
   })
 
-  it('preserves duplicate songs at distinct positions and rejects duplicate slots', async () => {
+  it('preserves duplicate songs and rejects duplicate slots or entry identities', async () => {
     const db = await createTestDb()
     await insertUser(db, 'entries-user')
     const [playlist] = await db
@@ -176,6 +176,12 @@ describe('playlist snapshot schema', () => {
         ...duplicate,
         appleLibraryEntryId: 'entry-3',
         position: 1,
+      }),
+    ).rejects.toThrow()
+    await expect(
+      db.insert(playlistEntries).values({
+        ...duplicate,
+        position: 2,
       }),
     ).rejects.toThrow()
   })

@@ -1,6 +1,7 @@
 import { Buffer } from 'node:buffer'
 import { sql } from 'drizzle-orm'
 import type { Db } from '../db/types'
+import { PLAYLIST_SYNC_MAX_ENTRIES } from './contracts'
 
 export class PlaylistBrowseCursorError extends Error {
   constructor() {
@@ -45,6 +46,7 @@ type PlaylistCursor = { v: 1; t: string; id: string }
 type EntryCursor = { v: 1; p: number; id: string }
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const CURSOR_MAX_LENGTH = 512
+const POSTGRES_BIGINT_MAX = 9_223_372_036_854_775_807n
 
 function encodeCursor(value: PlaylistCursor | EntryCursor) {
   return Buffer.from(JSON.stringify(value)).toString('base64url')
@@ -72,6 +74,7 @@ function decodePlaylistCursor(cursor: string): PlaylistCursor {
     value.v !== 1
     || typeof value.t !== 'string'
     || !/^\d{1,20}$/.test(value.t)
+    || BigInt(value.t) > POSTGRES_BIGINT_MAX
     || typeof value.id !== 'string'
     || !UUID_RE.test(value.id)
     || Object.keys(value).some((key) => !['v', 't', 'id'].includes(key))
@@ -86,6 +89,7 @@ function decodeEntryCursor(cursor: string): EntryCursor {
     || typeof value.p !== 'number'
     || !Number.isSafeInteger(value.p)
     || value.p < 0
+    || value.p >= PLAYLIST_SYNC_MAX_ENTRIES
     || typeof value.id !== 'string'
     || !UUID_RE.test(value.id)
     || Object.keys(value).some((key) => !['v', 'p', 'id'].includes(key))

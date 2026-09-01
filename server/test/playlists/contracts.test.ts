@@ -71,6 +71,13 @@ describe('playlist ingest contracts', () => {
     playlist({ appleLibraryId: 'nul\u0000id' }),
     playlist({ name: '' }),
     playlist({ kind: 'guessed_user' }),
+    playlist({ artworkUrlTemplate: 'http://is1-ssl.mzstatic.com/cover.jpg' }),
+    playlist({ artworkUrlTemplate: 'https://example.com/cover.jpg' }),
+    playlist({ artworkUrlTemplate: 'https://is1-ssl.mzstatic.com/{w}x600.jpg' }),
+    playlist({ artworkUrlTemplate: `https://is1-ssl.mzstatic.com/${'a'.repeat(2_100)}` }),
+    playlist({ name: 'bad\ud800text' }),
+    playlist({ name: 'bad\ud800' }),
+    playlist({ appleLibraryId: 'bad\udc00id' }),
   ])('rejects malformed playlist metadata', (value) => {
     expect(() => playlistChunkSchema.parse({ playlists: [value] })).toThrow()
   })
@@ -84,11 +91,27 @@ describe('playlist ingest contracts', () => {
     entry({ appleLibraryEntryId: '' }),
     entry({ titleSnapshot: 'nul\u0000title' }),
     entry({ appleCatalogId: 'unsafe/id' }),
+    entry({ artworkUrlTemplateSnapshot: 'https://evil.example/cover.jpg' }),
+    entry({ titleSnapshot: 'bad\ud800title' }),
+    entry({ appleLibraryTrackId: 'bad\udc00track' }),
   ])('rejects malformed entry metadata', (value) => {
     expect(() => playlistEntryChunkSchema.parse({
       playlistAppleId: 'library-playlist-1',
       entries: [value],
     })).toThrow()
+  })
+
+  it('preserves valid Unicode, emoji, and description line breaks', () => {
+    const parsed = playlistChunkSchema.parse({
+      playlists: [playlist({
+        name: 'Café 🌙',
+        description: 'Soft start\nLoud finish 🎵',
+      })],
+    })
+    expect(parsed.playlists[0]).toMatchObject({
+      name: 'Café 🌙',
+      description: 'Soft start\nLoud finish 🎵',
+    })
   })
 
   it('enforces chunk ceilings and accepts an explicit empty entry page', () => {

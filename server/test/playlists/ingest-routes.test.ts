@@ -118,7 +118,7 @@ describe('playlist ingest routes', () => {
       playlists: [playlist({ name: 'private-name' })],
     })
     expect(conflict.status).toBe(409)
-    expect(await conflict.json()).toEqual({ error: 'conflict' })
+    expect(await conflict.json()).toEqual({ error: 'sync_conflict' })
   })
 
   it('rejects malformed UUIDs and oversized chunks before store work', async () => {

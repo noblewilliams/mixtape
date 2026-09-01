@@ -391,14 +391,21 @@ void main() {
     });
 
     test('rejects a malformed snapshot header', () async {
+      final calls = <String>[];
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(
             channel,
-            (call) async => {
-              'snapshotId': '',
-              'storefront': 'NG',
-              'totalPlaylists': -1,
-              'totalEntries': 0,
+            (call) async {
+              calls.add(call.method);
+              if (call.method == 'beginPlaylistSnapshot') {
+                return {
+                  'snapshotId': '',
+                  'storefront': 'NG',
+                  'totalPlaylists': -1,
+                  'totalEntries': 0,
+                };
+              }
+              return true;
             },
           );
 
@@ -406,6 +413,23 @@ void main() {
         MusicKitBridge().beginPlaylistSnapshot(),
         throwsA(isA<MusicKitException>()),
       );
+      expect(calls, ['beginPlaylistSnapshot', 'cancelPlaylistSnapshot']);
+    });
+
+    test('rejects a wrong-typed snapshot header and cancels native state', () async {
+      final calls = <String>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            calls.add(call.method);
+            if (call.method == 'beginPlaylistSnapshot') return 'not-a-header';
+            return true;
+          });
+
+      await expectLater(
+        MusicKitBridge().beginPlaylistSnapshot(),
+        throwsA(isA<MusicKitException>()),
+      );
+      expect(calls, ['beginPlaylistSnapshot', 'cancelPlaylistSnapshot']);
     });
 
     test('times out begin and cancels native materialization', () async {

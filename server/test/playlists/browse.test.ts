@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { sql } from 'drizzle-orm'
+import { Buffer } from 'node:buffer'
 import { createApp, type AuthLike } from '../../src/app'
 import {
   playlistEntries,
@@ -169,6 +170,22 @@ describe('playlist browse routes', () => {
       db,
       'u1',
       '/playlists/00000000-0000-4000-8000-000000000000?entryCursor=bad',
+    )).status).toBe(400)
+    const bigintOverflow = Buffer.from(JSON.stringify({
+      v: 1,
+      t: '9223372036854775808',
+      id: '00000000-0000-4000-8000-000000000000',
+    })).toString('base64url')
+    const positionOverflow = Buffer.from(JSON.stringify({
+      v: 1,
+      p: 100_000,
+      id: '00000000-0000-4000-8000-000000000000',
+    })).toString('base64url')
+    expect((await get(db, 'u1', `/playlists?cursor=${bigintOverflow}`)).status).toBe(400)
+    expect((await get(
+      db,
+      'u1',
+      `/playlists/00000000-0000-4000-8000-000000000000?entryCursor=${positionOverflow}`,
     )).status).toBe(400)
   })
 

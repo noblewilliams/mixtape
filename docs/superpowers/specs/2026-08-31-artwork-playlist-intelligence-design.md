@@ -235,6 +235,7 @@ playlist_entries
   playlist_id uuid not null references user_playlists(id) on delete cascade
   position integer not null
   track_id uuid references tracks(id) on delete set null
+  apple_library_entry_id text not null
   apple_library_track_id text
   apple_catalog_id text
   title_snapshot text not null
@@ -246,10 +247,11 @@ playlist_entries
   created_at timestamptz not null
 
 unique(playlist_id, position)
+unique(playlist_id, apple_library_entry_id)
 index(track_id)
 ```
 
-Snapshots keep browsing honest when no global `tracks` row exists or catalog metadata later changes. A resolved `track_id` drives taste, enrichment, and catalog actions. An unresolved entry remains visible and remains in any full rebuild when the native client can resolve its Apple library ID. It is never silently dropped.
+Snapshots keep browsing honest when no global `tracks` row exists or catalog metadata later changes. A resolved `track_id` drives taste, enrichment, and catalog actions. An unresolved entry remains visible and remains in any full rebuild when the native client can resolve its Apple library ID. It is never silently dropped. Canonical rows merge on `(playlist_id, apple_library_entry_id)`, so their internal UUIDs survive reorders and metadata refreshes; duplicate songs remain distinct because Apple supplies a distinct entry ID for each occurrence.
 
 ### Deletion-safe sync staging
 
@@ -291,7 +293,7 @@ Staging uses typed, constrained columns rather than opaque JSON payloads. This l
 Staging rows are user-scoped through their run. Chunk uploads are idempotent. Canonical playlists are untouched until completion validates counts and commits the new snapshot in one transaction:
 
 1. Upsert every staged playlist.
-2. Replace entries for every staged playlist in exact order.
+2. Merge entries by stable Apple entry identity, safely apply exact order, add new occurrences, and remove stale occurrences.
 3. Mark previously present but now absent playlists `in_library = false`.
 4. Update `user_music_profiles.playlists_synced_at`.
 5. Mark the run completed.

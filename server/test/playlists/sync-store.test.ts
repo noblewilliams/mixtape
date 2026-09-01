@@ -175,6 +175,38 @@ describe('PlaylistSyncStore', () => {
     expect(updated).toMatchObject({ id: created.id, name: 'Renamed', isMixtapeOwned: true })
   })
 
+  it('keeps canonical entry IDs across a reordered resync', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const store = createPlaylistSyncStore(db, { now: () => now })
+    const first = await store.begin('u1', 'ng', 1, 2)
+    await store.putPlaylists('u1', first.syncId, [playlist()])
+    await store.putEntries('u1', first.syncId, 'p-1', [
+      entry(),
+      entry({ position: 1, appleLibraryEntryId: 'entry-2', titleSnapshot: 'Second' }),
+    ])
+    await store.complete('u1', first.syncId)
+    const original = await db.select().from(playlistEntries)
+    const ids = new Map(original.map((row) => [row.appleLibraryEntryId, row.id]))
+
+    const second = await store.begin('u1', 'ng', 1, 2)
+    await store.putPlaylists('u1', second.syncId, [playlist({ name: 'Reordered' })])
+    await store.putEntries('u1', second.syncId, 'p-1', [
+      entry({ appleLibraryEntryId: 'entry-2', titleSnapshot: 'Second updated' }),
+      entry({ position: 1 }),
+    ])
+    await store.complete('u1', second.syncId)
+
+    const reordered = await db.select().from(playlistEntries)
+      .orderBy(playlistEntries.position)
+    expect(reordered.map((row) => row.appleLibraryEntryId)).toEqual(['entry-2', 'entry-1'])
+    expect(reordered.map((row) => row.id)).toEqual([
+      ids.get('entry-2'),
+      ids.get('entry-1'),
+    ])
+    expect(reordered[0].titleSnapshot).toBe('Second updated')
+  })
+
   it('rejects count, position, ordinal, and duplicate entry-id mismatches', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')

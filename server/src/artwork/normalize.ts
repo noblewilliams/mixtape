@@ -5,6 +5,10 @@ export type ArtworkMetadata = {
   bgColor: string | null
 }
 
+export type NullableArtworkMetadata = Omit<ArtworkMetadata, 'url'> & {
+  url: string | null
+}
+
 export const MAX_ARTWORK_URL_LENGTH = 2048
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -23,15 +27,16 @@ function optionalBackgroundColor(value: unknown): string | null | undefined {
   return value.toLowerCase()
 }
 
-export function parseArtworkMetadata(value: unknown): ArtworkMetadata | null {
-  if (
-    !isRecord(value) ||
-    typeof value.url !== 'string' ||
-    value.url.length === 0 ||
-    value.url.length > MAX_ARTWORK_URL_LENGTH
-  ) {
-    return null
-  }
+export function parseNullableArtworkMetadata(value: unknown): NullableArtworkMetadata | null {
+  if (!isRecord(value) || (value.url !== null && typeof value.url !== 'string')) return null
+
+  const width = optionalPositiveInteger(value.width)
+  const height = optionalPositiveInteger(value.height)
+  const bgColor = optionalBackgroundColor(value.bgColor)
+  if (width === undefined || height === undefined || bgColor === undefined) return null
+
+  if (value.url === null) return { url: null, width, height, bgColor }
+  if (value.url.length === 0 || value.url.length > MAX_ARTWORK_URL_LENGTH) return null
 
   let parsedUrl: URL
   try {
@@ -56,10 +61,10 @@ export function parseArtworkMetadata(value: unknown): ArtworkMetadata | null {
   const hasHeightToken = value.url.includes('{h}')
   if (hasWidthToken !== hasHeightToken) return null
 
-  const width = optionalPositiveInteger(value.width)
-  const height = optionalPositiveInteger(value.height)
-  const bgColor = optionalBackgroundColor(value.bgColor)
-  if (width === undefined || height === undefined || bgColor === undefined) return null
-
   return { url: value.url, width, height, bgColor }
+}
+
+export function parseArtworkMetadata(value: unknown): ArtworkMetadata | null {
+  const parsed = parseNullableArtworkMetadata(value)
+  return parsed?.url == null ? null : { ...parsed, url: parsed.url }
 }
