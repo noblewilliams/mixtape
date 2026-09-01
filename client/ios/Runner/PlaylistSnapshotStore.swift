@@ -50,6 +50,26 @@ actor PlaylistSnapshotStore {
     let appleLastModifiedAt: Int?
     let sourceFingerprint: String
     let entries: [EntryValue]
+
+    func replacingEntries(_ entries: [EntryValue]) -> PlaylistValue {
+      PlaylistValue(
+        appleLibraryId: appleLibraryId,
+        appleCatalogId: appleCatalogId,
+        name: name,
+        description: description,
+        curatorName: curatorName,
+        artworkUrlTemplate: artworkUrlTemplate,
+        artworkWidth: artworkWidth,
+        artworkHeight: artworkHeight,
+        artworkBgColor: artworkBgColor,
+        kind: kind,
+        canEdit: canEdit,
+        appleDateAdded: appleDateAdded,
+        appleLastModifiedAt: appleLastModifiedAt,
+        sourceFingerprint: sourceFingerprint,
+        entries: entries
+      )
+    }
   }
 
   struct EntryValue: Sendable {
@@ -66,6 +86,26 @@ actor PlaylistSnapshotStore {
     let artworkWidthSnapshot: Int?
     let artworkHeightSnapshot: Int?
     let artworkBgColorSnapshot: String?
+
+    func replacingIdentity(
+      _ identity: LibrarySongCatalogCrosswalk.LinkedIdentity?
+    ) -> EntryValue {
+      EntryValue(
+        position: position,
+        appleLibraryEntryId: appleLibraryEntryId,
+        appleLibraryTrackId: appleLibraryTrackId,
+        appleCatalogId: identity?.catalogId ?? appleCatalogId,
+        isrcSnapshot: identity?.isrc ?? isrcSnapshot,
+        titleSnapshot: titleSnapshot,
+        artistSnapshot: artistSnapshot,
+        albumSnapshot: albumSnapshot,
+        durationMsSnapshot: durationMsSnapshot,
+        artworkUrlTemplateSnapshot: artworkUrlTemplateSnapshot,
+        artworkWidthSnapshot: artworkWidthSnapshot,
+        artworkHeightSnapshot: artworkHeightSnapshot,
+        artworkBgColorSnapshot: artworkBgColorSnapshot
+      )
+    }
   }
 
   private struct Snapshot: Sendable {
@@ -234,6 +274,7 @@ actor PlaylistSnapshotStore {
       materialized: playlists,
       expectedTotalEntries: totalEntries
     )
+    playlists = try await attachLibrarySongIdentity(to: playlists)
 
     return Snapshot(
       header: Header(
@@ -305,7 +346,10 @@ actor PlaylistSnapshotStore {
       position: position,
       appleLibraryEntryId: try requiredOpaqueId(entry.id.rawValue),
       appleLibraryTrackId: validOpaqueId(item?.id.rawValue),
-      appleCatalogId: nil,
+      appleCatalogId: PlaylistEntryCatalogIdentity.catalogId(
+        playParameters: entry.playParameters ?? item?.playParameters,
+        musicURL: entry.url ?? item?.url
+      ),
       isrcSnapshot: normalizedISRC(entry.isrc),
       titleSnapshot: boundedOptionalText(entry.title, max: 1_000)
         ?? boundedRequiredText(item?.title, fallback: "Unknown", max: 1_000),
@@ -412,6 +456,35 @@ actor PlaylistSnapshotStore {
     }
 
     guard verifiedTotal == expectedTotalEntries else { throw StoreError.libraryChanged }
+  }
+
+  private static func attachLibrarySongIdentity(to playlists: [PlaylistValue]) async throws
+    -> [PlaylistValue]
+  {
+    let librarySongIds = playlists.flatMap(\.entries).compactMap(\.appleLibraryTrackId)
+    guard !librarySongIds.isEmpty else { return playlists }
+
+    let identities: [String: LibrarySongCatalogCrosswalk.LinkedIdentity]
+    do {
+      identities = try await LibrarySongCatalogCrosswalk().resolve(
+        librarySongIds: librarySongIds
+      )
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      return playlists
+    }
+    try Task.checkCancellation()
+
+    return playlists.map { playlist in
+      playlist.replacingEntries(
+        playlist.entries.map { entry in
+          entry.replacingIdentity(
+            entry.appleLibraryTrackId.flatMap { identities[$0] }
+          )
+        }
+      )
+    }
   }
 
   private static func epochMilliseconds(_ date: Date?) -> Int? {
@@ -522,6 +595,171 @@ actor PlaylistSnapshotStore {
       builder.append(entry.durationMsSnapshot)
     }
     return SHA256.hash(data: builder.data).map { String(format: "%02x", $0) }.joined()
+  }
+}
+
+/// Extracts catalog identity only from exact fields already materialized by
+/// typed MusicKit. It never performs title, artist, or album fuzzy matching.
+struct PlaylistEntryCatalogIdentity {
+  static func catalogId(
+    playParameters: PlayParameters?,
+    musicURL: URL?
+  ) -> String? {
+    if
+      let playParameters,
+      let encoded = try? JSONEncoder().encode(playParameters),
+      let catalogId = catalogId(fromEncodedPlayParameters: encoded)
+    {
+      return catalogId
+    }
+    return catalogId(fromMusicURL: musicURL)
+  }
+
+  static func catalogId(fromEncodedPlayParameters data: Data) -> String? {
+    guard
+      let object = try? JSONSerialization.jsonObject(with: data),
+      let values = object as? [String: Any]
+    else { return nil }
+    return validCatalogId(values["catalogId"] as? String)
+  }
+
+  static func catalogId(fromMusicURL url: URL?) -> String? {
+    guard
+      let url,
+      url.scheme?.lowercased() == "https",
+      url.host?.lowercased() == "music.apple.com",
+      url.user == nil,
+      url.password == nil,
+      url.port == nil,
+      let queryItems = URLComponents(
+        url: url,
+        resolvingAgainstBaseURL: false
+      )?.queryItems
+    else { return nil }
+    let songIds = queryItems.filter { $0.name == "i" }.compactMap(\.value)
+    guard songIds.count == 1 else { return nil }
+    return validCatalogId(songIds[0])
+  }
+
+  static func validCatalogId(_ value: String?) -> String? {
+    guard
+      let value,
+      value.range(
+        of: "^[A-Za-z0-9._~-]{1,128}$",
+        options: .regularExpression
+      ) != nil
+    else { return nil }
+    return value
+  }
+
+  static func normalizedISRC(_ value: String?) -> String? {
+    guard
+      let value,
+      value.utf16.count == 12,
+      !value.contains("\0")
+    else { return nil }
+    let normalized = value.uppercased()
+    return normalized.range(
+      of: "^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$",
+      options: .regularExpression
+    ) == nil
+      ? nil
+      : normalized
+  }
+}
+
+/// Resolves opaque library-song IDs through MusicKit's typed library request.
+/// Returned values are reconciled only by the exact requested library ID.
+struct LibrarySongCatalogCrosswalk: Sendable {
+  static let maxBatchSize = 25
+  private static let maxLibraryIdLength = 512
+
+  struct SongValue: Sendable {
+    let libraryId: String
+    let catalogId: String?
+    let isrc: String?
+  }
+
+  struct LinkedIdentity: Equatable, Sendable {
+    let catalogId: String?
+    let isrc: String?
+  }
+
+  typealias Fetch = @Sendable ([String]) async throws -> [SongValue]
+  private let fetch: Fetch
+
+  init() {
+    fetch = { ids in try await Self.fetchSongs(ids) }
+  }
+
+  init(fetch: @escaping Fetch) {
+    self.fetch = fetch
+  }
+
+  func resolve(librarySongIds: [String]) async throws -> [String: LinkedIdentity] {
+    let requestedIds = Array(
+      Set(librarySongIds.filter(Self.isValidLibrarySongId))
+    ).sorted()
+    guard !requestedIds.isEmpty else { return [:] }
+
+    var result: [String: LinkedIdentity] = [:]
+    for start in stride(from: 0, to: requestedIds.count, by: Self.maxBatchSize) {
+      try Task.checkCancellation()
+      let end = min(start + Self.maxBatchSize, requestedIds.count)
+      let batch = Array(requestedIds[start..<end])
+      let songs = try await fetch(batch)
+      Self.reconcile(songs, requestedIds: Set(batch), into: &result)
+    }
+    return result
+  }
+
+  private static func fetchSongs(_ ids: [String]) async throws -> [SongValue] {
+    var request = MusicLibraryRequest<Song>()
+    request.limit = ids.count
+    request.filter(matching: \.id, memberOf: ids.map { MusicItemID($0) })
+    let songs = try await request.response().items
+    return songs.map { song in
+      SongValue(
+        libraryId: song.id.rawValue,
+        catalogId: PlaylistEntryCatalogIdentity.catalogId(
+          playParameters: song.playParameters,
+          musicURL: song.url
+        ),
+        isrc: PlaylistEntryCatalogIdentity.normalizedISRC(song.isrc)
+      )
+    }
+  }
+
+  private static func reconcile(
+    _ songs: [SongValue],
+    requestedIds: Set<String>,
+    into result: inout [String: LinkedIdentity]
+  ) {
+    var seenIds = Set<String>()
+    var rejectedIds = Set<String>()
+
+    for song in songs {
+      guard requestedIds.contains(song.libraryId) else { continue }
+      guard seenIds.insert(song.libraryId).inserted else {
+        result.removeValue(forKey: song.libraryId)
+        rejectedIds.insert(song.libraryId)
+        continue
+      }
+      guard !rejectedIds.contains(song.libraryId) else { continue }
+
+      let identity = LinkedIdentity(
+        catalogId: PlaylistEntryCatalogIdentity.validCatalogId(song.catalogId),
+        isrc: PlaylistEntryCatalogIdentity.normalizedISRC(song.isrc)
+      )
+      guard identity.catalogId != nil || identity.isrc != nil else { continue }
+      result[song.libraryId] = identity
+    }
+  }
+
+  private static func isValidLibrarySongId(_ value: String) -> Bool {
+    !value.isEmpty
+      && value.utf16.count <= maxLibraryIdLength
+      && !value.contains("\0")
   }
 }
 

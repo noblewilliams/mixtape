@@ -8,10 +8,7 @@ void main() {
 
     expect(source, contains(r'^[A-Za-z0-9._~-]{1,128}$'));
     expect(source, contains('isSupportedAppleSongID'));
-    expect(
-      source,
-      contains(r'isSupportedAppleSongID($0.playbackStoreID)'),
-    );
+    expect(source, contains(r'isSupportedAppleSongID($0.playbackStoreID)'));
   });
 
   test('native playlist snapshots stay behind one cancellable actor', () {
@@ -50,5 +47,25 @@ void main() {
     ]) {
       expect(bridge, contains('case "$method"'));
     }
+  });
+
+  test('native playlist snapshots derive exact typed catalog identity', () {
+    final store = File(
+      'ios/Runner/PlaylistSnapshotStore.swift',
+    ).readAsStringSync();
+
+    expect(store, contains('struct PlaylistEntryCatalogIdentity'));
+    expect(store, contains('entry.playParameters'));
+    expect(store, contains('item?.playParameters'));
+    expect(store, contains('entry.url'));
+    expect(store, contains('item?.url'));
+    expect(store, contains('struct LibrarySongCatalogCrosswalk'));
+    expect(store, contains('MusicLibraryRequest<Song>()'));
+    expect(store, contains(r'filter(matching: \.id, memberOf:'));
+    expect(store, contains('song.isrc'));
+    expect(store, isNot(contains('MusicDataRequest(urlRequest: request)')));
+    expect(store, isNot(contains('/v1/me/library/songs')));
+    expect(store, isNot(contains('titleSnapshot.lowercased()')));
+    expect(store, isNot(contains('artistSnapshot.lowercased()')));
   });
 }

@@ -356,6 +356,7 @@ These refine the approved system design without changing its product behavior:
 - This founder library had no empty playlist, so the production empty-playlist observation remains unexercised; transaction and route tests cover it.
 - MusicKit returned background colours for all 36 playlists and 1,329 entries but no usable playlist/entry artwork URLs. Nullable browse contracts behaved as designed; album artwork remains independently populated on canonical tracks.
 - All 1,333 entries carried library-track IDs, but none carried a catalog ID or ISRC, so resolved/unresolved was 0/1,333. Collection and browsing are shipped; an on-device library-song-to-catalog crosswalk is required before Phase 3 can use membership as a canonical-track taste signal.
+- A follow-up founder-device sync resolved those opaque library-song IDs through typed `MusicLibraryRequest<Song>` batches. All 1,333 staged entries carried an exact Apple catalog ID; 353 linked immediately to existing canonical tracks and 980 remained unresolved for catalog ingestion. MusicKit returned no ISRCs through this path. The sync completed in production without logging tokens, IDs, playlist metadata, or track metadata.
 
 ---
 
