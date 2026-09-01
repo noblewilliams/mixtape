@@ -1,0 +1,3 @@
+CREATE INDEX "playlist_sync_runs_open_cleanup_idx" ON "playlist_sync_runs" USING btree ("started_at","id") WHERE "playlist_sync_runs"."status" = 'open';--> statement-breakpoint
+CREATE INDEX "playlist_sync_runs_expired_cleanup_idx" ON "playlist_sync_runs" USING btree ("expires_at","id") WHERE "playlist_sync_runs"."status" = 'expired';--> statement-breakpoint
+CREATE INDEX "playlist_sync_runs_completed_cleanup_idx" ON "playlist_sync_runs" USING btree ("completed_at","id") WHERE "playlist_sync_runs"."status" = 'completed';

@@ -43,7 +43,11 @@ describe('handleScheduled', () => {
 
     expect(runEnrichment).toHaveBeenCalledOnce()
     expect(runArtwork).toHaveBeenCalledOnce()
-    expect(result).toEqual({ enrichment: { error: 'failed' }, artwork: artworkResult })
+    expect(result).toEqual({
+      enrichment: { error: 'failed' },
+      artwork: artworkResult,
+      playlistCleanup: expect.objectContaining({ touchedRuns: 0 }),
+    })
   })
 
   it('runs feature and meaning enrichment even when artwork fails', async () => {
@@ -60,6 +64,65 @@ describe('handleScheduled', () => {
 
     expect(runEnrichment).toHaveBeenCalledOnce()
     expect(runArtwork).toHaveBeenCalledOnce()
-    expect(result).toEqual({ enrichment: enrichmentResult, artwork: { error: 'failed' } })
+    expect(result).toEqual({
+      enrichment: enrichmentResult,
+      artwork: { error: 'failed' },
+      playlistCleanup: expect.objectContaining({ touchedRuns: 0 }),
+    })
+  })
+
+  it('runs playlist cleanup even without enrichment or artwork dependencies', async () => {
+    const db = await createTestDb()
+    const playlistCleanup = vi.fn(async () => ({
+      touchedRuns: 0,
+      expiredRuns: 0,
+      deletedEntries: 0,
+      deletedPlaylists: 0,
+      purgedRuns: 0,
+    }))
+
+    const result = await handleScheduled(db, {}, { playlistCleanup })
+
+    expect(playlistCleanup).toHaveBeenCalledOnce()
+    expect(result.playlistCleanup).toMatchObject({ touchedRuns: 0 })
+  })
+
+  it('keeps playlist cleanup independent from enrichment failure', async () => {
+    const db = await createTestDb()
+    const enrichment = vi.fn(async () => { throw new Error('secret feature failure') })
+    const playlistCleanup = vi.fn(async () => ({
+      touchedRuns: 1,
+      expiredRuns: 1,
+      deletedEntries: 0,
+      deletedPlaylists: 0,
+      purgedRuns: 0,
+    }))
+
+    const result = await handleScheduled(db, { enrichment: okDeps }, {
+      enrichment,
+      playlistCleanup,
+    })
+
+    expect(result).toEqual({
+      enrichment: { error: 'failed' },
+      playlistCleanup: expect.objectContaining({ expiredRuns: 1 }),
+    })
+  })
+
+  it('keeps enrichment independent from playlist cleanup failure', async () => {
+    const db = await createTestDb()
+    const enrichmentResult = { processed: 0, features: 0, meaning: 0, remaining: 0 }
+    const enrichment = vi.fn(async () => enrichmentResult)
+    const playlistCleanup = vi.fn(async () => { throw new Error('secret cleanup failure') })
+
+    const result = await handleScheduled(db, { enrichment: okDeps }, {
+      enrichment,
+      playlistCleanup,
+    })
+
+    expect(result).toEqual({
+      enrichment: enrichmentResult,
+      playlistCleanup: { error: 'failed' },
+    })
   })
 })

@@ -187,12 +187,11 @@ export default {
     const deps = buildDeps(env)
     const musicKit = buildMusicKit(env, [])
     const artwork = buildArtworkDeps(env, musicKit)
-    if (!deps && !artwork) return
     const { db, pool } = buildDb(env)
     try {
-      // Counts and fixed failure markers only — no track data, Apple payloads,
+      // Counts and fixed failure markers only — no track/playlist data, Apple payloads,
       // lyric/embedding content, tokens, or exception messages.
-      console.log('enrich cron', JSON.stringify(await handleScheduled(db, { enrichment: deps, artwork })))
+      console.log('maintenance cron', JSON.stringify(await handleScheduled(db, { enrichment: deps, artwork })))
     } finally {
       ctx.waitUntil(pool.end())
     }

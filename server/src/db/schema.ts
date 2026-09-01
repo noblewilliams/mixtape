@@ -410,6 +410,15 @@ export const playlistSyncRuns = pgTable(
       .on(t.userId)
       .where(sql`${t.status} = 'open'`),
     index('playlist_sync_runs_user_status_started_idx').on(t.userId, t.status, t.startedAt),
+    index('playlist_sync_runs_open_cleanup_idx')
+      .on(t.startedAt, t.id)
+      .where(sql`${t.status} = 'open'`),
+    index('playlist_sync_runs_expired_cleanup_idx')
+      .on(t.expiresAt, t.id)
+      .where(sql`${t.status} = 'expired'`),
+    index('playlist_sync_runs_completed_cleanup_idx')
+      .on(t.completedAt, t.id)
+      .where(sql`${t.status} = 'completed'`),
     check(
       'playlist_sync_runs_status_check',
       sql`${t.status} IN ('open', 'completed', 'failed', 'expired')`,

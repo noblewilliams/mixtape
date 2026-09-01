@@ -1,6 +1,6 @@
 # Artwork + Playlist Intelligence — System Design
 
-*Status: founder-approved 2026-08-31 · iOS 16 minimum locked · Phase 0–1 production-complete*
+*Status: founder-approved 2026-08-31 · iOS 16 minimum locked · Phase 0–1 production-complete · Phase 2 code-complete, rollout pending*
 *Companion docs: [vision](../../product/vision.md) · [v1 design](2026-08-29-mixtape-v1-design.md) · [decisions](../../decisions.md) · [backlog](../../backlog.md)*
 *Phase 0–1 plan: [capability spikes + artwork metadata](../plans/2026-08-31-artwork-capability-spikes.md)*
 *Phase 2 plan: [read-only playlist sync + browse](../plans/2026-08-31-playlist-sync-browse.md)*
@@ -260,26 +260,33 @@ playlist_sync_runs
   id uuid primary key
   user_id text not null
   status text not null              -- open, completed, failed, expired
-  expected_playlists integer
-  expected_entries integer
-  received_playlists integer
-  received_entries integer
+  apple_storefront text not null
+  expected_playlists integer not null
+  expected_entries integer not null
+  received_playlists integer not null
+  received_entries integer not null
+  result_* integer                  -- immutable completion summary
   started_at timestamptz not null
+  expires_at timestamptz not null
   completed_at timestamptz
 
 playlist_sync_playlists
   sync_id uuid not null
   ordinal integer not null
-  payload jsonb not null
-  primary key(sync_id, ordinal)
+  apple_library_id text not null
+  normalized playlist fields       -- bounded text, artwork, kind, dates, fingerprint, count
+  primary key(sync_id, apple_library_id)
+  unique(sync_id, ordinal)
 
 playlist_sync_entries
   sync_id uuid not null
   apple_playlist_id text not null
   position integer not null
-  payload jsonb not null
+  normalized entry fields          -- library IDs, nullable resolver IDs, snapshots, artwork
   primary key(sync_id, apple_playlist_id, position)
 ```
+
+Staging uses typed, constrained columns rather than opaque JSON payloads. This lets Postgres enforce ordering, colour, duration, relationship, and identifier invariants before publish, while still preserving valid Unicode display text unchanged.
 
 Staging rows are user-scoped through their run. Chunk uploads are idempotent. Canonical playlists are untouched until completion validates counts and commits the new snapshot in one transaction:
 
@@ -289,7 +296,7 @@ Staging rows are user-scoped through their run. Chunk uploads are idempotent. Ca
 4. Update `user_music_profiles.playlists_synced_at`.
 5. Mark the run completed.
 
-An interrupted, cancelled, or expired run never produces a half-old/half-new browse result. A scheduled/admin cleanup may delete expired staging rows after a safe retention window.
+An interrupted, cancelled, or expired run never produces a half-old/half-new browse result. Scheduled cleanup marks open runs older than 24 hours expired. Expired and completed staging becomes eligible after seven days; each pass locks at most 25 oldest runs, skips concurrent locks, and deletes at most 5,000 entry rows plus 500 empty playlist headers. Completed run summaries remain intact.
 
 ### Playlist edit conversations and drafts
 
@@ -383,21 +390,21 @@ The native layer holds a per-run snapshot or opaque snapshot token so a library 
 
 ### HTTP contract
 
-Proposed authenticated endpoints:
+Phase 2 implements these authenticated endpoints:
 
 ```text
 POST /ingest/playlists/syncs
-  -> { syncId }
+  { storefront, expectedPlaylists, expectedEntries }
+  -> { syncId, expiresAt }
 
 PUT /ingest/playlists/syncs/:syncId/playlists
-  { ordinal, playlists[] }             -- bounded chunk, idempotent
+  { playlists[] }                       -- max 50, exactly idempotent
 
 PUT /ingest/playlists/syncs/:syncId/entries
-  { playlistAppleId, entries[] }        -- positions included, bounded chunk
+  { playlistAppleId, entries[] }        -- max 200, empty list is meaningful
 
 POST /ingest/playlists/syncs/:syncId/complete
-  { expectedPlaylists, expectedEntries }
-  -> { playlists, entries, unresolvedEntries }
+  -> { playlists, entries, resolvedEntries, unresolvedEntries }
 ```
 
 Every route requires the existing Mixtape session and verifies ownership of the sync run. Malformed IDs, negative positions, duplicate positions inside one chunk, out-of-range colours, and oversized chunks are rejected before database work.
@@ -408,18 +415,22 @@ The Flutter sync orchestrator runs song sync first, then playlist sync. This max
 
 ```text
 GET /playlists?status=active&cursor=...
-  -> summaries: artwork, name, kind, count, duration, editable capability
+  -> { playlists[], nextCursor }
 
-GET /playlists/:id
-  -> owned metadata + ordered entries + capability
+GET /playlists/:id?entryLimit=200&entryCursor=...
+  -> { playlist, entries[], nextEntryCursor }
+```
 
+Future editing phase:
+
+```text
 POST /playlists/:id/edit-sessions
   -> existing active edit session or a new session + exact initial draft
 ```
 
 Playlist IDs exposed by the API are internal UUIDs, never accepted as proof of ownership. Every lookup joins on `user_id` and returns 404 for another user's resource.
 
-Browse ordering defaults to Apple's latest-modified value, falling back to local `updated_at`. Search by playlist name is case-insensitive and user-scoped.
+Browse ordering defaults to Apple's latest-modified value, falling back to local `updated_at`. Search by playlist name is literal, case-insensitive, and user-scoped. Phase 2 returns the conservative capability `copy_only` for every playlist: browse and collection contracts are implemented, but taste scoring, conversational editing, mutation, and browse UI are not yet shipped.
 
 ## Playlist taste signal
 
