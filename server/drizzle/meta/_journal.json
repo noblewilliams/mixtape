@@ -127,6 +127,13 @@
       "when": 1788254799873,
       "tag": "0017_brief_dreadnoughts",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1788294036431,
+      "tag": "0018_easy_gwen_stacy",
+      "breakpoints": true
     }
   ]
 }

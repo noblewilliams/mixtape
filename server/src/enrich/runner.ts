@@ -36,6 +36,7 @@ const truthy = (v: unknown): boolean => v === true || v === 't' || v === 'true'
 type CandidateRow = {
   id: string
   apple_id: string | null
+  spotify_id: string | null
   isrc: string | null
   title: string
   artist: string
@@ -49,6 +50,8 @@ type CandidateRow = {
   artwork_height: number | null
   artwork_bg_color: string | null
   artwork_fetched_at: string | null
+  artist_source: TrackRow['artistSource']
+  enrich_priority: number
   created_at: string
   skip_features: boolean
   skip_meaning: boolean
@@ -58,6 +61,7 @@ function toTrackRow(r: CandidateRow): TrackRow {
   return {
     id: r.id,
     appleId: r.apple_id,
+    spotifyId: r.spotify_id,
     isrc: r.isrc,
     title: r.title,
     artist: r.artist,
@@ -72,6 +76,8 @@ function toTrackRow(r: CandidateRow): TrackRow {
     artworkBgColor: r.artwork_bg_color,
     artworkFetchedAt:
       r.artwork_fetched_at === null ? null : new Date(r.artwork_fetched_at),
+    artistSource: r.artist_source,
+    enrichPriority: r.enrich_priority,
     // Raw SQL hands back created_at as a string, not a Date, despite the
     // schema type — a type-only accommodation. Nothing below does date
     // arithmetic on it, so this cast is safe as long as that stays true.
