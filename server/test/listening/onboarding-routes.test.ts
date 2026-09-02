@@ -148,4 +148,21 @@ describe('GET /me/onboarding', () => {
 
     expect(await (await get(db, authFor('u1'))).json()).toEqual(blank)
   })
+  it('a Spotify account import with liked tracks and no funnel event still reads spotify', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await db.insert(userMusicSources).values({ userId: 'u1', source: 'spotify_export', connectedAt: now })
+    const [row] = await db
+      .insert(tracks)
+      .values({ appleId: null, spotifyId: '0VjIjW4GlUZAMYd2vXMi3b', title: 'Liked', artist: 'Artist' })
+      .returning({ id: tracks.id })
+    await db.insert(userTracks).values({ userId: 'u1', trackId: row.id, inLibrary: true })
+
+    const body = (await (await get(db, authFor('u1'))).json()) as {
+      hasLibrary: boolean
+      chosenService: string | null
+    }
+    expect(body.hasLibrary).toBe(true)
+    expect(body.chosenService).toBe('spotify')
+  })
 })

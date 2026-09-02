@@ -44,11 +44,16 @@ export function onboardingRoutes(db: Db) {
         .where(eq(funnelEvents.userId, userId)),
     ])
 
-    // Choosing Spotify is an explicit act and wins outright; Apple is
-    // inferred from evidence (a synced or exported library, or any Apple
-    // source), since the Apple path never posts a "chose" event.
+    // Choosing Spotify is an explicit act and wins outright, and so does a
+    // completed Spotify import (the "chose" event is fire-and-forget, and a
+    // listener who already holds the ZIP never walks the request flow).
+    // Apple is inferred from evidence (a synced or exported library, or any
+    // Apple source), since the Apple path never posts a "chose" event.
+    // hasLibrary alone cannot mean Apple: a Spotify account package marks
+    // liked tracks in_library too, which is why the Spotify checks come first.
+    const hasSpotifySource = sources.some((s) => s.source === 'spotify_export')
     const hasAppleSource = sources.some((s) => s.source === 'apple_live' || s.source === 'apple_export')
-    const chosenService = state.choseSpotifyAt
+    const chosenService = state.choseSpotifyAt || hasSpotifySource
       ? 'spotify'
       : state.hasLibrary || hasAppleSource
         ? 'apple'
