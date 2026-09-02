@@ -310,15 +310,15 @@ describe('parseExport never opens files outside the allow-list', () => {
           type: contentType ?? this.type,
         })
       }
-      override arrayBuffer(): Promise<ArrayBuffer> {
+      override arrayBuffer() {
         this.log.push({ start: this.base, end: this.base + this.size, via: 'arrayBuffer' })
         return super.arrayBuffer()
       }
-      override stream(): ReadableStream<Uint8Array> {
+      override stream() {
         this.log.push({ start: this.base, end: this.base + this.size, via: 'stream' })
         return super.stream()
       }
-      override text(): Promise<string> {
+      override text() {
         this.log.push({ start: this.base, end: this.base + this.size, via: 'text' })
         return super.text()
       }
