@@ -192,7 +192,9 @@ Future<LoadedExportFile?> loadExportFile(ExportArchive archive, ExportFile file)
   final String text;
   try {
     text = await archive.readText(file.path);
-  } on Exception {
+  } catch (_) {
+    // Any failure while reading the entry makes the file unreadable; the
+    // error itself is dropped so nothing from the archive can ride along.
     return null;
   }
   final Object? data;
@@ -269,6 +271,9 @@ int? instantFromTs(Object? value) {
   if (value is! String) return null;
   final match = _ts.firstMatch(value);
   if (match == null) return null;
+  // Years before 1900 are outside the grammar (interpretation 7); this also
+  // keeps Dart clear of JavaScript's 0-99 -> 1900s mapping in Date.UTC.
+  if (int.parse(match[1]!) < 1900) return null;
   final fraction = match[7];
   final millis = fraction == null ? 0 : int.parse(fraction.padRight(3, '0'));
   return DateTime.utc(
@@ -289,6 +294,7 @@ int? epochMsFromExportDate(Object? value) {
   if (value is! String) return null;
   final match = _dateOnly.firstMatch(value);
   if (match == null) return null;
+  if (int.parse(match[1]!) < 1900) return null; // same year floor as `ts` (interpretation 13)
   return DateTime.utc(
     int.parse(match[1]!),
     int.parse(match[2]!),
