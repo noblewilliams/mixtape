@@ -1,6 +1,6 @@
 # Listening-export import — Phase 1: server
 
-*Status: active · 2026-09-01*
+*Status: code complete locally · 2026-09-02 · migrations 0018–0019 and the Worker deploy wait for the founder's go, from a clean worktree*
 *Design: [listening-export import](../specs/2026-09-01-listening-export-import-design.md) (revision 3)*
 
 **Founder decisions (2026-09-01):** Spotify listeners bring their own data export (Account data + Extended streaming history); Apple export is an optional "go deeper" step; parsing happens on the device; the ledger is per track per day; private sessions are excluded by default; pool candidates are library, seeded, or three counted plays in the last two years; a mix before any data requires the DJ interview and enough seed matches and is labeled "not personal yet"; iOS and web ship the Spotify import in parallel; the Apple adapter is web-first; connected sources are a set per listener. The eleven proposed decisions in the spec are approved and land in `docs/decisions.md` in Task 0.
@@ -123,4 +123,22 @@ Parsers · any UI · the ReccoBeats-by-id enrichment stage, ISRC cross-link, and
 
 ## Current verification
 
-Not started.
+- Server: 55 files / 1069 tests green with `npx vitest run --no-file-parallelism` (from 701 / 39 files before phase 1). `npm run typecheck` clean.
+- Every task ran as implementer → adversarial review → fix round; every review finding was either fixed in the same phase or recorded above for phase 2.
+- No migration applied, no deploy, no listener data touched.
+
+## Delivered
+
+| Task | Commits |
+|---|---|
+| 0 decisions and docs | `608eb04` |
+| 1 schema, migration 0018 | `2d6203f` |
+| 2 contracts and staging | `e3ba56e`, `27da951` |
+| 3 publish, derivations, delete-source, migration 0019 | `72978f2`, `79e9e39` |
+| 4 routes | `0e39618`, `7f43742`, `ae6d3fe` |
+| 5 candidates, dedupe, corpus mode | `b011a4a`, `d43b245` |
+| 6 seeds, interview, funnel | `0b26f1e`, `76cec09` |
+| 7 enrichment priority | `a4e82da` |
+| 8 Spotify playlists via sync | `d961ca5`, `510fca7` |
+
+Task 9's remaining step is the gated migration apply and deploy.
