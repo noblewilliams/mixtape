@@ -5,6 +5,9 @@ import {
   playlistEntryChunkSchema,
 } from '../../src/playlists/contracts'
 
+const SPOTIFY_ID = '4uLU6hMCjMI75M1A2tKUQC'
+const FINGERPRINT_KEY = 'c'.repeat(64)
+
 const playlist = (over: Record<string, unknown> = {}) => ({
   ordinal: 0,
   appleLibraryId: 'library-playlist-1',
@@ -135,5 +138,53 @@ describe('playlist ingest contracts', () => {
       playlistAppleId: 'library-playlist-1',
       entries: [],
     }).entries).toEqual([])
+  })
+
+
+  it('accepts a Spotify export begin without a storefront', () => {
+    expect(beginPlaylistSyncSchema.parse({
+      source: 'spotify_export', expectedPlaylists: 1, expectedEntries: 2,
+    })).toEqual({
+      source: 'spotify_export', storefront: null, expectedPlaylists: 1, expectedEntries: 2,
+    })
+    expect(beginPlaylistSyncSchema.parse({
+      source: 'spotify_export', storefront: null, expectedPlaylists: 0, expectedEntries: 0,
+    }).storefront).toBeNull()
+  })
+
+  it.each([
+    { source: 'ios_native' },
+    { source: 'web_musickit' },
+    { source: 'web_musickit', storefront: null },
+    {},
+  ])('requires a storefront for Apple sources %j', (over) => {
+    expect(() => beginPlaylistSyncSchema.parse({
+      expectedPlaylists: 0, expectedEntries: 0, ...over,
+    })).toThrow()
+  })
+
+  it('carries a nullable Spotify id on entries and defaults it to null', () => {
+    const parsed = playlistEntryChunkSchema.parse({
+      playlistAppleId: FINGERPRINT_KEY,
+      entries: [
+        entry({ appleLibraryEntryId: `${FINGERPRINT_KEY}:0`, spotifyId: SPOTIFY_ID }),
+        entry({ position: 1, appleLibraryEntryId: `${FINGERPRINT_KEY}:1`, spotifyId: null }),
+        entry({ position: 2, appleLibraryEntryId: `${FINGERPRINT_KEY}:2` }),
+      ],
+    })
+    expect(parsed.entries.map((value) => value.spotifyId)).toEqual([SPOTIFY_ID, null, null])
+  })
+
+  it.each([
+    'spotify:track:4uLU6hMCjMI75M1A2tKUQC',
+    '4uLU6hMCjMI75M1A2tKUQ',
+    '4uLU6hMCjMI75M1A2tKUQC1',
+    '4uLU6hMCjMI75M1A2tKU-C',
+    '',
+  ])('rejects malformed Spotify id %j', (spotifyId) => {
+    expect(() => playlistEntryChunkSchema.parse({
+      playlistAppleId: 'library-playlist-1',
+      entries: [entry({ spotifyId })],
+    })).toThrow()
   })
 })

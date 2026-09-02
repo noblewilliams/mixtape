@@ -28,6 +28,26 @@ const playlist = (over: Record<string, unknown> = {}) => ({
   ...over,
 })
 
+const SPOTIFY_ID = '4uLU6hMCjMI75M1A2tKUQC'
+const KEY = 'c'.repeat(64)
+
+const entry = (over: Record<string, unknown> = {}) => ({
+  position: 0,
+  appleLibraryEntryId: `${KEY}:0`,
+  appleLibraryTrackId: null,
+  appleCatalogId: null,
+  isrcSnapshot: null,
+  titleSnapshot: 'Song',
+  artistSnapshot: 'Artist',
+  albumSnapshot: null,
+  durationMsSnapshot: null,
+  artworkUrlTemplateSnapshot: null,
+  artworkWidthSnapshot: null,
+  artworkHeightSnapshot: null,
+  artworkBgColorSnapshot: null,
+  ...over,
+})
+
 async function seedUser(db: TestDb, id: string) {
   await db.insert(user).values({
     id,
@@ -151,5 +171,43 @@ describe('playlist ingest routes', () => {
     })
     expect(response.status).toBe(204)
     expect(response.headers.get('access-control-allow-methods')).toContain('PUT')
+  })
+
+
+  it('runs a Spotify export sync without a storefront and validates Spotify ids', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const auth = authFor('u1')
+    const start = await request(db, auth, '/ingest/playlists/syncs', 'POST', {
+      source: 'spotify_export', expectedPlaylists: 1, expectedEntries: 1,
+    })
+    expect(start.status).toBe(201)
+    const { syncId } = await start.json() as { syncId: string }
+    expect((await request(db, auth, `/ingest/playlists/syncs/${syncId}/playlists`, 'PUT', {
+      playlists: [playlist({ appleLibraryId: KEY, entryCount: 1 })],
+    })).status).toBe(200)
+    expect((await request(db, auth, `/ingest/playlists/syncs/${syncId}/entries`, 'PUT', {
+      playlistAppleId: KEY, entries: [entry({ spotifyId: `spotify:track:${SPOTIFY_ID}` })],
+    })).status).toBe(400)
+    expect((await request(db, auth, `/ingest/playlists/syncs/${syncId}/entries`, 'PUT', {
+      playlistAppleId: KEY, entries: [entry({ spotifyId: SPOTIFY_ID })],
+    })).status).toBe(200)
+    const complete = await request(db, auth, `/ingest/playlists/syncs/${syncId}/complete`, 'POST')
+    expect(complete.status).toBe(200)
+    expect(await complete.json())
+      .toEqual({ playlists: 1, entries: 1, resolvedEntries: 0, unresolvedEntries: 1 })
+  })
+
+  it.each([
+    { source: 'ios_native' },
+    { source: 'web_musickit', storefront: null },
+    {},
+  ])('rejects an Apple sync without a storefront %j', async (over) => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const response = await request(db, authFor('u1'), '/ingest/playlists/syncs', 'POST', {
+      expectedPlaylists: 0, expectedEntries: 0, ...over,
+    })
+    expect(response.status).toBe(400)
   })
 })

@@ -10,6 +10,9 @@ import {
 } from '../../src/db/schema'
 import { createTestDb, type TestDb } from '../helpers/db'
 
+const SPOTIFY_ID = '4uLU6hMCjMI75M1A2tKUQC'
+const KEY = 'c'.repeat(64)
+
 const authFor = (id: string | null): AuthLike => ({
   handler: () => new Response('ok'),
   api: { getSession: async () => id ? { user: { id } } : null },
@@ -269,5 +272,31 @@ describe('playlist browse routes', () => {
       expect(response.status).toBe(404)
       expect(await response.json()).toEqual({ error: 'not_found' })
     }
+  })
+
+
+  it('carries the Spotify id on entries', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const [imported] = await db.insert(userPlaylists).values({
+      userId: 'u1', appleLibraryId: KEY, name: 'Imported', kind: 'user',
+      sourceFingerprint: 'a'.repeat(64), source: 'spotify_export',
+    }).returning()
+    await db.insert(playlistEntries).values([
+      {
+        playlistId: imported.id, position: 0, appleLibraryEntryId: `${KEY}:0`,
+        titleSnapshot: 'One', artistSnapshot: 'A', spotifyId: SPOTIFY_ID,
+      },
+      {
+        playlistId: imported.id, position: 1, appleLibraryEntryId: `${KEY}:1`,
+        titleSnapshot: 'Two', artistSnapshot: 'B', spotifyId: null,
+      },
+    ])
+
+    const response = await get(db, 'u1', `/playlists/${imported.id}`)
+    expect(response.status).toBe(200)
+    const body = await response.json() as { entries: Record<string, unknown>[] }
+    expect(body.entries.map((row) => [row.spotifyId, row.appleCatalogId, row.resolved]))
+      .toEqual([[SPOTIFY_ID, null, false], [null, null, false]])
   })
 })

@@ -6,14 +6,18 @@ import {
   playlistSyncRuns,
   userMusicProfiles,
 } from '../db/schema'
-import type { PlaylistEntrySnapshot, PlaylistSnapshot } from './contracts'
-import type { LibrarySyncSource } from '../library/contracts'
+import type {
+  PlaylistEntrySnapshot,
+  PlaylistSnapshot,
+  PlaylistSyncSource,
+} from './contracts'
 
 export type PlaylistSyncErrorCategory =
   | 'not_found'
   | 'conflict'
   | 'invalid_state'
   | 'count_mismatch'
+  | 'invalid_storefront'
   | 'internal'
 
 export class PlaylistSyncError extends Error {
@@ -33,10 +37,10 @@ export type PlaylistSyncSummary = {
 export type PlaylistSyncStore = {
   begin(
     userId: string,
-    storefront: string,
+    storefront: string | null,
     expectedPlaylists: number,
     expectedEntries: number,
-    source?: LibrarySyncSource,
+    source?: PlaylistSyncSource,
   ): Promise<{ syncId: string; expiresAt: number }>
   putPlaylists(userId: string, syncId: string, playlists: PlaylistSnapshot[]): Promise<void>
   putEntries(
@@ -57,6 +61,9 @@ type StoreDeps = {
 const DEFAULT_TTL_MS = 60 * 60 * 1_000
 const POSITION_REORDER_OFFSET = 100_001
 const toDate = (value: number | null) => value == null ? null : new Date(value)
+// user_playlists.source: both MusicKit clients publish Apple playlists.
+const playlistSourceFor = (source: PlaylistSyncSource) =>
+  source === 'spotify_export' ? 'spotify_export' : 'apple'
 
 function normalizeRows(value: unknown): Record<string, unknown>[] {
   if (Array.isArray(value)) return value as Record<string, unknown>[]
@@ -102,6 +109,7 @@ function sameEntry(
     && row.appleLibraryEntryId === value.appleLibraryEntryId
     && row.appleLibraryTrackId === value.appleLibraryTrackId
     && row.appleCatalogId === value.appleCatalogId
+    && row.spotifyId === value.spotifyId
     && row.isrcSnapshot === value.isrcSnapshot
     && row.titleSnapshot === value.titleSnapshot
     && row.artistSnapshot === value.artistSnapshot
@@ -169,6 +177,9 @@ export function createPlaylistSyncStore(db: Db, deps: StoreDeps = {}): PlaylistS
 
   return {
     async begin(userId, storefront, expectedPlaylists, expectedEntries, source = 'ios_native') {
+      if (storefront == null && source !== 'spotify_export') {
+        throw new PlaylistSyncError('invalid_storefront')
+      }
       return db.transaction(async (rawTx) => {
         const tx = rawTx as unknown as Db
         const now = currentTime()
@@ -180,9 +191,11 @@ export function createPlaylistSyncStore(db: Db, deps: StoreDeps = {}): PlaylistS
           .where(eq(userMusicProfiles.userId, userId))
           .for('update')
         if (!profile) throw new PlaylistSyncError('not_found')
-        await tx.update(userMusicProfiles)
-          .set({ appleStorefront: storefront, updatedAt: now })
-          .where(eq(userMusicProfiles.userId, userId))
+        if (storefront != null) {
+          await tx.update(userMusicProfiles)
+            .set({ appleStorefront: storefront, updatedAt: now })
+            .where(eq(userMusicProfiles.userId, userId))
+        }
         await tx.update(playlistSyncRuns)
           .set({ status: 'expired' })
           .where(and(eq(playlistSyncRuns.userId, userId), eq(playlistSyncRuns.status, 'open')))
@@ -349,18 +362,19 @@ export function createPlaylistSyncStore(db: Db, deps: StoreDeps = {}): PlaylistS
           || validation?.entries_valid !== true
         ) throw new PlaylistSyncError('count_mismatch')
 
+        const playlistSource = playlistSourceFor(run.source)
         await tx.execute(sql`
           INSERT INTO user_playlists (
             user_id, apple_library_id, apple_catalog_id, name, description, curator_name,
             artwork_url_template, artwork_width, artwork_height, artwork_bg_color, kind,
             can_edit, apple_date_added, apple_last_modified_at, source_fingerprint,
-            in_library, created_at, updated_at
+            source, in_library, created_at, updated_at
           )
           SELECT
             ${userId}, apple_library_id, apple_catalog_id, name, description, curator_name,
             artwork_url_template, artwork_width, artwork_height, artwork_bg_color, kind,
             can_edit, apple_date_added, apple_last_modified_at, source_fingerprint,
-            true, ${now}, ${now}
+            ${playlistSource}, true, ${now}, ${now}
           FROM playlist_sync_playlists
           WHERE sync_id = ${syncId}
           ORDER BY apple_library_id
@@ -378,6 +392,7 @@ export function createPlaylistSyncStore(db: Db, deps: StoreDeps = {}): PlaylistS
             apple_date_added = excluded.apple_date_added,
             apple_last_modified_at = excluded.apple_last_modified_at,
             source_fingerprint = excluded.source_fingerprint,
+            source = excluded.source,
             in_library = true,
             updated_at = excluded.updated_at
         `)
@@ -385,6 +400,7 @@ export function createPlaylistSyncStore(db: Db, deps: StoreDeps = {}): PlaylistS
           UPDATE user_playlists up
           SET in_library = false, updated_at = ${now}
           WHERE up.user_id = ${userId}
+            AND up.source = ${playlistSource}
             AND up.in_library = true
             AND NOT EXISTS (
               SELECT 1 FROM playlist_sync_playlists sp
@@ -408,9 +424,10 @@ export function createPlaylistSyncStore(db: Db, deps: StoreDeps = {}): PlaylistS
           UPDATE playlist_entries pe
           SET
             position = se.position,
-            track_id = coalesce(catalog_track.id, unique_isrc.id),
+            track_id = coalesce(catalog_track.id, spotify_track.id, unique_isrc.id),
             apple_library_track_id = se.apple_library_track_id,
             apple_catalog_id = se.apple_catalog_id,
+            spotify_id = se.spotify_id,
             isrc_snapshot = se.isrc_snapshot,
             title_snapshot = se.title_snapshot,
             artist_snapshot = se.artist_snapshot,
@@ -425,13 +442,18 @@ export function createPlaylistSyncStore(db: Db, deps: StoreDeps = {}): PlaylistS
           JOIN user_playlists up
             ON up.user_id = ${userId} AND up.apple_library_id = se.apple_playlist_id
           LEFT JOIN tracks catalog_track ON catalog_track.apple_id = se.apple_catalog_id
+          LEFT JOIN tracks spotify_track
+            ON catalog_track.id IS NULL AND spotify_track.spotify_id = se.spotify_id
           LEFT JOIN (
             SELECT isrc, min(id::text)::uuid AS id
             FROM tracks
             WHERE isrc IS NOT NULL
             GROUP BY isrc
             HAVING count(*) = 1
-          ) unique_isrc ON catalog_track.id IS NULL AND unique_isrc.isrc = se.isrc_snapshot
+          ) unique_isrc
+            ON catalog_track.id IS NULL
+            AND spotify_track.id IS NULL
+            AND unique_isrc.isrc = se.isrc_snapshot
           WHERE se.sync_id = ${syncId}
             AND pe.playlist_id = up.id
             AND pe.apple_library_entry_id = se.apple_library_entry_id
@@ -439,17 +461,19 @@ export function createPlaylistSyncStore(db: Db, deps: StoreDeps = {}): PlaylistS
         await tx.execute(sql`
           INSERT INTO playlist_entries (
             playlist_id, position, track_id, apple_library_entry_id, apple_library_track_id,
-            apple_catalog_id, isrc_snapshot, title_snapshot, artist_snapshot, album_snapshot,
-            duration_ms_snapshot, artwork_url_template_snapshot, artwork_width_snapshot,
-            artwork_height_snapshot, artwork_bg_color_snapshot, created_at, updated_at
+            apple_catalog_id, spotify_id, isrc_snapshot, title_snapshot, artist_snapshot,
+            album_snapshot, duration_ms_snapshot, artwork_url_template_snapshot,
+            artwork_width_snapshot, artwork_height_snapshot, artwork_bg_color_snapshot,
+            created_at, updated_at
           )
           SELECT
             up.id,
             se.position,
-            coalesce(catalog_track.id, unique_isrc.id),
+            coalesce(catalog_track.id, spotify_track.id, unique_isrc.id),
             se.apple_library_entry_id,
             se.apple_library_track_id,
             se.apple_catalog_id,
+            se.spotify_id,
             se.isrc_snapshot,
             se.title_snapshot,
             se.artist_snapshot,
@@ -465,13 +489,18 @@ export function createPlaylistSyncStore(db: Db, deps: StoreDeps = {}): PlaylistS
           JOIN user_playlists up
             ON up.user_id = ${userId} AND up.apple_library_id = se.apple_playlist_id
           LEFT JOIN tracks catalog_track ON catalog_track.apple_id = se.apple_catalog_id
+          LEFT JOIN tracks spotify_track
+            ON catalog_track.id IS NULL AND spotify_track.spotify_id = se.spotify_id
           LEFT JOIN (
             SELECT isrc, min(id::text)::uuid AS id
             FROM tracks
             WHERE isrc IS NOT NULL
             GROUP BY isrc
             HAVING count(*) = 1
-          ) unique_isrc ON catalog_track.id IS NULL AND unique_isrc.isrc = se.isrc_snapshot
+          ) unique_isrc
+            ON catalog_track.id IS NULL
+            AND spotify_track.id IS NULL
+            AND unique_isrc.isrc = se.isrc_snapshot
           WHERE se.sync_id = ${syncId}
             AND NOT EXISTS (
               SELECT 1 FROM playlist_entries pe
@@ -516,7 +545,12 @@ export function createPlaylistSyncStore(db: Db, deps: StoreDeps = {}): PlaylistS
           unresolvedEntries: entries - resolvedEntries,
         }
         await tx.update(userMusicProfiles)
-          .set({ appleStorefront: run.appleStorefront, playlistsSyncedAt: now, updatedAt: now })
+          .set({
+            // A Spotify run carries no storefront and must not clear the profile's.
+            ...(run.appleStorefront == null ? {} : { appleStorefront: run.appleStorefront }),
+            playlistsSyncedAt: now,
+            updatedAt: now,
+          })
           .where(eq(userMusicProfiles.userId, userId))
         await deps.beforeCommit?.()
         await tx.update(playlistSyncRuns).set({

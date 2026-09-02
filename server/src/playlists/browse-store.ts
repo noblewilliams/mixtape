@@ -31,6 +31,7 @@ export type PlaylistEntryView = {
   position: number
   trackId: string | null
   appleCatalogId: string | null
+  spotifyId: string | null
   title: string
   artist: string
   album: string | null
@@ -149,6 +150,7 @@ function entryFromRow(row: Record<string, unknown>): PlaylistEntryView {
     position: Number(row.position),
     trackId,
     appleCatalogId: row.apple_catalog_id == null ? null : String(row.apple_catalog_id),
+    spotifyId: row.spotify_id == null ? null : String(row.spotify_id),
     title: String(row.title_snapshot),
     artist: String(row.artist_snapshot),
     album: row.album_snapshot == null ? null : String(row.album_snapshot),
@@ -259,6 +261,7 @@ export function createPlaylistBrowseStore(db: Db) {
           pe.position,
           pe.track_id,
           pe.apple_catalog_id,
+          pe.spotify_id,
           pe.title_snapshot,
           pe.artist_snapshot,
           pe.album_snapshot,

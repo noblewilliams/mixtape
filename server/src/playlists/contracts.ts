@@ -3,6 +3,7 @@ import {
   MAX_ARTWORK_URL_LENGTH,
   parseNullableArtworkMetadata,
 } from '../artwork/normalize'
+import { SPOTIFY_ID_PATTERN } from '../listening/contracts'
 import { isAppleSongId } from '../musickit/apple-id'
 
 export const PLAYLIST_SYNC_MAX_PLAYLISTS = 2_000
@@ -34,18 +35,36 @@ const textSnapshot = (max: number) =>
 const nullableTextSnapshot = (max: number) =>
   safeString(z.string().max(max)).nullable()
 const nullableAppleId = z.string().refine(isAppleSongId).nullable()
+const nullableSpotifyId = z.string().regex(SPOTIFY_ID_PATTERN).nullable()
 const postgresInteger = z.number().int().max(2_147_483_647)
 const nullableTimestamp = z.number().int().min(0).max(8_640_000_000_000_000).nullable()
 const nullablePositiveInteger = postgresInteger.positive().nullable()
 const nullableNonnegativeInteger = postgresInteger.nonnegative().nullable()
 const nullableArtworkColor = z.string().regex(/^[0-9a-f]{6}$/).nullable()
 
-export const beginPlaylistSyncSchema = z.object({
-  source: z.enum(['ios_native', 'web_musickit']).default('ios_native'),
-  storefront: z.string().regex(/^[a-z]{2}$/),
+export const playlistSyncSourceSchema = z.enum([
+  'ios_native',
+  'web_musickit',
+  'spotify_export',
+])
+
+const beginPlaylistSyncObject = z.object({
+  source: playlistSyncSourceSchema.default('ios_native'),
+  // A Spotify export carries no Apple storefront; every MusicKit source does.
+  storefront: z.string().regex(/^[a-z]{2}$/).nullable().default(null),
   expectedPlaylists: z.number().int().min(0).max(PLAYLIST_SYNC_MAX_PLAYLISTS),
   expectedEntries: z.number().int().min(0).max(PLAYLIST_SYNC_MAX_ENTRIES),
 }).strict()
+
+export const beginPlaylistSyncSchema = beginPlaylistSyncObject.superRefine((value, context) => {
+  if (value.storefront == null && value.source !== 'spotify_export') {
+    context.addIssue({
+      code: 'custom',
+      path: ['storefront'],
+      message: 'storefront is required for this source',
+    })
+  }
+})
 
 const playlistSnapshotObject = z.object({
   ordinal: z.number().int().min(0).max(PLAYLIST_SYNC_MAX_PLAYLISTS - 1),
@@ -89,6 +108,8 @@ const playlistEntrySnapshotObject = z.object({
   appleLibraryEntryId: opaqueLibraryId,
   appleLibraryTrackId: opaqueLibraryId.nullable(),
   appleCatalogId: nullableAppleId,
+  // Defaults to null so MusicKit clients that predate the field keep working.
+  spotifyId: nullableSpotifyId.default(null),
   isrcSnapshot: z.string().regex(/^[A-Z]{2}[A-Z0-9]{3}\d{7}$/).nullable(),
   titleSnapshot: textSnapshot(1_000),
   artistSnapshot: textSnapshot(1_000),
@@ -121,6 +142,7 @@ export const playlistEntryChunkSchema = z.object({
   entries: z.array(playlistEntrySnapshotSchema).max(PLAYLIST_ENTRY_CHUNK_MAX),
 }).strict()
 
+export type PlaylistSyncSource = z.infer<typeof playlistSyncSourceSchema>
 export type BeginPlaylistSync = z.infer<typeof beginPlaylistSyncSchema>
 export type PlaylistSnapshot = z.infer<typeof playlistSnapshotSchema>
 export type PlaylistEntrySnapshot = z.infer<typeof playlistEntrySnapshotSchema>

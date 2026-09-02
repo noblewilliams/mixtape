@@ -18,6 +18,10 @@ import type { PlaylistEntrySnapshot, PlaylistSnapshot } from '../../src/playlist
 import { createTestDb, type TestDb } from '../helpers/db'
 
 const now = new Date('2026-08-31T12:00:00.000Z')
+const SPOTIFY_ID_A = '4uLU6hMCjMI75M1A2tKUQC'
+const SPOTIFY_ID_B = '7ouMYWpwJ422jRcDASZB7P'
+// Spotify playlists carry no platform id; the client keys them by fingerprint.
+const KEY = 'c'.repeat(64)
 
 const playlist = (over: Partial<PlaylistSnapshot> = {}): PlaylistSnapshot => ({
   ordinal: 0,
@@ -44,6 +48,7 @@ const entry = (over: Partial<PlaylistEntrySnapshot> = {}): PlaylistEntrySnapshot
   appleLibraryEntryId: 'entry-1',
   appleLibraryTrackId: 'library-track-1',
   appleCatalogId: null,
+  spotifyId: null,
   isrcSnapshot: null,
   titleSnapshot: 'Song',
   artistSnapshot: 'Artist',
@@ -53,6 +58,14 @@ const entry = (over: Partial<PlaylistEntrySnapshot> = {}): PlaylistEntrySnapshot
   artworkWidthSnapshot: null,
   artworkHeightSnapshot: null,
   artworkBgColorSnapshot: '010203',
+  ...over,
+})
+
+const spotifyEntry = (position: number, over: Partial<PlaylistEntrySnapshot> = {}) => entry({
+  position,
+  appleLibraryEntryId: `${KEY}:${position}`,
+  appleLibraryTrackId: null,
+  appleCatalogId: null,
   ...over,
 })
 
@@ -295,5 +308,101 @@ describe('PlaylistSyncStore', () => {
     expect((await db.select().from(userMusicProfiles))[0].playlistsSyncedAt).toBeNull()
     expect(await db.select().from(playlistSyncPlaylists)).toHaveLength(1)
     expect(await db.select().from(playlistSyncEntries)).toHaveLength(0)
+  })
+
+
+  it('publishes a Spotify export run without a storefront and links entries by Spotify id', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const [spotifyTrack, isrcTrack] = await db.insert(tracks).values([
+      { spotifyId: SPOTIFY_ID_A, isrc: 'USABC1234567', title: 'Spotify', artist: 'A' },
+      { spotifyId: null, isrc: 'GBABC1234567', title: 'ISRC', artist: 'B' },
+    ]).returning()
+    const store = createPlaylistSyncStore(db, { now: () => now })
+    const started = await store.begin('u1', null, 1, 4, 'spotify_export')
+    await store.putPlaylists('u1', started.syncId, [playlist({
+      appleLibraryId: KEY, kind: 'user', canEdit: false, entryCount: 4,
+    })])
+    await store.putEntries('u1', started.syncId, KEY, [
+      spotifyEntry(0, { spotifyId: SPOTIFY_ID_A }),
+      // Same track again; the Spotify id outranks a matching ISRC.
+      spotifyEntry(1, { spotifyId: SPOTIFY_ID_A, isrcSnapshot: 'GBABC1234567' }),
+      spotifyEntry(2, { spotifyId: SPOTIFY_ID_B, isrcSnapshot: 'GBABC1234567' }),
+      spotifyEntry(3, { spotifyId: null }),
+    ])
+
+    await expect(store.complete('u1', started.syncId)).resolves.toEqual({
+      playlists: 1, entries: 4, resolvedEntries: 3, unresolvedEntries: 1,
+    })
+    const [run] = await db.select().from(playlistSyncRuns)
+    expect(run).toMatchObject({ source: 'spotify_export', appleStorefront: null, status: 'completed' })
+    const [saved] = await db.select().from(userPlaylists)
+    expect(saved).toMatchObject({
+      appleLibraryId: KEY, source: 'spotify_export', kind: 'user', canEdit: false, inLibrary: true,
+    })
+    const savedEntries = await db.select().from(playlistEntries)
+      .where(eq(playlistEntries.playlistId, saved.id))
+      .orderBy(playlistEntries.position)
+    expect(savedEntries.map((row) => row.appleLibraryEntryId))
+      .toEqual([`${KEY}:0`, `${KEY}:1`, `${KEY}:2`, `${KEY}:3`])
+    expect(savedEntries.map((row) => row.trackId))
+      .toEqual([spotifyTrack.id, spotifyTrack.id, isrcTrack.id, null])
+    expect(savedEntries.map((row) => row.spotifyId))
+      .toEqual([SPOTIFY_ID_A, SPOTIFY_ID_A, SPOTIFY_ID_B, null])
+    const [profile] = await db.select().from(userMusicProfiles)
+    expect(profile.appleStorefront).toBeNull()
+    expect(profile.playlistsSyncedAt?.getTime()).toBe(now.getTime())
+  })
+
+  it('rejects a null storefront for Apple sources without opening a run', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const store = createPlaylistSyncStore(db, { now: () => now })
+    await expect(store.begin('u1', null, 0, 0))
+      .rejects.toMatchObject({ category: 'invalid_storefront' })
+    await expect(store.begin('u1', null, 0, 0, 'web_musickit'))
+      .rejects.toMatchObject({ category: 'invalid_storefront' })
+    expect(await db.select().from(playlistSyncRuns)).toEqual([])
+    expect(await db.select().from(userMusicProfiles)).toEqual([])
+  })
+
+  it('rejects an entry retry whose Spotify id changed', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const store = createPlaylistSyncStore(db, { now: () => now })
+    const { syncId } = await store.begin('u1', null, 1, 1, 'spotify_export')
+    await store.putPlaylists('u1', syncId, [playlist({ appleLibraryId: KEY, kind: 'user', entryCount: 1 })])
+    await store.putEntries('u1', syncId, KEY, [spotifyEntry(0, { spotifyId: SPOTIFY_ID_A })])
+    await store.putEntries('u1', syncId, KEY, [spotifyEntry(0, { spotifyId: SPOTIFY_ID_A })])
+    await expect(store.putEntries('u1', syncId, KEY, [spotifyEntry(0, { spotifyId: SPOTIFY_ID_B })]))
+      .rejects.toMatchObject({ category: 'conflict' })
+  })
+
+  it('scopes soft-removal and the profile storefront to the run source', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const store = createPlaylistSyncStore(db, { now: () => now })
+    const apple = await store.begin('u1', 'ng', 1, 0)
+    await store.putPlaylists('u1', apple.syncId, [playlist({ entryCount: 0 })])
+    await store.complete('u1', apple.syncId)
+    const spotify = await store.begin('u1', null, 1, 0, 'spotify_export')
+    await store.putPlaylists('u1', spotify.syncId, [
+      playlist({ appleLibraryId: KEY, kind: 'user', entryCount: 0 }),
+    ])
+    await store.complete('u1', spotify.syncId)
+    const inLibraryBySource = async () => Object.fromEntries(
+      (await db.select().from(userPlaylists)).map((row) => [row.source, row.inLibrary]),
+    )
+    expect(await inLibraryBySource()).toEqual({ apple: true, spotify_export: true })
+    expect((await db.select().from(userMusicProfiles))[0].appleStorefront).toBe('ng')
+
+    const emptyApple = await store.begin('u1', 'ng', 0, 0)
+    await store.complete('u1', emptyApple.syncId)
+    expect(await inLibraryBySource()).toEqual({ apple: false, spotify_export: true })
+
+    const emptySpotify = await store.begin('u1', null, 0, 0, 'spotify_export')
+    await store.complete('u1', emptySpotify.syncId)
+    expect(await inLibraryBySource()).toEqual({ apple: false, spotify_export: false })
+    expect((await db.select().from(userMusicProfiles))[0].appleStorefront).toBe('ng')
   })
 })

@@ -24,6 +24,7 @@ function errorResponse(c: Context<{ Variables: AppVars }>, error: unknown) {
     case 'conflict': return c.json({ error: 'sync_conflict' }, 409)
     case 'invalid_state': return c.json({ error: 'invalid_state' }, 409)
     case 'count_mismatch': return c.json({ error: 'count_mismatch' }, 409)
+    case 'invalid_storefront': return c.json({ error: 'invalid_storefront' }, 400)
     case 'internal': throw error
   }
 }
