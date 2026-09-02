@@ -91,12 +91,17 @@ export async function runEnrichmentBatch(db: Db, deps: EnrichDeps, limit: number
   // skip_* is computed in SQL, not just from row-existence, so a stage that's
   // already burned through MAX_ATTEMPTS is never retried just because the
   // *other* stage is what made this track a candidate.
+  //
+  // Highest enrich_priority first: an import raises it for the listener's pool
+  // candidates, so a new listener's heavy-rotation tracks are enriched ahead
+  // of the backlog instead of waiting their turn by creation date. Ties fall
+  // back to creation order so the walk stays stable batch to batch.
   const selectRes = await db.execute(sql`
     SELECT t.*,
       (f.track_id IS NOT NULL OR COALESCE(ff.attempts, 0) >= ${MAX_ATTEMPTS}) AS skip_features,
       (m.track_id IS NOT NULL OR COALESCE(fm.attempts, 0) >= ${MAX_ATTEMPTS}) AS skip_meaning
     ${CANDIDATE_FROM_WHERE}
-    ORDER BY t.created_at, t.id
+    ORDER BY t.enrich_priority DESC, t.created_at, t.id
     LIMIT ${limit}
   `)
   const rows = normalizeRows(selectRes) as unknown as CandidateRow[]
