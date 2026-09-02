@@ -1,6 +1,6 @@
 # Listening-export import — Phase 2: Spotify import on iOS and web
 
-*Status: draft for founder go · 2026-09-02*
+*Status: active · 2026-09-02 · founder go for Track A and both parsers (B1, C1); B3 board approval pending before B4/B5; deploy deferred*
 *Design: [listening-export import](../specs/2026-09-01-listening-export-import-design.md) (revision 3) · Phase 1: [server plan](2026-09-01-listening-export-p1-server.md) (code complete)*
 
 **Founder decisions (2026-09-01/02):** both surfaces get the Spotify import, each ships when ready; iOS is the natural home (the email lands there and the archive is small); web carries paste-in, copy-out, and the embed probe later; both Spotify packages are requested and imported in either order; private sessions excluded by default with a toggle; the interview gates any pre-data mix; no email provider, Spotify's emails are the triggers; deploy is deferred and happens on explicit go.
@@ -102,6 +102,7 @@ Apple "go deeper" parsing (phase 5) · ReccoBeats-by-id enrichment stage, ISRC c
 
 ## Review follow-ups
 
+- A2 review: `GET /me/onboarding` reports `chosenService` as `'spotify' | 'apple' | null`, wider than the plan's `'spotify' | null`; `'apple'` is inferred from a live or exported Apple library and lets both clients skip the service gate for existing Apple listeners. A Spotify import source counts as Spotify even without the funnel event (fix round).
 Recorded from phase-1 reviews for this phase: `ApiSession.notPersonal` and `spotifyId` on queue tracks (A2, B2, C4); clients must refetch a session after a message turn to learn it went corpus-mode; the playlist browse summary lacks `user_playlists.source`, so a mixed listing cannot badge per source until a later server addition; malformed JSON is a 400 `invalid_request`.
 
 ## Current verification
