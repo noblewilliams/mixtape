@@ -50,14 +50,22 @@ export const playlistSyncSourceSchema = z.enum([
 
 const beginPlaylistSyncObject = z.object({
   source: playlistSyncSourceSchema.default('ios_native'),
-  // A Spotify export carries no Apple storefront; every MusicKit source does.
+  // Every MusicKit source carries an Apple storefront; a Spotify export must
+  // not, since begin() writes it over the listener's Apple storefront.
   storefront: z.string().regex(/^[a-z]{2}$/).nullable().default(null),
   expectedPlaylists: z.number().int().min(0).max(PLAYLIST_SYNC_MAX_PLAYLISTS),
   expectedEntries: z.number().int().min(0).max(PLAYLIST_SYNC_MAX_ENTRIES),
 }).strict()
 
 export const beginPlaylistSyncSchema = beginPlaylistSyncObject.superRefine((value, context) => {
-  if (value.storefront == null && value.source !== 'spotify_export') {
+  const spotify = value.source === 'spotify_export'
+  if (spotify && value.storefront != null) {
+    context.addIssue({
+      code: 'custom',
+      path: ['storefront'],
+      message: 'storefront must be null for a Spotify export',
+    })
+  } else if (!spotify && value.storefront == null) {
     context.addIssue({
       code: 'custom',
       path: ['storefront'],

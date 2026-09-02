@@ -152,15 +152,29 @@ describe('playlist ingest contracts', () => {
     }).storefront).toBeNull()
   })
 
+  const storefrontIssuePaths = (over: Record<string, unknown>) => {
+    const result = beginPlaylistSyncSchema.safeParse({
+      expectedPlaylists: 0, expectedEntries: 0, ...over,
+    })
+    return result.success ? [] : result.error.issues.map((issue) => issue.path)
+  }
+
   it.each([
     { source: 'ios_native' },
     { source: 'web_musickit' },
     { source: 'web_musickit', storefront: null },
     {},
   ])('requires a storefront for Apple sources %j', (over) => {
-    expect(() => beginPlaylistSyncSchema.parse({
-      expectedPlaylists: 0, expectedEntries: 0, ...over,
-    })).toThrow()
+    expect(storefrontIssuePaths(over)).toEqual([['storefront']])
+  })
+
+  it.each([
+    { source: 'spotify_export', storefront: 'ng' },
+    { source: 'spotify_export', storefront: 'us' },
+  ])('rejects a storefront on a Spotify export begin %j', (over) => {
+    // A Spotify run must never carry a storefront: begin() would write it
+    // over the listener's Apple storefront.
+    expect(storefrontIssuePaths(over)).toEqual([['storefront']])
   })
 
   it('carries a nullable Spotify id on entries and defaults it to null', () => {

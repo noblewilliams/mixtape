@@ -20,6 +20,7 @@ import { createTestDb, type TestDb } from '../helpers/db'
 const now = new Date('2026-08-31T12:00:00.000Z')
 const SPOTIFY_ID_A = '4uLU6hMCjMI75M1A2tKUQC'
 const SPOTIFY_ID_B = '7ouMYWpwJ422jRcDASZB7P'
+const SPOTIFY_ID_C = '1301WleyT98MSxVHPZCA6M'
 // Spotify playlists carry no platform id; the client keys them by fingerprint.
 const KEY = 'c'.repeat(64)
 
@@ -352,6 +353,105 @@ describe('PlaylistSyncStore', () => {
     const [profile] = await db.select().from(userMusicProfiles)
     expect(profile.appleStorefront).toBeNull()
     expect(profile.playlistsSyncedAt?.getTime()).toBe(now.getTime())
+  })
+
+  it('re-links and re-snapshots Spotify entries by position slot on a shifted resync', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const [spotifyTrack, isrcTrack, newTrack] = await db.insert(tracks).values([
+      { spotifyId: SPOTIFY_ID_A, isrc: 'USABC1234567', title: 'Spotify', artist: 'A' },
+      { spotifyId: null, isrc: 'GBABC1234567', title: 'ISRC', artist: 'B' },
+      { spotifyId: SPOTIFY_ID_C, isrc: null, title: 'New', artist: 'C' },
+    ]).returning()
+    const store = createPlaylistSyncStore(db, { now: () => now })
+    const spotifyPlaylist = (entryCount: number) =>
+      playlist({ appleLibraryId: KEY, kind: 'user', canEdit: false, entryCount })
+    const first = await store.begin('u1', null, 1, 4, 'spotify_export')
+    await store.putPlaylists('u1', first.syncId, [spotifyPlaylist(4)])
+    await store.putEntries('u1', first.syncId, KEY, [
+      spotifyEntry(0, { spotifyId: SPOTIFY_ID_A, titleSnapshot: 'T0' }),
+      spotifyEntry(1, { spotifyId: SPOTIFY_ID_A, isrcSnapshot: 'GBABC1234567', titleSnapshot: 'T1' }),
+      spotifyEntry(2, { spotifyId: SPOTIFY_ID_B, isrcSnapshot: 'GBABC1234567', titleSnapshot: 'T2' }),
+      spotifyEntry(3, { spotifyId: null, titleSnapshot: 'T3' }),
+    ])
+    await store.complete('u1', first.syncId)
+    const before = await db.select().from(playlistEntries).orderBy(playlistEntries.position)
+    expect(before.map((row) => row.trackId))
+      .toEqual([spotifyTrack.id, spotifyTrack.id, isrcTrack.id, null])
+
+    // The listener prepends a song. Spotify entry ids are `key:position`, so
+    // every existing id now names the song that sat one slot earlier: the
+    // canonical row per slot survives, but its Spotify id, snapshot, and link
+    // all have to move with the song.
+    const second = await store.begin('u1', null, 1, 5, 'spotify_export')
+    await store.putPlaylists('u1', second.syncId, [spotifyPlaylist(5)])
+    await store.putEntries('u1', second.syncId, KEY, [
+      spotifyEntry(0, { spotifyId: SPOTIFY_ID_C, titleSnapshot: 'New' }),
+      spotifyEntry(1, { spotifyId: SPOTIFY_ID_A, titleSnapshot: 'T0' }),
+      spotifyEntry(2, { spotifyId: SPOTIFY_ID_A, isrcSnapshot: 'GBABC1234567', titleSnapshot: 'T1' }),
+      spotifyEntry(3, { spotifyId: SPOTIFY_ID_B, isrcSnapshot: 'GBABC1234567', titleSnapshot: 'T2' }),
+      spotifyEntry(4, { spotifyId: null, titleSnapshot: 'T3' }),
+    ])
+    await expect(store.complete('u1', second.syncId)).resolves.toEqual({
+      playlists: 1, entries: 5, resolvedEntries: 4, unresolvedEntries: 1,
+    })
+
+    const after = await db.select().from(playlistEntries).orderBy(playlistEntries.position)
+    expect(after).toHaveLength(before.length + 1)
+    expect(after.map((row) => row.position)).toEqual([0, 1, 2, 3, 4])
+    expect(after.map((row) => row.appleLibraryEntryId))
+      .toEqual([`${KEY}:0`, `${KEY}:1`, `${KEY}:2`, `${KEY}:3`, `${KEY}:4`])
+    expect(after.slice(0, 4).map((row) => row.id)).toEqual(before.map((row) => row.id))
+    expect(before.map((row) => row.id)).not.toContain(after[4].id)
+    expect(after.map((row) => row.spotifyId))
+      .toEqual([SPOTIFY_ID_C, SPOTIFY_ID_A, SPOTIFY_ID_A, SPOTIFY_ID_B, null])
+    expect(after.map((row) => row.titleSnapshot)).toEqual(['New', 'T0', 'T1', 'T2', 'T3'])
+    expect(after.map((row) => row.isrcSnapshot))
+      .toEqual([null, null, 'GBABC1234567', 'GBABC1234567', null])
+    // Slot 2 moves from the ISRC fallback to the Spotify id; slot 3 from
+    // name-only to the ISRC fallback.
+    expect(after.map((row) => row.trackId))
+      .toEqual([newTrack.id, spotifyTrack.id, spotifyTrack.id, isrcTrack.id, null])
+    expect((await db.select().from(userMusicProfiles))[0].appleStorefront).toBeNull()
+  })
+
+  it('links a catalog id ahead of a Spotify id that names a different track', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const [catalogTrack, spotifyTrack] = await db.insert(tracks).values([
+      { appleId: 'catalog-1', title: 'Catalog', artist: 'A' },
+      { spotifyId: SPOTIFY_ID_A, title: 'Spotify', artist: 'B' },
+    ]).returning()
+    const store = createPlaylistSyncStore(db, { now: () => now })
+    const one = playlist({ entryCount: 1 })
+    const first = await store.begin('u1', 'ng', 1, 1)
+    await store.putPlaylists('u1', first.syncId, [one])
+    await store.putEntries('u1', first.syncId, 'p-1', [entry({ spotifyId: SPOTIFY_ID_A })])
+    await store.complete('u1', first.syncId)
+    expect((await db.select().from(playlistEntries)).map((row) => row.trackId))
+      .toEqual([spotifyTrack.id])
+
+    // The same entry gains a catalog pin on resync: the Apple row wins on the
+    // update path just as it does on insert.
+    const second = await store.begin('u1', 'ng', 1, 1)
+    await store.putPlaylists('u1', second.syncId, [one])
+    await store.putEntries('u1', second.syncId, 'p-1', [
+      entry({ appleCatalogId: 'catalog-1', spotifyId: SPOTIFY_ID_A }),
+    ])
+    await expect(store.complete('u1', second.syncId))
+      .resolves.toMatchObject({ entries: 1, resolvedEntries: 1 })
+    expect((await db.select().from(playlistEntries)).map((row) => row.trackId))
+      .toEqual([catalogTrack.id])
+
+    const third = await store.begin('u1', 'ng', 1, 1)
+    await store.putPlaylists('u1', third.syncId, [playlist({ entryCount: 1, appleLibraryId: 'p-2' })])
+    await store.putEntries('u1', third.syncId, 'p-2', [
+      entry({ appleLibraryEntryId: 'entry-9', appleCatalogId: 'catalog-1', spotifyId: SPOTIFY_ID_A }),
+    ])
+    await store.complete('u1', third.syncId)
+    const inserted = await db.select().from(playlistEntries)
+      .where(eq(playlistEntries.appleLibraryEntryId, 'entry-9'))
+    expect(inserted.map((row) => row.trackId)).toEqual([catalogTrack.id])
   })
 
   it('rejects a null storefront for Apple sources without opening a run', async () => {

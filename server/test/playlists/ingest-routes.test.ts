@@ -1,6 +1,9 @@
+import { Hono } from 'hono'
 import { describe, expect, it } from 'vitest'
-import { createApp, type AuthLike } from '../../src/app'
-import { user } from '../../src/db/schema'
+import { createApp, type AppVars, type AuthLike } from '../../src/app'
+import { playlistSyncRuns, user, userMusicProfiles } from '../../src/db/schema'
+import { PlaylistSyncError, type PlaylistSyncStore } from '../../src/playlists/sync-store'
+import { playlistIngestRoutes } from '../../src/routes/playlist-ingest'
 import { createTestDb, type TestDb } from '../helpers/db'
 
 const authFor = (id: string | null): AuthLike => ({
@@ -209,5 +212,44 @@ describe('playlist ingest routes', () => {
       expectedPlaylists: 0, expectedEntries: 0, ...over,
     })
     expect(response.status).toBe(400)
+  })
+
+  it('rejects a Spotify export begin that carries a storefront before any store work', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const response = await request(db, authFor('u1'), '/ingest/playlists/syncs', 'POST', {
+      source: 'spotify_export', storefront: 'ng', expectedPlaylists: 0, expectedEntries: 0,
+    })
+    expect(response.status).toBe(400)
+    // The contract stops it: no run opens and no profile row is touched, so
+    // a Spotify sync can never overwrite the listener's Apple storefront.
+    expect(await db.select().from(playlistSyncRuns)).toEqual([])
+    expect(await db.select().from(userMusicProfiles)).toEqual([])
+  })
+
+  it('maps a store invalid_storefront rejection to a 400', async () => {
+    const db = await createTestDb()
+    const fail = async () => { throw new Error('unexpected store call') }
+    const store: PlaylistSyncStore = {
+      begin: async () => { throw new PlaylistSyncError('invalid_storefront') },
+      putPlaylists: fail,
+      putEntries: fail,
+      complete: fail,
+    }
+    // The routes alone with a session already resolved, so the stub drives
+    // the error mapping with a body the contract itself accepts.
+    const app = new Hono<{ Variables: AppVars }>()
+    app.use('*', async (c, next) => {
+      c.set('user', { id: 'u1' })
+      await next()
+    })
+    app.route('/ingest', playlistIngestRoutes(db, store))
+    const response = await app.request('http://x/ingest/playlists/syncs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ storefront: 'ng', expectedPlaylists: 0, expectedEntries: 0 }),
+    })
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: 'invalid_storefront' })
   })
 })
