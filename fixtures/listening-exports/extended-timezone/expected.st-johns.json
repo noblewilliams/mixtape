@@ -12,7 +12,7 @@
   "snapshot": {
     "source": "spotify_export",
     "package": "spotify_extended",
-    "timeZone": "Africa/Lagos",
+    "timeZone": "America/St_Johns",
     "country": "NG",
     "tracks": [
       {
@@ -52,7 +52,7 @@
         "skips": 0,
         "completes": 2,
         "msPlayed": 428000,
-        "hoursMask": 3072
+        "hoursMask": 384
       },
       {
         "platformId": "KiteSeason000000000001",
@@ -61,7 +61,7 @@
         "skips": 0,
         "completes": 1,
         "msPlayed": 180000,
-        "hoursMask": 64
+        "hoursMask": 8
       },
       {
         "platformId": "KiteSeason000000000001",
@@ -70,25 +70,25 @@
         "skips": 0,
         "completes": 1,
         "msPlayed": 180000,
-        "hoursMask": 32
+        "hoursMask": 2
       },
       {
         "platformId": "PaperLanterns000000001",
-        "day": "2025-06-11",
+        "day": "2025-06-10",
         "plays": 2,
         "skips": 0,
         "completes": 2,
         "msPlayed": 403000,
-        "hoursMask": 3
+        "hoursMask": 6291456
       },
       {
         "platformId": "SaltAndStatic000000001",
-        "day": "2025-01-11",
+        "day": "2025-01-10",
         "plays": 2,
         "skips": 0,
         "completes": 2,
         "msPlayed": 380000,
-        "hoursMask": 3
+        "hoursMask": 3145728
       }
     ],
     "library": [],
@@ -98,7 +98,7 @@
       "rows": 0,
       "plays": 0
     },
-    "ledgerFrom": "2025-01-11",
+    "ledgerFrom": "2025-01-10",
     "ledgerTo": "2025-11-02"
   }
 }

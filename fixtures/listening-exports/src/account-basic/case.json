@@ -28,6 +28,24 @@
             "album": "Signal Fires",
             "track": "Kite Season",
             "uri": "spotify:track:KiteSeason000000000001"
+          },
+          {
+            "artist": "Basement Sessions",
+            "album": null,
+            "track": null,
+            "uri": "spotify:track:NoName0000000000000001"
+          },
+          {
+            "artist": "Basement Sessions",
+            "album": "Demos 2025",
+            "track": "Rehearsal Take 3",
+            "uri": "spotify:local:Basement+Sessions:Demos+2025:Rehearsal+Take+3:240"
+          },
+          {
+            "artist": "Ivory Kestrel",
+            "album": null,
+            "track": "Halfway Home",
+            "uri": null
           }
         ],
         "albums": [

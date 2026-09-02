@@ -9,6 +9,10 @@
       {
         "path": "Spotify Extended Streaming History/Streaming_History_Audio_2025-2026_1.json",
         "rows": 5
+      },
+      {
+        "path": "Spotify Extended Streaming History/Streaming_History_Audio_2026_2.json",
+        "rows": 9
       }
     ],
     "ignored": []
@@ -19,6 +23,13 @@
     "timeZone": "Africa/Lagos",
     "country": "NG",
     "tracks": [
+      {
+        "platformId": "HalfwayHome00000000001",
+        "title": "Halfway Home",
+        "artist": "Ivory Kestrel",
+        "album": null,
+        "durationMs": null
+      },
       {
         "platformId": "LowTideRadio0000000001",
         "title": "Low Tide Radio",
@@ -34,14 +45,46 @@
         "durationMs": 187000
       },
       {
+        "platformId": "Nameless00000000000001",
+        "title": "Nameless00000000000001",
+        "artist": "Unknown Artist",
+        "album": null,
+        "durationMs": 120000
+      },
+      {
         "platformId": "PaperLanterns000000001",
         "title": "Paper Lanterns",
         "artist": "Meridian Vale",
         "album": "Glasswork",
         "durationMs": 201500
+      },
+      {
+        "platformId": "ShortReprise0000000001",
+        "title": "Short Reprise",
+        "artist": "Juniper Ashby",
+        "album": "Field Notes",
+        "durationMs": 25000
       }
     ],
     "days": [
+      {
+        "platformId": "HalfwayHome00000000001",
+        "day": "2026-04-03",
+        "plays": 1,
+        "skips": 1,
+        "completes": 0,
+        "msPlayed": 90000,
+        "hoursMask": 1024
+      },
+      {
+        "platformId": "HalfwayHome00000000001",
+        "day": "2026-04-05",
+        "plays": 0,
+        "skips": 1,
+        "completes": 0,
+        "msPlayed": 10000,
+        "hoursMask": 0
+      },
       {
         "platformId": "LowTideRadio0000000001",
         "day": "2024-03-02",
@@ -61,6 +104,15 @@
         "hoursMask": 524288
       },
       {
+        "platformId": "LowTideRadio0000000001",
+        "day": "2026-04-03",
+        "plays": 0,
+        "skips": 1,
+        "completes": 0,
+        "msPlayed": 20000,
+        "hoursMask": 0
+      },
+      {
         "platformId": "LowTideRadio0000000002",
         "day": "2025-01-15",
         "plays": 1,
@@ -77,6 +129,15 @@
         "completes": 0,
         "msPlayed": 59999,
         "hoursMask": 64
+      },
+      {
+        "platformId": "Nameless00000000000001",
+        "day": "2026-04-01",
+        "plays": 1,
+        "skips": 0,
+        "completes": 1,
+        "msPlayed": 120000,
+        "hoursMask": 1024
       },
       {
         "platformId": "PaperLanterns000000001",
@@ -113,6 +174,15 @@
         "completes": 0,
         "msPlayed": 31000,
         "hoursMask": 1
+      },
+      {
+        "platformId": "PaperLanterns000000001",
+        "day": "2026-04-02",
+        "plays": 1,
+        "skips": 1,
+        "completes": 1,
+        "msPlayed": 45000,
+        "hoursMask": 8192
       }
     ],
     "library": [],
@@ -123,6 +193,6 @@
       "plays": 0
     },
     "ledgerFrom": "2024-03-02",
-    "ledgerTo": "2026-02-01"
+    "ledgerTo": "2026-04-05"
   }
 }

@@ -37,8 +37,33 @@
             ],
             "description": null,
             "numberOfFollowers": 0
+          },
+          {
+            "name": "Unsorted Shelf",
+            "lastModifiedDate": "2026-05-06",
+            "description": null,
+            "numberOfFollowers": 0
           }
         ]
+      }
+    },
+    {
+      "path": "Spotify Account Data/YourLibrary.json",
+      "json": {
+        "tracks": [
+          {
+            "artist": "Meridian Vale",
+            "album": "Glasswork",
+            "track": "Salt and Static",
+            "uri": "spotify:track:SaltAndStatic000000001"
+          }
+        ],
+        "albums": [],
+        "shows": [],
+        "episodes": [],
+        "bannedTracks": [],
+        "bannedArtists": [],
+        "other": []
       }
     }
   ],

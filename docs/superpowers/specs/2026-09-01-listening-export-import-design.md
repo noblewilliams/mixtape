@@ -268,18 +268,20 @@ iOS specifics:
 - Any new Swift file needs pbxproj target membership (recurring lesson, see CLAUDE.md).
 - The Spotify archive is tens of megabytes and parses comfortably on a phone. The Apple archive is the reason the Apple adapter is web-first.
 
-Snapshot contract:
+Snapshot contract. The normative form is `fixtures/listening-exports/README.md`
+(key orders, canonical row order, fallbacks, and every interpretation, each
+pinned by a fixture); the shape is:
 
 ```ts
 type ListeningExportSnapshot = {
   source: 'spotify_export' | 'apple_export'
+  package: 'spotify_extended' | 'spotify_account'          // Apple: to be defined with the Apple adapter
   timeZone: string
-  country: string | null
+  country: string | null                                    // most common `conn_country` among kept rows, `^[A-Z]{2}$`
   tracks: { platformId: string; title: string; artist: string; album: string | null; durationMs: number | null }[]
-  days: { platformId: string; day: string /* YYYY-MM-DD */; plays: number; skips: number | null; completes: number | null; msPlayed: number; hoursMask: number | null }[]
-  library: { platformId: string; playCount: number | null; skipCount: number | null; lastPlayedAt: number | null; dateAdded: number | null; likeRating: -1 | 0 | 1 | null }[]  // Apple only
-  likedTrackIds: string[]                                   // Spotify account data
-  followedArtists: { name: string; spotifyId: string }[]     // Spotify account data
+  days: { platformId: string; day: string /* YYYY-MM-DD */; plays: number; skips: number; completes: number; msPlayed: number; hoursMask: number }[]
+  library: { platformId: string; playCount: number | null; skipCount: number | null; lastPlayedAt: number | null; dateAdded: number | null; likeRating: -1 | 0 | 1 | null }[]  // Spotify: one row per liked track, counts null; Apple: from Library Tracks
+  artists: { name: string; spotifyId: string | null }[]     // followed artists (Spotify account data)
   playlists: {                                               // Spotify account data
     ordinal: number; key: string; name: string; description: string | null; lastModifiedAt: number | null
     entries: { position: number; platformId: string | null; title: string; artist: string; album: string | null; addedAt: number | null }[]
@@ -288,7 +290,16 @@ type ListeningExportSnapshot = {
   ledgerFrom: string | null
   ledgerTo: string | null
 }
+```
 
+Keys are serialized in exactly that order; `tracks`, `days`, `library` sort by
+`platformId` (then `day`), `artists` by `name` then `spotifyId` (null last),
+`playlists` by `ordinal`, `entries` by `position`. Names are never empty: a
+track title falls back to its platform id, an artist to `Unknown Artist`, a
+playlist name to `Untitled`; every number is an integer. A parser and the
+fixture builder must produce byte-identical canonical JSON.
+
+```ts
 type ExportDiagnostics = {
   source: 'spotify_export' | 'apple_export' | 'unknown'
   files: { path: string; bytes: number; rows: number | null; headers: string[] | null }[]

@@ -66,6 +66,36 @@
             ],
             "description": "Tracks, a demo, and a podcast episode in one list.",
             "numberOfFollowers": 0
+          },
+          {
+            "name": null,
+            "lastModifiedDate": "2026-06-21",
+            "items": [
+              {
+                "track": {
+                  "trackName": null,
+                  "artistName": null,
+                  "albumName": null,
+                  "trackUri": "spotify:track:SaltAndStatic000000001"
+                },
+                "episode": null,
+                "localTrack": null,
+                "addedDate": "2026-06-21"
+              },
+              {
+                "track": null,
+                "episode": null,
+                "localTrack": {
+                  "trackName": null,
+                  "artistName": null,
+                  "albumName": null,
+                  "uri": "spotify:local::::0"
+                },
+                "addedDate": null
+              }
+            ],
+            "description": null,
+            "numberOfFollowers": 0
           }
         ]
       }

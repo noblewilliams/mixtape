@@ -2,7 +2,7 @@
   "package": "spotify_account",
   "entries": [
     {
-      "path": "Spotify Account Data/YourLibrary.json",
+      "path": "Spotify Account Data/yourlibrary.json",
       "json": {
         "tracks": [
           {

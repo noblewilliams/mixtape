@@ -67,6 +67,10 @@
           }
         ]
       }
+    },
+    {
+      "path": "__MACOSX/._YourLibrary.json",
+      "sentinel": true
     }
   ],
   "options": [

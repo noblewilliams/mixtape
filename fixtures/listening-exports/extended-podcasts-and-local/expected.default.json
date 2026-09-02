@@ -4,7 +4,7 @@
     "read": [
       {
         "path": "Spotify Extended Streaming History/Streaming_History_Audio_2025-2026_0.json",
-        "rows": 9
+        "rows": 10
       }
     ],
     "ignored": []
@@ -48,6 +48,15 @@
         "completes": 1,
         "msPlayed": 214000,
         "hoursMask": 1024
+      },
+      {
+        "platformId": "Cartographer0000000001",
+        "day": "2025-04-08",
+        "plays": 1,
+        "skips": 0,
+        "completes": 1,
+        "msPlayed": 214000,
+        "hoursMask": 1024
       }
     ],
     "library": [],
@@ -58,6 +67,6 @@
       "plays": 2
     },
     "ledgerFrom": "2025-04-05",
-    "ledgerTo": "2025-04-07"
+    "ledgerTo": "2025-04-08"
   }
 }

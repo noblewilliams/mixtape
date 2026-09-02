@@ -1,0 +1,20 @@
+{
+  "inventory": {
+    "package": "spotify_extended",
+    "read": [
+      {
+        "path": "Spotify Extended Streaming History/Streaming_History_Audio_2025_0.json",
+        "rows": 1
+      },
+      {
+        "path": "Spotify Extended Streaming History/Streaming_History_Audio_2025_1.json",
+        "rows": null
+      }
+    ],
+    "ignored": []
+  },
+  "error": {
+    "code": "unreadable",
+    "file": "Streaming_History_Audio_2025_1.json"
+  }
+}

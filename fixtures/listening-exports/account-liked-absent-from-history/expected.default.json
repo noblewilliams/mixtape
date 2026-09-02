@@ -3,7 +3,7 @@
     "package": "spotify_account",
     "read": [
       {
-        "path": "Spotify Account Data/YourLibrary.json",
+        "path": "Spotify Account Data/yourlibrary.json",
         "rows": 3
       }
     ],

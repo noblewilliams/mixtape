@@ -4,7 +4,7 @@
     "read": [
       {
         "path": "Spotify Extended Streaming History/Streaming_History_Audio_2025_0.json",
-        "rows": 6
+        "rows": 8
       }
     ],
     "ignored": []
@@ -21,6 +21,13 @@
         "artist": "Juniper Ashby",
         "album": "Field Notes",
         "durationMs": 214000
+      },
+      {
+        "platformId": "KiteSeason000000000001",
+        "title": "Kite Season",
+        "artist": "Ivory Kestrel",
+        "album": "Signal Fires",
+        "durationMs": 180000
       },
       {
         "platformId": "PaperLanterns000000001",
@@ -46,6 +53,24 @@
         "completes": 2,
         "msPlayed": 428000,
         "hoursMask": 10
+      },
+      {
+        "platformId": "KiteSeason000000000001",
+        "day": "2025-03-08",
+        "plays": 1,
+        "skips": 0,
+        "completes": 1,
+        "msPlayed": 180000,
+        "hoursMask": 2097152
+      },
+      {
+        "platformId": "KiteSeason000000000001",
+        "day": "2025-11-01",
+        "plays": 1,
+        "skips": 0,
+        "completes": 1,
+        "msPlayed": 180000,
+        "hoursMask": 2097152
       },
       {
         "platformId": "PaperLanterns000000001",
@@ -74,6 +99,6 @@
       "plays": 0
     },
     "ledgerFrom": "2025-01-10",
-    "ledgerTo": "2025-06-10"
+    "ledgerTo": "2025-11-01"
   }
 }

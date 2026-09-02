@@ -4,7 +4,7 @@
     "read": [
       {
         "path": "Spotify Account Data/Playlist1.json",
-        "rows": 5
+        "rows": 7
       }
     ],
     "ignored": []
@@ -20,6 +20,13 @@
         "title": "Cartographer",
         "artist": "Juniper Ashby",
         "album": "Field Notes",
+        "durationMs": null
+      },
+      {
+        "platformId": "SaltAndStatic000000001",
+        "title": "SaltAndStatic000000001",
+        "artist": "Unknown Artist",
+        "album": null,
         "durationMs": null
       },
       {
@@ -82,10 +89,35 @@
             "addedAt": 1781913600000
           }
         ]
+      },
+      {
+        "ordinal": 1,
+        "key": "2e315bf9efc55d78951256e9c0bd223bf2c5d0d21fd3ed914c752c8d2896a07d",
+        "name": "Untitled",
+        "description": null,
+        "lastModifiedAt": 1782000000000,
+        "entries": [
+          {
+            "position": 0,
+            "platformId": "SaltAndStatic000000001",
+            "title": "SaltAndStatic000000001",
+            "artist": "Unknown Artist",
+            "album": null,
+            "addedAt": 1782000000000
+          },
+          {
+            "position": 1,
+            "platformId": null,
+            "title": "Untitled",
+            "artist": "Unknown Artist",
+            "album": null,
+            "addedAt": null
+          }
+        ]
       }
     ],
     "unresolved": {
-      "rows": 3,
+      "rows": 4,
       "plays": 0
     },
     "ledgerFrom": null,

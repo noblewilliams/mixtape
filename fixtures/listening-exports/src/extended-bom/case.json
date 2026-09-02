@@ -1,0 +1,16 @@
+{
+  "package": "spotify_extended",
+  "entries": [
+    {
+      "path": "Spotify Extended Streaming History/Streaming_History_Audio_2025_0.json",
+      "text": "\ufeff[\n  {\n    \"ts\": \"2025-08-01T12:00:00Z\",\n    \"platform\": \"android\",\n    \"ms_played\": 180000,\n    \"conn_country\": \"NG\",\n    \"ip_addr\": \"203.0.113.7\",\n    \"master_metadata_track_name\": \"Kite Season\",\n    \"master_metadata_album_artist_name\": \"Ivory Kestrel\",\n    \"master_metadata_album_album_name\": \"Signal Fires\",\n    \"spotify_track_uri\": \"spotify:track:KiteSeason000000000001\",\n    \"episode_name\": null,\n    \"episode_show_name\": null,\n    \"spotify_episode_uri\": null,\n    \"audiobook_title\": null,\n    \"audiobook_uri\": null,\n    \"audiobook_chapter_uri\": null,\n    \"audiobook_chapter_title\": null,\n    \"reason_start\": \"clickrow\",\n    \"reason_end\": \"trackdone\",\n    \"shuffle\": false,\n    \"skipped\": false,\n    \"offline\": false,\n    \"offline_timestamp\": null,\n    \"incognito_mode\": false\n  }\n]\n"
+    }
+  ],
+  "options": [
+    {
+      "name": "default",
+      "timeZone": "Africa/Lagos",
+      "includePrivateSessions": false
+    }
+  ]
+}

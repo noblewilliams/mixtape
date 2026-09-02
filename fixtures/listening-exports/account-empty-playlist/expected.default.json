@@ -9,6 +9,10 @@
       {
         "path": "Spotify Account Data/Playlist2.json",
         "rows": 1
+      },
+      {
+        "path": "Spotify Account Data/YourLibrary.json",
+        "rows": 1
       }
     ],
     "ignored": []
@@ -28,7 +32,16 @@
       }
     ],
     "days": [],
-    "library": [],
+    "library": [
+      {
+        "platformId": "SaltAndStatic000000001",
+        "playCount": null,
+        "skipCount": null,
+        "lastPlayedAt": null,
+        "dateAdded": null,
+        "likeRating": null
+      }
+    ],
     "artists": [],
     "playlists": [
       {
@@ -55,6 +68,14 @@
             "addedAt": 1777939200000
           }
         ]
+      },
+      {
+        "ordinal": 2,
+        "key": "bc38712f4a90f41ed2c7a3866c53bc70398c3e26172f7acd7d9de66e829b89b0",
+        "name": "Unsorted Shelf",
+        "description": null,
+        "lastModifiedAt": 1778025600000,
+        "entries": []
       }
     ],
     "unresolved": {

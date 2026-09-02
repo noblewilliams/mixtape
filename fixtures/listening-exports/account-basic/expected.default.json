@@ -8,7 +8,7 @@
       },
       {
         "path": "Spotify Account Data/YourLibrary.json",
-        "rows": 6
+        "rows": 9
       }
     ],
     "ignored": [
@@ -53,6 +53,13 @@
         "durationMs": null
       },
       {
+        "platformId": "NoName0000000000000001",
+        "title": "NoName0000000000000001",
+        "artist": "Basement Sessions",
+        "album": null,
+        "durationMs": null
+      },
+      {
         "platformId": "PaperLanterns000000001",
         "title": "Paper Lanterns",
         "artist": "Meridian Vale",
@@ -87,6 +94,14 @@
       },
       {
         "platformId": "LowTideRadio0000000001",
+        "playCount": null,
+        "skipCount": null,
+        "lastPlayedAt": null,
+        "dateAdded": null,
+        "likeRating": null
+      },
+      {
+        "platformId": "NoName0000000000000001",
         "playCount": null,
         "skipCount": null,
         "lastPlayedAt": null,

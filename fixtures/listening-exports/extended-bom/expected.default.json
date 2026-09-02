@@ -1,0 +1,47 @@
+{
+  "inventory": {
+    "package": "spotify_extended",
+    "read": [
+      {
+        "path": "Spotify Extended Streaming History/Streaming_History_Audio_2025_0.json",
+        "rows": 1
+      }
+    ],
+    "ignored": []
+  },
+  "snapshot": {
+    "source": "spotify_export",
+    "package": "spotify_extended",
+    "timeZone": "Africa/Lagos",
+    "country": "NG",
+    "tracks": [
+      {
+        "platformId": "KiteSeason000000000001",
+        "title": "Kite Season",
+        "artist": "Ivory Kestrel",
+        "album": "Signal Fires",
+        "durationMs": 180000
+      }
+    ],
+    "days": [
+      {
+        "platformId": "KiteSeason000000000001",
+        "day": "2025-08-01",
+        "plays": 1,
+        "skips": 0,
+        "completes": 1,
+        "msPlayed": 180000,
+        "hoursMask": 8192
+      }
+    ],
+    "library": [],
+    "artists": [],
+    "playlists": [],
+    "unresolved": {
+      "rows": 0,
+      "plays": 0
+    },
+    "ledgerFrom": "2025-08-01",
+    "ledgerTo": "2025-08-01"
+  }
+}

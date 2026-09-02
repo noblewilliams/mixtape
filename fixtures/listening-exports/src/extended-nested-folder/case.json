@@ -58,7 +58,8 @@
           "offline_timestamp": null,
           "incognito_mode": false
         }
-      ]
+      ],
+      "dataDescriptor": true
     },
     {
       "path": "my_spotify_data/Spotify Extended Streaming History/Streaming_History_Video_2024-2025.json",
@@ -83,6 +84,18 @@
         "bannedArtists": [],
         "other": []
       }
+    },
+    {
+      "path": "my_spotify_data/",
+      "directory": true
+    },
+    {
+      "path": "my_spotify_data/Spotify Account Data/",
+      "directory": true
+    },
+    {
+      "path": "my_spotify_data/Spotify Extended Streaming History/",
+      "directory": true
     }
   ],
   "options": [
