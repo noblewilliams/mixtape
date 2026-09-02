@@ -134,6 +134,13 @@
       "when": 1788294036431,
       "tag": "0018_easy_gwen_stacy",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1788296791918,
+      "tag": "0019_clear_albert_cleary",
+      "breakpoints": true
     }
   ]
 }

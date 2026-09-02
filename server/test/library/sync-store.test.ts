@@ -6,6 +6,7 @@ import {
   tracks,
   user,
   userMusicProfiles,
+  userMusicSources,
   userRecentTrackObservations,
   userTracks,
 } from '../../src/db/schema'
@@ -183,6 +184,32 @@ describe('LibrarySyncStore', () => {
     await expect(store.complete('u1', syncId)).rejects.toMatchObject({ category: 'count_mismatch' })
     expect(await db.select().from(tracks)).toEqual([])
     expect((await db.select().from(userMusicProfiles))[0].librarySyncedAt).toBeNull()
+  })
+
+  it('registers the live Apple source when a sync completes', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const store = createLibrarySyncStore(db, { now: () => now })
+    const first = await store.begin('u1', 'web_musickit', 'ng', 1)
+    await store.putSongs('u1', first.syncId, [song()])
+    await store.complete('u1', first.syncId)
+
+    let sources = await db.select().from(userMusicSources)
+    expect(sources).toMatchObject([{ userId: 'u1', source: 'apple_live', ledgerFrom: null, ledgerTo: null }])
+    expect(sources[0].connectedAt.getTime()).toBe(now.getTime())
+    expect(sources[0].lastImportedAt?.getTime()).toBe(now.getTime())
+
+    const later = new Date(now.getTime() + 60_000)
+    const laterStore = createLibrarySyncStore(db, { now: () => later })
+    const second = await laterStore.begin('u1', 'web_musickit', 'ng', 1)
+    await laterStore.putSongs('u1', second.syncId, [song()])
+    await laterStore.complete('u1', second.syncId)
+
+    sources = await db.select().from(userMusicSources)
+    expect(sources).toHaveLength(1)
+    expect(sources[0].connectedAt.getTime()).toBe(now.getTime())
+    expect(sources[0].lastImportedAt?.getTime()).toBe(later.getTime())
+    expect(sources[0].updatedAt.getTime()).toBe(later.getTime())
   })
 
   it('hides cross-tenant runs, expires replaced runs, and rejects expired writes', async () => {

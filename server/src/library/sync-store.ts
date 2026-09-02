@@ -5,6 +5,7 @@ import {
   librarySyncSongs,
   librarySyncRecentTracks,
   userMusicProfiles,
+  userMusicSources,
   userRecentTrackObservations,
 } from '../db/schema'
 import type { LibrarySongSnapshot, LibrarySyncSource } from './contracts'
@@ -389,6 +390,20 @@ export function createLibrarySyncStore(db: Db, deps: StoreDeps = {}): LibrarySyn
         await tx.update(userMusicProfiles)
           .set({ appleStorefront: run.appleStorefront, librarySyncedAt: now, updatedAt: now })
           .where(eq(userMusicProfiles.userId, userId))
+        // A live library is a music source too, so pool mode sees synced
+        // listeners the same way it sees imported ones.
+        await tx.insert(userMusicSources)
+          .values({
+            userId,
+            source: 'apple_live',
+            connectedAt: now,
+            lastImportedAt: now,
+            updatedAt: now,
+          })
+          .onConflictDoUpdate({
+            target: [userMusicSources.userId, userMusicSources.source],
+            set: { lastImportedAt: now, updatedAt: now },
+          })
         await deps.beforeCommit?.()
         await tx.update(librarySyncRuns).set({
           status: 'completed',

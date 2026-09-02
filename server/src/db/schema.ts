@@ -644,6 +644,11 @@ export const listeningImportRuns = pgTable(
     resultDays: integer('result_days'),
     resultLibraryTracks: integer('result_library_tracks'),
     resultArtists: integer('result_artists'),
+    // Spotify account re-import: liked rows marked out of the library, or
+    // skipped (and why the summary says so) for listeners with a live Apple
+    // library, whose in_library the library sync owns.
+    resultLikedRemoved: integer('result_liked_removed'),
+    resultLikedRemovalSkipped: boolean('result_liked_removal_skipped'),
     ledgerFrom: date('ledger_from', { mode: 'string' }),
     ledgerTo: date('ledger_to', { mode: 'string' }),
     startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
@@ -715,6 +720,10 @@ export const listeningImportRuns = pgTable(
       nonnegativeOrNullSql(t.resultLibraryTracks),
     ),
     check('listening_import_runs_result_artists_check', nonnegativeOrNullSql(t.resultArtists)),
+    check(
+      'listening_import_runs_result_liked_removed_check',
+      nonnegativeOrNullSql(t.resultLikedRemoved),
+    ),
   ],
 )
 

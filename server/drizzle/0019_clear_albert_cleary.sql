@@ -1,0 +1,3 @@
+ALTER TABLE "listening_import_runs" ADD COLUMN "result_liked_removed" integer;--> statement-breakpoint
+ALTER TABLE "listening_import_runs" ADD COLUMN "result_liked_removal_skipped" boolean;--> statement-breakpoint
+ALTER TABLE "listening_import_runs" ADD CONSTRAINT "listening_import_runs_result_liked_removed_check" CHECK ("listening_import_runs"."result_liked_removed" IS NULL OR "listening_import_runs"."result_liked_removed" >= 0);
