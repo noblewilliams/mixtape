@@ -107,4 +107,5 @@ Recorded from phase-1 reviews for this phase: `ApiSession.notPersonal` and `spot
 
 ## Current verification
 
-Not started.
+- Track A delivered: fixtures `d7dea60` + contract tightening `f596332` (15 cases, 56 verifier tests, gated by `server/test/fixtures/listening-exports.test.ts`); server additions `8c17832` + `320d6c1` (56 files / 1080 server tests at that point).
+- B1 (web parser) and C1 (Dart parser) in progress against the final contract.
