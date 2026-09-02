@@ -89,7 +89,11 @@ listed under "Interpretations" and is pinned by a fixture where noted.
   depth: `yourlibrary.json` and `YOURLIBRARY.JSON` match, `._YourLibrary.json`
   (a `__MACOSX` resource fork) does not. Every other entry is never read: the
   parser knows its path and its byte size (from the central directory) and
-  nothing else.
+  nothing else. "Never read" means never inflated, decoded, or parsed, and no
+  byte range of such an entry is requested on its own. One exception is
+  inherent to the format and allowed: a standard ZIP reader must load the
+  archive's trailing bytes (at most 65 557) raw to find the end-of-central-
+  directory record, and those bytes may belong to any entry.
 - Package: `spotify_extended` when any history file is present; otherwise
   `spotify_account` when a library or playlist file is present; a ZIP with
   neither is unreadable. In the extended package, library and playlist files
