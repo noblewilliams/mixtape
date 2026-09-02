@@ -40,6 +40,10 @@ async function seedTrack(
   db: TestDb,
   opts: {
     durationMs?: number
+    // Identity: an Apple id by default; `appleId: null` plus a spotifyId
+    // models a Spotify listener's export-only row.
+    appleId?: string | null
+    spotifyId?: string | null
     artwork?: {
       url: string
       width: number
@@ -53,7 +57,8 @@ async function seedTrack(
   const [t] = await db
     .insert(tracks)
     .values({
-      appleId: `apple-${label}`,
+      appleId: opts.appleId === undefined ? `apple-${label}` : opts.appleId,
+      spotifyId: opts.spotifyId ?? null,
       title: label,
       artist: 'Artist',
       durationMs: opts.durationMs ?? 200_000,
@@ -231,6 +236,20 @@ describe('queue-store', () => {
       expect(view[0].durationMs).toBe(trackList[0].durationMs)
       // trackList[1] was removed; trackList[2] renumbered to position 1.
       expect(view[1].trackId).toBe(trackList[2].id)
+    })
+
+    it('carries spotifyId alongside appleId — a Spotify-only row reads spotifyId set, appleId null', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const session = await seedSession(db, 'u1')
+      const spotifyOnly = await seedTrack(db, { appleId: null, spotifyId: '4uLU6hMCjMI75M1A2tKUQC' })
+      const appleOnly = await seedTrack(db)
+      await replaceQueue(db, session.id, picksFrom([spotifyOnly, appleOnly]), 'dj')
+
+      const view = await getActiveQueue(db, session.id)
+
+      expect(view[0]).toMatchObject({ trackId: spotifyOnly.id, appleId: null, spotifyId: '4uLU6hMCjMI75M1A2tKUQC' })
+      expect(view[1]).toMatchObject({ trackId: appleOnly.id, appleId: appleOnly.appleId, spotifyId: null })
     })
   })
 

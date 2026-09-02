@@ -7,6 +7,11 @@ export type QueueTrackView = {
   position: number
   trackId: string
   appleId: string | null
+  // Peer of appleId (db/schema.ts → tracks.spotifyId), never a replacement:
+  // a Spotify listener's export-only row carries this and no Apple id, and
+  // the queue UI renders it as "Open in Spotify" (same pairing as
+  // dj/pool.ts's PoolTrack).
+  spotifyId: string | null
   title: string
   artist: string
   reason: string | null
@@ -131,6 +136,7 @@ export async function getActiveQueue(db: Db, sessionId: string): Promise<QueueTr
       position: queueTracks.position,
       trackId: queueTracks.trackId,
       appleId: tracks.appleId,
+      spotifyId: tracks.spotifyId,
       title: tracks.title,
       artist: tracks.artist,
       reason: queueTracks.reason,

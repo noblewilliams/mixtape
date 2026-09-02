@@ -12,6 +12,7 @@ import { enrichRoutes } from './routes/enrich'
 import { sessionRoutes } from './routes/sessions'
 import { memoriesRoutes } from './routes/memories'
 import { musicSourcesRoutes } from './routes/music-sources'
+import { onboardingRoutes } from './routes/onboarding'
 import { artistSeedsRoutes } from './routes/artist-seeds'
 import { seedTracksRoutes, type SeedsWiring } from './routes/seed-tracks'
 import { interviewRoutes } from './routes/interview'
@@ -91,7 +92,7 @@ export function createApp({
   app.get('/health', (c) => c.json({ ok: true, service: 'mixtape-api' }))
   // Route groups land per docs/superpowers/specs/2026-08-29-mixtape-v1-design.md:
   //   /api/auth/* [P1]  /me [P1]  /ingest/* [P1]  /enrich/* [P2 live]  /sessions/* [P3 live]
-  //   /me/memories/* [P4 live]  /me/music-sources [listening import]
+  //   /me/memories/* [P4 live]  /me/music-sources  /me/onboarding [listening import]
   //   /me/artist-seeds  /me/seed-tracks/*  /me/interview  /me/funnel-events [taste seeds]
   app.all('/api/auth/*', (c) => auth.handler(c.req.raw))
   app.get('/me', requireSession(auth), (c) => c.json({ user: c.get('user') }))
@@ -117,6 +118,9 @@ export function createApp({
 
     app.use('/me/music-sources/*', requireSession(auth))
     app.route('/me/music-sources', musicSourcesRoutes(db))
+
+    app.use('/me/onboarding/*', requireSession(auth))
+    app.route('/me/onboarding', onboardingRoutes(db))
 
     app.use('/me/artist-seeds/*', requireSession(auth))
     app.route('/me/artist-seeds', artistSeedsRoutes(db))

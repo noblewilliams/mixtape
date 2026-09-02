@@ -19,6 +19,7 @@ import {
 } from '../../src/db/schema'
 import { eq } from 'drizzle-orm'
 import { replaceQueue, applyOps } from '../../src/dj/queue-store'
+import { SPOTIFY_A } from '../helpers/listening-fixtures'
 
 const DIMS = 1024
 
@@ -1333,5 +1334,86 @@ describe('notPersonal on session routes', () => {
     const listRes = await getJson(app, '/sessions')
     const list = (await listRes.json()) as { sessions: Array<{ id: string; notPersonal: boolean }> }
     expect(list.sessions.find((s) => s.id === body.session.id)?.notPersonal).toBe(true)
+  })
+})
+
+// A Spotify listener's export produces track rows with a spotify_id and no
+// apple_id (db/schema.ts → tracks.spotifyId is a peer of appleId). Every
+// response that carries queue tracks must expose both ids so a client can
+// render "Open in Spotify" for a row with no Apple id; nothing else about
+// the row shape changes.
+describe('spotifyId on queue tracks', () => {
+  type QueueRow = { trackId: string; appleId: string | null; spotifyId: string | null }
+
+  async function createSessionWithMixedQueue(db: TestDb, userId: string) {
+    const { llm } = makeFakeLlm([{ text: 'hi' }])
+    const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs(userId))
+    const res = await postJson(app, '/sessions', { prompt: 'a session' })
+    const { session } = (await res.json()) as { session: { id: string; queueVersion: number } }
+
+    const [spotifyOnly] = await db
+      .insert(tracks)
+      .values({ appleId: null, spotifyId: SPOTIFY_A, title: 'Export only', artist: 'Artist', durationMs: 200_000 })
+      .returning()
+    const appleOnly = await seedLibraryTrack(db, userId)
+    const queueVersion = await replaceQueue(
+      db,
+      session.id,
+      [
+        { trackId: spotifyOnly.id, reason: 'from the export' },
+        { trackId: appleOnly.id, reason: 'from the library' },
+      ],
+      'dj',
+    )
+    return { sessionId: session.id, queueVersion, spotifyOnly, appleOnly }
+  }
+
+  function expectMixedQueue(queue: QueueRow[], spotifyOnlyId: string, appleOnly: { id: string; appleId: string | null }) {
+    expect(queue).toHaveLength(2)
+    expect(queue[0]).toMatchObject({ trackId: spotifyOnlyId, appleId: null, spotifyId: SPOTIFY_A })
+    expect(queue[1]).toMatchObject({ trackId: appleOnly.id, appleId: appleOnly.appleId, spotifyId: null })
+  }
+
+  it('GET /sessions/:id carries spotifyId (set) and appleId (null) for an export-only track', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const { sessionId, spotifyOnly, appleOnly } = await createSessionWithMixedQueue(db, 'u1')
+    const { llm } = makeFakeLlm([{ text: 'n/a' }])
+    const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+    const res = await getJson(app, `/sessions/${sessionId}`)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { queue: QueueRow[] }
+    expectMixedQueue(body.queue, spotifyOnly.id, appleOnly)
+  })
+
+  it('POST /sessions/:id/messages returns the queue with spotifyId on every row', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const { sessionId, spotifyOnly, appleOnly } = await createSessionWithMixedQueue(db, 'u1')
+    const { llm } = makeFakeLlm([{ text: 'just chatting.' }])
+    const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+    const res = await postJson(app, `/sessions/${sessionId}/messages`, { text: 'how are you' })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { queue: QueueRow[] }
+    expectMixedQueue(body.queue, spotifyOnly.id, appleOnly)
+  })
+
+  it('POST /sessions/:id/queue-ops returns the edited queue with spotifyId', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const { sessionId, queueVersion, spotifyOnly } = await createSessionWithMixedQueue(db, 'u1')
+    const { llm } = makeFakeLlm([{ text: 'n/a' }])
+    const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+    const res = await postJson(app, `/sessions/${sessionId}/queue-ops`, {
+      ops: [{ op: 'remove', position: 1 }],
+      expectedVersion: queueVersion,
+    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { queue: QueueRow[] }
+    expect(body.queue).toHaveLength(1)
+    expect(body.queue[0]).toMatchObject({ trackId: spotifyOnly.id, appleId: null, spotifyId: SPOTIFY_A })
   })
 })
