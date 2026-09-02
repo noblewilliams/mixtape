@@ -57,7 +57,10 @@ export function createApp({
     // application/json content type, for one) already carry the right status
     // and a fixed message: hand them back rather than turning a caller's
     // mistake into a 500.
-    if (err instanceof HTTPException) return err.getResponse()
+    // Hono's own request rejections (malformed JSON, validator failures)
+    // keep their status but take the app's JSON envelope so clients parse
+    // one error shape everywhere.
+    if (err instanceof HTTPException) return c.json({ error: 'invalid_request' }, err.status)
     // Request errors may wrap upstream response bodies, user input, or
     // credentials. Keep production logs useful as a failure signal without
     // serializing the error object itself.
