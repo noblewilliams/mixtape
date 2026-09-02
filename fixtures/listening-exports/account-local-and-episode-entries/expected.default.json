@@ -1,0 +1,94 @@
+{
+  "inventory": {
+    "package": "spotify_account",
+    "read": [
+      {
+        "path": "Spotify Account Data/Playlist1.json",
+        "rows": 5
+      }
+    ],
+    "ignored": []
+  },
+  "snapshot": {
+    "source": "spotify_export",
+    "package": "spotify_account",
+    "timeZone": "Africa/Lagos",
+    "country": null,
+    "tracks": [
+      {
+        "platformId": "Cartographer0000000001",
+        "title": "Cartographer",
+        "artist": "Juniper Ashby",
+        "album": "Field Notes",
+        "durationMs": null
+      },
+      {
+        "platformId": "SlowOrbit0000000000001",
+        "title": "Slow Orbit",
+        "artist": "Juniper Ashby",
+        "album": "Field Notes",
+        "durationMs": null
+      }
+    ],
+    "days": [],
+    "library": [],
+    "artists": [],
+    "playlists": [
+      {
+        "ordinal": 0,
+        "key": "e2beaacb71538e348ed6ae508443c0a337ac36140020af59e03774e8a5a0b6bd",
+        "name": "Workshop Radio",
+        "description": "Tracks, a demo, and a podcast episode in one list.",
+        "lastModifiedAt": 1781913600000,
+        "entries": [
+          {
+            "position": 0,
+            "platformId": "Cartographer0000000001",
+            "title": "Cartographer",
+            "artist": "Juniper Ashby",
+            "album": "Field Notes",
+            "addedAt": 1780272000000
+          },
+          {
+            "position": 1,
+            "platformId": null,
+            "title": "Ep. 12: Joinery",
+            "artist": "The Quiet Workshop",
+            "album": null,
+            "addedAt": 1780358400000
+          },
+          {
+            "position": 2,
+            "platformId": null,
+            "title": "Rehearsal Take 3",
+            "artist": "Basement Sessions",
+            "album": "Demos 2025",
+            "addedAt": 1780444800000
+          },
+          {
+            "position": 3,
+            "platformId": null,
+            "title": "Halfway Home",
+            "artist": "Ivory Kestrel",
+            "album": null,
+            "addedAt": null
+          },
+          {
+            "position": 4,
+            "platformId": "SlowOrbit0000000000001",
+            "title": "Slow Orbit",
+            "artist": "Juniper Ashby",
+            "album": "Field Notes",
+            "addedAt": 1781913600000
+          }
+        ]
+      }
+    ],
+    "unresolved": {
+      "rows": 3,
+      "plays": 0
+    },
+    "ledgerFrom": null,
+    "ledgerTo": null
+  }
+}

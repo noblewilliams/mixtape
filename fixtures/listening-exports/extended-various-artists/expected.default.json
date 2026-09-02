@@ -1,0 +1,104 @@
+{
+  "inventory": {
+    "package": "spotify_extended",
+    "read": [
+      {
+        "path": "Spotify Extended Streaming History/Streaming_History_Audio_2024_0.json",
+        "rows": 5
+      }
+    ],
+    "ignored": []
+  },
+  "snapshot": {
+    "source": "spotify_export",
+    "package": "spotify_extended",
+    "timeZone": "Africa/Lagos",
+    "country": "NG",
+    "tracks": [
+      {
+        "platformId": "Cartographer0000000001",
+        "title": "Cartographer",
+        "artist": "Juniper Ashby",
+        "album": "Field Notes",
+        "durationMs": 214000
+      },
+      {
+        "platformId": "DeparturesBoard0000001",
+        "title": "Departures Board",
+        "artist": "Various Artists",
+        "album": "The Lantern Route (Original Soundtrack)",
+        "durationMs": 150000
+      },
+      {
+        "platformId": "MothToNeon000000000001",
+        "title": "Moth to Neon",
+        "artist": "Various Artists",
+        "album": "Harbour Lights: A Compilation",
+        "durationMs": 198000
+      },
+      {
+        "platformId": "UndertowWaltz000000001",
+        "title": "Undertow Waltz",
+        "artist": "Various Artists",
+        "album": "Harbour Lights: A Compilation",
+        "durationMs": 176000
+      }
+    ],
+    "days": [
+      {
+        "platformId": "Cartographer0000000001",
+        "day": "2024-08-11",
+        "plays": 1,
+        "skips": 0,
+        "completes": 1,
+        "msPlayed": 214000,
+        "hoursMask": 131072
+      },
+      {
+        "platformId": "DeparturesBoard0000001",
+        "day": "2024-08-10",
+        "plays": 1,
+        "skips": 0,
+        "completes": 1,
+        "msPlayed": 150000,
+        "hoursMask": 131072
+      },
+      {
+        "platformId": "MothToNeon000000000001",
+        "day": "2024-08-10",
+        "plays": 1,
+        "skips": 0,
+        "completes": 1,
+        "msPlayed": 198000,
+        "hoursMask": 131072
+      },
+      {
+        "platformId": "MothToNeon000000000001",
+        "day": "2024-08-11",
+        "plays": 1,
+        "skips": 0,
+        "completes": 1,
+        "msPlayed": 198000,
+        "hoursMask": 131072
+      },
+      {
+        "platformId": "UndertowWaltz000000001",
+        "day": "2024-08-10",
+        "plays": 1,
+        "skips": 0,
+        "completes": 1,
+        "msPlayed": 176000,
+        "hoursMask": 131072
+      }
+    ],
+    "library": [],
+    "artists": [],
+    "playlists": [],
+    "unresolved": {
+      "rows": 0,
+      "plays": 0
+    },
+    "ledgerFrom": "2024-08-10",
+    "ledgerTo": "2024-08-11"
+  }
+}

@@ -1,0 +1,182 @@
+{
+  "inventory": {
+    "package": "spotify_account",
+    "read": [
+      {
+        "path": "Spotify Account Data/Playlist1.json",
+        "rows": 5
+      },
+      {
+        "path": "Spotify Account Data/YourLibrary.json",
+        "rows": 6
+      }
+    ],
+    "ignored": [
+      {
+        "path": "Spotify Account Data/StreamingHistory_music_0.json",
+        "bytes": 2079
+      }
+    ]
+  },
+  "snapshot": {
+    "source": "spotify_export",
+    "package": "spotify_account",
+    "timeZone": "Africa/Lagos",
+    "country": null,
+    "tracks": [
+      {
+        "platformId": "Cartographer0000000001",
+        "title": "Cartographer",
+        "artist": "Juniper Ashby",
+        "album": "Field Notes",
+        "durationMs": null
+      },
+      {
+        "platformId": "KiteSeason000000000001",
+        "title": "Kite Season",
+        "artist": "Ivory Kestrel",
+        "album": "Signal Fires",
+        "durationMs": null
+      },
+      {
+        "platformId": "LowTideRadio0000000001",
+        "title": "Low Tide Radio",
+        "artist": "The Copper Hours",
+        "album": "Night Ferry",
+        "durationMs": null
+      },
+      {
+        "platformId": "MothToNeon000000000001",
+        "title": "Moth to Neon",
+        "artist": "Various Artists",
+        "album": "Harbour Lights: A Compilation",
+        "durationMs": null
+      },
+      {
+        "platformId": "PaperLanterns000000001",
+        "title": "Paper Lanterns",
+        "artist": "Meridian Vale",
+        "album": "Glasswork",
+        "durationMs": null
+      },
+      {
+        "platformId": "WinterHarbour000000001",
+        "title": "Winter Harbour",
+        "artist": "Ivory Kestrel",
+        "album": "Signal Fires",
+        "durationMs": null
+      }
+    ],
+    "days": [],
+    "library": [
+      {
+        "platformId": "Cartographer0000000001",
+        "playCount": null,
+        "skipCount": null,
+        "lastPlayedAt": null,
+        "dateAdded": null,
+        "likeRating": null
+      },
+      {
+        "platformId": "KiteSeason000000000001",
+        "playCount": null,
+        "skipCount": null,
+        "lastPlayedAt": null,
+        "dateAdded": null,
+        "likeRating": null
+      },
+      {
+        "platformId": "LowTideRadio0000000001",
+        "playCount": null,
+        "skipCount": null,
+        "lastPlayedAt": null,
+        "dateAdded": null,
+        "likeRating": null
+      },
+      {
+        "platformId": "PaperLanterns000000001",
+        "playCount": null,
+        "skipCount": null,
+        "lastPlayedAt": null,
+        "dateAdded": null,
+        "likeRating": null
+      }
+    ],
+    "artists": [
+      {
+        "name": "Juniper Ashby",
+        "spotifyId": "JuniperAshby0000000001"
+      },
+      {
+        "name": "Meridian Vale",
+        "spotifyId": "MeridianVale0000000001"
+      }
+    ],
+    "playlists": [
+      {
+        "ordinal": 0,
+        "key": "3c88137edc1b39c79d1e8cbe6089c0b3e5eb4f751d0947990347c6aa95f2231e",
+        "name": "Late Nights on the Ferry",
+        "description": "Slow ones for the crossing.",
+        "lastModifiedAt": 1785542400000,
+        "entries": [
+          {
+            "position": 0,
+            "platformId": "LowTideRadio0000000001",
+            "title": "Low Tide Radio",
+            "artist": "The Copper Hours",
+            "album": "Night Ferry",
+            "addedAt": 1762041600000
+          },
+          {
+            "position": 1,
+            "platformId": "PaperLanterns000000001",
+            "title": "Paper Lanterns",
+            "artist": "Meridian Vale",
+            "album": "Glasswork",
+            "addedAt": 1762041600000
+          },
+          {
+            "position": 2,
+            "platformId": "WinterHarbour000000001",
+            "title": "Winter Harbour",
+            "artist": "Ivory Kestrel",
+            "album": "Signal Fires",
+            "addedAt": 1768780800000
+          }
+        ]
+      },
+      {
+        "ordinal": 1,
+        "key": "8c09ae7ec3931a633140ce84a1f0f1064827fdcf3bff7608b4c88395169a917b",
+        "name": "Running Uphill",
+        "description": null,
+        "lastModifiedAt": 1773532800000,
+        "entries": [
+          {
+            "position": 0,
+            "platformId": "KiteSeason000000000001",
+            "title": "Kite Season",
+            "artist": "Ivory Kestrel",
+            "album": "Signal Fires",
+            "addedAt": 1769904000000
+          },
+          {
+            "position": 1,
+            "platformId": "MothToNeon000000000001",
+            "title": "Moth to Neon",
+            "artist": "Various Artists",
+            "album": "Harbour Lights: A Compilation",
+            "addedAt": 1770076800000
+          }
+        ]
+      }
+    ],
+    "unresolved": {
+      "rows": 0,
+      "plays": 0
+    },
+    "ledgerFrom": null,
+    "ledgerTo": null
+  }
+}

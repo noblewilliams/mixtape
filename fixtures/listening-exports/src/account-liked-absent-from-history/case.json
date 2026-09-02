@@ -1,0 +1,44 @@
+{
+  "package": "spotify_account",
+  "entries": [
+    {
+      "path": "Spotify Account Data/YourLibrary.json",
+      "json": {
+        "tracks": [
+          {
+            "artist": "Various Artists",
+            "album": "The Lantern Route (Original Soundtrack)",
+            "track": "Departures Board",
+            "uri": "spotify:track:DeparturesBoard0000001"
+          },
+          {
+            "artist": "Ivory Kestrel",
+            "album": "Signal Fires",
+            "track": "Winter Harbour",
+            "uri": "spotify:track:WinterHarbour000000001"
+          },
+          {
+            "artist": "Various Artists",
+            "album": "Harbour Lights: A Compilation",
+            "track": "Undertow Waltz",
+            "uri": "spotify:track:UndertowWaltz000000001"
+          }
+        ],
+        "albums": [],
+        "shows": [],
+        "episodes": [],
+        "bannedTracks": [],
+        "artists": [],
+        "bannedArtists": [],
+        "other": []
+      }
+    }
+  ],
+  "options": [
+    {
+      "name": "default",
+      "timeZone": "Africa/Lagos",
+      "includePrivateSessions": false
+    }
+  ]
+}

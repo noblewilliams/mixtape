@@ -1,0 +1,79 @@
+{
+  "package": "spotify_account",
+  "entries": [
+    {
+      "path": "Spotify Account Data/Identity.json",
+      "sentinel": true
+    },
+    {
+      "path": "Spotify Account Data/Inferences.json",
+      "sentinel": true
+    },
+    {
+      "path": "Spotify Account Data/Payments.json",
+      "sentinel": true
+    },
+    {
+      "path": "Spotify Account Data/Userdata.json",
+      "sentinel": true
+    },
+    {
+      "path": "Spotify Account Data/YourLibrary.json",
+      "json": {
+        "tracks": [
+          {
+            "artist": "Juniper Ashby",
+            "album": "Field Notes",
+            "track": "Slow Orbit",
+            "uri": "spotify:track:SlowOrbit0000000000001"
+          }
+        ],
+        "albums": [],
+        "shows": [],
+        "episodes": [],
+        "bannedTracks": [],
+        "artists": [
+          {
+            "name": "Juniper Ashby",
+            "uri": "spotify:artist:JuniperAshby0000000001"
+          }
+        ],
+        "bannedArtists": [],
+        "other": []
+      }
+    },
+    {
+      "path": "Spotify Account Data/Playlist1.json",
+      "json": {
+        "playlists": [
+          {
+            "name": "Kitchen Radio",
+            "lastModifiedDate": "2026-05-05",
+            "items": [
+              {
+                "track": {
+                  "trackName": "Slow Orbit",
+                  "artistName": "Juniper Ashby",
+                  "albumName": "Field Notes",
+                  "trackUri": "spotify:track:SlowOrbit0000000000001"
+                },
+                "episode": null,
+                "localTrack": null,
+                "addedDate": "2026-05-05"
+              }
+            ],
+            "description": null,
+            "numberOfFollowers": 0
+          }
+        ]
+      }
+    }
+  ],
+  "options": [
+    {
+      "name": "default",
+      "timeZone": "Africa/Lagos",
+      "includePrivateSessions": false
+    }
+  ]
+}

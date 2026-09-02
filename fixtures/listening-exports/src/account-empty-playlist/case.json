@@ -1,0 +1,52 @@
+{
+  "package": "spotify_account",
+  "entries": [
+    {
+      "path": "Spotify Account Data/Playlist1.json",
+      "json": {
+        "playlists": [
+          {
+            "name": "Empty Shelf",
+            "lastModifiedDate": null,
+            "items": [],
+            "description": "",
+            "numberOfFollowers": 0
+          }
+        ]
+      }
+    },
+    {
+      "path": "Spotify Account Data/Playlist2.json",
+      "json": {
+        "playlists": [
+          {
+            "name": "Kitchen Radio",
+            "lastModifiedDate": "2026-05-05",
+            "items": [
+              {
+                "track": {
+                  "trackName": "Salt and Static",
+                  "artistName": "Meridian Vale",
+                  "albumName": "Glasswork",
+                  "trackUri": "spotify:track:SaltAndStatic000000001"
+                },
+                "episode": null,
+                "localTrack": null,
+                "addedDate": "2026-05-05"
+              }
+            ],
+            "description": null,
+            "numberOfFollowers": 0
+          }
+        ]
+      }
+    }
+  ],
+  "options": [
+    {
+      "name": "default",
+      "timeZone": "Africa/Lagos",
+      "includePrivateSessions": false
+    }
+  ]
+}

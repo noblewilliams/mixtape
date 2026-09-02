@@ -1,0 +1,159 @@
+{
+  "package": "spotify_account",
+  "entries": [
+    {
+      "path": "Spotify Account Data/YourLibrary.json",
+      "json": {
+        "tracks": [
+          {
+            "artist": "Meridian Vale",
+            "album": "Glasswork",
+            "track": "Paper Lanterns",
+            "uri": "spotify:track:PaperLanterns000000001"
+          },
+          {
+            "artist": "The Copper Hours",
+            "album": "Night Ferry",
+            "track": "Low Tide Radio",
+            "uri": "spotify:track:LowTideRadio0000000001"
+          },
+          {
+            "artist": "Juniper Ashby",
+            "album": "Field Notes",
+            "track": "Cartographer",
+            "uri": "spotify:track:Cartographer0000000001"
+          },
+          {
+            "artist": "Ivory Kestrel",
+            "album": "Signal Fires",
+            "track": "Kite Season",
+            "uri": "spotify:track:KiteSeason000000000001"
+          }
+        ],
+        "albums": [
+          {
+            "artist": "Meridian Vale",
+            "album": "Glasswork",
+            "uri": "spotify:album:Glasswork0000000000001"
+          }
+        ],
+        "shows": [
+          {
+            "name": "The Quiet Workshop",
+            "publisher": "Quiet Workshop Media",
+            "uri": "spotify:show:QuietWorkshop000000001"
+          }
+        ],
+        "episodes": [
+          {
+            "name": "Ep. 12: Joinery",
+            "show": "The Quiet Workshop",
+            "uri": "spotify:episode:QuietWorkshopEp0000012"
+          }
+        ],
+        "bannedTracks": [],
+        "artists": [
+          {
+            "name": "Meridian Vale",
+            "uri": "spotify:artist:MeridianVale0000000001"
+          },
+          {
+            "name": "Juniper Ashby",
+            "uri": "spotify:artist:JuniperAshby0000000001"
+          }
+        ],
+        "bannedArtists": [],
+        "other": []
+      }
+    },
+    {
+      "path": "Spotify Account Data/Playlist1.json",
+      "json": {
+        "playlists": [
+          {
+            "name": "Late Nights on the Ferry",
+            "lastModifiedDate": "2026-08-01",
+            "items": [
+              {
+                "track": {
+                  "trackName": "Low Tide Radio",
+                  "artistName": "The Copper Hours",
+                  "albumName": "Night Ferry",
+                  "trackUri": "spotify:track:LowTideRadio0000000001"
+                },
+                "episode": null,
+                "localTrack": null,
+                "addedDate": "2025-11-02"
+              },
+              {
+                "track": {
+                  "trackName": "Paper Lanterns",
+                  "artistName": "Meridian Vale",
+                  "albumName": "Glasswork",
+                  "trackUri": "spotify:track:PaperLanterns000000001"
+                },
+                "episode": null,
+                "localTrack": null,
+                "addedDate": "2025-11-02"
+              },
+              {
+                "track": {
+                  "trackName": "Winter Harbour",
+                  "artistName": "Ivory Kestrel",
+                  "albumName": "Signal Fires",
+                  "trackUri": "spotify:track:WinterHarbour000000001"
+                },
+                "episode": null,
+                "localTrack": null,
+                "addedDate": "2026-01-19"
+              }
+            ],
+            "description": "Slow ones for the crossing.",
+            "numberOfFollowers": 0
+          },
+          {
+            "name": "Running Uphill",
+            "lastModifiedDate": "2026-03-15",
+            "items": [
+              {
+                "track": {
+                  "trackName": "Kite Season",
+                  "artistName": "Ivory Kestrel",
+                  "albumName": "Signal Fires",
+                  "trackUri": "spotify:track:KiteSeason000000000001"
+                },
+                "episode": null,
+                "localTrack": null,
+                "addedDate": "2026-02-01"
+              },
+              {
+                "track": {
+                  "trackName": "Moth to Neon",
+                  "artistName": "Various Artists",
+                  "albumName": "Harbour Lights: A Compilation",
+                  "trackUri": "spotify:track:MothToNeon000000000001"
+                },
+                "episode": null,
+                "localTrack": null,
+                "addedDate": "2026-02-03"
+              }
+            ],
+            "description": "",
+            "numberOfFollowers": 0
+          }
+        ]
+      }
+    },
+    {
+      "path": "Spotify Account Data/StreamingHistory_music_0.json",
+      "sentinel": true
+    }
+  ],
+  "options": [
+    {
+      "name": "default",
+      "timeZone": "Africa/Lagos",
+      "includePrivateSessions": false
+    }
+  ]
+}

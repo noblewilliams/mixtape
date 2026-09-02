@@ -1,0 +1,67 @@
+{
+  "inventory": {
+    "package": "spotify_account",
+    "read": [
+      {
+        "path": "Spotify Account Data/Playlist1.json",
+        "rows": 0
+      },
+      {
+        "path": "Spotify Account Data/Playlist2.json",
+        "rows": 1
+      }
+    ],
+    "ignored": []
+  },
+  "snapshot": {
+    "source": "spotify_export",
+    "package": "spotify_account",
+    "timeZone": "Africa/Lagos",
+    "country": null,
+    "tracks": [
+      {
+        "platformId": "SaltAndStatic000000001",
+        "title": "Salt and Static",
+        "artist": "Meridian Vale",
+        "album": "Glasswork",
+        "durationMs": null
+      }
+    ],
+    "days": [],
+    "library": [],
+    "artists": [],
+    "playlists": [
+      {
+        "ordinal": 0,
+        "key": "da07194b7e0dd893c319ae7f3b6f5ab9cafbd7ac0d00572187c9d583d8118bd2",
+        "name": "Empty Shelf",
+        "description": null,
+        "lastModifiedAt": null,
+        "entries": []
+      },
+      {
+        "ordinal": 1,
+        "key": "4d8f33d7e24b387abd65c3856ff7f1736e80772c9b127b971293d7428b96d4f3",
+        "name": "Kitchen Radio",
+        "description": null,
+        "lastModifiedAt": 1777939200000,
+        "entries": [
+          {
+            "position": 0,
+            "platformId": "SaltAndStatic000000001",
+            "title": "Salt and Static",
+            "artist": "Meridian Vale",
+            "album": "Glasswork",
+            "addedAt": 1777939200000
+          }
+        ]
+      }
+    ],
+    "unresolved": {
+      "rows": 0,
+      "plays": 0
+    },
+    "ledgerFrom": null,
+    "ledgerTo": null
+  }
+}

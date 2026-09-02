@@ -1,0 +1,81 @@
+{
+  "package": "spotify_account",
+  "entries": [
+    {
+      "path": "Spotify Account Data/Playlist1.json",
+      "json": {
+        "playlists": [
+          {
+            "name": "Workshop Radio",
+            "lastModifiedDate": "2026-06-20",
+            "items": [
+              {
+                "track": {
+                  "trackName": "Cartographer",
+                  "artistName": "Juniper Ashby",
+                  "albumName": "Field Notes",
+                  "trackUri": "spotify:track:Cartographer0000000001"
+                },
+                "episode": null,
+                "localTrack": null,
+                "addedDate": "2026-06-01"
+              },
+              {
+                "track": null,
+                "episode": {
+                  "episodeName": "Ep. 12: Joinery",
+                  "showName": "The Quiet Workshop",
+                  "episodeUri": "spotify:episode:QuietWorkshopEp0000012"
+                },
+                "localTrack": null,
+                "addedDate": "2026-06-02"
+              },
+              {
+                "track": null,
+                "episode": null,
+                "localTrack": {
+                  "trackName": "Rehearsal Take 3",
+                  "artistName": "Basement Sessions",
+                  "albumName": "Demos 2025",
+                  "uri": "spotify:local:Basement+Sessions:Demos+2025:Rehearsal+Take+3:240"
+                },
+                "addedDate": "2026-06-03"
+              },
+              {
+                "track": {
+                  "trackName": "Halfway Home",
+                  "artistName": "Ivory Kestrel",
+                  "albumName": null,
+                  "trackUri": null
+                },
+                "episode": null,
+                "localTrack": null,
+                "addedDate": null
+              },
+              {
+                "track": {
+                  "trackName": "Slow Orbit",
+                  "artistName": "Juniper Ashby",
+                  "albumName": "Field Notes",
+                  "trackUri": "spotify:track:SlowOrbit0000000000001"
+                },
+                "episode": null,
+                "localTrack": null,
+                "addedDate": "2026-06-20"
+              }
+            ],
+            "description": "Tracks, a demo, and a podcast episode in one list.",
+            "numberOfFollowers": 0
+          }
+        ]
+      }
+    }
+  ],
+  "options": [
+    {
+      "name": "default",
+      "timeZone": "Africa/Lagos",
+      "includePrivateSessions": false
+    }
+  ]
+}

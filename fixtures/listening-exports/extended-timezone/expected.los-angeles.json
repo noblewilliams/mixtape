@@ -1,0 +1,79 @@
+{
+  "inventory": {
+    "package": "spotify_extended",
+    "read": [
+      {
+        "path": "Spotify Extended Streaming History/Streaming_History_Audio_2025_0.json",
+        "rows": 6
+      }
+    ],
+    "ignored": []
+  },
+  "snapshot": {
+    "source": "spotify_export",
+    "package": "spotify_extended",
+    "timeZone": "America/Los_Angeles",
+    "country": "NG",
+    "tracks": [
+      {
+        "platformId": "Cartographer0000000001",
+        "title": "Cartographer",
+        "artist": "Juniper Ashby",
+        "album": "Field Notes",
+        "durationMs": 214000
+      },
+      {
+        "platformId": "PaperLanterns000000001",
+        "title": "Paper Lanterns",
+        "artist": "Meridian Vale",
+        "album": "Glasswork",
+        "durationMs": 201500
+      },
+      {
+        "platformId": "SaltAndStatic000000001",
+        "title": "Salt and Static",
+        "artist": "Meridian Vale",
+        "album": "Glasswork",
+        "durationMs": 190000
+      }
+    ],
+    "days": [
+      {
+        "platformId": "Cartographer0000000001",
+        "day": "2025-03-09",
+        "plays": 2,
+        "skips": 0,
+        "completes": 2,
+        "msPlayed": 428000,
+        "hoursMask": 10
+      },
+      {
+        "platformId": "PaperLanterns000000001",
+        "day": "2025-06-10",
+        "plays": 2,
+        "skips": 0,
+        "completes": 2,
+        "msPlayed": 403000,
+        "hoursMask": 196608
+      },
+      {
+        "platformId": "SaltAndStatic000000001",
+        "day": "2025-01-10",
+        "plays": 2,
+        "skips": 0,
+        "completes": 2,
+        "msPlayed": 380000,
+        "hoursMask": 98304
+      }
+    ],
+    "library": [],
+    "artists": [],
+    "playlists": [],
+    "unresolved": {
+      "rows": 0,
+      "plays": 0
+    },
+    "ledgerFrom": "2025-01-10",
+    "ledgerTo": "2025-06-10"
+  }
+}

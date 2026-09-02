@@ -1,0 +1,90 @@
+{
+  "inventory": {
+    "package": "spotify_account",
+    "read": [
+      {
+        "path": "Spotify Account Data/Playlist1.json",
+        "rows": 1
+      },
+      {
+        "path": "Spotify Account Data/YourLibrary.json",
+        "rows": 2
+      }
+    ],
+    "ignored": [
+      {
+        "path": "Spotify Account Data/Identity.json",
+        "bytes": 2068
+      },
+      {
+        "path": "Spotify Account Data/Inferences.json",
+        "bytes": 2058
+      },
+      {
+        "path": "Spotify Account Data/Payments.json",
+        "bytes": 2068
+      },
+      {
+        "path": "Spotify Account Data/Userdata.json",
+        "bytes": 2068
+      }
+    ]
+  },
+  "snapshot": {
+    "source": "spotify_export",
+    "package": "spotify_account",
+    "timeZone": "Africa/Lagos",
+    "country": null,
+    "tracks": [
+      {
+        "platformId": "SlowOrbit0000000000001",
+        "title": "Slow Orbit",
+        "artist": "Juniper Ashby",
+        "album": "Field Notes",
+        "durationMs": null
+      }
+    ],
+    "days": [],
+    "library": [
+      {
+        "platformId": "SlowOrbit0000000000001",
+        "playCount": null,
+        "skipCount": null,
+        "lastPlayedAt": null,
+        "dateAdded": null,
+        "likeRating": null
+      }
+    ],
+    "artists": [
+      {
+        "name": "Juniper Ashby",
+        "spotifyId": "JuniperAshby0000000001"
+      }
+    ],
+    "playlists": [
+      {
+        "ordinal": 0,
+        "key": "c0b5d26ec25988d32091121f337d2ad33746fd8b0d5b0dceb85c75aa70925fb3",
+        "name": "Kitchen Radio",
+        "description": null,
+        "lastModifiedAt": 1777939200000,
+        "entries": [
+          {
+            "position": 0,
+            "platformId": "SlowOrbit0000000000001",
+            "title": "Slow Orbit",
+            "artist": "Juniper Ashby",
+            "album": "Field Notes",
+            "addedAt": 1777939200000
+          }
+        ]
+      }
+    ],
+    "unresolved": {
+      "rows": 0,
+      "plays": 0
+    },
+    "ledgerFrom": null,
+    "ledgerTo": null
+  }
+}

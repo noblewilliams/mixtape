@@ -1,0 +1,128 @@
+{
+  "inventory": {
+    "package": "spotify_extended",
+    "read": [
+      {
+        "path": "Spotify Extended Streaming History/Streaming_History_Audio_2024-2025_0.json",
+        "rows": 9
+      },
+      {
+        "path": "Spotify Extended Streaming History/Streaming_History_Audio_2025-2026_1.json",
+        "rows": 5
+      }
+    ],
+    "ignored": []
+  },
+  "snapshot": {
+    "source": "spotify_export",
+    "package": "spotify_extended",
+    "timeZone": "Africa/Lagos",
+    "country": "NG",
+    "tracks": [
+      {
+        "platformId": "LowTideRadio0000000001",
+        "title": "Low Tide Radio",
+        "artist": "The Copper Hours",
+        "album": "Night Ferry",
+        "durationMs": 187000
+      },
+      {
+        "platformId": "LowTideRadio0000000002",
+        "title": "Low Tide Radio",
+        "artist": "The Copper Hours",
+        "album": "Night Ferry (Deluxe Edition)",
+        "durationMs": 187000
+      },
+      {
+        "platformId": "PaperLanterns000000001",
+        "title": "Paper Lanterns",
+        "artist": "Meridian Vale",
+        "album": "Glasswork",
+        "durationMs": 201500
+      }
+    ],
+    "days": [
+      {
+        "platformId": "LowTideRadio0000000001",
+        "day": "2024-03-02",
+        "plays": 0,
+        "skips": 1,
+        "completes": 0,
+        "msPlayed": 12000,
+        "hoursMask": 0
+      },
+      {
+        "platformId": "LowTideRadio0000000001",
+        "day": "2025-01-15",
+        "plays": 1,
+        "skips": 0,
+        "completes": 1,
+        "msPlayed": 187000,
+        "hoursMask": 524288
+      },
+      {
+        "platformId": "LowTideRadio0000000002",
+        "day": "2025-01-15",
+        "plays": 1,
+        "skips": 0,
+        "completes": 1,
+        "msPlayed": 187000,
+        "hoursMask": 524288
+      },
+      {
+        "platformId": "LowTideRadio0000000002",
+        "day": "2026-02-01",
+        "plays": 1,
+        "skips": 1,
+        "completes": 0,
+        "msPlayed": 59999,
+        "hoursMask": 64
+      },
+      {
+        "platformId": "PaperLanterns000000001",
+        "day": "2024-03-02",
+        "plays": 3,
+        "skips": 1,
+        "completes": 2,
+        "msPlayed": 447500,
+        "hoursMask": 4202752
+      },
+      {
+        "platformId": "PaperLanterns000000001",
+        "day": "2024-03-03",
+        "plays": 1,
+        "skips": 0,
+        "completes": 1,
+        "msPlayed": 214000,
+        "hoursMask": 2048
+      },
+      {
+        "platformId": "PaperLanterns000000001",
+        "day": "2025-11-20",
+        "plays": 1,
+        "skips": 0,
+        "completes": 1,
+        "msPlayed": 201500,
+        "hoursMask": 8388608
+      },
+      {
+        "platformId": "PaperLanterns000000001",
+        "day": "2025-11-21",
+        "plays": 1,
+        "skips": 1,
+        "completes": 0,
+        "msPlayed": 31000,
+        "hoursMask": 1
+      }
+    ],
+    "library": [],
+    "artists": [],
+    "playlists": [],
+    "unresolved": {
+      "rows": 0,
+      "plays": 0
+    },
+    "ledgerFrom": "2024-03-02",
+    "ledgerTo": "2026-02-01"
+  }
+}

@@ -1,0 +1,99 @@
+{
+  "package": "spotify_account",
+  "entries": [
+    {
+      "path": "Spotify Account Data/YourLibrary.json",
+      "json": {
+        "tracks": [
+          {
+            "artist": "Meridian Vale",
+            "album": "Glasswork",
+            "track": "Paper Lanterns",
+            "uri": "spotify:track:PaperLanterns000000001"
+          }
+        ],
+        "albums": [],
+        "shows": [],
+        "episodes": [],
+        "bannedTracks": [],
+        "artists": [],
+        "bannedArtists": [],
+        "other": []
+      }
+    },
+    {
+      "path": "Spotify Account Data/Playlist1.json",
+      "json": {
+        "playlists": [
+          {
+            "name": "Repeat Offenders",
+            "lastModifiedDate": "2026-04-10",
+            "items": [
+              {
+                "track": {
+                  "trackName": "Paper Lanterns",
+                  "artistName": "Meridian Vale",
+                  "albumName": "Glasswork (Deluxe)",
+                  "trackUri": "spotify:track:PaperLanterns000000001"
+                },
+                "episode": null,
+                "localTrack": null,
+                "addedDate": "2025-12-01"
+              },
+              {
+                "track": {
+                  "trackName": "Salt and Static",
+                  "artistName": "Meridian Vale",
+                  "albumName": "Glasswork",
+                  "trackUri": "spotify:track:SaltAndStatic000000001"
+                },
+                "episode": null,
+                "localTrack": null,
+                "addedDate": "2025-12-01"
+              },
+              {
+                "track": {
+                  "trackName": "Paper Lanterns",
+                  "artistName": "Meridian Vale",
+                  "albumName": "Glasswork (Deluxe)",
+                  "trackUri": "spotify:track:PaperLanterns000000001"
+                },
+                "episode": null,
+                "localTrack": null,
+                "addedDate": "2026-04-10"
+              }
+            ],
+            "description": null,
+            "numberOfFollowers": 0
+          },
+          {
+            "name": "Running Uphill",
+            "lastModifiedDate": "2026-04-11",
+            "items": [
+              {
+                "track": {
+                  "trackName": "Paper Lanterns",
+                  "artistName": "Meridian Vale",
+                  "albumName": "Glasswork (Deluxe)",
+                  "trackUri": "spotify:track:PaperLanterns000000001"
+                },
+                "episode": null,
+                "localTrack": null,
+                "addedDate": "2026-04-11"
+              }
+            ],
+            "description": null,
+            "numberOfFollowers": 0
+          }
+        ]
+      }
+    }
+  ],
+  "options": [
+    {
+      "name": "default",
+      "timeZone": "Africa/Lagos",
+      "includePrivateSessions": false
+    }
+  ]
+}

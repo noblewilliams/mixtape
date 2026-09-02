@@ -1,0 +1,108 @@
+{
+  "inventory": {
+    "package": "spotify_account",
+    "read": [
+      {
+        "path": "Spotify Account Data/Playlist1.json",
+        "rows": 4
+      },
+      {
+        "path": "Spotify Account Data/YourLibrary.json",
+        "rows": 1
+      }
+    ],
+    "ignored": []
+  },
+  "snapshot": {
+    "source": "spotify_export",
+    "package": "spotify_account",
+    "timeZone": "Africa/Lagos",
+    "country": null,
+    "tracks": [
+      {
+        "platformId": "PaperLanterns000000001",
+        "title": "Paper Lanterns",
+        "artist": "Meridian Vale",
+        "album": "Glasswork",
+        "durationMs": null
+      },
+      {
+        "platformId": "SaltAndStatic000000001",
+        "title": "Salt and Static",
+        "artist": "Meridian Vale",
+        "album": "Glasswork",
+        "durationMs": null
+      }
+    ],
+    "days": [],
+    "library": [
+      {
+        "platformId": "PaperLanterns000000001",
+        "playCount": null,
+        "skipCount": null,
+        "lastPlayedAt": null,
+        "dateAdded": null,
+        "likeRating": null
+      }
+    ],
+    "artists": [],
+    "playlists": [
+      {
+        "ordinal": 0,
+        "key": "d8c169fd4710f869758abd49219b85d7b2e3816a9dd21ad2c0091494383a7b82",
+        "name": "Repeat Offenders",
+        "description": null,
+        "lastModifiedAt": 1775779200000,
+        "entries": [
+          {
+            "position": 0,
+            "platformId": "PaperLanterns000000001",
+            "title": "Paper Lanterns",
+            "artist": "Meridian Vale",
+            "album": "Glasswork (Deluxe)",
+            "addedAt": 1764547200000
+          },
+          {
+            "position": 1,
+            "platformId": "SaltAndStatic000000001",
+            "title": "Salt and Static",
+            "artist": "Meridian Vale",
+            "album": "Glasswork",
+            "addedAt": 1764547200000
+          },
+          {
+            "position": 2,
+            "platformId": "PaperLanterns000000001",
+            "title": "Paper Lanterns",
+            "artist": "Meridian Vale",
+            "album": "Glasswork (Deluxe)",
+            "addedAt": 1775779200000
+          }
+        ]
+      },
+      {
+        "ordinal": 1,
+        "key": "8c09ae7ec3931a633140ce84a1f0f1064827fdcf3bff7608b4c88395169a917b",
+        "name": "Running Uphill",
+        "description": null,
+        "lastModifiedAt": 1775865600000,
+        "entries": [
+          {
+            "position": 0,
+            "platformId": "PaperLanterns000000001",
+            "title": "Paper Lanterns",
+            "artist": "Meridian Vale",
+            "album": "Glasswork (Deluxe)",
+            "addedAt": 1775865600000
+          }
+        ]
+      }
+    ],
+    "unresolved": {
+      "rows": 0,
+      "plays": 0
+    },
+    "ledgerFrom": null,
+    "ledgerTo": null
+  }
+}

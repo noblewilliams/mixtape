@@ -1,0 +1,76 @@
+{
+  "inventory": {
+    "package": "spotify_account",
+    "read": [
+      {
+        "path": "Spotify Account Data/YourLibrary.json",
+        "rows": 3
+      }
+    ],
+    "ignored": []
+  },
+  "snapshot": {
+    "source": "spotify_export",
+    "package": "spotify_account",
+    "timeZone": "Africa/Lagos",
+    "country": null,
+    "tracks": [
+      {
+        "platformId": "DeparturesBoard0000001",
+        "title": "Departures Board",
+        "artist": "Various Artists",
+        "album": "The Lantern Route (Original Soundtrack)",
+        "durationMs": null
+      },
+      {
+        "platformId": "UndertowWaltz000000001",
+        "title": "Undertow Waltz",
+        "artist": "Various Artists",
+        "album": "Harbour Lights: A Compilation",
+        "durationMs": null
+      },
+      {
+        "platformId": "WinterHarbour000000001",
+        "title": "Winter Harbour",
+        "artist": "Ivory Kestrel",
+        "album": "Signal Fires",
+        "durationMs": null
+      }
+    ],
+    "days": [],
+    "library": [
+      {
+        "platformId": "DeparturesBoard0000001",
+        "playCount": null,
+        "skipCount": null,
+        "lastPlayedAt": null,
+        "dateAdded": null,
+        "likeRating": null
+      },
+      {
+        "platformId": "UndertowWaltz000000001",
+        "playCount": null,
+        "skipCount": null,
+        "lastPlayedAt": null,
+        "dateAdded": null,
+        "likeRating": null
+      },
+      {
+        "platformId": "WinterHarbour000000001",
+        "playCount": null,
+        "skipCount": null,
+        "lastPlayedAt": null,
+        "dateAdded": null,
+        "likeRating": null
+      }
+    ],
+    "artists": [],
+    "playlists": [],
+    "unresolved": {
+      "rows": 0,
+      "plays": 0
+    },
+    "ledgerFrom": null,
+    "ledgerTo": null
+  }
+}

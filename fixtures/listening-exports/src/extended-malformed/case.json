@@ -1,0 +1,71 @@
+{
+  "package": "spotify_extended",
+  "entries": [
+    {
+      "path": "Spotify Extended Streaming History/Streaming_History_Audio_2024-2025_0.json",
+      "json": [
+        {
+          "ts": "2024-09-01T12:00:00Z",
+          "platform": "android",
+          "ms_played": 225000,
+          "conn_country": "NG",
+          "ip_addr": "203.0.113.7",
+          "master_metadata_track_name": "Slow Orbit",
+          "master_metadata_album_artist_name": "Juniper Ashby",
+          "master_metadata_album_album_name": "Field Notes",
+          "spotify_track_uri": "spotify:track:SlowOrbit0000000000001",
+          "episode_name": null,
+          "episode_show_name": null,
+          "spotify_episode_uri": null,
+          "audiobook_title": null,
+          "audiobook_uri": null,
+          "audiobook_chapter_uri": null,
+          "audiobook_chapter_title": null,
+          "reason_start": "clickrow",
+          "reason_end": "trackdone",
+          "shuffle": false,
+          "skipped": false,
+          "offline": false,
+          "offline_timestamp": null,
+          "incognito_mode": false
+        },
+        {
+          "ts": "2024-09-01T12:04:00Z",
+          "platform": "android",
+          "ms_played": 225000,
+          "conn_country": "NG",
+          "ip_addr": "203.0.113.7",
+          "master_metadata_track_name": "Slow Orbit",
+          "master_metadata_album_artist_name": "Juniper Ashby",
+          "master_metadata_album_album_name": "Field Notes",
+          "spotify_track_uri": "spotify:track:SlowOrbit0000000000001",
+          "episode_name": null,
+          "episode_show_name": null,
+          "spotify_episode_uri": null,
+          "audiobook_title": null,
+          "audiobook_uri": null,
+          "audiobook_chapter_uri": null,
+          "audiobook_chapter_title": null,
+          "reason_start": "clickrow",
+          "reason_end": "trackdone",
+          "shuffle": false,
+          "skipped": false,
+          "offline": false,
+          "offline_timestamp": null,
+          "incognito_mode": false
+        }
+      ]
+    },
+    {
+      "path": "Spotify Extended Streaming History/Streaming_History_Audio_2025-2026_1.json",
+      "text": "[\n  {\n    \"ts\": \"2025-05-01T10:00:00Z\",\n    \"platform\": \"android\",\n    \"ms_played\": 1200"
+    }
+  ],
+  "options": [
+    {
+      "name": "default",
+      "timeZone": "Africa/Lagos",
+      "includePrivateSessions": false
+    }
+  ]
+}

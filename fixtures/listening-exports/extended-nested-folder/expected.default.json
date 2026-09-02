@@ -1,0 +1,76 @@
+{
+  "inventory": {
+    "package": "spotify_extended",
+    "read": [
+      {
+        "path": "my_spotify_data/Spotify Extended Streaming History/Streaming_History_Audio_2023-2025_0.json",
+        "rows": 2
+      }
+    ],
+    "ignored": [
+      {
+        "path": "my_spotify_data/ReadMeFirst_ExtendedStreamingHistory.pdf",
+        "bytes": 2070
+      },
+      {
+        "path": "my_spotify_data/Spotify Account Data/YourLibrary.json",
+        "bytes": 306
+      },
+      {
+        "path": "my_spotify_data/Spotify Extended Streaming History/Streaming_History_Video_2024-2025.json",
+        "bytes": 2142
+      }
+    ]
+  },
+  "snapshot": {
+    "source": "spotify_export",
+    "package": "spotify_extended",
+    "timeZone": "Africa/Lagos",
+    "country": "NG",
+    "tracks": [
+      {
+        "platformId": "KiteSeason000000000001",
+        "title": "Kite Season",
+        "artist": "Ivory Kestrel",
+        "album": "Signal Fires",
+        "durationMs": 180000
+      },
+      {
+        "platformId": "WinterHarbour000000001",
+        "title": "Winter Harbour",
+        "artist": "Ivory Kestrel",
+        "album": "Signal Fires",
+        "durationMs": 200000
+      }
+    ],
+    "days": [
+      {
+        "platformId": "KiteSeason000000000001",
+        "day": "2023-12-24",
+        "plays": 1,
+        "skips": 0,
+        "completes": 1,
+        "msPlayed": 180000,
+        "hoursMask": 2048
+      },
+      {
+        "platformId": "WinterHarbour000000001",
+        "day": "2025-02-14",
+        "plays": 1,
+        "skips": 0,
+        "completes": 1,
+        "msPlayed": 200000,
+        "hoursMask": 2048
+      }
+    ],
+    "library": [],
+    "artists": [],
+    "playlists": [],
+    "unresolved": {
+      "rows": 0,
+      "plays": 0
+    },
+    "ledgerFrom": "2023-12-24",
+    "ledgerTo": "2025-02-14"
+  }
+}
