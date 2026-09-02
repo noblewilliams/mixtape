@@ -23,10 +23,11 @@ export interface ExportArchive {
 }
 
 // No zip.js worker pool (the parser already runs in our own Worker, or in a
-// test) and the platform's DecompressionStream('deflate-raw') everywhere. The
-// non-native fallback in zip.js 2.9 is a WebAssembly module fetched at
-// runtime, which a bundled page, a Worker, and vitest would each resolve
-// differently; the native stream behaves the same in all three.
+// test) and the platform's DecompressionStream('deflate-raw') everywhere it
+// exists (Chrome 103+, Safari 16.4+, Firefox 113+, Node 22). Where it is
+// missing, zip.js 2.9 falls back on its own zlib compiled to WebAssembly and
+// inlined as a data: URI, so nothing is fetched at runtime and the page, the
+// Worker, and vitest all behave the same.
 const CODEC_OPTIONS = { useWebWorkers: false, useCompressionStream: true } as const
 
 const utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false })

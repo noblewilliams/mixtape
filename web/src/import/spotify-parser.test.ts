@@ -176,7 +176,7 @@ describe('parseExport progress and abort', () => {
     expect(events.some((event) => event.stage === 'complete')).toBe(false)
   })
 
-  it('rejects with AbortError when aborted mid-file', async () => {
+  it('rejects with AbortError when aborted during decompression', async () => {
     const rows = Array.from({ length: YIELD_EVERY_ROWS * 3 }, (_, index) =>
       historyRow({ ts: new Date(Date.UTC(2025, 0, 1) + index * 60_000).toISOString().replace(/\.\d{3}Z$/, 'Z') }),
     )
@@ -193,6 +193,43 @@ describe('parseExport progress and abort', () => {
       (error: unknown) => error,
     )
     expect(failure).toMatchObject({ name: 'AbortError' })
+  })
+
+  it('rejects with AbortError when aborted between row batches of one file', async () => {
+    const rows = Array.from({ length: YIELD_EVERY_ROWS * 3 }, (_, index) =>
+      historyRow({ ts: new Date(Date.UTC(2025, 0, 1) + index * 60_000).toISOString().replace(/\.\d{3}Z$/, 'Z') }),
+    )
+    const text = JSON.stringify(rows)
+    const path = `${HISTORY_DIR}/Streaming_History_Audio_2025_0.json`
+    const controller = new AbortController()
+    let yields = 0
+    const OriginalChannel = globalThis.MessageChannel
+    class CountingChannel extends OriginalChannel {
+      constructor() {
+        super()
+        yields += 1
+      }
+    }
+    globalThis.MessageChannel = CountingChannel as typeof MessageChannel
+    try {
+      // The abort is queued only once the file's text has been handed over, so
+      // the only place it can be honoured is the row-loop yield.
+      const archive: ExportArchive = {
+        entries: async () => [{ path, bytes: text.length }],
+        readText: async () => {
+          setTimeout(() => controller.abort(), 0)
+          return text
+        },
+      }
+      const failure = await parseExport(archive, { ...lagos, signal: controller.signal }).then(
+        () => null,
+        (error: unknown) => error,
+      )
+      expect(failure).toMatchObject({ name: 'AbortError' })
+      expect(yields).toBeGreaterThan(0)
+    } finally {
+      globalThis.MessageChannel = OriginalChannel
+    }
   })
 
   it('rejects an already-aborted signal before reading any entry', async () => {
@@ -222,30 +259,87 @@ describe('parseExport never opens files outside the allow-list', () => {
     )
   })
 
-  it('never slices the bytes of a sentinel entry out of the blob', async () => {
-    const bytes = readFixtureArchiveBytes(piiCase.name)
+  it('materialises sentinel bytes only through the raw end-of-directory tail read', async () => {
+    // A ZIP reader must load the trailing <= 65 557 bytes raw to find the
+    // central directory; that read may overlap any entry and is allowed by the
+    // fixture contract. Beyond it, no byte range of a sentinel may be read.
+    // The archive is built large enough that the tail cannot cover the
+    // sentinel bodies, and with the sentinel first and the library last.
+    const sentinelPaths = [`${ACCOUNT_DIR}/Userdata.json`, `${ACCOUNT_DIR}/Payments.json`]
+    // Incompressible bodies (a fixed-seed generator), so deflate cannot shrink
+    // the sentinels below the tail-read window.
+    const noise = (length: number, seed: number) => {
+      const out = new Uint8Array(length)
+      let state = seed >>> 0
+      for (let index = 0; index < length; index += 1) {
+        state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0
+        out[index] = state >>> 24
+      }
+      return out
+    }
+    const bytes = new Uint8Array(
+      await (
+        await buildZipBlob([
+          { path: sentinelPaths[0], bytes: noise(120_000, 7) },
+          { path: sentinelPaths[1], bytes: noise(20_000, 11) },
+          { path: `${ACCOUNT_DIR}/YourLibrary.json`, json: LIBRARY },
+        ])
+      ).arrayBuffer(),
+    )
+    expect(bytes.length).toBeGreaterThan(70_000)
     const listed = await new ZipReader(new BlobReader(new Blob([bytes])), { useWebWorkers: false }).getEntries()
     const spans = listed
-      .filter((entry) => piiCase.sentinelPaths.includes(entry.filename))
+      .filter((entry) => sentinelPaths.includes(entry.filename))
       .map((entry) => [entry.offset, entry.offset + 30 + entry.rawFilename.length + entry.compressedSize] as const)
-    expect(spans).toHaveLength(piiCase.sentinelPaths.length)
+    expect(spans).toHaveLength(sentinelPaths.length)
 
+    type Read = { start: number; end: number; via: string }
     class RecordingBlob extends Blob {
-      readonly ranges: [number, number][] = []
+      constructor(
+        parts: BlobPart[],
+        readonly log: Read[],
+        readonly base: number,
+        options?: BlobPropertyBag,
+      ) {
+        super(parts, options)
+      }
       override slice(start = 0, end = this.size, contentType?: string): Blob {
-        this.ranges.push([start, end])
-        return super.slice(start, end, contentType)
+        const from = start < 0 ? Math.max(0, this.size + start) : Math.min(start, this.size)
+        const to = end < 0 ? Math.max(0, this.size + end) : Math.min(end, this.size)
+        return new RecordingBlob([super.slice(from, to, contentType)], this.log, this.base + from, {
+          type: contentType ?? this.type,
+        })
+      }
+      override arrayBuffer(): Promise<ArrayBuffer> {
+        this.log.push({ start: this.base, end: this.base + this.size, via: 'arrayBuffer' })
+        return super.arrayBuffer()
+      }
+      override stream(): ReadableStream<Uint8Array> {
+        this.log.push({ start: this.base, end: this.base + this.size, via: 'stream' })
+        return super.stream()
+      }
+      override text(): Promise<string> {
+        this.log.push({ start: this.base, end: this.base + this.size, via: 'text' })
+        return super.text()
       }
     }
-    const blob = new RecordingBlob([bytes], { type: 'application/zip' })
+    const overlapping = (reads: Read[]) =>
+      reads.filter((read) => spans.some(([spanStart, spanEnd]) => read.start < spanEnd && read.end > spanStart))
+
+    const log: Read[] = []
+    const blob = new RecordingBlob([bytes], log, 0, { type: 'application/zip' })
     const archive = await openZipArchive(blob)
-    await parseExport(archive, lagos)
-    expect(blob.ranges.length).toBeGreaterThan(0)
-    for (const [start, end] of blob.ranges) {
-      for (const [spanStart, spanEnd] of spans) {
-        expect(start < spanEnd && end > spanStart, `read ${start}-${end} overlaps a sentinel`).toBe(false)
-      }
+    const listingReads = [...log]
+    expect(listingReads.length).toBeGreaterThan(0)
+    const tailStart = bytes.length - 65_557
+    for (const read of overlapping(listingReads)) {
+      expect(read.start, `listing read ${read.start}-${read.end} via ${read.via} is not a tail read`).toBeGreaterThanOrEqual(tailStart)
     }
+
+    log.length = 0
+    await parseExport(archive, lagos)
+    expect(log.length).toBeGreaterThan(0)
+    expect(overlapping(log)).toEqual([])
   })
 
   it('lists a resource fork beside a library file as ignored and never reads it', async () => {

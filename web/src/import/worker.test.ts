@@ -85,15 +85,22 @@ describe('parser worker protocol', () => {
   })
 
   it('aborts a call through the abort message and rejects with AbortError', async () => {
-    const { client, pageSide } = connect()
+    const { client, pageSide, workerSide } = connect()
     const controller = new AbortController()
     const pending = client.parse(readFixtureArchive('extended-basic'), { ...lagos, signal: controller.signal })
     controller.abort()
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
     const abort = pageSide.sent.find((message) => (message as WorkerRequest).type === 'abort') as WorkerRequest | undefined
     expect(abort).toEqual({ type: 'abort', id: 1 })
-    // The host's late failure for the aborted id is dropped, and later calls still work.
+    // The host must actually honour the abort: it answers the aborted id with
+    // an AbortError failure and never with a result. The client drops that late
+    // failure, and later calls still work.
     await new Promise((resolve) => setTimeout(resolve, 20))
+    const answers = workerSide.sent.filter((message) => (message as { id?: number }).id === 1)
+    expect(answers).toContainEqual(
+      expect.objectContaining({ type: 'failure', id: 1, failure: expect.objectContaining({ name: 'AbortError' }) }),
+    )
+    expect(answers.some((message) => (message as { type?: string }).type === 'result')).toBe(false)
     const inventory = await client.inspect(readFixtureArchive('extended-basic'))
     expect(inventory.package).toBe('spotify_extended')
   })
