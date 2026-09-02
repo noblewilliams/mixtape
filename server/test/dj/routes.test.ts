@@ -5,7 +5,18 @@ import type { DjDeps } from '../../src/dj/loop'
 import type { LlmClient, LlmComplete, LlmRequest, LlmTurn, LlmAssistantBlock, LlmToolCall } from '../../src/dj/llm'
 import { LlmError } from '../../src/dj/llm'
 import type { Embedder } from '../../src/enrich/embedder'
-import { tracks, trackMeanings, userTracks, user, djSessions, djMessages, sessionEvents, djMemories } from '../../src/db/schema'
+import {
+  tracks,
+  trackFeatures,
+  trackMeanings,
+  userTracks,
+  userArtistSeeds,
+  user,
+  djSessions,
+  djMessages,
+  sessionEvents,
+  djMemories,
+} from '../../src/db/schema'
 import { eq } from 'drizzle-orm'
 import { replaceQueue, applyOps } from '../../src/dj/queue-store'
 
@@ -44,6 +55,24 @@ async function seedLibrary(db: TestDb, userId: string, n: number) {
   const out = []
   for (let i = 0; i < n; i++) out.push(await seedLibraryTrack(db, userId, { embedding: MATCHING_DIRECTION }))
   return out
+}
+
+// A listener with no library and no ledger but enough interview seeds to
+// unlock corpus mode (Task 5): 3 seed artists, 9 enriched corpus tracks
+// each, none owned by anyone.
+async function seedCorpusListener(db: TestDb, userId: string) {
+  for (const artist of ['SeedA', 'SeedB', 'SeedC']) {
+    await db.insert(userArtistSeeds).values({ userId, name: artist, source: 'interview' })
+    for (let i = 0; i < 9; i++) {
+      trackCounter += 1
+      const [t] = await db
+        .insert(tracks)
+        .values({ appleId: `corpus-${trackCounter}`, title: `Corpus ${trackCounter}`, artist, durationMs: 200_000 })
+        .returning()
+      await db.insert(trackFeatures).values({ trackId: t.id, tempo: 120, source: 'reccobeats' })
+      await db.insert(trackMeanings).values({ trackId: t.id, embedding: MATCHING_DIRECTION, lyricsSource: 'lrclib' })
+    }
+  }
 }
 
 type ScriptedTurn = Partial<LlmTurn>
@@ -1242,5 +1271,67 @@ describe('session routes', () => {
       const res = await patchJson(app, `/sessions/${sessionId}`, {})
       expect(res.status).toBe(400)
     })
+  })
+})
+
+// --- Task 5: notPersonal rides every session summary --------------------
+
+describe('notPersonal on session routes', () => {
+  async function createPlainSession(db: TestDb, userId: string) {
+    const { llm } = makeFakeLlm([{ text: 'hi' }])
+    const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs(userId))
+    const res = await postJson(app, '/sessions', { prompt: 'a session' })
+    const body = (await res.json()) as { session: { id: string; notPersonal: boolean } }
+    return body
+  }
+
+  it('POST /sessions echoes notPersonal (false for a text-only first turn)', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const body = await createPlainSession(db, 'u1')
+    expect(body.session.notPersonal).toBe(false)
+  })
+
+  it('GET /sessions, GET /sessions/:id, and PATCH /sessions/:id all carry the flag', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const { session } = await createPlainSession(db, 'u1')
+    await db.update(djSessions).set({ notPersonal: true }).where(eq(djSessions.id, session.id))
+    const { llm } = makeFakeLlm([{ text: 'n/a' }])
+    const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+    const listRes = await getJson(app, '/sessions')
+    const list = (await listRes.json()) as { sessions: Array<{ id: string; notPersonal: boolean }> }
+    expect(list.sessions.find((s) => s.id === session.id)?.notPersonal).toBe(true)
+
+    const detailRes = await getJson(app, `/sessions/${session.id}`)
+    const detail = (await detailRes.json()) as { session: { notPersonal: boolean } }
+    expect(detail.session.notPersonal).toBe(true)
+
+    const patchRes = await patchJson(app, `/sessions/${session.id}`, { title: 'Renamed' })
+    const patched = (await patchRes.json()) as { session: { notPersonal: boolean; title: string } }
+    expect(patched.session.notPersonal).toBe(true)
+    expect(patched.session.title).toBe('Renamed')
+  })
+
+  it('a corpus-mode first turn creates the session already flagged, end to end', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedCorpusListener(db, 'u1')
+    const { llm } = makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'late night', targetCount: 4 })] },
+      { text: 'a first guess, not from your history yet.' },
+    ])
+    const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+    const res = await postJson(app, '/sessions', { prompt: 'something for late night' })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { session: { id: string; notPersonal: boolean }; queue: unknown[] }
+    expect(body.queue).toHaveLength(4)
+    expect(body.session.notPersonal).toBe(true)
+
+    const listRes = await getJson(app, '/sessions')
+    const list = (await listRes.json()) as { sessions: Array<{ id: string; notPersonal: boolean }> }
+    expect(list.sessions.find((s) => s.id === body.session.id)?.notPersonal).toBe(true)
   })
 })

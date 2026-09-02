@@ -15,7 +15,7 @@ import {
   type Intent,
   type OpIntent,
 } from './contracts'
-import { buildPool } from './pool'
+import { buildPool, resolvePoolMode, type PoolMode } from './pool'
 import { curate, CurationTruncated, CurationUnparseable } from './curate'
 import { sanitizeForPrompt, sanitizeTitleText } from './sanitize'
 import {
@@ -58,6 +58,24 @@ export type DjTurnResult = {
 const MAX_TURNS = 4
 
 export const FALLBACK_TEXT = "took too many tries — here's where I landed."
+
+// Tool-result text for a listener resolvePoolMode (dj/pool.ts) puts at
+// `insufficient_seeds`: no synced library, no listening ledger, and too few
+// seeds to draw a "not personal yet" mix from the shared corpus. This goes
+// to the MODEL as the tool's result — it tells the listener in its own
+// voice — never straight to the client. No pool is built and no curation
+// budget is spent on the way to it.
+export const INSUFFICIENT_SEEDS_TEXT =
+  "not enough taste to draw from yet: this listener has no synced library, no listening history, and too few seed artists or pasted songs. Tell them you don't know them well enough yet and ask them to finish the DJ interview or paste a few songs they love. The queue is unchanged."
+
+// Prepended, as its own first line, to a generate/edit tool result whenever
+// the picks came from the shared corpus rather than the listener's own
+// history (corpus mode, see resolvePoolMode) — the model must say so, and
+// the session is flagged not_personal (markNotPersonal) in the same breath
+// so the client's banner agrees with what the DJ said.
+export const CORPUS_NOTICE =
+  "note: these picks come from the shared catalog and this listener's seeds, not their own listening history — say so plainly."
+
 const CURATION_APOLOGY = 'lost my train of thought on that one — try again?'
 const CONFLICT_APOLOGY = 'the queue shifted while I was working on it — try that again?'
 const LLM_APOLOGY = 'the line to the booth dropped — try that again?'
@@ -392,6 +410,19 @@ type GenerateOutcome = {
   intent?: Intent
 }
 
+// Flags a session whose queue now holds picks drawn from the shared corpus
+// (dj_sessions.not_personal — the client renders its "not personal yet"
+// banner off this). Set here, never cleared here: a session that has mixed
+// corpus picks stays flagged. Idempotent — the WHERE skips an already-
+// flagged row outright, so a second corpus generate in the same session
+// neither rewrites the flag nor rides $onUpdate into a spurious updatedAt.
+async function markNotPersonal(db: Db, sessionId: string): Promise<void> {
+  await db
+    .update(djSessions)
+    .set({ notPersonal: true })
+    .where(and(eq(djSessions.id, sessionId), eq(djSessions.notPersonal, false)))
+}
+
 async function executeGenerateQueue(
   db: Db,
   deps: DjDeps,
@@ -405,7 +436,17 @@ async function executeGenerateQueue(
     return { resultText: formatZodIssues('invalid generate_queue input', parsed.error), queueChanged: false }
   }
   const intent = parsed.data
-  const pool = await buildPool(db, deps.embed, session.userId, intent)
+  // Resolved fresh before EVERY pool build (here and in executeEditQueue's
+  // provider), never cached on the session: a listener's mode changes the
+  // moment their import lands or a seed crosses the threshold, and the very
+  // next turn must see that. A listener with nothing to draw from gets the
+  // insufficient text back as the tool result — no pool, no curate() call,
+  // so nothing is consumed from the budget — and the model does the telling.
+  const poolMode = await resolvePoolMode(db, session.userId)
+  if (poolMode.mode === 'insufficient_seeds') {
+    return { resultText: INSUFFICIENT_SEEDS_TEXT, queueChanged: false, intent }
+  }
+  const pool = await buildPool(db, deps.embed, session.userId, intent, undefined, { mode: poolMode.mode })
   if (pool.length === 0) {
     // Not an error — the model still gets to tell the listener, in its own
     // voice, that nothing matched.
@@ -419,12 +460,17 @@ async function executeGenerateQueue(
     picks.map((p) => ({ trackId: p.trackId, reason: p.reason })),
     'dj',
   )
+  // Flagged only once the corpus picks have actually landed in the queue —
+  // a session is "not personal" because of what its queue holds, not
+  // because of what was attempted.
+  if (poolMode.mode === 'corpus') await markNotPersonal(db, session.id)
   // The model must describe results from THIS listing, never from
   // assumption — accounting numbers alone ("3 added") don't tell it what
   // actually landed where, or in what order.
   const updatedQueue = await getActiveQueue(db, session.id)
   return {
     resultText: [
+      ...(poolMode.mode === 'corpus' ? [CORPUS_NOTICE] : []),
       `queue generated: ${picks.length} tracks (now version ${version})`,
       'Updated queue (positions are 0-based):',
       formatQueueListing(updatedQueue),
@@ -456,6 +502,27 @@ async function executeEditQueue(
     return { resultText: formatZodIssues('invalid edit_queue input', parsed.error), queueChanged: false }
   }
   const ops = parsed.data.ops
+
+  // Only a swap or extend ever needs a pool (remove/move are pure
+  // rearrangement — queue-store never calls the provider for them), so the
+  // mode is resolved only when one is present, ONCE for the whole batch
+  // rather than per provider call: a 20-op swap batch must not re-run the
+  // resolution query 20 times, and one batch must not straddle two modes.
+  // A listener with nothing to draw from gets the insufficient text back
+  // before applyOps is ever reached — no partial application, no version
+  // bump, no curation spent — while a remove-only batch from that same
+  // listener (say, trimming a demo tape) still applies exactly as before.
+  const needsPool = ops.some((op) => op.op === 'swap' || op.op === 'extend')
+  let poolMode: PoolMode = 'personal'
+  if (needsPool) {
+    const resolved = await resolvePoolMode(db, session.userId)
+    if (resolved.mode === 'insufficient_seeds') return { resultText: INSUFFICIENT_SEEDS_TEXT, queueChanged: false }
+    poolMode = resolved.mode
+  }
+  // Set by the provider once corpus picks are actually handed to
+  // queue-store (an empty pool hands back nothing and leaves the original
+  // track in place — that queue holds no corpus pick, so no flag).
+  let corpusPicksLanded = false
 
   // Resolves a swap/extend's replacement picks. `opIntent` is whatever the
   // model put on that specific op (may be absent). With no op intent, this
@@ -489,21 +556,27 @@ async function executeEditQueue(
     // which this provider has no access to) — an acceptable, unlocked phase-1
     // read, same as everything else this provider touches before phase 2.
     const activeQueue = await getActiveQueue(db, session.id)
-    const pool = await buildPool(db, deps.embed, session.userId, fullIntent, activeQueue.map((t) => t.trackId))
+    const pool = await buildPool(db, deps.embed, session.userId, fullIntent, activeQueue.map((t) => t.trackId), { mode: poolMode })
     if (pool.length === 0) return [] // shortfall — queue-store leaves the original track(s) in place
     budget.consume()
     const picks = await curate(deps.llm, pool, fullIntent, sessionContext)
+    if (poolMode === 'corpus' && picks.length > 0) corpusPicksLanded = true
     return picks.map((p) => ({ trackId: p.trackId, reason: p.reason }))
   }
 
   try {
     const result = await applyOps(db, session.id, ops, 'dj', provider)
+    // Same rule as executeGenerateQueue: flagged after the picks landed
+    // (applyOps is atomic — a throw above means nothing landed and we never
+    // get here), and the model is told in the same result.
+    if (corpusPicksLanded) await markNotPersonal(db, session.id)
     // Same rationale as executeGenerateQueue: the accounting line alone
     // can't tell the model which position actually moved/dropped/swapped —
     // the model must describe results from this listing, never assumption.
     const updatedQueue = await getActiveQueue(db, session.id)
     return {
       resultText: [
+        ...(corpusPicksLanded ? [CORPUS_NOTICE] : []),
         `queue edited — requested ${result.requested}, added ${result.added}, removed ${result.removed} (now version ${result.version})`,
         'Updated queue (positions are 0-based):',
         formatQueueListing(updatedQueue),

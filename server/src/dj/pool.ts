@@ -6,6 +6,10 @@ import type { Intent } from './contracts'
 export type PoolTrack = {
   trackId: string
   appleId: string | null
+  // Peer of appleId (db/schema.ts → tracks.spotifyId), never a replacement:
+  // a row carries either, both, or — a Spotify listener's export — only this
+  // one. The queue UI renders a row with no Apple id as "Open in Spotify".
+  spotifyId: string | null
   title: string
   artist: string
   playCount: number | null
@@ -16,6 +20,46 @@ export type PoolTrack = {
   durationMs: number | null
   score: number
 }
+
+// Which candidate set buildPool draws from — decided by resolvePoolMode.
+// `personal` is the listener's own rows (library, seeds, counted plays);
+// `corpus` is the whole enriched catalog, for a listener who has shared
+// taste (interview seeds, pasted songs) but owns no data of their own yet.
+export type PoolMode = 'personal' | 'corpus'
+
+export type PoolModeResolution = {
+  mode: PoolMode | 'insufficient_seeds'
+  seedTracks: number
+  seedArtists: number
+}
+
+export type BuildPoolOptions = { mode?: PoolMode }
+
+// Candidate rule, personal mode (spec 2026-09-01 → Pool): a user_tracks row
+// is a candidate when it is in the library, was seeded (pasted/interview),
+// OR the listening ledger counts at least RECENT_PLAY_MIN plays for it
+// inside the last RECENT_PLAY_WINDOW_DAYS. Three plays in two years is the
+// founder's threshold. Computed live from listening_days on every call — the
+// window drifts with the calendar and needs no recompute job. Accepted edge:
+// an Apple listener's removed library song that still had three plays in the
+// window re-enters the pool; session removals still penalize it (the taste
+// term below).
+export const RECENT_PLAY_WINDOW_DAYS = 730
+export const RECENT_PLAY_MIN = 3
+
+// Corpus-mode gate (spec → Before the data arrives): a "not personal yet"
+// mix unlocks only once the listener's seeds match at least MIN_SEED_TRACKS
+// enriched corpus tracks across at least MIN_SEED_ARTISTS artists. Below
+// that the DJ says it does not know enough yet (dj/loop.ts) rather than
+// guessing off two names.
+export const MIN_SEED_TRACKS = 25
+export const MIN_SEED_ARTISTS = 3
+
+// Corpus-mode familiarity (spec → Before the data arrives): 1.0 for a row
+// the listener seeded themselves, this for a row by an artist they named,
+// 0 for the rest of the catalog. Plays mean nothing here — a corpus-mode
+// listener has no ledger and no library by construction.
+const SEED_ARTIST_FAMILIARITY = 0.7
 
 // Score weights per familiarity preset — v1, hand-set by feel rather than fit
 // to any data; P4 tunes these against real skip/favorite signal once it
@@ -149,6 +193,7 @@ function normalizeRows(res: unknown): Record<string, unknown>[] {
 type PoolRow = {
   track_id: string
   apple_id: string | null
+  spotify_id: string | null
   title: string
   artist: string
   play_count: number | string | null
@@ -160,18 +205,99 @@ type PoolRow = {
   score: number | string
 }
 
+type PoolModeRow = {
+  has_source: boolean
+  has_library: boolean
+  seed_tracks: number | string
+  seed_artists: number | string
+}
+
 const num = (v: number | string | null): number | null => (v === null ? null : Number(v))
 
 /**
- * Builds a scored candidate pool from the requesting user's library for the
- * given intent. Single-stage query — the plan accepted this at current scale
- * (~4.6k tracks total, far fewer per personal library): a scored seq scan
- * over a few hundred rows is single-digit ms. The HNSW index on
+ * Decides which candidate set buildPool should draw from for this listener.
+ *
+ * `personal` as soon as ANY data of their own exists: a user_music_sources
+ * row whose import actually landed (last_imported_at set — begin registers
+ * the source before a single row arrives, so a bare source row is an
+ * abandoned import and proves nothing), or any in_library row (a library
+ * synced before user_music_sources existed has no source row at all).
+ * Otherwise the seed matches decide: `corpus` at or above the MIN_SEED_*
+ * thresholds, `insufficient_seeds` below them.
+ *
+ * Seed matches = enriched corpus tracks (a track_features or track_meanings
+ * row — an unenriched row has nothing to score on, so it can't stand in for
+ * taste) whose normalized artist equals one of the listener's
+ * user_artist_seeds names, UNIONed by track id with the listener's own
+ * seeded user_tracks rows (explicit taste, counted enriched or not). Artist
+ * matching is lower(btrim()) equality on both sides — the same v1 limitation
+ * the taste term records above ('Wizkid' and 'Wizkid feat. Tems' are two
+ * artists here), accepted for the same reason.
+ *
+ * One query; the seed counts are computed even when the mode resolves
+ * personal, so whoever surfaces them later (the funnel) gets honest numbers
+ * rather than a placeholder zero. That costs one lower(btrim()) scan over
+ * the corpus per call — single-digit ms at current scale, the same
+ * acceptance as buildPool's own scored scan (see its doc comment).
+ */
+export async function resolvePoolMode(db: Db, userId: string): Promise<PoolModeResolution> {
+  const res = await db.execute(sql`
+    WITH seed_names AS (
+      SELECT DISTINCT lower(btrim(name)) AS name
+      FROM user_artist_seeds
+      WHERE user_id = ${userId}
+    ),
+    seed_matches AS (
+      SELECT t.id AS track_id, lower(btrim(t.artist)) AS artist
+      FROM tracks t
+      WHERE lower(btrim(t.artist)) IN (SELECT name FROM seed_names)
+        AND (
+          EXISTS (SELECT 1 FROM track_features f WHERE f.track_id = t.id)
+          OR EXISTS (SELECT 1 FROM track_meanings tm WHERE tm.track_id = t.id)
+        )
+      UNION
+      SELECT t.id AS track_id, lower(btrim(t.artist)) AS artist
+      FROM user_tracks ut
+      JOIN tracks t ON t.id = ut.track_id
+      WHERE ut.user_id = ${userId} AND ut.seeded = true
+    )
+    SELECT
+      EXISTS (
+        SELECT 1 FROM user_music_sources
+        WHERE user_id = ${userId} AND last_imported_at IS NOT NULL
+      ) AS has_source,
+      EXISTS (
+        SELECT 1 FROM user_tracks
+        WHERE user_id = ${userId} AND in_library = true
+      ) AS has_library,
+      (SELECT COUNT(*) FROM seed_matches)::int AS seed_tracks,
+      (SELECT COUNT(DISTINCT artist) FROM seed_matches)::int AS seed_artists
+  `)
+  const [row] = normalizeRows(res) as unknown as PoolModeRow[]
+  const seedTracks = Number(row.seed_tracks)
+  const seedArtists = Number(row.seed_artists)
+  if (row.has_source || row.has_library) return { mode: 'personal', seedTracks, seedArtists }
+  const mode = seedTracks >= MIN_SEED_TRACKS && seedArtists >= MIN_SEED_ARTISTS ? 'corpus' : 'insufficient_seeds'
+  return { mode, seedTracks, seedArtists }
+}
+
+/**
+ * Builds a scored candidate pool for the given intent — from the requesting
+ * user's own rows (personal mode, the default) or from the whole enriched
+ * catalog (corpus mode; see resolvePoolMode and the mode switch inside).
+ * Single-stage query — the plan accepted this at current scale (~4.6k
+ * tracks total, far fewer per personal library): a scored seq scan over a
+ * few hundred rows is single-digit ms. The HNSW index on
  * track_meanings.embedding is NOT used by this composite ORDER BY (the
  * planner can't use an ANN index when the sort key is a blended expression,
  * not the raw distance) — accepted for now. If P4's scale hurts this,
  * restructure as an ANN-inner-CTE (pull top-N by embedding distance first)
  * feeding a scored outer query (see Task 1 review).
+ *
+ * Every row that comes back is one RECORDING, not one tracks row: rows that
+ * share an ISRC are collapsed to a single survivor after scoring (see the
+ * dedupe comment in the query), so the pool never offers the same song
+ * twice under two platform ids.
  */
 export async function buildPool(
   db: Db,
@@ -179,7 +305,9 @@ export async function buildPool(
   userId: string,
   intent: Intent,
   excludeTrackIds?: string[],
+  options: BuildPoolOptions = {},
 ): Promise<PoolTrack[]> {
+  const mode: PoolMode = options.mode ?? 'personal'
   const embedding = await embed(intent.themes)
   // Defensive shape guard before the embedding touches SQL at all — the error
   // deliberately excludes the values themselves (only the length), since a
@@ -250,7 +378,13 @@ export async function buildPool(
   // counts. Web MusicKit cannot supply that number, so web-only rows use the
   // strongest honest signal available: bounded recent-play rank or deliberate
   // playlist membership. Missing stays missing; it never becomes a fake zero.
-  const observedPlayCountFit = sql`LEAST(1, LN(1 + ut.play_count) / ${FAM_REFERENCE_LN})`
+  // The play count read here is fam_plays' (see the query), not the row's
+  // own user_tracks column: one recording can sit in several tracks rows (a
+  // Spotify relink, an Apple reissue), so plays are summed across the
+  // recording's ISRC group and `observed` is true if ANY row in the group
+  // observed them — a listener's 100 Apple plays plus 100 Spotify plays of
+  // one song are 200 plays of one song, not two half-familiar strangers.
+  const observedPlayCountFit = sql`LEAST(1, LN(1 + fp.plays) / ${FAM_REFERENCE_LN})`
   const recentFit = sql`COALESCE(1 - (rs.rank::float8 / 30.0), 0)`
   // PostgreSQL LEAST ignores NULL operands, so COALESCE(LEAST(0.8, NULL), 0)
   // would incorrectly return 0.8. Branch before LEAST to keep no signal at 0.
@@ -258,10 +392,26 @@ export async function buildPool(
     WHEN ps.playlist_count IS NULL THEN 0
     ELSE LEAST(0.8, LN(1 + ps.playlist_count) / LN(6))
   END`
-  const famFit = sql`CASE
-    WHEN ut.play_count_observed THEN ${observedPlayCountFit}
+  const personalFamFit = sql`CASE
+    WHEN fp.observed THEN ${observedPlayCountFit}
     ELSE GREATEST(${recentFit}, ${playlistFit})
   END`
+  // Corpus mode has no plays worth reading — the listener owns nothing yet —
+  // so familiarity is the one place their explicit taste enters the score: a
+  // row they seeded themselves is fully familiar, a row by an artist they
+  // named in the interview is SEED_ARTIST_FAMILIARITY, and the rest of the
+  // catalog is a stranger. The recent-play and playlist signals contribute
+  // NOTHING here on purpose (a web listener with a synced library is
+  // personal mode anyway, so those signals have no honest corpus reading).
+  // `ut.seeded` is NULL for a row the listener has no user_tracks row for
+  // (the LEFT JOIN in the corpus candidate source below); CASE reads that
+  // as not-seeded, which is exactly right.
+  const corpusFamFit = sql`CASE
+    WHEN ut.seeded THEN 1.0::float8
+    WHEN lower(btrim(t.artist)) IN (SELECT name FROM seed_names) THEN ${SEED_ARTIST_FAMILIARITY}::float8
+    ELSE 0::float8
+  END`
+  const famFit = mode === 'corpus' ? corpusFamFit : personalFamFit
 
   // Taste: COALESCE inside the expression (not wrapped around it) so a track
   // whose artist has no row in artist_taste at all (LEFT JOIN miss — no
@@ -272,7 +422,31 @@ export async function buildPool(
 
   const scoreExpr = sql`(${weights.sim} * ${simFit} + ${weights.feat} * ${featureFit} + ${weights.fam} * ${famFit} + ${weights.taste} * ${tasteFit})`
 
-  const filters: SQL[] = [sql`ut.user_id = ${userId}`, sql`ut.in_library = true`]
+  // The mode switch — where candidates come from is the ONE structural
+  // difference between the two modes; the score formula (bar the familiarity
+  // term above), the hard filters below, and the recording dedupe are all
+  // shared, so a corpus mix is scored by exactly the rules a personal one is.
+  //  - personal: the listener's own user_tracks rows, gated by the candidate
+  //    rule (in_library OR seeded OR counted plays in the window — see
+  //    RECENT_PLAY_* above). recent_plays is ONE aggregated CTE over
+  //    listening_days, never a correlated subquery: a 20k-row lifetime
+  //    history must not pay a per-candidate ledger lookup.
+  //  - corpus: every track with a track_features or track_meanings row (an
+  //    unenriched row has nothing to score on), LEFT JOINed to the
+  //    listener's own user_tracks row purely so the familiarity term can see
+  //    `seeded`. A corpus-mode listener has no library and no ledger by
+  //    construction (resolvePoolMode), so nothing else of theirs is read.
+  const candidateSource: SQL =
+    mode === 'corpus'
+      ? sql`tracks t LEFT JOIN user_tracks ut ON ut.track_id = t.id AND ut.user_id = ${userId}`
+      : sql`user_tracks ut JOIN tracks t ON t.id = ut.track_id`
+  const filters: SQL[] =
+    mode === 'corpus'
+      ? [sql`(f.track_id IS NOT NULL OR tm.track_id IS NOT NULL)`]
+      : [
+          sql`ut.user_id = ${userId}`,
+          sql`(ut.in_library OR ut.seeded OR ut.track_id IN (SELECT track_id FROM recent_plays))`,
+        ]
   // Only a real two-bound window hard-filters — see the tempo comment above.
   // NULL tempo PASSES (consistent with releaseYear/explicit below): unknown
   // is not the same as out-of-window, and excluding it would just mean this
@@ -291,13 +465,18 @@ export async function buildPool(
   // no-op (materialize would just drop it as a duplicate) — excluding the
   // queue's own tracks up front means the pool's top candidates are actually
   // usable replacements, not the queue re-selecting itself. Each id is its
-  // own bound parameter (never string-joined into the query text).
+  // own bound parameter (never string-joined into the query text). Applied
+  // BEFORE the recording dedupe below, deliberately: excluding a group's
+  // preferred row lets its sibling stand in rather than vanishing with it.
   if (excludeTrackIds && excludeTrackIds.length > 0) {
     filters.push(sql`t.id NOT IN (${sql.join(excludeTrackIds.map((id) => sql`${id}::uuid`), sql`, `)})`)
   }
 
   const whereClause = sql.join(filters, sql` AND `)
 
+  // recent_plays and seed_names are each read by only one mode (the personal
+  // candidate rule and the corpus familiarity term respectively); Postgres
+  // never evaluates an unreferenced CTE, so the other one costs nothing.
   const res = await db.execute(sql`
     WITH removal_events AS (
       SELECT t.artist AS artist, qt.session_id AS session_id, MAX(qt.updated_at) AS ts
@@ -371,28 +550,90 @@ export async function buildPool(
         AND up.in_library = true
         AND pe.track_id IS NOT NULL
       GROUP BY pe.track_id
+    ),
+    -- Candidate rule, the ledger leg (see RECENT_PLAY_* above): tracks this
+    -- listener played at least RECENT_PLAY_MIN times, summed across every
+    -- day and every source, inside the window. Aggregated once here; the
+    -- personal candidate filter reads it as a plain IN.
+    recent_plays AS (
+      SELECT track_id
+      FROM listening_days
+      WHERE user_id = ${userId}
+        AND day >= CURRENT_DATE - ${RECENT_PLAY_WINDOW_DAYS}::int
+      GROUP BY track_id
+      HAVING SUM(plays) >= ${RECENT_PLAY_MIN}
+    ),
+    seed_names AS (
+      SELECT DISTINCT lower(btrim(name)) AS name
+      FROM user_artist_seeds
+      WHERE user_id = ${userId}
+    ),
+    -- Recording dedupe, part one (spec 2026-09-01 → Pool): Spotify relinks
+    -- tracks across re-releases and regions and Apple reissues catalog ids,
+    -- so one recording can hold several tracks rows over a lifetime history.
+    -- Rows group on COALESCE(isrc, id::text) — no ISRC, no grouping, a row is
+    -- its own recording — and this CTE is the group's play evidence: plays
+    -- summed over every row of the listener's that the group holds, observed
+    -- true if any of them observed a count. Read by the familiarity term
+    -- and the returned play_count, in both modes (a corpus row the listener
+    -- happens to own still reports its honest count).
+    fam_plays AS (
+      SELECT
+        COALESCE(t.isrc, t.id::text) AS key,
+        SUM(ut.play_count) AS plays,
+        BOOL_OR(ut.play_count_observed) AS observed
+      FROM user_tracks ut
+      JOIN tracks t ON t.id = ut.track_id
+      WHERE ut.user_id = ${userId}
+      GROUP BY 1
+    ),
+    scored AS (
+      SELECT
+        COALESCE(t.isrc, t.id::text) AS key,
+        -- Recording dedupe, part two — which row of a group survives. The
+        -- queue can only play what the listener's player can open, so a
+        -- listener with any Apple source (live sync or export, landed or
+        -- not — it says which player they have) prefers the row with an
+        -- apple_id, and everyone else prefers the row with a spotify_id.
+        -- One uncorrelated EXISTS, evaluated once per query, not per row.
+        CASE
+          WHEN EXISTS (
+            SELECT 1 FROM user_music_sources
+            WHERE user_id = ${userId} AND source IN ('apple_live', 'apple_export')
+          ) THEN (t.apple_id IS NOT NULL)
+          ELSE (t.spotify_id IS NOT NULL)
+        END AS pref,
+        t.id AS track_id,
+        t.apple_id AS apple_id,
+        t.spotify_id AS spotify_id,
+        t.title AS title,
+        t.artist AS artist,
+        CASE WHEN fp.observed THEN fp.plays ELSE NULL END AS play_count,
+        f.tempo AS tempo,
+        f.energy AS energy,
+        f.valence AS valence,
+        t.release_year AS release_year,
+        t.duration_ms AS duration_ms,
+        ${scoreExpr} AS score
+      FROM ${candidateSource}
+      LEFT JOIN track_features f ON f.track_id = t.id
+      LEFT JOIN track_meanings tm ON tm.track_id = t.id
+      LEFT JOIN artist_taste at ON at.artist = t.artist
+      LEFT JOIN recent_signal rs ON rs.track_id = t.id
+      LEFT JOIN playlist_signal ps ON ps.track_id = t.id
+      LEFT JOIN fam_plays fp ON fp.key = COALESCE(t.isrc, t.id::text)
+      WHERE ${whereClause}
     )
-    SELECT
-      t.id AS track_id,
-      t.apple_id AS apple_id,
-      t.title AS title,
-      t.artist AS artist,
-      CASE WHEN ut.play_count_observed THEN ut.play_count ELSE NULL END AS play_count,
-      f.tempo AS tempo,
-      f.energy AS energy,
-      f.valence AS valence,
-      t.release_year AS release_year,
-      t.duration_ms AS duration_ms,
-      ${scoreExpr} AS score
-    FROM user_tracks ut
-    JOIN tracks t ON t.id = ut.track_id
-    LEFT JOIN track_features f ON f.track_id = t.id
-    LEFT JOIN track_meanings tm ON tm.track_id = t.id
-    LEFT JOIN artist_taste at ON at.artist = t.artist
-    LEFT JOIN recent_signal rs ON rs.track_id = t.id
-    LEFT JOIN playlist_signal ps ON ps.track_id = t.id
-    WHERE ${whereClause}
-    ORDER BY score DESC, t.id
+    -- Recording dedupe, part three: exactly one row per group survives —
+    -- the platform-preferred one first, then the best score (track_id last,
+    -- for a stable tie) — and only THEN does the pool get ranked and cut to
+    -- size, so a duplicate can never crowd a distinct song out of the LIMIT.
+    SELECT * FROM (
+      SELECT DISTINCT ON (key) *
+      FROM scored
+      ORDER BY key, pref DESC, score DESC, track_id
+    ) deduped
+    ORDER BY score DESC, track_id
     LIMIT ${poolSize}
   `)
 
@@ -400,6 +641,7 @@ export async function buildPool(
   return rows.map((r) => ({
     trackId: r.track_id,
     appleId: r.apple_id,
+    spotifyId: r.spotify_id,
     title: r.title,
     artist: r.artist,
     playCount: num(r.play_count),

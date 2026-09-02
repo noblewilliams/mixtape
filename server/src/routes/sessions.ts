@@ -99,12 +99,18 @@ const MANUAL_OPS_HINT = 'swap/extend require the DJ — send a message instead'
 // The list-row shape: what GET /sessions returns per row, and what POST /
 // and PATCH /:id echo back for the ONE session they touched — one shape
 // everywhere a session is summarized, rather than three routes each
-// inventing their own subset of its columns.
+// inventing their own subset of its columns. (GET /:id returns the full row,
+// a superset of this.)
 const sessionListColumns = {
   id: djSessions.id,
   title: djSessions.title,
   status: djSessions.status,
   queueVersion: djSessions.queueVersion,
+  // True once a corpus-mode generate/swap has put shared-catalog picks in
+  // this session's queue (dj/loop.ts markNotPersonal) — the client's "not
+  // personal yet" banner reads this off every summary, so a listener sees
+  // it in the collection list, not only inside the open session.
+  notPersonal: djSessions.notPersonal,
   updatedAt: djSessions.updatedAt,
 }
 

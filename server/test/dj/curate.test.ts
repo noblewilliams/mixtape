@@ -15,6 +15,7 @@ function makePool(n: number): PoolTrack[] {
   return Array.from({ length: n }, (_, i) => ({
     trackId: `t${i}`,
     appleId: `apple${i}`,
+    spotifyId: null,
     title: `Title ${i}`,
     artist: `Artist ${i}`,
     playCount: n - i,

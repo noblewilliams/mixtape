@@ -1,10 +1,28 @@
 import { describe, it, expect, vi } from 'vitest'
 import { asc, eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
-import { runDjTurn, DjError, FALLBACK_TEXT, type DjDeps, type DjSessionRef } from '../../src/dj/loop'
+import {
+  runDjTurn,
+  DjError,
+  FALLBACK_TEXT,
+  INSUFFICIENT_SEEDS_TEXT,
+  CORPUS_NOTICE,
+  type DjDeps,
+  type DjSessionRef,
+} from '../../src/dj/loop'
 import { LlmError, type LlmClient, type LlmRequest, type LlmTurn, type LlmAssistantBlock, type LlmToolCall } from '../../src/dj/llm'
 import { replaceQueue, applyOps, getActiveQueue } from '../../src/dj/queue-store'
-import { djMemories, djMessages, djSessions, tracks, trackMeanings, userTracks, user } from '../../src/db/schema'
+import {
+  djMemories,
+  djMessages,
+  djSessions,
+  tracks,
+  trackFeatures,
+  trackMeanings,
+  userTracks,
+  userArtistSeeds,
+  user,
+} from '../../src/db/schema'
 import type { Embedder } from '../../src/enrich/embedder'
 
 const DIMS = 1024
@@ -47,6 +65,40 @@ async function seedLibrary(db: TestDb, userId: string, n: number) {
   const out = []
   for (let i = 0; i < n; i++) out.push(await seedLibraryTrack(db, userId, { embedding: MATCHING_DIRECTION }))
   return out
+}
+
+// An enriched track in the shared corpus with NO user_tracks row — a
+// corpus-mode candidate (Task 5), never a personal-mode one.
+async function seedCorpusTrack(db: TestDb, opts: { artist?: string; embedding?: number[] } = {}) {
+  trackCounter += 1
+  const [t] = await db
+    .insert(tracks)
+    .values({ appleId: `corpus-${trackCounter}`, title: `Corpus ${trackCounter}`, artist: opts.artist ?? 'CorpusArtist', durationMs: 200_000 })
+    .returning()
+  await db.insert(trackFeatures).values({ trackId: t.id, tempo: 120, source: 'reccobeats' })
+  await db.insert(trackMeanings).values({ trackId: t.id, embedding: opts.embedding ?? MATCHING_DIRECTION, lyricsSource: 'lrclib' })
+  return t
+}
+
+// A listener with no library, no ledger, and enough interview seeds to
+// unlock corpus mode: 3 seed artists with 9 enriched corpus tracks each
+// (27 >= MIN_SEED_TRACKS across 3 >= MIN_SEED_ARTISTS).
+async function seedCorpusListener(db: TestDb, userId: string) {
+  const out = []
+  for (const artist of ['SeedA', 'SeedB', 'SeedC']) {
+    await db.insert(userArtistSeeds).values({ userId, name: artist, source: 'interview' })
+    for (let i = 0; i < 9; i++) out.push(await seedCorpusTrack(db, { artist }))
+  }
+  return out
+}
+
+function curateRequests(requests: LlmRequest[]): LlmRequest[] {
+  return requests.filter((r) => r.tools.length === 0)
+}
+
+async function readNotPersonal(db: TestDb, sessionId: string) {
+  const [row] = await db.select({ notPersonal: djSessions.notPersonal }).from(djSessions).where(eq(djSessions.id, sessionId))
+  return row.notPersonal
 }
 
 async function readMessages(db: TestDb, sessionId: string) {
@@ -362,10 +414,18 @@ describe('runDjTurn', () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')
     const session = await seedSession(db, 'u1')
-    // No library tracks at all for this user — buildPool must come back empty.
+    // A personal listener (one library row) whose only track the intent's
+    // hard filters reject — buildPool must come back empty. A listener with
+    // NO library at all is a different case now (insufficient_seeds, see the
+    // pool-mode gating tests below).
+    const [explicitOnly] = await db
+      .insert(tracks)
+      .values({ appleId: 'explicit-only', title: 'Explicit', artist: 'Artist', durationMs: 200_000, explicit: true })
+      .returning()
+    await db.insert(userTracks).values({ userId: 'u1', trackId: explicitOnly.id, inLibrary: true })
     const sessionRef: DjSessionRef = { id: session.id, userId: 'u1' }
     const { llm, requests } = makeFakeLlm([
-      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'nonexistent genre', targetCount: 5 })] },
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'nonexistent genre', targetCount: 5, allowExplicit: false })] },
       { text: "sorry, nothing quite fits that in your library yet." },
     ])
     const deps: DjDeps = { embed: fakeEmbed, llm }
@@ -1518,5 +1578,129 @@ describe('runDjTurn', () => {
       const convo = conversationRequests(requests)
       expect(toolResultTextFrom(convo[1])).toBe('{"ok":false}')
     })
+  })
+})
+
+// --- Task 5: pool mode gating (personal / corpus / insufficient_seeds) -----
+
+describe('pool mode gating', () => {
+  it('insufficient_seeds: generate_queue returns the not-enough-taste text — no curate call, no queue change, no version bump', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1') // blank listener: no library, no ledger, no seeds
+    const session = await seedSession(db, 'u1')
+    const sessionRef: DjSessionRef = { id: session.id, userId: 'u1' }
+    const { llm, requests } = makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'late night', targetCount: 5 })] },
+      { text: 'tell me a few artists you love first.' },
+    ])
+    const deps: DjDeps = { embed: fakeEmbed, llm }
+
+    const result = await runDjTurn(db, deps, sessionRef, 'play me something')
+
+    expect(result.queue).toHaveLength(0)
+    expect(result.djMessage.queueVersion).toBeNull()
+    expect(toolResultTextFrom(conversationRequests(requests)[1])).toBe(INSUFFICIENT_SEEDS_TEXT)
+    expect(curateRequests(requests)).toHaveLength(0) // no curation budget consumed
+    expect(await readNotPersonal(db, session.id)).toBe(false)
+  })
+
+  it('insufficient_seeds: a swap returns the same text and leaves the queue exactly as it was', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const session = await seedSession(db, 'u1')
+    // A queue that exists (say, from a demo tape) but a listener who still
+    // owns nothing — the swap must not partially apply.
+    const queued = [await seedCorpusTrack(db), await seedCorpusTrack(db)]
+    const v1 = await replaceQueue(db, session.id, queued.map((t) => ({ trackId: t.id, reason: '' })), 'dj')
+    const sessionRef: DjSessionRef = { id: session.id, userId: 'u1' }
+    const { llm, requests } = makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'edit_queue', { ops: [{ op: 'swap', position: 0 }] })] },
+      { text: 'I need to know you a little better first.' },
+    ])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'swap the first one')
+
+    expect(toolResultTextFrom(conversationRequests(requests)[1])).toBe(INSUFFICIENT_SEEDS_TEXT)
+    expect(curateRequests(requests)).toHaveLength(0)
+    expect(result.queue.map((t) => t.trackId)).toEqual(queued.map((t) => t.id))
+    expect(result.queueVersion).toBe(v1)
+  })
+
+  it('insufficient_seeds: a remove-only edit needs no pool and still applies', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const session = await seedSession(db, 'u1')
+    const queued = [await seedCorpusTrack(db), await seedCorpusTrack(db)]
+    await replaceQueue(db, session.id, queued.map((t) => ({ trackId: t.id, reason: '' })), 'dj')
+    const sessionRef: DjSessionRef = { id: session.id, userId: 'u1' }
+    const { llm } = makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'edit_queue', { ops: [{ op: 'remove', position: 0 }] })] },
+      { text: 'gone.' },
+    ])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'drop the first one')
+
+    expect(result.queue.map((t) => t.trackId)).toEqual([queued[1].id])
+  })
+
+  it('corpus: generate_queue fills the queue from the shared catalog, flags the session not_personal, and tells the model so', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedCorpusListener(db, 'u1')
+    const session = await seedSession(db, 'u1')
+    const sessionRef: DjSessionRef = { id: session.id, userId: 'u1' }
+    const { llm, requests } = makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'late night', targetCount: 5 })] },
+      { text: "here's a first guess — not from your own history yet." },
+    ])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'play me something')
+
+    expect(result.queue).toHaveLength(5)
+    expect(result.queueVersion).toBe(1)
+    expect(await readNotPersonal(db, session.id)).toBe(true)
+    const text = toolResultTextFrom(conversationRequests(requests)[1])
+    expect(text.split('\n')[0]).toBe(CORPUS_NOTICE)
+    expect(text).toContain('queue generated: 5 tracks')
+  })
+
+  it('corpus: a swap replaces from the shared catalog and flags the session not_personal too', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const corpus = await seedCorpusListener(db, 'u1')
+    const session = await seedSession(db, 'u1')
+    const v1 = await replaceQueue(db, session.id, corpus.slice(0, 3).map((t) => ({ trackId: t.id, reason: '' })), 'dj')
+    const sessionRef: DjSessionRef = { id: session.id, userId: 'u1' }
+    const { llm, requests } = makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'edit_queue', { ops: [{ op: 'swap', position: 0 }] })] },
+      { text: 'swapped.' },
+    ])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'swap the first one')
+
+    expect(result.queueVersion).toBe(v1 + 1)
+    expect(result.queue).toHaveLength(3)
+    expect(result.queue.map((t) => t.trackId)).not.toContain(corpus[0].id)
+    expect(curateRequests(requests)).toHaveLength(1)
+    expect(await readNotPersonal(db, session.id)).toBe(true)
+    expect(toolResultTextFrom(conversationRequests(requests)[1]).split('\n')[0]).toBe(CORPUS_NOTICE)
+  })
+
+  it('personal: a library listener gets no corpus notice and the session stays personal', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedLibrary(db, 'u1', 5)
+    const session = await seedSession(db, 'u1')
+    const sessionRef: DjSessionRef = { id: session.id, userId: 'u1' }
+    const { llm, requests } = makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'late night', targetCount: 5 })] },
+      { text: 'done.' },
+    ])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'play me something')
+
+    expect(result.queue).toHaveLength(5)
+    expect(await readNotPersonal(db, session.id)).toBe(false)
+    expect(toolResultTextFrom(conversationRequests(requests)[1])).not.toContain(CORPUS_NOTICE)
   })
 })
