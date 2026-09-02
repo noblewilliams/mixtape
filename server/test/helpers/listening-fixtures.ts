@@ -1,5 +1,13 @@
-import { eq, getTableColumns, sql } from 'drizzle-orm'
-import { listeningImportRuns, tracks, user, userTracks } from '../../src/db/schema'
+import { asc, eq, getTableColumns, sql } from 'drizzle-orm'
+import {
+  listeningDays,
+  listeningImportRuns,
+  tracks,
+  user,
+  userArtistSeeds,
+  userMusicSources,
+  userTracks,
+} from '../../src/db/schema'
 import type {
   BeginListeningImport,
   ListeningArtistSnapshot,
@@ -173,6 +181,25 @@ export async function userTracksByPlatform(db: TestDb, userId: string) {
     .where(eq(userTracks.userId, userId))
   return new Map<string, UserTrackRow>(rows.map(({ spotifyId, appleId, ...row }) =>
     [spotifyId ?? appleId ?? '', row]))
+}
+
+// Every row the import pipeline owns for one user, in a stable order, so a
+// test can prove another tenant's import or reset left them untouched.
+export async function tenantRows(db: TestDb, userId: string) {
+  return {
+    days: await db.select().from(listeningDays)
+      .where(eq(listeningDays.userId, userId))
+      .orderBy(asc(listeningDays.source), asc(listeningDays.trackId), asc(listeningDays.day)),
+    tracks: await db.select().from(userTracks)
+      .where(eq(userTracks.userId, userId))
+      .orderBy(asc(userTracks.trackId)),
+    seeds: await db.select().from(userArtistSeeds)
+      .where(eq(userArtistSeeds.userId, userId))
+      .orderBy(asc(userArtistSeeds.name)),
+    sources: await db.select().from(userMusicSources)
+      .where(eq(userMusicSources.userId, userId))
+      .orderBy(asc(userMusicSources.source)),
+  }
 }
 
 export const withoutIdentity = (row: UserTrackRow | undefined) => {

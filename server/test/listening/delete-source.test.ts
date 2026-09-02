@@ -28,6 +28,7 @@ import {
   SPOTIFY_A,
   SPOTIFY_B,
   SPOTIFY_C,
+  tenantRows,
   track,
   userTracksByPlatform,
 } from '../helpers/listening-fixtures'
@@ -160,7 +161,115 @@ describe('ListeningImportStore.deleteSource', () => {
     expect(await db.select().from(listeningDays)).toMatchObject([{ source: 'apple_export', day: d1 }])
   })
 
-  it('removes an Apple export without touching Spotify rows', async () => {
+  it('resets the deleting user only', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedUser(db, 'u2')
+    const store = createListeningImportStore(db, { now: () => now })
+    const today = await dbToday(db)
+    const [d1, d2] = [shiftDay(today, -2), shiftDay(today, -1)]
+    for (const userId of ['u1', 'u2']) {
+      await publish(store, userId, begin(), {
+        tracks: [track(), track({ ordinal: 1, platformId: SPOTIFY_B })],
+        days: [
+          day({ day: d1, plays: 5, skips: 1 }),
+          day({ ordinal: 1, platformId: SPOTIFY_B, day: d2, plays: 1 }),
+        ],
+      })
+      await publish(store, userId, accountBegin(), {
+        tracks: [track()],
+        library: [libraryRow()],
+        artists: [artist()],
+      })
+    }
+    const before = await tenantRows(db, 'u1')
+    expect(before.days).toHaveLength(2)
+    expect(before.tracks.filter((row) => row.inLibrary)).toHaveLength(1)
+    expect(before.seeds).toMatchObject([{ name: 'Artist', source: 'spotify_export' }])
+    expect(before.sources).toMatchObject([{ source: 'spotify_export' }])
+    // A later clock: any touch of u1's rows would move updated_at as well.
+    const later = createListeningImportStore(db, { now: () => new Date(now.getTime() + 60_000) })
+
+    await expect(later.deleteSource('u2', 'spotify_export')).resolves.toEqual({
+      deletedDays: 2,
+      deletedTracks: 2,
+      unlibraried: 1,
+    })
+
+    expect(await tenantRows(db, 'u1')).toEqual(before)
+    expect(await tenantRows(db, 'u2')).toEqual({ days: [], tracks: [], seeds: [], sources: [] })
+    // The canonical track rows are shared and stay.
+    expect(await db.select().from(tracks)).toHaveLength(2)
+  })
+
+  it('resets an Apple export for a listener without a live Apple library', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const store = createListeningImportStore(db, { now: () => now })
+    const today = await dbToday(db)
+    const d1 = shiftDay(today, -1)
+    await publish(store, 'u1', appleBegin(), {
+      tracks: [track({ platformId: APPLE_A }), track({ ordinal: 1, platformId: APPLE_B })],
+      days: [day({ platformId: APPLE_A, day: d1, plays: 2, skips: 1 })],
+      library: [
+        libraryRow({ platformId: APPLE_A, playCount: 10 }),
+        libraryRow({ ordinal: 1, platformId: APPLE_B, likeRating: 1 }),
+      ],
+    })
+    const open = await store.begin('u1', appleBegin())
+    expect([...(await userTracksByPlatform(db, 'u1')).values()].map((row) => row.inLibrary))
+      .toEqual([true, true])
+
+    await expect(store.deleteSource('u1', 'apple_export')).resolves.toEqual({
+      deletedDays: 1,
+      deletedTracks: 2,
+      unlibraried: 2,
+    })
+
+    expect(await db.select().from(userTracks).where(eq(userTracks.userId, 'u1'))).toEqual([])
+    expect(await db.select().from(listeningDays)).toEqual([])
+    expect(await db.select().from(userMusicSources)).toEqual([])
+    expect((await runRow(db, open.importId)).status).toBe('expired')
+    // The canonical track rows are shared and stay.
+    expect(await db.select().from(tracks)).toHaveLength(2)
+  })
+
+  it('keeps Apple library rows for a listener with a live Apple library', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await db.insert(userMusicSources).values({ userId: 'u1', source: 'apple_live', lastImportedAt: now })
+    const store = createListeningImportStore(db, { now: () => now })
+    const today = await dbToday(db)
+    const d1 = shiftDay(today, -1)
+    await publish(store, 'u1', appleBegin(), {
+      tracks: [track({ platformId: APPLE_A }), track({ ordinal: 1, platformId: APPLE_B })],
+      days: [
+        day({ platformId: APPLE_A, day: d1, plays: 2, skips: 1 }),
+        day({ ordinal: 1, platformId: APPLE_B, day: d1, plays: 1, skips: 0 }),
+      ],
+      library: [libraryRow({ platformId: APPLE_A, playCount: 10, skipCount: 4 })],
+    })
+    expect((await userTracksByPlatform(db, 'u1')).get(APPLE_A))
+      .toMatchObject({ inLibrary: true, playCount: 10, playCountRecent: 2, skipCount: 4 })
+    const laterNow = new Date(now.getTime() + 60_000)
+    const later = createListeningImportStore(db, { now: () => laterNow })
+
+    await expect(later.deleteSource('u1', 'apple_export')).resolves.toEqual({
+      deletedDays: 2,
+      deletedTracks: 1,
+      unlibraried: 0,
+    })
+
+    const rows = await userTracksByPlatform(db, 'u1')
+    expect([...rows.keys()]).toEqual([APPLE_A])
+    // Only the ledger-derived fields move; the library's own counts stay.
+    expect(rows.get(APPLE_A)).toMatchObject({ inLibrary: true, playCount: 10, playCountRecent: 0, skipCount: 4 })
+    expect(rows.get(APPLE_A)?.updatedAt.getTime()).toBe(laterNow.getTime())
+    expect(await db.select().from(listeningDays)).toEqual([])
+    expect(await db.select().from(userMusicSources)).toMatchObject([{ source: 'apple_live' }])
+  })
+
+  it('removes an Apple export and keeps the Spotify ledger and rows', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')
     const store = createListeningImportStore(db, { now: () => now })
@@ -178,16 +287,15 @@ describe('ListeningImportStore.deleteSource', () => {
 
     await expect(store.deleteSource('u1', 'apple_export')).resolves.toEqual({
       deletedDays: 1,
-      deletedTracks: 1,
-      unlibraried: 0,
+      deletedTracks: 2,
+      unlibraried: 1,
     })
 
     const rows = await userTracksByPlatform(db, 'u1')
-    expect([...rows.keys()].sort()).toEqual([APPLE_A, SPOTIFY_A])
-    expect(rows.get(APPLE_A)).toMatchObject({ inLibrary: true, playCount: 2, playCountRecent: 0, skipCount: 1 })
+    expect([...rows.keys()]).toEqual([SPOTIFY_A])
     expect(rows.get(SPOTIFY_A)).toMatchObject({ inLibrary: false, playCount: 3, playCountRecent: 3, skipCount: 0 })
     expect(await db.select().from(listeningDays)).toMatchObject([{ source: 'spotify_export', plays: 3 }])
     expect(await db.select().from(userMusicSources)).toMatchObject([{ source: 'spotify_export' }])
-    expect(await db.select().from(userTracks).where(eq(userTracks.userId, 'u1'))).toHaveLength(2)
+    expect(await db.select().from(tracks)).toHaveLength(3)
   })
 })

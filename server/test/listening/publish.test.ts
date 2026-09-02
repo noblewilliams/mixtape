@@ -33,6 +33,7 @@ import {
   SPOTIFY_B,
   SPOTIFY_C,
   stage,
+  tenantRows,
   track,
   UNKNOWN_IMPORT,
   userTracksByPlatform,
@@ -577,6 +578,62 @@ describe('ListeningImportStore.complete', () => {
     })
     expect(byId.get(SPOTIFY_C))
       .toMatchObject({ title: 'New', artist: 'Catalog Artist', artistSource: 'apple_catalog' })
+  })
+
+  it('prunes days and un-likes rows for the importing user only', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedUser(db, 'u2')
+    const store = createListeningImportStore(db, { now: () => now })
+    const today = await dbToday(db)
+    const [d1, d2] = [shiftDay(today, -2), shiftDay(today, -1)]
+    const extended = () => ({
+      tracks: twoTracks(),
+      days: [
+        day({ day: d1, plays: 3, skips: 1 }),
+        day({ ordinal: 1, day: d2, plays: 2, skips: 0 }),
+        day({ ordinal: 2, platformId: SPOTIFY_B, day: d2, plays: 1, skips: 0 }),
+      ],
+    })
+    const account = () => ({
+      tracks: twoTracks(),
+      library: [libraryRow(), libraryRow({ ordinal: 1, platformId: SPOTIFY_B })],
+      artists: [artist()],
+    })
+    for (const userId of ['u1', 'u2']) {
+      await publish(store, userId, begin(), extended())
+      await publish(store, userId, accountBegin(), account())
+    }
+    const before = await tenantRows(db, 'u1')
+    expect(before.days).toHaveLength(3)
+    expect(before.tracks.map((row) => row.inLibrary)).toEqual([true, true])
+    expect(before.sources).toMatchObject([{ source: 'spotify_export', ledgerFrom: d1, ledgerTo: d2 }])
+    // A later clock: any touch of u1's rows would move updated_at as well.
+    const later = createListeningImportStore(db, { now: () => new Date(now.getTime() + 60_000) })
+
+    // Fewer days for the same track, then an account package liking none of them.
+    await publish(later, 'u2', begin(), {
+      tracks: [track()],
+      days: [day({ day: d1, plays: 1, skips: 0 })],
+    })
+    const { summary } = await publish(later, 'u2', accountBegin(), {
+      tracks: [track({ platformId: SPOTIFY_C, title: 'Third' })],
+      library: [libraryRow({ platformId: SPOTIFY_C })],
+      artists: [artist({ name: 'Other', spotifyId: null })],
+    })
+
+    expect(summary).toMatchObject({ likedRemoved: 2, likedRemovalSkipped: false })
+    expect(await tenantRows(db, 'u1')).toEqual(before)
+    expect(await dayRows(db, 'u2')).toMatchObject([
+      { spotifyId: SPOTIFY_A, day: d1, plays: 1 },
+      { spotifyId: SPOTIFY_B, day: d2, plays: 1 },
+    ])
+    const rows = await userTracksByPlatform(db, 'u2')
+    expect(rows.get(SPOTIFY_A)).toMatchObject({ inLibrary: false, playCount: 5, playCountRecent: 1 })
+    expect(rows.get(SPOTIFY_B)).toMatchObject({ inLibrary: false, playCount: 1, playCountRecent: 1 })
+    expect(rows.get(SPOTIFY_C)).toMatchObject({ inLibrary: true, playCount: 0 })
+    expect(await db.select().from(userMusicSources).where(eq(userMusicSources.userId, 'u2')))
+      .toMatchObject([{ source: 'spotify_export', ledgerFrom: d1, ledgerTo: d2 }])
   })
 
   it('hides other tenants and refuses runs that are not open', async () => {

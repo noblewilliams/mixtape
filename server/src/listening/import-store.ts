@@ -746,7 +746,8 @@ export function createListeningImportStore(db: Db, deps: StoreDeps = {}): Listen
     },
 
     // Delete-import is the reset for everything an import derived: the
-    // source's ledger and seeds go, rows the ledger alone justified go, and
+    // source's ledger and seeds go, its tracks leave the library unless a live
+    // Apple library owns membership, rows nothing else justifies go, and
     // survivors are recomputed from what remains. play_count stays as is.
     async deleteSource(userId, source) {
       return db.transaction(async (rawTx) => {
@@ -771,7 +772,6 @@ export function createListeningImportStore(db: Db, deps: StoreDeps = {}): Listen
         await tx.delete(userMusicSources)
           .where(and(eq(userMusicSources.userId, userId), eq(userMusicSources.source, source)))
 
-        let unlibraried = 0
         if (source === 'spotify_export') {
           await tx.update(userPlaylists)
             .set({ inLibrary: false, updatedAt: now })
@@ -780,18 +780,21 @@ export function createListeningImportStore(db: Db, deps: StoreDeps = {}): Listen
               eq(userPlaylists.source, 'spotify_export'),
               eq(userPlaylists.inLibrary, true),
             ))
-          if (!(await hasAppleLive(tx, userId))) {
-            unlibraried = normalizeRows(await tx.execute(sql`
-              UPDATE user_tracks ut
-              SET in_library = false, updated_at = ${now}
-              FROM tracks t
-              WHERE ut.user_id = ${userId}
-                AND ut.track_id = t.id
-                AND t.spotify_id IS NOT NULL
-                AND ut.in_library = true
-              RETURNING ut.track_id
-            `)).length
-          }
+        }
+        // The source's tracks leave the library with it, unless a live Apple
+        // library owns in_library for this listener.
+        let unlibraried = 0
+        if (!(await hasAppleLive(tx, userId))) {
+          unlibraried = normalizeRows(await tx.execute(sql`
+            UPDATE user_tracks ut
+            SET in_library = false, updated_at = ${now}
+            FROM tracks t
+            WHERE ut.user_id = ${userId}
+              AND ut.track_id = t.id
+              AND t.${PLATFORM_COLUMNS[source]} IS NOT NULL
+              AND ut.in_library = true
+            RETURNING ut.track_id
+          `)).length
         }
 
         const deletedTracks = normalizeRows(await tx.execute(sql`
