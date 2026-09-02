@@ -142,9 +142,12 @@ For each row in each history file, in order:
    `spotify:track:`. When `spotify_track_uri` is null (local files), the row
    is **unresolved**: add 1 to `unresolved.rows`, and 1 to `unresolved.plays`
    when `ms_played >= 30000`; then stop processing the row.
-4. `ts` must match `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$`; the
-   instant is `Date.UTC` (or the platform equivalent) of the captured fields,
-   with the fraction right-padded to milliseconds. Any other value, including
+4. `ts` must match `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$` and its
+   year must be 1900 or later (JavaScript's `Date.UTC` maps years 0–99 to the
+   1900s and Dart's `DateTime.utc` does not, so the floor keeps both sides
+   identical); the instant is `Date.UTC` (or the platform equivalent) of the
+   captured fields, with the fraction right-padded to milliseconds. The same
+   year floor applies to `addedDate` and `lastModifiedDate` (interpretation 13). Any other value, including
    an offset-less `2026-04-01T10:00:00`, a `+00:00` offset, or an RFC 2822
    date, drops the row. Convert the instant to the option's IANA zone: local
    day `YYYY-MM-DD` and local hour 0–23 (see "Time zone conversion").
@@ -292,9 +295,9 @@ fails if a parser chooses differently.
 6. A `spotify_track_uri` that is a string but not `spotify:track:` plus 22
    base62 characters is treated like null (unresolved). Not pinned; the builder
    refuses such fixtures.
-7. `ts` accepts only the grammar in step 4; any other value drops the row,
-   after step 3, so an unresolved row with a bad `ts` still counts as
-   unresolved. Pinned: `extended-basic` (an offset-less
+7. `ts` accepts only the grammar in step 4, year 1900 or later; any other
+   value drops the row, after step 3, so an unresolved row with a bad `ts`
+   still counts as unresolved. Pinned: `extended-basic` (a `0099-…` row, an offset-less
    `2026-04-01T10:00:00` and an RFC 2822 `Wed, 01 Apr 2026 11:00:00 GMT`, both
    resolved, are dropped; a lenient `Date.parse` would keep them).
 8. `ms_played` that is a JSON number is truncated toward zero; anything else

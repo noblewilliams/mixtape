@@ -461,6 +461,7 @@ export function instantFromTs(value) {
   if (typeof value !== 'string') return null
   const match = TS.exec(value)
   if (match === null) return null
+  if (Number(match[1]) < 1900) return null // years before 1900 are outside the grammar (step 4)
   const millis = match[7] === undefined ? 0 : Number(match[7].padEnd(3, '0'))
   return Date.UTC(
     Number(match[1]),
@@ -637,6 +638,7 @@ export function epochMsFromExportDate(value) {
   if (typeof value !== 'string') return null
   const match = DATE_ONLY.exec(value)
   if (match === null) return null
+  if (Number(match[1]) < 1900) return null // same year floor as `ts` (interpretation 13)
   const ms = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
   return Number.isNaN(ms) ? null : ms
 }
