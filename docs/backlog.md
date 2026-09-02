@@ -53,6 +53,7 @@ Server / DJ:
 - `analyze-previews` front-loads all downloads before analysis (operator UX); interleaving fetch/analyze chunks recorded as deferred (P2.5 Task 3 review).
 - Opus-for-sequencing escalation stays a contingency: only with evidence of Sonnet ordering poorly (see CLAUDE.md).
 - Playlist tables and contracts keep Apple-flavored column names (`apple_library_id`, `apple_library_entry_id`) while carrying opaque Spotify fingerprint keys; rename to `source_*` when the tables are next touched for another reason (listening-export spec, naming debt).
+- Listening-export: a track row holding both `spotify_id` and `apple_id` is swept by the Spotify liked-removal and delete-source rules even when its library membership came from an Apple export; revisit when phase 3's ISRC cross-link starts producing dual-id rows (Task 3 review, 2026-09-02).
 - Listening-export re-import cannot lower a play count (`GREATEST` merge); delete-import is the reset. A removed Apple library song with three plays in the last two years re-enters the pool; session removals still penalize it. Both accepted 2026-09-01.
 
 ## Reopen clauses (from decisions.md — conditions, not tasks)

@@ -110,8 +110,10 @@ Read the spec first. These are the facts an implementer must not drift from.
 ## Review follow-ups (recorded, not gates)
 
 - Task 2 review: the staged-days lookup uses a row-value `IN` list of up to 2 000 `(platform_id, day)` tuples, which the planner expands into a wide `OR`. Fine at current volumes; if import latency shows it, switch to a join against `unnest(text[], date[])`.
-- Task 4 must guard `:importId` with a UUID param schema (as `library-ingest.ts` does) so a malformed id is a 404, never a raw Postgres uuid error.
+- Task 4 review: one convention across all three staging protocols (library, playlist, listening) — a malformed `:syncId`/`:importId` is a 404 `{ error: 'not_found' }` via a shared `routes/uuid-param.ts` helper (library and playlist routes moved from a zod 400 to this), the conflict category maps to `sync_conflict` everywhere, and `/me/*` read endpoints emit timestamps as ISO strings like `/me/memories`. Invalid JSON bodies are now a 400 (Hono's `HTTPException` is returned from `app.onError` instead of being swallowed into a 500). Phase-2 clients can share one staging-protocol helper.
 - Task 3 `complete()` locks the profile row, then the run row, matching `begin()` and the library sibling, so lock order stays deadlock-free.
+- Task 3 review: `deleteSource('apple_export')` now un-libraries export-derived Apple rows when the user has no `apple_live` source (fix round), so delete-import is a real reset for both sources. Dual-id rows (a track with both `spotify_id` and `apple_id`) are still swept by the Spotify liked-removal and delete rules when their membership came from an Apple export; rare until phase 3's ISRC cross-link creates such rows, so it is recorded for phase 3 rather than fixed here.
+- Task 6 must insert seeded rows with `in_library = false` explicitly (`user_tracks.in_library` defaults to true), or the Spotify liked-removal and delete-source rules will sweep them.
 
 ## Out of scope (resist)
 Parsers · any UI · the ReccoBeats-by-id enrichment stage, ISRC cross-link, and oEmbed artwork (phase 3) · relay and embed probes (phase 4) · Apple adapter specifics beyond accepting `apple_media` runs · physical merge of duplicate rows · scoring changes beyond the candidate rule and corpus familiarity · cron batch size changes · email or push.
