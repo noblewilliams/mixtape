@@ -123,13 +123,15 @@ describe('PUT /me/artist-seeds', () => {
     expect(await response.json()).toMatchObject({ seeds: [{ name: 'B', source: 'spotify_export' }] })
   })
 
-  it('400s on more than 50 names, a blank name, an over-long name, a missing list, or an unknown key', async () => {
+  it('400s on more than 50 names, a blank name, an over-long name, a NUL byte, a lone surrogate, a missing list, or an unknown key', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')
     for (const body of [
       { names: Array.from({ length: 51 }, (_, i) => `Artist ${i}`) },
       { names: ['   '] },
       { names: ['x'.repeat(501)] },
+      { names: ['Wiz\0kid'] },
+      { names: ['Wiz\ud800kid'] },
       { names: 'Tems' },
       {},
       { names: ['Tems'], extra: true },

@@ -105,4 +105,26 @@ describe('fetchTracksBySpotifyIds', () => {
     const bad: FetchLike = async () => new Response('nope', { status: 200 })
     await expect(fetchTracksBySpotifyIds([A], bad)).rejects.toThrow(EnrichSourceError)
   })
+
+  // A rejected fetch's own message carries the request URL, ids included,
+  // so it must never become the error detail.
+  it('throws EnrichSourceError with a fixed detail when the fetch times out', async () => {
+    const timedOut: FetchLike = async () => {
+      throw new DOMException(`https://api.reccobeats.com/v1/track?ids=${A} timed out`, 'TimeoutError')
+    }
+    const error = await fetchTracksBySpotifyIds([A], timedOut).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(EnrichSourceError)
+    expect(error).toMatchObject({ source: 'reccobeats', detail: 'track fetch failed', status: undefined })
+    expect((error as Error).message).not.toContain(A)
+  })
+
+  it('throws EnrichSourceError with a fixed detail when the fetch cannot connect', async () => {
+    const unreachable: FetchLike = async () => {
+      throw new TypeError(`fetch failed: https://api.reccobeats.com/v1/track?ids=${A}`)
+    }
+    const error = await fetchTracksBySpotifyIds([A], unreachable).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(EnrichSourceError)
+    expect(error).toMatchObject({ source: 'reccobeats', detail: 'track fetch failed', status: undefined })
+    expect((error as Error).message).not.toContain(A)
+  })
 })

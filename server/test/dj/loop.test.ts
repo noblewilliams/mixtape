@@ -48,12 +48,16 @@ async function seedSession(db: TestDb, userId: string, title = 'session') {
 
 let trackCounter = 0
 
-async function seedLibraryTrack(db: TestDb, userId: string, opts: { title?: string; embedding?: number[]; playCount?: number } = {}) {
+async function seedLibraryTrack(
+  db: TestDb,
+  userId: string,
+  opts: { title?: string; embedding?: number[]; playCount?: number; isrc?: string } = {},
+) {
   trackCounter += 1
   const label = opts.title ?? `Track ${trackCounter}`
   const [t] = await db
     .insert(tracks)
-    .values({ appleId: `apple-${trackCounter}`, title: label, artist: 'Artist', durationMs: 200_000 })
+    .values({ appleId: `apple-${trackCounter}`, isrc: opts.isrc, title: label, artist: 'Artist', durationMs: 200_000 })
     .returning()
   if (opts.embedding) {
     await db.insert(trackMeanings).values({ trackId: t.id, embedding: opts.embedding, lyricsSource: 'lrclib' })
@@ -862,6 +866,44 @@ describe('runDjTurn', () => {
       const poolText = (curateCall.messages[0].content as Array<{ text?: string }>)[0]?.text ?? ''
       expect(poolText).not.toContain(queued.id)
       expect(poolText).toContain(replacement.id)
+    })
+
+    it("a swap never lands the queued recording's ISRC sibling — the same song under another platform id leaves the pool with it", async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const session = await seedSession(db, 'u1')
+      const isrc = 'NGA0A2000001'
+      // The queue holds the Apple row of a recording. Its Spotify-only
+      // sibling is a fully qualified candidate (in the library, enriched)
+      // that would otherwise top the pool by a wide margin.
+      const queued = await seedLibraryTrack(db, 'u1', { embedding: MATCHING_DIRECTION, playCount: 0, isrc })
+      const [sibling] = await db
+        .insert(tracks)
+        .values({ spotifyId: '4uLU6hMCjMI75M1A2tKUQC', isrc, title: 'Sibling', artist: 'Artist', durationMs: 200_000 })
+        .returning()
+      await db.insert(trackFeatures).values({ trackId: sibling.id, tempo: 120, source: 'reccobeats' })
+      await db.insert(trackMeanings).values({ trackId: sibling.id, embedding: MATCHING_DIRECTION, lyricsSource: 'lrclib' })
+      await db.insert(userTracks).values({ userId: 'u1', trackId: sibling.id, playCount: 999, inLibrary: true })
+      const other = await seedLibraryTrack(db, 'u1', { embedding: MATCHING_DIRECTION, playCount: 0 })
+      await replaceQueue(db, session.id, [{ trackId: queued.id, reason: '' }], 'dj')
+
+      const sessionRef: DjSessionRef = { id: session.id, userId: 'u1' }
+      const { llm, requests } = makeFakeLlm([
+        { toolCalls: [toolCall('c1', 'edit_queue', { ops: [{ op: 'swap', position: 0 }] })] },
+        { text: 'swapped it out.' },
+      ])
+
+      const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'try something different here')
+
+      expect(result.queue).toHaveLength(1)
+      expect(result.queue[0].trackId).toBe(other.id)
+      expect(result.queue.map((t) => t.trackId)).not.toContain(sibling.id)
+
+      const curateCall = requests.find((r) => r.tools.length === 0)!
+      const poolText = (curateCall.messages[0].content as Array<{ text?: string }>)[0]?.text ?? ''
+      expect(poolText).not.toContain(queued.id)
+      expect(poolText).not.toContain(sibling.id)
+      expect(poolText).toContain(other.id)
     })
   })
 

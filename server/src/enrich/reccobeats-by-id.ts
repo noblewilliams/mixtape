@@ -57,9 +57,13 @@ export async function fetchTracksBySpotifyIds(
   for (let start = 0; start < wanted.length; start += RECCOBEATS_ID_BATCH) {
     const batch = wanted.slice(start, start + RECCOBEATS_ID_BATCH)
     // Ids are base62, so the comma-joined list needs no encoding; a
-    // URLSearchParams value would send %2C instead.
+    // URLSearchParams value would send %2C instead. A rejected fetch (the
+    // timeout's TimeoutError, a DNS or connection TypeError) names the
+    // request URL, ids and all, in its message, so the detail is fixed.
     const response = await fetchLike(`${BASE}/track?ids=${batch.join(',')}`, {
       signal: AbortSignal.timeout(SOURCE_TIMEOUT_MS),
+    }).catch(() => {
+      throw new EnrichSourceError('reccobeats', 'track fetch failed')
     })
     if (!response.ok) {
       throw new EnrichSourceError('reccobeats', `track HTTP ${response.status}`, response.status)

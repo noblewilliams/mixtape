@@ -3,7 +3,11 @@ import { and, asc, eq } from 'drizzle-orm'
 import { createApp, type AuthLike } from '../../src/app'
 import { listeningDays, tracks, userArtistSeeds, userTracks } from '../../src/db/schema'
 import { EnrichSourceError } from '../../src/enrich/types'
-import type { FetchTracksBySpotifyIds, ReccoBeatsTrackHit } from '../../src/enrich/reccobeats-by-id'
+import {
+  fetchTracksBySpotifyIds,
+  type FetchTracksBySpotifyIds,
+  type ReccoBeatsTrackHit,
+} from '../../src/enrich/reccobeats-by-id'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { now, seedUser, SPOTIFY_A, SPOTIFY_B, SPOTIFY_C } from '../helpers/listening-fixtures'
 
@@ -193,6 +197,18 @@ describe('POST /me/seed-tracks', () => {
     expect(await response.json()).toEqual({ error: 'upstream' })
     expect(await trackRows(db)).toHaveLength(0)
     expect(await userTrackRows(db, 'u1')).toHaveLength(0)
+  })
+
+  it('answers 502 {error: "upstream"} when the ReccoBeats fetch itself rejects (DNS, connection, timeout)', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const unreachable: FetchTracksBySpotifyIds = (ids) =>
+      fetchTracksBySpotifyIds(ids, async () => { throw new TypeError('fetch failed') })
+    const response = await app(db, authFor('u1'), unreachable)
+      .request('http://x/me/seed-tracks', json('POST', { spotifyIds: [SPOTIFY_A] }))
+    expect(response.status).toBe(502)
+    expect(await response.json()).toEqual({ error: 'upstream' })
+    expect(await trackRows(db)).toHaveLength(0)
   })
 
   it('other failures stay internal 500s', async () => {

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { safeString } from '../contracts/safe-string'
 import { SPOTIFY_ID_PATTERN } from '../listening/contracts'
 
 export const ARTIST_SEEDS_MAX = 50
@@ -9,11 +10,10 @@ export const INTERVIEW_ARTISTS_MAX = 20
 export const INTERVIEW_ARTIST_MAX = 200
 export const INTERVIEW_ANSWER_MAX = 300
 
-// Postgres rejects a NUL byte in text; everything else is stored as typed and
-// sanitized where it is rendered (dj/sanitize.ts), never on the way in.
-const noNul = <T extends z.ZodString>(schema: T) => schema.refine((value) => !value.includes('\0'))
-const trimmedName = (max: number) => noNul(z.string().trim().min(1).max(max))
-const answer = noNul(z.string().trim().max(INTERVIEW_ANSWER_MAX))
+// Stored as typed and sanitized where it is rendered (dj/sanitize.ts), never
+// on the way in; safeString refuses only what Postgres cannot hold as sent.
+const trimmedName = (max: number) => safeString(z.string().trim().min(1).max(max))
+const answer = safeString(z.string().trim().max(INTERVIEW_ANSWER_MAX))
 
 export const surfaceSchema = z.enum(['ios', 'web'])
 export type Surface = z.infer<typeof surfaceSchema>

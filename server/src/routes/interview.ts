@@ -38,7 +38,10 @@ export function interviewRoutes(db: Db) {
       for (const [prefix, pick] of NOTE_PREFIXES) {
         const answer = pick(answers, artists).trim()
         if (answer.length === 0) continue
-        const outcome = await insertMemoryNote(tx, userId, prefix + answer.slice(0, MAX_MEMORY_NOTE_LENGTH - prefix.length))
+        // The same code-point cut insertMemoryNote makes, so the prefixed
+        // note never ends in half a surrogate pair.
+        const budget = MAX_MEMORY_NOTE_LENGTH - prefix.length
+        const outcome = await insertMemoryNote(tx, userId, prefix + Array.from(answer).slice(0, budget).join(''))
         if (outcome !== 'empty') notes[outcome] += 1
       }
       await tx.insert(funnelEvents).values({ userId, type: 'interview_completed', surface: answers.surface })

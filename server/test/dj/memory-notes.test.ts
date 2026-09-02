@@ -47,6 +47,16 @@ describe('insertMemoryNote', () => {
     expect(row.note).toHaveLength(MAX_MEMORY_NOTE_LENGTH)
   })
 
+  it('caps by code point: an emoji at the cut survives whole, never as a lone surrogate', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const kept = `${'x'.repeat(MAX_MEMORY_NOTE_LENGTH - 1)}😀`
+    expect(await insertMemoryNote(db, 'u1', `${kept}tail`)).toBe('saved')
+    const [row] = await db.select().from(djMemories).where(eq(djMemories.userId, 'u1'))
+    expect(row.note).toBe(kept)
+    expect(Array.from(row.note)).toHaveLength(MAX_MEMORY_NOTE_LENGTH)
+  })
+
   it('scopes the cap and the duplicate check to the user', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { asc, eq } from 'drizzle-orm'
 import { createApp, type AuthLike } from '../../src/app'
 import { djMemories, funnelEvents, userArtistSeeds } from '../../src/db/schema'
+import { hasValidUnicodeScalars } from '../../src/contracts/safe-string'
 import { MAX_MEMORY_NOTES, MAX_MEMORY_NOTE_LENGTH } from '../../src/dj/memory-notes'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { now, seedUser } from '../helpers/listening-fixtures'
@@ -48,7 +49,7 @@ describe('POST /me/interview', () => {
     expect((await post(db, authFor(null), answers())).status).toBe(401)
   })
 
-  it('400s on an unknown key, a bad surface, too many artists, a blank artist, an over-long answer, or a missing field', async () => {
+  it('400s on an unknown key, a bad surface, too many artists, a blank artist, an over-long answer, a lone surrogate, a NUL byte, or a missing field', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')
     for (const body of [
@@ -58,6 +59,9 @@ describe('POST /me/interview', () => {
       answers({ neverSkip: ['  '] }),
       answers({ neverSkip: ['x'.repeat(201)] }),
       answers({ era: 'x'.repeat(301) }),
+      answers({ neverSkip: ['Wiz\ud800kid'] }),
+      answers({ era: 'the \ud800 90s' }),
+      answers({ playsMost: 'ama\0piano' }),
       (() => { const { era: _era, ...rest } = answers(); return rest })(),
     ]) {
       expect((await post(db, authFor('u1'), body)).status, JSON.stringify(body).slice(0, 60)).toBe(400)
@@ -138,6 +142,20 @@ describe('POST /me/interview', () => {
     const [note] = await notes(db, 'u1')
     expect(note.startsWith('Plays most: ')).toBe(true)
     expect(note).toHaveLength(MAX_MEMORY_NOTE_LENGTH)
+  })
+
+  it('truncates by code point: an emoji at the cut survives whole, never as a lone surrogate', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    // 'Era: ' leaves 195 code points; the 195th is a surrogate pair, which a
+    // UTF-16 slice would cut in half.
+    const era = `${'a'.repeat(194)}😀${'b'.repeat(20)}`
+    const response = await post(db, authFor('u1'), answers({ neverSkip: [], playsMost: '', listensWhen: '', neverWants: '', era }))
+    expect(response.status).toBe(200)
+    const [note] = await notes(db, 'u1')
+    expect(note).toBe(`Era: ${'a'.repeat(194)}😀`)
+    expect(hasValidUnicodeScalars(note)).toBe(true)
+    expect(Array.from(note).length).toBeLessThanOrEqual(MAX_MEMORY_NOTE_LENGTH)
   })
 
   it('trims and dedupes the artists case-insensitively before seeding and noting', async () => {

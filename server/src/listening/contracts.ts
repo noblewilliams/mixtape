@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { safeString } from '../contracts/safe-string'
 
 export const LISTENING_IMPORT_MAX_TRACKS = 100_000
 export const LISTENING_IMPORT_MAX_DAYS = 2_000_000
@@ -19,24 +20,6 @@ export function isSpotifyId(value: string): boolean {
   return SPOTIFY_ID_PATTERN.test(value)
 }
 
-function hasValidUnicodeScalars(value: string) {
-  for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index)
-    if (code >= 0xd800 && code <= 0xdbff) {
-      if (index + 1 >= value.length) return false
-      const next = value.charCodeAt(index + 1)
-      if (next < 0xdc00 || next > 0xdfff) return false
-      index += 1
-    } else if (code >= 0xdc00 && code <= 0xdfff) {
-      return false
-    }
-  }
-  return true
-}
-
-const safeString = (schema: z.ZodString) => schema.refine(
-  (value) => !value.includes('\0') && hasValidUnicodeScalars(value),
-)
 const textSnapshot = (max: number) => safeString(z.string().min(1).max(max))
 const nullableTextSnapshot = (max: number) => safeString(z.string().max(max)).nullable()
 const postgresInteger = z.number().int().max(2_147_483_647)

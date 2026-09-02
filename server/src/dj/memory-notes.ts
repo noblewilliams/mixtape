@@ -7,10 +7,11 @@ import { djMemories } from '../db/schema'
 // one constant so the three can never quietly drift apart.
 export const MAX_MEMORY_NOTES = 50
 
-// A note's storage cap. contracts.ts's rememberPreferenceInputSchema bounds
-// the model's tool input to the same 200 (pinned by test/dj/memory-notes),
-// so a note the loop accepts is never clipped here; the interview truncates
-// its answers to this before prefixing them.
+// A note's storage cap, in code points. contracts.ts's
+// rememberPreferenceInputSchema bounds the model's tool input to the same
+// 200 (pinned by test/dj/memory-notes; UTF-16 units, so never more code
+// points), so a note the loop accepts is never clipped here; the interview
+// truncates its answers to this before prefixing them.
 export const MAX_MEMORY_NOTE_LENGTH = 200
 
 export type MemoryNoteOutcome = 'saved' | 'duplicate' | 'capped' | 'empty'
@@ -21,7 +22,9 @@ export type MemoryNoteOutcome = 'saved' | 'duplicate' | 'capped' | 'empty'
 // failure propagates so each caller can decide (the loop swallows it into a
 // refusal, a route lets it 500).
 export async function insertMemoryNote(db: Db, userId: string, rawNote: string): Promise<MemoryNoteOutcome> {
-  const note = rawNote.trim().slice(0, MAX_MEMORY_NOTE_LENGTH).trim()
+  // Cut by code point, not UTF-16 unit: a slice through a surrogate pair
+  // would leave a lone surrogate the driver stores as U+FFFD.
+  const note = Array.from(rawNote.trim()).slice(0, MAX_MEMORY_NOTE_LENGTH).join('').trim()
   if (note.length === 0) return 'empty'
 
   // The cap check and the insert below aren't atomic with each other, so
