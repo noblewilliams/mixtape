@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { HTTPException } from 'hono/http-exception'
 import { requireSession } from './middleware/require-session'
 import { requireAdmin } from './middleware/require-admin'
 import { ingestRoutes } from './routes/ingest'
@@ -51,7 +52,12 @@ export function createApp({
 }) {
   const app = new Hono<{ Variables: AppVars }>()
 
-  app.onError((_err, c) => {
+  app.onError((err, c) => {
+    // Hono's own request errors (a body that is not JSON under an
+    // application/json content type, for one) already carry the right status
+    // and a fixed message: hand them back rather than turning a caller's
+    // mistake into a 500.
+    if (err instanceof HTTPException) return err.getResponse()
     // Request errors may wrap upstream response bodies, user input, or
     // credentials. Keep production logs useful as a failure signal without
     // serializing the error object itself.

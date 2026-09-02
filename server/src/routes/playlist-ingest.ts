@@ -1,5 +1,4 @@
 import { Hono, type Context } from 'hono'
-import { z } from 'zod'
 import { zValidator } from '@hono/zod-validator'
 import type { AppVars } from '../app'
 import type { Db } from '../db/types'
@@ -13,8 +12,10 @@ import {
   PlaylistSyncError,
   type PlaylistSyncStore,
 } from '../playlists/sync-store'
+import { uuidParam } from './uuid-param'
 
-const syncParamSchema = z.object({ syncId: z.string().uuid() })
+// A malformed :syncId is the same 404 as a run the caller cannot see.
+const syncParam = () => uuidParam('syncId')
 
 function errorResponse(c: Context<{ Variables: AppVars }>, error: unknown) {
   if (!(error instanceof PlaylistSyncError)) throw error
@@ -51,7 +52,7 @@ export function playlistIngestRoutes(
 
   app.put(
     '/playlists/syncs/:syncId/playlists',
-    zValidator('param', syncParamSchema),
+    syncParam(),
     zValidator('json', playlistChunkSchema),
     async (c) => {
       try {
@@ -67,7 +68,7 @@ export function playlistIngestRoutes(
 
   app.put(
     '/playlists/syncs/:syncId/entries',
-    zValidator('param', syncParamSchema),
+    syncParam(),
     zValidator('json', playlistEntryChunkSchema),
     async (c) => {
       try {
@@ -83,7 +84,7 @@ export function playlistIngestRoutes(
 
   app.post(
     '/playlists/syncs/:syncId/complete',
-    zValidator('param', syncParamSchema),
+    syncParam(),
     async (c) => {
       try {
         const { syncId } = c.req.valid('param')

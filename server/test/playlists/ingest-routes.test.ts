@@ -121,13 +121,15 @@ describe('playlist ingest routes', () => {
     expect(await conflict.json()).toEqual({ error: 'sync_conflict' })
   })
 
-  it('rejects malformed UUIDs and oversized chunks before store work', async () => {
+  it('hides a malformed sync id behind the same 404 and rejects oversized chunks before store work', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')
     const auth = authFor('u1')
-    expect((await request(db, auth, '/ingest/playlists/syncs/not-a-uuid/playlists', 'PUT', {
+    const malformed = await request(db, auth, '/ingest/playlists/syncs/not-a-uuid/playlists', 'PUT', {
       playlists: [playlist()],
-    })).status).toBe(400)
+    })
+    expect(malformed.status).toBe(404)
+    expect(await malformed.json()).toEqual({ error: 'not_found' })
     expect((await request(db, auth, '/ingest/playlists/syncs', 'POST', {
       storefront: 'ng', expectedPlaylists: 2_001, expectedEntries: 0,
     })).status).toBe(400)

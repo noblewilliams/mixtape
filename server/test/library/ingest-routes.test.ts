@@ -103,15 +103,27 @@ describe('library sync routes', () => {
     expect(await conflict.json()).toEqual({ error: 'sync_conflict' })
   })
 
-  it('rejects malformed parameters and oversized snapshots', async () => {
+  it('hides a malformed sync id behind the same 404 and rejects oversized snapshots', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')
     const auth = authFor('u1')
-    expect((await request(db, auth, '/ingest/library/syncs/not-a-uuid/songs', 'PUT', {
+    const malformed = await request(db, auth, '/ingest/library/syncs/not-a-uuid/songs', 'PUT', {
       songs: [song()],
-    })).status).toBe(400)
+    })
+    expect(malformed.status).toBe(404)
+    expect(await malformed.json()).toEqual({ error: 'not_found' })
     expect((await request(db, auth, '/ingest/library/syncs', 'POST', {
       source: 'web_musickit', storefront: 'ng', expectedSongs: 100_001,
     })).status).toBe(400)
+  })
+
+  it('answers a body that is not JSON with a 400, not an internal error', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const response = await createApp({ auth: authFor('u1'), db }).request(
+      'http://x/ingest/library/syncs',
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"source": ' },
+    )
+    expect(response.status).toBe(400)
   })
 })

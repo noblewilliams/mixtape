@@ -1,6 +1,12 @@
+import { asc, eq } from 'drizzle-orm'
 import { Hono } from 'hono'
 import { describe, expect, it } from 'vitest'
 import { createApp, type AppVars, type AuthLike } from '../../src/app'
+import { listeningDays } from '../../src/db/schema'
+import {
+  LISTENING_ARTIST_CHUNK_MAX,
+  LISTENING_TRACK_CHUNK_MAX,
+} from '../../src/listening/contracts'
 import {
   ListeningImportError,
   type ListeningImportErrorCategory,
@@ -32,6 +38,12 @@ function request(db: TestDb, auth: AuthLike, path: string, method: string, body?
     body: body === undefined ? undefined : JSON.stringify(body),
   })
 }
+
+// The user's ledger rows in a stable order, to prove another tenant's reset
+// left them untouched.
+const ledger = (db: TestDb, userId: string) => db.select().from(listeningDays)
+  .where(eq(listeningDays.userId, userId))
+  .orderBy(asc(listeningDays.trackId), asc(listeningDays.day))
 
 const extendedBegin = {
   source: 'spotify_export',
@@ -139,11 +151,50 @@ describe('listening import routes', () => {
     }
   })
 
+  // An unknown run would 404 from the store, so a 400 here proves the chunk
+  // validator answered first; exactly the maximum passes through to the store.
+  it('rejects empty and oversized chunks before store work', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const auth = authFor('u1')
+    const tracksPath = `${imports(UNKNOWN_IMPORT)}/tracks`
+    const artistsPath = `${imports(UNKNOWN_IMPORT)}/artists`
+    const tracks = (length: number) => Array.from({ length }, (_, ordinal) =>
+      track({ ordinal, platformId: String(ordinal).padStart(22, '0') }))
+    const artists = (length: number) => Array.from({ length }, (_, ordinal) =>
+      artist({ ordinal, name: `Artist ${ordinal}`, spotifyId: null }))
+
+    for (const [path, body] of [
+      [tracksPath, { tracks: [] }],
+      [tracksPath, { tracks: tracks(LISTENING_TRACK_CHUNK_MAX + 1) }],
+      [artistsPath, { artists: [] }],
+      [artistsPath, { artists: artists(LISTENING_ARTIST_CHUNK_MAX + 1) }],
+    ] as Array<[string, unknown]>) {
+      expect((await request(db, auth, path, 'PUT', body)).status, path).toBe(400)
+    }
+    expect((await request(db, auth, tracksPath, 'PUT', {
+      tracks: tracks(LISTENING_TRACK_CHUNK_MAX),
+    })).status).toBe(404)
+    expect((await request(db, auth, artistsPath, 'PUT', {
+      artists: artists(LISTENING_ARTIST_CHUNK_MAX),
+    })).status).toBe(404)
+  })
+
+  it('answers a body that is not JSON with a 400, not an internal error', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const response = await createApp({ auth: authFor('u1'), db }).request(
+      'http://x/ingest/listening/imports',
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"source": ' },
+    )
+    expect(response.status).toBe(400)
+  })
+
   it('maps every store error category on every endpoint and rethrows internal', async () => {
     const db = await createTestDb()
     const expected: Record<ListeningImportErrorCategory, [number, string]> = {
       not_found: [404, 'not_found'],
-      conflict: [409, 'import_conflict'],
+      conflict: [409, 'sync_conflict'],
       invalid_state: [409, 'invalid_state'],
       count_mismatch: [409, 'count_mismatch'],
       invalid_id: [400, 'invalid_id'],
@@ -277,7 +328,7 @@ describe('listening import routes', () => {
       tracks: [track({ platformId: SPOTIFY_B })],
     })
     expect(conflict.status).toBe(409)
-    expect(await conflict.json()).toEqual({ error: 'import_conflict' })
+    expect(await conflict.json()).toEqual({ error: 'sync_conflict' })
 
     const short = await request(db, auth, `${imports(importId)}/complete`, 'POST')
     expect(short.status).toBe(409)
@@ -286,6 +337,33 @@ describe('listening import routes', () => {
     const missing = await request(db, auth, `${imports(UNKNOWN_IMPORT)}/complete`, 'POST')
     expect(missing.status).toBe(404)
     expect(await missing.json()).toEqual({ error: 'not_found' })
+  })
+
+  it("leaves another user's ledger and source alone when deleting the same source", async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedUser(db, 'u2')
+    const owner = authFor('u1')
+    const importId = await beginImport(db, owner, extendedBegin)
+    expect((await request(db, owner, `${imports(importId)}/tracks`, 'PUT', { tracks: [track()] })).status).toBe(200)
+    expect((await request(db, owner, `${imports(importId)}/days`, 'PUT', { days: [day()] })).status).toBe(200)
+    expect((await request(db, owner, `${imports(importId)}/complete`, 'POST')).status).toBe(200)
+    const before = await ledger(db, 'u1')
+    expect(before).toHaveLength(1)
+
+    const deleted = await request(db, authFor('u2'), '/ingest/listening/sources/spotify_export', 'DELETE')
+    expect(deleted.status).toBe(200)
+    expect(await deleted.json()).toEqual({ deletedDays: 0, deletedTracks: 0, unlibraried: 0 })
+
+    expect(await ledger(db, 'u1')).toEqual(before)
+    expect((await userTracksByPlatform(db, 'u1')).get(SPOTIFY_A)).toMatchObject({
+      playCount: 3, playCountObserved: true,
+    })
+    const sources = await request(db, owner, '/me/music-sources', 'GET')
+    expect(sources.status).toBe(200)
+    expect(await sources.json()).toMatchObject({
+      sources: [{ source: 'spotify_export', ledgerFrom: '2026-08-30', ledgerTo: '2026-08-30' }],
+    })
   })
 
   it("hides another user's run behind the same 404", async () => {

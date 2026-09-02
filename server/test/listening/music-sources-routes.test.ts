@@ -20,7 +20,7 @@ describe('GET /me/music-sources', () => {
     expect((await list(db, authFor(null))).status).toBe(401)
   })
 
-  it("lists the caller's sources by name with import and ledger bounds", async () => {
+  it("lists the caller's sources by name with ISO timestamps and ledger bounds", async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')
     await seedUser(db, 'u2')
@@ -39,15 +39,15 @@ describe('GET /me/music-sources', () => {
       sources: [
         {
           source: 'apple_live',
-          connectedAt: now.getTime(),
+          connectedAt: now.toISOString(),
           lastImportedAt: null,
           ledgerFrom: null,
           ledgerTo: null,
         },
         {
           source: 'spotify_export',
-          connectedAt: now.getTime(),
-          lastImportedAt: now.getTime(),
+          connectedAt: now.toISOString(),
+          lastImportedAt: now.toISOString(),
           ledgerFrom: '2026-08-30',
           ledgerTo: '2026-08-31',
         },

@@ -1,6 +1,6 @@
-import { Hono, type Context, type Env as HonoEnv } from 'hono'
+import { Hono, type Context } from 'hono'
 import { z } from 'zod'
-import { zValidator, type Hook } from '@hono/zod-validator'
+import { zValidator } from '@hono/zod-validator'
 import type { AppVars } from '../app'
 import type { Db } from '../db/types'
 import {
@@ -16,29 +16,22 @@ import {
   ListeningImportError,
   type ListeningImportStore,
 } from '../listening/import-store'
+import { uuidParam } from './uuid-param'
 
 type Env = { Variables: AppVars }
 
-// listening_import_runs.id is a uuid column: a malformed path segment must
-// resolve to the same 404 as a run the caller cannot see, never a raw
-// Postgres uuid error. The hook never reads app variables, so it is typed on
-// Hono's base Env, which is what a standalone zValidator infers.
-const importParamSchema = z.object({ importId: z.string().uuid() })
-const notFoundOnMalformed: Hook<z.infer<typeof importParamSchema>, HonoEnv, string, 'param'> = (
-  result,
-  c,
-) => {
-  if (!result.success) return c.json({ error: 'not_found' }, 404)
-}
-const importParam = () => zValidator('param', importParamSchema, notFoundOnMalformed)
+// A malformed :importId is the same 404 as a run the caller cannot see.
+const importParam = () => uuidParam('importId')
 
 const sourceParamSchema = z.object({ source: listeningImportSourceSchema })
 
+// Same bodies as the library and playlist staging routes, so one client
+// helper covers all three protocols; invalid_id is the listening-only extra.
 function errorResponse(c: Context<Env>, error: unknown) {
   if (!(error instanceof ListeningImportError)) throw error
   switch (error.category) {
     case 'not_found': return c.json({ error: 'not_found' }, 404)
-    case 'conflict': return c.json({ error: 'import_conflict' }, 409)
+    case 'conflict': return c.json({ error: 'sync_conflict' }, 409)
     case 'invalid_state': return c.json({ error: 'invalid_state' }, 409)
     case 'count_mismatch': return c.json({ error: 'count_mismatch' }, 409)
     case 'invalid_id': return c.json({ error: 'invalid_id' }, 400)
