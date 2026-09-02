@@ -297,7 +297,8 @@ export async function resolvePoolMode(db: Db, userId: string): Promise<PoolModeR
  * Every row that comes back is one RECORDING, not one tracks row: rows that
  * share an ISRC are collapsed to a single survivor after scoring (see the
  * dedupe comment in the query), so the pool never offers the same song
- * twice under two platform ids.
+ * twice under two platform ids. `excludeTrackIds` works at the same grain —
+ * excluding a row excludes its whole recording (see the filter comment).
  */
 export async function buildPool(
   db: Db,
@@ -460,16 +461,24 @@ export async function buildPool(
   // rows lack a year until re-sync; excluding them would empty pools.
   if (intent.eraFrom !== undefined) filters.push(sql`(t.release_year IS NULL OR t.release_year >= ${intent.eraFrom})`)
   if (intent.eraTo !== undefined) filters.push(sql`(t.release_year IS NULL OR t.release_year <= ${intent.eraTo})`)
-  // Used by the dj loop's swap/extend replacement lookup: a replacement
-  // picked from the pool that's already sitting in the active queue is a
-  // no-op (materialize would just drop it as a duplicate) — excluding the
-  // queue's own tracks up front means the pool's top candidates are actually
-  // usable replacements, not the queue re-selecting itself. Each id is its
-  // own bound parameter (never string-joined into the query text). Applied
-  // BEFORE the recording dedupe below, deliberately: excluding a group's
-  // preferred row lets its sibling stand in rather than vanishing with it.
+  // Used by the dj loop's swap/extend replacement lookup, where the ids are
+  // the active queue's contents: a replacement picked from the pool that's
+  // already sitting in the queue is a no-op (materialize would just drop it
+  // as a duplicate) — excluding the queue up front means the pool's top
+  // candidates are actually usable replacements, not the queue re-selecting
+  // itself. Exclusion is by RECORDING, not by row: a queued track's ISRC
+  // sibling (the same song under another platform id) is the same song to
+  // the listener, so it must go too — otherwise a swap could replace a song
+  // with itself under another id, and an extend could queue one recording
+  // twice. The key is the dedupe's own COALESCE(isrc, id::text), so a row
+  // with no ISRC is its own recording and only that row goes. Each id is its
+  // own bound parameter (never string-joined into the query text); the
+  // subquery never yields NULL (id is the primary key), so NOT IN is safe.
   if (excludeTrackIds && excludeTrackIds.length > 0) {
-    filters.push(sql`t.id NOT IN (${sql.join(excludeTrackIds.map((id) => sql`${id}::uuid`), sql`, `)})`)
+    const ids = sql.join(excludeTrackIds.map((id) => sql`${id}::uuid`), sql`, `)
+    filters.push(sql`COALESCE(t.isrc, t.id::text) NOT IN (
+      SELECT COALESCE(x.isrc, x.id::text) FROM tracks x WHERE x.id IN (${ids})
+    )`)
   }
 
   const whereClause = sql.join(filters, sql` AND `)
@@ -594,12 +603,21 @@ export async function buildPool(
         -- queue can only play what the listener's player can open, so a
         -- listener with any Apple source (live sync or export, landed or
         -- not — it says which player they have) prefers the row with an
-        -- apple_id, and everyone else prefers the row with a spotify_id.
-        -- One uncorrelated EXISTS, evaluated once per query, not per row.
+        -- apple_id. So does a listener with a library but NO source row at
+        -- all: that library was synced before user_music_sources existed,
+        -- when Apple was the only sync there was (the same legacy shape
+        -- resolvePoolMode reads as personal). Everyone else prefers the row
+        -- with a spotify_id — the bare default stays Spotify on purpose, so
+        -- a corpus-mode listener with no source and no library (seeds only)
+        -- is offered the ids they pasted. Uncorrelated subqueries, each
+        -- evaluated once per query, not per row.
         CASE
           WHEN EXISTS (
             SELECT 1 FROM user_music_sources
             WHERE user_id = ${userId} AND source IN ('apple_live', 'apple_export')
+          ) OR (
+            NOT EXISTS (SELECT 1 FROM user_music_sources WHERE user_id = ${userId})
+            AND EXISTS (SELECT 1 FROM user_tracks WHERE user_id = ${userId} AND in_library = true)
           ) THEN (t.apple_id IS NOT NULL)
           ELSE (t.spotify_id IS NOT NULL)
         END AS pref,

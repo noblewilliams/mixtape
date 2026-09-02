@@ -1007,18 +1007,157 @@ describe('buildPool recording dedupe', () => {
     expect(ids).toContain(b.id)
   })
 
-  it('excludeTrackIds is applied before dedupe: excluding the preferred row lets its sibling survive', async () => {
+  it('excludeTrackIds excludes by recording: a queued row takes its ISRC sibling out with it', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedSource(db, 'u1', 'apple_live', new Date())
+    const appleRow = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY, isrc: 'ISRC-1' })
+    const spotifyRow = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY, isrc: 'ISRC-1', appleId: null, spotifyId: spotifyId() })
+    const other = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY, isrc: 'ISRC-2' })
+
+    // The queue holds the apple row (the preferred one). Its sibling is the
+    // same song to the listener, so a swap must not offer it as the
+    // replacement and an extend must not queue the recording twice.
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' }), [appleRow.id])
+
+    const ids = pool.map((p) => p.trackId)
+    expect(ids).not.toContain(appleRow.id)
+    expect(ids).not.toContain(spotifyRow.id)
+    expect(ids).toContain(other.id)
+  })
+
+  it('excludeTrackIds by recording works from either side of the group: excluding the non-preferred row takes the preferred row out too', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')
     await seedSource(db, 'u1', 'apple_live', new Date())
     const appleRow = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY, isrc: 'ISRC-1' })
     const spotifyRow = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY, isrc: 'ISRC-1', appleId: null, spotifyId: spotifyId() })
 
-    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' }), [appleRow.id])
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' }), [spotifyRow.id])
 
     const ids = pool.map((p) => p.trackId)
+    expect(ids).not.toContain(spotifyRow.id)
     expect(ids).not.toContain(appleRow.id)
+  })
+
+  it('excludeTrackIds on a row with no ISRC removes only that row: a null ISRC is its own recording, not a group', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const excluded = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY, isrc: null })
+    const otherNoIsrc = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY, isrc: null, appleId: null, spotifyId: spotifyId() })
+    const withIsrc = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY, isrc: 'ISRC-1' })
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' }), [excluded.id])
+
+    const ids = pool.map((p) => p.trackId)
+    expect(ids).not.toContain(excluded.id)
+    expect(ids).toContain(otherNoIsrc.id)
+    expect(ids).toContain(withIsrc.id)
+  })
+
+  it('a legacy library (in_library rows, no user_music_sources row) prefers the apple_id row — the same shape resolvePoolMode reads as personal', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    // No seedSource: this library was synced before user_music_sources
+    // existed. The Spotify row is a pasted seed of a song it already holds.
+    const appleRow = await seedTrack(db, 'u1', { embedding: ORTHOGONAL_TO_QUERY, isrc: 'ISRC-1' })
+    const spotifyRow = await seedTrack(db, 'u1', {
+      embedding: SAME_AS_QUERY,
+      isrc: 'ISRC-1',
+      appleId: null,
+      spotifyId: spotifyId(),
+      inLibrary: false,
+      seeded: true,
+    })
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' }))
+
+    const ids = pool.map((p) => p.trackId)
+    expect(ids).toContain(appleRow.id)
+    expect(ids).not.toContain(spotifyRow.id)
+  })
+
+  it('the bare default stays Spotify: a seeds-only listener (no source row, no library) keeps the spotify_id row even when the Apple row scores higher', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const appleRow = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY, isrc: 'ISRC-1', inLibrary: false, seeded: true })
+    const sid = spotifyId()
+    const spotifyRow = await seedTrack(db, 'u1', {
+      embedding: ORTHOGONAL_TO_QUERY,
+      isrc: 'ISRC-1',
+      appleId: null,
+      spotifyId: sid,
+      inLibrary: false,
+      seeded: true,
+    })
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' }), undefined, { mode: 'corpus' })
+
+    const ids = pool.map((p) => p.trackId)
     expect(ids).toContain(spotifyRow.id)
+    expect(ids).not.toContain(appleRow.id)
+    expect(pool.find((p) => p.trackId === spotifyRow.id)!.spotifyId).toBe(sid)
+  })
+
+  it('a group with one observed and one unobserved row takes the observed branch, with plays summed across both', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const observed = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY, isrc: 'ISRC-1', playCount: 100, playCountObserved: true })
+    const unobserved = await seedTrack(db, 'u1', {
+      embedding: SAME_AS_QUERY,
+      isrc: 'ISRC-1',
+      appleId: null,
+      spotifyId: spotifyId(),
+      playCount: 50,
+      playCountObserved: false,
+    })
+    // Reference: one observed row carrying the group's total. Had the group
+    // taken the unobserved branch, play_count would come back null and the
+    // familiarity term would fall to the (absent) recent/playlist signals.
+    const reference = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY, isrc: 'ISRC-REF', playCount: 150 })
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', familiarity: 'comfort' }))
+
+    const group = pool.filter((p) => p.trackId === observed.id || p.trackId === unobserved.id)
+    expect(group).toHaveLength(1)
+    expect(group[0].playCount).toBe(150)
+    const ref = pool.find((p) => p.trackId === reference.id)!
+    expect(group[0].score).toBeCloseTo(ref.score, 10)
+  })
+
+  it('LIMIT applies after dedupe: with more recordings than the pool holds, the pool is full of distinct, platform-preferred recordings', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedSource(db, 'u1', 'apple_live', new Date())
+    // 50 ISRC pairs against a pool of 45 (15 x targetCount 3). In every pair
+    // the Spotify row OUTSCORES the preferred Apple row, so a LIMIT taken
+    // before the dedupe would fill the pool with Spotify rows (and, with
+    // siblings scored alike, could cut it short of 45 once they collapsed).
+    // Batch-inserted for speed — this test needs volume, not per-row shape.
+    const PAIRS = 50
+    const pairRows = Array.from({ length: PAIRS }, (_, i) => [
+      { appleId: `pair-${i}-apple`, spotifyId: null, isrc: `ISRC-PAIR-${i}`, title: `pair-${i}`, artist: 'Artist' },
+      { appleId: null, spotifyId: spotifyId(), isrc: `ISRC-PAIR-${i}`, title: `pair-${i}`, artist: 'Artist' },
+    ]).flat()
+    const inserted = await db
+      .insert(tracks)
+      .values(pairRows)
+      .returning({ id: tracks.id, appleId: tracks.appleId, isrc: tracks.isrc })
+    await db.insert(userTracks).values(inserted.map((t) => ({ userId: 'u1', trackId: t.id, playCount: 0 })))
+    await db.insert(trackMeanings).values(
+      inserted.map((t) => ({
+        trackId: t.id,
+        embedding: t.appleId ? ORTHOGONAL_TO_QUERY : SAME_AS_QUERY,
+        lyricsSource: 'lrclib' as const,
+      })),
+    )
+    const isrcOf = new Map(inserted.map((t) => [t.id, t.isrc]))
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', targetCount: 3 }))
+
+    expect(pool).toHaveLength(45)
+    expect(new Set(pool.map((p) => isrcOf.get(p.trackId))).size).toBe(45)
+    expect(pool.every((p) => p.appleId !== null)).toBe(true)
   })
 })
 
@@ -1226,12 +1365,14 @@ describe('buildPool corpus mode', () => {
     expect(byId(recent.id).score).toBeCloseTo(byId(plain.id).score, 10)
   })
 
-  it('recording dedupe applies in corpus mode too', async () => {
+  it('recording dedupe applies in corpus mode too: the platform-preferred row survives even when its sibling outscores it', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')
     await seedSource(db, 'u1', 'spotify_export', null)
+    // The Apple row scores HIGHER (identical meaning vs orthogonal), so only
+    // the Spotify preference can make the spotify row the survivor.
     const appleRow = await seedCorpusTrack(db, { embedding: SAME_AS_QUERY, isrc: 'ISRC-1' })
-    const spotifyRow = await seedCorpusTrack(db, { embedding: SAME_AS_QUERY, isrc: 'ISRC-1', appleId: null, spotifyId: spotifyId() })
+    const spotifyRow = await seedCorpusTrack(db, { embedding: ORTHOGONAL_TO_QUERY, isrc: 'ISRC-1', appleId: null, spotifyId: spotifyId() })
 
     const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' }), undefined, { mode: 'corpus' })
 
