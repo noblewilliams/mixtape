@@ -18,6 +18,7 @@ import {
 import { buildPool, resolvePoolMode, type PoolMode } from './pool'
 import { curate, CurationTruncated, CurationUnparseable } from './curate'
 import { sanitizeForPrompt, sanitizeTitleText } from './sanitize'
+import { insertMemoryNote, MAX_MEMORY_NOTES } from './memory-notes'
 import {
   applyOps,
   getActiveQueue,
@@ -294,12 +295,11 @@ function formatQueueListing(queue: QueueTrackView[]): string {
   return lines.join('\n')
 }
 
-// Hard cap on active notes per user — enforced both here (context load) and
-// by executeRememberPreference (insert refusal, advisory only under
-// concurrency — see that function's comment) below. Exported so
-// routes/memories.ts's GET /me/memories can share the exact same number
-// instead of a second hardcoded literal that could drift from this one.
-export const MAX_MEMORY_NOTES = 50
+// Hard cap on active notes per user — enforced here (context load) and at
+// insert by memory-notes.ts's insertMemoryNote (the path remember_preference
+// and the interview share). Re-exported so routes/memories.ts's GET
+// /me/memories and existing imports keep one source for the number.
+export { MAX_MEMORY_NOTES }
 
 // Newest-first, capped — matches GET /me/memories' own ordering, so what the
 // model sees in context and what the "What the DJ knows" screen shows are the
@@ -608,48 +608,23 @@ const REMEMBER_REFUSED = JSON.stringify({ ok: false })
 
 // Executed inline by the tool-call loop below, deliberately WITHOUT touching
 // `budget` — remember_preference never calls curate() (no LLM round trip of
-// its own), so it isn't part of what MAX_CURATIONS_PER_TURN bounds. Refusal
-// (cap reached, an exact duplicate already on file, or a DB error — see the
-// try/catch below) is a silent no-op: the note set doesn't change (or
-// doesn't change further), but THIS FUNCTION ITSELF never throws — a
-// bad/duplicate/DB-error save attempt is exactly as recoverable as an
-// out-of-range edit_queue op, never a turn-ending failure.
+// its own), so it isn't part of what MAX_CURATIONS_PER_TURN bounds. The
+// trim/cap/duplicate rules live in memory-notes.ts's insertMemoryNote, shared
+// with the interview route. Refusal (empty, cap reached, an exact duplicate
+// already on file, or a DB error — see the try/catch below) is a silent
+// no-op: the note set doesn't change (or doesn't change further), but THIS
+// FUNCTION ITSELF never throws — a bad/duplicate/DB-error save attempt is
+// exactly as recoverable as an out-of-range edit_queue op, never a
+// turn-ending failure.
 async function executeRememberPreference(db: Db, session: DjSessionRef, rawInput: unknown): Promise<{ resultText: string }> {
   const parsed = rememberPreferenceInputSchema.safeParse(rawInput)
   if (!parsed.success) {
     return { resultText: formatZodIssues('invalid remember_preference input', parsed.error) }
   }
-  const note = parsed.data.note.trim()
-  if (note.length === 0) {
-    return { resultText: REMEMBER_REFUSED }
-  }
 
   try {
-    // The cap check and the insert below aren't atomic with each other, so
-    // two concurrent remember_preference calls for the same user can both
-    // pass this count and both insert — under real concurrency the cap is
-    // advisory, not a hard guarantee, and can be exceeded by a small margin.
-    // Acceptable at the one-user-per-session request rates this app runs at.
-    const existing = await db.select({ note: djMemories.note }).from(djMemories).where(eq(djMemories.userId, session.userId))
-    if (existing.length >= MAX_MEMORY_NOTES) {
-      return { resultText: REMEMBER_REFUSED }
-    }
-
-    // onConflictDoNothing (backed by dj_memories' unique (user_id, note)
-    // index) is the REAL dupe guard, unlike the cap check above — a plain
-    // select-then-insert dupe check only ever sees its own read snapshot, so
-    // two concurrent saves of the identical note could both pass a read
-    // check and both insert. A conflict here returns no row, which is
-    // treated exactly like the cap refusal above.
-    const [inserted] = await db
-      .insert(djMemories)
-      .values({ userId: session.userId, note })
-      .onConflictDoNothing({ target: [djMemories.userId, djMemories.note] })
-      .returning({ id: djMemories.id })
-    if (!inserted) {
-      return { resultText: REMEMBER_REFUSED }
-    }
-    return { resultText: REMEMBER_OK }
+    const outcome = await insertMemoryNote(db, session.userId, parsed.data.note)
+    return { resultText: outcome === 'saved' ? REMEMBER_OK : REMEMBER_REFUSED }
   } catch {
     // A DB blip on this one tool call (connection error, timeout, ...) must
     // never take down an otherwise-healthy curation turn — refuse the save,

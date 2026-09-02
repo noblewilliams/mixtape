@@ -12,6 +12,10 @@ import { enrichRoutes } from './routes/enrich'
 import { sessionRoutes } from './routes/sessions'
 import { memoriesRoutes } from './routes/memories'
 import { musicSourcesRoutes } from './routes/music-sources'
+import { artistSeedsRoutes } from './routes/artist-seeds'
+import { seedTracksRoutes, type SeedsWiring } from './routes/seed-tracks'
+import { interviewRoutes } from './routes/interview'
+import { funnelEventsRoutes } from './routes/funnel-events'
 import { musicKitRoutes } from './routes/musickit'
 import type { Db } from './db/types'
 import type { EnrichDeps } from './enrich/pipeline'
@@ -29,6 +33,7 @@ export type AuthLike = {
 export type AppVars = { user: { id: string } }
 
 export type EnrichWiring = { deps?: EnrichDeps; artwork?: ArtworkDeps; adminToken: string }
+export type { SeedsWiring }
 export type DjWiring = { deps: DjDeps }
 export type MusicKitWiring = {
   allowedOrigins: string[]
@@ -41,6 +46,7 @@ export function createApp({
   enrich,
   dj,
   musicKit,
+  seeds,
   allowedOrigins = [],
 }: {
   auth: AuthLike
@@ -48,6 +54,7 @@ export function createApp({
   enrich?: EnrichWiring
   dj?: DjWiring
   musicKit?: MusicKitWiring
+  seeds?: SeedsWiring
   allowedOrigins?: string[]
 }) {
   const app = new Hono<{ Variables: AppVars }>()
@@ -85,6 +92,7 @@ export function createApp({
   // Route groups land per docs/superpowers/specs/2026-08-29-mixtape-v1-design.md:
   //   /api/auth/* [P1]  /me [P1]  /ingest/* [P1]  /enrich/* [P2 live]  /sessions/* [P3 live]
   //   /me/memories/* [P4 live]  /me/music-sources [listening import]
+  //   /me/artist-seeds  /me/seed-tracks/*  /me/interview  /me/funnel-events [taste seeds]
   app.all('/api/auth/*', (c) => auth.handler(c.req.raw))
   app.get('/me', requireSession(auth), (c) => c.json({ user: c.get('user') }))
 
@@ -109,6 +117,18 @@ export function createApp({
 
     app.use('/me/music-sources/*', requireSession(auth))
     app.route('/me/music-sources', musicSourcesRoutes(db))
+
+    app.use('/me/artist-seeds/*', requireSession(auth))
+    app.route('/me/artist-seeds', artistSeedsRoutes(db))
+
+    app.use('/me/seed-tracks/*', requireSession(auth))
+    app.route('/me/seed-tracks', seedTracksRoutes(db, seeds))
+
+    app.use('/me/interview/*', requireSession(auth))
+    app.route('/me/interview', interviewRoutes(db))
+
+    app.use('/me/funnel-events/*', requireSession(auth))
+    app.route('/me/funnel-events', funnelEventsRoutes(db))
 
     if (enrich && (enrich.deps || enrich.artwork)) {
       app.use('/enrich/*', requireAdmin(enrich.adminToken))
