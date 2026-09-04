@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { ApiQueueTrack } from './client'
-import { toQueueTrack } from './mappers'
+import type { ApiQueueTrack, ApiSession } from './client'
+import { toDjSession, toQueueTrack } from './mappers'
 
 function track(artwork: Pick<
   ApiQueueTrack,
@@ -10,6 +10,7 @@ function track(artwork: Pick<
     position: 0,
     trackId: 'track-1',
     appleId: 'apple-1',
+    spotifyId: null,
     title: 'Song',
     artist: 'Artist',
     reason: null,
@@ -53,5 +54,31 @@ describe('toQueueTrack artwork contract', () => {
       artworkHeight: undefined,
       artworkBgColor: undefined,
     })
+  })
+})
+
+const nullArtwork = { artworkUrl: null, artworkWidth: null, artworkHeight: null, artworkBgColor: null }
+
+describe('toQueueTrack Spotify id', () => {
+  it('carries a Spotify id and a null one as-is', () => {
+    expect(toQueueTrack({ ...track(nullArtwork), spotifyId: 'LowTideRadio0000000001' }).spotifyId)
+      .toBe('LowTideRadio0000000001')
+    expect(toQueueTrack(track(nullArtwork)).spotifyId).toBeNull()
+  })
+})
+
+describe('toDjSession corpus flag', () => {
+  const session: ApiSession = {
+    id: 'session-1',
+    title: 'Blue hour',
+    status: 'active',
+    queueVersion: 2,
+    notPersonal: true,
+    updatedAt: new Date().toISOString(),
+  }
+
+  it('carries notPersonal from the API session', () => {
+    expect(toDjSession(session, []).notPersonal).toBe(true)
+    expect(toDjSession({ ...session, notPersonal: false, trackCount: 1, durationMs: 1 }).notPersonal).toBe(false)
   })
 })

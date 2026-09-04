@@ -325,6 +325,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
                 title: session.title,
                 status: session.status,
                 queueVersion,
+                notPersonal: session.notPersonal,
                 updatedAt: new Date().toISOString(),
               },
               queue,

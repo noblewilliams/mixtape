@@ -5,6 +5,7 @@ export type DjSession = {
   title: string
   status: SessionStatus
   queueVersion: number
+  notPersonal: boolean
   updatedAt: string
   ageLabel: string
   trackCount: number
@@ -25,6 +26,7 @@ export type QueueTrack = {
   position: number
   trackId: string
   appleId: string | null
+  spotifyId: string | null
   title: string
   artist: string
   reason?: string

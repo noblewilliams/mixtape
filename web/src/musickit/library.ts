@@ -44,6 +44,8 @@ export type PlaylistEntrySnapshot = {
   appleLibraryEntryId: string
   appleLibraryTrackId: string | null
   appleCatalogId: string | null
+  /** Set by the Spotify export sync; MusicKit entries leave it out (server default null). */
+  spotifyId?: string | null
   isrcSnapshot: string | null
   titleSnapshot: string
   artistSnapshot: string

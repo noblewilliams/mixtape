@@ -11,6 +11,8 @@ export type ApiSession = {
   title: string
   status: ApiSessionStatus
   queueVersion: number
+  /** True once corpus-mode picks landed in the queue: the "Not personal yet" banner. */
+  notPersonal: boolean
   updatedAt: string
 }
 
@@ -31,6 +33,7 @@ export type ApiQueueTrack = {
   position: number
   trackId: string
   appleId: string | null
+  spotifyId: string | null
   title: string
   artist: string
   reason?: string | null
@@ -124,6 +127,143 @@ export type PlaylistSyncSummary = {
   unresolvedEntries: number
 }
 
+export type ListeningImportSource = 'spotify_export' | 'apple_export'
+export type ListeningImportPackage = 'spotify_extended' | 'spotify_account' | 'apple_media'
+
+export type BeginListeningImportInput = {
+  source: ListeningImportSource
+  package: ListeningImportPackage
+  timeZone: string
+  country: string | null
+  expectedTracks: number
+  expectedDays: number
+  expectedLibraryTracks: number
+  expectedArtists: number
+  unresolvedRows: number
+  unresolvedPlays: number
+}
+export type ListeningImportStart = { importId: string; expiresAt: number }
+export type ListeningTrackRow = {
+  ordinal: number
+  platformId: string
+  title: string
+  artist: string
+  album: string | null
+  durationMs: number | null
+}
+export type ListeningDayRow = {
+  ordinal: number
+  platformId: string
+  day: string
+  plays: number
+  skips: number | null
+  completes: number | null
+  msPlayed: number
+  hoursMask: number | null
+}
+export type ListeningLibraryRow = {
+  ordinal: number
+  platformId: string
+  playCount: number | null
+  skipCount: number | null
+  lastPlayedAt: number | null
+  dateAdded: number | null
+  likeRating: -1 | 0 | 1 | null
+}
+export type ListeningArtistRow = {
+  ordinal: number
+  name: string
+  spotifyId: string | null
+}
+export type ListeningImportSummary = {
+  tracks: number
+  days: number
+  libraryTracks: number
+  artists: number
+  unresolvedRows: number
+  unresolvedPlays: number
+  ledgerFrom: string | null
+  ledgerTo: string | null
+  likedRemoved: number
+  likedRemovalSkipped: boolean
+}
+export type DeleteListeningSourceResult = {
+  deletedDays: number
+  deletedTracks: number
+  unlibraried: number
+}
+
+export type ApiMusicSource = {
+  source: 'apple_live' | 'apple_export' | 'spotify_export'
+  connectedAt: string
+  lastImportedAt: string | null
+  ledgerFrom: string | null
+  ledgerTo: string | null
+}
+export type OnboardingResponse = {
+  sources: ApiMusicSource[]
+  hasLibrary: boolean
+  chosenService: 'spotify' | 'apple' | null
+  markedRequestedAt: string | null
+  interviewCompletedAt: string | null
+  importCompletedAt: string | null
+}
+
+export type FunnelEventType =
+  | 'chose_spotify'
+  | 'marked_requested'
+  | 'file_inspected'
+  | 'import_completed'
+  | 'first_personal_mix'
+  | 'first_output'
+export type FunnelEventInput = { type: FunnelEventType; surface: 'web' }
+
+export type InterviewInput = {
+  surface: 'web'
+  neverSkip: string[]
+  playsMost: string
+  listensWhen: string
+  neverWants: string
+  era: string
+}
+export type InterviewResponse = {
+  seeds: number
+  notes: { saved: number; duplicate: number; capped: number }
+}
+
+export type ApiArtistSeed = {
+  name: string
+  spotifyId: string | null
+  source: 'interview' | 'pasted' | 'spotify_export'
+  createdAt: string
+}
+export type ApiSeedTrack = {
+  trackId: string
+  spotifyId: string | null
+  title: string
+  artist: string
+  album: string | null
+}
+export type PostSeedTracksResponse = {
+  resolved: { spotifyId: string; trackId: string; title: string; artist: string }[]
+  unresolved: string[]
+}
+export type DeleteSeedTrackResponse = { removed: true; deleted: boolean }
+
+export type BeginPlaylistSyncInput =
+  | {
+    source: 'ios_native' | 'web_musickit'
+    storefront: string
+    expectedPlaylists: number
+    expectedEntries: number
+  }
+  | {
+    source: 'spotify_export'
+    storefront: null
+    expectedPlaylists: number
+    expectedEntries: number
+  }
+
 export type MixtapeApi = {
   listSessions: () => Promise<{ sessions: ApiSessionSummary[] }>
   getSession: (sessionId: string) => Promise<SessionDetailResponse>
@@ -169,12 +309,7 @@ export type MixtapeApi = {
     signal?: AbortSignal,
   ) => Promise<{ accepted: number }>
   completeLibrarySync: (syncId: string, signal?: AbortSignal) => Promise<LibrarySyncSummary>
-  beginPlaylistSync: (input: {
-    source: 'ios_native' | 'web_musickit'
-    storefront: string
-    expectedPlaylists: number
-    expectedEntries: number
-  }, signal?: AbortSignal) => Promise<StagedSyncStart>
+  beginPlaylistSync: (input: BeginPlaylistSyncInput, signal?: AbortSignal) => Promise<StagedSyncStart>
   putPlaylists: (
     syncId: string,
     playlists: PlaylistSnapshot[],
@@ -187,6 +322,22 @@ export type MixtapeApi = {
     signal?: AbortSignal,
   ) => Promise<{ accepted: number }>
   completePlaylistSync: (syncId: string, signal?: AbortSignal) => Promise<PlaylistSyncSummary>
+  beginListeningImport: (input: BeginListeningImportInput, signal?: AbortSignal) => Promise<ListeningImportStart>
+  putListeningTracks: (importId: string, tracks: ListeningTrackRow[], signal?: AbortSignal) => Promise<{ accepted: number }>
+  putListeningDays: (importId: string, days: ListeningDayRow[], signal?: AbortSignal) => Promise<{ accepted: number }>
+  putListeningLibrary: (importId: string, tracks: ListeningLibraryRow[], signal?: AbortSignal) => Promise<{ accepted: number }>
+  putListeningArtists: (importId: string, artists: ListeningArtistRow[], signal?: AbortSignal) => Promise<{ accepted: number }>
+  completeListeningImport: (importId: string, signal?: AbortSignal) => Promise<ListeningImportSummary>
+  deleteListeningSource: (source: ListeningImportSource, signal?: AbortSignal) => Promise<DeleteListeningSourceResult>
+  getOnboarding: (signal?: AbortSignal) => Promise<OnboardingResponse>
+  getMusicSources: (signal?: AbortSignal) => Promise<{ sources: ApiMusicSource[] }>
+  postFunnelEvent: (event: FunnelEventInput, signal?: AbortSignal) => Promise<{ ok: true }>
+  postInterview: (answers: InterviewInput, signal?: AbortSignal) => Promise<InterviewResponse>
+  getArtistSeeds: (signal?: AbortSignal) => Promise<{ seeds: ApiArtistSeed[] }>
+  putArtistSeeds: (names: string[], signal?: AbortSignal) => Promise<{ seeds: ApiArtistSeed[] }>
+  getSeedTracks: (signal?: AbortSignal) => Promise<{ tracks: ApiSeedTrack[] }>
+  postSeedTracks: (spotifyIds: string[], signal?: AbortSignal) => Promise<PostSeedTracksResponse>
+  deleteSeedTrack: (trackId: string, signal?: AbortSignal) => Promise<DeleteSeedTrackResponse>
 }
 
 export class ApiError extends Error {
@@ -332,6 +483,79 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
     completePlaylistSync: (syncId, signal) =>
       request(`/ingest/playlists/syncs/${encodeURIComponent(syncId)}/complete`, {
         method: 'POST',
+        signal,
+      }),
+    beginListeningImport: (input, signal) =>
+      request('/ingest/listening/imports', {
+        method: 'POST',
+        body: JSON.stringify(input),
+        signal,
+      }),
+    putListeningTracks: (importId, tracks, signal) =>
+      request(`/ingest/listening/imports/${encodeURIComponent(importId)}/tracks`, {
+        method: 'PUT',
+        body: JSON.stringify({ tracks }),
+        signal,
+      }),
+    putListeningDays: (importId, days, signal) =>
+      request(`/ingest/listening/imports/${encodeURIComponent(importId)}/days`, {
+        method: 'PUT',
+        body: JSON.stringify({ days }),
+        signal,
+      }),
+    putListeningLibrary: (importId, tracks, signal) =>
+      request(`/ingest/listening/imports/${encodeURIComponent(importId)}/library`, {
+        method: 'PUT',
+        body: JSON.stringify({ tracks }),
+        signal,
+      }),
+    putListeningArtists: (importId, artists, signal) =>
+      request(`/ingest/listening/imports/${encodeURIComponent(importId)}/artists`, {
+        method: 'PUT',
+        body: JSON.stringify({ artists }),
+        signal,
+      }),
+    completeListeningImport: (importId, signal) =>
+      request(`/ingest/listening/imports/${encodeURIComponent(importId)}/complete`, {
+        method: 'POST',
+        signal,
+      }),
+    deleteListeningSource: (source, signal) =>
+      request(`/ingest/listening/sources/${encodeURIComponent(source)}`, {
+        method: 'DELETE',
+        signal,
+      }),
+    getOnboarding: (signal) => request('/me/onboarding', { signal }),
+    getMusicSources: (signal) => request('/me/music-sources', { signal }),
+    postFunnelEvent: (event, signal) =>
+      request('/me/funnel-events', {
+        method: 'POST',
+        body: JSON.stringify(event),
+        signal,
+      }),
+    postInterview: (answers, signal) =>
+      request('/me/interview', {
+        method: 'POST',
+        body: JSON.stringify(answers),
+        signal,
+      }),
+    getArtistSeeds: (signal) => request('/me/artist-seeds', { signal }),
+    putArtistSeeds: (names, signal) =>
+      request('/me/artist-seeds', {
+        method: 'PUT',
+        body: JSON.stringify({ names }),
+        signal,
+      }),
+    getSeedTracks: (signal) => request('/me/seed-tracks', { signal }),
+    postSeedTracks: (spotifyIds, signal) =>
+      request('/me/seed-tracks', {
+        method: 'POST',
+        body: JSON.stringify({ spotifyIds }),
+        signal,
+      }),
+    deleteSeedTrack: (trackId, signal) =>
+      request(`/me/seed-tracks/${encodeURIComponent(trackId)}`, {
+        method: 'DELETE',
         signal,
       }),
   }

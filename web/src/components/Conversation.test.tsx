@@ -8,6 +8,7 @@ const session: DjSession = {
   title: 'Blue hour, windows down',
   status: 'active',
   queueVersion: 3,
+  notPersonal: false,
   updatedAt: '2026-08-31T12:00:00.000Z',
   ageLabel: 'a moment ago',
   trackCount: 15,
