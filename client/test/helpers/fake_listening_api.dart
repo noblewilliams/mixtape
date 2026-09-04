@@ -16,8 +16,10 @@ class FakeListeningApi implements ListeningApi {
   Future<OnboardingState> Function()? onGetOnboarding;
   Future<void> Function(FunnelEventType type)? onPostFunnelEvent;
   Future<InterviewResult> Function(InterviewAnswers answers)? onPostInterview;
+  Future<DeleteSourceResult> Function(String source)? onDeleteSource;
 
   final List<FunnelEventType> funnelEvents = [];
+  final List<String> deletedSources = [];
   final List<InterviewAnswers> interviews = [];
   int getOnboardingCalls = 0;
 
@@ -71,7 +73,12 @@ class FakeListeningApi implements ListeningApi {
       throw UnimplementedError();
 
   @override
-  Future<DeleteSourceResult> deleteSource(String source) => throw UnimplementedError();
+  Future<DeleteSourceResult> deleteSource(String source) {
+    deletedSources.add(source);
+    final impl = onDeleteSource;
+    if (impl == null) throw UnimplementedError('onDeleteSource not wired');
+    return impl(source);
+  }
 
   @override
   Future<PlaylistSyncRun> beginPlaylistSync({
@@ -126,6 +133,7 @@ OnboardingState onboardingState({
   DateTime? importCompletedAt,
   bool hasLibrary = false,
   List<MusicSource> sources = const [],
+  InterviewCounts? interview,
 }) =>
     OnboardingState(
       userId: userId,
@@ -135,6 +143,25 @@ OnboardingState onboardingState({
       markedRequestedAt: markedRequestedAt,
       interviewCompletedAt: interviewCompletedAt,
       importCompletedAt: importCompletedAt,
+      interview: interview,
+    );
+
+/// A connected source row; [packages] is what actually landed for it.
+MusicSource musicSource({
+  String source = 'spotify_export',
+  List<String> packages = const [],
+  DateTime? connectedAt,
+  DateTime? lastImportedAt,
+  String? ledgerFrom,
+  String? ledgerTo,
+}) =>
+    MusicSource(
+      source: source,
+      connectedAt: connectedAt ?? DateTime.utc(2026, 9, 1, 10),
+      lastImportedAt: lastImportedAt,
+      ledgerFrom: ledgerFrom,
+      ledgerTo: ledgerTo,
+      packages: packages,
     );
 
 /// Records every reminder a screen asks for, and every cancellation; touches

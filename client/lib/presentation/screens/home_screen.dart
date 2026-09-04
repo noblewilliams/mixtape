@@ -4,14 +4,19 @@ import '../../data/api/api_client.dart';
 import '../../data/dj/dj_api.dart';
 import '../../data/dj/dj_models.dart';
 import '../../data/listening/listening_models.dart';
+import '../format/import_format.dart';
 import '../format/relative_time.dart';
+import '../format/source_labels.dart';
 import '../providers/auth_provider.dart';
 import '../providers/dj_providers.dart';
 import '../providers/library_sync_provider.dart';
+import '../providers/listening_import_provider.dart';
 import '../providers/onboarding_provider.dart';
 import 'chat_screen.dart';
+import 'import_sheet.dart';
 import 'interview_screen.dart';
 import 'memory_screen.dart';
+import 'music_sources_screen.dart';
 import 'spotify_request_screen.dart';
 
 const _archiveFailedMessage = "couldn't archive — try again";
@@ -122,9 +127,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   void _openRequestScreen() {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const SpotifyRequestScreen()),
-    );
+    Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => const SpotifyRequestScreen()))
+        // "I've requested it" refreshes on its own; this covers a listener
+        // who comes back after the server learned of it another way.
+        .then((_) {
+          if (!mounted) return;
+          ref.read(onboardingProvider.notifier).refresh();
+        });
   }
 
   void _openInterview() {
@@ -137,16 +147,37 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         });
   }
 
+  void _openSources() {
+    Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => const MusicSourcesScreen()))
+        // An import or a removal over there changes what the card says.
+        .then((_) {
+          if (!mounted) return;
+          ref.read(onboardingProvider.notifier).refresh();
+        });
+  }
+
+  /// "Choose a ZIP": the sheet opens over Home and the picker comes up at
+  /// once, so the listener is not asked twice.
+  void _openImportSheet() {
+    final notifier = ref.read(listeningImportProvider.notifier);
+    notifier.reset();
+    notifier.pick();
+    showImportSheet(context);
+  }
+
   @override
   Widget build(BuildContext context) {
     final sessionsAsync = ref.watch(sessionsProvider);
     final sync = ref.watch(librarySyncProvider);
     // The Spotify waiting state, until the import lands. Apple listeners
     // (and anyone whose onboarding cannot be read) see Home exactly as before.
+    // The card stays until both packages have landed: the first import is
+    // half the data, and the nudge for the other half lives here.
     final onboarding = ref.watch(onboardingProvider).value;
     final waiting = onboarding != null &&
         onboarding.chosenService == 'spotify' &&
-        onboarding.importCompletedAt == null;
+        spotifyPackages(onboarding).count < 2;
 
     return Scaffold(
       appBar: AppBar(
@@ -159,6 +190,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const MemoryScreen()),
             ),
+          ),
+          IconButton(
+            key: const Key('sources-action'),
+            tooltip: 'Your music',
+            icon: const Icon(Icons.library_music_outlined),
+            onPressed: _openSources,
           ),
           IconButton(
             key: const Key('sync-action'),
@@ -199,6 +236,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       onboarding: onboarding,
                       onOpenRequest: _openRequestScreen,
                       onOpenInterview: _openInterview,
+                      onChooseZip: _openImportSheet,
                     ),
                     const SizedBox(height: 12),
                   ],
@@ -303,26 +341,44 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 }
 
-/// Home's waiting state for a Spotify listener whose import has not landed:
-/// the elapsed wait since "I've requested it" (or the way to the request
-/// screen), the interview card, and the "Not personal yet" note. Route
-/// pushes stay with Home via the callbacks.
+/// Home's waiting state for a Spotify listener until both packages have
+/// landed: the status chip, the elapsed wait since "I've requested it" (or
+/// the way to the request screen) until the first package is in and the
+/// nudge for the other package after, "Choose a ZIP", the interview card
+/// with what it produced, and the "Not personal yet" note while nothing has
+/// landed. Route pushes stay with Home via the callbacks.
 class _SpotifyWaitingCard extends StatelessWidget {
   const _SpotifyWaitingCard({
     required this.onboarding,
     required this.onOpenRequest,
     required this.onOpenInterview,
+    required this.onChooseZip,
   });
 
   final OnboardingState onboarding;
   final VoidCallback onOpenRequest;
   final VoidCallback onOpenInterview;
+  final VoidCallback onChooseZip;
+
+  String? get _nudge {
+    final source = spotifySource(onboarding);
+    final packages = packagesOf(source);
+    if (source == null || packages.count == 0) return null;
+    final when = shortDate(source.lastImportedAt ?? source.connectedAt);
+    return packages.extended
+        ? 'Extended history imported $when. Still waiting for the account data; check your inbox '
+            'for the second email.'
+        : 'Account data imported $when. Still waiting for the extended history; it can take up '
+            'to 30 days.';
+  }
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     final markedAt = onboarding.markedRequestedAt;
     final interviewDone = onboarding.interviewCompletedAt != null;
+    final interview = onboarding.interview;
+    final nudge = _nudge;
     return Card(
       key: const Key('waiting-card'),
       child: Padding(
@@ -330,36 +386,64 @@ class _SpotifyWaitingCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('Waiting for your Spotify data', style: textTheme.titleMedium),
-            const SizedBox(height: 8),
             Row(
               children: [
-                Icon(markedAt == null ? Icons.mail_outline : Icons.hourglass_top, size: 20),
-                const SizedBox(width: 8),
                 Expanded(
-                  child: markedAt == null
-                      ? const Text('Not requested yet', key: Key('waiting-not-requested'))
-                      : Text(
-                          'Requested ${elapsedWait(markedAt)}',
-                          key: const Key('waiting-requested'),
-                        ),
+                  child: Text(
+                    nudge == null ? 'Waiting for your Spotify data' : 'Your Spotify data',
+                    style: textTheme.titleMedium,
+                  ),
                 ),
-                TextButton(
-                  key: const Key('open-request'),
-                  onPressed: onOpenRequest,
-                  child: Text(markedAt == null ? 'Request it' : 'See the steps'),
+                Chip(
+                  key: const Key('waiting-chip'),
+                  label: Text(spotifyStatusLabel(onboarding)),
+                  visualDensity: VisualDensity.compact,
                 ),
               ],
             ),
+            const SizedBox(height: 8),
+            if (nudge != null)
+              Text(nudge, key: const Key('waiting-nudge'), style: textTheme.bodySmall)
+            else
+              Row(
+                children: [
+                  Icon(markedAt == null ? Icons.mail_outline : Icons.hourglass_top, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: markedAt == null
+                        ? const Text('Not requested yet', key: Key('waiting-not-requested'))
+                        : Text(
+                            'Requested ${elapsedWait(markedAt)}',
+                            key: const Key('waiting-requested'),
+                          ),
+                  ),
+                  TextButton(
+                    key: const Key('open-request'),
+                    onPressed: onOpenRequest,
+                    child: Text(markedAt == null ? 'Request it' : 'See the steps'),
+                  ),
+                ],
+              ),
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: FilledButton.tonalIcon(
+                key: const Key('waiting-choose-zip'),
+                onPressed: onChooseZip,
+                icon: const Icon(Icons.folder_zip_outlined),
+                label: Text(nudge == null ? 'Choose a ZIP' : 'Choose the other ZIP'),
+              ),
+            ),
             const Divider(),
             if (interviewDone)
-              Row(
+              ListTile(
                 key: const Key('interview-done'),
-                children: const [
-                  Icon(Icons.check_circle_outline, size: 20),
-                  SizedBox(width: 8),
-                  Text('Interview done'),
-                ],
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.check_circle_outline),
+                title: const Text('Interview done'),
+                subtitle: interview == null
+                    ? null
+                    : Text('${plural(interview.notes, 'note')}, ${plural(interview.artists, 'artist')}'),
               )
             else
               ListTile(
@@ -371,12 +455,14 @@ class _SpotifyWaitingCard extends StatelessWidget {
                 trailing: const Icon(Icons.chevron_right),
                 onTap: onOpenInterview,
               ),
-            const SizedBox(height: 8),
-            Text(
-              'Mixes before the import are labeled "Not personal yet".',
-              key: const Key('not-personal-note'),
-              style: textTheme.bodySmall,
-            ),
+            if (nudge == null) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Mixes before the import are labeled "Not personal yet".',
+                key: const Key('not-personal-note'),
+                style: textTheme.bodySmall,
+              ),
+            ],
           ],
         ),
       ),

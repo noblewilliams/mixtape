@@ -244,6 +244,7 @@ void main() {
       'lastImportedAt': '2026-09-02T10:00:00.000Z',
       'ledgerFrom': '2024-03-02',
       'ledgerTo': '2026-04-05',
+      'packages': ['spotify_account', 'spotify_extended'],
     };
 
     test('getOnboarding GETs /me/onboarding and parses every field', () async {
@@ -255,8 +256,9 @@ void main() {
             'hasLibrary': true,
             'chosenService': 'spotify',
             'markedRequestedAt': '2026-09-01T11:00:00.000Z',
-            'interviewCompletedAt': null,
+            'interviewCompletedAt': '2026-09-01T12:00:00.000Z',
             'importCompletedAt': '2026-09-02T10:00:00.000Z',
+            'interview': {'artists': 4, 'notes': 5},
           }),
           200,
         ),
@@ -266,6 +268,10 @@ void main() {
       expect(state.userId, 'user-1');
       expect(state.sources, hasLength(1));
       expect(state.sources.single.source, 'spotify_export');
+      expect(state.sources.single.packages, ['spotify_account', 'spotify_extended']);
+      expect(state.interview?.artists, 4);
+      expect(state.interview?.notes, 5);
+      expect(state.withChosenService('spotify').interview?.notes, 5);
       expect(state.sources.single.connectedAt, DateTime.utc(2026, 9, 1, 10));
       expect(state.sources.single.lastImportedAt, DateTime.utc(2026, 9, 2, 10));
       expect(state.sources.single.ledgerFrom, '2024-03-02');
@@ -273,7 +279,7 @@ void main() {
       expect(state.hasLibrary, isTrue);
       expect(state.chosenService, 'spotify');
       expect(state.markedRequestedAt, DateTime.utc(2026, 9, 1, 11));
-      expect(state.interviewCompletedAt, isNull);
+      expect(state.interviewCompletedAt, DateTime.utc(2026, 9, 1, 12));
       expect(state.importCompletedAt, DateTime.utc(2026, 9, 2, 10));
     });
 
@@ -290,6 +296,39 @@ void main() {
       expect(state.hasLibrary, isFalse);
       expect(state.chosenService, isNull);
       expect(state.markedRequestedAt, isNull);
+      expect(state.interview, isNull);
+    });
+
+    test('getOnboarding reads a null interview and a source without packages', () async {
+      final recorder = _Recorder({
+        'GET /me/onboarding': http.Response(
+          '{"userId":"user-1","sources":[{"source":"apple_live","connectedAt":"2026-09-01T10:00:00.000Z",'
+          '"lastImportedAt":null,"ledgerFrom":null,"ledgerTo":null}],"hasLibrary":true,'
+          '"chosenService":"apple","markedRequestedAt":null,"interviewCompletedAt":null,'
+          '"importCompletedAt":null,"interview":null}',
+          200,
+        ),
+      });
+      final state = await (await _api(recorder)).getOnboarding();
+      expect(state.sources.single.packages, isEmpty);
+      expect(state.interview, isNull);
+    });
+
+    test('getOnboarding rejects packages that are not strings and a malformed interview', () async {
+      for (final body in [
+        '{"userId":"user-1","sources":[{"source":"spotify_export","connectedAt":"2026-09-01T10:00:00.000Z",'
+            '"lastImportedAt":null,"ledgerFrom":null,"ledgerTo":null,"packages":[1]}],"hasLibrary":false,'
+            '"chosenService":null,"markedRequestedAt":null,"interviewCompletedAt":null,"importCompletedAt":null}',
+        '{"userId":"user-1","sources":[],"hasLibrary":false,"chosenService":null,"markedRequestedAt":null,'
+            '"interviewCompletedAt":null,"importCompletedAt":null,"interview":{"artists":-1,"notes":2}}',
+      ]) {
+        final recorder = _Recorder({'GET /me/onboarding': http.Response(body, 200)});
+        await expectLater(
+          (await _api(recorder)).getOnboarding(),
+          throwsA(isA<ListeningModelException>()),
+          reason: body,
+        );
+      }
     });
 
     test('getOnboarding rejects an answer without the listener id', () async {
@@ -317,6 +356,18 @@ void main() {
       expect(sources.single.source, 'apple_live');
       expect(sources.single.lastImportedAt, isNull);
       expect(sources.single.ledgerFrom, isNull);
+      expect(sources.single.packages, isEmpty);
+    });
+
+    test('getMusicSources parses the packages that landed', () async {
+      final recorder = _Recorder({
+        'GET /me/music-sources': http.Response(
+          '{"sources":[{"source":"spotify_export","connectedAt":"2026-09-01T10:00:00.000Z","lastImportedAt":"2026-09-02T10:00:00.000Z","ledgerFrom":null,"ledgerTo":null,"packages":["spotify_account"]}]}',
+          200,
+        ),
+      });
+      final sources = await (await _api(recorder)).getMusicSources();
+      expect(sources.single.packages, ['spotify_account']);
     });
   });
 

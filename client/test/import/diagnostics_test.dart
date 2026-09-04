@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/import/diagnostics.dart';
 import 'package:mixtape/import/zip_reader.dart';
@@ -83,6 +85,20 @@ void main() {
       await archive.close();
     }
   });
+  test('diagnoseExportFile reports a broken archive from its path, off the main isolate', () async {
+    final diagnostics = await diagnoseExportFile(fixtureArchive('extended-malformed').path);
+    expect(diagnostics.source, 'spotify_export');
+    expect(diagnostics.files.any((f) => f.rows == null), isTrue);
+    expect(diagnostics.canonicalJsonString(), isNot(contains('"spotify_track_uri": "')));
+  });
+
+  test('diagnoseExportFile reports a file that is not a ZIP as unknown with no files', () async {
+    final notAZip = File('${listeningExportFixtures().path}/README.md');
+    final diagnostics = await diagnoseExportFile(notAZip.path);
+    expect(diagnostics.source, 'unknown');
+    expect(diagnostics.files, isEmpty);
+    expect(diagnostics.parserVersion, spotifyParserVersion);
+  });
 }
 
 Iterable<String> _leafStrings(Object? node) sync* {
@@ -99,4 +115,5 @@ Iterable<String> _leafStrings(Object? node) sync* {
   } else if (node is String && node.length >= 4) {
     yield node;
   }
+
 }

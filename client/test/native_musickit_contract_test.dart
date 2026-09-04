@@ -68,4 +68,16 @@ void main() {
     expect(store, isNot(contains('titleSnapshot.lowercased()')));
     expect(store, isNot(contains('artistSnapshot.lowercased()')));
   });
+
+  test('Info.plist lets Files hand ZIP archives to the app', () {
+    final plist = File('ios/Runner/Info.plist').readAsStringSync();
+
+    expect(plist, contains('<key>CFBundleDocumentTypes</key>'));
+    expect(plist, contains('<string>public.zip-archive</string>'));
+    expect(plist, contains('<key>CFBundleTypeRole</key>\n\t\t\t<string>Viewer</string>'));
+    expect(plist, contains('<key>LSHandlerRank</key>\n\t\t\t<string>Alternate</string>'));
+    expect(plist, contains('<key>LSSupportsOpeningDocumentsInPlace</key>\n\t<true/>'));
+    // The share-sheet path is C5: no custom URL scheme or opener yet.
+    expect(plist, isNot(contains('CFBundleURLTypes')));
+  });
 }

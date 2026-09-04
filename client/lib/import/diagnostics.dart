@@ -1,3 +1,6 @@
+import 'dart:io';
+import 'dart:isolate';
+
 import 'snapshot.dart';
 import 'spotify_parser.dart';
 import 'zip_reader.dart';
@@ -33,4 +36,24 @@ Future<ExportDiagnostics> diagnoseExport(ExportArchive archive) async {
     files: report,
     parserVersion: spotifyParserVersion,
   );
+}
+
+/// [diagnoseExport] over the archive at [path], off the main isolate (it
+/// decodes every file the parser would read, which for a long history is
+/// seconds of work). A file that is not a ZIP reports `unknown` with no
+/// files.
+Future<ExportDiagnostics> diagnoseExportFile(String path) => Isolate.run(() => _diagnoseFile(path));
+
+Future<ExportDiagnostics> _diagnoseFile(String path) async {
+  final ZipExportArchive archive;
+  try {
+    archive = ZipExportArchive.open(File(path));
+  } on ArchiveFormatException {
+    return const ExportDiagnostics(source: 'unknown', files: [], parserVersion: spotifyParserVersion);
+  }
+  try {
+    return await diagnoseExport(archive);
+  } finally {
+    await archive.close();
+  }
 }

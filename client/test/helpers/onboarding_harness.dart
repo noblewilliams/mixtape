@@ -8,8 +8,10 @@ import 'package:mixtape/data/onboarding/service_preference_store.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/device_providers.dart';
 import 'package:mixtape/presentation/providers/dj_providers.dart';
+import 'package:mixtape/presentation/providers/listening_import_provider.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
 
+import 'fake_import_service.dart';
 import 'fake_listening_api.dart';
 
 /// authProvider settled at a stable status (same pattern as
@@ -84,9 +86,17 @@ ProviderContainer onboardingContainer({
   ServicePreferenceStore? prefs,
   FakeLinkOpener? links,
   AuthNotifier? auth,
+  FakeImportService? importService,
+  FakeArchivePicker? picker,
+  String timeZone = 'Africa/Lagos',
+  ExportDiagnoser? diagnoser,
 }) {
   final container = ProviderContainer(
     overrides: [
+      listeningImportServiceProvider.overrideWithValue(importService ?? FakeImportService()),
+      archivePickerProvider.overrideWithValue(picker ?? FakeArchivePicker()),
+      deviceTimeZoneProvider.overrideWithValue(() async => timeZone),
+      exportDiagnoserProvider.overrideWithValue(diagnoser ?? (_) async => brokenDiagnostics),
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
       djApiProvider.overrideWithValue(BareDjApi()),
       listeningApiProvider.overrideWithValue(listening),
@@ -109,12 +119,17 @@ Future<void> pumpScreen(WidgetTester tester, ProviderContainer container, Widget
 }
 
 bool _isInteractive(Widget w) =>
-    w is ButtonStyleButton || w is TextField || w is IconButton || w is InputChip || w is ListTile;
+    w is ButtonStyleButton ||
+    w is TextField ||
+    w is IconButton ||
+    w is InputChip ||
+    w is ListTile ||
+    w is SwitchListTile;
 
 /// House rule: every interactive widget carries a Key. Audits the Material
 /// controls under [root] that a screen declares itself: a match nested inside
 /// another match is the framework's own internal (an IconButton builds an
-/// `_IconButtonM3`) and is skipped, while a private type the screen declares
+/// `_IconButtonM3`, a SwitchListTile a ListTile) and is skipped, while a private type the screen declares
 /// directly (`FilledButton.icon` is a `_FilledButtonWithIcon`) is checked.
 void expectInteractiveWidgetsKeyed(Finder root) {
   final interactive = find.descendant(of: root, matching: find.byWidgetPredicate(_isInteractive));

@@ -215,6 +215,7 @@ class MusicSource {
     required this.lastImportedAt,
     required this.ledgerFrom,
     required this.ledgerTo,
+    this.packages = const [],
   });
 
   /// `apple_live`, `apple_export`, or `spotify_export`.
@@ -224,12 +225,31 @@ class MusicSource {
   final String? ledgerFrom;
   final String? ledgerTo;
 
+  /// The distinct packages with a completed import behind them
+  /// (`spotify_extended`, `spotify_account`), sorted; a source row alone
+  /// proves nothing landed. Empty when the server sends none.
+  final List<String> packages;
+
   factory MusicSource.fromJson(Map<String, dynamic> json) => MusicSource(
         source: readString(json, 'source'),
         connectedAt: readDate(json, 'connectedAt'),
         lastImportedAt: readOptionalDate(json, 'lastImportedAt'),
         ledgerFrom: readOptionalString(json, 'ledgerFrom'),
         ledgerTo: readOptionalString(json, 'ledgerTo'),
+        packages: json['packages'] == null ? const [] : readStringList(json, 'packages'),
+      );
+}
+
+/// What the interview produced, for the "Interview done" tile.
+class InterviewCounts {
+  const InterviewCounts({required this.artists, required this.notes});
+
+  final int artists;
+  final int notes;
+
+  factory InterviewCounts.fromJson(Map<String, dynamic> json) => InterviewCounts(
+        artists: readNonnegativeInt(json, 'artists'),
+        notes: readNonnegativeInt(json, 'notes'),
       );
 }
 
@@ -242,6 +262,7 @@ class OnboardingState {
     required this.markedRequestedAt,
     required this.interviewCompletedAt,
     required this.importCompletedAt,
+    this.interview,
   });
 
   /// The signed-in listener, so device-local state (the "service chosen"
@@ -256,6 +277,9 @@ class OnboardingState {
   final DateTime? interviewCompletedAt;
   final DateTime? importCompletedAt;
 
+  /// Null until the interview has been completed at all.
+  final InterviewCounts? interview;
+
   factory OnboardingState.fromJson(Map<String, dynamic> json) => OnboardingState(
         userId: readString(json, 'userId'),
         sources: musicSourcesFromJson(json['sources']),
@@ -264,6 +288,7 @@ class OnboardingState {
         markedRequestedAt: readOptionalDate(json, 'markedRequestedAt'),
         interviewCompletedAt: readOptionalDate(json, 'interviewCompletedAt'),
         importCompletedAt: readOptionalDate(json, 'importCompletedAt'),
+        interview: json['interview'] == null ? null : InterviewCounts.fromJson(asObject(json['interview'])),
       );
 
   /// This state with the device-local service choice overlaid.
@@ -275,6 +300,7 @@ class OnboardingState {
         markedRequestedAt: markedRequestedAt,
         interviewCompletedAt: interviewCompletedAt,
         importCompletedAt: importCompletedAt,
+        interview: interview,
       );
 }
 
@@ -474,6 +500,11 @@ String? readOptionalString(Map<String, dynamic> json, String key) {
   if (value is! String) throw const ListeningModelException();
   return value;
 }
+
+List<String> readStringList(Map<String, dynamic> json, String key) => asList(json[key]).map((value) {
+      if (value is! String) throw const ListeningModelException();
+      return value;
+    }).toList(growable: false);
 
 bool readBool(Map<String, dynamic> json, String key) {
   final value = json[key];
