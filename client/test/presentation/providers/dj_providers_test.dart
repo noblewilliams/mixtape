@@ -165,6 +165,19 @@ DjSession _session({
   notPersonal: notPersonal,
 );
 
+/// The onboarding read the service gate has already made before any
+/// signed-in screen exists: [FunnelMilestones] reads it synchronously, so a
+/// container that has never loaded it posts no milestone at all.
+Future<ProviderContainer> _onboarded(
+  FakeDjApi api, {
+  FakeListeningApi? listening,
+  FunnelOnceStore? milestones,
+}) async {
+  final container = _makeContainer(api, listening: listening, milestones: milestones);
+  await container.read(onboardingProvider.future);
+  return container;
+}
+
 /// Lets the fire-and-forget funnel posts (unawaited by design) run out.
 Future<void> _flush() async {
   for (var i = 0; i < 5; i++) {
@@ -1217,7 +1230,7 @@ void main() {
       final api = FakeDjApi();
       api.onCreateSession = (_) async =>
           SessionDetail(session: _session(id: 's9'), messages: [], queue: [_track(0)]);
-      final container = _makeContainer(api, listening: listening, milestones: milestones);
+      final container = await _onboarded(api, listening: listening, milestones: milestones);
 
       await container.read(sessionStarterProvider)('late drive');
       await _flush();
@@ -1236,7 +1249,7 @@ void main() {
           SessionDetail(session: _session(id: 's9'), messages: [], queue: [_track(0)]);
 
       final before = FakeListeningApi(onboarding: onboardingState(chosenService: 'spotify'));
-      await _makeContainer(api, listening: before).read(sessionStarterProvider)('late drive');
+      await (await _onboarded(api, listening: before)).read(sessionStarterProvider)('late drive');
       await _flush();
       expect(before.funnelEvents, isEmpty);
 
@@ -1246,15 +1259,35 @@ void main() {
           sources: [musicSource(lastImportedAt: DateTime(2026, 9, 1))],
         ),
       );
-      await _makeContainer(api, listening: viaSource).read(sessionStarterProvider)('late drive');
+      await (await _onboarded(api, listening: viaSource)).read(sessionStarterProvider)('late drive');
       await _flush();
       expect(viaSource.funnelEvents, [FunnelEventType.firstPersonalMix]);
+    });
+
+    test('an apple_live library sync is not a completed import', () async {
+      final api = FakeDjApi();
+      api.onCreateSession = (_) async =>
+          SessionDetail(session: _session(id: 's9'), messages: [], queue: [_track(0)]);
+      // The funnel measures the export import: an Apple listener whose live
+      // library synced has a lastImportedAt, and it must not open the gate.
+      final listening = FakeListeningApi(
+        onboarding: onboardingState(
+          chosenService: 'apple',
+          hasLibrary: true,
+          sources: [musicSource(source: 'apple_live', lastImportedAt: DateTime(2026, 9, 1))],
+        ),
+      );
+
+      await (await _onboarded(api, listening: listening)).read(sessionStarterProvider)('late drive');
+      await _flush();
+
+      expect(listening.funnelEvents, isEmpty);
     });
 
     test('first_personal_mix never posts for a corpus-mode queue or an empty one', () async {
       final api = FakeDjApi();
       final listening = FakeListeningApi(onboarding: _imported());
-      final container = _makeContainer(api, listening: listening);
+      final container = await _onboarded(api, listening: listening);
 
       api.onCreateSession = (_) async => SessionDetail(
         session: _session(id: 's9', notPersonal: true),
@@ -1272,6 +1305,35 @@ void main() {
       expect(listening.funnelEvents, isEmpty);
     });
 
+    test('a turn whose refetch flips notPersonal posts nothing — the flag is adopted first',
+        () async {
+      final listening = FakeListeningApi(onboarding: _imported());
+      final api = FakeDjApi();
+      var loads = 0;
+      // Personal on the first load, corpus-mode on the post-turn refetch:
+      // the milestone must read the refetched flag, not the stale one.
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(notPersonal: ++loads > 1),
+        messages: [],
+        queue: [],
+      );
+      api.onSendMessage = (id, text) async => TurnResult(
+        djMessage: _msg('m2', 'dj', 'here you go'),
+        queue: [_track(0)],
+        queueVersion: 2,
+      );
+      final container = await _onboarded(api, listening: listening);
+      final sub = container.listen(chatProvider('s1'), (_, _) {});
+      addTearDown(sub.close);
+      await container.read(chatProvider('s1').future);
+
+      await container.read(chatProvider('s1').notifier).send('play jazz');
+      await _flush();
+
+      expect(container.read(chatProvider('s1')).value!.session.notPersonal, isTrue);
+      expect(listening.funnelEvents, isEmpty);
+    });
+
     test('a turn whose refetched session is personal posts first_personal_mix too', () async {
       final listening = FakeListeningApi(onboarding: _imported());
       final api = FakeDjApi();
@@ -1281,7 +1343,7 @@ void main() {
         queue: [_track(0)],
         queueVersion: 2,
       );
-      final container = _makeContainer(api, listening: listening);
+      final container = await _onboarded(api, listening: listening);
       // Held: chatProvider is autoDispose, and the flush below would drop it.
       final sub = container.listen(chatProvider('s1'), (_, _) {});
       addTearDown(sub.close);

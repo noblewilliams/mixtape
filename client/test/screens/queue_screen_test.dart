@@ -961,8 +961,10 @@ void main() {
       final action = find.byKey(const Key('open-in-spotify-t0'));
       expect(action, findsOneWidget);
       expect(find.byKey(const Key('open-in-spotify-t1')), findsNothing);
-      expect(tester.widget<IconButton>(action).tooltip, 'Open Title 0 in Spotify');
-      expect(find.bySemanticsLabel('Open Title 0 in Spotify'), findsOneWidget);
+      // "Open in Spotify: <title>" — the visible label is a prefix of the
+      // accessible name, so voice control matches what a listener reads.
+      expect(tester.widget<IconButton>(action).tooltip, 'Open in Spotify: Title 0');
+      expect(find.bySemanticsLabel('Open in Spotify: Title 0'), findsOneWidget);
       final size = tester.getSize(action);
       expect(size.width, greaterThanOrEqualTo(44));
       expect(size.height, greaterThanOrEqualTo(44));
@@ -1038,19 +1040,35 @@ void main() {
       expectInteractiveWidgetsKeyed(find.byType(QueueScreen));
     });
 
-    testWidgets('a mixed Apple + Spotify queue keeps Play and Save and only gains the row links', (tester) async {
+    testWidgets('a mixed Apple + Spotify queue shows BOTH sets of actions, Apple first', (tester) async {
       final api = FakeDjApi();
       api.onGetSession = (_) async =>
           SessionDetail(session: _session(), messages: [], queue: [_track(0), _spotifyTrack(1)]);
       final container = _makeContainer(api);
       await _pump(tester, container);
 
-      expect(tester.widget<IconButton>(find.byKey(const Key('play-button'))).onPressed, isNotNull);
-      expect(tester.widget<IconButton>(find.byKey(const Key('save-button'))).onPressed, isNotNull);
-      expect(find.byKey(const Key('share-button')), findsNothing);
+      final play = find.byKey(const Key('play-button'));
+      final save = find.byKey(const Key('save-button'));
+      final share = find.byKey(const Key('share-button'));
+      expect(tester.widget<IconButton>(play).onPressed, isNotNull);
+      expect(tester.widget<IconButton>(save).onPressed, isNotNull);
+      // The Spotify half of a mixed mix is reachable too (plan: Outputs).
+      expect(tester.widget<IconButton>(share).onPressed, isNotNull);
+      expect(tester.getTopLeft(play).dx, lessThan(tester.getTopLeft(share).dx));
+      expect(tester.getTopLeft(save).dx, lessThan(tester.getTopLeft(share).dx));
       expect(find.byKey(const Key('open-in-spotify-t0')), findsNothing);
       expect(find.byKey(const Key('open-in-spotify-t1')), findsOneWidget);
       expectInteractiveWidgetsKeyed(find.byType(QueueScreen));
+    });
+
+    testWidgets('an Apple-only queue offers no transfer handoff', (tester) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(), messages: [], queue: [_track(0), _track(1)]);
+      await _pump(tester, _makeContainer(api));
+
+      expect(tester.widget<IconButton>(find.byKey(const Key('play-button'))).onPressed, isNotNull);
+      expect(find.byKey(const Key('share-button')), findsNothing);
     });
 
     testWidgets('Send to a transfer tool shares one "Artist – Title" line per track under the session title, then confirms', (
@@ -1064,7 +1082,8 @@ void main() {
         queue: [_spotifyTrack(0), _spotifyTrack(1), _track(2, appleId: null)],
       );
       final sharer = FakeTextSharer();
-      final container = _makeContainer(api, sharer: sharer);
+      final links = FakeLinkOpener();
+      final container = _makeContainer(api, sharer: sharer, links: links);
       await _pump(tester, container);
 
       await tester.tap(find.byKey(const Key('share-button')));
@@ -1073,7 +1092,22 @@ void main() {
       expect(sharer.shares, hasLength(1));
       expect(sharer.shares.single.text, 'Artist 0 – Title 0\nArtist 1 – Title 1\nArtist 2 – Title 2');
       expect(sharer.shares.single.subject, 'Mixtape · Late drive');
-      expect(find.text('shared 3 songs — the transfer tool makes the playlist in Spotify'), findsOneWidget);
+      // iPad shows the sheet as a popover and needs an anchor: the share
+      // button's own rect, on screen (share_plus throws on an empty one).
+      final origin = sharer.shares.single.origin;
+      expect(origin.isEmpty, isFalse);
+      expect(
+        (Offset.zero & tester.view.physicalSize / tester.view.devicePixelRatio).contains(origin.topLeft),
+        isTrue,
+      );
+      expect(origin.width, greaterThanOrEqualTo(44));
+      // Parity with the web rail: the handoff also opens the tool's own page,
+      // so the listener has somewhere to paste what they just shared.
+      expect(links.opened, [Uri.parse('https://www.tunemymusic.com/transfer')]);
+      expect(
+        find.text('shared 3 songs — TuneMyMusic makes the playlist in Spotify'),
+        findsOneWidget,
+      );
     });
 
     testWidgets('a share the listener dismissed confirms nothing and counts as no output', (tester) async {
@@ -1082,7 +1116,8 @@ void main() {
           SessionDetail(session: _session(), messages: [], queue: [_spotifyTrack(0)]);
       final sharer = FakeTextSharer()..handedOff = false;
       final listening = FakeListeningApi();
-      final container = _makeContainer(api, sharer: sharer, listening: listening);
+      final links = FakeLinkOpener();
+      final container = _makeContainer(api, sharer: sharer, listening: listening, links: links);
       await _pump(tester, container);
 
       await tester.tap(find.byKey(const Key('share-button')));
@@ -1090,6 +1125,7 @@ void main() {
 
       expect(sharer.shares, hasLength(1));
       expect(find.textContaining('shared'), findsNothing);
+      expect(links.opened, isEmpty, reason: 'no handoff, no transfer tool');
       expect(listening.funnelEvents, isEmpty);
     });
 
@@ -1120,7 +1156,7 @@ void main() {
       expect(find.text('Not personal yet'), findsNothing);
     });
 
-    testWidgets('first_output posts once per listener across Play, Open in Spotify, and the share handoff', (
+    testWidgets('first_output posts once per listener across Open in Spotify and the share handoff', (
       tester,
     ) async {
       final listening = FakeListeningApi();
@@ -1131,12 +1167,13 @@ void main() {
       final container = _makeContainer(api, listening: listening, milestones: milestones);
       await _pump(tester, container);
 
-      await tester.tap(find.byKey(const Key('play-button')));
+      await tester.tap(find.byKey(const Key('open-in-spotify-t1')));
       await tester.pumpAndSettle();
       expect(listening.funnelEvents, [FunnelEventType.firstOutput]);
       expect(await milestones.has('user-1', FunnelEventType.firstOutput), isTrue);
 
-      await tester.tap(find.byKey(const Key('open-in-spotify-t1')));
+      // Play is an Apple output, not a Spotify one: it adds nothing here.
+      await tester.tap(find.byKey(const Key('play-button')));
       await tester.pumpAndSettle();
       expect(listening.funnelEvents, [FunnelEventType.firstOutput]);
 
@@ -1150,19 +1187,20 @@ void main() {
       expect(listening.funnelEvents, [FunnelEventType.firstOutput]);
     });
 
-    testWidgets('a Play that fails is no output', (tester) async {
+    testWidgets('Play is an Apple output, not a Spotify one: it posts no funnel event', (tester) async {
       final listening = FakeListeningApi();
       final api = FakeDjApi();
       api.onGetSession = (_) async =>
           SessionDetail(session: _session(), messages: [], queue: [_track(0)]);
-      final bridge = FakeBridge();
-      bridge.onPlayQueue = (_) async => throw MusicKitException('boom');
-      final container = _makeContainer(api, listening: listening, bridge: bridge);
+      final container = _makeContainer(api, listening: listening);
       await _pump(tester, container);
 
       await tester.tap(find.byKey(const Key('play-button')));
       await tester.pumpAndSettle();
 
+      expect(find.text('playing in Apple Music'), findsOneWidget);
+      // The session event still lands; only the funnel milestone is Spotify's.
+      expect(api.postedEvents.map((e) => e.type), ['played']);
       expect(listening.funnelEvents, isEmpty);
     });
   });

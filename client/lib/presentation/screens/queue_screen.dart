@@ -20,9 +20,10 @@ import '../providers/onboarding_provider.dart';
 /// response rather than editing local state optimistically.
 ///
 /// Spotify listeners (plan `2026-09-02-listening-export-p2-spotify-import.md`,
-/// Outputs): a row with a Spotify id gets "Open in Spotify"; a queue Apple
-/// Music can do nothing with swaps Play/Save for "Send to a transfer tool";
-/// a corpus-mode session carries the "Not personal yet" band above the list.
+/// Outputs): a row with a Spotify id gets "Open in Spotify"; any queue with
+/// a Spotify id gains "Send to a transfer tool" (and one Apple Music can do
+/// nothing with drops Play/Save entirely); a corpus-mode session carries the
+/// "Not personal yet" band above the list.
 ///
 /// Every mutation goes through one FIFO of [_QueueIntent]s rather than
 /// firing straight at the provider — see [_QueueScreenState._enqueue] for
@@ -184,10 +185,11 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     }());
   }
 
-  /// The once-only `first_output` funnel milestone: any Spotify output, and
-  /// Play too so the funnel closes for a listener whose mix played in Apple
-  /// Music. Same fire-and-forget contract as [_postEvent]; the once-ness
-  /// lives in [FunnelMilestones].
+  /// The once-only `first_output` funnel milestone: the FIRST SPOTIFY output
+  /// action (plan: funnel events) — an "Open in Spotify" tap or a share the
+  /// listener carried through. Play and Save are Apple outputs and post
+  /// nothing here; they have their own session events. Same fire-and-forget
+  /// contract as [_postEvent]; the once-ness lives in [FunnelMilestones].
   void _noteOutput() =>
       ref.read(funnelMilestonesProvider).recordOnce(FunnelEventType.firstOutput);
 
@@ -220,16 +222,16 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     _noteOutput();
   }
 
-  /// Text handoff for a queue Apple Music can't play: one "Artist – Title"
-  /// per track (en dash), every visible track — a transfer tool searches
-  /// Spotify by name, so a track with no id at all still belongs in the list.
-  /// The tool itself is the listener's pick from the share sheet: TuneMyMusic
-  /// accepts pasted text without an account (the approval record left the
-  /// choice to build time, and that was the deciding criterion), and the
-  /// sheet lets them choose it, Soundiiz, or anything else — so the app
-  /// names no tool and opens none.
+  /// Text handoff for a Spotify mix: one "Artist – Title" per track (en
+  /// dash), every visible track — a transfer tool searches Spotify by name,
+  /// so a track with no id at all still belongs in the list. Once the sheet
+  /// reports the text went somewhere, the tool's own page opens, the same
+  /// way the web rail opens it in a new tab: TuneMyMusic is the tool of the
+  /// two on the approved board whose transfer page accepts pasted text
+  /// without an account, so the listener lands where they can paste.
   Future<void> _handleShare(
     BuildContext screenContext,
+    BuildContext buttonContext,
     List<QueueTrack> queue,
     String title,
   ) async {
@@ -237,11 +239,20 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     setState(() => _sharing = true);
     try {
       final text = [for (final t in queue) '${t.artist} – ${t.title}'].join('\n');
-      final handedOff =
-          await ref.read(textSharerProvider).share(text, subject: 'Mixtape · $title');
+      final handedOff = await ref.read(textSharerProvider).share(
+            text,
+            subject: 'Mixtape · $title',
+            origin: _shareOrigin(buttonContext, screenContext),
+          );
       if (!mounted || !handedOff) return; // a dismissed sheet is no output
       _noteOutput();
-      if (!screenContext.mounted) return;
+      try {
+        await ref.read(linkOpenerProvider)(_transferToolUrl);
+      } catch (_) {
+        // The text is already in the listener's hands; a browser that won't
+        // open isn't worth a second message on top of the confirmation.
+      }
+      if (!mounted || !screenContext.mounted) return;
       _showSnack(screenContext, _shareSuccessMessage(queue.length));
     } catch (_) {
       if (!screenContext.mounted) return;
@@ -249,6 +260,19 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     } finally {
       if (mounted) setState(() => _sharing = false);
     }
+  }
+
+  /// The anchor the share sheet points at. On iPad the sheet is a popover
+  /// and UIKit raises without a source rect, so this is the share button's
+  /// own rect in global logical coordinates ([buttonContext] is the Builder
+  /// wrapping it, whose first render object is the button). A button that
+  /// has left the tree falls back to the whole screen, which centres it.
+  Rect _shareOrigin(BuildContext buttonContext, BuildContext screenContext) {
+    final box = buttonContext.findRenderObject();
+    if (box is RenderBox && box.hasSize && !box.size.isEmpty) {
+      return box.localToGlobal(Offset.zero) & box.size;
+    }
+    return Offset.zero & MediaQuery.sizeOf(screenContext);
   }
 
   Future<void> _handlePlay(BuildContext screenContext, List<QueueTrack> queue) async {
@@ -259,7 +283,6 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
       final skipped = queue.length - ids.length;
       await ref.read(musicKitBridgeProvider).playQueue(ids);
       _postEvent('played');
-      if (mounted) _noteOutput();
       if (!screenContext.mounted) return;
       _showSnack(screenContext, _playSuccessMessage(skipped));
     } on MusicKitException catch (e) {
@@ -364,7 +387,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
       : 'saved $added songs to Apple Music';
 
   String _shareSuccessMessage(int count) =>
-      'shared $count song${count == 1 ? '' : 's'} — the transfer tool makes the playlist in Spotify';
+      'shared $count song${count == 1 ? '' : 's'} — TuneMyMusic makes the playlist in Spotify';
 
   /// Null when Play/Save are actionable; otherwise the tooltip explaining
   /// why they're disabled — an empty queue has nothing to act on, and a
@@ -372,21 +395,24 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
   /// played or saved at all (a partial match still works: the filtered
   /// track count is reported in the success snackbar instead). Not
   /// consulted for a Spotify-only queue, which shows no Play/Save at all —
-  /// see [_isSpotifyOnly].
+  /// see [_hasAppleActions].
   String? _actionsDisabledReason(List<QueueTrack> queue) {
     if (queue.isEmpty) return 'nothing queued yet';
     if (queue.every((t) => t.appleId == null)) return "these tracks aren't in Apple Music";
     return null;
   }
 
-  /// A queue Apple Music can do nothing with but Spotify can: the Spotify
-  /// actions take the Play/Save slot instead of a disabled pair with a
-  /// reason. A queue with no ids of either kind keeps the disabled Play/Save,
-  /// and a mixed queue keeps them live (the row links carry the Spotify half).
-  bool _isSpotifyOnly(List<QueueTrack> queue) =>
-      queue.isNotEmpty &&
-      queue.every((t) => t.appleId == null) &&
-      queue.any((t) => t.spotifyId != null);
+  /// Each platform's controls appear when the queue has anything that
+  /// platform can act on (plan: Outputs), so a mixed mix shows both — Apple
+  /// first, since Play is still the primary action for a mix Apple Music can
+  /// play. A queue with no Spotify ids at all shows no transfer handoff, and
+  /// one with no ids of either kind (or none at all) keeps the disabled
+  /// Play/Save pair carrying [_actionsDisabledReason] rather than an empty
+  /// bar.
+  bool _hasSpotifyActions(List<QueueTrack> queue) => queue.any((t) => t.spotifyId != null);
+
+  bool _hasAppleActions(List<QueueTrack> queue) =>
+      queue.any((t) => t.appleId != null) || !_hasSpotifyActions(queue);
 
   @override
   Widget build(BuildContext context) {
@@ -395,6 +421,12 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     // name is (usually) resolved by the time the save dialog reads it
     // non-blocking — see _openSaveDialog.
     ref.watch(accountNameProvider);
+    // Same reason, for the same reader: [FunnelMilestones] reads the
+    // onboarding state synchronously (it never awaits a user-scoped
+    // provider), so an output action can only post its milestone if the
+    // read has landed. The service gate has normally loaded it long before
+    // this screen opens; watching keeps it loaded and current here too.
+    ref.watch(onboardingProvider);
 
     ref.listen(chatProvider(widget.sessionId), (previous, next) {
       final state = next.value;
@@ -451,40 +483,50 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     // removal hasn't round-tripped yet.
     final visibleQueue = state.queue.where((t) => !_hiddenTrackIds.contains(t.trackId)).toList();
     final disabledReason = _actionsDisabledReason(visibleQueue);
-    final spotifyOnly = _isSpotifyOnly(visibleQueue);
+    final spotifyActions = _hasSpotifyActions(visibleQueue);
+    final appleActions = _hasAppleActions(visibleQueue);
 
     return Scaffold(
       appBar: AppBar(
         title: Text(state.session.title),
-        actions: spotifyOnly
-            ? [
-                IconButton(
-                  key: const Key('share-button'),
-                  tooltip: 'Send to a transfer tool',
-                  onPressed: _sharing
-                      ? null
-                      : () => _handleShare(context, visibleQueue, state.session.title),
-                  icon: const Icon(Icons.ios_share),
-                ),
-              ]
-            : [
-                IconButton(
-                  key: const Key('play-button'),
-                  tooltip: disabledReason ?? 'Play in Apple Music',
-                  onPressed: (disabledReason == null && !_playing)
-                      ? () => _handlePlay(context, visibleQueue)
-                      : null,
-                  icon: const Icon(Icons.play_circle),
-                ),
-                IconButton(
-                  key: const Key('save-button'),
-                  tooltip: disabledReason ?? 'Save as playlist',
-                  onPressed: (disabledReason == null && !_saving)
-                      ? () => _openSaveDialog(context, visibleQueue, state.session.title)
-                      : null,
-                  icon: const Icon(Icons.playlist_add),
-                ),
-              ],
+        actions: [
+          if (appleActions) ...[
+            IconButton(
+              key: const Key('play-button'),
+              tooltip: disabledReason ?? 'Play in Apple Music',
+              onPressed: (disabledReason == null && !_playing)
+                  ? () => _handlePlay(context, visibleQueue)
+                  : null,
+              icon: const Icon(Icons.play_circle),
+            ),
+            IconButton(
+              key: const Key('save-button'),
+              tooltip: disabledReason ?? 'Save as playlist',
+              onPressed: (disabledReason == null && !_saving)
+                  ? () => _openSaveDialog(context, visibleQueue, state.session.title)
+                  : null,
+              icon: const Icon(Icons.playlist_add),
+            ),
+          ],
+          // The Builder is the share sheet's popover anchor on iPad: its
+          // context resolves to the button's own render object.
+          if (spotifyActions)
+            Builder(
+              builder: (buttonContext) => IconButton(
+                key: const Key('share-button'),
+                tooltip: 'Send to a transfer tool',
+                onPressed: _sharing
+                    ? null
+                    : () => _handleShare(
+                          context,
+                          buttonContext,
+                          visibleQueue,
+                          state.session.title,
+                        ),
+                icon: const Icon(Icons.ios_share),
+              ),
+            ),
+        ],
       ),
       body: SafeArea(
         child: Column(
@@ -524,6 +566,10 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     );
   }
 }
+
+/// The transfer tool the handoff opens, matching the web rail's
+/// TRANSFER_TOOL_URL (`web/src/components/QueuePanel.tsx`).
+final _transferToolUrl = Uri.https('www.tunemymusic.com', '/transfer');
 
 /// One queued queue-mutation, held in terms of TRACK IDS rather than
 /// positions. The gesture that creates it knows what the user meant ("drop
@@ -747,11 +793,11 @@ class _QueueRow extends StatelessWidget {
                     if (onOpenInSpotify != null)
                       IconButton(
                         key: Key('open-in-spotify-${track.trackId}'),
-                        tooltip: 'Open ${track.title} in Spotify',
+                        tooltip: 'Open in Spotify: ${track.title}',
                         onPressed: onOpenInSpotify,
                         icon: Icon(
                           Icons.open_in_new,
-                          semanticLabel: 'Open ${track.title} in Spotify',
+                          semanticLabel: 'Open in Spotify: ${track.title}',
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),

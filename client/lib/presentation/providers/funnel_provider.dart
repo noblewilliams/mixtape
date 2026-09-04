@@ -30,9 +30,11 @@ class FunnelMilestones {
   void recordOnce(FunnelEventType type) => unawaited(_recordOnce(type, gate: null));
 
   /// `first_personal_mix`: [session] came back with a queue built from the
-  /// listener's own plays. Nothing before an import counts — an Apple
+  /// listener's own plays. Nothing before an EXPORT import counts — an Apple
   /// listener's every mix is personal, but the funnel measures the Spotify
-  /// import, so the gate is a completed import on any device.
+  /// import, so the gate is [OnboardingState.hasCompletedImport] (a live
+  /// Apple library sync is not one). An empty queue is no mix at all, so it
+  /// never counts either, however personal the session says it is.
   void notePersonalMix(DjSession session, List<QueueTrack> queue) {
     if (session.notPersonal || queue.isEmpty) return;
     unawaited(
@@ -47,9 +49,16 @@ class FunnelMilestones {
     String? key;
     try {
       // The onboarding read is the client's only source of the listener's
-      // id; it is loaded before any signed-in screen shows, so this resolves
-      // at once in practice. A sign-out mid-await rejects and is swallowed.
-      final onboarding = await _ref.read(onboardingProvider.future);
+      // id, and it is loaded by the service gate before any signed-in screen
+      // shows — so it is read SYNCHRONOUSLY, from the current build only
+      // (`unwrapPrevious`, so a previous account's state carried into a
+      // reload never counts). Never `await ...future`: a user-scoped
+      // provider awaited across an auth transition would resolve for
+      // whoever is signed in when it lands (CLAUDE.md). With nothing loaded
+      // there is no listener to attribute the milestone to, and a courtesy
+      // funnel event is not worth holding a tap open for.
+      final onboarding = _ref.read(onboardingProvider).unwrapPrevious().value;
+      if (onboarding == null) return;
       if (gate != null && !gate(onboarding)) return;
       key = funnelOnceKey(type, onboarding.userId);
       if (!_settled.add(key)) return;

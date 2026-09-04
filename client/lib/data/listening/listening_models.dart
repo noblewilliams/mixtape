@@ -280,10 +280,19 @@ class OnboardingState {
   /// Null until the interview has been completed at all.
   final InterviewCounts? interview;
 
-  /// Whether a listening import has landed for this listener on any device:
-  /// the funnel's `first_personal_mix` only counts after one.
+  /// Whether an EXPORT import has landed for this listener on any device:
+  /// the funnel's `first_personal_mix` only counts after one. A live Apple
+  /// library sync (`apple_live`) carries a `lastImportedAt` too and is
+  /// deliberately not one — the funnel measures the export flow, and an
+  /// Apple listener's every mix would otherwise count from day one (plan:
+  /// funnel events).
   bool get hasCompletedImport =>
-      importCompletedAt != null || sources.any((s) => s.lastImportedAt != null);
+      importCompletedAt != null ||
+      sources.any(
+        (s) =>
+            (s.source == 'spotify_export' || s.source == 'apple_export') &&
+            s.lastImportedAt != null,
+      );
 
   factory OnboardingState.fromJson(Map<String, dynamic> json) => OnboardingState(
         userId: readString(json, 'userId'),
