@@ -6,18 +6,17 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../data/files/archive_picker.dart';
 import '../../data/files/opened_archive_channel.dart';
 import 'auth_provider.dart';
 import 'device_providers.dart';
 
-class OpenedArchiveNotifier extends Notifier<PickedArchive?> {
+class OpenedArchiveNotifier extends Notifier<HandedArchive?> {
   /// Bumped by every rebuild so a [takePending] still in flight for the
   /// previous listener cannot land on this one's state.
   int _generation = 0;
 
   @override
-  PickedArchive? build() {
+  HandedArchive? build() {
     _generation++;
     // Nothing is opened for a listener who is not there: while signed out
     // the archive stays with the source (the native buffer, or the Dart-side
@@ -34,7 +33,7 @@ class OpenedArchiveNotifier extends Notifier<PickedArchive?> {
   }
 
   Future<void> _takePending(OpenedArchiveSource source, int generation) async {
-    PickedArchive? pending;
+    HandedArchive? pending;
     try {
       pending = await source.takePending();
     } catch (_) {
@@ -47,12 +46,12 @@ class OpenedArchiveNotifier extends Notifier<PickedArchive?> {
 
   /// Home opened the flow with it. Consumed exactly once: reopening Home,
   /// or a later run ending, must not start the same import again.
-  void consumed(PickedArchive archive) {
-    if (state == archive) state = null;
+  void consumed(HandedArchive handedOver) {
+    if (state == handedOver) state = null;
   }
 
   bool _current(int generation) => ref.mounted && generation == _generation;
 }
 
 final openedArchiveProvider =
-    NotifierProvider<OpenedArchiveNotifier, PickedArchive?>(OpenedArchiveNotifier.new);
+    NotifierProvider<OpenedArchiveNotifier, HandedArchive?>(OpenedArchiveNotifier.new);

@@ -6,7 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/import/snapshot.dart';
 import 'package:mixtape/import/listening_import_service.dart';
+import 'package:mixtape/data/api/api_client.dart';
 import 'package:mixtape/presentation/providers/listening_import_provider.dart';
+import 'package:mixtape/presentation/providers/opened_archive_provider.dart';
 import 'package:mixtape/presentation/screens/import_sheet.dart';
 
 import '../helpers/fake_import_service.dart';
@@ -21,12 +23,22 @@ class _Host extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Scaffold(
         key: const Key('host'),
-        body: Center(
-          child: TextButton(
-            key: const Key('open'),
-            onPressed: () => showImportSheet(context),
-            child: const Text('open'),
-          ),
+        body: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            TextButton(
+              key: const Key('open'),
+              onPressed: () => showImportSheet(context),
+              child: const Text('open'),
+            ),
+            // How Home opens it over a run in flight, when a file handed to
+            // the app arrives mid-upload.
+            TextButton(
+              key: const Key('open-locked'),
+              onPressed: () => showImportSheet(context, dismissible: false),
+              child: const Text('open locked'),
+            ),
+          ],
         ),
       );
 }
@@ -434,5 +446,126 @@ void main() {
     expect(find.byKey(const Key('import-copy-report')), findsNothing);
     expect(find.textContaining('Expected files'), findsNothing);
     expect(find.byKey(const Key('import-try-another')), findsOneWidget);
+  });
+
+  testWidgets('the sheet says it is showing while it is up, wherever it was opened from',
+      (tester) async {
+    final c = container();
+    await pumpScreen(tester, c, const _Host());
+    expect(importSheetShowing, isFalse);
+
+    await tester.tap(find.byKey(const Key('open')));
+    await tester.pumpAndSettle();
+    expect(importSheetShowing, isTrue);
+
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+    expect(importSheetShowing, isFalse);
+  });
+
+  testWidgets('a sheet opened over a run in flight is locked, and is dismissible again the '
+      'moment the run lands — with the result still on it', (tester) async {
+    final c = container();
+    await open(tester, c);
+    await tester.tap(find.byKey(const Key('import-pick')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('import-upload')));
+    await tester.pump();
+    // The listener puts the sheet away mid-upload, and a file handed to the
+    // app brings it back over the run still going.
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+    expect(sheet(), findsNothing);
+    await tester.tap(find.byKey(const Key('open-locked')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('import-progress')), findsOneWidget);
+
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+    expect(sheet(), findsOneWidget, reason: 'an upload cannot be dismissed out from under');
+    expect(importSheetShowing, isTrue);
+
+    service.finish(extendedResult());
+    await tester.pumpAndSettle();
+
+    // The result is on the sheet, and the sheet is a dismissible one now.
+    expect(find.byKey(const Key('import-done-title')), findsOneWidget);
+    expect(importSheetShowing, isTrue);
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+    expect(sheet(), findsNothing);
+    expect(importSheetShowing, isFalse);
+  });
+
+  testWidgets('a result offers the file handed over while the run was going, and Import it '
+      'starts that file without the picker', (tester) async {
+    final opened = FakeOpenedArchiveSource(pending: handedOverArchive);
+    listening = FakeListeningApi(onboarding: onboardingState(chosenService: 'spotify'));
+    service = FakeImportService();
+    picker = FakeArchivePicker(extendedArchive);
+    final c = onboardingContainer(
+      listening: listening,
+      importService: service,
+      picker: picker,
+      opened: opened,
+    );
+    await open(tester, c);
+    await tester.tap(find.byKey(const Key('import-pick')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('import-upload')));
+    await tester.pump();
+    service.finish(extendedResult());
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('import-done-title')), findsOneWidget);
+    expect(
+      tester.widget<Text>(find.byKey(const Key('import-waiting-file'))).data,
+      'Another file is waiting: ${handedOverArchive.name}',
+    );
+    expectInteractiveWidgetsKeyed(sheet());
+
+    await tester.tap(find.byKey(const Key('import-waiting-start')));
+    await tester.pumpAndSettle();
+
+    expect(service.inspected, [extendedArchive.path, handedOverArchive.path]);
+    expect(picker.picks, 1, reason: 'only the first file went through the picker');
+    expect(c.read(openedArchiveProvider), isNull, reason: 'taken exactly once');
+    expect(find.byKey(const Key('import-waiting-file')), findsNothing);
+  });
+
+  testWidgets('a failed run offers the waiting file too, and an unreadable hand-over is named',
+      (tester) async {
+    final opened = FakeOpenedArchiveSource();
+    listening = FakeListeningApi(onboarding: onboardingState(chosenService: 'spotify'));
+    service = FakeImportService()..inspectError = NetworkException('offline');
+    picker = FakeArchivePicker(extendedArchive);
+    final c = onboardingContainer(
+      listening: listening,
+      importService: service,
+      picker: picker,
+      opened: opened,
+    );
+    await open(tester, c);
+    await tester.tap(find.byKey(const Key('import-pick')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('import-failed-title')), findsOneWidget);
+
+    // The file could not even be copied out of its security scope: there is
+    // nothing to parse, only a name.
+    c.read(openedArchiveProvider);
+    opened.handUnreadable('my_spotify_data.zip');
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.widget<Text>(find.byKey(const Key('import-waiting-file'))).data,
+      'Another file is waiting: my_spotify_data.zip',
+    );
+
+    await tester.tap(find.byKey(const Key('import-waiting-start')));
+    await tester.pumpAndSettle();
+
+    expect(service.inspected, [extendedArchive.path], reason: 'there is no file to read');
+    expect(find.text("Couldn't read this export"), findsOneWidget);
+    expect(find.textContaining('my_spotify_data.zip'), findsOneWidget);
   });
 }

@@ -91,14 +91,24 @@ void main() {
   test('a ZIP handed to the app is copied out of its security scope and passed to Dart', () {
     final source = File('ios/Runner/AppDelegate.swift').readAsStringSync();
 
-    // The document-type open path, for a running app and for a cold start.
+    // The document-type open path. The launch options carry the same URL on
+    // a cold start and the open hook runs straight after, so copying there
+    // as well would leave a second copy of the export behind: one path only.
     expect(source, contains('open url: URL'));
-    expect(source, contains('launchOptions?[.url] as? URL'));
+    expect(source, isNot(contains('launchOptions?[.url]')));
     // A document opened in place is only readable inside its scope, so the
     // file is copied into our own temporary directory under a fresh name
-    // before the scope ends and the import reads it.
-    expect(source, contains('startAccessingSecurityScopedResource()'));
-    expect(source, contains('stopAccessingSecurityScopedResource()'));
+    // before the scope ends and the import reads it. The scope is balanced
+    // by a `defer` on the acquire, so no return path can leak it.
+    expect(
+      source,
+      contains(
+        'let scoped = url.startAccessingSecurityScopedResource()\n'
+        '    defer {\n'
+        '      if scoped { url.stopAccessingSecurityScopedResource() }\n'
+        '    }',
+      ),
+    );
     expect(source, contains('temporaryDirectory'));
     expect(source, contains('UUID().uuidString'));
     // The channel Dart listens on, plus the buffer a cold start drains.
@@ -106,8 +116,35 @@ void main() {
     expect(source, contains('invokeMethod("onOpenedArchive"'));
     expect(source, contains('case "getPendingArchive"'));
     expect(source, contains('pendingArchive = nil'));
+    // A file that could not be copied at all is said so by name, rather than
+    // silently doing nothing.
+    expect(source, contains('"error": "unreadable"'));
     // The name of a listener's export file is theirs: never logged.
     expect(source, isNot(contains('print(')));
     expect(source, isNot(contains('NSLog')));
+  });
+
+  test('the copies of handed-over archives never outlive the import that reads them', () {
+    final source = File('ios/Runner/AppDelegate.swift').readAsStringSync();
+
+    // Everything under tmp/opened-archives is a listener's whole export —
+    // the identity and payment files the parser refuses to read included.
+    expect(source, contains('"opened-archives"'));
+    // A copy from a previous launch is dead: the import that would have read
+    // it went with the process, so the directory is emptied before anything
+    // else runs.
+    final launch = source.indexOf('didFinishLaunchingWithOptions launchOptions');
+    final purge = source.indexOf('purgeOpenedArchives()', launch);
+    expect(purge, greaterThan(launch));
+    expect(purge, lessThan(source.indexOf('GeneratedPluginRegistrant', launch)));
+    expect(source, contains('removeItem(at: openedArchivesDirectory)'));
+    // Dart deletes each copy the moment its import is over, and only ever
+    // our own copies: a path anywhere else is refused, not deleted.
+    expect(source, contains('case "deleteOpenedArchive"'));
+    expect(source, contains('hasPrefix(root.path + "/")'));
+    // Mail and "Copy to Mixtape" hand the file over through our own Inbox;
+    // that copy is ours to remove once it has been copied.
+    expect(source, contains('Inbox'));
+    expect(source, contains('removeItem(at: url)'));
   });
 }

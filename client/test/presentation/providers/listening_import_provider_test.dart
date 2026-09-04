@@ -20,17 +20,20 @@ void main() {
   late FakeListeningApi listening;
   late FakeImportService service;
   late FakeArchivePicker picker;
+  late FakeOpenedArchiveSource opened;
   late List<String> diagnosed;
 
   ProviderContainer container({TestAuthNotifier? auth, String timeZone = 'Africa/Lagos'}) {
     listening = FakeListeningApi(onboarding: onboardingState(chosenService: 'spotify'));
     service = FakeImportService();
     picker = FakeArchivePicker(extendedArchive);
+    opened = FakeOpenedArchiveSource();
     diagnosed = [];
     return onboardingContainer(
       listening: listening,
       importService: service,
       picker: picker,
+      opened: opened,
       timeZone: timeZone,
       auth: auth,
       diagnoser: (path) async {
@@ -397,5 +400,98 @@ void main() {
 
     expect(c.read(listeningImportProvider), isA<ImportIdle>());
     expect(listening.getOnboardingCalls, before);
+  });
+
+  // C5 privacy: a file handed to the app from Files or Mail was copied into
+  // the app's own temporary directory. That copy is the listener's whole
+  // export — the identity and payment files the parser refuses to read
+  // included — so it goes the moment the run is over.
+  test('the copy of a handed-over archive is deleted once the import lands', () async {
+    final c = container();
+    await notifier(c).inspect(handedOverArchive, handedOver: true);
+    final upload = notifier(c).upload();
+    await _settle();
+    expect(opened.discarded, isEmpty, reason: 'the run is still reading it');
+
+    service.finish(extendedResult());
+    await upload;
+
+    expect(c.read(listeningImportProvider), isA<ImportDone>());
+    expect(opened.discarded, [handedOverArchive]);
+  });
+
+  test('a handed-over archive the listener cancelled, reset, or failed on is deleted too',
+      () async {
+    for (final land in [
+      (ListeningImportNotifier n) => n.cancel(),
+      (ListeningImportNotifier n) => n.reset(),
+    ]) {
+      final c = container();
+      await notifier(c).inspect(handedOverArchive, handedOver: true);
+      final upload = notifier(c).upload();
+      await _settle();
+
+      land(notifier(c));
+      await upload;
+      await _settle();
+
+      expect(opened.discarded, [handedOverArchive]);
+    }
+
+    final c = container();
+    service.inspectError = brokenError;
+    await notifier(c).inspect(handedOverArchive, handedOver: true);
+    await _settle();
+
+    expect(c.read(listeningImportProvider), isA<ImportFailed>());
+    expect(diagnosed, [handedOverArchive.path], reason: 'the report is built before the delete');
+    expect(opened.discarded, [handedOverArchive]);
+  });
+
+  test('a file the listener picked here is never deleted: it is theirs, not our copy', () async {
+    final c = container();
+    await notifier(c).inspect(extendedArchive);
+    final upload = notifier(c).upload();
+    await _settle();
+    service.finish(extendedResult());
+    await upload;
+
+    expect(c.read(listeningImportProvider), isA<ImportDone>());
+    expect(opened.discarded, isEmpty);
+  });
+
+  test('a partial keeps the copy only while a retry would have to read it again', () async {
+    final c = container();
+    await notifier(c).inspect(handedOverArchive, handedOver: true);
+    final upload = notifier(c).upload();
+    await _settle();
+    service.finish(accountResult(playlistError: 'nope'));
+    await upload;
+
+    // "Retry playlists" re-runs from the preview, never from the file.
+    expect(c.read(listeningImportProvider), isA<ImportPartial>());
+    expect(opened.discarded, [handedOverArchive]);
+  });
+
+  test('a file the app could not copy at all fails by name, and never over a run in flight',
+      () async {
+    final c = container();
+    await notifier(c).inspect(extendedArchive);
+    final upload = notifier(c).upload();
+    await _settle();
+
+    notifier(c).handOverFailed('my_spotify_data.zip');
+    expect(c.read(listeningImportProvider), isA<ImportUploading>(),
+        reason: 'the run in flight is never thrown away');
+
+    service.finish(extendedResult());
+    await upload;
+    notifier(c).handOverFailed('my_spotify_data.zip');
+
+    final failed = c.read(listeningImportProvider) as ImportFailed;
+    expect(failed.unreadable, isTrue);
+    expect(failed.message, contains('my_spotify_data.zip'));
+    expect(failed.archive, isNull);
+    expect(failed.diagnosing, isFalse, reason: 'there is no file here to report on');
   });
 }

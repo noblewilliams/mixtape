@@ -145,6 +145,12 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
   /// finishes after the listener moved on cannot write over the newer state.
   int _generation = 0;
 
+  /// The archive of the run in flight when it was handed to the app from
+  /// Files or Mail (C5), rather than picked here. Such an archive is a copy
+  /// the app made of the listener's whole export — identity and payment
+  /// files included — so the copy is deleted the moment the run is over.
+  PickedArchive? _handedOver;
+
   @override
   ImportFlowState build() {
     // First: the rebuild cancels the run in flight (through onDispose below),
@@ -182,9 +188,10 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
   /// Parses the archive for the inventory, with days local to the device
   /// zone. A file that cannot yield a snapshot fails here with its
   /// diagnostics, before anything is uploaded.
-  Future<void> inspect(PickedArchive archive) async {
+  Future<void> inspect(PickedArchive archive, {bool handedOver = false}) async {
     if (state is ImportUploading) return;
     final generation = ++_generation;
+    _handedOver = handedOver ? archive : null;
     state = ImportInspecting(archive);
     try {
       final timeZone = await ref.read(deviceTimeZoneProvider)();
@@ -193,7 +200,7 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
       if (!_current(generation)) return;
       state = ImportInventory(archive: archive, preview: preview, includePrivateSessions: false);
     } on ImportCancelled {
-      if (_current(generation)) state = const ImportFlowCancelled();
+      if (_current(generation)) _settle(const ImportFlowCancelled());
     } on UnreadableExportException catch (error) {
       await _failUnreadable(generation, archive, error.inventory.package, error.file);
     } catch (error) {
@@ -239,12 +246,17 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
         },
       );
       if (!_current(generation)) return;
-      state = result.playlistError == null
-          ? ImportDone(archive, result)
-          : ImportPartial(archive, result, options, preview);
+      if (result.playlistError == null) {
+        _settle(ImportDone(archive, result));
+      } else {
+        state = ImportPartial(archive, result, options, preview);
+        // "Retry playlists" re-runs from the preview, so the file is only
+        // still needed when there is no preview to re-run from.
+        if (preview != null) _discardHandedOver();
+      }
     } on ImportCancelled {
       if (!_current(generation)) return;
-      state = const ImportFlowCancelled();
+      _settle(const ImportFlowCancelled());
     } on UnreadableExportException catch (error) {
       await _failUnreadable(generation, archive, error.inventory.package, error.file);
     } on NetworkException {
@@ -275,7 +287,7 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
     final current = state;
     if (current is ImportFailed && current.diagnosing) {
       _generation++;
-      state = const ImportFlowCancelled();
+      _settle(const ImportFlowCancelled());
       return;
     }
     _service.cancel();
@@ -285,7 +297,39 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
   void reset() {
     _generation++;
     _service.cancel();
-    state = const ImportIdle();
+    _settle(const ImportIdle());
+  }
+
+  /// A file handed to the app from Files or Mail that could not even be
+  /// copied out of its security scope: there is nothing to parse, so the
+  /// flow lands on failed with the name and nothing else. A run in flight is
+  /// never thrown away for it (the same re-entry rule as [inspect]).
+  void handOverFailed(String name) {
+    if (state.inProgress) return;
+    _generation++;
+    _settle(ImportFailed(
+      archive: null,
+      message: "$name couldn't be read, so nothing was imported.",
+      diagnostics: null,
+      unreadable: true,
+    ));
+  }
+
+  /// Lands the flow where nothing follows from, and the copy of a
+  /// handed-over archive goes with it.
+  void _settle(ImportFlowState terminal) {
+    state = terminal;
+    _discardHandedOver();
+  }
+
+  void _discardHandedOver() {
+    final archive = _handedOver;
+    if (archive == null) return;
+    _handedOver = null;
+    // A flow torn down mid-run (a sign-out) leaves the copy behind; the next
+    // launch empties the directory before anything else runs.
+    if (!ref.mounted) return;
+    unawaited(ref.read(openedArchiveSourceProvider).discard(archive));
   }
 
   bool _current(int generation) => ref.mounted && generation == _generation;
@@ -322,7 +366,10 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
       unreadable: diagnose,
       diagnosing: diagnose,
     );
-    if (!diagnose) return;
+    if (!diagnose) {
+      _discardHandedOver();
+      return;
+    }
     ExportDiagnostics? diagnostics;
     try {
       diagnostics = await ref.read(exportDiagnoserProvider)(archive.path);
@@ -330,7 +377,14 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
       diagnostics = null;
     }
     if (!_current(generation)) return;
-    state = ImportFailed(archive: archive, message: message, diagnostics: diagnostics, unreadable: true);
+    // The report is built from the file, so the copy only goes once it has
+    // been read for the last time.
+    _settle(ImportFailed(
+      archive: archive,
+      message: message,
+      diagnostics: diagnostics,
+      unreadable: true,
+    ));
   }
 
   Future<void> _refreshOnboarding() async {

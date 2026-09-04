@@ -2,10 +2,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/files/archive_picker.dart';
+import '../../data/files/opened_archive_channel.dart';
 import '../../import/listening_import_service.dart';
 import '../../import/snapshot.dart';
 import '../format/import_format.dart';
 import '../providers/listening_import_provider.dart';
+import '../providers/opened_archive_provider.dart';
+
+/// How many import sheets are on screen. Home and the sources screen both
+/// open one, and a file handed to the app can arrive over either, so the
+/// fact lives here rather than in one screen's private flag: a hand-over
+/// must never stack a second sheet over the one already up. The sheets
+/// themselves keep the count, so a screen torn down with one up leaves
+/// nothing behind, and the swap below (the old sheet is still on its way out
+/// when the new one is pushed) never shows a gap.
+int _showing = 0;
+
+bool get importSheetShowing => _showing > 0;
 
 /// Opens the import flow as a bottom sheet over the current route, the way
 /// Home's library sync sheet is shown. The sheet reflects
@@ -13,14 +26,55 @@ import '../providers/listening_import_provider.dart';
 /// and reopening it shows where the run got to. A sheet opened over an
 /// upload in flight is not [dismissible]: it stays until the upload lands
 /// or the listener cancels it.
-Future<void> showImportSheet(BuildContext context, {bool dismissible = true}) =>
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      isDismissible: dismissible,
-      enableDrag: dismissible,
-      builder: (_) => const ImportSheet(),
-    );
+///
+/// A modal sheet's dismissibility is fixed when it opens, so the locked one
+/// pops itself the moment the run lands and comes straight back dismissible
+/// — nobody is left trapped in front of a result.
+Future<void> showImportSheet(BuildContext context, {bool dismissible = true}) async {
+  var landed = false;
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    isDismissible: dismissible,
+    enableDrag: dismissible,
+    builder: (_) =>
+        dismissible ? const ImportSheet() : _LockedSheet(onLanded: () => landed = true),
+  );
+  // The locked sheet asked to come back: the route it pops is still on its
+  // way out, so the count never drops to nothing in between.
+  if (!landed || !context.mounted) return;
+  await showImportSheet(context);
+}
+
+/// The sheet while it may not be dismissed. It shows the same flow; when the
+/// run reaches a state nothing follows from it pops itself, and
+/// [showImportSheet] shows it again as a sheet the listener can dismiss.
+class _LockedSheet extends ConsumerStatefulWidget {
+  const _LockedSheet({required this.onLanded});
+
+  final VoidCallback onLanded;
+
+  @override
+  ConsumerState<_LockedSheet> createState() => _LockedSheetState();
+}
+
+class _LockedSheetState extends ConsumerState<_LockedSheet> {
+  bool _popping = false;
+
+  @override
+  Widget build(BuildContext context) {
+    // Watched rather than listened to: a run that had already landed by the
+    // time this opened would never fire a change.
+    if (!_popping && !ref.watch(listeningImportProvider).inProgress) {
+      _popping = true;
+      widget.onLanded();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) Navigator.of(context).pop();
+      });
+    }
+    return const ImportSheet();
+  }
+}
 
 /// Home's "Choose a ZIP" and the sources screen's "Import again": the sheet
 /// opens and the picker comes up at once, so the listener is not asked
@@ -37,26 +91,82 @@ Future<void> openImportFlow(BuildContext context, WidgetRef ref) {
 }
 
 /// The share-sheet path (C5): the listener already chose the file in Files
-/// or Mail, so the flow starts on [archive] and the picker never opens.
+/// or Mail, so the flow starts on it and the picker never opens. A file the
+/// app could not copy at all has no archive to read, only a name to fail by.
+///
 /// Returns false, having changed nothing, when a run is in flight — the same
-/// re-entry rule as [openImportFlow]: starting over would cancel it, so the
-/// handed archive waits for that run to end.
-bool startImportFor(WidgetRef ref, PickedArchive archive) {
+/// re-entry rule as [openImportFlow]: starting over would cancel it. The
+/// handed file then waits, and the result screen offers it.
+bool startHandedArchive(WidgetRef ref, HandedArchive handedOver) {
   if (ref.read(listeningImportProvider).inProgress) return false;
   final notifier = ref.read(listeningImportProvider.notifier);
   notifier.reset();
-  notifier.inspect(archive);
+  final archive = handedOver.archive;
+  if (archive == null) {
+    notifier.handOverFailed(handedOver.name);
+  } else {
+    notifier.inspect(archive, handedOver: true);
+  }
+  ref.read(openedArchiveProvider.notifier).consumed(handedOver);
   return true;
+}
+
+/// A file handed to the app while this run was still going (C5). Starting it
+/// then would have thrown the run away, and starting it the moment the run
+/// landed would have thrown the result away before anyone read it — so it is
+/// offered here instead, on the screen that result is on.
+class _WaitingFile extends ConsumerWidget {
+  const _WaitingFile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final waiting = ref.watch(openedArchiveProvider);
+    if (waiting == null) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 16),
+        Text(
+          'Another file is waiting: ${waiting.name}',
+          key: const Key('import-waiting-file'),
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        const SizedBox(height: 8),
+        FilledButton(
+          key: const Key('import-waiting-start'),
+          onPressed: () => startHandedArchive(ref, waiting),
+          child: const Text('Import it'),
+        ),
+      ],
+    );
+  }
 }
 
 /// The Spotify import flow: pick a ZIP → inventory → upload with progress →
 /// done / partial / failed / cancelled. Every fact shown comes from the
 /// inventory or the summary; never a track, artist, or playlist name.
-class ImportSheet extends ConsumerWidget {
+class ImportSheet extends ConsumerStatefulWidget {
   const ImportSheet({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ImportSheet> createState() => _ImportSheetState();
+}
+
+class _ImportSheetState extends ConsumerState<ImportSheet> {
+  @override
+  void initState() {
+    super.initState();
+    _showing++;
+  }
+
+  @override
+  void dispose() {
+    _showing--;
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final state = ref.watch(listeningImportProvider);
     final notifier = ref.read(listeningImportProvider.notifier);
     return SafeArea(
@@ -381,6 +491,7 @@ class _Done extends StatelessWidget {
           },
           child: Text(extended ? 'Import the account data too' : 'Import the extended history too'),
         ),
+        const _WaitingFile(),
       ],
     );
   }
@@ -441,6 +552,7 @@ class _Partial extends StatelessWidget {
           style: theme.textTheme.bodySmall,
           textAlign: TextAlign.center,
         ),
+        const _WaitingFile(),
       ],
     );
   }
@@ -553,6 +665,7 @@ class _Failed extends StatelessWidget {
           },
           child: const Text('Try another file'),
         ),
+        const _WaitingFile(),
       ],
     );
   }

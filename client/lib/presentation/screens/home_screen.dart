@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/api/api_client.dart';
 import '../../data/dj/dj_api.dart';
 import '../../data/dj/dj_models.dart';
+import '../../data/files/opened_archive_channel.dart';
 import '../../data/listening/listening_models.dart';
 import '../format/import_format.dart';
 import '../format/relative_time.dart';
@@ -48,10 +51,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   String? _error;
   bool _showArchived = false;
 
-  /// C5 bookkeeping: whether the import sheet is already up (so a handed
-  /// archive never stacks a second one), and whether one is already on its
-  /// way to being opened this frame.
-  bool _importSheetOpen = false;
+  /// C5 bookkeeping: the handed archive this screen has already acted on, so
+  /// an unrelated rebuild does not open the sheet over and over; and whether
+  /// one is already on its way to being opened this frame.
+  HandedArchive? _handled;
   bool _openingHandedArchive = false;
 
   @override
@@ -166,14 +169,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   /// "Choose a ZIP": the sheet opens over Home and the picker comes up at
   /// once (or the run in progress shows where it got to).
-  Future<void> _openImportSheet() async {
-    _importSheetOpen = true;
-    try {
-      await openImportFlow(context, ref);
-    } finally {
-      _importSheetOpen = false;
-    }
-  }
+  Future<void> _openImportSheet() => openImportFlow(context, ref);
 
   /// A ZIP handed to the app from Files or Mail (C5). Home is the only
   /// screen that pushes routes, so the flow opens from here: for a cold
@@ -192,26 +188,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   void _openHandedArchive() {
     if (!mounted) return;
-    final archive = ref.read(openedArchiveProvider);
-    if (archive == null) return;
-    final dismissible = ref.read(listeningImportProvider) is! ImportUploading;
-    // A run in flight is never reset (the re-entry rule): the sheet shows it
-    // where it got to and the handed archive stays pending until it ends,
-    // when the listener below brings us back here.
-    if (startImportFor(ref, archive)) {
-      ref.read(openedArchiveProvider.notifier).consumed(archive);
+    final handedOver = ref.read(openedArchiveProvider);
+    if (handedOver == null) return;
+    final state = ref.read(listeningImportProvider);
+    // A run in flight is never reset (the re-entry rule), and a run that has
+    // landed on a result nobody has read is not thrown away for the new file
+    // either: the result screen offers it with "Import it". Only a flow with
+    // nothing on it starts the handed file by itself.
+    if (state is ImportIdle || state is ImportFlowCancelled) {
+      startHandedArchive(ref, handedOver);
     }
-    // One sheet only: a file opened over an open sheet re-renders it from
-    // the provider rather than stacking a second one.
-    if (!_importSheetOpen) _openHandedSheet(dismissible: dismissible);
-  }
-
-  Future<void> _openHandedSheet({required bool dismissible}) async {
-    _importSheetOpen = true;
-    try {
-      await showImportSheet(context, dismissible: dismissible);
-    } finally {
-      _importSheetOpen = false;
+    // One sheet only, wherever it was opened from: a file opened over an
+    // open sheet re-renders it from the provider rather than stacking a
+    // second one. A sheet opened over an upload is locked until it lands.
+    if (!importSheetShowing) {
+      unawaited(showImportSheet(context, dismissible: state is! ImportUploading));
     }
   }
 
@@ -229,9 +220,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     // so an upload's progress ticks do not rebuild Home.
     final handedArchive = ref.watch(openedArchiveProvider);
     ref.listen(listeningImportProvider, (previous, next) {
+      // A run ending is the one moment a file that had to wait is worth
+      // another look — the result it waited for now has somewhere to offer
+      // it from. Nothing else that rebuilds Home is: [_handled] is left
+      // alone, so a sheet the listener put away stays away.
       if ((previous?.inProgress ?? false) && !next.inProgress) _scheduleHandedArchive();
     });
-    if (handedArchive != null) _scheduleHandedArchive();
+    if (handedArchive != null && handedArchive != _handled) {
+      _handled = handedArchive;
+      _scheduleHandedArchive();
+    }
     final waiting = onboarding != null &&
         onboarding.chosenService == 'spotify' &&
         spotifyPackages(onboarding).count < 2;

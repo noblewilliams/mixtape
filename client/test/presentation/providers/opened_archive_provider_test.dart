@@ -3,6 +3,7 @@
 // the next one, and an archive that arrives while nobody is signed in waits
 // for the sign-in rather than being dropped.
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixtape/data/files/opened_archive_channel.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/opened_archive_provider.dart';
 
@@ -18,11 +19,11 @@ void main() {
     expect(container.read(openedArchiveProvider), isNull);
     await pumpEventQueue();
 
-    expect(container.read(openedArchiveProvider), extendedArchive);
+    expect(container.read(openedArchiveProvider), handed(extendedArchive));
     expect(opened.takes, 1);
 
     // Home opened the flow with it: it is gone, and nothing re-delivers it.
-    container.read(openedArchiveProvider.notifier).consumed(extendedArchive);
+    container.read(openedArchiveProvider.notifier).consumed(handed(extendedArchive));
     expect(container.read(openedArchiveProvider), isNull);
     await pumpEventQueue();
     expect(container.read(openedArchiveProvider), isNull);
@@ -37,7 +38,7 @@ void main() {
     opened.hand(accountArchive);
     await pumpEventQueue();
 
-    expect(container.read(openedArchiveProvider), accountArchive);
+    expect(container.read(openedArchiveProvider), handed(accountArchive));
   });
 
   test('an archive opened before the listener signs in waits for the sign-in', () async {
@@ -57,7 +58,7 @@ void main() {
     container.read(openedArchiveProvider);
     await pumpEventQueue();
 
-    expect(container.read(openedArchiveProvider), extendedArchive);
+    expect(container.read(openedArchiveProvider), handed(extendedArchive));
   });
 
   test('an archive opened for one listener never surfaces for the next', () async {
@@ -70,7 +71,7 @@ void main() {
 
     opened.hand(extendedArchive);
     await pumpEventQueue();
-    expect(container.read(openedArchiveProvider), extendedArchive);
+    expect(container.read(openedArchiveProvider), handed(extendedArchive));
 
     auth.set(AuthStatus.signedOut);
     container.read(openedArchiveProvider);
@@ -79,5 +80,40 @@ void main() {
     await pumpEventQueue();
 
     expect(container.read(openedArchiveProvider), isNull);
+  });
+
+  test('an archive that both paths carry is surfaced exactly once', () async {
+    // The cold-start race: the push replays as soon as the handler
+    // registers, while the launch buffer still holds the same file. Home
+    // opens the flow with the streamed one; the buffered answer landing
+    // afterwards must not start the same import a second time.
+    final opened = FakeOpenedArchiveSource()..holdPending = true;
+    final container = onboardingContainer(listening: FakeListeningApi(), opened: opened);
+    container.read(openedArchiveProvider);
+    await pumpEventQueue();
+
+    opened.handAndBuffer(extendedArchive);
+    await pumpEventQueue();
+    expect(container.read(openedArchiveProvider), handed(extendedArchive));
+
+    container.read(openedArchiveProvider.notifier).consumed(handed(extendedArchive));
+    opened.settlePending();
+    await pumpEventQueue();
+
+    expect(container.read(openedArchiveProvider), isNull);
+  });
+
+  test('a file the app could not copy surfaces as an unreadable hand-over', () async {
+    final opened = FakeOpenedArchiveSource();
+    final container = onboardingContainer(listening: FakeListeningApi(), opened: opened);
+    container.read(openedArchiveProvider);
+    await pumpEventQueue();
+
+    opened.handUnreadable('my_spotify_data.zip');
+    await pumpEventQueue();
+
+    final handedOver = container.read(openedArchiveProvider);
+    expect(handedOver, const HandedArchive(name: 'my_spotify_data.zip'));
+    expect(handedOver!.unreadable, isTrue);
   });
 }

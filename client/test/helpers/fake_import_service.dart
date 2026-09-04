@@ -121,33 +121,78 @@ class FakeImportService extends ListeningImportService {
 /// Stands in for the native open-archive channel (C5). [pending] is what a
 /// cold start finds; [hand] is a file opened while the app runs, which —
 /// exactly like the method-channel source — becomes the pending archive when
-/// nobody is listening (no listener signed in yet).
+/// nobody is listening (no listener signed in yet). The same source contract
+/// is kept: a hand-over is delivered exactly once, whichever path carries it.
 class FakeOpenedArchiveSource implements OpenedArchiveSource {
-  FakeOpenedArchiveSource({this.pending});
+  FakeOpenedArchiveSource({PickedArchive? pending})
+      : pending = pending == null ? null : handed(pending);
 
-  PickedArchive? pending;
+  HandedArchive? pending;
   int takes = 0;
-  final StreamController<PickedArchive> _opened = StreamController<PickedArchive>.broadcast();
+
+  /// The copies the flow asked to have deleted, in order.
+  final List<PickedArchive> discarded = [];
+
+  /// Holds the answer to [takePending] until [settlePending]: the window in
+  /// which a push on the stream is delivered — and consumed — first.
+  bool holdPending = false;
+  Completer<void>? _held;
+
+  final StreamController<HandedArchive> _opened = StreamController<HandedArchive>.broadcast();
+  HandedArchive? _delivered;
 
   @override
-  Stream<PickedArchive> get opened => _opened.stream;
+  Stream<HandedArchive> get opened => _opened.stream;
 
   @override
-  Future<PickedArchive?> takePending() async {
+  Future<HandedArchive?> takePending() async {
     takes++;
-    final held = pending;
+    if (holdPending) {
+      _held = Completer<void>();
+      await _held!.future;
+    }
+    final waiting = pending;
     pending = null;
-    return held;
+    if (waiting == null || waiting == _delivered) return null;
+    _delivered = waiting;
+    return waiting;
   }
 
-  void hand(PickedArchive archive) {
+  @override
+  Future<void> discard(PickedArchive archive) async => discarded.add(archive);
+
+  void settlePending() {
+    final held = _held;
+    _held = null;
+    if (held != null && !held.isCompleted) held.complete();
+  }
+
+  void hand(PickedArchive archive) => _push(handed(archive));
+
+  /// A file the app could not even copy out of its security scope.
+  void handUnreadable(String name) => _push(HandedArchive(name: name));
+
+  /// Both native paths at once, as a cold start has them: the push replays
+  /// to the handler while the same file is still in the launch buffer.
+  void handAndBuffer(PickedArchive archive) {
+    final delivery = handed(archive);
+    pending = delivery;
+    _push(delivery);
+  }
+
+  void _push(HandedArchive delivery) {
     if (_opened.hasListener) {
-      _opened.add(archive);
+      _delivered = delivery;
+      _opened.add(delivery);
     } else {
-      pending = archive;
+      pending = delivery;
     }
   }
 }
+
+/// The hand-over a successfully copied [archive] arrives as.
+HandedArchive handed(PickedArchive archive) =>
+    HandedArchive(name: archive.name, archive: archive);
 
 /// Hands the screen a fixed pick (or a dismissed picker when null), or
 /// throws [error] the way the platform picker can.
@@ -175,6 +220,15 @@ const extendedArchive = PickedArchive(
 
 const accountArchive = PickedArchive(
   path: '/tmp/my_spotify_data.zip',
+  name: 'my_spotify_data.zip',
+  bytes: 1_300_000,
+);
+
+/// A copy the app made of a file handed to it from Files or Mail: it lives
+/// under the temporary directory the native side empties, and the flow
+/// deletes it as soon as the import is over.
+const handedOverArchive = PickedArchive(
+  path: '/tmp/opened-archives/a1b2/my_spotify_data.zip',
   name: 'my_spotify_data.zip',
   bytes: 1_300_000,
 );
