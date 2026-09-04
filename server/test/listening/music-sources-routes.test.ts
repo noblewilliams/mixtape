@@ -42,14 +42,14 @@ describe('GET /me/music-sources', () => {
           connectedAt: now.toISOString(),
           lastImportedAt: null,
           ledgerFrom: null,
-          ledgerTo: null,
+          ledgerTo: null, packages: [],
         },
         {
           source: 'spotify_export',
           connectedAt: now.toISOString(),
           lastImportedAt: now.toISOString(),
           ledgerFrom: '2026-08-30',
-          ledgerTo: '2026-08-31',
+          ledgerTo: '2026-08-31', packages: ['spotify_extended'],
         },
       ],
     })

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createApp, type AuthLike } from '../../src/app'
-import { funnelEvents, tracks, userMusicSources, userTracks } from '../../src/db/schema'
+import { djMemories, funnelEvents, listeningImportRuns, tracks, userArtistSeeds, userMusicSources, userTracks } from '../../src/db/schema'
 import { createListeningImportStore } from '../../src/listening/import-store'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { APPLE_A, begin, day, now, publish, seedUser, track } from '../helpers/listening-fixtures'
@@ -25,6 +25,7 @@ const blank = {
   markedRequestedAt: null,
   interviewCompletedAt: null,
   importCompletedAt: null,
+  interview: null,
 }
 
 async function seedAppleLibraryTrack(db: TestDb, userId: string) {
@@ -73,7 +74,7 @@ describe('GET /me/onboarding', () => {
           connectedAt: now.toISOString(),
           lastImportedAt: now.toISOString(),
           ledgerFrom: '2026-08-30',
-          ledgerTo: '2026-08-31',
+          ledgerTo: '2026-08-31', packages: ['spotify_extended'],
         },
       ],
       // A history-only import writes no library rows.
@@ -82,6 +83,7 @@ describe('GET /me/onboarding', () => {
       markedRequestedAt: earlier.toISOString(),
       interviewCompletedAt: null,
       importCompletedAt: null,
+      interview: null,
     })
   })
 
@@ -105,6 +107,7 @@ describe('GET /me/onboarding', () => {
       markedRequestedAt: null,
       interviewCompletedAt: earlier.toISOString(),
       importCompletedAt: later.toISOString(),
+      interview: { artists: 0, notes: 0 },
     })
   })
 
@@ -117,13 +120,14 @@ describe('GET /me/onboarding', () => {
     expect(await (await get(db, authFor('u1'))).json()).toEqual({
       userId: 'u1',
       sources: [
-        { source: 'apple_live', connectedAt: now.toISOString(), lastImportedAt: null, ledgerFrom: null, ledgerTo: null },
+        { source: 'apple_live', connectedAt: now.toISOString(), lastImportedAt: null, ledgerFrom: null, ledgerTo: null, packages: [], },
       ],
       hasLibrary: true,
       chosenService: 'apple',
       markedRequestedAt: null,
       interviewCompletedAt: null,
       importCompletedAt: null,
+      interview: null,
     })
   })
 
@@ -168,5 +172,37 @@ describe('GET /me/onboarding', () => {
     }
     expect(body.hasLibrary).toBe(true)
     expect(body.chosenService).toBe('spotify')
+  })
+  it('lists the packages that have landed for a source and counts the interview', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await db.insert(userMusicSources).values({ userId: 'u1', source: 'spotify_export', connectedAt: now })
+    const run = {
+      userId: 'u1', source: 'spotify_export' as const, status: 'completed' as const, timeZone: 'Africa/Lagos',
+      expectedTracks: 0, expectedDays: 0, expectedLibraryTracks: 0, expectedArtists: 0, expiresAt: now,
+    }
+    await db.insert(listeningImportRuns).values([
+      { ...run, package: 'spotify_extended' },
+      { ...run, package: 'spotify_account' },
+      { ...run, package: 'spotify_extended', status: 'expired' },
+    ])
+    await db.insert(funnelEvents).values({ userId: 'u1', type: 'interview_completed', surface: 'web', createdAt: now })
+    await db.insert(userArtistSeeds).values([
+      { userId: 'u1', name: 'Ivory Kestrel', source: 'interview' },
+      { userId: 'u1', name: 'Juniper North', source: 'interview' },
+      { userId: 'u1', name: 'Pasted Artist', source: 'pasted' },
+    ])
+    await db.insert(djMemories).values([
+      { userId: 'u1', note: 'Never skips: Ivory Kestrel, Juniper North' },
+      { userId: 'u1', note: 'Era: late 2010s' },
+      { userId: 'u1', note: 'Prefers long intros' },
+    ])
+
+    const body = (await (await get(db, authFor('u1'))).json()) as {
+      sources: { source: string; packages: string[] }[]
+      interview: { artists: number; notes: number } | null
+    }
+    expect(body.sources[0].packages).toEqual(['spotify_account', 'spotify_extended'])
+    expect(body.interview).toEqual({ artists: 2, notes: 2 })
   })
 })

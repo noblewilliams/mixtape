@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { and, eq, exists, sql } from 'drizzle-orm'
 import type { AppVars } from '../app'
 import type { Db } from '../db/types'
-import { funnelEvents, userTracks } from '../db/schema'
+import { djMemories, funnelEvents, userArtistSeeds, userTracks } from '../db/schema'
 import type { FunnelEventType } from '../seeds/contracts'
 import { listMusicSources } from './music-sources'
 
@@ -59,6 +59,29 @@ export function onboardingRoutes(db: Db) {
         ? 'apple'
         : null
 
+    // What the interview produced, for the "Interview done" tile: artists are
+    // the interview-sourced seeds; notes are the memory notes carrying the
+    // interview's fixed prefixes (see routes/interview.ts). Null until the
+    // interview has been completed at all.
+    const interview = state.interviewCompletedAt
+      ? await (async () => {
+        const [[artists], [notes]] = await Promise.all([
+          db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(userArtistSeeds)
+            .where(and(eq(userArtistSeeds.userId, userId), eq(userArtistSeeds.source, 'interview'))),
+          db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(djMemories)
+            .where(and(
+              eq(djMemories.userId, userId),
+              sql`(${djMemories.note} LIKE 'Never skips: %' OR ${djMemories.note} LIKE 'Plays most: %' OR ${djMemories.note} LIKE 'Listens when: %' OR ${djMemories.note} LIKE 'Never wants: %' OR ${djMemories.note} LIKE 'Era: %')`,
+            )),
+        ])
+        return { artists: Number(artists?.count ?? 0), notes: Number(notes?.count ?? 0) }
+      })()
+      : null
+
     return c.json({
       // The clients key their per-device "service chosen" flag by user id.
       userId,
@@ -68,6 +91,7 @@ export function onboardingRoutes(db: Db) {
       markedRequestedAt: state.markedRequestedAt,
       interviewCompletedAt: state.interviewCompletedAt,
       importCompletedAt: state.importCompletedAt,
+      interview,
     })
   })
 
