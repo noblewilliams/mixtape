@@ -70,6 +70,7 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
   const queueState = new Map<string, ApiQueueTrack[]>()
   const funnelEvents: FunnelEventInput[] = []
   const listeningImports = new Map<string, FakeListeningImport>()
+  const playlistSyncs = new Map<string, { playlists: number; entries: number }>()
   const musicSources: ApiMusicSource[] = []
   let interviewCompletedAt: string | null = null
   let interview: { artists: number; notes: number } | null = null
@@ -79,6 +80,11 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
   const listeningImport = (importId: string) => {
     const run = listeningImports.get(importId)
     if (!run) throw new Error('fake listening import not begun')
+    return run
+  }
+  const playlistSync = (syncId: string) => {
+    const run = playlistSyncs.get(syncId)
+    if (!run) throw new Error('fake playlist sync not begun')
     return run
   }
   const currentQueue = (sessionId: string) => {
@@ -166,15 +172,23 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
       playCountsObserved: 0,
       recentTracks: 0,
     }),
-    beginPlaylistSync: async () => ({ syncId: 'playlist-sync', expiresAt: Date.now() + 60_000 }),
-    putPlaylists: async (_syncId, playlists) => ({ accepted: playlists.length }),
-    putPlaylistEntries: async (_syncId, _playlistAppleId, entries) => ({ accepted: entries.length }),
-    completePlaylistSync: async () => ({
-      playlists: 0,
-      entries: 0,
-      resolvedEntries: 0,
-      unresolvedEntries: 0,
-    }),
+    beginPlaylistSync: async () => {
+      const syncId = `playlist-sync-${playlistSyncs.size + 1}`
+      playlistSyncs.set(syncId, { playlists: 0, entries: 0 })
+      return { syncId, expiresAt: Date.now() + 60_000 }
+    },
+    putPlaylists: async (syncId, playlists) => {
+      playlistSync(syncId).playlists += playlists.length
+      return { accepted: playlists.length }
+    },
+    putPlaylistEntries: async (syncId, _playlistAppleId, entries) => {
+      playlistSync(syncId).entries += entries.length
+      return { accepted: entries.length }
+    },
+    completePlaylistSync: async (syncId) => {
+      const run = playlistSync(syncId)
+      return { playlists: run.playlists, entries: run.entries, resolvedEntries: 0, unresolvedEntries: run.entries }
+    },
     beginListeningImport: async (input): Promise<ListeningImportStart> => {
       const importId = `listening-import-${listeningImports.size + 1}`
       listeningImports.set(importId, {

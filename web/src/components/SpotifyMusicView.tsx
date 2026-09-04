@@ -1,6 +1,9 @@
 import { useRef, useState } from 'react'
 import type { ListeningImportSource, MixtapeApi, OnboardingResponse } from '../api/client'
+import type { ListeningImportService } from '../import/import-service'
+import type { PageParser } from '../import/page-parser'
 import { elapsedWaitLabel, recentDayLabel, spotifyPackages, spotifySource, spotifyStatus } from '../lib/onboarding'
+import { ImportPanel, type ImportPanelHandle } from './ImportPanel'
 import { MusicSourcesList } from './MusicSourcesList'
 import { PasteSongsBox } from './PasteSongsBox'
 
@@ -9,12 +12,15 @@ const MARK_FAILED = 'Couldn’t save that. Check your connection and try again.'
 
 type SpotifyMusicViewProps = {
   api: MixtapeApi
+  importService: ListeningImportService
+  parser: PageParser
   onboarding: OnboardingResponse
   interviewStatus: string
   onRefresh: () => Promise<void>
   onOpenInterview: () => void
   onNewTape: () => void
   onRemoveSource: (source: ListeningImportSource) => void
+  onImportBusyChange?: (busy: boolean) => void
   onOpenDemo?: () => void
 }
 
@@ -80,18 +86,21 @@ function DemoTile({ onOpenDemo }: { onOpenDemo?: () => void }) {
 
 export function SpotifyMusicView({
   api,
+  importService,
+  parser,
   onboarding,
   interviewStatus,
   onRefresh,
   onOpenInterview,
   onNewTape,
   onRemoveSource,
+  onImportBusyChange,
   onOpenDemo,
 }: SpotifyMusicViewProps) {
   const [marking, setMarking] = useState(false)
   const [markError, setMarkError] = useState('')
   const [pasteOpen, setPasteOpen] = useState(false)
-  const dropRef = useRef<HTMLDivElement>(null)
+  const importRef = useRef<ImportPanelHandle>(null)
   const stepsRef = useRef<HTMLElement>(null)
 
   const source = spotifySource(onboarding)
@@ -116,8 +125,7 @@ export function SpotifyMusicView({
   }
 
   function focusDropZone() {
-    dropRef.current?.scrollIntoView?.({ block: 'center' })
-    dropRef.current?.focus()
+    importRef.current?.focus()
   }
 
   function showSteps() {
@@ -230,12 +238,14 @@ export function SpotifyMusicView({
               </div>
             ) : null}
 
-            <div className="drop" ref={dropRef} tabIndex={-1} data-todo="import-page">
-              <div>
-                <strong>Drop a Spotify ZIP here</strong>
-                <span>or choose a file · either package, in any order</span>
-              </div>
-            </div>
+            <ImportPanel
+              ref={importRef}
+              importService={importService}
+              parser={parser}
+              onRefresh={onRefresh}
+              onNewTape={onNewTape}
+              onBusyChange={onImportBusyChange}
+            />
           </section>
         ) : (
           <>

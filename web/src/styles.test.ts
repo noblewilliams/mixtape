@@ -124,6 +124,13 @@ describe('approved Spotify import surfaces', () => {
     expect(stylesheet).toMatch(/\.drop\s*{[^}]*border:\s*2px dashed rgba\(73, 64, 72, 0\.22\);[^}]*border-radius:\s*16px;/s)
   })
 
+  it('highlights the drop zone under a dragged file and frames the unreadable card in pink', () => {
+    expect(stylesheet).toMatch(/\.drop\.drop--over\s*{[^}]*border-color:\s*var\(--plum\);/s)
+    expect(stylesheet).toMatch(/\.card\.err\s*{[^}]*border-color:\s*rgba\(201, 104, 127, 0\.45\);/s)
+    expect(stylesheet).toMatch(/\.file-list \.file-label\s*{[^}]*display:\s*inline-block;[^}]*text-decoration:\s*none;/s)
+    expect(stylesheet).toMatch(/\.diag\s*{[^}]*white-space:\s*pre-wrap;/s)
+  })
+
   it('strikes ignored files through and keeps the inventory two-column on desktop', () => {
     expect(stylesheet).toMatch(/\.inventory\s*{[^}]*grid-template-columns:\s*1fr 1fr;/s)
     expect(stylesheet).toMatch(/\.file-list li\.ignored\s*{[^}]*text-decoration:\s*line-through;/s)

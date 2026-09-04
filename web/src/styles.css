@@ -3642,6 +3642,37 @@ button.mini:disabled {
   outline-offset: 3px;
 }
 
+.drop.drop--over {
+  background: rgba(255, 255, 255, 0.62);
+  border-color: var(--plum);
+}
+
+.file-pick {
+  color: var(--plum);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.file-pick:focus-within {
+  outline: 3px solid rgba(91, 146, 184, 0.72);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.import-card {
+  margin-top: 14px;
+}
+
+.import-card:focus-visible {
+  outline: 3px solid rgba(91, 146, 184, 0.72);
+  outline-offset: 3px;
+}
+
+.card.err {
+  border-color: rgba(201, 104, 127, 0.45);
+}
+
 .drop strong {
   display: block;
   color: var(--plum);
@@ -3742,6 +3773,14 @@ button.mini:disabled {
   text-decoration-thickness: 1px;
 }
 
+/* Inline-block so the label escapes the strike-through on its row. */
+.file-list .file-label {
+  display: inline-block;
+  margin-left: 4px;
+  font-style: italic;
+  text-decoration: none;
+}
+
 .progress {
   height: 10px;
   margin-top: 10px;
@@ -3814,8 +3853,9 @@ button.mini:disabled {
 }
 
 .diag {
-  margin-top: 10px;
+  margin: 10px 0 0;
   padding: 10px 12px;
+  white-space: pre-wrap;
   color: var(--graphite);
   background: rgba(84, 68, 81, 0.06);
   border-radius: 10px;

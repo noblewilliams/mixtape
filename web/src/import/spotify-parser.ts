@@ -16,6 +16,7 @@ import type {
   SnapshotPlaylistEntry,
   SnapshotTrack,
 } from './snapshot'
+import { UnreadableExportError } from './unreadable-error'
 import type { ExportArchive } from './zip-reader'
 
 export const PARSER_VERSION = 'web-spotify-export/1'
@@ -55,20 +56,10 @@ export type ParseResult = {
   snapshot: ListeningExportSnapshot
 }
 
-/** The archive cannot be imported: no Spotify files, or one of them is broken. */
-export class UnreadableExportError extends Error {
-  readonly code = 'unreadable' as const
-  /** Base name of the first broken allow-listed file in path order; null when there is none to read. */
-  readonly file: string | null
-  readonly inventory: ExportInventory
-
-  constructor(file: string | null, inventory: ExportInventory) {
-    super(file === null ? 'The archive holds no Spotify export files.' : 'A Spotify export file could not be read.')
-    this.name = 'UnreadableExportError'
-    this.file = file
-    this.inventory = inventory
-  }
-}
+// The fail-closed error (no Spotify files, or one of them broken) lives in
+// its own module so the page's Worker client can revive it without pulling
+// the parser into the main bundle; re-exported here for the parser's callers.
+export { UnreadableExportError }
 
 // ---------------------------------------------------------------------------
 // Entries and packages

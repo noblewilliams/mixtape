@@ -3,7 +3,8 @@
 
 import type { ExportDiagnostics } from './diagnostics'
 import type { ExportInventory } from './snapshot'
-import { UnreadableExportError, type ParseProgress, type ParseResult } from './spotify-parser'
+import type { ParseProgress, ParseResult } from './spotify-parser'
+import { UnreadableExportError } from './unreadable-error'
 import {
   isWorkerResponse,
   type MessagePortLike,

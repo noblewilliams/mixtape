@@ -19,6 +19,8 @@ type SidebarProps = {
   onOpenAccount: () => void
   onSync: () => void
   onSignOut: () => void
+  /** True while a Spotify upload holds the one-playlist-run gate. */
+  syncDisabled?: boolean
 }
 
 export function Sidebar({
@@ -34,6 +36,7 @@ export function Sidebar({
   onNewTape,
   onOpenAccount,
   onSync,
+  syncDisabled = false,
   onSignOut,
 }: SidebarProps) {
   return (
@@ -116,7 +119,7 @@ export function Sidebar({
             <small>{signInMethod ? `Signed in with ${signInMethod === 'apple' ? 'Apple' : 'Google'}` : 'Mixtape account'}</small>
           </span>
         </button>
-        <button className="sync-button" type="button" onClick={onSync} aria-label="Sync music library">
+        <button className="sync-button" type="button" onClick={onSync} aria-label="Sync music library" disabled={syncDisabled}>
           <SyncIcon />
         </button>
         <button className="sync-button" type="button" onClick={onSignOut} aria-label="Sign out">

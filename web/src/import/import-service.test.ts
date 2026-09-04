@@ -209,7 +209,14 @@ describe('ListeningImportService', () => {
     expect(mocks.completeListeningImport).toHaveBeenCalledWith('import-1', options.signal)
     expect(mocks.beginPlaylistSync).not.toHaveBeenCalled()
     expect(mocks.postFunnelEvent).toHaveBeenCalledWith({ type: 'import_completed', surface: 'web' })
-    expect(result).toEqual({ inventory: expected.inventory, summary: importSummary, playlists: null, playlistError: null })
+    expect(result).toEqual({
+      inventory: expected.inventory,
+      summary: importSummary,
+      plays: expected.snapshot.days.reduce((sum, day) => sum + day.plays, 0),
+      playlists: null,
+      playlistError: null,
+    })
+    expect(result.plays).toBeGreaterThan(0)
 
     const stages = options.onProgress.mock.calls.map(([progress]) => progress)
     expect(stages.some((progress) => progress.stage === 'reading')).toBe(true)

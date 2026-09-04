@@ -5,7 +5,9 @@ import { ApiError, type ApiMusicSource, type MixtapeApi, type OnboardingResponse
 import type { AccountBridge } from './components/AccountDialog'
 import type { MusicKitClient } from './musickit/client'
 import { writeServiceChoice } from './lib/service-preference'
+import { createDirectParser } from './import/direct-parser'
 import { createFakeApi } from './test/fake-api'
+import { readFixtureArchiveBytes } from './test/listening-export-fixtures'
 
 const user = { id: 'user-1', name: 'Noble', email: 'noble@example.com' }
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -68,7 +70,15 @@ function renderApp(
   const musicKit = options.musicKit ?? createFakeMusicKit()
   const onSignOut = options.onSignOut ?? vi.fn()
   render(
-    <App api={api} accountAuth={accountAuth} lastSignInProvider="google" musicKit={musicKit} user={user} onSignOut={onSignOut} />,
+    <App
+      api={api}
+      accountAuth={accountAuth}
+      lastSignInProvider="google"
+      musicKit={musicKit}
+      user={user}
+      onSignOut={onSignOut}
+      importParser={createDirectParser()}
+    />,
   )
   return { api, musicKit, onSignOut }
 }
@@ -286,9 +296,10 @@ describe('Spotify request page', () => {
     expect(within(view).getByRole('button', { name: /^Try a demo tape/ })).toBeDisabled()
     expect(within(view).getByText('Demo tape coming soon.')).toBeInTheDocument()
     expect(within(view).queryByRole('alert')).not.toBeInTheDocument()
-    const drop = view.querySelector('[data-todo="import-page"]') as HTMLElement
+    const drop = within(view).getByRole('region', { name: 'Import a Spotify ZIP' })
     expect(drop).toHaveTextContent('Drop a Spotify ZIP here')
     expect(drop).toHaveTextContent('or choose a file · either package, in any order')
+    expect(within(drop).getByLabelText('choose a file')).toHaveAttribute('type', 'file')
     expect(within(view).queryByRole('button', { name: 'Make a mix' })).not.toBeInTheDocument()
     expect(screen.getByText('Spotify · waiting for your data')).toBeInTheDocument()
     expect(document.querySelector('.app-shell')).toHaveClass('app-shell--home')
@@ -485,5 +496,76 @@ describe('Spotify request page', () => {
 
     for (const control of within(view).getAllByRole('button')) expect(control).toHaveAccessibleName()
     for (const control of screen.getAllByRole('button')) expect(control).toHaveAccessibleName()
+  })
+})
+
+describe('Spotify import page', () => {
+  afterEach(cleanup)
+
+  function extendedZip() {
+    return new File([readFixtureArchiveBytes('extended-basic')], 'my_spotify_data_extended.zip', { type: 'application/zip' })
+  }
+
+  it('gates the Apple sync while an upload is in flight, then refreshes the chip, sources, and nudge', async () => {
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const api = createFakeApi({
+      putListeningTracks: async (_importId, tracks) => {
+        await held
+        return { accepted: tracks.length }
+      },
+    })
+    await api.postFunnelEvent({ type: 'chose_spotify', surface: 'web' })
+    await api.postFunnelEvent({ type: 'marked_requested', surface: 'web' })
+    renderApp({ api })
+    await settled(api)
+    fireEvent.click(screen.getByRole('button', { name: /^Your music/ }))
+    const view = await screen.findByRole('main', { name: 'Your music' })
+    const sync = screen.getByRole('button', { name: 'Sync music library' })
+    expect(sync).toBeEnabled()
+
+    const drop = within(view).getByRole('region', { name: 'Import a Spotify ZIP' })
+    fireEvent.change(within(drop).getByLabelText('choose a file'), { target: { files: [extendedZip()] } })
+    const panel = () => within(view).getByRole('region', { name: 'Import a Spotify ZIP' })
+    fireEvent.click(await within(panel()).findByRole('button', { name: 'Upload' }))
+    await within(panel()).findByRole('button', { name: 'Cancel' })
+    expect(sync).toBeDisabled()
+    expect(within(panel()).queryByLabelText('choose a file')).not.toBeInTheDocument()
+
+    release()
+    await within(panel()).findByText('Extended history imported')
+    await waitFor(() => expect(sync).toBeEnabled())
+    expect(await within(view).findByText('1 of 2 in', { selector: 'header .status-chip' })).toBeInTheDocument()
+    expect(within(view).getByText(/^Extended history imported \w+\. Still waiting for the account data/)).toBeInTheDocument()
+    expect(within(view).getByText('Spotify · extended history')).toBeInTheDocument()
+    expect(screen.getByText(/^Spotify · imported /)).toBeInTheDocument()
+
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Make your first mix' }))
+    expect(screen.getByRole('dialog', { name: /new tape/i })).toBeInTheDocument()
+  })
+
+  it('brings the drop zone back from Import again and Drop the other ZIP', async () => {
+    const api = createFakeApi()
+    await api.postFunnelEvent({ type: 'chose_spotify', surface: 'web' })
+    await api.postFunnelEvent({ type: 'marked_requested', surface: 'web' })
+    renderApp({ api })
+    await settled(api)
+    fireEvent.click(screen.getByRole('button', { name: /^Your music/ }))
+    const view = await screen.findByRole('main', { name: 'Your music' })
+    const panel = () => within(view).getByRole('region', { name: 'Import a Spotify ZIP' })
+    fireEvent.change(within(panel()).getByLabelText('choose a file'), { target: { files: [extendedZip()] } })
+    fireEvent.click(await within(panel()).findByRole('button', { name: 'Upload' }))
+    await within(panel()).findByText('Extended history imported')
+
+    fireEvent.click(await within(view).findByRole('button', { name: 'Drop the other ZIP' }))
+    await waitFor(() => expect(panel()).toHaveClass('drop'))
+    expect(panel()).toHaveFocus()
+
+    fireEvent.change(within(panel()).getByLabelText('choose a file'), { target: { files: [extendedZip()] } })
+    await within(panel()).findByRole('button', { name: 'Upload' })
+    fireEvent.click(within(view).getByRole('button', { name: 'Import again' }))
+    await waitFor(() => expect(panel()).toHaveClass('drop'))
   })
 })

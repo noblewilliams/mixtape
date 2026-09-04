@@ -54,6 +54,8 @@ export type ListeningImportProgress =
 export type ListeningImportResult = {
   inventory: ExportInventory
   summary: ListeningImportSummary
+  /** Plays counted in the uploaded snapshot (the sum over its day rows); the server summary carries none. */
+  plays: number
   /** The playlist sync's summary for an account package; null when the package carries no playlists or the sync failed. */
   playlists: PlaylistSyncSummary | null
   /**
@@ -343,7 +345,8 @@ export function createListeningImportService({ api, parser }: ListeningImportSer
       }
 
       onProgress({ stage: 'complete', completed: 1, total: 1 })
-      return { inventory, summary, playlists, playlistError }
+      const plays = snapshot.days.reduce((sum, day) => sum + day.plays, 0)
+      return { inventory, summary, plays, playlists, playlistError }
     },
   }
 }

@@ -23,6 +23,8 @@ import { QueuePanel } from './components/QueuePanel'
 import { Sidebar } from './components/Sidebar'
 import { SpotifyMusicView } from './components/SpotifyMusicView'
 import type { AppView, CollectionView, DjMessage, DjSession, QueueTrack } from './domain'
+import { createListeningImportService } from './import/import-service'
+import { createLazyParser, createPageParser, type PageParser } from './import/page-parser'
 import type { MusicKitClient } from './musickit/client'
 import type { AuthProvider } from './lib/auth-provider'
 import { musicLinkLabel } from './lib/onboarding'
@@ -39,6 +41,8 @@ type AppProps = {
   musicKit: MusicKitClient
   user: AuthUser
   onSignOut: () => void
+  /** The export parser the import page drives; the lazy Worker parser unless a test injects one. */
+  importParser?: PageParser
 }
 
 function accountCallback(): { dialog: boolean; message: string; tone: 'success' | 'error' } {
@@ -89,8 +93,12 @@ function conflictSnapshot(error: unknown): { queue: ApiQueueTrack[]; queueVersio
   return { queue: payload.queue as ApiQueueTrack[], queueVersion: payload.queueVersion }
 }
 
-export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSignOut }: AppProps) {
+export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSignOut, importParser }: AppProps) {
   const callback = useMemo(accountCallback, [])
+  // One parser and one import service for the app's life. The Worker behind
+  // the parser is spawned on the first inspect and released after each run.
+  const parser = useMemo(() => importParser ?? createLazyParser(createPageParser), [importParser])
+  const importService = useMemo(() => createListeningImportService({ api, parser }), [api, parser])
   const [sessions, setSessions] = useState<DjSession[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [activeView, setActiveView] = useState<AppView>('home')
@@ -115,6 +123,8 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
   // choice before any sync, a Spotify choice whose funnel event is in flight).
   const [localChoice, setLocalChoice] = useState<ServiceChoice | null>(() => readServiceChoice(user.id))
   const [interviewStatus, setInterviewStatus] = useState('')
+  // The one-playlist-run gate: a Spotify upload in flight holds the Apple sync entry points shut.
+  const [importBusy, setImportBusy] = useState(false)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const queueVersions = useRef<Record<string, number>>({})
   const queueMutationChains = useRef<Record<string, Promise<void>>>({})
@@ -532,20 +542,26 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
         onOpenMusic={openMusic}
         onNewTape={() => setDialog('new-tape')}
         onOpenAccount={() => setDialog('account')}
-        onSync={() => setDialog('sync')}
+        onSync={() => {
+          if (!importBusy) setDialog('sync')
+        }}
         onSignOut={signOut}
         signInMethod={lastSignInProvider}
+        syncDisabled={importBusy}
       />
 
       {activeView === 'spotify' && effectiveOnboarding ? (
         <SpotifyMusicView
           api={api}
+          importService={importService}
+          parser={parser}
           onboarding={effectiveOnboarding}
           interviewStatus={interviewStatus}
           onRefresh={refreshOnboarding}
           onOpenInterview={() => setDialog('interview')}
           onNewTape={() => setDialog('new-tape')}
           onRemoveSource={(source) => void removeSource(source)}
+          onImportBusyChange={setImportBusy}
         />
       ) : activeView !== 'session' || !activeSession ? (
         <Home
