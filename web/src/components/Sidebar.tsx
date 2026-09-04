@@ -1,7 +1,9 @@
 import type { AppView, DjSession } from '../domain'
 import type { AuthProvider } from '../lib/auth-provider'
 import { Cassette } from './Cassette'
-import { HomeIcon, PlusIcon, SignOutIcon, SyncIcon } from './Icons'
+import { HomeIcon, MusicIcon, PlusIcon, SignOutIcon, SyncIcon } from './Icons'
+
+export type MusicLinkLabel = { text: string; tone: 'ok' | 'waiting' | 'quiet' }
 
 type SidebarProps = {
   sessions: DjSession[]
@@ -9,8 +11,10 @@ type SidebarProps = {
   activeView: AppView
   userName: string
   signInMethod: AuthProvider | null
+  musicLabel: MusicLinkLabel
   onOpenSession: (id: string) => void
   onOpenHome: () => void
+  onOpenMusic: () => void
   onNewTape: () => void
   onOpenAccount: () => void
   onSync: () => void
@@ -23,8 +27,10 @@ export function Sidebar({
   activeView,
   userName,
   signInMethod,
+  musicLabel,
   onOpenSession,
   onOpenHome,
+  onOpenMusic,
   onNewTape,
   onOpenAccount,
   onSync,
@@ -50,6 +56,24 @@ export function Sidebar({
         <span className="new-tape-reel" aria-hidden="true" />
         <span>Make a new tape</span>
         <PlusIcon />
+      </button>
+
+      <button
+        className={`music-link ${activeView === 'spotify' ? 'is-active' : ''}`}
+        type="button"
+        onClick={onOpenMusic}
+        aria-current={activeView === 'spotify' ? 'page' : undefined}
+      >
+        <span className="music-link-mark" aria-hidden="true">
+          <MusicIcon />
+        </span>
+        <span className="music-link-copy">
+          <strong>Your music</strong>
+          <small className={`music-link-state music-link-state--${musicLabel.tone}`}>{musicLabel.text}</small>
+        </span>
+        <span className="chevron" aria-hidden="true">
+          ›
+        </span>
       </button>
 
       <div className="sidebar-section-heading">

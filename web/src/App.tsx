@@ -2,7 +2,10 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import {
   ApiError,
   type ApiQueueTrack,
+  type InterviewResponse,
+  type ListeningImportSource,
   type MixtapeApi,
+  type OnboardingResponse,
   type QueueOp,
   type QueueOpsResponse,
   type SessionDetailResponse,
@@ -11,16 +14,20 @@ import { toDjMessage, toDjSession, toQueueTrack } from './api/mappers'
 import type { AuthUser } from './components/AuthGate'
 import { AccountDialog, type AccountBridge } from './components/AccountDialog'
 import { Cassette } from './components/Cassette'
+import { ChooseServiceDialog } from './components/ChooseServiceDialog'
 import { Conversation } from './components/Conversation'
 import { Home } from './components/Home'
+import { InterviewDialog } from './components/InterviewDialog'
 import { NewTapeDialog, SaveDialog, SyncOverlay, Toast } from './components/Overlays'
 import { QueuePanel } from './components/QueuePanel'
 import { Sidebar } from './components/Sidebar'
+import { SpotifyMusicView } from './components/SpotifyMusicView'
 import type { AppView, CollectionView, DjMessage, DjSession, QueueTrack } from './domain'
 import type { MusicKitClient } from './musickit/client'
 import type { AuthProvider } from './lib/auth-provider'
+import { musicLinkLabel } from './lib/onboarding'
 
-type DialogState = 'new-tape' | 'save-playlist' | 'sync' | 'account' | null
+type DialogState = 'new-tape' | 'save-playlist' | 'sync' | 'account' | 'interview' | null
 type MusicConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
 type ToastState = { message: string; tone: 'success' | 'error' }
 
@@ -102,6 +109,9 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
   const [musicConnection, setMusicConnection] = useState<MusicConnectionState>('disconnected')
   const [error, setError] = useState('')
   const [toast, setToast] = useState<ToastState | null>(null)
+  const [onboarding, setOnboarding] = useState<OnboardingResponse | null>(null)
+  const [gateDismissed, setGateDismissed] = useState(false)
+  const [interviewStatus, setInterviewStatus] = useState('')
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const queueVersions = useRef<Record<string, number>>({})
   const queueMutationChains = useRef<Record<string, Promise<void>>>({})
@@ -154,6 +164,25 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
     }
   }, [api, onSignOut])
 
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadOnboarding() {
+      try {
+        const result = await api.getOnboarding()
+        if (!cancelled) setOnboarding(result)
+      } catch (requestError) {
+        // Any other failure falls through: onboarding never locks a listener out.
+        if (requestError instanceof ApiError && requestError.status === 401 && !cancelled) onSignOut()
+      }
+    }
+
+    void loadOnboarding()
+    return () => {
+      cancelled = true
+    }
+  }, [api, onSignOut])
+
   useEffect(
     () => () => {
       if (toastTimer.current) clearTimeout(toastTimer.current)
@@ -175,6 +204,57 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
     setToast({ message, tone })
     if (toastTimer.current) clearTimeout(toastTimer.current)
     toastTimer.current = setTimeout(() => setToast(null), 2800)
+  }
+
+  async function refreshOnboarding() {
+    try {
+      setOnboarding(await api.getOnboarding())
+    } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 401) onSignOut()
+    }
+  }
+
+  function chooseApple() {
+    setGateDismissed(true)
+    void connectAppleMusic()
+  }
+
+  function chooseSpotify() {
+    setGateDismissed(true)
+    setActiveView('spotify')
+    setQueueOpen(false)
+    void api
+      .postFunnelEvent({ type: 'chose_spotify', surface: 'web' })
+      .catch(() => undefined)
+      .then(() => refreshOnboarding())
+  }
+
+  function openMusic() {
+    if (onboarding?.chosenService === 'spotify') {
+      setActiveView('spotify')
+      setQueueOpen(false)
+      return
+    }
+    setDialog('sync')
+  }
+
+  async function removeSource(source: ListeningImportSource) {
+    try {
+      await api.deleteListeningSource(source)
+      await refreshOnboarding()
+      announce(source === 'spotify_export' ? 'Your Spotify data is gone from Mixtape.' : 'The Apple Music export is gone from Mixtape.')
+    } catch (requestError) {
+      announce(errorCopy(requestError), 'error')
+      if (requestError instanceof ApiError && requestError.status === 401) onSignOut()
+    }
+  }
+
+  function completeInterview(response: InterviewResponse) {
+    const notes = response.notes.saved
+    const artists = response.seeds
+    setDialog(null)
+    setInterviewStatus(`Saved ${notes} ${notes === 1 ? 'note' : 'notes'}, ${artists} ${artists === 1 ? 'artist' : 'artists'}`)
+    void refreshOnboarding()
   }
 
   function activeAppleIds(): string[] | null {
@@ -424,14 +504,16 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
   }
 
   return (
-    <div className={`app-shell ${activeView === 'home' || !activeSession ? 'app-shell--home' : ''}`} style={shellStyle}>
+    <div className={`app-shell ${activeView !== 'session' || !activeSession ? 'app-shell--home' : ''}`} style={shellStyle}>
       <Sidebar
         sessions={sessions}
         activeSessionId={activeSession?.id ?? null}
         activeView={activeView}
         userName={user.name}
+        musicLabel={musicLinkLabel(onboarding)}
         onOpenSession={openSession}
         onOpenHome={() => setActiveView('home')}
+        onOpenMusic={openMusic}
         onNewTape={() => setDialog('new-tape')}
         onOpenAccount={() => setDialog('account')}
         onSync={() => setDialog('sync')}
@@ -439,7 +521,17 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
         signInMethod={lastSignInProvider}
       />
 
-      {activeView === 'home' || !activeSession ? (
+      {activeView === 'spotify' && onboarding ? (
+        <SpotifyMusicView
+          api={api}
+          onboarding={onboarding}
+          interviewStatus={interviewStatus}
+          onRefresh={refreshOnboarding}
+          onOpenInterview={() => setDialog('interview')}
+          onNewTape={() => setDialog('new-tape')}
+          onRemoveSource={(source) => void removeSource(source)}
+        />
+      ) : activeView !== 'session' || !activeSession ? (
         <Home
           sessions={sessions}
           collectionView={collectionView}
@@ -491,6 +583,12 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
         />
       ) : null}
       {dialog === 'sync' ? <SyncOverlay onClose={() => setDialog(null)} /> : null}
+      {dialog === 'interview' ? (
+        <InterviewDialog api={api} onClose={() => setDialog(null)} onComplete={completeInterview} />
+      ) : null}
+      {onboarding && onboarding.chosenService === null && !gateDismissed ? (
+        <ChooseServiceDialog onChooseApple={chooseApple} onChooseSpotify={chooseSpotify} />
+      ) : null}
       {dialog === 'account' ? (
         <AccountDialog
           auth={accountAuth}

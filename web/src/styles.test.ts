@@ -84,3 +84,65 @@ describe('approved shared content-plane glass', () => {
     expect(stylesheet).toMatch(/@media \(prefers-reduced-transparency:\s*reduce\)[\s\S]*?\.sidebar,[\s\S]*?\.queue-panel[\s\S]*?backdrop-filter:\s*none !important;/)
   })
 })
+
+describe('approved Spotify import surfaces', () => {
+  it('pins the status chip variants as monospace uppercase pills with a dot, never colour alone', () => {
+    expect(stylesheet).toMatch(/\.status-chip\s*{[^}]*border-radius:\s*999px;[^}]*ui-monospace[^}]*text-transform:\s*uppercase;/s)
+    expect(stylesheet).toMatch(/\.status-chip\.ok\s*{[^}]*color:\s*#315f42;[^}]*background:\s*#e4f0e7;/s)
+    expect(stylesheet).toMatch(/\.status-chip\.wait\s*{[^}]*color:\s*#8a6a3a;[^}]*background:\s*#f4ecdc;/s)
+    expect(stylesheet).toMatch(/\.status-chip\.err\s*{[^}]*color:\s*#8a3a49;[^}]*background:\s*#f6e2e6;/s)
+    expect(stylesheet).toMatch(/\.status-chip \.dot\s*{[^}]*width:\s*7px;[^}]*background:\s*currentColor;/s)
+  })
+
+  it('keeps 44px targets on the buttons and tiles', () => {
+    expect(stylesheet).toMatch(/\.btn\s*{[^}]*min-height:\s*44px;/s)
+    expect(stylesheet).toMatch(/\.mini\s*{[^}]*min-height:\s*44px;/s)
+    expect(stylesheet).toMatch(/\.music-link\s*{[^}]*min-height:\s*52px;/s)
+  })
+
+  it('uses the plum raised primary, the translucent secondary, and the pink-bordered quiet destructive', () => {
+    expect(stylesheet).toMatch(/\.btn\s*{[^}]*background:\s*rgba\(255, 255, 255, 0\.66\);[^}]*border:\s*1px solid rgba\(73, 64, 72, 0\.2\);/s)
+    expect(stylesheet).toMatch(/\.btn\.primary\s*{[^}]*background:\s*#4d404b;[^}]*box-shadow:\s*0 3px 0 #2d272e;/s)
+    expect(stylesheet).toMatch(/\.btn\.danger\s*{[^}]*color:\s*#8a3a49;[^}]*border-color:\s*rgba\(201, 104, 127, 0\.45\);/s)
+  })
+
+  it('marks attention with the orange hairline and success with the green one', () => {
+    expect(stylesheet).toMatch(/\.card\.attention\s*{[^}]*border-color:\s*rgba\(209, 138, 101, 0\.5\);/s)
+    expect(stylesheet).toMatch(/\.mini\.done\s*{[^}]*border-color:\s*rgba\(112, 151, 120, 0\.5\);/s)
+    expect(stylesheet).toMatch(/\.mini\.done strong::before\s*{[^}]*content:\s*"✓ ";/s)
+  })
+
+  it('draws the interview stepper as five flat segments and keeps the dialog on the warm gray', () => {
+    expect(stylesheet).toMatch(/\.stepper span\s*{[^}]*width:\s*22px;[^}]*height:\s*4px;/s)
+    expect(stylesheet).toMatch(/\.stepper span\.on\s*{[^}]*background:\s*var\(--plum\);/s)
+    expect(stylesheet).toMatch(/\.dialog\.interview-dialog,\s*\.dialog\.service-dialog\s*{[^}]*width:\s*min\(520px, calc\(100vw - 32px\)\);/s)
+    expect(stylesheet).not.toMatch(/\.(?:interview|service)-dialog[^{]*{[^}]*content-paint/s)
+  })
+
+  it('sets the elapsed wait in marker type and the drop zone as a dashed field', () => {
+    expect(stylesheet).toMatch(/\.elapsed\s*{[^}]*font:\s*italic 450 30px\/var\(--marker-leading\) var\(--marker\);/s)
+    expect(stylesheet).toMatch(/\.drop\s*{[^}]*border:\s*2px dashed rgba\(73, 64, 72, 0\.22\);[^}]*border-radius:\s*16px;/s)
+  })
+
+  it('strikes ignored files through and keeps the inventory two-column on desktop', () => {
+    expect(stylesheet).toMatch(/\.inventory\s*{[^}]*grid-template-columns:\s*1fr 1fr;/s)
+    expect(stylesheet).toMatch(/\.file-list li\.ignored\s*{[^}]*text-decoration:\s*line-through;/s)
+  })
+
+  it('hides the paste surface on mobile web and stacks the tiles', () => {
+    expect(stylesheet).toMatch(/@media \(max-width:\s*760px\)[\s\S]*?\.mini--desktop,\s*\.paste-box\s*{[^}]*display:\s*none;/)
+    expect(stylesheet).toMatch(/@media \(max-width:\s*760px\)[\s\S]*?\.mini-grid,\s*\.mini-grid--pair\s*{[^}]*grid-template-columns:\s*1fr;/)
+    expect(stylesheet).toMatch(/@media \(max-width:\s*1020px\)[\s\S]*?\.mini-grid\s*{[^}]*grid-template-columns:\s*1fr 1fr;/)
+  })
+
+  it('stops the stripe travel and card transitions under reduced motion', () => {
+    expect(stylesheet).toMatch(/@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.progress > span\s*{[^}]*animation:\s*none !important;/)
+    expect(stylesheet).toMatch(/@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.card,\s*\.drop,\s*\.switch,\s*\.switch::after\s*{[^}]*transition:\s*none !important;/)
+  })
+
+  it('ships the deep-graphite dark reading for cards, chips, and the raised primary', () => {
+    expect(stylesheet).toMatch(/@media \(prefers-color-scheme:\s*dark\)[\s\S]*?\.status-chip\.wait\s*{[^}]*color:\s*#e6c98f;[^}]*background:\s*rgba\(209, 138, 101, 0\.14\);/)
+    expect(stylesheet).toMatch(/@media \(prefers-color-scheme:\s*dark\)[\s\S]*?\.btn\.primary\s*{[^}]*color:\s*#1b181c;[^}]*background:\s*#e3dbe0;/)
+    expect(stylesheet).toMatch(/@media \(prefers-color-scheme:\s*dark\)[\s\S]*?\.music-view\s*{[^}]*background:\s*rgba\(21, 21, 24, 0\.34\);/)
+  })
+})

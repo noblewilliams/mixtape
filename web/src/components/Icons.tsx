@@ -124,3 +124,13 @@ export function PlayIcon({ paused = false, ...props }: IconProps & { paused?: bo
     </svg>
   )
 }
+
+export function MusicIcon(props: IconProps) {
+  return (
+    <svg {...iconDefaults} {...props}>
+      <path d="M9 18V6l10-2v12" />
+      <circle cx="6" cy="18" r="3" />
+      <circle cx="16" cy="16" r="3" />
+    </svg>
+  )
+}
