@@ -13,6 +13,7 @@ import '../../data/api/api_client.dart';
 import '../../data/dj/dj_api.dart';
 import '../../data/dj/dj_models.dart';
 import 'auth_provider.dart';
+import 'funnel_provider.dart';
 
 /// Built over the SAME baseUrl/tokenStore as the app's shared [ApiClient]
 /// (structural sharing, per [DjApi.from]'s doc comment) but with its own
@@ -243,6 +244,19 @@ DjSession _withTitle(DjSession session, String title) => DjSession(
   notPersonal: session.notPersonal,
 );
 
+/// Bumps only the corpus-mode flag, carrying every other field over verbatim
+/// — used by [ChatNotifier._adoptSessionFlags] after a turn, which must not
+/// touch the version the turn (or a queue edit that interleaved with it)
+/// already landed.
+DjSession _withNotPersonal(DjSession session, bool notPersonal) => DjSession(
+  id: session.id,
+  title: session.title,
+  status: session.status,
+  queueVersion: session.queueVersion,
+  updatedAt: session.updatedAt,
+  notPersonal: notPersonal,
+);
+
 class ChatNotifier extends AsyncNotifier<ChatState> {
   ChatNotifier(this.sessionId);
 
@@ -340,6 +354,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       if (newTitle != null && ref.mounted) {
         ref.invalidate(sessionsProvider);
       }
+      await _adoptSessionFlags();
+      _notePersonalMix();
     } on DjApiException catch (e) {
       if (e.kind == 'stale') {
         // Degraded 409 fallback (see dj_api.dart's _translate409): a
@@ -401,6 +417,35 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       // if some other path (e.g. the stale refetch) already cleared it.
       _mergeCurrent((c) => c.sending ? c.copyWith(sending: false) : c);
     }
+  }
+
+  /// `POST /sessions/:id/messages` returns no session summary (plan review
+  /// follow-up), so the one flag a turn can flip — `notPersonal`, once a
+  /// corpus-mode generate put shared-catalog picks in the queue — is learned
+  /// by refetching the session right after. Only that flag is adopted: the
+  /// turn's own queue and version already landed, and a queue edit that
+  /// interleaved with the turn may have moved the version past what this
+  /// read returns, so a wholesale replace could 409 the next op. Never
+  /// throws — a dropped refetch just leaves the banner to the next full load.
+  Future<void> _adoptSessionFlags() async {
+    if (!ref.mounted) return;
+    try {
+      final detail = await ref.read(djApiProvider).getSession(sessionId);
+      _mergeCurrent(
+        (c) => c.copyWith(session: _withNotPersonal(c.session, detail.session.notPersonal)),
+      );
+    } catch (_) {
+      // Silent by design — see above.
+    }
+  }
+
+  /// The `first_personal_mix` milestone for what this turn generated — after
+  /// [_adoptSessionFlags], so the flag it checks is the server's.
+  void _notePersonalMix() {
+    if (!ref.mounted) return;
+    final current = state.value;
+    if (current == null) return;
+    ref.read(funnelMilestonesProvider).notePersonalMix(current.session, current.queue);
   }
 
   Future<void> _refetchAfterFailedTurn() async {
@@ -508,6 +553,9 @@ final sessionStarterProvider = Provider<Future<String> Function(String prompt)>(
       try {
         final detail = await ref.read(djApiProvider).createSession(prompt);
         ref.invalidate(sessionsProvider);
+        // The create response's session row is read after the first turn,
+        // so its notPersonal already says whether this mix was personal.
+        ref.read(funnelMilestonesProvider).notePersonalMix(detail.session, detail.queue);
         return detail.session.id;
       } on DjApiException {
         ref.invalidate(sessionsProvider);

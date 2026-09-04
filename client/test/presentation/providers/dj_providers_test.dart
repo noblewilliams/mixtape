@@ -6,8 +6,15 @@ import 'package:mixtape/data/api/api_client.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/dj/dj_api.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
+import 'package:mixtape/data/listening/listening_models.dart';
+import 'package:mixtape/data/onboarding/funnel_once_store.dart';
+import 'package:mixtape/data/onboarding/service_preference_store.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
+import 'package:mixtape/presentation/providers/device_providers.dart';
 import 'package:mixtape/presentation/providers/dj_providers.dart';
+import 'package:mixtape/presentation/providers/onboarding_provider.dart';
+
+import '../../helpers/fake_listening_api.dart';
 
 /// Implements DjApi's public surface (not `extends` — DjApi's constructor
 /// builds a real ApiClient, which a fake has no use for; Dart lets any class
@@ -148,13 +155,26 @@ DjSession _session({
   String id = 's1',
   String status = 'active',
   int queueVersion = 1,
+  bool notPersonal = false,
 }) => DjSession(
   id: id,
   title: 'Test Session',
   status: status,
   queueVersion: queueVersion,
   updatedAt: DateTime(2026, 1, 1),
+  notPersonal: notPersonal,
 );
+
+/// Lets the fire-and-forget funnel posts (unawaited by design) run out.
+Future<void> _flush() async {
+  for (var i = 0; i < 5; i++) {
+    await Future<void>.delayed(Duration.zero);
+  }
+}
+
+/// An onboarding read for a Spotify listener whose import has landed.
+OnboardingState _imported() =>
+    onboardingState(chosenService: 'spotify', importCompletedAt: DateTime(2026, 9, 1));
 
 DjMessage _msg(String id, String role, String content) => DjMessage(
   id: id,
@@ -178,12 +198,21 @@ QueueTrack _track(int position) => QueueTrack(
 /// flipping auth mid-test and triggering an unrelated rebuild. The dedicated
 /// auth-transition test below builds its own container instead, so it can
 /// flip status deliberately.
-ProviderContainer _makeContainer(FakeDjApi api) {
+ProviderContainer _makeContainer(
+  FakeDjApi api, {
+  FakeListeningApi? listening,
+  FunnelOnceStore? milestones,
+}) {
   final container = ProviderContainer(
     overrides: [
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
       djApiProvider.overrideWithValue(api),
       authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.signedIn)),
+      // The personal-mix milestone reads the listener and the import state
+      // from onboarding and remembers itself in the keychain.
+      listeningApiProvider.overrideWithValue(listening ?? FakeListeningApi()),
+      servicePreferenceStoreProvider.overrideWithValue(InMemoryServicePreferenceStore()),
+      funnelOnceStoreProvider.overrideWithValue(milestones ?? InMemoryFunnelOnceStore()),
     ],
   );
   addTearDown(container.dispose);
@@ -1116,6 +1145,153 @@ void main() {
       await container.read(memoriesProvider.future);
 
       expect(api.listMemoriesCallCount, 2);
+    });
+  });
+
+  group('session flags after a turn and the first_personal_mix milestone', () {
+    test('send refetches the session afterwards and adopts notPersonal, keeping the turn\'s own '
+        'version and same-turn title', () async {
+      final api = FakeDjApi();
+      var getSessionCalls = 0;
+      api.onGetSession = (_) async {
+        getSessionCalls++;
+        // The refetch answers with a later version too: only the flag is taken.
+        return SessionDetail(
+          session: _session(queueVersion: getSessionCalls == 1 ? 1 : 9, notPersonal: getSessionCalls > 1),
+          messages: [],
+          queue: [],
+        );
+      };
+      api.onSendMessage = (id, text) async => TurnResult(
+        djMessage: _msg('m2', 'dj', 'here you go'),
+        queue: [_track(0)],
+        queueVersion: 2,
+        sessionTitle: 'Renamed',
+      );
+      final container = _makeContainer(api);
+      await container.read(chatProvider('s1').future);
+      expect(container.read(chatProvider('s1')).value!.session.notPersonal, isFalse);
+
+      await container.read(chatProvider('s1').notifier).send('play jazz');
+
+      final state = container.read(chatProvider('s1')).value!;
+      expect(getSessionCalls, 2);
+      expect(state.session.notPersonal, isTrue);
+      expect(state.queueVersion, 2);
+      expect(state.session.title, 'Renamed');
+      expect(state.queue, hasLength(1));
+      expect(state.messages, hasLength(2));
+      expect(state.sending, isFalse);
+    });
+
+    test('a failed refetch after a turn keeps the turn\'s result and clears sending', () async {
+      final api = FakeDjApi();
+      var getSessionCalls = 0;
+      api.onGetSession = (_) async {
+        if (++getSessionCalls > 1) throw StateError('offline');
+        return SessionDetail(session: _session(), messages: [], queue: []);
+      };
+      api.onSendMessage = (id, text) async => TurnResult(
+        djMessage: _msg('m2', 'dj', 'here you go'),
+        queue: [_track(0)],
+        queueVersion: 2,
+      );
+      final container = _makeContainer(api);
+      await container.read(chatProvider('s1').future);
+
+      await container.read(chatProvider('s1').notifier).send('play jazz');
+
+      final state = container.read(chatProvider('s1')).value!;
+      expect(getSessionCalls, 2);
+      expect(state.queue, hasLength(1));
+      expect(state.queueVersion, 2);
+      expect(state.session.notPersonal, isFalse);
+      expect(state.messages, hasLength(2));
+      expect(state.sending, isFalse);
+    });
+
+    test('creating a session whose queue is personal posts first_personal_mix once, after an import',
+        () async {
+      final listening = FakeListeningApi(onboarding: _imported());
+      final milestones = InMemoryFunnelOnceStore();
+      final api = FakeDjApi();
+      api.onCreateSession = (_) async =>
+          SessionDetail(session: _session(id: 's9'), messages: [], queue: [_track(0)]);
+      final container = _makeContainer(api, listening: listening, milestones: milestones);
+
+      await container.read(sessionStarterProvider)('late drive');
+      await _flush();
+      expect(listening.funnelEvents, [FunnelEventType.firstPersonalMix]);
+      expect(await milestones.has('user-1', FunnelEventType.firstPersonalMix), isTrue);
+
+      await container.read(sessionStarterProvider)('another');
+      await _flush();
+      expect(listening.funnelEvents, [FunnelEventType.firstPersonalMix]);
+    });
+
+    test('first_personal_mix never posts before an import; a source\'s lastImportedAt counts as one',
+        () async {
+      final api = FakeDjApi();
+      api.onCreateSession = (_) async =>
+          SessionDetail(session: _session(id: 's9'), messages: [], queue: [_track(0)]);
+
+      final before = FakeListeningApi(onboarding: onboardingState(chosenService: 'spotify'));
+      await _makeContainer(api, listening: before).read(sessionStarterProvider)('late drive');
+      await _flush();
+      expect(before.funnelEvents, isEmpty);
+
+      final viaSource = FakeListeningApi(
+        onboarding: onboardingState(
+          chosenService: 'spotify',
+          sources: [musicSource(lastImportedAt: DateTime(2026, 9, 1))],
+        ),
+      );
+      await _makeContainer(api, listening: viaSource).read(sessionStarterProvider)('late drive');
+      await _flush();
+      expect(viaSource.funnelEvents, [FunnelEventType.firstPersonalMix]);
+    });
+
+    test('first_personal_mix never posts for a corpus-mode queue or an empty one', () async {
+      final api = FakeDjApi();
+      final listening = FakeListeningApi(onboarding: _imported());
+      final container = _makeContainer(api, listening: listening);
+
+      api.onCreateSession = (_) async => SessionDetail(
+        session: _session(id: 's9', notPersonal: true),
+        messages: [],
+        queue: [_track(0)],
+      );
+      await container.read(sessionStarterProvider)('late drive');
+      await _flush();
+      expect(listening.funnelEvents, isEmpty);
+
+      api.onCreateSession = (_) async =>
+          SessionDetail(session: _session(id: 's9'), messages: [], queue: []);
+      await container.read(sessionStarterProvider)('late drive');
+      await _flush();
+      expect(listening.funnelEvents, isEmpty);
+    });
+
+    test('a turn whose refetched session is personal posts first_personal_mix too', () async {
+      final listening = FakeListeningApi(onboarding: _imported());
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(session: _session(), messages: [], queue: []);
+      api.onSendMessage = (id, text) async => TurnResult(
+        djMessage: _msg('m2', 'dj', 'here you go'),
+        queue: [_track(0)],
+        queueVersion: 2,
+      );
+      final container = _makeContainer(api, listening: listening);
+      // Held: chatProvider is autoDispose, and the flush below would drop it.
+      final sub = container.listen(chatProvider('s1'), (_, _) {});
+      addTearDown(sub.close);
+      await container.read(chatProvider('s1').future);
+      await _flush();
+      expect(listening.funnelEvents, isEmpty, reason: 'loading a session is not generating one');
+
+      await container.read(chatProvider('s1').notifier).send('play jazz');
+      await _flush();
+      expect(listening.funnelEvents, [FunnelEventType.firstPersonalMix]);
     });
   });
 }

@@ -11,6 +11,7 @@ import 'package:mixtape/data/dj/dj_api.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
 import 'package:mixtape/data/library/library_sync_service.dart';
 import 'package:mixtape/main.dart';
+import 'package:mixtape/data/onboarding/funnel_once_store.dart';
 import 'package:mixtape/data/onboarding/service_preference_store.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/device_providers.dart';
@@ -111,6 +112,7 @@ void main() {
         listeningApiProvider.overrideWithValue(FakeListeningApi()),
         reminderSchedulerProvider.overrideWithValue(FakeReminderScheduler()),
         servicePreferenceStoreProvider.overrideWithValue(InMemoryServicePreferenceStore()),
+        funnelOnceStoreProvider.overrideWithValue(InMemoryFunnelOnceStore()),
       ],
       child: const MixtapeApp(),
     ));
@@ -129,6 +131,7 @@ void main() {
         listeningApiProvider.overrideWithValue(FakeListeningApi()),
         reminderSchedulerProvider.overrideWithValue(FakeReminderScheduler()),
         servicePreferenceStoreProvider.overrideWithValue(InMemoryServicePreferenceStore()),
+        funnelOnceStoreProvider.overrideWithValue(InMemoryFunnelOnceStore()),
       ],
       child: const MixtapeApp(),
     ));
@@ -158,6 +161,7 @@ void main() {
         listeningApiProvider.overrideWithValue(FakeListeningApi()),
         reminderSchedulerProvider.overrideWithValue(FakeReminderScheduler()),
         servicePreferenceStoreProvider.overrideWithValue(InMemoryServicePreferenceStore()),
+        funnelOnceStoreProvider.overrideWithValue(InMemoryFunnelOnceStore()),
         librarySyncServiceProvider.overrideWithValue(service),
       ],
       child: const MixtapeApp(),
@@ -217,6 +221,7 @@ void main() {
         listeningApiProvider.overrideWithValue(FakeListeningApi()),
         reminderSchedulerProvider.overrideWithValue(FakeReminderScheduler()),
         servicePreferenceStoreProvider.overrideWithValue(InMemoryServicePreferenceStore()),
+        funnelOnceStoreProvider.overrideWithValue(InMemoryFunnelOnceStore()),
         librarySyncServiceProvider.overrideWithValue(service),
       ],
       child: const MixtapeApp(),
@@ -281,6 +286,7 @@ void main() {
         listeningApiProvider.overrideWithValue(FakeListeningApi()),
         reminderSchedulerProvider.overrideWithValue(FakeReminderScheduler()),
         servicePreferenceStoreProvider.overrideWithValue(InMemoryServicePreferenceStore()),
+        funnelOnceStoreProvider.overrideWithValue(InMemoryFunnelOnceStore()),
         librarySyncServiceProvider.overrideWithValue(service),
       ],
       child: const MixtapeApp(),
@@ -342,6 +348,7 @@ void main() {
         listeningApiProvider.overrideWithValue(FakeListeningApi()),
         reminderSchedulerProvider.overrideWithValue(FakeReminderScheduler()),
         servicePreferenceStoreProvider.overrideWithValue(InMemoryServicePreferenceStore()),
+        funnelOnceStoreProvider.overrideWithValue(InMemoryFunnelOnceStore()),
         librarySyncServiceProvider.overrideWithValue(service),
       ],
       child: const MixtapeApp(),

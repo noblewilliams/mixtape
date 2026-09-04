@@ -21,6 +21,13 @@ final linkOpenerProvider = Provider<LinkOpener>(
   (ref) => (uri) => launchUrl(uri, mode: LaunchMode.externalApplication),
 );
 
+typedef LinkProbe = Future<bool> Function(Uri uri);
+
+/// Whether this device can open [uri] at all — the app-scheme check behind
+/// "Open in Spotify" (iOS answers only for schemes Info.plist declares under
+/// LSApplicationQueriesSchemes); overridden in widget tests.
+final linkProbeProvider = Provider<LinkProbe>((ref) => canLaunchUrl);
+
 class OnboardingNotifier extends AsyncNotifier<OnboardingState> {
   @override
   Future<OnboardingState> build() async {

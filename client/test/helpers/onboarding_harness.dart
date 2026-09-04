@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/dj/dj_api.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
+import 'package:mixtape/data/onboarding/funnel_once_store.dart';
 import 'package:mixtape/data/onboarding/service_preference_store.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/device_providers.dart';
@@ -104,6 +105,7 @@ ProviderContainer onboardingContainer({
       reminderSchedulerProvider.overrideWithValue(reminders ?? FakeReminderScheduler()),
       servicePreferenceStoreProvider
           .overrideWithValue(prefs ?? InMemoryServicePreferenceStore()),
+      funnelOnceStoreProvider.overrideWithValue(InMemoryFunnelOnceStore()),
       linkOpenerProvider.overrideWithValue((links ?? FakeLinkOpener()).call),
     ],
   );

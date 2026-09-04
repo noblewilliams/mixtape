@@ -77,6 +77,12 @@ void main() {
     expect(plist, contains('<key>CFBundleTypeRole</key>\n\t\t\t<string>Viewer</string>'));
     expect(plist, contains('<key>LSHandlerRank</key>\n\t\t\t<string>Alternate</string>'));
     expect(plist, contains('<key>LSSupportsOpeningDocumentsInPlace</key>\n\t<true/>'));
+    // "Open in Spotify" probes the app scheme before falling back to https
+    // (queue_screen.dart); iOS answers canOpenURL only for declared schemes.
+    expect(
+      plist,
+      contains('<key>LSApplicationQueriesSchemes</key>\n\t<array>\n\t\t<string>spotify</string>\n\t</array>'),
+    );
     // The share-sheet path is C5: no custom URL scheme or opener yet.
     expect(plist, isNot(contains('CFBundleURLTypes')));
   });

@@ -61,14 +61,20 @@ class AuthNotifier extends Notifier<AuthStatus> {
 
   /// Device-local state that belongs to the departing listener, dropped
   /// alongside the token: the "service chosen" flag (keyed by their id, so
-  /// stale at worst) and the pending request reminder. Best effort: a
-  /// failing keychain or notification plugin must never leave a listener
-  /// unable to sign out.
+  /// stale at worst), the once-only funnel milestones (same keying; the
+  /// server tolerates a repeat), and the pending request reminder. Best
+  /// effort: a failing keychain or notification plugin must never leave a
+  /// listener unable to sign out.
   Future<void> _forgetDeviceState() async {
     try {
       await ref.read(servicePreferenceStoreProvider).clear();
     } catch (e) {
       if (kDebugMode) debugPrint('service flag clear failed: $e');
+    }
+    try {
+      await ref.read(funnelOnceStoreProvider).clear();
+    } catch (e) {
+      if (kDebugMode) debugPrint('funnel flag clear failed: $e');
     }
     try {
       await ref.read(reminderSchedulerProvider).cancelRequestReminder();

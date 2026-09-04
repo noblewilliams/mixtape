@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/auth/token_store.dart';
+import 'package:mixtape/data/listening/listening_models.dart';
+import 'package:mixtape/data/onboarding/funnel_once_store.dart';
 import 'package:mixtape/data/onboarding/service_preference_store.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/device_providers.dart';
@@ -76,15 +78,18 @@ void main() {
   });
 
   test('signOut() forgets the device-local state of the departing listener: the service '
-      'flag and the request reminder', () async {
+      'flag, the funnel milestones, and the request reminder', () async {
     final store = InMemoryTokenStore();
     await store.write('tok-123');
     final prefs = InMemoryServicePreferenceStore();
     await prefs.write('u1', 'spotify');
+    final milestones = InMemoryFunnelOnceStore();
+    await milestones.mark('u1', FunnelEventType.firstOutput);
     final reminders = FakeReminderScheduler();
     final container = ProviderContainer(overrides: [
       tokenStoreProvider.overrideWithValue(store),
       servicePreferenceStoreProvider.overrideWithValue(prefs),
+      funnelOnceStoreProvider.overrideWithValue(milestones),
       reminderSchedulerProvider.overrideWithValue(reminders),
     ]);
     addTearDown(container.dispose);
@@ -96,6 +101,7 @@ void main() {
 
     expect(container.read(authProvider), AuthStatus.signedOut);
     expect(await prefs.read('u1'), isNull);
+    expect(await milestones.has('u1', FunnelEventType.firstOutput), isFalse);
     expect(reminders.cancelled, 1);
   });
 }

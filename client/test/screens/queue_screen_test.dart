@@ -7,13 +7,22 @@ import 'package:mixtape/data/api/api_client.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/dj/dj_api.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
+import 'package:mixtape/data/listening/listening_models.dart';
 import 'package:mixtape/data/musickit/musickit_bridge.dart';
+import 'package:mixtape/data/onboarding/funnel_once_store.dart';
+import 'package:mixtape/data/onboarding/service_preference_store.dart';
 import 'package:mixtape/data/settings/author_store.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
+import 'package:mixtape/presentation/providers/device_providers.dart';
 import 'package:mixtape/presentation/providers/dj_providers.dart';
 import 'package:mixtape/presentation/providers/library_sync_provider.dart';
+import 'package:mixtape/presentation/providers/onboarding_provider.dart';
 import 'package:mixtape/presentation/screens/chat_screen.dart';
 import 'package:mixtape/presentation/screens/queue_screen.dart';
+
+import '../helpers/fake_listening_api.dart';
+import '../helpers/fake_text_sharer.dart';
+import '../helpers/onboarding_harness.dart' show FakeLinkOpener, expectInteractiveWidgetsKeyed;
 
 /// Mirrors chat_screen_test.dart's FakeDjApi: implements DjApi's public
 /// surface (not `extends`, since DjApi's constructor builds a real
@@ -184,19 +193,41 @@ class TestAuthNotifier extends AuthNotifier {
   AuthStatus build() => _initial;
 }
 
-DjSession _session({String id = 's1', int queueVersion = 1, String title = 'Test Session'}) =>
-    DjSession(id: id, title: title, status: 'active', queueVersion: queueVersion, updatedAt: DateTime(2026, 1, 1));
+DjSession _session({
+  String id = 's1',
+  int queueVersion = 1,
+  String title = 'Test Session',
+  bool notPersonal = false,
+}) =>
+    DjSession(
+      id: id,
+      title: title,
+      status: 'active',
+      queueVersion: queueVersion,
+      updatedAt: DateTime(2026, 1, 1),
+      notPersonal: notPersonal,
+    );
 
-QueueTrack _track(int position, {Object? appleId = _sentinel, String? reason, int? durationMs = 180000}) =>
+QueueTrack _track(
+  int position, {
+  Object? appleId = _sentinel,
+  String? spotifyId,
+  String? reason,
+  int? durationMs = 180000,
+}) =>
     QueueTrack(
       position: position,
       trackId: 't$position',
       appleId: identical(appleId, _sentinel) ? 'apple-$position' : appleId as String?,
+      spotifyId: spotifyId,
       title: 'Title $position',
       artist: 'Artist $position',
       reason: reason,
       durationMs: durationMs,
     );
+
+/// A track Apple Music has no match for, but Spotify does.
+QueueTrack _spotifyTrack(int position) => _track(position, appleId: null, spotifyId: 'sp$position');
 
 const _sentinel = Object();
 
@@ -204,6 +235,7 @@ QueueTrack _renumbered(QueueTrack track, int position) => QueueTrack(
       position: position,
       trackId: track.trackId,
       appleId: track.appleId,
+      spotifyId: track.spotifyId,
       title: track.title,
       artist: track.artist,
       reason: track.reason,
@@ -256,6 +288,11 @@ ProviderContainer _makeContainer(
   FakeBridge? bridge,
   AuthorStore? authorStore,
   String? accountName,
+  FakeListeningApi? listening,
+  FunnelOnceStore? milestones,
+  FakeLinkOpener? links,
+  LinkProbe? probe,
+  FakeTextSharer? sharer,
 }) {
   final container = ProviderContainer(
     overrides: [
@@ -268,6 +305,15 @@ ProviderContainer _makeContainer(
       authorStoreProvider.overrideWithValue(authorStore ?? InMemoryAuthorStore()),
       // The real provider hits GET /me over the network.
       accountNameProvider.overrideWith((ref) async => accountName),
+      // The Spotify outputs: the funnel milestones read the listener from the
+      // onboarding state and remember themselves in the keychain; links and
+      // the share sheet are platform channels.
+      listeningApiProvider.overrideWithValue(listening ?? FakeListeningApi()),
+      servicePreferenceStoreProvider.overrideWithValue(InMemoryServicePreferenceStore()),
+      funnelOnceStoreProvider.overrideWithValue(milestones ?? InMemoryFunnelOnceStore()),
+      linkOpenerProvider.overrideWithValue((links ?? FakeLinkOpener()).call),
+      linkProbeProvider.overrideWithValue(probe ?? (_) async => false),
+      textSharerProvider.overrideWithValue(sharer ?? FakeTextSharer()),
     ],
   );
   addTearDown(container.dispose);
@@ -275,6 +321,11 @@ ProviderContainer _makeContainer(
 }
 
 Future<void> _pump(WidgetTester tester, ProviderContainer container, {String sessionId = 's1'}) async {
+  // A second container in one test: tear the first tree down first, or the
+  // same-typed root is updated in place and the old screen's state lingers.
+  if (find.byType(QueueScreen).evaluate().isNotEmpty) {
+    await tester.pumpWidget(const SizedBox());
+  }
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
@@ -434,6 +485,8 @@ void main() {
     expect(saveButton.onPressed, isNull);
     expect(playButton.tooltip, isNotEmpty);
     expect(saveButton.tooltip, isNotEmpty);
+    // Without a Spotify id either, there is nothing to send anywhere.
+    expect(find.byKey(const Key('share-button')), findsNothing);
   });
 
   testWidgets('save dialog is prefilled with the session title, trims the entered name, and reports counts', (
@@ -889,5 +942,228 @@ void main() {
     await tester.pump(const Duration(seconds: 6));
     await tester.pumpAndSettle();
     expect(find.text('queue was updated — showing the latest'), findsNothing);
+  });
+
+  group('Spotify outputs (C4)', () {
+    const bannerLine =
+        "Built from Mixtape's catalog and your interview, not your listening. Import your Spotify data for the real thing.";
+
+    testWidgets('a row with a Spotify id gets a keyed 44pt "Open in Spotify" action; rows without one get none', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(), messages: [], queue: [_spotifyTrack(0), _track(1)]);
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+
+      final action = find.byKey(const Key('open-in-spotify-t0'));
+      expect(action, findsOneWidget);
+      expect(find.byKey(const Key('open-in-spotify-t1')), findsNothing);
+      expect(tester.widget<IconButton>(action).tooltip, 'Open Title 0 in Spotify');
+      expect(find.bySemanticsLabel('Open Title 0 in Spotify'), findsOneWidget);
+      final size = tester.getSize(action);
+      expect(size.width, greaterThanOrEqualTo(44));
+      expect(size.height, greaterThanOrEqualTo(44));
+      // The row still expands on tap and still reorders from its handle.
+      await tester.tap(find.byKey(const Key('queue-row-tap-t0')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('queue-row-reason-t0')), findsOneWidget);
+      expect(find.byKey(const Key('drag-handle-t0')), findsOneWidget);
+      handle.dispose();
+    });
+
+    testWidgets('Open in Spotify asks whether the app can open the scheme and uses it when it can', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(), messages: [], queue: [_spotifyTrack(0)]);
+      final links = FakeLinkOpener();
+      final probed = <Uri>[];
+      final container = _makeContainer(
+        api,
+        links: links,
+        probe: (uri) async {
+          probed.add(uri);
+          return true;
+        },
+      );
+      await _pump(tester, container);
+
+      await tester.tap(find.byKey(const Key('open-in-spotify-t0')));
+      await tester.pumpAndSettle();
+
+      expect(probed, [Uri.parse('spotify:track:sp0')]);
+      expect(links.opened, [Uri.parse('spotify:track:sp0')]);
+    });
+
+    testWidgets('Open in Spotify falls back to the https link when the app cannot be opened or the probe fails', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(), messages: [], queue: [_spotifyTrack(0)]);
+      final links = FakeLinkOpener();
+      final container = _makeContainer(api, links: links, probe: (_) async => false);
+      await _pump(tester, container);
+      await tester.tap(find.byKey(const Key('open-in-spotify-t0')));
+      await tester.pumpAndSettle();
+      expect(links.opened, [Uri.parse('https://open.spotify.com/track/sp0')]);
+
+      final throwing = FakeLinkOpener();
+      final container2 = _makeContainer(api, links: throwing, probe: (_) async => throw StateError('no channel'));
+      await _pump(tester, container2);
+      await tester.tap(find.byKey(const Key('open-in-spotify-t0')));
+      await tester.pumpAndSettle();
+      expect(throwing.opened, [Uri.parse('https://open.spotify.com/track/sp0')]);
+    });
+
+    testWidgets('a Spotify-only queue hides Play and Save and offers "Send to a transfer tool" instead', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(), messages: [], queue: [_spotifyTrack(0), _spotifyTrack(1)]);
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+
+      expect(find.byKey(const Key('play-button')), findsNothing);
+      expect(find.byKey(const Key('save-button')), findsNothing);
+      final share = find.byKey(const Key('share-button'));
+      expect(share, findsOneWidget);
+      expect(tester.widget<IconButton>(share).tooltip, 'Send to a transfer tool');
+      expect(tester.widget<IconButton>(share).onPressed, isNotNull);
+      expectInteractiveWidgetsKeyed(find.byType(QueueScreen));
+    });
+
+    testWidgets('a mixed Apple + Spotify queue keeps Play and Save and only gains the row links', (tester) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(), messages: [], queue: [_track(0), _spotifyTrack(1)]);
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+
+      expect(tester.widget<IconButton>(find.byKey(const Key('play-button'))).onPressed, isNotNull);
+      expect(tester.widget<IconButton>(find.byKey(const Key('save-button'))).onPressed, isNotNull);
+      expect(find.byKey(const Key('share-button')), findsNothing);
+      expect(find.byKey(const Key('open-in-spotify-t0')), findsNothing);
+      expect(find.byKey(const Key('open-in-spotify-t1')), findsOneWidget);
+      expectInteractiveWidgetsKeyed(find.byType(QueueScreen));
+    });
+
+    testWidgets('Send to a transfer tool shares one "Artist – Title" line per track under the session title, then confirms', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(title: 'Late drive'),
+        messages: [],
+        // A track with neither id still goes into the text: the tool searches by name.
+        queue: [_spotifyTrack(0), _spotifyTrack(1), _track(2, appleId: null)],
+      );
+      final sharer = FakeTextSharer();
+      final container = _makeContainer(api, sharer: sharer);
+      await _pump(tester, container);
+
+      await tester.tap(find.byKey(const Key('share-button')));
+      await tester.pumpAndSettle();
+
+      expect(sharer.shares, hasLength(1));
+      expect(sharer.shares.single.text, 'Artist 0 – Title 0\nArtist 1 – Title 1\nArtist 2 – Title 2');
+      expect(sharer.shares.single.subject, 'Mixtape · Late drive');
+      expect(find.text('shared 3 songs — the transfer tool makes the playlist in Spotify'), findsOneWidget);
+    });
+
+    testWidgets('a share the listener dismissed confirms nothing and counts as no output', (tester) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(), messages: [], queue: [_spotifyTrack(0)]);
+      final sharer = FakeTextSharer()..handedOff = false;
+      final listening = FakeListeningApi();
+      final container = _makeContainer(api, sharer: sharer, listening: listening);
+      await _pump(tester, container);
+
+      await tester.tap(find.byKey(const Key('share-button')));
+      await tester.pumpAndSettle();
+
+      expect(sharer.shares, hasLength(1));
+      expect(find.textContaining('shared'), findsNothing);
+      expect(listening.funnelEvents, isEmpty);
+    });
+
+    testWidgets('the "Not personal yet" banner shows above a corpus-mode queue as a live region, and not otherwise', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(notPersonal: true), messages: [], queue: [_spotifyTrack(0)]);
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+
+      final banner = find.byKey(const Key('not-personal-banner'));
+      expect(banner, findsOneWidget);
+      expect(tester.widget<Semantics>(banner).properties.liveRegion, isTrue);
+      expect(find.text('Not personal yet'), findsOneWidget);
+      expect(find.text(bannerLine), findsOneWidget);
+      expect(
+        tester.getBottomLeft(banner).dy,
+        lessThanOrEqualTo(tester.getTopLeft(find.byKey(const Key('queue-row-t0'))).dy),
+      );
+      expect(find.byKey(const Key('open-in-spotify-t0')), findsOneWidget);
+
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(), messages: [], queue: [_spotifyTrack(0)]);
+      await _pump(tester, _makeContainer(api));
+      expect(find.byKey(const Key('not-personal-banner')), findsNothing);
+      expect(find.text('Not personal yet'), findsNothing);
+    });
+
+    testWidgets('first_output posts once per listener across Play, Open in Spotify, and the share handoff', (
+      tester,
+    ) async {
+      final listening = FakeListeningApi();
+      final milestones = InMemoryFunnelOnceStore();
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(), messages: [], queue: [_track(0), _spotifyTrack(1)]);
+      final container = _makeContainer(api, listening: listening, milestones: milestones);
+      await _pump(tester, container);
+
+      await tester.tap(find.byKey(const Key('play-button')));
+      await tester.pumpAndSettle();
+      expect(listening.funnelEvents, [FunnelEventType.firstOutput]);
+      expect(await milestones.has('user-1', FunnelEventType.firstOutput), isTrue);
+
+      await tester.tap(find.byKey(const Key('open-in-spotify-t1')));
+      await tester.pumpAndSettle();
+      expect(listening.funnelEvents, [FunnelEventType.firstOutput]);
+
+      // A later screen on the same device and account: the flag outlives it.
+      final api2 = FakeDjApi();
+      api2.onGetSession = (_) async =>
+          SessionDetail(session: _session(id: 's2'), messages: [], queue: [_spotifyTrack(0)]);
+      await _pump(tester, _makeContainer(api2, listening: listening, milestones: milestones), sessionId: 's2');
+      await tester.tap(find.byKey(const Key('share-button')));
+      await tester.pumpAndSettle();
+      expect(listening.funnelEvents, [FunnelEventType.firstOutput]);
+    });
+
+    testWidgets('a Play that fails is no output', (tester) async {
+      final listening = FakeListeningApi();
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(), messages: [], queue: [_track(0)]);
+      final bridge = FakeBridge();
+      bridge.onPlayQueue = (_) async => throw MusicKitException('boom');
+      final container = _makeContainer(api, listening: listening, bridge: bridge);
+      await _pump(tester, container);
+
+      await tester.tap(find.byKey(const Key('play-button')));
+      await tester.pumpAndSettle();
+
+      expect(listening.funnelEvents, isEmpty);
+    });
   });
 }

@@ -3,8 +3,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import '../../data/files/archive_picker.dart';
+import '../../data/onboarding/funnel_once_store.dart';
 import '../../data/onboarding/service_preference_store.dart';
 import '../../data/reminders/reminder_scheduler.dart';
+import '../../data/share/text_sharer.dart';
 
 /// The one local reminder this app sends (the Spotify request nudge).
 final reminderSchedulerProvider =
@@ -13,6 +15,13 @@ final reminderSchedulerProvider =
 /// The per-user "service chosen" flag the gate consults (keychain).
 final servicePreferenceStoreProvider =
     Provider<ServicePreferenceStore>((ref) => SecureServicePreferenceStore());
+
+/// The per-user "already posted" flags for the once-only funnel milestones
+/// (keychain), cleared alongside the service flag on sign-out.
+final funnelOnceStoreProvider = Provider<FunnelOnceStore>((ref) => SecureFunnelOnceStore());
+
+/// The share sheet behind "Send to a transfer tool" on the queue screen.
+final textSharerProvider = Provider<TextSharer>((ref) => const SharePlusTextSharer());
 
 /// The ZIP picker behind "Choose a ZIP" (the document picker).
 final archivePickerProvider = Provider<ArchivePicker>((ref) => const FilePickerArchivePicker());

@@ -280,6 +280,11 @@ class OnboardingState {
   /// Null until the interview has been completed at all.
   final InterviewCounts? interview;
 
+  /// Whether a listening import has landed for this listener on any device:
+  /// the funnel's `first_personal_mix` only counts after one.
+  bool get hasCompletedImport =>
+      importCompletedAt != null || sources.any((s) => s.lastImportedAt != null);
+
   factory OnboardingState.fromJson(Map<String, dynamic> json) => OnboardingState(
         userId: readString(json, 'userId'),
         sources: musicSourcesFromJson(json['sources']),

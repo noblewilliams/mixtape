@@ -3,9 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/dj/dj_models.dart';
+import '../../data/listening/listening_models.dart';
 import '../../data/musickit/musickit_bridge.dart';
+import '../providers/device_providers.dart';
 import '../providers/dj_providers.dart';
+import '../providers/funnel_provider.dart';
 import '../providers/library_sync_provider.dart';
+import '../providers/onboarding_provider.dart';
 
 /// The full tape for one session (see
 /// `docs/superpowers/plans/2026-08-29-p3b-dj-client.md` Task 5): reorder,
@@ -14,6 +18,11 @@ import '../providers/library_sync_provider.dart';
 /// [QueueCard] already watch. Server-canonical, like every other queue
 /// mutation in this app: reorder/remove post an op and re-render from the
 /// response rather than editing local state optimistically.
+///
+/// Spotify listeners (plan `2026-09-02-listening-export-p2-spotify-import.md`,
+/// Outputs): a row with a Spotify id gets "Open in Spotify"; a queue Apple
+/// Music can do nothing with swaps Play/Save for "Send to a transfer tool";
+/// a corpus-mode session carries the "Not personal yet" band above the list.
 ///
 /// Every mutation goes through one FIFO of [_QueueIntent]s rather than
 /// firing straight at the provider — see [_QueueScreenState._enqueue] for
@@ -57,6 +66,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
 
   bool _playing = false;
   bool _saving = false;
+  bool _sharing = false;
 
   void _toggleReason(String trackId) {
     setState(() {
@@ -174,6 +184,73 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     }());
   }
 
+  /// The once-only `first_output` funnel milestone: any Spotify output, and
+  /// Play too so the funnel closes for a listener whose mix played in Apple
+  /// Music. Same fire-and-forget contract as [_postEvent]; the once-ness
+  /// lives in [FunnelMilestones].
+  void _noteOutput() =>
+      ref.read(funnelMilestonesProvider).recordOnce(FunnelEventType.firstOutput);
+
+  /// `spotify:track:<id>` when the Spotify app answers the probe (the scheme
+  /// is declared under LSApplicationQueriesSchemes in Info.plist, or iOS
+  /// says no regardless), else the https link, which Safari or the App Store
+  /// banner handles. A probe that throws counts as "cannot".
+  Future<void> _openInSpotify(BuildContext screenContext, QueueTrack track) async {
+    final id = track.spotifyId!;
+    final app = Uri.parse('spotify:track:$id');
+    var canOpenApp = false;
+    try {
+      canOpenApp = await ref.read(linkProbeProvider)(app);
+    } catch (_) {
+      canOpenApp = false;
+    }
+    if (!mounted) return;
+    final target = canOpenApp ? app : Uri.https('open.spotify.com', '/track/$id');
+    var opened = false;
+    try {
+      opened = await ref.read(linkOpenerProvider)(target);
+    } catch (_) {
+      opened = false;
+    }
+    if (!mounted) return;
+    if (!opened) {
+      if (screenContext.mounted) _showSnack(screenContext, "couldn't open Spotify");
+      return;
+    }
+    _noteOutput();
+  }
+
+  /// Text handoff for a queue Apple Music can't play: one "Artist – Title"
+  /// per track (en dash), every visible track — a transfer tool searches
+  /// Spotify by name, so a track with no id at all still belongs in the list.
+  /// The tool itself is the listener's pick from the share sheet: TuneMyMusic
+  /// accepts pasted text without an account (the approval record left the
+  /// choice to build time, and that was the deciding criterion), and the
+  /// sheet lets them choose it, Soundiiz, or anything else — so the app
+  /// names no tool and opens none.
+  Future<void> _handleShare(
+    BuildContext screenContext,
+    List<QueueTrack> queue,
+    String title,
+  ) async {
+    if (_sharing) return;
+    setState(() => _sharing = true);
+    try {
+      final text = [for (final t in queue) '${t.artist} – ${t.title}'].join('\n');
+      final handedOff =
+          await ref.read(textSharerProvider).share(text, subject: 'Mixtape · $title');
+      if (!mounted || !handedOff) return; // a dismissed sheet is no output
+      _noteOutput();
+      if (!screenContext.mounted) return;
+      _showSnack(screenContext, _shareSuccessMessage(queue.length));
+    } catch (_) {
+      if (!screenContext.mounted) return;
+      _showSnack(screenContext, "couldn't open the share sheet");
+    } finally {
+      if (mounted) setState(() => _sharing = false);
+    }
+  }
+
   Future<void> _handlePlay(BuildContext screenContext, List<QueueTrack> queue) async {
     if (_playing) return;
     setState(() => _playing = true);
@@ -182,6 +259,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
       final skipped = queue.length - ids.length;
       await ref.read(musicKitBridgeProvider).playQueue(ids);
       _postEvent('played');
+      if (mounted) _noteOutput();
       if (!screenContext.mounted) return;
       _showSnack(screenContext, _playSuccessMessage(skipped));
     } on MusicKitException catch (e) {
@@ -285,16 +363,30 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
       ? 'saved $added songs to Apple Music ($failed failed)'
       : 'saved $added songs to Apple Music';
 
+  String _shareSuccessMessage(int count) =>
+      'shared $count song${count == 1 ? '' : 's'} — the transfer tool makes the playlist in Spotify';
+
   /// Null when Play/Save are actionable; otherwise the tooltip explaining
   /// why they're disabled — an empty queue has nothing to act on, and a
   /// queue whose tracks are ALL missing an Apple Music match can't be
   /// played or saved at all (a partial match still works: the filtered
-  /// track count is reported in the success snackbar instead).
+  /// track count is reported in the success snackbar instead). Not
+  /// consulted for a Spotify-only queue, which shows no Play/Save at all —
+  /// see [_isSpotifyOnly].
   String? _actionsDisabledReason(List<QueueTrack> queue) {
     if (queue.isEmpty) return 'nothing queued yet';
     if (queue.every((t) => t.appleId == null)) return "these tracks aren't in Apple Music";
     return null;
   }
+
+  /// A queue Apple Music can do nothing with but Spotify can: the Spotify
+  /// actions take the Play/Save slot instead of a disabled pair with a
+  /// reason. A queue with no ids of either kind keeps the disabled Play/Save,
+  /// and a mixed queue keeps them live (the row links carry the Spotify half).
+  bool _isSpotifyOnly(List<QueueTrack> queue) =>
+      queue.isNotEmpty &&
+      queue.every((t) => t.appleId == null) &&
+      queue.any((t) => t.spotifyId != null);
 
   @override
   Widget build(BuildContext context) {
@@ -359,53 +451,75 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     // removal hasn't round-tripped yet.
     final visibleQueue = state.queue.where((t) => !_hiddenTrackIds.contains(t.trackId)).toList();
     final disabledReason = _actionsDisabledReason(visibleQueue);
+    final spotifyOnly = _isSpotifyOnly(visibleQueue);
 
     return Scaffold(
       appBar: AppBar(
         title: Text(state.session.title),
-        actions: [
-          IconButton(
-            key: const Key('play-button'),
-            tooltip: disabledReason ?? 'Play in Apple Music',
-            onPressed: (disabledReason == null && !_playing)
-                ? () => _handlePlay(context, visibleQueue)
-                : null,
-            icon: const Icon(Icons.play_circle),
-          ),
-          IconButton(
-            key: const Key('save-button'),
-            tooltip: disabledReason ?? 'Save as playlist',
-            onPressed: (disabledReason == null && !_saving)
-                ? () => _openSaveDialog(context, visibleQueue, state.session.title)
-                : null,
-            icon: const Icon(Icons.playlist_add),
-          ),
-        ],
+        actions: spotifyOnly
+            ? [
+                IconButton(
+                  key: const Key('share-button'),
+                  tooltip: 'Send to a transfer tool',
+                  onPressed: _sharing
+                      ? null
+                      : () => _handleShare(context, visibleQueue, state.session.title),
+                  icon: const Icon(Icons.ios_share),
+                ),
+              ]
+            : [
+                IconButton(
+                  key: const Key('play-button'),
+                  tooltip: disabledReason ?? 'Play in Apple Music',
+                  onPressed: (disabledReason == null && !_playing)
+                      ? () => _handlePlay(context, visibleQueue)
+                      : null,
+                  icon: const Icon(Icons.play_circle),
+                ),
+                IconButton(
+                  key: const Key('save-button'),
+                  tooltip: disabledReason ?? 'Save as playlist',
+                  onPressed: (disabledReason == null && !_saving)
+                      ? () => _openSaveDialog(context, visibleQueue, state.session.title)
+                      : null,
+                  icon: const Icon(Icons.playlist_add),
+                ),
+              ],
       ),
       body: SafeArea(
-        child: visibleQueue.isEmpty
-            ? const _EmptyQueue()
-            : ReorderableListView.builder(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                itemCount: visibleQueue.length,
-                // Each row supplies its own ReorderableDragStartListener on
-                // the drag handle — the default handles would add a second,
-                // duplicate one on every row.
-                buildDefaultDragHandles: false,
-                onReorder: (oldIndex, newIndex) =>
-                    _handleReorder(visibleQueue, oldIndex, newIndex),
-                itemBuilder: (context, index) {
-                  final track = visibleQueue[index];
-                  return _QueueRow(
-                    key: ValueKey('queue-row-${track.trackId}'),
-                    index: index,
-                    track: track,
-                    expanded: _expandedTrackIds.contains(track.trackId),
-                    onToggle: () => _toggleReason(track.trackId),
-                    onDismissed: () => _handleDismiss(track),
-                  );
-                },
-              ),
+        child: Column(
+          children: [
+            if (state.session.notPersonal) const _NotPersonalBanner(),
+            Expanded(
+              child: visibleQueue.isEmpty
+                  ? const _EmptyQueue()
+                  : ReorderableListView.builder(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      itemCount: visibleQueue.length,
+                      // Each row supplies its own ReorderableDragStartListener on
+                      // the drag handle — the default handles would add a second,
+                      // duplicate one on every row.
+                      buildDefaultDragHandles: false,
+                      onReorder: (oldIndex, newIndex) =>
+                          _handleReorder(visibleQueue, oldIndex, newIndex),
+                      itemBuilder: (context, index) {
+                        final track = visibleQueue[index];
+                        return _QueueRow(
+                          key: ValueKey('queue-row-${track.trackId}'),
+                          index: index,
+                          track: track,
+                          expanded: _expandedTrackIds.contains(track.trackId),
+                          onToggle: () => _toggleReason(track.trackId),
+                          onDismissed: () => _handleDismiss(track),
+                          onOpenInSpotify: track.spotifyId == null
+                              ? null
+                              : () => _openInSpotify(context, track),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -524,6 +638,44 @@ class _EmptyQueue extends StatelessWidget {
   }
 }
 
+/// The corpus-mode band (plan: Copy — "Not personal yet" wherever a session
+/// has `notPersonal`): the mix came from the shared catalog and the
+/// interview, not this listener's plays. Text only — Home is the only screen
+/// that pushes routes, so the import itself is reached from there. A live
+/// region so a screen reader announces it when a turn flips the flag.
+class _NotPersonalBanner extends StatelessWidget {
+  const _NotPersonalBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = theme.colorScheme.onSecondaryContainer;
+    return Semantics(
+      key: const Key('not-personal-banner'),
+      container: true,
+      liveRegion: true,
+      child: Material(
+        color: theme.colorScheme.secondaryContainer,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Not personal yet', style: theme.textTheme.titleSmall?.copyWith(color: color)),
+              const SizedBox(height: 4),
+              Text(
+                "Built from Mixtape's catalog and your interview, not your listening. "
+                'Import your Spotify data for the real thing.',
+                style: theme.textTheme.bodySmall?.copyWith(color: color),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _QueueRow extends StatelessWidget {
   const _QueueRow({
     super.key,
@@ -532,6 +684,7 @@ class _QueueRow extends StatelessWidget {
     required this.expanded,
     required this.onToggle,
     required this.onDismissed,
+    required this.onOpenInSpotify,
   });
 
   final int index;
@@ -539,6 +692,11 @@ class _QueueRow extends StatelessWidget {
   final bool expanded;
   final VoidCallback onToggle;
   final VoidCallback onDismissed;
+
+  /// Set only when the track has a Spotify id — the row then shows "Open in
+  /// Spotify" ahead of its drag handle (a 48pt IconButton, over the 44pt
+  /// floor).
+  final VoidCallback? onOpenInSpotify;
 
   Widget _dismissBackground(ThemeData theme, Alignment alignment) => Container(
     color: theme.colorScheme.errorContainer,
@@ -586,6 +744,17 @@ class _QueueRow extends StatelessWidget {
                         ],
                       ),
                     ),
+                    if (onOpenInSpotify != null)
+                      IconButton(
+                        key: Key('open-in-spotify-${track.trackId}'),
+                        tooltip: 'Open ${track.title} in Spotify',
+                        onPressed: onOpenInSpotify,
+                        icon: Icon(
+                          Icons.open_in_new,
+                          semanticLabel: 'Open ${track.title} in Spotify',
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
                     ReorderableDragStartListener(
                       index: index,
                       child: Padding(
