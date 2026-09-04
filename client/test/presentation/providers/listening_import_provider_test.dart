@@ -79,7 +79,7 @@ void main() {
     notifier(c).setIncludePrivateSessions(false);
     expect((c.read(listeningImportProvider) as ImportInventory).includePrivateSessions, isFalse);
 
-    service.inventory = accountInventory;
+    service.preview = accountPreview;
     await notifier(c).inspect(accountArchive);
     notifier(c).setIncludePrivateSessions(true);
     expect((c.read(listeningImportProvider) as ImportInventory).includePrivateSessions, isFalse);
@@ -118,7 +118,7 @@ void main() {
     c.listen(onboardingProvider, (_, _) {}, fireImmediately: true);
     await _settle();
     final before = listening.getOnboardingCalls;
-    service.inventory = accountInventory;
+    service.preview = accountPreview;
     await notifier(c).inspect(accountArchive);
 
     final upload = notifier(c).upload();
@@ -137,7 +137,7 @@ void main() {
     final c = container();
     c.listen(onboardingProvider, (_, _) {}, fireImmediately: true);
     await _settle();
-    service.inventory = accountInventory;
+    service.preview = accountPreview;
     await notifier(c).inspect(accountArchive);
     final upload = notifier(c).upload();
     await _settle();
@@ -189,7 +189,7 @@ void main() {
 
   test('an unreadable inventory fails with the content-free diagnostics for that file', () async {
     final c = container();
-    service.inventory = brokenInventory;
+    service.inspectError = brokenError;
 
     await notifier(c).inspect(extendedArchive);
 
@@ -203,7 +203,7 @@ void main() {
   test('an archive with none of the expected files, or no ZIP at all, fails with a message '
       'that names what was expected', () async {
     final c = container();
-    service.inventory = ExportInventory.empty;
+    service.inspectError = const UnreadableExportException(file: null, inventory: ExportInventory.empty);
     await notifier(c).inspect(extendedArchive);
     expect((c.read(listeningImportProvider) as ImportFailed).message, contains('Spotify export'));
 
@@ -218,7 +218,7 @@ void main() {
   test('a diagnoser failure still reports the failure, without a report', () async {
     final c = onboardingContainer(
       listening: FakeListeningApi(onboarding: onboardingState(chosenService: 'spotify')),
-      importService: FakeImportService()..inventory = brokenInventory,
+      importService: FakeImportService()..inspectError = brokenError,
       diagnoser: (_) async => throw StateError('no report'),
     );
     await notifier(c).inspect(extendedArchive);
@@ -231,7 +231,7 @@ void main() {
 
   ProviderContainer heldReportContainer(Completer<ExportDiagnostics> report) => onboardingContainer(
         listening: FakeListeningApi(onboarding: onboardingState(chosenService: 'spotify')),
-        importService: FakeImportService()..inventory = brokenInventory,
+        importService: FakeImportService()..inspectError = brokenError,
         diagnoser: (_) => report.future,
       );
 
@@ -339,7 +339,7 @@ void main() {
     await _settle();
 
     notifier(c).reset();
-    service.inventory = accountInventory;
+    service.preview = accountPreview;
     await notifier(c).inspect(accountArchive);
     final second = notifier(c).upload();
     await _settle();

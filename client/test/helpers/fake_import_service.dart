@@ -9,26 +9,27 @@ import 'package:mixtape/import/spotify_parser.dart';
 import 'fake_listening_api.dart';
 
 /// Stands in for the import service in provider and widget tests: [inspect]
-/// answers from [inventory] (or throws [inspectError]; or holds until
-/// [cancel] when [holdInspect] is set), and [import] hands the test a run it
-/// drives by hand with [report], [finish], and [fail]. No isolate, no
-/// network.
+/// throws [inspectError] at once, answers with [preview] on the next turn
+/// of the event loop, or holds until [cancel] when [holdInspect] is set;
+/// [import] hands the test a run it drives by hand with [report], [finish],
+/// and [fail]. No isolate, no network.
 class FakeImportService extends ListeningImportService {
   FakeImportService({FakeListeningApi? api})
       : super(
           api: api ?? FakeListeningApi(),
           parser: (_, _) => throw UnimplementedError('parser'),
-          inspector: (_, {cancelToken}) => throw UnimplementedError('inspector'),
         );
 
-  ExportInventory inventory = extendedInventory;
+  ImportPreview preview = extendedPreview;
   Object? inspectError;
   bool holdInspect = false;
-  Completer<ExportInventory>? _inspect;
+  Completer<ImportPreview>? _inspect;
 
   final List<String> inspected = [];
+  final List<String> inspectedZones = [];
   String? importedPath;
   ImportOptions? importedOptions;
+  ImportPreview? importedPreview;
   Completer<ListeningImportResult>? _run;
   void Function(double progress)? _onProgress;
   int cancels = 0;
@@ -43,37 +44,46 @@ class FakeImportService extends ListeningImportService {
   bool get running => _run != null && !_run!.isCompleted;
 
   @override
-  Future<ExportInventory> inspect(String path) {
+  Future<ImportPreview> inspect(String path, {required String timeZone}) {
     inspected.add(path);
+    inspectedZones.add(timeZone);
     final error = inspectError;
     if (error != null) return Future.error(error);
-    if (!holdInspect) return Future.value(inventory);
-    _inspect = Completer<ExportInventory>();
-    return _inspect!.future;
+    if (holdInspect) {
+      _inspect = Completer<ImportPreview>();
+      return _inspect!.future;
+    }
+    // The real parse runs in an isolate and never answers on the calling
+    // turn, so the preview is read when the event loop comes back: a widget
+    // test may set [preview] after the tap that starts the inspect.
+    return Future(() => preview);
   }
 
   @override
   Future<ListeningImportResult> import(
     String path,
     ImportOptions options, {
+    ImportPreview? preview,
     void Function(double progress)? onProgress,
   }) {
     final held = _cancelled;
-    if (held == null || held.isCompleted) return _start(path, options, onProgress);
+    if (held == null || held.isCompleted) return _start(path, options, preview, onProgress);
     // The service's contract: a call inside the cancel window waits for the
     // cancelled run to settle and then starts fresh, never joining it.
     return held.future
         .then<void>((_) {}, onError: (Object _) {})
-        .then((_) => _start(path, options, onProgress));
+        .then((_) => _start(path, options, preview, onProgress));
   }
 
   Future<ListeningImportResult> _start(
     String path,
     ImportOptions options,
+    ImportPreview? preview,
     void Function(double progress)? onProgress,
   ) {
     importedPath = path;
     importedOptions = options;
+    importedPreview = preview;
     _onProgress = onProgress;
     _run = Completer<ListeningImportResult>();
     return _run!.future;
@@ -187,6 +197,111 @@ const brokenInventory = ExportInventory(
   ],
   ignored: [],
 );
+
+/// What the real service throws for [brokenInventory].
+const brokenError = UnreadableExportException(
+  file: 'Streaming_History_Audio_2021-2023_1.json',
+  inventory: brokenInventory,
+);
+
+/// A parse of the extended package with the round numbers the inventory
+/// screen shows: 1,203 tracks, 486 days with plays across 2018 – 2026, twelve
+/// podcast rows and three local files skipped, five private plays kept out.
+final extendedPreview = extendedPreviewWith();
+
+ImportPreview extendedPreviewWith({
+  int tracks = 1203,
+  int days = 486,
+  String? ledgerFrom = '2018-03-02',
+  String? ledgerTo = '2026-08-30',
+  int podcasts = 12,
+  int localFiles = 3,
+  int privatePlays = 5,
+  String timeZone = 'Africa/Lagos',
+}) =>
+    ImportPreview(
+      inventory: extendedInventory,
+      snapshot: ListeningExportSnapshot(
+        package: ExportPackage.spotifyExtended,
+        timeZone: timeZone,
+        country: 'NG',
+        tracks: _tracks(tracks),
+        days: [
+          for (var i = 0; i < days; i++)
+            SnapshotDay(
+              platformId: 'track${(i % 500).toString().padLeft(18, '0')}',
+              day: '2020-01-${(1 + i ~/ 500).toString().padLeft(2, '0')}',
+              plays: 1,
+              skips: 0,
+              completes: 1,
+              msPlayed: 30000,
+              hoursMask: 1,
+            ),
+        ],
+        library: const [],
+        artists: const [],
+        playlists: const [],
+        unresolved: SnapshotUnresolved(rows: localFiles, plays: 0),
+        ledgerFrom: ledgerFrom,
+        ledgerTo: ledgerTo,
+      ),
+      stats: ExportStats(
+        podcastOrAudiobook: podcasts,
+        localFile: localFiles,
+        privateSession: privatePlays + 2,
+        badTimestamp: 1,
+        privatePlays: privatePlays,
+      ),
+      options: ImportOptions(timeZone: timeZone),
+    );
+
+/// A parse of the account package: 226 tracks named across 214 liked songs,
+/// 37 followed artists, and 12 playlists; nothing skipped.
+final accountPreview = ImportPreview(
+  inventory: accountInventory,
+  snapshot: ListeningExportSnapshot(
+    package: ExportPackage.spotifyAccount,
+    timeZone: 'Africa/Lagos',
+    country: null,
+    tracks: _tracks(226),
+    days: const [],
+    library: [
+      for (var i = 0; i < 214; i++)
+        SnapshotLibraryRow(platformId: 'track${i.toString().padLeft(18, '0')}'),
+    ],
+    artists: [
+      for (var i = 0; i < 37; i++)
+        SnapshotArtist(name: 'Artist ${i.toString().padLeft(2, '0')}', spotifyId: null),
+    ],
+    playlists: [
+      for (var i = 0; i < 12; i++)
+        SnapshotPlaylist(
+          ordinal: i,
+          key: 'k' * 62 + i.toString().padLeft(2, '0'),
+          name: 'P$i',
+          description: null,
+          lastModifiedAt: null,
+          entries: const [],
+        ),
+    ],
+    unresolved: const SnapshotUnresolved(rows: 0, plays: 0),
+    ledgerFrom: null,
+    ledgerTo: null,
+  ),
+  stats: ExportStats.zero,
+  options: const ImportOptions(timeZone: 'Africa/Lagos'),
+);
+
+List<SnapshotTrack> _tracks(int count) => [
+      for (var i = 0; i < count; i++)
+        SnapshotTrack(
+          platformId: 'track${i.toString().padLeft(18, '0')}',
+          title: 'T$i',
+          artist: 'A',
+          album: null,
+          durationMs: null,
+        ),
+    ];
 
 const brokenDiagnostics = ExportDiagnostics(
   source: 'spotify_export',

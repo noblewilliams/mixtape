@@ -134,9 +134,10 @@ class _Inventory extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final inventory = state.inventory;
-    final extended = inventory.package == ExportPackage.spotifyExtended;
-    final rows = inventory.read.fold<int>(0, (sum, file) => sum + (file.rows ?? 0));
+    final preview = state.preview;
+    final inventory = preview.inventory;
+    final snapshot = preview.snapshot;
+    final extended = preview.package == ExportPackage.spotifyExtended;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -148,11 +149,21 @@ class _Inventory extends StatelessWidget {
           style: theme.textTheme.bodySmall,
         ),
         const SizedBox(height: 12),
-        // Rows read is the only figure the inventory has: the web shows
-        // tracks, days, and years too, which come from the parser. The
-        // inventory-preview round adds those parser stats to the inspect
-        // step; until then the inventory shows what the listing counted.
-        _Fact(label: 'Rows read', value: formatCount(rows)),
+        // Every figure comes from the parse the service ran at inspect: the
+        // snapshot for the counts, its stats for the drops.
+        _Fact(label: 'Tracks', value: formatCount(preview.tracks)),
+        if (extended) ...[
+          _Fact(label: 'Days with plays', value: formatCount(preview.daysWithPlays)),
+          _Fact(label: 'Years covered', value: yearsRange(snapshot.ledgerFrom, snapshot.ledgerTo) ?? '—'),
+        ] else ...[
+          _Fact(label: 'Liked songs', value: formatCount(snapshot.library.length)),
+          _Fact(label: 'Artists', value: formatCount(snapshot.artists.length)),
+          _Fact(label: 'Playlists', value: formatCount(snapshot.playlists.length)),
+        ],
+        _Fact(
+          label: 'Skipped rows',
+          value: skippedRowsLabel(podcasts: preview.skippedPodcasts, localFiles: preview.skippedLocalFiles),
+        ),
         if (extended) ...[
           const SizedBox(height: 4),
           Text('Local days in ${state.timeZone}', key: const Key('import-zone'), style: theme.textTheme.bodySmall),
@@ -182,7 +193,7 @@ class _Inventory extends StatelessWidget {
             key: const Key('import-private-sessions'),
             contentPadding: EdgeInsets.zero,
             title: const Text('Include private sessions'),
-            subtitle: const Text('Plays hidden from followers stay out unless you choose otherwise.'),
+            subtitle: Text(privateSessionsHint(preview.privatePlays), key: const Key('import-private-hint')),
             value: state.includePrivateSessions,
             onChanged: notifier.setIncludePrivateSessions,
           ),

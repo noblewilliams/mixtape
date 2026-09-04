@@ -239,6 +239,79 @@ void main() {
       }
     });
   });
+
+  // Stats are not part of the fixture contract: the fixture suite compares
+  // inventory and snapshot only. The numbers here are hand-counted from the
+  // cases' `src/<case>/case.json` (invented data).
+  group('stats (not compared by the fixture contract)', () {
+    Future<ExportStats> statsFor(String caseName, {bool includePrivateSessions = false}) async {
+      final archive = ZipExportArchive.open(fixtureArchive(caseName));
+      try {
+        final parsed = await parseExport(
+          archive,
+          ParseOptions(timeZone: 'Africa/Lagos', includePrivateSessions: includePrivateSessions),
+        );
+        return parsed.stats;
+      } finally {
+        await archive.close();
+      }
+    }
+
+    test('extended-podcasts-and-local: two episodes and an audiobook, three rows with no track uri', () async {
+      final stats = await statsFor('extended-podcasts-and-local');
+      expect(stats.podcastOrAudiobook, 3);
+      expect(stats.localFile, 3);
+      expect(stats.privateSession, 0);
+      expect(stats.badTimestamp, 0);
+      expect(stats.privatePlays, 0);
+    });
+
+    test('extended-private-sessions: four private rows dropped by default, all four at or over 30 s', () async {
+      final stats = await statsFor('extended-private-sessions');
+      expect(stats.privateSession, 4);
+      // Three resolved private plays plus one private local-file row of 90 s:
+      // the 30 s rule counts it, whether or not it resolves to a track.
+      expect(stats.privatePlays, 4);
+      // Private rows are filtered first, so the private local-file row is
+      // not a local-file drop under the default.
+      expect(stats.localFile, 0);
+      expect(stats.podcastOrAudiobook, 0);
+      expect(stats.badTimestamp, 0);
+    });
+
+    test('extended-private-sessions with private sessions included drops nothing for privacy', () async {
+      final stats = await statsFor('extended-private-sessions', includePrivateSessions: true);
+      expect(stats.privateSession, 0);
+      expect(stats.privatePlays, 0);
+      expect(stats.localFile, 1);
+    });
+
+    test('extended-basic: three resolved rows with a timestamp outside the grammar', () async {
+      final stats = await statsFor('extended-basic');
+      expect(stats.badTimestamp, 3);
+      expect(stats.podcastOrAudiobook, 0);
+      expect(stats.localFile, 0);
+      expect(stats.privateSession, 0);
+      expect(stats.privatePlays, 0);
+    });
+
+    test('the account package has no row drops', () async {
+      final stats = await statsFor('account-basic');
+      expect(stats, ExportStats.zero);
+      expect(ExportStats.zero.podcastOrAudiobook + ExportStats.zero.localFile, 0);
+    });
+
+    test('stats never reach the canonical documents', () async {
+      final archive = ZipExportArchive.open(fixtureArchive('extended-podcasts-and-local'));
+      try {
+        final parsed = await parseExport(archive, lagos);
+        expect(parsed.inventory.toCanonicalJson().keys, ['package', 'read', 'ignored']);
+        expect(parsed.snapshot.toCanonicalJson().keys, isNot(contains('stats')));
+      } finally {
+        await archive.close();
+      }
+    });
+  });
 }
 
 Map<String, Object?> _row({required String ts, required int ms, required String? uri}) => {

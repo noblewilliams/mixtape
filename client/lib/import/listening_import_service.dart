@@ -13,15 +13,48 @@ import 'spotify_parser.dart';
 /// Parses an export archive at a path (default: [parseExportInIsolate]).
 typedef ExportParser = Future<ParsedExport> Function(String path, ParseOptions options);
 
-/// Lists an export archive at a path (default: [inspectExportInIsolate]).
-typedef ExportInspector = Future<ExportInventory> Function(String path, {CancelToken? cancelToken});
-
 class ImportOptions {
   const ImportOptions({required this.timeZone, this.includePrivateSessions = false});
 
   /// IANA zone the run records; days and hours are local to it.
   final String timeZone;
   final bool includePrivateSessions;
+
+  bool sameAs(ImportOptions other) =>
+      timeZone == other.timeZone && includePrivateSessions == other.includePrivateSessions;
+}
+
+/// What [ListeningImportService.inspect] hands the inventory screen: the full
+/// parse of the archive under [options] (the device zone, private sessions
+/// excluded), so the screen can show tracks, days with plays, the ledger
+/// years, and the row drops before anything is uploaded. Handed back to
+/// [ListeningImportService.import], it is uploaded as is unless the options
+/// changed. Holds the whole snapshot: drop it with the screen.
+class ImportPreview {
+  const ImportPreview({
+    required this.inventory,
+    required this.snapshot,
+    required this.stats,
+    required this.options,
+  });
+
+  final ExportInventory inventory;
+  final ListeningExportSnapshot snapshot;
+  final ExportStats stats;
+
+  /// The options the parse ran with.
+  final ImportOptions options;
+
+  ExportPackage get package => snapshot.package;
+  String get timeZone => snapshot.timeZone;
+  int get tracks => snapshot.tracks.length;
+  int get daysWithPlays => snapshot.days.length;
+  int get skippedPodcasts => stats.podcastOrAudiobook;
+  int get skippedLocalFiles => stats.localFile;
+
+  /// Private-session plays the default parse kept out (see
+  /// [ExportStats.privatePlays]).
+  int get privatePlays => stats.privatePlays;
 }
 
 class ListeningImportResult {
@@ -73,12 +106,8 @@ class ListeningImportProtocolException implements Exception {
 /// The server keeps one open playlist run per user, so a caller must not run
 /// this and `LibrarySyncService.sync` at the same time.
 class ListeningImportService {
-  ListeningImportService({
-    required this.api,
-    ExportParser? parser,
-    ExportInspector? inspector,
-  })  : _parser = parser ?? parseExportInIsolate,
-        _inspector = inspector ?? inspectExportInIsolate;
+  ListeningImportService({required this.api, ExportParser? parser})
+      : _parser = parser ?? parseExportInIsolate;
 
   static const int trackChunkSize = 500;
   static const int dayChunkSize = 2000;
@@ -93,7 +122,6 @@ class ListeningImportService {
 
   final ListeningApi api;
   final ExportParser _parser;
-  final ExportInspector _inspector;
 
   _ImportRun? _inFlight;
   CancelToken? _inspectToken;
@@ -101,9 +129,9 @@ class ListeningImportService {
   /// Requests that the in-flight run stop at its next await boundary; a
   /// parse in progress is cancelled through its token so the worker isolate
   /// stops too. The run then fails with [ImportCancelled]. An [inspect] in
-  /// flight is cancelled the same way: its worker decodes every allow-listed
-  /// file to count rows, so a large history would otherwise keep it busy
-  /// after the listener left the sheet.
+  /// flight is cancelled the same way: it parses the whole archive, so a
+  /// large history would otherwise keep the worker busy after the listener
+  /// left the sheet.
   void cancel() {
     _inspectToken?.cancel();
     final job = _inFlight;
@@ -112,26 +140,41 @@ class ListeningImportService {
     job.parseToken?.cancel();
   }
 
-  /// Lists the archive for the inventory screen and records that the
-  /// listener got this far (`file_inspected`, fire-and-forget: a funnel
-  /// failure never reaches the caller). [cancel] aborts it with
+  /// Parses the archive for the inventory screen, with private sessions
+  /// excluded and days local to [timeZone], and records that the listener
+  /// got this far (`file_inspected`, fire-and-forget: a funnel failure never
+  /// reaches the caller). One parse serves both the preview and, unless the
+  /// listener flips the private-sessions switch, the upload. An unreadable
+  /// archive throws [UnreadableExportException]; [cancel] aborts with
   /// [ImportCancelled] and posts nothing.
-  Future<ExportInventory> inspect(String path) async {
+  Future<ImportPreview> inspect(String path, {required String timeZone}) async {
     final token = CancelToken();
     _inspectToken = token;
+    final options = ImportOptions(timeZone: timeZone);
     try {
-      final inventory = await _inspector(path, cancelToken: token);
+      final parsed = await _parser(
+        path,
+        ParseOptions(timeZone: timeZone, includePrivateSessions: false, cancelToken: token),
+      );
       _funnel(FunnelEventType.fileInspected);
-      return inventory;
+      return ImportPreview(
+        inventory: parsed.inventory,
+        snapshot: parsed.snapshot,
+        stats: parsed.stats,
+        options: options,
+      );
     } finally {
       if (identical(_inspectToken, token)) _inspectToken = null;
     }
   }
 
-  /// Parses and uploads the archive at [path]. Concurrent callers join the
-  /// same in-flight run; a joiner's path, options, and progress callback are
-  /// intentionally ignored. Progress: parse 0–0.4, uploads 0.4–0.95,
-  /// playlist sync to 0.99, 1.0 on completion.
+  /// Parses and uploads the archive at [path]. A [preview] from [inspect] is
+  /// uploaded as it is when [options] match the ones it was parsed with;
+  /// otherwise (or without one) the archive is parsed again. Concurrent
+  /// callers join the same in-flight run; a joiner's path, options, preview,
+  /// and progress callback are intentionally ignored. Progress: parse 0–0.4
+  /// (reported as 0.4 at once when the preview is reused), uploads
+  /// 0.4–0.95, playlist sync to 0.99, 1.0 on completion.
   ///
   /// A call that arrives after [cancel] but before the cancelled run has
   /// settled never joins it: it waits for that settlement (the cancelled
@@ -142,13 +185,14 @@ class ListeningImportService {
   Future<ListeningImportResult> import(
     String path,
     ImportOptions options, {
+    ImportPreview? preview,
     void Function(double progress)? onProgress,
   }) {
     final current = _inFlight;
     if (current != null && !current.cancelRequested) return current.future;
     final settled = current?.future.then<void>((_) {}, onError: (Object _) {}) ?? Future<void>.value();
     final job = _ImportRun();
-    job.future = settled.then((_) => _run(job, path, options, onProgress)).whenComplete(() {
+    job.future = settled.then((_) => _run(job, path, options, preview, onProgress)).whenComplete(() {
       if (identical(_inFlight, job)) _inFlight = null;
     });
     _inFlight = job;
@@ -159,9 +203,15 @@ class ListeningImportService {
     _ImportRun job,
     String path,
     ImportOptions options,
+    ImportPreview? preview,
     void Function(double progress)? onProgress,
   ) async {
-    final parsed = await _parse(job, path, options, onProgress);
+    final ParsedExport parsed;
+    if (preview != null && preview.options.sameAs(options)) {
+      parsed = ParsedExport(inventory: preview.inventory, snapshot: preview.snapshot, stats: preview.stats);
+    } else {
+      parsed = await _parse(job, path, options, onProgress);
+    }
     job.checkCancelled();
     onProgress?.call(_parseStageEnd);
 

@@ -48,6 +48,35 @@ String? ledgerRange(String? from, String? to) {
   return start == end ? start : '$start → $end';
 }
 
+/// `2018 – 2026` from the ledger bounds; one year reads as that year, a
+/// missing end stands in as the start, and no start is null. Mirrors the
+/// web's `yearsLabel`.
+String? yearsRange(String? from, String? to) {
+  if (from == null) return null;
+  final start = _year(from);
+  final end = to == null ? start : _year(to);
+  return start == end ? start : '$start – $end';
+}
+
+String _year(String day) => day.length > 4 ? day.substring(0, 4) : day;
+
+/// The inventory's skipped-row line: `12 podcasts · 3 local files`, zero
+/// parts left out, `None` when nothing was skipped.
+String skippedRowsLabel({required int podcasts, required int localFiles}) {
+  final parts = [
+    if (podcasts > 0) plural(podcasts, 'podcast'),
+    if (localFiles > 0) plural(localFiles, 'local file'),
+  ];
+  return parts.isEmpty ? 'None' : parts.join(' · ');
+}
+
+/// The private-sessions switch's hint: how many plays the default keeps out.
+String privateSessionsHint(int privatePlays) {
+  if (privatePlays == 0) return 'No private-session plays in this file.';
+  final verb = privatePlays == 1 ? 'stays' : 'stay';
+  return '${plural(privatePlays, 'play')} hidden from followers $verb out unless you choose otherwise.';
+}
+
 /// `4 Sep`, with the year when it is not the current one.
 String shortDate(DateTime date, {DateTime? now}) {
   final local = date.toLocal();

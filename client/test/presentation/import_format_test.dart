@@ -38,6 +38,29 @@ void main() {
     expect(shortDate(DateTime(2025, 12, 25), now: now), '25 Dec 2025');
   });
 
+  test('yearsRange joins the ledger years, collapses one year, stands in for a missing end, '
+      'and is null with no start', () {
+    expect(yearsRange('2018-03-02', '2026-08-30'), '2018 – 2026');
+    expect(yearsRange('2026-01-04', '2026-08-30'), '2026');
+    expect(yearsRange('2024-03-02', null), '2024');
+    expect(yearsRange(null, '2026-08-30'), isNull);
+  });
+
+  test('skippedRowsLabel joins the non-zero parts with a middle dot, in the singular or plural, '
+      'and reads None when nothing was skipped', () {
+    expect(skippedRowsLabel(podcasts: 12, localFiles: 3), '12 podcasts · 3 local files');
+    expect(skippedRowsLabel(podcasts: 1, localFiles: 0), '1 podcast');
+    expect(skippedRowsLabel(podcasts: 0, localFiles: 1), '1 local file');
+    expect(skippedRowsLabel(podcasts: 0, localFiles: 0), 'None');
+  });
+
+  test('privateSessionsHint counts the plays the default keeps out, in the singular or plural, '
+      'and says so when there are none', () {
+    expect(privateSessionsHint(5), '5 plays hidden from followers stay out unless you choose otherwise.');
+    expect(privateSessionsHint(1), '1 play hidden from followers stays out unless you choose otherwise.');
+    expect(privateSessionsHint(0), 'No private-session plays in this file.');
+  });
+
   test('plural picks the unit by count', () {
     expect(plural(1, 'track'), '1 track');
     expect(plural(2, 'track'), '2 tracks');

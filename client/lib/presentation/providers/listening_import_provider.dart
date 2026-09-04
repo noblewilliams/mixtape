@@ -53,25 +53,28 @@ class ImportInspecting extends ImportFlowState {
 class ImportInventory extends ImportFlowState {
   const ImportInventory({
     required this.archive,
-    required this.inventory,
-    required this.timeZone,
+    required this.preview,
     required this.includePrivateSessions,
   });
 
   final PickedArchive archive;
-  final ExportInventory inventory;
+
+  /// The full parse under the default options: every fact the inventory
+  /// shows, and the snapshot the upload sends unless the switch is flipped.
+  final ImportPreview preview;
+  final bool includePrivateSessions;
+
+  ExportInventory get inventory => preview.inventory;
 
   /// The zone local days are computed in (shown as "Local days in …").
-  final String timeZone;
-  final bool includePrivateSessions;
+  String get timeZone => preview.timeZone;
 
   ImportOptions get options =>
       ImportOptions(timeZone: timeZone, includePrivateSessions: includePrivateSessions);
 
   ImportInventory withPrivateSessions(bool include) => ImportInventory(
         archive: archive,
-        inventory: inventory,
-        timeZone: timeZone,
+        preview: preview,
         includePrivateSessions: include,
       );
 }
@@ -92,12 +95,14 @@ class ImportDone extends ImportFlowState {
 
 /// The history was published but the playlist sync after it failed.
 class ImportPartial extends ImportFlowState {
-  const ImportPartial(this.archive, this.result, this.options);
+  const ImportPartial(this.archive, this.result, this.options, this.preview);
   final PickedArchive archive;
   final ListeningImportResult result;
 
-  /// What the run was started with, so "Retry playlists" repeats it exactly.
+  /// What the run was started with, so "Retry playlists" repeats it exactly
+  /// (and, with the [preview], without parsing the file again).
   final ImportOptions options;
+  final ImportPreview? preview;
 }
 
 class ImportFailed extends ImportFlowState {
@@ -174,27 +179,19 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
     await inspect(archive);
   }
 
-  /// Lists the archive for the inventory. A file that cannot yield a
-  /// snapshot fails here with its diagnostics, before anything is uploaded.
+  /// Parses the archive for the inventory, with days local to the device
+  /// zone. A file that cannot yield a snapshot fails here with its
+  /// diagnostics, before anything is uploaded.
   Future<void> inspect(PickedArchive archive) async {
     if (state is ImportUploading) return;
     final generation = ++_generation;
     state = ImportInspecting(archive);
     try {
-      final inventory = await _service.inspect(archive.path);
-      if (!_current(generation)) return;
-      if (!inventory.isReadable) {
-        await _failUnreadable(generation, archive, inventory.package, inventory.unreadableFile);
-        return;
-      }
       final timeZone = await ref.read(deviceTimeZoneProvider)();
       if (!_current(generation)) return;
-      state = ImportInventory(
-        archive: archive,
-        inventory: inventory,
-        timeZone: timeZone,
-        includePrivateSessions: false,
-      );
+      final preview = await _service.inspect(archive.path, timeZone: timeZone);
+      if (!_current(generation)) return;
+      state = ImportInventory(archive: archive, preview: preview, includePrivateSessions: false);
     } on ImportCancelled {
       if (_current(generation)) state = const ImportFlowCancelled();
     } on UnreadableExportException catch (error) {
@@ -217,7 +214,7 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
   Future<void> upload() async {
     final current = state;
     if (current is! ImportInventory) return;
-    await _upload(current.archive, current.options);
+    await _upload(current.archive, current.options, current.preview);
   }
 
   /// Partial state: imports the same file again with the same options. The
@@ -226,16 +223,17 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
   Future<void> retryPlaylists() async {
     final current = state;
     if (current is! ImportPartial) return;
-    await _upload(current.archive, current.options);
+    await _upload(current.archive, current.options, current.preview);
   }
 
-  Future<void> _upload(PickedArchive archive, ImportOptions options) async {
+  Future<void> _upload(PickedArchive archive, ImportOptions options, ImportPreview? preview) async {
     final generation = ++_generation;
     state = ImportUploading(archive, 0);
     try {
       final result = await _service.import(
         archive.path,
         options,
+        preview: preview,
         onProgress: (progress) {
           if (_current(generation)) state = ImportUploading(archive, progress);
         },
@@ -243,7 +241,7 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
       if (!_current(generation)) return;
       state = result.playlistError == null
           ? ImportDone(archive, result)
-          : ImportPartial(archive, result, options);
+          : ImportPartial(archive, result, options, preview);
     } on ImportCancelled {
       if (!_current(generation)) return;
       state = const ImportFlowCancelled();

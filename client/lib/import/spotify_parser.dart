@@ -83,10 +83,62 @@ class ParseOptions {
 }
 
 class ParsedExport {
-  const ParsedExport({required this.inventory, required this.snapshot});
+  const ParsedExport({required this.inventory, required this.snapshot, this.stats = ExportStats.zero});
 
   final ExportInventory inventory;
   final ListeningExportSnapshot snapshot;
+
+  /// Row drops the inventory screen reports. Not part of the fixture
+  /// contract: never serialized, never compared.
+  final ExportStats stats;
+}
+
+/// How many history rows the extended parse dropped, by reason, in the order
+/// the rules apply (private session, then podcast or audiobook, then no
+/// track uri, then a timestamp outside the grammar); [privatePlays] is how
+/// many of the [privateSession] drops the 30 s rule would have counted as
+/// plays, whether or not the row resolves to a track (podcast and audiobook
+/// rows never count). All zero for the account package, and for a parse that
+/// includes private sessions the two private counts are zero.
+class ExportStats {
+  const ExportStats({
+    required this.podcastOrAudiobook,
+    required this.localFile,
+    required this.privateSession,
+    required this.badTimestamp,
+    required this.privatePlays,
+  });
+
+  static const zero = ExportStats(
+    podcastOrAudiobook: 0,
+    localFile: 0,
+    privateSession: 0,
+    badTimestamp: 0,
+    privatePlays: 0,
+  );
+
+  final int podcastOrAudiobook;
+  final int localFile;
+  final int privateSession;
+  final int badTimestamp;
+  final int privatePlays;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ExportStats &&
+      other.podcastOrAudiobook == podcastOrAudiobook &&
+      other.localFile == localFile &&
+      other.privateSession == privateSession &&
+      other.badTimestamp == badTimestamp &&
+      other.privatePlays == privatePlays;
+
+  @override
+  int get hashCode => Object.hash(podcastOrAudiobook, localFile, privateSession, badTimestamp, privatePlays);
+
+  @override
+  String toString() =>
+      'ExportStats(podcastOrAudiobook: $podcastOrAudiobook, localFile: $localFile, '
+      'privateSession: $privateSession, badTimestamp: $badTimestamp, privatePlays: $privatePlays)';
 }
 
 enum ExportFileKind { history, library, playlist }
@@ -331,14 +383,15 @@ Future<ParsedExport> parseExport(ExportArchive archive, ParseOptions options) as
   if (snapshot == null) {
     throw UnreadableExportException(file: inventory.unreadableFile, inventory: inventory);
   }
-  return ParsedExport(inventory: inventory, snapshot: snapshot);
+  return ParsedExport(inventory: inventory, snapshot: snapshot, stats: scan.stats);
 }
 
 class _Scan {
-  const _Scan(this.inventory, this.snapshot);
+  const _Scan(this.inventory, this.snapshot, this.stats);
 
   final ExportInventory inventory;
   final ListeningExportSnapshot? snapshot;
+  final ExportStats stats;
 }
 
 Future<void> _checkpoint(CancelToken? token) async {
@@ -409,9 +462,9 @@ Future<_Scan> _scan(
   }
 
   final inventory = ExportInventory(package: package, read: read, ignored: ignored);
-  if (!aggregate || broken || package == null) return _Scan(inventory, null);
+  if (!aggregate || broken || package == null) return _Scan(inventory, null, ExportStats.zero);
   final snapshot = extended?.snapshot(timeZone) ?? account!.snapshot(timeZone);
-  return _Scan(inventory, snapshot);
+  return _Scan(inventory, snapshot, extended?.stats ?? ExportStats.zero);
 }
 
 class _Track {
@@ -447,6 +500,18 @@ class _ExtendedAggregator {
   final Map<String, int> countries = {};
   int unresolvedRows = 0;
   int unresolvedPlays = 0;
+  int podcastOrAudiobook = 0;
+  int privateSession = 0;
+  int privatePlays = 0;
+  int badTimestamp = 0;
+
+  ExportStats get stats => ExportStats(
+        podcastOrAudiobook: podcastOrAudiobook,
+        localFile: unresolvedRows,
+        privateSession: privateSession,
+        badTimestamp: badTimestamp,
+        privatePlays: privatePlays,
+      );
 
   Future<void> consume(
     LoadedExportFile loaded,
@@ -466,10 +531,18 @@ class _ExtendedAggregator {
   }
 
   void _row(Map<dynamic, dynamic> row) {
-    if (row['incognito_mode'] == true && !includePrivateSessions) return;
-    if (row['spotify_episode_uri'] != null || row['audiobook_uri'] != null) return;
+    final isEpisode = row['spotify_episode_uri'] != null || row['audiobook_uri'] != null;
     final msPlayed = asInteger(row['ms_played']);
     final isPlay = msPlayed >= playThresholdMs;
+    if (row['incognito_mode'] == true && !includePrivateSessions) {
+      privateSession += 1;
+      if (isPlay && !isEpisode) privatePlays += 1;
+      return;
+    }
+    if (isEpisode) {
+      podcastOrAudiobook += 1;
+      return;
+    }
     final platformId = spotifyIdFromUri(row['spotify_track_uri'], 'track');
     if (platformId == null) {
       unresolvedRows += 1;
@@ -477,7 +550,10 @@ class _ExtendedAggregator {
       return;
     }
     final utcMs = instantFromTs(row['ts']);
-    if (utcMs == null) return;
+    if (utcMs == null) {
+      badTimestamp += 1;
+      return;
+    }
 
     final skipped = row['skipped'];
     final reasonEnd = row['reason_end'];

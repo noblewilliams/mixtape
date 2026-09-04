@@ -64,8 +64,16 @@ void main() {
     expect(picker.picks, 1);
     expect(find.text('my_spotify_data_extended.zip'), findsOneWidget);
     expect(find.text('38.4 MB · Extended streaming history'), findsOneWidget);
-    expect(find.text('54,111'), findsOneWidget);
+    expect(find.text('Tracks'), findsOneWidget);
+    expect(find.text('1,203'), findsOneWidget);
+    expect(find.text('Days with plays'), findsOneWidget);
+    expect(find.text('486'), findsOneWidget);
+    expect(find.text('Years covered'), findsOneWidget);
+    expect(find.text('2018 – 2026'), findsOneWidget);
     expect(find.text('Local days in Africa/Lagos'), findsOneWidget);
+    expect(find.text('Skipped rows'), findsOneWidget);
+    expect(find.text('12 podcasts · 3 local files'), findsOneWidget);
+    expect(find.text('54,111'), findsNothing, reason: 'rows read is not a fact the record shows');
     expect(find.text('Streaming_History_Audio_2018-2020_0.json'), findsOneWidget);
     expect(find.text('24,110 rows'), findsOneWidget);
     expect(find.text('Streaming_History_Video_2024_0.json'), findsOneWidget);
@@ -75,7 +83,7 @@ void main() {
     final toggle = tester.widget<SwitchListTile>(find.byKey(const Key('import-private-sessions')));
     expect(toggle.value, isFalse);
     expect(
-      find.text('Plays hidden from followers stay out unless you choose otherwise.'),
+      find.text('5 plays hidden from followers stay out unless you choose otherwise.'),
       findsOneWidget,
     );
     expect(
@@ -99,7 +107,7 @@ void main() {
     expect((c.read(listeningImportProvider) as ImportInventory).includePrivateSessions, isTrue);
     expect(tester.widget<SwitchListTile>(find.byKey(const Key('import-private-sessions'))).value, isTrue);
 
-    service.inventory = accountInventory;
+    service.preview = accountPreview;
     picker.next = accountArchive;
     await tester.tap(find.byKey(const Key('import-pick-other')));
     await tester.pumpAndSettle();
@@ -107,10 +115,71 @@ void main() {
     expect(picker.picks, 2);
     expect(find.text('my_spotify_data.zip'), findsOneWidget);
     expect(find.text('1.2 MB · Account data'), findsOneWidget);
+    expect(find.text('Tracks'), findsOneWidget);
+    expect(find.text('226'), findsOneWidget);
+    expect(find.text('Liked songs'), findsOneWidget);
+    expect(find.text('214'), findsOneWidget);
+    expect(find.text('Artists'), findsOneWidget);
+    expect(find.text('37'), findsOneWidget);
+    expect(find.text('Playlists'), findsOneWidget);
+    expect(find.text('12'), findsOneWidget);
+    expect(find.text('Skipped rows'), findsOneWidget);
+    expect(find.text('None'), findsOneWidget);
+    expect(find.text('Days with plays'), findsNothing);
+    expect(find.text('Years covered'), findsNothing);
     expect(find.byKey(const Key('import-private-sessions')), findsNothing);
+    expect(find.textContaining('hidden from followers'), findsNothing);
     expect(find.textContaining('Local days in'), findsNothing);
     expect(find.text('YourLibrary.json'), findsOneWidget);
     expect(find.text('Identity.json'), findsOneWidget);
+    expect(find.text('ignored'), findsOneWidget);
+  });
+
+  Future<void> inventoryFor(WidgetTester tester, ImportPreview preview) async {
+    final c = container();
+    service.preview = preview;
+    await open(tester, c);
+    await tester.tap(find.byKey(const Key('import-pick')));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('one private play reads in the singular; none replaces the hint and keeps the switch',
+      (tester) async {
+    await inventoryFor(tester, extendedPreviewWith(privatePlays: 1));
+    expect(
+      find.text('1 play hidden from followers stays out unless you choose otherwise.'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const Key('import-pick-other')));
+    service.preview = extendedPreviewWith(privatePlays: 0);
+    await tester.pumpAndSettle();
+    expect(find.text('No private-session plays in this file.'), findsOneWidget);
+    expect(find.textContaining('hidden from followers'), findsNothing);
+    expect(tester.widget<SwitchListTile>(find.byKey(const Key('import-private-sessions'))).value, isFalse);
+  });
+
+  testWidgets('skipped rows omit zero parts, read None when nothing was skipped, and years '
+      'collapse to one', (tester) async {
+    await inventoryFor(tester, extendedPreviewWith(localFiles: 0));
+    expect(find.text('12 podcasts'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('import-pick-other')));
+    service.preview = extendedPreviewWith(podcasts: 0, localFiles: 1);
+    await tester.pumpAndSettle();
+    expect(find.text('1 local file'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('import-pick-other')));
+    service.preview = extendedPreviewWith(
+      podcasts: 0,
+      localFiles: 0,
+      ledgerFrom: '2026-01-04',
+      ledgerTo: '2026-08-30',
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('None'), findsOneWidget);
+    expect(find.text('2026'), findsOneWidget);
+    expect(find.textContaining('podcast'), findsNothing);
   });
 
   testWidgets('inspecting shows the file name with a spinner and a Cancel that lands on cancelled',
@@ -205,7 +274,7 @@ void main() {
   testWidgets('done for the account package counts liked songs, artists, and playlists',
       (tester) async {
     final c = container();
-    service.inventory = accountInventory;
+    service.preview = accountPreview;
     picker.next = accountArchive;
     await open(tester, c);
     await tester.tap(find.byKey(const Key('import-pick')));
@@ -225,7 +294,7 @@ void main() {
   testWidgets('partial: history published, playlists failed, the web\'s copy, Retry playlists '
       're-uploads the same file, Make a mix anyway', (tester) async {
     final c = container();
-    service.inventory = accountInventory;
+    service.preview = accountPreview;
     picker.next = accountArchive;
     await open(tester, c);
     await tester.tap(find.byKey(const Key('import-pick')));
@@ -271,7 +340,7 @@ void main() {
       'it', (tester) async {
     final report = Completer<ExportDiagnostics>();
     listening = FakeListeningApi(onboarding: onboardingState(chosenService: 'spotify'));
-    service = FakeImportService()..inventory = brokenInventory;
+    service = FakeImportService()..inspectError = brokenError;
     picker = FakeArchivePicker(extendedArchive);
     final c = onboardingContainer(
       listening: listening,
@@ -301,7 +370,7 @@ void main() {
   testWidgets('failed: the expected file names, the report in a monospace box, Copy report puts '
       'the report on the clipboard, Try another file picks again', (tester) async {
     final c = container();
-    service.inventory = brokenInventory;
+    service.inspectError = brokenError;
     final clipboard = <String>[];
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform,
         (call) async {
@@ -340,7 +409,7 @@ void main() {
     expect(clipboard.single, isNot(contains('spotify_track_uri": "')));
     expect(find.text('Report copied'), findsOneWidget);
 
-    service.inventory = extendedInventory;
+    service.inspectError = null;
     await tester.ensureVisible(find.byKey(const Key('import-try-another')));
     await tester.tap(find.byKey(const Key('import-try-another')));
     await tester.pumpAndSettle();

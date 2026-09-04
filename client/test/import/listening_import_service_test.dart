@@ -107,16 +107,8 @@ class _Server {
       .toList();
 }
 
-Future<ListeningImportService> _service(
-  _Server server, {
-  ExportParser? parser,
-  ExportInspector? inspector,
-}) async =>
-    ListeningImportService(
-      api: ListeningApi(await apiWith(server.client)),
-      parser: parser,
-      inspector: inspector,
-    );
+Future<ListeningImportService> _service(_Server server, {ExportParser? parser}) async =>
+    ListeningImportService(api: ListeningApi(await apiWith(server.client)), parser: parser);
 
 List<int> _ordinals(List<List<Map<String, dynamic>>> chunks) =>
     [for (final chunk in chunks) for (final row in chunk) row['ordinal'] as int];
@@ -652,30 +644,111 @@ void main() {
     test('cancel() during inspect() rejects with ImportCancelled and leaves the service usable', () async {
       final server = _Server();
       late ListeningImportService service;
-      var inspections = 0;
+      var parses = 0;
       service = await _service(
         server,
-        inspector: (path, {cancelToken}) async {
-          if (++inspections == 1) {
+        parser: (path, options) async {
+          if (++parses == 1) {
             service.cancel();
-            cancelToken!.throwIfCancelled();
+            options.cancelToken!.throwIfCancelled();
             throw StateError('unreachable');
           }
-          return ExportInventory.empty;
+          return ParsedExport(inventory: ExportInventory.empty, snapshot: _synthetic(tracks: 1));
         },
-        parser: _parserFor(_synthetic(tracks: 1)),
       );
 
-      await expectLater(service.inspect('any.zip'), throwsA(isA<ImportCancelled>()));
+      await expectLater(service.inspect('any.zip', timeZone: 'Africa/Lagos'), throwsA(isA<ImportCancelled>()));
       await pumpEventQueue();
       expect(server.funnelTypes, isEmpty);
 
-      final inventory = await service.inspect('any.zip');
-      final result = await service.import('any.zip', _lagos);
+      final preview = await service.inspect('any.zip', timeZone: 'Africa/Lagos');
+      final result = await service.import('any.zip', _lagos, preview: preview);
       await pumpEventQueue();
-      expect(inventory.package, isNull);
+      expect(preview.tracks, 1);
       expect(result.summary.tracks, 1);
+      expect(parses, 2);
       expect(server.funnelTypes, ['file_inspected', 'import_completed']);
+    });
+  });
+
+  group('inspect preview', () {
+    test('inspect parses once with private sessions excluded; an untouched toggle uploads that '
+        'parse and a flipped one parses again', () async {
+      final server = _Server();
+      final parses = <bool>[];
+      final service = await _service(server, parser: (path, options) async {
+        parses.add(options.includePrivateSessions);
+        return ParsedExport(inventory: ExportInventory.empty, snapshot: _synthetic(tracks: 1));
+      });
+
+      final preview = await service.inspect('any.zip', timeZone: 'Africa/Lagos');
+      expect(parses, [false]);
+      expect(preview.options.timeZone, 'Africa/Lagos');
+      expect(preview.options.includePrivateSessions, isFalse);
+
+      await service.import('any.zip', _lagos, preview: preview);
+      expect(parses, [false], reason: 'the preview already holds the snapshot');
+
+      await service.import(
+        'any.zip',
+        const ImportOptions(timeZone: 'Africa/Lagos', includePrivateSessions: true),
+        preview: preview,
+      );
+      expect(parses, [false, true]);
+      await pumpEventQueue();
+      expect(server.funnelTypes, ['file_inspected', 'import_completed', 'import_completed']);
+    });
+
+    test('an upload from the preview skips the parse stage: progress starts at 0.4', () async {
+      final server = _Server();
+      final progress = <double>[];
+      final service = await _service(server, parser: _parserFor(_synthetic(tracks: 1)));
+      final preview = await service.inspect('any.zip', timeZone: 'Africa/Lagos');
+      await service.import('any.zip', _lagos, preview: preview, onProgress: progress.add);
+      expect(progress.first, 0.4);
+      expect(progress.last, 1.0);
+    });
+
+    test('the preview for extended-basic carries the counts the inventory shows', () async {
+      final server = _Server();
+      final preview = await (await _service(server)).inspect(
+        fixtureArchive('extended-basic').path,
+        timeZone: 'Africa/Lagos',
+      );
+      expect(preview.package, ExportPackage.spotifyExtended);
+      expect(preview.tracks, 6);
+      expect(preview.daysWithPlays, 13);
+      expect(preview.snapshot.ledgerFrom, '2024-03-02');
+      expect(preview.snapshot.ledgerTo, '2026-04-05');
+      expect(preview.timeZone, 'Africa/Lagos');
+      expect(preview.skippedPodcasts, 0);
+      expect(preview.skippedLocalFiles, 0);
+      expect(preview.privatePlays, 0);
+      expect(preview.stats.badTimestamp, 3);
+      expect(preview.inventory.toCanonicalJson(), expectedFor('extended-basic', 'default')['inventory']);
+      await pumpEventQueue();
+      expect(server.funnelTypes, ['file_inspected']);
+    });
+
+    test('the preview for extended-private-sessions counts the private plays the toggle keeps out', () async {
+      final server = _Server();
+      final preview = await (await _service(server)).inspect(
+        fixtureArchive('extended-private-sessions').path,
+        timeZone: 'Africa/Lagos',
+      );
+      expect(preview.tracks, 1);
+      expect(preview.daysWithPlays, 1);
+      expect(preview.privatePlays, 4);
+    });
+
+    test('inspect on an unreadable archive throws with the broken file and posts nothing', () async {
+      final server = _Server();
+      await expectLater(
+        (await _service(server)).inspect(fixtureArchive('extended-malformed').path, timeZone: 'Africa/Lagos'),
+        throwsA(isA<UnreadableExportException>().having((e) => e.file, 'file', isNotNull)),
+      );
+      await pumpEventQueue();
+      expect(server.funnelTypes, isEmpty);
     });
   });
 
@@ -811,19 +884,23 @@ void main() {
     test('a funnel transport failure never surfaces from inspect()', () async {
       final service = ListeningImportService(
         api: ListeningApi(await apiWith(MockClient((_) async => throw http.ClientException('down')))),
-        inspector: (path, {cancelToken}) async => ExportInventory.empty,
+        parser: _parserFor(_synthetic(tracks: 1)),
       );
-      final inventory = await service.inspect('any.zip');
+      final preview = await service.inspect('any.zip', timeZone: 'Africa/Lagos');
       await pumpEventQueue();
-      expect(inventory.package, isNull);
+      expect(preview.tracks, 1);
     });
 
-    test('inspect() lists the archive and posts file_inspected', () async {
+    test('inspect() parses the archive, posts file_inspected, and sends nothing else', () async {
       final server = _Server();
       final service = await _service(server);
-      final inventory = await service.inspect(fixtureArchive('account-basic').path);
+      final preview = await service.inspect(fixtureArchive('account-basic').path, timeZone: 'Africa/Lagos');
       await pumpEventQueue();
-      expect(inventory.toCanonicalJson(), expectedFor('account-basic', 'default')['inventory']);
+      final expected = expectedFor('account-basic', 'default');
+      expect(preview.inventory.toCanonicalJson(), expected['inventory']);
+      expect(preview.snapshot.toCanonicalJson(), expected['snapshot']);
+      expect(preview.stats, ExportStats.zero);
+      expect(preview.package, ExportPackage.spotifyAccount);
       expect(server.protocol, isEmpty);
       expect(server.funnelTypes, ['file_inspected']);
     });
