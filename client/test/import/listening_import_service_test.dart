@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -477,9 +478,9 @@ void main() {
         byPlaylist.putIfAbsent(put['playlistAppleId'] as String, () => []).add((put['entries'] as List).length);
       }
       expect(byPlaylist['${'k' * 63}0'], [200, 1]);
-      // An empty playlist sends one empty page, as the Apple sync does.
-      expect(byPlaylist['${'k' * 63}1'], [0]);
-      expect(byPlaylist, hasLength(51));
+      // An empty playlist sends no entries page, as the web service does.
+      expect(byPlaylist, isNot(contains('${'k' * 63}1')));
+      expect(byPlaylist, hasLength(1));
       expect(server.chunks('/playlists', 'playlists').first.first['sourceFingerprint'], hasLength(64));
       expect(
         server.chunks('/playlists', 'playlists').first[1]['sourceFingerprint'],
@@ -545,6 +546,100 @@ void main() {
       service.cancel();
       final result = await service.import('any.zip', _lagos);
       expect(result.summary.tracks, 1);
+    });
+
+    test('between playlist entry chunks stops the sync and throws ImportCancelled', () async {
+      late ListeningImportService service;
+      final server = _Server(
+        onRequest: (request) {
+          if (request.url.path.endsWith('/entries')) service.cancel();
+        },
+      );
+      final snapshot = _synthetic(package: ExportPackage.spotifyAccount, tracks: 1, playlists: [_playlist(0, 201)]);
+      service = await _service(server, parser: _parserFor(snapshot));
+
+      await expectLater(service.import('any.zip', _lagos), throwsA(isA<ImportCancelled>()));
+      await pumpEventQueue();
+      expect(server.protocol, [
+        'POST /ingest/listening/imports',
+        'PUT /ingest/listening/imports/run-1/tracks',
+        'POST /ingest/listening/imports/run-1/complete',
+        'POST /ingest/playlists/syncs',
+        'PUT /ingest/playlists/syncs/sync-1/playlists',
+        'PUT /ingest/playlists/syncs/sync-1/entries',
+      ]);
+      expect(server.funnelTypes, isEmpty);
+    });
+
+    test('after a cancel, the next import() starts a fresh run', () async {
+      late ListeningImportService service;
+      var cancelled = false;
+      final server = _Server(
+        onRequest: (request) {
+          if (cancelled || !request.url.path.endsWith('/tracks')) return;
+          cancelled = true;
+          service.cancel();
+        },
+      );
+      service = await _service(server, parser: _parserFor(_synthetic(tracks: 501)));
+
+      await expectLater(service.import('any.zip', _lagos), throwsA(isA<ImportCancelled>()));
+      final result = await service.import('any.zip', _lagos);
+      await pumpEventQueue();
+      expect(result.summary.tracks, 501);
+      expect(server.protocol.where((r) => r == 'POST /ingest/listening/imports'), hasLength(2));
+      expect(server.protocol.last, 'POST /ingest/listening/imports/run-1/complete');
+      expect(server.funnelTypes, ['import_completed']);
+    });
+
+    test("a joiner's cancel() aborts the shared run for the first caller too", () async {
+      final begun = Completer<void>();
+      final server = _Server(
+        onRequest: (request) {
+          if (request.url.path == '/ingest/listening/imports' && !begun.isCompleted) begun.complete();
+        },
+      );
+      final service = await _service(server, parser: _parserFor(_synthetic(tracks: 501)));
+
+      final first = service.import('any.zip', _lagos);
+      await begun.future;
+      final joined = service.import('other.zip', _lagos);
+      service.cancel();
+
+      await expectLater(joined, throwsA(isA<ImportCancelled>()));
+      await expectLater(first, throwsA(isA<ImportCancelled>()));
+      await pumpEventQueue();
+      expect(server.protocol, ['POST /ingest/listening/imports']);
+      expect(server.funnelTypes, isEmpty);
+    });
+
+    test('cancel() during inspect() rejects with ImportCancelled and leaves the service usable', () async {
+      final server = _Server();
+      late ListeningImportService service;
+      var inspections = 0;
+      service = await _service(
+        server,
+        inspector: (path, {cancelToken}) async {
+          if (++inspections == 1) {
+            service.cancel();
+            cancelToken!.throwIfCancelled();
+            throw StateError('unreachable');
+          }
+          return ExportInventory.empty;
+        },
+        parser: _parserFor(_synthetic(tracks: 1)),
+      );
+
+      await expectLater(service.inspect('any.zip'), throwsA(isA<ImportCancelled>()));
+      await pumpEventQueue();
+      expect(server.funnelTypes, isEmpty);
+
+      final inventory = await service.inspect('any.zip');
+      final result = await service.import('any.zip', _lagos);
+      await pumpEventQueue();
+      expect(inventory.package, isNull);
+      expect(result.summary.tracks, 1);
+      expect(server.funnelTypes, ['file_inspected', 'import_completed']);
     });
   });
 
@@ -647,7 +742,7 @@ void main() {
     test('a funnel transport failure never surfaces from inspect()', () async {
       final service = ListeningImportService(
         api: ListeningApi(await apiWith(MockClient((_) async => throw http.ClientException('down')))),
-        inspector: (path) async => ExportInventory.empty,
+        inspector: (path, {cancelToken}) async => ExportInventory.empty,
       );
       final inventory = await service.inspect('any.zip');
       await pumpEventQueue();

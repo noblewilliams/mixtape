@@ -1,8 +1,25 @@
+import 'dart:io';
+
+import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/import/import_isolate.dart';
 import 'package:mixtape/import/spotify_parser.dart';
 
 import 'fixtures.dart';
+
+/// The path of a fresh archive of [count] empty history files. Every file is
+/// a checkpoint, so a cancel sent while the worker runs is seen before the
+/// worker finishes, however loaded the machine is.
+String _manyFileArchive(int count) {
+  final built = Archive();
+  for (var i = 0; i < count; i++) {
+    built.add(ArchiveFile.string('Streaming_History_Audio_2026_$i.json', '[]'));
+  }
+  final dir = Directory.systemTemp.createTempSync('mixtape-import-isolate-');
+  addTearDown(() => dir.deleteSync(recursive: true));
+  final file = File('${dir.path}/archive.zip')..writeAsBytesSync(ZipEncoder().encodeBytes(built));
+  return file.path;
+}
 
 void main() {
   test('parses a fixture in a worker isolate with progress across the boundary', () async {
@@ -47,7 +64,7 @@ void main() {
     final token = CancelToken();
     await expectLater(
       parseExportInIsolate(
-        fixtureArchive('extended-basic').path,
+        _manyFileArchive(300),
         ParseOptions(
           timeZone: 'Africa/Lagos',
           cancelToken: token,
@@ -71,5 +88,12 @@ void main() {
       inspectExportInIsolate(notZip),
       throwsA(isA<UnreadableExportException>().having((e) => e.file, 'file', isNull)),
     );
+  });
+
+  test('cancelling the token while the inspector scans stops the worker with ImportCancelled', () async {
+    final token = CancelToken();
+    final inventory = inspectExportInIsolate(_manyFileArchive(300), cancelToken: token);
+    token.cancel();
+    await expectLater(inventory, throwsA(isA<ImportCancelled>()));
   });
 }

@@ -14,7 +14,7 @@ import 'spotify_parser.dart';
 typedef ExportParser = Future<ParsedExport> Function(String path, ParseOptions options);
 
 /// Lists an export archive at a path (default: [inspectExportInIsolate]).
-typedef ExportInspector = Future<ExportInventory> Function(String path);
+typedef ExportInspector = Future<ExportInventory> Function(String path, {CancelToken? cancelToken});
 
 class ImportOptions {
   const ImportOptions({required this.timeZone, this.includePrivateSessions = false});
@@ -85,11 +85,16 @@ class ListeningImportService {
   Future<ListeningImportResult>? _inFlight;
   bool _cancelRequested = false;
   CancelToken? _parseToken;
+  CancelToken? _inspectToken;
 
   /// Requests that the in-flight run stop at its next await boundary; a
   /// parse in progress is cancelled through its token so the worker isolate
-  /// stops too. The run then fails with [ImportCancelled].
+  /// stops too. The run then fails with [ImportCancelled]. An [inspect] in
+  /// flight is cancelled the same way: its worker decodes every allow-listed
+  /// file to count rows, so a large history would otherwise keep it busy
+  /// after the listener left the sheet.
   void cancel() {
+    _inspectToken?.cancel();
     if (_inFlight == null) return;
     _cancelRequested = true;
     _parseToken?.cancel();
@@ -97,11 +102,18 @@ class ListeningImportService {
 
   /// Lists the archive for the inventory screen and records that the
   /// listener got this far (`file_inspected`, fire-and-forget: a funnel
-  /// failure never reaches the caller).
+  /// failure never reaches the caller). [cancel] aborts it with
+  /// [ImportCancelled] and posts nothing.
   Future<ExportInventory> inspect(String path) async {
-    final inventory = await _inspector(path);
-    _funnel(FunnelEventType.fileInspected);
-    return inventory;
+    final token = CancelToken();
+    _inspectToken = token;
+    try {
+      final inventory = await _inspector(path, cancelToken: token);
+      _funnel(FunnelEventType.fileInspected);
+      return inventory;
+    } finally {
+      if (identical(_inspectToken, token)) _inspectToken = null;
+    }
   }
 
   /// Parses and uploads the archive at [path]. Concurrent callers join the
@@ -270,9 +282,7 @@ class ListeningImportService {
 
       for (final playlist in chunk) {
         final entries = List.of(playlist.entries)..sort((a, b) => a.position.compareTo(b.position));
-        // An empty playlist still sends one empty page, as the Apple sync does.
-        var entryOffset = 0;
-        while (true) {
+        for (var entryOffset = 0; entryOffset < entries.length; entryOffset += entryChunkSize) {
           _checkCancelled();
           final page = entries.sublist(entryOffset, math.min(entryOffset + entryChunkSize, entries.length));
           final accepted = await api.putPlaylistEntries(
@@ -282,11 +292,8 @@ class ListeningImportService {
           );
           _checkCancelled();
           if (accepted != page.length) throw const ListeningImportProtocolException();
-          if (page.isEmpty) break;
-          entryOffset += page.length;
           completedUnits += page.length;
           reportPlaylists();
-          if (entryOffset == entries.length) break;
         }
       }
     }
