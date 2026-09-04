@@ -224,6 +224,7 @@ DjSession _withQueueVersion(DjSession session, int queueVersion) => DjSession(
   status: session.status,
   queueVersion: queueVersion,
   updatedAt: session.updatedAt,
+  notPersonal: session.notPersonal,
 );
 
 /// Bumps only the title, carrying every other field over verbatim — the
@@ -239,6 +240,7 @@ DjSession _withTitle(DjSession session, String title) => DjSession(
   status: session.status,
   queueVersion: session.queueVersion,
   updatedAt: session.updatedAt,
+  notPersonal: session.notPersonal,
 );
 
 class ChatNotifier extends AsyncNotifier<ChatState> {

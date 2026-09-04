@@ -57,4 +57,19 @@ void main() {
       throwsA(isA<ImportCancelled>()),
     );
   });
+
+  test('inspects a fixture in a worker isolate without aggregating', () async {
+    final expected = expectedFor('extended-basic', 'default');
+    final inventory = await inspectExportInIsolate(fixtureArchive('extended-basic').path);
+    expect(inventory.toCanonicalJson(), expected['inventory']);
+    expect(inventory.isReadable, isTrue);
+  });
+
+  test('inspecting a file that is not a ZIP surfaces as unreadable with no file', () async {
+    final notZip = '${fixtureArchive('extended-basic').parent.path}/expected.default.json';
+    await expectLater(
+      inspectExportInIsolate(notZip),
+      throwsA(isA<UnreadableExportException>().having((e) => e.file, 'file', isNull)),
+    );
+  });
 }

@@ -10,6 +10,7 @@ class DjSession {
     required this.status,
     required this.queueVersion,
     required this.updatedAt,
+    this.notPersonal = false,
   });
 
   final String id;
@@ -18,12 +19,19 @@ class DjSession {
   final int queueVersion;
   final DateTime updatedAt;
 
+  /// True once a corpus-mode generate/swap put shared-catalog picks in this
+  /// session's queue (server routes/sessions.ts → sessionListColumns). Every
+  /// session summary carries it; the "Not personal yet" banner reads it.
+  /// Absent on the wire (older server) reads as false.
+  final bool notPersonal;
+
   factory DjSession.fromJson(Map<String, dynamic> json) => DjSession(
         id: json['id'] as String,
         title: json['title'] as String,
         status: json['status'] as String,
         queueVersion: json['queueVersion'] as int,
         updatedAt: DateTime.parse(json['updatedAt'] as String),
+        notPersonal: json['notPersonal'] as bool? ?? false,
       );
 }
 
@@ -58,6 +66,7 @@ class QueueTrack {
     required this.appleId,
     required this.title,
     required this.artist,
+    this.spotifyId,
     this.reason,
     this.durationMs,
     this.artworkUrl,
@@ -74,6 +83,10 @@ class QueueTrack {
   final String? appleId;
   final String title;
   final String artist;
+  // Peer of appleId, never a replacement (tracks.spotify_id): present for
+  // tracks that came in through a Spotify export or a pasted seed, and what
+  // the "Open in Spotify" output actions key on.
+  final String? spotifyId;
   final String? reason;
   final int? durationMs;
   final String? artworkUrl;
@@ -87,6 +100,7 @@ class QueueTrack {
         appleId: json['appleId'] as String?,
         title: json['title'] as String,
         artist: json['artist'] as String,
+        spotifyId: json['spotifyId'] as String?,
         reason: json['reason'] as String?,
         durationMs: json['durationMs'] as int?,
         artworkUrl: json['artworkUrl'] as String?,

@@ -97,3 +97,24 @@ Future<ParsedExport> _work(String path, String timeZone, bool includePrivateSess
     cancels.close();
   }
 }
+
+/// Lists the archive at [path] in a worker isolate: which files the parser
+/// would read and their row counts, without aggregating anything. A file
+/// that is not a ZIP archive is unreadable with a null file, as in
+/// [parseExportInIsolate].
+Future<ExportInventory> inspectExportInIsolate(String path) =>
+    Isolate.run(() => _inspect(path), debugName: 'spotify-export-inspector');
+
+Future<ExportInventory> _inspect(String path) async {
+  final ZipExportArchive archive;
+  try {
+    archive = ZipExportArchive.open(File(path));
+  } on ArchiveFormatException {
+    throw const UnreadableExportException(file: null, inventory: ExportInventory.empty);
+  }
+  try {
+    return await inspectExport(archive);
+  } finally {
+    await archive.close();
+  }
+}
