@@ -29,14 +29,22 @@ class ListeningImportResult {
     required this.inventory,
     required this.summary,
     required this.playlistSummary,
+    required this.playlistError,
   });
 
   final ExportInventory inventory;
   final ListeningImportSummary summary;
 
   /// Present for an account package only (the playlist sync that follows
-  /// the import); an extended package carries no playlists.
+  /// the import); an extended package carries no playlists, and a partial
+  /// result (see [playlistError]) carries none either.
   final PlaylistSyncSummary? playlistSummary;
+
+  /// Set when the listening import was published but the playlist sync
+  /// that followed failed: the history is on the server, the playlists are
+  /// not, and the caller decides how to say so. Null on full success and
+  /// for an extended package.
+  final Object? playlistError;
 }
 
 /// The server accepted or reported a count that does not match the snapshot.
@@ -53,6 +61,11 @@ class ListeningImportProtocolException implements Exception {
 /// Modelled on `LibrarySyncService`: [cancel] is honoured at every await,
 /// progress reports staged bounds, and concurrent [import] calls join the
 /// run in flight.
+///
+/// The listening import is published at `complete`; a playlist-sync failure
+/// after that resolves as a partial [ListeningImportResult] rather than
+/// throwing, so the caller never mistakes a landed history for a lost one.
+/// Only a cancel still throws from the playlist phase.
 ///
 /// Only the snapshot leaves the device, never the file. Nothing here logs a
 /// track, artist, album, or playlist name.
@@ -203,6 +216,10 @@ class ListeningImportService {
 
     _checkCancelled();
     final summary = await api.completeImport(run.importId);
+    // The history is committed server-side from here, so the funnel step
+    // goes up now: the onboarding read derives importCompletedAt from it
+    // and must learn the history landed even if the playlists don't.
+    _funnel(FunnelEventType.importCompleted);
     _checkCancelled();
     if (summary.tracks != tracks.length ||
         summary.days != days.length ||
@@ -211,17 +228,28 @@ class ListeningImportService {
       throw const ListeningImportProtocolException();
     }
 
+    // Playlists belong to the account package; the listening run has
+    // completed by now, so at most one staged run is open at a time. A
+    // failure here is reported on the result as a partial success, never
+    // as a throw; only a cancel still throws.
     PlaylistSyncSummary? playlistSummary;
+    Object? playlistError;
     if (snapshot.package == ExportPackage.spotifyAccount) {
-      playlistSummary = await _syncPlaylists(snapshot.playlists, onProgress);
+      try {
+        playlistSummary = await _syncPlaylists(snapshot.playlists, onProgress);
+      } on ImportCancelled {
+        rethrow;
+      } catch (error) {
+        playlistError = error;
+      }
     }
 
     onProgress?.call(1.0);
-    _funnel(FunnelEventType.importCompleted);
     return ListeningImportResult(
       inventory: parsed.inventory,
       summary: summary,
       playlistSummary: playlistSummary,
+      playlistError: playlistError,
     );
   }
 

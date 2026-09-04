@@ -419,11 +419,17 @@ void main() {
       ]);
     });
 
-    test('returns both summaries and posts import_completed once', () {
+    test('returns both summaries with no playlist error and posts import_completed once', () {
       expect(result.summary.libraryTracks, 5);
       expect(result.playlistSummary?.playlists, 2);
       expect(result.playlistSummary?.entries, 5);
+      expect(result.playlistError, isNull);
       expect(server.funnelTypes, ['import_completed']);
+    });
+
+    test('posts import_completed before the playlist sync begins', () {
+      final paths = server.requests.map((r) => r.url.path).toList();
+      expect(paths.indexOf('/me/funnel-events'), lessThan(paths.indexOf('/ingest/playlists/syncs')));
     });
 
     test('progress passes through the playlist stage before 1.0', () {
@@ -548,7 +554,7 @@ void main() {
       expect(result.summary.tracks, 1);
     });
 
-    test('between playlist entry chunks stops the sync and throws ImportCancelled', () async {
+    test('between playlist entry chunks throws ImportCancelled with import_completed already posted', () async {
       late ListeningImportService service;
       final server = _Server(
         onRequest: (request) {
@@ -568,7 +574,7 @@ void main() {
         'PUT /ingest/playlists/syncs/sync-1/playlists',
         'PUT /ingest/playlists/syncs/sync-1/entries',
       ]);
-      expect(server.funnelTypes, isEmpty);
+      expect(server.funnelTypes, ['import_completed']);
     });
 
     test('after a cancel, the next import() starts a fresh run', () async {
@@ -693,7 +699,37 @@ void main() {
       );
     });
 
-    test('a playlist summary that does not add up is a protocol failure', () async {
+    test('a playlist-phase API error resolves as a partial result carrying the error', () async {
+      final server = _Server(override: {
+        'PUT /ingest/playlists/syncs/sync-1/playlists': (_) =>
+            http.Response('{"error":"sync_conflict"}', 409),
+      });
+      final snapshot = _synthetic(package: ExportPackage.spotifyAccount, tracks: 1, playlists: [_playlist(0, 2)]);
+      final service = await _service(server, parser: _parserFor(snapshot));
+      final progress = <double>[];
+
+      final result = await service.import('any.zip', _lagos, onProgress: progress.add);
+      await pumpEventQueue();
+      expect(result.summary.tracks, 1);
+      expect(result.playlistSummary, isNull);
+      expect(
+        result.playlistError,
+        isA<ApiException>()
+            .having((e) => e.statusCode, 'statusCode', 409)
+            .having(ListeningApiErrorCode.of, 'code', ListeningApiErrorCode.syncConflict),
+      );
+      expect(progress.last, 1.0);
+      expect(server.protocol, [
+        'POST /ingest/listening/imports',
+        'PUT /ingest/listening/imports/run-1/tracks',
+        'POST /ingest/listening/imports/run-1/complete',
+        'POST /ingest/playlists/syncs',
+        'PUT /ingest/playlists/syncs/sync-1/playlists',
+      ]);
+      expect(server.funnelTypes, ['import_completed']);
+    });
+
+    test('a playlist summary that does not add up lands on the result as a protocol failure', () async {
       final server = _Server(override: {
         'POST /ingest/playlists/syncs/sync-1/complete': (_) => http.Response(
               '{"playlists":1,"entries":2,"resolvedEntries":1,"unresolvedEntries":0}',
@@ -702,10 +738,13 @@ void main() {
       });
       final snapshot = _synthetic(package: ExportPackage.spotifyAccount, tracks: 1, playlists: [_playlist(0, 2)]);
       final service = await _service(server, parser: _parserFor(snapshot));
-      await expectLater(
-        service.import('any.zip', _lagos),
-        throwsA(isA<ListeningImportProtocolException>()),
-      );
+
+      final result = await service.import('any.zip', _lagos);
+      await pumpEventQueue();
+      expect(result.summary.tracks, 1);
+      expect(result.playlistSummary, isNull);
+      expect(result.playlistError, isA<ListeningImportProtocolException>());
+      expect(server.funnelTypes, ['import_completed']);
     });
 
     test('an unreadable archive surfaces as UnreadableExportException before any request', () async {
