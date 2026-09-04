@@ -86,9 +86,19 @@ function paintChannels(hex: string) {
     .join(', ')
 }
 
-/** Any completed import, on any source: the gate for `first_personal_mix`. */
+/**
+ * A completed listening export, the gate for `first_personal_mix`: the
+ * funnel's `import_completed` timestamp, or an export source that has
+ * imported. An `apple_live` library sync never counts.
+ */
 function hasCompletedImport(onboarding: OnboardingResponse | null) {
-  return Boolean(onboarding?.importCompletedAt || onboarding?.sources.some((source) => source.lastImportedAt))
+  if (!onboarding) return false
+  return Boolean(
+    onboarding.importCompletedAt ||
+      onboarding.sources.some(
+        (source) => (source.source === 'spotify_export' || source.source === 'apple_export') && source.lastImportedAt,
+      ),
+  )
 }
 
 function conflictSnapshot(error: unknown): { queue: ApiQueueTrack[]; queueVersion: number } | null {
@@ -319,12 +329,16 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
   }
 
   // A message turn returns no session summary, so the session is read again
-  // afterwards to learn whether the DJ went corpus-mode (`notPersonal`).
+  // afterwards to learn whether the DJ went corpus-mode (`notPersonal`). Only
+  // that flag is taken from the read: the turn's own response already carries
+  // the queue and its version, and a queue op may have moved on since.
   async function refreshSessionAfterTurn(sessionId: string) {
     try {
       const detail = await api.getSession(sessionId)
       setSessions((current) =>
-        current.map((session) => (session.id === sessionId ? toDjSession(detail.session, detail.queue) : session)),
+        current.map((session) =>
+          session.id === sessionId ? { ...session, notPersonal: detail.session.notPersonal } : session,
+        ),
       )
       notePersonalMix(detail.session)
     } catch (requestError) {

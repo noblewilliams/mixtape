@@ -146,10 +146,12 @@ export function QueuePanel({
     () => displayTracks.reduce((sum, track) => sum + (track.durationMs ?? 0), 0),
     [displayTracks],
   )
-  // A mix with Spotify ids and no Apple id at all gets the Spotify actions in
-  // the Apple slot; a mixed mix keeps the Apple controls and only gains links.
-  const spotifyOnly =
-    displayTracks.some((track) => track.spotifyId) && !displayTracks.some((track) => track.appleId)
+  // The Apple controls render whenever any track has an Apple id and the
+  // Spotify actions whenever any track has a Spotify id, so a Spotify-only
+  // mix gets the Spotify actions in the Apple slot and a mixed mix shows
+  // both, Apple first.
+  const hasApple = displayTracks.some((track) => track.appleId)
+  const hasSpotify = displayTracks.some((track) => track.spotifyId)
 
   useEffect(() => {
     const normalized = withPositions(tracks)
@@ -554,7 +556,7 @@ export function QueuePanel({
                       target="_blank"
                       rel="noopener"
                       draggable={false}
-                      aria-label={`Open ${track.title} in Spotify`}
+                      aria-label={`Open in Spotify: ${track.title}`}
                       onPointerDown={(event) => event.stopPropagation()}
                       onClick={() => onOutput?.()}
                     >
@@ -600,20 +602,7 @@ export function QueuePanel({
         Use the three-line handle or its Arrow keys to reorder. Swipe left with one finger or two fingers on a trackpad to remove. Delete reveals Remove and Escape closes it.
       </p>
 
-      {displayTracks.length > 0 && spotifyOnly ? (
-        <div className="rail-actions">
-          <button className="btn primary rail-action--desktop" type="button" onClick={() => void copyForSpotify()}>
-            Copy for Spotify
-          </button>
-          <button className="btn" type="button" onClick={() => void sendToTransferTool()}>
-            Send to a transfer tool
-          </button>
-          <p className="rail-hint rail-hint--desktop">
-            Paste the links into a new playlist in Spotify on your computer. The transfer tool creates the playlist for you on any device.
-          </p>
-          <p className="rail-hint rail-hint--mobile">Copies “Artist – Title” lines and opens the tool, which creates the playlist in Spotify.</p>
-        </div>
-      ) : displayTracks.length > 0 ? (
+      {displayTracks.length > 0 && hasApple ? (
         <div className="music-actions">
           {musicConnection === 'connected' ? (
             <>
@@ -648,6 +637,21 @@ export function QueuePanel({
               <ConnectMusicButton state={musicConnection} onClick={onConnect} />
             </>
           )}
+        </div>
+      ) : null}
+
+      {displayTracks.length > 0 && hasSpotify ? (
+        <div className="rail-actions">
+          <button className="btn primary rail-action--desktop" type="button" onClick={() => void copyForSpotify()}>
+            Copy for Spotify
+          </button>
+          <button className="btn" type="button" onClick={() => void sendToTransferTool()}>
+            Send to a transfer tool
+          </button>
+          <p className="rail-hint rail-hint--desktop">
+            Paste the links into a new playlist in Spotify on your computer. The transfer tool creates the playlist for you on any device.
+          </p>
+          <p className="rail-hint rail-hint--mobile">Copies “Artist – Title” lines and opens the tool, which creates the playlist in Spotify.</p>
         </div>
       ) : null}
 

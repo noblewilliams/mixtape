@@ -1,14 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { funnelFlagKey, postFunnelEventOnce } from './funnel-once'
 
+const settled = () => new Promise((resolve) => setTimeout(resolve, 0))
+
 describe('once-per-user funnel events', () => {
   beforeEach(() => localStorage.clear())
   afterEach(() => vi.restoreAllMocks())
 
-  it('posts the event and remembers it for this user', () => {
+  it('posts the event and remembers it for this user once the post has landed', async () => {
     const postFunnelEvent = vi.fn(async () => ({ ok: true as const }))
 
     expect(postFunnelEventOnce({ postFunnelEvent }, 'user-1', 'first_output')).toBe(true)
+    await settled()
     expect(postFunnelEventOnce({ postFunnelEvent }, 'user-1', 'first_output')).toBe(false)
 
     expect(postFunnelEvent).toHaveBeenCalledTimes(1)
@@ -24,6 +27,26 @@ describe('once-per-user funnel events', () => {
     postFunnelEventOnce({ postFunnelEvent }, 'user-1', 'first_personal_mix')
 
     expect(postFunnelEvent).toHaveBeenCalledTimes(3)
+  })
+
+  it('leaves no flag behind a failed post, so the next occasion posts again', async () => {
+    let offline = true
+    const postFunnelEvent = vi.fn(async () => {
+      if (offline) throw new Error('offline')
+      return { ok: true as const }
+    })
+    const key = funnelFlagKey('first_personal_mix', 'user-1')
+
+    expect(postFunnelEventOnce({ postFunnelEvent }, 'user-1', 'first_personal_mix')).toBe(true)
+    await settled()
+    expect(localStorage.getItem(key)).toBeNull()
+
+    offline = false
+    expect(postFunnelEventOnce({ postFunnelEvent }, 'user-1', 'first_personal_mix')).toBe(true)
+    await settled()
+    expect(postFunnelEvent).toHaveBeenCalledTimes(2)
+    expect(localStorage.getItem(key)).toBeTruthy()
+    expect(postFunnelEventOnce({ postFunnelEvent }, 'user-1', 'first_personal_mix')).toBe(false)
   })
 
   it('never throws when the post fails or storage is blocked', async () => {

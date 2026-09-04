@@ -271,19 +271,21 @@ describe('Spotify mix outputs', () => {
   it('links every Spotify track to open.spotify.com in a new tab, named for the track', () => {
     renderQueue({ tracks: spotifyTracks })
 
-    const link = screen.getByRole('link', { name: 'Open Window Seat in Spotify' })
+    const link = screen.getByRole('link', { name: 'Open in Spotify: Window Seat' })
     expect(link).toHaveAttribute('href', 'https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC')
     expect(link).toHaveAttribute('target', '_blank')
     expect(link).toHaveAttribute('rel', 'noopener')
     expect(link).toHaveClass('open')
-    expect(screen.getByRole('link', { name: 'Open Streetlight Weather in Spotify' })).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: 'Open Paper Tickets in Spotify' })).not.toBeInTheDocument()
+    expect(link).toHaveTextContent('Open in Spotify')
+    expect(link.getAttribute('aria-label')?.startsWith(link.textContent?.trim() ?? '')).toBe(true)
+    expect(screen.getByRole('link', { name: 'Open in Spotify: Streetlight Weather' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Open in Spotify: Paper Tickets' })).not.toBeInTheDocument()
   })
 
   it('shows no Spotify link on an Apple-only mix', () => {
     renderQueue()
 
-    expect(screen.queryByRole('link', { name: /in Spotify$/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /^Open in Spotify: / })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Copy for Spotify' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Connect Apple Music' })).toBeInTheDocument()
   })
@@ -301,14 +303,32 @@ describe('Spotify mix outputs', () => {
     ).toBeInTheDocument()
   })
 
-  it('keeps the Apple controls and adds only the links on a mixed Apple and Spotify mix', () => {
+  it('shows the Apple controls first, then the Spotify actions, on a mixed Apple and Spotify mix', () => {
     renderQueue({ tracks: mixedTracks, musicConnection: 'connected' })
 
-    expect(screen.getByRole('button', { name: 'Play now' })).toBeInTheDocument()
+    const play = screen.getByRole('button', { name: 'Play now' })
     expect(screen.getByRole('button', { name: 'Create playlist' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Open Window Seat in Spotify' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Copy for Spotify' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Send to a transfer tool' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Open in Spotify: Window Seat' })).toBeInTheDocument()
+    const copy = screen.getByRole('button', { name: 'Copy for Spotify' })
+    expect(screen.getByRole('button', { name: 'Send to a transfer tool' })).toBeInTheDocument()
+    expect(
+      screen.getByText('Paste the links into a new playlist in Spotify on your computer. The transfer tool creates the playlist for you on any device.'),
+    ).toBeInTheDocument()
+    expect(play.compareDocumentPosition(copy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('still reorders from the keyboard on a row that carries a Spotify link', () => {
+    const { onPreviewTracks, onCommitQueueOp } = renderQueue({ tracks: spotifyTracks })
+
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Move Window Seat, track 1' }), { key: 'ArrowDown' })
+
+    expect(onPreviewTracks).toHaveBeenLastCalledWith([
+      expect.objectContaining({ trackId: 's-2', position: 0 }),
+      expect.objectContaining({ trackId: 's-1', position: 1 }),
+      expect.objectContaining({ trackId: 's-3', position: 2 }),
+    ])
+    expect(onCommitQueueOp).toHaveBeenCalledWith({ op: 'move', from: 0, to: 1 })
+    expect(screen.getByRole('link', { name: 'Open in Spotify: Window Seat' })).toBeInTheDocument()
   })
 
   it('copies one Spotify link per line and says how many, with the paste hint', async () => {
@@ -354,7 +374,7 @@ describe('Spotify mix outputs', () => {
   it('reports an Open in Spotify click as an output without starting a swipe', () => {
     const { onOutput } = renderQueue({ tracks: spotifyTracks })
     const trackRow = row('s-1')
-    const link = screen.getByRole('link', { name: 'Open Window Seat in Spotify' })
+    const link = screen.getByRole('link', { name: 'Open in Spotify: Window Seat' })
     link.addEventListener('click', (event) => event.preventDefault())
 
     fireEvent.pointerDown(link, { button: 0, clientX: 380, clientY: 30, pointerId: 1 })

@@ -1,7 +1,7 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
-import { ApiError, type ApiMusicSource, type MixtapeApi, type OnboardingResponse } from './api/client'
+import { ApiError, type ApiMusicSource, type MixtapeApi, type OnboardingResponse, type QueueOpsResponse } from './api/client'
 import type { AccountBridge } from './components/AccountDialog'
 import type { MusicKitClient } from './musickit/client'
 import { writeServiceChoice } from './lib/service-preference'
@@ -699,6 +699,97 @@ describe('Spotify mix outputs', () => {
     expect(await screen.findByText('Not personal yet')).toBeInTheDocument()
   })
 
+  /** An API whose `getSession` changes behaviour once a message turn has happened. */
+  function apiWithPostTurnRefetch(
+    afterTurn: (detail: Awaited<ReturnType<MixtapeApi['getSession']>>) => ReturnType<MixtapeApi['getSession']>,
+    overrides: Partial<MixtapeApi> = {},
+  ) {
+    const base = createFakeApi()
+    let turned = false
+    return apiWithOnboarding(
+      { chosenService: 'spotify' },
+      {
+        getSession: async (sessionId) => {
+          const detail = await base.getSession(sessionId)
+          return turned ? afterTurn(detail) : detail
+        },
+        sendMessage: async (sessionId, text) => {
+          turned = true
+          return base.sendMessage(sessionId, text)
+        },
+        ...overrides,
+      },
+    )
+  }
+
+  const djTurns = () => document.querySelectorAll('.conversation-turn--dj').length
+  const trackTitles = () => [...document.querySelectorAll('.track-row .track-copy strong')].map((element) => element.textContent)
+
+  it('keeps the turn’s tape version through the post-turn refetch and sends it with the next queue op', async () => {
+    const applyQueueOps = vi.fn(() => new Promise<QueueOpsResponse>(() => undefined))
+    const api = apiWithPostTurnRefetch(
+      async (detail) => ({ ...detail, session: { ...detail.session, queueVersion: 1, notPersonal: true } }),
+      { applyQueueOps },
+    )
+    renderApp({ api })
+    await settled(api)
+
+    await sendMessage('Make the middle brighter.')
+    expect(await screen.findByText('Not personal yet')).toBeInTheDocument()
+
+    expect(screen.getByText(/Tape version 4/)).toBeInTheDocument()
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Move Sweetest Taboo, track 1' }), { key: 'ArrowDown' })
+    await waitFor(() => expect(applyQueueOps).toHaveBeenCalledWith('blue-hour', [{ op: 'move', from: 0, to: 1 }], 4))
+  })
+
+  it('leaves the queue alone when the post-turn refetch returns a different one', async () => {
+    const api = apiWithPostTurnRefetch(async (detail) => ({
+      ...detail,
+      session: { ...detail.session, notPersonal: true },
+      queue: detail.queue.slice(0, 1),
+    }))
+    renderApp({ api })
+    await settled(api)
+    const before = trackTitles()
+    expect(before.length).toBeGreaterThan(1)
+
+    await sendMessage('Make the middle brighter.')
+    expect(await screen.findByText('Not personal yet')).toBeInTheDocument()
+
+    expect(trackTitles()).toEqual(before)
+  })
+
+  it('adds no DJ error bubble when the post-turn refetch fails', async () => {
+    const api = apiWithPostTurnRefetch(async () => {
+      throw new Error('offline')
+    })
+    renderApp({ api })
+    await settled(api)
+    const reads = api.calls.filter((call) => call.method === 'getSession').length
+    const turns = djTurns()
+
+    await sendMessage('Make the middle brighter.')
+    await waitFor(() => expect(api.calls.filter((call) => call.method === 'getSession').length).toBe(reads + 1))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    expect(djTurns()).toBe(turns + 1)
+    expect(screen.queryByText('Something interrupted the connection. Please try again.')).not.toBeInTheDocument()
+  })
+
+  it('signs out when the post-turn refetch says the session has ended', async () => {
+    const api = apiWithPostTurnRefetch(async () => {
+      throw new ApiError(401, { error: 'unauthorized' })
+    })
+    const { onSignOut } = renderApp({ api, onSignOut: vi.fn() })
+    await settled(api)
+
+    await sendMessage('Make the middle brighter.')
+
+    await waitFor(() => expect(onSignOut).toHaveBeenCalled())
+  })
+
   it('posts first_personal_mix once, and only after an import has completed', async () => {
     const api = apiWithOnboarding({ chosenService: 'spotify' })
     renderApp({ api })
@@ -746,6 +837,36 @@ describe('Spotify mix outputs', () => {
     expect(funnelTypes(api, 'first_personal_mix')).toHaveLength(0)
   })
 
+  it('never counts an Apple library sync as a completed import for first_personal_mix', async () => {
+    const appleLibrary: ApiMusicSource = {
+      source: 'apple_live',
+      connectedAt: '2026-09-04T09:00:00.000Z',
+      lastImportedAt: '2026-09-04T09:30:00.000Z',
+      ledgerFrom: null,
+      ledgerTo: null,
+      packages: [],
+    }
+    writeServiceChoice(user.id, 'apple')
+    const api = apiWithOnboarding({ sources: [appleLibrary], hasLibrary: true, importCompletedAt: null })
+    renderApp({ api })
+    await settled(api)
+
+    await createTape('Dinner after the rain')
+
+    expect(api.calls.filter((call) => call.method === 'createSession')).toHaveLength(1)
+    expect(funnelTypes(api, 'first_personal_mix')).toHaveLength(0)
+  })
+
+  it('counts a listening export source with an import date as completed for first_personal_mix', async () => {
+    const api = apiWithOnboarding({ chosenService: 'spotify', sources: [accountPackage], importCompletedAt: null })
+    renderApp({ api })
+    await settled(api)
+
+    await createTape('Dinner after the rain')
+
+    await waitFor(() => expect(funnelTypes(api, 'first_personal_mix')).toHaveLength(1))
+  })
+
   it('posts first_output once across Open in Spotify, Copy for Spotify, and the transfer handoff', async () => {
     const base = createFakeApi()
     const api = apiWithOnboarding(
@@ -766,7 +887,7 @@ describe('Spotify mix outputs', () => {
     renderApp({ api })
     await settled(api)
 
-    const link = await screen.findByRole('link', { name: 'Open Sweetest Taboo in Spotify' })
+    const link = await screen.findByRole('link', { name: 'Open in Spotify: Sweetest Taboo' })
     link.addEventListener('click', (event) => event.preventDefault())
     fireEvent.click(link)
     await waitFor(() => expect(funnelTypes(api, 'first_output')).toHaveLength(1))

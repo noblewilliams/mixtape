@@ -3922,6 +3922,11 @@ button.mini:disabled {
   justify-content: center;
 }
 
+/* A mixed mix stacks the Spotify actions under the Apple controls. */
+.music-actions + .rail-actions {
+  margin-top: 12px;
+}
+
 .rail-hint {
   margin: 0;
   color: var(--muted);
