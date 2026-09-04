@@ -60,6 +60,8 @@ export function onboardingRoutes(db: Db) {
         : null
 
     return c.json({
+      // The clients key their per-device "service chosen" flag by user id.
+      userId,
       sources,
       hasLibrary: state.hasLibrary,
       chosenService,

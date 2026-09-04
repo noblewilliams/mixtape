@@ -18,6 +18,7 @@ const earlier = new Date('2026-08-20T08:00:00.000Z')
 const later = new Date('2026-08-25T08:00:00.000Z')
 
 const blank = {
+  userId: 'u1',
   sources: [],
   hasLibrary: false,
   chosenService: null,
