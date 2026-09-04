@@ -4,7 +4,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/dj/dj_api.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
+import 'package:mixtape/data/onboarding/service_preference_store.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
+import 'package:mixtape/presentation/providers/device_providers.dart';
 import 'package:mixtape/presentation/providers/dj_providers.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
 
@@ -79,6 +81,7 @@ class FakeLinkOpener {
 ProviderContainer onboardingContainer({
   required FakeListeningApi listening,
   FakeReminderScheduler? reminders,
+  ServicePreferenceStore? prefs,
   FakeLinkOpener? links,
   AuthNotifier? auth,
 }) {
@@ -89,6 +92,8 @@ ProviderContainer onboardingContainer({
       listeningApiProvider.overrideWithValue(listening),
       authProvider.overrideWith(() => auth ?? TestAuthNotifier(AuthStatus.signedIn)),
       reminderSchedulerProvider.overrideWithValue(reminders ?? FakeReminderScheduler()),
+      servicePreferenceStoreProvider
+          .overrideWithValue(prefs ?? InMemoryServicePreferenceStore()),
       linkOpenerProvider.overrideWithValue((links ?? FakeLinkOpener()).call),
     ],
   );

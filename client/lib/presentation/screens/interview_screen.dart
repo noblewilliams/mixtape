@@ -11,11 +11,12 @@ const _offlineErrorMessage =
     "couldn't reach the DJ — check your connection and try again";
 
 /// The waiting state's five-turn DJ interview (spec "Before the data
-/// arrives"), as one scrolling form: artists you would never skip as chips,
-/// then four short free-text answers, any of which may stay empty. Submit
-/// posts the answers on the `ios` surface; the server stores the notes and
-/// seeds and records `interview_completed` itself — this screen never posts
-/// that event. Pushed from Home, which refreshes onboarding on return.
+/// arrives"), as one scrolling form: artists you would never skip as chips
+/// (at least one, or there is nothing to submit), then four short free-text
+/// answers, any of which may stay empty. Submit posts the answers on the
+/// `ios` surface; the server stores the notes and seeds and records
+/// `interview_completed` itself — this screen never posts that event.
+/// Pushed from Home, which refreshes onboarding on return.
 class InterviewScreen extends ConsumerStatefulWidget {
   const InterviewScreen({super.key});
 
@@ -68,9 +69,22 @@ class _InterviewScreenState extends ConsumerState<InterviewScreen> {
     _artistController.clear();
   }
 
-  /// Guarded by [_submitting] so a second tap can never post twice.
+  /// The server's limit counts UTF-16 code units (JavaScript's `length`),
+  /// while the field's `maxLength` counts graphemes, so an emoji-heavy answer
+  /// can pass the field and still be over. Checked here, before the post.
+  static bool _tooLong(TextEditingController c) =>
+      c.text.trim().length > InterviewScreen.maxAnswerLength;
+
+  /// Guarded by [_submitting] so a second tap can never post twice, and by
+  /// the artist list because the button is only enabled once it has one.
   Future<void> _submit() async {
-    if (_submitting) return;
+    if (_submitting || _artists.isEmpty) return;
+    if ([_playsMost, _listensWhen, _neverWants, _era].any(_tooLong)) {
+      setState(
+        () => _error = 'Keep each answer to ${InterviewScreen.maxAnswerLength} characters',
+      );
+      return;
+    }
     setState(() {
       _submitting = true;
       _error = null;
@@ -122,7 +136,8 @@ class _InterviewScreenState extends ConsumerState<InterviewScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                'Five quick questions. Skip any you like — the DJ works with what it gets.',
+                'Five quick questions. Name at least one artist; the other four are '
+                'optional — the DJ works with what it gets.',
                 style: theme.textTheme.bodyLarge,
               ),
               const SizedBox(height: 24),
@@ -206,7 +221,7 @@ class _InterviewScreenState extends ConsumerState<InterviewScreen> {
               ],
               FilledButton(
                 key: const Key('interview-submit'),
-                onPressed: _submitting ? null : _submit,
+                onPressed: _submitting || _artists.isEmpty ? null : _submit,
                 child: _submitting
                     ? const SizedBox(
                         width: 20,

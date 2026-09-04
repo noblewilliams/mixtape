@@ -250,6 +250,7 @@ void main() {
       final recorder = _Recorder({
         'GET /me/onboarding': http.Response(
           jsonEncode({
+            'userId': 'user-1',
             'sources': [source],
             'hasLibrary': true,
             'chosenService': 'spotify',
@@ -262,6 +263,7 @@ void main() {
       });
       final state = await (await _api(recorder)).getOnboarding();
       expect(recorder.single.method, 'GET');
+      expect(state.userId, 'user-1');
       expect(state.sources, hasLength(1));
       expect(state.sources.single.source, 'spotify_export');
       expect(state.sources.single.connectedAt, DateTime.utc(2026, 9, 1, 10));
@@ -278,15 +280,29 @@ void main() {
     test('getOnboarding parses a fresh listener (nulls everywhere)', () async {
       final recorder = _Recorder({
         'GET /me/onboarding': http.Response(
-          '{"sources":[],"hasLibrary":false,"chosenService":null,"markedRequestedAt":null,"interviewCompletedAt":null,"importCompletedAt":null}',
+          '{"userId":"user-1","sources":[],"hasLibrary":false,"chosenService":null,"markedRequestedAt":null,"interviewCompletedAt":null,"importCompletedAt":null}',
           200,
         ),
       });
       final state = await (await _api(recorder)).getOnboarding();
+      expect(state.userId, 'user-1');
       expect(state.sources, isEmpty);
       expect(state.hasLibrary, isFalse);
       expect(state.chosenService, isNull);
       expect(state.markedRequestedAt, isNull);
+    });
+
+    test('getOnboarding rejects an answer without the listener id', () async {
+      final recorder = _Recorder({
+        'GET /me/onboarding': http.Response(
+          '{"sources":[],"hasLibrary":false,"chosenService":null,"markedRequestedAt":null,"interviewCompletedAt":null,"importCompletedAt":null}',
+          200,
+        ),
+      });
+      await expectLater(
+        (await _api(recorder)).getOnboarding(),
+        throwsA(isA<ListeningModelException>()),
+      );
     });
 
     test('getMusicSources parses a bare source (nothing landed yet)', () async {

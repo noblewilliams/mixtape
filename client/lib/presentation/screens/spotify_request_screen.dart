@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../format/relative_time.dart';
 import '../providers/onboarding_provider.dart';
+import '../providers/device_providers.dart';
 
 /// The address in step 1, as it reads on screen and where it opens.
 const String spotifyPrivacyAddress = 'spotify.com/account/privacy';

@@ -16,10 +16,13 @@ import 'spotify_request_screen.dart';
 /// Home stays the only screen that pushes routes and hosts sign-out.
 ///
 /// The decision is latched once made: a later refetch (the `chose_spotify`
-/// event lands and onboarding starts saying 'spotify', or a failed load
-/// eventually succeeds) must never swap the screen out from under the
-/// listener. An auth transition disposes the gate with the rest of the
-/// signed-in tree, so the next listener starts from pending again.
+/// event lands and onboarding starts saying 'spotify', or a manual refresh
+/// after a failed load succeeds) must never swap the screen out from under
+/// the listener. An auth transition disposes the gate with the rest of the
+/// signed-in tree, so the next listener starts from pending again — and
+/// decides only from state loaded for them: the keep-alive provider carries
+/// the previous account's value or error into the next one's loading state,
+/// which is why [_resolve] sees the value with that history stripped.
 class ServiceGate extends ConsumerStatefulWidget {
   const ServiceGate({super.key});
 
@@ -43,7 +46,11 @@ class _ServiceGateState extends ConsumerState<ServiceGate> {
     return null;
   }
 
-  void _chooseApple() => setState(() => _step = _GateStep.home);
+  void _chooseApple() {
+    // Remembered on the device only (nothing to post), then Home right away.
+    unawaited(ref.read(onboardingProvider.notifier).markChoseApple());
+    setState(() => _step = _GateStep.home);
+  }
 
   void _chooseSpotify() {
     // Fire-and-forget funnel step, then the request screen right away.
@@ -54,7 +61,7 @@ class _ServiceGateState extends ConsumerState<ServiceGate> {
   @override
   Widget build(BuildContext context) {
     if (_step == _GateStep.pending) {
-      final resolved = _resolve(ref.watch(onboardingProvider));
+      final resolved = _resolve(ref.watch(onboardingProvider).unwrapPrevious());
       if (resolved == null) {
         // Same spinner as AuthStatus.unknown in main.dart.
         return const Scaffold(body: Center(child: CircularProgressIndicator()));

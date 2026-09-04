@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixtape/data/onboarding/service_preference_store.dart';
 import 'package:mixtape/presentation/screens/home_screen.dart';
 import 'package:mixtape/presentation/screens/interview_screen.dart';
 import 'package:mixtape/presentation/screens/spotify_request_screen.dart';
@@ -14,6 +15,21 @@ void main() {
 
     expect(find.byKey(const Key('waiting-card')), findsNothing);
     expect(find.byKey(const Key('prompt-field')), findsOneWidget);
+  });
+
+  testWidgets('a Spotify choice the server never heard (dropped post) still shows the waiting '
+      'card on the next launch, through the flag kept on the device', (tester) async {
+    final prefs = InMemoryServicePreferenceStore();
+    await prefs.write('user-1', 'spotify');
+    final listening = FakeListeningApi(onboarding: onboardingState(userId: 'user-1'));
+    await pumpScreen(
+      tester,
+      onboardingContainer(listening: listening, prefs: prefs),
+      const HomeScreen(),
+    );
+
+    expect(find.byKey(const Key('waiting-card')), findsOneWidget);
+    expect(find.text('Not requested yet'), findsOneWidget);
   });
 
   testWidgets('a Spotify listener who has imported sees no waiting card', (tester) async {

@@ -7,6 +7,10 @@ import 'package:timezone/timezone.dart' as tz;
 /// so widget tests inject a fake and never touch a platform channel.
 abstract class ReminderScheduler {
   Future<void> scheduleRequestReminder({required Duration after});
+
+  /// Drops a pending request reminder (sign-out: the nudge must not reach
+  /// whoever signs in next on this device). A no-op when none is pending.
+  Future<void> cancelRequestReminder();
 }
 
 /// [ReminderScheduler] over `flutter_local_notifications`. Initializes the
@@ -58,5 +62,11 @@ class LocalNotificationReminderScheduler implements ReminderScheduler {
       notificationDetails: const NotificationDetails(iOS: DarwinNotificationDetails()),
       androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
     );
+  }
+
+  @override
+  Future<void> cancelRequestReminder() async {
+    await _ensureInitialized();
+    await _plugin.cancel(id: requestReminderId);
   }
 }

@@ -1,7 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/auth/token_store.dart';
+import 'package:mixtape/data/onboarding/service_preference_store.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
+import 'package:mixtape/presentation/providers/device_providers.dart';
+
+import '../../helpers/fake_listening_api.dart';
 
 class ThrowingTokenStore implements TokenStore {
   @override
@@ -69,5 +73,29 @@ void main() {
 
     expect(container.read(authProvider), AuthStatus.signedOut);
     expect(await store.read(), isNull);
+  });
+
+  test('signOut() forgets the device-local state of the departing listener: the service '
+      'flag and the request reminder', () async {
+    final store = InMemoryTokenStore();
+    await store.write('tok-123');
+    final prefs = InMemoryServicePreferenceStore();
+    await prefs.write('u1', 'spotify');
+    final reminders = FakeReminderScheduler();
+    final container = ProviderContainer(overrides: [
+      tokenStoreProvider.overrideWithValue(store),
+      servicePreferenceStoreProvider.overrideWithValue(prefs),
+      reminderSchedulerProvider.overrideWithValue(reminders),
+    ]);
+    addTearDown(container.dispose);
+    expect(container.read(authProvider), AuthStatus.unknown);
+    await _settle();
+    expect(container.read(authProvider), AuthStatus.signedIn);
+
+    await container.read(authProvider.notifier).signOut();
+
+    expect(container.read(authProvider), AuthStatus.signedOut);
+    expect(await prefs.read('u1'), isNull);
+    expect(reminders.cancelled, 1);
   });
 }

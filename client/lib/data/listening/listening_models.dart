@@ -235,6 +235,7 @@ class MusicSource {
 
 class OnboardingState {
   const OnboardingState({
+    required this.userId,
     required this.sources,
     required this.hasLibrary,
     required this.chosenService,
@@ -243,6 +244,9 @@ class OnboardingState {
     required this.importCompletedAt,
   });
 
+  /// The signed-in listener, so device-local state (the "service chosen"
+  /// flag) can be keyed per account.
+  final String userId;
   final List<MusicSource> sources;
   final bool hasLibrary;
 
@@ -253,12 +257,24 @@ class OnboardingState {
   final DateTime? importCompletedAt;
 
   factory OnboardingState.fromJson(Map<String, dynamic> json) => OnboardingState(
+        userId: readString(json, 'userId'),
         sources: musicSourcesFromJson(json['sources']),
         hasLibrary: readBool(json, 'hasLibrary'),
         chosenService: readOptionalString(json, 'chosenService'),
         markedRequestedAt: readOptionalDate(json, 'markedRequestedAt'),
         interviewCompletedAt: readOptionalDate(json, 'interviewCompletedAt'),
         importCompletedAt: readOptionalDate(json, 'importCompletedAt'),
+      );
+
+  /// This state with the device-local service choice overlaid.
+  OnboardingState withChosenService(String service) => OnboardingState(
+        userId: userId,
+        sources: sources,
+        hasLibrary: hasLibrary,
+        chosenService: service,
+        markedRequestedAt: markedRequestedAt,
+        interviewCompletedAt: interviewCompletedAt,
+        importCompletedAt: importCompletedAt,
       );
 }
 

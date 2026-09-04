@@ -113,22 +113,70 @@ void main() {
     expect(find.text('saved 4 notes, 2 artists'), findsOneWidget);
   });
 
-  testWidgets('empty answers are allowed and post as empty strings', (tester) async {
+  testWidgets('"Save my answers" stays disabled until at least one artist is named',
+      (tester) async {
+    final listening = FakeListeningApi(onboarding: onboardingState(chosenService: 'spotify'));
+    await pumpScreen(tester, onboardingContainer(listening: listening), const InterviewScreen());
+    FilledButton submit() =>
+        tester.widget<FilledButton>(find.byKey(const Key('interview-submit')));
+
+    expect(submit().onPressed, isNull);
+    await _addArtist(tester, 'Sade');
+    expect(submit().onPressed, isNotNull);
+
+    tester.widget<InputChip>(find.byKey(const Key('interview-artist-0'))).onDeleted!();
+    await tester.pump();
+    expect(submit().onPressed, isNull);
+
+    // The four answers alone are not enough.
+    await tester.enterText(find.byKey(const Key('interview-era')), '1999');
+    await tester.pump();
+    expect(submit().onPressed, isNull);
+    expect(listening.interviews, isEmpty);
+  });
+
+  testWidgets('the four answers may stay empty and post as empty strings', (tester) async {
     final listening = FakeListeningApi(onboarding: onboardingState(chosenService: 'spotify'))
       ..onPostInterview = (_) async =>
-          const InterviewResult(seeds: 0, notesSaved: 1, notesDuplicate: 0, notesCapped: 0);
+          const InterviewResult(seeds: 1, notesSaved: 1, notesDuplicate: 0, notesCapped: 0);
     await _pumpPushed(tester, onboardingContainer(listening: listening));
 
+    await _addArtist(tester, 'Sade');
     await tester.enterText(find.byKey(const Key('interview-era')), 'the nineties');
     await tester.ensureVisible(find.byKey(const Key('interview-submit')));
     await tester.tap(find.byKey(const Key('interview-submit')));
     await tester.pumpAndSettle();
 
     final answers = listening.interviews.single;
-    expect(answers.neverSkip, isEmpty);
+    expect(answers.neverSkip, ['Sade']);
     expect(answers.playsMost, '');
+    expect(answers.listensWhen, '');
+    expect(answers.neverWants, '');
     expect(answers.era, 'the nineties');
-    expect(find.text('saved 1 note, 0 artists'), findsOneWidget);
+    expect(find.text('saved 1 note, 1 artist'), findsOneWidget);
+  });
+
+  testWidgets('an answer over 300 UTF-16 code units is refused inline, never posted',
+      (tester) async {
+    final listening = FakeListeningApi(onboarding: onboardingState(chosenService: 'spotify'))
+      ..onPostInterview = (_) async => _result;
+    await _pumpPushed(tester, onboardingContainer(listening: listening));
+
+    await _addArtist(tester, 'Sade');
+    // 160 graphemes — inside the field's own 300-character limit — but two
+    // UTF-16 code units each, which is what the server's 300 counts.
+    final astral = '\u{1F3B5}' * 160;
+    expect(astral.characters.length, 160);
+    expect(astral.length, 320);
+    await tester.enterText(find.byKey(const Key('interview-era')), astral);
+    await tester.ensureVisible(find.byKey(const Key('interview-submit')));
+    await tester.tap(find.byKey(const Key('interview-submit')));
+    await tester.pumpAndSettle();
+
+    expect(listening.interviews, isEmpty);
+    expect(find.byType(InterviewScreen), findsOneWidget);
+    expect(find.byKey(const Key('interview-error')), findsOneWidget);
+    expect(find.text('Keep each answer to 300 characters'), findsOneWidget);
   });
 
   testWidgets('a failed submit shows an inline error and keeps the form', (tester) async {
@@ -136,6 +184,7 @@ void main() {
       ..onPostInterview = (_) async => throw ApiException(500, 'boom');
     await _pumpPushed(tester, onboardingContainer(listening: listening));
 
+    await _addArtist(tester, 'Sade');
     await tester.enterText(find.byKey(const Key('interview-era')), '1999');
     await tester.ensureVisible(find.byKey(const Key('interview-submit')));
     await tester.tap(find.byKey(const Key('interview-submit')));

@@ -119,6 +119,7 @@ class FakeListeningApi implements ListeningApi {
 
 /// An onboarding answer with every field defaulted to "nothing yet".
 OnboardingState onboardingState({
+  String userId = 'user-1',
   String? chosenService,
   DateTime? markedRequestedAt,
   DateTime? interviewCompletedAt,
@@ -127,6 +128,7 @@ OnboardingState onboardingState({
   List<MusicSource> sources = const [],
 }) =>
     OnboardingState(
+      userId: userId,
       sources: sources,
       hasLibrary: hasLibrary,
       chosenService: chosenService,
@@ -135,12 +137,19 @@ OnboardingState onboardingState({
       importCompletedAt: importCompletedAt,
     );
 
-/// Records every reminder a screen asks for; touches no platform channel.
+/// Records every reminder a screen asks for, and every cancellation; touches
+/// no platform channel.
 class FakeReminderScheduler implements ReminderScheduler {
   final List<Duration> scheduled = [];
+  int cancelled = 0;
 
   @override
   Future<void> scheduleRequestReminder({required Duration after}) async {
     scheduled.add(after);
+  }
+
+  @override
+  Future<void> cancelRequestReminder() async {
+    cancelled++;
   }
 }

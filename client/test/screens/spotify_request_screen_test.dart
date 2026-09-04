@@ -6,10 +6,6 @@ import 'package:mixtape/presentation/screens/spotify_request_screen.dart';
 import '../helpers/fake_listening_api.dart';
 import '../helpers/onboarding_harness.dart';
 
-/// The spec's copy is kept in the screen with `**bold**` / `*italic*`
-/// markup; what the listener reads is the text without the marks.
-String plain(String step) => step.replaceAll('**', '').replaceAll('*', '');
-
 void main() {
   testWidgets('renders the eight request steps, word for word, with the address as a link',
       (tester) async {
@@ -25,7 +21,11 @@ void main() {
     for (var i = 1; i <= 8; i++) {
       expect(find.text('$i.'), findsOneWidget, reason: 'step $i number');
     }
-    // Step 1 carries the link inline, so its plain text is checked around it.
+    // The spec's eight sentences ("Spotify request flow" in
+    // docs/superpowers/specs/2026-09-01-listening-export-import-design.md),
+    // as literals so copy drift in the screen fails here. Step 1 carries
+    // the link inline, so its plain text is checked around the address.
+    expect(find.text('spotify.com/account/privacy'), findsOneWidget);
     expect(
       find.textContaining(
         'and log in with the account that has your listening history. '
@@ -33,18 +33,28 @@ void main() {
       ),
       findsOneWidget,
     );
-    for (final step in spotifyRequestSteps.skip(1)) {
-      expect(find.text(plain(step)), findsOneWidget, reason: step);
+    const specSteps = [
+      'Scroll to Download your data.',
+      'Select Account data and Extended streaming history. '
+          'Leave Technical log information unselected.',
+      'Press Request data.',
+      'Check your email. Spotify sends a confirmation message first. Open it and press '
+          'Confirm. Nothing is prepared until you do, and this is the step most people miss.',
+      'Wait. The two packages arrive as separate emails, each with a Download button, '
+          'usually within days; the extended history can take up to 30. Each link expires '
+          'after about two weeks, so download it when you see it.',
+      "Save the ZIPs as they are. Don't unzip them.",
+      "Come back to Mixtape and give it each ZIP as it arrives. You don't have to wait for both.",
+    ];
+    for (final step in specSteps) {
+      expect(find.text(step), findsOneWidget, reason: step);
     }
-    expect(find.text('Scroll to Download your data.'), findsOneWidget);
-    expect(find.text("Save the ZIPs as they are. Don't unzip them."), findsOneWidget);
     expect(
       find.textContaining('tap the download link in Mail, Safari saves the ZIP to Files'),
       findsOneWidget,
     );
     expect(find.textContaining('What the two emails look like'), findsOneWidget);
 
-    expect(find.text('spotify.com/account/privacy'), findsOneWidget);
     await tester.tap(find.byKey(const Key('link-spotify-privacy')));
     await tester.pump();
     expect(links.opened, [spotifyPrivacyUrl]);

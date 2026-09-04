@@ -11,7 +11,9 @@ import 'package:mixtape/data/dj/dj_api.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
 import 'package:mixtape/data/library/library_sync_service.dart';
 import 'package:mixtape/main.dart';
+import 'package:mixtape/data/onboarding/service_preference_store.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
+import 'package:mixtape/presentation/providers/device_providers.dart';
 import 'package:mixtape/presentation/providers/dj_providers.dart';
 import 'package:mixtape/presentation/providers/library_sync_provider.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
@@ -107,6 +109,8 @@ void main() {
         djApiProvider.overrideWithValue(_FakeDjApi()),
         // An Apple listener: the service gate resolves straight to Home.
         listeningApiProvider.overrideWithValue(FakeListeningApi()),
+        reminderSchedulerProvider.overrideWithValue(FakeReminderScheduler()),
+        servicePreferenceStoreProvider.overrideWithValue(InMemoryServicePreferenceStore()),
       ],
       child: const MixtapeApp(),
     ));
@@ -123,6 +127,8 @@ void main() {
         djApiProvider.overrideWithValue(_FakeDjApi()),
         // An Apple listener: the service gate resolves straight to Home.
         listeningApiProvider.overrideWithValue(FakeListeningApi()),
+        reminderSchedulerProvider.overrideWithValue(FakeReminderScheduler()),
+        servicePreferenceStoreProvider.overrideWithValue(InMemoryServicePreferenceStore()),
       ],
       child: const MixtapeApp(),
     ));
@@ -150,6 +156,8 @@ void main() {
         djApiProvider.overrideWithValue(_FakeDjApi()),
         // An Apple listener: the service gate resolves straight to Home.
         listeningApiProvider.overrideWithValue(FakeListeningApi()),
+        reminderSchedulerProvider.overrideWithValue(FakeReminderScheduler()),
+        servicePreferenceStoreProvider.overrideWithValue(InMemoryServicePreferenceStore()),
         librarySyncServiceProvider.overrideWithValue(service),
       ],
       child: const MixtapeApp(),
@@ -207,6 +215,8 @@ void main() {
         djApiProvider.overrideWithValue(_FakeDjApi()),
         // An Apple listener: the service gate resolves straight to Home.
         listeningApiProvider.overrideWithValue(FakeListeningApi()),
+        reminderSchedulerProvider.overrideWithValue(FakeReminderScheduler()),
+        servicePreferenceStoreProvider.overrideWithValue(InMemoryServicePreferenceStore()),
         librarySyncServiceProvider.overrideWithValue(service),
       ],
       child: const MixtapeApp(),
@@ -269,6 +279,8 @@ void main() {
         djApiProvider.overrideWithValue(_FakeDjApi()),
         // An Apple listener: the service gate resolves straight to Home.
         listeningApiProvider.overrideWithValue(FakeListeningApi()),
+        reminderSchedulerProvider.overrideWithValue(FakeReminderScheduler()),
+        servicePreferenceStoreProvider.overrideWithValue(InMemoryServicePreferenceStore()),
         librarySyncServiceProvider.overrideWithValue(service),
       ],
       child: const MixtapeApp(),
@@ -328,6 +340,8 @@ void main() {
         djApiProvider.overrideWithValue(_FakeDjApi()),
         // An Apple listener: the service gate resolves straight to Home.
         listeningApiProvider.overrideWithValue(FakeListeningApi()),
+        reminderSchedulerProvider.overrideWithValue(FakeReminderScheduler()),
+        servicePreferenceStoreProvider.overrideWithValue(InMemoryServicePreferenceStore()),
         librarySyncServiceProvider.overrideWithValue(service),
       ],
       child: const MixtapeApp(),

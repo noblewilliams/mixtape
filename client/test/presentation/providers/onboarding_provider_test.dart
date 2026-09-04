@@ -6,7 +6,9 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/listening/listening_api.dart';
+import 'package:mixtape/data/onboarding/service_preference_store.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
+import 'package:mixtape/presentation/providers/device_providers.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
 
 import '../../helpers/fake_bridge.dart' show apiWith;
@@ -22,13 +24,13 @@ class TestAuthNotifier extends AuthNotifier {
 }
 
 const _blank =
-    '{"sources":[],"hasLibrary":false,"chosenService":null,"markedRequestedAt":null,'
+    '{"userId":"u1","sources":[],"hasLibrary":false,"chosenService":null,"markedRequestedAt":null,'
     '"interviewCompletedAt":null,"importCompletedAt":null}';
 const _spotify =
-    '{"sources":[],"hasLibrary":false,"chosenService":"spotify","markedRequestedAt":null,'
+    '{"userId":"u1","sources":[],"hasLibrary":false,"chosenService":"spotify","markedRequestedAt":null,'
     '"interviewCompletedAt":null,"importCompletedAt":null}';
 const _requested =
-    '{"sources":[],"hasLibrary":false,"chosenService":"spotify",'
+    '{"userId":"u1","sources":[],"hasLibrary":false,"chosenService":"spotify",'
     '"markedRequestedAt":"2026-09-01T10:00:00.000Z",'
     '"interviewCompletedAt":null,"importCompletedAt":null}';
 
@@ -62,13 +64,19 @@ class _Server {
   int get onboardingGets => requests.where((r) => r.url.path == '/me/onboarding').length;
 }
 
-Future<ProviderContainer> _container(_Server server, {AuthNotifier? auth}) async {
+Future<ProviderContainer> _container(
+  _Server server, {
+  AuthNotifier? auth,
+  ServicePreferenceStore? prefs,
+}) async {
   final api = ListeningApi(await apiWith(server.client));
   final container = ProviderContainer(
     overrides: [
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
       listeningApiProvider.overrideWithValue(api),
       authProvider.overrideWith(() => auth ?? TestAuthNotifier(AuthStatus.signedIn)),
+      servicePreferenceStoreProvider
+          .overrideWithValue(prefs ?? InMemoryServicePreferenceStore()),
     ],
   );
   addTearDown(container.dispose);
@@ -143,6 +151,60 @@ void main() {
 
     expect(ok, isFalse);
     expect(container.read(onboardingProvider).value?.chosenService, 'spotify');
+  });
+
+  test('markChoseApple posts nothing, remembers the choice for this listener on the device, '
+      'and the state says apple', () async {
+    final server = _Server([_blank]);
+    final prefs = InMemoryServicePreferenceStore();
+    final container = await _container(server, prefs: prefs);
+    await container.read(onboardingProvider.future);
+
+    await container.read(onboardingProvider.notifier).markChoseApple();
+
+    expect(server.funnelPosts, isEmpty);
+    expect(await prefs.read('u1'), 'apple');
+    expect(container.read(onboardingProvider).value?.chosenService, 'apple');
+  });
+
+  test('a remembered choice fills in a blank server answer, on this launch and the next',
+      () async {
+    final prefs = InMemoryServicePreferenceStore();
+    await prefs.write('u1', 'apple');
+    final container = await _container(_Server([_blank]), prefs: prefs);
+    expect((await container.read(onboardingProvider.future)).chosenService, 'apple');
+
+    final next = await _container(_Server([_blank]), prefs: prefs);
+    expect((await next.read(onboardingProvider.future)).chosenService, 'apple');
+  });
+
+  test("a remembered choice never overrides the server's, and another account's is ignored",
+      () async {
+    final prefs = InMemoryServicePreferenceStore();
+    await prefs.write('u1', 'apple');
+    final container = await _container(_Server([_spotify]), prefs: prefs);
+    expect((await container.read(onboardingProvider.future)).chosenService, 'spotify');
+
+    await prefs.write('someone-else', 'apple');
+    final other = await _container(_Server([_blank]), prefs: prefs);
+    expect((await other.read(onboardingProvider.future)).chosenService, isNull);
+  });
+
+  test('a dropped chose_spotify post still yields the Spotify state through the local flag, '
+      'now and on the next launch', () async {
+    final prefs = InMemoryServicePreferenceStore();
+    final server = _Server([_blank, _blank], failFunnel: true);
+    final container = await _container(server, prefs: prefs);
+    await container.read(onboardingProvider.future);
+
+    await container.read(onboardingProvider.notifier).markChoseSpotify();
+
+    expect(server.funnelPosts, hasLength(1));
+    expect(await prefs.read('u1'), 'spotify');
+    expect(container.read(onboardingProvider).value?.chosenService, 'spotify');
+
+    final next = await _container(_Server([_blank]), prefs: prefs);
+    expect((await next.read(onboardingProvider.future)).chosenService, 'spotify');
   });
 
   test('an auth transition rebuilds the state for the next listener', () async {
