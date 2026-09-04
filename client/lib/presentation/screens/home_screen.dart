@@ -10,7 +10,9 @@ import '../format/source_labels.dart';
 import '../providers/auth_provider.dart';
 import '../providers/dj_providers.dart';
 import '../providers/library_sync_provider.dart';
+import '../providers/listening_import_provider.dart';
 import '../providers/onboarding_provider.dart';
+import '../providers/opened_archive_provider.dart';
 import 'chat_screen.dart';
 import 'import_sheet.dart';
 import 'interview_screen.dart';
@@ -45,6 +47,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   bool _starting = false;
   String? _error;
   bool _showArchived = false;
+
+  /// C5 bookkeeping: whether the import sheet is already up (so a handed
+  /// archive never stacks a second one), and whether one is already on its
+  /// way to being opened this frame.
+  bool _importSheetOpen = false;
+  bool _openingHandedArchive = false;
 
   @override
   void dispose() {
@@ -158,7 +166,54 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   /// "Choose a ZIP": the sheet opens over Home and the picker comes up at
   /// once (or the run in progress shows where it got to).
-  void _openImportSheet() => openImportFlow(context, ref);
+  Future<void> _openImportSheet() async {
+    _importSheetOpen = true;
+    try {
+      await openImportFlow(context, ref);
+    } finally {
+      _importSheetOpen = false;
+    }
+  }
+
+  /// A ZIP handed to the app from Files or Mail (C5). Home is the only
+  /// screen that pushes routes, so the flow opens from here: for a cold
+  /// start (the archive was already waiting when Home mounted) and for a
+  /// file opened while the app runs. Post-frame because both paths can land
+  /// during a build, and guarded so a rebuild in between cannot schedule it
+  /// twice.
+  void _scheduleHandedArchive() {
+    if (_openingHandedArchive) return;
+    _openingHandedArchive = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _openingHandedArchive = false;
+      _openHandedArchive();
+    });
+  }
+
+  void _openHandedArchive() {
+    if (!mounted) return;
+    final archive = ref.read(openedArchiveProvider);
+    if (archive == null) return;
+    final dismissible = ref.read(listeningImportProvider) is! ImportUploading;
+    // A run in flight is never reset (the re-entry rule): the sheet shows it
+    // where it got to and the handed archive stays pending until it ends,
+    // when the listener below brings us back here.
+    if (startImportFor(ref, archive)) {
+      ref.read(openedArchiveProvider.notifier).consumed(archive);
+    }
+    // One sheet only: a file opened over an open sheet re-renders it from
+    // the provider rather than stacking a second one.
+    if (!_importSheetOpen) _openHandedSheet(dismissible: dismissible);
+  }
+
+  Future<void> _openHandedSheet({required bool dismissible}) async {
+    _importSheetOpen = true;
+    try {
+      await showImportSheet(context, dismissible: dismissible);
+    } finally {
+      _importSheetOpen = false;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -169,6 +224,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     // The card stays until both packages have landed: the first import is
     // half the data, and the nudge for the other half lives here.
     final onboarding = ref.watch(onboardingProvider).value;
+    // C5: a ZIP handed to the app from Files or Mail, and the run that may
+    // have to end first. The import state is listened to rather than watched
+    // so an upload's progress ticks do not rebuild Home.
+    final handedArchive = ref.watch(openedArchiveProvider);
+    ref.listen(listeningImportProvider, (previous, next) {
+      if ((previous?.inProgress ?? false) && !next.inProgress) _scheduleHandedArchive();
+    });
+    if (handedArchive != null) _scheduleHandedArchive();
     final waiting = onboarding != null &&
         onboarding.chosenService == 'spotify' &&
         spotifyPackages(onboarding).count < 2;

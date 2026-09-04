@@ -36,6 +36,19 @@ Future<void> openImportFlow(BuildContext context, WidgetRef ref) {
   return showImportSheet(context, dismissible: state is! ImportUploading);
 }
 
+/// The share-sheet path (C5): the listener already chose the file in Files
+/// or Mail, so the flow starts on [archive] and the picker never opens.
+/// Returns false, having changed nothing, when a run is in flight — the same
+/// re-entry rule as [openImportFlow]: starting over would cancel it, so the
+/// handed archive waits for that run to end.
+bool startImportFor(WidgetRef ref, PickedArchive archive) {
+  if (ref.read(listeningImportProvider).inProgress) return false;
+  final notifier = ref.read(listeningImportProvider.notifier);
+  notifier.reset();
+  notifier.inspect(archive);
+  return true;
+}
+
 /// The Spotify import flow: pick a ZIP → inventory → upload with progress →
 /// done / partial / failed / cancelled. Every fact shown comes from the
 /// inventory or the summary; never a track, artist, or playlist name.

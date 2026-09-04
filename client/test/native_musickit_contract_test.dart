@@ -83,7 +83,31 @@ void main() {
       plist,
       contains('<key>LSApplicationQueriesSchemes</key>\n\t<array>\n\t\t<string>spotify</string>\n\t</array>'),
     );
-    // The share-sheet path is C5: no custom URL scheme or opener yet.
+    // The share-sheet path (C5) goes through the document type above, so
+    // there is still no custom URL scheme to declare.
     expect(plist, isNot(contains('CFBundleURLTypes')));
+  });
+
+  test('a ZIP handed to the app is copied out of its security scope and passed to Dart', () {
+    final source = File('ios/Runner/AppDelegate.swift').readAsStringSync();
+
+    // The document-type open path, for a running app and for a cold start.
+    expect(source, contains('open url: URL'));
+    expect(source, contains('launchOptions?[.url] as? URL'));
+    // A document opened in place is only readable inside its scope, so the
+    // file is copied into our own temporary directory under a fresh name
+    // before the scope ends and the import reads it.
+    expect(source, contains('startAccessingSecurityScopedResource()'));
+    expect(source, contains('stopAccessingSecurityScopedResource()'));
+    expect(source, contains('temporaryDirectory'));
+    expect(source, contains('UUID().uuidString'));
+    // The channel Dart listens on, plus the buffer a cold start drains.
+    expect(source, contains('mixtape/open-archive'));
+    expect(source, contains('invokeMethod("onOpenedArchive"'));
+    expect(source, contains('case "getPendingArchive"'));
+    expect(source, contains('pendingArchive = nil'));
+    // The name of a listener's export file is theirs: never logged.
+    expect(source, isNot(contains('print(')));
+    expect(source, isNot(contains('NSLog')));
   });
 }

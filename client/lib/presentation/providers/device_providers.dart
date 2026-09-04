@@ -3,6 +3,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import '../../data/files/archive_picker.dart';
+import '../../data/files/opened_archive_channel.dart';
 import '../../data/onboarding/funnel_once_store.dart';
 import '../../data/onboarding/service_preference_store.dart';
 import '../../data/reminders/reminder_scheduler.dart';
@@ -25,6 +26,15 @@ final textSharerProvider = Provider<TextSharer>((ref) => const SharePlusTextShar
 
 /// The ZIP picker behind "Choose a ZIP" (the document picker).
 final archivePickerProvider = Provider<ArchivePicker>((ref) => const FilePickerArchivePicker());
+
+/// The other way in: a ZIP handed to the app from Files or Mail. Not
+/// user-scoped itself (the channel outlives any one listener); the notifier
+/// that reads it is.
+final openedArchiveSourceProvider = Provider<OpenedArchiveSource>((ref) {
+  final source = MethodChannelOpenedArchiveSource();
+  ref.onDispose(source.dispose);
+  return source;
+});
 
 typedef TimeZoneReader = Future<String> Function();
 

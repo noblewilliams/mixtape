@@ -89,6 +89,7 @@ ProviderContainer onboardingContainer({
   AuthNotifier? auth,
   FakeImportService? importService,
   FakeArchivePicker? picker,
+  FakeOpenedArchiveSource? opened,
   String timeZone = 'Africa/Lagos',
   ExportDiagnoser? diagnoser,
 }) {
@@ -96,6 +97,7 @@ ProviderContainer onboardingContainer({
     overrides: [
       listeningImportServiceProvider.overrideWithValue(importService ?? FakeImportService()),
       archivePickerProvider.overrideWithValue(picker ?? FakeArchivePicker()),
+      openedArchiveSourceProvider.overrideWithValue(opened ?? FakeOpenedArchiveSource()),
       deviceTimeZoneProvider.overrideWithValue(() async => timeZone),
       exportDiagnoserProvider.overrideWithValue(diagnoser ?? (_) async => brokenDiagnostics),
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),

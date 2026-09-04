@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:mixtape/data/files/archive_picker.dart';
+import 'package:mixtape/data/files/opened_archive_channel.dart';
 import 'package:mixtape/data/listening/listening_models.dart';
 import 'package:mixtape/import/listening_import_service.dart';
 import 'package:mixtape/import/snapshot.dart';
@@ -113,6 +114,37 @@ class FakeImportService extends ListeningImportService {
       _cancelled = run;
     } else {
       run.completeError(ImportCancelled());
+    }
+  }
+}
+
+/// Stands in for the native open-archive channel (C5). [pending] is what a
+/// cold start finds; [hand] is a file opened while the app runs, which —
+/// exactly like the method-channel source — becomes the pending archive when
+/// nobody is listening (no listener signed in yet).
+class FakeOpenedArchiveSource implements OpenedArchiveSource {
+  FakeOpenedArchiveSource({this.pending});
+
+  PickedArchive? pending;
+  int takes = 0;
+  final StreamController<PickedArchive> _opened = StreamController<PickedArchive>.broadcast();
+
+  @override
+  Stream<PickedArchive> get opened => _opened.stream;
+
+  @override
+  Future<PickedArchive?> takePending() async {
+    takes++;
+    final held = pending;
+    pending = null;
+    return held;
+  }
+
+  void hand(PickedArchive archive) {
+    if (_opened.hasListener) {
+      _opened.add(archive);
+    } else {
+      pending = archive;
     }
   }
 }
