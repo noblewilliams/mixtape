@@ -1,6 +1,6 @@
 # Listening-export import — Phase 2: Spotify import on iOS and web
 
-*Status: active · 2026-09-02 · founder go for Track A and both parsers (B1, C1); B3 board approval pending before B4/B5; deploy deferred*
+*Status: active · 2026-09-04 · Track A and both parsers delivered; founder go for B2/C2 (import services) in progress; B3 board approval pending before B4/B5; deploy deferred*
 *Design: [listening-export import](../specs/2026-09-01-listening-export-import-design.md) (revision 3) · Phase 1: [server plan](2026-09-01-listening-export-p1-server.md) (code complete)*
 
 **Founder decisions (2026-09-01/02):** both surfaces get the Spotify import, each ships when ready; iOS is the natural home (the email lands there and the archive is small); web carries paste-in, copy-out, and the embed probe later; both Spotify packages are requested and imported in either order; private sessions excluded by default with a toggle; the interview gates any pre-data mix; no email provider, Spotify's emails are the triggers; deploy is deferred and happens on explicit go.
