@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'presentation/providers/auth_provider.dart';
-import 'presentation/screens/home_screen.dart';
+import 'presentation/screens/choose_service_screen.dart';
 import 'presentation/screens/sign_in_screen.dart';
 
 void main() {
@@ -25,7 +25,10 @@ class MixtapeApp extends ConsumerWidget {
       home: switch (auth) {
         AuthStatus.unknown => const Scaffold(body: Center(child: CircularProgressIndicator())),
         AuthStatus.signedOut => const SignInScreen(),
-        AuthStatus.signedIn => const HomeScreen(),
+        // ServiceGate resolves to Home once the listener has a service (or
+        // onboarding cannot be read); Home stays the only screen that pushes
+        // routes and hosts sign-out.
+        AuthStatus.signedIn => const ServiceGate(),
       },
     );
   }

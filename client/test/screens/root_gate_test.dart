@@ -14,10 +14,12 @@ import 'package:mixtape/main.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/dj_providers.dart';
 import 'package:mixtape/presentation/providers/library_sync_provider.dart';
+import 'package:mixtape/presentation/providers/onboarding_provider.dart';
 import 'package:mixtape/presentation/screens/home_screen.dart';
 import 'package:mixtape/presentation/screens/sign_in_screen.dart';
 import '../helpers/fake_bridge.dart'
     show FakeBridge, song, apiWith, emptyPlaylistSyncResponse;
+import '../helpers/fake_listening_api.dart';
 
 /// Home now watches sessionsProvider on every build (sessions-first Home,
 /// Task 6) — a bare FakeDjApi with an empty session list keeps these
@@ -103,6 +105,8 @@ void main() {
       overrides: [
         tokenStoreProvider.overrideWithValue(store),
         djApiProvider.overrideWithValue(_FakeDjApi()),
+        // An Apple listener: the service gate resolves straight to Home.
+        listeningApiProvider.overrideWithValue(FakeListeningApi()),
       ],
       child: const MixtapeApp(),
     ));
@@ -117,6 +121,8 @@ void main() {
       overrides: [
         tokenStoreProvider.overrideWithValue(store),
         djApiProvider.overrideWithValue(_FakeDjApi()),
+        // An Apple listener: the service gate resolves straight to Home.
+        listeningApiProvider.overrideWithValue(FakeListeningApi()),
       ],
       child: const MixtapeApp(),
     ));
@@ -142,6 +148,8 @@ void main() {
       overrides: [
         tokenStoreProvider.overrideWithValue(store),
         djApiProvider.overrideWithValue(_FakeDjApi()),
+        // An Apple listener: the service gate resolves straight to Home.
+        listeningApiProvider.overrideWithValue(FakeListeningApi()),
         librarySyncServiceProvider.overrideWithValue(service),
       ],
       child: const MixtapeApp(),
@@ -197,6 +205,8 @@ void main() {
       overrides: [
         tokenStoreProvider.overrideWithValue(store),
         djApiProvider.overrideWithValue(_FakeDjApi()),
+        // An Apple listener: the service gate resolves straight to Home.
+        listeningApiProvider.overrideWithValue(FakeListeningApi()),
         librarySyncServiceProvider.overrideWithValue(service),
       ],
       child: const MixtapeApp(),
@@ -257,6 +267,8 @@ void main() {
       overrides: [
         tokenStoreProvider.overrideWithValue(store),
         djApiProvider.overrideWithValue(_FakeDjApi()),
+        // An Apple listener: the service gate resolves straight to Home.
+        listeningApiProvider.overrideWithValue(FakeListeningApi()),
         librarySyncServiceProvider.overrideWithValue(service),
       ],
       child: const MixtapeApp(),
@@ -314,6 +326,8 @@ void main() {
       overrides: [
         tokenStoreProvider.overrideWithValue(store),
         djApiProvider.overrideWithValue(_FakeDjApi()),
+        // An Apple listener: the service gate resolves straight to Home.
+        listeningApiProvider.overrideWithValue(FakeListeningApi()),
         librarySyncServiceProvider.overrideWithValue(service),
       ],
       child: const MixtapeApp(),

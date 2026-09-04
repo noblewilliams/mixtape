@@ -11,3 +11,17 @@ String relativeTime(DateTime dt) {
   final local = dt.toLocal();
   return '${local.month}/${local.day}/${local.year}';
 }
+
+/// The waiting state's elapsed wait ("Requested 2 days ago"): full words,
+/// unlike [relativeTime]'s compact list-row form, and never collapsing to a
+/// date — a wait is a count of days however long it runs. [now] is
+/// injectable so tests pin exact boundaries.
+String elapsedWait(DateTime since, {DateTime? now}) {
+  final diff = (now ?? DateTime.now()).difference(since);
+  if (diff.inMinutes < 1) return 'just now';
+  if (diff.inHours < 1) return _ago(diff.inMinutes, 'minute');
+  if (diff.inDays < 1) return _ago(diff.inHours, 'hour');
+  return _ago(diff.inDays, 'day');
+}
+
+String _ago(int count, String unit) => '$count ${count == 1 ? unit : '${unit}s'} ago';

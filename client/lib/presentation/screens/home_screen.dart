@@ -3,12 +3,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/api/api_client.dart';
 import '../../data/dj/dj_api.dart';
 import '../../data/dj/dj_models.dart';
+import '../../data/listening/listening_models.dart';
 import '../format/relative_time.dart';
 import '../providers/auth_provider.dart';
 import '../providers/dj_providers.dart';
 import '../providers/library_sync_provider.dart';
+import '../providers/onboarding_provider.dart';
 import 'chat_screen.dart';
+import 'interview_screen.dart';
 import 'memory_screen.dart';
+import 'spotify_request_screen.dart';
 
 const _archiveFailedMessage = "couldn't archive — try again";
 const _unarchiveFailedMessage = "couldn't unarchive — try again";
@@ -117,10 +121,32 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
+  void _openRequestScreen() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const SpotifyRequestScreen()),
+    );
+  }
+
+  void _openInterview() {
+    Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => const InterviewScreen()))
+        // The server records interview_completed; the card reads it back.
+        .then((_) {
+          if (!mounted) return;
+          ref.read(onboardingProvider.notifier).refresh();
+        });
+  }
+
   @override
   Widget build(BuildContext context) {
     final sessionsAsync = ref.watch(sessionsProvider);
     final sync = ref.watch(librarySyncProvider);
+    // The Spotify waiting state, until the import lands. Apple listeners
+    // (and anyone whose onboarding cannot be read) see Home exactly as before.
+    final onboarding = ref.watch(onboardingProvider).value;
+    final waiting = onboarding != null &&
+        onboarding.chosenService == 'spotify' &&
+        onboarding.importCompletedAt == null;
 
     return Scaffold(
       appBar: AppBar(
@@ -168,6 +194,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  if (waiting) ...[
+                    _SpotifyWaitingCard(
+                      onboarding: onboarding,
+                      onOpenRequest: _openRequestScreen,
+                      onOpenInterview: _openInterview,
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   ValueListenableBuilder<TextEditingValue>(
                     valueListenable: _promptController,
                     builder: (context, value, _) {
@@ -264,6 +298,87 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         showArchived: _showArchived,
         onToggleArchived: () => setState(() => _showArchived = !_showArchived),
         onTapSession: _navigateToChat,
+      ),
+    );
+  }
+}
+
+/// Home's waiting state for a Spotify listener whose import has not landed:
+/// the elapsed wait since "I've requested it" (or the way to the request
+/// screen), the interview card, and the "Not personal yet" note. Route
+/// pushes stay with Home via the callbacks.
+class _SpotifyWaitingCard extends StatelessWidget {
+  const _SpotifyWaitingCard({
+    required this.onboarding,
+    required this.onOpenRequest,
+    required this.onOpenInterview,
+  });
+
+  final OnboardingState onboarding;
+  final VoidCallback onOpenRequest;
+  final VoidCallback onOpenInterview;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final markedAt = onboarding.markedRequestedAt;
+    final interviewDone = onboarding.interviewCompletedAt != null;
+    return Card(
+      key: const Key('waiting-card'),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 8, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('Waiting for your Spotify data', style: textTheme.titleMedium),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(markedAt == null ? Icons.mail_outline : Icons.hourglass_top, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: markedAt == null
+                      ? const Text('Not requested yet', key: Key('waiting-not-requested'))
+                      : Text(
+                          'Requested ${elapsedWait(markedAt)}',
+                          key: const Key('waiting-requested'),
+                        ),
+                ),
+                TextButton(
+                  key: const Key('open-request'),
+                  onPressed: onOpenRequest,
+                  child: Text(markedAt == null ? 'Request it' : 'See the steps'),
+                ),
+              ],
+            ),
+            const Divider(),
+            if (interviewDone)
+              Row(
+                key: const Key('interview-done'),
+                children: const [
+                  Icon(Icons.check_circle_outline, size: 20),
+                  SizedBox(width: 8),
+                  Text('Interview done'),
+                ],
+              )
+            else
+              ListTile(
+                key: const Key('open-interview'),
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.record_voice_over_outlined),
+                title: const Text('Tell the DJ about your taste'),
+                subtitle: const Text('Five quick questions so the first mixes have something to go on.'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: onOpenInterview,
+              ),
+            const SizedBox(height: 8),
+            Text(
+              'Mixes before the import are labeled "Not personal yet".',
+              key: const Key('not-personal-note'),
+              style: textTheme.bodySmall,
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -12,9 +12,11 @@ import 'package:mixtape/data/library/library_sync_service.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/dj_providers.dart';
 import 'package:mixtape/presentation/providers/library_sync_provider.dart';
+import 'package:mixtape/presentation/providers/onboarding_provider.dart';
 import 'package:mixtape/presentation/screens/chat_screen.dart';
 import 'package:mixtape/presentation/screens/home_screen.dart';
 import '../helpers/fake_bridge.dart';
+import '../helpers/fake_listening_api.dart';
 
 /// Mirrors chat_screen_test.dart's FakeDjApi: implements DjApi's public
 /// surface (not `extends`, since DjApi's constructor builds a real
@@ -139,6 +141,9 @@ ProviderContainer _makeContainer(FakeDjApi api, {LibrarySyncService? syncService
   final overrides = [
     tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
     djApiProvider.overrideWithValue(api),
+    // Home watches onboarding for the Spotify waiting card; an Apple
+    // listener keeps every existing assertion untouched.
+    listeningApiProvider.overrideWithValue(FakeListeningApi()),
     authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.signedIn)),
     if (syncService != null) librarySyncServiceProvider.overrideWithValue(syncService),
   ];
