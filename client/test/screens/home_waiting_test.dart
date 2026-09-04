@@ -128,6 +128,39 @@ void main() {
     expect(find.text('Upload'), findsOneWidget);
   });
 
+  testWidgets('Choose a ZIP while an upload is in flight shows where it got to, in a sheet that '
+      'cannot be swiped away, and cancels nothing', (tester) async {
+    final listening = FakeListeningApi(onboarding: onboardingState(chosenService: 'spotify'));
+    final picker = FakeArchivePicker(extendedArchive);
+    final service = FakeImportService();
+    await pumpScreen(
+      tester,
+      onboardingContainer(listening: listening, picker: picker, importService: service),
+      const HomeScreen(),
+    );
+    await tester.tap(find.byKey(const Key('waiting-choose-zip')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('import-upload')));
+    await tester.pump();
+    expect(find.byKey(const Key('import-progress')), findsOneWidget);
+    Navigator.of(tester.element(find.byType(ImportSheet))).pop();
+    await tester.pumpAndSettle();
+    expect(find.byType(ImportSheet), findsNothing);
+    // reset() before the first pick counted one cancel; re-entry adds none.
+    final cancelsBefore = service.cancels;
+
+    await tester.tap(find.byKey(const Key('waiting-choose-zip')));
+    await tester.pumpAndSettle();
+
+    expect(service.cancels, cancelsBefore);
+    expect(service.running, isTrue);
+    expect(picker.picks, 1);
+    expect(find.byKey(const Key('import-progress')), findsOneWidget);
+    final route = ModalRoute.of(tester.element(find.byType(ImportSheet)))! as ModalBottomSheetRoute<void>;
+    expect(route.isDismissible, isFalse);
+    expect(route.enableDrag, isFalse);
+  });
+
   testWidgets('the Interview done tile shows the notes and artists it produced', (tester) async {
     final listening = FakeListeningApi(
       onboarding: onboardingState(

@@ -105,6 +105,42 @@ void main() {
     expect(find.text('Upload'), findsOneWidget);
   });
 
+  testWidgets('Import again while an upload is in flight shows where it got to and cancels '
+      'nothing', (tester) async {
+    final listening = FakeListeningApi(
+      onboarding: onboardingState(
+        chosenService: 'spotify',
+        sources: [musicSource(packages: ['spotify_account'], lastImportedAt: importedAt)],
+      ),
+    );
+    final picker = FakeArchivePicker(extendedArchive);
+    final service = FakeImportService();
+    await pumpScreen(
+      tester,
+      onboardingContainer(listening: listening, picker: picker, importService: service),
+      const MusicSourcesScreen(),
+    );
+    await tester.tap(find.byKey(const Key('import-again-spotify_export')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('import-upload')));
+    await tester.pump();
+    Navigator.of(tester.element(find.byType(ImportSheet))).pop();
+    await tester.pumpAndSettle();
+    expect(find.byType(ImportSheet), findsNothing);
+    // reset() before the first pick counted one cancel; re-entry adds none.
+    final cancelsBefore = service.cancels;
+
+    await tester.tap(find.byKey(const Key('import-again-spotify_export')));
+    await tester.pumpAndSettle();
+
+    expect(service.cancels, cancelsBefore);
+    expect(service.running, isTrue);
+    expect(picker.picks, 1);
+    expect(find.byKey(const Key('import-progress')), findsOneWidget);
+    final route = ModalRoute.of(tester.element(find.byType(ImportSheet)))! as ModalBottomSheetRoute<void>;
+    expect(route.isDismissible, isFalse);
+  });
+
   testWidgets('Remove confirms with the copy that says what goes and what stays, then deletes '
       'and refreshes', (tester) async {
     final listening = FakeListeningApi(

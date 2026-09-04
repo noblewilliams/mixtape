@@ -598,6 +598,36 @@ void main() {
       expect(server.funnelTypes, ['import_completed']);
     });
 
+    test('an import() inside the cancel window waits for the cancelled run to settle, then '
+        'starts fresh with its own path', () async {
+      final server = _Server();
+      final release = Completer<void>();
+      final parsed = <String>[];
+      final service = await _service(server, parser: (path, options) async {
+        parsed.add(path);
+        // The first parse outlives its cancel, the way a worker isolate does.
+        if (parsed.length == 1) await release.future;
+        options.cancelToken?.throwIfCancelled();
+        return ParsedExport(inventory: ExportInventory.empty, snapshot: _synthetic(tracks: 1));
+      });
+
+      final first = service.import('any.zip', _lagos);
+      await pumpEventQueue();
+      service.cancel();
+      final second = service.import('other.zip', _lagos);
+      await pumpEventQueue();
+      expect(parsed, ['any.zip'], reason: 'the fresh run waits for the cancelled one to settle');
+
+      release.complete();
+      await expectLater(first, throwsA(isA<ImportCancelled>()));
+      final result = await second;
+      await pumpEventQueue();
+      expect(result.summary.tracks, 1);
+      expect(parsed, ['any.zip', 'other.zip']);
+      expect(server.protocol.where((r) => r == 'POST /ingest/listening/imports'), hasLength(1));
+      expect(server.funnelTypes, ['import_completed']);
+    });
+
     test("a joiner's cancel() aborts the shared run for the first caller too", () async {
       final begun = Completer<void>();
       final server = _Server(

@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixtape/import/snapshot.dart';
 import 'package:mixtape/import/listening_import_service.dart';
 import 'package:mixtape/presentation/providers/listening_import_provider.dart';
 import 'package:mixtape/presentation/screens/import_sheet.dart';
@@ -159,7 +162,7 @@ void main() {
   });
 
   testWidgets('done: counts, ledger range, the enrichment note, Make your first mix pops to Home, '
-      'Import the other package picks again', (tester) async {
+      'Import the account data too picks again', (tester) async {
     final c = container();
     await open(tester, c);
     await tester.tap(find.byKey(const Key('import-pick')));
@@ -179,7 +182,7 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Make your first mix'), findsOneWidget);
-    expect(find.text('Import the other package'), findsOneWidget);
+    expect(find.text('Import the account data too'), findsOneWidget);
     expectInteractiveWidgetsKeyed(sheet());
 
     await tester.tap(find.byKey(const Key('import-other')));
@@ -216,9 +219,11 @@ void main() {
     expect(find.text('214 liked songs · 37 artists · 12 playlists'), findsOneWidget);
     expect(find.textContaining('Ledger'), findsNothing);
     expect(find.text('10 playlist entries are still unmatched.'), findsOneWidget);
+    expect(find.text('Import the extended history too'), findsOneWidget);
   });
 
-  testWidgets('partial: history published, playlists failed, Make a mix anyway', (tester) async {
+  testWidgets('partial: history published, playlists failed, the web\'s copy, Retry playlists '
+      're-uploads the same file, Make a mix anyway', (tester) async {
     final c = container();
     service.inventory = accountInventory;
     picker.next = accountArchive;
@@ -232,17 +237,65 @@ void main() {
 
     expect(find.text("Account data imported, playlists didn't land"), findsOneWidget);
     expect(
-      find.text('Your liked songs and artists are in. The playlist sync was interrupted; nothing '
-          'is lost and nothing needs re-uploading.'),
+      find.text('Likes and followed artists are in. The playlist sync was interrupted.'),
+      findsOneWidget,
+    );
+    expect(find.text('214 liked songs · 37 artists'), findsOneWidget);
+    expect(
+      find.text('Your liked songs and artists are safe on the server. Nothing is lost and nothing '
+          'needs re-uploading; the playlists can follow later.'),
       findsOneWidget,
     );
     expect(find.text('Make a mix anyway'), findsOneWidget);
-    expect(find.text('Retry playlists'), findsNothing);
+    expect(find.text('Retry playlists'), findsOneWidget);
+    expect(find.text('Re-uploads the file; nothing is duplicated.'), findsOneWidget);
+    expect(find.byKey(const Key('import-other')), findsNothing);
     expectInteractiveWidgetsKeyed(sheet());
+
+    service.importedPath = null;
+    await tester.tap(find.byKey(const Key('import-retry-playlists')));
+    await tester.pump();
+    expect(find.byKey(const Key('import-progress')), findsOneWidget);
+    expect(service.importedPath, accountArchive.path);
+    expect(picker.picks, 1);
+    service.finish(accountResult());
+    await tester.pumpAndSettle();
+    expect(find.text('Account data imported'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('import-make-mix')));
     await tester.pumpAndSettle();
     expect(sheet(), findsNothing);
+  });
+
+  testWidgets('an unreadable file fails at once and says the report is being built, then shows '
+      'it', (tester) async {
+    final report = Completer<ExportDiagnostics>();
+    listening = FakeListeningApi(onboarding: onboardingState(chosenService: 'spotify'));
+    service = FakeImportService()..inventory = brokenInventory;
+    picker = FakeArchivePicker(extendedArchive);
+    final c = onboardingContainer(
+      listening: listening,
+      importService: service,
+      picker: picker,
+      diagnoser: (_) => report.future,
+    );
+    await open(tester, c);
+    await tester.tap(find.byKey(const Key('import-pick')));
+    await tester.pumpAndSettle();
+
+    expect(find.text("Couldn't read this export"), findsOneWidget);
+    expect(find.textContaining('Expected files'), findsOneWidget);
+    expect(find.text('Building the report…'), findsOneWidget);
+    expect(find.byKey(const Key('import-diagnostics')), findsNothing);
+    expect(find.byKey(const Key('import-copy-report')), findsNothing);
+    expect(find.byKey(const Key('import-cancel')), findsNothing);
+    expect(find.byKey(const Key('import-try-another')), findsOneWidget);
+
+    report.complete(brokenDiagnostics);
+    await tester.pumpAndSettle();
+    expect(find.text('Building the report…'), findsNothing);
+    expect(find.byKey(const Key('import-diagnostics')), findsOneWidget);
+    expect(find.byKey(const Key('import-copy-report')), findsOneWidget);
   });
 
   testWidgets('failed: the expected file names, the report in a monospace box, Copy report puts '

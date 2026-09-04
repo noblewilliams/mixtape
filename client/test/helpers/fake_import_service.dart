@@ -33,6 +33,13 @@ class FakeImportService extends ListeningImportService {
   void Function(double progress)? _onProgress;
   int cancels = 0;
 
+  /// When set, [cancel] flags the run but leaves it pending until
+  /// [settleCancelled]: the window in which a fresh [import] must not join
+  /// the cancelled run, and in which a rebuilt provider must not let the
+  /// cancelled run's error land on its fresh state.
+  bool holdCancel = false;
+  Completer<ListeningImportResult>? _cancelled;
+
   bool get running => _run != null && !_run!.isCompleted;
 
   @override
@@ -51,11 +58,32 @@ class FakeImportService extends ListeningImportService {
     ImportOptions options, {
     void Function(double progress)? onProgress,
   }) {
+    final held = _cancelled;
+    if (held == null || held.isCompleted) return _start(path, options, onProgress);
+    // The service's contract: a call inside the cancel window waits for the
+    // cancelled run to settle and then starts fresh, never joining it.
+    return held.future
+        .then<void>((_) {}, onError: (Object _) {})
+        .then((_) => _start(path, options, onProgress));
+  }
+
+  Future<ListeningImportResult> _start(
+    String path,
+    ImportOptions options,
+    void Function(double progress)? onProgress,
+  ) {
     importedPath = path;
     importedOptions = options;
     _onProgress = onProgress;
     _run = Completer<ListeningImportResult>();
     return _run!.future;
+  }
+
+  /// Settles the run a held [cancel] flagged, with [ImportCancelled].
+  void settleCancelled() {
+    final run = _cancelled;
+    _cancelled = null;
+    if (run != null && !run.isCompleted) run.completeError(ImportCancelled());
   }
 
   void report(double progress) => _onProgress?.call(progress);
@@ -70,20 +98,29 @@ class FakeImportService extends ListeningImportService {
     final inspect = _inspect;
     if (inspect != null && !inspect.isCompleted) inspect.completeError(ImportCancelled());
     final run = _run;
-    if (run != null && !run.isCompleted) run.completeError(ImportCancelled());
+    if (run == null || run.isCompleted) return;
+    if (holdCancel) {
+      _cancelled = run;
+    } else {
+      run.completeError(ImportCancelled());
+    }
   }
 }
 
-/// Hands the screen a fixed pick (or a dismissed picker when null).
+/// Hands the screen a fixed pick (or a dismissed picker when null), or
+/// throws [error] the way the platform picker can.
 class FakeArchivePicker implements ArchivePicker {
   FakeArchivePicker([this.next]);
 
   PickedArchive? next;
+  Object? error;
   int picks = 0;
 
   @override
   Future<PickedArchive?> pick() async {
     picks++;
+    final failure = error;
+    if (failure != null) throw failure;
     return next;
   }
 }

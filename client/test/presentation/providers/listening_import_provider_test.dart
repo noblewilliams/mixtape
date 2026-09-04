@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/api/api_client.dart';
@@ -130,6 +132,34 @@ void main() {
     expect(listening.getOnboardingCalls, before + 1);
   });
 
+  test('Retry playlists re-runs the import on the partial archive with the same options, and '
+      'refreshes when it lands', () async {
+    final c = container();
+    c.listen(onboardingProvider, (_, _) {}, fireImmediately: true);
+    await _settle();
+    service.inventory = accountInventory;
+    await notifier(c).inspect(accountArchive);
+    final upload = notifier(c).upload();
+    await _settle();
+    service.finish(accountResult(playlistError: const ListeningImportProtocolException()));
+    await upload;
+    expect(c.read(listeningImportProvider), isA<ImportPartial>());
+    final before = listening.getOnboardingCalls;
+    service.importedPath = null;
+
+    final retry = notifier(c).retryPlaylists();
+    await _settle();
+    expect(c.read(listeningImportProvider), isA<ImportUploading>());
+    expect(service.importedPath, accountArchive.path);
+    expect(service.importedOptions!.timeZone, 'Africa/Lagos');
+    expect(service.importedOptions!.includePrivateSessions, isFalse);
+
+    service.finish(accountResult());
+    await retry;
+    expect((c.read(listeningImportProvider) as ImportDone).result.playlistSummary, isNotNull);
+    expect(listening.getOnboardingCalls, before + 1);
+  });
+
   test('cancel during the upload lands on cancelled', () async {
     final c = container();
     await notifier(c).inspect(extendedArchive);
@@ -194,7 +224,64 @@ void main() {
     await notifier(c).inspect(extendedArchive);
     final failed = c.read(listeningImportProvider) as ImportFailed;
     expect(failed.diagnostics, isNull);
+    expect(failed.unreadable, isTrue);
+    expect(failed.diagnosing, isFalse);
     expect(failed.message, isNotEmpty);
+  });
+
+  ProviderContainer heldReportContainer(Completer<ExportDiagnostics> report) => onboardingContainer(
+        listening: FakeListeningApi(onboarding: onboardingState(chosenService: 'spotify')),
+        importService: FakeImportService()..inventory = brokenInventory,
+        diagnoser: (_) => report.future,
+      );
+
+  test('an unreadable file fails at once, before the report is built, and the report attaches '
+      'when it arrives', () async {
+    final report = Completer<ExportDiagnostics>();
+    final c = heldReportContainer(report);
+    final inspect = notifier(c).inspect(extendedArchive);
+    await _settle();
+
+    var failed = c.read(listeningImportProvider) as ImportFailed;
+    expect(failed.unreadable, isTrue);
+    expect(failed.diagnosing, isTrue);
+    expect(failed.diagnostics, isNull);
+    expect(failed.message, contains('Streaming_History_Audio_2021-2023_1.json'));
+
+    report.complete(brokenDiagnostics);
+    await inspect;
+    failed = c.read(listeningImportProvider) as ImportFailed;
+    expect(failed.diagnosing, isFalse);
+    expect(failed.diagnostics, same(brokenDiagnostics));
+  });
+
+  test('cancel while the report is being built lands on cancelled and drops the report', () async {
+    final report = Completer<ExportDiagnostics>();
+    final c = heldReportContainer(report);
+    final inspect = notifier(c).inspect(extendedArchive);
+    await _settle();
+    expect((c.read(listeningImportProvider) as ImportFailed).diagnosing, isTrue);
+
+    notifier(c).cancel();
+    expect(c.read(listeningImportProvider), isA<ImportFlowCancelled>());
+
+    report.complete(brokenDiagnostics);
+    await inspect;
+    expect(c.read(listeningImportProvider), isA<ImportFlowCancelled>());
+  });
+
+  test('a picker that throws fails with a message, no file, and no report', () async {
+    final c = container();
+    picker.error = StateError('no document picker');
+
+    await notifier(c).pick();
+
+    final failed = c.read(listeningImportProvider) as ImportFailed;
+    expect(failed.message, "Couldn't open the file picker. Try again.");
+    expect(failed.archive, isNull);
+    expect(failed.unreadable, isFalse);
+    expect(failed.diagnostics, isNull);
+    expect(service.inspected, isEmpty);
   });
 
   test('upload failures map to messages: offline, server, protocol, and a broken parse', () async {
@@ -225,6 +312,52 @@ void main() {
     expect(parse.diagnostics, same(brokenDiagnostics));
   });
 
+  test('a protocol failure on the upload still refreshes onboarding: the mismatch can come '
+      'after the history was published', () async {
+    final c = container();
+    c.listen(onboardingProvider, (_, _) {}, fireImmediately: true);
+    await _settle();
+    final before = listening.getOnboardingCalls;
+    await notifier(c).inspect(extendedArchive);
+    final upload = notifier(c).upload();
+    await _settle();
+
+    service.fail(const ListeningImportProtocolException());
+    await upload;
+
+    expect(c.read(listeningImportProvider), isA<ImportFailed>());
+    expect(listening.getOnboardingCalls, before + 1);
+  });
+
+  test('a new upload inside the cancel window never joins the cancelled run: it waits for that '
+      'run to settle, then proceeds with the new file and options', () async {
+    final c = container();
+    service.holdCancel = true;
+    await notifier(c).inspect(extendedArchive);
+    notifier(c).setIncludePrivateSessions(true);
+    final first = notifier(c).upload();
+    await _settle();
+
+    notifier(c).reset();
+    service.inventory = accountInventory;
+    await notifier(c).inspect(accountArchive);
+    final second = notifier(c).upload();
+    await _settle();
+    expect(c.read(listeningImportProvider), isA<ImportUploading>());
+    expect(service.importedPath, extendedArchive.path, reason: 'the fresh run waits for the old one');
+
+    service.settleCancelled();
+    await first;
+    await _settle();
+    expect(c.read(listeningImportProvider), isA<ImportUploading>());
+    expect(service.importedPath, accountArchive.path);
+    expect(service.importedOptions!.includePrivateSessions, isFalse);
+
+    service.finish(accountResult());
+    await second;
+    expect((c.read(listeningImportProvider) as ImportDone).archive, accountArchive);
+  });
+
   test('reset returns to idle and cancels whatever is running', () async {
     final c = container();
     await notifier(c).inspect(extendedArchive);
@@ -239,17 +372,30 @@ void main() {
     expect(service.cancels, 1);
   });
 
-  test('a sign-out resets the flow and cancels the service', () async {
+  test('a sign-out resets the flow and cancels the service; what the cancelled run reports '
+      'after that is dropped: no cancelled state over the fresh idle, no onboarding refresh '
+      'while signed out', () async {
     final auth = TestAuthNotifier(AuthStatus.signedIn);
     final c = container(auth: auth);
     c.listen(listeningImportProvider, (_, _) {});
+    c.listen(onboardingProvider, (_, _) {}, fireImmediately: true);
+    service.holdCancel = true;
     await notifier(c).inspect(extendedArchive);
-    expect(c.read(listeningImportProvider), isA<ImportInventory>());
+    final upload = notifier(c).upload();
+    await _settle();
+    expect(c.read(listeningImportProvider), isA<ImportUploading>());
 
     auth.set(AuthStatus.signedOut);
     await _settle();
-
     expect(c.read(listeningImportProvider), isA<ImportIdle>());
     expect(service.cancels, greaterThanOrEqualTo(1));
+    final before = listening.getOnboardingCalls;
+
+    service.settleCancelled();
+    await upload;
+    await _settle();
+
+    expect(c.read(listeningImportProvider), isA<ImportIdle>());
+    expect(listening.getOnboardingCalls, before);
   });
 }

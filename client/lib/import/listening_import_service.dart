@@ -95,9 +95,7 @@ class ListeningImportService {
   final ExportParser _parser;
   final ExportInspector _inspector;
 
-  Future<ListeningImportResult>? _inFlight;
-  bool _cancelRequested = false;
-  CancelToken? _parseToken;
+  _ImportRun? _inFlight;
   CancelToken? _inspectToken;
 
   /// Requests that the in-flight run stop at its next await boundary; a
@@ -108,9 +106,10 @@ class ListeningImportService {
   /// after the listener left the sheet.
   void cancel() {
     _inspectToken?.cancel();
-    if (_inFlight == null) return;
-    _cancelRequested = true;
-    _parseToken?.cancel();
+    final job = _inFlight;
+    if (job == null) return;
+    job.cancelRequested = true;
+    job.parseToken?.cancel();
   }
 
   /// Lists the archive for the inventory screen and records that the
@@ -134,30 +133,36 @@ class ListeningImportService {
   /// intentionally ignored. Progress: parse 0–0.4, uploads 0.4–0.95,
   /// playlist sync to 0.99, 1.0 on completion.
   ///
-  /// The run starts on a microtask so [_inFlight] is set before its first
-  /// step: [cancel] is honoured from the moment this returns.
+  /// A call that arrives after [cancel] but before the cancelled run has
+  /// settled never joins it: it waits for that settlement (the cancelled
+  /// run's error belongs to its own callers) and then starts fresh with its
+  /// own path and options. Either way the run starts on a microtask so
+  /// [_inFlight] is set before its first step: [cancel] is honoured from the
+  /// moment this returns.
   Future<ListeningImportResult> import(
     String path,
     ImportOptions options, {
     void Function(double progress)? onProgress,
-  }) =>
-      _inFlight ??= Future.microtask(() => _run(path, options, onProgress)).whenComplete(() {
-        _inFlight = null;
-        _cancelRequested = false;
-        _parseToken = null;
-      });
-
-  void _checkCancelled() {
-    if (_cancelRequested) throw ImportCancelled();
+  }) {
+    final current = _inFlight;
+    if (current != null && !current.cancelRequested) return current.future;
+    final settled = current?.future.then<void>((_) {}, onError: (Object _) {}) ?? Future<void>.value();
+    final job = _ImportRun();
+    job.future = settled.then((_) => _run(job, path, options, onProgress)).whenComplete(() {
+      if (identical(_inFlight, job)) _inFlight = null;
+    });
+    _inFlight = job;
+    return job.future;
   }
 
   Future<ListeningImportResult> _run(
+    _ImportRun job,
     String path,
     ImportOptions options,
     void Function(double progress)? onProgress,
   ) async {
-    final parsed = await _parse(path, options, onProgress);
-    _checkCancelled();
+    final parsed = await _parse(job, path, options, onProgress);
+    job.checkCancelled();
     onProgress?.call(_parseStageEnd);
 
     final snapshot = parsed.snapshot;
@@ -181,7 +186,7 @@ class ListeningImportService {
         unresolvedPlays: snapshot.unresolved.plays,
       ),
     );
-    _checkCancelled();
+    job.checkCancelled();
 
     final totalRows = tracks.length + days.length + library.length + artists.length;
     var uploadedRows = 0;
@@ -196,10 +201,10 @@ class ListeningImportService {
       Future<int> Function(String importId, List<Map<String, Object?>> rows) put,
     ) async {
       for (var offset = 0; offset < rows.length; offset += chunkSize) {
-        _checkCancelled();
+        job.checkCancelled();
         final chunk = rows.sublist(offset, math.min(offset + chunkSize, rows.length));
         final accepted = await put(run.importId, chunk);
-        _checkCancelled();
+        job.checkCancelled();
         if (accepted != chunk.length) throw const ListeningImportProtocolException();
         uploadedRows += chunk.length;
         reportUpload();
@@ -214,13 +219,13 @@ class ListeningImportService {
     await upload(artists, artistChunkSize, api.putArtists);
     if (totalRows == 0) reportUpload();
 
-    _checkCancelled();
+    job.checkCancelled();
     final summary = await api.completeImport(run.importId);
     // The history is committed server-side from here, so the funnel step
     // goes up now: the onboarding read derives importCompletedAt from it
     // and must learn the history landed even if the playlists don't.
     _funnel(FunnelEventType.importCompleted);
-    _checkCancelled();
+    job.checkCancelled();
     if (summary.tracks != tracks.length ||
         summary.days != days.length ||
         summary.libraryTracks != library.length ||
@@ -236,7 +241,7 @@ class ListeningImportService {
     Object? playlistError;
     if (snapshot.package == ExportPackage.spotifyAccount) {
       try {
-        playlistSummary = await _syncPlaylists(snapshot.playlists, onProgress);
+        playlistSummary = await _syncPlaylists(job, snapshot.playlists, onProgress);
       } on ImportCancelled {
         rethrow;
       } catch (error) {
@@ -254,13 +259,14 @@ class ListeningImportService {
   }
 
   Future<ParsedExport> _parse(
+    _ImportRun job,
     String path,
     ImportOptions options,
     void Function(double progress)? onProgress,
   ) async {
     final token = CancelToken();
-    _parseToken = token;
-    if (_cancelRequested) token.cancel();
+    job.parseToken = token;
+    if (job.cancelRequested) token.cancel();
     try {
       return await _parser(
         path,
@@ -275,11 +281,12 @@ class ListeningImportService {
         ),
       );
     } finally {
-      _parseToken = null;
+      job.parseToken = null;
     }
   }
 
   Future<PlaylistSyncSummary> _syncPlaylists(
+    _ImportRun job,
     List<SnapshotPlaylist> unordered,
     void Function(double progress)? onProgress,
   ) async {
@@ -290,7 +297,7 @@ class ListeningImportService {
       expectedPlaylists: playlists.length,
       expectedEntries: totalEntries,
     );
-    _checkCancelled();
+    job.checkCancelled();
 
     final totalUnits = playlists.length + totalEntries;
     var completedUnits = 0;
@@ -300,10 +307,10 @@ class ListeningImportService {
     }
 
     for (var offset = 0; offset < playlists.length; offset += playlistChunkSize) {
-      _checkCancelled();
+      job.checkCancelled();
       final chunk = playlists.sublist(offset, math.min(offset + playlistChunkSize, playlists.length));
       final accepted = await api.putPlaylists(sync.syncId, chunk.map(_playlistSnapshot).toList());
-      _checkCancelled();
+      job.checkCancelled();
       if (accepted != chunk.length) throw const ListeningImportProtocolException();
       completedUnits += chunk.length;
       reportPlaylists();
@@ -311,14 +318,14 @@ class ListeningImportService {
       for (final playlist in chunk) {
         final entries = List.of(playlist.entries)..sort((a, b) => a.position.compareTo(b.position));
         for (var entryOffset = 0; entryOffset < entries.length; entryOffset += entryChunkSize) {
-          _checkCancelled();
+          job.checkCancelled();
           final page = entries.sublist(entryOffset, math.min(entryOffset + entryChunkSize, entries.length));
           final accepted = await api.putPlaylistEntries(
             sync.syncId,
             playlist.key,
             page.map((entry) => _entrySnapshot(playlist, entry)).toList(),
           );
-          _checkCancelled();
+          job.checkCancelled();
           if (accepted != page.length) throw const ListeningImportProtocolException();
           completedUnits += page.length;
           reportPlaylists();
@@ -327,9 +334,9 @@ class ListeningImportService {
     }
     if (totalUnits == 0) reportPlaylists();
 
-    _checkCancelled();
+    job.checkCancelled();
     final summary = await api.completePlaylistSync(sync.syncId);
-    _checkCancelled();
+    job.checkCancelled();
     if (summary.playlists != playlists.length ||
         summary.entries != totalEntries ||
         summary.resolvedEntries + summary.unresolvedEntries != summary.entries) {
@@ -386,6 +393,19 @@ class ListeningImportService {
         'artworkHeightSnapshot': null,
         'artworkBgColorSnapshot': null,
       };
+}
+
+/// One [ListeningImportService.import] run: its cancel flag and parse token
+/// live here rather than on the service so a cancelled run that is still
+/// settling cannot leak either into the fresh run that follows it.
+class _ImportRun {
+  bool cancelRequested = false;
+  CancelToken? parseToken;
+  late final Future<ListeningImportResult> future;
+
+  void checkCancelled() {
+    if (cancelRequested) throw ImportCancelled();
+  }
 }
 
 /// Lowercase hex SHA-256 of the entries in position order, one line per

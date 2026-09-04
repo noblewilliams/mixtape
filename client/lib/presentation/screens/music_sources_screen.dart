@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/listening/listening_models.dart';
 import '../format/import_format.dart';
 import '../format/source_labels.dart';
-import '../providers/listening_import_provider.dart';
 import '../providers/onboarding_provider.dart';
 import 'import_sheet.dart';
 
@@ -17,12 +16,7 @@ const _removeFailedMessage = "couldn't remove — try again";
 class MusicSourcesScreen extends ConsumerWidget {
   const MusicSourcesScreen({super.key});
 
-  Future<void> _import(BuildContext context, WidgetRef ref) {
-    final notifier = ref.read(listeningImportProvider.notifier);
-    notifier.reset();
-    notifier.pick();
-    return showImportSheet(context);
-  }
+  Future<void> _import(BuildContext context, WidgetRef ref) => openImportFlow(context, ref);
 
   Future<void> _remove(BuildContext context, WidgetRef ref, MusicSource source) async {
     final confirmed = await showDialog<bool>(

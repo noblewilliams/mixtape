@@ -38,9 +38,15 @@ String ledgerMonth(String day) {
   return '${_months[month - 1]} ${match.group(1)}';
 }
 
-/// `Mar 2018 → Aug 2026`, or null unless both bounds are known.
-String? ledgerRange(String? from, String? to) =>
-    from == null || to == null ? null : '${ledgerMonth(from)} → ${ledgerMonth(to)}';
+/// `Mar 2018 → Aug 2026`; a range inside one month reads as that month
+/// (`Aug 2026`), a missing end stands in as the start, and no start is
+/// null. Mirrors the web's `ledgerRangeLabel` so both surfaces agree.
+String? ledgerRange(String? from, String? to) {
+  if (from == null) return null;
+  final start = ledgerMonth(from);
+  final end = to == null ? start : ledgerMonth(to);
+  return start == end ? start : '$start → $end';
+}
 
 /// `4 Sep`, with the year when it is not the current one.
 String shortDate(DateTime date, {DateTime? now}) {

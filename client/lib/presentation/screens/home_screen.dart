@@ -10,7 +10,6 @@ import '../format/source_labels.dart';
 import '../providers/auth_provider.dart';
 import '../providers/dj_providers.dart';
 import '../providers/library_sync_provider.dart';
-import '../providers/listening_import_provider.dart';
 import '../providers/onboarding_provider.dart';
 import 'chat_screen.dart';
 import 'import_sheet.dart';
@@ -158,13 +157,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   /// "Choose a ZIP": the sheet opens over Home and the picker comes up at
-  /// once, so the listener is not asked twice.
-  void _openImportSheet() {
-    final notifier = ref.read(listeningImportProvider.notifier);
-    notifier.reset();
-    notifier.pick();
-    showImportSheet(context);
-  }
+  /// once (or the run in progress shows where it got to).
+  void _openImportSheet() => openImportFlow(context, ref);
 
   @override
   Widget build(BuildContext context) {

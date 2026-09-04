@@ -10,12 +10,31 @@ import '../providers/listening_import_provider.dart';
 /// Opens the import flow as a bottom sheet over the current route, the way
 /// Home's library sync sheet is shown. The sheet reflects
 /// [listeningImportProvider], so a run keeps going if the sheet is dismissed
-/// and reopening it shows where the run got to.
-Future<void> showImportSheet(BuildContext context) => showModalBottomSheet<void>(
+/// and reopening it shows where the run got to. A sheet opened over an
+/// upload in flight is not [dismissible]: it stays until the upload lands
+/// or the listener cancels it.
+Future<void> showImportSheet(BuildContext context, {bool dismissible = true}) =>
+    showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
+      isDismissible: dismissible,
+      enableDrag: dismissible,
       builder: (_) => const ImportSheet(),
     );
+
+/// Home's "Choose a ZIP" and the sources screen's "Import again": the sheet
+/// opens and the picker comes up at once, so the listener is not asked
+/// twice. A run in progress (a file being read, an inventory, an upload) is
+/// shown where it got to instead; starting over would cancel it.
+Future<void> openImportFlow(BuildContext context, WidgetRef ref) {
+  final state = ref.read(listeningImportProvider);
+  if (!state.inProgress) {
+    final notifier = ref.read(listeningImportProvider.notifier);
+    notifier.reset();
+    notifier.pick();
+  }
+  return showImportSheet(context, dismissible: state is! ImportUploading);
+}
 
 /// The Spotify import flow: pick a ZIP → inventory → upload with progress →
 /// done / partial / failed / cancelled. Every fact shown comes from the
@@ -37,8 +56,8 @@ class ImportSheet extends ConsumerWidget {
           ImportInventory() => _Inventory(state: state, notifier: notifier),
           ImportUploading(:final archive, :final progress) =>
             _Uploading(archive: archive, progress: progress, onCancel: notifier.cancel),
-          ImportDone(:final result) => _Done(result: result, partial: false, notifier: notifier),
-          ImportPartial(:final result) => _Done(result: result, partial: true, notifier: notifier),
+          ImportDone(:final result) => _Done(result: result, notifier: notifier),
+          ImportPartial(:final result) => _Partial(result: result, notifier: notifier),
           ImportFailed() => _Failed(state: state, notifier: notifier),
         },
       ),
@@ -129,6 +148,10 @@ class _Inventory extends StatelessWidget {
           style: theme.textTheme.bodySmall,
         ),
         const SizedBox(height: 12),
+        // Rows read is the only figure the inventory has: the web shows
+        // tracks, days, and years too, which come from the parser. The
+        // inventory-preview round adds those parser stats to the inspect
+        // step; until then the inventory shows what the listing counted.
         _Fact(label: 'Rows read', value: formatCount(rows)),
         if (extended) ...[
           const SizedBox(height: 4),
@@ -273,10 +296,9 @@ class _Uploading extends StatelessWidget {
 }
 
 class _Done extends StatelessWidget {
-  const _Done({required this.result, required this.partial, required this.notifier});
+  const _Done({required this.result, required this.notifier});
 
   final ListeningImportResult result;
-  final bool partial;
   final ListeningImportNotifier notifier;
 
   @override
@@ -297,22 +319,9 @@ class _Done extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Icon(partial ? Icons.error_outline : Icons.check_circle_outline),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                partial
-                    ? "Account data imported, playlists didn't land"
-                    : extended
-                        ? 'Extended history imported'
-                        : 'Account data imported',
-                key: const Key('import-done-title'),
-                style: theme.textTheme.titleMedium,
-              ),
-            ),
-          ],
+        _ResultTitle(
+          icon: Icons.check_circle_outline,
+          title: extended ? 'Extended history imported' : 'Account data imported',
         ),
         const SizedBox(height: 8),
         Text(counts, key: const Key('import-done-counts')),
@@ -330,21 +339,15 @@ class _Done extends StatelessWidget {
           ),
         const SizedBox(height: 12),
         Text(
-          partial
-              ? 'Your liked songs and artists are in. The playlist sync was interrupted; nothing is '
-                  'lost and nothing needs re-uploading.'
-              : 'The DJ starts with what it knows best. More detail arrives over the next hours as '
-                  'tracks are enriched.',
+          'The DJ starts with what it knows best. More detail arrives over the next hours as '
+          'tracks are enriched.',
           style: theme.textTheme.bodySmall,
         ),
         const SizedBox(height: 16),
         FilledButton(
           key: const Key('import-make-mix'),
-          onPressed: () {
-            notifier.reset();
-            Navigator.of(context).popUntil((route) => route.isFirst);
-          },
-          child: Text(partial ? 'Make a mix anyway' : 'Make your first mix'),
+          onPressed: () => _makeMix(context, notifier),
+          child: const Text('Make your first mix'),
         ),
         TextButton(
           key: const Key('import-other'),
@@ -352,7 +355,96 @@ class _Done extends StatelessWidget {
             notifier.reset();
             notifier.pick();
           },
-          child: const Text('Import the other package'),
+          child: Text(extended ? 'Import the account data too' : 'Import the extended history too'),
+        ),
+      ],
+    );
+  }
+}
+
+/// The history was published but the playlist sync after it failed. Same
+/// copy as the web's partial card; "Retry playlists" re-imports the same
+/// file (idempotent on the server) so the playlist sync runs again.
+class _Partial extends StatelessWidget {
+  const _Partial({required this.result, required this.notifier});
+
+  final ListeningImportResult result;
+  final ListeningImportNotifier notifier;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final summary = result.summary;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const _ResultTitle(
+          icon: Icons.error_outline,
+          title: "Account data imported, playlists didn't land",
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Likes and followed artists are in. The playlist sync was interrupted.',
+          key: const Key('import-partial-subtitle'),
+          style: theme.textTheme.bodySmall,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '${plural(summary.libraryTracks, 'liked song')} · ${plural(summary.artists, 'artist')}',
+          key: const Key('import-done-counts'),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'Your liked songs and artists are safe on the server. Nothing is lost and nothing needs '
+          're-uploading; the playlists can follow later.',
+          style: theme.textTheme.bodySmall,
+        ),
+        const SizedBox(height: 16),
+        FilledButton(
+          key: const Key('import-make-mix'),
+          onPressed: () => _makeMix(context, notifier),
+          child: const Text('Make a mix anyway'),
+        ),
+        TextButton(
+          key: const Key('import-retry-playlists'),
+          onPressed: notifier.retryPlaylists,
+          child: const Text('Retry playlists'),
+        ),
+        Text(
+          'Re-uploads the file; nothing is duplicated.',
+          key: const Key('import-retry-note'),
+          style: theme.textTheme.bodySmall,
+          textAlign: TextAlign.center,
+        ),
+      ],
+    );
+  }
+}
+
+void _makeMix(BuildContext context, ListeningImportNotifier notifier) {
+  notifier.reset();
+  Navigator.of(context).popUntil((route) => route.isFirst);
+}
+
+class _ResultTitle extends StatelessWidget {
+  const _ResultTitle({required this.icon, required this.title});
+
+  final IconData icon;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            title,
+            key: const Key('import-done-title'),
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
         ),
       ],
     );
@@ -369,7 +461,7 @@ class _Failed extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final diagnostics = state.diagnostics;
-    final unreadable = diagnostics != null;
+    final unreadable = state.unreadable;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -388,6 +480,16 @@ class _Failed extends StatelessWidget {
             key: const Key('import-expected'),
             style: theme.textTheme.bodySmall,
           ),
+        ],
+        if (state.diagnosing) ...[
+          const SizedBox(height: 12),
+          Text(
+            'Building the report…',
+            key: const Key('import-diagnosing'),
+            style: theme.textTheme.bodySmall,
+          ),
+        ],
+        if (diagnostics != null) ...[
           const SizedBox(height: 12),
           Container(
             width: double.infinity,

@@ -31,6 +31,14 @@ const String expectedExportFiles = 'Streaming_History_Audio_*.json, YourLibrary.
 
 sealed class ImportFlowState {
   const ImportFlowState();
+
+  /// A pick being read, an inventory awaiting its Upload, or an upload
+  /// underway: re-entry from Home or the sources screen shows it where it
+  /// got to rather than starting over (which would cancel it).
+  bool get inProgress => switch (this) {
+        ImportInspecting() || ImportInventory() || ImportUploading() => true,
+        ImportIdle() || ImportDone() || ImportPartial() || ImportFailed() || ImportFlowCancelled() => false,
+      };
 }
 
 class ImportIdle extends ImportFlowState {
@@ -57,6 +65,9 @@ class ImportInventory extends ImportFlowState {
   final String timeZone;
   final bool includePrivateSessions;
 
+  ImportOptions get options =>
+      ImportOptions(timeZone: timeZone, includePrivateSessions: includePrivateSessions);
+
   ImportInventory withPrivateSessions(bool include) => ImportInventory(
         archive: archive,
         inventory: inventory,
@@ -81,19 +92,40 @@ class ImportDone extends ImportFlowState {
 
 /// The history was published but the playlist sync after it failed.
 class ImportPartial extends ImportFlowState {
-  const ImportPartial(this.archive, this.result);
+  const ImportPartial(this.archive, this.result, this.options);
   final PickedArchive archive;
   final ListeningImportResult result;
+
+  /// What the run was started with, so "Retry playlists" repeats it exactly.
+  final ImportOptions options;
 }
 
 class ImportFailed extends ImportFlowState {
-  const ImportFailed({required this.archive, required this.message, required this.diagnostics});
-  final PickedArchive archive;
+  const ImportFailed({
+    required this.archive,
+    required this.message,
+    required this.diagnostics,
+    this.unreadable = false,
+    this.diagnosing = false,
+  });
+
+  /// Null when the failure came before a file was picked.
+  final PickedArchive? archive;
   final String message;
 
+  /// The file itself could not be read (as opposed to a failure on the way
+  /// to the server): the sheet names the expected files and shows the
+  /// report once there is one.
+  final bool unreadable;
+
+  /// The content-free report for an unreadable file is still being built
+  /// off the main isolate; it cannot be cancelled, so the failure shows at
+  /// once and the report attaches when it arrives.
+  final bool diagnosing;
+
   /// Present when the file itself could not be read; null for a failure on
-  /// the way to the server (nothing about the file to report) or when the
-  /// report could not be built.
+  /// the way to the server (nothing about the file to report), while the
+  /// report is being built ([diagnosing]), or when it could not be built.
   final ExportDiagnostics? diagnostics;
 }
 
@@ -104,12 +136,16 @@ class ImportFlowCancelled extends ImportFlowState {
 class ListeningImportNotifier extends Notifier<ImportFlowState> {
   late ListeningImportService _service;
 
-  /// Bumped by every inspect, upload, and reset so a run that finishes after
-  /// the listener moved on cannot write over the newer state.
+  /// Bumped by every inspect, upload, reset, and rebuild so a run that
+  /// finishes after the listener moved on cannot write over the newer state.
   int _generation = 0;
 
   @override
   ImportFlowState build() {
+    // First: the rebuild cancels the run in flight (through onDispose below),
+    // and that run's cancelled state must not land on the fresh idle, nor
+    // its refresh reach the server for a listener who has signed out.
+    _generation++;
     ref.watch(authProvider); // user-scoped: reset to idle on every auth transition
     final service = ref.watch(listeningImportServiceProvider);
     ref.onDispose(service.cancel);
@@ -117,9 +153,23 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
     return const ImportIdle();
   }
 
-  /// Opens the document picker; a dismissed picker changes nothing.
+  /// Opens the document picker; a dismissed picker changes nothing, and a
+  /// picker that cannot open fails the flow with nothing to report.
   Future<void> pick() async {
-    final archive = await ref.read(archivePickerProvider).pick();
+    final PickedArchive? archive;
+    try {
+      archive = await ref.read(archivePickerProvider).pick();
+    } catch (error) {
+      if (kDebugMode) debugPrint('import pick failed: ${error.runtimeType}');
+      if (!ref.mounted || state is ImportUploading) return;
+      _generation++;
+      state = const ImportFailed(
+        archive: null,
+        message: "Couldn't open the file picker. Try again.",
+        diagnostics: null,
+      );
+      return;
+    }
     if (archive == null || !ref.mounted) return;
     await inspect(archive);
   }
@@ -167,16 +217,25 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
   Future<void> upload() async {
     final current = state;
     if (current is! ImportInventory) return;
+    await _upload(current.archive, current.options);
+  }
+
+  /// Partial state: imports the same file again with the same options. The
+  /// import is idempotent on the server, so the re-run duplicates nothing;
+  /// what it adds is a fresh playlist sync after the history.
+  Future<void> retryPlaylists() async {
+    final current = state;
+    if (current is! ImportPartial) return;
+    await _upload(current.archive, current.options);
+  }
+
+  Future<void> _upload(PickedArchive archive, ImportOptions options) async {
     final generation = ++_generation;
-    final archive = current.archive;
     state = ImportUploading(archive, 0);
     try {
       final result = await _service.import(
         archive.path,
-        ImportOptions(
-          timeZone: current.timeZone,
-          includePrivateSessions: current.includePrivateSessions,
-        ),
+        options,
         onProgress: (progress) {
           if (_current(generation)) state = ImportUploading(archive, progress);
         },
@@ -184,13 +243,10 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
       if (!_current(generation)) return;
       state = result.playlistError == null
           ? ImportDone(archive, result)
-          : ImportPartial(archive, result);
-      await _refreshOnboarding();
+          : ImportPartial(archive, result, options);
     } on ImportCancelled {
       if (!_current(generation)) return;
       state = const ImportFlowCancelled();
-      // A cancel after `complete` has still published the history.
-      await _refreshOnboarding();
     } on UnreadableExportException catch (error) {
       await _failUnreadable(generation, archive, error.inventory.package, error.file);
     } on NetworkException {
@@ -208,10 +264,24 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
       if (kDebugMode) debugPrint('import failed: ${error.runtimeType}');
       await _fail(generation, archive, 'Import failed. Try again.');
     }
+    // Every terminal state refreshes: a cancel or a count mismatch after
+    // `complete` has still published the history, and Home and the sources
+    // screen show what the server holds.
+    if (_current(generation)) await _refreshOnboarding();
   }
 
-  /// Stops the inspect or upload in flight; the flow lands on cancelled.
-  void cancel() => _service.cancel();
+  /// Stops the inspect or upload in flight; the flow lands on cancelled. A
+  /// report still being built for an unreadable file cannot be stopped, so
+  /// the flow moves on without it and the report is dropped when it lands.
+  void cancel() {
+    final current = state;
+    if (current is ImportFailed && current.diagnosing) {
+      _generation++;
+      state = const ImportFlowCancelled();
+      return;
+    }
+    _service.cancel();
+  }
 
   /// Back to idle, dropping (and cancelling) whatever was in flight.
   void reset() {
@@ -236,22 +306,33 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
     return _fail(generation, archive, message, diagnose: true);
   }
 
+  /// Lands on failed at once. For an unreadable file ([diagnose]) the
+  /// content-free report is then built off the main isolate, which cannot
+  /// be cancelled: it attaches when it arrives unless the listener has
+  /// moved on (cancel, reset, a new pick) by then.
   Future<void> _fail(
     int generation,
     PickedArchive archive,
     String message, {
     bool diagnose = false,
   }) async {
+    if (!_current(generation)) return;
+    state = ImportFailed(
+      archive: archive,
+      message: message,
+      diagnostics: null,
+      unreadable: diagnose,
+      diagnosing: diagnose,
+    );
+    if (!diagnose) return;
     ExportDiagnostics? diagnostics;
-    if (diagnose) {
-      try {
-        diagnostics = await ref.read(exportDiagnoserProvider)(archive.path);
-      } catch (_) {
-        diagnostics = null;
-      }
+    try {
+      diagnostics = await ref.read(exportDiagnoserProvider)(archive.path);
+    } catch (_) {
+      diagnostics = null;
     }
     if (!_current(generation)) return;
-    state = ImportFailed(archive: archive, message: message, diagnostics: diagnostics);
+    state = ImportFailed(archive: archive, message: message, diagnostics: diagnostics, unreadable: true);
   }
 
   Future<void> _refreshOnboarding() async {

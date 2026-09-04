@@ -23,10 +23,13 @@ void main() {
     expect(ledgerMonth('garbage'), 'garbage');
   });
 
-  test('ledgerRange joins both bounds, or is null without them', () {
+  test('ledgerRange joins both bounds, collapses a same-month range, stands in for a missing '
+      'end with the start, and is null without a start (the web\'s ledgerRangeLabel)', () {
     expect(ledgerRange('2018-03-02', '2026-08-30'), 'Mar 2018 → Aug 2026');
+    expect(ledgerRange('2026-08-01', '2026-08-30'), 'Aug 2026');
+    expect(ledgerRange('2018-03-02', null), 'Mar 2018');
     expect(ledgerRange(null, '2026-08-30'), isNull);
-    expect(ledgerRange('2018-03-02', null), isNull);
+    expect(ledgerRange(null, null), isNull);
   });
 
   test('shortDate is day and month, with the year when it is not this one', () {
