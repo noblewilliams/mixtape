@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react'
 import {
   ApiError,
   type ApiQueueTrack,
@@ -23,6 +23,7 @@ import { QueuePanel } from './components/QueuePanel'
 import { Sidebar } from './components/Sidebar'
 import { SpotifyMusicView } from './components/SpotifyMusicView'
 import type { AppView, CollectionView, DjMessage, DjSession, QueueTrack } from './domain'
+import { createImportRun } from './import/import-run'
 import { createListeningImportService } from './import/import-service'
 import { createLazyParser, createPageParser, type PageParser } from './import/page-parser'
 import type { MusicKitClient } from './musickit/client'
@@ -95,10 +96,19 @@ function conflictSnapshot(error: unknown): { queue: ApiQueueTrack[]; queueVersio
 
 export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSignOut, importParser }: AppProps) {
   const callback = useMemo(accountCallback, [])
-  // One parser and one import service for the app's life. The Worker behind
-  // the parser is spawned on the first inspect and released after each run.
+  // One parser, one import service, and one import run for the signed-in
+  // user's life. The Worker behind the parser is spawned on the first read
+  // and released after each run; the run outlives the import page so an
+  // upload keeps going while the listener is on Home or in a session.
   const parser = useMemo(() => importParser ?? createLazyParser(createPageParser), [importParser])
   const importService = useMemo(() => createListeningImportService({ api, parser }), [api, parser])
+  const refreshRef = useRef<() => Promise<void>>(async () => undefined)
+  const importRun = useMemo(
+    () => createImportRun({ importService, parser, onImported: () => refreshRef.current() }),
+    // A new run per signed-in user, never shared across sign-ins.
+    [importService, parser, user.id],
+  )
+  useEffect(() => () => importRun.dispose(), [importRun])
   const [sessions, setSessions] = useState<DjSession[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [activeView, setActiveView] = useState<AppView>('home')
@@ -124,7 +134,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
   const [localChoice, setLocalChoice] = useState<ServiceChoice | null>(() => readServiceChoice(user.id))
   const [interviewStatus, setInterviewStatus] = useState('')
   // The one-playlist-run gate: a Spotify upload in flight holds the Apple sync entry points shut.
-  const [importBusy, setImportBusy] = useState(false)
+  const importBusy = useSyncExternalStore(importRun.subscribe, () => importRun.getState().kind === 'uploading')
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const queueVersions = useRef<Record<string, number>>({})
   const queueMutationChains = useRef<Record<string, Promise<void>>>({})
@@ -141,9 +151,10 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
     [onboarding, localChoice],
   )
   const signOut = useCallback(() => {
+    importRun.dispose()
     clearServiceChoice(user.id)
     onSignOut()
-  }, [onSignOut, user.id])
+  }, [importRun, onSignOut, user.id])
   const activeMessages = activeSession ? messagesBySession[activeSession.id] ?? [] : []
   const activeQueue = activeSession ? queuesBySession[activeSession.id] ?? [] : []
   const contentPaint = activeView === 'session' && activeSession ? activeSession.caseColor : '#45596d'
@@ -155,6 +166,17 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
   useEffect(() => {
     for (const session of sessions) queueVersions.current[session.id] = session.queueVersion
   }, [sessions])
+
+  // Closing the tab mid-upload would lose the run; the browser asks first.
+  useEffect(() => {
+    if (!importBusy) return
+    const guard = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', guard)
+    return () => window.removeEventListener('beforeunload', guard)
+  }, [importBusy])
 
   useEffect(() => {
     let cancelled = false
@@ -237,6 +259,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
       if (requestError instanceof ApiError && requestError.status === 401) signOut()
     }
   }
+  refreshRef.current = refreshOnboarding
 
   function chooseApple() {
     writeServiceChoice(user.id, 'apple')
@@ -553,15 +576,13 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
       {activeView === 'spotify' && effectiveOnboarding ? (
         <SpotifyMusicView
           api={api}
-          importService={importService}
-          parser={parser}
+          importRun={importRun}
           onboarding={effectiveOnboarding}
           interviewStatus={interviewStatus}
           onRefresh={refreshOnboarding}
           onOpenInterview={() => setDialog('interview')}
           onNewTape={() => setDialog('new-tape')}
           onRemoveSource={(source) => void removeSource(source)}
-          onImportBusyChange={setImportBusy}
         />
       ) : activeView !== 'session' || !activeSession ? (
         <Home

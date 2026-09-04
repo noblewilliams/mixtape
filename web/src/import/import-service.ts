@@ -28,15 +28,20 @@ export const LISTENING_ARTIST_CHUNK = 500
 export const PLAYLIST_CHUNK = 50
 export const PLAYLIST_ENTRY_CHUNK = 200
 
-/** The parser calls the service needs: the Worker client on the page, the pure parser in tests. */
+/** The parser call the service needs: the Worker client on the page, the pure parser in tests. */
 export type ImportParser = {
-  inspect(file: Blob, options?: { signal?: AbortSignal }): Promise<ExportInventory>
   parse(file: Blob, options: {
     timeZone: string
     includePrivateSessions: boolean
     signal?: AbortSignal
     onProgress?: (progress: ParseProgress) => void
   }): Promise<ParseResult>
+}
+
+/** One full parse of an archive with the options it was parsed under; `upload` reuses it when those match. */
+export type InspectedExport = ParseResult & {
+  timeZone: string
+  includePrivateSessions: boolean
 }
 
 export type ListeningUploadStage =
@@ -68,11 +73,21 @@ export type ListeningImportResult = {
 }
 
 export type ListeningImportService = {
-  /** The inventory for the drop-zone card; records `file_inspected` without waiting on it. */
-  inspect(file: Blob, options?: { signal?: AbortSignal }): Promise<ExportInventory>
+  /**
+   * The one parse behind the inventory card: the whole archive with the
+   * default options, so the preview can show counts. Records
+   * `file_inspected` without waiting on it.
+   */
+  inspect(file: Blob, options: {
+    timeZone: string
+    signal?: AbortSignal
+    onProgress?: (progress: ParseProgress) => void
+  }): Promise<InspectedExport>
+  /** Uploads `inspected` as it is when its options match; parses again only when they differ (or nothing was inspected). */
   upload(file: Blob, options: {
     timeZone: string
     includePrivateSessions: boolean
+    inspected?: InspectedExport
     signal: AbortSignal
     onProgress: (progress: ListeningImportProgress) => void
   }): Promise<ListeningImportResult>
@@ -288,20 +303,22 @@ export function createListeningImportService({ api, parser }: ListeningImportSer
   }
 
   return {
-    async inspect(file, options = {}) {
-      const inventory = await parser.inspect(file, { signal: options.signal })
+    async inspect(file, { timeZone, signal, onProgress }) {
+      const includePrivateSessions = false
+      const { inventory, snapshot } = await parser.parse(file, { timeZone, includePrivateSessions, signal, onProgress })
       recordFunnelStep(api, 'file_inspected')
-      return inventory
+      return { inventory, snapshot, timeZone, includePrivateSessions }
     },
 
-    async upload(file, { timeZone, includePrivateSessions, signal, onProgress }) {
+    async upload(file, { timeZone, includePrivateSessions, inspected, signal, onProgress }) {
       signal.throwIfAborted()
-      const { inventory, snapshot } = await parser.parse(file, {
-        timeZone,
-        includePrivateSessions,
-        signal,
-        onProgress,
-      })
+      const reusable =
+        inspected !== undefined &&
+        inspected.timeZone === timeZone &&
+        inspected.includePrivateSessions === includePrivateSessions
+      const { inventory, snapshot } = reusable
+        ? inspected
+        : await parser.parse(file, { timeZone, includePrivateSessions, signal, onProgress })
       signal.throwIfAborted()
 
       const run = await api.beginListeningImport(toBeginInput(snapshot), signal)

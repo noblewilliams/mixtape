@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ImportPanel, type ImportPanelHandle } from './ImportPanel'
 import { ApiError, type MixtapeApi } from '../api/client'
 import { createDirectParser } from '../import/direct-parser'
+import { createImportRun } from '../import/import-run'
 import { createListeningImportService } from '../import/import-service'
 import type { PageParser } from '../import/page-parser'
 import { parseExport } from '../import/spotify-parser'
@@ -32,25 +33,34 @@ function deferred(): Deferred {
   return { release, held }
 }
 
+/** The in-page parser with its parse held until released, for the reading and re-parse states. */
+function heldParser(hold: (options: { includePrivateSessions: boolean }) => boolean = () => true) {
+  const direct = createDirectParser()
+  const gate = deferred()
+  const signals: AbortSignal[] = []
+  const parser: PageParser = {
+    ...direct,
+    parse: async (file, options) => {
+      if (hold(options)) {
+        if (options.signal) signals.push(options.signal)
+        await gate.held
+      }
+      return direct.parse(file, options)
+    },
+  }
+  return { parser, gate, signals }
+}
+
 function renderPanel(options: { overrides?: Partial<MixtapeApi>; parser?: PageParser } = {}) {
   const api = createFakeApi(options.overrides)
   const parser = options.parser ?? createDirectParser()
   const importService = createListeningImportService({ api, parser })
   const onRefresh = vi.fn(async () => undefined)
+  const run = createImportRun({ importService, parser, onImported: onRefresh })
   const onNewTape = vi.fn()
-  const onBusyChange = vi.fn()
   const handle: { current: ImportPanelHandle | null } = { current: null }
-  render(
-    <ImportPanel
-      ref={handle}
-      importService={importService}
-      parser={parser}
-      onRefresh={onRefresh}
-      onNewTape={onNewTape}
-      onBusyChange={onBusyChange}
-    />,
-  )
-  return { api, parser, onRefresh, onNewTape, onBusyChange, handle }
+  const view = render(<ImportPanel ref={handle} run={run} onNewTape={onNewTape} />)
+  return { api, parser, run, onRefresh, onNewTape, handle, unmount: view.unmount }
 }
 
 function pick(file: File) {
@@ -125,7 +135,14 @@ describe('ImportPanel · inventory', () => {
 
     const toggle = within(view).getByRole('switch', { name: 'Include private sessions' })
     expect(toggle).toHaveAttribute('aria-checked', 'false')
+    const label = toggle.closest('label')!
+    expect(label).toHaveClass('toggle')
+    expect(label.control).toBe(toggle)
     expect(within(view).getByText(/Plays hidden from followers stay out unless you choose otherwise\./)).toBeInTheDocument()
+    fireEvent.click(within(label).getByText(/^Include private sessions/))
+    expect(toggle).toHaveAttribute('aria-checked', 'true')
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-checked', 'false')
     expect(within(view).getByText('Only these plays leave this device. Your account details, payments, and IP addresses are never read.')).toBeInTheDocument()
     expect(within(view).getByRole('button', { name: 'Upload' })).toBeInTheDocument()
     expect(within(view).getByRole('button', { name: 'Choose a different file' })).toBeInTheDocument()
@@ -185,7 +202,7 @@ describe('ImportPanel · inventory', () => {
 
 describe('ImportPanel · upload', () => {
   it('uploads with live progress, then reports the summary and refreshes onboarding', async () => {
-    const { api, onRefresh, onBusyChange, onNewTape } = await inventoryFor('extended-basic')
+    const { api, onRefresh, onNewTape } = await inventoryFor('extended-basic')
     const snapshot = await facts('extended-basic')
 
     fireEvent.click(within(panel()).getByRole('button', { name: 'Upload' }))
@@ -205,7 +222,6 @@ describe('ImportPanel · upload', () => {
     expect(definitions[3]).toBe('your most-played first')
     expect(within(view).getByText('The DJ starts with what it knows best. More detail arrives over the next hours as tracks are enriched.')).toBeInTheDocument()
     expect(onRefresh).toHaveBeenCalledTimes(1)
-    expect(onBusyChange.mock.calls.map(([busy]) => busy)).toEqual([false, true, false])
     expect(api.calls.filter((call) => call.method === 'postFunnelEvent').map((call) => call.args[0])).toEqual([
       { type: 'file_inspected', surface: 'web' },
       { type: 'import_completed', surface: 'web' },
@@ -217,9 +233,35 @@ describe('ImportPanel · upload', () => {
     expect(panel()).toHaveClass('drop')
   })
 
+  it('keeps the summary when the refresh after publishing fails', async () => {
+    const { onRefresh } = await inventoryFor('extended-basic')
+    onRefresh.mockRejectedValueOnce(new Error('offline'))
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Upload' }))
+
+    expect(await within(panel()).findByText('Extended history imported')).toBeInTheDocument()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(onRefresh).toHaveBeenCalledTimes(1)
+    expect(chip()).toHaveTextContent('Done')
+    expect(within(panel()).queryByText('Upload interrupted')).not.toBeInTheDocument()
+  })
+
+  it('parses once across inspect and upload when the switch is untouched', async () => {
+    const parser = createDirectParser()
+    const parse = vi.spyOn(parser, 'parse')
+    const { api } = await inventoryFor('extended-private-sessions', undefined, { parser })
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Upload' }))
+
+    await within(panel()).findByText('Extended history imported')
+    expect(parse).toHaveBeenCalledTimes(1)
+    expect(api.calls.filter((call) => call.method === 'postFunnelEvent').map((call) => call.args[0])).toEqual([
+      { type: 'file_inspected', surface: 'web' },
+      { type: 'import_completed', surface: 'web' },
+    ])
+  })
+
   it('shows the uploading state with the live chip, the stage line, the decorative band, and Cancel', async () => {
     const gate = deferred()
-    const { onBusyChange } = await inventoryFor('extended-basic', 'my_spotify_data_extended.zip', {
+    const { run } = await inventoryFor('extended-basic', 'my_spotify_data_extended.zip', {
       overrides: {
         putListeningDays: async (_importId, days) => {
           await gate.held
@@ -242,15 +284,15 @@ describe('ImportPanel · upload', () => {
     expect(within(view).getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
     expect(within(view).queryByRole('button', { name: 'Upload' })).not.toBeInTheDocument()
     expect(screen.queryByLabelText('choose a file')).not.toBeInTheDocument()
-    expect(onBusyChange).toHaveBeenLastCalledWith(true)
+    expect(run.getState().kind).toBe('uploading')
 
     gate.release()
     await within(panel()).findByText('Extended history imported')
   })
 
-  it('returns to the inventory on Cancel and never completes the import', async () => {
+  it('cancels mid-upload: the chunk in flight was sent, nothing follows, and the inventory returns', async () => {
     const gate = deferred()
-    const { api, onBusyChange, parser } = await inventoryFor('extended-basic', undefined, {
+    const { api, run, parser } = await inventoryFor('extended-basic', undefined, {
       overrides: {
         putListeningTracks: async (_importId, tracks) => {
           await gate.held
@@ -261,17 +303,38 @@ describe('ImportPanel · upload', () => {
     const terminate = vi.spyOn(parser, 'terminate')
 
     fireEvent.click(within(panel()).getByRole('button', { name: 'Upload' }))
-    fireEvent.click(await within(panel()).findByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(api.calls.some((call) => call.method === 'putListeningTracks')).toBe(true))
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Cancel' }))
 
     expect(await within(panel()).findByRole('button', { name: 'Upload' })).toBeInTheDocument()
     expect(chip()).toHaveTextContent('Readable')
+    expect(run.getState().kind).toBe('inventory')
+    const sentBeforeCancel = api.calls.length
     gate.release()
     await new Promise((resolve) => setTimeout(resolve, 20))
-    expect(api.calls.some((call) => call.method === 'completeListeningImport')).toBe(false)
+    expect(api.calls.slice(sentBeforeCancel)).toEqual([])
     expect(api.calls.some((call) => call.method === 'putListeningDays')).toBe(false)
-    expect(onBusyChange).toHaveBeenLastCalledWith(false)
+    expect(api.calls.some((call) => call.method === 'completeListeningImport')).toBe(false)
     expect(terminate).toHaveBeenCalled()
     expect(within(panel()).getByRole('switch', { name: 'Include private sessions' })).toBeInTheDocument()
+  })
+
+  it('cancels mid-parse: the parse’s signal is aborted and the server run never begins', async () => {
+    const { parser, gate, signals } = heldParser((options) => options.includePrivateSessions)
+    const { api, run } = await inventoryFor('extended-private-sessions', undefined, { parser })
+    fireEvent.click(within(panel()).getByRole('switch', { name: 'Include private sessions' }))
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Upload' }))
+    await waitFor(() => expect(signals).toHaveLength(1))
+    expect(chip()).toHaveTextContent('Uploading')
+
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Cancel' }))
+    expect(signals[0].aborted).toBe(true)
+    expect(await within(panel()).findByRole('button', { name: 'Upload' })).toBeInTheDocument()
+    expect(run.getState().kind).toBe('inventory')
+    gate.release()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(api.calls.some((call) => call.method === 'beginListeningImport')).toBe(false)
+    expect(within(panel()).getByRole('switch', { name: 'Include private sessions' })).toHaveAttribute('aria-checked', 'true')
   })
 
   it('passes the private-sessions choice to the upload parse, not the inventory parse', async () => {
@@ -318,13 +381,43 @@ describe('ImportPanel · upload', () => {
     expect(view).toHaveClass('attention')
     expect(within(view).getByText('Likes and followed artists are in. The playlist sync was interrupted.')).toBeInTheDocument()
     expect(chip()).toHaveTextContent('Partly done')
-    expect(within(view).getByText(/Your liked songs and artists are safe on the server\. Nothing is lost and nothing needs re-uploading/)).toBeInTheDocument()
+    expect(within(view).getByText('Your liked songs and artists are safe on the server. Nothing is lost; the playlists can follow with a retry.')).toBeInTheDocument()
+    expect(within(view).getByText('Re-uploads the file; nothing is duplicated.')).toBeInTheDocument()
     expect(screen.queryByText('another run is open')).not.toBeInTheDocument()
     expect(onRefresh).toHaveBeenCalledTimes(1)
+    expect(within(view).getByRole('button', { name: 'Retry playlists' })).toHaveClass('primary')
     fireEvent.click(within(view).getByRole('button', { name: 'Make a mix anyway' }))
     expect(onNewTape).toHaveBeenCalledTimes(1)
-    fireEvent.click(within(view).getByRole('button', { name: 'Choose a different file' }))
-    expect(panel()).toHaveClass('drop')
+  })
+
+  it('retries the whole import from the partial state without a second file_inspected', async () => {
+    let playlistAttempts = 0
+    const { api, run, onRefresh } = await inventoryFor('account-basic', undefined, {
+      overrides: {
+        putPlaylists: async (_syncId, playlists) => {
+          playlistAttempts += 1
+          if (playlistAttempts === 1) throw new ApiError(409, { error: 'sync_conflict', message: 'another run is open' })
+          return { accepted: playlists.length }
+        },
+      },
+    })
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Upload' }))
+    await within(panel()).findByText('Account data imported, playlists didn’t land')
+
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Retry playlists' }))
+    expect(run.getState().kind).toBe('uploading')
+    expect(within(panel()).getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+
+    expect(await within(panel()).findByText('Account data imported')).toBeInTheDocument()
+    expect(chip()).toHaveTextContent('Done')
+    expect(playlistAttempts).toBe(2)
+    expect(api.calls.filter((call) => call.method === 'beginListeningImport')).toHaveLength(2)
+    expect(api.calls.filter((call) => call.method === 'postFunnelEvent').map((call) => call.args[0])).toEqual([
+      { type: 'file_inspected', surface: 'web' },
+      { type: 'import_completed', surface: 'web' },
+      { type: 'import_completed', surface: 'web' },
+    ])
+    expect(onRefresh).toHaveBeenCalledTimes(2)
   })
 
   it('keeps the inventory and says nothing was published when the upload itself fails', async () => {
@@ -382,9 +475,14 @@ describe('ImportPanel · unreadable', () => {
       expect(lines).toHaveLength(4)
       expect(within(view).getByText('The report lists file names, sizes, and row counts only. No song, artist, or personal data.')).toBeInTheDocument()
 
+      const live = view.querySelector('[aria-live="polite"]') as HTMLElement
+      expect(live).toBeInTheDocument()
+      expect(live).toHaveTextContent('')
       fireEvent.click(within(view).getByRole('button', { name: 'Copy report' }))
       await waitFor(() => expect(writeText).toHaveBeenCalledWith(report.textContent))
       expect(await within(view).findByText('Report copied.')).toBeInTheDocument()
+      expect(view.querySelector('[aria-live="polite"]')).toBe(live)
+      expect(live).toHaveTextContent('Report copied.')
 
       fireEvent.click(within(view).getByRole('button', { name: 'Try another file' }))
       expect(panel()).toHaveClass('drop')
@@ -435,7 +533,148 @@ describe('ImportPanel · unreadable', () => {
   })
 })
 
+describe('ImportPanel · reading', () => {
+  it('offers Choose a different file while reading, which aborts the read', async () => {
+    const { parser, gate, signals } = heldParser()
+    const { run } = renderPanel({ parser })
+    pick(fixtureFile('extended-basic'))
+    await within(panel()).findByText('Reading on this device')
+    expect(chip()).toHaveTextContent('Reading')
+    await waitFor(() => expect(signals).toHaveLength(1))
+
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Choose a different file' }))
+    expect(panel()).toHaveClass('drop')
+    expect(signals[0].aborted).toBe(true)
+    gate.release()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(panel()).toHaveClass('drop')
+    expect(run.getState().kind).toBe('pick')
+  })
+})
+
+describe('ImportPanel · device failure', () => {
+  function deadParser(overrides: Partial<PageParser> = {}): PageParser {
+    const dead = async () => {
+      throw new Error('worker_failed')
+    }
+    return { inspect: dead, parse: dead, diagnose: vi.fn(dead), terminate: vi.fn(), ...overrides }
+  }
+
+  it('says the file couldn’t be read on this device when the parser worker fails, with a way out', async () => {
+    const parser = deadParser()
+    renderPanel({ parser })
+    pick(fixtureFile('extended-basic', 'my_spotify_data.zip'))
+
+    expect(await within(panel()).findByText('Couldn’t read this file on this device. Try again.')).toBeInTheDocument()
+    const view = panel()
+    expect(view).toHaveClass('err')
+    expect(within(view).getByText('my_spotify_data.zip')).toBeInTheDocument()
+    expect(chip()).toHaveTextContent('Not read')
+    expect(chip()).toHaveClass('err')
+    expect(parser.diagnose).not.toHaveBeenCalled()
+    expect(parser.terminate).toHaveBeenCalled()
+    expect(within(view).queryByText(/couldn’t be opened as a ZIP/)).not.toBeInTheDocument()
+    expect(within(view).queryByText(/Expected files/)).not.toBeInTheDocument()
+    expect(within(view).getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+    fireEvent.click(within(view).getByRole('button', { name: 'Choose a different file' }))
+    expect(panel()).toHaveClass('drop')
+  })
+
+  it('treats a worker that dies while building the report the same way', async () => {
+    const parser = deadParser({
+      parse: async () => {
+        throw new Error('boom')
+      },
+    })
+    renderPanel({ parser })
+    pick(fixtureFile('extended-basic'))
+    expect(await within(panel()).findByText('Couldn’t read this file on this device. Try again.')).toBeInTheDocument()
+    expect(parser.diagnose).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads the same file again from Try again', async () => {
+    let attempts = 0
+    const direct = createDirectParser()
+    const parser: PageParser = {
+      ...direct,
+      parse: async (file, options) => {
+        attempts += 1
+        if (attempts === 1) throw new Error('worker_failed')
+        return direct.parse(file, options)
+      },
+    }
+    renderPanel({ parser })
+    pick(fixtureFile('extended-basic'))
+    fireEvent.click(await within(panel()).findByRole('button', { name: 'Try again' }))
+    expect(await within(panel()).findByRole('button', { name: 'Upload' })).toBeInTheDocument()
+    expect(attempts).toBe(2)
+  })
+})
+
+describe('ImportPanel · run ownership', () => {
+  it('keeps an upload running when the panel unmounts, and shows it again on remount', async () => {
+    const gate = deferred()
+    const { api, run, onRefresh, unmount } = await inventoryFor('extended-basic', undefined, {
+      overrides: {
+        putListeningTracks: async (_importId, tracks) => {
+          await gate.held
+          return { accepted: tracks.length }
+        },
+      },
+    })
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Upload' }))
+    await within(panel()).findByRole('button', { name: 'Cancel' })
+
+    unmount()
+    expect(run.getState().kind).toBe('uploading')
+
+    render(<ImportPanel run={run} onNewTape={vi.fn()} />)
+    expect(within(panel()).getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+    expect(chip()).toHaveTextContent('Uploading')
+    expect(run.getState().kind).toBe('uploading')
+
+    gate.release()
+    expect(await within(panel()).findByText('Extended history imported')).toBeInTheDocument()
+    expect(api.calls.filter((call) => call.method === 'beginListeningImport')).toHaveLength(1)
+    expect(api.calls.some((call) => call.method === 'completeListeningImport')).toBe(true)
+    expect(onRefresh).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('ImportPanel · handle and names', () => {
+  it('only scrolls through the handle while reading', async () => {
+    const { parser, gate } = heldParser()
+    const { handle, run } = renderPanel({ parser })
+    pick(fixtureFile('extended-basic'))
+    await within(panel()).findByText('Reading on this device')
+
+    handle.current!.focus()
+    expect(run.getState().kind).toBe('inspecting')
+    expect(panel()).not.toHaveClass('drop')
+    gate.release()
+    expect(await within(panel()).findByRole('button', { name: 'Upload' })).toBeInTheDocument()
+  })
+
+  it('only scrolls through the handle while uploading', async () => {
+    const gate = deferred()
+    const { handle, run } = await inventoryFor('extended-basic', undefined, {
+      overrides: {
+        putListeningTracks: async (_importId, tracks) => {
+          await gate.held
+          return { accepted: tracks.length }
+        },
+      },
+    })
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Upload' }))
+    await within(panel()).findByRole('button', { name: 'Cancel' })
+
+    handle.current!.focus()
+    expect(run.getState().kind).toBe('uploading')
+    expect(within(panel()).getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+    gate.release()
+    expect(await within(panel()).findByText('Extended history imported')).toBeInTheDocument()
+  })
+
   it('resets to the drop zone and focuses it through the handle when idle', async () => {
     const { handle } = await inventoryFor('extended-basic')
     handle.current!.focus()

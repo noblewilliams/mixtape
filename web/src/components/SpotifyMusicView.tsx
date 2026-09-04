@@ -1,7 +1,6 @@
 import { useRef, useState } from 'react'
 import type { ListeningImportSource, MixtapeApi, OnboardingResponse } from '../api/client'
-import type { ListeningImportService } from '../import/import-service'
-import type { PageParser } from '../import/page-parser'
+import type { ImportRun } from '../import/import-run'
 import { elapsedWaitLabel, recentDayLabel, spotifyPackages, spotifySource, spotifyStatus } from '../lib/onboarding'
 import { ImportPanel, type ImportPanelHandle } from './ImportPanel'
 import { MusicSourcesList } from './MusicSourcesList'
@@ -12,15 +11,14 @@ const MARK_FAILED = 'Couldn’t save that. Check your connection and try again.'
 
 type SpotifyMusicViewProps = {
   api: MixtapeApi
-  importService: ListeningImportService
-  parser: PageParser
+  /** The app-owned import run; it outlives this view so an upload survives navigation. */
+  importRun: ImportRun
   onboarding: OnboardingResponse
   interviewStatus: string
   onRefresh: () => Promise<void>
   onOpenInterview: () => void
   onNewTape: () => void
   onRemoveSource: (source: ListeningImportSource) => void
-  onImportBusyChange?: (busy: boolean) => void
   onOpenDemo?: () => void
 }
 
@@ -86,15 +84,13 @@ function DemoTile({ onOpenDemo }: { onOpenDemo?: () => void }) {
 
 export function SpotifyMusicView({
   api,
-  importService,
-  parser,
+  importRun,
   onboarding,
   interviewStatus,
   onRefresh,
   onOpenInterview,
   onNewTape,
   onRemoveSource,
-  onImportBusyChange,
   onOpenDemo,
 }: SpotifyMusicViewProps) {
   const [marking, setMarking] = useState(false)
@@ -238,14 +234,7 @@ export function SpotifyMusicView({
               </div>
             ) : null}
 
-            <ImportPanel
-              ref={importRef}
-              importService={importService}
-              parser={parser}
-              onRefresh={onRefresh}
-              onNewTape={onNewTape}
-              onBusyChange={onImportBusyChange}
-            />
+            <ImportPanel ref={importRef} run={importRun} onNewTape={onNewTape} />
           </section>
         ) : (
           <>

@@ -3,13 +3,12 @@ import { ApiError, type MixtapeApi } from '../api/client'
 import { readExpected, readFixtureArchive } from '../test/listening-export-fixtures'
 import { createListeningImportService, playlistFingerprint, type ImportParser } from './import-service'
 import type { ListeningExportSnapshot, SnapshotPlaylist } from './snapshot'
-import { inspectExport, parseExport } from './spotify-parser'
+import { parseExport } from './spotify-parser'
 import { openZipArchive } from './zip-reader'
 
 // The pure parser over the fixture archives; the page passes the Worker
-// client, which has the same two calls.
+// client, which has the same call.
 const directParser: ImportParser = {
-  inspect: async (file, options) => inspectExport(await openZipArchive(file), options),
   parse: async (file, options) => parseExport(await openZipArchive(file), options),
 }
 
@@ -83,7 +82,6 @@ type ExpectedSnapshot = { snapshot: ListeningExportSnapshot }
 function fakeParser(snapshot: ListeningExportSnapshot): ImportParser {
   const inventory = { package: snapshot.package, read: [], ignored: [] }
   return {
-    inspect: async () => inventory,
     parse: async (_file, options) => {
       options.onProgress?.({ stage: 'listing', file: null, completed: 0, total: 0 })
       return { inventory, snapshot }
@@ -154,22 +152,67 @@ const accountSnapshot = (rows: number, playlists: number, entriesInFirst: number
 })
 
 describe('ListeningImportService', () => {
-  it('inspects an archive and records the funnel step without waiting on it', async () => {
-    const { service, mocks } = setup()
+  it('inspects an archive with one full default parse and records the funnel step without waiting on it', async () => {
+    const parse = vi.fn(directParser.parse)
+    const { service, mocks } = setup({ parse })
     const expected = readExpected('extended-basic', 'default')
     let resolveFunnel: (() => void) | undefined
     mocks.postFunnelEvent.mockImplementation(() => new Promise((resolve) => {
       resolveFunnel = () => resolve({ ok: true })
     }))
+    const progress = vi.fn()
 
-    const inventory = await service.inspect(readFixtureArchive('extended-basic'), {
+    const inspected = await service.inspect(readFixtureArchive('extended-basic'), {
+      timeZone: 'Africa/Lagos',
       signal: new AbortController().signal,
+      onProgress: progress,
     })
 
-    expect(inventory).toEqual(expected.inventory)
+    expect(inspected).toEqual({
+      inventory: expected.inventory,
+      snapshot: expected.snapshot,
+      timeZone: 'Africa/Lagos',
+      includePrivateSessions: false,
+    })
+    expect(parse).toHaveBeenCalledTimes(1)
+    expect(parse.mock.calls[0][1]).toMatchObject({ timeZone: 'Africa/Lagos', includePrivateSessions: false })
+    expect(progress).toHaveBeenCalledWith(expect.objectContaining({ stage: 'complete' }))
+    expect(mocks.postFunnelEvent).toHaveBeenCalledTimes(1)
     expect(mocks.postFunnelEvent).toHaveBeenCalledWith({ type: 'file_inspected', surface: 'web' })
     expect(resolveFunnel).toBeDefined()
     resolveFunnel?.()
+  })
+
+  it('uploads the inspected snapshot without a second parse when the options match', async () => {
+    const parse = vi.fn(directParser.parse)
+    const { service, mocks, calls } = setup({ parse })
+    const file = readFixtureArchive('extended-basic')
+    const inspected = await service.inspect(file, { timeZone: 'Africa/Lagos', signal: new AbortController().signal })
+
+    const result = await service.upload(file, { ...uploadOptions(), inspected })
+
+    expect(parse).toHaveBeenCalledTimes(1)
+    expect(result.inventory).toEqual(inspected.inventory)
+    expect(mocks.beginListeningImport.mock.calls[0][0]).toMatchObject({ expectedTracks: inspected.snapshot.tracks.length })
+    expect(calls.filter((call) => call.startsWith('funnel:'))).toEqual(['funnel:file_inspected', 'funnel:import_completed'])
+  })
+
+  it('parses again only when the private-sessions choice differs from the inspected parse', async () => {
+    const parse = vi.fn(directParser.parse)
+    const { service, mocks } = setup({ parse })
+    const file = readFixtureArchive('extended-private-sessions')
+    const inspected = await service.inspect(file, { timeZone: 'Africa/Lagos', signal: new AbortController().signal })
+    const included = readExpected('extended-private-sessions', 'private-included').snapshot as ListeningExportSnapshot
+
+    await service.upload(file, { ...uploadOptions(), includePrivateSessions: true, inspected })
+
+    expect(parse).toHaveBeenCalledTimes(2)
+    expect(parse.mock.calls[1][1]).toMatchObject({ timeZone: 'Africa/Lagos', includePrivateSessions: true })
+    expect(mocks.beginListeningImport.mock.calls[0][0]).toMatchObject({
+      expectedTracks: included.tracks.length,
+      expectedDays: included.days.length,
+    })
+    expect(mocks.postFunnelEvent.mock.calls.map(([event]) => event.type)).toEqual(['file_inspected', 'import_completed'])
   })
 
   it('uploads an extended package as tracks and days, then completes, with no playlist sync', async () => {
@@ -524,7 +567,6 @@ describe('ListeningImportService', () => {
 
   it('does not begin the server run when parsing fails', async () => {
     const { service, mocks } = setup({
-      inspect: async () => { throw new Error('unreadable') },
       parse: async () => { throw new Error('unreadable') },
     })
 
@@ -548,8 +590,8 @@ describe('ListeningImportService', () => {
     mocks.postFunnelEvent.mockRejectedValueOnce(new Error('offline'))
     mocks.postFunnelEvent.mockImplementationOnce(() => { throw new Error('offline') })
 
-    await expect(service.inspect(new Blob([]), { signal: new AbortController().signal }))
-      .resolves.toEqual({ package: 'spotify_extended', read: [], ignored: [] })
+    await expect(service.inspect(new Blob([]), { timeZone: 'Africa/Lagos', signal: new AbortController().signal }))
+      .resolves.toMatchObject({ inventory: { package: 'spotify_extended', read: [], ignored: [] } })
     await expect(service.upload(new Blob([]), uploadOptions())).resolves.toMatchObject({ playlists: null })
     expect(mocks.postFunnelEvent).toHaveBeenCalledTimes(2)
   })

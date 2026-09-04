@@ -14,7 +14,21 @@ import {
   type WorkerResponse,
 } from './worker-protocol'
 
-export type WorkerHandle = MessagePortLike & { terminate?: () => void }
+/** The Worker events the client listens for beyond messages: a script that failed to load or threw at top level. */
+export type WorkerFailureListener = (event: unknown) => void
+
+export type WorkerHandle = MessagePortLike & {
+  addEventListener(type: 'error' | 'messageerror', listener: WorkerFailureListener): void
+  removeEventListener(type: 'error' | 'messageerror', listener: WorkerFailureListener): void
+  terminate?: () => void
+}
+
+/** The message of the error every call gets when the Worker itself fails; never an abort. */
+export const WORKER_FAILED = 'worker_failed'
+
+export function isWorkerFailure(error: unknown): boolean {
+  return error instanceof Error && error.message === WORKER_FAILED
+}
 
 export type ClientCallOptions = {
   signal?: AbortSignal
@@ -28,7 +42,12 @@ export type ParserWorkerClient = {
   inspect(file: Blob, options?: ClientCallOptions): Promise<ExportInventory>
   parse(file: Blob, options: ClientParseOptions): Promise<ParseResult>
   diagnose(file: Blob, options?: ClientCallOptions): Promise<ExportDiagnostics>
-  /** Rejects every pending call with an AbortError and terminates the Worker. */
+  /**
+   * Rejects every pending call with an AbortError and terminates the Worker.
+   * A Worker that fails on its own (script load error, uncaught throw,
+   * undeliverable message) does the same with `Error(WORKER_FAILED)`, and
+   * every later call rejects the same way until the client is replaced.
+   */
   terminate(): void
 }
 
@@ -58,7 +77,29 @@ type Pending = {
 
 export function createParserWorkerClient(port: WorkerHandle = spawnParserWorker()): ParserWorkerClient {
   let nextId = 1
+  let failed = false
   const pending = new Map<number, Pending>()
+
+  function settleAll(reason: () => unknown) {
+    for (const [id, call] of pending) {
+      pending.delete(id)
+      call.cleanup()
+      call.reject(reason())
+    }
+  }
+
+  function release() {
+    port.removeEventListener('message', listener)
+    port.removeEventListener('error', onFailure)
+    port.removeEventListener('messageerror', onFailure)
+    port.terminate?.()
+  }
+
+  const onFailure: WorkerFailureListener = () => {
+    failed = true
+    settleAll(() => new Error(WORKER_FAILED))
+    release()
+  }
 
   const listener = (event: { data: unknown }) => {
     const response = event.data
@@ -75,6 +116,8 @@ export function createParserWorkerClient(port: WorkerHandle = spawnParserWorker(
     else call.reject(reviveFailure(response.failure))
   }
   port.addEventListener('message', listener)
+  port.addEventListener('error', onFailure)
+  port.addEventListener('messageerror', onFailure)
 
   function request(
     build: (id: number) => WorkerRequest,
@@ -82,6 +125,7 @@ export function createParserWorkerClient(port: WorkerHandle = spawnParserWorker(
   ): Promise<WorkerResponse & { type: 'result' }> {
     const { signal } = options
     if (signal?.aborted) return Promise.reject(abortError(signal.reason))
+    if (failed) return Promise.reject(new Error(WORKER_FAILED))
     const id = nextId
     nextId += 1
     return new Promise((resolve, reject) => {
@@ -123,13 +167,8 @@ export function createParserWorkerClient(port: WorkerHandle = spawnParserWorker(
       return response.result as ExportDiagnostics
     },
     terminate() {
-      port.removeEventListener('message', listener)
-      for (const [id, call] of pending) {
-        pending.delete(id)
-        call.cleanup()
-        call.reject(abortError())
-      }
-      port.terminate?.()
+      settleAll(abortError)
+      release()
     },
   }
 }

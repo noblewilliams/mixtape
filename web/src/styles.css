@@ -3815,6 +3815,7 @@ button.mini:disabled {
   gap: 10px;
   color: var(--graphite);
   font-size: var(--type-meta-size);
+  cursor: pointer;
 }
 
 .switch {
@@ -3827,6 +3828,13 @@ button.mini:disabled {
   border: 0;
   border-radius: 999px;
   transition: background-color 0.2s ease;
+}
+
+/* The 44px hit area around the 36×20 track. */
+.switch::before {
+  content: "";
+  position: absolute;
+  inset: -12px;
 }
 
 .switch::after {
@@ -3850,6 +3858,11 @@ button.mini:disabled {
 .switch.on::after,
 .switch[aria-checked="true"]::after {
   left: 18px;
+}
+
+/* The copy-status live region is always in the card so a change is announced; empty, it takes no room. */
+.copy-status:empty {
+  margin: 0;
 }
 
 .diag {

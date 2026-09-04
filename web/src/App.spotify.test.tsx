@@ -546,6 +546,84 @@ describe('Spotify import page', () => {
     expect(screen.getByRole('dialog', { name: /new tape/i })).toBeInTheDocument()
   })
 
+  it('keeps an upload running across Home and back, and warns before unload while it runs', async () => {
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const api = createFakeApi({
+      putListeningTracks: async (_importId, tracks) => {
+        await held
+        return { accepted: tracks.length }
+      },
+    })
+    await api.postFunnelEvent({ type: 'chose_spotify', surface: 'web' })
+    await api.postFunnelEvent({ type: 'marked_requested', surface: 'web' })
+    renderApp({ api })
+    await settled(api)
+    fireEvent.click(screen.getByRole('button', { name: /^Your music/ }))
+    const view = await screen.findByRole('main', { name: 'Your music' })
+    const panel = () => within(screen.getByRole('main', { name: 'Your music' })).getByRole('region', { name: 'Import a Spotify ZIP' })
+    fireEvent.change(within(view).getByLabelText('choose a file'), { target: { files: [extendedZip()] } })
+    fireEvent.click(await within(panel()).findByRole('button', { name: 'Upload' }))
+    await within(panel()).findByRole('button', { name: 'Cancel' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Home' }))
+    expect(screen.queryByRole('main', { name: 'Your music' })).not.toBeInTheDocument()
+    const leaving = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(leaving)
+    expect(leaving.defaultPrevented).toBe(true)
+    expect(screen.getByRole('button', { name: 'Sync music library' })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: /^Your music/ }))
+    await screen.findByRole('main', { name: 'Your music' })
+    expect(within(panel()).getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+    expect(within(panel()).getByRole('status')).toHaveTextContent('Uploading')
+
+    release()
+    await within(panel()).findByText('Extended history imported')
+    expect(api.calls.filter((call) => call.method === 'beginListeningImport')).toHaveLength(1)
+    expect(api.calls.some((call) => call.method === 'completeListeningImport')).toBe(true)
+    const staying = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(staying)
+    expect(staying.defaultPrevented).toBe(false)
+  })
+
+  it('aborts and forgets the run on sign-out', async () => {
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let uploadSignal: AbortSignal | undefined
+    const api = createFakeApi({
+      putListeningTracks: async (_importId, tracks, signal) => {
+        uploadSignal = signal
+        await held
+        return { accepted: tracks.length }
+      },
+    })
+    await api.postFunnelEvent({ type: 'chose_spotify', surface: 'web' })
+    await api.postFunnelEvent({ type: 'marked_requested', surface: 'web' })
+    const { onSignOut } = renderApp({ api, onSignOut: vi.fn() })
+    await settled(api)
+    fireEvent.click(screen.getByRole('button', { name: /^Your music/ }))
+    const view = await screen.findByRole('main', { name: 'Your music' })
+    const panel = () => within(view).getByRole('region', { name: 'Import a Spotify ZIP' })
+    fireEvent.change(within(view).getByLabelText('choose a file'), { target: { files: [extendedZip()] } })
+    fireEvent.click(await within(panel()).findByRole('button', { name: 'Upload' }))
+    await within(panel()).findByRole('button', { name: 'Cancel' })
+    await waitFor(() => expect(uploadSignal).toBeDefined())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }))
+    expect(onSignOut).toHaveBeenCalledTimes(1)
+    expect(uploadSignal!.aborted).toBe(true)
+    await waitFor(() => expect(panel()).toHaveClass('drop'))
+    release()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(api.calls.some((call) => call.method === 'completeListeningImport')).toBe(false)
+    expect(panel()).toHaveClass('drop')
+  })
+
   it('brings the drop zone back from Import again and Drop the other ZIP', async () => {
     const api = createFakeApi()
     await api.postFunnelEvent({ type: 'chose_spotify', surface: 'web' })

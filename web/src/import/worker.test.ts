@@ -10,22 +10,27 @@ class FakePort implements MessagePortLike {
   peer!: FakePort
   readonly sent: unknown[] = []
   terminated = false
-  private readonly listeners = new Set<MessageListener>()
+  private readonly listeners = new Map<string, Set<(event: never) => void>>()
 
   postMessage(message: unknown): void {
     this.sent.push(message)
     const { peer } = this
-    setTimeout(() => {
-      for (const listener of [...peer.listeners]) listener({ data: message })
-    }, 0)
+    setTimeout(() => peer.emit('message', { data: message }), 0)
   }
 
-  addEventListener(_type: 'message', listener: MessageListener): void {
-    this.listeners.add(listener)
+  addEventListener(type: string, listener: (event: never) => void): void {
+    let set = this.listeners.get(type)
+    if (!set) this.listeners.set(type, (set = new Set()))
+    set.add(listener)
   }
 
-  removeEventListener(_type: 'message', listener: MessageListener): void {
-    this.listeners.delete(listener)
+  removeEventListener(type: string, listener: (event: never) => void): void {
+    this.listeners.get(type)?.delete(listener)
+  }
+
+  /** What the browser does when the Worker script fails to load or throws at top level. */
+  emit(type: string, event: unknown): void {
+    for (const listener of [...(this.listeners.get(type) ?? [])]) (listener as (event: unknown) => void)(event)
   }
 
   terminate(): void {
@@ -124,6 +129,29 @@ describe('parser worker protocol', () => {
     expect(workerSide.sent).toHaveLength(2)
     const inventory = await client.inspect(readFixtureArchive('account-empty-playlist'))
     expect(inventory.package).toBe('spotify_account')
+  })
+
+  it('fails every pending call with a non-abort error when the Worker itself errors, then terminates it', async () => {
+    const { client, pageSide } = connect()
+    const pending = client.parse(readFixtureArchive('extended-basic'), lagos)
+    const inspecting = client.inspect(readFixtureArchive('account-basic'))
+    pageSide.emit('error', new Event('error'))
+
+    await expect(pending).rejects.toThrow('worker_failed')
+    await expect(pending).rejects.not.toMatchObject({ name: 'AbortError' })
+    await expect(inspecting).rejects.toThrow('worker_failed')
+    expect(pageSide.terminated).toBe(true)
+    // The Worker is gone: a later call cannot hang waiting for it either.
+    await expect(client.diagnose(readFixtureArchive('account-basic'))).rejects.toThrow('worker_failed')
+    expect(pageSide.sent.filter((message) => (message as WorkerRequest).type === 'diagnose')).toHaveLength(0)
+  })
+
+  it('treats a messageerror the same way', async () => {
+    const { client, pageSide } = connect()
+    const pending = client.inspect(readFixtureArchive('extended-basic'))
+    pageSide.emit('messageerror', new Event('messageerror'))
+    await expect(pending).rejects.toThrow('worker_failed')
+    expect(pageSide.terminated).toBe(true)
   })
 
   it('terminate rejects pending calls and terminates the worker', async () => {

@@ -142,6 +142,12 @@ describe('approved Spotify import surfaces', () => {
     expect(stylesheet).toMatch(/@media \(max-width:\s*1020px\)[\s\S]*?\.mini-grid\s*{[^}]*grid-template-columns:\s*1fr 1fr;/)
   })
 
+  it('gives the private-sessions switch a 44px hit area inside a clickable label', () => {
+    expect(stylesheet).toMatch(/\.toggle\s*{[^}]*cursor:\s*pointer;/s)
+    expect(stylesheet).toMatch(/\.switch\s*{[^}]*position:\s*relative;/s)
+    expect(stylesheet).toMatch(/\.switch::before\s*{[^}]*content:\s*"";[^}]*position:\s*absolute;[^}]*inset:\s*-12px;/s)
+  })
+
   it('stops the stripe travel and card transitions under reduced motion', () => {
     expect(stylesheet).toMatch(/@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.progress > span\s*{[^}]*animation:\s*none !important;/)
     expect(stylesheet).toMatch(/@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.card,\s*\.drop,\s*\.switch,\s*\.switch::after\s*{[^}]*transition:\s*none !important;/)

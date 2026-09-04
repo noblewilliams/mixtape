@@ -1,14 +1,17 @@
-// What the import page needs from a parser: the service's inspect and parse,
-// plus diagnose for the unreadable state and terminate to let the Worker go.
+// What the import page needs from a parser: the service's parse, the
+// protocol's inspect (the listing alone), diagnose for the unreadable state,
+// and terminate to let the Worker go.
 // The production parser is lazy, so no Worker exists until the first file is
 // inspected, and each terminate (cancel, finish) frees it; the next call
 // spawns a fresh one.
 
 import type { ExportDiagnostics } from './diagnostics'
 import type { ImportParser } from './import-service'
+import type { ExportInventory } from './snapshot'
 import { createParserWorkerClient, spawnParserWorker } from './worker-client'
 
 export type PageParser = ImportParser & {
+  inspect(file: Blob, options?: { signal?: AbortSignal }): Promise<ExportInventory>
   diagnose(file: Blob, options?: { signal?: AbortSignal }): Promise<ExportDiagnostics>
   /** Rejects pending calls and releases whatever backs the parser; a later call starts fresh. */
   terminate(): void
@@ -29,15 +32,24 @@ export function createLazyParser(create: () => PageParser): PageParser {
   }
 }
 
-/** The in-page parser, loaded on demand so the main bundle never carries it where Workers exist. */
-function createFallbackParser(): PageParser {
-  const loaded = import('./direct-parser').then((module) => module.createDirectParser())
+const loadDirectParser = () => import('./direct-parser').then((module) => module.createDirectParser())
+
+/**
+ * The in-page parser, loaded on demand so the main bundle never carries it
+ * where Workers exist. A chunk that fails to load rejects every call with
+ * that error; terminate has nothing to release then and swallows it.
+ */
+export function createFallbackParser(load: () => Promise<PageParser> = loadDirectParser): PageParser {
+  const loaded = load()
   return {
     inspect: async (file, options) => (await loaded).inspect(file, options),
     parse: async (file, options) => (await loaded).parse(file, options),
     diagnose: async (file, options) => (await loaded).diagnose(file, options),
     terminate() {
-      void loaded.then((parser) => parser.terminate())
+      void loaded.then(
+        (parser) => parser.terminate(),
+        () => undefined,
+      )
     },
   }
 }

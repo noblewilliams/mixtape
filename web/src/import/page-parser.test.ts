@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createDirectParser } from './direct-parser'
-import { createLazyParser, type PageParser } from './page-parser'
+import { createFallbackParser, createLazyParser, type PageParser } from './page-parser'
 import { UnreadableExportError } from './spotify-parser'
 import { readExpected, readFixtureArchive } from '../test/listening-export-fixtures'
 
@@ -53,6 +53,36 @@ describe('createLazyParser', () => {
     expect(created).toHaveLength(2)
     expect(created[0].inspect).toHaveBeenCalledTimes(1)
     expect(created[1].inspect).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('createFallbackParser', () => {
+  it('terminates the in-page parser once its chunk has loaded', async () => {
+    const direct = createDirectParser()
+    const terminate = vi.spyOn(direct, 'terminate')
+    const parser = createFallbackParser(async () => direct)
+    const inventory = await parser.inspect(readFixtureArchive('account-basic'))
+    expect(inventory.package).toBe('spotify_account')
+    parser.terminate()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(terminate).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects calls with the load error and lets terminate swallow a chunk that never loaded', async () => {
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason)
+    }
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      const parser = createFallbackParser(() => Promise.reject(new Error('chunk failed')))
+      await expect(parser.inspect(new Blob([]))).rejects.toThrow('chunk failed')
+      parser.terminate()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
   })
 })
 
