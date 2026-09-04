@@ -63,6 +63,23 @@ function plural(count: number, noun: string): string {
 
 const unresolvedLabel = (rows: number): string => (rows === 0 ? 'None' : plural(rows, 'row'))
 
+/** "3 podcasts · 9 local files": zero parts omitted, "None" when nothing was skipped. */
+function skippedRowsLabel(facts: ImportFacts): string {
+  if (facts.package !== 'spotify_extended') return facts.unresolvedRows === 0 ? 'None' : formatCount(facts.unresolvedRows)
+  const parts = [
+    facts.stats.podcastOrAudiobook > 0 ? plural(facts.stats.podcastOrAudiobook, 'podcast') : null,
+    facts.stats.localFile > 0 ? plural(facts.stats.localFile, 'local file') : null,
+  ].filter((part): part is string => part !== null)
+  return parts.length === 0 ? 'None' : parts.join(' · ')
+}
+
+/** The note beside the private-sessions switch: what flipping it would add. */
+function privateSessionsNote(privatePlays: number): string {
+  if (privatePlays === 0) return '· No private-session plays in this file.'
+  const verb = privatePlays === 1 ? 'stays' : 'stay'
+  return `· ${plural(privatePlays, 'play')} hidden from followers ${verb} out unless you choose otherwise.`
+}
+
 const ledgerLabel = (summary: ListeningImportResult['summary']): string =>
   ledgerRangeLabel(summary.ledgerFrom, summary.ledgerTo) ?? '—'
 
@@ -153,7 +170,7 @@ function FileList({ inventory }: { inventory: ExportInventory }) {
 }
 
 function inventoryRows(facts: ImportFacts): [string, string][] {
-  const skipped = facts.unresolvedRows === 0 ? 'None' : formatCount(facts.unresolvedRows)
+  const skipped = skippedRowsLabel(facts)
   if (facts.package === 'spotify_extended') {
     return [
       ['Tracks', formatCount(facts.tracks)],
@@ -394,9 +411,7 @@ export function ImportPanel({ run, onNewTape, ref }: ImportPanelProps) {
               />
               <span>
                 Include private sessions{' '}
-                <span className="note note--inline">
-                  · Plays hidden from followers stay out unless you choose otherwise.
-                </span>
+                <span className="note note--inline">{privateSessionsNote(state.facts.stats.privatePlays)}</span>
               </span>
             </label>
           ) : null}

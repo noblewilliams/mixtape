@@ -3,7 +3,7 @@ import { ApiError, type MixtapeApi } from '../api/client'
 import { readExpected, readFixtureArchive } from '../test/listening-export-fixtures'
 import { createListeningImportService, playlistFingerprint, type ImportParser } from './import-service'
 import type { ListeningExportSnapshot, SnapshotPlaylist } from './snapshot'
-import { parseExport } from './spotify-parser'
+import { parseExport, type ExportStats } from './spotify-parser'
 import { openZipArchive } from './zip-reader'
 
 // The pure parser over the fixture archives; the page passes the Worker
@@ -79,12 +79,14 @@ const uploadOptions = (signal = new AbortController().signal) => ({
 
 type ExpectedSnapshot = { snapshot: ListeningExportSnapshot }
 
+const zeroStats = (): ExportStats => ({ podcastOrAudiobook: 0, localFile: 0, privateSession: 0, badTimestamp: 0, privatePlays: 0 })
+
 function fakeParser(snapshot: ListeningExportSnapshot): ImportParser {
   const inventory = { package: snapshot.package, read: [], ignored: [] }
   return {
     parse: async (_file, options) => {
       options.onProgress?.({ stage: 'listing', file: null, completed: 0, total: 0 })
-      return { inventory, snapshot }
+      return { inventory, snapshot, stats: zeroStats() }
     },
   }
 }
@@ -171,6 +173,7 @@ describe('ListeningImportService', () => {
     expect(inspected).toEqual({
       inventory: expected.inventory,
       snapshot: expected.snapshot,
+      stats: { podcastOrAudiobook: 0, localFile: 0, privateSession: 0, badTimestamp: 3, privatePlays: 0 },
       timeZone: 'Africa/Lagos',
       includePrivateSessions: false,
     })

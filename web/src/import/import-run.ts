@@ -17,6 +17,7 @@ import type {
 } from './import-service'
 import type { PageParser } from './page-parser'
 import type { ExportInventory, ListeningExportPackage } from './snapshot'
+import type { ExportStats } from './spotify-parser'
 import { isWorkerFailure } from './worker-client'
 
 /** What the inventory shows: the listing plus the counts the inspect parse gives. */
@@ -30,6 +31,8 @@ export type ImportFacts = {
   artists: number
   playlists: number
   unresolvedRows: number
+  /** Rows the parse dropped, by reason, and the private plays the switch would add. */
+  stats: ExportStats
   ledgerFrom: string | null
   ledgerTo: string | null
 }
@@ -97,7 +100,7 @@ export function deviceTimeZone(): string {
   }
 }
 
-function factsFrom({ inventory, snapshot, timeZone }: InspectedExport): ImportFacts {
+function factsFrom({ inventory, snapshot, stats, timeZone }: InspectedExport): ImportFacts {
   return {
     package: snapshot.package,
     inventory,
@@ -108,6 +111,7 @@ function factsFrom({ inventory, snapshot, timeZone }: InspectedExport): ImportFa
     artists: snapshot.artists.length,
     playlists: snapshot.playlists.length,
     unresolvedRows: snapshot.unresolved.rows,
+    stats,
     ledgerFrom: snapshot.ledgerFrom,
     ledgerTo: snapshot.ledgerTo,
   }

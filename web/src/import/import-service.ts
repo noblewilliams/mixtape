@@ -38,7 +38,7 @@ export type ImportParser = {
   }): Promise<ParseResult>
 }
 
-/** One full parse of an archive with the options it was parsed under; `upload` reuses it when those match. */
+/** One full parse of an archive (listing, snapshot, and drop stats) with the options it was parsed under; `upload` reuses it when those match. */
 export type InspectedExport = ParseResult & {
   timeZone: string
   includePrivateSessions: boolean
@@ -305,9 +305,9 @@ export function createListeningImportService({ api, parser }: ListeningImportSer
   return {
     async inspect(file, { timeZone, signal, onProgress }) {
       const includePrivateSessions = false
-      const { inventory, snapshot } = await parser.parse(file, { timeZone, includePrivateSessions, signal, onProgress })
+      const { inventory, snapshot, stats } = await parser.parse(file, { timeZone, includePrivateSessions, signal, onProgress })
       recordFunnelStep(api, 'file_inspected')
-      return { inventory, snapshot, timeZone, includePrivateSessions }
+      return { inventory, snapshot, stats, timeZone, includePrivateSessions }
     },
 
     async upload(file, { timeZone, includePrivateSessions, inspected, signal, onProgress }) {

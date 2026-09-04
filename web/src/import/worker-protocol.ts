@@ -26,6 +26,7 @@ export type WorkerFailure = {
 
 export type WorkerResponse =
   | { type: 'progress'; id: number; progress: ParseProgress }
+  /** A parse result carries its `stats` too; structured clone copies the plain object. */
   | { type: 'result'; id: number; result: ExportInventory | ParseResult | ExportDiagnostics }
   | { type: 'failure'; id: number; failure: WorkerFailure }
 

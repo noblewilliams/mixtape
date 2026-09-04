@@ -61,6 +61,7 @@ describe('parser worker protocol', () => {
     const expected = readExpected('extended-basic', 'default')
     expect(result.inventory).toEqual(expected.inventory)
     expect(result.snapshot).toEqual(expected.snapshot)
+    expect(result.stats).toEqual({ podcastOrAudiobook: 0, localFile: 0, privateSession: 0, badTimestamp: 3, privatePlays: 0 })
     expect(events[0]?.stage).toBe('listing')
     expect(events.at(-1)?.stage).toBe('complete')
     expect(events.filter((event) => event.stage === 'reading')).toHaveLength(expected.inventory.read.length)

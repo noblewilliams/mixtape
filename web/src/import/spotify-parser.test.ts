@@ -447,6 +447,49 @@ describe('parseExport decoding', () => {
   })
 })
 
+describe('parseExport stats', () => {
+  const zeroStats = { podcastOrAudiobook: 0, localFile: 0, privateSession: 0, badTimestamp: 0, privatePlays: 0 }
+
+  it('counts podcast, audiobook, and local-file drops for the podcasts-and-local fixture', async () => {
+    const archive = await openZipArchive(readFixtureArchive('extended-podcasts-and-local'))
+    const { stats, snapshot } = await parseExport(archive, lagos)
+    expect(stats).toEqual({ ...zeroStats, podcastOrAudiobook: 3, localFile: 3 })
+    expect(snapshot.unresolved).toEqual({ rows: 3, plays: 2 })
+  })
+
+  it('counts private-session drops and the plays among them only while the toggle drops them', async () => {
+    const archive = await openZipArchive(readFixtureArchive('extended-private-sessions'))
+    const { stats } = await parseExport(archive, lagos)
+    expect(stats).toEqual({ ...zeroStats, privateSession: 4, privatePlays: 4 })
+    // Included, the private local-file row reaches the URI check and is a local-file drop instead.
+    const included = await parseExport(archive, { ...lagos, includePrivateSessions: true })
+    expect(included.stats).toEqual({ ...zeroStats, localFile: 1 })
+    expect(included.snapshot.unresolved).toEqual({ rows: 1, plays: 1 })
+  })
+
+  it('counts rows dropped for a bad timestamp, after the local-file check', async () => {
+    const basic = await parseExport(await openZipArchive(readFixtureArchive('extended-basic')), lagos)
+    expect(basic.stats).toEqual({ ...zeroStats, badTimestamp: 3 })
+
+    const archive = await extendedArchive({
+      'Streaming_History_Audio_2024_0.json': [
+        historyRow({ ts: 'not a timestamp', spotify_track_uri: null, ms_played: 45000 }),
+        historyRow({ ts: 'not a timestamp' }),
+        historyRow({ incognito_mode: true, ms_played: 29999 }),
+        historyRow({ incognito_mode: true, ms_played: 30000, spotify_episode_uri: 'spotify:episode:QuietWorkshopEp0000012' }),
+      ],
+    })
+    const { stats, snapshot } = await parseExport(archive, lagos)
+    expect(stats).toEqual({ ...zeroStats, localFile: 1, badTimestamp: 1, privateSession: 2, privatePlays: 1 })
+    expect(snapshot.unresolved).toEqual({ rows: 1, plays: 1 })
+  })
+
+  it('is all zeros for an account package', async () => {
+    const { stats } = await parseExport(await openZipArchive(readFixtureArchive('account-basic')), lagos)
+    expect(stats).toEqual(zeroStats)
+  })
+})
+
 describe('parseExport history rules', () => {
   it('drops rows whose ts is outside the grammar, without counting them as unresolved', async () => {
     const archive = await extendedArchive({

@@ -10,6 +10,8 @@ import { parseExport } from '../import/spotify-parser'
 import { openZipArchive } from '../import/zip-reader'
 import { createFakeApi } from '../test/fake-api'
 import { readExpected, readFixtureArchiveBytes } from '../test/listening-export-fixtures'
+import { HISTORY_DIR, historyRow } from '../test/spotify-export-rows'
+import { buildZipBlob } from '../test/zip-builder'
 
 function fixtureFile(caseName: string, fileName = `${caseName}.zip`): File {
   return new File([readFixtureArchiveBytes(caseName)], fileName, { type: 'application/zip' })
@@ -138,7 +140,7 @@ describe('ImportPanel · inventory', () => {
     const label = toggle.closest('label')!
     expect(label).toHaveClass('toggle')
     expect(label.control).toBe(toggle)
-    expect(within(view).getByText(/Plays hidden from followers stay out unless you choose otherwise\./)).toBeInTheDocument()
+    expect(within(view).getByText('· No private-session plays in this file.')).toBeInTheDocument()
     fireEvent.click(within(label).getByText(/^Include private sessions/))
     expect(toggle).toHaveAttribute('aria-checked', 'true')
     fireEvent.click(toggle)
@@ -150,6 +152,71 @@ describe('ImportPanel · inventory', () => {
       { type: 'file_inspected', surface: 'web' },
     ])
     expect(api.calls.some((call) => call.method === 'beginListeningImport')).toBe(false)
+  })
+
+  it('breaks skipped rows out by reason and says when no plays are private', async () => {
+    await inventoryFor('extended-podcasts-and-local')
+    const view = panel()
+    const definitions = within(view).getAllByRole('definition').map((definition) => definition.textContent)
+    expect(definitions[4]).toBe('3 podcasts · 3 local files')
+    expect(within(view).getByRole('switch', { name: 'Include private sessions' })).toHaveAttribute('aria-checked', 'false')
+    expect(within(view).getByText('· No private-session plays in this file.')).toBeInTheDocument()
+    expect(within(view).queryByText(/hidden from followers/)).not.toBeInTheDocument()
+  })
+
+  it('counts the private plays the switch would add', async () => {
+    await inventoryFor('extended-private-sessions')
+    const view = panel()
+    const definitions = within(view).getAllByRole('definition').map((definition) => definition.textContent)
+    expect(definitions[4]).toBe('None')
+    expect(
+      within(view).getByText('· 4 plays hidden from followers stay out unless you choose otherwise.'),
+    ).toBeInTheDocument()
+  })
+
+  it('uses singular forms and omits zero parts of the skipped-rows fact', async () => {
+    const onePodcast = new File(
+      [
+        await buildZipBlob([
+          {
+            path: `${HISTORY_DIR}/Streaming_History_Audio_2025_0.json`,
+            json: [
+              historyRow(),
+              historyRow({ spotify_episode_uri: 'spotify:episode:QuietWorkshopEp0000012' }),
+              historyRow({ incognito_mode: true }),
+            ],
+          },
+        ]),
+      ],
+      'one.zip',
+      { type: 'application/zip' },
+    )
+    renderPanel()
+    pick(onePodcast)
+    await within(panel()).findByRole('button', { name: 'Upload' })
+    const definitions = within(panel()).getAllByRole('definition').map((definition) => definition.textContent)
+    expect(definitions[4]).toBe('1 podcast')
+    expect(
+      within(panel()).getByText('· 1 play hidden from followers stays out unless you choose otherwise.'),
+    ).toBeInTheDocument()
+    cleanup()
+
+    const oneLocal = new File(
+      [
+        await buildZipBlob([
+          {
+            path: `${HISTORY_DIR}/Streaming_History_Audio_2025_0.json`,
+            json: [historyRow(), historyRow({ spotify_track_uri: null })],
+          },
+        ]),
+      ],
+      'one.zip',
+      { type: 'application/zip' },
+    )
+    renderPanel()
+    pick(oneLocal)
+    await within(panel()).findByRole('button', { name: 'Upload' })
+    expect(within(panel()).getAllByRole('definition').map((definition) => definition.textContent)[4]).toBe('1 local file')
   })
 
   it('lists the facts for an account package with no private-sessions switch and the ignored file named', async () => {

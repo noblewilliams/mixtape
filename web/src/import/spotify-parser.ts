@@ -51,9 +51,36 @@ export type ParseOptions = InspectOptions & {
   includePrivateSessions: boolean
 }
 
+/**
+ * What the extended parse dropped, by reason, for the inventory preview. Not
+ * part of the fixture contract (never canonicalized or compared); zeros for
+ * the account package, which drops no rows this way.
+ */
+export type ExportStats = {
+  /** Rows with an episode or audiobook URI (step 2). */
+  podcastOrAudiobook: number
+  /** Rows with no usable track URI (step 3); these are the snapshot's unresolved rows. */
+  localFile: number
+  /** Private-session rows the toggle dropped (step 1); 0 when they were included. */
+  privateSession: number
+  /** Resolved rows whose `ts` was outside the grammar (step 4). */
+  badTimestamp: number
+  /** Among the dropped private-session rows, those at or over the 30 s play rule. */
+  privatePlays: number
+}
+
+export const zeroStats = (): ExportStats => ({
+  podcastOrAudiobook: 0,
+  localFile: 0,
+  privateSession: 0,
+  badTimestamp: 0,
+  privatePlays: 0,
+})
+
 export type ParseResult = {
   inventory: ExportInventory
   snapshot: ListeningExportSnapshot
+  stats: ExportStats
 }
 
 // The fail-closed error (no Spotify files, or one of them broken) lives in
@@ -327,11 +354,13 @@ type MutableTrack = {
 }
 
 interface SnapshotBuilder {
+  readonly stats: ExportStats
   add(loaded: LoadedFile): Promise<void>
   finish(): Promise<ListeningExportSnapshot>
 }
 
 class ExtendedBuilder implements SnapshotBuilder {
+  readonly stats = zeroStats()
   private readonly clock: ZoneClock
   private readonly tracks = new Map<string, MutableTrack>()
   private readonly days = new Map<string, SnapshotDay>()
@@ -359,22 +388,34 @@ class ExtendedBuilder implements SnapshotBuilder {
 
   private addRow(row: unknown): void {
     if (!isObject(row)) return
-    // 1. Private rows first (interpretation 1): they count toward nothing.
-    if (row.incognito_mode === true && !this.options.includePrivateSessions) return
-    // 2. Podcasts and audiobooks are dropped silently.
-    if (row.spotify_episode_uri != null || row.audiobook_uri != null) return
     const msPlayed = asInteger(row.ms_played)
     const isPlay = msPlayed >= PLAY_THRESHOLD_MS
+    // 1. Private rows first (interpretation 1): they count toward nothing
+    // in the snapshot; the stats remember how many plays the toggle hides.
+    if (row.incognito_mode === true && !this.options.includePrivateSessions) {
+      this.stats.privateSession += 1
+      if (isPlay) this.stats.privatePlays += 1
+      return
+    }
+    // 2. Podcasts and audiobooks are dropped silently.
+    if (row.spotify_episode_uri != null || row.audiobook_uri != null) {
+      this.stats.podcastOrAudiobook += 1
+      return
+    }
     // 3. No usable track URI: unresolved.
     const platformId = spotifyIdFromUri(row.spotify_track_uri, 'track')
     if (platformId === null) {
+      this.stats.localFile += 1
       this.unresolvedRows += 1
       if (isPlay) this.unresolvedPlays += 1
       return
     }
     // 4. Timestamp, strictly.
     const utcMs = parseTimestamp(row.ts)
-    if (utcMs === null) return
+    if (utcMs === null) {
+      this.stats.badTimestamp += 1
+      return
+    }
     // 5. Classify.
     const isSkip = row.skipped === true || (row.skipped == null && row.reason_end === 'fwdbtn')
     const isComplete = row.reason_end === 'trackdone'
@@ -459,6 +500,7 @@ class ExtendedBuilder implements SnapshotBuilder {
 // ---------------------------------------------------------------------------
 
 class AccountBuilder implements SnapshotBuilder {
+  readonly stats = zeroStats()
   private readonly libraries: LoadedLibrary[] = []
   private readonly playlistFiles: LoadedPlaylistFile[] = []
 
@@ -646,7 +688,7 @@ export async function inspectExport(archive: ExportArchive, options: InspectOpti
   return readPlannedFiles(archive, plan, options, noVisit)
 }
 
-/** The inventory and the canonical snapshot; throws UnreadableExportError when the archive fails closed. */
+/** The inventory, the canonical snapshot, and the drop stats; throws UnreadableExportError when the archive fails closed. */
 export async function parseExport(archive: ExportArchive, options: ParseOptions): Promise<ParseResult> {
   const plan = await planArchive(archive)
   if (plan.package === null) {
@@ -659,5 +701,5 @@ export async function parseExport(archive: ExportArchive, options: ParseOptions)
   if (broken !== undefined) throw new UnreadableExportError(baseName(broken.path), inventory)
   const snapshot = await builder.finish()
   options.signal?.throwIfAborted()
-  return { inventory, snapshot }
+  return { inventory, snapshot, stats: builder.stats }
 }
