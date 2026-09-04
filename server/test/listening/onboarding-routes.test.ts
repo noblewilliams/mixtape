@@ -66,6 +66,7 @@ describe('GET /me/onboarding', () => {
     const response = await get(db, authFor('u1'))
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({
+      userId: 'u1',
       sources: [
         {
           source: 'spotify_export',
@@ -97,6 +98,7 @@ describe('GET /me/onboarding', () => {
     ])
 
     expect(await (await get(db, authFor('u1'))).json()).toEqual({
+      userId: 'u1',
       sources: [],
       hasLibrary: true,
       chosenService: 'spotify',
@@ -113,6 +115,7 @@ describe('GET /me/onboarding', () => {
     await seedAppleLibraryTrack(db, 'u1')
 
     expect(await (await get(db, authFor('u1'))).json()).toEqual({
+      userId: 'u1',
       sources: [
         { source: 'apple_live', connectedAt: now.toISOString(), lastImportedAt: null, ledgerFrom: null, ledgerTo: null },
       ],
