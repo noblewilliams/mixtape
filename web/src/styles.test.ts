@@ -163,3 +163,34 @@ describe('approved Spotify import surfaces', () => {
     expect(stylesheet).toMatch(/@media \(prefers-color-scheme:\s*dark\)[\s\S]*?\.dialog-error[^{]*{[^}]*color:\s*#e9a3b3;/)
   })
 })
+
+describe('approved Spotify mix rail outputs', () => {
+  it('gives every Open in Spotify link a 44px target and its own column in the row', () => {
+    expect(stylesheet).toMatch(/\.track-row \.open\s*{[^}]*min-width:\s*44px;[^}]*min-height:\s*44px;[^}]*text-decoration:\s*underline;/s)
+    expect(stylesheet).toMatch(/\.track-swipe-surface\.has-open\s*{[^}]*grid-template-columns:\s*48px minmax\(0, 1fr\) auto 44px;/s)
+  })
+
+  it('stacks the Spotify actions in the Apple slot with the one-line hint', () => {
+    expect(stylesheet).toMatch(/\.rail-actions\s*{[^}]*display:\s*grid;[^}]*gap:\s*8px;[^}]*border-top:\s*1px solid var\(--hairline\);/s)
+    expect(stylesheet).toMatch(/\.rail-actions \.btn\s*{[^}]*justify-content:\s*center;/s)
+    expect(stylesheet).toMatch(/\.rail-hint\s*{[^}]*text-align:\s*center;/s)
+    expect(stylesheet).toMatch(/\.rail-hint--mobile\s*{[^}]*display:\s*none;/s)
+  })
+
+  it('omits Copy for Spotify and its hint on mobile web, where Spotify cannot paste links', () => {
+    expect(stylesheet).toMatch(/@media \(max-width:\s*760px\)[\s\S]*?\.rail-action--desktop,\s*\.rail-hint--desktop,\s*\.open-tail\s*{[^}]*display:\s*none;/)
+    expect(stylesheet).toMatch(/@media \(max-width:\s*760px\)[\s\S]*?\.rail-hint--mobile\s*{[^}]*display:\s*block;/)
+  })
+
+  it('draws the Not personal yet banner on the amber tokens, above the tracks', () => {
+    expect(stylesheet).toMatch(/\.banner\s*{[^}]*color:\s*#6b5220;[^}]*background:\s*#f4ecdc;[^}]*border:\s*1px solid rgba\(209, 138, 101, 0\.5\);/s)
+    expect(stylesheet).toMatch(/\.banner b\s*{[^}]*display:\s*block;/s)
+    expect(stylesheet).toMatch(/\.queue-panel:has\(\.banner\)\s*{[^}]*grid-template-rows:\s*auto auto auto minmax\(0, 1fr\) auto;/s)
+    expect(stylesheet).toMatch(/@media \(prefers-color-scheme:\s*dark\)[\s\S]*?\.banner\s*{[^}]*color:\s*#e6c98f;[^}]*background:\s*rgba\(209, 138, 101, 0\.14\);[^}]*border-color:\s*rgba\(209, 138, 101, 0\.35\);/)
+  })
+
+  it('holds the copy toast and banner still under reduced motion', () => {
+    expect(stylesheet).toMatch(/@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.queue-undo-toast,\s*\.banner\s*{[^}]*animation:\s*none !important;/)
+    expect(stylesheet).toMatch(/\.queue-toast-hint\s*{[^}]*display:\s*block;/s)
+  })
+})

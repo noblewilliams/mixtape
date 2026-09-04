@@ -68,6 +68,7 @@ type FakeListeningImport = {
 
 export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
   const queueState = new Map<string, ApiQueueTrack[]>()
+  const createdSessions = new Map<string, CreateSessionResponse>()
   const funnelEvents: FunnelEventInput[] = []
   const listeningImports = new Map<string, FakeListeningImport>()
   const playlistSyncs = new Map<string, { playlists: number; entries: number }>()
@@ -97,12 +98,20 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
   const api: MixtapeApi = {
     listSessions: async () => ({ sessions: summaries.map((session) => ({ ...session })) }),
     getSession: async (sessionId): Promise<SessionDetailResponse> => {
+      const created = createdSessions.get(sessionId)
+      if (created) {
+        return {
+          session: { ...created.session },
+          messages: created.messages.map((message) => ({ ...message })),
+          queue: currentQueue(sessionId),
+        }
+      }
       const session = summaries.find((item) => item.id === sessionId) ?? summaries[0]
       return { session: { ...session }, messages: messagesFor(sessionId), queue: currentQueue(sessionId) }
     },
     createSession: async (prompt): Promise<CreateSessionResponse> => {
       const createdAt = new Date().toISOString()
-      return {
+      const created: CreateSessionResponse = {
         session: {
           id: 'created-session',
           title: prompt,
@@ -117,6 +126,8 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
         ],
         queue: [],
       }
+      createdSessions.set(created.session.id, created)
+      return created
     },
     sendMessage: async (_sessionId, _text) => ({
       djMessage: {

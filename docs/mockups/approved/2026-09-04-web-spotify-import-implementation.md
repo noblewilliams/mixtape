@@ -29,3 +29,11 @@
 - **"ignored" everywhere.** Files the parser never opens are labelled "ignored" in the inventory list and in the report; the board’s "never read" is not used.
 - **Retry playlists** re-runs the whole import for the same file and options (idempotent server-side; the playlist sync runs again) rather than a playlists-only sync, under "Re-uploads the file; nothing is duplicated." The partial body reads "Your liked songs and artists are safe on the server. Nothing is lost; the playlists can follow with a retry." A retry records `import_completed` again and never a second `file_inspected`.
 - **The run outlives the page.** The import run (its state, abort, and the parser’s Worker) belongs to the app for the signed-in user’s life: leaving for Home, a session, or a new tape never cancels an upload, coming back shows its progress, the browser asks before the tab closes mid-upload, and sign-out aborts and forgets it. Each import parses once: the inventory’s full default parse is what goes up unless the private-sessions switch was flipped.
+
+## Mix rail (B5)
+
+- The transfer tool is TuneMyMusic (`https://www.tunemymusic.com/transfer`), the one that accepts pasted text without an account; the handoff copies one "Artist – Title" line per track and opens the tool in the same gesture.
+- Desktop and mobile hint copy both live in the DOM and toggle at the 760px breakpoint; the row link label shortens to "Open" on mobile while its accessible name stays "Open <title> in Spotify".
+- `first_output` fires after a successful clipboard write for Copy, when the tool opens for the handoff, and on click for a row link; `first_personal_mix` fires once per user when a session comes back with `notPersonal` false after any completed import.
+- After a message turn the session record is refetched so the "Not personal yet" banner updates; the queue and messages are not clobbered.
+- The output toast auto-dismisses after four seconds so its hint can be read; the undo window stays three seconds.

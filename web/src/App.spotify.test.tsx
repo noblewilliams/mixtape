@@ -647,3 +647,137 @@ describe('Spotify import page', () => {
     await waitFor(() => expect(panel()).toHaveClass('drop'))
   })
 })
+
+describe('Spotify mix outputs', () => {
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+    Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined })
+  })
+
+  function funnelTypes(api: ReturnType<typeof createFakeApi>, type: string) {
+    return api.calls.filter((call) => call.method === 'postFunnelEvent' && (call.args[0] as { type: string }).type === type)
+  }
+
+  async function createTape(prompt: string) {
+    fireEvent.click(await screen.findByRole('button', { name: 'Make a new tape' }))
+    fireEvent.change(screen.getByLabelText('What should this tape feel like?'), { target: { value: prompt } })
+    fireEvent.click(screen.getByRole('button', { name: 'Start tape' }))
+    await screen.findByRole('heading', { name: prompt })
+  }
+
+  async function sendMessage(text: string) {
+    fireEvent.change(await screen.findByLabelText('Message your DJ'), { target: { value: text } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }))
+    await screen.findByText(/reshaped the middle around that feeling/)
+  }
+
+  it('refetches the session after a message turn so a corpus-mode answer shows the banner', async () => {
+    const base = createFakeApi()
+    let corpusMode = false
+    const api = apiWithOnboarding(
+      { chosenService: 'spotify' },
+      {
+        getSession: async (sessionId) => {
+          const detail = await base.getSession(sessionId)
+          return { ...detail, session: { ...detail.session, notPersonal: corpusMode } }
+        },
+        sendMessage: async (sessionId, text) => {
+          corpusMode = true
+          return base.sendMessage(sessionId, text)
+        },
+      },
+    )
+    renderApp({ api })
+    await settled(api)
+    expect(screen.queryByText('Not personal yet')).not.toBeInTheDocument()
+    const reads = api.calls.filter((call) => call.method === 'getSession').length
+
+    await sendMessage('Make the middle brighter.')
+
+    await waitFor(() => expect(api.calls.filter((call) => call.method === 'getSession').length).toBe(reads + 1))
+    expect(await screen.findByText('Not personal yet')).toBeInTheDocument()
+  })
+
+  it('posts first_personal_mix once, and only after an import has completed', async () => {
+    const api = apiWithOnboarding({ chosenService: 'spotify' })
+    renderApp({ api })
+    await settled(api)
+
+    await createTape('Dinner after the rain')
+    expect(funnelTypes(api, 'first_personal_mix')).toHaveLength(0)
+    cleanup()
+
+    const imported = apiWithOnboarding({
+      chosenService: 'spotify',
+      sources: [accountPackage],
+      importCompletedAt: '2026-09-04T09:30:00.000Z',
+    })
+    renderApp({ api: imported })
+    await settled(imported)
+
+    await createTape('Dinner after the rain')
+    await waitFor(() => expect(funnelTypes(imported, 'first_personal_mix')).toHaveLength(1))
+    expect(funnelTypes(imported, 'first_personal_mix')[0].args[0]).toEqual({ type: 'first_personal_mix', surface: 'web' })
+
+    await sendMessage('Make the middle brighter.')
+    await createTape('Slow start')
+    await waitFor(() => expect(imported.calls.filter((call) => call.method === 'createSession')).toHaveLength(2))
+    expect(funnelTypes(imported, 'first_personal_mix')).toHaveLength(1)
+  })
+
+  it('does not post first_personal_mix for a corpus-mode tape', async () => {
+    const base = createFakeApi()
+    const api = apiWithOnboarding(
+      { chosenService: 'spotify', sources: [accountPackage], importCompletedAt: '2026-09-04T09:30:00.000Z' },
+      {
+        createSession: async (prompt) => {
+          const created = await base.createSession(prompt)
+          return { ...created, session: { ...created.session, notPersonal: true } }
+        },
+      },
+    )
+    renderApp({ api })
+    await settled(api)
+
+    await createTape('Something for a rainy desk')
+
+    expect(await screen.findByText('Not personal yet')).toBeInTheDocument()
+    expect(funnelTypes(api, 'first_personal_mix')).toHaveLength(0)
+  })
+
+  it('posts first_output once across Open in Spotify, Copy for Spotify, and the transfer handoff', async () => {
+    const base = createFakeApi()
+    const api = apiWithOnboarding(
+      { chosenService: 'spotify' },
+      {
+        getSession: async (sessionId) => {
+          const detail = await base.getSession(sessionId)
+          return {
+            ...detail,
+            queue: detail.queue.map((track) => ({ ...track, appleId: null, spotifyId: `sp-${track.trackId}` })),
+          }
+        },
+      },
+    )
+    const writeText = vi.fn(async (_text: string) => undefined)
+    Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+    renderApp({ api })
+    await settled(api)
+
+    const link = await screen.findByRole('link', { name: 'Open Sweetest Taboo in Spotify' })
+    link.addEventListener('click', (event) => event.preventDefault())
+    fireEvent.click(link)
+    await waitFor(() => expect(funnelTypes(api, 'first_output')).toHaveLength(1))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy for Spotify' }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole('button', { name: 'Send to a transfer tool' }))
+    await waitFor(() => expect(open).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(2))
+
+    expect(funnelTypes(api, 'first_output')).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'Connect Apple Music' })).not.toBeInTheDocument()
+  })
+})

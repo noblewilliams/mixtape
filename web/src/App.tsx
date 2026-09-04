@@ -28,6 +28,7 @@ import { createListeningImportService } from './import/import-service'
 import { createLazyParser, createPageParser, type PageParser } from './import/page-parser'
 import type { MusicKitClient } from './musickit/client'
 import type { AuthProvider } from './lib/auth-provider'
+import { postFunnelEventOnce } from './lib/funnel-once'
 import { musicLinkLabel } from './lib/onboarding'
 import { clearServiceChoice, readServiceChoice, writeServiceChoice, type ServiceChoice } from './lib/service-preference'
 
@@ -83,6 +84,11 @@ function paintChannels(hex: string) {
   return [value.slice(0, 2), value.slice(2, 4), value.slice(4, 6)]
     .map((channel) => Number.parseInt(channel, 16))
     .join(', ')
+}
+
+/** Any completed import, on any source: the gate for `first_personal_mix`. */
+function hasCompletedImport(onboarding: OnboardingResponse | null) {
+  return Boolean(onboarding?.importCompletedAt || onboarding?.sources.some((source) => source.lastImportedAt))
 }
 
 function conflictSnapshot(error: unknown): { queue: ApiQueueTrack[]; queueVersion: number } | null {
@@ -306,6 +312,26 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
     void refreshOnboarding()
   }
 
+  function notePersonalMix(session: { notPersonal: boolean }) {
+    if (!session.notPersonal && hasCompletedImport(effectiveOnboarding)) {
+      postFunnelEventOnce(api, user.id, 'first_personal_mix')
+    }
+  }
+
+  // A message turn returns no session summary, so the session is read again
+  // afterwards to learn whether the DJ went corpus-mode (`notPersonal`).
+  async function refreshSessionAfterTurn(sessionId: string) {
+    try {
+      const detail = await api.getSession(sessionId)
+      setSessions((current) =>
+        current.map((session) => (session.id === sessionId ? toDjSession(detail.session, detail.queue) : session)),
+      )
+      notePersonalMix(detail.session)
+    } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 401) signOut()
+    }
+  }
+
   function activeAppleIds(): string[] | null {
     const ids = activeQueue.flatMap((track) => (track.appleId ? [track.appleId] : []))
     if (ids.length !== activeQueue.length) {
@@ -366,6 +392,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
       setDialog(null)
       setError('')
       announce('Your new tape is ready.')
+      notePersonalMix(response.session)
     } catch (requestError) {
       setError(errorCopy(requestError))
       if (requestError instanceof ApiError && requestError.status === 401) signOut()
@@ -414,6 +441,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
             : session,
         ),
       )
+      void refreshSessionAfterTurn(sessionId)
     } catch (requestError) {
       const message = errorCopy(requestError)
       setMessagesBySession((current) => ({
@@ -618,6 +646,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
             onClose={() => setQueueOpen(false)}
             onPreviewTracks={(tracks) => previewQueue(activeSession.id, tracks)}
             onCommitQueueOp={(op) => commitQueueOp(activeSession.id, op)}
+            onOutput={() => postFunnelEventOnce(api, user.id, 'first_output')}
           />
         </>
       )}

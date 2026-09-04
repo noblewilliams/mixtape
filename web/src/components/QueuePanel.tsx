@@ -28,6 +28,8 @@ type QueuePanelProps = {
   onClose: () => void
   onPreviewTracks: (tracks: QueueTrack[]) => void
   onCommitQueueOp: (op: QueueOp) => Promise<void>
+  /** A Spotify output happened: Open in Spotify, Copy for Spotify, or the transfer handoff. */
+  onOutput?: () => void
 }
 
 type SwipeState = {
@@ -59,7 +61,32 @@ type PointerReorder = {
 const REMOVE_THRESHOLD = 0.65
 const SETTLED_REMOVE_SIZE = 42
 const UNDO_WINDOW_MS = 3000
+const OUTPUT_TOAST_MS = 4000
 const WHEEL_RELEASE_MS = 120
+
+// Spotify outputs (docs/mockups/approved/2026-09-04-web-spotify-import.md,
+// "The mix rail for a Spotify listener"). The transfer tool is TuneMyMusic:
+// of the two candidates on the board it is the one whose transfer page
+// accepts pasted "Artist – Title" text without an account.
+const SPOTIFY_TRACK_URL = 'https://open.spotify.com/track/'
+const TRANSFER_TOOL_URL = 'https://www.tunemymusic.com/transfer'
+const COPY_HINT = 'Paste the links into a new playlist in Spotify on your computer.'
+const COPY_FAILED = 'Couldn’t copy on this browser.'
+
+function spotifyTrackUrl(spotifyId: string) {
+  return `${SPOTIFY_TRACK_URL}${encodeURIComponent(spotifyId)}`
+}
+
+async function copyText(text: string) {
+  const clipboard = navigator.clipboard
+  if (!clipboard || typeof clipboard.writeText !== 'function') return false
+  try {
+    await clipboard.writeText(text)
+    return true
+  } catch {
+    return false
+  }
+}
 
 function formatDuration(milliseconds: number) {
   const minutes = Math.floor(milliseconds / 60_000)
@@ -99,11 +126,12 @@ export function QueuePanel({
   onClose,
   onPreviewTracks,
   onCommitQueueOp,
+  onOutput,
 }: QueuePanelProps) {
   const [displayTracks, setDisplayTracks] = useState(() => withPositions(tracks))
   const [swipe, setSwipeState] = useState<SwipeState | null>(null)
   const [draggedTrackId, setDraggedTrackId] = useState<string | null>(null)
-  const [toast, setToast] = useState<{ message: string; undo: boolean } | null>(null)
+  const [toast, setToast] = useState<{ message: string; hint?: string; undo: boolean } | null>(null)
   const displayTracksRef = useRef(displayTracks)
   const swipeRef = useRef<SwipeState | null>(null)
   const pendingUndoRef = useRef<PendingUndo | null>(null)
@@ -118,6 +146,10 @@ export function QueuePanel({
     () => displayTracks.reduce((sum, track) => sum + (track.durationMs ?? 0), 0),
     [displayTracks],
   )
+  // A mix with Spotify ids and no Apple id at all gets the Spotify actions in
+  // the Apple slot; a mixed mix keeps the Apple controls and only gains links.
+  const spotifyOnly =
+    displayTracks.some((track) => track.spotifyId) && !displayTracks.some((track) => track.appleId)
 
   useEffect(() => {
     const normalized = withPositions(tracks)
@@ -234,6 +266,36 @@ export function QueuePanel({
         setToast({ message: commitErrorCopy(error), undo: false })
         statusTimerRef.current = setTimeout(() => setToast(null), UNDO_WINDOW_MS)
       })
+  }
+
+  function showOutputToast(message: string, hint?: string) {
+    finalizePreviousUndo()
+    if (statusTimerRef.current) clearTimeout(statusTimerRef.current)
+    setToast({ message, hint, undo: false })
+    statusTimerRef.current = setTimeout(() => setToast(null), OUTPUT_TOAST_MS)
+  }
+
+  async function copyForSpotify() {
+    const links = displayTracksRef.current.flatMap((track) => (track.spotifyId ? [spotifyTrackUrl(track.spotifyId)] : []))
+    const copied = await copyText(links.join('\n'))
+    if (!copied) {
+      showOutputToast(COPY_FAILED)
+      return
+    }
+    showOutputToast(`Copied ${links.length} ${links.length === 1 ? 'link' : 'links'}`, COPY_HINT)
+    onOutput?.()
+  }
+
+  async function sendToTransferTool() {
+    const lines = displayTracksRef.current.map((track) => `${track.artist} – ${track.title}`)
+    // Start the clipboard write and open the tool in the same gesture frame:
+    // the write needs this document still focused, the new tab needs the
+    // user activation that an await would spend.
+    const write = copyText(lines.join('\n'))
+    window.open(TRANSFER_TOOL_URL, '_blank', 'noopener')
+    onOutput?.()
+    const copied = await write
+    showOutputToast(copied ? `Copied ${lines.length} ${lines.length === 1 ? 'song' : 'songs'}` : COPY_FAILED)
   }
 
   function moveTrack(from: number, to: number) {
@@ -431,6 +493,16 @@ export function QueuePanel({
         <span>{displayTracks.length === 0 ? 'waiting for a prompt' : `about ${Math.round(totalDuration / 60_000)} min`}</span>
       </div>
 
+      {session.notPersonal ? (
+        <div className="banner" role="status">
+          <span aria-hidden="true">◐</span>
+          <span>
+            <b>Not personal yet</b>
+            <span>Built from Mixtape’s catalog and your interview, not your listening. Import your Spotify data for the real thing.</span>
+          </span>
+        </div>
+      ) : null}
+
       {displayTracks.length === 0 ? (
         <div className="empty-queue">
           <h2>This mix is still blank.</h2>
@@ -459,7 +531,7 @@ export function QueuePanel({
                 onWheel={(event) => handleTrackpad(event, track.trackId)}
               >
                 <div
-                  className="track-swipe-surface"
+                  className={`track-swipe-surface ${track.spotifyId ? 'has-open' : ''}`}
                   data-testid="track-swipe-surface"
                   tabIndex={0}
                   aria-label={`${track.title} by ${track.artist}, track ${index + 1}`}
@@ -475,6 +547,22 @@ export function QueuePanel({
                     <small>{track.artist} · {track.durationMs ? formatDuration(track.durationMs) : '—'}</small>
                     <em id={reasonId}>{track.reason || 'Chosen to hold the shape of this mix.'}</em>
                   </span>
+                  {track.spotifyId ? (
+                    <a
+                      className="open"
+                      href={spotifyTrackUrl(track.spotifyId)}
+                      target="_blank"
+                      rel="noopener"
+                      draggable={false}
+                      aria-label={`Open ${track.title} in Spotify`}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={() => onOutput?.()}
+                    >
+                      <span aria-hidden="true">
+                        Open<span className="open-tail"> in Spotify</span>
+                      </span>
+                    </a>
+                  ) : null}
                   <button
                     className="reorder-handle"
                     type="button"
@@ -512,7 +600,20 @@ export function QueuePanel({
         Use the three-line handle or its Arrow keys to reorder. Swipe left with one finger or two fingers on a trackpad to remove. Delete reveals Remove and Escape closes it.
       </p>
 
-      {displayTracks.length > 0 ? (
+      {displayTracks.length > 0 && spotifyOnly ? (
+        <div className="rail-actions">
+          <button className="btn primary rail-action--desktop" type="button" onClick={() => void copyForSpotify()}>
+            Copy for Spotify
+          </button>
+          <button className="btn" type="button" onClick={() => void sendToTransferTool()}>
+            Send to a transfer tool
+          </button>
+          <p className="rail-hint rail-hint--desktop">
+            Paste the links into a new playlist in Spotify on your computer. The transfer tool creates the playlist for you on any device.
+          </p>
+          <p className="rail-hint rail-hint--mobile">Copies “Artist – Title” lines and opens the tool, which creates the playlist in Spotify.</p>
+        </div>
+      ) : displayTracks.length > 0 ? (
         <div className="music-actions">
           {musicConnection === 'connected' ? (
             <>
@@ -552,7 +653,10 @@ export function QueuePanel({
 
       {toast ? (
         <div className="queue-undo-toast">
-          <span className="queue-undo-message" role="status" aria-live="polite">{toast.message}</span>
+          <span className="queue-undo-message" role="status" aria-live="polite">
+            {toast.message}
+            {toast.hint ? <small className="queue-toast-hint">{toast.hint}</small> : null}
+          </span>
           {toast.undo ? (
             <button className="queue-undo-action" type="button" onClick={undoLastMutation} aria-label="Undo">
               <UndoIcon />
