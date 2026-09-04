@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mixtape — Web Spotify import states</title>
+  <style>
+    :root {
+      color: #38333a;
+      background: #0d0d11;
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-synthesis: none;
+      --marker: "Noteworthy", "Segoe Print", "Bradley Hand", cursive;
+      --marker-leading: 1.2;
+      --graphite: #38333a; --plum: #544451; --slate: #45596d; --smoke: #746d75; --muted: #8a838b;
+      --hairline: rgba(66, 58, 65, .12);
+      --pink: #c9687f; --orange: #d18a65; --yellow: #d2c76f; --green: #709778; --blue: #688fa8;
+      --stripe-horizontal: linear-gradient(90deg, var(--pink), var(--orange), var(--yellow), var(--green), var(--blue));
+    }
+    * { box-sizing: border-box; }
+    html { min-width: 320px; }
+    body { min-width: 320px; min-height: 100vh; margin: 0; background: radial-gradient(circle at 10% 4%, rgba(104,143,168,.14), transparent 27%), radial-gradient(circle at 88% 96%, rgba(201,104,127,.09), transparent 30%), #0d0d11; }
+    button, input, textarea { font: inherit; }
+    button { cursor: pointer; }
+    .board { width: min(1510px, calc(100% - 32px)); margin: 0 auto; padding: 32px 0 80px; }
+    .board-head { margin-bottom: 24px; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 28px; align-items: end; color: #f0ede8; }
+    .board-head h1 { margin: 0; font-size: 20px; letter-spacing: -.02em; }
+    .board-head p { max-width: 860px; margin: 8px 0 0; color: #aaa4ac; font-size: 12px; line-height: 1.6; }
+    .board-flag, .frame-label { font: 750 9px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .14em; text-transform: uppercase; }
+    .board-flag { color: #b8d0bf; white-space: nowrap; }
+    .frame-label { margin: 0 0 9px 5px; color: #aaa4ac; }
+    .section { margin-top: 34px; }
+    .section-title { margin: 0 0 6px; color: #e7e3e7; font-size: 13px; }
+    .section-copy { max-width: 880px; margin: 0 0 16px; color: #99939b; font-size: 11px; line-height: 1.6; }
+    .row { display: grid; gap: 18px; }
+    .row-2 { grid-template-columns: 1fr 1fr; } .row-3 { grid-template-columns: 1fr 1fr 1fr; } .row-4 { grid-template-columns: repeat(4, 1fr); }
+    @media (max-width: 1100px) { .row-2, .row-3, .row-4 { grid-template-columns: 1fr; } }
+
+    /* product shell (desktop) */
+    .app-shell { --paint: #45596d; width: 100%; height: 720px; display: grid; grid-template-columns: 238px minmax(0,1fr); overflow: hidden; color: var(--graphite); background: radial-gradient(ellipse at 18% 8%, color-mix(in srgb, var(--paint) 14%, transparent), transparent 48%), radial-gradient(ellipse at 88% 90%, color-mix(in srgb, var(--paint) 8%, transparent), transparent 44%), radial-gradient(ellipse at 54% 44%, rgba(255,255,255,.88), transparent 62%), #fafaf8; border: 1px solid rgba(255,255,255,.7); border-radius: 30px; box-shadow: 0 28px 90px rgba(0,0,0,.35); }
+    .app-shell.with-rail { grid-template-columns: 238px minmax(0,1fr) 468px; }
+    .sidebar { min-width: 0; padding: 19px 13px 14px; display: grid; grid-template-rows: auto auto auto minmax(0,1fr) auto; background: rgba(248,247,246,.62); border-right: 1px solid rgba(255,255,255,.74); backdrop-filter: blur(30px) saturate(106%); }
+    .topline { min-height: 42px; padding: 0 4px 13px; display: flex; align-items: center; justify-content: space-between; }
+    .wordmark { color: var(--plum); font: italic 500 25px/var(--marker-leading) var(--marker); letter-spacing: -.04em; transform: rotate(-2deg); }
+    .home-button, .icon-button { width: 40px; height: 40px; display: grid; place-items: center; color: var(--smoke); background: transparent; border: 0; border-radius: 12px; }
+    .home-button { color: var(--plum); background: rgba(255,255,255,.72); box-shadow: inset 0 0 0 1px var(--hairline); }
+    .home-button svg, .icon-button svg, .music-link svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .new-mix { min-height: 50px; padding: 0 10px 0 8px; display: grid; grid-template-columns: 27px 1fr 20px; gap: 8px; align-items: center; color: #f5f0f2; background: #4d404b; border: 1px solid #3b3039; border-radius: 9px 9px 13px 13px; box-shadow: 0 4px 0 #2d272e; font-size: 11px; font-weight: 750; text-align: left; }
+    .reel { width: 26px; aspect-ratio: 1; background: repeating-conic-gradient(#dedbd6 0 23deg, transparent 23deg 45deg), #262329; border: 3px solid #262329; border-radius: 50%; }
+    .plus { font-size: 21px; font-weight: 350; line-height: 1; text-align: center; }
+    .music-link { min-height: 52px; margin-top: 15px; padding: 0 9px; display: grid; grid-template-columns: 34px minmax(0,1fr) auto; gap: 9px; align-items: center; color: var(--graphite); background: rgba(255,255,255,.58); border: 1px solid rgba(68,59,66,.07); border-radius: 11px; text-align: left; }
+    .music-link > span:first-child { width: 34px; height: 34px; display: grid; place-items: center; color: var(--plum); background: rgba(84,68,81,.08); border-radius: 10px; }
+    .music-link strong, .music-link small { display: block; } .music-link strong { font-size: 11px; } .music-link small { margin-top: 3px; color: #627c68; font-size: 9px; }
+    .music-link small.waiting { color: #8a6a3a; }
+    .chevron { color: var(--muted); font-size: 18px; }
+    .section-head { padding: 22px 8px 8px; display: flex; justify-content: space-between; color: var(--muted); font: 750 9px/1 ui-monospace, monospace; letter-spacing: .12em; text-transform: uppercase; }
+    .session { min-height: 55px; padding: 6px 7px; display: grid; grid-template-columns: 44px minmax(0,1fr); gap: 9px; align-items: center; border-radius: 11px; }
+    .mini-tape { width: 44px; height: 28px; position: relative; background: #45515b; border: 2px solid #29272b; border-radius: 4px; }
+    .mini-tape::before { content: ""; position: absolute; inset: 5px 4px 7px; background: linear-gradient(#f1ece2 0 38%, var(--pink) 38% 45%, var(--orange) 45% 52%, var(--yellow) 52% 59%, var(--green) 59% 66%, var(--blue) 66% 73%, #1c1a1d 73%); border-radius: 2px; }
+    .session strong, .session small { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .session strong { color: var(--plum); font: italic 450 14px/var(--marker-leading) var(--marker); } .session small { margin-top: 3px; color: var(--muted); font-size: 10px; }
+    .account { padding: 13px 4px 0; display: grid; grid-template-columns: 30px minmax(0,1fr) 34px; gap: 8px; align-items: center; border-top: 1px solid var(--hairline); }
+    .avatar { width: 30px; height: 30px; display: grid; place-items: center; color: white; background: var(--plum); border-radius: 50%; font: 500 12px var(--marker); }
+    .account strong, .account small { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; } .account strong { font-size: 11px; } .account small { margin-top: 2px; color: var(--muted); font-size: 9px; }
+
+    .view { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0,1fr); overflow: hidden; background: rgba(251,251,249,.34); }
+    .view-head { min-height: 104px; padding: 23px 34px 18px; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 24px; align-items: end; border-bottom: 1px solid rgba(72,64,71,.08); }
+    .kicker { margin: 0 0 6px; color: var(--muted); font: 750 9px/1 ui-monospace, monospace; letter-spacing: .14em; text-transform: uppercase; }
+    .view-head h2, .card h3, .dialog h3 { margin: 0; color: var(--plum); font: italic 450 26px/var(--marker-leading) var(--marker); }
+    .card h3 { font-size: 20px; } .dialog h3 { font-size: 22px; }
+    .view-head p, .card p, .dialog p { margin: 6px 0 0; color: var(--smoke); font-size: 11px; line-height: 1.55; }
+    .view-scroll { padding: 22px 34px 34px; overflow: auto; display: grid; gap: 16px; align-content: start; }
+    .card { padding: 16px 18px; background: rgba(255,255,255,.5); border: 1px solid rgba(255,255,255,.76); border-radius: 14px; box-shadow: 0 1px 0 rgba(66,58,65,.05); }
+    .card.quiet { background: rgba(255,255,255,.3); }
+    .card.attention { border-color: rgba(209,138,101,.5); }
+    .steps { margin: 12px 0 0; padding: 0 0 0 20px; color: var(--graphite); font-size: 12px; line-height: 1.6; }
+    .steps li { margin: 6px 0; } .steps li + li { border-top: 1px dashed var(--hairline); padding-top: 6px; }
+    .steps a, .inline-link { color: var(--slate); font-weight: 650; text-decoration: underline; text-underline-offset: 2px; }
+    .steps b { font-weight: 750; color: var(--plum); }
+    .btn { min-height: 44px; padding: 0 16px; display: inline-flex; align-items: center; gap: 8px; color: var(--plum); background: rgba(255,255,255,.66); border: 1px solid rgba(73,64,72,.2); border-radius: 8px 8px 12px 12px; font-size: 11px; font-weight: 750; }
+    .btn.primary { color: #f5f0f2; background: #4d404b; border-color: #3b3039; box-shadow: 0 3px 0 #2d272e; }
+    .btn.danger { color: #8a3a49; border-color: rgba(201,104,127,.45); }
+    .btn:disabled { opacity: .5; cursor: default; }
+    .btn-row { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    .note { margin: 10px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+    .status-chip { min-height: 26px; padding: 0 10px; display: inline-flex; align-items: center; gap: 6px; color: var(--plum); background: rgba(255,255,255,.7); border: 1px solid var(--hairline); border-radius: 999px; font: 750 9px/1 ui-monospace, monospace; letter-spacing: .1em; text-transform: uppercase; }
+    .status-chip.ok { color: #315f42; background: #e4f0e7; } .status-chip.wait { color: #8a6a3a; background: #f4ecdc; } .status-chip.err { color: #8a3a49; background: #f6e2e6; }
+    .status-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+    .wait-card { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 16px; align-items: center; }
+    .elapsed { color: var(--plum); font: italic 450 30px/1 var(--marker); }
+    .mini-grid { margin-top: 12px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+    .mini { padding: 12px 13px; background: rgba(255,255,255,.5); border: 1px solid rgba(255,255,255,.8); border-radius: 11px; }
+    .mini strong { display: block; color: var(--plum); font-size: 11px; } .mini small { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+    .mini.done { border-color: rgba(112,151,120,.5); } .mini.done strong::before { content: "✓ "; color: #315f42; }
+    .field { margin-top: 12px; display: grid; gap: 6px; } .field label { color: var(--plum); font-size: 11px; font-weight: 750; }
+    .field input, .field textarea { min-height: 40px; padding: 8px 12px; color: var(--graphite); background: rgba(255,255,255,.7); border: 1px solid rgba(73,64,72,.18); border-radius: 9px; font-size: 12px; }
+    .field textarea { min-height: 64px; resize: none; }
+    .field input:focus, .field textarea:focus { outline: 0; border-color: transparent; box-shadow: 0 0 0 2px transparent; background: linear-gradient(rgba(255,255,255,.9), rgba(255,255,255,.9)) padding-box, var(--stripe-horizontal) border-box; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; } .chip { min-height: 28px; padding: 0 10px; display: inline-flex; align-items: center; gap: 6px; color: var(--plum); background: rgba(255,255,255,.75); border: 1px solid var(--hairline); border-radius: 999px; font-size: 11px; }
+    .chip .x { color: var(--muted); font-size: 13px; line-height: 1; }
+    .progress { position: relative; height: 10px; margin-top: 10px; overflow: hidden; background: rgba(84,68,81,.12); border-radius: 999px; }
+    .progress > span { position: absolute; inset: 0 auto 0 0; background: var(--stripe-horizontal); border-radius: 999px; }
+    .inventory { margin-top: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .inventory dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; font-size: 11px; } .inventory dt { color: var(--muted); } .inventory dd { margin: 0; color: var(--graphite); font-weight: 650; }
+    .file-list { margin: 8px 0 0; padding: 0; list-style: none; font: 500 10px/1.6 ui-monospace, monospace; color: var(--graphite); }
+    .file-list li.ignored { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 1px; }
+    .toggle { display: inline-flex; align-items: center; gap: 10px; font-size: 11px; color: var(--graphite); }
+    .switch { width: 36px; height: 20px; position: relative; background: rgba(84,68,81,.2); border-radius: 999px; }
+    .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: white; border-radius: 50%; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+    .switch.on { background: var(--green); } .switch.on::after { left: 18px; }
+    .drop { min-height: 150px; display: grid; place-items: center; text-align: center; color: var(--smoke); background: rgba(255,255,255,.35); border: 2px dashed rgba(73,64,72,.22); border-radius: 16px; }
+    .drop strong { display: block; color: var(--plum); font: italic 450 22px/var(--marker-leading) var(--marker); }
+    .diag { margin-top: 10px; padding: 10px 12px; background: rgba(84,68,81,.06); border-radius: 10px; font: 500 10px/1.6 ui-monospace, monospace; color: var(--graphite); }
+    .source-row { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 14px; align-items: center; }
+    .source-mark { width: 40px; height: 40px; display: grid; place-items: center; color: var(--plum); background: rgba(84,68,81,.08); border-radius: 12px; font: 750 11px ui-monospace, monospace; }
+    .source-row strong { display: block; color: var(--plum); font-size: 12px; } .source-row small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+
+    /* dialog */
+    .overlay { position: relative; height: 560px; display: grid; place-items: center; background: rgba(17,17,22,.32); border-radius: 30px; overflow: hidden; }
+    .dialog { width: min(520px, calc(100% - 32px)); padding: 22px 24px 20px; background: #f4f3f0; border: 1px solid rgba(255,255,255,.8); border-radius: 18px; box-shadow: 0 30px 80px rgba(0,0,0,.35); }
+    .dialog .close { float: right; width: 32px; height: 32px; color: var(--smoke); background: transparent; border: 0; border-radius: 10px; font-size: 18px; }
+    .dialog-actions { margin-top: 16px; display: flex; justify-content: flex-end; gap: 10px; }
+    .stepper { margin-top: 10px; display: flex; gap: 6px; } .stepper span { width: 22px; height: 4px; background: rgba(84,68,81,.18); border-radius: 999px; } .stepper span.on { background: var(--plum); }
+
+    /* queue rail */
+    .rail { min-width: 0; display: grid; grid-template-rows: auto auto minmax(0,1fr) auto; background: rgba(248,247,246,.62); border-left: 1px solid rgba(255,255,255,.74); backdrop-filter: blur(30px) saturate(106%); }
+    .rail-head { padding: 18px 18px 10px; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px; align-items: center; }
+    .rail-head h2 { margin: 0; color: var(--plum); font: italic 450 22px/var(--marker-leading) var(--marker); } .rail-head small { display: block; color: var(--muted); font-size: 10px; }
+    .banner { margin: 0 18px 8px; padding: 9px 12px; display: grid; grid-template-columns: auto minmax(0,1fr); gap: 10px; align-items: center; color: #6b5220; background: #f4ecdc; border: 1px solid rgba(209,138,101,.5); border-radius: 10px; font-size: 11px; }
+    .banner b { display: block; font-size: 11px; } .banner span:last-child { font-size: 10px; color: #8a6a3a; }
+    .tracks { margin: 0; padding: 0 18px; list-style: none; overflow: auto; }
+    .track { display: grid; grid-template-columns: 44px minmax(0,1fr) auto; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--hairline); }
+    .art { width: 44px; height: 44px; border-radius: 8px; background: var(--art, #b9a9b4); }
+    .track strong, .track small { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; } .track strong { font-size: 12px; color: var(--graphite); } .track small { margin-top: 2px; color: var(--muted); font-size: 10px; }
+    .track .open { min-width: 44px; min-height: 44px; display: inline-grid; place-items: center; color: var(--slate); background: transparent; border: 0; border-radius: 10px; font-size: 10px; font-weight: 750; text-decoration: underline; text-underline-offset: 2px; }
+    .rail-actions { padding: 12px 18px 16px; display: grid; gap: 8px; border-top: 1px solid var(--hairline); }
+    .rail-actions .btn { justify-content: center; }
+    .rail-actions .hint { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; text-align: center; }
+    .toast { margin: 0 18px 8px; min-height: 38px; padding: 4px 9px 4px 12px; display: flex; align-items: center; justify-content: space-between; color: #f3efef; background: #4d404b; border-radius: 10px; font-size: 11px; }
+    .toast button { color: #f3efef; background: transparent; border: 0; font-size: 11px; font-weight: 750; text-decoration: underline; }
+
+    /* mobile */
+    .mobile-frame { width: 390px; height: 760px; margin: 0 auto; display: grid; grid-template-rows: auto minmax(0,1fr); overflow: hidden; color: var(--graphite); background: radial-gradient(ellipse at 20% 6%, rgba(69,89,109,.16), transparent 48%), #fafaf8; border: 1px solid rgba(255,255,255,.7); border-radius: 34px; box-shadow: 0 28px 90px rgba(0,0,0,.35); }
+    .mobile-bar { min-height: 56px; padding: 10px 12px 8px; display: grid; grid-template-columns: 40px minmax(0,1fr) 40px; align-items: center; justify-items: center; background: rgba(248,247,246,.72); border-bottom: 1px solid rgba(255,255,255,.8); backdrop-filter: blur(24px); }
+    .mobile-bar .wordmark { font-size: 21px; }
+    .mobile-body { padding: 16px 16px 24px; overflow: auto; display: grid; gap: 12px; align-content: start; }
+    .mobile-body .card { padding: 14px 15px; } .mobile-body .steps { font-size: 12px; }
+    .mobile-body .btn { width: 100%; justify-content: center; }
+    .mobile-frame.dark { --graphite: #e8e4e6; --plum: #d9cfd6; --slate: #9db6c9; --smoke: #b4adb3; --muted: #9a939a; --hairline: rgba(255,255,255,.1); color: #e8e4e6; background: radial-gradient(ellipse at 20% 6%, rgba(104,143,168,.18), transparent 48%), #151518; border-color: rgba(255,255,255,.08); }
+    .mobile-frame.dark .mobile-bar { background: rgba(30,30,36,.7); border-color: rgba(255,255,255,.06); }
+    .mobile-frame.dark .card { background: rgba(255,255,255,.05); border-color: rgba(255,255,255,.08); box-shadow: none; }
+    .mobile-frame.dark .btn { color: #e8e4e6; background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.16); }
+    .mobile-frame.dark .btn.primary { color: #1b181c; background: #e3dbe0; border-color: #cfc5cb; box-shadow: 0 3px 0 #a99ea6; }
+    .mobile-frame.dark .track { border-color: rgba(255,255,255,.08); } .mobile-frame.dark .banner { color: #e6c98f; background: rgba(209,138,101,.14); border-color: rgba(209,138,101,.35); } .mobile-frame.dark .banner span:last-child { color: #c9ad7a; }
+    .mobile-frame.dark .status-chip { background: rgba(255,255,255,.08); color: #e8e4e6; } .mobile-frame.dark .status-chip.wait { color: #e6c98f; background: rgba(209,138,101,.14); }
+    .mobile-frame.dark .diag, .mobile-frame.dark .mini { background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.08); }
+
+    /* large text stress */
+    .large-text { font-size: 15px; } .large-text .steps, .large-text .card p, .large-text .track strong { font-size: 15px; } .large-text .track small, .large-text .note { font-size: 13px; } .large-text .btn { min-height: 52px; font-size: 14px; } .large-text .elapsed { font-size: 38px; }
+
+    /* commentary */
+    .choice-grid { margin-top: 13px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; } .choice { padding: 13px 14px; color: #b5aeb5; background: rgba(255,255,255,.035); border: 1px solid rgba(255,255,255,.07); border-radius: 10px; font-size: 11px; line-height: 1.6; } .choice.recommended { border-color: rgba(112,151,120,.36); } .choice b { display: block; margin-bottom: 5px; color: #ddd8dc; }
+    .a11y-list { margin: 10px 0 0; padding-left: 18px; color: #b5aeb5; font-size: 11px; line-height: 1.7; }
+    .target { outline: 1px dashed rgba(201,104,127,.75); outline-offset: 0; }
+  </style>
+</head>
+<body>
+  <main class="board">
+    <header class="board-head">
+      <div>
+        <h1>Web · Spotify import states</h1>
+        <p>Every screen a Spotify listener touches on the web, from choosing a service to a mix they can take into Spotify. Copy follows the listening-export spec word for word. Frames use the approved content-plane glass system; the sources view is drawn as a Spotify state of the pending “Your music” view, not a second destination. All names and numbers are synthetic.</p>
+      </div>
+      <span class="board-flag">Recommended · B: request page with a living waiting card</span>
+    </header>
+
+    <!-- 1. choose a service -->
+    <section class="section">
+      <h2 class="section-title">1 · Choosing a service</h2>
+      <p class="section-copy">Shown once, after sign-in, only when the onboarding read reports no connected source and no library. Existing Apple listeners never see it. The Apple choice leads to the existing MusicKit connect flow; the Spotify choice records the choice and opens the request page.</p>
+      <p class="frame-label">Desktop / first sign-in / no sources</p>
+      <div class="overlay">
+        <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="svc-title">
+          <p class="kicker">Before your first tape</p>
+          <h3 id="svc-title">Which do you use?</h3>
+          <p>Mixtape builds mixes from what you actually listen to. Tell it where that lives.</p>
+          <div class="mini-grid" style="grid-template-columns:1fr 1fr">
+            <button class="mini" style="text-align:left"><strong>Apple Music</strong><small>Connect in the browser and sync your library and playlists now.</small></button>
+            <button class="mini" style="text-align:left"><strong>Spotify</strong><small>Ask Spotify for your listening data. It arrives by email within days; Mixtape reads it on this device.</small></button>
+          </div>
+          <p class="note">You can add the other later from Your music.</p>
+        </section>
+      </div>
+    </section>
+
+    <!-- 2. request flow: two directions -->
+    <section class="section">
+      <h2 class="section-title">2 · Spotify request flow — two directions</h2>
+      <p class="section-copy">The decision: where the eight steps live while the listener waits days for Spotify. <b style="color:#ddd8dc">A</b> keeps them in a one-time checklist dialog. <b style="color:#ddd8dc">B (recommended)</b> gives them a page under Your music that stays available, holds the “I’ve requested it” checkpoint, shows the elapsed wait, and becomes the import page when a file arrives. The email-confirmation step is the one most people miss, so it is set in bold in both.</p>
+      <div class="row row-2">
+        <article>
+          <p class="frame-label">Direction A · one-time checklist dialog</p>
+          <div class="overlay">
+            <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="a-title">
+              <button class="close" aria-label="Close">×</button>
+              <p class="kicker">Spotify</p>
+              <h3 id="a-title">Get your listening data</h3>
+              <ol class="steps">
+                <li>Open <a href="#">spotify.com/account/privacy</a> and log in with the account that has your listening history. A laptop is easier than a phone for this part.</li>
+                <li>Scroll to <b>Download your data</b>.</li>
+                <li>Select <b>Account data</b> and <b>Extended streaming history</b>. Leave <i>Technical log information</i> unselected.</li>
+                <li>Press <b>Request data</b>.</li>
+                <li>Check your email. Spotify sends a <b>confirmation</b> message first. Open it and press <b>Confirm</b>. Nothing is prepared until you do, and this is the step most people miss.</li>
+                <li>Wait. The two packages arrive as separate emails, each with a <b>Download</b> button, usually within days; the extended history can take up to 30. Each link expires after about two weeks, so download it when you see it.</li>
+                <li>Save the ZIPs as they are. Don’t unzip them.</li>
+                <li>Come back to Mixtape and give it each ZIP as it arrives. You don’t have to wait for both.</li>
+              </ol>
+              <div class="dialog-actions"><button class="btn">Later</button><button class="btn primary">I’ve requested it</button></div>
+            </section>
+          </div>
+        </article>
+        <article>
+          <p class="frame-label">Direction B · request page under Your music (recommended)</p>
+          <div class="app-shell">
+            <aside class="sidebar" aria-label="Mixtape navigation">
+              <div class="topline"><span class="wordmark">mixtape</span><button class="home-button" aria-label="Home"><svg viewBox="0 0 24 24"><path d="m3.5 10 8.5-7 8.5 7v10.5h-6v-6h-5v6h-6z"/></svg></button></div>
+              <button class="new-mix"><span class="reel"></span><span>Make a new tape</span><span class="plus">+</span></button>
+              <button class="music-link"><span><svg viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg></span><span><strong>Your music</strong><small class="waiting">Spotify · waiting for your data</small></span><span class="chevron">›</span></button>
+              <div><div class="section-head"><span>Your tapes</span><span>0</span></div><p class="note" style="padding:0 8px">Nothing yet. The DJ makes the first one once it knows you.</p></div>
+              <div class="account"><span class="avatar">A</span><span><strong>Ada Okafor</strong><small>Signed in with Google</small></span><span class="chevron">⋯</span></div>
+            </aside>
+            <section class="view">
+              <header class="view-head"><div><p class="kicker">Your music · Spotify</p><h2>Get your listening data</h2><p>Spotify prepares it and emails you. Mixtape reads the file on this device and keeps only your plays and playlists.</p></div><span class="status-chip wait"><span class="dot"></span>Not requested</span></header>
+              <div class="view-scroll">
+                <div class="card">
+                  <ol class="steps">
+                    <li>Open <a href="#">spotify.com/account/privacy</a> and log in with the account that has your listening history. A laptop is easier than a phone for this part.</li>
+                    <li>Scroll to <b>Download your data</b>.</li>
+                    <li>Select <b>Account data</b> and <b>Extended streaming history</b>. Leave <i>Technical log information</i> unselected.</li>
+                    <li>Press <b>Request data</b>.</li>
+                    <li>Check your email. Spotify sends a <b>confirmation</b> message first. Open it and press <b>Confirm</b>. Nothing is prepared until you do, and this is the step most people miss.</li>
+                    <li>Wait. The two packages arrive as separate emails, each with a <b>Download</b> button, usually within days; the extended history can take up to 30. Each link expires after about two weeks, so download it when you see it.</li>
+                    <li>Save the ZIPs as they are. Don’t unzip them.</li>
+                    <li>Come back to Mixtape and give it each ZIP as it arrives. You don’t have to wait for both.</li>
+                  </ol>
+                  <div class="btn-row"><button class="btn primary">I’ve requested it</button><span class="note" style="margin:0">Marks today so Mixtape can show how long you’ve waited. No email from Mixtape; Spotify’s two emails are the signal.</span></div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- 3. waiting states -->
+    <section class="section">
+      <h2 class="section-title">3 · Waiting state (direction B) and what the listener can do</h2>
+      <p class="section-copy">After “I’ve requested it” the same page turns into a waiting card: elapsed time, the two arrivals, and the three things worth doing now. The interview is required before any mix; pasting songs is desktop-only; the demo tape teaches the refine loop. When a file arrives the drop zone is right there.</p>
+      <div class="row row-3">
+        <article>
+          <p class="frame-label">Requested · 2 days · interview not done</p>
+          <div class="card attention">
+            <div class="wait-card"><div><p class="kicker">Waiting for Spotify</p><span class="elapsed">2 days</span><p>Requested Tuesday. Confirmation email clicked? If not, nothing is being prepared.</p></div><span class="status-chip wait"><span class="dot"></span>Waiting</span></div>
+            <div class="mini-grid">
+              <div class="mini"><strong>Tell the DJ about your taste</strong><small>Five short questions. Required before your first mix.</small></div>
+              <div class="mini"><strong>Paste songs from Spotify</strong><small>Select tracks in Spotify on your computer, copy, paste here.</small></div>
+              <div class="mini"><strong>Try a demo tape</strong><small>See how refining a mix works.</small></div>
+            </div>
+            <div class="drop" style="margin-top:14px;min-height:96px"><div><strong>Drop a Spotify ZIP here</strong><span>or choose a file · either package, in any order</span></div></div>
+          </div>
+        </article>
+        <article>
+          <p class="frame-label">Requested · 5 days · interview done · one package in</p>
+          <div class="card">
+            <div class="wait-card"><div><p class="kicker">Waiting for Spotify</p><span class="elapsed">5 days</span><p>Account data imported Friday. Still waiting for the extended history; it can take up to 30 days.</p></div><span class="status-chip ok"><span class="dot"></span>1 of 2 in</span></div>
+            <div class="mini-grid">
+              <div class="mini done"><strong>Interview done</strong><small>4 notes, 6 artists. The DJ can already make a mix from your likes and playlists.</small></div>
+              <div class="mini"><strong>Paste songs from Spotify</strong><small>Adds to what the DJ knows. Optional.</small></div>
+              <div class="mini"><strong>Try a demo tape</strong><small>See how refining a mix works.</small></div>
+            </div>
+            <div class="btn-row"><button class="btn primary">Make a mix</button><button class="btn">Drop the other ZIP</button></div>
+          </div>
+        </article>
+        <article>
+          <p class="frame-label">Not requested yet · nothing to do but the interview</p>
+          <div class="card quiet">
+            <div class="wait-card"><div><p class="kicker">Spotify</p><span class="elapsed">Not requested</span><p>The DJ can’t make a personal mix until your data arrives. Ask Spotify now; it takes two minutes.</p></div><span class="status-chip"><span class="dot"></span>Not requested</span></div>
+            <div class="mini-grid">
+              <div class="mini"><strong>Tell the DJ about your taste</strong><small>Five short questions. Required before any mix.</small></div>
+              <div class="mini" style="opacity:.55"><strong>Not personal yet</strong><small>Once the interview is done, the DJ can offer a mix from what it already knows, clearly labeled.</small></div>
+              <div class="mini"><strong>Try a demo tape</strong><small>See how refining a mix works.</small></div>
+            </div>
+            <div class="btn-row"><button class="btn primary">Show me the steps</button></div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- 4. interview and paste -->
+    <section class="section">
+      <h2 class="section-title">4 · Interview and paste songs</h2>
+      <p class="section-copy">The interview is a five-step dialog with one question per step and the stepper visible. Answers are optional except artists, which need at least one; the DJ stores them as memories and seeds. The paste box takes one Spotify link per line, shows what resolved, and lets the listener remove a seed.</p>
+      <div class="row row-3">
+        <article>
+          <p class="frame-label">Interview · step 1 of 5 · artists as chips</p>
+          <div class="overlay" style="height:520px">
+            <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="iv-title">
+              <button class="close" aria-label="Close interview">×</button>
+              <p class="kicker">Tell the DJ about your taste · 1 of 5</p>
+              <h3 id="iv-title">Artists you would never skip</h3>
+              <p>Type a name and press Enter. Up to 20.</p>
+              <div class="field"><label for="iv-artist">Artist</label><input id="iv-artist" placeholder="Ivory Kestrel"><div class="chips"><span class="chip">Ivory Kestrel <span class="x" aria-hidden="true">×</span></span><span class="chip">Juniper North <span class="x" aria-hidden="true">×</span></span><span class="chip">The Late Ferry <span class="x" aria-hidden="true">×</span></span></div></div>
+              <div class="stepper" aria-hidden="true"><span class="on"></span><span></span><span></span><span></span><span></span></div>
+              <div class="dialog-actions"><button class="btn" disabled>Back</button><button class="btn primary">Next</button></div>
+            </section>
+          </div>
+        </article>
+        <article>
+          <p class="frame-label">Interview · step 4 of 5 · long free text</p>
+          <div class="overlay" style="height:520px">
+            <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="iv4-title">
+              <button class="close" aria-label="Close interview">×</button>
+              <p class="kicker">Tell the DJ about your taste · 4 of 5</p>
+              <h3 id="iv4-title">Anything you never want to hear?</h3>
+              <p>Genres, moods, explicit lyrics, a specific artist. Say it plainly; the DJ treats it as a rule.</p>
+              <div class="field"><label for="iv-never">Never</label><textarea id="iv-never">No stadium country, nothing with a children’s choir, and please keep the explicit versions off when I say it’s a dinner mix. Skip anything over eight minutes unless it’s a live take I already know.</textarea><span class="note" style="margin:0;text-align:right">213 / 300</span></div>
+              <div class="stepper" aria-hidden="true"><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span><span></span></div>
+              <div class="dialog-actions"><button class="btn">Back</button><button class="btn primary">Next</button></div>
+            </section>
+          </div>
+        </article>
+        <article>
+          <p class="frame-label">Paste songs (desktop) · resolved and unresolved</p>
+          <div class="card" style="min-height:520px">
+            <p class="kicker">Paste songs from Spotify</p>
+            <h3>Seed the DJ with songs you love</h3>
+            <p>In Spotify on your computer, select tracks, copy, and paste the links here. One per line.</p>
+            <div class="field"><label for="paste">Links</label><textarea id="paste">https://open.spotify.com/track/3n3Ppam7vgaVa1iaRUc9Lp
+https://open.spotify.com/track/7qiZfU4dY1lWllzX7mPBI3
+https://open.spotify.com/track/notARealId</textarea></div>
+            <div class="btn-row"><button class="btn primary">Add 3 songs</button></div>
+            <div class="mini-grid" style="grid-template-columns:1fr">
+              <div class="mini done"><strong>2 songs added</strong><small>Small Distances · Ari Sola &nbsp;·&nbsp; Streetlight Weather · Juniper North</small></div>
+              <div class="mini" style="border-color:rgba(201,104,127,.45)"><strong>1 link not recognised</strong><small>The last line isn’t a Spotify track link. Nothing else was affected.</small></div>
+            </div>
+            <div class="chips" style="margin-top:12px"><span class="chip">Small Distances <span class="x" aria-label="Remove Small Distances">×</span></span><span class="chip">Streetlight Weather <span class="x" aria-label="Remove Streetlight Weather">×</span></span></div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- 5. import page states -->
+    <section class="section">
+      <h2 class="section-title">5 · Import page states</h2>
+      <p class="section-copy">Pick or drop a ZIP, see exactly what will be uploaded, then upload. The inventory names the package, the files read and ignored, the counts, the years covered, the time zone used for local days, and the private-sessions toggle (off by default). Failure shows a content-free diagnostics report the listener can copy. A partial result after the playlists fail is its own state, not an error.</p>
+      <div class="row row-4">
+        <article>
+          <p class="frame-label">Inventory · extended history · before upload</p>
+          <div class="card">
+            <div class="source-row"><span class="source-mark">ZIP</span><span><strong>my_spotify_data_extended.zip</strong><small>38.4 MB · Extended streaming history</small></span><span class="status-chip ok"><span class="dot"></span>Readable</span></div>
+            <div class="inventory">
+              <dl><dt>Tracks</dt><dd>4,812</dd><dt>Days with plays</dt><dd>1,903</dd><dt>Years</dt><dd>2018 – 2026</dd><dt>Local days in</dt><dd>Africa/Lagos</dd><dt>Skipped rows</dt><dd>212 podcast · 9 local files</dd></dl>
+              <ul class="file-list"><li>Streaming_History_Audio_2018-2020_0.json</li><li>Streaming_History_Audio_2021-2023_1.json</li><li>Streaming_History_Audio_2024-2026_2.json</li><li class="ignored">Streaming_History_Video_2024_0.json</li><li class="ignored">ReadMeFirst_ExtendedStreamingHistory.pdf</li></ul>
+            </div>
+            <label class="toggle" style="margin-top:12px"><span class="switch" role="switch" aria-checked="false" aria-label="Include private sessions"></span>Include private sessions <span class="note" style="margin:0">· 41 plays hidden from followers stay out unless you choose otherwise</span></label>
+            <p class="note">Only these plays leave this device. Your account details, payments, and IP addresses are never read.</p>
+            <div class="btn-row"><button class="btn primary">Upload</button><button class="btn">Choose a different file</button></div>
+          </div>
+        </article>
+        <article>
+          <p class="frame-label">Uploading · cancellable · real progress</p>
+          <div class="card">
+            <div class="source-row"><span class="source-mark">ZIP</span><span><strong>my_spotify_data_extended.zip</strong><small>Reading and uploading on this device</small></span><span class="status-chip wait" role="status"><span class="dot"></span>Uploading 62%</span></div>
+            <div class="progress" aria-hidden="true"><span style="width:62%"></span></div>
+            <p class="note" style="margin-top:8px">Uploading days 3 of 4 · nothing needs to stay open in Spotify</p>
+            <div class="inventory" style="margin-top:10px"><dl><dt>Tracks</dt><dd>4,812 sent</dd><dt>Days</dt><dd>4,000 of 1,903 × … </dd></dl></div>
+            <p class="note">Announced as “Uploading, 62 percent, days 3 of 4”. The chip is the live region; the bar is decorative.</p>
+            <div class="btn-row"><button class="btn danger">Cancel</button></div>
+          </div>
+        </article>
+        <article>
+          <p class="frame-label">Failed · unreadable file · diagnostics</p>
+          <div class="card" style="border-color:rgba(201,104,127,.45)">
+            <div class="source-row"><span class="source-mark">ZIP</span><span><strong>my_spotify_data.zip</strong><small>Couldn’t read this export</small></span><span class="status-chip err"><span class="dot"></span>Unreadable</span></div>
+            <p>One of the history files isn’t valid JSON, so nothing was uploaded. Expected files: Streaming_History_Audio_*.json, YourLibrary.json, Playlist*.json.</p>
+            <div class="diag">source: spotify_export<br>Streaming_History_Audio_2018-2020_0.json · 11.9 MB · rows 24,110<br>Streaming_History_Audio_2021-2023_1.json · 12.1 MB · unreadable<br>Userdata.json · 1.2 KB · ignored<br>parser web 1.0</div>
+            <p class="note">The report lists file names, sizes, and row counts only. No song, artist, or personal data.</p>
+            <div class="btn-row"><button class="btn primary">Copy report</button><button class="btn">Try another file</button></div>
+          </div>
+        </article>
+        <article>
+          <p class="frame-label">Summary · complete · first mix</p>
+          <div class="card">
+            <div class="source-row"><span class="source-mark">✓</span><span><strong>Extended history imported</strong><small>2018 – 2026 · 4,812 tracks · 1,903 days</small></span><span class="status-chip ok"><span class="dot"></span>Done</span></div>
+            <div class="inventory" style="margin-top:12px"><dl><dt>Plays counted</dt><dd>61,220</dd><dt>Unresolved</dt><dd>9 local files</dd><dt>Ledger</dt><dd>Mar 2018 → Aug 2026</dd><dt>Enriching</dt><dd>your most-played first</dd></dl></div>
+            <p class="note">The DJ starts with what it knows best. More detail arrives over the next hours as tracks are enriched.</p>
+            <div class="btn-row"><button class="btn primary">Make your first mix</button><button class="btn">Import the account data too</button></div>
+          </div>
+        </article>
+      </div>
+      <div class="row row-2" style="margin-top:18px">
+        <article>
+          <p class="frame-label">Partial · history published, playlists failed</p>
+          <div class="card attention">
+            <div class="source-row"><span class="source-mark">!</span><span><strong>Account data imported, playlists didn’t land</strong><small>Likes and followed artists are in. The playlist sync was interrupted.</small></span><span class="status-chip wait"><span class="dot"></span>Partly done</span></div>
+            <p>Your liked songs and artists are safe on the server. Retry the playlists whenever you like; nothing is lost and nothing needs re-uploading.</p>
+            <div class="btn-row"><button class="btn primary">Retry playlists</button><button class="btn">Make a mix anyway</button></div>
+          </div>
+        </article>
+        <article>
+          <p class="frame-label">Sources · connected set · delete with confirmation</p>
+          <div class="card">
+            <p class="kicker">Your music · connected</p>
+            <div class="source-row" style="margin-top:8px"><span class="source-mark">SP</span><span><strong>Spotify · extended history</strong><small>Imported 4 Sep · Mar 2018 → Aug 2026 · re-import any time</small></span><button class="btn">Import again</button></div>
+            <div class="source-row" style="margin-top:10px"><span class="source-mark">SP</span><span><strong>Spotify · account data</strong><small>Imported 1 Sep · 214 liked songs · 12 playlists</small></span><button class="btn danger">Remove</button></div>
+            <div class="dialog" style="width:auto;margin-top:14px;padding:14px 16px;box-shadow:none"><h3 style="font-size:18px">Remove Spotify account data?</h3><p>Deletes your liked songs, artists, and playlists from Mixtape. Your listening history stays. The DJ forgets nothing you told it in the interview.</p><div class="dialog-actions"><button class="btn">Keep it</button><button class="btn danger">Remove</button></div></div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- 6. queue outputs -->
+    <section class="section">
+      <h2 class="section-title">6 · The mix rail for a Spotify listener</h2>
+      <p class="section-copy">No Apple play or save control when no track has an Apple id; the Spotify actions take that slot. Each track has a 44px “Open in Spotify” target. “Copy for Spotify” puts one link per line on the clipboard with a paste hint; “Send to a transfer tool” copies “Artist – Title” lines and opens the tool. A corpus-mode mix carries the “Not personal yet” banner above the tracks.</p>
+      <div class="row">
+        <article>
+          <p class="frame-label">Desktop · personal mix · Spotify outputs</p>
+          <div class="app-shell with-rail" style="height:640px">
+            <aside class="sidebar" aria-label="Mixtape navigation">
+              <div class="topline"><span class="wordmark">mixtape</span><button class="home-button" aria-label="Home"><svg viewBox="0 0 24 24"><path d="m3.5 10 8.5-7 8.5 7v10.5h-6v-6h-5v6h-6z"/></svg></button></div>
+              <button class="new-mix"><span class="reel"></span><span>Make a new tape</span><span class="plus">+</span></button>
+              <button class="music-link"><span><svg viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg></span><span><strong>Your music</strong><small>Spotify · imported 4 Sep</small></span><span class="chevron">›</span></button>
+              <div><div class="section-head"><span>Your tapes</span><span>3</span></div><div class="session"><span class="mini-tape"></span><span><strong>Lagos after rain</strong><small>just now · 16 songs</small></span></div><div class="session"><span class="mini-tape"></span><span><strong>Slow start</strong><small>yesterday · 12 songs</small></span></div></div>
+              <div class="account"><span class="avatar">A</span><span><strong>Ada Okafor</strong><small>Signed in with Google</small></span><span class="chevron">⋯</span></div>
+            </aside>
+            <section class="view"><header class="view-head"><div><p class="kicker">Tape</p><h2>Lagos after rain</h2><p>“Something warm for the drive back, nothing too loud, mostly things I already love.”</p></div></header><div class="view-scroll"><div class="card quiet"><p style="margin:0"><b style="color:var(--plum)">DJ</b> Sixteen songs, mostly your heavy rotation from 2023 onward with two newer ones you played a lot last month. Swap anything and I’ll keep the mood.</p></div></div></section>
+            <aside class="rail" aria-label="Queue">
+              <div class="rail-head"><div><h2>The mix</h2><small>16 songs · 58 min · v2</small></div><span class="status-chip">Spotify</span></div>
+              <div></div>
+              <ol class="tracks">
+                <li class="track"><span class="art" style="--art:#8f6f7e"></span><span><strong>Window Seat</strong><small>Niko Vale · played 212 times</small></span><a class="open target" href="#">Open in Spotify</a></li>
+                <li class="track"><span class="art" style="--art:#6f8f7e"></span><span><strong>Streetlight Weather</strong><small>Juniper North</small></span><a class="open" href="#">Open in Spotify</a></li>
+                <li class="track"><span class="art" style="--art:#7e6f8f"></span><span><strong>Paper Tickets</strong><small>Ari Sola</small></span><a class="open" href="#">Open in Spotify</a></li>
+                <li class="track"><span class="art" style="--art:#9a8a6f"></span><span><strong>Late Transfer</strong><small>Mara Glass</small></span><a class="open" href="#">Open in Spotify</a></li>
+                <li class="track"><span class="art" style="--art:#6f7e9a"></span><span><strong>Halfway Home</strong><small>Ivory Kestrel</small></span><a class="open" href="#">Open in Spotify</a></li>
+              </ol>
+              <div class="rail-actions">
+                <div class="toast" role="status">Copied 16 links<button>Undo</button></div>
+                <button class="btn primary">Copy for Spotify</button>
+                <button class="btn">Send to a transfer tool</button>
+                <p class="hint">Paste the links into a new playlist in Spotify on your computer. The transfer tool creates the playlist for you on any device.</p>
+              </div>
+            </aside>
+          </div>
+        </article>
+        <article>
+          <p class="frame-label">Desktop · corpus mix · “Not personal yet”</p>
+          <div class="app-shell with-rail" style="height:640px;grid-template-columns: minmax(0,1fr) 468px">
+            <section class="view"><header class="view-head"><div><p class="kicker">Tape</p><h2>Something for a rainy desk</h2><p>“Calm, a little melancholy, I don’t mind not knowing the songs.”</p></div><span class="status-chip wait"><span class="dot"></span>Not personal yet</span></header><div class="view-scroll"><div class="card quiet"><p style="margin:0"><b style="color:var(--plum)">DJ</b> I don’t have your history yet, so this comes from what I know and the artists you named. When your Spotify data lands I’ll rebuild it around what you actually play.</p></div></div></section>
+            <aside class="rail" aria-label="Queue">
+              <div class="rail-head"><div><h2>The mix</h2><small>14 songs · 51 min · v1</small></div><span class="status-chip">Spotify</span></div>
+              <div class="banner" role="status"><span aria-hidden="true">◐</span><span><b>Not personal yet</b><span>Built from Mixtape’s catalog and your interview, not your listening. Import your Spotify data for the real thing.</span></span></div>
+              <ol class="tracks">
+                <li class="track"><span class="art" style="--art:#8a7f9a"></span><span><strong>Second Pot of Coffee</strong><small>Example Ensemble · seeded artist</small></span><a class="open" href="#">Open in Spotify</a></li>
+                <li class="track"><span class="art" style="--art:#7f9a8a"></span><span><strong>Courtyard Windows</strong><small>Juniper North · seeded artist</small></span><a class="open" href="#">Open in Spotify</a></li>
+                <li class="track"><span class="art" style="--art:#9a8a7f"></span><span><strong>The Table Is Still Warm</strong><small>Mara Glass</small></span><a class="open" href="#">Open in Spotify</a></li>
+              </ol>
+              <div class="rail-actions"><button class="btn primary">Copy for Spotify</button><button class="btn">Send to a transfer tool</button><p class="hint">Same outputs as a personal mix. The banner stays until the tape is regenerated after an import.</p></div>
+            </aside>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- 7. mobile -->
+    <section class="section">
+      <h2 class="section-title">7 · Mobile web (Android Chrome), light and dark</h2>
+      <p class="section-copy">Same hierarchy, no side panes. The request page keeps the eight steps and the checkpoint; the inventory keeps every fact and the toggle; the rail shows Spotify actions without the desktop-only copy button, since Spotify’s mobile app can’t paste links into a playlist. Dark mode follows the approved deep-graphite canvas.</p>
+      <div class="row row-3">
+        <article>
+          <p class="frame-label">Mobile · request page · requested 2 days</p>
+          <div class="mobile-frame">
+            <header class="mobile-bar"><button class="icon-button" aria-label="Home"><svg viewBox="0 0 24 24"><path d="m3.5 10 8.5-7 8.5 7v10.5h-6v-6h-5v6h-6z"/></svg></button><span class="wordmark">mixtape</span><button class="icon-button" aria-label="Your music"><svg viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg></button></header>
+            <div class="mobile-body">
+              <p class="kicker">Your music · Spotify</p>
+              <div class="card attention"><div class="wait-card"><div><span class="elapsed">2 days</span><p>Requested Tuesday. Check the confirmation email if you haven’t.</p></div><span class="status-chip wait"><span class="dot"></span>Waiting</span></div></div>
+              <div class="card"><ol class="steps"><li>Open <a href="#">spotify.com/account/privacy</a> and log in with the account that has your listening history. A laptop is easier than a phone for this part.</li><li>Scroll to <b>Download your data</b>.</li><li>Select <b>Account data</b> and <b>Extended streaming history</b>. Leave <i>Technical log information</i> unselected.</li><li>Press <b>Request data</b>.</li><li>Check your email. Spotify sends a <b>confirmation</b> message first. Open it and press <b>Confirm</b>. Nothing is prepared until you do, and this is the step most people miss.</li></ol><p class="note">Steps 6 – 8 continue below.</p></div>
+              <button class="btn primary">Choose a ZIP</button>
+            </div>
+          </div>
+        </article>
+        <article>
+          <p class="frame-label">Mobile · inventory · toggle</p>
+          <div class="mobile-frame">
+            <header class="mobile-bar"><button class="icon-button" aria-label="Back">‹</button><span class="wordmark">mixtape</span><span></span></header>
+            <div class="mobile-body">
+              <p class="kicker">Import</p>
+              <div class="card"><div class="source-row"><span class="source-mark">ZIP</span><span><strong>my_spotify_data.zip</strong><small>2.1 MB · Account data</small></span></div>
+                <dl style="margin:12px 0 0;display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:12px"><dt style="color:var(--muted)">Liked songs</dt><dd style="margin:0;font-weight:650">214</dd><dt style="color:var(--muted)">Playlists</dt><dd style="margin:0;font-weight:650">12 · 1,041 songs</dd><dt style="color:var(--muted)">Followed artists</dt><dd style="margin:0;font-weight:650">37</dd></dl>
+                <ul class="file-list"><li>YourLibrary.json</li><li>Playlist1.json</li><li class="ignored">Userdata.json · never read</li><li class="ignored">Payments.json · never read</li></ul>
+                <p class="note">No private-session toggle: this package has no play history.</p>
+              </div>
+              <button class="btn primary">Upload</button><button class="btn">Choose a different file</button>
+            </div>
+          </div>
+        </article>
+        <article>
+          <p class="frame-label">Mobile dark · mix rail · Spotify actions</p>
+          <div class="mobile-frame dark">
+            <header class="mobile-bar"><button class="icon-button" aria-label="Back">‹</button><span class="wordmark">mixtape</span><span class="status-chip">Spotify</span></header>
+            <div class="mobile-body" style="gap:0;padding:0">
+              <div class="rail-head" style="padding:16px 16px 8px"><div><h2>Lagos after rain</h2><small>16 songs · 58 min</small></div></div>
+              <div class="banner" style="margin:0 16px 8px" role="status"><span aria-hidden="true">◐</span><span><b>Not personal yet</b><span>Import your Spotify data for the real thing.</span></span></div>
+              <ol class="tracks" style="padding:0 16px">
+                <li class="track"><span class="art" style="--art:#5f4f5e"></span><span><strong>Window Seat</strong><small>Niko Vale</small></span><a class="open" href="#">Open</a></li>
+                <li class="track"><span class="art" style="--art:#4f5f5e"></span><span><strong>Streetlight Weather</strong><small>Juniper North</small></span><a class="open" href="#">Open</a></li>
+                <li class="track"><span class="art" style="--art:#5e4f5f"></span><span><strong>Paper Tickets</strong><small>Ari Sola</small></span><a class="open" href="#">Open</a></li>
+                <li class="track"><span class="art" style="--art:#6a5a4f"></span><span><strong>Late Transfer</strong><small>Mara Glass</small></span><a class="open" href="#">Open</a></li>
+              </ol>
+              <div class="rail-actions" style="padding:12px 16px 20px"><button class="btn primary">Send to a transfer tool</button><p class="hint">Copies “Artist – Title” lines and opens the tool, which creates the playlist in Spotify.</p></div>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- 8. accessibility -->
+    <section class="section">
+      <h2 class="section-title">8 · Large text and reduced motion</h2>
+      <p class="section-copy">Content grows; chrome and targets hold. Reduced motion removes the progress bar’s stripe travel and any card transitions; every state keeps a complete static reading through the chip text and the numbers.</p>
+      <div class="row row-2">
+        <article>
+          <p class="frame-label">Large text · waiting card · long artist names</p>
+          <div class="card attention large-text">
+            <div class="wait-card"><div><p class="kicker">Waiting for Spotify</p><span class="elapsed">12 days</span><p>Requested three Mondays ago. The extended history can take up to 30 days; the account data usually arrives first.</p></div><span class="status-chip wait"><span class="dot"></span>Waiting</span></div>
+            <div class="mini-grid" style="grid-template-columns:1fr 1fr"><div class="mini done"><strong>Interview done</strong><small>A Deliberately Long Synthetic Artist Name That Wraps Safely, Another Wrapping Ensemble, and four more.</small></div><div class="mini"><strong>Paste songs from Spotify</strong><small>Optional. Adds seeds the DJ can lean on now.</small></div></div>
+            <div class="btn-row"><button class="btn primary">Choose a ZIP</button><button class="btn">Show me the steps again</button></div>
+          </div>
+        </article>
+        <article>
+          <p class="frame-label">Reduced motion · uploading · static reading</p>
+          <div class="card">
+            <div class="source-row"><span class="source-mark">ZIP</span><span><strong>my_spotify_data_extended.zip</strong><small>Reading and uploading on this device</small></span><span class="status-chip wait" role="status"><span class="dot"></span>Uploading 62% · days 3 of 4</span></div>
+            <div class="progress" aria-hidden="true"><span style="width:62%;background:var(--plum)"></span></div>
+            <p class="note">No stripe travel and no pulsing chip. The chip text carries the whole state; the bar is a plain filled band.</p>
+            <ul class="a11y-list" style="color:var(--smoke)">
+              <li>Status chip is the live region; announcements: “Uploading, 62 percent, days 3 of 4”, “Import complete, 4,812 tracks”, “Couldn’t read this export”.</li>
+              <li>Every “Open in Spotify” link has a 44px target (dashed outline shows the hit area in frame 6) and an accessible name naming the track.</li>
+              <li>The private-sessions toggle is a real switch with an accessible name and its default state announced.</li>
+              <li>Status is never colour alone: chips carry text, the banner carries text, ignored files carry the word “ignored” or “never read”.</li>
+            </ul>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- 9. decision -->
+    <section class="section">
+      <h2 class="section-title">9 · The decision</h2>
+      <div class="choice-grid">
+        <div class="choice recommended"><b>Recommended — B: request page under Your music with a living waiting card</b>The steps stay findable for the days the listener waits, the checkpoint and elapsed time live where the file will be dropped, and the same page becomes the import page and the sources view. No second navigation destination, no modal that disappears with the instructions in it.</div>
+        <div class="choice"><b>Rejected — A: one-time checklist dialog</b>Smaller build, but the instructions vanish when dismissed, the listener has no place to see how long they have waited, and the drop zone would need its own home anyway. It also competes with the pending Your music board for the same space.</div>
+      </div>
+      <p class="section-copy" style="margin-top:14px">Intentionally unresolved: exact placement of the request page relative to the Apple states in the pending Your music board; the transfer tool named in the handoff (TuneMyMusic or Soundiiz, decided at build time by whichever accepts pasted text without an account); whether the demo tape opens in place or as a new session.</p>
+    </section>
+  </main>
+</body>
+</html>
