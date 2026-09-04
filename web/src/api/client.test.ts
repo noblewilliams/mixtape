@@ -412,6 +412,30 @@ describe('Mixtape API client: listening import and onboarding', () => {
       .rejects.toMatchObject({ status: 404, code: 'not_found' })
   })
 
+  it('folds a schema rejection into the invalid_request code', async () => {
+    const zodPayload = {
+      success: false,
+      error: { name: 'ZodError', issues: [{ code: 'too_big', path: ['tracks'], message: 'Too many' }] },
+    }
+    fetchMock
+      .mockResolvedValueOnce(json(zodPayload, 400))
+      .mockResolvedValueOnce(json({ error: 'invalid_request' }, 400))
+    vi.stubGlobal('fetch', fetchMock)
+    const api = createMixtapeApi('https://api.mixtape.test')
+
+    await expect(api.putListeningTracks('import-1', [track]))
+      .rejects.toMatchObject({ name: 'ApiError', status: 400, code: 'invalid_request', payload: zodPayload })
+    await expect(api.putListeningTracks('import-1', [track]))
+      .rejects.toMatchObject({ name: 'ApiError', status: 400, code: 'invalid_request' })
+
+    // The mapping is narrow: a code string wins, and only an explicit refusal folds.
+    expect(new ApiError(400, { success: false }).code).toBe('invalid_request')
+    expect(new ApiError(409, { success: false, error: 'count_mismatch' }).code).toBe('count_mismatch')
+    expect(new ApiError(500, { success: true }).code).toBeUndefined()
+    expect(new ApiError(500, {}).code).toBeUndefined()
+    expect(new ApiError(502, 'Bad Gateway').code).toBeUndefined()
+  })
+
   it('begins a Spotify playlist sync with a null storefront', async () => {
     fetchMock.mockResolvedValueOnce(json({ syncId: 'playlist-sync', expiresAt: 1_788_138_000_000 }, 201))
     vi.stubGlobal('fetch', fetchMock)

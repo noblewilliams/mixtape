@@ -6,6 +6,7 @@
 // request. Nothing here logs: rows carry track, artist, and playlist names.
 
 import type {
+  ApiError,
   BeginListeningImportInput,
   ListeningArtistRow,
   ListeningDayRow,
@@ -53,8 +54,15 @@ export type ListeningImportProgress =
 export type ListeningImportResult = {
   inventory: ExportInventory
   summary: ListeningImportSummary
-  /** The playlist sync's summary for an account package; null when the package carries no playlists. */
+  /** The playlist sync's summary for an account package; null when the package carries no playlists or the sync failed. */
   playlists: PlaylistSyncSummary | null
+  /**
+   * What stopped the playlist sync, when something did. The listening
+   * history had already been committed by then, so the upload resolves as
+   * a partial success instead of rejecting. Null when the sync succeeded
+   * or never ran.
+   */
+  playlistError: ApiError | Error | null
 }
 
 export type ListeningImportService = {
@@ -212,6 +220,16 @@ function recordFunnelStep(api: MixtapeApi, type: 'file_inspected' | 'import_comp
   }
 }
 
+/**
+ * A cancel, whether raised between steps (`signal.reason` from
+ * `throwIfAborted`) or by fetch mid-request (the same reason, or an
+ * AbortError from an older runtime). Anything else is a real failure.
+ */
+function isAbort(error: unknown, signal: AbortSignal): boolean {
+  if (signal.aborted && error === signal.reason) return true
+  return typeof error === 'object' && error !== null && (error as { name?: unknown }).name === 'AbortError'
+}
+
 export function createListeningImportService({ api, parser }: ListeningImportServiceDeps): ListeningImportService {
   async function uploadRows<T>(
     rows: T[],
@@ -304,16 +322,28 @@ export function createListeningImportService({ api, parser }: ListeningImportSer
       )
       signal.throwIfAborted()
       const summary = await api.completeListeningImport(importId, signal)
+      // The history is committed server-side from here, so the funnel step
+      // goes up now: the onboarding read derives importCompletedAt from it
+      // and must learn the history landed even if the playlists don't.
+      recordFunnelStep(api, 'import_completed')
 
       // Playlists belong to the account package; the listening run has
-      // completed by now, so at most one staged run is open at a time.
-      const playlists = snapshot.package === 'spotify_account'
-        ? await syncPlaylists(snapshot.playlists, signal, onProgress)
-        : null
+      // completed by now, so at most one staged run is open at a time. A
+      // failure here is reported on the result as a partial success, never
+      // as a rejection; only a cancel still rejects.
+      let playlists: PlaylistSyncSummary | null = null
+      let playlistError: ApiError | Error | null = null
+      if (snapshot.package === 'spotify_account') {
+        try {
+          playlists = await syncPlaylists(snapshot.playlists, signal, onProgress)
+        } catch (error) {
+          if (isAbort(error, signal)) throw error
+          playlistError = error instanceof Error ? error : new Error(String(error), { cause: error })
+        }
+      }
 
-      recordFunnelStep(api, 'import_completed')
       onProgress({ stage: 'complete', completed: 1, total: 1 })
-      return { inventory, summary, playlists }
+      return { inventory, summary, playlists, playlistError }
     },
   }
 }

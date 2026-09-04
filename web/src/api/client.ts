@@ -351,7 +351,12 @@ export class ApiError extends Error {
     super(message)
     this.name = 'ApiError'
     this.status = status
-    this.code = typeof record?.error === 'string' ? record.error : undefined
+    // A schema miss from the server's zValidator comes back as
+    // `{ success: false, error: ZodError }` rather than a code string; fold
+    // it into the code the malformed-JSON guard uses so a page branches once.
+    this.code = typeof record?.error === 'string'
+      ? record.error
+      : record?.success === false ? 'invalid_request' : undefined
     this.payload = payload
   }
 }

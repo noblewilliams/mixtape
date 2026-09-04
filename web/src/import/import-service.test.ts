@@ -209,7 +209,7 @@ describe('ListeningImportService', () => {
     expect(mocks.completeListeningImport).toHaveBeenCalledWith('import-1', options.signal)
     expect(mocks.beginPlaylistSync).not.toHaveBeenCalled()
     expect(mocks.postFunnelEvent).toHaveBeenCalledWith({ type: 'import_completed', surface: 'web' })
-    expect(result).toEqual({ inventory: expected.inventory, summary: importSummary, playlists: null })
+    expect(result).toEqual({ inventory: expected.inventory, summary: importSummary, playlists: null, playlistError: null })
 
     const stages = options.onProgress.mock.calls.map(([progress]) => progress)
     expect(stages.some((progress) => progress.stage === 'reading')).toBe(true)
@@ -227,9 +227,8 @@ describe('ListeningImportService', () => {
     const result = await service.upload(readFixtureArchive('account-basic'), options)
 
     expect(calls).toEqual([
-      'begin-import', 'put-tracks', 'put-library', 'put-artists', 'complete-import',
+      'begin-import', 'put-tracks', 'put-library', 'put-artists', 'complete-import', 'funnel:import_completed',
       'begin-playlists', 'put-playlists', 'put-entries', 'put-entries', 'complete-playlists',
-      'funnel:import_completed',
     ])
     expect(mocks.beginListeningImport).toHaveBeenCalledWith({
       source: 'spotify_export',
@@ -336,6 +335,7 @@ describe('ListeningImportService', () => {
     expect(mocks.completePlaylistSync).toHaveBeenCalledWith('playlist-sync', options.signal)
     expect(result.playlists).toEqual(playlistSummary)
     expect(result.summary).toEqual(importSummary)
+    expect(result.playlistError).toBeNull()
     expect(options.onProgress.mock.calls.map(([progress]) => progress))
       .toContainEqual({ stage: 'uploading_playlists', completed: 7, total: 7 })
   })
@@ -418,6 +418,101 @@ describe('ListeningImportService', () => {
     expect(mocks.putListeningDays).not.toHaveBeenCalled()
     expect(mocks.completeListeningImport).not.toHaveBeenCalled()
     expect(mocks.postFunnelEvent).not.toHaveBeenCalled()
+  })
+
+  it('resolves with the listening summary when the playlist phase fails after the history landed', async () => {
+    const { service, mocks, calls } = setup(fakeParser(accountSnapshot(1, 1, 1)))
+    const options = uploadOptions()
+    mocks.putPlaylists.mockRejectedValueOnce(new ApiError(409, { error: 'sync_conflict' }))
+
+    const result = await service.upload(new Blob([]), options)
+
+    expect(result.summary).toEqual(importSummary)
+    expect(result.playlists).toBeNull()
+    expect(result.playlistError).toBeInstanceOf(ApiError)
+    expect(result.playlistError).toMatchObject({ status: 409, code: 'sync_conflict' })
+    // The rejected putPlaylists call bypasses the recording mock body, so it is checked on its own.
+    expect(calls).toEqual([
+      'begin-import', 'put-library', 'put-artists', 'complete-import', 'funnel:import_completed', 'begin-playlists',
+    ])
+    expect(mocks.putPlaylists).toHaveBeenCalledOnce()
+    expect(mocks.postFunnelEvent).toHaveBeenCalledTimes(1)
+    expect(mocks.postFunnelEvent).toHaveBeenCalledWith({ type: 'import_completed', surface: 'web' })
+    expect(mocks.completePlaylistSync).not.toHaveBeenCalled()
+    expect(options.onProgress).toHaveBeenLastCalledWith({ stage: 'complete', completed: 1, total: 1 })
+  })
+
+  it('keeps a non-API playlist failure on the result too', async () => {
+    const { service, mocks } = setup(fakeParser(accountSnapshot(1, 1, 1)))
+    mocks.completePlaylistSync.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+    const result = await service.upload(new Blob([]), uploadOptions())
+
+    expect(result.summary).toEqual(importSummary)
+    expect(result.playlists).toBeNull()
+    expect(result.playlistError).toBeInstanceOf(TypeError)
+    expect(mocks.postFunnelEvent).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects on a cancel between playlist steps, with the completion already recorded', async () => {
+    const { service, mocks } = setup(fakeParser(accountSnapshot(1, 1, 1)))
+    const controller = new AbortController()
+    mocks.putPlaylists.mockImplementationOnce(async (_syncId, playlists) => {
+      controller.abort()
+      return { accepted: playlists.length }
+    })
+
+    await expect(service.upload(new Blob([]), uploadOptions(controller.signal)))
+      .rejects.toMatchObject({ name: 'AbortError' })
+
+    expect(mocks.putPlaylistEntries).not.toHaveBeenCalled()
+    expect(mocks.completePlaylistSync).not.toHaveBeenCalled()
+    expect(mocks.postFunnelEvent).toHaveBeenCalledTimes(1)
+    expect(mocks.postFunnelEvent).toHaveBeenCalledWith({ type: 'import_completed', surface: 'web' })
+  })
+
+  it('rejects when a playlist request is aborted mid-flight', async () => {
+    const { service, mocks } = setup(fakeParser(accountSnapshot(1, 1, 1)))
+    const controller = new AbortController()
+    mocks.beginPlaylistSync.mockImplementationOnce(async () => {
+      controller.abort()
+      throw controller.signal.reason // what fetch rejects with once its signal aborts
+    })
+
+    await expect(service.upload(new Blob([]), uploadOptions(controller.signal)))
+      .rejects.toMatchObject({ name: 'AbortError' })
+
+    expect(mocks.putPlaylists).not.toHaveBeenCalled()
+    expect(mocks.postFunnelEvent).toHaveBeenCalledTimes(1)
+  })
+
+  it('rethrows a custom abort reason from the playlist phase untouched', async () => {
+    const { service, mocks } = setup(fakeParser(accountSnapshot(1, 1, 1)))
+    const controller = new AbortController()
+    const reason = new Error('left the page')
+    mocks.beginPlaylistSync.mockImplementationOnce(async () => {
+      controller.abort(reason)
+      throw reason
+    })
+
+    await expect(service.upload(new Blob([]), uploadOptions(controller.signal))).rejects.toBe(reason)
+    expect(mocks.postFunnelEvent).toHaveBeenCalledTimes(1)
+  })
+
+  it('stops between playlist entry chunks when cancelled', async () => {
+    const { service, mocks } = setup(fakeParser(accountSnapshot(1, 1, 201)))
+    const controller = new AbortController()
+    mocks.putPlaylistEntries.mockImplementationOnce(async (_syncId, _key, entries) => {
+      controller.abort()
+      return { accepted: entries.length }
+    })
+
+    await expect(service.upload(new Blob([]), uploadOptions(controller.signal)))
+      .rejects.toMatchObject({ name: 'AbortError' })
+
+    expect(mocks.putPlaylistEntries).toHaveBeenCalledOnce()
+    expect(mocks.completePlaylistSync).not.toHaveBeenCalled()
+    expect(mocks.postFunnelEvent).toHaveBeenCalledTimes(1)
   })
 
   it('does not begin the server run when parsing fails', async () => {
