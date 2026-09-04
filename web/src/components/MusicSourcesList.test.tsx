@@ -9,6 +9,7 @@ const extended: ApiMusicSource = {
   lastImportedAt: '2026-09-04T09:30:00.000Z',
   ledgerFrom: '2018-03-02',
   ledgerTo: '2026-08-29',
+  packages: ['spotify_extended'],
 }
 
 const appleLive: ApiMusicSource = {
@@ -17,6 +18,7 @@ const appleLive: ApiMusicSource = {
   lastImportedAt: '2026-08-21T09:00:00.000Z',
   ledgerFrom: null,
   ledgerTo: null,
+  packages: [],
 }
 
 function renderList(sources: ApiMusicSource[]) {
@@ -62,6 +64,7 @@ describe('MusicSourcesList', () => {
       'Deletes your listening history, liked songs, artists, and playlists from Mixtape. The DJ forgets nothing you told it in the interview, and the songs you pasted stay.',
     )).toBeInTheDocument()
     expect(onRemove).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Keep it' })).toHaveFocus()
 
     fireEvent.click(screen.getByRole('button', { name: 'Keep it' }))
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()

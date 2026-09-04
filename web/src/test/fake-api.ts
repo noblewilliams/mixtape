@@ -7,6 +7,8 @@ import type {
   ApiSessionSummary,
   CreateSessionResponse,
   FunnelEventInput,
+  ListeningImportPackage,
+  ListeningImportSource,
   ListeningImportStart,
   MixtapeApi,
   SessionDetailResponse,
@@ -53,6 +55,8 @@ export type FakeApi = MixtapeApi & {
 }
 
 type FakeListeningImport = {
+  source: ListeningImportSource
+  package: ListeningImportPackage
   tracks: number
   days: number
   libraryTracks: number
@@ -67,6 +71,8 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
   const funnelEvents: FunnelEventInput[] = []
   const listeningImports = new Map<string, FakeListeningImport>()
   const musicSources: ApiMusicSource[] = []
+  let interviewCompletedAt: string | null = null
+  let interview: { artists: number; notes: number } | null = null
   let artistSeeds: ApiArtistSeed[] = []
   let seedTracks: ApiSeedTrack[] = []
   const stamp = () => new Date().toISOString()
@@ -172,6 +178,8 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
     beginListeningImport: async (input): Promise<ListeningImportStart> => {
       const importId = `listening-import-${listeningImports.size + 1}`
       listeningImports.set(importId, {
+        source: input.source,
+        package: input.package,
         tracks: 0,
         days: 0,
         libraryTracks: 0,
@@ -182,7 +190,7 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
       })
       if (!musicSources.some((source) => source.source === input.source)) {
         musicSources.push({
-          source: input.source, connectedAt: stamp(), lastImportedAt: null, ledgerFrom: null, ledgerTo: null,
+          source: input.source, connectedAt: stamp(), lastImportedAt: null, ledgerFrom: null, ledgerTo: null, packages: [],
         })
       }
       return { importId, expiresAt: Date.now() + 60_000 }
@@ -211,7 +219,9 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
       const ledgerFrom = days[0] ?? null
       const ledgerTo = days[days.length - 1] ?? null
       for (const source of musicSources) {
+        if (source.source !== run.source) continue
         source.lastImportedAt = stamp()
+        if (!source.packages.includes(run.package)) source.packages = [...source.packages, run.package].sort()
         if (ledgerFrom !== null) {
           source.ledgerFrom = source.ledgerFrom === null || ledgerFrom < source.ledgerFrom ? ledgerFrom : source.ledgerFrom
           source.ledgerTo = source.ledgerTo === null || (ledgerTo !== null && ledgerTo > source.ledgerTo) ? ledgerTo : source.ledgerTo
@@ -238,15 +248,17 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
     getOnboarding: async () => {
       const firstAt = (type: FunnelEventInput['type']) => (funnelEvents.some((event) => event.type === type) ? stamp() : null)
       return {
-        sources: musicSources.map((source) => ({ ...source })),
+        userId: 'user-1',
+        sources: musicSources.map((source) => ({ ...source, packages: [...source.packages] })),
         hasLibrary: false,
         chosenService: funnelEvents.some((event) => event.type === 'chose_spotify') ? 'spotify' : null,
         markedRequestedAt: firstAt('marked_requested'),
-        interviewCompletedAt: null,
+        interviewCompletedAt,
         importCompletedAt: firstAt('import_completed'),
+        interview: interview ? { ...interview } : null,
       }
     },
-    getMusicSources: async () => ({ sources: musicSources.map((source) => ({ ...source })) }),
+    getMusicSources: async () => ({ sources: musicSources.map((source) => ({ ...source, packages: [...source.packages] })) }),
     postFunnelEvent: async (event) => {
       funnelEvents.push({ ...event })
       return { ok: true }
@@ -258,6 +270,8 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
       ]
       const saved = [answers.playsMost, answers.listensWhen, answers.neverWants, answers.era]
         .filter((answer) => answer.trim().length > 0).length + (answers.neverSkip.length > 0 ? 1 : 0)
+      interviewCompletedAt = stamp()
+      interview = { artists: answers.neverSkip.length, notes: saved }
       return { seeds: answers.neverSkip.length, notes: { saved, duplicate: 0, capped: 0 } }
     },
     getArtistSeeds: async () => ({ seeds: artistSeeds.map((seed) => ({ ...seed })) }),

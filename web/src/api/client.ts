@@ -199,14 +199,20 @@ export type ApiMusicSource = {
   lastImportedAt: string | null
   ledgerFrom: string | null
   ledgerTo: string | null
+  /** Packages with a completed import behind this source, sorted. */
+  packages: ListeningImportPackage[]
 }
 export type OnboardingResponse = {
+  /** Keys the per-device "service chosen" flag. */
+  userId: string
   sources: ApiMusicSource[]
   hasLibrary: boolean
   chosenService: 'spotify' | 'apple' | null
   markedRequestedAt: string | null
   interviewCompletedAt: string | null
   importCompletedAt: string | null
+  /** What the interview produced; null until it has been completed. */
+  interview: { artists: number; notes: number } | null
 }
 
 export type FunnelEventType =

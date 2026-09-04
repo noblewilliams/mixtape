@@ -145,4 +145,8 @@ describe('approved Spotify import surfaces', () => {
     expect(stylesheet).toMatch(/@media \(prefers-color-scheme:\s*dark\)[\s\S]*?\.btn\.primary\s*{[^}]*color:\s*#1b181c;[^}]*background:\s*#e3dbe0;/)
     expect(stylesheet).toMatch(/@media \(prefers-color-scheme:\s*dark\)[\s\S]*?\.music-view\s*{[^}]*background:\s*rgba\(21, 21, 24, 0\.34\);/)
   })
+
+  it('keeps the dialog error line readable on the deep-graphite canvas', () => {
+    expect(stylesheet).toMatch(/@media \(prefers-color-scheme:\s*dark\)[\s\S]*?\.dialog-error[^{]*{[^}]*color:\s*#e9a3b3;/)
+  })
 })

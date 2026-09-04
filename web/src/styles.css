@@ -3482,6 +3482,10 @@ button.mini:disabled {
   border-color: rgba(201, 104, 127, 0.45);
 }
 
+.mini.quiet {
+  opacity: 0.55;
+}
+
 .field {
   margin-top: 12px;
   display: grid;
@@ -4034,6 +4038,11 @@ button.mini:disabled {
   .status-chip.err {
     color: #e9a3b3;
     background: rgba(201, 104, 127, 0.16);
+  }
+
+  .dialog-error,
+  .dialog > p.dialog-error {
+    color: #e9a3b3;
   }
 
   .field input,

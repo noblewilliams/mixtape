@@ -54,6 +54,18 @@ describe('InterviewDialog', () => {
     expect(screen.getAllByRole('button', { name: /^Remove Artist/ })).toHaveLength(20)
   })
 
+  it('drops a duplicate name at five artists without spending a slot', () => {
+    renderDialog()
+
+    for (const name of ['Ari Sola', 'Juniper North', 'Ivory Kestrel', 'Mara Lune', 'Tidal Choir']) addArtist(name)
+    addArtist('ivory kestrel')
+    addArtist('  Ari Sola ')
+    expect(screen.getAllByRole('button', { name: /^Remove / })).toHaveLength(5)
+
+    addArtist('Sixth Sense')
+    expect(screen.getAllByRole('button', { name: /^Remove / })).toHaveLength(6)
+  })
+
   it('walks the five steps with a 300-character counter and Finish on the last', () => {
     renderDialog()
     addArtist('Ivory Kestrel')

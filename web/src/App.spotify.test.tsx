@@ -1,21 +1,24 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
-import type { ApiMusicSource, InterviewResponse, MixtapeApi, OnboardingResponse } from './api/client'
+import { ApiError, type ApiMusicSource, type MixtapeApi, type OnboardingResponse } from './api/client'
 import type { AccountBridge } from './components/AccountDialog'
 import type { MusicKitClient } from './musickit/client'
+import { writeServiceChoice } from './lib/service-preference'
 import { createFakeApi } from './test/fake-api'
 
 const user = { id: 'user-1', name: 'Noble', email: 'noble@example.com' }
 const DAY_MS = 24 * 60 * 60 * 1000
 
 const blank: OnboardingResponse = {
+  userId: 'user-1',
   sources: [],
   hasLibrary: false,
   chosenService: null,
   markedRequestedAt: null,
   interviewCompletedAt: null,
   importCompletedAt: null,
+  interview: null,
 }
 
 const accountPackage: ApiMusicSource = {
@@ -24,6 +27,14 @@ const accountPackage: ApiMusicSource = {
   lastImportedAt: '2026-09-04T09:30:00.000Z',
   ledgerFrom: null,
   ledgerTo: null,
+  packages: ['spotify_account'],
+}
+
+const bothPackages: ApiMusicSource = {
+  ...accountPackage,
+  ledgerFrom: '2018-03-02',
+  ledgerTo: '2026-08-29',
+  packages: ['spotify_account', 'spotify_extended'],
 }
 
 function createFakeMusicKit(overrides: Partial<MusicKitClient> = {}): MusicKitClient {
@@ -50,14 +61,19 @@ const accountAuth: AccountBridge = {
   unlinkAccount: vi.fn(async () => ({})),
 }
 
-function renderApp(options: { api?: ReturnType<typeof createFakeApi>; musicKit?: MusicKitClient } = {}) {
+function renderApp(
+  options: { api?: ReturnType<typeof createFakeApi>; musicKit?: MusicKitClient; onSignOut?: () => void } = {},
+) {
   const api = options.api ?? createFakeApi()
   const musicKit = options.musicKit ?? createFakeMusicKit()
+  const onSignOut = options.onSignOut ?? vi.fn()
   render(
-    <App api={api} accountAuth={accountAuth} lastSignInProvider="google" musicKit={musicKit} user={user} onSignOut={vi.fn()} />,
+    <App api={api} accountAuth={accountAuth} lastSignInProvider="google" musicKit={musicKit} user={user} onSignOut={onSignOut} />,
   )
-  return { api, musicKit }
+  return { api, musicKit, onSignOut }
 }
+
+beforeEach(() => localStorage.clear())
 
 function apiWithOnboarding(state: Partial<OnboardingResponse>, overrides: Partial<MixtapeApi> = {}) {
   return createFakeApi({ getOnboarding: async () => ({ ...blank, ...state }), ...overrides })
@@ -80,6 +96,7 @@ describe('service gate', () => {
     expect(within(dialog).getByText('Before your first tape')).toBeInTheDocument()
     expect(within(dialog).getByText('Mixtape builds mixes from what you actually listen to. Tell it where that lives.')).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: /^Apple Music/ })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: /^Apple Music/ })).toHaveFocus()
     expect(within(dialog).getByRole('button', { name: /^Spotify/ })).toBeInTheDocument()
     expect(within(dialog).getByText('You can add the other later from Your music.')).toBeInTheDocument()
   })
@@ -131,6 +148,76 @@ describe('service gate', () => {
 
     expect(gate()).not.toBeInTheDocument()
     expect(musicKit.connect).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('service gate persistence', () => {
+  afterEach(cleanup)
+  afterEach(() => vi.restoreAllMocks())
+
+  it('remembers an Apple choice on this device so the gate does not come back', async () => {
+    renderApp()
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Which do you use?' })).getByRole('button', { name: /^Apple Music/ }))
+    expect(localStorage.getItem('mixtape:service-choice:user-1')).toBe('apple')
+    expect(screen.getByText('Apple Music')).toBeInTheDocument()
+    cleanup()
+
+    const api = createFakeApi()
+    renderApp({ api })
+    await settled(api)
+    expect(gate()).not.toBeInTheDocument()
+    expect(screen.getByText('Apple Music')).toBeInTheDocument()
+  })
+
+  it('honours a remembered Spotify choice before the server has it', async () => {
+    writeServiceChoice('user-1', 'spotify')
+    const api = createFakeApi()
+    renderApp({ api })
+    await settled(api)
+
+    expect(gate()).not.toBeInTheDocument()
+    expect(screen.getByText('Spotify · not requested yet')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /^Your music/ }))
+    expect(await screen.findByRole('heading', { name: 'Get your listening data' })).toBeInTheDocument()
+  })
+
+  it('forgets the remembered choice on sign-out', async () => {
+    writeServiceChoice('user-1', 'apple')
+    const api = createFakeApi()
+    const { onSignOut } = renderApp({ api, onSignOut: vi.fn() })
+    await settled(api)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }))
+
+    expect(onSignOut).toHaveBeenCalledTimes(1)
+    expect(localStorage.getItem('mixtape:service-choice:user-1')).toBeNull()
+  })
+
+  it('still gates and still takes the choice when storage throws', async () => {
+    const blocked = () => {
+      throw new Error('blocked')
+    }
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(blocked)
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(blocked)
+    const { musicKit } = renderApp()
+
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Which do you use?' })).getByRole('button', { name: /^Apple Music/ }))
+
+    expect(gate()).not.toBeInTheDocument()
+    expect(musicKit.connect).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('Apple Music')).toBeInTheDocument()
+  })
+
+  it('signs out when the onboarding read says the session has ended', async () => {
+    const api = createFakeApi({
+      getOnboarding: async () => {
+        throw new ApiError(401, { error: 'unauthorized' })
+      },
+    })
+    const { onSignOut } = renderApp({ api, onSignOut: vi.fn() })
+
+    await waitFor(() => expect(onSignOut).toHaveBeenCalled())
+    expect(gate()).not.toBeInTheDocument()
   })
 })
 
@@ -197,13 +284,56 @@ describe('Spotify request page', () => {
     expect(within(view).getByRole('button', { name: /^Tell the DJ about your taste/ })).toBeInTheDocument()
     expect(within(view).getByRole('button', { name: /^Paste songs from Spotify/ })).toHaveClass('mini--desktop')
     expect(within(view).getByRole('button', { name: /^Try a demo tape/ })).toBeDisabled()
-    expect(within(view).getByText('Coming with the import page.')).toBeInTheDocument()
+    expect(within(view).getByText('Demo tape coming soon.')).toBeInTheDocument()
+    expect(within(view).queryByRole('alert')).not.toBeInTheDocument()
     const drop = view.querySelector('[data-todo="import-page"]') as HTMLElement
     expect(drop).toHaveTextContent('Drop a Spotify ZIP here')
     expect(drop).toHaveTextContent('or choose a file · either package, in any order')
     expect(within(view).queryByRole('button', { name: 'Make a mix' })).not.toBeInTheDocument()
     expect(screen.getByText('Spotify · waiting for your data')).toBeInTheDocument()
     expect(document.querySelector('.app-shell')).toHaveClass('app-shell--home')
+  })
+
+  it('says so when marking the request fails, and stays on the steps', async () => {
+    const api = createFakeApi({
+      getOnboarding: async () => ({ ...blank, chosenService: 'spotify' }),
+      postFunnelEvent: async () => {
+        throw new ApiError(500, { error: 'internal' })
+      },
+    })
+    await openRequestPage(api)
+    const reads = api.calls.filter((call) => call.method === 'getOnboarding').length
+
+    fireEvent.click(screen.getByRole('button', { name: 'I’ve requested it' }))
+
+    const view = screen.getByRole('main', { name: 'Your music' })
+    expect(await within(view).findByRole('alert')).toHaveTextContent('Couldn’t save that. Check your connection and try again.')
+    expect(within(view).getByRole('button', { name: 'I’ve requested it' })).toBeEnabled()
+    expect(within(view).queryByText('Waiting for Spotify')).not.toBeInTheDocument()
+    expect(api.calls.filter((call) => call.method === 'getOnboarding').length).toBe(reads)
+  })
+
+  it('offers the interview and the demo before the checkpoint, with a way to the steps', async () => {
+    await openRequestPage()
+    const view = screen.getByRole('main', { name: 'Your music' })
+
+    const quiet = within(view).getByRole('region', { name: 'Not requested' })
+    const steps = within(view).getByRole('region', { name: 'How to get your listening data' })
+    expect(quiet.compareDocumentPosition(steps) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(quiet).getByText('The DJ can’t make a personal mix until your data arrives. Ask Spotify now; it takes two minutes.')).toBeInTheDocument()
+    expect(within(quiet).getByText('Five short questions. Required before any mix.')).toBeInTheDocument()
+    expect(within(quiet).getByText('Not personal yet')).toBeInTheDocument()
+    expect(within(quiet).getByText('Once the interview is done, the DJ can offer a mix from what it already knows, clearly labeled.')).toBeInTheDocument()
+    expect(within(quiet).getByRole('button', { name: /^Try a demo tape/ })).toBeDisabled()
+    expect(within(quiet).getByText('Demo tape coming soon.')).toBeInTheDocument()
+    expect(within(quiet).queryByRole('button', { name: /^Paste songs/ })).not.toBeInTheDocument()
+    expect(within(steps).getAllByRole('listitem')).toHaveLength(8)
+
+    fireEvent.click(within(quiet).getByRole('button', { name: 'Show me the steps' }))
+    expect(steps).toHaveFocus()
+
+    fireEvent.click(within(quiet).getByRole('button', { name: /^Tell the DJ about your taste/ }))
+    expect(screen.getByRole('dialog', { name: 'Artists you would never skip' })).toBeInTheDocument()
   })
 
   it('reflects the interview and a package that arrived', async () => {
@@ -213,6 +343,7 @@ describe('Spotify request page', () => {
       interviewCompletedAt: '2026-09-03T10:00:00.000Z',
       importCompletedAt: '2026-09-04T09:30:00.000Z',
       sources: [accountPackage],
+      interview: { artists: 6, notes: 4 },
     })
     renderApp({ api })
     await settled(api)
@@ -224,6 +355,7 @@ describe('Spotify request page', () => {
     expect(within(view).getAllByText('1 of 2 in')).toHaveLength(2)
     expect(within(view).getByText(/^Account data imported \w+\. Still waiting for the extended history; it can take up to 30 days\.$/)).toBeInTheDocument()
     expect(within(view).getByText('Interview done')).toBeInTheDocument()
+    expect(within(view).getByText('4 notes, 6 artists. The DJ can already make a mix from your likes and playlists.')).toBeInTheDocument()
     expect(within(view).queryByRole('button', { name: /^Tell the DJ about your taste/ })).not.toBeInTheDocument()
     expect(within(view).getByRole('button', { name: 'Make a mix' })).toBeInTheDocument()
     expect(within(view).getByRole('button', { name: 'Drop the other ZIP' })).toBeInTheDocument()
@@ -233,6 +365,29 @@ describe('Spotify request page', () => {
 
     fireEvent.click(within(view).getByRole('button', { name: 'Make a mix' }))
     expect(screen.getByRole('dialog', { name: 'Make a new tape' })).toBeInTheDocument()
+  })
+
+  it('stops nudging once both packages are in', async () => {
+    const api = apiWithOnboarding({
+      chosenService: 'spotify',
+      markedRequestedAt: '2026-08-20T08:00:00.000Z',
+      interviewCompletedAt: '2026-09-03T10:00:00.000Z',
+      importCompletedAt: '2026-09-04T09:30:00.000Z',
+      sources: [bothPackages],
+    })
+    renderApp({ api })
+    await settled(api)
+    fireEvent.click(screen.getByRole('button', { name: /^Your music/ }))
+
+    const view = await screen.findByRole('main', { name: 'Your music' })
+    expect(within(view).getAllByText('Both in')).toHaveLength(2)
+    expect(within(view).getByRole('heading', { name: 'Data in' })).toBeInTheDocument()
+    expect(within(view).queryByText(/Still waiting/)).not.toBeInTheDocument()
+    expect(within(view).getByText(/^Both packages imported .+\. Drop a newer ZIP any time to bring it up to date\.$/)).toBeInTheDocument()
+    expect(within(view).getByText('Spotify · both packages')).toBeInTheDocument()
+    expect(within(view).getByRole('button', { name: 'Drop a newer ZIP' })).toBeInTheDocument()
+    expect(within(view).getByText('Interview done')).toBeInTheDocument()
+    expect(within(view).getByText('The DJ can already make a mix from your likes and playlists.')).toBeInTheDocument()
   })
 
   it('opens the paste box from its tile', async () => {
@@ -249,20 +404,9 @@ describe('Spotify request page', () => {
   })
 
   it('runs the interview from the tile and refreshes the card with the saved counts', async () => {
-    let completedAt: string | null = null
-    const response: InterviewResponse = { seeds: 2, notes: { saved: 3, duplicate: 0, capped: 0 } }
-    const api = createFakeApi({
-      getOnboarding: async () => ({
-        ...blank,
-        chosenService: 'spotify',
-        markedRequestedAt: '2026-09-01T08:00:00.000Z',
-        interviewCompletedAt: completedAt,
-      }),
-      postInterview: async () => {
-        completedAt = '2026-09-04T10:00:00.000Z'
-        return response
-      },
-    })
+    const api = createFakeApi()
+    await api.postFunnelEvent({ type: 'chose_spotify', surface: 'web' })
+    await api.postFunnelEvent({ type: 'marked_requested', surface: 'web' })
     renderApp({ api })
     await settled(api)
     fireEvent.click(screen.getByRole('button', { name: /^Your music/ }))
@@ -275,9 +419,10 @@ describe('Spotify request page', () => {
     for (let step = 0; step < 4; step += 1) fireEvent.click(within(dialog).getByRole('button', { name: 'Next' }))
     fireEvent.click(within(dialog).getByRole('button', { name: 'Finish' }))
 
-    expect(await screen.findByText('Saved 3 notes, 2 artists')).toBeInTheDocument()
+    expect(await screen.findByText('Saved 1 note, 1 artist')).toBeInTheDocument()
     expect(screen.queryByRole('dialog', { name: 'Artists you would never skip' })).not.toBeInTheDocument()
     expect(await within(view).findByText('Interview done')).toBeInTheDocument()
+    expect(within(view).getByText('1 note, 1 artist. The DJ can already make a mix from what it knows, clearly labeled.')).toBeInTheDocument()
     expect(api.calls.filter((call) => call.method === 'getOnboarding').length).toBeGreaterThanOrEqual(2)
   })
 
@@ -304,6 +449,26 @@ describe('Spotify request page', () => {
     await waitFor(() => expect(within(view).queryByText('Spotify · account data')).not.toBeInTheDocument())
     expect(await screen.findByText('Your Spotify data is gone from Mixtape.')).toBeInTheDocument()
     expect(screen.getByText('Spotify · waiting for your data')).toBeInTheDocument()
+  })
+
+  it('announces a failed removal with fixed copy, never the server message', async () => {
+    const api = createFakeApi({
+      getOnboarding: async () => ({ ...blank, chosenService: 'spotify', markedRequestedAt: '2026-09-01T08:00:00.000Z', sources: [accountPackage] }),
+      deleteListeningSource: async () => {
+        throw new ApiError(500, { message: 'db exploded' })
+      },
+    })
+    renderApp({ api })
+    await settled(api)
+    fireEvent.click(screen.getByRole('button', { name: /^Your music/ }))
+    const view = await screen.findByRole('main', { name: 'Your music' })
+
+    fireEvent.click(within(view).getByRole('button', { name: 'Remove Spotify · account data' }))
+    fireEvent.click(within(view).getByRole('button', { name: 'Confirm remove' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t remove that source. Try again.')
+    expect(screen.queryByText('db exploded')).not.toBeInTheDocument()
+    expect(within(view).getByText('Spotify · account data')).toBeInTheDocument()
   })
 
   it('gives every control in the view an accessible name', async () => {

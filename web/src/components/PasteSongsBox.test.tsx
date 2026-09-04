@@ -77,4 +77,27 @@ describe('PasteSongsBox', () => {
     await waitFor(() => expect(deleteSeedTrack).toHaveBeenCalledWith('track-a'))
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Remove Small Distances' })).not.toBeInTheDocument())
   })
+
+  it('ignores a second click while a chip removal is in flight', async () => {
+    const seeds: ApiSeedTrack[] = [
+      { trackId: 'track-a', spotifyId: '3n3Ppam7vgaVa1iaRUc9Lp', title: 'Small Distances', artist: 'Ari Sola', album: null },
+    ]
+    let release: () => void = () => undefined
+    const deleteSeedTrack = vi.fn(
+      () =>
+        new Promise<{ removed: true; deleted: boolean }>((resolve) => {
+          release = () => resolve({ removed: true, deleted: true })
+        }),
+    )
+    renderBox(createFakeApi({ getSeedTracks: async () => ({ tracks: seeds }), deleteSeedTrack }))
+
+    const remove = await screen.findByRole('button', { name: 'Remove Small Distances' })
+    fireEvent.click(remove)
+    fireEvent.click(remove)
+
+    expect(deleteSeedTrack).toHaveBeenCalledTimes(1)
+    expect(remove).toBeDisabled()
+    release()
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Remove Small Distances' })).not.toBeInTheDocument())
+  })
 })

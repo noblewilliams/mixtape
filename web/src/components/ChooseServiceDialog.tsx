@@ -11,7 +11,7 @@ export function ChooseServiceDialog({ onChooseApple, onChooseSpotify }: ChooseSe
         <h2 id="service-title">Which do you use?</h2>
         <p>Mixtape builds mixes from what you actually listen to. Tell it where that lives.</p>
         <div className="mini-grid mini-grid--pair">
-          <button className="mini" type="button" onClick={onChooseApple}>
+          <button className="mini" type="button" autoFocus onClick={onChooseApple}>
             <strong>Apple Music</strong>
             <small>Connect in the browser and sync your library and playlists now.</small>
           </button>

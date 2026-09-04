@@ -28,10 +28,12 @@ export function parseSpotifyTrackLines(text: string): ParsedTrackLines {
   return { ids, unrecognised, lines }
 }
 
+// Local calendar days, so "Today" is the device's today. Date.UTC only turns
+// the local y/m/d into a day index here; it is not a zone conversion.
 function daysBetween(iso: string, now: Date): number {
   const then = new Date(iso)
-  const startOfNow = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
-  const startOfThen = Date.UTC(then.getUTCFullYear(), then.getUTCMonth(), then.getUTCDate())
+  const startOfNow = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
+  const startOfThen = Date.UTC(then.getFullYear(), then.getMonth(), then.getDate())
   return Math.max(0, Math.round((startOfNow - startOfThen) / DAY_MS))
 }
 
@@ -43,11 +45,11 @@ export function elapsedWaitLabel(markedRequestedAt: string, now: Date = new Date
 
 export function shortDate(iso: string): string {
   const date = new Date(iso)
-  return `${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]}`
+  return `${date.getDate()} ${MONTHS[date.getMonth()]}`
 }
 
 export function recentDayLabel(markedRequestedAt: string, now: Date = new Date()): string {
-  if (daysBetween(markedRequestedAt, now) < 7) return WEEKDAYS[new Date(markedRequestedAt).getUTCDay()]
+  if (daysBetween(markedRequestedAt, now) < 7) return WEEKDAYS[new Date(markedRequestedAt).getDay()]
   return shortDate(markedRequestedAt)
 }
 
@@ -67,10 +69,22 @@ export function spotifySource(onboarding: OnboardingResponse | null): ApiMusicSo
   return onboarding?.sources.find((source) => source.source === 'spotify_export') ?? null
 }
 
+export type SpotifyPackages = { extended: boolean; account: boolean; count: number }
+
+/** Which Spotify packages have a completed import behind them; a source row alone proves nothing. */
+export function spotifyPackages(source: ApiMusicSource | null): SpotifyPackages {
+  const packages = source?.packages ?? []
+  const extended = packages.includes('spotify_extended')
+  const account = packages.includes('spotify_account')
+  return { extended, account, count: Number(extended) + Number(account) }
+}
+
 export type StatusTone = 'neutral' | 'ok' | 'wait' | 'err'
 
 export function spotifyStatus(onboarding: OnboardingResponse): { label: string; tone: StatusTone } {
-  if (spotifySource(onboarding)) return { label: '1 of 2 in', tone: 'ok' }
+  const { count } = spotifyPackages(spotifySource(onboarding))
+  if (count === 2) return { label: 'Both in', tone: 'ok' }
+  if (count === 1) return { label: '1 of 2 in', tone: 'ok' }
   if (onboarding.markedRequestedAt) return { label: 'Waiting', tone: 'wait' }
   return { label: 'Not requested', tone: 'wait' }
 }
@@ -87,8 +101,13 @@ export function musicLinkLabel(onboarding: OnboardingResponse | null): { text: s
 
 export function sourceName(source: ApiMusicSource): string {
   switch (source.source) {
-    case 'spotify_export':
-      return source.ledgerFrom ? 'Spotify · extended history' : 'Spotify · account data'
+    case 'spotify_export': {
+      const { extended, account } = spotifyPackages(source)
+      if (extended && account) return 'Spotify · both packages'
+      if (extended) return 'Spotify · extended history'
+      if (account) return 'Spotify · account data'
+      return 'Spotify'
+    }
     case 'apple_live':
       return 'Apple Music'
     case 'apple_export':

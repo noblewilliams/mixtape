@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import {
   ApiError,
   type ApiQueueTrack,
@@ -26,6 +26,7 @@ import type { AppView, CollectionView, DjMessage, DjSession, QueueTrack } from '
 import type { MusicKitClient } from './musickit/client'
 import type { AuthProvider } from './lib/auth-provider'
 import { musicLinkLabel } from './lib/onboarding'
+import { clearServiceChoice, readServiceChoice, writeServiceChoice, type ServiceChoice } from './lib/service-preference'
 
 type DialogState = 'new-tape' | 'save-playlist' | 'sync' | 'account' | 'interview' | null
 type MusicConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
@@ -110,7 +111,9 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
   const [error, setError] = useState('')
   const [toast, setToast] = useState<ToastState | null>(null)
   const [onboarding, setOnboarding] = useState<OnboardingResponse | null>(null)
-  const [gateDismissed, setGateDismissed] = useState(false)
+  // The device-side choice covers what the server cannot know yet (an Apple
+  // choice before any sync, a Spotify choice whose funnel event is in flight).
+  const [localChoice, setLocalChoice] = useState<ServiceChoice | null>(() => readServiceChoice(user.id))
   const [interviewStatus, setInterviewStatus] = useState('')
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const queueVersions = useRef<Record<string, number>>({})
@@ -120,6 +123,17 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
     () => sessions.find((session) => session.id === activeSessionId) ?? null,
     [activeSessionId, sessions],
   )
+  const effectiveOnboarding = useMemo<OnboardingResponse | null>(
+    () =>
+      onboarding && onboarding.chosenService === null && localChoice
+        ? { ...onboarding, chosenService: localChoice }
+        : onboarding,
+    [onboarding, localChoice],
+  )
+  const signOut = useCallback(() => {
+    clearServiceChoice(user.id)
+    onSignOut()
+  }, [onSignOut, user.id])
   const activeMessages = activeSession ? messagesBySession[activeSession.id] ?? [] : []
   const activeQueue = activeSession ? queuesBySession[activeSession.id] ?? [] : []
   const contentPaint = activeView === 'session' && activeSession ? activeSession.caseColor : '#45596d'
@@ -152,7 +166,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
         }
       } catch (requestError) {
         if (!cancelled) setError(errorCopy(requestError))
-        if (requestError instanceof ApiError && requestError.status === 401 && !cancelled) onSignOut()
+        if (requestError instanceof ApiError && requestError.status === 401 && !cancelled) signOut()
       } finally {
         if (!cancelled) setLoadingCollection(false)
       }
@@ -162,7 +176,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
     return () => {
       cancelled = true
     }
-  }, [api, onSignOut])
+  }, [api, signOut])
 
   useEffect(() => {
     let cancelled = false
@@ -173,7 +187,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
         if (!cancelled) setOnboarding(result)
       } catch (requestError) {
         // Any other failure falls through: onboarding never locks a listener out.
-        if (requestError instanceof ApiError && requestError.status === 401 && !cancelled) onSignOut()
+        if (requestError instanceof ApiError && requestError.status === 401 && !cancelled) signOut()
       }
     }
 
@@ -181,7 +195,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
     return () => {
       cancelled = true
     }
-  }, [api, onSignOut])
+  }, [api, signOut])
 
   useEffect(
     () => () => {
@@ -210,17 +224,19 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
     try {
       setOnboarding(await api.getOnboarding())
     } catch (requestError) {
-      if (requestError instanceof ApiError && requestError.status === 401) onSignOut()
+      if (requestError instanceof ApiError && requestError.status === 401) signOut()
     }
   }
 
   function chooseApple() {
-    setGateDismissed(true)
+    writeServiceChoice(user.id, 'apple')
+    setLocalChoice('apple')
     void connectAppleMusic()
   }
 
   function chooseSpotify() {
-    setGateDismissed(true)
+    writeServiceChoice(user.id, 'spotify')
+    setLocalChoice('spotify')
     setActiveView('spotify')
     setQueueOpen(false)
     void api
@@ -230,7 +246,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
   }
 
   function openMusic() {
-    if (onboarding?.chosenService === 'spotify') {
+    if (effectiveOnboarding?.chosenService === 'spotify') {
       setActiveView('spotify')
       setQueueOpen(false)
       return
@@ -244,8 +260,8 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
       await refreshOnboarding()
       announce(source === 'spotify_export' ? 'Your Spotify data is gone from Mixtape.' : 'The Apple Music export is gone from Mixtape.')
     } catch (requestError) {
-      announce(errorCopy(requestError), 'error')
-      if (requestError instanceof ApiError && requestError.status === 401) onSignOut()
+      announce('Couldn’t remove that source. Try again.', 'error')
+      if (requestError instanceof ApiError && requestError.status === 401) signOut()
     }
   }
 
@@ -279,7 +295,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
       setError('')
     } catch (requestError) {
       if (!isCancelled()) setError(errorCopy(requestError))
-      if (requestError instanceof ApiError && requestError.status === 401 && !isCancelled()) onSignOut()
+      if (requestError instanceof ApiError && requestError.status === 401 && !isCancelled()) signOut()
     } finally {
       if (!isCancelled()) setLoadingSessionId(null)
     }
@@ -319,7 +335,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
       announce('Your new tape is ready.')
     } catch (requestError) {
       setError(errorCopy(requestError))
-      if (requestError instanceof ApiError && requestError.status === 401) onSignOut()
+      if (requestError instanceof ApiError && requestError.status === 401) signOut()
     } finally {
       setCreatingTape(false)
     }
@@ -374,7 +390,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
           { id: `${sessionId}-error-${Date.now()}`, role: 'dj', content: message, createdAt: new Date().toISOString() },
         ],
       }))
-      if (requestError instanceof ApiError && requestError.status === 401) onSignOut()
+      if (requestError instanceof ApiError && requestError.status === 401) signOut()
     } finally {
       setThinkingSessionId(null)
     }
@@ -426,7 +442,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
       applyQueueSnapshot(sessionId, detail.session.queueVersion, detail.queue)
     } catch (refreshError) {
       setError(errorCopy(refreshError))
-      if (refreshError instanceof ApiError && refreshError.status === 401) onSignOut()
+      if (refreshError instanceof ApiError && refreshError.status === 401) signOut()
     }
   }
 
@@ -440,7 +456,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
         setError('')
       } catch (requestError) {
         await refreshQueueAfterFailure(sessionId, requestError)
-        if (requestError instanceof ApiError && requestError.status === 401) onSignOut()
+        if (requestError instanceof ApiError && requestError.status === 401) signOut()
         throw requestError
       }
     })
@@ -510,21 +526,21 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
         activeSessionId={activeSession?.id ?? null}
         activeView={activeView}
         userName={user.name}
-        musicLabel={musicLinkLabel(onboarding)}
+        musicLabel={musicLinkLabel(effectiveOnboarding)}
         onOpenSession={openSession}
         onOpenHome={() => setActiveView('home')}
         onOpenMusic={openMusic}
         onNewTape={() => setDialog('new-tape')}
         onOpenAccount={() => setDialog('account')}
         onSync={() => setDialog('sync')}
-        onSignOut={onSignOut}
+        onSignOut={signOut}
         signInMethod={lastSignInProvider}
       />
 
-      {activeView === 'spotify' && onboarding ? (
+      {activeView === 'spotify' && effectiveOnboarding ? (
         <SpotifyMusicView
           api={api}
-          onboarding={onboarding}
+          onboarding={effectiveOnboarding}
           interviewStatus={interviewStatus}
           onRefresh={refreshOnboarding}
           onOpenInterview={() => setDialog('interview')}
@@ -586,7 +602,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
       {dialog === 'interview' ? (
         <InterviewDialog api={api} onClose={() => setDialog(null)} onComplete={completeInterview} />
       ) : null}
-      {onboarding && onboarding.chosenService === null && !gateDismissed ? (
+      {effectiveOnboarding && effectiveOnboarding.chosenService === null ? (
         <ChooseServiceDialog onChooseApple={chooseApple} onChooseSpotify={chooseSpotify} />
       ) : null}
       {dialog === 'account' ? (

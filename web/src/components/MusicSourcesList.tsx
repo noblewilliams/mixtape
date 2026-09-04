@@ -80,7 +80,7 @@ export function MusicSourcesList({ sources, onImportAgain, onRemove }: MusicSour
           <h3 id="remove-source-title">{confirmation.title}</h3>
           <p>{confirmation.body}</p>
           <div className="dialog-actions">
-            <button className="btn" type="button" onClick={() => setConfirming(null)}>
+            <button className="btn" type="button" autoFocus onClick={() => setConfirming(null)}>
               Keep it
             </button>
             <button

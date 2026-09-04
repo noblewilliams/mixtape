@@ -20,6 +20,7 @@ export function PasteSongsBox({ api }: PasteSongsBoxProps) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [seeds, setSeeds] = useState<ApiSeedTrack[]>([])
+  const [removing, setRemoving] = useState<ReadonlySet<string>>(() => new Set())
   const [result, setResult] = useState<PasteResult | null>(null)
   const [error, setError] = useState('')
 
@@ -67,12 +68,20 @@ export function PasteSongsBox({ api }: PasteSongsBoxProps) {
   }
 
   async function remove(trackId: string) {
+    if (removing.has(trackId)) return
     setError('')
+    setRemoving((current) => new Set(current).add(trackId))
     try {
       await api.deleteSeedTrack(trackId)
       setSeeds((current) => current.filter((seed) => seed.trackId !== trackId))
     } catch {
       setError('That song couldn’t be removed. Try again.')
+    } finally {
+      setRemoving((current) => {
+        const next = new Set(current)
+        next.delete(trackId)
+        return next
+      })
     }
   }
 
@@ -133,6 +142,7 @@ export function PasteSongsBox({ api }: PasteSongsBoxProps) {
                 className="chip-remove"
                 type="button"
                 onClick={() => void remove(seed.trackId)}
+                disabled={removing.has(seed.trackId)}
                 aria-label={`Remove ${seed.title}`}
               >
                 ×

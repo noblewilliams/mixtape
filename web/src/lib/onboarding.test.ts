@@ -12,12 +12,14 @@ import {
 } from './onboarding'
 
 const blank: OnboardingResponse = {
+  userId: 'user-1',
   sources: [],
   hasLibrary: false,
   chosenService: null,
   markedRequestedAt: null,
   interviewCompletedAt: null,
   importCompletedAt: null,
+  interview: null,
 }
 
 const spotifySource: ApiMusicSource = {
@@ -26,7 +28,11 @@ const spotifySource: ApiMusicSource = {
   lastImportedAt: '2026-09-04T09:30:00.000Z',
   ledgerFrom: '2018-03-02',
   ledgerTo: '2026-08-29',
+  packages: ['spotify_extended'],
 }
+const accountSource: ApiMusicSource = { ...spotifySource, ledgerFrom: null, ledgerTo: null, packages: ['spotify_account'] }
+const bothSources: ApiMusicSource = { ...spotifySource, packages: ['spotify_account', 'spotify_extended'] }
+const begunSource: ApiMusicSource = { ...accountSource, lastImportedAt: null, packages: [] }
 
 describe('parseSpotifyTrackLines', () => {
   it('reads both link forms, ignores query strings, and counts the rest', () => {
@@ -73,20 +79,47 @@ describe('wait labels', () => {
 
   it('formats short dates and ledger ranges', () => {
     expect(shortDate('2026-09-04T09:30:00.000Z')).toBe('4 Sep')
+    // The suite runs in UTC (test setup), so a late-evening stamp stays on its UTC day here.
+    expect(shortDate('2026-09-04T23:30:00.000Z')).toBe('4 Sep')
     expect(ledgerRangeLabel('2018-03-02', '2026-08-29')).toBe('Mar 2018 → Aug 2026')
     expect(ledgerRangeLabel('2026-08-02', '2026-08-29')).toBe('Aug 2026')
     expect(ledgerRangeLabel(null, null)).toBeNull()
   })
 })
 
+describe('local days', () => {
+  it('labels days by the device zone, not UTC', () => {
+    const zone = process.env.TZ
+    process.env.TZ = 'Pacific/Kiritimati' // UTC+14, no DST: 23:30Z on the 4th is 13:30 on the 5th
+    try {
+      expect(shortDate('2026-09-04T23:30:00.000Z')).toBe('5 Sep')
+      expect(recentDayLabel('2026-09-04T23:30:00.000Z', new Date('2026-09-05T12:00:00.000Z'))).toBe('Saturday')
+      expect(elapsedWaitLabel('2026-09-04T23:30:00.000Z', new Date('2026-09-05T09:00:00.000Z'))).toBe('Today')
+      expect(elapsedWaitLabel('2026-09-04T23:30:00.000Z', new Date('2026-09-05T10:30:00.000Z'))).toBe('1 day')
+    } finally {
+      process.env.TZ = zone
+    }
+  })
+})
+
 describe('spotifyStatus', () => {
-  it('moves from Not requested to Waiting to 1 of 2 in', () => {
+  it('moves from Not requested to Waiting to 1 of 2 in to Both in', () => {
     expect(spotifyStatus(blank)).toEqual({ label: 'Not requested', tone: 'wait' })
     expect(spotifyStatus({ ...blank, markedRequestedAt: '2026-09-02T08:00:00.000Z' })).toEqual({
       label: 'Waiting',
       tone: 'wait',
     })
     expect(spotifyStatus({ ...blank, sources: [spotifySource] })).toEqual({ label: '1 of 2 in', tone: 'ok' })
+    expect(spotifyStatus({ ...blank, sources: [accountSource] })).toEqual({ label: '1 of 2 in', tone: 'ok' })
+    expect(spotifyStatus({ ...blank, sources: [bothSources] })).toEqual({ label: 'Both in', tone: 'ok' })
+  })
+
+  it('counts only published packages, so a begun-but-unfinished import is still waiting', () => {
+    expect(spotifyStatus({ ...blank, sources: [begunSource] })).toEqual({ label: 'Not requested', tone: 'wait' })
+    expect(spotifyStatus({ ...blank, markedRequestedAt: '2026-09-02T08:00:00.000Z', sources: [begunSource] })).toEqual({
+      label: 'Waiting',
+      tone: 'wait',
+    })
   })
 })
 
@@ -116,7 +149,9 @@ describe('musicLinkLabel', () => {
 describe('sourceName', () => {
   it('names each source the way the sources view does', () => {
     expect(sourceName(spotifySource)).toBe('Spotify · extended history')
-    expect(sourceName({ ...spotifySource, ledgerFrom: null, ledgerTo: null })).toBe('Spotify · account data')
+    expect(sourceName(accountSource)).toBe('Spotify · account data')
+    expect(sourceName(bothSources)).toBe('Spotify · both packages')
+    expect(sourceName(begunSource)).toBe('Spotify')
     expect(sourceName({ ...spotifySource, source: 'apple_live' })).toBe('Apple Music')
     expect(sourceName({ ...spotifySource, source: 'apple_export' })).toBe('Apple Music · export')
   })
