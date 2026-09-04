@@ -322,8 +322,9 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
     void refreshOnboarding()
   }
 
-  function notePersonalMix(session: { notPersonal: boolean }) {
-    if (!session.notPersonal && hasCompletedImport(effectiveOnboarding)) {
+  // An empty queue is not a mix; both surfaces skip the milestone for it.
+  function notePersonalMix(session: { notPersonal: boolean }, queueLength: number) {
+    if (queueLength > 0 && !session.notPersonal && hasCompletedImport(effectiveOnboarding)) {
       postFunnelEventOnce(api, user.id, 'first_personal_mix')
     }
   }
@@ -340,7 +341,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
           session.id === sessionId ? { ...session, notPersonal: detail.session.notPersonal } : session,
         ),
       )
-      notePersonalMix(detail.session)
+      notePersonalMix(detail.session, detail.queue.length)
     } catch (requestError) {
       if (requestError instanceof ApiError && requestError.status === 401) signOut()
     }
@@ -406,7 +407,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
       setDialog(null)
       setError('')
       announce('Your new tape is ready.')
-      notePersonalMix(response.session)
+      notePersonalMix(response.session, response.queue.length)
     } catch (requestError) {
       setError(errorCopy(requestError))
       if (requestError instanceof ApiError && requestError.status === 401) signOut()
