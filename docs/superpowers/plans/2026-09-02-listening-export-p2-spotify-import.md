@@ -104,6 +104,7 @@ Apple "go deeper" parsing (phase 5) · ReccoBeats-by-id enrichment stage, ISRC c
 
 ## Review follow-ups
 
+- C3a review (`8cb6a0a`): the iOS gate decides only from onboarding state produced by the current build (`unwrapPrevious()`), with provider retry disabled so a failed first load falls through to Home instead of spinning through Riverpod's backoff; the per-device service flag is overlaid only when the server reports no choice (server wins), keyed by user id, cleared on sign-out together with the pending reminder; the interview requires at least one artist and validates answer length in UTF-16 code units to match the server.
 - A2 review: `GET /me/onboarding` reports `chosenService` as `'spotify' | 'apple' | null`, wider than the plan's `'spotify' | null`; `'apple'` is inferred from a live or exported Apple library and lets both clients skip the service gate for existing Apple listeners. A Spotify import source counts as Spotify even without the funnel event (fix round).
 Recorded from phase-1 reviews for this phase: `ApiSession.notPersonal` and `spotifyId` on queue tracks (A2, B2, C4); clients must refetch a session after a message turn to learn it went corpus-mode; the playlist browse summary lacks `user_playlists.source`, so a mixed listing cannot badge per source until a later server addition; malformed JSON is a 400 `invalid_request`.
 
