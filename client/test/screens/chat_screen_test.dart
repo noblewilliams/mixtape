@@ -18,6 +18,9 @@ import 'package:mixtape/presentation/screens/queue_screen.dart';
 /// callback, and an unset callback throws so an unexpected call fails
 /// loudly rather than hanging.
 class FakeDjApi implements DjApi {
+  @override
+  Future<void> recordPlaylistCreation(String sessionId, String appleLibraryId) async {}
+
   Future<SessionDetail> Function(String prompt)? onCreateSession;
   Future<List<DjSession>> Function()? onListSessions;
   Future<SessionDetail> Function(String id)? onGetSession;

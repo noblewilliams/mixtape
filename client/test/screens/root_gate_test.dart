@@ -29,6 +29,9 @@ import '../helpers/fake_listening_api.dart';
 /// sign-in/sign-out/sync gate tests from making a real network call.
 class _FakeDjApi implements DjApi {
   @override
+  Future<void> recordPlaylistCreation(String sessionId, String appleLibraryId) async {}
+
+  @override
   Duration get timeout => const Duration(seconds: 120);
 
   @override

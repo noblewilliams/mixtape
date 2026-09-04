@@ -28,6 +28,23 @@ function setup() {
 }
 
 describe('MusicKit browser client', () => {
+  it.each([{}, { data: [] }, { data: [{ id: 'p.1', type: 'songs' }] },
+    { data: [{ id: 'bad/id', type: 'library-playlists' }] }])(
+    'keeps successful creation successful when its receipt is unusable', async (payload) => {
+      const { client, fetchImpl } = setup()
+      fetchImpl.mockResolvedValue(new Response(JSON.stringify(payload), { status: 201 }))
+      await client.connect()
+      const onCreated = vi.fn()
+      await expect(client.createPlaylist('Mix', ['123'], onCreated)).resolves.toBeUndefined()
+      expect(onCreated).not.toHaveBeenCalled()
+    },
+  )
+  it('does not fail successful creation if recording its ID throws', async () => {
+    const { client, fetchImpl } = setup()
+    fetchImpl.mockResolvedValue(new Response(JSON.stringify({ data: [{ id: 'p.1', type: 'library-playlists' }] }), { status: 201 }))
+    await client.connect()
+    await expect(client.createPlaylist('Mix', ['123'], () => { throw new Error('offline') })).resolves.toBeUndefined()
+  })
   afterEach(() => vi.restoreAllMocks())
 
   it('configures Apple Music and authorizes the listener without persisting the user token', async () => {
@@ -60,10 +77,12 @@ describe('MusicKit browser client', () => {
 
   it('creates an Apple Music playlist with developer and in-memory user authorization', async () => {
     const { client, fetchImpl } = setup()
-    fetchImpl.mockResolvedValue(new Response(JSON.stringify({ data: [{ id: 'p.123' }] }), { status: 201 }))
+    fetchImpl.mockResolvedValue(new Response(JSON.stringify({ data: [{ id: 'p.123', type: 'library-playlists' }] }), { status: 201 }))
     await client.connect()
 
-    await client.createPlaylist('Blue hour', ['song-1', 'song-2'])
+    const onCreated = vi.fn()
+    await client.createPlaylist('Blue hour', ['song-1', 'song-2'], onCreated)
+    expect(onCreated).toHaveBeenCalledExactlyOnceWith('p.123')
 
     expect(fetchImpl).toHaveBeenCalledWith(
       'https://api.music.apple.com/v1/me/library/playlists',

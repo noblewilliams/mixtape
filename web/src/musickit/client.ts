@@ -33,7 +33,7 @@ export type MusicKitClient = {
   }) => Promise<MusicSnapshot>
   play: (appleIds: string[]) => Promise<void>
   pause: () => Promise<void>
-  createPlaylist: (name: string, appleIds: string[]) => Promise<void>
+  createPlaylist: (name: string, appleIds: string[], onCreated?: (libraryId: string) => void) => Promise<void>
 }
 
 export type MusicKitClientErrorCode =
@@ -269,7 +269,7 @@ export function createMusicKitClient({
         throw asClientError(error, 'playback_failed', 'Apple Music could not pause this mix.')
       }
     },
-    async createPlaylist(name, appleIds) {
+    async createPlaylist(name, appleIds, onCreated) {
       if (appleIds.length === 0) throw new MusicKitClientError('empty_queue', 'This mix has no Apple Music tracks.')
       const current = await requireConnection()
 
@@ -294,6 +294,19 @@ export function createMusicKitClient({
           if (response.status === 401 || response.status === 403) musicUserToken = null
           throw new Error(`Apple Music returned ${response.status}`)
         }
+        // Apple has already created the playlist. Missing/malformed metadata or
+        // a receipt callback failure must not invite a duplicate-creating retry.
+        try {
+          const payload: unknown = await response.json()
+          if (payload && typeof payload === 'object' && 'data' in payload && Array.isArray(payload.data)
+            && payload.data.length === 1) {
+            const item: unknown = payload.data[0]
+            if (item && typeof item === 'object' && 'type' in item && item.type === 'library-playlists'
+              && 'id' in item && typeof item.id === 'string' && /^[A-Za-z0-9._~-]{1,500}$/.test(item.id)) {
+              onCreated?.(item.id)
+            }
+          }
+        } catch { /* Successful creation remains successful; origin stays unknown. */ }
       } catch (error) {
         throw asClientError(error, 'playlist_failed', 'Apple Music could not create this playlist.')
       }

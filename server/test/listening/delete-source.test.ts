@@ -2,6 +2,7 @@ import { asc, eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import {
   listeningDays,
+  playlistOrigins,
   tracks,
   userArtistSeeds,
   userMusicSources,
@@ -47,6 +48,18 @@ async function playlist(db: TestDb, source: 'apple' | 'spotify_export', key: str
 }
 
 describe('ListeningImportStore.deleteSource', () => {
+  it('forgets Spotify playlist confirmations without erasing Apple creation receipts', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await db.insert(playlistOrigins).values([
+      { userId: 'u1', source: 'spotify_export', libraryId: 'export-key', origin: 'user_confirmed' },
+      { userId: 'u1', source: 'apple', libraryId: 'p-created', origin: 'mixtape' },
+    ])
+    await createListeningImportStore(db).deleteSource('u1', 'spotify_export')
+    expect(await db.select().from(playlistOrigins)).toMatchObject([
+      { source: 'apple', libraryId: 'p-created', origin: 'mixtape' },
+    ])
+  })
   it('removes a Spotify source: ledger, seeds, playlists, liked rows, orphaned user tracks', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')

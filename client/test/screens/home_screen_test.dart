@@ -23,6 +23,9 @@ import '../helpers/fake_listening_api.dart';
 /// ApiClient), each method delegating to a settable callback that throws
 /// loudly when unset rather than hanging.
 class FakeDjApi implements DjApi {
+  @override
+  Future<void> recordPlaylistCreation(String sessionId, String appleLibraryId) async {}
+
   Future<SessionDetail> Function(String prompt)? onCreateSession;
   Future<List<DjSession>> Function()? onListSessions;
   Future<SessionDetail> Function(String id)? onGetSession;

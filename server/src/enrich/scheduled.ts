@@ -18,6 +18,7 @@ import {
   cleanupListeningImportStaging,
   type ListeningImportCleanupResult,
 } from '../listening/cleanup'
+import { runPlaylistCatalogBatch, type PlaylistCatalogResult } from '../playlists/catalog-resolution'
 
 // Same subrequest budget as MAX_BATCH (see routes/enrich.ts); small batches
 // also keep runs well inside the 5-min cadence so overlapping crons stay rare.
@@ -31,6 +32,7 @@ export type ScheduledDeps = {
 
 type FailedRun = { error: 'failed' }
 export type ScheduledResult = {
+  playlistCatalog?: PlaylistCatalogResult | FailedRun
   enrichment?: RunResult | FailedRun
   artwork?: ArtworkRunResult | FailedRun
   playlistCleanup: PlaylistSyncCleanupResult | FailedRun
@@ -39,6 +41,7 @@ export type ScheduledResult = {
 }
 
 type ScheduledRunners = {
+  playlistCatalog: typeof runPlaylistCatalogBatch
   enrichment: typeof runEnrichmentBatch
   artwork: typeof runArtworkBatch
   playlistCleanup: typeof cleanupPlaylistSyncStaging
@@ -52,6 +55,7 @@ export async function handleScheduled(
   runners: Partial<ScheduledRunners> = {},
 ): Promise<ScheduledResult> {
   const result = {} as ScheduledResult
+  const runPlaylistCatalog = runners.playlistCatalog ?? runPlaylistCatalogBatch
   const runEnrichment = runners.enrichment ?? runEnrichmentBatch
   const runArtwork = runners.artwork ?? runArtworkBatch
   const runPlaylistCleanup = runners.playlistCleanup ?? cleanupPlaylistSyncStaging
@@ -74,6 +78,18 @@ export async function handleScheduled(
     result.playlistCleanup = await runPlaylistCleanup(db)
   } catch {
     result.playlistCleanup = { error: 'failed' }
+  }
+
+  // Reuse the existing server-only catalog client. The resolver selects each
+  // listener's persisted storefront instead of the artwork job's default market.
+  if (deps.artwork) {
+    try {
+      result.playlistCatalog = await runPlaylistCatalog(db, {
+        catalog: deps.artwork.catalog, now: deps.artwork.now,
+      })
+    } catch {
+      result.playlistCatalog = { error: 'failed' }
+    }
   }
 
   if (deps.enrichment) {

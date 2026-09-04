@@ -1,4 +1,7 @@
 import { Hono } from 'hono'
+import { bodyLimit } from 'hono/body-limit'
+import { z } from 'zod'
+import { confirmPlaylistTaste, recordPlaylistCreation } from '../playlists/origin'
 import type { AppVars } from '../app'
 import type { Db } from '../db/types'
 import {
@@ -18,6 +21,28 @@ function boundedInteger(value: string | undefined, fallback: number, max: number
 export function playlistsRoutes(db: Db) {
   const app = new Hono<{ Variables: AppVars }>()
   const store = createPlaylistBrowseStore(db)
+
+  app.post('/creation-receipts', bodyLimit({ maxSize: 2048 }), async (c) => {
+    const value = z.object({ sessionId: z.string().uuid(),
+      appleLibraryId: z.string().min(1).max(500).regex(/^[A-Za-z0-9._~-]+$/),
+    }).strict().safeParse(await c.req.json().catch(() => null))
+    if (!value.success) return c.json({ error: 'invalid_request' }, 400)
+    const ok = await recordPlaylistCreation(db, c.get('user').id,
+      value.data.sessionId, value.data.appleLibraryId)
+    return ok ? c.json({ ok: true }) : c.json({ error: 'not_found' }, 404)
+  })
+
+  app.put('/:id/taste-confirmation', bodyLimit({ maxSize: 1024 }), async (c) => {
+    const id = c.req.param('id')
+    if (!UUID_RE.test(id)) return c.json({ error: 'not_found' }, 404)
+    const value = z.object({ confirmed: z.boolean() }).strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!value.success) return c.json({ error: 'invalid_request' }, 400)
+    const result = await confirmPlaylistTaste(db, c.get('user').id, id, value.data.confirmed)
+    if (result === 'not_found') return c.json({ error: 'not_found' }, 404)
+    if (result === 'ineligible') return c.json({ error: 'playlist_not_eligible' }, 409)
+    return c.json({ ok: true })
+  })
 
   app.get('/', async (c) => {
     const status = c.req.query('status') ?? 'active'

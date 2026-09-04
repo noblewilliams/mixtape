@@ -83,6 +83,7 @@ export type ApiPlaylistSummary = {
   name: string
   curatorName: string | null
   kind: string
+  origin?: 'unknown' | 'mixtape' | 'user_confirmed'
   artworkUrlTemplate: string | null
   artworkWidth: number | null
   artworkHeight: number | null
@@ -278,6 +279,7 @@ export type MixtapeApi = {
   applyQueueOps: (sessionId: string, ops: QueueOp[], expectedVersion?: number) => Promise<QueueOpsResponse>
   getMusicKitToken: () => Promise<MusicKitTokenResponse>
   recordSessionEvent: (sessionId: string, type: 'played' | 'saved_playlist') => Promise<{ ok: true }>
+  recordPlaylistCreation: (sessionId: string, appleLibraryId: string) => Promise<{ ok: true }>
   updateSession: (
     sessionId: string,
     updates: { title?: string; status?: ApiSessionStatus },
@@ -423,6 +425,9 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
         body: JSON.stringify({ ops, ...(expectedVersion === undefined ? {} : { expectedVersion }) }),
       }),
     getMusicKitToken: () => request('/musickit/token'),
+    recordPlaylistCreation: (sessionId, appleLibraryId) => request('/playlists/creation-receipts', {
+      method: 'POST', body: JSON.stringify({ sessionId, appleLibraryId }),
+    }),
     recordSessionEvent: (sessionId, type) =>
       request(`/sessions/${encodeURIComponent(sessionId)}/events`, {
         method: 'POST',

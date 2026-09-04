@@ -1,5 +1,6 @@
 import Flutter
 import MediaPlayer
+import MusicKit
 
 /// Bridges the on-device music library (MediaPlayer) to Dart.
 /// P1 scope: authorization + paged library read with play counts.
@@ -102,56 +103,44 @@ class MusicKitBridge: NSObject {
       result(FlutterError(code: "empty_playlist", message: "name and tracks are required", details: nil))
       return
     }
-    DispatchQueue.main.async {
-      let metadata = MPMediaPlaylistCreationMetadata(name: name)
-      // Without an explicit author Apple attributes the playlist to the
-      // Xcode product name ("Runner"), not even the display name.
-      if let author, !author.isEmpty { metadata.authorDisplayName = author }
-      if let description, !description.isEmpty { metadata.descriptionText = description }
-      MPMediaLibrary.default().getPlaylist(with: UUID(), creationMetadata: metadata) { playlist, error in
-        DispatchQueue.main.async {
-          guard let playlist = playlist, error == nil else {
-            result(FlutterError(
-              code: "playlist_failed",
-              message: "could not create playlist",
-              details: error?.localizedDescription
-            ))
-            return
+    Task { @MainActor in
+      do {
+        // Resolve exact songs before creating anything. Do not guess a
+        // MusicKit ID from a MediaPlayer persistent ID or playlist metadata.
+        var songs: [String: Song] = [:]
+        let validIds = Array(Set(appleIds.filter { isSupportedAppleSongID($0) })).sorted()
+        for offset in stride(from: 0, to: validIds.count, by: 25) {
+          let ids = Array(validIds[offset..<min(offset + 25, validIds.count)])
+          let request = MusicCatalogResourceRequest<Song>(matching: \.id,
+            memberOf: ids.map { MusicItemID($0) })
+          let response = try await request.response()
+          for song in response.items where ids.contains(song.id.rawValue) {
+            songs[song.id.rawValue] = song
           }
-          addItems(appleIds, to: playlist, index: 0, added: 0, failed: 0, result: result)
         }
-      }
-    }
-  }
-
-  /// Adds `appleIds[index...]` to `playlist` one at a time via a recursive
-  /// completion chain — NOT a DispatchGroup. The real reason isn't
-  /// deadlock-avoidance (a DispatchGroup's `enter`/`leave`/`notify` doesn't
-  /// deadlock here); it's ORDER: a DispatchGroup would fire every
-  /// `addItem(withProductID:)` call at once and let them race, so tracks
-  /// would land in the playlist in whatever order the async completions
-  /// happen to return — not the queue's order. This chain only starts item
-  /// N+1's `addItem` once item N's completion has landed, which is what
-  /// preserves the queue's track order in the created playlist. A per-item
-  /// failure is counted and the chain continues; it never aborts the whole
-  /// batch.
-  private static func addItems(
-    _ appleIds: [String],
-    to playlist: MPMediaPlaylist,
-    index: Int,
-    added: Int,
-    failed: Int,
-    result: @escaping FlutterResult
-  ) {
-    guard index < appleIds.count else {
-      result(["added": added, "failed": failed])
-      return
-    }
-    playlist.addItem(withProductID: appleIds[index]) { error in
-      DispatchQueue.main.async {
-        let nextAdded = added + (error == nil ? 1 : 0)
-        let nextFailed = failed + (error == nil ? 0 : 1)
-        addItems(appleIds, to: playlist, index: index + 1, added: nextAdded, failed: nextFailed, result: result)
+        guard !songs.isEmpty else {
+          result(FlutterError(code: "playlist_failed", message: "No songs could be resolved.", details: nil))
+          return
+        }
+        var playlist = try await MusicLibrary.shared.createPlaylist(
+          name: name, description: description, authorDisplayName: author)
+        let libraryId = playlist.id.rawValue
+        var added = 0
+        var failed = 0
+        // Sequential additions preserve requested order and duplicate entries.
+        // Once creation succeeds, always report its ID, including partial saves.
+        for id in appleIds {
+          guard let song = songs[id] else { failed += 1; continue }
+          do {
+            playlist = try await MusicLibrary.shared.add(song, to: playlist)
+            added += 1
+          } catch {
+            failed += 1
+          }
+        }
+        result(["added": added, "failed": failed, "appleLibraryId": libraryId])
+      } catch {
+        result(FlutterError(code: "playlist_failed", message: "Could not create playlist.", details: nil))
       }
     }
   }

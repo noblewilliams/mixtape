@@ -2,6 +2,7 @@ import { Buffer } from 'node:buffer'
 import { sql } from 'drizzle-orm'
 import type { Db } from '../db/types'
 import { PLAYLIST_SYNC_MAX_ENTRIES } from './contracts'
+import { playlistOriginSql } from './origin'
 
 export class PlaylistBrowseCursorError extends Error {
   constructor() {
@@ -14,6 +15,7 @@ export type PlaylistSummary = {
   name: string
   curatorName: string | null
   kind: string
+  origin: 'unknown' | 'mixtape' | 'user_confirmed'
   artworkUrlTemplate: string | null
   artworkWidth: number | null
   artworkHeight: number | null
@@ -130,6 +132,7 @@ function summaryFromRow(row: Record<string, unknown>): PlaylistSummary {
     name: String(row.name),
     curatorName: row.curator_name == null ? null : String(row.curator_name),
     kind: String(row.kind),
+    origin: row.origin === 'mixtape' || row.origin === 'user_confirmed' ? row.origin : 'unknown',
     artworkUrlTemplate: row.artwork_url_template == null ? null : String(row.artwork_url_template),
     artworkWidth: nullableNumber(row.artwork_width),
     artworkHeight: nullableNumber(row.artwork_height),
@@ -172,6 +175,7 @@ const summarySelect = sql`
   up.name,
   up.curator_name,
   up.kind,
+  ${playlistOriginSql} AS origin,
   up.artwork_url_template,
   up.artwork_width,
   up.artwork_height,

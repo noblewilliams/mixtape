@@ -52,6 +52,13 @@ Future<PlaylistApi> apiWith(MockClient inner) async {
 }
 
 void main() {
+  test('origin is explicit and older or unknown server values stay neutral', () {
+    expect(PlaylistSummary.fromJson(summaryJson()).origin, 'unknown');
+    expect(PlaylistSummary.fromJson(summaryJson(over: {'origin': 'mixtape'})).origin, 'mixtape');
+    expect(PlaylistSummary.fromJson(summaryJson(over: {'origin': 'user_confirmed'})).origin, 'user_confirmed');
+    expect(PlaylistSummary.fromJson(summaryJson(over: {'origin': 'future'})).origin, 'unknown');
+  });
+
   test('lists playlists with encoded filters and defensive nulls', () async {
     late http.Request request;
     final api = await apiWith(

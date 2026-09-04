@@ -16,6 +16,9 @@ import 'package:mixtape/presentation/screens/memory_screen.dart';
 /// callback that throws loudly when unset. MemoryScreen only ever touches
 /// listMemories/deleteMemory, so everything else is left unwired.
 class FakeDjApi implements DjApi {
+  @override
+  Future<void> recordPlaylistCreation(String sessionId, String appleLibraryId) async {}
+
   Future<List<DjMemory>> Function()? onListMemories;
   Future<void> Function(String id)? onDeleteMemory;
 

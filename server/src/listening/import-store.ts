@@ -11,6 +11,7 @@ import {
   userMusicProfiles,
   userMusicSources,
   userPlaylists,
+  playlistOrigins,
 } from '../db/schema'
 import { isAppleSongId } from '../musickit/apple-id'
 import {
@@ -773,6 +774,9 @@ export function createListeningImportStore(db: Db, deps: StoreDeps = {}): Listen
           .where(and(eq(userMusicSources.userId, userId), eq(userMusicSources.source, source)))
 
         if (source === 'spotify_export') {
+          await tx.delete(playlistOrigins).where(and(
+            eq(playlistOrigins.userId, userId), eq(playlistOrigins.source, 'spotify_export'),
+          ))
           await tx.update(userPlaylists)
             .set({ inLibrary: false, updatedAt: now })
             .where(and(

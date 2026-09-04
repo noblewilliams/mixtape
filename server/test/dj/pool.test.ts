@@ -21,6 +21,7 @@ import {
   sessionEvents,
   userRecentTrackObservations,
   userPlaylists,
+  playlistOrigins,
   playlistEntries,
   listeningDays,
   userMusicSources,
@@ -239,12 +240,100 @@ const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 60 * 60 * 1000)
 
 // Hand-computed neutral-signal score for a track seeded with `embedding:
 // SAME_AS_QUERY, playCount: 0` and no tempo intent, under familiarity 'mix' —
-// mirrors the FAMILIARITY_WEIGHTS['mix'] convex combination in pool.ts with
-// taste's neutral 0.5: 0.396*1 (sim) + 0.22*0.5 (feat, no tempo target) +
-// 0.264*0 (fam, 0 plays) + 0.12*0.5 (taste, no signal) = 0.566.
-const NEUTRAL_MIX_SCORE = 0.45 * 0.88 * 1 + 0.25 * 0.88 * 0.5 + 0.3 * 0.88 * 0 + 0.12 * 0.5
+// Personal weights reserve 0.10 for playlist taste: 0.351*1 (meaning)
+// + 0.195*0.5 (tempo neutral) + 0.234*0 (plays) + 0.12*0.5 (taste)
+// + 0.10*0 (no confirmed playlist) = 0.5085.
+const NEUTRAL_MIX_SCORE = 0.5085
 
 describe('buildPool', () => {
+  it('counts distinct confirmed playlists per recording, with diminishing returns and no duplicate amplification', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const plain = await seedTrack(db, 'u1')
+    const saved = await seedTrack(db, 'u1', { isrc: 'USABC2400001' })
+    const sibling = await seedCorpusTrack(db, { isrc: saved.isrc })
+    const delta = async () => {
+      const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' }))
+      return pool.find(t => t.trackId === saved.id)!.score - pool.find(t => t.trackId === plain.id)!.score
+    }
+    for (let n = 1; n <= 11; n++) {
+      const [p] = await db.insert(userPlaylists).values({ userId: 'u1', appleLibraryId: `p-count-${n}`,
+        name: 'Playlist', kind: 'user', sourceFingerprint: 'a'.repeat(64) }).returning()
+      await db.insert(playlistOrigins).values({ userId: 'u1', source: 'apple', libraryId: p.appleLibraryId, origin: 'user_confirmed' })
+      await db.insert(playlistEntries).values([saved, sibling, saved].map((t, position) => ({
+        playlistId: p.id, position, appleLibraryEntryId: `e${position}`, trackId: t.id,
+        titleSnapshot: 'T', artistSnapshot: 'A',
+      })))
+      if (n === 1) expect(await delta()).toBeCloseTo(0.05, 8)
+      if (n === 2) expect(await delta()).toBeCloseTo(0.075, 8)
+    }
+    expect(await delta()).toBeCloseTo(0.09990234375, 10)
+  })
+
+  it('keeps unconfirmed, generated, automatic, removed and other-user evidence neutral', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedUser(db, 'u2')
+    const track = await seedTrack(db, 'u1', { playCountObserved: false })
+    const score = async () => (await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' })))[0].score
+    const before = await score()
+    for (const [i, variant] of [
+      { origin: null }, { origin: 'mixtape' }, { kind: 'editorial' }, { kind: 'replay' },
+      { kind: 'personal_mix' }, { inLibrary: false }, { userId: 'u2' }, { isMixtapeOwned: true },
+    ].entries()) {
+      const opts = { userId: 'u1', kind: 'user' as string, inLibrary: true, isMixtapeOwned: false,
+        origin: 'user_confirmed' as string | null, ...variant }
+      const [p] = await db.insert(userPlaylists).values({ userId: opts.userId,
+        appleLibraryId: `p-neutral-${i}`, kind: opts.kind as 'user', inLibrary: opts.inLibrary,
+        isMixtapeOwned: opts.isMixtapeOwned, name: 'Mixtape or editorial names prove nothing',
+        sourceFingerprint: 'a'.repeat(64) }).returning()
+      if (opts.origin) await db.insert(playlistOrigins).values({ userId: opts.userId, source: 'apple',
+        libraryId: p.appleLibraryId, origin: opts.origin as 'mixtape' | 'user_confirmed' })
+      await db.insert(playlistEntries).values({ playlistId: p.id, position: 0, appleLibraryEntryId: 'e',
+        trackId: track.id, titleSnapshot: 'T', artistSnapshot: 'A' })
+      expect(await score()).toBeCloseTo(before, 10)
+    }
+  })
+
+  it('does not admit playlist-only songs or override prompt filters, and ignores confirmation in corpus mode', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const plain = await seedTrack(db, 'u1', { tempo: 100 })
+    const excluded = await seedTrack(db, 'u1', { tempo: 200 })
+    const playlistOnly = await seedCorpusTrack(db, { tempo: 100 })
+    const [p] = await db.insert(userPlaylists).values({ userId: 'u1', appleLibraryId: 'p-filter',
+      name: 'Confirmed', kind: 'user', sourceFingerprint: 'a'.repeat(64) }).returning()
+    await db.insert(playlistOrigins).values({ userId: 'u1', source: 'apple', libraryId: p.appleLibraryId, origin: 'user_confirmed' })
+    await db.insert(playlistEntries).values([excluded, playlistOnly].map((t, position) => ({
+      playlistId: p.id, position, appleLibraryEntryId: `e${position}`, trackId: t.id, titleSnapshot: 'T', artistSnapshot: 'A',
+    })))
+    const prompt = intent({ themes: 'x', tempoMin: 90, tempoMax: 110 })
+    expect((await buildPool(db, fakeEmbed, 'u1', prompt)).map(t => t.trackId)).toEqual([plain.id])
+    const corpus = await buildPool(db, fakeEmbed, 'u1', prompt, undefined, { mode: 'corpus' })
+    expect(corpus.find(t => t.trackId === playlistOnly.id)!.score).toBeCloseTo(corpus.find(t => t.trackId === plain.id)!.score, 10)
+  })
+
+  it('gives a confirmed playlist one capped taste contribution regardless of play-count capability', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    for (const observed of [true, false]) {
+      const plain = await seedTrack(db, 'u1', { playCountObserved: observed })
+      const saved = await seedTrack(db, 'u1', { playCountObserved: observed })
+      const [playlist] = await db.insert(userPlaylists).values({ userId: 'u1',
+        appleLibraryId: `p-${observed}`, kind: 'unknown', name: 'Hand-built',
+        sourceFingerprint: 'a'.repeat(64) }).returning()
+      await db.insert(playlistOrigins).values({ userId: 'u1', source: 'apple',
+        libraryId: playlist.appleLibraryId, origin: 'user_confirmed' })
+      await db.insert(playlistEntries).values({ playlistId: playlist.id, position: 0,
+        appleLibraryEntryId: 'e1', trackId: saved.id, titleSnapshot: 'T', artistSnapshot: 'A' })
+      for (const familiarity of ['comfort', 'mix', 'adventurous'] as const) {
+        const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', familiarity }))
+        const score = (id: string) => pool.find(row => row.trackId === id)!.score
+        expect(score(saved.id) - score(plain.id)).toBeCloseTo(0.05, 8)
+      }
+    }
+  })
+
   it("calls embed with intent.themes verbatim", async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')
@@ -416,7 +505,7 @@ describe('buildPool', () => {
     )
   })
 
-  it('uses recent rank and playlist membership when web play counts are unavailable', async () => {
+  it('uses recent rank but not unconfirmed playlists when web play counts are unavailable', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')
     const recent = await seedTrack(db, 'u1', {
@@ -450,7 +539,7 @@ describe('buildPool', () => {
     expect(byId(playlisted.id).playCount).toBeNull()
     expect(byId(noSignal.id).playCount).toBeNull()
     expect(byId(recent.id).score).toBeGreaterThan(byId(noSignal.id).score)
-    expect(byId(playlisted.id).score).toBeGreaterThan(byId(noSignal.id).score)
+    expect(byId(playlisted.id).score).toBeCloseTo(byId(noSignal.id).score, 10)
   })
 
   it('pool size is min(15 * targetCount, 300, available)', async () => {
@@ -1287,6 +1376,7 @@ describe('resolvePoolMode', () => {
 
 describe('buildPool corpus mode', () => {
   const CORPUS_FAM_WEIGHT = 0.3 * 0.88 // FAMILIARITY_WEIGHTS.mix.fam
+  const NEUTRAL_MIX_SCORE = 0.566 // Corpus mode retains its original weights.
 
   it('familiarity is 1.0 for a seeded row, 0.7 for a seed-artist row, 0 otherwise — every other term unchanged', async () => {
     const db = await createTestDb()

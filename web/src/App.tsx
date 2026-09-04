@@ -572,7 +572,9 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
     setPlaylistBusy(true)
     setPlaylistError('')
     try {
-      await musicKit.createPlaylist(name, ids)
+      await musicKit.createPlaylist(name, ids, (libraryId) => {
+        void api.recordPlaylistCreation(sessionId, libraryId).catch(() => undefined)
+      })
       setDialog(null)
       announce(`“${name}” is now in Apple Music.`)
       void api.recordSessionEvent(sessionId, 'saved_playlist').catch(() => undefined)

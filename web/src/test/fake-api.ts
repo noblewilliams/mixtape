@@ -165,6 +165,7 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
     },
     getMusicKitToken: async () => ({ developerToken: 'fake-developer-token', expiresAt: 1_788_138_000 }),
     recordSessionEvent: async () => ({ ok: true }),
+    recordPlaylistCreation: async () => ({ ok: true }),
     updateSession: async (sessionId, updates) => {
       const session = summaries.find((item) => item.id === sessionId) ?? summaries[0]
       return { session: { ...session, ...updates } }

@@ -351,12 +351,20 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
       await ref.read(authorStoreProvider).write(trimmedAuthor);
     }
     final ids = [for (final t in queue) if (t.appleId != null) t.appleId!];
+    final creationApi = ref.read(djApiProvider);
+    final creationSessionId = widget.sessionId;
     try {
       final result = await ref.read(musicKitBridgeProvider).createPlaylist(
             name,
             ids,
             author: author,
             description: 'made by mixtape',
+            onCreated: (libraryId) {
+              // Bind to the originating mix, not a screen/account that may
+              // have changed while Apple was creating the playlist.
+              unawaited(creationApi.recordPlaylistCreation(creationSessionId, libraryId)
+                  .catchError((Object _) {}));
+            },
           );
       // A zero-added save is a false taste signal, not evidence of a like —
       // see _postEvent's doc comment.

@@ -22,6 +22,9 @@ import '../../helpers/fake_listening_api.dart';
 /// individual tests only wire up what they need; unset callbacks throw so a
 /// test exercising an unexpected call fails loudly rather than hanging.
 class FakeDjApi implements DjApi {
+  @override
+  Future<void> recordPlaylistCreation(String sessionId, String appleLibraryId) async {}
+
   Future<SessionDetail> Function(String prompt)? onCreateSession;
   Future<List<DjSession>> Function()? onListSessions;
   Future<SessionDetail> Function(String id)? onGetSession;

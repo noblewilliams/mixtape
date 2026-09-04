@@ -29,6 +29,13 @@ import '../helpers/onboarding_harness.dart' show FakeLinkOpener, expectInteracti
 /// ApiClient), each method delegating to a settable callback that throws
 /// loudly when unset rather than hanging.
 class FakeDjApi implements DjApi {
+  final creationReceipts = <({String sessionId, String libraryId})>[];
+  @override
+  Future<void> recordPlaylistCreation(String sessionId, String appleLibraryId) async {
+    creationReceipts.add((sessionId: sessionId, libraryId: appleLibraryId));
+    throw Exception('receipt upload offline');
+  }
+
   Future<SessionDetail> Function(String prompt)? onCreateSession;
   Future<List<DjSession>> Function()? onListSessions;
   Future<SessionDetail> Function(String id)? onGetSession;
@@ -175,10 +182,12 @@ class FakeBridge implements MusicKitBridge {
     List<String> appleIds, {
     String? author,
     String? description,
+    void Function(String libraryId)? onCreated,
   }) {
     createCalls.add((name: name, ids: appleIds, author: author, description: description));
     final impl = onCreatePlaylist;
-    return impl == null ? Future.value((added: appleIds.length, failed: 0)) : impl(name, appleIds);
+    return (impl == null ? Future.value((added: appleIds.length, failed: 0)) : impl(name, appleIds))
+        .then((result) { onCreated?.call('p.created'); return result; });
   }
 }
 
@@ -838,6 +847,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(api.postedEvents, [(sessionId: 's1', type: 'saved_playlist')]);
+      expect(api.creationReceipts, [(sessionId: 's1', libraryId: 'p.created')]);
     });
 
     testWidgets('a save that added zero tracks posts NO event — a false taste signal', (tester) async {

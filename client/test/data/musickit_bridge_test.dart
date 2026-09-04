@@ -218,6 +218,41 @@ void main() {
   });
 
   group('createPlaylist', () {
+    test('missing or invalid creation IDs stay unknown without failing the save', () async {
+      for (final id in [null, '', 'bad/id', 123]) {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, (_) async => {
+          'added': 1, 'failed': 0, 'appleLibraryId': id,
+        });
+        var called = false;
+        final result = await MusicKitBridge().createPlaylist('Mix', ['111'],
+            onCreated: (_) => called = true);
+        expect(called, isFalse);
+        expect(result, (added: 1, failed: 0));
+      }
+    });
+
+    test('receipt failure does not turn successful creation into a save error', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (_) async => {
+        'added': 1, 'failed': 0, 'appleLibraryId': 'p.created',
+      });
+      expect(await MusicKitBridge().createPlaylist('Mix', ['111'],
+          onCreated: (_) => throw Exception('offline')), (added: 1, failed: 0));
+    });
+
+    test('reports an exact creation ID without changing added/failed counts', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (_) async => {
+        'added': 1, 'failed': 1, 'appleLibraryId': 'p.created',
+      });
+      String? created;
+      final result = await MusicKitBridge().createPlaylist('Mix', ['111', '222'],
+          onCreated: (id) => created = id);
+      expect(created, 'p.created');
+      expect(result, (added: 1, failed: 1));
+    });
+
     test('sends name and appleIds and decodes the added/failed record', () async {
       MethodCall? captured;
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger

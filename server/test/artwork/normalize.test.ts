@@ -41,6 +41,8 @@ describe('parseArtworkMetadata', () => {
     { width: 10, height: 0 },
     { width: 10, height: -1 },
     { width: 1.5, height: 10 },
+    { width: 2147483648, height: 10 },
+    { width: 10, height: Number.MAX_SAFE_INTEGER },
   ])('rejects non-positive or non-integer dimensions: %j', ({ width, height }) => {
     expect(
       parseArtworkMetadata({ url: appleUrl('600x600.jpg'), width, height, bgColor: 'a1b2c3' }),

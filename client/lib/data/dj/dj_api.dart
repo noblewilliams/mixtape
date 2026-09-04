@@ -137,6 +137,11 @@ class DjApi {
   Future<void> postSessionEvent(String sessionId, String type) =>
       _callVoid(() => _client.postJson('/sessions/$sessionId/events', {'type': type}));
 
+  Future<void> recordPlaylistCreation(String sessionId, String appleLibraryId) =>
+      _callVoid(() => _client.postJson('/playlists/creation-receipts', {
+        'sessionId': sessionId, 'appleLibraryId': appleLibraryId,
+      }));
+
   /// `GET /me/memories` — newest-first, capped at 50 server-side.
   Future<List<DjMemory>> listMemories() => _call(
         () => _client.getJson('/me/memories'),

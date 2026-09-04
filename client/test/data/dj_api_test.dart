@@ -560,6 +560,15 @@ void main() {
   });
 
   group('postSessionEvent', () {
+    test('records the exact playlist ID against the originating mix', () async {
+      final inner = MockClient((req) async {
+        expect(req.method, 'POST');
+        expect(req.url.path, '/playlists/creation-receipts');
+        expect(jsonDecode(req.body), {'sessionId': 's1', 'appleLibraryId': 'p.created'});
+        return http.Response('{"ok":true}', 200);
+      });
+      await _api(inner: inner).recordPlaylistCreation('s1', 'p.created');
+    });
     test('POSTs {type} to /sessions/:id/events, resolves void on {ok:true}', () async {
       String? seenMethod;
       Uri? seenUrl;

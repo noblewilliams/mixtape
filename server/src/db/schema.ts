@@ -828,6 +828,21 @@ export const listeningImportArtists = pgTable(
   ],
 )
 
+// Independent of snapshots: a creation receipt can precede the first sync.
+// Missing evidence is unknown, never proof of user curation.
+export const playlistOrigins = pgTable('playlist_origins', {
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  source: text('source', { enum: ['apple', 'spotify_export'] }).notNull(),
+  libraryId: text('library_id').notNull(),
+  origin: text('origin', { enum: ['mixtape', 'user_confirmed'] }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  primaryKey({ columns: [t.userId, t.source, t.libraryId] }),
+  check('playlist_origins_source_check', sql`${t.source} IN ('apple', 'spotify_export')`),
+  check('playlist_origins_origin_check', sql`${t.origin} IN ('mixtape', 'user_confirmed')`),
+  check('playlist_origins_library_id_check', sql`char_length(${t.libraryId}) BETWEEN 1 AND 500`),
+])
+
 export const userPlaylists = pgTable(
   'user_playlists',
   {
@@ -912,6 +927,9 @@ export const playlistEntries = pgTable(
     uniqueIndex('playlist_entries_playlist_library_entry_idx')
       .on(t.playlistId, t.appleLibraryEntryId),
     index('playlist_entries_track_idx').on(t.trackId).where(sql`${t.trackId} IS NOT NULL`),
+    index('playlist_entries_unresolved_catalog_idx')
+      .on(t.appleCatalogId, t.playlistId)
+      .where(sql`${t.trackId} IS NULL AND ${t.appleCatalogId} IS NOT NULL`),
     check('playlist_entries_position_nonnegative_check', sql`${t.position} >= 0`),
     check('playlist_entries_spotify_id_check', spotifyIdOrNullSql(t.spotifyId)),
     check(
@@ -930,6 +948,30 @@ export const playlistEntries = pgTable(
       'playlist_entries_artwork_height_positive_check',
       positiveOrNullSql(t.artworkHeightSnapshot),
     ),
+  ],
+)
+
+// Global lookup state for public catalog IDs; no user/library IDs or metadata.
+// A lease token fences late completions after a crashed worker's lease expires.
+export const playlistCatalogLookups = pgTable(
+  'playlist_catalog_lookups',
+  {
+    storefront: text('storefront').notNull(),
+    appleId: text('apple_id').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    lastCategory: text('last_category').notNull().default('pending'),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull(),
+    leaseToken: uuid('lease_token').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.storefront, t.appleId] }),
+    check('playlist_catalog_lookups_storefront_check', sql`${t.storefront} ~ '^[a-z]{2}$'`),
+    check('playlist_catalog_lookups_apple_id_check', sql`${t.appleId} ~ '^[A-Za-z0-9._~-]{1,128}$'`),
+    check('playlist_catalog_lookups_attempts_check', sql`${t.attempts} >= 0`),
+    check('playlist_catalog_lookups_category_check', sql`${t.lastCategory} IN (
+      'pending', 'no_match', 'rate_limit', 'authorization', 'upstream', 'timeout', 'network', 'malformed', 'internal'
+    )`),
   ],
 )
 

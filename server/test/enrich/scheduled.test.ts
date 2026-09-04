@@ -4,8 +4,36 @@ import { okDeps } from '../helpers/enrich-fixtures'
 import { handleScheduled, CRON_BATCH } from '../../src/enrich/scheduled'
 import { tracks, trackFeatures } from '../../src/db/schema'
 import type { ArtworkRunResult } from '../../src/artwork/runner'
+import type { PlaylistCatalogResult } from '../../src/playlists/catalog-resolution'
+
+const emptyCatalog: PlaylistCatalogResult = { processed: 0, matched: 0, missing: 0, failed: 0, linkedEntries: 0 }
 
 describe('handleScheduled', () => {
+  it('resolves playlist catalog identities before existing enrichment and artwork work', async () => {
+    const db = await createTestDb()
+    const order: string[] = []
+    const catalog = { getSongs: async () => new Map() }
+    const playlistCatalog = vi.fn(async () => { order.push('catalog'); return emptyCatalog })
+    const enrichment = vi.fn(async () => { order.push('enrichment'); return { processed: 0, features: 0, meaning: 0, remaining: 0 } })
+    const artwork = vi.fn(async () => { order.push('artwork'); return { processed: 0, matched: 0, missing: 0, failed: 0, remaining: 0 } })
+    const result = await handleScheduled(db, { enrichment: okDeps, artwork: { storefront: 'ng', catalog } },
+      { playlistCatalog, enrichment, artwork })
+    expect(order).toEqual(['catalog', 'enrichment', 'artwork'])
+    expect(result.playlistCatalog).toEqual(emptyCatalog)
+    expect(playlistCatalog).toHaveBeenCalledWith(db, { catalog, now: undefined })
+  })
+
+  it('keeps existing maintenance running after catalog resolution fails, without returning the error text', async () => {
+    const db = await createTestDb()
+    const playlistCatalog = vi.fn(async () => { throw new Error('SECRET CATALOG SQL') })
+    const artwork = vi.fn(async () => ({ processed: 0, matched: 0, missing: 0, failed: 0, remaining: 0 }))
+    const result = await handleScheduled(db, { artwork: { storefront: 'ng', catalog: { getSongs: async () => new Map() } } },
+      { playlistCatalog, artwork })
+    expect(result.playlistCatalog).toEqual({ error: 'failed' })
+    expect(artwork).toHaveBeenCalledOnce()
+    expect(JSON.stringify(result)).not.toContain('SECRET CATALOG SQL')
+  })
+
   it('processes a small batch', async () => {
     const db = await createTestDb()
     await db.insert(tracks).values({ appleId: 'c1', title: 'T', artist: 'A' })
@@ -46,6 +74,7 @@ describe('handleScheduled', () => {
     expect(result).toEqual({
       enrichment: { error: 'failed' },
       artwork: artworkResult,
+      playlistCatalog: emptyCatalog,
       libraryCleanup: expect.objectContaining({ touchedRuns: 0 }),
       listeningCleanup: expect.objectContaining({ touchedRuns: 0 }),
       playlistCleanup: expect.objectContaining({ touchedRuns: 0 }),
@@ -69,6 +98,7 @@ describe('handleScheduled', () => {
     expect(result).toEqual({
       enrichment: enrichmentResult,
       artwork: { error: 'failed' },
+      playlistCatalog: emptyCatalog,
       libraryCleanup: expect.objectContaining({ touchedRuns: 0 }),
       listeningCleanup: expect.objectContaining({ touchedRuns: 0 }),
       playlistCleanup: expect.objectContaining({ touchedRuns: 0 }),

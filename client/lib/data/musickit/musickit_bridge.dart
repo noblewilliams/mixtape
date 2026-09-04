@@ -619,6 +619,7 @@ class MusicKitBridge {
     List<String> appleIds, {
     String? author,
     String? description,
+    void Function(String libraryId)? onCreated,
   }) async {
     if (name.isEmpty) {
       throw MusicKitException('playlist name cannot be empty');
@@ -645,6 +646,14 @@ class MusicKitBridge {
       final rawFailed = raw?['failed'];
       final added = rawAdded is int ? rawAdded : 0;
       final failed = rawFailed is int ? rawFailed : 0;
+      final libraryId = raw?['appleLibraryId'];
+      if (libraryId is String && RegExp(r'^[A-Za-z0-9._~-]{1,500}$').hasMatch(libraryId)) {
+        try {
+          onCreated?.call(libraryId);
+        } catch (_) {
+          // Apple already created it. Receipt failure must not invite a retry.
+        }
+      }
       return (added: added, failed: failed);
     } on PlatformException catch (e) {
       throw _fromPlatform(e);

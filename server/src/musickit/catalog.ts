@@ -16,6 +16,10 @@ export type CatalogSong = {
   artist: string
   album: string | null
   artwork: ArtworkMetadata | null
+  durationMs?: number | null
+  genre?: string | null
+  releaseYear?: number | null
+  explicit?: boolean | null
 }
 
 export type AppleCatalogClient = {
@@ -65,7 +69,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function parseSong(value: unknown): CatalogSong | null {
-  if (!isRecord(value) || typeof value.id !== 'string' || !isRecord(value.attributes)) return null
+  if (!isRecord(value) || value.type !== 'songs' || typeof value.id !== 'string' || !isRecord(value.attributes)) return null
   const attributes = value.attributes
   if (typeof attributes.name !== 'string' || typeof attributes.artistName !== 'string') return null
 
@@ -76,6 +80,15 @@ function parseSong(value: unknown): CatalogSong | null {
     artist: attributes.artistName,
     album: typeof attributes.albumName === 'string' ? attributes.albumName : null,
     artwork: parseArtworkMetadata(attributes.artwork),
+    durationMs: typeof attributes.durationInMillis === 'number'
+      && Number.isInteger(attributes.durationInMillis)
+      && attributes.durationInMillis > 0 && attributes.durationInMillis <= 2147483647
+      ? attributes.durationInMillis : null,
+    genre: Array.isArray(attributes.genreNames) && typeof attributes.genreNames[0] === 'string'
+      ? attributes.genreNames[0] : null,
+    releaseYear: typeof attributes.releaseDate === 'string' && /^\d{4}(?:-\d{2}-\d{2})?$/.test(attributes.releaseDate)
+      ? Number(attributes.releaseDate.slice(0, 4)) : null,
+    explicit: attributes.contentRating === 'explicit' ? true : attributes.contentRating === 'clean' ? false : null,
   }
 }
 
@@ -192,15 +205,20 @@ export function createAppleCatalogClient({
   return {
     async getSongs(storefront, appleIds) {
       const requestedIds = [...new Set(appleIds.filter(isAppleSongId))]
-      const requested = new Set(requestedIds)
       const songs = new Map<string, CatalogSong>()
 
       for (let offset = 0; offset < requestedIds.length; offset += MAX_IDS_PER_REQUEST) {
-        const payload = await requestBatch(storefront, requestedIds.slice(offset, offset + MAX_IDS_PER_REQUEST))
+        const batch = requestedIds.slice(offset, offset + MAX_IDS_PER_REQUEST)
+        const requested = new Set(batch)
+        const seen = new Set<string>()
+        const payload = await requestBatch(storefront, batch)
         if (!isRecord(payload) || !Array.isArray(payload.data)) {
           throw new AppleCatalogError('response', 200)
         }
         for (const value of payload.data) {
+          if (!isRecord(value) || typeof value.id !== 'string' || !requested.has(value.id)) continue
+          if (seen.has(value.id)) { songs.delete(value.id); continue }
+          seen.add(value.id)
           const parsed = parseSong(value)
           if (parsed && requested.has(parsed.appleId)) songs.set(parsed.appleId, parsed)
         }

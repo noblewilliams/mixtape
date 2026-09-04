@@ -223,12 +223,13 @@ describe('Mixtape web shell', () => {
   it('creates and records an Apple playlist only after the Apple request succeeds', async () => {
     let resolvePlaylist: () => void = () => undefined
     const createPlaylist = vi.fn(
-      () => new Promise<void>((resolve) => {
-        resolvePlaylist = resolve
+      (_name: string, _ids: string[], onCreated?: (id: string) => void) => new Promise<void>((resolve) => {
+        resolvePlaylist = () => { onCreated?.('p.created'); resolve() }
       }),
     )
     const recordSessionEvent = vi.fn(async () => ({ ok: true as const }))
-    const api = createFakeApi({ recordSessionEvent })
+    const recordPlaylistCreation = vi.fn(async () => { throw new Error('offline') })
+    const api = createFakeApi({ recordSessionEvent, recordPlaylistCreation })
     renderApp({ api, musicKit: createFakeMusicKit({ createPlaylist }) })
 
     fireEvent.click(await screen.findByRole('button', { name: 'Connect Apple Music' }))
@@ -239,9 +240,11 @@ describe('Mixtape web shell', () => {
     expect(createPlaylist).toHaveBeenCalledWith(
       'Blue hour, windows down',
       Array.from({ length: 15 }, (_, index) => `apple-${index + 1}`),
+      expect.any(Function),
     )
     expect(recordSessionEvent).not.toHaveBeenCalled()
     await act(async () => resolvePlaylist())
+    expect(recordPlaylistCreation).toHaveBeenCalledExactlyOnceWith('blue-hour', 'p.created')
 
     await waitFor(() => {
       expect(recordSessionEvent).toHaveBeenCalledWith('blue-hour', 'saved_playlist')

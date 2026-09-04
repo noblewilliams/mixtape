@@ -75,6 +75,23 @@ describe('parseArtworkMetadata', () => {
 })
 
 describe('Apple catalog client', () => {
+  it('carries duration, genre, release year and an honest nullable content rating', async () => {
+    const item = song('1')
+    const result = await client(async () => jsonResponse({ data: [{ ...item, attributes: {
+      ...item.attributes, durationInMillis: 180000, genreNames: ['R&B/Soul'],
+      releaseDate: '2024-03-15', contentRating: 'clean',
+    } }, song('2')] })).getSongs('ng', ['1', '2'])
+    expect(result.get('1')).toMatchObject({ durationMs: 180000, genre: 'R&B/Soul', releaseYear: 2024, explicit: false })
+    expect(result.get('2')).toMatchObject({ durationMs: null, genre: null, releaseYear: null, explicit: null })
+  })
+
+  it('rejects ambiguous duplicate IDs and non-song resources instead of choosing a winner', async () => {
+    const result = await client(async () => jsonResponse({ data: [
+      song('1'), song('1'), { ...song('2'), type: 'albums' }, song('3'),
+    ] })).getSongs('ng', ['1', '2', '3'])
+    expect([...result.keys()]).toEqual(['3'])
+  })
+
   it('batches at 300, URL-encodes the storefront, and authenticates each request', async () => {
     const ids = Array.from({ length: 302 }, (_, index) => String(1_000_000_000 + index))
     const fetchLike = vi.fn<FetchLike>(async () => jsonResponse({ data: [] }))

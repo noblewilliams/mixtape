@@ -61,6 +61,7 @@ class FakeBridge with NoPlaylistSnapshots implements MusicKitBridge {
     List<String> appleIds, {
     String? author,
     String? description,
+    void Function(String libraryId)? onCreated,
   }) async =>
       (added: appleIds.length, failed: 0);
 }
@@ -79,6 +80,7 @@ class DeniedBridge with NoPlaylistSnapshots implements MusicKitBridge {
     List<String> appleIds, {
     String? author,
     String? description,
+    void Function(String libraryId)? onCreated,
   }) =>
       throw UnimplementedError();
 }
@@ -108,6 +110,7 @@ class BoomBridge with NoPlaylistSnapshots implements MusicKitBridge {
     List<String> appleIds, {
     String? author,
     String? description,
+    void Function(String libraryId)? onCreated,
   }) async =>
       (added: appleIds.length, failed: 0);
 }

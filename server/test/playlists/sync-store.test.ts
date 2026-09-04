@@ -2,6 +2,7 @@ import { and, eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import {
   playlistEntries,
+  playlistOrigins,
   playlistSyncEntries,
   playlistSyncPlaylists,
   playlistSyncRuns,
@@ -16,6 +17,7 @@ import {
 } from '../../src/playlists/sync-store'
 import type { PlaylistEntrySnapshot, PlaylistSnapshot } from '../../src/playlists/contracts'
 import { createTestDb, type TestDb } from '../helpers/db'
+import { createPlaylistBrowseStore } from '../../src/playlists/browse-store'
 
 const now = new Date('2026-08-31T12:00:00.000Z')
 const SPOTIFY_ID_A = '4uLU6hMCjMI75M1A2tKUQC'
@@ -82,6 +84,20 @@ async function seedUser(db: TestDb, id: string) {
 }
 
 describe('PlaylistSyncStore', () => {
+  it('preserves origin through initial sync, rename, disappearance and reappearance', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await db.insert(playlistOrigins).values({ userId: 'u1', source: 'apple', libraryId: 'p-1', origin: 'mixtape' })
+    const store = createPlaylistSyncStore(db, { now: () => now })
+    const browse = createPlaylistBrowseStore(db)
+    for (const name of ['Initial', 'Renamed', null, 'Returned']) {
+      const run = await store.begin('u1', 'ng', name ? 1 : 0, 0)
+      if (name) await store.putPlaylists('u1', run.syncId, [playlist({ name, entryCount: 0 })])
+      await store.complete('u1', run.syncId)
+      const view = await browse.list('u1', { status: 'all', limit: 10 })
+      expect(view.playlists[0]).toMatchObject({ origin: 'mixtape', inLibrary: name !== null })
+    }
+  })
   it('publishes ordered duplicates and resolves catalog then unique ISRC', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')

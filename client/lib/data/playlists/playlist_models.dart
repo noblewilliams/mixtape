@@ -22,6 +22,7 @@ class PlaylistSummary {
     required this.entryCount,
     required this.inLibrary,
     required this.capability,
+    this.origin = 'unknown',
     this.curatorName,
     this.artworkUrlTemplate,
     this.artworkWidth,
@@ -38,6 +39,8 @@ class PlaylistSummary {
       name: _requiredString(json['name']),
       curatorName: _optionalString(json['curatorName']),
       kind: _requiredString(json['kind']),
+      origin: ['mixtape', 'user_confirmed'].contains(json['origin'])
+          ? json['origin'] as String : 'unknown',
       artworkUrlTemplate: _optionalString(json['artworkUrlTemplate']),
       artworkWidth: _optionalPositiveInt(json['artworkWidth']),
       artworkHeight: _optionalPositiveInt(json['artworkHeight']),
@@ -55,6 +58,7 @@ class PlaylistSummary {
   final String name;
   final String? curatorName;
   final String kind;
+  final String origin;
   final String? artworkUrlTemplate;
   final int? artworkWidth;
   final int? artworkHeight;

@@ -31,6 +31,9 @@ class TestAuthNotifier extends AuthNotifier {
 /// everything else — the onboarding screens never talk to the DJ.
 class BareDjApi implements DjApi {
   @override
+  Future<void> recordPlaylistCreation(String sessionId, String appleLibraryId) async {}
+
+  @override
   Duration get timeout => const Duration(seconds: 120);
 
   @override

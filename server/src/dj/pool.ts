@@ -2,6 +2,7 @@ import { sql, type SQL } from 'drizzle-orm'
 import type { Db } from '../db/types'
 import { EMBEDDING_DIMENSIONS, type Embedder } from '../enrich/embedder'
 import type { Intent } from './contracts'
+import { playlistOriginSql } from '../playlists/origin'
 
 export type PoolTrack = {
   trackId: string
@@ -323,7 +324,13 @@ export async function buildPool(
   // string-interpolated into the query text.
   const vecLiteral = `[${embedding.join(',')}]`
 
-  const weights = FAMILIARITY_WEIGHTS[intent.familiarity]
+  const baseWeights = FAMILIARITY_WEIGHTS[intent.familiarity]
+  // Personal mode reserves 0.10 for confirmed playlist curation. Keep the
+  // learned-taste weight intact and preserve the other preset ratios.
+  const playlistWeight = mode === 'personal' ? 0.10 : 0
+  const scale = (1 - TASTE_WEIGHT - playlistWeight) / PRE_TASTE_SCALE
+  const weights = { sim: baseWeights.sim * scale, feat: baseWeights.feat * scale,
+    fam: baseWeights.fam * scale, taste: baseWeights.taste }
   const poolSize = Math.min(POOL_MULTIPLE * intent.targetCount, MAX_POOL_SIZE)
 
   // Tempo has two distinct shapes, not one:
@@ -377,8 +384,9 @@ export async function buildPool(
 
   // Familiarity is capability-aware. Native syncs use observed lifetime play
   // counts. Web MusicKit cannot supply that number, so web-only rows use the
-  // strongest honest signal available: bounded recent-play rank or deliberate
-  // playlist membership. Missing stays missing; it never becomes a fake zero.
+  // bounded recent-play rank. Playlist evidence lives only in its own taste
+  // term; counting it here too would double its influence for web listeners.
+  // Missing stays missing; it never becomes a fake zero.
   // The play count read here is fam_plays' (see the query), not the row's
   // own user_tracks column: one recording can sit in several tracks rows (a
   // Spotify relink, an Apple reissue), so plays are summed across the
@@ -387,15 +395,13 @@ export async function buildPool(
   // one song are 200 plays of one song, not two half-familiar strangers.
   const observedPlayCountFit = sql`LEAST(1, LN(1 + fp.plays) / ${FAM_REFERENCE_LN})`
   const recentFit = sql`COALESCE(1 - (rs.rank::float8 / 30.0), 0)`
-  // PostgreSQL LEAST ignores NULL operands, so COALESCE(LEAST(0.8, NULL), 0)
-  // would incorrectly return 0.8. Branch before LEAST to keep no signal at 0.
-  const playlistFit = sql`CASE
-    WHEN ps.playlist_count IS NULL THEN 0
-    ELSE LEAST(0.8, LN(1 + ps.playlist_count) / LN(6))
-  END`
+  // One playlist = 0.5, two = 0.75; diminishing returns capped below 1.
+  const playlistFit = mode === 'personal'
+    ? sql`(1 - POWER(0.5::float8, LEAST(10, COALESCE(ps.playlist_count, 0))))`
+    : sql`0`
   const personalFamFit = sql`CASE
     WHEN fp.observed THEN ${observedPlayCountFit}
-    ELSE GREATEST(${recentFit}, ${playlistFit})
+    ELSE ${recentFit}
   END`
   // Corpus mode has no plays worth reading — the listener owns nothing yet —
   // so familiarity is the one place their explicit taste enters the score: a
@@ -421,7 +427,7 @@ export async function buildPool(
   // or punished for silence.
   const tasteFit = sql`(0.5 + 0.5 * TANH(${TASTE_K}::float8 * (COALESCE(at.boosts, 0) - COALESCE(at.penalties, 0))))`
 
-  const scoreExpr = sql`(${weights.sim} * ${simFit} + ${weights.feat} * ${featureFit} + ${weights.fam} * ${famFit} + ${weights.taste} * ${tasteFit})`
+  const scoreExpr = sql`(${weights.sim} * ${simFit} + ${weights.feat} * ${featureFit} + ${weights.fam} * ${famFit} + ${weights.taste} * ${tasteFit} + ${playlistWeight} * ${playlistFit})`
 
   // The mode switch — where candidates come from is the ONE structural
   // difference between the two modes; the score formula (bar the familiarity
@@ -552,13 +558,15 @@ export async function buildPool(
       GROUP BY track_id
     ),
     playlist_signal AS (
-      SELECT pe.track_id, COUNT(DISTINCT pe.playlist_id)::int AS playlist_count
+      SELECT COALESCE(pt.isrc, pt.id::text) AS key, COUNT(DISTINCT pe.playlist_id)::int AS playlist_count
       FROM playlist_entries pe
       JOIN user_playlists up ON up.id = pe.playlist_id
+      JOIN tracks pt ON pt.id = pe.track_id
       WHERE up.user_id = ${userId}
         AND up.in_library = true
-        AND pe.track_id IS NOT NULL
-      GROUP BY pe.track_id
+        AND up.kind IN ('user', 'external', 'user_shared', 'unknown')
+        AND ${playlistOriginSql} = 'user_confirmed'
+      GROUP BY 1
     ),
     -- Candidate rule, the ledger leg (see RECENT_PLAY_* above): tracks this
     -- listener played at least RECENT_PLAY_MIN times, summed across every
@@ -638,7 +646,7 @@ export async function buildPool(
       LEFT JOIN track_meanings tm ON tm.track_id = t.id
       LEFT JOIN artist_taste at ON at.artist = t.artist
       LEFT JOIN recent_signal rs ON rs.track_id = t.id
-      LEFT JOIN playlist_signal ps ON ps.track_id = t.id
+      LEFT JOIN playlist_signal ps ON ps.key = COALESCE(t.isrc, t.id::text)
       LEFT JOIN fam_plays fp ON fp.key = COALESCE(t.isrc, t.id::text)
       WHERE ${whereClause}
     )

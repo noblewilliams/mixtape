@@ -141,6 +141,20 @@
       "when": 1788296791918,
       "tag": "0019_clear_albert_cleary",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1788538229178,
+      "tag": "0020_playlist_catalog_resolution",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1788539591596,
+      "tag": "0021_playlist_origins",
+      "breakpoints": true
     }
   ]
 }

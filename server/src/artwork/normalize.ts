@@ -17,7 +17,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function optionalPositiveInteger(value: unknown): number | null | undefined {
   if (value === undefined || value === null) return null
-  if (!Number.isInteger(value) || (value as number) <= 0) return undefined
+  if (!Number.isInteger(value) || (value as number) <= 0 || (value as number) > 2147483647) return undefined
   return value as number
 }
 

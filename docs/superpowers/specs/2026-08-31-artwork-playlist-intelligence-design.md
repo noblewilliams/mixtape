@@ -440,6 +440,13 @@ Playlist membership is an explicit curation signal, but not all playlists mean t
 
 ### Eligible positive signal
 
+**2026-09-04 implementation refinement:** eligibility also requires explicit
+owner confirmation (`playlist_origins.origin = user_confirmed`), because playlist
+kind/editability does not establish authorship. Exact Mixtape creation receipts
+and the legacy ownership flag always exclude a playlist. Missing origin is
+unknown, not user-created. The confirmation API is implemented separately from
+the future approved browse UI; collection never confirms automatically.
+
 - `kind = user` or equivalent editable user collection.
 - Not an Apple editorial, Replay, chart, or personal-mix playlist.
 - Not automatically counted merely because Mixtape generated it.
@@ -452,6 +459,14 @@ For a track appearing in `n` eligible distinct playlists, use a bounded diminish
 - ten playlists: never enough to overwhelm a direct prompt mismatch.
 
 Add this as a distinct `playlist` term in `buildPool`, initially around 0.08–0.12 of the convex score. Rebalance similarity, features, familiarity, and existing learned taste so all terms still sum to 1. Playlist signal reranks; it never hard-gates the pool.
+
+The initial implementation pins the weight to 0.10 and the curve to
+`1 - 0.5^min(n,10)`, counting distinct playlists per resolved recording (ISRC,
+otherwise track ID). Learned taste remains 0.12; the other personal weights
+retain their proportions over 0.78. Remove playlist membership from familiarity
+to avoid double-counting. Corpus-mode weights and eligibility are unchanged.
+No playlist-only songs enter the personal pool until a separate candidate/seed
+contract is approved. See `../plans/2026-09-04-playlist-origin-taste.md`.
 
 ### Negative and neutral behavior
 
