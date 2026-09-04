@@ -124,7 +124,8 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
           { id: 'created-user', role: 'user', content: prompt, createdAt },
           { id: 'created-dj', role: 'dj', content: 'I made a first pass for this moment.', queueVersion: 1, createdAt },
         ],
-        queue: [],
+        // A created session carries the DJ's first pass, as the real API does.
+        queue: demoQueue.slice(0, 1).map(apiTrack),
       }
       createdSessions.set(created.session.id, created)
       return created
