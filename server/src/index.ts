@@ -5,6 +5,7 @@ import * as schema from './db/schema'
 import { createAuth, parseWebOrigins } from './auth/create-auth'
 import { createApp } from './app'
 import { resolveAndFetchFeatures } from './enrich/reccobeats'
+import { fetchTracksBySpotifyIds, fetchAudioFeaturesBySpotifyIds } from './enrich/reccobeats-by-id'
 import { fetchLyrics } from './enrich/lrclib'
 import { workersAiEmbedder } from './enrich/embedder'
 import type { EnrichDeps } from './enrich/pipeline'
@@ -17,10 +18,14 @@ import {
   createAppleCatalogClient,
   createAppleCatalogTokenCache,
   type AppleCatalogClient,
+  type AppleIsrcCatalogClient,
   type FetchLike,
 } from './musickit/catalog'
 import type { MusicKitWiring } from './app'
 import type { ArtworkDeps } from './artwork/runner'
+import { createSpotifyOEmbedArtworkClient } from './artwork/spotify-oembed'
+import { createDeezerArtworkClient } from './artwork/deezer'
+import type { SpotifyArtworkDeps } from './artwork/spotify-fallback'
 
 // Minimal structural stand-in for the platform's ScheduledController — this
 // project's tsconfig doesn't pull in @cloudflare/workers-types, so the real
@@ -80,6 +85,7 @@ function buildDeps(env: Bindings): EnrichDeps | undefined {
     // library sync. lookupItunes stays for local/P2.5 use.
     itunes: async () => null,
     features: resolveAndFetchFeatures,
+    spotify: { tracks: fetchTracksBySpotifyIds, features: fetchAudioFeaturesBySpotifyIds },
     lyrics: fetchLyrics,
     embed: workersAiEmbedder(env.AI),
   }
@@ -111,7 +117,7 @@ export function buildMusicKit(
   },
   allowedOrigins: string[],
   fetchLike: FetchLike = fetch,
-): (MusicKitWiring & { catalog: AppleCatalogClient }) | undefined {
+): (MusicKitWiring & { catalog: AppleCatalogClient & AppleIsrcCatalogClient }) | undefined {
   const keyId = env.MUSICKIT_KEY_ID
   const privateKey = env.MUSICKIT_PRIVATE_KEY
 
@@ -156,6 +162,15 @@ function buildArtworkDeps(
   }
 }
 
+export function buildSpotifyArtworkDeps(fetchLike: FetchLike = fetch): SpotifyArtworkDeps {
+  return {
+    spotify: createSpotifyOEmbedArtworkClient({ fetchLike }),
+    // Deezer is only attempted after a valid oEmbed miss and only by exact
+    // public ISRC. Its response is never accepted as a track identity write.
+    deezer: createDeezerArtworkClient({ fetchLike }),
+  }
+}
+
 export default {
   async fetch(req: Request, env: Bindings, ctx: ExecutionContext) {
     const { db, pool } = buildDb(env)
@@ -187,11 +202,17 @@ export default {
     const deps = buildDeps(env)
     const musicKit = buildMusicKit(env, [])
     const artwork = buildArtworkDeps(env, musicKit)
+    const spotifyArtwork = buildSpotifyArtworkDeps()
     const { db, pool } = buildDb(env)
     try {
       // Counts and fixed failure markers only — no track/playlist data, Apple payloads,
       // lyric/embedding content, tokens, or exception messages.
-      console.log('maintenance cron', JSON.stringify(await handleScheduled(db, { enrichment: deps, artwork })))
+      console.log('maintenance cron', JSON.stringify(await handleScheduled(db, {
+        enrichment: deps,
+        artwork,
+        appleIsrc: musicKit ? { catalog: musicKit.catalog } : undefined,
+        spotifyArtwork,
+      })))
     } finally {
       ctx.waitUntil(pool.end())
     }

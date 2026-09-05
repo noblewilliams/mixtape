@@ -10,6 +10,7 @@ import {
   userTracks,
 } from '../../src/db/schema'
 import { createListeningImportStore } from '../../src/listening/import-store'
+import { createLibrarySyncStore } from '../../src/library/sync-store'
 import { createTestDb, type TestDb } from '../helpers/db'
 import {
   accountBegin,
@@ -35,6 +36,17 @@ import {
 } from '../helpers/listening-fixtures'
 
 const SEED_ID = 'aaaaaaaaaaaaaaaaaaaaaa'
+
+async function liveApple(db: TestDb) {
+  const store = createLibrarySyncStore(db, { now: () => now })
+  const { syncId } = await store.begin('u1', 'web_musickit', 'ng', 1)
+  await store.putSongs('u1', syncId, [{
+    ordinal: 0, appleLibraryId: 'i.library', appleCatalogId: APPLE_A,
+    title: 'Song', artist: 'Artist', album: null, genre: null, releaseYear: null,
+    explicit: null, playCount: null, lastPlayedAt: null, dateAdded: null,
+  }])
+  await store.complete('u1', syncId)
+}
 
 async function playlist(db: TestDb, source: 'apple' | 'spotify_export', key: string) {
   await db.insert(userPlaylists).values({
@@ -124,7 +136,8 @@ describe('ListeningImportStore.deleteSource', () => {
   it('keeps liked rows for a listener with a live Apple library', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')
-    await db.insert(userMusicSources).values({ userId: 'u1', source: 'apple_live', lastImportedAt: now })
+    await db.insert(tracks).values({ spotifyId: SPOTIFY_A, appleId: APPLE_A, title: 'Song', artist: 'Artist' })
+    await liveApple(db)
     const store = createListeningImportStore(db, { now: () => now })
     await publish(store, 'u1', accountBegin(), {
       tracks: [track(), track({ ordinal: 1, platformId: SPOTIFY_B })],
@@ -166,11 +179,11 @@ describe('ListeningImportStore.deleteSource', () => {
     await expect(store.deleteSource('u1', 'spotify_export')).resolves.toEqual({
       deletedDays: 1,
       deletedTracks: 0,
-      unlibraried: 1,
+      unlibraried: 0,
     })
 
     const rows = await userTracksByPlatform(db, 'u1')
-    expect(rows.get(SPOTIFY_A)).toMatchObject({ playCount: 7, playCountRecent: 2, skipCount: 1, inLibrary: false })
+    expect(rows.get(SPOTIFY_A)).toMatchObject({ playCount: 7, playCountRecent: 2, skipCount: 1, inLibrary: true })
     expect(await db.select().from(listeningDays)).toMatchObject([{ source: 'apple_export', day: d1 }])
   })
 
@@ -250,7 +263,7 @@ describe('ListeningImportStore.deleteSource', () => {
   it('keeps Apple library rows for a listener with a live Apple library', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')
-    await db.insert(userMusicSources).values({ userId: 'u1', source: 'apple_live', lastImportedAt: now })
+    await liveApple(db)
     const store = createListeningImportStore(db, { now: () => now })
     const today = await dbToday(db)
     const d1 = shiftDay(today, -1)

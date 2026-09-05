@@ -19,6 +19,12 @@ import {
   type ListeningImportCleanupResult,
 } from '../listening/cleanup'
 import { runPlaylistCatalogBatch, type PlaylistCatalogResult } from '../playlists/catalog-resolution'
+import { runAppleIsrcBatch, type AppleIsrcDeps, type AppleIsrcResult } from './apple-isrc'
+import {
+  runSpotifyArtworkBatch,
+  type SpotifyArtworkDeps,
+  type SpotifyArtworkResult,
+} from '../artwork/spotify-fallback'
 
 // Same subrequest budget as MAX_BATCH (see routes/enrich.ts); small batches
 // also keep runs well inside the 5-min cadence so overlapping crons stay rare.
@@ -28,11 +34,15 @@ export const ARTWORK_CRON_BATCH = 300
 export type ScheduledDeps = {
   enrichment?: EnrichDeps
   artwork?: ArtworkDeps
+  appleIsrc?: AppleIsrcDeps
+  spotifyArtwork?: SpotifyArtworkDeps
 }
 
 type FailedRun = { error: 'failed' }
 export type ScheduledResult = {
   playlistCatalog?: PlaylistCatalogResult | FailedRun
+  appleIsrc?: AppleIsrcResult | FailedRun
+  spotifyArtwork?: SpotifyArtworkResult | FailedRun
   enrichment?: RunResult | FailedRun
   artwork?: ArtworkRunResult | FailedRun
   playlistCleanup: PlaylistSyncCleanupResult | FailedRun
@@ -42,6 +52,8 @@ export type ScheduledResult = {
 
 type ScheduledRunners = {
   playlistCatalog: typeof runPlaylistCatalogBatch
+  appleIsrc: typeof runAppleIsrcBatch
+  spotifyArtwork: typeof runSpotifyArtworkBatch
   enrichment: typeof runEnrichmentBatch
   artwork: typeof runArtworkBatch
   playlistCleanup: typeof cleanupPlaylistSyncStaging
@@ -56,6 +68,8 @@ export async function handleScheduled(
 ): Promise<ScheduledResult> {
   const result = {} as ScheduledResult
   const runPlaylistCatalog = runners.playlistCatalog ?? runPlaylistCatalogBatch
+  const runAppleIsrc = runners.appleIsrc ?? runAppleIsrcBatch
+  const runSpotifyArtwork = runners.spotifyArtwork ?? runSpotifyArtworkBatch
   const runEnrichment = runners.enrichment ?? runEnrichmentBatch
   const runArtwork = runners.artwork ?? runArtworkBatch
   const runPlaylistCleanup = runners.playlistCleanup ?? cleanupPlaylistSyncStaging
@@ -97,6 +111,27 @@ export async function handleScheduled(
       result.enrichment = await runEnrichment(db, deps.enrichment, CRON_BATCH)
     } catch {
       result.enrichment = { error: 'failed' }
+    }
+  }
+
+  // Newly observed Spotify ISRCs can link in this same pass. Provider failure
+  // does not stop artwork or undo the metadata stage that produced the ISRC.
+  if (deps.appleIsrc) {
+    try {
+      result.appleIsrc = await runAppleIsrc(db, deps.appleIsrc)
+    } catch {
+      result.appleIsrc = { error: 'failed' }
+    }
+  }
+
+  // Apple remains the preferred catalog. Tracks still unlinked after that
+  // stage can receive a fixed Spotify thumbnail, with exact-ISRC Deezer as a
+  // last fallback. This job is independently fenced and failure-isolated.
+  if (deps.spotifyArtwork) {
+    try {
+      result.spotifyArtwork = await runSpotifyArtwork(db, deps.spotifyArtwork)
+    } catch {
+      result.spotifyArtwork = { error: 'failed' }
     }
   }
 

@@ -1,5 +1,6 @@
 import { and, eq, inArray, or, sql } from 'drizzle-orm'
 import type { Db } from '../db/types'
+import { updateLibraryMembership } from '../library/membership'
 import {
   listeningDays,
   listeningImportArtists,
@@ -50,8 +51,8 @@ export type ListeningImportSummary = {
   // Bounds of this source's ledger after the run; null for a package with no days.
   ledgerFrom: string | null
   ledgerTo: string | null
-  // Spotify account re-import: liked rows marked out of the library, or the
-  // removal skipped because a live Apple library owns in_library.
+  // Tracks leaving the combined library on Spotify account re-import.
+  // The compatibility skip field is false for newly completed runs.
   likedRemoved: number
   likedRemovalSkipped: boolean
 }
@@ -282,12 +283,6 @@ function completedSummary(run: Run): ListeningImportSummary {
     likedRemoved: run.resultLikedRemoved,
     likedRemovalSkipped: run.resultLikedRemovalSkipped,
   }
-}
-
-async function hasAppleLive(tx: Db, userId: string) {
-  const rows = await tx.select({ source: userMusicSources.source }).from(userMusicSources)
-    .where(and(eq(userMusicSources.userId, userId), eq(userMusicSources.source, 'apple_live')))
-  return rows.length > 0
 }
 
 // Per-user ledger aggregate, optionally restricted to a set of tracks. Recent
@@ -608,7 +603,7 @@ export function createListeningImportStore(db: Db, deps: StoreDeps = {}): Listen
             coalesce(lb.skip_count, lg.skips),
             lb.like_rating,
             lb.date_added,
-            lb.track_id IS NOT NULL,
+            false,
             false,
             ${now}
           FROM run_tracks rt
@@ -626,33 +621,26 @@ export function createListeningImportStore(db: Db, deps: StoreDeps = {}): Listen
             skip_count = coalesce(excluded.skip_count, user_tracks.skip_count),
             like_rating = coalesce(excluded.like_rating, user_tracks.like_rating),
             date_added = coalesce(user_tracks.date_added, excluded.date_added),
-            in_library = user_tracks.in_library OR excluded.in_library,
             updated_at = excluded.updated_at
         `)
 
-        // 4. Liked tracks no longer in the account package leave the library,
-        // unless a live Apple library owns in_library for this listener.
+        // 4. Account snapshots replace Spotify membership only; Apple media
+        // library rows remain additive. History is never membership evidence.
         let likedRemoved = 0
-        let likedRemovalSkipped = false
+        const likedRemovalSkipped = false
+        if (CHUNKS_BY_PACKAGE[run.package].includes('library')) {
+          const removed = await updateLibraryMembership(tx, userId, run.source, {
+            kind: accountPackage ? 'replace' : 'add',
+            trackIds: sql`
+              SELECT rt.track_id
+              FROM listening_import_library l
+              JOIN (${runTracks}) rt ON rt.platform_id = l.platform_id
+              WHERE l.import_id = ${importId}
+            `,
+          }, now)
+          if (accountPackage) likedRemoved = removed
+        }
         if (accountPackage) {
-          if (await hasAppleLive(tx, userId)) {
-            likedRemovalSkipped = true
-          } else {
-            likedRemoved = normalizeRows(await tx.execute(sql`
-              UPDATE user_tracks ut
-              SET in_library = false, updated_at = ${now}
-              FROM tracks t
-              WHERE ut.user_id = ${userId}
-                AND ut.track_id = t.id
-                AND t.spotify_id IS NOT NULL
-                AND ut.in_library = true
-                AND NOT EXISTS (
-                  SELECT 1 FROM listening_import_library l
-                  WHERE l.import_id = ${importId} AND l.platform_id = t.spotify_id
-                )
-              RETURNING ut.track_id
-            `)).length
-          }
           // 5. Followed artists seed the pool; a seed keeps the id it has.
           await tx.execute(sql`
             INSERT INTO user_artist_seeds (user_id, name, spotify_id, source, created_at)
@@ -755,6 +743,7 @@ export function createListeningImportStore(db: Db, deps: StoreDeps = {}): Listen
         const tx = rawTx as unknown as Db
         const now = currentTime()
         // Same profile lock as complete(), so the two never interleave.
+        await tx.insert(userMusicProfiles).values({ userId }).onConflictDoNothing()
         await tx.select({ userId: userMusicProfiles.userId }).from(userMusicProfiles)
           .where(eq(userMusicProfiles.userId, userId))
           .for('update')
@@ -785,21 +774,7 @@ export function createListeningImportStore(db: Db, deps: StoreDeps = {}): Listen
               eq(userPlaylists.inLibrary, true),
             ))
         }
-        // The source's tracks leave the library with it, unless a live Apple
-        // library owns in_library for this listener.
-        let unlibraried = 0
-        if (!(await hasAppleLive(tx, userId))) {
-          unlibraried = normalizeRows(await tx.execute(sql`
-            UPDATE user_tracks ut
-            SET in_library = false, updated_at = ${now}
-            FROM tracks t
-            WHERE ut.user_id = ${userId}
-              AND ut.track_id = t.id
-              AND t.${PLATFORM_COLUMNS[source]} IS NOT NULL
-              AND ut.in_library = true
-            RETURNING ut.track_id
-          `)).length
-        }
+        const unlibraried = await updateLibraryMembership(tx, userId, source, { kind: 'remove' }, now)
 
         const deletedTracks = normalizeRows(await tx.execute(sql`
           DELETE FROM user_tracks ut

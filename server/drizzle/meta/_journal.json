@@ -155,6 +155,27 @@
       "when": 1788539591596,
       "tag": "0021_playlist_origins",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1788541633611,
+      "tag": "0022_library_source_ownership",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1788543781650,
+      "tag": "0023_apple_isrc_linking",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1788544718796,
+      "tag": "0024_playlist_session_seeds",
+      "breakpoints": true
     }
   ]
 }

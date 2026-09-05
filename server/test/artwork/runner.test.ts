@@ -76,6 +76,18 @@ async function seed(
 }
 
 describe('runArtworkBatch', () => {
+  it('refreshes one recorded catalog market per pass and keeps the default for legacy tracks', async () => {
+    const db = await createTestDb()
+    const gb = await seed(db, 'gb-song', { createdAt: new Date('2026-01-01T00:00:00Z') })
+    await db.update(tracks).set({ appleCatalogStorefront: 'gb' }).where(eq(tracks.id, gb.id))
+    await seed(db, 'legacy-song', { createdAt: new Date('2026-01-02T00:00:00Z') })
+    const getSongs = vi.fn(async (_storefront: string, ids: readonly string[]) => new Map(ids.map(id => [id, song(id)])))
+    expect(await runArtworkBatch(db, deps(getSongs), 300)).toMatchObject({ processed: 1, matched: 1, remaining: 1 })
+    expect(getSongs).toHaveBeenNthCalledWith(1, 'gb', ['gb-song'])
+    expect(await runArtworkBatch(db, deps(getSongs), 300)).toMatchObject({ processed: 1, matched: 1, remaining: 0 })
+    expect(getSongs).toHaveBeenNthCalledWith(2, 'ng', ['legacy-song'])
+  })
+
   it('selects only Apple tracks with missing or stale artwork in deterministic order', async () => {
     const db = await createTestDb()
     await seed(db, 'third', { createdAt: new Date('2026-01-03T00:00:00Z') })

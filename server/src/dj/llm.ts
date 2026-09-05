@@ -3,7 +3,7 @@ import Anthropic from '@anthropic-ai/sdk'
 export type LlmToolDef = {
   name: string
   description: string
-  input_schema: { type: 'object'; properties: Record<string, unknown>; required?: string[] }
+  input_schema: { type: 'object'; properties: Record<string, unknown>; required?: string[]; additionalProperties?: boolean }
 }
 
 // Assistant content blocks. `thinking` is opaque — Sonnet 5 runs adaptive thinking by

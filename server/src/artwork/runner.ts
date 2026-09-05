@@ -43,6 +43,7 @@ export type ArtworkRunResult = {
 type Candidate = {
   id: string
   apple_id: string
+  storefront: string
 }
 
 function normalizeRows(res: unknown): Record<string, unknown>[] {
@@ -82,7 +83,7 @@ function categoryForError(error: unknown): ArtworkFailureCategory {
   return 'internal'
 }
 
-function retryMs(category: ArtworkFailureCategory): number {
+export function artworkRetryMs(category: ArtworkFailureCategory): number {
   if (category === 'no_match') return ARTWORK_NO_MATCH_RETRY_MS
   if (category === 'malformed') return ARTWORK_MALFORMED_RETRY_MS
   if (category === 'rate_limit') return ARTWORK_RATE_LIMIT_RETRY_MS
@@ -136,7 +137,7 @@ async function persistResults(db: Db, matches: Match[], failures: Failure[], now
           trackId,
           attempts: 1,
           lastCategory: category,
-          nextAttemptAt: new Date(now.getTime() + retryMs(category)),
+          nextAttemptAt: new Date(now.getTime() + artworkRetryMs(category)),
           updatedAt: now,
         })),
       )
@@ -160,8 +161,14 @@ async function runLockedArtworkBatch(
   const now = deps.now?.() ?? new Date()
   const fromWhere = candidateWhere(now)
   const selected = await db.execute(sql`
-    SELECT t.id, t.apple_id
+    WITH market AS (
+      SELECT coalesce(t.apple_catalog_storefront, ${deps.storefront}) AS storefront
+      ${fromWhere}
+      ORDER BY t.created_at, t.id LIMIT 1
+    )
+    SELECT t.id, t.apple_id, coalesce(t.apple_catalog_storefront, ${deps.storefront}) AS storefront
     ${fromWhere}
+      AND coalesce(t.apple_catalog_storefront, ${deps.storefront}) = (SELECT storefront FROM market)
     ORDER BY t.created_at, t.id
     LIMIT ${clampLimit(requestedLimit)}
   `)
@@ -177,7 +184,7 @@ async function runLockedArtworkBatch(
 
   try {
     const songs = await deps.catalog.getSongs(
-      deps.storefront,
+      candidates[0].storefront,
       candidates.map((candidate) => candidate.apple_id),
     )
     for (const candidate of candidates) {

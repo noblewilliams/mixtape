@@ -123,7 +123,7 @@ Extends the table in the web sync and consumption spec. Missing is still not zer
 | Hour-of-day | No | No | Yes | Only if Daily Tracks carries `Hours` |
 | Like / dislike | No | No | No | Library songs |
 | Duration | Yes | Yes | Derived from complete plays, else ReccoBeats | Yes |
-| Artwork | Apple catalog | Apple catalog | Apple catalog via ISRC, else oEmbed | Apple catalog |
+| Artwork | Apple catalog | Apple catalog | Apple catalog via ISRC, else oEmbed then exact-ISRC Deezer | Apple catalog |
 | Playback | System player | MusicKit on the Web | Links, embed where it works | Existing |
 
 Export rows with ledger data enter `user_tracks` with `play_count_observed = true`, so the familiarity term takes the native branch with no scoring change. An account-data-only import leaves `play_count_observed = false`, and familiarity falls back to playlist membership exactly as it does for web MusicKit listeners.
@@ -332,7 +332,7 @@ Complete, in one transaction:
 
 1. Upsert `tracks` on `spotify_id` or `apple_id`. Export title and artist win on insert; on an existing row, artist is kept if enrichment has already corrected it (see Enrichment); album and duration coalesce.
 2. Upsert `listening_days` on `(user_id, source, track_id, day)`, replacing values. Delete this source's day rows for tracks in the run that the run no longer covers.
-3. Recompute `user_tracks` for every track in the run: `play_count` = lifetime counted plays across sources, merged with `greatest()` against native counts as today; `play_count_recent` = counted plays in the last 730 days; `play_count_observed = true` when any ledger row exists for the track, else unchanged; `last_played_at` = latest day; `skip_count` from the ledger or the Apple library row; `like_rating` from the Apple library row. Apple library rows and Spotify liked tracks set `in_library = true` (and `date_added` when known). A re-import of the Spotify account package marks liked tracks no longer present `in_library = false`, mirroring library-sync removal. Followed artists upsert into `user_artist_seeds` with source `spotify_export`.
+3. Recompute `user_tracks` for every track in the run: `play_count` = lifetime counted plays across sources, merged with `greatest()` against native counts as today; `play_count_recent` = counted plays in the last 730 days; `play_count_observed = true` when any ledger row exists for the track, else unchanged; `last_played_at` = latest day; `skip_count` from the ledger or the Apple library row; `like_rating` from the Apple library row. Apple library rows and Spotify liked tracks record per-source membership (and `date_added` when known). `in_library` is true while any membership remains. A Spotify account re-import replaces only `spotify_export` membership; completed live Apple snapshots replace only `apple_live`; Apple media imports remain additive. Removing an export removes only its memberships, never inferring ownership from global provider IDs. `likedRemoved` counts tracks leaving the combined library, and the compatibility `likedRemovalSkipped` flag is false for new runs. Followed artists upsert into `user_artist_seeds` with source `spotify_export`.
 4. Upsert `user_music_sources` for this source with `last_imported_at`, `ledger_from`, `ledger_to`, and update `country` and `time_zone` on the profile.
 5. Queue enrichment for the run's tracks in pool order (see Enrichment).
 
@@ -347,6 +347,7 @@ Interrupted, expired, or count-mismatched runs leave canonical state untouched.
 - `user_tracks`: add `play_count_recent`, `skip_count` nullable, `like_rating` nullable, `seeded boolean default false`.
 - `user_artist_seeds`: `user_id`, `name`, `spotify_id` nullable, `source` (`interview` | `pasted` | `spotify_export`), `created_at`. Unique `(user_id, name)`.
 - Playlist tables: the existing `user_playlists`, `playlist_entries`, and their staging tables, with `source` gaining `spotify_export` and entries gaining `spotify_id`.
+- `user_track_library_sources` (migration 0022, local): primary key `(user_id, track_id, source)` and cascading foreign key to `user_tracks`; source is `apple_live`, `apple_export`, `spotify_export`, or `legacy`. Each saved-library writer updates this evidence and the derived `in_library` flag atomically under the listener-profile lock. Existing saved rows are preserved as `legacy` because source provenance was not stored; source removal and sync do not retire unknown legacy membership. Explicit historical reconciliation remains separate work.
 - `user_music_sources`: `user_id`, `source` (`apple_live` | `apple_export` | `spotify_export`, later relay values), `connected_at`, `last_imported_at`, `ledger_from`, `ledger_to`. Primary key `(user_id, source)`. Replaces the idea of a single platform column.
 - `user_music_profiles`: add `country`, `time_zone`; make `apple_storefront` nullable.
 - `dj_sessions.not_personal boolean default false`.
@@ -392,6 +393,60 @@ No scoring change beyond that in this delivery. Skip rate, completion, like rati
 
 Apple export rows already carry a catalog id and need nothing new.
 
+**Phase 3 first slice, 2026-09-04 (local implementation).** Spotify-ID metadata
+and audio-feature adapters now run before text matching. The existing runner
+shares lazy lookups across its eligible batch, with requests capped at 40 IDs;
+cached/exhausted feature stages retain their existing skip behavior. Credited
+artists replace export/sync credits only, while concurrent catalog or ReccoBeats
+corrections and existing ISRC/duration are preserved. The effective artist and
+duration feed the same pass's LRCLIB lookup. Metadata correction survives a
+feature-request failure; absent results may fall back to text matching, while
+upstream errors use the existing bounded retry path. No listener membership or
+platform IDs change. Completed/exhausted historical tracks are not automatically
+reset; a backfill is a separate reviewed operation. The later local source-ownership
+and Apple ISRC slices below build on this without resetting completed enrichment.
+Plan and validation:
+`../plans/2026-09-04-spotify-id-enrichment.md`.
+
+**Apple ISRC linking, 2026-09-04 (local implementation).** After source-safe
+membership (migration 0022), migration 0023 adds `apple_isrc_lookups` keyed by
+track/storefront/ISRC and nullable `tracks.apple_catalog_storefront`. The user
+approved storefront selection: persisted Apple storefront first, otherwise the
+listener's import country in lowercase; defer if neither is known. No global
+fallback is used for these identity lookups.
+
+The new maintenance stage runs after Spotify metadata enrichment and before
+artwork, claims at most 25 Spotify tracks in one market, and requires a completed
+Spotify source plus a user-track row. Exact ISRC lookup preserves multiple
+results and rejects malformed or paginated responses. A single exact result
+links only if the Apple ID is unowned. Conflicts leave both canonical rows and
+all listener data intact; a uniqueness race is contained to its update. Missing
+metadata and validated artwork are filled without replacing existing values.
+Five-minute leases are fenced on completion; no network request holds this
+resolver's transaction open. Current source, storefront, and identity are
+rechecked, and fixed-category retries are bounded. Artwork refresh selects one
+recorded catalog market per pass, retaining the configured default only for
+older rows without a recorded market. Existing artwork locking is unchanged.
+Plan/verification: `../plans/2026-09-04-apple-isrc-linking.md`.
+
+**Fallback artwork, 2026-09-04 (local implementation).** After Apple ISRC
+linking, a bounded maintenance job claims at most three active Spotify records
+without an Apple ID or artwork. It requests the official oEmbed endpoint by exact
+Spotify ID, validates a fixed Spotify CDN thumbnail, and tries Deezer only after
+a valid miss and only by exact ISRC. A Deezer response must repeat that ISRC and
+use its expected cover CDN; it never creates identity. Provider bodies and music
+metadata are neither logged nor persisted as errors. Five-minute fenced claims,
+bounded retries, 5-second requests, 256 KiB bodies, current-source/identity
+rechecks, and conditional writes protect concurrent maintenance and imports.
+Apple linking clears older fallback retry state. No network request holds a
+database transaction. Plan/verification:
+`../plans/2026-09-04-spotify-fallback-artwork.md`.
+
+Phase 3 is now implemented locally. Cross-linking and fallback artwork do not
+merge recording rows, infer library membership, or promise playback availability
+in every storefront. Spotify/Deezer Worker-runtime smoke, deployment, and
+real-export/device checks remain separate release gates.
+
 ## Error and privacy posture
 
 - No server endpoint accepts a file. The archive never leaves the device.
@@ -428,7 +483,6 @@ Apple export rows already carry a catalog id and need nothing new.
 - Whether current `Playlist*.json` files carry playlist URIs; the fingerprint key stands in until they do.
 - Whether Apple's nested archive is stored or deflated, which decides whether random access reaches inside it.
 - ReccoBeats by-id batch limit is 40 (probed 2026-09-01: 41 ids returns HTTP 400 "size must be between 1 and 40"). Rate limits are still unknown.
-- Which storefront to use for Apple catalog lookups on behalf of a Spotify listener.
 - oEmbed behavior from datacenter IPs at batch volume.
 - Relay probe: ListenBrainz's Spotify import latency and completeness, its API terms for a commercial app, Last.fm's commercial terms, and how well name-only listens resolve to our tracks.
 - All five embed-player probe questions above.

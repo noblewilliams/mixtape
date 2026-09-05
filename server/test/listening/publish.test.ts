@@ -324,7 +324,7 @@ describe('ListeningImportStore.complete', () => {
     await expect(store.complete('u1', importId)).resolves.toEqual(summary)
   })
 
-  it('keeps liked rows for a listener with a live Apple library and says so', async () => {
+  it('reconciles Spotify likes even when an Apple connection exists', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')
     await db.insert(userMusicSources).values({ userId: 'u1', source: 'apple_live', lastImportedAt: now })
@@ -341,10 +341,10 @@ describe('ListeningImportStore.complete', () => {
       artists: [artist()],
     })
 
-    expect(summary).toMatchObject({ likedRemoved: 0, likedRemovalSkipped: true })
+    expect(summary).toMatchObject({ likedRemoved: 1, likedRemovalSkipped: false })
     const rows = await userTracksByPlatform(db, 'u1')
-    expect(rows.get(SPOTIFY_B)?.inLibrary).toBe(true)
-    expect(await runRow(db, importId)).toMatchObject({ resultLikedRemoved: 0, resultLikedRemovalSkipped: true })
+    expect(rows.get(SPOTIFY_B)?.inLibrary).toBe(false)
+    expect(await runRow(db, importId)).toMatchObject({ resultLikedRemoved: 1, resultLikedRemovalSkipped: false })
     await expect(store.complete('u1', importId)).resolves.toEqual(summary)
   })
 

@@ -3,6 +3,7 @@ import type { Db } from '../db/types'
 import { EMBEDDING_DIMENSIONS, type Embedder } from '../enrich/embedder'
 import type { Intent } from './contracts'
 import { playlistOriginSql } from '../playlists/origin'
+import { MAX_PROFILE_RECORDINGS, MAX_PROFILE_RECORDINGS_PER_ARTIST } from '../playlists/seed'
 
 export type PoolTrack = {
   trackId: string
@@ -34,7 +35,10 @@ export type PoolModeResolution = {
   seedArtists: number
 }
 
-export type BuildPoolOptions = { mode?: PoolMode }
+export type BuildPoolOptions = {
+  mode?: PoolMode
+  playlistSeed?: { playlistId: string; excludeSourceTracks: boolean }
+}
 
 // Candidate rule, personal mode (spec 2026-09-01 → Pool): a user_tracks row
 // is a candidate when it is in the library, was seeded (pasted/interview),
@@ -310,6 +314,7 @@ export async function buildPool(
   options: BuildPoolOptions = {},
 ): Promise<PoolTrack[]> {
   const mode: PoolMode = options.mode ?? 'personal'
+  const selectedPlaylistId = options.playlistSeed?.playlistId ?? null
   const embedding = await embed(intent.themes)
   // Defensive shape guard before the embedding touches SQL at all — the error
   // deliberately excludes the values themselves (only the length), since a
@@ -328,7 +333,8 @@ export async function buildPool(
   // Personal mode reserves 0.10 for confirmed playlist curation. Keep the
   // learned-taste weight intact and preserve the other preset ratios.
   const playlistWeight = mode === 'personal' ? 0.10 : 0
-  const scale = (1 - TASTE_WEIGHT - playlistWeight) / PRE_TASTE_SCALE
+  const seedWeight = selectedPlaylistId ? 0.15 : 0
+  const scale = (1 - TASTE_WEIGHT - playlistWeight - seedWeight) / PRE_TASTE_SCALE
   const weights = { sim: baseWeights.sim * scale, feat: baseWeights.feat * scale,
     fam: baseWeights.fam * scale, taste: baseWeights.taste }
   const poolSize = Math.min(POOL_MULTIPLE * intent.targetCount, MAX_POOL_SIZE)
@@ -427,7 +433,20 @@ export async function buildPool(
   // or punished for silence.
   const tasteFit = sql`(0.5 + 0.5 * TANH(${TASTE_K}::float8 * (COALESCE(at.boosts, 0) - COALESCE(at.penalties, 0))))`
 
-  const scoreExpr = sql`(${weights.sim} * ${simFit} + ${weights.feat} * ${featureFit} + ${weights.fam} * ${famFit} + ${weights.taste} * ${tasteFit} + ${playlistWeight} * ${playlistFit})`
+  // A selected playlist is soft context, never a hard rule. Every axis is
+  // centred at 0.5 when absent so enrichment success alone is not a boost.
+  // The profile is computed inside Postgres from one row per recording; no
+  // private title list or high-dimensional vectors cross into Worker memory.
+  const seedFit = sql`(
+    0.45 * COALESCE(GREATEST(0, 1 - (tm.embedding <=> sp.embedding)), 0.5) +
+    0.20 * COALESCE(1 - LEAST(1, ABS(f.tempo - sp.tempo) / 60.0), 0.5) +
+    0.15 * COALESCE(1 - LEAST(1, ABS(f.energy - sp.energy)), 0.5) +
+    0.10 * CASE WHEN lower(btrim(t.artist)) = ANY(sp.artists) THEN 1 ELSE 0.5 END +
+    0.05 * CASE WHEN lower(btrim(t.genre)) = ANY(sp.genres) THEN 1 ELSE 0.5 END +
+    0.05 * COALESCE(1 - LEAST(1, ABS(t.release_year - sp.release_year) / 30.0), 0.5)
+  )`
+
+  const scoreExpr = sql`(${weights.sim} * ${simFit} + ${weights.feat} * ${featureFit} + ${weights.fam} * ${famFit} + ${weights.taste} * ${tasteFit} + ${playlistWeight} * ${playlistFit} + ${seedWeight} * ${seedFit})`
 
   // The mode switch — where candidates come from is the ONE structural
   // difference between the two modes; the score formula (bar the familiarity
@@ -486,6 +505,9 @@ export async function buildPool(
       SELECT COALESCE(x.isrc, x.id::text) FROM tracks x WHERE x.id IN (${ids})
     )`)
   }
+  if (selectedPlaylistId && options.playlistSeed?.excludeSourceTracks) {
+    filters.push(sql`COALESCE(t.isrc, t.id::text) NOT IN (SELECT key FROM seed_recordings)`)
+  }
 
   const whereClause = sql.join(filters, sql` AND `)
 
@@ -493,7 +515,44 @@ export async function buildPool(
   // candidate rule and the corpus familiarity term respectively); Postgres
   // never evaluates an unreferenced CTE, so the other one costs nothing.
   const res = await db.execute(sql`
-    WITH removal_events AS (
+    WITH seed_deduped AS (
+      SELECT DISTINCT ON (COALESCE(st.isrc, st.id::text))
+        st.*, sf.tempo, sf.energy, sm.embedding,
+        COALESCE(st.isrc, st.id::text) AS recording_key
+      FROM playlist_entries spe
+      JOIN user_playlists sup ON sup.id = spe.playlist_id
+      JOIN tracks st ON st.id = spe.track_id
+      LEFT JOIN track_features sf ON sf.track_id = st.id
+      LEFT JOIN track_meanings sm ON sm.track_id = st.id
+      WHERE spe.playlist_id = ${selectedPlaylistId}::uuid
+        AND sup.user_id = ${userId}
+        AND sup.in_library = true
+      ORDER BY COALESCE(st.isrc, st.id::text), spe.position
+    ),
+    seed_recordings AS (
+      SELECT recording_key AS key FROM seed_deduped
+    ),
+    seed_ranked AS (
+      SELECT seed_deduped.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY lower(btrim(artist))
+          ORDER BY md5(recording_key), recording_key
+        ) AS artist_rank
+      FROM seed_deduped
+    ),
+    seed_tracks AS (
+      SELECT * FROM seed_ranked
+      WHERE artist_rank <= ${MAX_PROFILE_RECORDINGS_PER_ARTIST}
+      ORDER BY md5(recording_key), recording_key
+      LIMIT ${MAX_PROFILE_RECORDINGS}
+    ),
+    seed_profile AS (
+      SELECT AVG(tempo) AS tempo, AVG(energy) AS energy, AVG(release_year) AS release_year, AVG(embedding) AS embedding,
+        ARRAY_AGG(DISTINCT lower(btrim(artist))) FILTER (WHERE artist IS NOT NULL) AS artists,
+        ARRAY_AGG(DISTINCT lower(btrim(genre))) FILTER (WHERE genre IS NOT NULL) AS genres
+      FROM seed_tracks
+    ),
+    removal_events AS (
       SELECT t.artist AS artist, qt.session_id AS session_id, MAX(qt.updated_at) AS ts
       FROM queue_tracks qt
       JOIN dj_sessions ds ON ds.id = qt.session_id
@@ -642,6 +701,7 @@ export async function buildPool(
         t.duration_ms AS duration_ms,
         ${scoreExpr} AS score
       FROM ${candidateSource}
+      CROSS JOIN seed_profile sp
       LEFT JOIN track_features f ON f.track_id = t.id
       LEFT JOIN track_meanings tm ON tm.track_id = t.id
       LEFT JOIN artist_taste at ON at.artist = t.artist

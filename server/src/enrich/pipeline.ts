@@ -6,11 +6,13 @@ import type { ItunesHit } from './itunes'
 import type { AudioFeatures, TrackKey } from './reccobeats'
 import type { LyricsResult, LyricsKey } from './lrclib'
 import type { Embedder } from './embedder'
+import type { SpotifyEnrichSource } from './reccobeats-by-id'
 
 export type EnrichDeps = {
   storefront: string
   itunes: (appleId: string, storefront: string) => Promise<ItunesHit | null>
   features: (key: TrackKey) => Promise<AudioFeatures | null>
+  spotify?: SpotifyEnrichSource
   lyrics: (key: LyricsKey) => Promise<LyricsResult | null>
   embed: Embedder
 }
@@ -61,6 +63,7 @@ export async function enrichTrack(
   // would otherwise strand tracks without a genre forever. Once both are
   // known, later re-runs skip this stage entirely.
   let durationMs = track.durationMs
+  let artist = track.artist
   if (track.appleId && (track.durationMs == null || track.genre == null)) {
     try {
       const hit = await deps.itunes(track.appleId, deps.storefront)
@@ -88,7 +91,33 @@ export async function enrichTrack(
     featuresOutcome = 'skipped'
   } else {
     try {
-      const feats = await deps.features({ title: track.title, artist: track.artist, durationMs })
+      let feats: AudioFeatures | null = null
+      if (track.spotifyId && deps.spotify) {
+        const metadata = await deps.spotify.tracks([track.spotifyId])
+        const hit = metadata.hits.find((item) => item.spotifyId === track.spotifyId)
+        if (hit) {
+          const creditedArtist = hit.artists.join(' & ')
+          // Inspect provenance in the UPDATE, not on the runner's stale row:
+          // an Apple catalog correction may have landed during the lookup.
+          const canCorrect = sql`${creditedArtist !== ''} AND ${tracks.artistSource} IN ('export', 'sync')`
+          const [updated] = await db.update(tracks).set({
+            artist: sql`CASE WHEN ${canCorrect} THEN ${creditedArtist} ELSE ${tracks.artist} END`,
+            artistSource: sql`CASE WHEN ${canCorrect} THEN 'reccobeats' ELSE ${tracks.artistSource} END`,
+            isrc: sql`COALESCE(${tracks.isrc}, ${hit.isrc})`,
+            durationMs: sql`COALESCE(${tracks.durationMs}, ${hit.durationMs})`,
+          }).where(and(eq(tracks.id, track.id), eq(tracks.spotifyId, track.spotifyId)))
+            .returning({ artist: tracks.artist, durationMs: tracks.durationMs })
+          if (updated) {
+            artist = updated.artist
+            durationMs = updated.durationMs
+          }
+        }
+        const result = await deps.spotify.features([track.spotifyId])
+        feats = result.hits.find((item) => item.spotifyId === track.spotifyId)?.features ?? null
+      }
+      // Only absence falls through. Timeouts, malformed responses and 429s
+      // follow the existing failure/retry path without another provider call.
+      feats ??= await deps.features({ title: track.title, artist, durationMs })
       if (feats) {
         const { isrc, matchedDurationMs, ...cols } = feats
         await db
@@ -128,7 +157,7 @@ export async function enrichTrack(
     meaningOutcome = 'skipped'
   } else {
     try {
-      const lyr = await deps.lyrics({ title: track.title, artist: track.artist, album: track.album, durationMs })
+      const lyr = await deps.lyrics({ title: track.title, artist, album: track.album, durationMs })
       if (!lyr || (!lyr.instrumental && !lyr.lyrics)) {
         // Either nothing was found, or what came back has no usable signal
         // (not instrumental, no text) — a silent "ok" here would leave a

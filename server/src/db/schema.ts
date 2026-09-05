@@ -49,6 +49,8 @@ export const tracks = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     appleId: text('apple_id'),
+    // Market where an ISRC match was verified; artwork refresh must reuse it.
+    appleCatalogStorefront: text('apple_catalog_storefront'),
     // Peer of apple_id, never a replacement: one recording may exist as
     // several rows that link by isrc (spec 2026-09-01 → Identity).
     spotifyId: text('spotify_id'),
@@ -82,6 +84,7 @@ export const tracks = pgTable(
       .on(t.spotifyId)
       .where(sql`${t.spotifyId} IS NOT NULL`),
     index('tracks_isrc_idx').on(t.isrc),
+    check('tracks_apple_catalog_storefront_check', storefrontOrNullSql(t.appleCatalogStorefront)),
     index('tracks_enrich_priority_idx').on(t.enrichPriority.desc(), t.createdAt, t.id),
     check('tracks_spotify_id_check', spotifyIdOrNullSql(t.spotifyId)),
     check(
@@ -137,6 +140,31 @@ export const userTracks = pgTable(
     check('user_tracks_play_count_recent_check', sql`${t.playCountRecent} >= 0`),
     check('user_tracks_skip_count_check', nonnegativeOrNullSql(t.skipCount)),
     check('user_tracks_like_rating_check', likeRatingOrNullSql(t.likeRating)),
+  ],
+)
+
+// Catalog IDs never establish which source saved a track for this listener.
+export const userTrackLibrarySources = pgTable(
+  'user_track_library_sources',
+  {
+    userId: text('user_id').notNull(),
+    trackId: uuid('track_id').notNull(),
+    source: text('source', {
+      enum: ['apple_live', 'apple_export', 'spotify_export', 'legacy'],
+    }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.trackId, t.source] }),
+    foreignKey({
+      name: 'user_track_library_sources_user_track_fk',
+      columns: [t.userId, t.trackId],
+      foreignColumns: [userTracks.userId, userTracks.trackId],
+    }).onDelete('cascade'),
+    index('user_track_library_sources_user_source_idx').on(t.userId, t.source),
+    check(
+      'user_track_library_sources_source_check',
+      sql`${t.source} IN ('apple_live', 'apple_export', 'spotify_export', 'legacy')`,
+    ),
   ],
 )
 
@@ -645,9 +673,8 @@ export const listeningImportRuns = pgTable(
     resultDays: integer('result_days'),
     resultLibraryTracks: integer('result_library_tracks'),
     resultArtists: integer('result_artists'),
-    // Spotify account re-import: liked rows marked out of the library, or
-    // skipped (and why the summary says so) for listeners with a live Apple
-    // library, whose in_library the library sync owns.
+    // Spotify re-import summary. Preserve historical skip flags on completed
+    // runs; per-source membership makes the flag false for new runs.
     resultLikedRemoved: integer('result_liked_removed'),
     resultLikedRemovalSkipped: boolean('result_liked_removal_skipped'),
     ledgerFrom: date('ledger_from', { mode: 'string' }),
@@ -894,6 +921,21 @@ export const userPlaylists = pgTable(
   ],
 )
 
+// Selection only: the musical profile is read from the published playlist,
+// never copied into session storage. enabled retains an unavailable tombstone
+// when a source playlist is physically deleted; clearing remains explicit.
+export const sessionPlaylistSeeds = pgTable('session_playlist_seeds', {
+  sessionId: uuid('session_id').primaryKey().references(() => djSessions.id, { onDelete: 'cascade' }),
+  playlistId: uuid('playlist_id').references(() => userPlaylists.id, { onDelete: 'set null' }),
+  enabled: boolean('enabled').notNull().default(false),
+  excludeSourceTracks: boolean('exclude_source_tracks').notNull().default(false),
+  revision: integer('revision').notNull().default(0),
+}, t => [
+  index('session_playlist_seeds_playlist_idx').on(t.playlistId),
+  check('session_playlist_seeds_revision_check', sql`${t.revision} >= 0`),
+  check('session_playlist_seeds_cleared_check', sql`${t.enabled} OR (${t.playlistId} IS NULL AND NOT ${t.excludeSourceTracks})`),
+])
+
 export const playlistEntries = pgTable(
   'playlist_entries',
   {
@@ -953,6 +995,33 @@ export const playlistEntries = pgTable(
 
 // Global lookup state for public catalog IDs; no user/library IDs or metadata.
 // A lease token fences late completions after a crashed worker's lease expires.
+export const appleIsrcLookups = pgTable(
+  'apple_isrc_lookups',
+  {
+    trackId: uuid('track_id').notNull().references(() => tracks.id, { onDelete: 'cascade' }),
+    storefront: text('storefront').notNull(),
+    isrc: text('isrc').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    lastCategory: text('last_category', { enum: [
+      'pending', 'no_match', 'ambiguous', 'conflict', 'malformed', 'rate_limit',
+      'authorization', 'upstream', 'timeout', 'network', 'internal',
+    ] }).notNull().default('pending'),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+    leaseToken: uuid('lease_token').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.trackId, t.storefront, t.isrc] }),
+    check('apple_isrc_lookups_storefront_check', sql`${t.storefront} ~ '^[a-z]{2}$'`),
+    check('apple_isrc_lookups_isrc_check', sql`${t.isrc} ~ '^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$'`),
+    check('apple_isrc_lookups_attempts_check', sql`${t.attempts} >= 0`),
+    check('apple_isrc_lookups_category_check', sql`${t.lastCategory} IN (
+      'pending', 'no_match', 'ambiguous', 'conflict', 'malformed', 'rate_limit',
+      'authorization', 'upstream', 'timeout', 'network', 'internal'
+    )`),
+  ],
+)
+
 export const playlistCatalogLookups = pgTable(
   'playlist_catalog_lookups',
   {

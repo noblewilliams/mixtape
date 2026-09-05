@@ -10,6 +10,8 @@ import { applyOps, getActiveQueue, QueueOpError, QueueVersionConflict } from '..
 import { queueOpsSchema } from '../dj/contracts'
 import { generateSessionTitle } from '../dj/title'
 import { sanitizeTitleText } from '../dj/sanitize'
+import { bodyLimit } from 'hono/body-limit'
+import { createSessionWithPlaylistSeed, initialSeedSchema, PlaylistSeedError, readPlaylistSeed, selectPlaylistSeed, seedSelectionSchema } from '../playlists/seed'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -72,7 +74,7 @@ function djErrorBody(e: DjError, extra: Record<string, unknown> = {}) {
   return { error: e.kind, message: e.message, queue: e.queue, queueVersion: e.queueVersion, sessionTitle: e.sessionTitle, ...extra }
 }
 
-const createSessionSchema = z.object({ prompt: z.string().min(1).max(2000) })
+const createSessionSchema = z.object({ prompt: z.string().min(1).max(2000), playlistSeed: initialSeedSchema.optional() }).strict()
 const messageSchema = z.object({ text: z.string().min(1).max(2000) })
 const queueOpsBodySchema = z.object({
   ops: queueOpsSchema,
@@ -117,8 +119,19 @@ const sessionListColumns = {
 export function sessionRoutes(db: Db, deps: DjDeps) {
   const app = new Hono<{ Variables: AppVars }>()
 
+  app.put('/:id/playlist-seed', bodyLimit({ maxSize: 2048 }), zValidator('json', seedSelectionSchema), async c => {
+    const id = c.req.param('id')
+    if (!isUuid(id)) return c.json({ error: 'not_found' }, 404)
+    try {
+      return c.json({ playlistSeed: await selectPlaylistSeed(db, id, c.get('user').id, c.req.valid('json')) })
+    } catch (e) {
+      if (!(e instanceof PlaylistSeedError)) throw e
+      return c.json({ error: e.kind }, e.kind === 'not_found' ? 404 : 409)
+    }
+  })
+
   app.post('/', zValidator('json', createSessionSchema), async (c) => {
-    const { prompt } = c.req.valid('json')
+    const { prompt, playlistSeed } = c.req.valid('json')
     const userId = c.get('user').id
     const fallbackTitle = titleFromPrompt(prompt)
 
@@ -128,7 +141,13 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
     // than losing their prompt to an LLM hiccup. Starts with the durable
     // truncated-prompt title; replaced below only once the Haiku-generated
     // name (run concurrently with the turn) resolves.
-    const [session] = await db.insert(djSessions).values({ userId, title: fallbackTitle }).returning()
+    let session
+    try {
+      session = await createSessionWithPlaylistSeed(db, userId, fallbackTitle, playlistSeed)
+    } catch (e) {
+      if (e instanceof PlaylistSeedError) return c.json({ error: e.kind }, e.kind === 'not_found' ? 404 : 409)
+      throw e
+    }
     const sessionRef: DjSessionRef = { id: session.id, userId }
 
     // A naming call, not curation (see dj/title.ts) — run CONCURRENTLY with
@@ -199,6 +218,7 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
       session: sessionRow,
       messages,
       queue: turnResult.value.queue,
+      playlistSeed: await readPlaylistSeed(db, session.id, userId),
       // Present ONLY when rename_session actually fired this turn — lets the
       // client adopt the new title without a refetch (see
       // dj_providers.dart's ChatNotifier). Omitted entirely on a no-rename
@@ -252,7 +272,7 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
       getActiveQueue(db, session.id),
     ])
     const messages = newestFirst.reverse()
-    return c.json({ session, messages, queue })
+    return c.json({ session, messages, queue, playlistSeed: await readPlaylistSeed(db, session.id, userId) })
   })
 
   // Archiving is client-side-only bookkeeping — no queue/message side

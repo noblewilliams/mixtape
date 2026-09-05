@@ -1,8 +1,9 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { zValidator } from '@hono/zod-validator'
-import { sql } from 'drizzle-orm'
-import { tracks, userTracks } from '../db/schema'
+import { eq, sql } from 'drizzle-orm'
+import { tracks, userTracks, userMusicProfiles } from '../db/schema'
+import { updateLibraryMembership } from '../library/membership'
 import type { AppVars } from '../app'
 import type { Db } from '../db/types'
 import { isAppleSongId } from '../musickit/apple-id'
@@ -51,10 +52,8 @@ export function ingestRoutes(db: Db) {
     songs.sort((a, b) => (a.appleId < b.appleId ? -1 : 1))
     const userId = c.get('user').id
 
-    // Deliberately non-atomic: neon-http has no transactions. Both stages are
-    // idempotent upserts keyed by stable ids, so a stage-2 failure leaves only
-    // orphaned shared-catalog rows and a client retry converges. Single-CTE
-    // rewrite is a tracked follow-up.
+    // Shared catalog writes are idempotent. Listener state publishes atomically
+    // below; a failure there can leave only harmless unowned catalog rows.
     const trackRows = await db
       .insert(tracks)
       .values(
@@ -86,37 +85,49 @@ export function ingestRoutes(db: Db) {
 
     const idByAppleId = new Map(trackRows.map((t) => [t.appleId, t.id]))
 
-    // dateAdded is intentionally never updated on conflict — it's the date
-    // the track first entered the user's library, and re-syncs shouldn't
-    // move it. inLibrary reconciliation for tracks removed from the device
-    // library is deferred to P2.
-    await db
-      .insert(userTracks)
-      .values(
-        songs.map((s) => {
-          const trackId = idByAppleId.get(s.appleId)
-          if (!trackId) throw new Error(`ingest: no track id returned for ${s.appleId}`)
-          return {
-            userId,
-            trackId,
-            playCount: s.playCount,
-            lastPlayedAt: toDate(s.lastPlayedAt),
-            dateAdded: toDate(s.dateAdded),
-            inLibrary: true,
-          }
-        }),
-      )
-      .onConflictDoUpdate({
-        target: [userTracks.userId, userTracks.trackId],
-        set: {
-          // greatest() ignores NULLs, so a page/retry that lost track of the
-          // play count or last-played date can't clobber a known value.
-          playCount: sql`greatest(${userTracks.playCount}, excluded.play_count)`,
-          lastPlayedAt: sql`greatest(${userTracks.lastPlayedAt}, excluded.last_played_at)`,
-          inLibrary: sql`excluded.in_library`,
-          updatedAt: sql`now()`,
-        },
-      })
+    await db.transaction(async (rawTx) => {
+      const tx = rawTx as unknown as Db
+      await tx.insert(userMusicProfiles).values({ userId }).onConflictDoNothing()
+      await tx.select({ userId: userMusicProfiles.userId }).from(userMusicProfiles)
+        .where(eq(userMusicProfiles.userId, userId)).for('update')
+
+      // dateAdded is intentionally never updated on conflict — it's the date
+      // the track first entered the user's library, and re-syncs shouldn't
+      // move it. This paged endpoint is additive; full snapshots own removal.
+      await tx
+        .insert(userTracks)
+        .values(
+          songs.map((s) => {
+            const trackId = idByAppleId.get(s.appleId)
+            if (!trackId) throw new Error(`ingest: no track id returned for ${s.appleId}`)
+            return {
+              userId,
+              trackId,
+              playCount: s.playCount,
+              lastPlayedAt: toDate(s.lastPlayedAt),
+              dateAdded: toDate(s.dateAdded),
+              inLibrary: false,
+            }
+          }),
+        )
+        .onConflictDoUpdate({
+          target: [userTracks.userId, userTracks.trackId],
+          set: {
+            // greatest() ignores NULLs, so a page/retry that lost track of the
+            // play count or last-played date can't clobber a known value.
+            playCount: sql`greatest(${userTracks.playCount}, excluded.play_count)`,
+            lastPlayedAt: sql`greatest(${userTracks.lastPlayedAt}, excluded.last_played_at)`,
+            updatedAt: sql`now()`,
+          },
+        })
+      await updateLibraryMembership(tx, userId, 'apple_live', {
+        kind: 'add',
+        trackIds: sql`
+          SELECT id AS track_id FROM tracks
+          WHERE apple_id IN (${sql.join(songs.map((s) => sql`${s.appleId}`), sql`,`)})
+        `,
+      }, new Date())
+    })
 
     return c.json({ ingested: songs.length })
   })

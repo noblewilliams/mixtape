@@ -82,6 +82,12 @@ export type RememberPreferenceInput = z.infer<typeof rememberPreferenceInputSche
 // accepted here and capped on write, not rejected outright.
 export const renameSessionInputSchema = z.object({ title: z.string().min(1).max(120) })
 export type RenameSessionInput = z.infer<typeof renameSessionInputSchema>
+export const findPlaylistInputSchema = z.object({ query: z.string().min(1).max(120) }).strict()
+export const setPlaylistSeedInputSchema = z.object({
+  playlistId: z.uuid().nullable(),
+  excludeSourceTracks: z.boolean().default(false),
+  expectedRevision: z.number().int().min(0).max(2147483646),
+}).strict()
 
 // Longhand JSON Schema for the intent fields, shared verbatim between
 // generate_queue's top-level input and edit_queue's swap/extend `intent`
@@ -198,6 +204,19 @@ const renameSessionJsonSchema = Object.freeze({
 })
 
 export const DJ_TOOLS: LlmToolDef[] = [
+  {
+    name: 'find_playlists',
+    description: 'Look up this listener’s active playlists by name before selecting inspiration. Use only when they explicitly refer to a playlist without an exact id. If several plausible matches return, ask which one; never guess.',
+    input_schema: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 120 } }, required: ['query'], additionalProperties: false },
+  },
+  {
+    name: 'set_playlist_inspiration',
+    description: 'Select, replace, or clear the playlist inspiring this ordinary mix. This never edits the playlist or queue. playlistId null clears it. Call only on an explicit request and use the selection revision from context.',
+    input_schema: { type: 'object', properties: {
+      playlistId: { oneOf: [{ type: 'string', format: 'uuid' }, { type: 'null' }] },
+      excludeSourceTracks: { type: 'boolean' }, expectedRevision: { type: 'integer', minimum: 0, maximum: 2147483646 },
+    }, required: ['playlistId', 'expectedRevision'], additionalProperties: false },
+  },
   {
     name: 'generate_queue',
     description:

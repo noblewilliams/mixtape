@@ -1,9 +1,11 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { okDeps, OK_FEATURES } from '../helpers/enrich-fixtures'
 import { runEnrichmentBatch, enrichmentStatus, MAX_ATTEMPTS } from '../../src/enrich/runner'
 import { tracks, trackFeatures, trackMeanings, enrichmentFailures } from '../../src/db/schema'
+import type { EnrichDeps } from '../../src/enrich/pipeline'
+import { EnrichSourceError } from '../../src/enrich/types'
 
 async function seedTracks(db: TestDb, n: number) {
   for (let i = 0; i < n; i++) {
@@ -12,6 +14,85 @@ async function seedTracks(db: TestDb, n: number) {
 }
 
 describe('runEnrichmentBatch', () => {
+  it('shares one metadata/feature batch across Spotify candidates and does not refetch completed tracks', async () => {
+    const db = await createTestDb()
+    const ids = ['4uLU6hMCjMI75M1A2tKUQC', '7ouMYWpwJ422jRcDASZB7P']
+    await db.insert(tracks).values(ids.map((spotifyId, index) => ({
+      spotifyId, title: 'Song', artist: 'Various Artists', artistSource: 'export' as const,
+      enrichPriority: 2 - index,
+    })))
+    const metadata = vi.fn(async (requested: string[]) => ({
+      hits: requested.map((spotifyId) => ({ spotifyId, title: 'Song', artists: ['Credited'], isrc: null, durationMs: 200_000 })),
+      missing: [],
+    }))
+    const features = vi.fn(async (requested: string[]) => ({
+      hits: requested.map((spotifyId) => ({ spotifyId, features: OK_FEATURES })), missing: [],
+    }))
+    const search = vi.fn(okDeps.features)
+    const deps: EnrichDeps = { ...okDeps, features: search, spotify: { tracks: metadata, features } }
+    expect(await runEnrichmentBatch(db, deps, 3)).toEqual({ processed: 2, features: 2, meaning: 2, remaining: 0 })
+    expect(metadata).toHaveBeenCalledExactlyOnceWith(ids)
+    expect(features).toHaveBeenCalledExactlyOnceWith(ids)
+    expect(search).not.toHaveBeenCalled()
+    expect(await runEnrichmentBatch(db, deps, 3)).toEqual({ processed: 0, features: 0, meaning: 0, remaining: 0 })
+    expect(metadata).toHaveBeenCalledTimes(1)
+    expect(features).toHaveBeenCalledTimes(1)
+  })
+
+  it('omits cached and exhausted Spotify feature stages while Apple candidates use text matching', async () => {
+    const db = await createTestDb()
+    const ids = ['4uLU6hMCjMI75M1A2tKUQC', '7ouMYWpwJ422jRcDASZB7P', '1301WleyT98MSxVHPZCA6M']
+    const rows = await db.insert(tracks).values(ids.map((spotifyId, index) => ({
+      spotifyId, title: 'Song', artist: 'Various Artists', artistSource: 'export' as const,
+      enrichPriority: 3 - index,
+    }))).returning()
+    await db.insert(trackFeatures).values({ trackId: rows[1].id, tempo: 100, source: 'local_preview' })
+    await db.insert(enrichmentFailures).values({ trackId: rows[2].id, stage: 'features', attempts: MAX_ATTEMPTS, error: 'miss' })
+    await db.insert(tracks).values({ appleId: '1440935467', title: 'Apple song', artist: 'Apple artist' })
+    const metadata = vi.fn(async () => ({
+      hits: [{ spotifyId: ids[0], title: 'Song', artists: ['Credited'], isrc: null, durationMs: null }], missing: [],
+    }))
+    const features = vi.fn(async () => ({ hits: [{ spotifyId: ids[0], features: OK_FEATURES }], missing: [] }))
+    const search = vi.fn(okDeps.features)
+    const deps: EnrichDeps = { ...okDeps, features: search, spotify: { tracks: metadata, features } }
+    expect(await runEnrichmentBatch(db, deps, 5)).toEqual({ processed: 4, features: 2, meaning: 4, remaining: 0 })
+    expect(metadata).toHaveBeenCalledExactlyOnceWith([ids[0]])
+    expect(features).toHaveBeenCalledExactlyOnceWith([ids[0]])
+    expect(search).toHaveBeenCalledExactlyOnceWith({ title: 'Apple song', artist: 'Apple artist', durationMs: null })
+    expect(await db.select().from(trackFeatures).where(eq(trackFeatures.trackId, rows[1].id)))
+      .toEqual([expect.objectContaining({ source: 'local_preview', tempo: 100 })])
+    expect(await db.select().from(enrichmentFailures)).toEqual([expect.objectContaining({
+      trackId: rows[2].id, stage: 'features', attempts: MAX_ATTEMPTS,
+    })])
+  })
+
+  it('shares a failed batch once, retries next invocation, and keeps successful meanings', async () => {
+    const db = await createTestDb()
+    const ids = ['4uLU6hMCjMI75M1A2tKUQC', '7ouMYWpwJ422jRcDASZB7P']
+    await db.insert(tracks).values(ids.map((spotifyId) => ({
+      spotifyId, title: 'Song', artist: 'Various Artists', artistSource: 'export' as const,
+    })))
+    const metadata = vi.fn(async (requested: string[]) => ({
+      hits: requested.map((spotifyId) => ({ spotifyId, title: 'Song', artists: ['Credited'], isrc: null, durationMs: null })),
+      missing: [],
+    }))
+    const features = vi.fn(async (requested: string[]) => {
+      if (features.mock.calls.length === 1) throw new EnrichSourceError('reccobeats', 'features HTTP 429', 429)
+      return { hits: requested.map((spotifyId) => ({ spotifyId, features: OK_FEATURES })), missing: [] }
+    })
+    const search = vi.fn(okDeps.features)
+    const deps: EnrichDeps = { ...okDeps, features: search, spotify: { tracks: metadata, features } }
+    expect(await runEnrichmentBatch(db, deps, 3)).toEqual({ processed: 2, features: 0, meaning: 2, remaining: 2 })
+    expect(features).toHaveBeenCalledTimes(1)
+    expect(await db.select().from(enrichmentFailures)).toHaveLength(2)
+    expect(await runEnrichmentBatch(db, deps, 3)).toEqual({ processed: 2, features: 2, meaning: 0, remaining: 0 })
+    expect(features).toHaveBeenCalledTimes(2)
+    expect(metadata).toHaveBeenCalledTimes(2)
+    expect(search).not.toHaveBeenCalled()
+    expect(await db.select().from(enrichmentFailures)).toHaveLength(0)
+    expect(await db.select().from(trackMeanings)).toHaveLength(2)
+  })
+
   it('processes up to limit unenriched tracks and reports remaining', async () => {
     const db = await createTestDb()
     await seedTracks(db, 5)

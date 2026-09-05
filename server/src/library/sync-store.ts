@@ -9,6 +9,7 @@ import {
   userRecentTrackObservations,
 } from '../db/schema'
 import type { LibrarySongSnapshot, LibrarySyncSource } from './contracts'
+import { updateLibraryMembership } from './membership'
 
 export type LibrarySyncErrorCategory =
   | 'not_found'
@@ -330,7 +331,7 @@ export function createLibrarySyncStore(db: Db, deps: StoreDeps = {}): LibrarySyn
           )
           SELECT
             ${userId}, t.id, coalesce(s.play_count, 0), s.play_count IS NOT NULL,
-            s.last_played_at, s.date_added, true, ${now}
+            s.last_played_at, s.date_added, false, ${now}
           FROM library_sync_songs s
           JOIN tracks t ON t.apple_id = s.apple_catalog_id
           WHERE s.sync_id = ${syncId}
@@ -344,21 +345,17 @@ export function createLibrarySyncStore(db: Db, deps: StoreDeps = {}): LibrarySyn
             play_count_observed = user_tracks.play_count_observed OR excluded.play_count_observed,
             last_played_at = greatest(user_tracks.last_played_at, excluded.last_played_at),
             date_added = coalesce(user_tracks.date_added, excluded.date_added),
-            in_library = true,
             updated_at = excluded.updated_at
         `)
-        await tx.execute(sql`
-          UPDATE user_tracks ut
-          SET in_library = false, updated_at = ${now}
-          WHERE ut.user_id = ${userId}
-            AND ut.in_library = true
-            AND NOT EXISTS (
-              SELECT 1
-              FROM library_sync_songs s
-              JOIN tracks t ON t.apple_id = s.apple_catalog_id
-              WHERE s.sync_id = ${syncId} AND t.id = ut.track_id
-            )
-        `)
+        await updateLibraryMembership(tx, userId, 'apple_live', {
+          kind: 'replace',
+          trackIds: sql`
+            SELECT t.id AS track_id
+            FROM library_sync_songs s
+            JOIN tracks t ON t.apple_id = s.apple_catalog_id
+            WHERE s.sync_id = ${syncId}
+          `,
+        }, now)
 
         let recentTracks = 0
         if (run.source === 'web_musickit') {

@@ -36,6 +36,7 @@ const truthy = (v: unknown): boolean => v === true || v === 't' || v === 'true'
 type CandidateRow = {
   id: string
   apple_id: string | null
+  apple_catalog_storefront: string | null
   spotify_id: string | null
   isrc: string | null
   title: string
@@ -61,6 +62,7 @@ function toTrackRow(r: CandidateRow): TrackRow {
   return {
     id: r.id,
     appleId: r.apple_id,
+    appleCatalogStorefront: r.apple_catalog_storefront,
     spotifyId: r.spotify_id,
     isrc: r.isrc,
     title: r.title,
@@ -87,6 +89,24 @@ function toTrackRow(r: CandidateRow): TrackRow {
 
 export type RunResult = { processed: number; features: number; meaning: number; remaining: number }
 
+// Cache only this invocation's pending batch. Each track still receives only
+// its own requested records; a rejected batch is shared too, so an outage
+// cannot trigger another identical request for every track in the batch.
+function batchLookup<T extends { spotifyId: string }>(
+  ids: string[],
+  lookup: (ids: string[]) => Promise<{ hits: T[]; missing: string[] }>,
+) {
+  let pending: ReturnType<typeof lookup> | undefined
+  return async (requested: string[]) => {
+    const result = await (pending ??= lookup(ids))
+    const wanted = new Set(requested)
+    return {
+      hits: result.hits.filter((hit) => wanted.has(hit.spotifyId)),
+      missing: result.missing.filter((id) => wanted.has(id)),
+    }
+  }
+}
+
 export async function runEnrichmentBatch(db: Db, deps: EnrichDeps, limit: number): Promise<RunResult> {
   // skip_* is computed in SQL, not just from row-existence, so a stage that's
   // already burned through MAX_ATTEMPTS is never retried just because the
@@ -105,12 +125,21 @@ export async function runEnrichmentBatch(db: Db, deps: EnrichDeps, limit: number
     LIMIT ${limit}
   `)
   const rows = normalizeRows(selectRes) as unknown as CandidateRow[]
+  const spotifyIds = rows.flatMap((row) =>
+    row.spotify_id && !truthy(row.skip_features) ? [row.spotify_id] : [])
+  const batchDeps: EnrichDeps = deps.spotify && spotifyIds.length > 0 ? {
+    ...deps,
+    spotify: {
+      tracks: batchLookup(spotifyIds, deps.spotify.tracks),
+      features: batchLookup(spotifyIds, deps.spotify.features),
+    },
+  } : deps
 
   let features = 0
   let meaning = 0
   for (const row of rows) {
     const track = toTrackRow(row)
-    const outcome = await enrichTrack(db, deps, track, {
+    const outcome = await enrichTrack(db, batchDeps, track, {
       features: truthy(row.skip_features),
       meaning: truthy(row.skip_meaning),
     })

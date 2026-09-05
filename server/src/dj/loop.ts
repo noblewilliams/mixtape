@@ -11,6 +11,8 @@ import {
   queueOpsSchema,
   rememberPreferenceInputSchema,
   renameSessionInputSchema,
+  findPlaylistInputSchema,
+  setPlaylistSeedInputSchema,
   DJ_TOOLS,
   type Intent,
   type OpIntent,
@@ -19,6 +21,7 @@ import { buildPool, resolvePoolMode, type PoolMode } from './pool'
 import { curate, CurationTruncated, CurationUnparseable } from './curate'
 import { sanitizeForPrompt, sanitizeTitleText } from './sanitize'
 import { insertMemoryNote, MAX_MEMORY_NOTES } from './memory-notes'
+import { findPlaylistSeeds, PlaylistSeedError, playlistSeedContext, readPlaylistSeed, selectPlaylistSeed } from '../playlists/seed'
 import {
   applyOps,
   getActiveQueue,
@@ -390,7 +393,19 @@ async function buildSessionContext(db: Db, sessionId: string, userId: string): P
 
   const memoryBlock = formatMemoryBlock(await loadMemoryNotes(db, userId))
 
-  return [queueLine, removalLine, memoryBlock].filter((l): l is string => l !== null).join('\n')
+  const seedBlock = playlistSeedContext(await readPlaylistSeed(db, sessionId, userId))
+  return [queueLine, removalLine, memoryBlock, seedBlock].filter((l): l is string => l !== null).join('\n')
+}
+
+// Playlist context is deliberately the final context block. A model may select
+// inspiration and generate in the SAME tool-use round, so the curation call
+// cannot reuse the snapshot built at the start of the turn. Replace that final
+// block with a freshly read state instead of appending contradictory context.
+function withPlaylistSeedContext(sessionContext: string, state: Awaited<ReturnType<typeof readPlaylistSeed>>): string {
+  const marker = '\nPlaylist inspiration:'
+  const markerAt = sessionContext.indexOf(marker)
+  const base = markerAt >= 0 ? sessionContext.slice(0, markerAt) : sessionContext
+  return `${base}\n${playlistSeedContext(state)}`
 }
 
 // Wraps a full Intent (as captured off a successful generate_queue call)
@@ -430,6 +445,7 @@ async function executeGenerateQueue(
   rawInput: unknown,
   sessionContext: string,
   budget: CurationBudget,
+  startVersion: number,
 ): Promise<GenerateOutcome> {
   const parsed = intentSchema.safeParse(rawInput)
   if (!parsed.success) {
@@ -446,19 +462,24 @@ async function executeGenerateQueue(
   if (poolMode.mode === 'insufficient_seeds') {
     return { resultText: INSUFFICIENT_SEEDS_TEXT, queueChanged: false, intent }
   }
-  const pool = await buildPool(db, deps.embed, session.userId, intent, undefined, { mode: poolMode.mode })
+  const seed = await readPlaylistSeed(db, session.id, session.userId)
+  if (seed.status !== 'none' && seed.status !== 'ready') return { resultText: `playlist inspiration is ${seed.status.replace('_', ' ')}; ask the listener to choose another playlist or clear it. The queue is unchanged.`, queueChanged: false, intent }
+  const selected = seed.status === 'ready' ? { playlistId: seed.playlistId!, excludeSourceTracks: seed.excludeSourceTracks } : undefined
+  const pool = await buildPool(db, deps.embed, session.userId, intent, undefined, { mode: poolMode.mode, playlistSeed: selected })
   if (pool.length === 0) {
     // Not an error — the model still gets to tell the listener, in its own
     // voice, that nothing matched.
     return { resultText: 'no tracks in the library match those constraints', queueChanged: false, intent }
   }
   budget.consume()
-  const picks = await curate(deps.llm, pool, intent, sessionContext)
+  const picks = await curate(deps.llm, pool, intent, withPlaylistSeedContext(sessionContext, seed))
   const version = await replaceQueue(
     db,
     session.id,
     picks.map((p) => ({ trackId: p.trackId, reason: p.reason })),
     'dj',
+    { queueVersion: startVersion, seedRevision: seed.revision, playlistId: seed.status === 'ready' ? seed.playlistId : null,
+      fingerprint: seed.status === 'ready' ? seed.fingerprint : null },
   )
   // Flagged only once the corpus picks have actually landed in the queue —
   // a session is "not personal" because of what its queue holds, not
@@ -514,6 +535,13 @@ async function executeEditQueue(
   // listener (say, trimming a demo tape) still applies exactly as before.
   const needsPool = ops.some((op) => op.op === 'swap' || op.op === 'extend')
   let poolMode: PoolMode = 'personal'
+  const seed = await readPlaylistSeed(db, session.id, session.userId)
+  if (needsPool && seed.status !== 'none' && seed.status !== 'ready') {
+    return { resultText: `playlist inspiration is ${seed.status.replace('_', ' ')}; ask the listener to choose another playlist or clear it. The queue is unchanged.`, queueChanged: false }
+  }
+  const selectedSeed = seed.status === 'ready'
+    ? { playlistId: seed.playlistId!, excludeSourceTracks: seed.excludeSourceTracks }
+    : undefined
   if (needsPool) {
     const resolved = await resolvePoolMode(db, session.userId)
     if (resolved.mode === 'insufficient_seeds') return { resultText: INSUFFICIENT_SEEDS_TEXT, queueChanged: false }
@@ -556,16 +584,19 @@ async function executeEditQueue(
     // which this provider has no access to) — an acceptable, unlocked phase-1
     // read, same as everything else this provider touches before phase 2.
     const activeQueue = await getActiveQueue(db, session.id)
-    const pool = await buildPool(db, deps.embed, session.userId, fullIntent, activeQueue.map((t) => t.trackId), { mode: poolMode })
+    const pool = await buildPool(db, deps.embed, session.userId, fullIntent, activeQueue.map((t) => t.trackId),
+      { mode: poolMode, playlistSeed: selectedSeed })
     if (pool.length === 0) return [] // shortfall — queue-store leaves the original track(s) in place
     budget.consume()
-    const picks = await curate(deps.llm, pool, fullIntent, sessionContext)
+    const picks = await curate(deps.llm, pool, fullIntent, withPlaylistSeedContext(sessionContext, seed))
     if (poolMode === 'corpus' && picks.length > 0) corpusPicksLanded = true
     return picks.map((p) => ({ trackId: p.trackId, reason: p.reason }))
   }
 
   try {
-    const result = await applyOps(db, session.id, ops, 'dj', provider)
+    const result = await applyOps(db, session.id, ops, 'dj', provider, undefined,
+      needsPool ? { seedRevision: seed.revision, playlistId: seed.status === 'ready' ? seed.playlistId : null,
+        fingerprint: seed.status === 'ready' ? seed.fingerprint : null } : undefined)
     // Same rule as executeGenerateQueue: flagged after the picks landed
     // (applyOps is atomic — a throw above means nothing landed and we never
     // get here), and the model is told in the same result.
@@ -814,7 +845,7 @@ async function attemptTurn(
         // since nothing else about this design is visible from either
         // function's own signature.
         if (call.name === 'generate_queue') {
-          const outcome = await executeGenerateQueue(db, countedDeps, session, call.input, sessionContext, budget)
+          const outcome = await executeGenerateQueue(db, countedDeps, session, call.input, sessionContext, budget, currentVersion)
           resultText = outcome.resultText
           if (outcome.intent) lastGenerateIntent = outcome.intent
           if (outcome.queueChanged) currentVersion = outcome.newVersion!
@@ -822,6 +853,20 @@ async function attemptTurn(
           const outcome = await executeEditQueue(db, countedDeps, session, call.input, userText, lastGenerateIntent, sessionContext, budget)
           resultText = outcome.resultText
           if (outcome.queueChanged) currentVersion = outcome.newVersion!
+        } else if (call.name === 'find_playlists') {
+          const parsed = findPlaylistInputSchema.safeParse(call.input)
+          resultText = parsed.success ? JSON.stringify(await findPlaylistSeeds(db, session.userId, parsed.data.query))
+            : formatZodIssues('invalid find_playlists input', parsed.error)
+        } else if (call.name === 'set_playlist_inspiration') {
+          const parsed = setPlaylistSeedInputSchema.safeParse(call.input)
+          if (!parsed.success) resultText = formatZodIssues('invalid set_playlist_inspiration input', parsed.error)
+          else try {
+            const next = await selectPlaylistSeed(db, session.id, session.userId, parsed.data)
+            resultText = `${playlistSeedContext(next)}\nThe queue is unchanged.`
+          } catch (e) {
+            if (!(e instanceof PlaylistSeedError)) throw e
+            resultText = `playlist inspiration could not be changed (${e.kind.replace('_', ' ')}); the queue is unchanged.`
+          }
         } else if (call.name === 'remember_preference') {
           // No budget.consume() here — see executeRememberPreference's comment:
           // this never calls curate(), so it isn't part of what

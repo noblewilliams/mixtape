@@ -120,13 +120,10 @@ describe('LibrarySyncStore', () => {
   it('soft-removes songs missing from a completed snapshot', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')
-    const [oldTrack] = await db.insert(tracks).values({
-      appleId: 'old-catalog', title: 'Old', artist: 'Artist',
-    }).returning()
-    await db.insert(userTracks).values({
-      userId: 'u1', trackId: oldTrack.id, playCount: 8, playCountObserved: true,
-    })
     const store = createLibrarySyncStore(db, { now: () => now })
+    const previous = await store.begin('u1', 'ios_native', 'ng', 1)
+    await store.putSongs('u1', previous.syncId, [song({ appleCatalogId: 'old-catalog', playCount: 8 })])
+    await store.complete('u1', previous.syncId)
     const { syncId } = await store.begin('u1', 'web_musickit', 'ng', 0)
 
     const first = await store.complete('u1', syncId)

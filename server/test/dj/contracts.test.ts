@@ -6,6 +6,8 @@ import {
   queueOpsSchema,
   rememberPreferenceInputSchema,
   renameSessionInputSchema,
+  findPlaylistInputSchema,
+  setPlaylistSeedInputSchema,
   DJ_TOOLS,
 } from '../../src/dj/contracts'
 
@@ -246,6 +248,7 @@ function matchesJsonSchema(schema: any, value: unknown): boolean {
       if (schema.minLength !== undefined && value.length < schema.minLength) return false
       if (schema.maxLength !== undefined && value.length > schema.maxLength) return false
       if (schema.enum && !schema.enum.includes(value)) return false
+      if (schema.format === 'uuid' && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) return false
       return true
     }
     case 'integer': {
@@ -256,18 +259,22 @@ function matchesJsonSchema(schema: any, value: unknown): boolean {
     }
     case 'boolean':
       return typeof value === 'boolean'
+    case 'null':
+      return value === null
     default:
       return false
   }
 }
 
 describe('DJ_TOOLS', () => {
-  it('defines exactly generate_queue, edit_queue, remember_preference, and rename_session', () => {
+  it('defines the six supported DJ tools', () => {
     expect(DJ_TOOLS.map((t) => t.name).sort()).toEqual([
       'edit_queue',
+      'find_playlists',
       'generate_queue',
       'remember_preference',
       'rename_session',
+      'set_playlist_inspiration',
     ])
   })
 
@@ -283,6 +290,39 @@ describe('DJ_TOOLS', () => {
     expect(Object.isFrozen(rememberPreference.input_schema)).toBe(true)
     const renameSession = DJ_TOOLS.find((t) => t.name === 'rename_session')!
     expect(Object.isFrozen(renameSession.input_schema)).toBe(true)
+  })
+})
+
+const findPlaylistRows: Row[] = [
+  { label: 'name query is valid', sample: { query: 'Late Nights' } },
+  { label: 'empty query is invalid', sample: { query: '' } },
+  { label: 'long query is invalid', sample: { query: 'x'.repeat(121) } },
+  { label: 'missing query is invalid', sample: {} },
+  { label: 'unknown lookup field is invalid', sample: { query: 'Late', guess: true } },
+]
+
+describe('find_playlists: zod and its longhand JSON schema agree', () => {
+  const schema = DJ_TOOLS.find((t) => t.name === 'find_playlists')!.input_schema
+  it.each(findPlaylistRows)('$label', ({ sample }) => {
+    expect(matchesJsonSchema(schema, sample)).toBe(findPlaylistInputSchema.safeParse(sample).success)
+  })
+})
+
+const playlistId = '11111111-1111-4111-8111-111111111111'
+const setPlaylistRows: Row[] = [
+  { label: 'selection is valid', sample: { playlistId, expectedRevision: 0 } },
+  { label: 'selection with exclusion is valid', sample: { playlistId, expectedRevision: 4, excludeSourceTracks: true } },
+  { label: 'clear is valid', sample: { playlistId: null, expectedRevision: 2 } },
+  { label: 'malformed id is invalid', sample: { playlistId: 'not-a-uuid', expectedRevision: 0 } },
+  { label: 'missing revision is invalid', sample: { playlistId } },
+  { label: 'negative revision is invalid', sample: { playlistId, expectedRevision: -1 } },
+  { label: 'unknown selection field is invalid', sample: { playlistId, expectedRevision: 0, guess: true } },
+]
+
+describe('set_playlist_inspiration: zod and its longhand JSON schema agree', () => {
+  const schema = DJ_TOOLS.find((t) => t.name === 'set_playlist_inspiration')!.input_schema
+  it.each(setPlaylistRows)('$label', ({ sample }) => {
+    expect(matchesJsonSchema(schema, sample)).toBe(setPlaylistSeedInputSchema.safeParse(sample).success)
   })
 })
 

@@ -215,3 +215,97 @@ The first follow-on to playlist collection resolves exact Apple catalog IDs from
 The scheduled resolver claims at most 25 IDs in one storefront per run, with a five-minute lease and fenced completion. Relinking is separately capped at 1,000 entries per pass (before lookup and, when a batch was claimed, after completion). Network calls hold no database transaction open. Global retry state contains only public catalog IDs, storefront, and fixed operational categories; misses and failures have bounded retry delays, not permanent exclusion. Removed playlists are rechecked after the catalog request. Concurrent imports retain their canonical metadata. Resolver failure is isolated from existing enrichment and cleanup work.
 
 This is a local implementation milestone: migration 0020 is prepared, not applied. Release requires a reviewed committed snapshot, approval for production migrations/deployment, and a private smoke. Export migrations 0018–0019 have their own rollout gate; do not silently deploy unrelated local work. Spotify enrichment/ISRC cross-linking, richer playlist taste/seeds, browse UI, conversational drafts, and verified native apply are not delivered by this slice. In particular, resolve the documented dual-ID source-deletion issue before cross-platform identity writes.
+
+
+## 2026-09-04 — Saved-library membership belongs to listener sources
+
+Before Phase 3 adds cross-platform identity links, persist the source that saved
+each track for each listener in `user_track_library_sources`. Global Apple and
+Spotify IDs cannot establish ownership. `user_tracks.in_library` is the union
+of surviving memberships. Spotify account snapshots replace Spotify membership;
+completed Apple library snapshots replace live Apple membership; Apple media
+imports and the older paged native ingest remain additive for their own source.
+Deleting an export removes only its membership, leaving another source, seeds,
+and remaining listening history protected. The blanket `apple_live` removal
+bypass is superseded; `likedRemovalSkipped` stays in the wire contract and is
+false for new runs. Previously completed summaries remain unchanged.
+
+Migration 0022 preserves existing saved rows as `legacy`: expiring staging data
+and catalog IDs cannot reconstruct historical ownership reliably. Later source
+removal or sync does not discard those unknown memberships. This favors retaining
+saved music over silently removing it; an explicit historical reconciliation
+flow is owed separately. All membership writes and derived flags publish in one
+transaction under the listener-profile lock, including the paged native endpoint.
+No physical track merge, play-count semantics, playlist-origin cleanup, or UI
+change is included. Plan: `superpowers/plans/2026-09-04-library-source-ownership.md`.
+This is local work; migration application and deployment remain release gates.
+
+
+## 2026-09-04 — Apple ISRC matches use the listener's market
+
+The user approved this rule for Spotify imports: use the listener's saved Apple
+storefront, otherwise their import country in lowercase, and wait if neither is
+known. Do not substitute the founder's Nigerian storefront for unknown users.
+
+A bounded maintenance job queries Apple by exact ISRC. Only one complete,
+validated catalog result may populate an unowned `apple_id`; missing, ambiguous,
+or conflicting results stay unlinked. A unique-index race never overwrites an
+owner or causes a physical track merge. Fill missing metadata and valid artwork
+while preserving existing values and all listener state. Catalog identity does
+not imply availability in every listener's market.
+
+Migration 0023 records the successful `apple_catalog_storefront` on the track,
+which artwork refresh then uses. Existing tracks retain a null value and the
+older artwork fallback setting. Its `apple_isrc_lookups` table separates retries
+by track, ISRC, and storefront, with short fenced claims, fixed error categories,
+and no private source payloads. The ISRC request runs outside a transaction and
+completion rechecks the source, market, and identity. Scheduler failure remains
+isolated from artwork/enrichment/cleanup.
+
+Plan: `superpowers/plans/2026-09-04-apple-isrc-linking.md`. This local slice depends
+on the migration-0022 membership fix. It does not ship Spotify fallback artwork,
+change playlists or session behavior, or bypass migration/deployment approval.
+
+## 2026-09-04 — Playlist inspiration is session context, not taste
+
+An ordinary mix session may explicitly select one active playlist owned by the
+listener as a read-only inspiration source. The selection persists across
+follow-ups and has revision-checked replace/clear semantics. Name lookup is
+literal, active, user-scoped, capped, and ambiguity asks instead of guessing.
+Selecting a playlist never edits it, changes the queue by itself, admits tracks
+outside existing candidate rules, or creates saved-library/play/taste evidence.
+Original source songs may compete unless the listener asks for different songs;
+then every resolved source recording and ISRC sibling is excluded.
+
+The live profile requires 3 resolved recordings and deterministically samples at
+most 200 identities with at most 5 per normalized artist. It adds a bounded 0.15
+pre-limit score while preserving learned taste 0.12 and confirmed-playlist 0.10;
+missing axes are neutral. Prompt constraints win. Playlist-derived context is
+sanitized at USER altitude. Queue commits recheck selection revision, source
+activity/fingerprint, and queue version after curation; an unavailable or changed
+source preserves the current mix. Migration 0024 is local and unreleased.
+
+## 2026-09-04 — Spotify fallback artwork keeps identity exact
+
+For a current Spotify-import track still lacking an Apple ID and artwork after
+Apple ISRC matching, request the official Spotify oEmbed endpoint by exact
+Spotify ID. Store only a strictly validated fixed `i.scdn.co` thumbnail. After a
+valid oEmbed miss, Deezer may be tried only when the track has a valid ISRC; the
+response must repeat that ISRC and expose an allowlisted Deezer cover URL. This
+artwork is display metadata. It never creates an Apple/Deezer identity, merges a
+row, or changes listener membership, plays, taste, playlists, or mixes.
+
+The maintenance job claims at most three priority tracks for five minutes using
+the existing artwork retry state. Attempts fence expired or superseded work.
+Provider calls run outside transactions; completion rechecks the active completed
+Spotify source, Spotify ID, ISRC, Apple ID, existing artwork, and claim before a
+conditional write. Apple linking clears any earlier fallback retry. Requests
+time out after five seconds, response bodies are capped at 256 KiB, and stored
+errors/results contain fixed categories and counts only.
+
+Deezer's exact-ISRC route lacks a stable public reference, and current official
+community guidance says API access requires a token while new access requests
+are closed. It remains a guarded best-effort last fallback until a public-ID-only
+Worker-runtime smoke confirms access and policy. Spotify oEmbed is primary. Plan:
+`superpowers/plans/2026-09-04-spotify-fallback-artwork.md`. The slice adds no
+migration and is local, uncommitted, undeployed, and unprobed against providers.

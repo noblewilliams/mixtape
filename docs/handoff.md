@@ -4,6 +4,49 @@
 
 Read with: `docs/superpowers/specs/2026-09-01-listening-export-import-design.md` (rev 3), the phase plans `docs/superpowers/plans/2026-09-01-listening-export-p1-server.md` and `docs/superpowers/plans/2026-09-02-listening-export-p2-spotify-import.md`, and the 2026-09-01 entry in `docs/decisions.md`.
 
+## Follow-on status — 2026-09-04
+
+Phase 3 is implemented locally. Spotify-ID metadata/features feed the
+existing enrichment pipeline (plan `superpowers/plans/2026-09-04-spotify-id-enrichment.md`).
+Source ownership now has its own plan and migration 0022
+(`superpowers/plans/2026-09-04-library-source-ownership.md`): each source changes
+only its own saved-library memberships; the combined flag stays true if another
+source remains. This fixes dual-ID export deletion and Apple snapshots removing
+Spotify-only saved songs. Existing saved rows become protected `legacy`
+memberships because their historical source is unknown; retiring those rows needs
+explicit reconciliation. The original phase-1 blanket Apple-live skip no longer
+applies to new imports, but completed historical summaries retain their values.
+
+Source ownership is verified locally: the full server suite passed 1,168 tests;
+a final rollout-gap fix then passed 296 focused tests plus typecheck (details
+in its plan). Apple ISRC linking is now implemented locally in
+`superpowers/plans/2026-09-04-apple-isrc-linking.md`, with migration 0023. It uses
+the saved Apple storefront or the listener's import country (user approved),
+defers unknown country, preserves ambiguous/conflicting IDs, and records the
+successful market for artwork refresh. These follow-on changes are uncommitted
+and undeployed. The stable combined server checkpoint passed 67 files / 1,211
+tests, plus typecheck and migration checks; it precedes the separate
+playlist-inspired session work. The final fallback slice is in
+`superpowers/plans/2026-09-04-spotify-fallback-artwork.md`: official Spotify
+oEmbed first, then guarded exact-ISRC Deezer, with fixed CDN URLs, bounded
+provider reads, source-aware fenced claims, and no new migration. Its focused
+checkpoint passed 7 files / 101 tests plus typecheck. After all three sessions
+froze server files, the authoritative combined suite passed **73 files / 1,259
+tests in 192.63s**, including the 0014-to-current migration rehearsal. Current
+Deezer access policy makes that provider best effort until a public-ID-only Worker smoke.
+Real-export validation remains gated on the missing archives.
+The user's requested archives have not arrived. The separate playlist
+catalog/taste task committed its work at `1fb6c92`; do not confuse that committed
+release scope with these local changes.
+
+The separate read-only release preflight found production migrations only
+through 0014 applied. Its report is
+`superpowers/plans/2026-09-04-playlist-release-preflight.md`; the eventual combined
+release therefore needs at least 0015–0024, not only the export migrations listed
+in the original gate below. Re-read the ledger and selected committed migration
+chain at release time. Hold mixed-source rollout for the membership fix and its
+reviewed commit.
+
 ## What this is
 
 Spotify's Web API is closed to us (5 users, Premium only, batch track endpoint gone), so Spotify listeners bring their own data export instead. They request both packages from Spotify (Account data + Extended streaming history), wait for the email, and hand the ZIP to the app. The app parses it on the device, never uploads the archive, and posts only track identities, per-day play counts, liked tracks, followed artists, and playlists through a staged import protocol. The server builds a day ledger and a taste graph from that, the DJ makes mixes from it, and the outputs are API-free: open in Spotify links, copy as text, and a transfer handoff. Before any data lands, a DJ interview plus pasted seed songs let the DJ make a "not personal yet" mix from the shared corpus. Apple export is a later optional "go deeper" step (phase 5).
@@ -74,7 +117,7 @@ Every task ran implementer → adversarial reviewer → fix round. Every finding
 
 ### Later phases (spec "Phasing")
 
-- **Phase 3, enrichment.** ReccoBeats-by-id stage (batch limit 40, verified) with artist correction (`artist_source = 'reccobeats'`), ISRC → Apple catalog cross-link (`filter[isrc]`; storefront choice for Spotify listeners is open), Spotify oEmbed artwork with Deezer fallback. Needs its own plan.
+- **Phase 3, enrichment (implemented locally).** Spotify-ID metadata/features, source ownership, exact Apple ISRC linking, and Spotify oEmbed artwork with guarded exact-ISRC Deezer fallback have their follow-on plans above. Provider/runtime smoke, reviewed release, and real-export validation are still gates.
 - **Phase 4, probes.** Scrobble relay (ListenBrainz or Last.fm as the live feed; terms and latency unknown) and the Spotify iFrame embed player (five open questions in the spec). Each gets a short spec only if it holds. Gated on the funnel showing listeners reach `import_completed` and `first_output`.
 - **Phase 5, Apple "go deeper", web first.** Parser for `Apple Media Services information` (Daily Tracks CSV, Library Tracks JSON, nested archive stored or deflated, random access for a 1 GB archive). The server already accepts `apple_media` runs. iOS build waits for the web proof and funnel evidence.
 
@@ -84,7 +127,7 @@ Server:
 - Playlist entry snapshots carry no `addedAt`, so export playlist added-dates are dropped on the wire until a server field exists.
 - The playlist browse summary does not expose `user_playlists.source` and hardcodes `capability: 'copy_only'`; a mixed Apple + Spotify listing cannot badge per source yet.
 - Playlist sync allows one open run per user across sources; clients must not run an Apple and a Spotify playlist sync concurrently (move the partial unique index to `(user_id, source)` when it matters).
-- Dual-id rows (both `spotify_id` and `apple_id`, rare until phase 3 creates them) are swept by the Spotify liked-removal and delete-source rules even when their membership came from Apple.
+- The committed baseline still has the dual-ID membership deletion defect; the local migration-0022 source-ownership follow-on above resolves it. Deploy that fix before enabling cross-platform identity writes.
 - Re-running the interview appends notes rather than replacing them (default kept in phase 2).
 - `resolvePoolMode` scans the corpus for seed matches on every generate; gate it behind the personal check or index `lower(btrim(artist))` if latency shows it.
 - Staged-days lookup uses a row-value `IN` list of up to 2 000 tuples; switch to `unnest` if import latency shows it.
@@ -101,7 +144,7 @@ Clients:
 
 - A re-import cannot lower a play count; delete-source is the reset.
 - A Spotify account-only import leaves `play_count_observed = false`.
-- Spotify liked-track removal on re-import is skipped for listeners with an `apple_live` source and counted in the summary.
+- Historical phase-1 runs skipped Spotify liked-track removal for listeners with an `apple_live` source. The local source-ownership follow-on supersedes that rule for new runs; source-specific membership is now the protection.
 
 ## Working rules a next session must keep
 

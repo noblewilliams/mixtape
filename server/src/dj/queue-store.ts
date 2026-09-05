@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray, sql } from 'drizzle-orm'
 import type { Db } from '../db/types'
-import { djSessions, queueTracks, tracks } from '../db/schema'
+import { djSessions, queueTracks, sessionPlaylistSeeds, tracks, userPlaylists } from '../db/schema'
 import type { OpIntent, QueueOp } from './contracts'
 
 export type QueueTrackView = {
@@ -62,6 +62,19 @@ export type ApplyOpsResult = {
   added: number // tracks actually inserted (requested minus shortfall/duplicates)
   removed: number // rows marked removed (unconditional `remove`s + resolved swaps)
 }
+export type QueueMutationGuard = { seedRevision: number; playlistId: string | null; fingerprint: string | null }
+
+async function assertSeedGuard(tx: Db, sessionId: string, guard?: QueueMutationGuard) {
+  if (!guard) return
+  const [seed] = await tx.select().from(sessionPlaylistSeeds).where(eq(sessionPlaylistSeeds.sessionId, sessionId))
+  const playlistId = seed?.enabled ? seed.playlistId : null
+  if ((seed?.revision ?? 0) !== guard.seedRevision || playlistId !== guard.playlistId) throw new QueueVersionConflict()
+  if (guard.playlistId) {
+    const [playlist] = await tx.select({ fingerprint: userPlaylists.sourceFingerprint,
+      active: userPlaylists.inLibrary }).from(userPlaylists).where(eq(userPlaylists.id, guard.playlistId)).for('share')
+    if (!playlist?.active || playlist.fingerprint !== guard.fingerprint) throw new QueueVersionConflict()
+  }
+}
 
 // A duplicate trackId in `picks` (the curator picking the same track twice,
 // or a caller-assembled list that overlaps) would violate the "no duplicate
@@ -104,11 +117,14 @@ export async function replaceQueue(
   sessionId: string,
   picks: ReplacementPick[],
   addedBy: 'dj' | 'user',
+  guard?: QueueMutationGuard & { queueVersion: number },
 ): Promise<number> {
   const deduped = dedupeByTrackId(picks)
   return db.transaction(async (tx) => {
     const [session] = await tx.select().from(djSessions).where(eq(djSessions.id, sessionId)).for('update')
     if (!session) throw new Error('queue-store: session not found')
+    if (guard && session.queueVersion !== guard.queueVersion) throw new QueueVersionConflict()
+    await assertSeedGuard(tx, sessionId, guard)
 
     await tx.delete(queueTracks).where(and(eq(queueTracks.sessionId, sessionId), eq(queueTracks.state, 'active')))
 
@@ -421,6 +437,7 @@ export async function applyOps(
   actor: 'dj' | 'user',
   replacementsProvider?: ReplacementsProvider,
   expectedVersion?: number,
+  seedGuard?: QueueMutationGuard,
 ): Promise<ApplyOpsResult> {
   const [snapshot] = await db
     .select({ queueVersion: djSessions.queueVersion })
@@ -445,6 +462,7 @@ export async function applyOps(
     const [session] = await tx.select().from(djSessions).where(eq(djSessions.id, sessionId)).for('update')
     if (!session) throw new Error('queue-store: session not found')
     if (session.queueVersion !== snapshot.queueVersion) throw new QueueVersionConflict()
+    await assertSeedGuard(tx, sessionId, seedGuard)
 
     const currentRows = await readActiveRows(tx, sessionId)
     const { working, removedIds } = planOps(currentRows, ops)
