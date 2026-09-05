@@ -240,13 +240,15 @@ describe('Mixtape API client', () => {
     vi.stubGlobal('fetch', fetchMock)
     const api = createMixtapeApi('https://api.mixtape.test')
 
-    await api.listPlaylists({ status: 'active', q: 'late night', limit: 24, cursor: 'cursor/one' })
-    await api.getPlaylist('playlist/id', { entryLimit: 100, entryCursor: 'entry/one' })
+    const signal = new AbortController().signal
+    await api.listPlaylists({ status: 'active', source: 'spotify_export', q: 'late night', limit: 24, cursor: 'cursor/one' }, signal)
+    await api.getPlaylist('playlist/id', { entryLimit: 100, entryCursor: 'entry/one' }, signal)
 
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      'https://api.mixtape.test/playlists?status=active&limit=24&q=late+night&cursor=cursor%2Fone',
+      'https://api.mixtape.test/playlists?status=active&limit=24&q=late+night&source=spotify_export&cursor=cursor%2Fone',
       'https://api.mixtape.test/playlists/playlist%2Fid?entryLimit=100&entryCursor=entry%2Fone',
     ])
+    expect(fetchMock.mock.calls.every(([, init]) => init?.signal === signal)).toBe(true)
   })
 
   it('updates sessions and manages DJ memories', async () => {

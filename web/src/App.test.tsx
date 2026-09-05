@@ -58,6 +58,33 @@ function renderApp(options: {
 describe('Mixtape web shell', () => {
   afterEach(cleanup)
 
+  it('shows durable source counts without pretending this browser is authorized', async () => {
+    const api = createFakeApi({ getMusicCollectionSummary: async () => ({ apple: { songs: 42, playlists: 10, librarySyncedAt: '2026-09-01T12:00:00Z' }, spotify: { playlists: 0 } }) })
+    const { musicKit } = renderApp({ api })
+    fireEvent.click(await screen.findByRole('button', { name: /^Your music/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Sources' }))
+    expect(await screen.findByText(/42 songs · 10 playlists/)).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Manage Apple Music' }))
+    expect(await screen.findByText('Authorize this browser to sync')).toBeVisible()
+    expect(musicKit.connect).not.toHaveBeenCalled()
+  })
+
+  it('syncs from Your music and keeps the real run alive while browsing Home', async () => {
+    let finish!: (value: Awaited<ReturnType<MusicKitClient['snapshot']>>) => void
+    const snapshot = vi.fn(() => new Promise<Awaited<ReturnType<MusicKitClient['snapshot']>>>((resolve) => { finish = resolve }))
+    const { api, musicKit } = renderApp({ musicKit: createFakeMusicKit({ snapshot }) })
+    fireEvent.click(await screen.findByRole('button', { name: /^Your music/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect Apple Music' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect Apple Music' }))
+    await waitFor(() => expect(snapshot).toHaveBeenCalledOnce())
+    fireEvent.click(screen.getByRole('button', { name: 'Home' }))
+    await act(async () => finish({ storefront: 'ng', songs: [], playlists: [], playlistEntries: [], recentCatalogIds: [], excludedLibrarySongs: 0 }))
+    fireEvent.click(screen.getByRole('button', { name: /^Your music/ }))
+    expect(await screen.findByText('Your music is in')).toBeVisible()
+    expect(musicKit.connect).toHaveBeenCalledOnce()
+    expect(api.calls.filter((call) => call.method === 'completeLibrarySync')).toHaveLength(1)
+  })
+
   it('opens on the server-backed conversation with an unlabeled DJ voice and current tape', async () => {
     renderApp()
 

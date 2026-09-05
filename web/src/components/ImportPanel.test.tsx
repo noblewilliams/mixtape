@@ -12,6 +12,7 @@ import { createFakeApi } from '../test/fake-api'
 import { readExpected, readFixtureArchiveBytes } from '../test/listening-export-fixtures'
 import { HISTORY_DIR, historyRow } from '../test/spotify-export-rows'
 import { buildZipBlob } from '../test/zip-builder'
+import { createUploadGate, type UploadGate } from '../sync/upload-gate'
 
 function fixtureFile(caseName: string, fileName = `${caseName}.zip`): File {
   return new File([readFixtureArchiveBytes(caseName)], fileName, { type: 'application/zip' })
@@ -53,12 +54,12 @@ function heldParser(hold: (options: { includePrivateSessions: boolean }) => bool
   return { parser, gate, signals }
 }
 
-function renderPanel(options: { overrides?: Partial<MixtapeApi>; parser?: PageParser } = {}) {
+function renderPanel(options: { overrides?: Partial<MixtapeApi>; parser?: PageParser; uploadGate?: UploadGate } = {}) {
   const api = createFakeApi(options.overrides)
   const parser = options.parser ?? createDirectParser()
   const importService = createListeningImportService({ api, parser })
   const onRefresh = vi.fn(async () => undefined)
-  const run = createImportRun({ importService, parser, onImported: onRefresh })
+  const run = createImportRun({ importService, parser, onImported: onRefresh, uploadGate: options.uploadGate })
   const onNewTape = vi.fn()
   const handle: { current: ImportPanelHandle | null } = { current: null }
   const view = render(<ImportPanel ref={handle} run={run} onNewTape={onNewTape} />)
@@ -82,6 +83,18 @@ async function inventoryFor(caseName: string, fileName?: string, options?: Param
 afterEach(cleanup)
 
 describe('ImportPanel · pick', () => {
+  it('allows local inspection but prevents uploading while Apple holds the shared gate', async () => {
+    const uploadGate = createUploadGate()
+    const release = uploadGate.acquire('apple')!
+    const { run, api } = await inventoryFor('account-basic', undefined, { uploadGate })
+    run.upload()
+    expect(run.getState().kind).toBe('inventory')
+    expect(api.calls.some((call) => call.method === 'beginListeningImport')).toBe(false)
+    release()
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Upload' }))
+    await waitFor(() => expect(run.getState().kind).toBe('done'))
+    expect(uploadGate.getOwner()).toBeNull()
+  })
   it('offers the drop zone with the board copy and a real file input', () => {
     renderPanel()
     const drop = panel()

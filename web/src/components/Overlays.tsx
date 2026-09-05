@@ -1,5 +1,4 @@
 import { useState, type FormEvent } from 'react'
-import { Cassette } from './Cassette'
 import { CloseIcon, ErrorCircleIcon, SuccessCircleIcon } from './Icons'
 
 type NewTapeDialogProps = {
@@ -101,26 +100,6 @@ export function SaveDialog({ busy = false, error = '', defaultName, onClose, onS
             </button>
           </div>
         </form>
-      </section>
-    </div>
-  )
-}
-
-export function SyncOverlay({ onClose }: { onClose: () => void }) {
-  return (
-    <div className="overlay sync-overlay">
-      <section className="sync-card" role="dialog" aria-modal="true" aria-labelledby="sync-title">
-        <button className="dialog-close" type="button" onClick={onClose} aria-label="Close library preparation">
-          <CloseIcon />
-        </button>
-        <Cassette className="loader-cassette" loading labelled={false} />
-        <p className="quiet-kicker">Preparing your music</p>
-        <h2 id="sync-title">Listening through your library</h2>
-        <p>You can leave this open. Nothing is being added to Apple Music.</p>
-        <div className="sync-progress" role="progressbar" aria-label="Library sync" aria-valuemin={0} aria-valuemax={100} aria-valuenow={68}>
-          <span />
-        </div>
-        <small>Matching sound, meaning, and the songs you return to.</small>
       </section>
     </div>
   )

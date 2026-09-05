@@ -19,6 +19,7 @@ import type { PageParser } from './page-parser'
 import type { ExportInventory, ListeningExportPackage } from './snapshot'
 import type { ExportStats } from './spotify-parser'
 import { isWorkerFailure } from './worker-client'
+import type { UploadGate } from '../sync/upload-gate'
 
 /** What the inventory shows: the listing plus the counts the inspect parse gives. */
 export type ImportFacts = {
@@ -90,6 +91,7 @@ type ImportRunDeps = {
   parser: PageParser
   /** Called once a run has published (done or partial); its failure never changes the run's state. */
   onImported: () => Promise<void> | void
+  uploadGate?: UploadGate
 }
 
 export function deviceTimeZone(): string {
@@ -163,7 +165,7 @@ export function percentFor(progress: ListeningImportProgress): number {
 
 const loadedOf = ({ file, facts, inspected, includePrivate }: Loaded): Loaded => ({ file, facts, inspected, includePrivate })
 
-export function createImportRun({ importService, parser, onImported }: ImportRunDeps): ImportRun {
+export function createImportRun({ importService, parser, onImported, uploadGate }: ImportRunDeps): ImportRun {
   let state: ImportRunState = { kind: 'pick' }
   let controller: AbortController | null = null
   // Bumped whenever a run is superseded (cancel, reset, dispose) so a late
@@ -252,6 +254,8 @@ export function createImportRun({ importService, parser, onImported }: ImportRun
   }
 
   async function send(loaded: Loaded) {
+    const release = uploadGate?.acquire('spotify') ?? (uploadGate ? null : () => undefined)
+    if (!release) return
     const { run, signal, settle } = begin()
     let percent = 0
     set({ kind: 'uploading', ...loaded, progress: null, percent })
@@ -278,6 +282,7 @@ export function createImportRun({ importService, parser, onImported }: ImportRun
       return
     } finally {
       settle()
+      release()
     }
     // The import is published by now: a refresh that fails leaves the
     // summary standing, and the page's own onboarding read reports it.

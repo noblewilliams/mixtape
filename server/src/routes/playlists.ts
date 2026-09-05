@@ -44,22 +44,27 @@ export function playlistsRoutes(db: Db) {
     return c.json({ ok: true })
   })
 
+  app.get('/summary', async (c) => c.json(await store.summary(c.get('user').id)))
+
   app.get('/', async (c) => {
     const status = c.req.query('status') ?? 'active'
     const limit = boundedInteger(c.req.query('limit'), 30, 100)
     const q = c.req.query('q')?.trim()
     const cursor = c.req.query('cursor')
+    const source = c.req.query('source')
     if (
       (status !== 'active' && status !== 'all')
       || limit == null
       || (q != null && (q.length > 200 || q.includes('\0')))
       || (cursor != null && cursor.length > 512)
+      || (source != null && source !== 'apple' && source !== 'spotify_export')
     ) return c.json({ error: 'invalid_request' }, 400)
 
     try {
       return c.json(await store.list(c.get('user').id, {
         status,
         limit,
+        ...(source ? { source: source as 'apple' | 'spotify_export' } : {}),
         ...(q ? { q } : {}),
         ...(cursor ? { cursor } : {}),
       }))

@@ -38,7 +38,7 @@ describe('MusicSourcesList', () => {
     expect(screen.getByText('Spotify · extended history')).toBeInTheDocument()
     expect(screen.getByText('Imported 4 Sep · Mar 2018 → Aug 2026 · re-import any time')).toBeInTheDocument()
     expect(screen.getByText('Apple Music')).toBeInTheDocument()
-    expect(screen.getByText('Connected 20 Aug · synced from this browser')).toBeInTheDocument()
+    expect(screen.getByText('Connected 20 Aug · saved to your Mixtape account')).toBeInTheDocument()
     expect(screen.getAllByText('SP')).toHaveLength(1)
     expect(screen.getAllByText('AM')).toHaveLength(1)
   })

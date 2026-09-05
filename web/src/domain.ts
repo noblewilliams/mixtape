@@ -44,4 +44,4 @@ export type SessionDetail = {
 }
 
 export type CollectionView = 'list' | 'closet'
-export type AppView = 'session' | 'home' | 'spotify'
+export type AppView = 'session' | 'home' | 'music'

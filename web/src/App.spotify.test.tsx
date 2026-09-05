@@ -96,6 +96,14 @@ async function settled(api: ReturnType<typeof createFakeApi>) {
 
 const gate = () => screen.queryByRole('dialog', { name: 'Which do you use?' })
 
+async function openSpotify() {
+  fireEvent.click(screen.getByRole('button', { name: /^Your music/ }))
+  if (screen.queryByRole('region', { name: 'Spotify import' })) return
+  fireEvent.click(await screen.findByRole('button', { name: 'Sources' }))
+  fireEvent.click(await screen.findByRole('button', { name: /^(Get started|Continue Spotify import)$/ }))
+  await screen.findByRole('region', { name: 'Spotify import' })
+}
+
 describe('service gate', () => {
   afterEach(cleanup)
 
@@ -117,7 +125,7 @@ describe('service gate', () => {
 
     await settled(api)
     expect(gate()).not.toBeInTheDocument()
-    expect(screen.getByText('Apple Music')).toBeInTheDocument()
+    expect(within(screen.getByRole('complementary', { name: 'Mixtape navigation' })).getByText('Apple Music')).toBeInTheDocument()
   })
 
   it('never shows for a Spotify listener', async () => {
@@ -157,7 +165,9 @@ describe('service gate', () => {
     fireEvent.click(within(await screen.findByRole('dialog', { name: 'Which do you use?' })).getByRole('button', { name: /^Apple Music/ }))
 
     expect(gate()).not.toBeInTheDocument()
-    expect(musicKit.connect).toHaveBeenCalledTimes(1)
+    expect(musicKit.connect).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect Apple Music' }))
+    await waitFor(() => expect(musicKit.connect).toHaveBeenCalledTimes(1))
   })
 })
 
@@ -169,14 +179,14 @@ describe('service gate persistence', () => {
     renderApp()
     fireEvent.click(within(await screen.findByRole('dialog', { name: 'Which do you use?' })).getByRole('button', { name: /^Apple Music/ }))
     expect(localStorage.getItem('mixtape:service-choice:user-1')).toBe('apple')
-    expect(screen.getByText('Apple Music')).toBeInTheDocument()
+    expect(within(screen.getByRole('complementary', { name: 'Mixtape navigation' })).getByText('Apple Music')).toBeInTheDocument()
     cleanup()
 
     const api = createFakeApi()
     renderApp({ api })
     await settled(api)
     expect(gate()).not.toBeInTheDocument()
-    expect(screen.getByText('Apple Music')).toBeInTheDocument()
+    expect(within(screen.getByRole('complementary', { name: 'Mixtape navigation' })).getByText('Apple Music')).toBeInTheDocument()
   })
 
   it('honours a remembered Spotify choice before the server has it', async () => {
@@ -187,7 +197,7 @@ describe('service gate persistence', () => {
 
     expect(gate()).not.toBeInTheDocument()
     expect(screen.getByText('Spotify · not requested yet')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /^Your music/ }))
+    await openSpotify()
     expect(await screen.findByRole('heading', { name: 'Get your listening data' })).toBeInTheDocument()
   })
 
@@ -214,8 +224,10 @@ describe('service gate persistence', () => {
     fireEvent.click(within(await screen.findByRole('dialog', { name: 'Which do you use?' })).getByRole('button', { name: /^Apple Music/ }))
 
     expect(gate()).not.toBeInTheDocument()
-    expect(musicKit.connect).toHaveBeenCalledTimes(1)
-    expect(screen.getByText('Apple Music')).toBeInTheDocument()
+    expect(musicKit.connect).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect Apple Music' }))
+    await waitFor(() => expect(musicKit.connect).toHaveBeenCalledTimes(1))
+    expect(within(screen.getByRole('complementary', { name: 'Mixtape navigation' })).getByText('Apple Music')).toBeInTheDocument()
   })
 
   it('signs out when the onboarding read says the session has ended', async () => {
@@ -237,7 +249,7 @@ describe('Spotify request page', () => {
   async function openRequestPage(api = apiWithOnboarding({ chosenService: 'spotify' })) {
     renderApp({ api })
     await settled(api)
-    fireEvent.click(screen.getByRole('button', { name: /^Your music/ }))
+    await openSpotify()
     await screen.findByRole('heading', { name: 'Get your listening data' })
     return api
   }
@@ -358,7 +370,7 @@ describe('Spotify request page', () => {
     })
     renderApp({ api })
     await settled(api)
-    fireEvent.click(screen.getByRole('button', { name: /^Your music/ }))
+    await openSpotify()
 
     const view = await screen.findByRole('main', { name: 'Your music' })
     expect(within(view).getByRole('heading', { name: 'Your Spotify data' })).toBeInTheDocument()
@@ -388,7 +400,7 @@ describe('Spotify request page', () => {
     })
     renderApp({ api })
     await settled(api)
-    fireEvent.click(screen.getByRole('button', { name: /^Your music/ }))
+    await openSpotify()
 
     const view = await screen.findByRole('main', { name: 'Your music' })
     expect(within(view).getAllByText('Both in')).toHaveLength(2)
@@ -405,7 +417,7 @@ describe('Spotify request page', () => {
     const api = apiWithOnboarding({ chosenService: 'spotify', markedRequestedAt: new Date().toISOString() })
     renderApp({ api })
     await settled(api)
-    fireEvent.click(screen.getByRole('button', { name: /^Your music/ }))
+    await openSpotify()
 
     const view = await screen.findByRole('main', { name: 'Your music' })
     fireEvent.click(within(view).getByRole('button', { name: /^Paste songs from Spotify/ }))
@@ -420,7 +432,7 @@ describe('Spotify request page', () => {
     await api.postFunnelEvent({ type: 'marked_requested', surface: 'web' })
     renderApp({ api })
     await settled(api)
-    fireEvent.click(screen.getByRole('button', { name: /^Your music/ }))
+    await openSpotify()
     const view = await screen.findByRole('main', { name: 'Your music' })
 
     fireEvent.click(within(view).getByRole('button', { name: /^Tell the DJ about your taste/ }))
@@ -449,7 +461,7 @@ describe('Spotify request page', () => {
     })
     renderApp({ api })
     await settled(api)
-    fireEvent.click(screen.getByRole('button', { name: /^Your music/ }))
+    await openSpotify()
     const view = await screen.findByRole('main', { name: 'Your music' })
 
     fireEvent.click(within(view).getByRole('button', { name: 'Remove Spotify · account data' }))
@@ -471,7 +483,7 @@ describe('Spotify request page', () => {
     })
     renderApp({ api })
     await settled(api)
-    fireEvent.click(screen.getByRole('button', { name: /^Your music/ }))
+    await openSpotify()
     const view = await screen.findByRole('main', { name: 'Your music' })
 
     fireEvent.click(within(view).getByRole('button', { name: 'Remove Spotify · account data' }))
@@ -490,7 +502,7 @@ describe('Spotify request page', () => {
     })
     renderApp({ api })
     await settled(api)
-    fireEvent.click(screen.getByRole('button', { name: /^Your music/ }))
+    await openSpotify()
     const view = await screen.findByRole('main', { name: 'Your music' })
     fireEvent.click(within(view).getByRole('button', { name: /^Paste songs from Spotify/ }))
 
@@ -521,7 +533,7 @@ describe('Spotify import page', () => {
     await api.postFunnelEvent({ type: 'marked_requested', surface: 'web' })
     renderApp({ api })
     await settled(api)
-    fireEvent.click(screen.getByRole('button', { name: /^Your music/ }))
+    await openSpotify()
     const view = await screen.findByRole('main', { name: 'Your music' })
     const sync = screen.getByRole('button', { name: 'Sync music library' })
     expect(sync).toBeEnabled()
@@ -561,7 +573,7 @@ describe('Spotify import page', () => {
     await api.postFunnelEvent({ type: 'marked_requested', surface: 'web' })
     renderApp({ api })
     await settled(api)
-    fireEvent.click(screen.getByRole('button', { name: /^Your music/ }))
+    await openSpotify()
     const view = await screen.findByRole('main', { name: 'Your music' })
     const panel = () => within(screen.getByRole('main', { name: 'Your music' })).getByRole('region', { name: 'Import a Spotify ZIP' })
     fireEvent.change(within(view).getByLabelText('choose a file'), { target: { files: [extendedZip()] } })
@@ -575,7 +587,7 @@ describe('Spotify import page', () => {
     expect(leaving.defaultPrevented).toBe(true)
     expect(screen.getByRole('button', { name: 'Sync music library' })).toBeDisabled()
 
-    fireEvent.click(screen.getByRole('button', { name: /^Your music/ }))
+    await openSpotify()
     await screen.findByRole('main', { name: 'Your music' })
     expect(within(panel()).getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
     expect(within(panel()).getByRole('status')).toHaveTextContent('Uploading')
@@ -606,7 +618,7 @@ describe('Spotify import page', () => {
     await api.postFunnelEvent({ type: 'marked_requested', surface: 'web' })
     const { onSignOut } = renderApp({ api, onSignOut: vi.fn() })
     await settled(api)
-    fireEvent.click(screen.getByRole('button', { name: /^Your music/ }))
+    await openSpotify()
     const view = await screen.findByRole('main', { name: 'Your music' })
     const panel = () => within(view).getByRole('region', { name: 'Import a Spotify ZIP' })
     fireEvent.change(within(view).getByLabelText('choose a file'), { target: { files: [extendedZip()] } })
@@ -630,7 +642,7 @@ describe('Spotify import page', () => {
     await api.postFunnelEvent({ type: 'marked_requested', surface: 'web' })
     renderApp({ api })
     await settled(api)
-    fireEvent.click(screen.getByRole('button', { name: /^Your music/ }))
+    await openSpotify()
     const view = await screen.findByRole('main', { name: 'Your music' })
     const panel = () => within(view).getByRole('region', { name: 'Import a Spotify ZIP' })
     fireEvent.change(within(panel()).getByLabelText('choose a file'), { target: { files: [extendedZip()] } })

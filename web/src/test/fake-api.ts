@@ -172,7 +172,8 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
     },
     listMemories: async () => ({ memories: [] }),
     deleteMemory: async () => ({ ok: true }),
-    listPlaylists: async () => ({ playlists: [], nextCursor: null }),
+    getMusicCollectionSummary: async () => ({ apple: { songs: null, playlists: 0, librarySyncedAt: null }, spotify: { playlists: 0 } }),
+    listPlaylists: async () => ({ playlists: [], nextCursor: null, total: 0 }),
     getPlaylist: async () => {
       throw new Error('fake playlist detail not configured')
     },

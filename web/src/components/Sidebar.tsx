@@ -62,10 +62,10 @@ export function Sidebar({
       </button>
 
       <button
-        className={`music-link ${activeView === 'spotify' ? 'is-active' : ''}`}
+        className={`music-link ${activeView === 'music' ? 'is-active' : ''}`}
         type="button"
         onClick={onOpenMusic}
-        aria-current={activeView === 'spotify' ? 'page' : undefined}
+        aria-current={activeView === 'music' ? 'page' : undefined}
       >
         <span className="music-link-mark" aria-hidden="true">
           <MusicIcon />

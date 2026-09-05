@@ -18,21 +18,24 @@ import { ChooseServiceDialog } from './components/ChooseServiceDialog'
 import { Conversation } from './components/Conversation'
 import { Home } from './components/Home'
 import { InterviewDialog } from './components/InterviewDialog'
-import { NewTapeDialog, SaveDialog, SyncOverlay, Toast } from './components/Overlays'
+import { NewTapeDialog, SaveDialog, Toast } from './components/Overlays'
 import { QueuePanel } from './components/QueuePanel'
 import { Sidebar } from './components/Sidebar'
-import { SpotifyMusicView } from './components/SpotifyMusicView'
+import { YourMusicView, type MusicSection } from './components/YourMusicView'
+import { createMusicSyncService } from './sync/music-sync-service'
+import { createMusicSyncRun } from './sync/music-sync-run'
+import { createUploadGate } from './sync/upload-gate'
 import type { AppView, CollectionView, DjMessage, DjSession, QueueTrack } from './domain'
 import { createImportRun } from './import/import-run'
 import { createListeningImportService } from './import/import-service'
 import { createLazyParser, createPageParser, type PageParser } from './import/page-parser'
-import type { MusicKitClient } from './musickit/client'
+import { MusicKitClientError, type MusicKitClient } from './musickit/client'
 import type { AuthProvider } from './lib/auth-provider'
 import { postFunnelEventOnce } from './lib/funnel-once'
 import { musicLinkLabel } from './lib/onboarding'
 import { clearServiceChoice, readServiceChoice, writeServiceChoice, type ServiceChoice } from './lib/service-preference'
 
-type DialogState = 'new-tape' | 'save-playlist' | 'sync' | 'account' | 'interview' | null
+type DialogState = 'new-tape' | 'save-playlist' | 'account' | 'interview' | null
 type MusicConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
 type ToastState = { message: string; tone: 'success' | 'error' }
 
@@ -112,6 +115,7 @@ function conflictSnapshot(error: unknown): { queue: ApiQueueTrack[]; queueVersio
 
 export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSignOut, importParser }: AppProps) {
   const callback = useMemo(accountCallback, [])
+  const uploadGate = useMemo(createUploadGate, [user.id])
   // One parser, one import service, and one import run for the signed-in
   // user's life. The Worker behind the parser is spawned on the first read
   // and released after each run; the run outlives the import page so an
@@ -120,14 +124,16 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
   const importService = useMemo(() => createListeningImportService({ api, parser }), [api, parser])
   const refreshRef = useRef<() => Promise<void>>(async () => undefined)
   const importRun = useMemo(
-    () => createImportRun({ importService, parser, onImported: () => refreshRef.current() }),
+    () => createImportRun({ importService, parser, uploadGate, onImported: () => refreshRef.current() }),
     // A new run per signed-in user, never shared across sign-ins.
-    [importService, parser, user.id],
+    [importService, parser, uploadGate, user.id],
   )
   useEffect(() => () => importRun.dispose(), [importRun])
   const [sessions, setSessions] = useState<DjSession[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [activeView, setActiveView] = useState<AppView>('home')
+  const [musicSection, setMusicSection] = useState<MusicSection>('auto')
+  const [musicRevision, setMusicRevision] = useState(0)
   const [collectionView, setCollectionView] = useState<CollectionView>('list')
   const [messagesBySession, setMessagesBySession] = useState<Record<string, DjMessage[]>>({})
   const [queuesBySession, setQueuesBySession] = useState<Record<string, QueueTrack[]>>({})
@@ -142,6 +148,24 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
   const [playlistBusy, setPlaylistBusy] = useState(false)
   const [playlistError, setPlaylistError] = useState('')
   const [musicConnection, setMusicConnection] = useState<MusicConnectionState>('disconnected')
+  const syncRun = useMemo(() => createMusicSyncRun({
+    gate: uploadGate,
+    service: createMusicSyncService({ api, musicKit: { ...musicKit,
+      connect: async () => {
+        try { await musicKit.connect(); setMusicConnection('connected') }
+        catch (error) { setMusicConnection('error'); throw error }
+      },
+      snapshot: async (options) => {
+        try { return await musicKit.snapshot(options) }
+        catch (error) {
+          if (error instanceof MusicKitClientError && ['authorization_failed', 'not_connected'].includes(error.code)) setMusicConnection('disconnected')
+          throw error
+        }
+      },
+    } }),
+    onPublished: () => refreshRef.current(),
+  }), [api, musicKit, uploadGate])
+  useEffect(() => () => syncRun.dispose(), [syncRun])
   const [error, setError] = useState('')
   const [toast, setToast] = useState<ToastState | null>(null)
   const [onboarding, setOnboarding] = useState<OnboardingResponse | null>(null)
@@ -151,6 +175,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
   const [interviewStatus, setInterviewStatus] = useState('')
   // The one-playlist-run gate: a Spotify upload in flight holds the Apple sync entry points shut.
   const importBusy = useSyncExternalStore(importRun.subscribe, () => importRun.getState().kind === 'uploading')
+  const uploadOwner = useSyncExternalStore(uploadGate.subscribe, uploadGate.getOwner)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const queueVersions = useRef<Record<string, number>>({})
   const queueMutationChains = useRef<Record<string, Promise<void>>>({})
@@ -168,9 +193,10 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
   )
   const signOut = useCallback(() => {
     importRun.dispose()
+    syncRun.dispose()
     clearServiceChoice(user.id)
     onSignOut()
-  }, [importRun, onSignOut, user.id])
+  }, [importRun, syncRun, onSignOut, user.id])
   const activeMessages = activeSession ? messagesBySession[activeSession.id] ?? [] : []
   const activeQueue = activeSession ? queuesBySession[activeSession.id] ?? [] : []
   const contentPaint = activeView === 'session' && activeSession ? activeSession.caseColor : '#45596d'
@@ -185,14 +211,14 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
 
   // Closing the tab mid-upload would lose the run; the browser asks first.
   useEffect(() => {
-    if (!importBusy) return
+    if (!uploadOwner) return
     const guard = (event: BeforeUnloadEvent) => {
       event.preventDefault()
       event.returnValue = ''
     }
     window.addEventListener('beforeunload', guard)
     return () => window.removeEventListener('beforeunload', guard)
-  }, [importBusy])
+  }, [uploadOwner])
 
   useEffect(() => {
     let cancelled = false
@@ -274,19 +300,22 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
     } catch (requestError) {
       if (requestError instanceof ApiError && requestError.status === 401) signOut()
     }
+    setMusicRevision((revision) => revision + 1)
   }
   refreshRef.current = refreshOnboarding
 
   function chooseApple() {
     writeServiceChoice(user.id, 'apple')
     setLocalChoice('apple')
-    void connectAppleMusic()
+    setMusicSection('apple')
+    setActiveView('music')
   }
 
   function chooseSpotify() {
     writeServiceChoice(user.id, 'spotify')
     setLocalChoice('spotify')
-    setActiveView('spotify')
+    setActiveView('music')
+    setMusicSection('spotify')
     setQueueOpen(false)
     void api
       .postFunnelEvent({ type: 'chose_spotify', surface: 'web' })
@@ -295,12 +324,8 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
   }
 
   function openMusic() {
-    if (effectiveOnboarding?.chosenService === 'spotify') {
-      setActiveView('spotify')
-      setQueueOpen(false)
-      return
-    }
-    setDialog('sync')
+    setActiveView('music')
+    setQueueOpen(false)
   }
 
   async function removeSource(source: ListeningImportSource) {
@@ -611,18 +636,25 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
         onNewTape={() => setDialog('new-tape')}
         onOpenAccount={() => setDialog('account')}
         onSync={() => {
-          if (!importBusy) setDialog('sync')
+          setMusicSection('apple')
+          setActiveView('music')
         }}
         onSignOut={signOut}
         signInMethod={lastSignInProvider}
         syncDisabled={importBusy}
       />
 
-      {activeView === 'spotify' && effectiveOnboarding ? (
-        <SpotifyMusicView
+      {activeView === 'music' ? (
+        <YourMusicView
           api={api}
           importRun={importRun}
-          onboarding={effectiveOnboarding}
+          syncRun={syncRun}
+          uploadGate={uploadGate}
+          section={musicSection}
+          onSection={setMusicSection}
+          connected={musicConnection === 'connected'}
+          revision={musicRevision}
+          onSessionExpired={signOut}
           interviewStatus={interviewStatus}
           onRefresh={refreshOnboarding}
           onOpenInterview={() => setDialog('interview')}
@@ -681,7 +713,6 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
           onSave={(name) => void savePlaylist(name)}
         />
       ) : null}
-      {dialog === 'sync' ? <SyncOverlay onClose={() => setDialog(null)} /> : null}
       {dialog === 'interview' ? (
         <InterviewDialog api={api} onClose={() => setDialog(null)} onComplete={completeInterview} />
       ) : null}

@@ -1,6 +1,6 @@
 # Web sync and consumption — design
 
-*Status: in progress for founder review · 2026-09-01*
+*Status: Your music integration approved and implemented locally · 2026-09-04. Real-account and release gates remain.*
 *Companion docs: [vision](../../product/vision.md) · [playlist intelligence](2026-08-31-artwork-playlist-intelligence-design.md) · [decisions](../../decisions.md)*
 
 ## Product decision
@@ -27,7 +27,7 @@ A web listener with an Apple Music subscription must be able to:
 - Real progress, cancellation, retry, terminal success, and honest partial-capability copy.
 - Server-backed playlist browse and detail UI.
 - Existing mix creation, conversation, queue editing, playback, and create-playlist flows.
-- Web DJ memories plus manual session rename/archive/unarchive parity.
+- Web DJ memories plus manual session rename/archive/unarchive parity remain follow-up scope; the September 4 music approval does not authorize those interfaces.
 
 ### Excluded from this delivery
 
@@ -134,7 +134,7 @@ Rules:
 
 - `playCount: null` means unavailable, never zero.
 - A null web play count never overwrites a known native count.
-- Completion publishes in one transaction, marks absent prior `user_tracks` rows `in_library = false`, and updates `library_synced_at`.
+- Completion publishes in one transaction, replaces only `apple_live` membership, recomputes the union `user_tracks.in_library`, and updates `library_synced_at`. Migration 0022 and its owning task supply source membership; Spotify, Apple-export, and unknown historical evidence are not removed by an Apple refresh.
 - Interrupted, cancelled, expired, or count-mismatched runs leave the previous canonical library unchanged.
 - One open library run per user; a newer run expires the older one.
 - Completed summaries are idempotent.
@@ -201,7 +201,7 @@ Mixtape sign-in
 - 401/403 from Apple: clear in-memory authorization and request reconnect.
 - 429: bounded retry guidance; do not hammer Apple.
 - Offline or background suspension: preserve the previous completed server snapshot and allow a fresh retry.
-- Browser snapshot data lives only for the active sync and is released on success, failure, cancellation, sign-out, or replacement by a newer run.
+- Browser snapshot data lives only in memory. An unconfirmed publication retains an idempotent continuation and the shared upload lease until checked or signed out; a lost HTTP response is not evidence that nothing was saved. Completed/partial terminal results retain counts, not the full snapshot.
 - Never log Music User Tokens, Apple bodies, playlist/track names, prompts, or artwork URLs.
 
 ## Verification gates
@@ -230,3 +230,18 @@ Mixtape sign-in
 - Whether locally imported library songs expose enough catalog identity to enter the mix candidate pool or remain browse-only unresolved entries.
 
 These facts require a real authorized-device probe. They do not block building the source-aware server contract, the normalized browser adapter, or the approval board.
+
+## Approved integration — September 4
+
+The [combined Your music board](../../mockups/2026-09-04-web-your-music-integration-states.html) and [approval](../../mockups/approved/2026-09-04-web-your-music-integration.md) supersede the original Apple-only navigation proposal.
+
+- Your music has Playlists and Sources. First-use accounts see Sources; accounts with completed music default to Playlists. An explicit section choice is not overridden by a late server response.
+- The approved Spotify workspace is embedded under Sources, preserving its import, interview, paste, removal, and mix-output behavior. Apple and Spotify are additive; account data is separate from browser authorization.
+- App-owned sync and import runs share a synchronous upload lease. Reading a ZIP locally remains possible during Apple sync, but uploading it waits. Navigation does not cancel either run; sign-out aborts and drops private state. MusicKit clients are per sign-in, not module-level singletons.
+- Library and playlist publication are separate. A failed/cancelled playlist upload reports saved songs and unchanged previous playlists. Unconfirmed completion retries the same sync ID; it never automatically starts a replacement run.
+- Progress describes one actual stage. Playlist reading has no invented denominator, and reader completion is not presented as server publication.
+- Browse queries filter the full collection by source/name before pagination, return `total`, `source`, and `durationComplete`, and preserve duplicate entry IDs/positions. Unavailable entries stay visible; Spotify links use exact validated track IDs. No playlist seed or origin-confirmation action is introduced.
+- Individual playlist freshness uses its own publication update time, not the shared profile timestamp. Removed playlists omit that date. Partial duration sums are not labeled as full playlist duration.
+- `GET /playlists/summary` returns authenticated durable source counts. Apple song counts are unknown (`null`) while legacy membership evidence remains. `librarySyncedAt` is labeled as a songs-sync date, never a combined songs-and-playlists completion date.
+
+No new database migration is owned by this web slice. The source summary depends on migration 0022; shipping web/API before the reviewed migration chain is not supported.

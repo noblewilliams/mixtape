@@ -81,6 +81,7 @@ export type MusicKitTokenResponse = {
 export type ApiPlaylistSummary = {
   id: string
   name: string
+  source: 'apple' | 'spotify_export'
   curatorName: string | null
   kind: string
   origin?: 'unknown' | 'mixtape' | 'user_confirmed'
@@ -90,6 +91,7 @@ export type ApiPlaylistSummary = {
   artworkBgColor: string | null
   entryCount: number
   knownDurationMs: number | null
+  durationComplete: boolean
   lastModifiedAt: string | null
   syncedAt: string | null
   inLibrary: boolean
@@ -101,6 +103,7 @@ export type ApiPlaylistEntry = {
   position: number
   trackId: string | null
   appleCatalogId: string | null
+  spotifyId: string | null
   title: string
   artist: string
   album: string | null
@@ -113,6 +116,10 @@ export type ApiPlaylistEntry = {
 }
 
 export type ApiMemory = { id: string; note: string; createdAt: string }
+export type MusicCollectionSummary = {
+  apple: { songs: number | null; playlists: number; librarySyncedAt: string | null }
+  spotify: { playlists: number }
+}
 
 export type StagedSyncStart = { syncId: string; expiresAt: number }
 export type LibrarySyncSummary = {
@@ -286,15 +293,18 @@ export type MixtapeApi = {
   ) => Promise<{ session: ApiSession }>
   listMemories: () => Promise<{ memories: ApiMemory[] }>
   deleteMemory: (memoryId: string) => Promise<{ ok: true }>
+  getMusicCollectionSummary: (signal?: AbortSignal) => Promise<MusicCollectionSummary>
   listPlaylists: (options?: {
     status?: 'active' | 'all'
+    source?: 'apple' | 'spotify_export'
     q?: string
     limit?: number
     cursor?: string
-  }) => Promise<{ playlists: ApiPlaylistSummary[]; nextCursor: string | null }>
+  }, signal?: AbortSignal) => Promise<{ playlists: ApiPlaylistSummary[]; nextCursor: string | null; total: number }>
   getPlaylist: (
     playlistId: string,
     options?: { entryLimit?: number; entryCursor?: string },
+    signal?: AbortSignal,
   ) => Promise<{
     playlist: ApiPlaylistSummary
     entries: ApiPlaylistEntry[]
@@ -441,19 +451,21 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
     listMemories: () => request('/me/memories'),
     deleteMemory: (memoryId) =>
       request(`/me/memories/${encodeURIComponent(memoryId)}`, { method: 'DELETE' }),
-    listPlaylists: (options = {}) => {
+    getMusicCollectionSummary: (signal) => request('/playlists/summary', { signal }),
+    listPlaylists: (options = {}, signal) => {
       const params = new URLSearchParams()
       params.set('status', options.status ?? 'active')
       params.set('limit', String(options.limit ?? 30))
       if (options.q) params.set('q', options.q)
+      if (options.source) params.set('source', options.source)
       if (options.cursor) params.set('cursor', options.cursor)
-      return request(`/playlists?${params.toString()}`)
+      return request(`/playlists?${params.toString()}`, { signal })
     },
-    getPlaylist: (playlistId, options = {}) => {
+    getPlaylist: (playlistId, options = {}, signal) => {
       const params = new URLSearchParams()
       params.set('entryLimit', String(options.entryLimit ?? 200))
       if (options.entryCursor) params.set('entryCursor', options.entryCursor)
-      return request(`/playlists/${encodeURIComponent(playlistId)}?${params.toString()}`)
+      return request(`/playlists/${encodeURIComponent(playlistId)}?${params.toString()}`, { signal })
     },
     beginLibrarySync: (input, signal) =>
       request('/ingest/library/syncs', {

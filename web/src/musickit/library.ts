@@ -338,7 +338,6 @@ export async function fetchMusicSnapshot({ request, signal, onProgress }: FetchM
     onProgress({
       stage: 'playlist_tracks',
       completed: playlistEntries.length,
-      total: playlistEntries.length,
     })
   }
 

@@ -10,6 +10,8 @@ export const SPOTIFY_PRIVACY_URL = 'https://www.spotify.com/account/privacy/'
 const MARK_FAILED = 'Couldn’t save that. Check your connection and try again.'
 
 type SpotifyMusicViewProps = {
+  embedded?: boolean
+  uploadBlocked?: boolean
   api: MixtapeApi
   /** The app-owned import run; it outlives this view so an upload survives navigation. */
   importRun: ImportRun
@@ -92,6 +94,8 @@ export function SpotifyMusicView({
   onNewTape,
   onRemoveSource,
   onOpenDemo,
+  embedded = false,
+  uploadBlocked = false,
 }: SpotifyMusicViewProps) {
   const [marking, setMarking] = useState(false)
   const [markError, setMarkError] = useState('')
@@ -147,8 +151,9 @@ export function SpotifyMusicView({
           ? `Requested ${recentDayLabel(onboarding.markedRequestedAt)}. Confirmation email clicked? If not, nothing is being prepared.`
           : ''
 
+  const Container = embedded ? 'section' : 'main'
   return (
-    <main className="music-view" aria-label="Your music">
+    <Container className={`music-view ${embedded ? 'music-view--embedded' : ''}`} aria-label={embedded ? 'Spotify import' : 'Your music'}>
       <header className="music-view-head">
         <div>
           <p className="quiet-kicker">Your music · Spotify</p>
@@ -234,7 +239,7 @@ export function SpotifyMusicView({
               </div>
             ) : null}
 
-            <ImportPanel ref={importRef} run={importRun} onNewTape={onNewTape} />
+            <ImportPanel ref={importRef} run={importRun} onNewTape={onNewTape} uploadBlocked={uploadBlocked} />
           </section>
         ) : (
           <>
@@ -316,6 +321,6 @@ export function SpotifyMusicView({
           <MusicSourcesList sources={onboarding.sources} onImportAgain={focusDropZone} onRemove={onRemoveSource} />
         ) : null}
       </div>
-    </main>
+    </Container>
   )
 }

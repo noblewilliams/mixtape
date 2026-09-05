@@ -7,6 +7,7 @@ import {
   user,
   userMusicProfiles,
   userPlaylists,
+  tracks, userTracks, userTrackLibrarySources,
 } from '../../src/db/schema'
 import { createTestDb, type TestDb } from '../helpers/db'
 
@@ -59,6 +60,33 @@ function get(db: TestDb, userId: string | null, path: string) {
 }
 
 describe('playlist browse routes', () => {
+  it('keeps source counts durable and does not assign legacy songs to Apple', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedUser(db, 'u2')
+    const [track] = await db.insert(tracks).values({ title: 'A', artist: 'B', appleId: '100' }).returning()
+    await db.insert(userTracks).values([{ userId: 'u1', trackId: track.id }, { userId: 'u2', trackId: track.id }])
+    await db.insert(userTrackLibrarySources).values([{ userId: 'u1', trackId: track.id, source: 'apple_live' }, { userId: 'u2', trackId: track.id, source: 'legacy' }])
+    expect(await (await get(db, 'u1', '/playlists/summary')).json()).toMatchObject({ apple: { songs: 1, playlists: 0 } })
+    expect(await (await get(db, 'u2', '/playlists/summary')).json()).toMatchObject({ apple: { songs: null, playlists: 0 } })
+    expect((await get(db, null, '/playlists/summary')).status).toBe(401)
+  })
+
+  it('filters the full collection by source and uses each playlist’s own publication date', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedUser(db, 'u2')
+    await seedPlaylist(db, 'u1', 'a1', 'Apple one', new Date('2026-09-04T00:00:00Z'))
+    const spotify = await seedPlaylist(db, 'u1', 's1', 'Spotify one', new Date('2026-09-01T00:00:00Z'))
+    await seedPlaylist(db, 'u2', 'other', 'Other user', new Date())
+    await db.execute(sql`UPDATE user_playlists SET source = 'spotify_export', updated_at = '2026-09-02T09:00:00Z' WHERE id = ${spotify.id}`)
+    const body = await (await get(db, 'u1', '/playlists?source=spotify_export&limit=1')).json()
+    expect(body).toMatchObject({ total: 1, nextCursor: null, playlists: [{ id: spotify.id, source: 'spotify_export', syncedAt: '2026-09-02T09:00:00.000Z' }] })
+    expect((await get(db, 'u1', '/playlists?source=unrecognized')).status).toBe(400)
+    const summary = await (await get(db, 'u1', '/playlists/summary')).json()
+    expect(summary).toMatchObject({ apple: { playlists: 1 }, spotify: { playlists: 1 } })
+  })
+
   it('requires authentication', async () => {
     const db = await createTestDb()
     expect((await get(db, null, '/playlists')).status).toBe(401)
@@ -141,7 +169,7 @@ describe('playlist browse routes', () => {
     const empty = await (await get(db, 'u1', '/playlists?q=does-not-exist')).json() as {
       playlists: unknown[]; nextCursor: string | null
     }
-    expect(empty).toEqual({ playlists: [], nextCursor: null })
+    expect(empty).toEqual({ playlists: [], nextCursor: null, total: 0 })
   })
 
   it('keeps an old cursor safe after a newer playlist appears', async () => {

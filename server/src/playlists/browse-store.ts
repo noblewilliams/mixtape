@@ -13,6 +13,7 @@ export class PlaylistBrowseCursorError extends Error {
 export type PlaylistSummary = {
   id: string
   name: string
+  source: 'apple' | 'spotify_export'
   curatorName: string | null
   kind: string
   origin: 'unknown' | 'mixtape' | 'user_confirmed'
@@ -22,6 +23,7 @@ export type PlaylistSummary = {
   artworkBgColor: string | null
   entryCount: number
   knownDurationMs: number | null
+  durationComplete: boolean
   lastModifiedAt: Date | null
   syncedAt: Date | null
   inLibrary: boolean
@@ -130,6 +132,7 @@ function summaryFromRow(row: Record<string, unknown>): PlaylistSummary {
   return {
     id: String(row.id),
     name: String(row.name),
+    source: row.source === 'spotify_export' ? 'spotify_export' : 'apple',
     curatorName: row.curator_name == null ? null : String(row.curator_name),
     kind: String(row.kind),
     origin: row.origin === 'mixtape' || row.origin === 'user_confirmed' ? row.origin : 'unknown',
@@ -139,6 +142,7 @@ function summaryFromRow(row: Record<string, unknown>): PlaylistSummary {
     artworkBgColor: row.artwork_bg_color == null ? null : String(row.artwork_bg_color),
     entryCount: Number(row.entry_count),
     knownDurationMs: nullableNumber(row.known_duration_ms),
+    durationComplete: row.duration_complete === true,
     lastModifiedAt: nullableDate(row.last_modified_at),
     syncedAt: nullableDate(row.synced_at),
     inLibrary: row.in_library === true,
@@ -173,6 +177,7 @@ function entryFromRow(row: Record<string, unknown>): PlaylistEntryView {
 const summarySelect = sql`
   up.id,
   up.name,
+  up.source,
   up.curator_name,
   up.kind,
   ${playlistOriginSql} AS origin,
@@ -185,8 +190,9 @@ const summarySelect = sql`
     THEN NULL
     ELSE sum(pe.duration_ms_snapshot)
   END AS known_duration_ms,
+  count(pe.id) > 0 AND count(pe.duration_ms_snapshot) = count(pe.id) AS duration_complete,
   up.apple_last_modified_at AS last_modified_at,
-  ump.playlists_synced_at AS synced_at,
+  CASE WHEN up.in_library THEN up.updated_at ELSE NULL END AS synced_at,
   up.in_library,
   coalesce(up.apple_last_modified_at, up.updated_at) AS sort_at,
   (extract(epoch FROM coalesce(up.apple_last_modified_at, up.updated_at))
@@ -195,15 +201,35 @@ const summarySelect = sql`
 
 export function createPlaylistBrowseStore(db: Db) {
   return {
+    async summary(userId: string) {
+      const [row] = normalizeRows(await db.execute(sql`
+        SELECT
+          (SELECT count(*)::int FROM user_playlists WHERE user_id = ${userId} AND in_library AND source = 'apple') AS apple_playlists,
+          (SELECT count(*)::int FROM user_playlists WHERE user_id = ${userId} AND in_library AND source = 'spotify_export') AS spotify_playlists,
+          (SELECT library_synced_at FROM user_music_profiles WHERE user_id = ${userId}) AS library_synced_at,
+          CASE WHEN EXISTS (SELECT 1 FROM user_track_library_sources WHERE user_id = ${userId} AND source = 'legacy')
+            THEN NULL ELSE (SELECT count(*)::int FROM user_track_library_sources WHERE user_id = ${userId} AND source = 'apple_live') END AS apple_songs
+      `))
+      return {
+        apple: { songs: nullableNumber(row.apple_songs), playlists: Number(row.apple_playlists), librarySyncedAt: nullableDate(row.library_synced_at) },
+        spotify: { playlists: Number(row.spotify_playlists) },
+      }
+    },
+
     async list(
       userId: string,
-      options: { status: 'active' | 'all'; q?: string; limit: number; cursor?: string },
+      options: { status: 'active' | 'all'; source?: 'apple' | 'spotify_export'; q?: string; limit: number; cursor?: string },
     ) {
       const cursor = options.cursor ? decodePlaylistCursor(options.cursor) : null
       const active = options.status === 'active' ? sql`AND up.in_library = true` : sql``
       const search = options.q
         ? sql`AND position(lower(${options.q}) in lower(up.name)) > 0`
         : sql``
+      const source = options.source ? sql`AND up.source = ${options.source}` : sql``
+      const [count] = normalizeRows(await db.execute(sql`
+        SELECT count(*)::int AS total FROM user_playlists up
+        WHERE up.user_id = ${userId} ${active} ${search} ${source}
+      `))
       const after = cursor
         ? sql`AND (
             (extract(epoch FROM coalesce(up.apple_last_modified_at, up.updated_at))
@@ -219,6 +245,7 @@ export function createPlaylistBrowseStore(db: Db) {
         WHERE up.user_id = ${userId}
         ${active}
         ${search}
+        ${source}
         ${after}
         GROUP BY up.id, ump.playlists_synced_at
         ORDER BY sort_at DESC, up.id DESC
@@ -230,6 +257,7 @@ export function createPlaylistBrowseStore(db: Db) {
       const last = hasMore ? pageRows.at(-1) : null
       return {
         playlists,
+        total: Number(count.total),
         nextCursor: last
           ? encodeCursor({
               v: 1,

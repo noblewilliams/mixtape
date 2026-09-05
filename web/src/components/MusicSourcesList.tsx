@@ -10,7 +10,7 @@ type MusicSourcesListProps = {
 
 function sourceDetail(source: ApiMusicSource): string {
   const ledger = ledgerRangeLabel(source.ledgerFrom, source.ledgerTo)
-  if (source.source === 'apple_live') return `Connected ${shortDate(source.connectedAt)} · synced from this browser`
+  if (source.source === 'apple_live') return `Connected ${shortDate(source.connectedAt)} · saved to your Mixtape account`
   const imported = `Imported ${shortDate(source.lastImportedAt ?? source.connectedAt)}`
   const parts = [imported, ledger, source.source === 'spotify_export' ? 're-import any time' : null]
   return parts.filter((part): part is string => part !== null).join(' · ')

@@ -35,6 +35,7 @@ export type ImportPanelHandle = {
 }
 
 type ImportPanelProps = {
+  uploadBlocked?: boolean
   run: ImportRun
   onNewTape: () => void
   ref?: Ref<ImportPanelHandle>
@@ -189,7 +190,7 @@ function inventoryRows(facts: ImportFacts): [string, string][] {
   ]
 }
 
-export function ImportPanel({ run, onNewTape, ref }: ImportPanelProps) {
+export function ImportPanel({ run, onNewTape, ref, uploadBlocked = false }: ImportPanelProps) {
   const state = useSyncExternalStore(run.subscribe, run.getState)
   const [dragOver, setDragOver] = useState(false)
   const [copyStatus, setCopyStatus] = useState('')
@@ -419,9 +420,10 @@ export function ImportPanel({ run, onNewTape, ref }: ImportPanelProps) {
             Only these plays leave this device. Your account details, payments, and IP addresses are never read.
           </p>
           <div className="btn-row">
-            <button className="btn primary" type="button" onClick={run.upload}>
+            <button className="btn primary" type="button" disabled={uploadBlocked} onClick={run.upload}>
               Upload
             </button>
+            {uploadBlocked ? <p className="note" role="status">Apple sync is still running or checking its result. You can inspect this file now; upload after that sync finishes.</p> : null}
             <button className="btn" type="button" onClick={reset}>
               Choose a different file
             </button>
@@ -487,7 +489,7 @@ export function ImportPanel({ run, onNewTape, ref }: ImportPanelProps) {
           <p>Your liked songs and artists are safe on the server. Nothing is lost; the playlists can follow with a retry.</p>
           <p className="note">Re-uploads the file; nothing is duplicated.</p>
           <div className="btn-row">
-            <button className="btn primary" type="button" onClick={run.retry}>
+            <button className="btn primary" type="button" disabled={uploadBlocked} onClick={run.retry}>
               Retry playlists
             </button>
             <button className="btn" type="button" onClick={onNewTape}>

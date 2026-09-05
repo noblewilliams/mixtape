@@ -189,6 +189,7 @@ describe('MusicKit browser client', () => {
     ])
     expect(new Set(snapshot.playlistEntries.map((entry) => entry.appleLibraryEntryId)).size).toBe(3)
     expect(snapshot.recentCatalogIds).toEqual(['catalog-2'])
+    expect(progress.mock.calls.filter(([value]) => value.stage === 'playlist_tracks').every(([value]) => value.total === undefined)).toBe(true)
     expect(progress).toHaveBeenLastCalledWith(expect.objectContaining({ stage: 'complete' }))
     expect(localStorage).toHaveLength(0)
     expect(sessionStorage).toHaveLength(0)

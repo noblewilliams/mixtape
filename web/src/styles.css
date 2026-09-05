@@ -1827,49 +1827,6 @@ input:focus-visible {
   opacity: 0.42;
 }
 
-.sync-card {
-  width: min(560px, calc(100vw - 32px));
-  padding: 34px;
-  text-align: center;
-}
-
-.loader-cassette {
-  width: min(300px, 78%);
-  margin: 5px auto 27px;
-}
-
-.sync-card > p:not(.quiet-kicker) {
-  margin: 9px auto 18px;
-}
-
-.sync-progress {
-  width: min(260px, 80%);
-  height: 5px;
-  margin: 18px auto 11px;
-  overflow: hidden;
-  background: rgba(60, 53, 59, 0.1);
-  border-radius: 4px;
-}
-
-.sync-progress span {
-  width: 68%;
-  height: 100%;
-  display: block;
-  background: linear-gradient(90deg, var(--pink), var(--orange), var(--yellow), var(--green), var(--blue));
-  animation: progress-breathe 1.5s ease-in-out infinite;
-}
-
-@keyframes progress-breathe {
-  50% {
-    filter: brightness(1.18);
-  }
-}
-
-.sync-card > small {
-  color: var(--muted);
-  font-size: var(--type-meta-size);
-}
-
 .toast {
   width: fit-content;
   max-width: calc(100vw - 32px);
