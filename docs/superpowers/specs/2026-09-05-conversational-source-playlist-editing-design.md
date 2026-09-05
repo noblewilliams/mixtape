@@ -1,6 +1,6 @@
 # Conversational source-playlist editing
 
-**Status:** approved; server slices 1–2 implemented locally, apply and UI pending
+**Status:** approved; server slices 1–2 committed and migrated, Worker/apply/UI pending
 
 **Date:** 2026-09-05
 

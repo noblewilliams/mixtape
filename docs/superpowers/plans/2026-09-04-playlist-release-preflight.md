@@ -64,6 +64,20 @@ No playlist mutation or device smoke was performed as part of this execution.
 Private checks read aggregate counts only; no playlist names, prompts, or track
 metadata were returned.
 
+## Playlist-edit follow-on, 2026-09-05
+
+- Pushed conversational draft foundation and isolated playlist DJ through clean
+  commit `a5f8185`.
+- Re-read only the Drizzle ledger and verified all 25 production hashes through
+  0024 before writing.
+- Applied the exact pending suffix, migrations 0025 and 0026, from a clean
+  detached `a5f8185` worktree.
+- Post-run verification found 27 matching ledger entries, no pending migration,
+  and resolvable draft, entry, event, message, and message-index objects.
+- No playlist/account rows were read, no Worker was deployed, and no Apple
+  Music mutation ran. The live Worker remains version
+  `7a6ec181-2292-4d56-b8a4-abb996d6857a` until a separate approved deployment.
+
 ## Pre-migration production ledger: read-only check, 2026-09-04
 
 Read only `drizzle.__drizzle_migrations` through the configured Neon connection.

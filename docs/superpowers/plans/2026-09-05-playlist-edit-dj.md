@@ -1,6 +1,6 @@
 # Playlist edit DJ implementation plan
 
-**Status:** implemented and verified locally; migrations 0025–0026 and deployment remain release-gated
+**Status:** implemented, committed, pushed, and migrated; Worker deployment remains release-gated
 
 **Spec:** [conversational source-playlist editing](../specs/2026-09-05-conversational-source-playlist-editing-design.md)
 
@@ -27,7 +27,9 @@ launch files remain user-owned and out of scope.
 
 Complete. Migration 0026 adds a draft-cascading, indexed transcript with strict
 role/version coherence and monotonic sequence order. Reopening a draft returns
-its newest 200 messages in chronological order.
+its newest 200 messages in chronological order. Production migrations 0025 and
+0026 were applied from clean commit `a5f8185`; the 27-entry ledger has no hash
+mismatches or pending migrations.
 
 Red first for a `playlist_edit_messages` table keyed to the draft. Messages use
 a monotonic sequence for transcript order, carry `user | dj`, and record the
@@ -121,5 +123,6 @@ and cross-listener isolation.
 
 Finish with an adversarial review, focused tests, server typecheck, Drizzle
 consistency, full serial server tests, migration rehearsal, and diff hygiene.
-Commit only owned files. Applying migrations, deploying the Worker, and any
-device/provider mutation require a separate explicit approval.
+Commit only owned files. The implementation is committed and pushed as
+`a5f8185`. Deploying the Worker and any device/provider mutation remain separate
+explicit approval gates.
