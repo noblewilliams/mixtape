@@ -1,6 +1,6 @@
 # Playlist release preflight
 
-Status: committed release pushed and production migrations applied; Worker deployment and private smoke remain held.
+Status: release pushed, production migrations applied, Worker deployed, and initial public/private smokes passed; device-only creation smoke remains.
 
 ## Reviewed snapshot
 
@@ -45,9 +45,24 @@ The command compiles without deploying, as documented in the
   pending.
 - Verified that `user_track_library_sources`, `playlist_origins`,
   `apple_isrc_lookups`, and `session_playlist_seeds` resolve in production.
+- Deployed the exact clean `fd5f66b` snapshot as Worker version
+  `7a6ec181-2292-4d56-b8a4-abb996d6857a`, message
+  `playlist intelligence fd5f66b`, with 100% traffic. The recorded rollback
+  version is `e35b134c-c045-4267-92b6-31c42c918159`.
+- Production startup time was 110 ms. The minified upload was 1,839.25 KiB /
+  470.31 KiB gzip and the five-minute scheduled trigger deployed.
+- Public smoke: `/health` returned 200; `/me`, `/enrich/status`, and
+  `/musickit/token` returned the expected unauthenticated 401.
+- Aggregate private smoke: enrichment/artwork status returned 200 for 4,714
+  tracks; 4,711 had artwork, three were missing, and none was retryable.
+- The first bounded scheduled catalog pass is visible in aggregate state:
+  compared with the recorded pre-release baseline, 25 catalog tracks were
+  materialized and linked playlist entries rose from 353 to 379. The remaining
+  954 exact-ID entries will continue through bounded five-minute batches.
 
-No Worker deployment, private-library query, catalog job, playlist mutation, or
-device smoke was performed as part of this execution.
+No playlist mutation or device smoke was performed as part of this execution.
+Private checks read aggregate counts only; no playlist names, prompts, or track
+metadata were returned.
 
 ## Pre-migration production ledger: read-only check, 2026-09-04
 
@@ -90,19 +105,12 @@ does not itself activate Worker jobs or prove a private catalog smoke.
 
 ## Next release gates
 
-1. Obtain separate approval for the Worker deployment. Production migrations
-   are complete, but the existing Worker does not expose the newly committed
-   server behavior until deployed. Worker rollback does not undo schema changes
-   or completed data jobs; do not drop the additive tables as an automatic
-   rollback.
-2. Deploy only the already-pushed `05dad49` snapshot from a fresh clean
-   worktree, then verify public health and auth guards.
-3. Separately authorize private catalog
-   checks. The deployed scheduler will start bounded catalog resolution; its
-   activation is part of rollout approval, not a passive deployment detail.
-4. With device access and approval to create one disposable playlist, smoke the
+1. Let bounded scheduled catalog resolution drain normally; investigate only if
+   aggregate failure/retry categories appear or counts stop moving across
+   multiple scheduled windows.
+2. With device access and approval to create one disposable playlist, smoke the
    new typed MusicKit creation path: author, order, added/failed reporting,
    returned ID, sync-origin reconciliation, and rename/resync survival. Existing
    playlists must remain untouched. Simulator compilation is not this proof.
-5. Coordinate a separately approved browse confirmation control before expecting
+3. Coordinate a separately approved browse confirmation control before expecting
    existing unknown-origin playlists to provide positive taste evidence.
