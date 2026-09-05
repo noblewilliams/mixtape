@@ -1,6 +1,6 @@
 # Playlist catalog resolution — first shared-enrichment slice
 
-Status: implemented and locally verified; production rollout pending · 2026-09-04
+Status: implemented, verified, and deployed; migration 0020 is applied and bounded catalog resolution is running · 2026-09-05
 
 Implements the next server slice of the approved artwork/playlist design. Reuses
 the export work's global `tracks` records and existing artwork/features/meaning
@@ -23,8 +23,9 @@ jobs. No second import system, new client UI, or Apple Music mutation.
   runs outside a transaction. Retry by fixed category; no misses are permanent.
 - Schedule before existing enrichment/artwork, with independent failure handling.
   Operational results contain counts only. Tokens and raw errors are never logged.
-- Local-only verification now. Migrations, production catalog reads/backfill,
-  deployment and founder smoke need separate approval. No push is implied.
+- Migration 0020 was later applied in the reviewed `0015–0024` production chain.
+  The Worker was later deployed with approval. The initial aggregate smoke
+  passed; private item-level and founder-device smoke still need separate approval.
 
 ## Tasks
 
@@ -54,30 +55,28 @@ jobs. No second import system, new client UI, or Apple Music mutation.
   partial unique Apple-ID index, without replacing concurrent importer metadata.
 - Migration `0020_playlist_catalog_resolution.sql` was generated and inspected:
   one lookup-state table with checks/composite key and one partial unresolved-entry
-  index. It has not been applied to production. PGlite tests exercise the schema
-  and queries; a production migration smoke is still pending.
-- No private library read, production write, deployment, commit or push was
-  performed for this slice. Existing instruction-file and launch-config changes
+  index. PGlite tests exercise the schema and queries. It was later applied in
+  production from the clean `05dad49` worktree, and its table resolves.
+- During implementation, no private library read, production write, deployment,
+  commit, or push was performed. The slice was later committed and pushed with
+  the combined candidate. Existing instruction-file and launch-config changes
   were left untouched.
 
 ## Release gate
 
-Review and commit only the owned change set. Reconcile the pending export
-migrations 0018–0019 and other local commits before choosing a deployment
-snapshot; do not deploy the shared dirty checkout or silently release unrelated
-work. After explicit approval, apply reviewed migrations and deploy from a clean
-committed worktree, then run a separately authorized private smoke: verify
-unresolved counts fall, snapshots/order/duplicates remain unchanged, no saved
-library membership is created, and existing enrichment progresses. Historical
-counts below are not a substitute for that smoke.
+The reviewed combined candidate is committed/pushed, migrations through 0024 are
+applied, and the exact Worker code is deployed. The initial bounded scheduled
+pass materialized 25 catalog tracks and raised linked entries from 353 to 379,
+leaving 954. Let bounded batches drain and investigate only if aggregate
+failure/retry categories appear or progress stops across several windows.
+Item-level private and device smoke still require separate authorization.
 
 ## Later slices (not claimed complete here)
 
-Spotify-by-ID features/artist correction, ISRC-to-Apple cross-link and fallback
-artwork remain the export enrichment phase. Fix the documented dual-ID
-source-deletion issue before that cross-link writes both IDs. Richer playlist
-taste/seeds, browse/detail UI, conversational drafts and verified apply follow.
-The last founder count of 980 unresolved entries is historical, not a live count.
+Spotify-by-ID features/artist correction, source-safe membership, ISRC-to-Apple
+cross-link, fallback artwork, playlist taste/seeds, and browse/detail UI are now
+committed. Conversational drafts and verified apply remain later work. The last
+founder count of 980 unresolved entries is historical, not a live count.
 
 References: [Apple catalog songs](https://developer.apple.com/documentation/applemusicapi/get-multiple-catalog-songs-by-id),
 [Worker practices](https://developers.cloudflare.com/workers/best-practices/workers-best-practices/).

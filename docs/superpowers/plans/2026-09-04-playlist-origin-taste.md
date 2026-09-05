@@ -1,6 +1,6 @@
 # Playlist origin and bounded taste
 
-Status: implemented and locally verified — production/device rollout pending.
+Status: implemented and verified; committed in `bba5de9`, with migration 0021 and the matching Worker deployed; device smoke remains.
 
 ## Contract
 
@@ -43,10 +43,11 @@ Status: implemented and locally verified — production/device rollout pending.
    structural ranking tests, corpus regression and adversarial review/fix round.
 4. [x] Full server/client/web checks and native compile where available; docs.
 
-Production migrations/deployment, private reads, new Apple playlists, commit and
-push are not part of this local run. Earlier catalog migration 0020 and export
-migrations remain separately release-gated. Existing playlists need an explicit
-confirmation surface before they can provide positive signal.
+Production actions were not part of the local implementation run. The combined
+candidate was later committed/pushed and migrations through 0024 were applied.
+Private item-level reads and a new disposable Apple playlist still need separate
+approval. Existing playlists need an explicit confirmation surface
+before they can provide positive signal.
 
 ## Verification and review notes
 
@@ -70,17 +71,18 @@ confirmation surface before they can provide positive signal.
 - Adversarial review fix: Spotify source deletion also removes confirmation
   records, and confirmation shares the existing profile lock order with
   sync/deletion. Creation upload failures remain non-fatal on both clients.
-- Migration 0021 was generated and is exercised through migrated PGlite tests;
-  not applied to production. It adds one table with a listener/source/ID primary
-  key, source/origin/ID checks and account-delete cascade.
+- Migration 0021 was generated and is exercised through migrated PGlite tests.
+  It was later applied from the clean `05dad49` worktree and adds one table with
+  a listener/source/ID primary key, source/origin/ID checks and account-delete
+  cascade.
 - Shared-checkout enrichment and web-board work belong to other active tasks;
   neither task's changes are staged, reverted, or released here.
 
 ## Next release checks
 
-Review a committed release snapshot and migrations 0018–0021 together, without
-implicitly releasing other unfinished work. Obtain action-time approval before
-production migration/deployment or creating a founder playlist. Device smoke:
+The reviewed combined snapshot is pushed, migrations through 0024 are applied,
+and the Worker is deployed. Obtain separate action-time approval before creating
+a founder playlist. Device smoke:
 create one disposable mix playlist, confirm author/order/added-failed reporting,
 sync and prove the returned typed ID matches the collected playlist and origin
 is `mixtape`. Verify rename/resync preserves it. Separately approve the browse

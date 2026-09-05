@@ -1,10 +1,11 @@
 # Playlist-inspired mixes
 
-Status: approved and implemented locally; release approval pending.
+Status: approved, implemented, and deployed; committed in `bba5de9` with migration 0024 active in production.
 
 Parent: [artwork and playlist intelligence](2026-08-31-artwork-playlist-intelligence-design.md),
 playlist-as-seed section. This completes a separate part of Phase 3; it does
-not implement conversational playlist editing or release the pending foundation.
+not implement conversational playlist editing. Release state is tracked in the
+[release-validation record](2026-09-05-listening-export-release-validation-design.md).
 
 ## User outcome
 

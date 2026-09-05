@@ -1,6 +1,6 @@
 # Web music integration — regression matrix
 
-Status: implementation and local verification, 2026-09-04. Original test specification follows the execution record below. No production data changed; this slice adds no schema migration.
+Status: implemented, verified, and committed in `3d18a17`; matching Worker and Netlify build deployed, with production browser/account smoke remaining. Original test specification follows the execution record below. This slice adds no schema migration.
 
 ## Execution record — approved integration
 
@@ -16,15 +16,17 @@ Status: implementation and local verification, 2026-09-04. Original test specifi
 
 Local visual entry: run `npm run dev -- --host 127.0.0.1 --port 4180` in `web/`, then open `/qa/your-music.html`. It imports actual App/components with synthetic API/MusicKit adapters and makes no provider or application API calls. Query `state=partial`, `checking`, `reading`, `sources-failed`, or `collection-failed` selects fault scenarios. It is not a production Vite entry and is absent from `dist/`.
 
-Implementation boundaries: the handoff task owns source membership (0022), Spotify enrichment and ISRC linking (0023); the playlist task owns backend playlist-inspired mixes (0024). This task owns no catalog, schema, scheduler, curation, or seed implementation changes; it adds only the cross-chain migration rehearsal outside those ownership paths. No commit, push, deploy, migration application, or real-account operation performed.
+Implementation boundaries: the handoff task owned source membership (0022), Spotify enrichment and ISRC linking (0023); the playlist task owned backend playlist-inspired mixes (0024). This task owns no catalog, schema, scheduler, curation, or seed implementation changes; it adds only the cross-chain migration rehearsal outside those ownership paths. The web slice was committed in `3d18a17`. The combined candidate was later pushed and migrations were applied separately; no Worker deployment or real-account operation was performed here.
 
-## Ownership and execution
+## Ownership and execution — historical preparation record
 
 The active playlist catalog-resolution task owns migration `0020`, schema, catalog/artwork normalization, and scheduler files. Wait for that task's reviewed commit before any schema edit. Use synthetic data and the existing PGlite helpers for server coverage; use injected APIs/MusicKit and the existing fake API on web. Add tests red first at the named seam, then implement and review each bounded fix. Do not check in `.todo` tests and call them coverage, or leave intentionally failing tests in another task's active full-suite run.
 
 Ownership expanded and was confirmed directly during this preparation: the same task owns playlist-origin migration `0021`, browse/routes, pool scoring, native creation and web `App`, API client, MusicKit client and test fixtures for creation receipts. A separate Spotify enrichment slice also has local edits. Do not modify or stage any of those files until the owners' work is integrated and re-inspected. Reported test totals from those tasks are not executions of this matrix.
 
-End-of-preparation update: catalog/origin work is committed as `1fb6c92`, and its owner released the shared paths. Use that baseline for the next integration pass. Browse source/freshness and the M1/M3 membership cases remain open. Its new source-deletion test covers Spotify-origin confirmation cleanup while preserving Apple creation receipts; reuse that coverage rather than duplicating it. Spotify enrichment remains a separate dirty slice.
+End-of-preparation update: catalog/origin work is committed as `1fb6c92`, and its owner released the shared paths. Use that baseline for the next integration pass. Browse source/freshness and the M1/M3 membership cases remain open. Its new source-deletion test covers Spotify-origin confirmation cleanup while preserving Apple creation receipts; reuse that coverage rather than duplicating it. At that time, Spotify enrichment remained a separate dirty slice.
+
+Current result: the membership, enrichment, catalog, playlist-inspiration, and web slices are integrated in `bba5de9` and `3d18a17`; the regression results above are the frozen combined checkpoint. Production migrations reach `0024`, Worker version `7a6ec181-2292-4d56-b8a4-abb996d6857a` is live, and Netlify production reports commit `05dad49`. Remaining browser/account rollout work follows the [release-validation contract](../specs/2026-09-05-listening-export-release-validation-design.md).
 
 ## Mixed-source persistence
 
@@ -75,4 +77,4 @@ Apple sync currently completes the song snapshot before beginning playlists. Do 
 - Run targeted tests after each red-green-fix round, then the authoritative serial server suite, server typecheck, web tests and build against the current combined checkout.
 - Record exact commit/test evidence here or in the existing web plan, not by overwriting the handoff's historic totals.
 - Memories and mix rename/archive/unarchive require their own bounded visual coverage. They are not silently included in approval of the music board.
-- Before release, verify every unapplied production migration (including earlier sync migrations), validate real-export layouts outside the repo, review privacy disclosures, and obtain explicit authorization for deployment and real-account actions.
+- Before the remaining rollout, confirm the applied production ledger still matches `0024`, validate real-export layouts outside the repo, review privacy disclosures, and obtain explicit authorization for deployment and real-account actions.

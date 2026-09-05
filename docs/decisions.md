@@ -308,4 +308,6 @@ community guidance says API access requires a token while new access requests
 are closed. It remains a guarded best-effort last fallback until a public-ID-only
 Worker-runtime smoke confirms access and policy. Spotify oEmbed is primary. Plan:
 `superpowers/plans/2026-09-04-spotify-fallback-artwork.md`. The slice adds no
-migration and is local, uncommitted, undeployed, and unprobed against providers.
+migration and is committed in `bba5de9`; it remains undeployed and unprobed
+against providers. Release sequencing and acceptance are specified in
+`superpowers/specs/2026-09-05-listening-export-release-validation-design.md`.

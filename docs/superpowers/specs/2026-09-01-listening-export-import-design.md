@@ -1,6 +1,6 @@
 # Listening-export import — design
 
-*Status: draft for founder review · 2026-09-01 · revision 3 (both Spotify packages; playlists, likes, followed artists)*
+*Status: founder-approved and implemented · revision 3 · code pushed and migrations applied 2026-09-05; runtime and real-export validation remain*
 *Companion docs: [vision](../../product/vision.md) · [web sync and consumption](2026-09-01-web-sync-consumption-design.md) · [decisions](../../decisions.md) · [backlog](../../backlog.md)*
 
 ## Product decision

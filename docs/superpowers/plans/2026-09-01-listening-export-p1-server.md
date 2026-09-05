@@ -1,6 +1,6 @@
 # Listening-export import — Phase 1: server
 
-*Status: code complete locally · 2026-09-02 · migrations 0018–0019 and the Worker deploy wait for the founder's go, from a clean worktree*
+*Status: code complete and pushed · migrations 0018–0019 and the matching Worker deployed 2026-09-05 · real-export validation remains*
 *Design: [listening-export import](../specs/2026-09-01-listening-export-import-design.md) (revision 3)*
 
 **Founder decisions (2026-09-01):** Spotify listeners bring their own data export (Account data + Extended streaming history); Apple export is an optional "go deeper" step; parsing happens on the device; the ledger is per track per day; private sessions are excluded by default; pool candidates are library, seeded, or three counted plays in the last two years; a mix before any data requires the DJ interview and enough seed matches and is labeled "not personal yet"; iOS and web ship the Spotify import in parallel; the Apple adapter is web-first; connected sources are a set per listener. The eleven proposed decisions in the spec are approved and land in `docs/decisions.md` in Task 0.
@@ -105,7 +105,7 @@ Read the spec first. These are the facts an implementer must not drift from.
 ### Task 9: verification, docs, migration gate
 - `npx vitest run --no-file-parallelism` and `npm run typecheck` green in `server/`; record counts in this plan's "Current verification".
 - `docs/backlog.md` and this plan's status updated; the spec's "Open implementation facts" already records the ReccoBeats batch limit (40).
-- Migration apply and Worker deploy happen from a clean worktree of committed HEAD and only with the founder's go at action time. Nothing in this phase changes behavior for existing listeners until a client sends the new endpoints, so deploy can wait for phase 2 if the founder prefers.
+- Original release rule: migration apply and Worker deploy happen from a clean worktree of committed HEAD and only with the founder's go at action time. This rule was followed during the 2026-09-05 release.
 
 ## Review follow-ups (recorded, not gates)
 
@@ -113,7 +113,7 @@ Read the spec first. These are the facts an implementer must not drift from.
 - Task 4 review: one convention across all three staging protocols (library, playlist, listening) — a malformed `:syncId`/`:importId` is a 404 `{ error: 'not_found' }` via a shared `routes/uuid-param.ts` helper (library and playlist routes moved from a zod 400 to this), the conflict category maps to `sync_conflict` everywhere, and `/me/*` read endpoints emit timestamps as ISO strings like `/me/memories`. Invalid JSON bodies are now a 400 (Hono's `HTTPException` is returned from `app.onError` instead of being swallowed into a 500). Phase-2 clients can share one staging-protocol helper.
 - Task 3 `complete()` locks the profile row, then the run row, matching `begin()` and the library sibling, so lock order stays deadlock-free.
 - Task 3 review: `deleteSource('apple_export')` now un-libraries export-derived Apple rows when the user has no `apple_live` source (fix round), so delete-import is a real reset for both sources. Dual-id rows (a track with both `spotify_id` and `apple_id`) are still swept by the Spotify liked-removal and delete rules when their membership came from an Apple export; rare until phase 3's ISRC cross-link creates such rows, so it is recorded for phase 3 rather than fixed here.
-- Task 5 review: queue exclusion in `buildPool` is by recording key (ISRC group), not row id, so a queued song's sibling row can never be picked as its own replacement (fix round). Platform preference treats a legacy library (in_library rows, no `user_music_sources` row) as Apple. For phase 2: the web `ApiSession` type needs `notPersonal`, and `POST /sessions/:id/messages` returns no session summary, so a client must refetch the session to learn a turn went corpus-mode. `resolvePoolMode` runs a corpus-wide seed scan on every generate even for personal listeners; gate it behind the personal check or index `lower(btrim(artist))` if it ever shows in latency. A loop-level test that a swap never lands a queued recording's sibling is still owed once loop.ts is free. Known edge: a legacy Apple library (no source row) that adds a Spotify export before its next live sync prefers Spotify rows until that sync writes `apple_live`.
+- Task 5 review: queue exclusion in `buildPool` is by recording key (ISRC group), not row id, so a queued song's sibling row can never be picked as its own replacement (fix round). Platform preference treats a legacy library (in_library rows, no `user_music_sources` row) as Apple. For phase 2: the web `ApiSession` type needs `notPersonal`, and `POST /sessions/:id/messages` returns no session summary, so a client must refetch the session to learn a turn went corpus-mode. `resolvePoolMode` runs a corpus-wide seed scan on every generate even for personal listeners; gate it behind the personal check or index `lower(btrim(artist))` if it ever shows in latency. A later loop-level test now pins that a swap never lands a queued recording's sibling. Known edge: a legacy Apple library (no source row) that adds a Spotify export before its next live sync prefers Spotify rows until that sync writes `apple_live`.
 - Task 8 review: a Spotify playlist run rejects a storefront outright, so it can never touch the Apple storefront (fix round). For phase 2: the playlist browse summary does not expose `user_playlists.source` and hardcodes `capability: 'copy_only'`, so a mixed Apple + Spotify listing cannot badge or gate per source yet; and the playlist sync still allows one open run per user across sources, so a client must not run an Apple playlist sync and a Spotify playlist sync concurrently (move the partial unique index to `(user_id, source)` when that matters).
 - Task 6 review: re-running the interview accumulates notes (`Era: 2010s` and `Era: 90s` both persist since only exact duplicates are no-ops); phase 2 decides whether the interview replaces its previous notes.
 - Task 6 must insert seeded rows with `in_library = false` explicitly (`user_tracks.in_library` defaults to true), or the Spotify liked-removal and delete-source rules will sweep them.
@@ -121,11 +121,11 @@ Read the spec first. These are the facts an implementer must not drift from.
 ## Out of scope (resist)
 Parsers · any UI · the ReccoBeats-by-id enrichment stage, ISRC cross-link, and oEmbed artwork (phase 3) · relay and embed probes (phase 4) · Apple adapter specifics beyond accepting `apple_media` runs · physical merge of duplicate rows · scoring changes beyond the candidate rule and corpus familiarity · cron batch size changes · email or push.
 
-## Current verification
+## Phase-close verification — historical
 
 - Server: 55 files / 1069 tests green with `npx vitest run --no-file-parallelism` (from 701 / 39 files before phase 1). `npm run typecheck` clean.
 - Every task ran as implementer → adversarial review → fix round; every review finding was either fixed in the same phase or recorded above for phase 2.
-- No migration applied, no deploy, no listener data touched.
+- At phase close, no migration was applied, nothing was deployed, and no listener data was touched. The controlled release occurred later on 2026-09-05.
 
 ## Delivered
 

@@ -1,12 +1,12 @@
 # Handoff — listening-export program (Spotify import)
 
-*Written 2026-09-04 at `14cdc44`. Phases 1 and 2 are code-complete locally. Nothing is pushed, migrated, or deployed. Every remaining step is a founder gate or a later phase.*
+*Initial handoff written 2026-09-04 at `14cdc44`; follow-on status updated 2026-09-05. The completed program work is pushed, production migrations reach 0024, and the matching Worker and Netlify build are deployed. Production-browser/TestFlight, provider-specific, and device/real-export gates remain.*
 
 Read with: `docs/superpowers/specs/2026-09-01-listening-export-import-design.md` (rev 3), the phase plans `docs/superpowers/plans/2026-09-01-listening-export-p1-server.md` and `docs/superpowers/plans/2026-09-02-listening-export-p2-spotify-import.md`, and the 2026-09-01 entry in `docs/decisions.md`.
 
-## Follow-on status — 2026-09-04
+## Follow-on status — 2026-09-05
 
-Phase 3 is implemented locally. Spotify-ID metadata/features feed the
+Phase 3 is implemented and committed in `bba5de9`. Spotify-ID metadata/features feed the
 existing enrichment pipeline (plan `superpowers/plans/2026-09-04-spotify-id-enrichment.md`).
 Source ownership now has its own plan and migration 0022
 (`superpowers/plans/2026-09-04-library-source-ownership.md`): each source changes
@@ -19,12 +19,12 @@ applies to new imports, but completed historical summaries retain their values.
 
 Source ownership is verified locally: the full server suite passed 1,168 tests;
 a final rollout-gap fix then passed 296 focused tests plus typecheck (details
-in its plan). Apple ISRC linking is now implemented locally in
-`superpowers/plans/2026-09-04-apple-isrc-linking.md`, with migration 0023. It uses
+in its plan). Apple ISRC linking is implemented and committed in `bba5de9`; its
+plan is `superpowers/plans/2026-09-04-apple-isrc-linking.md`, with migration 0023. It uses
 the saved Apple storefront or the listener's import country (user approved),
 defers unknown country, preserves ambiguous/conflicting IDs, and records the
-successful market for artwork refresh. These follow-on changes are uncommitted
-and undeployed. The stable combined server checkpoint passed 67 files / 1,211
+successful market for artwork refresh. The matching Worker code is deployed.
+The stable combined server checkpoint passed 67 files / 1,211
 tests, plus typecheck and migration checks; it precedes the separate
 playlist-inspired session work. The final fallback slice is in
 `superpowers/plans/2026-09-04-spotify-fallback-artwork.md`: official Spotify
@@ -35,17 +35,22 @@ froze server files, the authoritative combined suite passed **73 files / 1,259
 tests in 192.63s**, including the 0014-to-current migration rehearsal. Current
 Deezer access policy makes that provider best effort until a public-ID-only Worker smoke.
 Real-export validation remains gated on the missing archives.
-The user's requested archives have not arrived. The separate playlist
-catalog/taste task committed its work at `1fb6c92`; do not confuse that committed
-release scope with these local changes.
+The user's requested archives have not arrived. The earlier playlist
+catalog/taste slice is `1fb6c92`; the combined music/enrichment work is `bba5de9`
+and the completed Your music web integration is `3d18a17`.
 
-The separate read-only release preflight found production migrations only
-through 0014 applied. Its report is
-`superpowers/plans/2026-09-04-playlist-release-preflight.md`; the eventual combined
-release therefore needs at least 0015–0024, not only the export migrations listed
-in the original gate below. Re-read the ledger and selected committed migration
-chain at release time. Hold mixed-source rollout for the membership fix and its
-reviewed commit.
+The remaining release and validation contract is centralized in
+`superpowers/specs/2026-09-05-listening-export-release-validation-design.md`.
+It separates provider/release work that can happen before the archives from the
+real Spotify validation and Phase 4 evidence gate that require them.
+
+The separate release preflight first found production migrations only through
+0014, then recorded the approved push and clean-worktree production migration.
+Its report is `superpowers/plans/2026-09-04-playlist-release-preflight.md`.
+Production now has all 25 migrations through 0024 with matching hashes; the new
+tables resolve. Worker version `7a6ec181-2292-4d56-b8a4-abb996d6857a` deploys
+the exact clean `fd5f66b` snapshot. Public health/auth and aggregate private
+smoke passed; no playlist mutation or device smoke ran.
 
 ## What this is
 
@@ -105,19 +110,20 @@ Every task ran implementer → adversarial reviewer → fix round. Every finding
 
 ## Left
 
-### Founder gates, in order (nothing here runs without an explicit go)
+### Release actions and remaining founder gates
 
-1. **Push.** `main` is 102 commits ahead of `origin/main`. Nothing from either phase is on GitHub yet.
-2. **Migrations 0018–0019, then the Worker deploy.** From a clean worktree of committed HEAD, never the working tree (`docs/decisions.md` incident rule). Migrations apply with `npm run db:migrate` in `server/` with the production `DATABASE_URL` set; deploy with `npm run deploy`. Existing listeners are unaffected until a client calls the new endpoints, but both clients now do, so the web and iOS releases depend on this step.
-3. **Web deploy** to Netlify after step 2.
-4. **TestFlight build.** The simulator build is proven; signing and upload are the founder's.
-5. **Fixture-layout check against real exports.** The fixture folder names, file names, and playlist item shapes are assumptions recorded in `fixtures/listening-exports/README.md`. When the founder's Spotify (both packages, requested 2026-09-01) and Apple exports arrive, put the archives in a folder outside the repo and give a session the paths; it verifies the layout, corrects the fixtures and both parsers if needed, and only then runs the smoke.
-6. **Real-export smoke** (spec "Real-world smoke"): import the founder's Spotify export in the iOS app, on desktop Chrome, and on Android Chrome. Ledger date ranges match the export; play counts for three known heavy-rotation tracks match a manual count, including one under two Spotify ids; a mix generates with observed counts and the top candidates get features and meanings within one cron cycle; re-import yields identical summaries.
-7. **Funnel baseline.** `scripts/funnel-report.ts` shows the founder's events in order: chose_spotify, marked_requested, interview_completed, file_inspected, import_completed, first_personal_mix, first_output.
+1. **Completed — push.** The reviewed foundation through `05dad49` was pushed to `origin/main`; the later migration record `fd5f66b` is also pushed.
+2. **Completed — migrations 0015–0024.** The exact production prefix and hashes were checked, then the full pending chain was applied from the clean detached `05dad49` worktree. The post-run ledger contains 25 matching entries through 0024.
+3. **Completed — Worker deploy and initial smoke.** Exact clean snapshot `fd5f66b` is live as version `7a6ec181-2292-4d56-b8a4-abb996d6857a`; rollback version `e35b134c-c045-4267-92b6-31c42c918159` is recorded. Health/auth guards and aggregate private status passed.
+4. **Published — web; verification remains.** Netlify production reports commit `05dad49`, and code-affecting `main` pushes auto-publish. Smoke auth, Your music, playlist browse/detail, and Android Chrome against the deployed Worker before calling the web rollout verified.
+5. **TestFlight build.** The simulator build is proven; signing and upload are the founder's.
+6. **Fixture-layout check against real exports.** The fixture folder names, file names, and playlist item shapes are assumptions recorded in `fixtures/listening-exports/README.md`. When the founder's Spotify (both packages, requested 2026-09-01) and Apple exports arrive, put the archives in a folder outside the repo and give a session the paths; it verifies the layout, corrects the fixtures and both parsers if needed, and only then runs the smoke.
+7. **Real-export smoke** (spec "Real-world smoke"): import the founder's Spotify export in the iOS app, on desktop Chrome, and on Android Chrome. Ledger date ranges match the export; play counts for three known heavy-rotation tracks match a manual count, including one under two Spotify ids; a mix generates with observed counts and the top candidates get features and meanings within one cron cycle; re-import yields identical summaries.
+8. **Funnel baseline.** `scripts/funnel-report.ts` shows the founder's events in order: chose_spotify, marked_requested, interview_completed, file_inspected, import_completed, first_personal_mix, first_output.
 
 ### Later phases (spec "Phasing")
 
-- **Phase 3, enrichment (implemented locally).** Spotify-ID metadata/features, source ownership, exact Apple ISRC linking, and Spotify oEmbed artwork with guarded exact-ISRC Deezer fallback have their follow-on plans above. Provider/runtime smoke, reviewed release, and real-export validation are still gates.
+- **Phase 3, enrichment (committed in `bba5de9`).** Spotify-ID metadata/features, source ownership, exact Apple ISRC linking, and Spotify oEmbed artwork with guarded exact-ISRC Deezer fallback have their follow-on plans above. Provider/runtime smoke, release, and real-export validation are still gates.
 - **Phase 4, probes.** Scrobble relay (ListenBrainz or Last.fm as the live feed; terms and latency unknown) and the Spotify iFrame embed player (five open questions in the spec). Each gets a short spec only if it holds. Gated on the funnel showing listeners reach `import_completed` and `first_output`.
 - **Phase 5, Apple "go deeper", web first.** Parser for `Apple Media Services information` (Daily Tracks CSV, Library Tracks JSON, nested archive stored or deflated, random access for a 1 GB archive). The server already accepts `apple_media` runs. iOS build waits for the web proof and funnel evidence.
 
@@ -127,24 +133,24 @@ Server:
 - Playlist entry snapshots carry no `addedAt`, so export playlist added-dates are dropped on the wire until a server field exists.
 - The playlist browse summary does not expose `user_playlists.source` and hardcodes `capability: 'copy_only'`; a mixed Apple + Spotify listing cannot badge per source yet.
 - Playlist sync allows one open run per user across sources; clients must not run an Apple and a Spotify playlist sync concurrently (move the partial unique index to `(user_id, source)` when it matters).
-- The committed baseline still has the dual-ID membership deletion defect; the local migration-0022 source-ownership follow-on above resolves it. Deploy that fix before enabling cross-platform identity writes.
+- The deployed candidate fixes the dual-ID membership deletion defect; migration 0022 and its matching Worker runtime are active.
 - Re-running the interview appends notes rather than replacing them (default kept in phase 2).
 - `resolvePoolMode` scans the corpus for seed matches on every generate; gate it behind the personal check or index `lower(btrim(artist))` if latency shows it.
 - Staged-days lookup uses a row-value `IN` list of up to 2 000 tuples; switch to `unnest` if import latency shows it.
-- A loop-level test that a swap never lands a queued recording's sibling is still owed.
+- A loop-level test now pins that a swap never lands a queued recording's sibling.
 - A legacy Apple library (no `user_music_sources` row) that adds a Spotify export before its next live sync prefers Spotify rows until that sync writes `apple_live`.
 
 Clients:
 - The web demo tile on the service-choice dialog is disabled until a demo mechanism exists.
 - An archive opened on iOS while signed out is held on the device and handed to whoever signs in next (deliberate).
 - `web/src/import/worker.test.ts` abort test flaked once on timing; make its wait deterministic if it recurs.
-- "Your music" Apple sync UI on the web is a separate, older track (see `docs/backlog.md` "Ship web sync and consumption").
+- The Your music Apple sync UI is committed in `3d18a17`; its production and launch-browser validation is part of the release spec.
 
 ### Accepted edges
 
 - A re-import cannot lower a play count; delete-source is the reset.
 - A Spotify account-only import leaves `play_count_observed = false`.
-- Historical phase-1 runs skipped Spotify liked-track removal for listeners with an `apple_live` source. The local source-ownership follow-on supersedes that rule for new runs; source-specific membership is now the protection.
+- Historical phase-1 runs skipped Spotify liked-track removal for listeners with an `apple_live` source. The deployed source-ownership runtime now supersedes that rule; migration 0022 provides source-specific membership storage.
 
 ## Working rules a next session must keep
 

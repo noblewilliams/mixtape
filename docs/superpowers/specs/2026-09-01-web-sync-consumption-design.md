@@ -1,6 +1,6 @@
 # Web sync and consumption — design
 
-*Status: Your music integration approved and implemented locally · 2026-09-04. Real-account and release gates remain.*
+*Status: Your music integration approved and committed in `3d18a17` · migrations, Worker, and Netlify build deployed 2026-09-05 · real-account and launch-browser gates remain.*
 *Companion docs: [vision](../../product/vision.md) · [playlist intelligence](2026-08-31-artwork-playlist-intelligence-design.md) · [decisions](../../decisions.md)*
 
 ## Product decision

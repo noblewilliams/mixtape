@@ -1,6 +1,6 @@
 # Playlist-inspired mixes implementation plan
 
-Status: implemented and verified locally; release remains.
+Status: implemented and verified; committed in `bba5de9`, with migration 0024 and the matching Worker deployed.
 
 Spec: [playlist-inspired mixes](../specs/2026-09-04-playlist-inspired-mixes-design.md).
 
@@ -13,10 +13,11 @@ Spec: [playlist-inspired mixes](../specs/2026-09-04-playlist-inspired-mixes-desi
 - Export task: membership and ISRC lookup migrations 0022–0023, schema/journal,
   catalog client, enrichment runner/scheduler/index. Schema ownership was handed
   over after 0023; this slice generated 0024 without modifying those paths.
-- Shared backlog/decisions/handoff currently contain that task's changes. Use
-  these dedicated documents until ownership is available for a scoped update.
-- No deployment or production data access. Do not widen the pinned release
-  candidate automatically to include this new feature.
+- Shared backlog, decisions, and handoff now reflect the combined committed
+  candidate. Remaining rollout work follows the release-validation contract.
+- No Worker deployment or private production data access occurred during this
+  feature's implementation. Migration 0024 and the Worker were later released
+  through separately approved actions.
 
 ## Task 1 — selection and authenticated session contract
 
@@ -73,12 +74,12 @@ Review adversarial cases and fix findings before expanding scope.
 
 ## Task 5 — verification and handoff
 
-Complete locally. The authoritative combined-worktree server suite passes 70
-files / 1,235 tests; focused playlist/session coverage, typecheck, Drizzle
-consistency, and diff hygiene pass. Spec, plan, backlog, and decisions document
-the API response, coverage, unavailable-source and shortfall states.
-Commit/push/deploy and real-library/device checks require separate authorization.
+Complete. The final frozen combined server suite passed 73 files / 1,259 tests;
+focused playlist/session coverage, typecheck, Drizzle consistency, migration
+rehearsal, and diff hygiene also passed. Spec, plan, backlog, and decisions
+document the API response, coverage, unavailable-source and shortfall states.
 
-Production code and migration 0024 are changed locally. Nothing has been
-committed, pushed, migrated, deployed, read from production, or sent to a music
-provider by this slice.
+The implementation was committed in `bba5de9`, pushed as part of the reviewed
+candidate, and migration 0024 plus the matching Worker are live. Initial
+health/auth and aggregate private smoke passed; no playlist was mutated and no
+device-level playlist-inspiration smoke ran.

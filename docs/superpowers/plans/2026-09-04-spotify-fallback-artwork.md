@@ -1,6 +1,6 @@
 # Spotify fallback artwork — Phase 3 final slice
 
-Status: implemented and focused-verified locally; uncommitted and undeployed.
+Status: implemented, verified, and deployed in Worker version `7a6ec181-2292-4d56-b8a4-abb996d6857a`; Spotify/Deezer-specific smoke remains.
 
 The user authorized the remaining Phase 3 implementation while the real Spotify
 and Apple exports are still pending. A Spotify track that does not acquire an
@@ -29,8 +29,9 @@ membership, taste, plays, playlists, or a listener's mix.
 - A successful Apple ISRC link clears any older fallback retry row so Apple
   artwork never inherits Spotify/Deezer backoff. The jobs remain failure-isolated
   and run metadata -> Apple ISRC -> Spotify/Deezer fallback -> Apple artwork.
-- No schema change, migration, production/provider request, private-library
-  read, commit, push, or deploy is part of this slice.
+- No schema change or migration was needed. The implementation made no
+  production/provider request or private-library read; release work is specified
+  in `../specs/2026-09-05-listening-export-release-validation-design.md`.
 
 ## Tasks
 
@@ -80,9 +81,10 @@ oEmbed hits or the rest of maintenance.
 
 ## Release gate
 
-Run one public-ID-only Spotify oEmbed request from the Worker runtime and, only
-after an oEmbed miss fixture, one exact-ISRC Deezer request. Confirm response
-shape, access policy, latency, and that no secret is needed or transmitted. Then
-review the complete commit, rehearse the pending migration chain selected for
-that commit, deploy from a clean worktree, and run the real-export smoke after
-the archives arrive. The exports are not required for this implementation.
+Against live Worker version `7a6ec181-2292-4d56-b8a4-abb996d6857a`, run one
+public-ID-only Spotify oEmbed request and, only after an oEmbed miss fixture, one
+exact-ISRC Deezer request. Confirm response shape, access policy, latency, and
+that no secret is needed or transmitted. Then observe aggregate fallback
+categories and run the real-export smoke after the archives arrive. The
+migrations and Worker are already deployed; the exports are not required for
+the provider-specific smoke.

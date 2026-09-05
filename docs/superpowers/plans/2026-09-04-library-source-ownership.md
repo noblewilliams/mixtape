@@ -1,6 +1,6 @@
 # Library source ownership
 
-Status: implemented and verified locally; uncommitted and undeployed.
+Status: implemented and verified; committed in `bba5de9`, with migration 0022 and the matching Worker deployed.
 
 A shared track's provider IDs identify the recording, not the source of a
 listener's saved-library membership. Before ISRC cross-linking adds more dual-ID
@@ -44,8 +44,8 @@ Owned: new membership module/tests/migration, schema and migration journal,
 related focused tests and docs. The playlist task handed these back after its
 scoped commit. Web UI and playlist catalog/artwork jobs remain separate.
 
-Real ZIP validation waits for the exports. Migration application, deployment,
-and commit/push are outside this local implementation.
+Real ZIP validation waits for the exports. Commit/push, migration application,
+and Worker deployment were handled later as controlled release actions.
 
 
 ## Review and verification
@@ -75,7 +75,7 @@ and commit/push are outside this local implementation.
   and changes no existing table definition.
 - The web task owns combined Your music UI, sync coordination, and playlist
   browse source/freshness contracts. It will reuse these membership regressions.
-- The separate release preflight reports production applied only through 0014.
-  Hold combined mixed-source rollout for a reviewed commit of this fix and an
-  isolated release rehearsal of the exact final snapshot. Production migration,
-  deployment, real-export smoke, and historical legacy reconciliation remain open.
+- The separate release preflight records that production advanced from 0014
+  through 0024 using the clean `05dad49` worktree, including this fix. The
+  matching Worker is deployed; real-export smoke and historical legacy
+  reconciliation remain open.

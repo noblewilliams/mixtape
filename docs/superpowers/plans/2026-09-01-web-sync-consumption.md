@@ -1,12 +1,12 @@
 # Web sync and consumption — delivery plan
 
-*Status: active · reconciled with the listening-export handoff 2026-09-04*
+*Status: implementation committed in `3d18a17`; release and launch validation remain*
 *Design: [web sync and consumption](../specs/2026-09-01-web-sync-consumption-design.md)*
 *Approval: [combined Your music decision](../../mockups/approved/2026-09-04-web-your-music-integration.md), 2026-09-04; [board](../../mockups/2026-09-04-web-your-music-integration-states.html). The original Apple board remains historical, not approved.*
 
 This is one continuous delivery track. Playlist intelligence is not paused: the existing native staging and browse work is reused by the browser adapter, then exposed through the web product flow.
 
-## Resumption boundary — 2026-09-04
+## Historical resumption boundary — 2026-09-04
 
 The listening-export handoff at `75f7e0d` adds completed Spotify import services, approved UI, source management, and mixed-platform mix outputs. Reuse that work; do not recreate the import parser or replace its approved request/waiting/import states. The new board proposes only the shared navigation, source overview, Apple sync states, and source-aware playlist collection/detail.
 
@@ -48,11 +48,11 @@ The listening-export handoff at `75f7e0d` adds completed Spotify import services
 - Added the regression matrix, including source-local membership, partial/unknown publication, both-direction upload ownership, source freshness/counts, and origin preservation. Those production cases are specified, not executed.
 - Coordinated ownership directly with the playlist task. It completed its separate commit `1fb6c92` during this pass; shared paths are available again. Verified the commit adds origin/receipt behavior, not browse source identity or source-specific freshness. Its Spotify deletion change clears Spotify origin confirmations, not the separate dual-ID library-membership edge. Nothing from another task was modified or staged here. No production code, migrations, account data, deployment, or Git commit by this task in this preparation pass.
 
-The founder approved the new/shared states after this preparation. Existing Spotify approvals are not superseded. Implementation starts against `1fb6c92`; the handoff task now owns source membership (migration 0022, library/listening stores) and Spotify enrichment. Leave those files untouched and integrate their verified results. This task owns browse contracts, web sync coordination and approved UI.
+The founder approved the new/shared states after this preparation. Existing Spotify approvals are not superseded. Implementation continued from `1fb6c92`; source membership, Spotify enrichment, ISRC linking, and playlist inspiration landed in `bba5de9`, while browse contracts, web sync coordination, and the approved UI landed in `3d18a17`.
 
 ## Delivery order
 
-### 1. Source-aware library foundation — complete locally
+### 1. Source-aware library foundation — committed
 
 - [x] Add deletion-safe staged song snapshots with start, chunk, and atomic completion routes.
 - [x] Preserve known native play counts when web MusicKit reports the signal as unavailable.
@@ -61,7 +61,7 @@ The founder approved the new/shared states after this preparation. Existing Spot
 - [x] Record iOS versus web source capability on song and playlist sync runs.
 - [x] Add migrations 0015–0017 and tenant/idempotency/rollback coverage.
 
-### 2. Browser MusicKit adapter — complete locally
+### 2. Browser MusicKit adapter — committed
 
 - [x] Page library songs, playlists, playlist tracks, and recent tracks.
 - [x] Normalize catalog-resolvable songs and retain unresolved playlist entries for honest browse.
@@ -70,7 +70,7 @@ The founder approved the new/shared states after this preparation. Existing Spot
 - [x] Keep Music User Tokens in memory and out of Mixtape requests and persistence.
 - [x] Upload songs before playlists through bounded retry-safe chunks with cancellation checks.
 
-### 3. Web taste quality — complete locally
+### 3. Web taste quality — committed
 
 - [x] Represent unavailable play count as unknown rather than zero.
 - [x] Use bounded recent-play rank for web-only familiarity.
@@ -84,7 +84,7 @@ The founder approved the new/shared states after this preparation. Existing Spot
 - [x] Approve the dedicated `Your music` destination and state hierarchy.
 - [x] Browser-render the board through the local dev origin.
 
-### 5. Real sync UI — implemented locally
+### 5. Real sync UI — committed
 
 - [x] Replace the static 68% overlay with `MusicSyncService` progress.
 - [x] Wire connect, cancel, retry, terminal summary, last-sync time, and reconnect states.
@@ -93,7 +93,7 @@ The founder approved the new/shared states after this preparation. Existing Spot
 - [x] Add component coverage for progress, authorization, cancellation, upload gating, partial, empty-complete, and unconfirmed outcomes; measure the primary layouts at all six approved breakpoints.
 - [ ] Complete exhaustive production-UI large-text/reduced-preference and real-device checks; board checks alone are not production-UI verification.
 
-### 6. Web consumption parity — follows the same implementation pass
+### 6. Web consumption parity — music surface committed; account controls remain
 
 - [x] Add the `Your music` route/view and paginated playlist collection.
 - [x] Add search, playlist detail pagination, unresolved/local-track treatment, and artwork fallbacks.
@@ -107,7 +107,9 @@ The founder approved the new/shared states after this preparation. Existing Spot
 - [x] Run the authoritative server suite, complete web suite, typechecks, and production build after UI integration. Frozen combined checkpoint: server 73 files / 1,259 tests plus typecheck; web 36 files / 349 tests plus production build.
 - [ ] Across the launch browser matrix, probe duplicate playlist identity, background playback, auth expiry, empty playlists, and local/unresolved songs; Android Chrome is launch-critical coverage.
 - [ ] Compare browser-visible counts/order against Apple Music without logging names, tokens, or Apple bodies.
-- [ ] Apply migrations and deploy from a clean worktree only after review and action-time approval.
+- [x] Apply migrations `0015–0024` from a clean worktree after review and action-time approval. Production reached `0024` on 2026-09-05; see the release preflight.
+- [x] Deploy the Worker and Netlify production build from reviewed snapshots. Worker version `7a6ec181-2292-4d56-b8a4-abb996d6857a` and Netlify commit `05dad49` are live.
+- [ ] Smoke the production web app across the launch browser matrix and real-account states.
 
 ## Foundation verification — historical, 2026-09-01
 
@@ -116,4 +118,4 @@ The founder approved the new/shared states after this preparation. Existing Spot
 - Web: production TypeScript and Vite build passed with `npm run build`.
 - Server: TypeScript passed with `npm run typecheck`.
 
-No migration has been applied, no Worker or web build has been deployed, and no Apple Music library has been accessed during this implementation pass.
+During the original implementation pass, no migration, deployment, or Apple Music library access occurred. Production migrations `0015–0024`, the Worker, and Netlify commit `05dad49` were subsequently released from reviewed snapshots. Production browser verification and real-account access remain open under the [release-validation contract](../specs/2026-09-05-listening-export-release-validation-design.md).

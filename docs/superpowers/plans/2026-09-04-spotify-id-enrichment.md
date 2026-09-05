@@ -1,6 +1,6 @@
 # Spotify ID enrichment — Phase 3 first slice
 
-Status: code complete locally · 2026-09-04 · tests/typecheck green; not committed or deployed
+Status: implemented, verified, and deployed in Worker version `7a6ec181-2292-4d56-b8a4-abb996d6857a`; provider-specific observation remains
 
 Implements the Spotify-specific enrichment portion of the approved
 [listening-export design](../specs/2026-09-01-listening-export-import-design.md).
@@ -18,10 +18,9 @@ the catalog client, artwork normalization, scheduler, schema/migrations, and
 shared backlog/decisions edits. Keep its current contracts intact. Record this
 slice's implementation details here and in the listening-export spec.
 
-Apple ISRC cross-linking and fallback artwork follow after the catalog task
-lands. The dual-ID source-deletion issue must be fixed before cross-linking
-writes Apple IDs onto Spotify rows. Real-export checks, production reads,
-backfills, migrations, deploys, and pushes are outside this local slice.
+Apple ISRC cross-linking, source-safe membership, and fallback artwork are also
+committed in `bba5de9`. Production migrations now reach `0024`; real-export
+checks, provider smoke, and backfills remain outside this implementation slice.
 
 ## Contract
 
@@ -88,6 +87,7 @@ backfills, migrations, deploys, and pushes are outside this local slice.
   passed, and scoped `git diff --check` was clean. This slice adds 37 tests
   across ID adapters, pipeline, runner, and the admin route. The full-suite
   total also includes concurrent playlist work and is a snapshot of that run.
-- No production data was read or changed. No migration, deployment, commit,
-  staging, or push was performed for this slice. Shared backlog/decisions and
-  the other tasks' files were left for their owners.
+- During implementation, no production data was read or changed and no
+  migration, deployment, staging, or push was performed. The slice was later
+  committed and pushed with the combined candidate, then deployed through a
+  separately approved release action.

@@ -1,6 +1,6 @@
 # Apple catalog linking by ISRC
 
-Status: implemented and verified locally; uncommitted and undeployed.
+Status: implemented and verified; committed in `bba5de9`, with migration 0023 and the matching Worker deployed.
 
 The user authorized this Phase 3 slice after source ownership. Spotify records
 with an exact ISRC can acquire an Apple catalog ID only when Apple returns one
@@ -29,8 +29,10 @@ listener membership, play counts, or playlist snapshots change.
   records without a catalog storefront keep the configured artwork default.
 - Run after Spotify metadata enrichment and before artwork; isolate failures
   from other maintenance. Logs/results contain counts and fixed categories only.
-- Migration 0022 and this slice's migration 0023 must precede deployment. No
-  production calls, private-library reads, migration apply, commit, or deploy.
+- Migration 0022 and this slice's migration 0023 must precede deployment. Both
+  were applied as part of the reviewed `0015–0024` chain on 2026-09-05. The
+  implementation made no provider calls or private-library reads. The matching
+  Worker was later deployed through a separately approved release action.
 
 ## Tasks
 
@@ -57,8 +59,8 @@ schema/journal back after generating 0023 so its later migration follows safely.
 - [Storefronts and localization](https://developer.apple.com/documentation/applemusicapi/storefronts_and_localization): catalogs vary by region.
 - [Workers best practices](https://developers.cloudflare.com/workers/best-practices/workers-best-practices/): bounded response reads, awaited work, server secrets, invocation-scoped database connections.
 
-Fallback Spotify artwork remains the next Phase 3 slice. Real-export layout and
-device/browser smoke wait for the requested archives.
+Fallback Spotify artwork is also committed in `bba5de9`. Real-provider,
+real-export layout, and device/browser smoke remain release gates.
 
 
 ## Review and verification
@@ -95,18 +97,19 @@ device/browser smoke wait for the requested archives.
 - Server `npm run typecheck`, `npx drizzle-kit check`, and diff/new-file whitespace
   checks passed. Snapshot 0023 follows 0022 and adds only the retry table plus the
   nullable catalog-storefront column/check on tracks.
-- No real Apple API request, private-library access, database migration apply,
-  commit/push, deployment, or real-export smoke was performed.
+- No real Apple API request, private-library access, deployment, or real-export
+  smoke was performed. Commit/push and migration application happened later as
+  controlled release actions, not during this implementation slice.
 
 ## Release and next work
 
-Review an explicit committed snapshot containing the source-membership fix and
-this slice; rehearse and apply the full pending migration chain for that snapshot
-before deploying. The separately recorded production ledger was only through
-0014, so these local slices require 0015–0023 (and any explicitly selected later
-work), not just 0022–0023. Re-read the ledger at release time.
+The reviewed candidate `05dad49` was pushed, production migrations `0015–0024`
+were applied from its clean detached worktree after ledger/hash verification,
+and clean snapshot `fd5f66b` was deployed as the Worker. Initial health/auth and
+aggregate private smoke passed; exact Apple-ISRC provider categories still need
+observation as the bounded scheduler runs.
 
-Spotify fallback artwork (oEmbed then the planned Deezer fallback) remains the
-next implementation slice. Real-provider/runtime checks and the requested export
+Spotify fallback artwork (oEmbed then guarded Deezer fallback) is committed in
+`bba5de9`. Real-provider/runtime checks and the requested export
 layout/device/browser smoke are still pending. Historical legacy membership
 reconciliation remains a separate, documented limitation of migration 0022.
