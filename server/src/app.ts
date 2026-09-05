@@ -8,6 +8,7 @@ import { libraryIngestRoutes } from './routes/library-ingest'
 import { listeningIngestRoutes } from './routes/listening-ingest'
 import { playlistIngestRoutes } from './routes/playlist-ingest'
 import { playlistsRoutes } from './routes/playlists'
+import { playlistEditDraftRoutes } from './routes/playlist-edit-drafts'
 import { enrichRoutes } from './routes/enrich'
 import { sessionRoutes } from './routes/sessions'
 import { memoriesRoutes } from './routes/memories'
@@ -112,6 +113,9 @@ export function createApp({
     app.use('/playlists', requireSession(auth))
     app.use('/playlists/*', requireSession(auth))
     app.route('/playlists', playlistsRoutes(db))
+
+    app.use('/playlist-edit-drafts/*', requireSession(auth))
+    app.route('/playlist-edit-drafts', playlistEditDraftRoutes(db))
 
     app.use('/me/memories/*', requireSession(auth))
     app.route('/me/memories', memoriesRoutes(db))

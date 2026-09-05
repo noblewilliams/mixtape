@@ -128,7 +128,7 @@ describe('pending production migration chain', () => {
         SELECT count(*)::int AS "count"
         FROM "drizzle"."__drizzle_migrations"
       `)
-      expect(migrationCount.rows).toEqual([{ count: 25 }])
+      expect(migrationCount.rows).toEqual([{ count: 26 }])
     } finally {
       await client.close()
     }

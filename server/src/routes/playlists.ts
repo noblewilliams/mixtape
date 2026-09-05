@@ -8,6 +8,7 @@ import {
   createPlaylistBrowseStore,
   PlaylistBrowseCursorError,
 } from '../playlists/browse-store'
+import { createPlaylistEditDraftStore } from '../playlist-editing/store'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -21,6 +22,15 @@ function boundedInteger(value: string | undefined, fallback: number, max: number
 export function playlistsRoutes(db: Db) {
   const app = new Hono<{ Variables: AppVars }>()
   const store = createPlaylistBrowseStore(db)
+  const editDrafts = createPlaylistEditDraftStore(db)
+
+  app.post('/:id/edit-draft', async (c) => {
+    const id = c.req.param('id')
+    if (!UUID_RE.test(id)) return c.json({ error: 'not_found' }, 404)
+    const result = await editDrafts.createOrResume(c.get('user').id, id)
+    if (result.kind === 'not_found') return c.json({ error: 'not_found' }, 404)
+    return c.json(result.view, result.created ? 201 : 200)
+  })
 
   app.post('/creation-receipts', bodyLimit({ maxSize: 2048 }), async (c) => {
     const value = z.object({ sessionId: z.string().uuid(),
