@@ -4,6 +4,12 @@ import { bodyLimit } from 'hono/body-limit'
 import type { AppVars } from '../app'
 import type { Db } from '../db/types'
 import { createPlaylistEditDraftStore } from '../playlist-editing/store'
+import {
+  PlaylistEditDjError,
+  runPlaylistEditTurn,
+  type PlaylistEditDjDeps,
+} from '../playlist-editing/loop'
+import { playlistEditMessageSchema } from '../playlist-editing/contracts'
 import { uuidParam } from './uuid-param'
 
 const anchors = {
@@ -25,12 +31,12 @@ const operationsSchema = z.object({
   operations: z.array(operationSchema).min(1).max(50),
 }).strict()
 
-export function playlistEditDraftRoutes(db: Db) {
+export function playlistEditDraftRoutes(db: Db, djDeps?: PlaylistEditDjDeps) {
   const app = new Hono<{ Variables: AppVars }>()
   const store = createPlaylistEditDraftStore(db)
 
   app.get('/:draftId', uuidParam('draftId'), async (c) => {
-    const view = await store.get(c.get('user').id, c.req.valid('param').draftId)
+    const view = await store.getThread(c.get('user').id, c.req.valid('param').draftId)
     return view ? c.json(view) : c.json({ error: 'not_found' }, 404)
   })
 
@@ -57,6 +63,32 @@ export function playlistEditDraftRoutes(db: Db) {
         return c.json({ error: 'invalid_operation' }, 400)
       }
       return c.json(result.view)
+    },
+  )
+
+  if (djDeps) app.post(
+    '/:draftId/messages',
+    bodyLimit({ maxSize: 16 * 1024 }),
+    uuidParam('draftId'),
+    async (c) => {
+      const parsed = playlistEditMessageSchema.safeParse(await c.req.json().catch(() => null))
+      if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
+      try {
+        return c.json(await runPlaylistEditTurn(
+          db,
+          djDeps,
+          { draftId: c.req.valid('param').draftId, userId: c.get('user').id },
+          parsed.data.content.trim(),
+          parsed.data.expectedVersion,
+        ))
+      } catch (error) {
+        if (!(error instanceof PlaylistEditDjError)) throw error
+        if (error.kind === 'not_found') return c.json({ error: 'not_found' }, 404)
+        return c.json(
+          { error: error.kind, message: error.message, ...(error.draft ? { draft: error.draft } : {}) },
+          error.kind === 'conflict' ? 409 : error.kind === 'validation' ? 400 : 502,
+        )
+      }
     },
   )
 

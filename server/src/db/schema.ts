@@ -1182,6 +1182,32 @@ export const playlistEditDraftEvents = pgTable(
   ],
 )
 
+// Playlist-edit conversation stays attached to the draft, not an ordinary DJ
+// session: the two editors have deliberately different ordering and identity
+// invariants. Sequence, rather than created_at, is the transcript order.
+export const playlistEditMessages = pgTable(
+  'playlist_edit_messages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    draftId: uuid('draft_id')
+      .notNull()
+      .references(() => playlistEditDrafts.id, { onDelete: 'cascade' }),
+    role: text('role', { enum: ['user', 'dj'] }).notNull(),
+    content: text('content').notNull(),
+    draftVersion: integer('draft_version'),
+    seq: bigserial('seq', { mode: 'number' }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('playlist_edit_messages_draft_seq_idx').on(t.draftId, t.seq),
+    check('playlist_edit_messages_role_check', sql`${t.role} IN ('user', 'dj')`),
+    check(
+      'playlist_edit_messages_version_check',
+      sql`(${t.role} = 'user' AND ${t.draftVersion} IS NULL) OR (${t.role} = 'dj' AND ${t.draftVersion} IS NOT NULL AND ${t.draftVersion} >= 0)`,
+    ),
+  ],
+)
+
 // Global lookup state for public catalog IDs; no user/library IDs or metadata.
 // A lease token fences late completions after a crashed worker's lease expires.
 export const appleIsrcLookups = pgTable(

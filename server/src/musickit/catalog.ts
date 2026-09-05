@@ -30,6 +30,10 @@ export type AppleIsrcCatalogClient = {
   getSongsByIsrc(storefront: string, isrcs: readonly string[]): Promise<Map<string, CatalogSong[]>>
 }
 
+export type AppleCatalogSearchClient = {
+  searchSongs(storefront: string, term: string, limit: number): Promise<CatalogSong[]>
+}
+
 export type AppleCatalogErrorCategory =
   | 'authorization'
   | 'rate_limit'
@@ -157,7 +161,7 @@ export function createAppleCatalogClient({
   maxResponseBytes?: number
   tokenCache?: AppleCatalogTokenCache
   tokenCacheKey?: string
-}): AppleCatalogClient & AppleIsrcCatalogClient {
+}): AppleCatalogClient & AppleIsrcCatalogClient & AppleCatalogSearchClient {
   async function token(): Promise<string> {
     let cachedToken = tokenCache.get(tokenCacheKey)
     if (!cachedToken || cachedToken.expiresAt - TOKEN_REFRESH_MARGIN_SECONDS <= nowSeconds()) {
@@ -167,11 +171,7 @@ export function createAppleCatalogClient({
     return cachedToken.developerToken
   }
 
-  async function requestBatch(storefront: string, ids: readonly string[], filter = 'ids'): Promise<unknown> {
-    const url = new URL(API_ROOT)
-    url.pathname = `/v1/catalog/${encodeURIComponent(storefront)}/songs`
-    url.searchParams.set(filter, ids.join(','))
-
+  async function request(url: URL): Promise<unknown> {
     let developerToken: string
     try {
       developerToken = await token()
@@ -207,7 +207,47 @@ export function createAppleCatalogClient({
     }
   }
 
+  async function requestBatch(storefront: string, ids: readonly string[], filter = 'ids'): Promise<unknown> {
+    const url = new URL(API_ROOT)
+    url.pathname = `/v1/catalog/${encodeURIComponent(storefront)}/songs`
+    url.searchParams.set(filter, ids.join(','))
+    return request(url)
+  }
+
   return {
+    async searchSongs(storefront, term, limit) {
+      const normalizedTerm = term.trim()
+      if (
+        !/^[a-z]{2}$/.test(storefront)
+        || normalizedTerm.length < 1
+        || normalizedTerm.length > 120
+        || !Number.isInteger(limit)
+        || limit < 1
+        || limit > 25
+      ) throw new AppleCatalogError('response')
+
+      const url = new URL(API_ROOT)
+      url.pathname = `/v1/catalog/${encodeURIComponent(storefront)}/search`
+      url.searchParams.set('term', normalizedTerm)
+      url.searchParams.set('types', 'songs')
+      url.searchParams.set('limit', String(limit))
+      const payload = await request(url)
+      if (
+        !isRecord(payload)
+        || !isRecord(payload.results)
+        || !isRecord(payload.results.songs)
+        || !Array.isArray(payload.results.songs.data)
+        || payload.errors != null
+      ) throw new AppleCatalogError('response', 200)
+
+      const parsed = new Map<string, CatalogSong | null>()
+      for (const value of payload.results.songs.data) {
+        const song = parseSong(value)
+        if (!song || !isAppleSongId(song.appleId)) continue
+        parsed.set(song.appleId, parsed.has(song.appleId) ? null : song)
+      }
+      return [...parsed.values()].filter((song): song is CatalogSong => song != null)
+    },
     async getSongsByIsrc(storefront, isrcs) {
       const requested = [...new Set(isrcs.map(value => value.toUpperCase())
         .filter(value => /^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$/.test(value)))]

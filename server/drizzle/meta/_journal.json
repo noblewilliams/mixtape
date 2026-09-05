@@ -183,6 +183,13 @@
       "when": 1788609676019,
       "tag": "0025_ordinary_sinister_six",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1788611023564,
+      "tag": "0026_nice_deathstrike",
+      "breakpoints": true
     }
   ]
 }

@@ -75,6 +75,56 @@ describe('parseArtworkMetadata', () => {
 })
 
 describe('Apple catalog client', () => {
+  it('searches the public song catalog with a bounded encoded request', async () => {
+    const fetchLike = vi.fn<FetchLike>(async () => jsonResponse({
+      results: { songs: { data: [song('1'), song('2')] } },
+    }))
+
+    const result = await client(fetchLike).searchSongs('ng', 'Daniel Caesar + love', 2)
+
+    expect(result.map((item) => item.appleId)).toEqual(['1', '2'])
+    expect(fetchLike).toHaveBeenCalledOnce()
+    const [input, init] = fetchLike.mock.calls[0]
+    const url = new URL(input)
+    expect(url.pathname).toBe('/v1/catalog/ng/search')
+    expect(url.searchParams.get('term')).toBe('Daniel Caesar + love')
+    expect(url.searchParams.get('types')).toBe('songs')
+    expect(url.searchParams.get('limit')).toBe('2')
+    expect(new Headers(init?.headers).get('authorization')).toBe('Bearer server-token')
+  })
+
+  it.each([
+    ['', 5],
+    ['x'.repeat(121), 5],
+    ['song', 0],
+    ['song', 26],
+    ['song', 1.5],
+  ] as const)('rejects an invalid catalog search before token or network work', async (term, limit) => {
+    const fetchLike = vi.fn<FetchLike>()
+    const issueServerToken = vi.fn(async () => ({ developerToken: 'server-token', expiresAt: 1_788_138_000 }))
+    const catalog = createAppleCatalogClient({ fetchLike, issueServerToken })
+
+    await expect(catalog.searchSongs('ng', term, limit)).rejects.toMatchObject({
+      name: 'AppleCatalogError',
+      category: 'response',
+    })
+    expect(fetchLike).not.toHaveBeenCalled()
+    expect(issueServerToken).not.toHaveBeenCalled()
+  })
+
+  it('rejects malformed search envelopes and drops duplicate or malformed songs', async () => {
+    const malformed = client(async () => jsonResponse({ data: [song('1')] }))
+    await expect(malformed.searchSongs('ng', 'song', 5)).rejects.toMatchObject({
+      name: 'AppleCatalogError', category: 'response', status: 200,
+    })
+
+    const catalog = client(async () => jsonResponse({ results: { songs: { data: [
+      song('1'), song('1'), { ...song('2'), type: 'albums' }, song('3'),
+    ] } } }))
+    expect((await catalog.searchSongs('ng', 'song', 5)).map((item) => item.appleId))
+      .toEqual(['3'])
+  })
+
   it('carries duration, genre, release year and an honest nullable content rating', async () => {
     const item = song('1')
     const result = await client(async () => jsonResponse({ data: [{ ...item, attributes: {

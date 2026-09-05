@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   playlistEditDraftEntries,
   playlistEditDraftEvents,
+  playlistEditMessages,
   playlistEditDrafts,
   playlistEntries,
   tracks,
@@ -132,11 +133,49 @@ describe('playlist edit draft schema', () => {
         'playlist_edit_entries_source_entry_idx',
         'playlist_edit_entries_track_idx',
         'playlist_edit_events_draft_version_idx',
-        'playlist_edit_events_track_idx'
+        'playlist_edit_events_track_idx',
+        'playlist_edit_messages_draft_seq_idx'
       )
       ORDER BY indexname
     `)
     const rows = Array.isArray(result) ? result : result.rows
-    expect(rows).toHaveLength(6)
+    expect(rows).toHaveLength(7)
+  })
+
+  it('orders draft-scoped messages by sequence and cascades them with the draft', async () => {
+    const db = await createTestDb()
+    const { draft } = await seed(db)
+    const [first] = await db.insert(playlistEditMessages).values({
+      draftId: draft.id,
+      role: 'user',
+      content: 'add two songs',
+    }).returning()
+    const [second] = await db.insert(playlistEditMessages).values({
+      draftId: draft.id,
+      role: 'dj',
+      content: 'I added two songs.',
+      draftVersion: 1,
+    }).returning()
+    expect(second.seq).toBeGreaterThan(first.seq)
+
+    await expect(db.insert(playlistEditMessages).values({
+      draftId: draft.id,
+      role: 'system' as 'user',
+      content: 'invalid',
+    })).rejects.toThrow()
+    await expect(db.insert(playlistEditMessages).values({
+      draftId: draft.id,
+      role: 'dj',
+      content: 'invalid',
+      draftVersion: -1,
+    })).rejects.toThrow()
+    await expect(db.insert(playlistEditMessages).values({
+      draftId: draft.id,
+      role: 'dj',
+      content: 'missing version',
+    })).rejects.toThrow()
+
+    await db.delete(playlistEditDrafts).where(eq(playlistEditDrafts.id, draft.id))
+    expect(await db.select().from(playlistEditMessages)).toHaveLength(0)
   })
 })

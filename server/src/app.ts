@@ -23,6 +23,7 @@ import type { Db } from './db/types'
 import type { EnrichDeps } from './enrich/pipeline'
 import type { ArtworkDeps } from './artwork/runner'
 import type { DjDeps } from './dj/loop'
+import type { PlaylistEditDjDeps } from './playlist-editing/loop'
 
 // Minimal structural type so tests can stub auth
 export type AuthLike = {
@@ -37,6 +38,7 @@ export type AppVars = { user: { id: string } }
 export type EnrichWiring = { deps?: EnrichDeps; artwork?: ArtworkDeps; adminToken: string }
 export type { SeedsWiring }
 export type DjWiring = { deps: DjDeps }
+export type PlaylistEditingWiring = { deps: PlaylistEditDjDeps }
 export type MusicKitWiring = {
   allowedOrigins: string[]
   issueDeveloperToken: (origin: string) => Promise<{ developerToken: string; expiresAt: number }>
@@ -47,6 +49,7 @@ export function createApp({
   db,
   enrich,
   dj,
+  playlistEditing,
   musicKit,
   seeds,
   allowedOrigins = [],
@@ -55,6 +58,7 @@ export function createApp({
   db?: Db
   enrich?: EnrichWiring
   dj?: DjWiring
+  playlistEditing?: PlaylistEditingWiring
   musicKit?: MusicKitWiring
   seeds?: SeedsWiring
   allowedOrigins?: string[]
@@ -115,7 +119,7 @@ export function createApp({
     app.route('/playlists', playlistsRoutes(db))
 
     app.use('/playlist-edit-drafts/*', requireSession(auth))
-    app.route('/playlist-edit-drafts', playlistEditDraftRoutes(db))
+    app.route('/playlist-edit-drafts', playlistEditDraftRoutes(db, playlistEditing?.deps))
 
     app.use('/me/memories/*', requireSession(auth))
     app.route('/me/memories', memoriesRoutes(db))

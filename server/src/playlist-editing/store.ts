@@ -1,9 +1,10 @@
-import { and, asc, eq, inArray, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import type { Db } from '../db/types'
 import {
   playlistEditDraftEntries,
   playlistEditDraftEvents,
   playlistEditDrafts,
+  playlistEditMessages,
   playlistEntries,
   tracks,
   userPlaylists,
@@ -21,7 +22,7 @@ const resumableStatuses = ['active', 'preparing', 'ready', 'applying', 'conflict
 const ENTRY_INSERT_BATCH = 250
 
 export type DraftOperationInput =
-  | { type: 'add'; trackId: string; afterEntryKey?: string; beforeEntryKey?: string }
+  | { type: 'add'; trackId: string; entryKey?: string; afterEntryKey?: string; beforeEntryKey?: string }
   | { type: 'remove'; entryKey: string }
   | { type: 'move'; entryKey: string; afterEntryKey?: string; beforeEntryKey?: string }
   | { type: 'replace'; entryKey: string; trackId: string }
@@ -54,6 +55,8 @@ type DraftMutationResult =
   | { kind: 'terminal' }
   | { kind: 'invalid_track' }
   | { kind: 'invalid_operation' }
+
+export type PlaylistEditMessage = typeof playlistEditMessages.$inferSelect
 
 function rowToEntry(row: typeof playlistEditDraftEntries.$inferSelect): DraftEntry {
   return {
@@ -105,7 +108,7 @@ function entryInsert(
 
 function trackEntry(
   track: typeof tracks.$inferSelect,
-  entryKey = crypto.randomUUID(),
+  entryKey: string = crypto.randomUUID(),
 ): DraftEntry {
   return {
     entryKey,
@@ -173,6 +176,14 @@ async function loadView(
   const base = rows.filter((row) => row.role === 'base').map(rowToEntry)
   const current = rows.filter((row) => row.role === 'draft').map(rowToEntry)
   return draftView(draft, base, current)
+}
+
+async function loadMessages(db: Db, draftId: string): Promise<PlaylistEditMessage[]> {
+  const newest = await db.select().from(playlistEditMessages)
+    .where(eq(playlistEditMessages.draftId, draftId))
+    .orderBy(desc(playlistEditMessages.seq))
+    .limit(200)
+  return newest.reverse()
 }
 
 function eventRows(
@@ -287,6 +298,11 @@ export function createPlaylistEditDraftStore(db: Db) {
       return loadView(db, userId, draftId)
     },
 
+    async getThread(userId: string, draftId: string) {
+      const view = await loadView(db, userId, draftId)
+      return view ? { ...view, messages: await loadMessages(db, draftId) } : null
+    },
+
     async mutate(
       userId: string,
       draftId: string,
@@ -320,8 +336,10 @@ export function createPlaylistEditDraftStore(db: Db) {
 
         const resolved: ResolvedDraftOperation[] = operations.map((operation) => {
           if (operation.type === 'add') return {
-            ...operation,
-            entry: trackEntry(tracksById.get(operation.trackId)!),
+            type: 'add' as const,
+            entry: trackEntry(tracksById.get(operation.trackId)!, operation.entryKey),
+            ...(operation.afterEntryKey ? { afterEntryKey: operation.afterEntryKey } : {}),
+            ...(operation.beforeEntryKey ? { beforeEntryKey: operation.beforeEntryKey } : {}),
           }
           if (operation.type === 'replace') return {
             type: 'replace',

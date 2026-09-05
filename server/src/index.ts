@@ -18,6 +18,7 @@ import {
   createAppleCatalogClient,
   createAppleCatalogTokenCache,
   type AppleCatalogClient,
+  type AppleCatalogSearchClient,
   type AppleIsrcCatalogClient,
   type FetchLike,
 } from './musickit/catalog'
@@ -26,6 +27,7 @@ import type { ArtworkDeps } from './artwork/runner'
 import { createSpotifyOEmbedArtworkClient } from './artwork/spotify-oembed'
 import { createDeezerArtworkClient } from './artwork/deezer'
 import type { SpotifyArtworkDeps } from './artwork/spotify-fallback'
+import type { PlaylistEditDjDeps } from './playlist-editing/loop'
 
 // Minimal structural stand-in for the platform's ScheduledController — this
 // project's tsconfig doesn't pull in @cloudflare/workers-types, so the real
@@ -117,7 +119,7 @@ export function buildMusicKit(
   },
   allowedOrigins: string[],
   fetchLike: FetchLike = fetch,
-): (MusicKitWiring & { catalog: AppleCatalogClient & AppleIsrcCatalogClient }) | undefined {
+): (MusicKitWiring & { catalog: AppleCatalogClient & AppleIsrcCatalogClient & AppleCatalogSearchClient }) | undefined {
   const keyId = env.MUSICKIT_KEY_ID
   const privateKey = env.MUSICKIT_PRIVATE_KEY
 
@@ -162,6 +164,13 @@ function buildArtworkDeps(
   }
 }
 
+function buildPlaylistEditingDeps(
+  dj: DjDeps | undefined,
+  musicKit: (MusicKitWiring & { catalog: AppleCatalogClient & AppleIsrcCatalogClient & AppleCatalogSearchClient }) | undefined,
+): PlaylistEditDjDeps | undefined {
+  return dj && musicKit ? { llm: dj.llm, catalog: musicKit.catalog } : undefined
+}
+
 export function buildSpotifyArtworkDeps(fetchLike: FetchLike = fetch): SpotifyArtworkDeps {
   return {
     spotify: createSpotifyOEmbedArtworkClient({ fetchLike }),
@@ -185,11 +194,13 @@ export default {
       const djDeps = buildDjDeps(env)
       const dj = djDeps ? { deps: djDeps } : undefined
       const musicKit = buildMusicKit(env, allowedOrigins)
+      const playlistEditingDeps = buildPlaylistEditingDeps(djDeps, musicKit)
+      const playlistEditing = playlistEditingDeps ? { deps: playlistEditingDeps } : undefined
       const artwork = buildArtworkDeps(env, musicKit)
       const enrich = env.ENRICH_ADMIN_TOKEN && (deps || artwork)
         ? { adminToken: env.ENRICH_ADMIN_TOKEN, deps, artwork }
         : undefined
-      const app = createApp({ auth, db, enrich, dj, musicKit, allowedOrigins })
+      const app = createApp({ auth, db, enrich, dj, playlistEditing, musicKit, allowedOrigins })
       return await app.fetch(req, env, ctx)
     } finally {
       // Closes the pool's socket(s) after the response is built rather than

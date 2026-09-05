@@ -311,3 +311,17 @@ Worker-runtime smoke confirms access and policy. Spotify oEmbed is primary. Plan
 migration and is committed in `bba5de9`; it remains undeployed and unprobed
 against providers. Release sequencing and acceptance are specified in
 `superpowers/specs/2026-09-05-listening-export-release-validation-design.md`.
+
+## 2026-09-05 — Playlist editing has its own bounded DJ loop
+
+Source-playlist editing does not reuse the ordinary mix queue or its tool set.
+It runs against an occurrence-aware private draft and exposes only bounded
+Apple catalog search plus versioned draft edits. Provider and model calls stay
+outside write transactions; Apple writes and apply-mode selection are absent
+from the loop. Catalog additions must come from a search result returned in the
+same turn, direct artist and album constraints are hard filters, existing songs
+are excluded, and `best_fit` placement is computed deterministically from
+neighbour metadata. Playlist names, entries, and transcript content remain at
+USER altitude in a bounded prompt. **Reopens if:** a provider offers a stronger
+transactional playlist editor or production evidence shows the separate loop
+cannot meet latency or placement quality targets.
