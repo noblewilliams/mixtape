@@ -1,6 +1,6 @@
 # Backlog & open items
 
-Single consolidated list. Detail lives in `decisions.md` (rationale) and the plan files under `superpowers/plans/` (specs). Last updated 2026-09-04 — v1 phases P1/P2/P2.5/P3/P4 are complete and founder-verified; artwork Phase 1 and playlist collection Phase 2 are deployed.
+Single consolidated list. Detail lives in `decisions.md` (rationale) and the plan files under `superpowers/plans/` (specs). Last updated 2026-09-05 — v1 phases P1/P2/P2.5/P3/P4 are complete and founder-verified; artwork Phase 1 and playlist collection Phase 2 are deployed.
 
 ## Owed right now
 
@@ -19,6 +19,8 @@ Single consolidated list. Detail lives in `decisions.md` (rationale) and the pla
 Founder direction is locked in `docs/superpowers/specs/2026-08-31-artwork-playlist-intelligence-design.md`: pull Apple artwork URL templates/dimensions/background colours; sync ordered playlists for browse and bounded taste scoring; support playlist-inspired mixes; then let a listener open a playlist and talk through an exact draft. The founder-device probe rejected exact rebuild for both the current Mixtape-created and Music-created disposable playlists, so the first apply contract is append-only only where that narrower operation is separately verified, and revised-copy for insertion/removal/reordering. Exact in-place rebuild is deferred until a `MusicLibrary.createPlaylist` path passes a separate device probe.
 
 The iOS minimum is locked to 16 before playlist sync ships; no iOS 13–15 fallback. Execution order: (0) Cloudflare-runtime catalog + iPhone playlist-ownership spikes, (1) artwork metadata, (2) deletion-safe playlist sync and browse APIs, (3) playlist taste/seeds, (4) conversational drafts + catalog discovery, (5) native apply + approved UI state board. Phase 0–1 is complete in production: the recorded rollout had 4,686/4,689 tracks with valid artwork and background colours, three scheduled 30-day catalog no-match retries, and zero failed. Phase 2 collection and browse contracts are shipped and founder-verified; the exact native crosswalk is also shipped. Catalog materialization is the next locally implemented prerequisite, not completion of the later taste/editing/UI phases.
+
+The remaining conversational editing contract is now isolated in `docs/superpowers/specs/2026-09-05-conversational-source-playlist-editing-design.md`. The honest first write path is a revised Apple Music copy; direct append follows only after disposable-device verification, and exact source rebuild remains disabled until the typed-MusicKit creation class passes its own probe. Implementation is split into draft foundation, playlist DJ, approved review UI, revised-copy apply, verified append, and optional rebuild.
 
 ## Next big phase: v2 — "The DJ learns" (vision.md milestone 2)
 

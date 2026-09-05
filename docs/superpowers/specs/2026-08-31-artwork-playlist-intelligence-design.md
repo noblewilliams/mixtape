@@ -488,6 +488,11 @@ Playlist names/descriptions help identify and frame the seed but are not system 
 
 ## Conversational playlist editing
 
+**2026-09-05 implementation refinement:** the standalone
+[conversational source-playlist editing spec](./2026-09-05-conversational-source-playlist-editing-design.md)
+supersedes this section for data shape, route, capability, retry, and rollout
+details. The product promise below remains unchanged.
+
 ### Opening a playlist
 
 Opening a playlist detail and choosing **Talk to the DJ** creates or resumes one `playlist_edit` session and its active draft. The initial message context contains:
