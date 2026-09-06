@@ -283,17 +283,21 @@ pre-limit score while preserving learned taste 0.12 and confirmed-playlist 0.10;
 missing axes are neutral. Prompt constraints win. Playlist-derived context is
 sanitized at USER altitude. Queue commits recheck selection revision, source
 activity/fingerprint, and queue version after curation; an unavailable or changed
-source preserves the current mix. Migration 0024 is local and unreleased.
+source preserves the current mix. Migration 0024 and its matching Worker are deployed.
 
 ## 2026-09-04 — Spotify fallback artwork keeps identity exact
 
 For a current Spotify-import track still lacking an Apple ID and artwork after
 Apple ISRC matching, request the official Spotify oEmbed endpoint by exact
-Spotify ID. Store only a strictly validated fixed `i.scdn.co` thumbnail. After a
-valid oEmbed miss, Deezer may be tried only when the track has a valid ISRC; the
-response must repeat that ISRC and expose an allowlisted Deezer cover URL. This
-artwork is display metadata. It never creates an Apple/Deezer identity, merges a
-row, or changes listener membership, plays, taste, playlists, or mixes.
+Spotify ID. Store only a strictly validated fixed thumbnail from legacy
+`i.scdn.co` or the anchored Spotify-owned
+`image-cdn-<letters>.spotifycdn.com` namespace. After a valid oEmbed miss,
+Deezer may be tried only when the track has a valid ISRC; the response must
+repeat that ISRC and expose either exact host `e-cdns-images.dzcdn.net` or
+`cdn-images.dzcdn.net`. Existing HTTPS, path, length, no-credentials, no-port,
+no-query, and no-fragment rules still apply. This artwork is display metadata.
+It never creates an Apple/Deezer identity, merges a row, or changes listener
+membership, plays, taste, playlists, or mixes.
 
 The maintenance job claims at most three priority tracks for five minutes using
 the existing artwork retry state. Attempts fence expired or superseded work.
@@ -303,14 +307,16 @@ conditional write. Apple linking clears any earlier fallback retry. Requests
 time out after five seconds, response bodies are capped at 256 KiB, and stored
 errors/results contain fixed categories and counts only.
 
-Deezer's exact-ISRC route lacks a stable public reference, and current official
-community guidance says API access requires a token while new access requests
-are closed. It remains a guarded best-effort last fallback until a public-ID-only
-Worker-runtime smoke confirms access and policy. Spotify oEmbed is primary. Plan:
-`superpowers/plans/2026-09-04-spotify-fallback-artwork.md`. The slice adds no
-migration and is committed in `bba5de9`; it remains undeployed and unprobed
-against providers. Release sequencing and acceptance are specified in
-`superpowers/specs/2026-09-05-listening-export-release-validation-design.md`.
+Deezer's exact-ISRC route lacks a stable public reference, so it remains a
+guarded best-effort fallback even though the 2026-09-06 binding-free Cloudflare
+edge smoke succeeded without listener data or a token. That smoke exposed the
+current CDN hosts above; the original deployed allowlists reject them. Isolated
+commit `b8f8393` keeps exact/anchored ownership checks and adds lookalike-host
+regressions. It passed 78 files / 1,307 tests, typecheck, a Worker dry-run, and
+the final Spotify known/missing plus Deezer known edge cases. The preview was
+stopped, and the fix is not merged or deployed. Spotify oEmbed remains primary.
+Plan: `superpowers/plans/2026-09-04-spotify-fallback-artwork.md`; release
+sequencing is in `superpowers/specs/2026-09-05-listening-export-release-validation-design.md`.
 
 ## 2026-09-05 — Playlist editing has its own bounded DJ loop
 

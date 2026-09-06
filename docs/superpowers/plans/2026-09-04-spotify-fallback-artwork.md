@@ -1,6 +1,6 @@
 # Spotify fallback artwork — Phase 3 final slice
 
-Status: implemented, verified, and deployed in Worker version `7a6ec181-2292-4d56-b8a4-abb996d6857a`; Spotify/Deezer-specific smoke remains.
+Status: provider smoke complete; CDN-host repair verified in isolated commit `b8f8393`, not merged or deployed. Production Worker `7a6ec181-2292-4d56-b8a4-abb996d6857a` still has the older allowlists.
 
 The user authorized the remaining Phase 3 implementation while the real Spotify
 and Apple exports are still pending. A Spotify track that does not acquire an
@@ -10,13 +10,16 @@ membership, taste, plays, playlists, or a listener's mix.
 ## Contract
 
 - Prefer the official Spotify oEmbed endpoint using the exact validated Spotify
-  track ID. Accept only a complete oEmbed envelope and an HTTPS `i.scdn.co/image/`
-  thumbnail with no credentials, port, query, or fragment. Store its fixed URL;
-  the existing clients already leave URLs without Apple size tokens unchanged.
+  track ID. Accept only a complete oEmbed envelope and an HTTPS thumbnail from
+  legacy `i.scdn.co` or the anchored Spotify-owned
+  `image-cdn-<letters>.spotifycdn.com` namespace, with the exact `/image/...`
+  path and no credentials, port, query, or fragment. Store its fixed URL; the
+  existing clients already leave URLs without Apple size tokens unchanged.
 - Only after a valid oEmbed miss, and only when the track has a valid ISRC, try
   Deezer's metadata endpoint by exact ISRC. Require the returned ISRC to match
-  before accepting a strict `e-cdns-images.dzcdn.net` cover URL. Deezer artwork
-  is display metadata only and never creates or changes a track identity.
+  before accepting a cover URL from the exact legacy
+  `e-cdns-images.dzcdn.net` or current `cdn-images.dzcdn.net` host. Deezer
+  artwork is display metadata only and never creates or changes a track identity.
 - Provider reads have a five-second timeout and a 256 KiB response ceiling.
   Errors retain only provider, fixed category, and HTTP status. Never log or
   persist response bodies, request URLs, titles, artist names, or listener data.
@@ -49,9 +52,10 @@ Spotify documents oEmbed as a public GET endpoint and documents nullable
 thumbnail fields. Deezer's exact-ISRC route is not in a stable public reference;
 official community material also says current API access requires a token while
 new access requests are closed. The adapter is therefore a guarded best-effort
-fallback behind Spotify, not an identity dependency. Release requires a
-non-private runtime smoke. An authorization response backs off without affecting
-oEmbed hits or the rest of maintenance.
+fallback behind Spotify, not an identity dependency. The binding-free edge smoke
+confirmed current Spotify and Deezer success without private data. An
+authorization response still backs off without affecting oEmbed hits or the
+rest of maintenance.
 
 ## Sources
 
@@ -79,12 +83,29 @@ oEmbed hits or the rest of maintenance.
   includes this slice, playlist-inspired sessions, web browse/server work, and
   the 0014-to-current migration rehearsal. Server typecheck and diff hygiene pass.
 
+### Provider edge smoke and repair — 2026-09-06
+
+- The first binding-free Cloudflare edge smoke rejected otherwise valid provider
+  responses because live Spotify now returned a regional
+  `image-cdn-ak.spotifycdn.com` thumbnail and Deezer returned
+  `cdn-images.dzcdn.net` rather than only the legacy hosts.
+- Isolated branch `codex/fix-provider-cdn-hosts`, commit `b8f8393`, accepts the
+  anchored Spotify-owned regional namespace and the two exact Deezer hosts. It
+  preserves all existing URL/path/schema checks and rejects lookalike suffixes.
+- Final edge smoke passed with fixed-category output only: Spotify known matched
+  with a valid schema, Spotify missing returned typed no-match with a valid
+  schema, and Deezer known matched with a valid schema.
+- The repaired candidate passed the authoritative server suite at **78 files /
+  1,307 tests**, TypeScript, and a binding-free Worker dry-run. The preview was
+  stopped. No production deploy, database access, or listener data was involved.
+
 ## Release gate
 
-Against live Worker version `7a6ec181-2292-4d56-b8a4-abb996d6857a`, run one
-public-ID-only Spotify oEmbed request and, only after an oEmbed miss fixture, one
-exact-ISRC Deezer request. Confirm response shape, access policy, latency, and
-that no secret is needed or transmitted. Then observe aggregate fallback
-categories and run the real-export smoke after the archives arrive. The
-migrations and Worker are already deployed; the exports are not required for
-the provider-specific smoke.
+Provider behavior is verified; production repair remains. Commit `b8f8393` is
+based on current `main` (`b45988b`), whose conversational playlist-editing server
+code and migrations 0025–0026 are not in the live Worker. Before deployment,
+choose and approve the exact scope: either release the combined `b8f8393`
+snapshot or backport only the provider repair onto the currently deployed
+`fd5f66b` base. Deploy from a clean worktree, repeat the fixed-output production
+provider smoke, and observe aggregate fallback categories. Do not silently use
+this repair to activate the separate playlist-editing backend.

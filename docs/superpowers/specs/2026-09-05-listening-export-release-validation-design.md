@@ -1,6 +1,6 @@
 # Listening-export release and validation
 
-**Status:** draft release contract with partial execution recorded, 2026-09-05
+**Status:** draft release contract with provider repair awaiting production, 2026-09-06
 **Scope:** release the completed listening-export, web music, playlist
 intelligence, and Phase 3 enrichment work; validate it with real Spotify exports;
 establish the evidence gate for Phase 4.
@@ -9,6 +9,8 @@ and `3d18a17` (Your music web integration) on `main`.
 **Selected release candidate:** application tree `05dad49`; Worker snapshot
 `fd5f66b` adds only the migration record and is deployed. Netlify production is
 on `05dad49`. Detailed Worker execution record: `7a2a514`.
+**Provider repair candidate:** isolated commit `b8f8393`, based on current
+`main` at `b45988b`; verified but not merged or deployed.
 
 Read with the [2026-09-01 listening-export design](2026-09-01-listening-export-import-design.md),
 the [2026-08-31 artwork and playlist-intelligence design](2026-08-31-artwork-playlist-intelligence-design.md),
@@ -49,7 +51,9 @@ deployed `fd5f66b` changes only the release record, not application code.
 At spec creation, the last read-only production check found migrations through
 `0014`, and local `main` was 106 commits ahead of `origin/main` and not behind.
 That is historical context: the reviewed foundation through `05dad49` was later
-pushed, and production now has matching migrations through `0024`. Re-read the
+pushed, and the original release reached matching migrations through `0024`.
+The separate playlist-editing follow-on then applied 0025–0026; production now
+has 27 matching migrations while the live Worker remains `fd5f66b`. Re-read the
 production ledger and Git remote before the remaining rollout actions.
 
 The shared checkout intentionally contains founder-owned changes to `AGENTS.md`,
@@ -74,9 +78,9 @@ migrate, and deploy only from a clean worktree at the selected commit.
   must now be treated as production publishing. This auto-publish happened
   before the Worker rollout was complete, so the intended compatibility order
   was not demonstrated; production browser smoke remains required.
-- No Spotify-oEmbed/Deezer-specific smoke, playlist mutation, TestFlight action,
-  device smoke, or real-export smoke occurred. Initial private checks returned
-  aggregate counts only; no track or playlist metadata was read.
+- No playlist mutation, TestFlight action, device smoke, or real-export smoke
+  occurred. Initial private checks returned aggregate counts only; no track or
+  playlist metadata was read.
 - The execution record does not document a Neon restore point or every
   postcondition below. Keep those acceptance items open until evidence exists.
 
@@ -89,7 +93,10 @@ migrate, and deploy only from a clean worktree at the selected commit.
   backend/schema state first.
 - [x] Rerun server, web, client, fixture, migration, and Worker-bundle gates from a
   clean worktree.
-- [ ] Run the public-ID-only Cloudflare provider smoke below.
+- [x] Run the public-ID-only Cloudflare provider smoke below and repair the
+  observed CDN-host drift in an isolated candidate.
+- [ ] Integrate the provider repair and deploy an explicitly approved Worker
+  scope, then repeat the fixed-output production smoke.
 - [ ] Record a recoverable Neon restore point/branch. The production prefix and
   local rehearsal were verified, and the migration chain is already applied.
 - [x] With explicit action-time approval, push and migrate.
@@ -148,18 +155,23 @@ Use one known public Spotify ID and one syntactically valid nonexistent ID.
 Pass conditions:
 
 - the known ID returns within the five-second application timeout;
-- the documented envelope and fixed HTTPS `i.scdn.co/image/...` URL validate;
+- the documented envelope and fixed HTTPS URL validates from legacy
+  `i.scdn.co/image/...` or the anchored Spotify-owned
+  `image-cdn-<letters>.spotifycdn.com/image/...` namespace;
 - the missing ID uses the typed no-match path;
 - the response remains within 256 KiB;
 - output contains no ID, title, artist, request URL, artwork URL, or body.
 
 A timeout, authorization response, persistent 5xx, changed host, or changed
-schema blocks release until the assumption or adapter is reviewed.
+schema blocks release until the assumption or adapter is reviewed. The first
+edge smoke triggered this rule; commit `b8f8393` updates only the strict host
+boundary and preserves the remaining checks.
 
 ### Deezer exact-ISRC — non-blocking contingency
 
 Use one known public ISRC, never one from a listener archive. Accept artwork only
-when the response repeats the exact ISRC and uses the allowlisted Deezer CDN.
+when the response repeats the exact ISRC and uses exact host
+`e-cdns-images.dzcdn.net` or `cdn-images.dzcdn.net`.
 
 | Result | Release behavior |
 |---|---|
@@ -171,6 +183,18 @@ when the response repeats the exact ISRC and uses the allowlisted Deezer CDN.
 
 Deezer never writes identity or membership and is not required for importing,
 mixing, or output.
+
+### Provider result — 2026-09-06
+
+The first binding-free Cloudflare edge run exposed provider hostname drift:
+Spotify used `image-cdn-ak.spotifycdn.com`, and Deezer used
+`cdn-images.dzcdn.net`. The repaired `b8f8393` candidate retains anchored/exact
+ownership checks plus all existing URL/schema limits and lookalike-host
+regressions. Its final edge smoke passed Spotify known, Spotify typed no-match,
+and Deezer known cases with fixed-category/schema-valid output only. The full
+server suite passed 78 files / 1,307 tests; TypeScript and the binding-free Worker
+dry-run passed. The preview was stopped. No production deploy, database access,
+listener data, provider ID, or music metadata was involved.
 
 ## Release-candidate verification
 
@@ -242,10 +266,16 @@ verified restore point only when one has actually been recorded.
 
 Execution completed candidate selection/fetch, all clean-snapshot checks, push,
 the production-ledger reread, migration application, Worker deploy, initial
-public/private smoke, and Netlify publication. It does not record a restore
-point, provider-specific smoke, browser/device smoke, or real-export validation.
+public/private smoke, Netlify publication, and binding-free provider smoke. It
+does not record a restore point, production deployment of the provider repair,
+browser/device smoke, or real-export validation.
 Continue from the current production ledger and deployed versions rather than
 replaying the migration chain.
+
+The provider repair branch is based on `b45988b`, which also contains the
+playlist-editing server follow-on that is not in the live Worker. Do not deploy
+`b8f8393` as a supposedly artwork-only release: either approve the combined
+Worker scope or backport only the repair onto the deployed `fd5f66b` base.
 
 1. Freeze the release SHA; fetch and confirm remote/Netlify behavior.
 2. Finish all candidate checks and provider smoke.
@@ -352,7 +382,8 @@ rows, provider IDs, URLs, or response bodies.
 - [x] Exact release SHA, migration list, and sequence received action-time approval.
 - [ ] Netlify auto-publish cannot expose a client before schema/Worker readiness.
 - [x] Clean-worktree candidate checks pass.
-- [ ] Spotify Worker smoke passes; Deezer outcome is recorded.
+- [x] Binding-free Spotify/Deezer Worker smoke passes and the hostname drift is fixed in `b8f8393`.
+- [ ] Provider repair is integrated and production smoke passes on the deployed Worker.
 - [ ] Production migration prefix and restore point are verified.
 - [ ] Migrations and postconditions pass.
 - [x] Worker and initial counts-only smoke pass.
@@ -368,7 +399,7 @@ rows, provider IDs, URLs, or response bodies.
 ## Reopen conditions
 
 Revisit this contract if production is not an exact migration prefix, `main`
-cannot be separated from web auto-deploy, Spotify changes oEmbed/CDN behavior,
+cannot be separated from web auto-deploy, Spotify changes oEmbed/CDN behavior again,
 Deezer gains a documented API contract, real archives do not fit the on-device
 parser architecture, production-shaped migration rehearsal misses a constraint
 or scale issue, or smoke finds a source-ownership/identity error.
