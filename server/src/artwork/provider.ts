@@ -35,7 +35,7 @@ export function optionalPositiveInteger(value: unknown): number | null | undefin
 
 export function fixedArtworkUrl(
   value: unknown,
-  host: string,
+  allowedHosts: string | readonly string[] | ((hostname: string) => boolean),
   pathPattern: RegExp,
 ): URL | null {
   if (typeof value !== 'string' || value.length === 0 || value.length > MAX_ARTWORK_URL_LENGTH) {
@@ -43,9 +43,14 @@ export function fixedArtworkUrl(
   }
   try {
     const url = new URL(value)
+    const hostAllowed = typeof allowedHosts === 'function'
+      ? allowedHosts(url.hostname)
+      : typeof allowedHosts === 'string'
+        ? url.hostname === allowedHosts
+        : allowedHosts.includes(url.hostname)
     if (
       url.protocol !== 'https:'
-      || url.hostname !== host
+      || !hostAllowed
       || url.username !== ''
       || url.password !== ''
       || url.port !== ''

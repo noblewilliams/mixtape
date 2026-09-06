@@ -11,7 +11,12 @@ import {
 
 const DEFAULT_TIMEOUT_MS = 5000
 const DEFAULT_MAX_RESPONSE_BYTES = 256 * 1024
+const SPOTIFY_IMAGE_CDN_HOST = /^image-cdn-[a-z]+\.spotifycdn\.com$/
 const SPOTIFY_IMAGE_PATH = /^\/image\/[0-9A-Za-z]+$/
+
+function isSpotifyImageHost(hostname: string): boolean {
+  return hostname === 'i.scdn.co' || SPOTIFY_IMAGE_CDN_HOST.test(hostname)
+}
 
 export type SpotifyOEmbedArtworkClient = {
   getArtwork(spotifyId: string): Promise<ArtworkMetadata | null>
@@ -46,7 +51,7 @@ export function createSpotifyOEmbedArtworkClient({
       ) throw new ArtworkProviderError('response', 'spotify_oembed', 200)
 
       if (payload.thumbnail_url === null) return null
-      const image = fixedArtworkUrl(payload.thumbnail_url, 'i.scdn.co', SPOTIFY_IMAGE_PATH)
+      const image = fixedArtworkUrl(payload.thumbnail_url, isSpotifyImageHost, SPOTIFY_IMAGE_PATH)
       const width = optionalPositiveInteger(payload.thumbnail_width)
       const height = optionalPositiveInteger(payload.thumbnail_height)
       if (!image || width === undefined || height === undefined) {
