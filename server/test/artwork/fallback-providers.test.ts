@@ -6,7 +6,10 @@ import { SPOTIFY_A } from '../helpers/listening-fixtures'
 
 const ISRC = 'USUG11904206'
 const SPOTIFY_IMAGE = 'https://i.scdn.co/image/ab67616d00001e02ff9ca10b55ce82ae553c8228'
+const SPOTIFY_IMAGE_CDN = 'https://image-cdn-ak.spotifycdn.com/image/ab67616d00001e02ff9ca10b55ce82ae553c8228'
+const SPOTIFY_REGIONAL_IMAGE_CDN = 'https://image-cdn-fa.spotifycdn.com/image/ab67616d00001e02ff9ca10b55ce82ae553c8228'
 const DEEZER_IMAGE = 'https://e-cdns-images.dzcdn.net/images/cover/abc123/1000x1000-000000-80-0-0.jpg'
+const DEEZER_CURRENT_IMAGE = 'https://cdn-images.dzcdn.net/images/cover/abc123/1000x1000-000000-80-0-0.jpg'
 
 function spotifyPayload(over: Record<string, unknown> = {}) {
   return {
@@ -66,8 +69,20 @@ describe('Spotify oEmbed artwork', () => {
     await expect(noThumbnail.getArtwork(SPOTIFY_A)).resolves.toBeNull()
   })
 
+  it.each([SPOTIFY_IMAGE_CDN, SPOTIFY_REGIONAL_IMAGE_CDN])(
+    'accepts Spotify regional image CDN host %s',
+    async (thumbnailUrl) => {
+      const client = createSpotifyOEmbedArtworkClient({
+        fetchLike: async () => Response.json(spotifyPayload({ thumbnail_url: thumbnailUrl })),
+      })
+
+      await expect(client.getArtwork(SPOTIFY_A)).resolves.toMatchObject({ url: thumbnailUrl })
+    },
+  )
+
   it.each([
     ['wrong host', 'https://example.com/cover.jpg'],
+    ['Spotify lookalike host', `https://image-cdn-ak.spotifycdn.com.example.com/image/abc`],
     ['credentials', 'https://user:secret@i.scdn.co/image/abc'],
     ['query string', `${SPOTIFY_IMAGE}?token=private`],
   ])('rejects a %s thumbnail without exposing its URL', async (_label, thumbnailUrl) => {
@@ -141,6 +156,16 @@ describe('Deezer exact-ISRC artwork fallback', () => {
     await expect(mismatch.getArtwork(ISRC)).rejects.toMatchObject({ category: 'response' })
   })
 
+  it('accepts the current Deezer image CDN host', async () => {
+    const client = createDeezerArtworkClient({
+      fetchLike: async () => Response.json(deezerPayload({
+        album: { id: 2, title: 'Album', cover_xl: DEEZER_CURRENT_IMAGE },
+      })),
+    })
+
+    await expect(client.getArtwork(ISRC)).resolves.toMatchObject({ url: DEEZER_CURRENT_IMAGE })
+  })
+
   it('rejects untrusted cover hosts and maps authorization failures', async () => {
     const badCover = createDeezerArtworkClient({
       fetchLike: async () => Response.json(deezerPayload({
@@ -148,6 +173,17 @@ describe('Deezer exact-ISRC artwork fallback', () => {
       })),
     })
     await expect(badCover.getArtwork(ISRC)).rejects.toMatchObject({ category: 'response' })
+
+    const lookalikeCover = createDeezerArtworkClient({
+      fetchLike: async () => Response.json(deezerPayload({
+        album: {
+          id: 2,
+          title: 'Album',
+          cover_xl: 'https://cdn-images.dzcdn.net.example.com/images/cover/abc123/1000x1000-000000-80-0-0.jpg',
+        },
+      })),
+    })
+    await expect(lookalikeCover.getArtwork(ISRC)).rejects.toMatchObject({ category: 'response' })
 
     const unauthorized = createDeezerArtworkClient({
       fetchLike: async () => new Response(null, { status: 403 }),
