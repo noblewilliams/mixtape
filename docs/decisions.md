@@ -310,11 +310,15 @@ errors/results contain fixed categories and counts only.
 Deezer's exact-ISRC route lacks a stable public reference, so it remains a
 guarded best-effort fallback even though the 2026-09-06 binding-free Cloudflare
 edge smoke succeeded without listener data or a token. That smoke exposed the
-current CDN hosts above; the original deployed allowlists reject them. Isolated
-commit `b8f8393` keeps exact/anchored ownership checks and adds lookalike-host
-regressions. It passed 78 files / 1,307 tests, typecheck, a Worker dry-run, and
-the final Spotify known/missing plus Deezer known edge cases. The preview was
-stopped, and the fix is not merged or deployed. Spotify oEmbed remains primary.
+current CDN hosts above; the original deployed allowlists rejected them.
+Isolated commit `b8f8393` keeps exact/anchored ownership checks and adds
+lookalike-host regressions. It passed 78 files / 1,307 tests, typecheck, a Worker
+dry-run, and the final Spotify known/missing plus Deezer known edge cases. The
+provider-only `cace81e` backport then passed 73 files / 1,263 tests, typecheck,
+and a full Worker dry-run before deployment as version
+`f2c5014b-a199-4398-bec9-e0dd22ac0d7e`; the next scheduled invocation completed
+with zero fallback failures and no eligible fallback rows. The same fix is on
+`origin/main` as `ebfe96d`. Spotify oEmbed remains primary.
 Plan: `superpowers/plans/2026-09-04-spotify-fallback-artwork.md`; release
 sequencing is in `superpowers/specs/2026-09-05-listening-export-release-validation-design.md`.
 

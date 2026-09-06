@@ -1,16 +1,18 @@
 # Listening-export release and validation
 
-**Status:** draft release contract with provider repair awaiting production, 2026-09-06
+**Status:** executed through the provider repair; browser, TestFlight, device,
+and real-export gates remain, 2026-09-06
 **Scope:** release the completed listening-export, web music, playlist
 intelligence, and Phase 3 enrichment work; validate it with real Spotify exports;
 establish the evidence gate for Phase 4.
 **Implementation baseline:** `bba5de9` (music/enrichment/playlist intelligence)
 and `3d18a17` (Your music web integration) on `main`.
-**Selected release candidate:** application tree `05dad49`; Worker snapshot
-`fd5f66b` adds only the migration record and is deployed. Netlify production is
-on `05dad49`. Detailed Worker execution record: `7a2a514`.
-**Provider repair candidate:** isolated commit `b8f8393`, based on current
-`main` at `b45988b`; verified but not merged or deployed.
+**Selected initial release candidate:** application tree `05dad49`; Worker
+snapshot `fd5f66b` added only the migration record. Netlify production remains
+on `05dad49`. Detailed initial Worker execution record: `7a2a514`.
+**Provider repair:** isolated fix `b8f8393` was backported alone as `cace81e`,
+deployed as Worker version `f2c5014b-a199-4398-bec9-e0dd22ac0d7e`, and
+integrated into `origin/main` as `ebfe96d`.
 
 Read with the [2026-09-01 listening-export design](2026-09-01-listening-export-import-design.md),
 the [2026-08-31 artwork and playlist-intelligence design](2026-08-31-artwork-playlist-intelligence-design.md),
@@ -53,8 +55,9 @@ At spec creation, the last read-only production check found migrations through
 That is historical context: the reviewed foundation through `05dad49` was later
 pushed, and the original release reached matching migrations through `0024`.
 The separate playlist-editing follow-on then applied 0025–0026; production now
-has 27 matching migrations while the live Worker remains `fd5f66b`. Re-read the
-production ledger and Git remote before the remaining rollout actions.
+has 27 matching migrations. The live Worker is the provider-only `cace81e`
+backport on the `fd5f66b` base. Re-read the production ledger and Git remote
+before the remaining rollout actions.
 
 The shared checkout intentionally contains founder-owned changes to `AGENTS.md`,
 `CLAUDE.md`, and `.claude/launch.json`. They are not release inputs. Build,
@@ -68,7 +71,7 @@ migrate, and deploy only from a clean worktree at the selected commit.
   matching hashes. The ordered `0015–0024` chain was then applied from a clean
   detached `05dad49` worktree. The post-run ledger has 25 matching entries
   through `0024`, and the four new core tables resolve.
-- Worker snapshot `fd5f66b` is live as version
+- Worker snapshot `fd5f66b` was deployed as version
   `7a6ec181-2292-4d56-b8a4-abb996d6857a`, with rollback version
   `e35b134c-c045-4267-92b6-31c42c918159`. Public health/auth guards and an
   aggregate private status check passed. The first bounded scheduler pass
@@ -95,8 +98,8 @@ migrate, and deploy only from a clean worktree at the selected commit.
   clean worktree.
 - [x] Run the public-ID-only Cloudflare provider smoke below and repair the
   observed CDN-host drift in an isolated candidate.
-- [ ] Integrate the provider repair and deploy an explicitly approved Worker
-  scope, then repeat the fixed-output production smoke.
+- [x] Integrate the provider repair and deploy the explicitly approved
+  provider-only Worker scope, then repeat the fixed-output production smoke.
 - [ ] Record a recoverable Neon restore point/branch. The production prefix and
   local rehearsal were verified, and the migration chain is already applied.
 - [x] With explicit action-time approval, push and migrate.
@@ -196,6 +199,15 @@ server suite passed 78 files / 1,307 tests; TypeScript and the binding-free Work
 dry-run passed. The preview was stopped. No production deploy, database access,
 listener data, provider ID, or music metadata was involved.
 
+The approved production release backported only those four files onto the live
+`fd5f66b` base as `cace81e`; it passed 73 files / 1,263 tests, TypeScript, and a
+full Worker dry-run. Worker version `f2c5014b-a199-4398-bec9-e0dd22ac0d7e` is
+live, with `7a6ec181-2292-4d56-b8a4-abb996d6857a` as the immediate rollback.
+Health and session/admin guards passed. The next scheduled maintenance invocation
+completed successfully with zero fallback failures and no eligible fallback rows,
+so it made no listener-data change; the edge run remains the direct provider-call
+evidence. The fix is also on `origin/main` as `ebfe96d`.
+
 ## Release-candidate verification
 
 Run from the clean worktree at the selected SHA:
@@ -265,17 +277,16 @@ verified restore point only when one has actually been recorded.
 ## Deployment order and rollback
 
 Execution completed candidate selection/fetch, all clean-snapshot checks, push,
-the production-ledger reread, migration application, Worker deploy, initial
-public/private smoke, Netlify publication, and binding-free provider smoke. It
-does not record a restore point, production deployment of the provider repair,
-browser/device smoke, or real-export validation.
+the production-ledger reread, migration application, the initial Worker/web
+release, binding-free provider smoke, and the provider-only repair deployment.
+It does not record a restore point, browser/device smoke, or real-export
+validation.
 Continue from the current production ledger and deployed versions rather than
 replaying the migration chain.
 
-The provider repair branch is based on `b45988b`, which also contains the
-playlist-editing server follow-on that is not in the live Worker. Do not deploy
-`b8f8393` as a supposedly artwork-only release: either approve the combined
-Worker scope or backport only the repair onto the deployed `fd5f66b` base.
+The provider repair was backported onto `fd5f66b` as `cace81e` and deployed
+without the playlist-editing server follow-on. The equivalent mainline commit is
+`ebfe96d`.
 
 1. Freeze the release SHA; fetch and confirm remote/Netlify behavior.
 2. Finish all candidate checks and provider smoke.
@@ -383,7 +394,7 @@ rows, provider IDs, URLs, or response bodies.
 - [ ] Netlify auto-publish cannot expose a client before schema/Worker readiness.
 - [x] Clean-worktree candidate checks pass.
 - [x] Binding-free Spotify/Deezer Worker smoke passes and the hostname drift is fixed in `b8f8393`.
-- [ ] Provider repair is integrated and production smoke passes on the deployed Worker.
+- [x] Provider repair is integrated and production smoke passes on the deployed Worker.
 - [ ] Production migration prefix and restore point are verified.
 - [ ] Migrations and postconditions pass.
 - [x] Worker and initial counts-only smoke pass.

@@ -1,6 +1,6 @@
 # Spotify fallback artwork — Phase 3 final slice
 
-Status: provider smoke complete; CDN-host repair verified in isolated commit `b8f8393`, not merged or deployed. Production Worker `7a6ec181-2292-4d56-b8a4-abb996d6857a` still has the older allowlists.
+Status: complete and deployed. The CDN-host repair was verified in `b8f8393`, backported alone as `cace81e`, deployed as Worker version `f2c5014b-a199-4398-bec9-e0dd22ac0d7e`, and integrated into `origin/main` as `ebfe96d`.
 
 The user authorized the remaining Phase 3 implementation while the real Spotify
 and Apple exports are still pending. A Spotify track that does not acquire an
@@ -98,14 +98,21 @@ rest of maintenance.
 - The repaired candidate passed the authoritative server suite at **78 files /
   1,307 tests**, TypeScript, and a binding-free Worker dry-run. The preview was
   stopped. No production deploy, database access, or listener data was involved.
+- The approved provider-only release cherry-picked those exact four files onto
+  the deployed `fd5f66b` base as `cace81e`. That clean snapshot passed **73 files /
+  1,263 tests**, TypeScript, and a full Worker dry-run before deployment as
+  version `f2c5014b-a199-4398-bec9-e0dd22ac0d7e`; previous version
+  `7a6ec181-2292-4d56-b8a4-abb996d6857a` is the immediate rollback.
+- Production health and session/admin guards passed. The next scheduled
+  maintenance invocation completed with zero fallback failures and no eligible
+  fallback rows, so it made no listener-data change. The edge smoke above remains
+  the direct provider-call evidence. The repair was integrated into `origin/main`
+  as `ebfe96d` after the separate playlist task finished.
 
 ## Release gate
 
-Provider behavior is verified; production repair remains. Commit `b8f8393` is
-based on current `main` (`b45988b`), whose conversational playlist-editing server
-code and migrations 0025–0026 are not in the live Worker. Before deployment,
-choose and approve the exact scope: either release the combined `b8f8393`
-snapshot or backport only the provider repair onto the currently deployed
-`fd5f66b` base. Deploy from a clean worktree, repeat the fixed-output production
-provider smoke, and observe aggregate fallback categories. Do not silently use
-this repair to activate the separate playlist-editing backend.
+Provider behavior and the production repair are complete. The approved release
+used the provider-only backport path, so the playlist-editing server follow-on
+was not activated. Direct provider behavior is pinned by the binding-free edge
+smoke; the production runtime is covered by the clean-snapshot suite, exact
+four-file diff, public guards, and the successful aggregate scheduled invocation.

@@ -1,6 +1,6 @@
 # Handoff — listening-export program (Spotify import)
 
-*Initial handoff written 2026-09-04 at `14cdc44`; follow-on status updated 2026-09-06. The completed program work is pushed; production migrations reach 0026; Netlify serves `05dad49`; and the live Worker remains the `fd5f66b` release. Provider-CDN repair, production-browser/TestFlight, and device/real-export gates remain.*
+*Initial handoff written 2026-09-04 at `14cdc44`; follow-on status updated 2026-09-06. The completed program work is pushed; production migrations reach 0026; Netlify serves `05dad49`; and the provider-only Worker repair is live. Production-browser/TestFlight and device/real-export gates remain.*
 
 Read with: `docs/superpowers/specs/2026-09-01-listening-export-import-design.md` (rev 3), the phase plans `docs/superpowers/plans/2026-09-01-listening-export-p1-server.md` and `docs/superpowers/plans/2026-09-02-listening-export-p2-spotify-import.md`, and the 2026-09-01 entry in `docs/decisions.md`.
 
@@ -34,9 +34,11 @@ checkpoint passed 7 files / 101 tests plus typecheck. After all three sessions
 froze server files, the authoritative combined suite passed **73 files / 1,259
 tests in 192.63s**, including the 0014-to-current migration rehearsal. A later
 binding-free Worker smoke proved Spotify and Deezer provider access, while also
-exposing current CDN hostname drift. The strict repair is verified in isolated
-commit `b8f8393`; it is not merged or deployed. Deezer remains best effort because
-its exact-ISRC route lacks a stable public contract.
+exposing current CDN hostname drift. The strict repair was verified in isolated
+commit `b8f8393`, backported alone as `cace81e`, deployed as Worker version
+`f2c5014b-a199-4398-bec9-e0dd22ac0d7e`, and integrated into `origin/main` as
+`ebfe96d`. Deezer remains best effort because its exact-ISRC route lacks a stable
+public contract.
 Real-export validation remains gated on the missing archives.
 The user's requested archives have not arrived. The earlier playlist
 catalog/taste slice is `1fb6c92`; the combined music/enrichment work is `bba5de9`
@@ -52,10 +54,13 @@ The separate release preflight first found production migrations only through
 Its report is `superpowers/plans/2026-09-04-playlist-release-preflight.md`.
 The original release applied all 25 migrations through 0024 with matching hashes.
 The separate playlist-editing follow-on later applied 0025–0026; production now
-has 27 matching entries, while the live Worker still runs the exact clean
-`fd5f66b` snapshot as version `7a6ec181-2292-4d56-b8a4-abb996d6857a`. Public
-health/auth and aggregate private smoke passed; no playlist mutation or device
-smoke ran.
+has 27 matching entries. The live Worker is the provider-only `cace81e` backport
+on the `fd5f66b` code base, version `f2c5014b-a199-4398-bec9-e0dd22ac0d7e`;
+`7a6ec181-2292-4d56-b8a4-abb996d6857a` is the immediate rollback version.
+Public health, session/admin guards, and scheduled maintenance passed. The
+scheduled fallback stage had zero eligible rows and zero failures, so it made no
+listener-data change; direct provider-call evidence remains the binding-free edge
+smoke. No playlist mutation or device smoke ran.
 
 ## What this is
 
@@ -119,8 +124,8 @@ Every task ran implementer → adversarial reviewer → fix round. Every finding
 
 1. **Completed — push.** The reviewed foundation through `05dad49`, release records, and playlist-editing server follow-on through `b45988b` are on `origin/main`.
 2. **Completed — migrations 0015–0026.** The original release applied 0015–0024 from clean `05dad49`; the separate playlist-editing action applied 0025–0026 from clean `a5f8185`. The post-run ledger contains 27 matching entries.
-3. **Completed — Worker deploy and initial smoke.** Exact clean snapshot `fd5f66b` is live as version `7a6ec181-2292-4d56-b8a4-abb996d6857a`; rollback version `e35b134c-c045-4267-92b6-31c42c918159` is recorded. Health/auth guards and aggregate private status passed.
-4. **Provider-CDN repair.** Binding-free edge smoke is complete. Integrate and deploy verified commit `b8f8393`, then repeat the fixed-output production smoke. Because it is based on `b45988b`, deploying it would also activate the playlist-editing server follow-on; approve that combined scope or backport only the provider fix to `fd5f66b`.
+3. **Completed — Worker deploy and initial smoke.** Exact clean snapshot `fd5f66b` shipped as version `7a6ec181-2292-4d56-b8a4-abb996d6857a`; rollback version `e35b134c-c045-4267-92b6-31c42c918159` is recorded. Health/auth guards and aggregate private status passed.
+4. **Completed — provider-CDN repair.** Verified fix `b8f8393` was backported alone onto `fd5f66b` as `cace81e`, so no playlist-editing runtime shipped. Production version `f2c5014b-a199-4398-bec9-e0dd22ac0d7e` passed health and session/admin guards; its next scheduled invocation completed successfully with zero fallback failures and no eligible fallback rows. The prior Worker version is the immediate rollback. The same fix is on `origin/main` as `ebfe96d`.
 5. **Published — web; verification remains.** Netlify production still reports commit `05dad49` as of 2026-09-06. Smoke auth, Your music, playlist browse/detail, and Android Chrome against the deployed Worker before calling the web rollout verified.
 6. **TestFlight build.** The simulator build is proven; signing and upload are the founder's.
 7. **Fixture-layout check against real exports.** The fixture folder names, file names, and playlist item shapes are assumptions recorded in `fixtures/listening-exports/README.md`. When the founder's Spotify (both packages, requested 2026-09-01) and Apple exports arrive, put the archives in a folder outside the repo and give a session the paths; it verifies the layout, corrects the fixtures and both parsers if needed, and only then runs the smoke.
@@ -129,7 +134,7 @@ Every task ran implementer → adversarial reviewer → fix round. Every finding
 
 ### Later phases (spec "Phasing")
 
-- **Phase 3, enrichment (committed in `bba5de9`).** Spotify-ID metadata/features, source ownership, exact Apple ISRC linking, and Spotify oEmbed artwork with guarded exact-ISRC Deezer fallback have their follow-on plans above. Provider edge behavior is verified; the CDN-host repair still needs an explicitly scoped production release. Real-export validation remains a gate.
+- **Phase 3, enrichment (committed in `bba5de9`).** Spotify-ID metadata/features, source ownership, exact Apple ISRC linking, and Spotify oEmbed artwork with guarded exact-ISRC Deezer fallback have their follow-on plans above. Provider edge behavior is verified and the CDN-host repair is live in the provider-only Worker backport. Real-export validation remains a gate.
 - **Phase 4, probes.** Scrobble relay (ListenBrainz or Last.fm as the live feed; terms and latency unknown) and the Spotify iFrame embed player (five open questions in the spec). Each gets a short spec only if it holds. Gated on the funnel showing listeners reach `import_completed` and `first_output`.
 - **Phase 5, Apple "go deeper", web first.** Parser for `Apple Media Services information` (Daily Tracks CSV, Library Tracks JSON, nested archive stored or deflated, random access for a 1 GB archive). The server already accepts `apple_media` runs. iOS build waits for the web proof and funnel evidence.
 
