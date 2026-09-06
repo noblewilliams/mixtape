@@ -12,6 +12,7 @@ export { ArtworkProviderError } from './provider'
 const DEFAULT_TIMEOUT_MS = 5000
 const DEFAULT_MAX_RESPONSE_BYTES = 256 * 1024
 const ISRC_PATTERN = /^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$/
+const DEEZER_IMAGE_HOSTS = ['e-cdns-images.dzcdn.net', 'cdn-images.dzcdn.net'] as const
 const DEEZER_COVER_PATH = /^\/images\/cover\/[0-9A-Za-z]+\/(\d+)x(\d+)-[0-9A-Za-z-]+\.(?:jpg|jpeg|png)$/
 
 export type DeezerArtworkClient = {
@@ -52,7 +53,7 @@ export function createDeezerArtworkClient({
 
       const image = fixedArtworkUrl(
         payload.album.cover_xl,
-        'e-cdns-images.dzcdn.net',
+        DEEZER_IMAGE_HOSTS,
         DEEZER_COVER_PATH,
       )
       const dimensions = image && DEEZER_COVER_PATH.exec(image.pathname)
