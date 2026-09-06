@@ -178,6 +178,35 @@ actor PlaylistSnapshotStore {
     return (Array(entries.dropFirst(offset).prefix(limit)), entries.count)
   }
 
+  /// Reads one playlist outside the long-lived sync snapshot so apply can
+  /// prove the source still matches the draft immediately before mutation.
+  func currentFingerprint(playlistId: String) async throws -> String {
+    let (playlist, entries) = try await Self.currentPlaylist(playlistId: playlistId)
+    return Self.fingerprint(
+      playlistId: playlistId,
+      lastModifiedAt: Self.epochMilliseconds(playlist.lastModifiedDate),
+      entries: entries
+    )
+  }
+
+  /// Computes the write receipt over the exact ordered Apple catalog IDs.
+  /// This differs from the sync fingerprint: it deliberately ignores mutable
+  /// playlist metadata and occurrence IDs created by Apple during the write.
+  func currentApplyFingerprint(playlistId: String) async throws -> String {
+    let (_, entries) = try await Self.currentPlaylist(playlistId: playlistId)
+    let libraryIds = entries.compactMap(\.appleLibraryTrackId)
+    let crosswalk = try await LibrarySongCatalogCrosswalk().resolve(
+      librarySongIds: libraryIds
+    )
+    let catalogIds = try entries.map { entry in
+      guard let catalogId = entry.appleCatalogId
+        ?? entry.appleLibraryTrackId.flatMap({ crosswalk[$0]?.catalogId })
+      else { throw StoreError.invalidPayload }
+      return catalogId
+    }
+    return Self.applyFingerprint(catalogIds: catalogIds)
+  }
+
   @discardableResult
   func cancel() -> Bool {
     activeMaterialization?.task.cancel()
@@ -286,6 +315,27 @@ actor PlaylistSnapshotStore {
       playlists: playlists,
       playlistIndex: playlistIndex
     )
+  }
+
+  private static func currentPlaylist(
+    playlistId: String
+  ) async throws -> (Playlist, [EntryValue]) {
+    guard validOpaqueId(playlistId) != nil else { throw StoreError.invalidPayload }
+    var request = MusicLibraryRequest<Playlist>()
+    request.limit = 2
+    request.filter(matching: \.id, memberOf: [MusicItemID(playlistId)])
+    let matches = try await request.response().items.filter {
+      $0.id.rawValue == playlistId
+    }
+    guard matches.count == 1, let playlist = matches.first else {
+      throw StoreError.playlistNotFound
+    }
+    let detailed = try await playlist.with(.entries, preferredSource: .library)
+    let rawEntries = try await fetchAllEntries(detailed.entries)
+    let entries = try rawEntries.enumerated().map { position, entry in
+      try makeEntry(entry, position: position)
+    }
+    return (playlist, entries)
   }
 
   private static func fetchAllPlaylists() async throws -> [Playlist] {
@@ -595,6 +645,14 @@ actor PlaylistSnapshotStore {
       builder.append(entry.durationMsSnapshot)
     }
     return SHA256.hash(data: builder.data).map { String(format: "%02x", $0) }.joined()
+  }
+
+  private static func applyFingerprint(catalogIds: [String]) -> String {
+    let canonical = "mixtape-playlist-apply-v1\n\(catalogIds.count)\n"
+      + catalogIds.joined(separator: "\n")
+    return SHA256.hash(data: Data(canonical.utf8))
+      .map { String(format: "%02x", $0) }
+      .joined()
   }
 }
 

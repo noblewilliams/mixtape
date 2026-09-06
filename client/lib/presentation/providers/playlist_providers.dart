@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/api/api_client.dart';
@@ -5,7 +8,10 @@ import '../../data/playlists/playlist_api.dart';
 import '../../data/playlists/playlist_edit_api.dart';
 import '../../data/playlists/playlist_edit_models.dart';
 import '../../data/playlists/playlist_models.dart';
+import '../../data/musickit/musickit_bridge.dart';
+import '../../data/musickit/playlist_apply_bridge.dart';
 import 'auth_provider.dart';
+import 'library_sync_provider.dart';
 
 final playlistApiProvider = Provider<PlaylistApi>(
   (ref) => PlaylistApi(ref.watch(apiClientProvider)),
@@ -15,6 +21,21 @@ final playlistEditApiProvider = Provider<PlaylistEditApi>((ref) {
   final api = PlaylistEditApi.from(ref.watch(apiClientProvider));
   ref.onDispose(api.close);
   return api;
+});
+
+final playlistApplyBridgeProvider = Provider<PlaylistApplyBridge>(
+  (ref) => PlaylistApplyBridge(),
+);
+
+final playlistApplySupportedProvider = Provider<bool>(
+  (ref) => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS,
+);
+
+final playlistRefreshAfterApplyProvider = Provider<Future<void> Function()>((
+  ref,
+) {
+  ref.watch(authProvider);
+  return () => ref.read(librarySyncProvider.notifier).sync();
 });
 
 class PlaylistCollectionState {
@@ -157,12 +178,16 @@ class PlaylistEditThreadState {
     required this.messages,
     this.sending = false,
     this.transientError,
+    this.applyStatus = PlaylistApplyUiStatus.idle,
+    this.applyPlan,
   });
 
   final PlaylistEditView view;
   final List<PlaylistEditUiMessage> messages;
   final bool sending;
   final String? transientError;
+  final PlaylistApplyUiStatus applyStatus;
+  final PlaylistApplyPlan? applyPlan;
 
   PlaylistEditThreadState copyWith({
     PlaylistEditView? view,
@@ -170,6 +195,8 @@ class PlaylistEditThreadState {
     bool? sending,
     String? transientError,
     bool clearTransientError = false,
+    PlaylistApplyUiStatus? applyStatus,
+    PlaylistApplyPlan? applyPlan,
   }) => PlaylistEditThreadState(
     view: view ?? this.view,
     messages: messages ?? this.messages,
@@ -177,7 +204,27 @@ class PlaylistEditThreadState {
     transientError: clearTransientError
         ? null
         : (transientError ?? this.transientError),
+    applyStatus: applyStatus ?? this.applyStatus,
+    applyPlan: applyPlan ?? this.applyPlan,
   );
+}
+
+enum PlaylistApplyUiStatus {
+  idle,
+  preparing,
+  applying,
+  applied,
+  partial,
+  unknown,
+  blocked,
+  sourceConflict,
+  failed,
+}
+
+extension PlaylistApplyUiStatusState on PlaylistApplyUiStatus {
+  bool get busy =>
+      this == PlaylistApplyUiStatus.preparing ||
+      this == PlaylistApplyUiStatus.applying;
 }
 
 const _offlineEditMessage =
@@ -230,7 +277,12 @@ class PlaylistEditThreadNotifier
   Future<void> send(String content) async {
     final text = content.trim();
     final base = state.value;
-    if (base == null || base.sending || text.isEmpty) return;
+    if (base == null ||
+        base.sending ||
+        base.applyStatus != PlaylistApplyUiStatus.idle ||
+        text.isEmpty) {
+      return;
+    }
     final messagesBefore = base.messages;
     state = AsyncData(
       base.copyWith(
@@ -285,6 +337,118 @@ class PlaylistEditThreadNotifier
       _merge(
         (current) =>
             current.sending ? current.copyWith(sending: false) : current,
+      );
+    }
+  }
+
+  Future<void> applyRevisedCopy() async {
+    final base = state.value;
+    if (base == null ||
+        base.sending ||
+        base.applyStatus.busy ||
+        !base.view.capability.applyAvailable ||
+        !ref.read(playlistApplySupportedProvider)) {
+      return;
+    }
+    PlaylistApplyPlan? plan = base.applyPlan;
+    try {
+      if (plan == null) {
+        _merge(
+          (current) => current.copyWith(
+            applyStatus: PlaylistApplyUiStatus.preparing,
+            clearTransientError: true,
+          ),
+        );
+        final fingerprint = base.view.draft.sourceType == 'apple'
+            ? await ref
+                  .read(playlistApplyBridgeProvider)
+                  .fetchPlaylistFingerprint(
+                    base.view.draft.sourceProviderLibraryId,
+                  )
+            : base.view.draft.baseSourceFingerprint;
+        plan = await ref
+            .read(playlistEditApiProvider)
+            .prepareApply(
+              draftId,
+              expectedVersion: base.view.draft.version,
+              currentSourceFingerprint: fingerprint,
+            );
+      }
+      _merge(
+        (current) => current.copyWith(
+          applyStatus: PlaylistApplyUiStatus.applying,
+          applyPlan: plan,
+        ),
+      );
+      final receipt = await ref
+          .read(playlistApplyBridgeProvider)
+          .createRevisedPlaylist(
+            operationId: plan.operationId,
+            name: plan.name,
+            description: plan.description,
+            appleCatalogIds: plan.appleCatalogIds,
+            desiredFingerprint: plan.desiredFingerprint,
+          );
+      if (receipt.outcome == PlaylistApplyOutcome.partial) {
+        _merge(
+          (current) => current.copyWith(
+            applyStatus: PlaylistApplyUiStatus.partial,
+            applyPlan: plan,
+          ),
+        );
+        return;
+      }
+      if (receipt.outcome == PlaylistApplyOutcome.unknown ||
+          receipt.appleLibraryId == null ||
+          receipt.resultingFingerprint == null) {
+        _merge(
+          (current) => current.copyWith(
+            applyStatus: PlaylistApplyUiStatus.unknown,
+            applyPlan: plan,
+          ),
+        );
+        return;
+      }
+      await ref
+          .read(playlistEditApiProvider)
+          .confirmApply(
+            draftId,
+            operationId: plan.operationId,
+            expectedVersion: plan.draftVersion,
+            applePlaylistLibraryId: receipt.appleLibraryId!,
+            resultingFingerprint: receipt.resultingFingerprint!,
+          );
+      _merge(
+        (current) => current.copyWith(
+          applyStatus: PlaylistApplyUiStatus.applied,
+          applyPlan: plan,
+        ),
+      );
+      ref.invalidate(playlistCollectionProvider);
+      ref.invalidate(playlistDetailProvider(base.view.draft.sourcePlaylistId));
+      unawaited(ref.read(playlistRefreshAfterApplyProvider)());
+    } on PlaylistEditApiException catch (error) {
+      final next = switch (error.kind) {
+        'source_conflict' => PlaylistApplyUiStatus.sourceConflict,
+        'apply_blocked' => PlaylistApplyUiStatus.blocked,
+        _ => PlaylistApplyUiStatus.failed,
+      };
+      _merge((current) => current.copyWith(applyStatus: next, applyPlan: plan));
+    } on MusicKitException catch (error) {
+      _merge(
+        (current) => current.copyWith(
+          applyStatus: error.message == 'playlist apply result is unknown'
+              ? PlaylistApplyUiStatus.unknown
+              : PlaylistApplyUiStatus.failed,
+          applyPlan: plan,
+        ),
+      );
+    } catch (_) {
+      _merge(
+        (current) => current.copyWith(
+          applyStatus: PlaylistApplyUiStatus.failed,
+          applyPlan: plan,
+        ),
       );
     }
   }

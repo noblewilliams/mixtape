@@ -89,6 +89,8 @@ class _PlaylistEditScreenState extends ConsumerState<PlaylistEditScreen> {
 
   Widget _body(PlaylistEditThreadState state) {
     final changes = state.view.diff.changeCount;
+    final composerEnabled =
+        !state.sending && state.applyStatus == PlaylistApplyUiStatus.idle;
     return Column(
       children: [
         _TruthHeader(view: state.view),
@@ -162,12 +164,12 @@ class _PlaylistEditScreenState extends ConsumerState<PlaylistEditScreen> {
                   child: TextField(
                     key: const Key('playlist-edit-composer'),
                     controller: _controller,
-                    enabled: !state.sending,
+                    enabled: composerEnabled,
                     minLines: 1,
                     maxLines: 4,
                     maxLength: 2000,
                     textInputAction: TextInputAction.send,
-                    onSubmitted: state.sending ? null : (_) => _send(),
+                    onSubmitted: composerEnabled ? (_) => _send() : null,
                     decoration: const InputDecoration(
                       hintText: 'Tell the DJ what to change…',
                       counterText: '',
@@ -181,7 +183,7 @@ class _PlaylistEditScreenState extends ConsumerState<PlaylistEditScreen> {
                 IconButton.filled(
                   key: const Key('playlist-edit-send'),
                   tooltip: 'Send',
-                  onPressed: state.sending ? null : _send,
+                  onPressed: composerEnabled ? _send : null,
                   icon: const Icon(Icons.arrow_upward_rounded),
                 ),
               ],
@@ -196,7 +198,7 @@ class _PlaylistEditScreenState extends ConsumerState<PlaylistEditScreen> {
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
-    builder: (context) => _ReviewSheet(view: view),
+    builder: (context) => _ReviewSheet(draftId: widget.draftId, view: view),
   );
 }
 
@@ -389,15 +391,22 @@ String _summary(PlaylistEditDiff diff) {
   return parts.join(' · ');
 }
 
-class _ReviewSheet extends StatelessWidget {
-  const _ReviewSheet({required this.view});
+class _ReviewSheet extends ConsumerWidget {
+  const _ReviewSheet({required this.draftId, required this.view});
 
+  final String draftId;
   final PlaylistEditView view;
 
   @override
-  Widget build(BuildContext context) {
-    final spotify = view.draft.sourceType == 'spotify_export';
-    final unresolved = view.entries.where((entry) => !entry.resolved).length;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final thread = ref.watch(playlistEditThreadProvider(draftId)).value;
+    final currentView = thread?.view ?? view;
+    final applyStatus = thread?.applyStatus ?? PlaylistApplyUiStatus.idle;
+    final supported = ref.watch(playlistApplySupportedProvider);
+    final spotify = currentView.draft.sourceType == 'spotify_export';
+    final unresolved = currentView.entries
+        .where((entry) => !entry.resolved)
+        .length;
     return SafeArea(
       child: SingleChildScrollView(
         padding: EdgeInsets.fromLTRB(
@@ -429,35 +438,35 @@ class _ReviewSheet extends StatelessWidget {
               child: Text(
                 spotify
                     ? 'This Spotify export stays untouched. A later apply step can create an Apple Music copy after every song is matched.'
-                    : 'Apple Music cannot safely place structural edits into the middle of this source. Mixtape will create a revised copy and leave “${view.draft.baseName}” untouched.',
+                    : 'Apple Music cannot safely place structural edits into the middle of this source. Mixtape will create a revised copy and leave “${currentView.draft.baseName}” untouched.',
               ),
             ),
             const SizedBox(height: 17),
             Text(
-              _summary(view.diff),
+              _summary(currentView.diff),
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 10),
-            for (final entry in view.review.added)
+            for (final entry in currentView.review.added)
               _ReviewRow(
                 icon: Icons.add_rounded,
                 entry: entry,
-                detail: _placement(view.entries, entry.position),
+                detail: _placement(currentView.entries, entry.position),
               ),
-            for (final entry in view.review.removed)
+            for (final entry in currentView.review.removed)
               _ReviewRow(
                 icon: Icons.remove_rounded,
                 entry: entry,
                 detail: 'Removed from position ${entry.position + 1}',
               ),
-            for (final entry in view.review.moved)
+            for (final entry in currentView.review.moved)
               _ReviewRow(
                 icon: Icons.swap_vert_rounded,
                 entry: entry,
                 detail:
                     'Moved from ${entry.fromPosition! + 1} to ${entry.position + 1}',
               ),
-            for (final replacement in view.review.replaced)
+            for (final replacement in currentView.review.replaced)
               _ReviewRow(
                 icon: Icons.sync_alt_rounded,
                 entry: replacement.after,
@@ -471,14 +480,31 @@ class _ReviewSheet extends StatelessWidget {
                 style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
             ],
+            if (applyStatus != PlaylistApplyUiStatus.idle) ...[
+              const SizedBox(height: 12),
+              _ApplyStatus(status: applyStatus),
+            ],
             const SizedBox(height: 18),
             FilledButton(
               key: const Key('apply-draft'),
-              onPressed: null,
+              onPressed:
+                  supported &&
+                      currentView.capability.applyAvailable &&
+                      !applyStatus.busy &&
+                      applyStatus != PlaylistApplyUiStatus.applied
+                  ? () => ref
+                        .read(playlistEditThreadProvider(draftId).notifier)
+                        .applyRevisedCopy()
+                  : null,
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(48),
               ),
-              child: const Text('Apple apply is not available in this build'),
+              child: applyStatus.busy
+                  ? const SizedBox.square(
+                      dimension: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Text(_applyLabel(applyStatus, supported)),
             ),
             const SizedBox(height: 8),
             OutlinedButton(
@@ -494,6 +520,19 @@ class _ReviewSheet extends StatelessWidget {
     );
   }
 
+  String _applyLabel(PlaylistApplyUiStatus status, bool supported) {
+    if (!supported) return 'Apple Music apply requires iPhone';
+    return switch (status) {
+      PlaylistApplyUiStatus.applied => 'Created in Apple Music',
+      PlaylistApplyUiStatus.partial ||
+      PlaylistApplyUiStatus.unknown => 'Reconcile result',
+      PlaylistApplyUiStatus.sourceConflict => 'Source changed',
+      PlaylistApplyUiStatus.blocked => 'Resolve unmatched songs first',
+      PlaylistApplyUiStatus.failed => 'Try again',
+      _ => 'Create revised playlist',
+    };
+  }
+
   String _placement(List<PlaylistEditEntry> entries, int position) {
     final before = position > 0 ? entries[position - 1].title : null;
     final after = position + 1 < entries.length
@@ -505,6 +544,77 @@ class _ReviewSheet extends StatelessWidget {
     if (before != null) return 'After “$before” · at the end';
     if (after != null) return 'Before “$after” · at the beginning';
     return 'Only song in the draft';
+  }
+}
+
+class _ApplyStatus extends StatelessWidget {
+  const _ApplyStatus({required this.status});
+
+  final PlaylistApplyUiStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final (title, detail, icon) = switch (status) {
+      PlaylistApplyUiStatus.applied => (
+        'Created in Apple Music',
+        'The revised copy is saved and your source is untouched.',
+        Icons.check_circle_outline_rounded,
+      ),
+      PlaylistApplyUiStatus.partial => (
+        'Some songs were not added',
+        'Mixtape will inspect the created copy before doing anything else.',
+        Icons.warning_amber_rounded,
+      ),
+      PlaylistApplyUiStatus.unknown => (
+        'Result needs checking',
+        'Mixtape will inspect the same operation. It will not create another copy.',
+        Icons.help_outline_rounded,
+      ),
+      PlaylistApplyUiStatus.sourceConflict => (
+        'The source changed',
+        'Sync the playlist, then review a fresh draft before applying.',
+        Icons.sync_problem_rounded,
+      ),
+      PlaylistApplyUiStatus.blocked => (
+        'This draft cannot be applied yet',
+        'Every song must have an exact Apple Music match.',
+        Icons.block_rounded,
+      ),
+      PlaylistApplyUiStatus.failed => (
+        'Could not prepare the copy',
+        'Nothing was confirmed. You can try this operation again.',
+        Icons.error_outline_rounded,
+      ),
+      _ => ('Working…', 'Keep Mixtape open for a moment.', Icons.sync_rounded),
+    };
+    return Semantics(
+      liveRegion: true,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(13),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, size: 21),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: Theme.of(context).textTheme.titleSmall),
+                  const SizedBox(height: 2),
+                  Text(detail, style: Theme.of(context).textTheme.bodySmall),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

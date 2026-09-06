@@ -44,9 +44,16 @@ void main() {
       'fetchPlaylistEntryPage',
       'cancelPlaylistSnapshot',
       'releasePlaylistSnapshot',
+      'fetchPlaylistFingerprint',
+      'createRevisedPlaylist',
     ]) {
       expect(bridge, contains('case "$method"'));
     }
+
+    expect(bridge, contains('mixtape.playlist-apply.'));
+    expect(store, contains('mixtape-playlist-apply-v1'));
+    expect(bridge, contains('desiredFingerprint'));
+    expect(bridge, contains('PlaylistApplyReceipt'));
   });
 
   test('native playlist snapshots derive exact typed catalog identity', () {

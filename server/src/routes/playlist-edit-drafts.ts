@@ -10,6 +10,7 @@ import {
   type PlaylistEditDjDeps,
 } from '../playlist-editing/loop'
 import { playlistEditMessageSchema } from '../playlist-editing/contracts'
+import { createPlaylistApplyStore } from '../playlist-editing/apply'
 import { uuidParam } from './uuid-param'
 
 const anchors = {
@@ -30,10 +31,28 @@ const operationsSchema = z.object({
   expectedVersion: z.number().int().nonnegative(),
   operations: z.array(operationSchema).min(1).max(50),
 }).strict()
+const fingerprintSchema = z.string().regex(/^[0-9a-f]{64}$/)
+const prepareApplySchema = z.object({
+  expectedVersion: z.number().int().nonnegative(),
+  currentSourceFingerprint: fingerprintSchema,
+  clientCapabilities: z.object({
+    revisedCopy: z.boolean(),
+    append: z.boolean(),
+    rebuildReceiptClasses: z.array(z.string().min(1).max(100)).max(20),
+  }).strict(),
+}).strict()
+const confirmApplySchema = z.object({
+  operationId: z.string().uuid(),
+  expectedVersion: z.number().int().nonnegative(),
+  appliedMode: z.literal('revised_copy'),
+  applePlaylistLibraryId: z.string().min(1).max(500).regex(/^[A-Za-z0-9._~-]+$/),
+  resultingFingerprint: fingerprintSchema,
+}).strict()
 
 export function playlistEditDraftRoutes(db: Db, djDeps?: PlaylistEditDjDeps) {
   const app = new Hono<{ Variables: AppVars }>()
   const store = createPlaylistEditDraftStore(db)
+  const applies = createPlaylistApplyStore(db)
 
   app.get('/:draftId', uuidParam('draftId'), async (c) => {
     const view = await store.getThread(c.get('user').id, c.req.valid('param').draftId)
@@ -63,6 +82,62 @@ export function playlistEditDraftRoutes(db: Db, djDeps?: PlaylistEditDjDeps) {
         return c.json({ error: 'invalid_operation' }, 400)
       }
       return c.json(result.view)
+    },
+  )
+
+  app.post(
+    '/:draftId/prepare-apply',
+    bodyLimit({ maxSize: 4 * 1024 }),
+    uuidParam('draftId'),
+    async (c) => {
+      const parsed = prepareApplySchema.safeParse(await c.req.json().catch(() => null))
+      if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
+      const result = await applies.prepare(
+        c.get('user').id,
+        c.req.valid('param').draftId,
+        parsed.data.expectedVersion,
+        parsed.data.currentSourceFingerprint,
+        parsed.data.clientCapabilities.revisedCopy,
+      )
+      if (result.kind === 'not_found') return c.json({ error: 'not_found' }, 404)
+      if (result.kind === 'version_conflict') {
+        return c.json({ error: 'draft_version_conflict' }, 409)
+      }
+      if (result.kind === 'source_conflict') return c.json({ error: 'source_conflict' }, 409)
+      if (result.kind === 'blocked') {
+        return c.json({ error: 'apply_blocked', unresolved: result.unresolved }, 409)
+      }
+      if (result.kind === 'no_changes') return c.json({ error: 'no_changes' }, 409)
+      if (result.kind === 'unsupported_client') {
+        return c.json({ error: 'unsupported_client' }, 409)
+      }
+      if (result.kind === 'terminal') return c.json({ error: 'draft_not_active' }, 409)
+      return c.json(result.plan)
+    },
+  )
+
+  app.post(
+    '/:draftId/confirm-apply',
+    bodyLimit({ maxSize: 4 * 1024 }),
+    uuidParam('draftId'),
+    async (c) => {
+      const parsed = confirmApplySchema.safeParse(await c.req.json().catch(() => null))
+      if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
+      const result = await applies.confirm(
+        c.get('user').id,
+        c.req.valid('param').draftId,
+        parsed.data,
+      )
+      if (result.kind === 'not_found') return c.json({ error: 'not_found' }, 404)
+      if (result.kind === 'version_conflict') {
+        return c.json({ error: 'draft_version_conflict' }, 409)
+      }
+      if (result.kind === 'result_mismatch') {
+        return c.json({ error: 'apply_result_mismatch' }, 409)
+      }
+      if (result.kind === 'plan_mismatch') return c.json({ error: 'apply_plan_mismatch' }, 409)
+      if (result.kind === 'terminal') return c.json({ error: 'draft_not_ready' }, 409)
+      return c.json(result.confirmation)
     },
   )
 

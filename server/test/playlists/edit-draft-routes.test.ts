@@ -94,6 +94,7 @@ describe('playlist edit draft routes', () => {
     const body = await first.json() as any
     expect(body.draft).toMatchObject({
       sourcePlaylistId: playlist.id,
+      sourceProviderLibraryId: 'p1',
       status: 'active',
       version: 0,
       sourceType: 'apple',

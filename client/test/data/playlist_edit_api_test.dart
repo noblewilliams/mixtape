@@ -10,6 +10,9 @@ import 'package:mixtape/data/playlists/playlist_edit_models.dart';
 const draftId = '00000000-0000-4000-8000-000000000010';
 const playlistId = '00000000-0000-4000-8000-000000000001';
 const entryKey = '00000000-0000-4000-8000-000000000020';
+const operationId = '00000000-0000-4000-8000-000000000060';
+const desiredFingerprint =
+    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 
 Map<String, dynamic> reviewEntryJson({Map<String, dynamic> over = const {}}) =>
     {
@@ -34,6 +37,7 @@ Map<String, dynamic> viewJson({
   'draft': {
     'id': draftId,
     'sourcePlaylistId': playlistId,
+    'sourceProviderLibraryId': 'p.source',
     'status': 'active',
     'version': version,
     'baseSourceFingerprint':
@@ -112,6 +116,7 @@ void main() {
       );
 
       expect(thread.draft.baseName, 'Night Bus Notes');
+      expect(thread.draft.sourceProviderLibraryId, 'p.source');
       expect(thread.entries.single.entryKey, entryKey);
       expect(thread.diff.added.single.toPosition, 1);
       expect(thread.review.added.single.artist, 'Daniel Caesar');
@@ -175,6 +180,78 @@ void main() {
     expect(jsonDecode(requests.last.body), {
       'content': 'add a couple',
       'expectedVersion': 1,
+    });
+  });
+
+  test('prepares and confirms one revised-copy apply receipt', () async {
+    final requests = <http.Request>[];
+    final api = await apiWith(
+      MockClient((request) async {
+        requests.add(request);
+        if (request.url.path.endsWith('/prepare-apply')) {
+          return http.Response(
+            jsonEncode({
+              'operationId': operationId,
+              'mode': 'revised_copy',
+              'draftVersion': 2,
+              'expiresAt': '2026-09-05T11:10:00.000Z',
+              'name': 'Night Bus Notes (mixtape revision)',
+              'description': 'revised with mixtape',
+              'appleCatalogIds': ['apple-1', 'apple-2', 'apple-2'],
+              'desiredFingerprint': desiredFingerprint,
+              'sourceWillRemainUntouched': true,
+            }),
+            200,
+          );
+        }
+        return http.Response(
+          jsonEncode({
+            'draftId': draftId,
+            'status': 'applied',
+            'mode': 'revised_copy',
+            'applePlaylistLibraryId': 'p.revised',
+            'resultingFingerprint': desiredFingerprint,
+            'sourceWillRemainUntouched': true,
+          }),
+          200,
+        );
+      }),
+    );
+
+    final plan = await api.prepareApply(
+      draftId,
+      expectedVersion: 2,
+      currentSourceFingerprint:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    );
+    final confirmed = await api.confirmApply(
+      draftId,
+      operationId: plan.operationId,
+      expectedVersion: plan.draftVersion,
+      applePlaylistLibraryId: 'p.revised',
+      resultingFingerprint: plan.desiredFingerprint,
+    );
+
+    expect(plan.appleCatalogIds, ['apple-1', 'apple-2', 'apple-2']);
+    expect(plan.sourceWillRemainUntouched, isTrue);
+    expect(confirmed.status, 'applied');
+    expect(confirmed.applePlaylistLibraryId, 'p.revised');
+    expect(jsonDecode(requests.first.body), {
+      'expectedVersion': 2,
+      'currentSourceFingerprint':
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      'clientCapabilities': {
+        'revisedCopy': true,
+        'append': false,
+        'rebuildReceiptClasses': <String>[],
+      },
+    });
+    expect(jsonDecode(requests.last.body), {
+      'operationId': operationId,
+      'expectedVersion': 2,
+      'appliedMode': 'revised_copy',
+      'applePlaylistLibraryId': 'p.revised',
+      'resultingFingerprint': desiredFingerprint,
     });
   });
 

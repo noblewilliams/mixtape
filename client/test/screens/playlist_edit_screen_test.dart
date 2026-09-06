@@ -6,6 +6,7 @@ import 'package:mixtape/data/playlists/playlist_api.dart';
 import 'package:mixtape/data/playlists/playlist_edit_api.dart';
 import 'package:mixtape/data/playlists/playlist_edit_models.dart';
 import 'package:mixtape/data/playlists/playlist_models.dart';
+import 'package:mixtape/data/musickit/playlist_apply_bridge.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/playlist_providers.dart';
 import 'package:mixtape/presentation/screens/playlist_browser_screen.dart';
@@ -47,6 +48,8 @@ class FakePlaylistEditApi implements PlaylistEditApi {
   List<PlaylistEditMessage> messages;
   Object? sendError;
   int starts = 0;
+  int prepares = 0;
+  int confirms = 0;
 
   @override
   Duration get timeout => const Duration(seconds: 120);
@@ -76,7 +79,86 @@ class FakePlaylistEditApi implements PlaylistEditApi {
   ) async => throw sendError ?? UnimplementedError();
 
   @override
+  Future<PlaylistApplyPlan> prepareApply(
+    String draftId, {
+    required int expectedVersion,
+    required String currentSourceFingerprint,
+  }) async {
+    prepares++;
+    return PlaylistApplyPlan(
+      operationId: '00000000-0000-4000-8000-000000000060',
+      mode: 'revised_copy',
+      draftVersion: expectedVersion,
+      expiresAt: DateTime(2026, 9, 6, 12, 10),
+      name: 'Night Bus Notes (mixtape revision)',
+      description: 'revised with mixtape',
+      appleCatalogIds: const ['apple-1', 'apple-2'],
+      desiredFingerprint:
+          'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      sourceWillRemainUntouched: true,
+    );
+  }
+
+  @override
+  Future<PlaylistApplyConfirmation> confirmApply(
+    String draftId, {
+    required String operationId,
+    required int expectedVersion,
+    required String applePlaylistLibraryId,
+    required String resultingFingerprint,
+  }) async {
+    confirms++;
+    return PlaylistApplyConfirmation(
+      draftId: draftId,
+      status: 'applied',
+      mode: 'revised_copy',
+      applePlaylistLibraryId: applePlaylistLibraryId,
+      resultingFingerprint: resultingFingerprint,
+      sourceWillRemainUntouched: true,
+    );
+  }
+
+  @override
   void close() {}
+}
+
+class FakePlaylistApplyBridge implements PlaylistApplyBridge {
+  FakePlaylistApplyBridge({this.outcome = PlaylistApplyOutcome.success});
+
+  final PlaylistApplyOutcome outcome;
+  int creates = 0;
+  int fingerprints = 0;
+
+  @override
+  Future<String> fetchPlaylistFingerprint(String appleLibraryId) async {
+    fingerprints++;
+    return 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  }
+
+  @override
+  Future<PlaylistApplyReceipt> createRevisedPlaylist({
+    required String operationId,
+    required String name,
+    required String description,
+    required List<String> appleCatalogIds,
+    required String desiredFingerprint,
+  }) async {
+    creates++;
+    return PlaylistApplyReceipt(
+      operationId: operationId,
+      outcome: outcome,
+      appleLibraryId: 'p.revised',
+      added: outcome == PlaylistApplyOutcome.success
+          ? appleCatalogIds.length
+          : 1,
+      failed: outcome == PlaylistApplyOutcome.partial ? 1 : 0,
+      resultingFingerprint: outcome == PlaylistApplyOutcome.unknown
+          ? null
+          : outcome == PlaylistApplyOutcome.success
+          ? desiredFingerprint
+          : 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+    );
+  }
 }
 
 PlaylistSummary _summary({String source = 'apple', int count = 4}) =>
@@ -125,6 +207,9 @@ PlaylistEditView _editView({
   'draft': {
     'id': '00000000-0000-4000-8000-000000000010',
     'sourcePlaylistId': '00000000-0000-4000-8000-000000000001',
+    'sourceProviderLibraryId': source == 'apple'
+        ? 'p.source'
+        : 'spotify-source',
     'status': 'active',
     'version': changed ? 1 : 0,
     'baseSourceFingerprint':
@@ -198,7 +283,7 @@ PlaylistEditView _editView({
   'capability': {
     'possibleModes': ['revised_copy'],
     'sourceWillRemainUntouched': true,
-    'applyAvailable': false,
+    'applyAvailable': changed,
   },
 });
 
@@ -214,13 +299,19 @@ PlaylistEditMessage _message(String role, String content, {int? version}) =>
 
 ProviderContainer _container(
   FakePlaylistApi playlists,
-  FakePlaylistEditApi edit,
-) {
+  FakePlaylistEditApi edit, {
+  FakePlaylistApplyBridge? apply,
+}) {
   final container = ProviderContainer(
     overrides: [
       authProvider.overrideWith(TestAuthNotifier.new),
       playlistApiProvider.overrideWithValue(playlists),
       playlistEditApiProvider.overrideWithValue(edit),
+      playlistApplyBridgeProvider.overrideWithValue(
+        apply ?? FakePlaylistApplyBridge(),
+      ),
+      playlistApplySupportedProvider.overrideWithValue(true),
+      playlistRefreshAfterApplyProvider.overrideWithValue(() async {}),
     ],
   );
   addTearDown(container.dispose);
@@ -357,10 +448,75 @@ void main() {
       final apply = tester.widget<FilledButton>(
         find.byKey(const Key('apply-draft')),
       );
-      expect(apply.onPressed, isNull);
+      expect(apply.onPressed, isNotNull);
+      expect(find.text('Create revised playlist'), findsOneWidget);
+    },
+  );
+
+  testWidgets('exact native success confirms and shows the created copy', (
+    tester,
+  ) async {
+    final summary = _summary();
+    final playlists = FakePlaylistApi(
+      page: PlaylistPage(playlists: [summary]),
+      detail: PlaylistDetail(playlist: summary, entries: const []),
+    );
+    final edit = FakePlaylistEditApi();
+    final apply = FakePlaylistApplyBridge();
+    await _pump(
+      tester,
+      _container(playlists, edit, apply: apply),
+      const PlaylistEditScreen(draftId: '00000000-0000-4000-8000-000000000010'),
+    );
+
+    await tester.tap(find.byKey(const Key('review-draft')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('apply-draft')));
+    await tester.pumpAndSettle();
+
+    expect(apply.fingerprints, 1);
+    expect(apply.creates, 1);
+    expect(edit.prepares, 1);
+    expect(edit.confirms, 1);
+    expect(find.text('Created in Apple Music'), findsWidgets);
+    expect(find.textContaining('source is untouched'), findsOneWidget);
+  });
+
+  testWidgets(
+    'unknown native result never confirms and offers reconciliation',
+    (tester) async {
+      final summary = _summary();
+      final playlists = FakePlaylistApi(
+        page: PlaylistPage(playlists: [summary]),
+        detail: PlaylistDetail(playlist: summary, entries: const []),
+      );
+      final edit = FakePlaylistEditApi();
+      final apply = FakePlaylistApplyBridge(
+        outcome: PlaylistApplyOutcome.unknown,
+      );
+      await _pump(
+        tester,
+        _container(playlists, edit, apply: apply),
+        const PlaylistEditScreen(
+          draftId: '00000000-0000-4000-8000-000000000010',
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('review-draft')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('apply-draft')));
+      await tester.pumpAndSettle();
+
+      expect(edit.confirms, 0);
+      expect(find.text('Result needs checking'), findsOneWidget);
+      expect(find.text('Reconcile result'), findsOneWidget);
       expect(
-        find.text('Apple apply is not available in this build'),
-        findsOneWidget,
+        tester
+            .widget<TextField>(
+              find.byKey(const Key('playlist-edit-composer')),
+            )
+            .enabled,
+        isFalse,
       );
     },
   );
@@ -417,9 +573,7 @@ void main() {
     await tester.pumpAndSettle();
     final thread = container
         .read(
-          playlistEditThreadProvider(
-            '00000000-0000-4000-8000-000000000010',
-          ),
+          playlistEditThreadProvider('00000000-0000-4000-8000-000000000010'),
         )
         .requireValue;
     expect(thread.messages.last.retryContent, 'move the closer later');

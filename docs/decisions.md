@@ -335,3 +335,21 @@ neighbour metadata. Playlist names, entries, and transcript content remain at
 USER altitude in a bounded prompt. **Reopens if:** a provider offers a stronger
 transactional playlist editor or production evidence shows the separate loop
 cannot meet latency or placement quality targets.
+
+## 2026-09-06 — First playlist write is an idempotent revised copy
+
+Applying a reviewed playlist draft first creates a new Apple Music playlist and
+leaves the Apple or Spotify source untouched. The server prepares one immutable,
+versioned `revised_copy` operation only when every desired occurrence has an
+exact Apple catalog ID. A fresh native fingerprint must still match an Apple
+source; Spotify exports use their immutable imported fingerprint and never gain
+Spotify write-back.
+
+The iOS adapter records the operation before creation, records Apple's new
+library ID immediately afterward, adds songs sequentially, then verifies the
+actual ordered catalog fingerprint. Repeating the same operation reconciles the
+stored playlist instead of creating or adding again. A renewed prepare window
+keeps the same operation ID, including after expiry, because a new ID could
+duplicate an unknown prior result. Only an exact verified result is confirmed;
+partial and unknown results remain visible and reconcilable. Append and rebuild
+remain disabled. No schema change is required beyond migration 0025.

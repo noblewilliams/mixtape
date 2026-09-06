@@ -54,6 +54,22 @@ class FakePlaylistEditApi implements PlaylistEditApi {
   }
 
   @override
+  Future<PlaylistApplyPlan> prepareApply(
+    String draftId, {
+    required int expectedVersion,
+    required String currentSourceFingerprint,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<PlaylistApplyConfirmation> confirmApply(
+    String draftId, {
+    required String operationId,
+    required int expectedVersion,
+    required String applePlaylistLibraryId,
+    required String resultingFingerprint,
+  }) => throw UnimplementedError();
+
+  @override
   void close() {}
 }
 
@@ -61,6 +77,7 @@ Map<String, dynamic> _viewJson(int version) => {
   'draft': {
     'id': '00000000-0000-4000-8000-000000000010',
     'sourcePlaylistId': '00000000-0000-4000-8000-000000000001',
+    'sourceProviderLibraryId': 'p.source',
     'status': 'active',
     'version': version,
     'baseSourceFingerprint':

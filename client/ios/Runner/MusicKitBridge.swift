@@ -8,6 +8,9 @@ class MusicKitBridge: NSObject {
   private static let queue = DispatchQueue(label: "mixtape.musickit.bridge")
   private static var catalogCache: [MPMediaItem] = []
   private static let playlistSnapshots = PlaylistSnapshotStore()
+  @MainActor private static let playlistApplies = PlaylistApplyCoordinator(
+    snapshots: playlistSnapshots
+  )
 
   /// MusicKit declares playbackStoreID as opaque. Keep a bounded set of URL-
   /// safe, comma-free characters that matches the server/catalog contract.
@@ -42,6 +45,12 @@ class MusicKitBridge: NSObject {
       case "releasePlaylistSnapshot":
         let args = call.arguments as? [String: Any] ?? [:]
         releasePlaylistSnapshot(args: args, result: result)
+      case "fetchPlaylistFingerprint":
+        let args = call.arguments as? [String: Any] ?? [:]
+        fetchPlaylistFingerprint(args: args, result: result)
+      case "createRevisedPlaylist":
+        let args = call.arguments as? [String: Any] ?? [:]
+        createRevisedPlaylist(args: args, result: result)
       case "playQueue":
         let args = call.arguments as? [String: Any] ?? [:]
         let appleIds = args["appleIds"] as? [String] ?? []
@@ -276,6 +285,96 @@ class MusicKitBridge: NSObject {
     }
   }
 
+  // MARK: - Reviewed playlist apply
+
+  private static func fetchPlaylistFingerprint(
+    args: [String: Any], result: @escaping FlutterResult
+  ) {
+    guard
+      let playlistId = args["appleLibraryId"] as? String,
+      isSupportedOpaqueId(playlistId)
+    else {
+      completeApplyError(result, code: "invalid_arguments")
+      return
+    }
+    Task {
+      do {
+        let fingerprint = try await playlistSnapshots.currentFingerprint(
+          playlistId: playlistId
+        )
+        completeOnMain(result, value: fingerprint)
+      } catch {
+        completeApplyError(result, code: "playlist_inspection_failed")
+      }
+    }
+  }
+
+  private static func createRevisedPlaylist(
+    args: [String: Any], result: @escaping FlutterResult
+  ) {
+    guard
+      let operationId = args["operationId"] as? String,
+      UUID(uuidString: operationId) != nil,
+      let name = args["name"] as? String,
+      !name.isEmpty,
+      name.utf16.count <= 500,
+      let description = args["description"] as? String,
+      description.utf16.count <= 10_000,
+      let catalogIds = args["appleCatalogIds"] as? [String],
+      !catalogIds.isEmpty,
+      catalogIds.allSatisfy(isSupportedAppleSongID),
+      let desiredFingerprint = args["desiredFingerprint"] as? String,
+      isFingerprint(desiredFingerprint)
+    else {
+      completeApplyError(result, code: "invalid_arguments")
+      return
+    }
+    Task { @MainActor in
+      do {
+        let receipt = try await playlistApplies.createRevisedPlaylist(
+          operationId: operationId.lowercased(),
+          name: name,
+          description: description,
+          catalogIds: catalogIds,
+          desiredFingerprint: desiredFingerprint
+        )
+        result(receipt.dictionary)
+      } catch let error as PlaylistApplyCoordinator.ApplyError {
+        result(FlutterError(
+          code: error.rawValue,
+          message: "playlist apply failed",
+          details: nil
+        ))
+      } catch {
+        result(FlutterError(
+          code: "playlist_apply_failed",
+          message: "playlist apply failed",
+          details: nil
+        ))
+      }
+    }
+  }
+
+  private static func isSupportedOpaqueId(_ value: String) -> Bool {
+    value.range(
+      of: #"^[A-Za-z0-9._~-]{1,512}$"#,
+      options: .regularExpression
+    ) != nil
+  }
+
+  private static func isFingerprint(_ value: String) -> Bool {
+    value.range(of: #"^[0-9a-f]{64}$"#, options: .regularExpression) != nil
+  }
+
+  private static func completeApplyError(
+    _ result: @escaping FlutterResult, code: String
+  ) {
+    completeOnMain(
+      result,
+      value: FlutterError(code: code, message: "playlist apply failed", details: nil)
+    )
+  }
+
   private static func completeSnapshotError(
     _ result: @escaping FlutterResult, error: Error
   ) {
@@ -353,5 +452,174 @@ class MusicKitBridge: NSObject {
         result(["songs": songs, "total": catalog.count])
       }
     }
+  }
+}
+
+@MainActor
+private final class PlaylistApplyCoordinator {
+  enum ApplyError: String, Error {
+    case unresolvedCatalog = "unresolved_catalog"
+    case creationFailed = "playlist_creation_failed"
+  }
+
+  private struct StoredReceipt: Codable {
+    let operationId: String
+    var appleLibraryId: String?
+    var added: Int
+    var failed: Int
+    let desiredFingerprint: String
+  }
+
+  struct PlaylistApplyReceipt {
+    let operationId: String
+    let outcome: String
+    let appleLibraryId: String?
+    let added: Int
+    let failed: Int
+    let resultingFingerprint: String?
+
+    var dictionary: [String: Any?] {
+      [
+        "operationId": operationId,
+        "outcome": outcome,
+        "appleLibraryId": appleLibraryId,
+        "added": added,
+        "failed": failed,
+        "resultingFingerprint": resultingFingerprint,
+      ]
+    }
+  }
+
+  private let snapshots: PlaylistSnapshotStore
+  private let defaults: UserDefaults
+  private let keyPrefix = "mixtape.playlist-apply."
+
+  init(snapshots: PlaylistSnapshotStore, defaults: UserDefaults = .standard) {
+    self.snapshots = snapshots
+    self.defaults = defaults
+  }
+
+  func createRevisedPlaylist(
+    operationId: String,
+    name: String,
+    description: String,
+    catalogIds: [String],
+    desiredFingerprint: String
+  ) async throws -> PlaylistApplyReceipt {
+    let key = keyPrefix + operationId
+    if let stored = storedReceipt(forKey: key) {
+      guard
+        stored.operationId == operationId,
+        stored.desiredFingerprint == desiredFingerprint
+      else { throw ApplyError.creationFailed }
+      return await inspect(stored)
+    }
+
+    // Resolve the complete write set before persisting the started marker or
+    // creating anything. A missing catalog song is a safe, retryable failure.
+    let songs = try await resolveSongs(catalogIds)
+    guard songs.count == Set(catalogIds).count else {
+      throw ApplyError.unresolvedCatalog
+    }
+
+    var stored = StoredReceipt(
+      operationId: operationId,
+      appleLibraryId: nil,
+      added: 0,
+      failed: 0,
+      desiredFingerprint: desiredFingerprint
+    )
+    try persist(stored, forKey: key)
+
+    let playlist: Playlist
+    do {
+      playlist = try await MusicLibrary.shared.createPlaylist(
+        name: name,
+        description: description,
+        authorDisplayName: "mixtape"
+      )
+    } catch {
+      // Keep the started marker. We cannot prove whether Apple completed the
+      // request after the client lost its response, so retrying could duplicate.
+      throw ApplyError.creationFailed
+    }
+
+    stored.appleLibraryId = playlist.id.rawValue
+    try persist(stored, forKey: key)
+
+    var current = playlist
+    for catalogId in catalogIds {
+      guard let song = songs[catalogId] else {
+        stored.failed += 1
+        continue
+      }
+      do {
+        current = try await MusicLibrary.shared.add(song, to: current)
+        stored.added += 1
+      } catch {
+        stored.failed += 1
+      }
+      try persist(stored, forKey: key)
+    }
+    return await inspect(stored)
+  }
+
+  private func resolveSongs(_ catalogIds: [String]) async throws -> [String: Song] {
+    let unique = Array(Set(catalogIds)).sorted()
+    var songs: [String: Song] = [:]
+    for offset in stride(from: 0, to: unique.count, by: 25) {
+      let ids = Array(unique[offset..<min(offset + 25, unique.count)])
+      let request = MusicCatalogResourceRequest<Song>(
+        matching: \.id,
+        memberOf: ids.map { MusicItemID($0) }
+      )
+      let response = try await request.response()
+      for song in response.items where ids.contains(song.id.rawValue) {
+        songs[song.id.rawValue] = song
+      }
+    }
+    return songs
+  }
+
+  private func inspect(_ stored: StoredReceipt) async -> PlaylistApplyReceipt {
+    guard let playlistId = stored.appleLibraryId else {
+      return receipt(stored, outcome: "unknown", fingerprint: nil)
+    }
+    do {
+      let fingerprint = try await snapshots.currentApplyFingerprint(
+        playlistId: playlistId
+      )
+      return receipt(
+        stored,
+        outcome: fingerprint == stored.desiredFingerprint ? "success" : "partial",
+        fingerprint: fingerprint
+      )
+    } catch {
+      return receipt(stored, outcome: "unknown", fingerprint: nil)
+    }
+  }
+
+  private func receipt(
+    _ stored: StoredReceipt,
+    outcome: String,
+    fingerprint: String?
+  ) -> PlaylistApplyReceipt {
+    PlaylistApplyReceipt(
+      operationId: stored.operationId,
+      outcome: outcome,
+      appleLibraryId: stored.appleLibraryId,
+      added: stored.added,
+      failed: stored.failed,
+      resultingFingerprint: fingerprint
+    )
+  }
+
+  private func storedReceipt(forKey key: String) -> StoredReceipt? {
+    guard let data = defaults.data(forKey: key) else { return nil }
+    return try? JSONDecoder().decode(StoredReceipt.self, from: data)
+  }
+
+  private func persist(_ receipt: StoredReceipt, forKey key: String) throws {
+    defaults.set(try JSONEncoder().encode(receipt), forKey: key)
   }
 }

@@ -9,6 +9,7 @@ class PlaylistEditDraft {
   const PlaylistEditDraft({
     required this.id,
     required this.sourcePlaylistId,
+    required this.sourceProviderLibraryId,
     required this.status,
     required this.version,
     required this.baseSourceFingerprint,
@@ -22,6 +23,7 @@ class PlaylistEditDraft {
       PlaylistEditDraft(
         id: _string(json['id']),
         sourcePlaylistId: _string(json['sourcePlaylistId']),
+        sourceProviderLibraryId: _string(json['sourceProviderLibraryId']),
         status: _string(json['status']),
         version: _nonnegativeInt(json['version']),
         baseSourceFingerprint: _string(json['baseSourceFingerprint']),
@@ -36,6 +38,7 @@ class PlaylistEditDraft {
 
   final String id;
   final String sourcePlaylistId;
+  final String sourceProviderLibraryId;
   final String status;
   final int version;
   final String baseSourceFingerprint;
@@ -387,6 +390,108 @@ class PlaylistEditTurnResult {
   final PlaylistEditMessage djMessage;
   final PlaylistEditView draft;
 }
+
+class PlaylistApplyPlan {
+  const PlaylistApplyPlan({
+    required this.operationId,
+    required this.mode,
+    required this.draftVersion,
+    required this.expiresAt,
+    required this.name,
+    required this.description,
+    required this.appleCatalogIds,
+    required this.desiredFingerprint,
+    required this.sourceWillRemainUntouched,
+  });
+
+  factory PlaylistApplyPlan.fromJson(Map<String, dynamic> json) {
+    final operationId = _string(json['operationId']);
+    final mode = _oneOf(json['mode'], const {'revised_copy'});
+    final name = _string(json['name']);
+    final description = json['description'];
+    final catalogIds = _strings(json['appleCatalogIds']);
+    final fingerprint = _string(json['desiredFingerprint']);
+    if (!_uuid.hasMatch(operationId) ||
+        name.length > 500 ||
+        description is! String ||
+        description.length > 10000 ||
+        catalogIds.isEmpty ||
+        catalogIds.any((id) => !_catalogId.hasMatch(id)) ||
+        !_fingerprint.hasMatch(fingerprint)) {
+      throw const PlaylistEditModelException();
+    }
+    final sourceUntouched = _bool(json['sourceWillRemainUntouched']);
+    if (!sourceUntouched) throw const PlaylistEditModelException();
+    return PlaylistApplyPlan(
+      operationId: operationId,
+      mode: mode,
+      draftVersion: _nonnegativeInt(json['draftVersion']),
+      expiresAt: _date(json['expiresAt']),
+      name: name,
+      description: description,
+      appleCatalogIds: catalogIds,
+      desiredFingerprint: fingerprint,
+      sourceWillRemainUntouched: sourceUntouched,
+    );
+  }
+
+  final String operationId;
+  final String mode;
+  final int draftVersion;
+  final DateTime expiresAt;
+  final String name;
+  final String description;
+  final List<String> appleCatalogIds;
+  final String desiredFingerprint;
+  final bool sourceWillRemainUntouched;
+}
+
+class PlaylistApplyConfirmation {
+  const PlaylistApplyConfirmation({
+    required this.draftId,
+    required this.status,
+    required this.mode,
+    required this.applePlaylistLibraryId,
+    required this.resultingFingerprint,
+    required this.sourceWillRemainUntouched,
+  });
+
+  factory PlaylistApplyConfirmation.fromJson(Map<String, dynamic> json) {
+    final draftId = _string(json['draftId']);
+    final libraryId = _string(json['applePlaylistLibraryId']);
+    final fingerprint = _string(json['resultingFingerprint']);
+    if (!_uuid.hasMatch(draftId) ||
+        !_opaqueId.hasMatch(libraryId) ||
+        !_fingerprint.hasMatch(fingerprint)) {
+      throw const PlaylistEditModelException();
+    }
+    final sourceUntouched = _bool(json['sourceWillRemainUntouched']);
+    if (!sourceUntouched) throw const PlaylistEditModelException();
+    return PlaylistApplyConfirmation(
+      draftId: draftId,
+      status: _oneOf(json['status'], const {'applied'}),
+      mode: _oneOf(json['mode'], const {'revised_copy'}),
+      applePlaylistLibraryId: libraryId,
+      resultingFingerprint: fingerprint,
+      sourceWillRemainUntouched: sourceUntouched,
+    );
+  }
+
+  final String draftId;
+  final String status;
+  final String mode;
+  final String applePlaylistLibraryId;
+  final String resultingFingerprint;
+  final bool sourceWillRemainUntouched;
+}
+
+final _uuid = RegExp(
+  r'^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
+  caseSensitive: false,
+);
+final _fingerprint = RegExp(r'^[0-9a-f]{64}$');
+final _catalogId = RegExp(r'^[A-Za-z0-9._~-]{1,128}$');
+final _opaqueId = RegExp(r'^[A-Za-z0-9._~-]{1,500}$');
 
 Map<String, dynamic> _object(Object? value) {
   if (value is! Map<String, dynamic>) throw const PlaylistEditModelException();

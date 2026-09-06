@@ -31,6 +31,7 @@ export type PlaylistEditDraftView = {
   draft: {
     id: string
     sourcePlaylistId: string
+    sourceProviderLibraryId: string
     status: string
     version: number
     baseSourceFingerprint: string
@@ -50,7 +51,7 @@ export type PlaylistEditDraftView = {
   capability: {
     possibleModes: ['revised_copy']
     sourceWillRemainUntouched: true
-    applyAvailable: false
+    applyAvailable: boolean
   }
 }
 
@@ -150,6 +151,7 @@ function trackEntry(
 
 function draftView(
   draft: typeof playlistEditDrafts.$inferSelect,
+  sourceProviderLibraryId: string,
   base: DraftEntry[],
   current: DraftEntry[],
 ): PlaylistEditDraftView {
@@ -175,6 +177,7 @@ function draftView(
     draft: {
       id: draft.id,
       sourcePlaylistId: draft.sourcePlaylistId,
+      sourceProviderLibraryId,
       status: draft.status,
       version: draft.version,
       baseSourceFingerprint: draft.baseSourceFingerprint,
@@ -206,7 +209,9 @@ function draftView(
     capability: {
       possibleModes: ['revised_copy'],
       sourceWillRemainUntouched: true,
-      applyAvailable: false,
+      applyAvailable: diff.added.length + diff.removed.length
+        + diff.moved.length + diff.replaced.length > 0
+        && current.every((entry) => entry.appleCatalogId != null),
     },
   }
 }
@@ -221,12 +226,19 @@ async function loadView(
     eq(playlistEditDrafts.userId, userId),
   )).limit(1)
   if (!draft) return null
+  const [source] = await db.select({
+    providerLibraryId: userPlaylists.appleLibraryId,
+  }).from(userPlaylists).where(and(
+    eq(userPlaylists.id, draft.sourcePlaylistId),
+    eq(userPlaylists.userId, userId),
+  )).limit(1)
+  if (!source) return null
   const rows = await db.select().from(playlistEditDraftEntries).where(
     eq(playlistEditDraftEntries.draftId, draft.id),
   ).orderBy(asc(playlistEditDraftEntries.role), asc(playlistEditDraftEntries.position))
   const base = rows.filter((row) => row.role === 'base').map(rowToEntry)
   const current = rows.filter((row) => row.role === 'draft').map(rowToEntry)
-  return draftView(draft, base, current)
+  return draftView(draft, source.providerLibraryId, base, current)
 }
 
 async function loadMessages(db: Db, draftId: string): Promise<PlaylistEditMessage[]> {
@@ -369,6 +381,14 @@ export function createPlaylistEditDraftStore(db: Db) {
         if (draft.status !== 'active') return { kind: 'terminal' as const }
         if (draft.version !== expectedVersion) return { kind: 'version_conflict' as const }
 
+        const [source] = await tx.select({
+          providerLibraryId: userPlaylists.appleLibraryId,
+        }).from(userPlaylists).where(and(
+          eq(userPlaylists.id, draft.sourcePlaylistId),
+          eq(userPlaylists.userId, userId),
+        )).limit(1)
+        if (!source) return { kind: 'not_found' as const }
+
         const rows = await tx.select().from(playlistEditDraftEntries).where(
           eq(playlistEditDraftEntries.draftId, draft.id),
         ).orderBy(asc(playlistEditDraftEntries.role), asc(playlistEditDraftEntries.position))
@@ -408,7 +428,10 @@ export function createPlaylistEditDraftStore(db: Db) {
         }
         const nextVersion = draft.version + 1
         const events = eventRows(draft.id, nextVersion, before, after)
-        if (!events.length) return { kind: 'ok' as const, view: draftView(draft, base, before) }
+        if (!events.length) return {
+          kind: 'ok' as const,
+          view: draftView(draft, source.providerLibraryId, base, before),
+        }
 
         await tx.delete(playlistEditDraftEntries).where(and(
           eq(playlistEditDraftEntries.draftId, draft.id),
@@ -428,7 +451,12 @@ export function createPlaylistEditDraftStore(db: Db) {
         }).where(eq(playlistEditDrafts.id, draft.id))
         return {
           kind: 'ok' as const,
-          view: draftView({ ...draft, version: nextVersion, updatedAt }, base, after),
+          view: draftView(
+            { ...draft, version: nextVersion, updatedAt },
+            source.providerLibraryId,
+            base,
+            after,
+          ),
         }
       })
       return result

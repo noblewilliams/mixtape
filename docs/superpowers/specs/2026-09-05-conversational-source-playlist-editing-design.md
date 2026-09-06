@@ -1,6 +1,6 @@
 # Conversational source-playlist editing
 
-**Status:** approved; server drafts and native browse/review implemented, Worker/apply pending
+**Status:** approved; revised-copy apply implemented locally, release pending
 
 **Date:** 2026-09-05
 
@@ -305,7 +305,10 @@ POST /playlists/:playlistId/edit-draft
 
 200/201
 {
-  "draft": { ... },
+  "draft": {
+    ...,
+    "sourceProviderLibraryId": "opaque provider identifier"
+  },
   "entries": [ ... ],
   "diff": { "added": [], "removed": [], "moved": [], "replaced": [] },
   "capability": {
@@ -318,6 +321,9 @@ POST /playlists/:playlistId/edit-draft
 Creation copies one published source snapshot into both `base` and `draft` in a
 short transaction. A source with zero entries may still be drafted. A source
 that disappeared after browse returns a recoverable unavailable response.
+The provider identifier is exposed only inside this authenticated, user-scoped
+draft contract so the native adapter can inspect the exact Apple source. It is
+never accepted as playlist ownership proof.
 
 ### Read and abandon
 
@@ -368,7 +374,8 @@ POST /playlist-edit-drafts/:draftId/prepare-apply
   "expectedVersion": 4,
   "currentSourceFingerprint": "...",
   "clientCapabilities": {
-    "append": true,
+    "revisedCopy": true,
+    "append": false,
     "rebuildReceiptClasses": []
   }
 }
@@ -386,7 +393,8 @@ The server first compares the native fingerprint with
 The stored apply plan includes an opaque `operationId`, draft version, source
 and desired fingerprints, ordered Apple catalog/library IDs, mode, and a
 10-minute expiry. Calling prepare again for the same version returns the same
-unexpired plan.
+operation. After expiry, a fresh source check renews its window without changing
+the operation ID; a new ID could duplicate an unknown prior device result.
 
 ### Confirm or reconcile
 
@@ -417,12 +425,18 @@ suffix happens to appear once somewhere in the playlist.
 
 ## Native Apple bridge
 
-Add three narrow methods rather than one generic mutation channel:
+Add narrow methods rather than one generic mutation channel. The first shipped
+slice exposes source inspection plus revised-copy creation; append and rebuild
+remain absent until their own gates pass:
 
 ```text
+fetchPlaylistFingerprint(playlistLibraryId) -> fingerprint
+createRevisedPlaylist(operationId, name, description, appleCatalogIds,
+                      desiredFingerprint) -> receipt
+
+# Later gated methods
 appendPlaylist(playlistLibraryId, appleCatalogIds) -> receipt
 rebuildPlaylist(playlistLibraryId, appleCatalogIds) -> receipt
-createRevisedPlaylist(name, description, appleCatalogIds) -> receipt
 ```
 
 Each method:
@@ -435,6 +449,13 @@ Each method:
 - runs sequential additions where ordering matters;
 - exposes partial/unknown outcomes instead of reporting a clean retryable
   failure.
+
+Before revised-copy creation, the native adapter resolves the complete catalog
+write set and persists a device marker keyed by `operationId`. It stores the new
+Apple library ID immediately after creation, adds songs sequentially to preserve
+order and duplicates, then refetches and fingerprints the actual ordered catalog
+IDs. Repeating the operation only inspects that stored playlist; it never repeats
+creation or additions.
 
 `rebuildPlaylist` is compiled but unavailable behind a server/client capability
 flag until the separate typed-creation device probe passes. The plan dispatcher

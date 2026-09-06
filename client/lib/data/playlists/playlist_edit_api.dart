@@ -75,6 +75,40 @@ class PlaylistEditApi {
     PlaylistEditTurnResult.fromJson,
   );
 
+  Future<PlaylistApplyPlan> prepareApply(
+    String draftId, {
+    required int expectedVersion,
+    required String currentSourceFingerprint,
+  }) => _call(
+    () => _client.postJson('/playlist-edit-drafts/$draftId/prepare-apply', {
+      'expectedVersion': expectedVersion,
+      'currentSourceFingerprint': currentSourceFingerprint,
+      'clientCapabilities': {
+        'revisedCopy': true,
+        'append': false,
+        'rebuildReceiptClasses': <String>[],
+      },
+    }),
+    PlaylistApplyPlan.fromJson,
+  );
+
+  Future<PlaylistApplyConfirmation> confirmApply(
+    String draftId, {
+    required String operationId,
+    required int expectedVersion,
+    required String applePlaylistLibraryId,
+    required String resultingFingerprint,
+  }) => _call(
+    () => _client.postJson('/playlist-edit-drafts/$draftId/confirm-apply', {
+      'operationId': operationId,
+      'expectedVersion': expectedVersion,
+      'appliedMode': 'revised_copy',
+      'applePlaylistLibraryId': applePlaylistLibraryId,
+      'resultingFingerprint': resultingFingerprint,
+    }),
+    PlaylistApplyConfirmation.fromJson,
+  );
+
   void close() => _client.close();
 
   Future<T> _call<T>(
