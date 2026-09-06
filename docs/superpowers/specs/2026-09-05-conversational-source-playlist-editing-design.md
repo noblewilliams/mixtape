@@ -1,6 +1,6 @@
 # Conversational source-playlist editing
 
-**Status:** approved; server slices 1–2 committed and migrated, Worker/apply/UI pending
+**Status:** approved; server drafts and native browse/review implemented, Worker/apply pending
 
 **Date:** 2026-09-05
 
@@ -154,6 +154,12 @@ The review shows:
 - unresolved entries that will be preserved or that block apply;
 - the actual apply mode before confirmation;
 - whether the source will remain untouched.
+
+Draft responses also carry a compact `review` projection for changed
+occurrences only. It includes the display snapshot for additions and removals,
+the before/after snapshot for replacements, and the current snapshot plus old
+position for moves. This lets a reopened client name every change without
+shipping a second full copy of the base playlist.
 
 The confirmation verb follows the real action:
 

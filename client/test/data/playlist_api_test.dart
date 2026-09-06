@@ -10,6 +10,7 @@ import 'package:mixtape/data/playlists/playlist_models.dart';
 
 Map<String, dynamic> summaryJson({Map<String, dynamic> over = const {}}) => {
   'id': '00000000-0000-4000-8000-000000000001',
+  'source': 'apple',
   'name': 'Evening',
   'curatorName': null,
   'kind': 'user',
@@ -52,12 +53,30 @@ Future<PlaylistApi> apiWith(MockClient inner) async {
 }
 
 void main() {
-  test('origin is explicit and older or unknown server values stay neutral', () {
-    expect(PlaylistSummary.fromJson(summaryJson()).origin, 'unknown');
-    expect(PlaylistSummary.fromJson(summaryJson(over: {'origin': 'mixtape'})).origin, 'mixtape');
-    expect(PlaylistSummary.fromJson(summaryJson(over: {'origin': 'user_confirmed'})).origin, 'user_confirmed');
-    expect(PlaylistSummary.fromJson(summaryJson(over: {'origin': 'future'})).origin, 'unknown');
-  });
+  test(
+    'origin is explicit and older or unknown server values stay neutral',
+    () {
+      expect(PlaylistSummary.fromJson(summaryJson()).origin, 'unknown');
+      expect(
+        PlaylistSummary.fromJson(
+          summaryJson(over: {'origin': 'mixtape'}),
+        ).origin,
+        'mixtape',
+      );
+      expect(
+        PlaylistSummary.fromJson(
+          summaryJson(over: {'origin': 'user_confirmed'}),
+        ).origin,
+        'user_confirmed',
+      );
+      expect(
+        PlaylistSummary.fromJson(
+          summaryJson(over: {'origin': 'future'}),
+        ).origin,
+        'unknown',
+      );
+    },
+  );
 
   test('lists playlists with encoded filters and defensive nulls', () async {
     late http.Request request;
@@ -91,6 +110,7 @@ void main() {
       'cursor': 'cursor-token',
     });
     expect(page.playlists.single.name, 'Evening');
+    expect(page.playlists.single.source, 'apple');
     expect(page.playlists.single.artworkBgColor, 'a1b2c3');
     expect(page.playlists.single.artworkUrlTemplate, isNull);
     expect(page.nextCursor, 'next-token');

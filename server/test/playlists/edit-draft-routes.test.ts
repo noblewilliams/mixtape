@@ -184,6 +184,36 @@ describe('playlist edit draft routes', () => {
       appleCatalogId: 'new-catalog-song',
       artworkBgColor: 'a1b2c3',
     })
+    expect(body.review).toEqual({
+      added: [{
+        entryKey: body.entries[1].entryKey,
+        position: 1,
+        title: 'New song',
+        artist: 'New artist',
+        album: null,
+        durationMs: null,
+        artworkUrlTemplate: null,
+        artworkWidth: null,
+        artworkHeight: null,
+        artworkBgColor: 'a1b2c3',
+        resolved: true,
+      }],
+      removed: [{
+        entryKey: second.entryKey,
+        position: 1,
+        title: 'Duplicate',
+        artist: 'Artist',
+        album: null,
+        durationMs: null,
+        artworkUrlTemplate: null,
+        artworkWidth: null,
+        artworkHeight: null,
+        artworkBgColor: null,
+        resolved: true,
+      }],
+      moved: [],
+      replaced: [],
+    })
     expect(await db.select().from(playlistEditDraftEvents)).toHaveLength(2)
 
     const stale = await request(

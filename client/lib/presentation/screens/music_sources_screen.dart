@@ -5,6 +5,7 @@ import '../format/import_format.dart';
 import '../format/source_labels.dart';
 import '../providers/onboarding_provider.dart';
 import 'import_sheet.dart';
+import 'playlist_browser_screen.dart';
 
 const _removeFailedMessage = "couldn't remove — try again";
 
@@ -16,9 +17,14 @@ const _removeFailedMessage = "couldn't remove — try again";
 class MusicSourcesScreen extends ConsumerWidget {
   const MusicSourcesScreen({super.key});
 
-  Future<void> _import(BuildContext context, WidgetRef ref) => openImportFlow(context, ref);
+  Future<void> _import(BuildContext context, WidgetRef ref) =>
+      openImportFlow(context, ref);
 
-  Future<void> _remove(BuildContext context, WidgetRef ref, MusicSource source) async {
+  Future<void> _remove(
+    BuildContext context,
+    WidgetRef ref,
+    MusicSource source,
+  ) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -43,9 +49,9 @@ class MusicSourcesScreen extends ConsumerWidget {
       await ref.read(listeningApiProvider).deleteSource(source.source);
     } catch (_) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text(_removeFailedMessage)),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text(_removeFailedMessage)));
       }
       return;
     }
@@ -55,24 +61,40 @@ class MusicSourcesScreen extends ConsumerWidget {
   /// Matches what the server's delete does for each source (spec "Schema":
   /// the export's rows go; seeds, interview notes, and a live library stay).
   static String _removalCopy(MusicSource source) => switch (source.source) {
-        'apple_export' =>
-          'Deletes the listening history that came from the export. Your synced Apple Music '
-              'library stays, and the DJ forgets nothing you told it.',
-        _ =>
-          'Deletes your listening history, liked songs, artists, and playlists from Mixtape. The '
-              'DJ forgets nothing you told it in the interview, and the songs you pasted stay.',
-      };
+    'apple_export' =>
+      'Deletes the listening history that came from the export. Your synced Apple Music '
+          'library stays, and the DJ forgets nothing you told it.',
+    _ =>
+      'Deletes your listening history, liked songs, artists, and playlists from Mixtape. The '
+          'DJ forgets nothing you told it in the interview, and the songs you pasted stay.',
+  };
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final onboarding = ref.watch(onboardingProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('Your music')),
+      appBar: AppBar(
+        title: const Text('Your music'),
+        actions: [
+          IconButton(
+            key: const Key('browse-playlists'),
+            tooltip: 'Browse playlists',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const PlaylistBrowserScreen()),
+            ),
+            icon: const Icon(Icons.queue_music_rounded),
+          ),
+        ],
+      ),
       body: SafeArea(child: _body(context, ref, onboarding)),
     );
   }
 
-  Widget _body(BuildContext context, WidgetRef ref, AsyncValue<OnboardingState> onboarding) {
+  Widget _body(
+    BuildContext context,
+    WidgetRef ref,
+    AsyncValue<OnboardingState> onboarding,
+  ) {
     if (onboarding.hasError && !onboarding.hasValue) {
       return Center(
         child: Column(
@@ -116,9 +138,15 @@ class MusicSourcesScreen extends ConsumerWidget {
           _SourceRow(
             key: Key('source-${source.source}'),
             source: source,
-            status: source.source == 'spotify_export' ? spotifyStatusLabel(state) : null,
-            onImportAgain: source.source == 'spotify_export' ? () => _import(context, ref) : null,
-            onRemove: source.source == 'spotify_export' || source.source == 'apple_export'
+            status: source.source == 'spotify_export'
+                ? spotifyStatusLabel(state)
+                : null,
+            onImportAgain: source.source == 'spotify_export'
+                ? () => _import(context, ref)
+                : null,
+            onRemove:
+                source.source == 'spotify_export' ||
+                    source.source == 'apple_export'
                 ? () => _remove(context, ref, source)
                 : null,
           ),
@@ -159,7 +187,12 @@ class _SourceRow extends StatelessWidget {
         children: [
           Row(
             children: [
-              Expanded(child: Text(sourceName(source), style: theme.textTheme.titleMedium)),
+              Expanded(
+                child: Text(
+                  sourceName(source),
+                  style: theme.textTheme.titleMedium,
+                ),
+              ),
               if (status != null)
                 Chip(
                   key: Key('source-status-${source.source}'),
@@ -182,7 +215,9 @@ class _SourceRow extends StatelessWidget {
                   TextButton(
                     key: Key('remove-${source.source}'),
                     onPressed: onRemove,
-                    style: TextButton.styleFrom(foregroundColor: theme.colorScheme.error),
+                    style: TextButton.styleFrom(
+                      foregroundColor: theme.colorScheme.error,
+                    ),
                     child: const Text('Remove'),
                   ),
               ],

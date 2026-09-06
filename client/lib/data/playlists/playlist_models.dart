@@ -22,6 +22,7 @@ class PlaylistSummary {
     required this.entryCount,
     required this.inLibrary,
     required this.capability,
+    this.source = 'unknown',
     this.origin = 'unknown',
     this.curatorName,
     this.artworkUrlTemplate,
@@ -36,11 +37,15 @@ class PlaylistSummary {
   factory PlaylistSummary.fromJson(Map<String, dynamic> json) {
     return PlaylistSummary(
       id: _requiredString(json['id']),
+      source: ['apple', 'spotify_export'].contains(json['source'])
+          ? json['source'] as String
+          : 'unknown',
       name: _requiredString(json['name']),
       curatorName: _optionalString(json['curatorName']),
       kind: _requiredString(json['kind']),
       origin: ['mixtape', 'user_confirmed'].contains(json['origin'])
-          ? json['origin'] as String : 'unknown',
+          ? json['origin'] as String
+          : 'unknown',
       artworkUrlTemplate: _optionalString(json['artworkUrlTemplate']),
       artworkWidth: _optionalPositiveInt(json['artworkWidth']),
       artworkHeight: _optionalPositiveInt(json['artworkHeight']),
@@ -55,6 +60,7 @@ class PlaylistSummary {
   }
 
   final String id;
+  final String source;
   final String name;
   final String? curatorName;
   final String kind;
@@ -80,6 +86,7 @@ class PlaylistEntry {
     required this.resolved,
     this.trackId,
     this.appleCatalogId,
+    this.spotifyId,
     this.album,
     this.durationMs,
     this.artworkUrlTemplate,
@@ -94,6 +101,7 @@ class PlaylistEntry {
       position: _requiredNonNegativeInt(json['position']),
       trackId: _optionalString(json['trackId']),
       appleCatalogId: _optionalString(json['appleCatalogId']),
+      spotifyId: _optionalString(json['spotifyId']),
       title: _requiredString(json['title']),
       artist: _requiredString(json['artist']),
       album: _optionalString(json['album']),
@@ -110,6 +118,7 @@ class PlaylistEntry {
   final int position;
   final String? trackId;
   final String? appleCatalogId;
+  final String? spotifyId;
   final String title;
   final String artist;
   final String? album;

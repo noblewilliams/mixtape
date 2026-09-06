@@ -41,12 +41,31 @@ export type PlaylistEditDraftView = {
   }
   entries: Array<DraftEntry & { position: number; resolved: boolean }>
   diff: DraftDiff
+  review: {
+    added: ReviewEntry[]
+    removed: ReviewEntry[]
+    moved: Array<ReviewEntry & { fromPosition: number }>
+    replaced: Array<{ before: ReviewEntry; after: ReviewEntry }>
+  }
   capability: {
     possibleModes: ['revised_copy']
     sourceWillRemainUntouched: true
     applyAvailable: false
   }
 }
+
+type ReviewEntry = Pick<
+  DraftEntry,
+  | 'entryKey'
+  | 'title'
+  | 'artist'
+  | 'album'
+  | 'durationMs'
+  | 'artworkUrlTemplate'
+  | 'artworkWidth'
+  | 'artworkHeight'
+  | 'artworkBgColor'
+> & { position: number; resolved: boolean }
 
 type DraftMutationResult =
   | { kind: 'ok'; view: PlaylistEditDraftView }
@@ -134,6 +153,24 @@ function draftView(
   base: DraftEntry[],
   current: DraftEntry[],
 ): PlaylistEditDraftView {
+  const diff = diffDraft(base, current)
+  const baseByKey = new Map(base.map((entry, position) => [entry.entryKey, { entry, position }]))
+  const currentByKey = new Map(
+    current.map((entry, position) => [entry.entryKey, { entry, position }]),
+  )
+  const reviewEntry = (entry: DraftEntry, position: number): ReviewEntry => ({
+    entryKey: entry.entryKey,
+    position,
+    title: entry.title,
+    artist: entry.artist,
+    album: entry.album,
+    durationMs: entry.durationMs,
+    artworkUrlTemplate: entry.artworkUrlTemplate,
+    artworkWidth: entry.artworkWidth,
+    artworkHeight: entry.artworkHeight,
+    artworkBgColor: entry.artworkBgColor,
+    resolved: entry.trackId != null,
+  })
   return {
     draft: {
       id: draft.id,
@@ -151,7 +188,21 @@ function draftView(
       position,
       resolved: entry.trackId != null,
     })),
-    diff: diffDraft(base, current),
+    diff,
+    review: {
+      added: diff.added.map(({ entryKey, toPosition }) =>
+        reviewEntry(currentByKey.get(entryKey)!.entry, toPosition)),
+      removed: diff.removed.map(({ entryKey, fromPosition }) =>
+        reviewEntry(baseByKey.get(entryKey)!.entry, fromPosition)),
+      moved: diff.moved.map(({ entryKey, fromPosition, toPosition }) => ({
+        ...reviewEntry(currentByKey.get(entryKey)!.entry, toPosition),
+        fromPosition,
+      })),
+      replaced: diff.replaced.map(({ entryKey, position }) => ({
+        before: reviewEntry(baseByKey.get(entryKey)!.entry, position),
+        after: reviewEntry(currentByKey.get(entryKey)!.entry, position),
+      })),
+    },
     capability: {
       possibleModes: ['revised_copy'],
       sourceWillRemainUntouched: true,
