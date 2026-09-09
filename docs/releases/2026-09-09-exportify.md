@@ -43,8 +43,9 @@ Previous Netlify deploy: `6a9bffa0a3859500081f577d`.
   only locally, including the production import pipeline against in-memory Postgres.
 - GitHub push was initially blocked by automatic approval review because the
   destination had not been verified. The destination is now verified as the public
-  `noblewilliams/mixtape` repository with ADMIN access. Publishing the new code
-  there remains pending explicit approval. No merge into main was attempted.
+  `noblewilliams/mixtape` repository with ADMIN access. The user explicitly approved publishing the release branch, and
+  `codex/exportify-release-2026-09-09` was pushed successfully. No merge into main
+  was attempted.
 
 Approved UX: compact actions, no decorative left-border containers, Exportify
 ZIP/CSV import first, explicit manual refresh review, official Spotify data
