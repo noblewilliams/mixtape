@@ -136,8 +136,7 @@
   margin-top: 16px;
 }
 .ym-notice {
-  border-left: 2px solid var(--hairline);
-  padding: 3px 0 3px 13px;
+  padding: 3px 0;
   margin: 22px 0;
   color: var(--smoke);
   font-size: 12px;
@@ -517,3 +516,14 @@
     --ym-field: #302f34;
   }
 }
+
+.collection-review { margin-top: 20px; }
+.collection-file { min-width: 0; margin: 14px 0; padding: 16px; border: 1px solid var(--hairline); border-radius: 12px; }
+.collection-file legend { max-width: 100%; overflow-wrap: anywhere; padding: 0 6px; font-weight: 600; }
+.collection-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 12px; }
+.collection-file label { display: grid; gap: 5px; min-width: 0; font-size: 12px; }
+.collection-file :is(input,select) { width: 100%; min-height: 44px; padding: 8px; border: 1px solid var(--hairline); border-radius: 6px; background: var(--surface); color: inherit; }
+.collection-confirm { display: flex !important; align-items: flex-start; gap: 10px; margin-top: 14px; font-size: 13px; }
+.collection-confirm input { width: 20px; min-height: 20px; flex-shrink: 0; }
+.music-view-head > .status-chip { justify-self: start; width: fit-content; }
+.review-counts { font-weight: 600; }

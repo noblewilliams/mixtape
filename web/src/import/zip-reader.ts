@@ -1,4 +1,9 @@
-import { BlobReader, Uint8ArrayWriter, ZipReader, type FileEntry } from '@zip.js/zip.js'
+import {
+  BlobReader,
+  Uint8ArrayWriter,
+  ZipReader,
+  type FileEntry,
+} from '@zip.js/zip.js'
 
 export type ArchiveEntry = {
   /** Entry path as stored in the central directory, forward slashes. */
@@ -28,7 +33,10 @@ export interface ExportArchive {
 // missing, zip.js 2.9 falls back on its own zlib compiled to WebAssembly and
 // inlined as a data: URI, so nothing is fetched at runtime and the page, the
 // Worker, and vitest all behave the same.
-const CODEC_OPTIONS = { useWebWorkers: false, useCompressionStream: true } as const
+const CODEC_OPTIONS = {
+  useWebWorkers: false,
+  useCompressionStream: true,
+} as const
 
 const utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false })
 
@@ -52,9 +60,33 @@ export async function openZipArchive(file: Blob): Promise<ExportArchive> {
       const entry = files.get(path)
       if (entry === undefined) throw new Error('entry is not in the archive')
       options.signal?.throwIfAborted()
-      const bytes = await entry.getData(new Uint8ArrayWriter(), { ...CODEC_OPTIONS, signal: options.signal })
+      const bytes = await entry.getData(new Uint8ArrayWriter(), {
+        ...CODEC_OPTIONS,
+        signal: options.signal,
+      })
       options.signal?.throwIfAborted()
       return decodeUtf8(bytes)
+    },
+  }
+}
+
+/** File-picker adapter. ZIP directory reads keep the existing privacy boundary. */
+export async function openExportArchive(file: Blob): Promise<ExportArchive> {
+  if (
+    !(file instanceof File && /\.csv$/i.test(file.name)) &&
+    file.type !== 'text/csv'
+  )
+    return openZipArchive(file)
+  if (file.size > 64 * 1024 * 1024) throw new Error('Export is too large')
+  const name = file instanceof File ? file.name : 'playlist.csv'
+  const path = /\.csv$/i.test(name) ? name : `${name}.csv`
+  return {
+    entries: async () => [{ path, bytes: file.size }],
+    readText: async (_path, options) => {
+      options?.signal?.throwIfAborted()
+      const text = decodeUtf8(new Uint8Array(await file.arrayBuffer()))
+      options?.signal?.throwIfAborted()
+      return text
     },
   }
 }

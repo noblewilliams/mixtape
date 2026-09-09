@@ -21,9 +21,15 @@ export function isSpotifyId(value: string): boolean {
 }
 
 const textSnapshot = (max: number) => safeString(z.string().min(1).max(max))
-const nullableTextSnapshot = (max: number) => safeString(z.string().max(max)).nullable()
+const nullableTextSnapshot = (max: number) =>
+  safeString(z.string().max(max)).nullable()
 const postgresInteger = z.number().int().max(2_147_483_647)
-const nullableTimestamp = z.number().int().min(0).max(8_640_000_000_000_000).nullable()
+const nullableTimestamp = z
+  .number()
+  .int()
+  .min(0)
+  .max(8_640_000_000_000_000)
+  .nullable()
 // Spotify track id or Apple song id; the store validates it against the run's
 // source, so the contract only bounds it.
 const platformId = safeString(z.string().min(1).max(64))
@@ -40,130 +46,227 @@ function isCalendarDay(value: string) {
   if (year < 1) return false
   const date = new Date(0)
   date.setUTCFullYear(year, month - 1, dayOfMonth)
-  return date.getUTCFullYear() === year
-    && date.getUTCMonth() === month - 1
-    && date.getUTCDate() === dayOfMonth
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === dayOfMonth
+  )
 }
 
 const daySchema = z.string().regex(DAY_PATTERN).refine(isCalendarDay)
 
-export const listeningImportSourceSchema = z.enum(['spotify_export', 'apple_export'])
+export const listeningImportSourceSchema = z.enum([
+  'spotify_export',
+  'apple_export',
+])
 export const listeningImportPackageSchema = z.enum([
   'spotify_extended',
   'spotify_account',
+  'spotify_exportify',
   'apple_media',
 ])
 
 export type ListeningImportSource = z.infer<typeof listeningImportSourceSchema>
-export type ListeningImportPackage = z.infer<typeof listeningImportPackageSchema>
+export type ListeningImportPackage = z.infer<
+  typeof listeningImportPackageSchema
+>
 
 const PACKAGE_SOURCE: Record<ListeningImportPackage, ListeningImportSource> = {
   spotify_extended: 'spotify_export',
   spotify_account: 'spotify_export',
+  spotify_exportify: 'spotify_export',
   apple_media: 'apple_export',
 }
 
-const beginListeningImportObject = z.object({
-  source: listeningImportSourceSchema,
-  package: listeningImportPackageSchema,
-  timeZone: safeString(z.string().min(1).max(64)),
-  country: z.string().regex(/^[A-Z]{2}$/).nullable(),
-  expectedTracks: z.number().int().min(0).max(LISTENING_IMPORT_MAX_TRACKS),
-  expectedDays: z.number().int().min(0).max(LISTENING_IMPORT_MAX_DAYS),
-  expectedLibraryTracks: z.number().int().min(0).max(LISTENING_IMPORT_MAX_LIBRARY_TRACKS),
-  expectedArtists: z.number().int().min(0).max(LISTENING_IMPORT_MAX_ARTISTS),
-  unresolvedRows: postgresInteger.min(0).default(0),
-  unresolvedPlays: postgresInteger.min(0).default(0),
-}).strict()
+export const libraryReviewSchema = z.discriminatedUnion('mode', [
+  z.object({ mode: z.literal('add') }).strict(),
+  z
+    .object({
+      mode: z.literal('replace'),
+      fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+    })
+    .strict(),
+])
+const beginListeningImportObject = z
+  .object({
+    libraryReview: libraryReviewSchema.optional(),
+    source: listeningImportSourceSchema,
+    package: listeningImportPackageSchema,
+    timeZone: safeString(z.string().min(1).max(64)),
+    country: z
+      .string()
+      .regex(/^[A-Z]{2}$/)
+      .nullable(),
+    expectedTracks: z.number().int().min(0).max(LISTENING_IMPORT_MAX_TRACKS),
+    expectedDays: z.number().int().min(0).max(LISTENING_IMPORT_MAX_DAYS),
+    expectedLibraryTracks: z
+      .number()
+      .int()
+      .min(0)
+      .max(LISTENING_IMPORT_MAX_LIBRARY_TRACKS),
+    expectedArtists: z.number().int().min(0).max(LISTENING_IMPORT_MAX_ARTISTS),
+    unresolvedRows: postgresInteger.min(0).default(0),
+    unresolvedPlays: postgresInteger.min(0).default(0),
+  })
+  .strict()
 
 type BeginListeningImportShape = z.infer<typeof beginListeningImportObject>
-type ExpectedCount = 'expectedDays' | 'expectedLibraryTracks' | 'expectedArtists'
+type ExpectedCount =
+  'expectedDays' | 'expectedLibraryTracks' | 'expectedArtists'
 
 // Chunk types a package does not carry must be expected as zero; mirrors the
 // listening_import_runs check constraints so a bad begin is a 400.
 const NOT_CARRIED: Record<ListeningImportPackage, readonly ExpectedCount[]> = {
   spotify_extended: ['expectedLibraryTracks', 'expectedArtists'],
   spotify_account: ['expectedDays'],
+  spotify_exportify: ['expectedDays', 'expectedArtists'],
   apple_media: ['expectedArtists'],
 }
 
-export const beginListeningImportSchema = beginListeningImportObject.superRefine(
-  (value: BeginListeningImportShape, ctx) => {
-    if (PACKAGE_SOURCE[value.package] !== value.source) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['package'],
-        message: 'package does not belong to source',
-      })
-    }
-    for (const field of NOT_CARRIED[value.package]) {
-      if (value[field] !== 0) {
+export const beginListeningImportSchema =
+  beginListeningImportObject.superRefine(
+    (value: BeginListeningImportShape, ctx) => {
+      if (value.package === 'spotify_exportify' && !value.libraryReview)
         ctx.addIssue({
           code: 'custom',
-          path: [field],
-          message: 'package does not carry this chunk type',
+          path: ['libraryReview'],
+          message: 'Review saved songs before importing',
+        })
+      if (
+        value.libraryReview &&
+        value.package !== 'spotify_exportify' &&
+        value.package !== 'spotify_account'
+      )
+        ctx.addIssue({
+          code: 'custom',
+          path: ['libraryReview'],
+          message: 'Package has no Spotify library',
+        })
+      if (PACKAGE_SOURCE[value.package] !== value.source) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['package'],
+          message: 'package does not belong to source',
         })
       }
-    }
-  },
-)
+      for (const field of NOT_CARRIED[value.package]) {
+        if (value[field] !== 0) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [field],
+            message: 'package does not carry this chunk type',
+          })
+        }
+      }
+    },
+  )
 
-export const listeningTrackSnapshotSchema = z.object({
-  ordinal: z.number().int().min(0).max(LISTENING_IMPORT_MAX_TRACKS - 1),
-  platformId,
-  title: textSnapshot(1_000),
-  artist: textSnapshot(1_000),
-  album: nullableTextSnapshot(1_000),
-  durationMs: postgresInteger.nonnegative().nullable(),
-}).strict()
+export const listeningTrackSnapshotSchema = z
+  .object({
+    ordinal: z
+      .number()
+      .int()
+      .min(0)
+      .max(LISTENING_IMPORT_MAX_TRACKS - 1),
+    platformId,
+    title: textSnapshot(1_000),
+    artist: textSnapshot(1_000),
+    album: nullableTextSnapshot(1_000),
+    durationMs: postgresInteger.nonnegative().nullable(),
+  })
+  .strict()
 
-export const listeningDaySnapshotSchema = z.object({
-  ordinal: z.number().int().min(0).max(LISTENING_IMPORT_MAX_DAYS - 1),
-  platformId,
-  day: daySchema,
-  plays: postgresInteger.nonnegative(),
-  skips: postgresInteger.nonnegative().nullable(),
-  completes: postgresInteger.nonnegative().nullable(),
-  // bigint column, read back as a JS number: stay inside the safe range.
-  msPlayed: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-  hoursMask: z.number().int().min(0).max(LISTENING_HOURS_MASK_MAX).nullable(),
-}).strict()
+export const listeningDaySnapshotSchema = z
+  .object({
+    ordinal: z
+      .number()
+      .int()
+      .min(0)
+      .max(LISTENING_IMPORT_MAX_DAYS - 1),
+    platformId,
+    day: daySchema,
+    plays: postgresInteger.nonnegative(),
+    skips: postgresInteger.nonnegative().nullable(),
+    completes: postgresInteger.nonnegative().nullable(),
+    // bigint column, read back as a JS number: stay inside the safe range.
+    msPlayed: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    hoursMask: z.number().int().min(0).max(LISTENING_HOURS_MASK_MAX).nullable(),
+  })
+  .strict()
 
-export const listeningLibrarySnapshotSchema = z.object({
-  ordinal: z.number().int().min(0).max(LISTENING_IMPORT_MAX_LIBRARY_TRACKS - 1),
-  platformId,
-  playCount: postgresInteger.nonnegative().nullable(),
-  skipCount: postgresInteger.nonnegative().nullable(),
-  lastPlayedAt: nullableTimestamp,
-  dateAdded: nullableTimestamp,
-  // -1 dislike, 0 neutral, 1 love (Apple library export).
-  likeRating: z.union([z.literal(-1), z.literal(0), z.literal(1)]).nullable(),
-}).strict()
+export const listeningLibrarySnapshotSchema = z
+  .object({
+    ordinal: z
+      .number()
+      .int()
+      .min(0)
+      .max(LISTENING_IMPORT_MAX_LIBRARY_TRACKS - 1),
+    platformId,
+    playCount: postgresInteger.nonnegative().nullable(),
+    skipCount: postgresInteger.nonnegative().nullable(),
+    lastPlayedAt: nullableTimestamp,
+    dateAdded: nullableTimestamp,
+    // -1 dislike, 0 neutral, 1 love (Apple library export).
+    likeRating: z.union([z.literal(-1), z.literal(0), z.literal(1)]).nullable(),
+  })
+  .strict()
 
-export const listeningArtistSnapshotSchema = z.object({
-  ordinal: z.number().int().min(0).max(LISTENING_IMPORT_MAX_ARTISTS - 1),
-  name: textSnapshot(500),
-  spotifyId: z.string().regex(SPOTIFY_ID_PATTERN).nullable(),
-}).strict()
+export const listeningArtistSnapshotSchema = z
+  .object({
+    ordinal: z
+      .number()
+      .int()
+      .min(0)
+      .max(LISTENING_IMPORT_MAX_ARTISTS - 1),
+    name: textSnapshot(500),
+    spotifyId: z.string().regex(SPOTIFY_ID_PATTERN).nullable(),
+  })
+  .strict()
 
-export const listeningTrackChunkSchema = z.object({
-  tracks: z.array(listeningTrackSnapshotSchema).min(1).max(LISTENING_TRACK_CHUNK_MAX),
-}).strict()
+export const listeningTrackChunkSchema = z
+  .object({
+    tracks: z
+      .array(listeningTrackSnapshotSchema)
+      .min(1)
+      .max(LISTENING_TRACK_CHUNK_MAX),
+  })
+  .strict()
 
-export const listeningDayChunkSchema = z.object({
-  days: z.array(listeningDaySnapshotSchema).min(1).max(LISTENING_DAY_CHUNK_MAX),
-}).strict()
+export const listeningDayChunkSchema = z
+  .object({
+    days: z
+      .array(listeningDaySnapshotSchema)
+      .min(1)
+      .max(LISTENING_DAY_CHUNK_MAX),
+  })
+  .strict()
 
-export const listeningLibraryChunkSchema = z.object({
-  tracks: z.array(listeningLibrarySnapshotSchema).min(1).max(LISTENING_LIBRARY_CHUNK_MAX),
-}).strict()
+export const listeningLibraryChunkSchema = z
+  .object({
+    tracks: z
+      .array(listeningLibrarySnapshotSchema)
+      .min(1)
+      .max(LISTENING_LIBRARY_CHUNK_MAX),
+  })
+  .strict()
 
-export const listeningArtistChunkSchema = z.object({
-  artists: z.array(listeningArtistSnapshotSchema).min(1).max(LISTENING_ARTIST_CHUNK_MAX),
-}).strict()
+export const listeningArtistChunkSchema = z
+  .object({
+    artists: z
+      .array(listeningArtistSnapshotSchema)
+      .min(1)
+      .max(LISTENING_ARTIST_CHUNK_MAX),
+  })
+  .strict()
 
 export type BeginListeningImport = z.infer<typeof beginListeningImportSchema>
-export type ListeningTrackSnapshot = z.infer<typeof listeningTrackSnapshotSchema>
+export type ListeningTrackSnapshot = z.infer<
+  typeof listeningTrackSnapshotSchema
+>
 export type ListeningDaySnapshot = z.infer<typeof listeningDaySnapshotSchema>
-export type ListeningLibrarySnapshot = z.infer<typeof listeningLibrarySnapshotSchema>
-export type ListeningArtistSnapshot = z.infer<typeof listeningArtistSnapshotSchema>
+export type ListeningLibrarySnapshot = z.infer<
+  typeof listeningLibrarySnapshotSchema
+>
+export type ListeningArtistSnapshot = z.infer<
+  typeof listeningArtistSnapshotSchema
+>

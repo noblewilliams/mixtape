@@ -53,9 +53,11 @@ class ZipExportArchive extends ExportArchive {
 
   /// Opens [file] with a buffered file stream; the whole archive is never
   /// loaded into memory. Call [close] when done.
-  factory ZipExportArchive.open(File file) => _decode(InputFileStream(file.path));
+  factory ZipExportArchive.open(File file) =>
+      _decode(InputFileStream(file.path));
 
-  factory ZipExportArchive.fromBytes(Uint8List bytes) => _decode(InputMemoryStream(bytes));
+  factory ZipExportArchive.fromBytes(Uint8List bytes) =>
+      _decode(InputMemoryStream(bytes));
 
   static ZipExportArchive _decode(InputStream input) {
     final Archive archive;
@@ -78,7 +80,11 @@ class ZipExportArchive extends ExportArchive {
     final files = <String, ArchiveFile>{};
     for (final entry in archive) {
       if (!entry.isFile || entry.name.endsWith('/')) continue;
-      files.putIfAbsent(entry.name, () => entry);
+      if (files.containsKey(entry.name)) {
+        input.closeSync();
+        throw const ArchiveFormatException('duplicate entry');
+      }
+      files[entry.name] = entry;
     }
     return ZipExportArchive._(input, files);
   }
@@ -88,7 +94,8 @@ class ZipExportArchive extends ExportArchive {
 
   @override
   Future<List<ArchiveEntryInfo>> entries() async => [
-    for (final file in _files.values) ArchiveEntryInfo(path: file.name, bytes: file.size),
+    for (final file in _files.values)
+      ArchiveEntryInfo(path: file.name, bytes: file.size),
   ];
 
   @override
@@ -111,7 +118,36 @@ class ZipExportArchive extends ExportArchive {
 
 /// Strict UTF-8 with a leading byte-order mark stripped.
 String decodeExportText(Uint8List bytes) {
-  final hasBom = bytes.length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
+  final hasBom =
+      bytes.length >= 3 &&
+      bytes[0] == 0xEF &&
+      bytes[1] == 0xBB &&
+      bytes[2] == 0xBF;
   final body = hasBom ? Uint8List.sublistView(bytes, 3) : bytes;
   return utf8.decode(body, allowMalformed: false);
+}
+
+/// CSV and ZIP share the same parser boundary; classification follows content.
+ExportArchive openExportArchive(File file) {
+  if(!file.path.toLowerCase().endsWith('.csv')) return ZipExportArchive.open(file);
+  return _CsvFileArchive(file);
+}
+
+class _CsvFileArchive extends ExportArchive {
+  _CsvFileArchive(this.file);
+  final File file;
+  String get path =>
+      '${file.uri.pathSegments.last.replaceFirst(RegExp(r"\.csv$", caseSensitive: false), "")}.csv';
+  @override
+  Future<List<ArchiveEntryInfo>> entries() async {
+    final bytes = await file.length();
+    if (bytes > 64 * 1024 * 1024) {
+      throw const ArchiveFormatException('Export is too large');
+    }
+    return [ArchiveEntryInfo(path: path, bytes: bytes)];
+  }
+
+  @override
+  Future<String> readText(String path) async =>
+      decodeExportText(await file.readAsBytes());
 }

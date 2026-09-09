@@ -3,7 +3,7 @@
 // these types mirrors the canonical JSON key order; canonical.ts enforces it.
 
 export type ListeningExportSource = 'spotify_export'
-export type ListeningExportPackage = 'spotify_extended' | 'spotify_account'
+export type ListeningExportPackage = 'spotify_extended' | 'spotify_account' | 'spotify_exportify'
 
 export type SnapshotTrack = {
   platformId: string

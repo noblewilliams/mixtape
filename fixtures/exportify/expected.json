@@ -1,0 +1,59 @@
+{
+  "source": "spotify_export",
+  "package": "spotify_exportify",
+  "timeZone": "UTC",
+  "country": null,
+  "tracks": [
+    {
+      "platformId": "4uLU6hMCjMI75M1A2tKUQC",
+      "title": "A \"quiet\"\nnight",
+      "artist": "Orchard Choir",
+      "album": "Moon",
+      "durationMs": 200000
+    }
+  ],
+  "days": [],
+  "library": [],
+  "artists": [],
+  "playlists": [
+    {
+      "ordinal": 0,
+      "key": "9e2e1508b2dffdbef1f50ce7ac7d12f0c33cdd89039b644b296e7acebb9b2af5",
+      "name": "sample",
+      "description": null,
+      "lastModifiedAt": null,
+      "entries": [
+        {
+          "position": 0,
+          "platformId": "4uLU6hMCjMI75M1A2tKUQC",
+          "title": "A \"quiet\"\nnight",
+          "artist": "Orchard Choir",
+          "album": "Moon",
+          "addedAt": null
+        },
+        {
+          "position": 1,
+          "platformId": null,
+          "title": "Local song",
+          "artist": "Home",
+          "album": null,
+          "addedAt": null
+        },
+        {
+          "position": 2,
+          "platformId": "4uLU6hMCjMI75M1A2tKUQC",
+          "title": "A repeat",
+          "artist": "Orchard Choir",
+          "album": "Moon",
+          "addedAt": null
+        }
+      ]
+    }
+  ],
+  "unresolved": {
+    "rows": 1,
+    "plays": 0
+  },
+  "ledgerFrom": null,
+  "ledgerTo": null
+}

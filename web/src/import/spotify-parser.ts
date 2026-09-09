@@ -4,6 +4,7 @@
 // Nothing in this module logs, and no track, artist, album, or playlist name
 // ever lands in an error message.
 
+import { isCsvPath, parseExportify } from './exportify-parser'
 import { canonicalize, compareOrdinal } from './canonical'
 import type {
   ExportInventory,
@@ -684,6 +685,10 @@ const noVisit: FileVisitor = () => Promise.resolve()
 
 /** The inventory: package, files read with row counts, everything else with byte sizes. Never throws for broken content. */
 export async function inspectExport(archive: ExportArchive, options: InspectOptions = {}): Promise<ExportInventory> {
+  if ((await archive.entries()).some(f => isCsvPath(f.path))) {
+    try { return (await parseExport(archive, { ...options, timeZone: 'UTC', includePrivateSessions: false })).inventory }
+    catch (error) { if (error instanceof UnreadableExportError) return error.inventory; throw error }
+  }
   const plan = await planArchive(archive)
   return readPlannedFiles(archive, plan, options, noVisit)
 }
@@ -691,6 +696,10 @@ export async function inspectExport(archive: ExportArchive, options: InspectOpti
 /** The inventory, the canonical snapshot, and the drop stats; throws UnreadableExportError when the archive fails closed. */
 export async function parseExport(archive: ExportArchive, options: ParseOptions): Promise<ParseResult> {
   const plan = await planArchive(archive)
+  if ((await archive.entries()).some(f => isCsvPath(f.path))) {
+    if (plan.package !== null) throw new UnreadableExportError(null, { package: null, read: [], ignored: [] })
+    return parseExportify(archive, options)
+  }
   if (plan.package === null) {
     throw new UnreadableExportError(null, await readPlannedFiles(archive, plan, options, noVisit))
   }

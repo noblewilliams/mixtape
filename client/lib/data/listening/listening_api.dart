@@ -1,3 +1,4 @@
+import '../../import/collection_review.dart';
 import 'dart:convert';
 
 import '../api/api_client.dart';
@@ -22,8 +23,18 @@ class ListeningApi {
 
   static const String playlistSyncSource = 'spotify_export';
 
+  Future<CollectionContext> getCollectionReview() async =>
+      CollectionContext.fromJson(
+        _decode(
+          (await _client.getJson('/ingest/listening/spotify/review')).body,
+        ),
+      );
+
   Future<ListeningImportRun> beginImport(BeginListeningImport body) async {
-    final response = await _client.postJson('/ingest/listening/imports', body.toJson());
+    final response = await _client.postJson(
+      '/ingest/listening/imports',
+      body.toJson(),
+    );
     return ListeningImportRun.fromJson(_decode(response.body));
   }
 
@@ -34,10 +45,14 @@ class ListeningApi {
       _putChunk('/ingest/listening/imports/$importId/days', {'days': rows});
 
   Future<int> putLibrary(String importId, List<Map<String, Object?>> rows) =>
-      _putChunk('/ingest/listening/imports/$importId/library', {'tracks': rows});
+      _putChunk('/ingest/listening/imports/$importId/library', {
+        'tracks': rows,
+      });
 
   Future<int> putArtists(String importId, List<Map<String, Object?>> rows) =>
-      _putChunk('/ingest/listening/imports/$importId/artists', {'artists': rows});
+      _putChunk('/ingest/listening/imports/$importId/artists', {
+        'artists': rows,
+      });
 
   Future<ListeningImportSummary> completeImport(String importId) async {
     final response = await _client.postJson(
@@ -48,7 +63,9 @@ class ListeningApi {
   }
 
   Future<DeleteSourceResult> deleteSource(String source) async {
-    final response = await _client.deleteJson('/ingest/listening/sources/$source');
+    final response = await _client.deleteJson(
+      '/ingest/listening/sources/$source',
+    );
     return DeleteSourceResult.fromJson(_decode(response.body));
   }
 
@@ -57,8 +74,10 @@ class ListeningApi {
   Future<PlaylistSyncRun> beginPlaylistSync({
     required int expectedPlaylists,
     required int expectedEntries,
+    List<Map<String, Object?>>? review,
   }) async {
     final response = await _client.postJson('/ingest/playlists/syncs', {
+      if (review != null) 'review': review,
       'source': playlistSyncSource,
       'storefront': null,
       'expectedPlaylists': expectedPlaylists,
@@ -67,18 +86,21 @@ class ListeningApi {
     return PlaylistSyncRun.fromJson(_decode(response.body));
   }
 
-  Future<int> putPlaylists(String syncId, List<Map<String, Object?>> playlists) =>
-      _putChunk('/ingest/playlists/syncs/$syncId/playlists', {'playlists': playlists});
+  Future<int> putPlaylists(
+    String syncId,
+    List<Map<String, Object?>> playlists,
+  ) => _putChunk('/ingest/playlists/syncs/$syncId/playlists', {
+    'playlists': playlists,
+  });
 
   Future<int> putPlaylistEntries(
     String syncId,
     String playlistAppleId,
     List<Map<String, Object?>> entries,
-  ) =>
-      _putChunk('/ingest/playlists/syncs/$syncId/entries', {
-        'playlistAppleId': playlistAppleId,
-        'entries': entries,
-      });
+  ) => _putChunk('/ingest/playlists/syncs/$syncId/entries', {
+    'playlistAppleId': playlistAppleId,
+    'entries': entries,
+  });
 
   Future<PlaylistSyncSummary> completePlaylistSync(String syncId) async {
     final response = await _client.postJson(
@@ -101,11 +123,17 @@ class ListeningApi {
   /// Records one funnel step. Callers that must never block or fail on it
   /// wrap this fire-and-forget (see the import service).
   Future<void> postFunnelEvent(FunnelEventType type) async {
-    await _client.postJson('/me/funnel-events', {'type': type.wire, 'surface': surface});
+    await _client.postJson('/me/funnel-events', {
+      'type': type.wire,
+      'surface': surface,
+    });
   }
 
   Future<InterviewResult> postInterview(InterviewAnswers answers) async {
-    final response = await _client.postJson('/me/interview', answers.toJson(surface));
+    final response = await _client.postJson(
+      '/me/interview',
+      answers.toJson(surface),
+    );
     return InterviewResult.fromJson(_decode(response.body));
   }
 
@@ -116,7 +144,9 @@ class ListeningApi {
 
   /// Replaces the interview-sourced seeds; answers with the full list.
   Future<List<ArtistSeed>> putArtistSeeds(List<String> names) async {
-    final response = await _client.putJson('/me/artist-seeds', {'names': names});
+    final response = await _client.putJson('/me/artist-seeds', {
+      'names': names,
+    });
     return artistSeedsFromJson(_decode(response.body)['seeds']);
   }
 
@@ -128,7 +158,9 @@ class ListeningApi {
   }
 
   Future<SeedTracksResult> postSeedTracks(List<String> spotifyIds) async {
-    final response = await _client.postJson('/me/seed-tracks', {'spotifyIds': spotifyIds});
+    final response = await _client.postJson('/me/seed-tracks', {
+      'spotifyIds': spotifyIds,
+    });
     return SeedTracksResult.fromJson(_decode(response.body));
   }
 

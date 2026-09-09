@@ -1,3 +1,4 @@
+import 'exportify_parser.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -26,7 +27,10 @@ class ImportCancelled implements Exception {}
 /// of the first broken file in path order (null when no file was readable at
 /// all); [inventory] still lists every entry, the broken file with null rows.
 class UnreadableExportException implements Exception {
-  const UnreadableExportException({required this.file, required this.inventory});
+  const UnreadableExportException({
+    required this.file,
+    required this.inventory,
+  });
 
   final String? file;
   final ExportInventory inventory;
@@ -65,7 +69,8 @@ enum ParseStage {
   parsing,
 }
 
-typedef ParseProgress = void Function(ParseStage stage, String? file, int completed, int total);
+typedef ParseProgress =
+    void Function(ParseStage stage, String? file, int completed, int total);
 
 class ParseOptions {
   const ParseOptions({
@@ -83,7 +88,11 @@ class ParseOptions {
 }
 
 class ParsedExport {
-  const ParsedExport({required this.inventory, required this.snapshot, this.stats = ExportStats.zero});
+  const ParsedExport({
+    required this.inventory,
+    required this.snapshot,
+    this.stats = ExportStats.zero,
+  });
 
   final ExportInventory inventory;
   final ListeningExportSnapshot snapshot;
@@ -133,7 +142,13 @@ class ExportStats {
       other.privatePlays == privatePlays;
 
   @override
-  int get hashCode => Object.hash(podcastOrAudiobook, localFile, privateSession, badTimestamp, privatePlays);
+  int get hashCode => Object.hash(
+    podcastOrAudiobook,
+    localFile,
+    privateSession,
+    badTimestamp,
+    privatePlays,
+  );
 
   @override
   String toString() =>
@@ -145,7 +160,11 @@ enum ExportFileKind { history, library, playlist }
 
 /// A file entry with its allow-list classification (null: never opened).
 class ExportFile {
-  const ExportFile({required this.path, required this.bytes, required this.kind});
+  const ExportFile({
+    required this.path,
+    required this.bytes,
+    required this.kind,
+  });
 
   final String path;
   final int bytes;
@@ -182,15 +201,24 @@ Future<List<ExportFile>> listExportFiles(ExportArchive archive) async {
   final files = [
     for (final entry in entries)
       if (!entry.path.endsWith('/'))
-        ExportFile(path: entry.path, bytes: entry.bytes, kind: classifyEntry(entry.path)),
+        ExportFile(
+          path: entry.path,
+          bytes: entry.bytes,
+          kind: classifyEntry(entry.path),
+        ),
   ];
   files.sort((a, b) => a.path.compareTo(b.path));
   return files;
 }
 
 ExportPackage? detectPackage(List<ExportFile> files) {
-  if (files.any((f) => f.kind == ExportFileKind.history)) return ExportPackage.spotifyExtended;
-  if (files.any((f) => f.kind == ExportFileKind.library || f.kind == ExportFileKind.playlist)) {
+  if (files.any((f) => f.kind == ExportFileKind.history)) {
+    return ExportPackage.spotifyExtended;
+  }
+  if (files.any(
+    (f) =>
+        f.kind == ExportFileKind.library || f.kind == ExportFileKind.playlist,
+  )) {
     return ExportPackage.spotifyAccount;
   }
   return null;
@@ -198,7 +226,11 @@ ExportPackage? detectPackage(List<ExportFile> files) {
 
 Set<ExportFileKind> readKindsFor(ExportPackage? package) => switch (package) {
   ExportPackage.spotifyExtended => const {ExportFileKind.history},
-  ExportPackage.spotifyAccount => const {ExportFileKind.library, ExportFileKind.playlist},
+  ExportPackage.spotifyAccount => const {
+    ExportFileKind.library,
+    ExportFileKind.playlist,
+  },
+  ExportPackage.spotifyExportify => {},
   null => const {},
 };
 
@@ -238,9 +270,14 @@ List<String> _keysOf(Object? value) =>
 
 /// Reads and decodes one allow-listed file. Returns null when the bytes, the
 /// JSON, or the top-level shape are wrong: the file is unreadable.
-Future<LoadedExportFile?> loadExportFile(ExportArchive archive, ExportFile file) async {
+Future<LoadedExportFile?> loadExportFile(
+  ExportArchive archive,
+  ExportFile file,
+) async {
   final kind = file.kind;
-  if (kind == null) throw ArgumentError.value(file.path, 'file', 'not an allow-listed entry');
+  if (kind == null) {
+    throw ArgumentError.value(file.path, 'file', 'not an allow-listed entry');
+  }
   final String text;
   try {
     text = await archive.readText(file.path);
@@ -291,7 +328,12 @@ Future<LoadedExportFile?> loadExportFile(ExportArchive archive, ExportFile file)
           playlists.add(LoadedPlaylist(record: record, items: itemList));
         }
       }
-      return LoadedExportFile(kind: kind, rows: rows, headers: _keysOf(data), playlists: playlists);
+      return LoadedExportFile(
+        kind: kind,
+        rows: rows,
+        headers: _keysOf(data),
+        playlists: playlists,
+      );
   }
 }
 
@@ -314,9 +356,12 @@ int asInteger(Object? value) {
 }
 
 /// A non-empty JSON string, else null.
-String? asText(Object? value) => value is String && value.isNotEmpty ? value : null;
+String? asText(Object? value) =>
+    value is String && value.isNotEmpty ? value : null;
 
-final RegExp _ts = RegExp(r'^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?Z$');
+final RegExp _ts = RegExp(
+  r'^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?Z$',
+);
 
 /// Epoch ms for a `ts` in the only accepted grammar; null drops the row.
 int? instantFromTs(Object? value) {
@@ -346,7 +391,9 @@ int? epochMsFromExportDate(Object? value) {
   if (value is! String) return null;
   final match = _dateOnly.firstMatch(value);
   if (match == null) return null;
-  if (int.parse(match[1]!) < 1900) return null; // same year floor as `ts` (interpretation 13)
+  if (int.parse(match[1]!) < 1900) {
+    return null; // same year floor as `ts` (interpretation 13)
+  }
   return DateTime.utc(
     int.parse(match[1]!),
     int.parse(match[2]!),
@@ -355,21 +402,53 @@ int? epochMsFromExportDate(Object? value) {
 }
 
 /// Lowercase hex SHA-256 of the UTF-8 bytes of `name + " " + ordinal`.
-String playlistKey(String name, int ordinal) => sha256.convert(utf8.encode('$name $ordinal')).toString();
+String playlistKey(String name, int ordinal) =>
+    sha256.convert(utf8.encode('$name $ordinal')).toString();
 
 final RegExp _country = RegExp(r'^[A-Z]{2}$');
 
 /// Lists the archive and counts rows without aggregating: the inventory the
 /// UI shows before an import. A broken file has `rows: null`; see
 /// [ExportInventory.unreadableFile].
-Future<ExportInventory> inspectExport(ExportArchive archive, {CancelToken? cancelToken}) async {
+Future<ExportInventory> inspectExport(
+  ExportArchive archive, {
+  CancelToken? cancelToken,
+}) async {
+  if ((await archive.entries()).any((f) => isCsvPath(f.path))) {
+    try {
+      return (await parseExport(
+        archive,
+        ParseOptions(timeZone: 'UTC', cancelToken: cancelToken),
+      )).inventory;
+    } on UnreadableExportException catch (e) {
+      return e.inventory;
+    }
+  }
   final scan = await _scan(archive, aggregate: false, cancelToken: cancelToken);
   return scan.inventory;
 }
 
 /// Parses the archive into its inventory and snapshot, or throws
 /// [UnreadableExportException] / [ImportCancelled].
-Future<ParsedExport> parseExport(ExportArchive archive, ParseOptions options) async {
+Future<ParsedExport> parseExport(
+  ExportArchive archive,
+  ParseOptions options,
+) async {
+  final entries = await archive.entries();
+  if (entries.any((f) => isCsvPath(f.path))) {
+    if (entries.any(
+      (f) => RegExp(
+        r'^(?:yourlibrary|playlist.*|streaming_history_audio_.*)\.json$',
+        caseSensitive: false,
+      ).hasMatch(f.path.split('/').last),
+    )) {
+      throw const UnreadableExportException(
+        file: null,
+        inventory: ExportInventory.empty,
+      );
+    }
+    return parseExportify(archive, options);
+  }
   final scan = await _scan(
     archive,
     aggregate: true,
@@ -381,9 +460,16 @@ Future<ParsedExport> parseExport(ExportArchive archive, ParseOptions options) as
   final inventory = scan.inventory;
   final snapshot = scan.snapshot;
   if (snapshot == null) {
-    throw UnreadableExportException(file: inventory.unreadableFile, inventory: inventory);
+    throw UnreadableExportException(
+      file: inventory.unreadableFile,
+      inventory: inventory,
+    );
   }
-  return ParsedExport(inventory: inventory, snapshot: snapshot, stats: scan.stats);
+  return ParsedExport(
+    inventory: inventory,
+    snapshot: snapshot,
+    stats: scan.stats,
+  );
 }
 
 class _Scan {
@@ -428,13 +514,21 @@ Future<_Scan> _scan(
   final package = detectPackage(files);
   final readKinds = readKindsFor(package);
   final toRead = files.where((f) => readKinds.contains(f.kind)).toList();
-  final progress = _Progress(onProgress, toRead.fold<int>(0, (sum, f) => sum + f.bytes));
+  final progress = _Progress(
+    onProgress,
+    toRead.fold<int>(0, (sum, f) => sum + f.bytes),
+  );
   onProgress?.call(ParseStage.inspecting, null, 0, toRead.length);
 
   final extended = aggregate && package == ExportPackage.spotifyExtended
-      ? _ExtendedAggregator(timeZone: timeZone, includePrivateSessions: includePrivateSessions)
+      ? _ExtendedAggregator(
+          timeZone: timeZone,
+          includePrivateSessions: includePrivateSessions,
+        )
       : null;
-  final account = aggregate && package == ExportPackage.spotifyAccount ? _AccountAggregator() : null;
+  final account = aggregate && package == ExportPackage.spotifyAccount
+      ? _AccountAggregator()
+      : null;
 
   final read = <InventoryReadFile>[];
   final ignored = <InventoryIgnoredFile>[];
@@ -453,7 +547,9 @@ Future<_Scan> _scan(
     } else {
       read.add(InventoryReadFile(path: file.path, rows: loaded.rows));
       if (!broken) {
-        if (extended != null) await extended.consume(loaded, file, progress, cancelToken);
+        if (extended != null) {
+          await extended.consume(loaded, file, progress, cancelToken);
+        }
         account?.consume(loaded);
       }
     }
@@ -461,8 +557,14 @@ Future<_Scan> _scan(
     progress.bytesDone += file.bytes;
   }
 
-  final inventory = ExportInventory(package: package, read: read, ignored: ignored);
-  if (!aggregate || broken || package == null) return _Scan(inventory, null, ExportStats.zero);
+  final inventory = ExportInventory(
+    package: package,
+    read: read,
+    ignored: ignored,
+  );
+  if (!aggregate || broken || package == null) {
+    return _Scan(inventory, null, ExportStats.zero);
+  }
   final snapshot = extended?.snapshot(timeZone) ?? account!.snapshot(timeZone);
   return _Scan(inventory, snapshot, extended?.stats ?? ExportStats.zero);
 }
@@ -490,8 +592,10 @@ class _Day {
 }
 
 class _ExtendedAggregator {
-  _ExtendedAggregator({required String timeZone, required this.includePrivateSessions})
-    : clock = ZoneClock(timeZone);
+  _ExtendedAggregator({
+    required String timeZone,
+    required this.includePrivateSessions,
+  }) : clock = ZoneClock(timeZone);
 
   final bool includePrivateSessions;
   final ZoneClock clock;
@@ -506,12 +610,12 @@ class _ExtendedAggregator {
   int badTimestamp = 0;
 
   ExportStats get stats => ExportStats(
-        podcastOrAudiobook: podcastOrAudiobook,
-        localFile: unresolvedRows,
-        privateSession: privateSession,
-        badTimestamp: badTimestamp,
-        privatePlays: privatePlays,
-      );
+    podcastOrAudiobook: podcastOrAudiobook,
+    localFile: unresolvedRows,
+    privateSession: privateSession,
+    badTimestamp: badTimestamp,
+    privatePlays: privatePlays,
+  );
 
   Future<void> consume(
     LoadedExportFile loaded,
@@ -531,7 +635,8 @@ class _ExtendedAggregator {
   }
 
   void _row(Map<dynamic, dynamic> row) {
-    final isEpisode = row['spotify_episode_uri'] != null || row['audiobook_uri'] != null;
+    final isEpisode =
+        row['spotify_episode_uri'] != null || row['audiobook_uri'] != null;
     final msPlayed = asInteger(row['ms_played']);
     final isPlay = msPlayed >= playThresholdMs;
     if (row['incognito_mode'] == true && !includePrivateSessions) {
@@ -557,7 +662,8 @@ class _ExtendedAggregator {
 
     final skipped = row['skipped'];
     final reasonEnd = row['reason_end'];
-    final isSkip = skipped == true || (skipped == null && reasonEnd == 'fwdbtn');
+    final isSkip =
+        skipped == true || (skipped == null && reasonEnd == 'fwdbtn');
     final isComplete = reasonEnd == 'trackdone';
     final local = clock.local(utcMs);
 
@@ -570,7 +676,10 @@ class _ExtendedAggregator {
       if (duration == null || msPlayed > duration) track.durationMs = msPlayed;
     }
 
-    final day = days.putIfAbsent('$platformId|${local.day}', () => _Day(platformId, local.day));
+    final day = days.putIfAbsent(
+      '$platformId|${local.day}',
+      () => _Day(platformId, local.day),
+    );
     day.msPlayed += msPlayed;
     if (isPlay) {
       day.plays += 1;
@@ -586,43 +695,48 @@ class _ExtendedAggregator {
   }
 
   ListeningExportSnapshot snapshot(String timeZone) {
-    final trackRows = tracks.values
-        .map(
-          (t) => SnapshotTrack(
-            platformId: t.platformId,
-            title: t.title ?? t.platformId,
-            artist: t.artist ?? unknownArtist,
-            album: t.album,
-            durationMs: t.durationMs,
-          ),
-        )
-        .toList()
-      ..sort((a, b) => a.platformId.compareTo(b.platformId));
-    final dayRows = days.values
-        .where((d) => d.plays > 0 || d.skips > 0)
-        .map(
-          (d) => SnapshotDay(
-            platformId: d.platformId,
-            day: d.day,
-            plays: d.plays,
-            skips: d.skips,
-            completes: d.completes,
-            msPlayed: d.msPlayed,
-            hoursMask: d.hoursMask,
-          ),
-        )
-        .toList()
-      ..sort((a, b) {
-        final byId = a.platformId.compareTo(b.platformId);
-        return byId != 0 ? byId : a.day.compareTo(b.day);
-      });
+    final trackRows =
+        tracks.values
+            .map(
+              (t) => SnapshotTrack(
+                platformId: t.platformId,
+                title: t.title ?? t.platformId,
+                artist: t.artist ?? unknownArtist,
+                album: t.album,
+                durationMs: t.durationMs,
+              ),
+            )
+            .toList()
+          ..sort((a, b) => a.platformId.compareTo(b.platformId));
+    final dayRows =
+        days.values
+            .where((d) => d.plays > 0 || d.skips > 0)
+            .map(
+              (d) => SnapshotDay(
+                platformId: d.platformId,
+                day: d.day,
+                plays: d.plays,
+                skips: d.skips,
+                completes: d.completes,
+                msPlayed: d.msPlayed,
+                hoursMask: d.hoursMask,
+              ),
+            )
+            .toList()
+          ..sort((a, b) {
+            final byId = a.platformId.compareTo(b.platformId);
+            return byId != 0 ? byId : a.day.compareTo(b.day);
+          });
 
     String? country;
     var countryCount = 0;
     for (final entry in countries.entries) {
       final code = entry.key;
       final count = entry.value;
-      if (count > countryCount || (count == countryCount && country != null && code.compareTo(country) < 0)) {
+      if (count > countryCount ||
+          (count == countryCount &&
+              country != null &&
+              code.compareTo(country) < 0)) {
         country = code;
         countryCount = count;
       }
@@ -631,8 +745,12 @@ class _ExtendedAggregator {
     String? ledgerFrom;
     String? ledgerTo;
     for (final row in dayRows) {
-      if (ledgerFrom == null || row.day.compareTo(ledgerFrom) < 0) ledgerFrom = row.day;
-      if (ledgerTo == null || row.day.compareTo(ledgerTo) > 0) ledgerTo = row.day;
+      if (ledgerFrom == null || row.day.compareTo(ledgerFrom) < 0) {
+        ledgerFrom = row.day;
+      }
+      if (ledgerTo == null || row.day.compareTo(ledgerTo) > 0) {
+        ledgerTo = row.day;
+      }
     }
 
     return ListeningExportSnapshot(
@@ -644,7 +762,10 @@ class _ExtendedAggregator {
       library: const [],
       artists: const [],
       playlists: const [],
-      unresolved: SnapshotUnresolved(rows: unresolvedRows, plays: unresolvedPlays),
+      unresolved: SnapshotUnresolved(
+        rows: unresolvedRows,
+        plays: unresolvedPlays,
+      ),
       ledgerFrom: ledgerFrom,
       ledgerTo: ledgerTo,
     );
@@ -689,17 +810,28 @@ class _AccountAggregator {
       if (liked is! Map) continue;
       final platformId = spotifyIdFromUri(liked['uri'], 'track');
       if (platformId == null) continue;
-      final track = tracks.putIfAbsent(platformId, () => _NamedTrack(platformId));
+      final track = tracks.putIfAbsent(
+        platformId,
+        () => _NamedTrack(platformId),
+      );
       track.libraryTitle ??= asText(liked['track']);
       track.libraryArtist ??= asText(liked['artist']);
       track.libraryAlbum ??= asText(liked['album']);
-      library.putIfAbsent(platformId, () => SnapshotLibraryRow(platformId: platformId));
+      library.putIfAbsent(
+        platformId,
+        () => SnapshotLibraryRow(platformId: platformId),
+      );
     }
     for (final followed in loaded.libraryArtists) {
       if (followed is! Map) continue;
       final name = asText(followed['name']);
       if (name == null) continue;
-      artists.add(SnapshotArtist(name: name, spotifyId: spotifyIdFromUri(followed['uri'], 'artist')));
+      artists.add(
+        SnapshotArtist(
+          name: name,
+          spotifyId: spotifyIdFromUri(followed['uri'], 'artist'),
+        ),
+      );
     }
   }
 
@@ -734,7 +866,10 @@ class _AccountAggregator {
         if (platformId == null) {
           unresolvedRows += 1;
         } else {
-          final named = tracks.putIfAbsent(platformId, () => _NamedTrack(platformId!));
+          final named = tracks.putIfAbsent(
+            platformId,
+            () => _NamedTrack(platformId!),
+          );
           named.playlistTitle ??= title;
           named.playlistArtist ??= artist;
           named.playlistAlbum ??= album;
@@ -765,19 +900,21 @@ class _AccountAggregator {
   }
 
   ListeningExportSnapshot snapshot(String timeZone) {
-    final trackRows = tracks.values
-        .map(
-          (t) => SnapshotTrack(
-            platformId: t.platformId,
-            title: t.libraryTitle ?? t.playlistTitle ?? t.platformId,
-            artist: t.libraryArtist ?? t.playlistArtist ?? unknownArtist,
-            album: t.libraryAlbum ?? t.playlistAlbum,
-            durationMs: null,
-          ),
-        )
-        .toList()
+    final trackRows =
+        tracks.values
+            .map(
+              (t) => SnapshotTrack(
+                platformId: t.platformId,
+                title: t.libraryTitle ?? t.playlistTitle ?? t.platformId,
+                artist: t.libraryArtist ?? t.playlistArtist ?? unknownArtist,
+                album: t.libraryAlbum ?? t.playlistAlbum,
+                durationMs: null,
+              ),
+            )
+            .toList()
+          ..sort((a, b) => a.platformId.compareTo(b.platformId));
+    final libraryRows = library.values.toList()
       ..sort((a, b) => a.platformId.compareTo(b.platformId));
-    final libraryRows = library.values.toList()..sort((a, b) => a.platformId.compareTo(b.platformId));
     final artistRows = List.of(artists)
       ..sort((a, b) {
         final byName = a.name.compareTo(b.name);

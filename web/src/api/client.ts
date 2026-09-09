@@ -136,9 +136,13 @@ export type PlaylistSyncSummary = {
 }
 
 export type ListeningImportSource = 'spotify_export' | 'apple_export'
-export type ListeningImportPackage = 'spotify_extended' | 'spotify_account' | 'apple_media'
+export type ListeningImportPackage = 'spotify_extended' | 'spotify_account' | 'spotify_exportify' | 'apple_media'
 
+export type LibraryReview = {mode:'add'} | {mode:'replace';fingerprint:string}
+export type PlaylistReview = {key:string;baseFingerprint:string|null;fileHash:string}[]
+export type SpotifyCollectionReview = {hasQuickImport?:boolean;library:{ids:string[];fingerprint:string};playlists:{key:string;name:string;fileHash:string|null;fingerprint:string}[]}
 export type BeginListeningImportInput = {
+  libraryReview?: LibraryReview
   source: ListeningImportSource
   package: ListeningImportPackage
   timeZone: string
@@ -273,12 +277,14 @@ export type BeginPlaylistSyncInput =
   }
   | {
     source: 'spotify_export'
+    review?: PlaylistReview
     storefront: null
     expectedPlaylists: number
     expectedEntries: number
   }
 
 export type MixtapeApi = {
+  getSpotifyCollectionReview: (signal?: AbortSignal) => Promise<SpotifyCollectionReview>
   listSessions: () => Promise<{ sessions: ApiSessionSummary[] }>
   getSession: (sessionId: string) => Promise<SessionDetailResponse>
   createSession: (prompt: string) => Promise<CreateSessionResponse>
@@ -513,6 +519,7 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
         method: 'POST',
         signal,
       }),
+    getSpotifyCollectionReview: signal => request('/ingest/listening/spotify/review', {signal}),
     beginListeningImport: (input, signal) =>
       request('/ingest/listening/imports', {
         method: 'POST',

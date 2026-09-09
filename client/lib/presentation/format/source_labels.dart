@@ -22,7 +22,8 @@ MusicSource? spotifySource(OnboardingState onboarding) {
   return null;
 }
 
-SpotifyPackages spotifyPackages(OnboardingState onboarding) => packagesOf(spotifySource(onboarding));
+SpotifyPackages spotifyPackages(OnboardingState onboarding) =>
+    packagesOf(spotifySource(onboarding));
 
 SpotifyPackages packagesOf(MusicSource? source) {
   final packages = source?.packages ?? const [];
@@ -34,6 +35,10 @@ SpotifyPackages packagesOf(MusicSource? source) {
 
 /// The waiting card's chip and the sources row's status.
 String spotifyStatusLabel(OnboardingState onboarding) {
+  if (spotifySource(onboarding)?.packages.contains('spotify_exportify') ??
+      false) {
+    return 'Saved music imported';
+  }
   final packages = spotifyPackages(onboarding);
   if (packages.count == 2) return 'Both in';
   if (packages.count == 1) return '1 of 2 in';
@@ -43,8 +48,15 @@ String spotifyStatusLabel(OnboardingState onboarding) {
 String sourceName(MusicSource source) {
   switch (source.source) {
     case 'spotify_export':
+      if (source.packages.contains('spotify_exportify')) {
+        return source.packages.contains('spotify_extended')
+            ? 'Spotify · saved music and history'
+            : 'Spotify · saved music';
+      }
       final packages = packagesOf(source);
-      if (packages.extended && packages.account) return 'Spotify · both packages';
+      if (packages.extended && packages.account) {
+        return 'Spotify · both packages';
+      }
       if (packages.extended) return 'Spotify · extended history';
       if (packages.account) return 'Spotify · account data';
       return 'Spotify';

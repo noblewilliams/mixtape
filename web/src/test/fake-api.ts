@@ -203,6 +203,7 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
       const run = playlistSync(syncId)
       return { playlists: run.playlists, entries: run.entries, resolvedEntries: 0, unresolvedEntries: run.entries }
     },
+    getSpotifyCollectionReview: async () => ({library:{ids:[],fingerprint:'0'.repeat(64)},playlists:[]}),
     beginListeningImport: async (input): Promise<ListeningImportStart> => {
       const importId = `listening-import-${listeningImports.size + 1}`
       listeningImports.set(importId, {

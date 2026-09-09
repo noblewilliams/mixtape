@@ -44,6 +44,7 @@ export function playlistIngestRoutes(
         body.expectedPlaylists,
         body.expectedEntries,
         body.source,
+        body.review,
       )
       return c.json(result, 201)
     } catch (error) {

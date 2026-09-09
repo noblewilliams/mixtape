@@ -17,6 +17,10 @@ void main() {
       const SpotifyRequestScreen(),
     );
 
+    expect(find.text('Bring your Spotify music'),findsOneWidget);
+    expect(find.byKey(const Key('link-spotify-privacy')),findsNothing);
+    await tester.tap(find.byKey(const Key('go-deeper')));
+    await tester.pumpAndSettle();
     expect(spotifyRequestSteps, hasLength(8));
     for (var i = 1; i <= 8; i++) {
       expect(find.text('$i.'), findsOneWidget, reason: 'step $i number');
@@ -55,6 +59,7 @@ void main() {
     );
     expect(find.textContaining('What the two emails look like'), findsOneWidget);
 
+    await tester.ensureVisible(find.byKey(const Key('link-spotify-privacy')));
     await tester.tap(find.byKey(const Key('link-spotify-privacy')));
     await tester.pump();
     expect(links.opened, [spotifyPrivacyUrl]);
@@ -79,6 +84,8 @@ void main() {
       onboardingContainer(listening: listening, reminders: reminders),
       const SpotifyRequestScreen(),
     );
+    await tester.tap(find.byKey(const Key('go-deeper')));
+    await tester.pumpAndSettle();
     expect(find.byKey(const Key('requested-elapsed')), findsNothing);
 
     await tester.ensureVisible(find.byKey(const Key('mark-requested')));
@@ -107,6 +114,8 @@ void main() {
     );
 
     expect(find.byKey(const Key('mark-requested')), findsNothing);
+    await tester.tap(find.byKey(const Key('go-deeper')));
+    await tester.pumpAndSettle();
     expect(find.text('Requested 2 days ago'), findsOneWidget);
     expect(reminders.scheduled, isEmpty);
     expect(listening.funnelEvents, isEmpty);

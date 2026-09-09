@@ -144,7 +144,7 @@ void expectInteractiveWidgetsKeyed(Finder root) {
   for (final element in interactive.evaluate()) {
     var nested = false;
     element.visitAncestorElements((ancestor) {
-      nested = _isInteractive(ancestor.widget);
+      nested = _isInteractive(ancestor.widget) || ancestor.widget is ExpansionTile;
       return !nested;
     });
     if (nested) continue;

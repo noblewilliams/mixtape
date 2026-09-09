@@ -232,7 +232,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
     final waiting = onboarding != null &&
         onboarding.chosenService == 'spotify' &&
-        spotifyPackages(onboarding).count < 2;
+        spotifyPackages(onboarding).count < 2 && !(spotifySource(onboarding)?.packages.contains('spotify_exportify') ?? false);
 
     return Scaffold(
       appBar: AppBar(
@@ -422,9 +422,9 @@ class _SpotifyWaitingCard extends StatelessWidget {
     final when = shortDate(source.lastImportedAt ?? source.connectedAt);
     return packages.extended
         ? 'Extended history imported $when. Still waiting for the account data; check your inbox '
-            'for the second email.'
+              'for the second email.'
         : 'Account data imported $when. Still waiting for the extended history; it can take up '
-            'to 30 days.';
+              'to 30 days.';
   }
 
   @override
@@ -445,7 +445,9 @@ class _SpotifyWaitingCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    nudge == null ? 'Waiting for your Spotify data' : 'Your Spotify data',
+                    nudge == null
+                        ? 'Bring your Spotify music'
+                        : 'Your Spotify data',
                     style: textTheme.titleMedium,
                   ),
                 ),
@@ -458,15 +460,25 @@ class _SpotifyWaitingCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             if (nudge != null)
-              Text(nudge, key: const Key('waiting-nudge'), style: textTheme.bodySmall)
+              Text(
+                nudge,
+                key: const Key('waiting-nudge'),
+                style: textTheme.bodySmall,
+              )
             else
               Row(
                 children: [
-                  Icon(markedAt == null ? Icons.mail_outline : Icons.hourglass_top, size: 20),
+                  Icon(
+                    markedAt == null ? Icons.mail_outline : Icons.hourglass_top,
+                    size: 20,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: markedAt == null
-                        ? const Text('Not requested yet', key: Key('waiting-not-requested'))
+                        ? const Text(
+                            'Ready to import',
+                            key: Key('waiting-not-requested'),
+                          )
                         : Text(
                             'Requested ${elapsedWait(markedAt)}',
                             key: const Key('waiting-requested'),
@@ -475,7 +487,7 @@ class _SpotifyWaitingCard extends StatelessWidget {
                   TextButton(
                     key: const Key('open-request'),
                     onPressed: onOpenRequest,
-                    child: Text(markedAt == null ? 'Request it' : 'See the steps'),
+                    child: Text('Import steps'),
                   ),
                 ],
               ),
@@ -486,7 +498,7 @@ class _SpotifyWaitingCard extends StatelessWidget {
                 key: const Key('waiting-choose-zip'),
                 onPressed: onChooseZip,
                 icon: const Icon(Icons.folder_zip_outlined),
-                label: Text(nudge == null ? 'Choose a ZIP' : 'Choose the other ZIP'),
+                label: Text('Choose files'),
               ),
             ),
             const Divider(),
@@ -498,7 +510,9 @@ class _SpotifyWaitingCard extends StatelessWidget {
                 title: const Text('Interview done'),
                 subtitle: interview == null
                     ? null
-                    : Text('${plural(interview.notes, 'note')}, ${plural(interview.artists, 'artist')}'),
+                    : Text(
+                        '${plural(interview.notes, 'note')}, ${plural(interview.artists, 'artist')}',
+                      ),
               )
             else
               ListTile(
@@ -506,7 +520,9 @@ class _SpotifyWaitingCard extends StatelessWidget {
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.record_voice_over_outlined),
                 title: const Text('Tell the DJ about your taste'),
-                subtitle: const Text('Five quick questions so the first mixes have something to go on.'),
+                subtitle: const Text(
+                  'Five quick questions so the first mixes have something to go on.',
+                ),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: onOpenInterview,
               ),

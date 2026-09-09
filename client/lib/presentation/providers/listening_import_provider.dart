@@ -1,3 +1,4 @@
+import '../../import/collection_review.dart';
 // The import flow's state machine: pick a ZIP, inspect it, show the
 // inventory, upload, and land on done / partial / failed / cancelled. Same
 // auth-transition rules as library_sync_provider.dart: user-scoped, the
@@ -24,10 +25,13 @@ final listeningImportServiceProvider = Provider<ListeningImportService>(
 /// Builds the content-free report for a failed file (names, sizes, counts).
 typedef ExportDiagnoser = Future<ExportDiagnostics> Function(String path);
 
-final exportDiagnoserProvider = Provider<ExportDiagnoser>((ref) => diagnoseExportFile);
+final exportDiagnoserProvider = Provider<ExportDiagnoser>(
+  (ref) => diagnoseExportFile,
+);
 
 /// The file names an export must carry, as the failure copy lists them.
-const String expectedExportFiles = 'Streaming_History_Audio_*.json, YourLibrary.json, Playlist*.json';
+const String expectedExportFiles =
+    'Streaming_History_Audio_*.json, YourLibrary.json, Playlist*.json';
 
 sealed class ImportFlowState {
   const ImportFlowState();
@@ -36,9 +40,13 @@ sealed class ImportFlowState {
   /// underway: re-entry from Home or the sources screen shows it where it
   /// got to rather than starting over (which would cancel it).
   bool get inProgress => switch (this) {
-        ImportInspecting() || ImportInventory() || ImportUploading() => true,
-        ImportIdle() || ImportDone() || ImportPartial() || ImportFailed() || ImportFlowCancelled() => false,
-      };
+    ImportInspecting() || ImportInventory() || ImportUploading() => true,
+    ImportIdle() ||
+    ImportDone() ||
+    ImportPartial() ||
+    ImportFailed() ||
+    ImportFlowCancelled() => false,
+  };
 }
 
 class ImportIdle extends ImportFlowState {
@@ -46,8 +54,10 @@ class ImportIdle extends ImportFlowState {
 }
 
 class ImportInspecting extends ImportFlowState {
-  const ImportInspecting(this.archive);
+  const ImportInspecting(this.archive, {this.file, this.progress});
   final PickedArchive archive;
+  final String? file;
+  final double? progress;
 }
 
 class ImportInventory extends ImportFlowState {
@@ -69,14 +79,16 @@ class ImportInventory extends ImportFlowState {
   /// The zone local days are computed in (shown as "Local days in …").
   String get timeZone => preview.timeZone;
 
-  ImportOptions get options =>
-      ImportOptions(timeZone: timeZone, includePrivateSessions: includePrivateSessions);
+  ImportOptions get options => ImportOptions(
+    timeZone: timeZone,
+    includePrivateSessions: includePrivateSessions,
+  );
 
   ImportInventory withPrivateSessions(bool include) => ImportInventory(
-        archive: archive,
-        preview: preview,
-        includePrivateSessions: include,
-      );
+    archive: archive,
+    preview: preview,
+    includePrivateSessions: include,
+  );
 }
 
 class ImportUploading extends ImportFlowState {
@@ -150,6 +162,7 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
   /// the app made of the listener's whole export — identity and payment
   /// files included — so the copy is deleted the moment the run is over.
   PickedArchive? _handedOver;
+  PickedArchive? _temporaryArchive;
 
   @override
   ImportFlowState build() {
@@ -157,9 +170,16 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
     // and that run's cancelled state must not land on the fresh idle, nor
     // its refresh reach the server for a listener who has signed out.
     _generation++;
-    ref.watch(authProvider); // user-scoped: reset to idle on every auth transition
+    ref.watch(
+      authProvider,
+    ); // user-scoped: reset to idle on every auth transition
     final service = ref.watch(listeningImportServiceProvider);
     ref.onDispose(service.cancel);
+    ref.onDispose(() {
+      final archive = _temporaryArchive;
+      _temporaryArchive = null;
+      if (archive != null) unawaited(archive.discardTemporaryCopy());
+    });
     _service = service;
     return const ImportIdle();
   }
@@ -181,7 +201,11 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
       );
       return;
     }
-    if (archive == null || !ref.mounted) return;
+    if (archive == null) return;
+    if (!ref.mounted) {
+      await archive.discardTemporaryCopy();
+      return;
+    }
     await inspect(archive);
   }
 
@@ -190,22 +214,53 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
   /// diagnostics, before anything is uploaded.
   Future<void> inspect(PickedArchive archive, {bool handedOver = false}) async {
     if (state is ImportUploading) return;
+    final previous = _temporaryArchive;
+    if (previous != null && previous.path != archive.path) {
+      unawaited(previous.discardTemporaryCopy());
+    }
+    _temporaryArchive = archive.temporaryDirectory == null ? null : archive;
     final generation = ++_generation;
     _handedOver = handedOver ? archive : null;
     state = ImportInspecting(archive);
     try {
       final timeZone = await ref.read(deviceTimeZoneProvider)();
       if (!_current(generation)) return;
-      final preview = await _service.inspect(archive.path, timeZone: timeZone);
+      final preview = await _service.inspect(
+        archive.path,
+        timeZone: timeZone,
+        onProgress: (stage, file, completed, total) {
+          if (_current(generation)) {
+            state = ImportInspecting(
+              archive,
+              file: file,
+              progress: total > 0 ? (completed / total).clamp(0.0, 1.0) : null,
+            );
+          }
+        },
+      );
       if (!_current(generation)) return;
-      state = ImportInventory(archive: archive, preview: preview, includePrivateSessions: false);
+      state = ImportInventory(
+        archive: archive,
+        preview: preview,
+        includePrivateSessions: false,
+      );
     } on ImportCancelled {
       if (_current(generation)) _settle(const ImportFlowCancelled());
     } on UnreadableExportException catch (error) {
-      await _failUnreadable(generation, archive, error.inventory.package, error.file);
+      await _failUnreadable(
+        generation,
+        archive,
+        error.inventory.package,
+        error.file,
+      );
     } catch (error) {
       if (kDebugMode) debugPrint('import inspect failed: ${error.runtimeType}');
-      await _fail(generation, archive, "Couldn't read this file. Try another file.", diagnose: true);
+      await _fail(
+        generation,
+        archive,
+        "Couldn't read this file. Try another file.",
+        diagnose: true,
+      );
     }
   }
 
@@ -216,6 +271,17 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
     if (current is! ImportInventory) return;
     if (current.inventory.package != ExportPackage.spotifyExtended) return;
     state = current.withPrivateSessions(include);
+  }
+
+  void setSelection(CollectionSelection selection) {
+    final current = state;
+    if (current is ImportInventory) {
+      state = ImportInventory(
+        archive: current.archive,
+        preview: current.preview.withSelection(selection),
+        includePrivateSessions: current.includePrivateSessions,
+      );
+    }
   }
 
   Future<void> upload() async {
@@ -230,10 +296,19 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
   Future<void> retryPlaylists() async {
     final current = state;
     if (current is! ImportPartial) return;
+    final error = current.result.playlistError;
+    if (error is ApiException && error.statusCode == 409) {
+      await inspect(current.archive);
+      return;
+    }
     await _upload(current.archive, current.options, current.preview);
   }
 
-  Future<void> _upload(PickedArchive archive, ImportOptions options, ImportPreview? preview) async {
+  Future<void> _upload(
+    PickedArchive archive,
+    ImportOptions options,
+    ImportPreview? preview,
+  ) async {
     final generation = ++_generation;
     state = ImportUploading(archive, 0);
     try {
@@ -258,18 +333,31 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
       if (!_current(generation)) return;
       _settle(const ImportFlowCancelled());
     } on UnreadableExportException catch (error) {
-      await _failUnreadable(generation, archive, error.inventory.package, error.file);
+      await _failUnreadable(
+        generation,
+        archive,
+        error.inventory.package,
+        error.file,
+      );
     } on NetworkException {
-      await _fail(generation, archive, "Couldn't reach mixtape. Check your connection and try again.");
+      await _fail(
+        generation,
+        archive,
+        "Couldn't reach mixtape. Check your connection and try again.",
+      );
     } on ApiException catch (error) {
       final message = switch (ListeningApiErrorCode.of(error)) {
         ListeningApiErrorCode.syncConflict =>
-          'Another import is still open. Wait a moment and try again.',
+          'The collection changed after your review. We kept the current version. Review again before replacing it.',
         _ => 'Something went wrong on our end. Try again.',
       };
       await _fail(generation, archive, message);
     } on ListeningImportProtocolException {
-      await _fail(generation, archive, "The server's counts didn't match this export. Try again.");
+      await _fail(
+        generation,
+        archive,
+        "The server's counts didn't match this export. Try again.",
+      );
     } catch (error) {
       if (kDebugMode) debugPrint('import failed: ${error.runtimeType}');
       await _fail(generation, archive, 'Import failed. Try again.');
@@ -297,6 +385,9 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
   void reset() {
     _generation++;
     _service.cancel();
+    final archive = _temporaryArchive;
+    _temporaryArchive = null;
+    if (archive != null) unawaited(archive.discardTemporaryCopy());
     _settle(const ImportIdle());
   }
 
@@ -307,12 +398,14 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
   void handOverFailed(String name) {
     if (state.inProgress) return;
     _generation++;
-    _settle(ImportFailed(
-      archive: null,
-      message: "$name couldn't be read, so nothing was imported.",
-      diagnostics: null,
-      unreadable: true,
-    ));
+    _settle(
+      ImportFailed(
+        archive: null,
+        message: "$name couldn't be read, so nothing was imported.",
+        diagnostics: null,
+        unreadable: true,
+      ),
+    );
   }
 
   /// Lands the flow where nothing follows from, and the copy of a
@@ -343,8 +436,8 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
     final message = file != null
         ? "$file couldn't be read, so nothing was uploaded."
         : package == null
-            ? "This doesn't look like a Spotify export: none of the expected files are in the ZIP."
-            : "This file isn't a ZIP archive Mixtape can open.";
+        ? "This doesn't look like a Spotify export: none of the expected files are in the ZIP."
+        : "This file isn't a ZIP archive Mixtape can open.";
     return _fail(generation, archive, message, diagnose: true);
   }
 
@@ -379,12 +472,14 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
     if (!_current(generation)) return;
     // The report is built from the file, so the copy only goes once it has
     // been read for the last time.
-    _settle(ImportFailed(
-      archive: archive,
-      message: message,
-      diagnostics: diagnostics,
-      unreadable: true,
-    ));
+    _settle(
+      ImportFailed(
+        archive: archive,
+        message: message,
+        diagnostics: diagnostics,
+        unreadable: true,
+      ),
+    );
   }
 
   Future<void> _refreshOnboarding() async {
@@ -394,4 +489,6 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
 }
 
 final listeningImportProvider =
-    NotifierProvider<ListeningImportNotifier, ImportFlowState>(ListeningImportNotifier.new);
+    NotifierProvider<ListeningImportNotifier, ImportFlowState>(
+      ListeningImportNotifier.new,
+    );

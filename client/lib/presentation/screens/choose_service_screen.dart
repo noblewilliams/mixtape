@@ -40,7 +40,9 @@ class _ServiceGateState extends ConsumerState<ServiceGate> {
   /// onboarding state.
   static _GateStep? _resolve(AsyncValue<OnboardingState> onboarding) {
     if (onboarding.hasValue) {
-      return onboarding.value!.chosenService == null ? _GateStep.choose : _GateStep.home;
+      return onboarding.value!.chosenService == null
+          ? _GateStep.choose
+          : _GateStep.home;
     }
     if (onboarding.hasError) return _GateStep.home;
     return null;
@@ -60,6 +62,11 @@ class _ServiceGateState extends ConsumerState<ServiceGate> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen(onboardingProvider, (previous, next) {
+      if (_step == _GateStep.request && next.value?.importCompletedAt != null) {
+        setState(() => _step = _GateStep.home);
+      }
+    });
     if (_step == _GateStep.pending) {
       final resolved = _resolve(ref.watch(onboardingProvider).unwrapPrevious());
       if (resolved == null) {
@@ -69,10 +76,13 @@ class _ServiceGateState extends ConsumerState<ServiceGate> {
       _step = resolved;
     }
     return switch (_step) {
-      _GateStep.choose => ChooseServiceScreen(onApple: _chooseApple, onSpotify: _chooseSpotify),
+      _GateStep.choose => ChooseServiceScreen(
+        onApple: _chooseApple,
+        onSpotify: _chooseSpotify,
+      ),
       _GateStep.request => SpotifyRequestScreen(
-          onDone: () => setState(() => _step = _GateStep.home),
-        ),
+        onDone: () => setState(() => _step = _GateStep.home),
+      ),
       _GateStep.pending || _GateStep.home => const HomeScreen(),
     };
   }
@@ -81,7 +91,11 @@ class _ServiceGateState extends ConsumerState<ServiceGate> {
 /// "Which do you use?" — Apple Music records nothing (the existing library
 /// sync from Home is the Apple path); Spotify starts the request flow.
 class ChooseServiceScreen extends StatelessWidget {
-  const ChooseServiceScreen({super.key, required this.onApple, required this.onSpotify});
+  const ChooseServiceScreen({
+    super.key,
+    required this.onApple,
+    required this.onSpotify,
+  });
 
   final VoidCallback onApple;
   final VoidCallback onSpotify;

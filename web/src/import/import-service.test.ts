@@ -21,6 +21,7 @@ const playlistSummary = { playlists: 0, entries: 0, resolvedEntries: 0, unresolv
 function setup(parser: ImportParser = directParser) {
   const calls: string[] = []
   const mocks = {
+    getSpotifyCollectionReview:vi.fn(async()=>({library:{ids:[],fingerprint:'0'.repeat(64)},playlists:[]})),
     beginListeningImport: vi.fn<MixtapeApi['beginListeningImport']>(async () => {
       calls.push('begin-import')
       return { importId: 'import-1', expiresAt: 1 }

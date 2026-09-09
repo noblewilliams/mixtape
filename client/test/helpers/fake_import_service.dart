@@ -16,10 +16,10 @@ import 'fake_listening_api.dart';
 /// and [fail]. No isolate, no network.
 class FakeImportService extends ListeningImportService {
   FakeImportService({FakeListeningApi? api})
-      : super(
-          api: api ?? FakeListeningApi(),
-          parser: (_, _) => throw UnimplementedError('parser'),
-        );
+    : super(
+        api: api ?? FakeListeningApi(),
+        parser: (_, _) => throw UnimplementedError('parser'),
+      );
 
   ImportPreview preview = extendedPreview;
   Object? inspectError;
@@ -45,7 +45,11 @@ class FakeImportService extends ListeningImportService {
   bool get running => _run != null && !_run!.isCompleted;
 
   @override
-  Future<ImportPreview> inspect(String path, {required String timeZone}) {
+  Future<ImportPreview> inspect(
+    String path, {
+    required String timeZone,
+    ParseProgress? onProgress,
+  }) {
     inspected.add(path);
     inspectedZones.add(timeZone);
     final error = inspectError;
@@ -68,7 +72,9 @@ class FakeImportService extends ListeningImportService {
     void Function(double progress)? onProgress,
   }) {
     final held = _cancelled;
-    if (held == null || held.isCompleted) return _start(path, options, preview, onProgress);
+    if (held == null || held.isCompleted) {
+      return _start(path, options, preview, onProgress);
+    }
     // The service's contract: a call inside the cancel window waits for the
     // cancelled run to settle and then starts fresh, never joining it.
     return held.future
@@ -107,7 +113,9 @@ class FakeImportService extends ListeningImportService {
   void cancel() {
     cancels++;
     final inspect = _inspect;
-    if (inspect != null && !inspect.isCompleted) inspect.completeError(ImportCancelled());
+    if (inspect != null && !inspect.isCompleted) {
+      inspect.completeError(ImportCancelled());
+    }
     final run = _run;
     if (run == null || run.isCompleted) return;
     if (holdCancel) {
@@ -125,7 +133,7 @@ class FakeImportService extends ListeningImportService {
 /// is kept: a hand-over is delivered exactly once, whichever path carries it.
 class FakeOpenedArchiveSource implements OpenedArchiveSource {
   FakeOpenedArchiveSource({PickedArchive? pending})
-      : pending = pending == null ? null : handed(pending);
+    : pending = pending == null ? null : handed(pending);
 
   HandedArchive? pending;
   int takes = 0;
@@ -138,7 +146,8 @@ class FakeOpenedArchiveSource implements OpenedArchiveSource {
   bool holdPending = false;
   Completer<void>? _held;
 
-  final StreamController<HandedArchive> _opened = StreamController<HandedArchive>.broadcast();
+  final StreamController<HandedArchive> _opened =
+      StreamController<HandedArchive>.broadcast();
   HandedArchive? _delivered;
 
   @override
@@ -237,21 +246,25 @@ const extendedInventory = ExportInventory(
   package: ExportPackage.spotifyExtended,
   read: [
     InventoryReadFile(
-      path: 'Spotify Extended Streaming History/Streaming_History_Audio_2018-2020_0.json',
+      path:
+          'Spotify Extended Streaming History/Streaming_History_Audio_2018-2020_0.json',
       rows: 24110,
     ),
     InventoryReadFile(
-      path: 'Spotify Extended Streaming History/Streaming_History_Audio_2021-2023_1.json',
+      path:
+          'Spotify Extended Streaming History/Streaming_History_Audio_2021-2023_1.json',
       rows: 30001,
     ),
   ],
   ignored: [
     InventoryIgnoredFile(
-      path: 'Spotify Extended Streaming History/Streaming_History_Video_2024_0.json',
+      path:
+          'Spotify Extended Streaming History/Streaming_History_Video_2024_0.json',
       bytes: 51200,
     ),
     InventoryIgnoredFile(
-      path: 'Spotify Extended Streaming History/ReadMeFirst_ExtendedStreamingHistory.pdf',
+      path:
+          'Spotify Extended Streaming History/ReadMeFirst_ExtendedStreamingHistory.pdf',
       bytes: 204800,
     ),
   ],
@@ -264,7 +277,10 @@ const accountInventory = ExportInventory(
     InventoryReadFile(path: 'Spotify Account Data/Playlist1.json', rows: 12),
   ],
   ignored: [
-    InventoryIgnoredFile(path: 'Spotify Account Data/Identity.json', bytes: 2068),
+    InventoryIgnoredFile(
+      path: 'Spotify Account Data/Identity.json',
+      bytes: 2068,
+    ),
   ],
 );
 
@@ -273,11 +289,13 @@ const brokenInventory = ExportInventory(
   package: ExportPackage.spotifyExtended,
   read: [
     InventoryReadFile(
-      path: 'Spotify Extended Streaming History/Streaming_History_Audio_2018-2020_0.json',
+      path:
+          'Spotify Extended Streaming History/Streaming_History_Audio_2018-2020_0.json',
       rows: 24110,
     ),
     InventoryReadFile(
-      path: 'Spotify Extended Streaming History/Streaming_History_Audio_2021-2023_1.json',
+      path:
+          'Spotify Extended Streaming History/Streaming_History_Audio_2021-2023_1.json',
       rows: null,
     ),
   ],
@@ -304,42 +322,41 @@ ImportPreview extendedPreviewWith({
   int localFiles = 3,
   int privatePlays = 5,
   String timeZone = 'Africa/Lagos',
-}) =>
-    ImportPreview(
-      inventory: extendedInventory,
-      snapshot: ListeningExportSnapshot(
-        package: ExportPackage.spotifyExtended,
-        timeZone: timeZone,
-        country: 'NG',
-        tracks: _tracks(tracks),
-        days: [
-          for (var i = 0; i < days; i++)
-            SnapshotDay(
-              platformId: 'track${(i % 500).toString().padLeft(18, '0')}',
-              day: '2020-01-${(1 + i ~/ 500).toString().padLeft(2, '0')}',
-              plays: 1,
-              skips: 0,
-              completes: 1,
-              msPlayed: 30000,
-              hoursMask: 1,
-            ),
-        ],
-        library: const [],
-        artists: const [],
-        playlists: const [],
-        unresolved: SnapshotUnresolved(rows: localFiles, plays: 0),
-        ledgerFrom: ledgerFrom,
-        ledgerTo: ledgerTo,
-      ),
-      stats: ExportStats(
-        podcastOrAudiobook: podcasts,
-        localFile: localFiles,
-        privateSession: privatePlays + 2,
-        badTimestamp: 1,
-        privatePlays: privatePlays,
-      ),
-      options: ImportOptions(timeZone: timeZone),
-    );
+}) => ImportPreview(
+  inventory: extendedInventory,
+  snapshot: ListeningExportSnapshot(
+    package: ExportPackage.spotifyExtended,
+    timeZone: timeZone,
+    country: 'NG',
+    tracks: _tracks(tracks),
+    days: [
+      for (var i = 0; i < days; i++)
+        SnapshotDay(
+          platformId: 'track${(i % 500).toString().padLeft(18, '0')}',
+          day: '2020-01-${(1 + i ~/ 500).toString().padLeft(2, '0')}',
+          plays: 1,
+          skips: 0,
+          completes: 1,
+          msPlayed: 30000,
+          hoursMask: 1,
+        ),
+    ],
+    library: const [],
+    artists: const [],
+    playlists: const [],
+    unresolved: SnapshotUnresolved(rows: localFiles, plays: 0),
+    ledgerFrom: ledgerFrom,
+    ledgerTo: ledgerTo,
+  ),
+  stats: ExportStats(
+    podcastOrAudiobook: podcasts,
+    localFile: localFiles,
+    privateSession: privatePlays + 2,
+    badTimestamp: 1,
+    privatePlays: privatePlays,
+  ),
+  options: ImportOptions(timeZone: timeZone),
+);
 
 /// A parse of the account package: 226 tracks named across 214 liked songs,
 /// 37 followed artists, and 12 playlists; nothing skipped.
@@ -357,7 +374,10 @@ final accountPreview = ImportPreview(
     ],
     artists: [
       for (var i = 0; i < 37; i++)
-        SnapshotArtist(name: 'Artist ${i.toString().padLeft(2, '0')}', spotifyId: null),
+        SnapshotArtist(
+          name: 'Artist ${i.toString().padLeft(2, '0')}',
+          spotifyId: null,
+        ),
     ],
     playlists: [
       for (var i = 0; i < 12; i++)
@@ -379,27 +399,29 @@ final accountPreview = ImportPreview(
 );
 
 List<SnapshotTrack> _tracks(int count) => [
-      for (var i = 0; i < count; i++)
-        SnapshotTrack(
-          platformId: 'track${i.toString().padLeft(18, '0')}',
-          title: 'T$i',
-          artist: 'A',
-          album: null,
-          durationMs: null,
-        ),
-    ];
+  for (var i = 0; i < count; i++)
+    SnapshotTrack(
+      platformId: 'track${i.toString().padLeft(18, '0')}',
+      title: 'T$i',
+      artist: 'A',
+      album: null,
+      durationMs: null,
+    ),
+];
 
 const brokenDiagnostics = ExportDiagnostics(
   source: 'spotify_export',
   files: [
     DiagnosticsFile(
-      path: 'Spotify Extended Streaming History/Streaming_History_Audio_2018-2020_0.json',
+      path:
+          'Spotify Extended Streaming History/Streaming_History_Audio_2018-2020_0.json',
       bytes: 12478361,
       rows: 24110,
       headers: ['ts', 'ms_played', 'spotify_track_uri'],
     ),
     DiagnosticsFile(
-      path: 'Spotify Extended Streaming History/Streaming_History_Audio_2021-2023_1.json',
+      path:
+          'Spotify Extended Streaming History/Streaming_History_Audio_2021-2023_1.json',
       bytes: 12688000,
       rows: null,
       headers: null,
@@ -417,28 +439,28 @@ ListeningImportSummary importSummary({
   int unresolvedPlays = 3,
   String? ledgerFrom = '2018-03-02',
   String? ledgerTo = '2026-08-30',
-}) =>
-    ListeningImportSummary(
-      tracks: tracks,
-      days: days,
-      libraryTracks: libraryTracks,
-      artists: artists,
-      unresolvedRows: unresolvedRows,
-      unresolvedPlays: unresolvedPlays,
-      ledgerFrom: ledgerFrom,
-      ledgerTo: ledgerTo,
-      likedRemoved: 0,
-      likedRemovalSkipped: false,
-    );
+}) => ListeningImportSummary(
+  tracks: tracks,
+  days: days,
+  libraryTracks: libraryTracks,
+  artists: artists,
+  unresolvedRows: unresolvedRows,
+  unresolvedPlays: unresolvedPlays,
+  ledgerFrom: ledgerFrom,
+  ledgerTo: ledgerTo,
+  likedRemoved: 0,
+  likedRemovalSkipped: false,
+);
 
 ListeningImportResult extendedResult() => ListeningImportResult(
-      inventory: extendedInventory,
-      summary: importSummary(),
-      playlistSummary: null,
-      playlistError: null,
-    );
+  inventory: extendedInventory,
+  summary: importSummary(),
+  playlistSummary: null,
+  playlistError: null,
+);
 
-ListeningImportResult accountResult({Object? playlistError}) => ListeningImportResult(
+ListeningImportResult accountResult({Object? playlistError}) =>
+    ListeningImportResult(
       inventory: accountInventory,
       summary: importSummary(
         tracks: 226,

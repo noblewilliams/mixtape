@@ -60,6 +60,7 @@ enum ListeningApiErrorCode {
 /// run carries (a type the package lacks must be expected as zero).
 class BeginListeningImport {
   const BeginListeningImport({
+    this.libraryReview,
     this.source = 'spotify_export',
     required this.package,
     required this.timeZone,
@@ -72,6 +73,7 @@ class BeginListeningImport {
     required this.unresolvedPlays,
   });
 
+  final Map<String, Object?>? libraryReview;
   final String source;
   final String package;
   final String timeZone;
@@ -84,17 +86,18 @@ class BeginListeningImport {
   final int unresolvedPlays;
 
   Map<String, Object?> toJson() => {
-        'source': source,
-        'package': package,
-        'timeZone': timeZone,
-        'country': country,
-        'expectedTracks': expectedTracks,
-        'expectedDays': expectedDays,
-        'expectedLibraryTracks': expectedLibraryTracks,
-        'expectedArtists': expectedArtists,
-        'unresolvedRows': unresolvedRows,
-        'unresolvedPlays': unresolvedPlays,
-      };
+    if (libraryReview != null) 'libraryReview': libraryReview,
+    'source': source,
+    'package': package,
+    'timeZone': timeZone,
+    'country': country,
+    'expectedTracks': expectedTracks,
+    'expectedDays': expectedDays,
+    'expectedLibraryTracks': expectedLibraryTracks,
+    'expectedArtists': expectedArtists,
+    'unresolvedRows': unresolvedRows,
+    'unresolvedPlays': unresolvedPlays,
+  };
 }
 
 class ListeningImportRun {
@@ -103,7 +106,8 @@ class ListeningImportRun {
   final String importId;
   final DateTime expiresAt;
 
-  factory ListeningImportRun.fromJson(Map<String, dynamic> json) => ListeningImportRun(
+  factory ListeningImportRun.fromJson(Map<String, dynamic> json) =>
+      ListeningImportRun(
         importId: readString(json, 'importId'),
         expiresAt: readEpochMillis(json, 'expiresAt'),
       );
@@ -140,7 +144,8 @@ class ListeningImportSummary {
   final int likedRemoved;
   final bool likedRemovalSkipped;
 
-  factory ListeningImportSummary.fromJson(Map<String, dynamic> json) => ListeningImportSummary(
+  factory ListeningImportSummary.fromJson(Map<String, dynamic> json) =>
+      ListeningImportSummary(
         tracks: readNonnegativeInt(json, 'tracks'),
         days: readNonnegativeInt(json, 'days'),
         libraryTracks: readNonnegativeInt(json, 'libraryTracks'),
@@ -165,7 +170,8 @@ class DeleteSourceResult {
   final int deletedTracks;
   final int unlibraried;
 
-  factory DeleteSourceResult.fromJson(Map<String, dynamic> json) => DeleteSourceResult(
+  factory DeleteSourceResult.fromJson(Map<String, dynamic> json) =>
+      DeleteSourceResult(
         deletedDays: readNonnegativeInt(json, 'deletedDays'),
         deletedTracks: readNonnegativeInt(json, 'deletedTracks'),
         unlibraried: readNonnegativeInt(json, 'unlibraried'),
@@ -178,7 +184,8 @@ class PlaylistSyncRun {
   final String syncId;
   final DateTime expiresAt;
 
-  factory PlaylistSyncRun.fromJson(Map<String, dynamic> json) => PlaylistSyncRun(
+  factory PlaylistSyncRun.fromJson(Map<String, dynamic> json) =>
+      PlaylistSyncRun(
         syncId: readString(json, 'syncId'),
         expiresAt: readEpochMillis(json, 'expiresAt'),
       );
@@ -197,7 +204,8 @@ class PlaylistSyncSummary {
   final int resolvedEntries;
   final int unresolvedEntries;
 
-  factory PlaylistSyncSummary.fromJson(Map<String, dynamic> json) => PlaylistSyncSummary(
+  factory PlaylistSyncSummary.fromJson(Map<String, dynamic> json) =>
+      PlaylistSyncSummary(
         playlists: readNonnegativeInt(json, 'playlists'),
         entries: readNonnegativeInt(json, 'entries'),
         resolvedEntries: readNonnegativeInt(json, 'resolvedEntries'),
@@ -231,13 +239,15 @@ class MusicSource {
   final List<String> packages;
 
   factory MusicSource.fromJson(Map<String, dynamic> json) => MusicSource(
-        source: readString(json, 'source'),
-        connectedAt: readDate(json, 'connectedAt'),
-        lastImportedAt: readOptionalDate(json, 'lastImportedAt'),
-        ledgerFrom: readOptionalString(json, 'ledgerFrom'),
-        ledgerTo: readOptionalString(json, 'ledgerTo'),
-        packages: json['packages'] == null ? const [] : readStringList(json, 'packages'),
-      );
+    source: readString(json, 'source'),
+    connectedAt: readDate(json, 'connectedAt'),
+    lastImportedAt: readOptionalDate(json, 'lastImportedAt'),
+    ledgerFrom: readOptionalString(json, 'ledgerFrom'),
+    ledgerTo: readOptionalString(json, 'ledgerTo'),
+    packages: json['packages'] == null
+        ? const []
+        : readStringList(json, 'packages'),
+  );
 }
 
 /// What the interview produced, for the "Interview done" tile.
@@ -247,7 +257,8 @@ class InterviewCounts {
   final int artists;
   final int notes;
 
-  factory InterviewCounts.fromJson(Map<String, dynamic> json) => InterviewCounts(
+  factory InterviewCounts.fromJson(Map<String, dynamic> json) =>
+      InterviewCounts(
         artists: readNonnegativeInt(json, 'artists'),
         notes: readNonnegativeInt(json, 'notes'),
       );
@@ -294,7 +305,8 @@ class OnboardingState {
             s.lastImportedAt != null,
       );
 
-  factory OnboardingState.fromJson(Map<String, dynamic> json) => OnboardingState(
+  factory OnboardingState.fromJson(Map<String, dynamic> json) =>
+      OnboardingState(
         userId: readString(json, 'userId'),
         sources: musicSourcesFromJson(json['sources']),
         hasLibrary: readBool(json, 'hasLibrary'),
@@ -302,24 +314,27 @@ class OnboardingState {
         markedRequestedAt: readOptionalDate(json, 'markedRequestedAt'),
         interviewCompletedAt: readOptionalDate(json, 'interviewCompletedAt'),
         importCompletedAt: readOptionalDate(json, 'importCompletedAt'),
-        interview: json['interview'] == null ? null : InterviewCounts.fromJson(asObject(json['interview'])),
+        interview: json['interview'] == null
+            ? null
+            : InterviewCounts.fromJson(asObject(json['interview'])),
       );
 
   /// This state with the device-local service choice overlaid.
   OnboardingState withChosenService(String service) => OnboardingState(
-        userId: userId,
-        sources: sources,
-        hasLibrary: hasLibrary,
-        chosenService: service,
-        markedRequestedAt: markedRequestedAt,
-        interviewCompletedAt: interviewCompletedAt,
-        importCompletedAt: importCompletedAt,
-        interview: interview,
-      );
+    userId: userId,
+    sources: sources,
+    hasLibrary: hasLibrary,
+    chosenService: service,
+    markedRequestedAt: markedRequestedAt,
+    interviewCompletedAt: interviewCompletedAt,
+    importCompletedAt: importCompletedAt,
+    interview: interview,
+  );
 }
 
-List<MusicSource> musicSourcesFromJson(Object? json) =>
-    asList(json).map((value) => MusicSource.fromJson(asObject(value))).toList(growable: false);
+List<MusicSource> musicSourcesFromJson(Object? json) => asList(
+  json,
+).map((value) => MusicSource.fromJson(asObject(value))).toList(growable: false);
 
 /// The funnel steps this client posts, in funnel order; the server records
 /// `interview_completed` itself.
@@ -353,13 +368,13 @@ class InterviewAnswers {
   final String era;
 
   Map<String, Object?> toJson(String surface) => {
-        'surface': surface,
-        'neverSkip': List<String>.of(neverSkip),
-        'playsMost': playsMost,
-        'listensWhen': listensWhen,
-        'neverWants': neverWants,
-        'era': era,
-      };
+    'surface': surface,
+    'neverSkip': List<String>.of(neverSkip),
+    'playsMost': playsMost,
+    'listensWhen': listensWhen,
+    'neverWants': neverWants,
+    'era': era,
+  };
 }
 
 class InterviewResult {
@@ -402,15 +417,16 @@ class ArtistSeed {
   final DateTime createdAt;
 
   factory ArtistSeed.fromJson(Map<String, dynamic> json) => ArtistSeed(
-        name: readString(json, 'name'),
-        spotifyId: readOptionalString(json, 'spotifyId'),
-        source: readString(json, 'source'),
-        createdAt: readDate(json, 'createdAt'),
-      );
+    name: readString(json, 'name'),
+    spotifyId: readOptionalString(json, 'spotifyId'),
+    source: readString(json, 'source'),
+    createdAt: readDate(json, 'createdAt'),
+  );
 }
 
-List<ArtistSeed> artistSeedsFromJson(Object? json) =>
-    asList(json).map((value) => ArtistSeed.fromJson(asObject(value))).toList(growable: false);
+List<ArtistSeed> artistSeedsFromJson(Object? json) => asList(
+  json,
+).map((value) => ArtistSeed.fromJson(asObject(value))).toList(growable: false);
 
 class SeedTrack {
   const SeedTrack({
@@ -428,12 +444,12 @@ class SeedTrack {
   final String? album;
 
   factory SeedTrack.fromJson(Map<String, dynamic> json) => SeedTrack(
-        trackId: readString(json, 'trackId'),
-        spotifyId: readOptionalString(json, 'spotifyId'),
-        title: readString(json, 'title'),
-        artist: readString(json, 'artist'),
-        album: readOptionalString(json, 'album'),
-      );
+    trackId: readString(json, 'trackId'),
+    spotifyId: readOptionalString(json, 'spotifyId'),
+    title: readString(json, 'title'),
+    artist: readString(json, 'artist'),
+    album: readOptionalString(json, 'album'),
+  );
 }
 
 class ResolvedSeedTrack {
@@ -449,7 +465,8 @@ class ResolvedSeedTrack {
   final String title;
   final String artist;
 
-  factory ResolvedSeedTrack.fromJson(Map<String, dynamic> json) => ResolvedSeedTrack(
+  factory ResolvedSeedTrack.fromJson(Map<String, dynamic> json) =>
+      ResolvedSeedTrack(
         spotifyId: readString(json, 'spotifyId'),
         trackId: readString(json, 'trackId'),
         title: readString(json, 'title'),
@@ -465,14 +482,17 @@ class SeedTracksResult {
   /// The pasted ids that did not become a track, in request order.
   final List<String> unresolved;
 
-  factory SeedTracksResult.fromJson(Map<String, dynamic> json) => SeedTracksResult(
+  factory SeedTracksResult.fromJson(Map<String, dynamic> json) =>
+      SeedTracksResult(
         resolved: asList(json['resolved'])
             .map((value) => ResolvedSeedTrack.fromJson(asObject(value)))
             .toList(growable: false),
-        unresolved: asList(json['unresolved']).map((value) {
-          if (value is! String) throw const ListeningModelException();
-          return value;
-        }).toList(growable: false),
+        unresolved: asList(json['unresolved'])
+            .map((value) {
+              if (value is! String) throw const ListeningModelException();
+              return value;
+            })
+            .toList(growable: false),
       );
 }
 
@@ -484,7 +504,8 @@ class DeleteSeedTrackResult {
   /// True when the user_tracks row itself went (nothing else kept it).
   final bool deleted;
 
-  factory DeleteSeedTrackResult.fromJson(Map<String, dynamic> json) => DeleteSeedTrackResult(
+  factory DeleteSeedTrackResult.fromJson(Map<String, dynamic> json) =>
+      DeleteSeedTrackResult(
         removed: readBool(json, 'removed'),
         deleted: readBool(json, 'deleted'),
       );
@@ -515,10 +536,13 @@ String? readOptionalString(Map<String, dynamic> json, String key) {
   return value;
 }
 
-List<String> readStringList(Map<String, dynamic> json, String key) => asList(json[key]).map((value) {
-      if (value is! String) throw const ListeningModelException();
-      return value;
-    }).toList(growable: false);
+List<String> readStringList(Map<String, dynamic> json, String key) =>
+    asList(json[key])
+        .map((value) {
+          if (value is! String) throw const ListeningModelException();
+          return value;
+        })
+        .toList(growable: false);
 
 bool readBool(Map<String, dynamic> json, String key) {
   final value = json[key];

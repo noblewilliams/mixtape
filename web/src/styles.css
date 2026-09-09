@@ -747,7 +747,6 @@ input:focus-visible {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   background: rgba(248, 247, 246, 0.62);
-  border-left: 1px solid rgba(255, 255, 255, 0.72);
   backdrop-filter: blur(30px) saturate(106%);
   overflow: hidden;
   animation: none;
@@ -3313,6 +3312,24 @@ input:focus-visible {
   align-items: center;
 }
 
+.btn.text-action {
+  width: auto;
+  flex: 0 0 auto;
+  min-width: 44px;
+  padding: 0 8px;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  box-shadow: none;
+  color: var(--plum);
+}
+
+.btn.text-action:hover:not(:disabled) {
+  background: transparent;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .note {
   margin: 10px 0 0;
   color: var(--muted);
@@ -4018,7 +4035,8 @@ button.mini:disabled {
   }
 
   .btn-row .btn {
-    width: 100%;
+    width: auto;
+    max-width: 100%;
     justify-content: center;
   }
 

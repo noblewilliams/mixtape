@@ -1,3 +1,4 @@
+import { spotifyLibraryReview } from '../../src/listening/collection-review'
 import { and, eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import {
@@ -711,4 +712,38 @@ describe('ListeningImportStore', () => {
       .toHaveLength(1)
     expect(await db.select().from(listeningImportTracks)).toHaveLength(2)
   })
+})
+
+it('adds quick-import likes without replacing previous saved music or listening history', async () => {
+  const db = await createTestDb()
+  await db.insert(user).values({id:'quick-user',name:'Test',email:'quick@example.test',createdAt:now,updatedAt:now})
+  const store = createListeningImportStore(db,{now: () => now})
+  const original = await store.begin('quick-user', accountBegin({expectedTracks:1,expectedLibraryTracks:1,expectedArtists:0}))
+  await store.putTracks('quick-user',original.importId,[track()])
+  await store.putLibrary('quick-user',original.importId,[libraryRow()])
+  await store.complete('quick-user',original.importId)
+  const quick = await store.begin('quick-user', begin({package:'spotify_exportify',expectedTracks:1,expectedDays:0,expectedLibraryTracks:1,libraryReview:{mode:'add'}}))
+  await store.putTracks('quick-user',quick.importId,[track({platformId:SPOTIFY_B})])
+  await store.putLibrary('quick-user',quick.importId,[libraryRow({platformId:SPOTIFY_B})])
+  await store.complete('quick-user',quick.importId)
+  const review = await spotifyLibraryReview(db,'quick-user')
+  expect(review.ids).toEqual([SPOTIFY_A,SPOTIFY_B].sort())
+  const stale = await store.begin('quick-user',begin({package:'spotify_exportify',expectedTracks:0,expectedDays:0,libraryReview:{mode:'replace',fingerprint:'f'.repeat(64)}}))
+  await expect(store.complete('quick-user',stale.importId)).rejects.toMatchObject({category:'conflict'})
+  expect((await spotifyLibraryReview(db,'quick-user')).ids).toEqual(review.ids)
+})
+
+it('keeps history after a quick import and refuses an unreviewed official account rollback',async()=>{
+ const db=await createTestDb();await seedUser(db,'quick-history')
+ const store=createListeningImportStore(db,{now:()=>now})
+ const history=await store.begin('quick-history',begin({expectedTracks:1,expectedDays:1}))
+ await store.putTracks('quick-history',history.importId,[track()]);await store.putDays('quick-history',history.importId,[day()]);
+ await store.complete('quick-history',history.importId)
+ const before=await db.select().from(userMusicSources)
+ const quick=await store.begin('quick-history',begin({package:'spotify_exportify',expectedTracks:1,expectedDays:0,libraryReview:{mode:'add'}}))
+ await store.putTracks('quick-history',quick.importId,[track({platformId:SPOTIFY_B})]);await store.complete('quick-history',quick.importId)
+ const after=await db.select().from(userMusicSources)
+ expect(after[0].ledgerFrom).toBe(before[0].ledgerFrom);expect(after[0].ledgerTo).toBe(before[0].ledgerTo)
+ const account=await store.begin('quick-history',accountBegin({expectedTracks:0,expectedLibraryTracks:0,expectedArtists:0}))
+ await expect(store.complete('quick-history',account.importId)).rejects.toMatchObject({category:'conflict'})
 })

@@ -1,0 +1,7 @@
+ALTER TABLE "listening_import_runs" DROP CONSTRAINT "listening_import_runs_package_check";--> statement-breakpoint
+ALTER TABLE "listening_import_runs" DROP CONSTRAINT "listening_import_runs_package_source_check";--> statement-breakpoint
+ALTER TABLE "listening_import_runs" ADD COLUMN "library_review" jsonb;--> statement-breakpoint
+ALTER TABLE "user_music_sources" ADD COLUMN "quick_imported_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "listening_import_runs" ADD CONSTRAINT "listening_import_runs_exportify_counts_check" CHECK ("listening_import_runs"."package" <> 'spotify_exportify' OR ("listening_import_runs"."expected_days" = 0 AND "listening_import_runs"."expected_artists" = 0));--> statement-breakpoint
+ALTER TABLE "listening_import_runs" ADD CONSTRAINT "listening_import_runs_package_check" CHECK ("listening_import_runs"."package" IN ('spotify_extended', 'spotify_account', 'spotify_exportify', 'apple_media'));--> statement-breakpoint
+ALTER TABLE "listening_import_runs" ADD CONSTRAINT "listening_import_runs_package_source_check" CHECK (("listening_import_runs"."source" = 'spotify_export' AND "listening_import_runs"."package" IN ('spotify_extended', 'spotify_account', 'spotify_exportify')) OR ("listening_import_runs"."source" = 'apple_export' AND "listening_import_runs"."package" = 'apple_media'));

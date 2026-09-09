@@ -382,3 +382,15 @@ describe('listening import routes', () => {
     expect(await completed.json()).toEqual({ error: 'not_found' })
   })
 })
+
+it('exposes collection review only to the signed-in listener and validates quick package coverage',async()=>{
+ const db=await createTestDb();await seedUser(db,'u1');await seedUser(db,'u2')
+ expect((await request(db,authFor(null),'/ingest/listening/spotify/review','GET')).status).toBe(401)
+ const review=await request(db,authFor('u1'),'/ingest/listening/spotify/review','GET')
+ expect(review.status).toBe(200)
+ expect(await review.json()).toMatchObject({library:{ids:[]},playlists:[],hasQuickImport:false})
+ const invalid=await request(db,authFor('u1'),'/ingest/listening/imports','POST',{...extendedBegin,package:'spotify_exportify',libraryReview:{mode:'add'}})
+ expect(invalid.status).toBe(400)
+ const valid=await request(db,authFor('u1'),'/ingest/listening/imports','POST',{...extendedBegin,package:'spotify_exportify',expectedDays:0,libraryReview:{mode:'add'}})
+ expect(valid.status).toBe(201)
+})

@@ -63,11 +63,11 @@ void main() {
 
   Finder sheet() => find.byType(ImportSheet);
 
-  testWidgets('idle: Choose a ZIP picks and inspects, then the inventory shows the file, the '
+  testWidgets('idle: Choose files picks and inspects, then the inventory shows the file, the '
       'package, the counts, the zone, the files, and the private toggle off', (tester) async {
     final c = container();
     await open(tester, c);
-    expect(find.text('Choose a ZIP'), findsOneWidget);
+    expect(find.text('Choose files'), findsOneWidget);
     expectInteractiveWidgetsKeyed(sheet());
 
     await tester.tap(find.byKey(const Key('import-pick')));
@@ -99,7 +99,7 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.text('Only these plays leave this device. Your account details, payments, and IP '
+      find.text('Only reviewed music leaves this device. Your account details, payments, and IP '
           'addresses are never read.'),
       findsOneWidget,
     );

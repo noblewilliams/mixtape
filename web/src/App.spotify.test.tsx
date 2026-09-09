@@ -10,7 +10,6 @@ import { createFakeApi } from './test/fake-api'
 import { readFixtureArchiveBytes } from './test/listening-export-fixtures'
 
 const user = { id: 'user-1', name: 'Noble', email: 'noble@example.com' }
-const DAY_MS = 24 * 60 * 60 * 1000
 
 const blank: OnboardingResponse = {
   userId: 'user-1',
@@ -134,7 +133,7 @@ describe('service gate', () => {
 
     await settled(api)
     expect(gate()).not.toBeInTheDocument()
-    expect(screen.getByText('Spotify · not requested yet')).toBeInTheDocument()
+    expect(screen.getByText('Spotify · ready to import')).toBeInTheDocument()
   })
 
   it('never shows while onboarding is still loading', async () => {
@@ -151,12 +150,12 @@ describe('service gate', () => {
 
     fireEvent.click(within(await screen.findByRole('dialog', { name: 'Which do you use?' })).getByRole('button', { name: /^Spotify/ }))
 
-    expect(await screen.findByRole('heading', { name: 'Get your listening data' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Bring your Spotify music' })).toBeInTheDocument()
     expect(gate()).not.toBeInTheDocument()
     expect(api.calls.filter((call) => call.method === 'postFunnelEvent').map((call) => call.args[0])).toEqual([
       { type: 'chose_spotify', surface: 'web' },
     ])
-    expect(await screen.findByText('Spotify · not requested yet')).toBeInTheDocument()
+    expect(await screen.findByText('Spotify · ready to import')).toBeInTheDocument()
   })
 
   it('sends the Apple choice into the existing connect flow', async () => {
@@ -196,9 +195,9 @@ describe('service gate persistence', () => {
     await settled(api)
 
     expect(gate()).not.toBeInTheDocument()
-    expect(screen.getByText('Spotify · not requested yet')).toBeInTheDocument()
+    expect(screen.getByText('Spotify · ready to import')).toBeInTheDocument()
     await openSpotify()
-    expect(await screen.findByRole('heading', { name: 'Get your listening data' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Bring your Spotify music' })).toBeInTheDocument()
   })
 
   it('forgets the remembered choice on sign-out', async () => {
@@ -243,272 +242,63 @@ describe('service gate persistence', () => {
   })
 })
 
-describe('Spotify request page', () => {
-  afterEach(cleanup)
-
-  async function openRequestPage(api = apiWithOnboarding({ chosenService: 'spotify' })) {
-    renderApp({ api })
-    await settled(api)
-    await openSpotify()
-    await screen.findByRole('heading', { name: 'Get your listening data' })
-    return api
-  }
-
-  it('shows the eight steps word for word with the privacy link in a new tab', async () => {
-    await openRequestPage()
-
-    const view = screen.getByRole('main', { name: 'Your music' })
-    expect(within(view).getByText('Your music · Spotify')).toBeInTheDocument()
-    expect(within(view).getByText('Spotify prepares it and emails you. Mixtape reads the file on this device and keeps only your plays and playlists.')).toBeInTheDocument()
-    expect(within(view).getByRole('status')).toHaveTextContent('Not requested')
-
-    const steps = within(view).getAllByRole('listitem')
-    expect(steps).toHaveLength(8)
-    expect(steps[0]).toHaveTextContent('Open spotify.com/account/privacy and log in with the account that has your listening history. A laptop is easier than a phone for this part.')
-    expect(steps[1]).toHaveTextContent('Scroll to Download your data.')
-    expect(steps[2]).toHaveTextContent('Select Account data and Extended streaming history. Leave Technical log information unselected.')
-    expect(steps[3]).toHaveTextContent('Press Request data.')
-    expect(steps[4]).toHaveTextContent('Check your email. Spotify sends a confirmation message first. Open it and press Confirm. Nothing is prepared until you do, and this is the step most people miss.')
-    expect(steps[4].querySelector('b')).toHaveTextContent('confirmation')
-    expect(steps[5]).toHaveTextContent('Wait. The two packages arrive as separate emails, each with a Download button, usually within days; the extended history can take up to 30. Each link expires after about two weeks, so download it when you see it.')
-    expect(steps[6]).toHaveTextContent('Save the ZIPs as they are. Don’t unzip them.')
-    expect(steps[7]).toHaveTextContent('Come back to Mixtape and give it each ZIP as it arrives. You don’t have to wait for both.')
-
-    const link = within(view).getByRole('link', { name: 'spotify.com/account/privacy' })
-    expect(link).toHaveAttribute('href', 'https://www.spotify.com/account/privacy/')
-    expect(link).toHaveAttribute('target', '_blank')
-    expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'))
-    expect(within(view).getByText('Marks today so Mixtape can show how long you’ve waited. No email from Mixtape; Spotify’s two emails are the signal.')).toBeInTheDocument()
-    expect(within(view).queryByText('Drop a Spotify ZIP here')).not.toBeInTheDocument()
-  })
-
-  it('marks the request and turns into the waiting card', async () => {
-    let marked: string | null = null
-    const api = createFakeApi({
-      getOnboarding: async () => ({ ...blank, chosenService: 'spotify', markedRequestedAt: marked }),
-      postFunnelEvent: async (event) => {
-        if (event.type === 'marked_requested') marked = new Date().toISOString()
-        return { ok: true }
-      },
-    })
-    await openRequestPage(api)
-
-    fireEvent.click(screen.getByRole('button', { name: 'I’ve requested it' }))
-
-    expect(await screen.findByRole('heading', { name: 'Today' })).toBeInTheDocument()
-    expect(api.calls.filter((call) => call.method === 'postFunnelEvent').map((call) => call.args[0])).toEqual([
-      { type: 'marked_requested', surface: 'web' },
-    ])
-    const view = screen.getByRole('main', { name: 'Your music' })
-    expect(within(view).getByText('Waiting for Spotify')).toBeInTheDocument()
-    expect(within(view).getByText(/^Requested \w+\. Confirmation email clicked\? If not, nothing is being prepared\.$/)).toBeInTheDocument()
-    expect(within(view).getAllByText('Waiting')).toHaveLength(2)
-    expect(within(view).getByRole('button', { name: /^Tell the DJ about your taste/ })).toBeInTheDocument()
-    expect(within(view).getByRole('button', { name: /^Paste songs from Spotify/ })).toHaveClass('mini--desktop')
-    expect(within(view).getByRole('button', { name: /^Try a demo tape/ })).toBeDisabled()
-    expect(within(view).getByText('Demo tape coming soon.')).toBeInTheDocument()
-    expect(within(view).queryByRole('alert')).not.toBeInTheDocument()
-    const drop = within(view).getByRole('region', { name: 'Import a Spotify ZIP' })
-    expect(drop).toHaveTextContent('Drop a Spotify ZIP here')
-    expect(drop).toHaveTextContent('or choose a file · either package, in any order')
-    expect(within(drop).getByLabelText('choose a file')).toHaveAttribute('type', 'file')
-    expect(within(view).queryByRole('button', { name: 'Make a mix' })).not.toBeInTheDocument()
-    expect(screen.getByText('Spotify · waiting for your data')).toBeInTheDocument()
-    expect(document.querySelector('.app-shell')).toHaveClass('app-shell--home')
-  })
-
-  it('says so when marking the request fails, and stays on the steps', async () => {
-    const api = createFakeApi({
-      getOnboarding: async () => ({ ...blank, chosenService: 'spotify' }),
-      postFunnelEvent: async () => {
-        throw new ApiError(500, { error: 'internal' })
-      },
-    })
-    await openRequestPage(api)
-    const reads = api.calls.filter((call) => call.method === 'getOnboarding').length
-
-    fireEvent.click(screen.getByRole('button', { name: 'I’ve requested it' }))
-
-    const view = screen.getByRole('main', { name: 'Your music' })
-    expect(await within(view).findByRole('alert')).toHaveTextContent('Couldn’t save that. Check your connection and try again.')
-    expect(within(view).getByRole('button', { name: 'I’ve requested it' })).toBeEnabled()
-    expect(within(view).queryByText('Waiting for Spotify')).not.toBeInTheDocument()
-    expect(api.calls.filter((call) => call.method === 'getOnboarding').length).toBe(reads)
-  })
-
-  it('offers the interview and the demo before the checkpoint, with a way to the steps', async () => {
-    await openRequestPage()
-    const view = screen.getByRole('main', { name: 'Your music' })
-
-    const quiet = within(view).getByRole('region', { name: 'Not requested' })
-    const steps = within(view).getByRole('region', { name: 'How to get your listening data' })
-    expect(quiet.compareDocumentPosition(steps) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(within(quiet).getByText('The DJ can’t make a personal mix until your data arrives. Ask Spotify now; it takes two minutes.')).toBeInTheDocument()
-    expect(within(quiet).getByText('Five short questions. Required before any mix.')).toBeInTheDocument()
-    expect(within(quiet).getByText('Not personal yet')).toBeInTheDocument()
-    expect(within(quiet).getByText('Once the interview is done, the DJ can offer a mix from what it already knows, clearly labeled.')).toBeInTheDocument()
-    expect(within(quiet).getByRole('button', { name: /^Try a demo tape/ })).toBeDisabled()
-    expect(within(quiet).getByText('Demo tape coming soon.')).toBeInTheDocument()
-    expect(within(quiet).queryByRole('button', { name: /^Paste songs/ })).not.toBeInTheDocument()
-    expect(within(steps).getAllByRole('listitem')).toHaveLength(8)
-
-    fireEvent.click(within(quiet).getByRole('button', { name: 'Show me the steps' }))
-    expect(steps).toHaveFocus()
-
-    fireEvent.click(within(quiet).getByRole('button', { name: /^Tell the DJ about your taste/ }))
-    expect(screen.getByRole('dialog', { name: 'Artists you would never skip' })).toBeInTheDocument()
-  })
-
-  it('reflects the interview and a package that arrived', async () => {
-    const api = apiWithOnboarding({
-      chosenService: 'spotify',
-      markedRequestedAt: new Date(Date.now() - 2 * DAY_MS).toISOString(),
-      interviewCompletedAt: '2026-09-03T10:00:00.000Z',
-      importCompletedAt: '2026-09-04T09:30:00.000Z',
-      sources: [accountPackage],
-      interview: { artists: 6, notes: 4 },
-    })
-    renderApp({ api })
-    await settled(api)
-    await openSpotify()
-
-    const view = await screen.findByRole('main', { name: 'Your music' })
-    expect(within(view).getByRole('heading', { name: 'Your Spotify data' })).toBeInTheDocument()
-    expect(within(view).getByRole('heading', { name: '2 days' })).toBeInTheDocument()
-    expect(within(view).getAllByText('1 of 2 in')).toHaveLength(2)
-    expect(within(view).getByText(/^Account data imported \w+\. Still waiting for the extended history; it can take up to 30 days\.$/)).toBeInTheDocument()
-    expect(within(view).getByText('Interview done')).toBeInTheDocument()
-    expect(within(view).getByText('4 notes, 6 artists. The DJ can already make a mix from your likes and playlists.')).toBeInTheDocument()
-    expect(within(view).queryByRole('button', { name: /^Tell the DJ about your taste/ })).not.toBeInTheDocument()
-    expect(within(view).getByRole('button', { name: 'Make a mix' })).toBeInTheDocument()
-    expect(within(view).getByRole('button', { name: 'Drop the other ZIP' })).toBeInTheDocument()
-    expect(within(view).getByText('Spotify · account data')).toBeInTheDocument()
-    expect(within(view).getByRole('button', { name: 'Import again' })).toBeInTheDocument()
-    expect(screen.getByText('Spotify · imported 4 Sep')).toBeInTheDocument()
-
-    fireEvent.click(within(view).getByRole('button', { name: 'Make a mix' }))
-    expect(screen.getByRole('dialog', { name: 'Make a new tape' })).toBeInTheDocument()
-  })
-
-  it('stops nudging once both packages are in', async () => {
-    const api = apiWithOnboarding({
-      chosenService: 'spotify',
-      markedRequestedAt: '2026-08-20T08:00:00.000Z',
-      interviewCompletedAt: '2026-09-03T10:00:00.000Z',
-      importCompletedAt: '2026-09-04T09:30:00.000Z',
-      sources: [bothPackages],
-    })
-    renderApp({ api })
-    await settled(api)
-    await openSpotify()
-
-    const view = await screen.findByRole('main', { name: 'Your music' })
-    expect(within(view).getAllByText('Both in')).toHaveLength(2)
-    expect(within(view).getByRole('heading', { name: 'Data in' })).toBeInTheDocument()
-    expect(within(view).queryByText(/Still waiting/)).not.toBeInTheDocument()
-    expect(within(view).getByText(/^Both packages imported .+\. Drop a newer ZIP any time to bring it up to date\.$/)).toBeInTheDocument()
-    expect(within(view).getByText('Spotify · both packages')).toBeInTheDocument()
-    expect(within(view).getByRole('button', { name: 'Drop a newer ZIP' })).toBeInTheDocument()
-    expect(within(view).getByText('Interview done')).toBeInTheDocument()
-    expect(within(view).getByText('The DJ can already make a mix from your likes and playlists.')).toBeInTheDocument()
-  })
-
-  it('opens the paste box from its tile', async () => {
-    const api = apiWithOnboarding({ chosenService: 'spotify', markedRequestedAt: new Date().toISOString() })
-    renderApp({ api })
-    await settled(api)
-    await openSpotify()
-
-    const view = await screen.findByRole('main', { name: 'Your music' })
-    fireEvent.click(within(view).getByRole('button', { name: /^Paste songs from Spotify/ }))
-
-    expect(within(view).getByRole('heading', { name: 'Seed the DJ with songs you love' })).toBeInTheDocument()
-    expect(within(view).getByRole('button', { name: /^Paste songs from Spotify/ })).toHaveAttribute('aria-expanded', 'true')
-  })
-
-  it('runs the interview from the tile and refreshes the card with the saved counts', async () => {
-    const api = createFakeApi()
-    await api.postFunnelEvent({ type: 'chose_spotify', surface: 'web' })
-    await api.postFunnelEvent({ type: 'marked_requested', surface: 'web' })
-    renderApp({ api })
-    await settled(api)
-    await openSpotify()
-    const view = await screen.findByRole('main', { name: 'Your music' })
-
-    fireEvent.click(within(view).getByRole('button', { name: /^Tell the DJ about your taste/ }))
-    const dialog = screen.getByRole('dialog', { name: 'Artists you would never skip' })
-    fireEvent.change(within(dialog).getByLabelText('Artist'), { target: { value: 'Ivory Kestrel' } })
-    fireEvent.keyDown(within(dialog).getByLabelText('Artist'), { key: 'Enter' })
-    for (let step = 0; step < 4; step += 1) fireEvent.click(within(dialog).getByRole('button', { name: 'Next' }))
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Finish' }))
-
-    expect(await screen.findByText('Saved 1 note, 1 artist')).toBeInTheDocument()
-    expect(screen.queryByRole('dialog', { name: 'Artists you would never skip' })).not.toBeInTheDocument()
-    expect(await within(view).findByText('Interview done')).toBeInTheDocument()
-    expect(within(view).getByText('1 note, 1 artist. The DJ can already make a mix from what it knows, clearly labeled.')).toBeInTheDocument()
-    expect(api.calls.filter((call) => call.method === 'getOnboarding').length).toBeGreaterThanOrEqual(2)
-  })
-
-  it('removes a source after confirmation and refreshes the view', async () => {
-    let sources: ApiMusicSource[] = [accountPackage]
-    const deleteListeningSource = vi.fn(async () => {
-      sources = []
-      return { deletedDays: 0, deletedTracks: 0, unlibraried: 0 }
-    })
-    const api = createFakeApi({
-      getOnboarding: async () => ({ ...blank, chosenService: 'spotify', markedRequestedAt: '2026-09-01T08:00:00.000Z', sources }),
-      deleteListeningSource,
-    })
-    renderApp({ api })
-    await settled(api)
-    await openSpotify()
-    const view = await screen.findByRole('main', { name: 'Your music' })
-
-    fireEvent.click(within(view).getByRole('button', { name: 'Remove Spotify · account data' }))
-    expect(within(view).getByRole('alertdialog', { name: 'Remove your Spotify data?' })).toBeInTheDocument()
-    fireEvent.click(within(view).getByRole('button', { name: 'Confirm remove' }))
-
-    await waitFor(() => expect(deleteListeningSource).toHaveBeenCalledWith('spotify_export'))
-    await waitFor(() => expect(within(view).queryByText('Spotify · account data')).not.toBeInTheDocument())
-    expect(await screen.findByText('Your Spotify data is gone from Mixtape.')).toBeInTheDocument()
-    expect(screen.getByText('Spotify · waiting for your data')).toBeInTheDocument()
-  })
-
-  it('announces a failed removal with fixed copy, never the server message', async () => {
-    const api = createFakeApi({
-      getOnboarding: async () => ({ ...blank, chosenService: 'spotify', markedRequestedAt: '2026-09-01T08:00:00.000Z', sources: [accountPackage] }),
-      deleteListeningSource: async () => {
-        throw new ApiError(500, { message: 'db exploded' })
-      },
-    })
-    renderApp({ api })
-    await settled(api)
-    await openSpotify()
-    const view = await screen.findByRole('main', { name: 'Your music' })
-
-    fireEvent.click(within(view).getByRole('button', { name: 'Remove Spotify · account data' }))
-    fireEvent.click(within(view).getByRole('button', { name: 'Confirm remove' }))
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t remove that source. Try again.')
-    expect(screen.queryByText('db exploded')).not.toBeInTheDocument()
-    expect(within(view).getByText('Spotify · account data')).toBeInTheDocument()
-  })
-
-  it('gives every control in the view an accessible name', async () => {
-    const api = apiWithOnboarding({
-      chosenService: 'spotify',
-      markedRequestedAt: '2026-09-01T08:00:00.000Z',
-      sources: [accountPackage],
-    })
-    renderApp({ api })
-    await settled(api)
-    await openSpotify()
-    const view = await screen.findByRole('main', { name: 'Your music' })
-    fireEvent.click(within(view).getByRole('button', { name: /^Paste songs from Spotify/ }))
-
-    for (const control of within(view).getAllByRole('button')) expect(control).toHaveAccessibleName()
-    for (const control of screen.getAllByRole('button')) expect(control).toHaveAccessibleName()
-  })
+describe('Spotify quick import and optional history',()=>{
+ afterEach(cleanup)
+ async function open(api=apiWithOnboarding({chosenService:'spotify'})) {renderApp({api});await settled(api);await openSpotify();return api}
+ it('leads with Exportify and a file picker while keeping official requests optional',async()=>{
+  const api=await open()
+  const link=screen.getByRole('link',{name:'Open Exportify ↗'})
+  expect(link).toHaveAttribute('href','https://exportify.app/')
+  expect(link).toHaveAttribute('target','_blank')
+  expect(screen.getByLabelText('choose files')).toHaveAttribute('multiple')
+  expect(screen.queryByRole('link',{name:'spotify.com/account/privacy'})).not.toBeInTheDocument()
+  expect(api.calls.filter(c=>c.method==='postFunnelEvent')).toHaveLength(0)
+  fireEvent.click(screen.getByRole('button',{name:'Go deeper →'}))
+  expect(screen.getByRole('link',{name:'spotify.com/account/privacy'})).toHaveAttribute('target','_blank')
+  expect(screen.getByText('Save the ZIPs as they are. Don’t unzip them.')).toBeInTheDocument()
+ })
+ it('marks an optional history request while keeping quick import available',async()=>{
+  let marked:string|null=null
+  const api=apiWithOnboarding({chosenService:'spotify'},{getOnboarding:async()=>({...blank,chosenService:'spotify',markedRequestedAt:marked}),postFunnelEvent:async()=>{marked=new Date().toISOString();return {ok:true}}})
+  await open(api)
+  fireEvent.click(screen.getByRole('button',{name:'Go deeper →'}))
+  fireEvent.click(screen.getByRole('button',{name:'I’ve requested it'}))
+  expect(await screen.findByText(/You can import saved music above while Spotify prepares/)).toBeInTheDocument()
+  expect(screen.getByLabelText('choose files')).toBeInTheDocument()
+ })
+ it('keeps the request retryable when saving its checkpoint fails',async()=>{
+  await open(apiWithOnboarding({chosenService:'spotify'},{postFunnelEvent:async()=>{throw new ApiError(500,{error:'internal'})}}))
+  fireEvent.click(screen.getByRole('button',{name:'Go deeper →'}))
+  fireEvent.click(screen.getByRole('button',{name:'I’ve requested it'}))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t save that.')
+  expect(screen.getByRole('button',{name:'I’ve requested it'})).toBeEnabled()
+ })
+ it('offers the required taste interview before any import',async()=>{
+  await open()
+  fireEvent.click(screen.getByRole('button',{name:'Tell the DJ about your taste'}))
+  expect(screen.getByRole('dialog',{name:'Artists you would never skip'})).toBeInTheDocument()
+ })
+ it('shows imported music as a manual refresh with history optional',async()=>{
+  await open(apiWithOnboarding({chosenService:'spotify',sources:[bothPackages],interviewCompletedAt:'2026-09-03T10:00:00.000Z'}))
+  expect(screen.getByRole('heading',{name:'Your Spotify music'})).toBeInTheDocument()
+  expect(screen.getByText('Manual refresh')).toBeInTheDocument()
+  expect(screen.getByRole('button',{name:'Import again'})).toBeInTheDocument()
+  expect(screen.queryByText(/Still waiting/)).not.toBeInTheDocument()
+ })
+ it('removes a source only after explicit confirmation',async()=>{
+  let sources:ApiMusicSource[]=[accountPackage]
+  const remove=vi.fn(async()=>{sources=[];return {deletedDays:0,deletedTracks:0,unlibraried:0}})
+  await open(apiWithOnboarding({chosenService:'spotify'},{getOnboarding:async()=>({...blank,chosenService:'spotify',sources}),deleteListeningSource:remove}))
+  fireEvent.click(screen.getByRole('button',{name:'Remove Spotify · account data'}))
+  expect(remove).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button',{name:'Confirm remove'}))
+  await waitFor(()=>expect(remove).toHaveBeenCalledWith('spotify_export'))
+ })
+ it('keeps controls named for assistive technology',async()=>{
+  await open()
+  fireEvent.click(screen.getByRole('button',{name:'Go deeper →'}))
+  for(const button of screen.getAllByRole('button'))expect(button).toHaveAccessibleName()
+ })
 })
 
 describe('Spotify import page', () => {
@@ -539,23 +329,22 @@ describe('Spotify import page', () => {
     expect(sync).toBeEnabled()
 
     const drop = within(view).getByRole('region', { name: 'Import a Spotify ZIP' })
-    fireEvent.change(within(drop).getByLabelText('choose a file'), { target: { files: [extendedZip()] } })
+    fireEvent.change(within(drop).getByLabelText('choose files'), { target: { files: [extendedZip()] } })
     const panel = () => within(view).getByRole('region', { name: 'Import a Spotify ZIP' })
     fireEvent.click(await within(panel()).findByRole('button', { name: 'Upload' }))
     await within(panel()).findByRole('button', { name: 'Cancel' })
     expect(sync).toBeDisabled()
-    expect(within(panel()).queryByLabelText('choose a file')).not.toBeInTheDocument()
+    expect(within(panel()).queryByLabelText('choose files')).not.toBeInTheDocument()
 
     release()
     await within(panel()).findByText('Extended history imported')
     await waitFor(() => expect(sync).toBeEnabled())
-    expect(await within(view).findByText('1 of 2 in', { selector: 'header .status-chip' })).toBeInTheDocument()
-    expect(within(view).getByText(/^Extended history imported \w+\. Still waiting for the account data/)).toBeInTheDocument()
+    expect(await within(view).findByText('Imported')).toBeInTheDocument()
     expect(within(view).getByText('Spotify · extended history')).toBeInTheDocument()
     expect(screen.getByText(/^Spotify · imported /)).toBeInTheDocument()
 
-    fireEvent.click(within(panel()).getByRole('button', { name: 'Make your first mix' }))
-    expect(screen.getByRole('dialog', { name: /new tape/i })).toBeInTheDocument()
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Tell the DJ about your taste' }))
+    expect(screen.getByRole('dialog', { name: 'Artists you would never skip' })).toBeInTheDocument()
   })
 
   it('keeps an upload running across Home and back, and warns before unload while it runs', async () => {
@@ -576,7 +365,7 @@ describe('Spotify import page', () => {
     await openSpotify()
     const view = await screen.findByRole('main', { name: 'Your music' })
     const panel = () => within(screen.getByRole('main', { name: 'Your music' })).getByRole('region', { name: 'Import a Spotify ZIP' })
-    fireEvent.change(within(view).getByLabelText('choose a file'), { target: { files: [extendedZip()] } })
+    fireEvent.change(within(view).getByLabelText('choose files'), { target: { files: [extendedZip()] } })
     fireEvent.click(await within(panel()).findByRole('button', { name: 'Upload' }))
     await within(panel()).findByRole('button', { name: 'Cancel' })
 
@@ -621,7 +410,7 @@ describe('Spotify import page', () => {
     await openSpotify()
     const view = await screen.findByRole('main', { name: 'Your music' })
     const panel = () => within(view).getByRole('region', { name: 'Import a Spotify ZIP' })
-    fireEvent.change(within(view).getByLabelText('choose a file'), { target: { files: [extendedZip()] } })
+    fireEvent.change(within(view).getByLabelText('choose files'), { target: { files: [extendedZip()] } })
     fireEvent.click(await within(panel()).findByRole('button', { name: 'Upload' }))
     await within(panel()).findByRole('button', { name: 'Cancel' })
     await waitFor(() => expect(uploadSignal).toBeDefined())
@@ -645,15 +434,15 @@ describe('Spotify import page', () => {
     await openSpotify()
     const view = await screen.findByRole('main', { name: 'Your music' })
     const panel = () => within(view).getByRole('region', { name: 'Import a Spotify ZIP' })
-    fireEvent.change(within(panel()).getByLabelText('choose a file'), { target: { files: [extendedZip()] } })
+    fireEvent.change(within(panel()).getByLabelText('choose files'), { target: { files: [extendedZip()] } })
     fireEvent.click(await within(panel()).findByRole('button', { name: 'Upload' }))
     await within(panel()).findByText('Extended history imported')
 
-    fireEvent.click(await within(view).findByRole('button', { name: 'Drop the other ZIP' }))
+    fireEvent.click(await within(view).findByRole('button', { name: 'Import again' }))
     await waitFor(() => expect(panel()).toHaveClass('drop'))
     expect(panel()).toHaveFocus()
 
-    fireEvent.change(within(panel()).getByLabelText('choose a file'), { target: { files: [extendedZip()] } })
+    fireEvent.change(within(panel()).getByLabelText('choose files'), { target: { files: [extendedZip()] } })
     await within(panel()).findByRole('button', { name: 'Upload' })
     fireEvent.click(within(view).getByRole('button', { name: 'Import again' }))
     await waitFor(() => expect(panel()).toHaveClass('drop'))

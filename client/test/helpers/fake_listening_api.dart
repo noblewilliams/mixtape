@@ -1,3 +1,4 @@
+import 'package:mixtape/import/collection_review.dart';
 import 'package:mixtape/data/listening/listening_api.dart';
 import 'package:mixtape/data/listening/listening_models.dart';
 import 'package:mixtape/data/reminders/reminder_scheduler.dart';
@@ -9,7 +10,7 @@ import 'package:mixtape/data/reminders/reminder_scheduler.dart';
 /// so an unexpected call fails loudly rather than hanging.
 class FakeListeningApi implements ListeningApi {
   FakeListeningApi({OnboardingState? onboarding})
-      : onboarding = onboarding ?? onboardingState(chosenService: 'apple');
+    : onboarding = onboarding ?? onboardingState(chosenService: 'apple');
 
   /// What [getOnboarding] answers with unless [onGetOnboarding] is set.
   OnboardingState onboarding;
@@ -17,6 +18,10 @@ class FakeListeningApi implements ListeningApi {
   Future<void> Function(FunnelEventType type)? onPostFunnelEvent;
   Future<InterviewResult> Function(InterviewAnswers answers)? onPostInterview;
   Future<DeleteSourceResult> Function(String source)? onDeleteSource;
+
+  @override
+  Future<CollectionContext> getCollectionReview() async =>
+      CollectionContext(ids: [], fingerprint: '0' * 64, playlists: []);
 
   final List<FunnelEventType> funnelEvents = [];
   final List<String> deletedSources = [];
@@ -82,22 +87,23 @@ class FakeListeningApi implements ListeningApi {
 
   @override
   Future<PlaylistSyncRun> beginPlaylistSync({
+    List<Map<String, Object?>>? review,
     required int expectedPlaylists,
     required int expectedEntries,
-  }) =>
-      throw UnimplementedError();
+  }) => throw UnimplementedError();
 
   @override
-  Future<int> putPlaylists(String syncId, List<Map<String, Object?>> playlists) =>
-      throw UnimplementedError();
+  Future<int> putPlaylists(
+    String syncId,
+    List<Map<String, Object?>> playlists,
+  ) => throw UnimplementedError();
 
   @override
   Future<int> putPlaylistEntries(
     String syncId,
     String playlistAppleId,
     List<Map<String, Object?>> entries,
-  ) =>
-      throw UnimplementedError();
+  ) => throw UnimplementedError();
 
   @override
   Future<PlaylistSyncSummary> completePlaylistSync(String syncId) =>
@@ -110,7 +116,8 @@ class FakeListeningApi implements ListeningApi {
   Future<List<ArtistSeed>> getArtistSeeds() => throw UnimplementedError();
 
   @override
-  Future<List<ArtistSeed>> putArtistSeeds(List<String> names) => throw UnimplementedError();
+  Future<List<ArtistSeed>> putArtistSeeds(List<String> names) =>
+      throw UnimplementedError();
 
   @override
   Future<List<SeedTrack>> getSeedTracks() => throw UnimplementedError();
@@ -134,17 +141,16 @@ OnboardingState onboardingState({
   bool hasLibrary = false,
   List<MusicSource> sources = const [],
   InterviewCounts? interview,
-}) =>
-    OnboardingState(
-      userId: userId,
-      sources: sources,
-      hasLibrary: hasLibrary,
-      chosenService: chosenService,
-      markedRequestedAt: markedRequestedAt,
-      interviewCompletedAt: interviewCompletedAt,
-      importCompletedAt: importCompletedAt,
-      interview: interview,
-    );
+}) => OnboardingState(
+  userId: userId,
+  sources: sources,
+  hasLibrary: hasLibrary,
+  chosenService: chosenService,
+  markedRequestedAt: markedRequestedAt,
+  interviewCompletedAt: interviewCompletedAt,
+  importCompletedAt: importCompletedAt,
+  interview: interview,
+);
 
 /// A connected source row; [packages] is what actually landed for it.
 MusicSource musicSource({
@@ -154,15 +160,14 @@ MusicSource musicSource({
   DateTime? lastImportedAt,
   String? ledgerFrom,
   String? ledgerTo,
-}) =>
-    MusicSource(
-      source: source,
-      connectedAt: connectedAt ?? DateTime.utc(2026, 9, 1, 10),
-      lastImportedAt: lastImportedAt,
-      ledgerFrom: ledgerFrom,
-      ledgerTo: ledgerTo,
-      packages: packages,
-    );
+}) => MusicSource(
+  source: source,
+  connectedAt: connectedAt ?? DateTime.utc(2026, 9, 1, 10),
+  lastImportedAt: lastImportedAt,
+  ledgerFrom: ledgerFrom,
+  ledgerTo: ledgerTo,
+  packages: packages,
+);
 
 /// Records every reminder a screen asks for, and every cancellation; touches
 /// no platform channel.

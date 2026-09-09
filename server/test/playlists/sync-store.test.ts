@@ -522,3 +522,53 @@ describe('PlaylistSyncStore', () => {
     expect((await db.select().from(userMusicProfiles))[0].appleStorefront).toBe('ng')
   })
 })
+
+it('publishes a reviewed Spotify collection without removing an unselected playlist, and rejects stale replacements', async () => {
+  const db = await createTestDb()
+  await db.insert(user).values({id:'quick-user',name:'Test',email:'quick@example.test',createdAt:now,updatedAt:now})
+  const store = createPlaylistSyncStore(db, {now: () => now})
+  const first = await store.begin('quick-user',null,1,0,'spotify_export')
+  await store.putPlaylists('quick-user',first.syncId,[playlist({appleLibraryId:'older',entryCount:0})])
+  await store.complete('quick-user',first.syncId)
+  const patch = await store.begin('quick-user',null,1,0,'spotify_export', [{key:'quick',baseFingerprint:null,fileHash:'b'.repeat(64)}])
+  await store.putPlaylists('quick-user',patch.syncId,[playlist({appleLibraryId:'quick',entryCount:0})])
+  await store.complete('quick-user',patch.syncId)
+  expect((await db.select().from(userPlaylists)).filter(p => p.inLibrary).map(p => p.appleLibraryId).sort()).toEqual(['older','quick'])
+  const stale = await store.begin('quick-user',null,1,0,'spotify_export',[{key:'quick',baseFingerprint:'f'.repeat(64),fileHash:'c'.repeat(64)}])
+  await store.putPlaylists('quick-user',stale.syncId,[playlist({appleLibraryId:'quick',entryCount:0,name:'Replacement'})])
+  await expect(store.complete('quick-user',stale.syncId)).rejects.toMatchObject({category:'conflict'})
+})
+
+it('uses owned Spotify targets, keeps reviewed creations idempotent and blocks an old full snapshot',async()=>{
+ const db=await createTestDb();await seedUser(db,'owner');await seedUser(db,'other')
+ const store=createPlaylistSyncStore(db,{now:()=>now})
+ const review=[{key:'exportify:new',baseFingerprint:null,fileHash:'a'.repeat(64)}]
+ for(let i=0;i<2;i++){
+  const run=await store.begin('owner',null,1,0,'spotify_export',review)
+  await store.putPlaylists('owner',run.syncId,[playlist({appleLibraryId:'exportify:new',entryCount:0})])
+  await store.complete('owner',run.syncId)
+ }
+ expect(await db.select().from(userPlaylists).where(eq(userPlaylists.userId,'owner'))).toHaveLength(1)
+ const foreign=await store.begin('other',null,1,0,'spotify_export',[{...review[0],baseFingerprint:'a'.repeat(64)}])
+ await store.putPlaylists('other',foreign.syncId,[playlist({appleLibraryId:'exportify:new',entryCount:0})])
+ await expect(store.complete('other',foreign.syncId)).rejects.toMatchObject({category:'conflict'})
+ const legacy=await store.begin('owner',null,0,0,'spotify_export')
+ await expect(store.complete('owner',legacy.syncId)).rejects.toMatchObject({category:'conflict'})
+ const current=(await db.select().from(userPlaylists).where(eq(userPlaylists.userId,'owner')))[0]
+ expect(current.inLibrary).toBe(true)
+})
+
+it('does not let an exact file retry overwrite a metadata-only edit', async () => {
+  const db = await createTestDb()
+  await seedUser(db, 'metadata-owner')
+  const store = createPlaylistSyncStore(db, { now: () => now })
+  const review = [{ key: 'quick', baseFingerprint: null, fileHash: 'a'.repeat(64) }]
+  const first = await store.begin('metadata-owner', null, 1, 0, 'spotify_export', review)
+  await store.putPlaylists('metadata-owner', first.syncId, [playlist({ appleLibraryId: 'quick', entryCount: 0 })])
+  await store.complete('metadata-owner', first.syncId)
+  await db.update(userPlaylists).set({ description: 'A later edit' }).where(eq(userPlaylists.userId, 'metadata-owner'))
+  const retry = await store.begin('metadata-owner', null, 1, 0, 'spotify_export', review)
+  await store.putPlaylists('metadata-owner', retry.syncId, [playlist({ appleLibraryId: 'quick', entryCount: 0 })])
+  await expect(store.complete('metadata-owner', retry.syncId)).rejects.toMatchObject({ category: 'conflict' })
+  expect((await db.select().from(userPlaylists).where(eq(userPlaylists.userId, 'metadata-owner')))[0].description).toBe('A later edit')
+})

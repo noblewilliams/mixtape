@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm'
 import {
   pgTable,
+  jsonb,
   uuid,
   text,
   timestamp,
@@ -502,6 +503,7 @@ export const userMusicSources = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
     source: text('source', { enum: ['apple_live', 'apple_export', 'spotify_export'] }).notNull(),
+    quickImportedAt: timestamp('quick_imported_at', {withTimezone:true}),
     connectedAt: timestamp('connected_at', { withTimezone: true }).notNull().defaultNow(),
     lastImportedAt: timestamp('last_imported_at', { withTimezone: true }),
     ledgerFrom: date('ledger_from', { mode: 'string' }),
@@ -653,8 +655,9 @@ export const listeningImportRuns = pgTable(
     source: text('source', { enum: ['spotify_export', 'apple_export'] }).notNull(),
     // Which files the device parsed; decides which chunk types the run carries.
     package: text('package', {
-      enum: ['spotify_extended', 'spotify_account', 'apple_media'],
+      enum: ['spotify_extended', 'spotify_account', 'spotify_exportify', 'apple_media'],
     }).notNull(),
+    libraryReview: jsonb('library_review').$type<{mode:'add'} | {mode:'replace';fingerprint:string}>(),
     status: text('status', { enum: ['open', 'completed', 'failed', 'expired'] }).notNull(),
     timeZone: text('time_zone').notNull(),
     country: text('country'),
@@ -700,7 +703,7 @@ export const listeningImportRuns = pgTable(
     check('listening_import_runs_source_check', sql`${t.source} ${listeningSourceSql}`),
     check(
       'listening_import_runs_package_check',
-      sql`${t.package} IN ('spotify_extended', 'spotify_account', 'apple_media')`,
+      sql`${t.package} IN ('spotify_extended', 'spotify_account', 'spotify_exportify', 'apple_media')`,
     ),
     check(
       'listening_import_runs_status_check',
@@ -708,7 +711,7 @@ export const listeningImportRuns = pgTable(
     ),
     check(
       'listening_import_runs_package_source_check',
-      sql`(${t.source} = 'spotify_export' AND ${t.package} IN ('spotify_extended', 'spotify_account')) OR (${t.source} = 'apple_export' AND ${t.package} = 'apple_media')`,
+      sql`(${t.source} = 'spotify_export' AND ${t.package} IN ('spotify_extended', 'spotify_account', 'spotify_exportify')) OR (${t.source} = 'apple_export' AND ${t.package} = 'apple_media')`,
     ),
     // A package only expects the chunk types it carries.
     check(
@@ -723,6 +726,7 @@ export const listeningImportRuns = pgTable(
       'listening_import_runs_apple_counts_check',
       sql`${t.package} <> 'apple_media' OR ${t.expectedArtists} = 0`,
     ),
+    check('listening_import_runs_exportify_counts_check', sql`${t.package} <> 'spotify_exportify' OR (${t.expectedDays} = 0 AND ${t.expectedArtists} = 0)`),
     check('listening_import_runs_time_zone_check', sql`char_length(${t.timeZone}) <= 64`),
     check('listening_import_runs_country_check', countryOrNullSql(t.country)),
     check('listening_import_runs_expected_tracks_check', sql`${t.expectedTracks} >= 0`),
@@ -879,6 +883,7 @@ export const userPlaylists = pgTable(
       .references(() => user.id, { onDelete: 'cascade' }),
     appleLibraryId: text('apple_library_id').notNull(),
     appleCatalogId: text('apple_catalog_id'),
+    importFileHash: text('import_file_hash'),
     name: text('name').notNull(),
     description: text('description'),
     curatorName: text('curator_name'),
@@ -993,6 +998,221 @@ export const playlistEntries = pgTable(
   ],
 )
 
+// Playlist editing snapshots are independent of the ordinary mix queue:
+// playlist occurrences may repeat and unresolved source entries must survive.
+export const playlistEditDrafts = pgTable(
+  'playlist_edit_drafts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    sourcePlaylistId: uuid('source_playlist_id')
+      .notNull()
+      .references(() => userPlaylists.id, { onDelete: 'cascade' }),
+    status: text('status', {
+      enum: ['active', 'preparing', 'ready', 'applying', 'applied', 'conflicted', 'abandoned'],
+    }).notNull().default('active'),
+    version: integer('version').notNull().default(0),
+    baseSourceFingerprint: text('base_source_fingerprint').notNull(),
+    baseName: text('base_name').notNull(),
+    sourceType: text('source_type', { enum: ['apple', 'spotify_export'] }).notNull(),
+    requestedApplyMode: text('requested_apply_mode', {
+      enum: ['append', 'rebuild', 'revised_copy'],
+    }),
+    preparedOperationId: uuid('prepared_operation_id'),
+    preparedExpiresAt: timestamp('prepared_expires_at', { withTimezone: true }),
+    preparedDesiredFingerprint: text('prepared_desired_fingerprint'),
+    appliedPlaylistSource: text('applied_playlist_source', { enum: ['apple'] }),
+    appliedPlaylistLibraryId: text('applied_playlist_library_id'),
+    appliedAt: timestamp('applied_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    uniqueIndex('playlist_edit_drafts_one_resumable_idx')
+      .on(t.userId, t.sourcePlaylistId)
+      .where(sql`${t.status} IN ('active', 'preparing', 'ready', 'applying', 'conflicted')`),
+    index('playlist_edit_drafts_source_idx').on(t.sourcePlaylistId),
+    index('playlist_edit_drafts_user_updated_idx').on(t.userId, t.updatedAt, t.id),
+    check(
+      'playlist_edit_drafts_status_check',
+      sql`${t.status} IN ('active', 'preparing', 'ready', 'applying', 'applied', 'conflicted', 'abandoned')`,
+    ),
+    check('playlist_edit_drafts_version_check', sql`${t.version} >= 0`),
+    check(
+      'playlist_edit_drafts_base_fingerprint_check',
+      sql`${t.baseSourceFingerprint} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      'playlist_edit_drafts_source_type_check',
+      sql`${t.sourceType} IN ('apple', 'spotify_export')`,
+    ),
+    check(
+      'playlist_edit_drafts_apply_mode_check',
+      sql`${t.requestedApplyMode} IS NULL OR ${t.requestedApplyMode} IN ('append', 'rebuild', 'revised_copy')`,
+    ),
+    check(
+      'playlist_edit_drafts_prepared_fields_check',
+      sql`(
+        ${t.requestedApplyMode} IS NULL
+        AND ${t.preparedOperationId} IS NULL
+        AND ${t.preparedExpiresAt} IS NULL
+        AND ${t.preparedDesiredFingerprint} IS NULL
+      ) OR (
+        ${t.requestedApplyMode} IS NOT NULL
+        AND ${t.preparedOperationId} IS NOT NULL
+        AND ${t.preparedExpiresAt} IS NOT NULL
+        AND ${t.preparedDesiredFingerprint} ~ '^[0-9a-f]{64}$'
+      )`,
+    ),
+    check(
+      'playlist_edit_drafts_applied_fields_check',
+      sql`(
+        ${t.appliedPlaylistSource} IS NULL
+        AND ${t.appliedPlaylistLibraryId} IS NULL
+        AND ${t.appliedAt} IS NULL
+      ) OR (
+        ${t.status} = 'applied'
+        AND ${t.appliedPlaylistSource} = 'apple'
+        AND char_length(${t.appliedPlaylistLibraryId}) BETWEEN 1 AND 500
+        AND ${t.appliedAt} IS NOT NULL
+      )`,
+    ),
+  ],
+)
+
+export const playlistEditDraftEntries = pgTable(
+  'playlist_edit_draft_entries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    draftId: uuid('draft_id')
+      .notNull()
+      .references(() => playlistEditDrafts.id, { onDelete: 'cascade' }),
+    role: text('role', { enum: ['base', 'draft'] }).notNull(),
+    entryKey: uuid('entry_key').notNull(),
+    position: integer('position').notNull(),
+    origin: text('origin', { enum: ['source', 'catalog_addition'] }).notNull(),
+    sourceEntryId: uuid('source_entry_id')
+      .references(() => playlistEntries.id, { onDelete: 'set null' }),
+    trackId: uuid('track_id').references(() => tracks.id, { onDelete: 'set null' }),
+    appleLibraryTrackId: text('apple_library_track_id'),
+    appleCatalogId: text('apple_catalog_id'),
+    spotifyId: text('spotify_id'),
+    titleSnapshot: text('title_snapshot').notNull(),
+    artistSnapshot: text('artist_snapshot').notNull(),
+    albumSnapshot: text('album_snapshot'),
+    durationMsSnapshot: integer('duration_ms_snapshot'),
+    artworkUrlTemplateSnapshot: text('artwork_url_template_snapshot'),
+    artworkWidthSnapshot: integer('artwork_width_snapshot'),
+    artworkHeightSnapshot: integer('artwork_height_snapshot'),
+    artworkBgColorSnapshot: text('artwork_bg_color_snapshot'),
+  },
+  (t) => [
+    uniqueIndex('playlist_edit_entries_draft_role_position_idx')
+      .on(t.draftId, t.role, t.position),
+    uniqueIndex('playlist_edit_entries_draft_role_key_idx')
+      .on(t.draftId, t.role, t.entryKey),
+    index('playlist_edit_entries_source_entry_idx')
+      .on(t.sourceEntryId)
+      .where(sql`${t.sourceEntryId} IS NOT NULL`),
+    index('playlist_edit_entries_track_idx')
+      .on(t.trackId)
+      .where(sql`${t.trackId} IS NOT NULL`),
+    index('playlist_edit_entries_unresolved_idx')
+      .on(t.draftId, t.role, t.position)
+      .where(sql`${t.trackId} IS NULL`),
+    check('playlist_edit_entries_role_check', sql`${t.role} IN ('base', 'draft')`),
+    check(
+      'playlist_edit_entries_origin_check',
+      sql`${t.origin} IN ('source', 'catalog_addition')`,
+    ),
+    check('playlist_edit_entries_position_check', sql`${t.position} >= 0`),
+    check('playlist_edit_entries_spotify_id_check', spotifyIdOrNullSql(t.spotifyId)),
+    check(
+      'playlist_edit_entries_duration_check',
+      nonnegativeOrNullSql(t.durationMsSnapshot),
+    ),
+    check(
+      'playlist_edit_entries_artwork_bg_color_check',
+      artworkColorSql(t.artworkBgColorSnapshot),
+    ),
+    check(
+      'playlist_edit_entries_artwork_width_check',
+      positiveOrNullSql(t.artworkWidthSnapshot),
+    ),
+    check(
+      'playlist_edit_entries_artwork_height_check',
+      positiveOrNullSql(t.artworkHeightSnapshot),
+    ),
+  ],
+)
+
+export const playlistEditDraftEvents = pgTable(
+  'playlist_edit_draft_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    draftId: uuid('draft_id')
+      .notNull()
+      .references(() => playlistEditDrafts.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    kind: text('kind', { enum: ['add', 'remove', 'move', 'replace', 'apply'] }).notNull(),
+    entryKey: uuid('entry_key'),
+    fromPosition: integer('from_position'),
+    toPosition: integer('to_position'),
+    trackId: uuid('track_id').references(() => tracks.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('playlist_edit_events_draft_version_idx').on(t.draftId, t.version, t.id),
+    index('playlist_edit_events_track_idx')
+      .on(t.trackId)
+      .where(sql`${t.trackId} IS NOT NULL`),
+    check('playlist_edit_events_version_check', sql`${t.version} >= 1`),
+    check(
+      'playlist_edit_events_kind_check',
+      sql`${t.kind} IN ('add', 'remove', 'move', 'replace', 'apply')`,
+    ),
+    check(
+      'playlist_edit_events_from_position_check',
+      nonnegativeOrNullSql(t.fromPosition),
+    ),
+    check(
+      'playlist_edit_events_to_position_check',
+      nonnegativeOrNullSql(t.toPosition),
+    ),
+  ],
+)
+
+// Playlist-edit conversation stays attached to the draft, not an ordinary DJ
+// session: the two editors have deliberately different ordering and identity
+// invariants. Sequence, rather than created_at, is the transcript order.
+export const playlistEditMessages = pgTable(
+  'playlist_edit_messages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    draftId: uuid('draft_id')
+      .notNull()
+      .references(() => playlistEditDrafts.id, { onDelete: 'cascade' }),
+    role: text('role', { enum: ['user', 'dj'] }).notNull(),
+    content: text('content').notNull(),
+    draftVersion: integer('draft_version'),
+    seq: bigserial('seq', { mode: 'number' }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('playlist_edit_messages_draft_seq_idx').on(t.draftId, t.seq),
+    check('playlist_edit_messages_role_check', sql`${t.role} IN ('user', 'dj')`),
+    check(
+      'playlist_edit_messages_version_check',
+      sql`(${t.role} = 'user' AND ${t.draftVersion} IS NULL) OR (${t.role} = 'dj' AND ${t.draftVersion} IS NOT NULL AND ${t.draftVersion} >= 0)`,
+    ),
+  ],
+)
+
 // Global lookup state for public catalog IDs; no user/library IDs or metadata.
 // A lease token fences late completions after a crashed worker's lease expires.
 export const appleIsrcLookups = pgTable(
@@ -1054,6 +1274,7 @@ export const playlistSyncRuns = pgTable(
     source: text('source', { enum: ['ios_native', 'web_musickit', 'spotify_export'] })
       .notNull()
       .default('ios_native'),
+    review: jsonb('review').$type<{key:string; baseFingerprint:string|null; fileHash:string}[]>(),
     status: text('status', { enum: ['open', 'completed', 'failed', 'expired'] }).notNull(),
     // Null only for a Spotify export run.
     appleStorefront: text('apple_storefront'),

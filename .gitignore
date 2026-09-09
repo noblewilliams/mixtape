@@ -7,3 +7,7 @@ node_modules/
 .wrangler/
 dist/
 coverage/
+
+# Dependency links used by isolated release checkouts.
+/server/node_modules
+/web/node_modules

@@ -67,7 +67,7 @@ function renderPanel(options: { overrides?: Partial<MixtapeApi>; parser?: PagePa
 }
 
 function pick(file: File) {
-  fireEvent.change(screen.getByLabelText('choose a file'), { target: { files: [file] } })
+  fireEvent.change(screen.getByLabelText('choose files'), { target: { files: [file] } })
 }
 
 const panel = () => screen.getByRole('region', { name: 'Import a Spotify ZIP' })
@@ -99,11 +99,11 @@ describe('ImportPanel · pick', () => {
     renderPanel()
     const drop = panel()
     expect(drop).toHaveClass('drop')
-    expect(drop).toHaveTextContent('Drop a Spotify ZIP here')
-    expect(drop).toHaveTextContent('or choose a file · either package, in any order')
-    const input = screen.getByLabelText('choose a file')
+    expect(drop).toHaveTextContent('Choose files')
+    expect(drop).toHaveTextContent('or choose files · Exportify ZIP or CSV files, or an official Spotify ZIP')
+    const input = screen.getByLabelText('choose files')
     expect(input).toHaveAttribute('type', 'file')
-    expect(input).toHaveAttribute('accept', '.zip,application/zip')
+    expect(input).toHaveAttribute('accept', '.zip,.csv,application/zip,text/csv')
     expect(within(drop).queryByRole('status')).not.toBeInTheDocument()
   })
 
@@ -158,7 +158,7 @@ describe('ImportPanel · inventory', () => {
     expect(toggle).toHaveAttribute('aria-checked', 'true')
     fireEvent.click(toggle)
     expect(toggle).toHaveAttribute('aria-checked', 'false')
-    expect(within(view).getByText('Only these plays leave this device. Your account details, payments, and IP addresses are never read.')).toBeInTheDocument()
+    expect(within(view).getByText('Only reviewed music leaves this device. Your account details, payments, and IP addresses are never read.')).toBeInTheDocument()
     expect(within(view).getByRole('button', { name: 'Upload' })).toBeInTheDocument()
     expect(within(view).getByRole('button', { name: 'Choose a different file' })).toBeInTheDocument()
     expect(api.calls.filter((call) => call.method === 'postFunnelEvent').map((call) => call.args[0])).toEqual([
@@ -363,7 +363,7 @@ describe('ImportPanel · upload', () => {
     expect(band.querySelector('span')).toHaveStyle({ width: '40%' })
     expect(within(view).getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
     expect(within(view).queryByRole('button', { name: 'Upload' })).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('choose a file')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('choose files')).not.toBeInTheDocument()
     expect(run.getState().kind).toBe('uploading')
 
     gate.release()
@@ -465,8 +465,8 @@ describe('ImportPanel · upload', () => {
     expect(within(view).getByText('Re-uploads the file; nothing is duplicated.')).toBeInTheDocument()
     expect(screen.queryByText('another run is open')).not.toBeInTheDocument()
     expect(onRefresh).toHaveBeenCalledTimes(1)
-    expect(within(view).getByRole('button', { name: 'Retry playlists' })).toHaveClass('primary')
-    fireEvent.click(within(view).getByRole('button', { name: 'Make a mix anyway' }))
+    expect(within(view).getByRole('button', { name: 'Review again' })).toHaveClass('primary')
+    fireEvent.click(within(view).getByRole('button', { name: 'Make your first mix' }))
     expect(onNewTape).toHaveBeenCalledTimes(1)
   })
 
@@ -476,7 +476,7 @@ describe('ImportPanel · upload', () => {
       overrides: {
         putPlaylists: async (_syncId, playlists) => {
           playlistAttempts += 1
-          if (playlistAttempts === 1) throw new ApiError(409, { error: 'sync_conflict', message: 'another run is open' })
+          if (playlistAttempts === 1) throw new ApiError(500, { error: 'sync_conflict', message: 'another run is open' })
           return { accepted: playlists.length }
         },
       },
@@ -544,7 +544,7 @@ describe('ImportPanel · unreadable', () => {
       expect(chip()).toHaveTextContent('Unreadable')
       expect(chip()).toHaveClass('err')
       expect(within(view).getByText('my_spotify_data.zip')).toBeInTheDocument()
-      expect(within(view).getByText('One of the history files couldn’t be read, so nothing was uploaded. Expected files: Streaming_History_Audio_*.json, YourLibrary.json, Playlist*.json.')).toBeInTheDocument()
+      expect(within(view).getByText('One of the history files couldn’t be read, so nothing was uploaded. Use an Exportify ZIP or CSV, or an official Spotify ZIP. Import Exportify and official files separately. Official files: Streaming_History_Audio_*.json, YourLibrary.json, Playlist*.json.')).toBeInTheDocument()
 
       const report = view.querySelector('.diag') as HTMLElement
       const lines = report.textContent!.split('\n')
@@ -614,7 +614,7 @@ describe('ImportPanel · unreadable', () => {
 })
 
 describe('ImportPanel · reading', () => {
-  it('offers Choose a different file while reading, which aborts the read', async () => {
+  it('offers Cancel while reading, which aborts the read', async () => {
     const { parser, gate, signals } = heldParser()
     const { run } = renderPanel({ parser })
     pick(fixtureFile('extended-basic'))
@@ -622,7 +622,7 @@ describe('ImportPanel · reading', () => {
     expect(chip()).toHaveTextContent('Reading')
     await waitFor(() => expect(signals).toHaveLength(1))
 
-    fireEvent.click(within(panel()).getByRole('button', { name: 'Choose a different file' }))
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Cancel' }))
     expect(panel()).toHaveClass('drop')
     expect(signals[0].aborted).toBe(true)
     gate.release()
@@ -788,6 +788,40 @@ describe('ImportPanel · handle and names', () => {
     check()
     handle.current!.focus()
     await waitFor(() => expect(panel()).toHaveClass('drop'))
-    expect(screen.getByLabelText('choose a file')).toBeInTheDocument()
+    expect(screen.getByLabelText('choose files')).toBeInTheDocument()
   })
+})
+
+it('reviews a CSV as Liked Songs and uploads no accidental playlist',async()=>{
+ const {api}=renderPanel()
+ pick(new File(['Track URI,Track Name,Artist Name(s)\nspotify:track:4uLU6hMCjMI75M1A2tKUQC,Quiet,Artist\n'],'liked.csv',{type:'text/csv'}))
+ await screen.findByText('Review your music')
+ expect(screen.getByRole('button',{name:'Upload'})).toBeDisabled()
+ fireEvent.change(screen.getByLabelText('Use as'),{target:{value:'liked'}})
+ fireEvent.click(screen.getByLabelText('I reviewed the collection roles and replacement targets.'))
+ fireEvent.click(screen.getByRole('button',{name:'Upload'}))
+ await screen.findByText('Spotify music imported')
+ expect(api.calls.find(c=>c.method==='beginListeningImport')?.args[0]).toMatchObject({package:'spotify_exportify',expectedLibraryTracks:1,expectedDays:0,libraryReview:{mode:'add'}})
+ expect(api.calls.find(c=>c.method==='beginPlaylistSync')?.args[0]).toMatchObject({expectedPlaylists:0,review:[]})
+})
+
+it('reads multiple CSV files together and keeps each role explicit', async () => {
+  renderPanel()
+  const csv = 'Track URI,Track Name,Artist Name(s)\nspotify:track:4uLU6hMCjMI75M1A2tKUQC,Song,Artist\n'
+  fireEvent.change(screen.getByLabelText('choose files'), {target: { files: [new File([csv], 'first.csv'), new File([csv], 'second.csv')] }})
+  await screen.findByText('Review your music')
+  expect(screen.getAllByLabelText('Use as')).toHaveLength(2)
+  expect(screen.getByRole('button', {name:'Upload'})).toBeDisabled()
+})
+it('retries a collection lookup failure without calling a readable CSV broken', async () => {
+  let attempts = 0
+  const {api} = renderPanel({overrides: {getSpotifyCollectionReview: async () => {
+    if (++attempts === 1) throw new ApiError(503,{})
+    return {library:{ids:[],fingerprint:'a'.repeat(64)},playlists:[]}
+  }}})
+  pick(new File(['Track URI,Track Name,Artist Name(s)\n'], 'empty.csv'))
+  await screen.findByText(/Your file was read, but we couldn’t load/)
+  expect(api.calls.some(c => c.method === 'beginListeningImport')).toBe(false)
+  fireEvent.click(screen.getByRole('button',{name:'Try again'}))
+  await screen.findByText('Review your music')
 })

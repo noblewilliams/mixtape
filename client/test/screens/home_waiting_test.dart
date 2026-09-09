@@ -33,7 +33,7 @@ void main() {
     );
 
     expect(find.byKey(const Key('waiting-card')), findsOneWidget);
-    expect(find.text('Not requested yet'), findsOneWidget);
+    expect(find.text('Ready to import'), findsOneWidget);
   });
 
   testWidgets('a Spotify listener with both packages in sees no waiting card', (tester) async {
@@ -111,7 +111,7 @@ void main() {
     expect(find.text('Waiting'), findsOneWidget);
   });
 
-  testWidgets('Choose a ZIP opens the import sheet and picks', (tester) async {
+  testWidgets('Choose files opens the import sheet and picks', (tester) async {
     final listening = FakeListeningApi(onboarding: onboardingState(chosenService: 'spotify'));
     final picker = FakeArchivePicker(extendedArchive);
     await pumpScreen(
@@ -128,7 +128,7 @@ void main() {
     expect(find.text('Upload'), findsOneWidget);
   });
 
-  testWidgets('Choose a ZIP while an upload is in flight shows where it got to, in a sheet that '
+  testWidgets('Choose files while an upload is in flight shows where it got to, in a sheet that '
       'cannot be swiped away, and cancels nothing', (tester) async {
     final listening = FakeListeningApi(onboarding: onboardingState(chosenService: 'spotify'));
     final picker = FakeArchivePicker(extendedArchive);
@@ -191,7 +191,7 @@ void main() {
     await pumpScreen(tester, onboardingContainer(listening: listening), const HomeScreen());
 
     expect(find.byKey(const Key('waiting-card')), findsOneWidget);
-    expect(find.text('Not requested yet'), findsOneWidget);
+    expect(find.text('Ready to import'), findsOneWidget);
     expect(find.textContaining('Not personal yet'), findsOneWidget);
     expectInteractiveWidgetsKeyed(find.byKey(const Key('waiting-card')));
 
@@ -200,6 +200,8 @@ void main() {
 
     expect(find.byType(SpotifyRequestScreen), findsOneWidget);
     expect(find.byKey(const Key('request-done')), findsNothing);
+    await tester.tap(find.byKey(const Key('go-deeper')));
+    await tester.pumpAndSettle();
     expect(find.byKey(const Key('mark-requested')), findsOneWidget);
   });
 
@@ -213,7 +215,7 @@ void main() {
     await pumpScreen(tester, onboardingContainer(listening: listening), const HomeScreen());
 
     expect(find.text('Requested 2 days ago'), findsOneWidget);
-    expect(find.text('Not requested yet'), findsNothing);
+    expect(find.text('Ready to import'), findsNothing);
     expect(find.byKey(const Key('open-request')), findsOneWidget);
   });
 
