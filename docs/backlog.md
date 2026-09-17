@@ -149,3 +149,15 @@ features remain pending.
   `testing/2026-09-09-routine-suggestions.md`.
 - Next approved slice: Apple deeper-history archive import, followed by private blends
   and opt-in taste twins. Existing core journeys remain founder-confirmed.
+
+## Native design program follow-ups (2026-09-17)
+
+- Home still renders `PlaybackMini` above the dock's mini-player; remove in Phase 6.2.
+- `LibraryTab` duplicates Home's library sync sheet and `YouTab` duplicates the
+  suggestion settings screen; extract shared widgets in Phase 8.
+- `DjSession` carries no song count, so the Mixes row meta shows only the relative
+  time; add a server field if the board's "12 songs · yesterday" is wanted.
+- The taste interview is reachable only from Home's Spotify waiting card; add an
+  entry under You in Phase 8.
+- Native tab bar is inset 22 pt like the mini-player; confirm on an iOS 26 device
+  whether the system already insets a bare `UITabBar` and drop the inset if so.

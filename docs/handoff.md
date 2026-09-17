@@ -22,7 +22,17 @@ Phase 1 (foundation) is on main: tokens and theme, gradient background and frost
 material, tape controls and the restyled composer, flush lists with the cassette painter,
 the collapsing large title with glass clusters, and a debug gallery reachable with
 `--dart-define=MIXTAPE_GALLERY=true`. Verified on the iOS 26.5 simulator in light, dark
-and 200% text. Awaiting the founder's gate review before Phase 2 (native dock).
+and 200% text. The founder approved the gallery gate.
+
+Phase 2 (shell) is on main: the native Liquid Glass dock (UITabBar plus a glass
+mini-player installed in the window on iOS 26, `mixtape/shell` channel, Flutter
+`FrostedDock` fallback below iOS 26), the four-tab `ShellScreen` with per-tab
+navigators and dock hide/show/minimise wiring, the Mixes tab, and Library and You
+skeletons. Home lost its list and overflow menu. Two follow-ups are recorded in the
+plan's backlog notes: Home still renders `PlaybackMini` above the dock's mini-player
+(Phase 6.2) and Library/You duplicate the sync sheet and suggestion settings (Phase 8).
+Verified on the iOS 26.5 and iOS 18.2 simulators up to sign-in; the signed-in smoke
+is the founder's Phase 2 gate.
 
 ## Current continuation — 2026-09-08
 
