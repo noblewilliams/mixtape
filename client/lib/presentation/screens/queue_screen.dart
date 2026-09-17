@@ -1,3 +1,5 @@
+import 'playback_screen.dart';
+import '../providers/playback_provider.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -499,13 +501,18 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
         title: Text(state.session.title),
         actions: [
           if (appleActions) ...[
+            IconButton(key:const Key('play-here-button'),tooltip:disabledReason??'Play in Mixtape',icon:const Icon(Icons.play_circle_filled),onPressed:disabledReason==null?(){
+              final player=ref.read(playbackProvider);
+              unawaited(player.start(widget.sessionId,state.queueVersion,state.session.title,visibleQueue));
+              Navigator.push(context,MaterialPageRoute(builder:(_)=>const PlaybackScreen()));
+            }:null),
             IconButton(
               key: const Key('play-button'),
-              tooltip: disabledReason ?? 'Play in Apple Music',
+              tooltip: disabledReason ?? 'Send to Music',
               onPressed: (disabledReason == null && !_playing)
                   ? () => _handlePlay(context, visibleQueue)
                   : null,
-              icon: const Icon(Icons.play_circle),
+              icon: const Icon(Icons.open_in_new),
             ),
             IconButton(
               key: const Key('save-button'),

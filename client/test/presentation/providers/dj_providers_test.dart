@@ -1,3 +1,4 @@
+import 'package:mixtape/data/playlists/playlist_context_models.dart';
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -41,6 +42,7 @@ class FakeDjApi implements DjApi {
   Future<List<DjMemory>> Function()? onListMemories;
   Future<void> Function(String id)? onDeleteMemory;
 
+  InitialPlaylistSeed? lastInitialSeed;
   int listSessionsCallCount = 0;
   int listMemoriesCallCount = 0;
   String? lastDeletedMemoryId;
@@ -55,7 +57,8 @@ class FakeDjApi implements DjApi {
   Duration get timeout => const Duration(seconds: 120);
 
   @override
-  Future<SessionDetail> createSession(String prompt) {
+  Future<SessionDetail> createSession(String prompt, {InitialPlaylistSeed? playlistSeed}) {
+    lastInitialSeed = playlistSeed;
     final impl = onCreateSession;
     if (impl == null) throw UnimplementedError('onCreateSession not wired');
     return impl(prompt);
@@ -784,6 +787,15 @@ void main() {
   });
 
   group('sessionStarterProvider', () {
+    test('forwards explicit seed when creating a new mix', () async {
+      final api = FakeDjApi();
+      api.onCreateSession = (_) async => SessionDetail(session: _session(id: 'new-seeded'), messages: [], queue: []);
+      final container = _makeContainer(api);
+      const seed = InitialPlaylistSeed(playlistId: 'exact-id', excludeSourceTracks: true);
+      expect(await container.read(sessionStarterProvider)('Night drive', playlistSeed: seed), 'new-seeded');
+      expect(identical(api.lastInitialSeed, seed), true);
+    });
+
     test('returns the new session id with no extra round-trip; invalidates the '
         'sessions list lazily rather than refetching eagerly', () async {
       final api = FakeDjApi();
@@ -1094,13 +1106,15 @@ void main() {
       expect(container.read(memoriesProvider).value!.single.id, 'm2');
     });
 
-    test('forget() deletes server-side then drops the note locally', () async {
+    test('forget() deletes then verifies canonical absence', () async {
       final api = FakeDjApi();
       api.onListMemories = () async => [
             DjMemory(id: 'm1', note: 'note 1', createdAt: DateTime(2026, 1, 1)),
             DjMemory(id: 'm2', note: 'note 2', createdAt: DateTime(2026, 1, 2)),
           ];
-      api.onDeleteMemory = (id) async {};
+      api.onDeleteMemory = (id) async {
+        api.onListMemories = () async => [DjMemory(id: 'm2', note: 'note 2', createdAt: DateTime(2026, 1, 2))];
+      };
       final container = _makeContainer(api);
       await container.read(memoriesProvider.future);
 
@@ -1126,12 +1140,15 @@ void main() {
       expect(container.read(memoriesProvider).value!.map((m) => m.id), ['m1']);
     });
 
-    test('forget() treats a 404 as success — the note is already gone, no restore', () async {
+    test('forget() verifies canonical absence after a 404', () async {
       final api = FakeDjApi();
       api.onListMemories = () async => [
             DjMemory(id: 'm1', note: 'note 1', createdAt: DateTime(2026, 1, 1)),
           ];
-      api.onDeleteMemory = (id) async => throw ApiException(404, 'not_found');
+      api.onDeleteMemory = (id) async {
+        api.onListMemories = () async => [];
+        throw ApiException(404, 'not_found');
+      };
       final container = _makeContainer(api);
       await container.read(memoriesProvider.future);
 

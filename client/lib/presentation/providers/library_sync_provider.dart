@@ -7,6 +7,7 @@ import '../../data/library/library_sync_service.dart';
 import '../../data/musickit/musickit_bridge.dart';
 import '../../data/settings/author_store.dart';
 import 'auth_provider.dart';
+import 'onboarding_provider.dart';
 
 final musicKitBridgeProvider = Provider<MusicKitBridge>((ref) => MusicKitBridge());
 
@@ -84,7 +85,10 @@ class LibrarySyncNotifier extends Notifier<SyncState> {
       final summary = await _service.sync(onProgress: (p) {
         if (ref.mounted) state = SyncRunning(p);
       });
-      if (ref.mounted) state = SyncDone(summary);
+      if (ref.mounted) {
+        ref.invalidate(onboardingProvider);
+        state = SyncDone(summary);
+      }
     } on LibraryAccessDenied {
       if (ref.mounted) {
         state = const SyncFailed('Music library access was denied. Enable it in Settings.');

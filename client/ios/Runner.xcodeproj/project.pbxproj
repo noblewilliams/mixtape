@@ -16,8 +16,8 @@
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
 		97CF2C53F40174A4FB66C4D3 /* Pods_Runner.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C6FF8B44DE0BA39294DBD98C /* Pods_Runner.framework */; };
 		A39E4A9ECCFCB38F1F4CEA6E /* MusicKitBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9718ED24A02A38F981E2CC2 /* MusicKitBridge.swift */; };
-		C13A91D6B75A4B64A69E4132 /* PlaylistSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D42BBF2CC65E4767A06B2C03 /* PlaylistSnapshotStore.swift */; };
 		B119CA61BBE1B22BDB4C88BE /* Pods_RunnerTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8A2AAD254C7D047A87598351 /* Pods_RunnerTests.framework */; };
+		C13A91D6B75A4B64A69E4132 /* PlaylistSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D42BBF2CC65E4767A06B2C03 /* PlaylistSnapshotStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -206,6 +206,7 @@
 				9705A1C41CF9048500538489 /* Embed Frameworks */,
 				3B06AD1E1E4923F5004D2608 /* Thin Binary */,
 				E68FF66867585AA65A30314E /* [CP] Embed Pods Frameworks */,
+				C4385BA7313EC6FDD049A4C1 /* [CP] Copy Pods Resources */,
 			);
 			buildRules = (
 			);
@@ -350,6 +351,23 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+		C4385BA7313EC6FDD049A4C1 /* [CP] Copy Pods Resources */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-Runner/Pods-Runner-resources-${CONFIGURATION}-input-files.xcfilelist",
+			);
+			name = "[CP] Copy Pods Resources";
+			outputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-Runner/Pods-Runner-resources-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-Runner/Pods-Runner-resources.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
 		E68FF66867585AA65A30314E /* [CP] Embed Pods Frameworks */ = {

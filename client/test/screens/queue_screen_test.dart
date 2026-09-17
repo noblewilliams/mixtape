@@ -1,3 +1,4 @@
+import 'package:mixtape/data/playlists/playlist_context_models.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -55,7 +56,7 @@ class FakeDjApi implements DjApi {
   Duration get timeout => const Duration(seconds: 120);
 
   @override
-  Future<SessionDetail> createSession(String prompt) {
+  Future<SessionDetail> createSession(String prompt, {InitialPlaylistSeed? playlistSeed}) {
     final impl = onCreateSession;
     if (impl == null) throw UnimplementedError('onCreateSession not wired');
     return impl(prompt);

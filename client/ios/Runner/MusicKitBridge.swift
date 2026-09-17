@@ -1,12 +1,15 @@
 import Flutter
 import MediaPlayer
 import MusicKit
+import Combine
+import UIKit
 
 /// Bridges the on-device music library (MediaPlayer) to Dart.
 /// P1 scope: authorization + paged library read with play counts.
 class MusicKitBridge: NSObject {
   private static let queue = DispatchQueue(label: "mixtape.musickit.bridge")
   private static var catalogCache: [MPMediaItem] = []
+  private static let appPlayer = MixtapePlayerBridge()
   private static let playlistSnapshots = PlaylistSnapshotStore()
   @MainActor private static let playlistApplies = PlaylistApplyCoordinator(
     snapshots: playlistSnapshots
@@ -22,6 +25,7 @@ class MusicKitBridge: NSObject {
   }
 
   static func register(with messenger: FlutterBinaryMessenger) {
+    appPlayer.register(with: messenger)
     let channel = FlutterMethodChannel(name: "mixtape/musickit", binaryMessenger: messenger)
     channel.setMethodCallHandler { call, result in
       switch call.method {
@@ -621,5 +625,123 @@ private final class PlaylistApplyCoordinator {
 
   private func persist(_ receipt: StoredReceipt, forKey key: String) throws {
     defaults.set(try JSONEncoder().encode(receipt), forKey: key)
+  }
+}
+
+
+// App-owned playback is separate from the existing system-player handoff.
+private final class MixtapePlayerBridge: NSObject, FlutterStreamHandler {
+  private let player = ApplicationMusicPlayer.shared
+  private var sink: FlutterEventSink?
+  private var timer: Timer?
+  private var observers = Set<AnyCancellable>()
+  private var pending: Task<Void, Never>?
+  private var generation = 0
+
+  func register(with messenger: FlutterBinaryMessenger) {
+    FlutterEventChannel(name: "mixtape/player-events", binaryMessenger: messenger).setStreamHandler(self)
+    let channel = FlutterMethodChannel(name: "mixtape/player", binaryMessenger: messenger)
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self else { return }
+      if call.method == "authorize" {
+        Task { @MainActor in result(await MusicAuthorization.request() == .authorized) }
+        return
+      }
+      if call.method == "stop" {
+        self.generation += 1; self.pending?.cancel(); self.player.stop(); self.emit(); result(nil); return
+      }
+      if call.method == "start" {
+        let args = call.arguments as? [String: Any] ?? [:]
+        let ids = args["appleIds"] as? [String] ?? []
+        guard !ids.isEmpty, ids.count <= 500 else {
+          result(FlutterError(code:"empty_queue",message:"No playable songs",details:nil)); return
+        }
+        self.generation += 1
+        let generation = self.generation
+        let previous = self.pending
+        previous?.cancel()
+        self.pending = Task { @MainActor in
+          await previous?.value
+          do {
+            try Task.checkCancellation()
+            self.player.stop()
+            guard MusicAuthorization.currentStatus == .authorized else {
+              result(FlutterError(code:"authorization_required",message:"Connect Apple Music to play here",details:nil)); return
+            }
+            let subscription = try await MusicSubscription.current
+            guard subscription.canPlayCatalogContent else {
+              result(FlutterError(code:"subscription_required",message:"An Apple Music subscription is needed",details:nil)); return
+            }
+            var songs: [String: Song] = [:]
+            for offset in stride(from: 0, to: ids.count, by: 25) {
+              let batch = Array(ids[offset..<min(offset + 25, ids.count)])
+              let request = MusicCatalogResourceRequest<Song>(matching: \.id, memberOf: batch.map { MusicItemID($0) })
+              let response = try await request.response()
+              for song in response.items { songs[song.id.rawValue] = song }
+              try Task.checkCancellation()
+            }
+            let ordered = ids.compactMap { songs[$0] }
+            guard ordered.count == ids.count else {
+              result(FlutterError(code:"song_unavailable",message:"A song cannot play here. Your mix is unchanged",details:["index":ids.firstIndex { songs[$0] == nil } ?? 0])); return
+            }
+            guard generation == self.generation else { throw CancellationError() }
+            self.player.queue = ApplicationMusicPlayer.Queue(for: ordered)
+            self.player.state.repeatMode = .none
+            self.player.state.shuffleMode = .off
+            try await self.player.prepareToPlay()
+            try Task.checkCancellation()
+            try await self.player.play()
+            if Task.isCancelled || generation != self.generation { self.player.stop(); throw CancellationError() }
+            self.observe(); self.emit(); result(nil)
+          } catch {
+            result(FlutterError(code:Task.isCancelled ? "cancelled" : "playback_failed",message:"Playback did not start",details:nil))
+          }
+        }
+        return
+      }
+      let commandGeneration = self.generation
+      Task { @MainActor in
+        do {
+          guard commandGeneration == self.generation else { throw CancellationError() }
+          switch call.method {
+          case "pause": self.player.pause()
+          case "resume": try await self.player.play()
+          case "next": try await self.player.skipToNextEntry()
+          case "previous": try await self.player.skipToPreviousEntry()
+          case "seek":
+            let args = call.arguments as? [String: Any] ?? [:]
+            self.player.playbackTime = max(0, args["seconds"] as? Double ?? 0)
+          default: result(FlutterMethodNotImplemented); return
+          }
+          if commandGeneration != self.generation { self.player.stop() }
+          self.emit(); result(nil)
+        } catch { result(FlutterError(code:"playback_failed",message:"Playback was interrupted",details:nil)) }
+      }
+    }
+  }
+  func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
+    sink = events; observe(); emit(); return nil
+  }
+  func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    sink = nil; timer?.invalidate(); timer = nil; observers.removeAll(); return nil
+  }
+  private func observe() {
+    observers.removeAll()
+    player.state.objectWillChange.sink { [weak self] in DispatchQueue.main.async { self?.emit() } }.store(in: &observers)
+    player.queue.objectWillChange.sink { [weak self] in DispatchQueue.main.async { self?.emit() } }.store(in: &observers)
+    timer?.invalidate()
+    timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.emit() }
+  }
+  private func emit() {
+    let index = player.queue.entries.firstIndex { $0.id == player.queue.currentEntry?.id }
+    let status: String
+    switch player.state.playbackStatus {
+      case .playing: status = "playing"
+      case .paused, .interrupted: status = "paused"
+      case .stopped: status = "stopped"
+      default: status = "waiting"
+    }
+    let time = player.playbackTime
+    sink?(["index": index.map { $0 as Any } ?? NSNull(), "positionMs": time.isFinite ? max(0,time * 1000) : 0, "status": status])
   }
 }

@@ -1,6 +1,11 @@
+import 'package:mixtape/data/playlists/playlist_context_models.dart';
 import 'dart:async';
+import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/testing.dart';
@@ -24,13 +29,20 @@ import '../helpers/fake_listening_api.dart';
 /// loudly when unset rather than hanging.
 class FakeDjApi implements DjApi {
   @override
-  Future<void> recordPlaylistCreation(String sessionId, String appleLibraryId) async {}
+  Future<void> recordPlaylistCreation(
+    String sessionId,
+    String appleLibraryId,
+  ) async {}
 
   Future<SessionDetail> Function(String prompt)? onCreateSession;
   Future<List<DjSession>> Function()? onListSessions;
   Future<SessionDetail> Function(String id)? onGetSession;
   Future<TurnResult> Function(String id, String text)? onSendMessage;
-  Future<QueueOpsResult> Function(String id, List<QueueOp> ops, int? expectedVersion)?
+  Future<QueueOpsResult> Function(
+    String id,
+    List<QueueOp> ops,
+    int? expectedVersion,
+  )?
   onApplyQueueOps;
   Future<DjSession> Function(String id, String status)? onSetStatus;
   Future<DjSession> Function(String id, String title)? onRenameSession;
@@ -42,7 +54,7 @@ class FakeDjApi implements DjApi {
   Duration get timeout => const Duration(seconds: 120);
 
   @override
-  Future<SessionDetail> createSession(String prompt) {
+  Future<SessionDetail> createSession(String prompt, {InitialPlaylistSeed? playlistSeed}) {
     final impl = onCreateSession;
     if (impl == null) throw UnimplementedError('onCreateSession not wired');
     return impl(prompt);
@@ -70,7 +82,11 @@ class FakeDjApi implements DjApi {
   }
 
   @override
-  Future<QueueOpsResult> applyQueueOps(String id, List<QueueOp> ops, int? expectedVersion) {
+  Future<QueueOpsResult> applyQueueOps(
+    String id,
+    List<QueueOp> ops,
+    int? expectedVersion,
+  ) {
     final impl = onApplyQueueOps;
     if (impl == null) throw UnimplementedError('onApplyQueueOps not wired');
     return impl(id, ops, expectedVersion);
@@ -140,7 +156,10 @@ DjSession _session({
   updatedAt: updatedAt ?? DateTime.now(),
 );
 
-ProviderContainer _makeContainer(FakeDjApi api, {LibrarySyncService? syncService}) {
+ProviderContainer _makeContainer(
+  FakeDjApi api, {
+  LibrarySyncService? syncService,
+}) {
   final overrides = [
     tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
     djApiProvider.overrideWithValue(api),
@@ -148,7 +167,8 @@ ProviderContainer _makeContainer(FakeDjApi api, {LibrarySyncService? syncService
     // listener keeps every existing assertion untouched.
     listeningApiProvider.overrideWithValue(FakeListeningApi()),
     authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.signedIn)),
-    if (syncService != null) librarySyncServiceProvider.overrideWithValue(syncService),
+    if (syncService != null)
+      librarySyncServiceProvider.overrideWithValue(syncService),
   ];
   final container = ProviderContainer(overrides: overrides);
   addTearDown(container.dispose);
@@ -165,514 +185,750 @@ Future<void> _pump(WidgetTester tester, ProviderContainer container) async {
   await tester.pumpAndSettle();
 }
 
+Future<void> _mixAction(WidgetTester tester, String id, String action) async {
+  await tester.tap(find.byKey(Key('mix-actions-$id')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(action));
+  await tester.pumpAndSettle();
+}
+
 void main() {
   group('prompt-first session start', () {
-    testWidgets('submitting the prompt calls sessionStarter with the trimmed text '
-        'and navigates to ChatScreen on success', (tester) async {
-      final api = FakeDjApi();
-      api.onListSessions = () async => [];
-      String? capturedPrompt;
-      api.onCreateSession = (prompt) async {
-        capturedPrompt = prompt;
-        return SessionDetail(session: _session(id: 'new-1'), messages: [], queue: []);
-      };
-      api.onGetSession = (id) async => SessionDetail(session: _session(id: id), messages: [], queue: []);
-      final container = _makeContainer(api);
-      await _pump(tester, container);
-
-      await tester.enterText(find.byKey(const Key('prompt-field')), '  chill sunset drive  ');
-      await tester.pump();
-      await tester.tap(find.byKey(const Key('start-session')));
-      await tester.pumpAndSettle();
-
-      expect(capturedPrompt, 'chill sunset drive');
-      expect(find.byType(ChatScreen), findsOneWidget);
-      final pushed = tester.widget<ChatScreen>(find.byType(ChatScreen));
-      expect(pushed.sessionId, 'new-1');
-    });
-
-    testWidgets('the start button is disabled while a create is in flight, and a second '
-        'tap does not mint a second session', (tester) async {
-      final completer = Completer<SessionDetail>();
-      var createCalls = 0;
-      final api = FakeDjApi();
-      api.onListSessions = () async => [];
-      api.onCreateSession = (prompt) {
-        createCalls++;
-        return completer.future;
-      };
-      api.onGetSession = (id) async => SessionDetail(session: _session(id: id), messages: [], queue: []);
-      final container = _makeContainer(api);
-      await _pump(tester, container);
-
-      await tester.enterText(find.byKey(const Key('prompt-field')), 'a prompt');
-      await tester.pump();
-      await tester.tap(find.byKey(const Key('start-session')));
-      await tester.pump();
-
-      final button = tester.widget<FilledButton>(find.byKey(const Key('start-session')));
-      expect(button.onPressed, isNull);
-      final field = tester.widget<TextField>(find.byKey(const Key('prompt-field')));
-      expect(field.enabled, isFalse);
-
-      // Tapping the (structurally disabled) button again is a no-op.
-      await tester.tap(find.byKey(const Key('start-session')), warnIfMissed: false);
-      await tester.pump();
-      expect(createCalls, 1);
-
-      completer.complete(SessionDetail(session: _session(id: 'new-2'), messages: [], queue: []));
-      await tester.pumpAndSettle();
-      expect(find.byType(ChatScreen), findsOneWidget);
-    });
-
-    testWidgets('a create failure that carries a sessionId still navigates to ChatScreen', (tester) async {
-      final api = FakeDjApi();
-      api.onListSessions = () async => [];
-      api.onCreateSession = (prompt) async => throw DjApiException(
-        kind: 'conflict',
-        message: 'the DJ hiccupped',
-        sessionId: 'partial-1',
-      );
-      api.onGetSession = (id) async => SessionDetail(session: _session(id: id), messages: [], queue: []);
-      final container = _makeContainer(api);
-      await _pump(tester, container);
-
-      await tester.enterText(find.byKey(const Key('prompt-field')), 'play jazz');
-      await tester.pump();
-      await tester.tap(find.byKey(const Key('start-session')));
-      await tester.pumpAndSettle();
-
-      expect(find.byType(ChatScreen), findsOneWidget);
-      final pushed = tester.widget<ChatScreen>(find.byType(ChatScreen));
-      expect(pushed.sessionId, 'partial-1');
-    });
-
-    testWidgets('a create failure without a sessionId shows an inline error and '
-        'preserves the prompt draft', (tester) async {
-      final api = FakeDjApi();
-      api.onListSessions = () async => [];
-      api.onCreateSession = (prompt) async =>
-          throw DjApiException(kind: 'invalid', message: 'try a shorter prompt');
-      final container = _makeContainer(api);
-      await _pump(tester, container);
-
-      await tester.enterText(find.byKey(const Key('prompt-field')), 'a very long prompt');
-      await tester.pump();
-      await tester.tap(find.byKey(const Key('start-session')));
-      await tester.pumpAndSettle();
-
-      expect(find.byType(ChatScreen), findsNothing);
-      expect(find.text('try a shorter prompt'), findsOneWidget);
-      final field = tester.widget<TextField>(find.byKey(const Key('prompt-field')));
-      expect(field.controller!.text, 'a very long prompt');
-      final button = tester.widget<FilledButton>(find.byKey(const Key('start-session')));
-      expect(button.onPressed, isNotNull); // usable again, not stuck disabled
-    });
-
-    testWidgets('a create failure with a sessionId passes the server message through as '
-        "ChatScreen's initialError", (tester) async {
-      final api = FakeDjApi();
-      api.onListSessions = () async => [];
-      api.onCreateSession = (prompt) async => throw DjApiException(
-        kind: 'conflict',
-        message: 'the DJ hiccupped',
-        sessionId: 'partial-1',
-      );
-      api.onGetSession = (id) async => SessionDetail(session: _session(id: id), messages: [], queue: []);
-      final container = _makeContainer(api);
-      await _pump(tester, container);
-
-      await tester.enterText(find.byKey(const Key('prompt-field')), 'play jazz');
-      await tester.pump();
-      await tester.tap(find.byKey(const Key('start-session')));
-      await tester.pumpAndSettle();
-
-      final pushed = tester.widget<ChatScreen>(find.byType(ChatScreen));
-      expect(pushed.initialError, 'the DJ hiccupped');
-    });
-
-    testWidgets('a NetworkException on submit shows the offline message and preserves the draft',
-        (tester) async {
-      final api = FakeDjApi();
-      api.onListSessions = () async => [];
-      api.onCreateSession = (prompt) async => throw NetworkException('boom');
-      final container = _makeContainer(api);
-      await _pump(tester, container);
-
-      await tester.enterText(find.byKey(const Key('prompt-field')), 'a network-flaky prompt');
-      await tester.pump();
-      await tester.tap(find.byKey(const Key('start-session')));
-      await tester.pumpAndSettle();
-
-      expect(find.byType(ChatScreen), findsNothing);
-      expect(
-        find.text("couldn't reach the DJ — check your connection and try again"),
-        findsOneWidget,
-      );
-      final field = tester.widget<TextField>(find.byKey(const Key('prompt-field')));
-      expect(field.controller!.text, 'a network-flaky prompt');
-    });
-
-    testWidgets('a plain ApiException on submit shows the generic message and preserves the draft',
-        (tester) async {
-      final api = FakeDjApi();
-      api.onListSessions = () async => [];
-      api.onCreateSession = (prompt) async => throw ApiException(500, 'internal server error');
-      final container = _makeContainer(api);
-      await _pump(tester, container);
-
-      await tester.enterText(find.byKey(const Key('prompt-field')), 'a 500 prompt');
-      await tester.pump();
-      await tester.tap(find.byKey(const Key('start-session')));
-      await tester.pumpAndSettle();
-
-      expect(find.byType(ChatScreen), findsNothing);
-      expect(find.text('something went wrong on our end — try again'), findsOneWidget);
-      final field = tester.widget<TextField>(find.byKey(const Key('prompt-field')));
-      expect(field.controller!.text, 'a 500 prompt');
-    });
-  });
-
-  group('sessions list', () {
-    testWidgets('renders session titles; tapping a row navigates to its ChatScreen', (tester) async {
-      final api = FakeDjApi();
-      api.onListSessions = () async => [
-        _session(id: 's1', title: 'Sunset Drive'),
-        _session(id: 's2', title: 'Rainy Focus'),
-      ];
-      api.onGetSession = (id) async => SessionDetail(session: _session(id: id), messages: [], queue: []);
-      final container = _makeContainer(api);
-      await _pump(tester, container);
-
-      expect(find.text('Sunset Drive'), findsOneWidget);
-      expect(find.text('Rainy Focus'), findsOneWidget);
-
-      await tester.tap(find.text('Sunset Drive'));
-      await tester.pumpAndSettle();
-
-      final pushed = tester.widget<ChatScreen>(find.byType(ChatScreen));
-      expect(pushed.sessionId, 's1');
-    });
-
-    testWidgets('archived sessions are excluded by default', (tester) async {
-      final api = FakeDjApi();
-      api.onListSessions = () async => [
-        _session(id: 's1', title: 'Active One', status: 'active'),
-        _session(id: 's2', title: 'Old One', status: 'archived'),
-      ];
-      final container = _makeContainer(api);
-      await _pump(tester, container);
-
-      expect(find.text('Active One'), findsOneWidget);
-      expect(find.text('Old One'), findsNothing);
-    });
-
-    testWidgets('archiving a session calls the API and removes it from the list', (tester) async {
-      var isArchived = false;
-      final api = FakeDjApi();
-      api.onListSessions = () async => [
-        _session(id: 's1', title: 'Sunset Drive', status: isArchived ? 'archived' : 'active'),
-      ];
-      api.onSetStatus = (id, status) async {
-        isArchived = status == 'archived';
-        return _session(id: id, title: 'Sunset Drive', status: status);
-      };
-      final container = _makeContainer(api);
-      await _pump(tester, container);
-
-      expect(find.text('Sunset Drive'), findsOneWidget);
-
-      await tester.tap(find.byKey(const Key('archive-s1')));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Sunset Drive'), findsNothing);
-    });
-
-    testWidgets('an empty sessions list (no archived either) renders the empty state', (tester) async {
-      final api = FakeDjApi();
-      api.onListSessions = () async => [];
-      final container = _makeContainer(api);
-      await _pump(tester, container);
-
-      expect(find.text('No sessions yet — tell the DJ what you want to hear.'), findsOneWidget);
-      expect(find.byKey(const Key('sessions-list')), findsNothing);
-      expect(find.byKey(const Key('toggle-archived')), findsNothing);
-    });
-
-    testWidgets('toggling "Show archived" reveals archived rows, correctly offsetting past the '
-        'toggle button itself', (tester) async {
-      final api = FakeDjApi();
-      api.onListSessions = () async => [
-        _session(id: 's1', title: 'Active One', status: 'active'),
-        _session(id: 's2', title: 'Old One', status: 'archived'),
-      ];
-      final container = _makeContainer(api);
-      await _pump(tester, container);
-
-      expect(find.text('Active One'), findsOneWidget);
-      expect(find.text('Old One'), findsNothing);
-      expect(find.text('Show archived (1)'), findsOneWidget);
-
-      await tester.tap(find.byKey(const Key('toggle-archived')));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Active One'), findsOneWidget);
-      expect(find.text('Old One'), findsOneWidget);
-      expect(find.text('Hide archived'), findsOneWidget);
-      // The archived row is a real, distinct list item (the +1 toggle-button
-      // offset at itemBuilder didn't collide it with the active row above).
-      expect(find.byKey(const Key('session-s1')), findsOneWidget);
-      expect(find.byKey(const Key('session-s2')), findsOneWidget);
-      expect(find.byKey(const Key('unarchive-s2')), findsOneWidget);
-
-      await tester.tap(find.byKey(const Key('toggle-archived')));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Old One'), findsNothing);
-    });
-
-    testWidgets('a failed archive shows a snackbar and the row stays', (tester) async {
-      final api = FakeDjApi();
-      api.onListSessions = () async => [
-        _session(id: 's1', title: 'Sunset Drive', status: 'active'),
-      ];
-      api.onSetStatus = (id, status) async => throw ApiException(500, 'boom');
-      final container = _makeContainer(api);
-      await _pump(tester, container);
-
-      await tester.tap(find.byKey(const Key('archive-s1')));
-      await tester.pumpAndSettle();
-
-      expect(find.text("couldn't archive — try again"), findsOneWidget);
-      expect(find.text('Sunset Drive'), findsOneWidget);
-      expect(find.byKey(const Key('archive-s1')), findsOneWidget); // still active, not archived
-    });
-
-    testWidgets('a failed unarchive shows a snackbar and the row stays archived', (tester) async {
-      final api = FakeDjApi();
-      api.onListSessions = () async => [
-        _session(id: 's1', title: 'Old One', status: 'archived'),
-      ];
-      api.onSetStatus = (id, status) async => throw ApiException(500, 'boom');
-      final container = _makeContainer(api);
-      await _pump(tester, container);
-
-      await tester.tap(find.byKey(const Key('toggle-archived')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('unarchive-s1')));
-      await tester.pumpAndSettle();
-
-      expect(find.text("couldn't unarchive — try again"), findsOneWidget);
-      expect(find.byKey(const Key('unarchive-s1')), findsOneWidget); // still archived
-    });
-
-    testWidgets('unarchiving a session calls setStatus(active) and the row moves back to the '
-        'default (non-archived) view', (tester) async {
-      var status = 'archived';
-      final api = FakeDjApi();
-      api.onListSessions = () async => [_session(id: 's1', title: 'Old One', status: status)];
-      api.onSetStatus = (id, newStatus) async {
-        status = newStatus;
-        return _session(id: id, title: 'Old One', status: newStatus);
-      };
-      final container = _makeContainer(api);
-      await _pump(tester, container);
-
-      await tester.tap(find.byKey(const Key('toggle-archived')));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('unarchive-s1')), findsOneWidget);
-
-      await tester.tap(find.byKey(const Key('unarchive-s1')));
-      await tester.pumpAndSettle();
-
-      // Now active again — no archived toggle at all, and it renders as a
-      // normal (non-dimmed) row with an archive action.
-      expect(find.text('Old One'), findsOneWidget);
-      expect(find.byKey(const Key('toggle-archived')), findsNothing);
-      expect(find.byKey(const Key('archive-s1')), findsOneWidget);
-    });
-  });
-
-  group('manual rename (long-press)', () {
     testWidgets(
-      'long-pressing a row opens a dialog prefilled with the current title; '
-      'confirming renames and refreshes the list',
+      'submitting the prompt calls sessionStarter with the trimmed text '
+      'and navigates to ChatScreen on success',
       (tester) async {
-        var title = 'Sunset Drive';
         final api = FakeDjApi();
-        api.onListSessions = () async => [_session(id: 's1', title: title)];
-        api.onRenameSession = (id, newTitle) async {
-          title = newTitle;
-          return _session(id: id, title: newTitle);
+        api.onListSessions = () async => [];
+        String? capturedPrompt;
+        api.onCreateSession = (prompt) async {
+          capturedPrompt = prompt;
+          return SessionDetail(
+            session: _session(id: 'new-1'),
+            messages: [],
+            queue: [],
+          );
         };
+        api.onGetSession = (id) async => SessionDetail(
+          session: _session(id: id),
+          messages: [],
+          queue: [],
+        );
         final container = _makeContainer(api);
         await _pump(tester, container);
 
-        await tester.longPress(find.text('Sunset Drive'));
-        await tester.pumpAndSettle();
-
-        final field = tester.widget<TextField>(find.byKey(const Key('rename-field')));
-        expect(field.controller!.text, 'Sunset Drive');
-
-        await tester.enterText(find.byKey(const Key('rename-field')), 'Lagos Nights');
+        await tester.enterText(
+          find.byKey(const Key('prompt-field')),
+          '  chill sunset drive  ',
+        );
         await tester.pump();
-        await tester.tap(find.byKey(const Key('rename-confirm')));
+        await tester.tap(find.byKey(const Key('start-session')));
         await tester.pumpAndSettle();
 
-        expect(find.text('Lagos Nights'), findsOneWidget);
-        expect(find.text('Sunset Drive'), findsNothing);
+        expect(capturedPrompt, 'chill sunset drive');
+        expect(find.byType(ChatScreen), findsOneWidget);
+        final pushed = tester.widget<ChatScreen>(find.byType(ChatScreen));
+        expect(pushed.sessionId, 'new-1');
       },
     );
 
-    testWidgets('the confirm button is disabled while the field is empty or whitespace-only', (
+    testWidgets(
+      'the start button is disabled while a create is in flight, and a second '
+      'tap does not mint a second session',
+      (tester) async {
+        final completer = Completer<SessionDetail>();
+        var createCalls = 0;
+        final api = FakeDjApi();
+        api.onListSessions = () async => [];
+        api.onCreateSession = (prompt) {
+          createCalls++;
+          return completer.future;
+        };
+        api.onGetSession = (id) async => SessionDetail(
+          session: _session(id: id),
+          messages: [],
+          queue: [],
+        );
+        final container = _makeContainer(api);
+        await _pump(tester, container);
+
+        await tester.enterText(
+          find.byKey(const Key('prompt-field')),
+          'a prompt',
+        );
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('start-session')));
+        await tester.pump();
+
+        final button = tester.widget<IconButton>(
+          find.byKey(const Key('start-session')),
+        );
+        expect(button.onPressed, isNull);
+        final field = tester.widget<TextField>(
+          find.byKey(const Key('prompt-field')),
+        );
+        expect(field.readOnly, isTrue);
+
+        // Tapping the (structurally disabled) button again is a no-op.
+        await tester.tap(
+          find.byKey(const Key('start-session')),
+          warnIfMissed: false,
+        );
+        await tester.pump();
+        expect(createCalls, 1);
+
+        completer.complete(
+          SessionDetail(
+            session: _session(id: 'new-2'),
+            messages: [],
+            queue: [],
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byType(ChatScreen), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'a create failure that carries a sessionId still navigates to ChatScreen',
+      (tester) async {
+        final api = FakeDjApi();
+        api.onListSessions = () async => [];
+        api.onCreateSession = (prompt) async => throw DjApiException(
+          kind: 'conflict',
+          message: 'the DJ hiccupped',
+          sessionId: 'partial-1',
+        );
+        api.onGetSession = (id) async => SessionDetail(
+          session: _session(id: id),
+          messages: [],
+          queue: [],
+        );
+        final container = _makeContainer(api);
+        await _pump(tester, container);
+
+        await tester.enterText(
+          find.byKey(const Key('prompt-field')),
+          'play jazz',
+        );
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('start-session')));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(ChatScreen), findsOneWidget);
+        final pushed = tester.widget<ChatScreen>(find.byType(ChatScreen));
+        expect(pushed.sessionId, 'partial-1');
+      },
+    );
+
+    testWidgets(
+      'a create failure without a sessionId shows an inline error and '
+      'preserves the prompt draft',
+      (tester) async {
+        final api = FakeDjApi();
+        api.onListSessions = () async => [];
+        api.onCreateSession = (prompt) async => throw DjApiException(
+          kind: 'invalid',
+          message: 'try a shorter prompt',
+        );
+        final container = _makeContainer(api);
+        await _pump(tester, container);
+
+        await tester.enterText(
+          find.byKey(const Key('prompt-field')),
+          'a very long prompt',
+        );
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('start-session')));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(ChatScreen), findsNothing);
+        expect(find.text('try a shorter prompt'), findsOneWidget);
+        final field = tester.widget<TextField>(
+          find.byKey(const Key('prompt-field')),
+        );
+        expect(field.controller!.text, 'a very long prompt');
+        final button = tester.widget<IconButton>(
+          find.byKey(const Key('start-session')),
+        );
+        expect(button.onPressed, isNotNull); // usable again, not stuck disabled
+      },
+    );
+
+    testWidgets(
+      'a create failure with a sessionId passes the server message through as '
+      "ChatScreen's initialError",
+      (tester) async {
+        final api = FakeDjApi();
+        api.onListSessions = () async => [];
+        api.onCreateSession = (prompt) async => throw DjApiException(
+          kind: 'conflict',
+          message: 'the DJ hiccupped',
+          sessionId: 'partial-1',
+        );
+        api.onGetSession = (id) async => SessionDetail(
+          session: _session(id: id),
+          messages: [],
+          queue: [],
+        );
+        final container = _makeContainer(api);
+        await _pump(tester, container);
+
+        await tester.enterText(
+          find.byKey(const Key('prompt-field')),
+          'play jazz',
+        );
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('start-session')));
+        await tester.pumpAndSettle();
+
+        final pushed = tester.widget<ChatScreen>(find.byType(ChatScreen));
+        expect(pushed.initialError, 'the DJ hiccupped');
+      },
+    );
+
+    testWidgets(
+      'a NetworkException on submit shows the offline message and preserves the draft',
+      (tester) async {
+        final api = FakeDjApi();
+        api.onListSessions = () async => [];
+        api.onCreateSession = (prompt) async => throw NetworkException('boom');
+        final container = _makeContainer(api);
+        await _pump(tester, container);
+
+        await tester.enterText(
+          find.byKey(const Key('prompt-field')),
+          'a network-flaky prompt',
+        );
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('start-session')));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(ChatScreen), findsNothing);
+        expect(
+          find.text(
+            "couldn't reach the DJ — check your connection and try again",
+          ),
+          findsOneWidget,
+        );
+        final field = tester.widget<TextField>(
+          find.byKey(const Key('prompt-field')),
+        );
+        expect(field.controller!.text, 'a network-flaky prompt');
+      },
+    );
+
+    testWidgets(
+      'a plain ApiException on submit shows the generic message and preserves the draft',
+      (tester) async {
+        final api = FakeDjApi();
+        api.onListSessions = () async => [];
+        api.onCreateSession = (prompt) async =>
+            throw ApiException(500, 'internal server error');
+        final container = _makeContainer(api);
+        await _pump(tester, container);
+
+        await tester.enterText(
+          find.byKey(const Key('prompt-field')),
+          'a 500 prompt',
+        );
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('start-session')));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(ChatScreen), findsNothing);
+        expect(
+          find.text('something went wrong on our end — try again'),
+          findsOneWidget,
+        );
+        final field = tester.widget<TextField>(
+          find.byKey(const Key('prompt-field')),
+        );
+        expect(field.controller!.text, 'a 500 prompt');
+      },
+    );
+  });
+
+  group('responsive native layout', () {
+    testWidgets(
+      'short narrow screen supports large text and keyboard draft without overflow',
+      (tester) async {
+        tester.view.physicalSize = const Size(320, 568);
+        tester.view.devicePixelRatio = 1;
+        tester.view.viewInsets = FakeViewPadding.zero;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.view.resetViewInsets);
+        final api = FakeDjApi()
+          ..onListSessions = () async => [
+            _session(title: 'An evening of quiet soul songs'),
+          ];
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: _makeContainer(api),
+            child: MaterialApp(
+              builder: (context, child) => MediaQuery(
+                data: MediaQuery.of(
+                  context,
+                ).copyWith(textScaler: const TextScaler.linear(2)),
+                child: child!,
+              ),
+              home: const HomeScreen(),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        tester.view.viewInsets = const FakeViewPadding(bottom: 260);
+        await tester.enterText(
+          find.byKey(const Key('prompt-field')),
+          'Quiet soul\nfor my evening\nwith warm vocals',
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(
+          tester
+              .widget<TextField>(find.byKey(const Key('prompt-field')))
+              .controller!
+              .text,
+          'Quiet soul\nfor my evening\nwith warm vocals',
+        );
+        await tester.ensureVisible(find.byKey(const Key('start-session')));
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const Key('start-session')).hitTestable(),
+          findsOneWidget,
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    for (final brightness in Brightness.values) {
+      testWidgets('renders synthetic Home in ${brightness.name} theme', (
+        tester,
+      ) async {
+        tester.view.physicalSize = const Size(390, 844);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        const output = String.fromEnvironment('NATIVE_HOME_SNAPSHOT_DIR');
+        if (output.isNotEmpty) {
+          final icons = FontLoader('MaterialIcons');
+          icons.addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
+          await tester.runAsync(icons.load);
+          const fontPath = String.fromEnvironment('NATIVE_HOME_SNAPSHOT_FONT');
+          if (fontPath.isNotEmpty) {
+            final loader = FontLoader('NativeSnapshot');
+            loader.addFont(
+              Future.value(
+                ByteData.sublistView(File(fontPath).readAsBytesSync()),
+              ),
+            );
+            await tester.runAsync(loader.load);
+          }
+        }
+        final api = FakeDjApi()
+          ..onListSessions = () async => [
+            _session(id: 'night', title: 'Night Bus Notes'),
+            _session(id: 'sunday', title: 'A slow Sunday'),
+            _session(id: 'rain', title: 'Rain against the window'),
+          ];
+        const boundaryKey = Key('native-home-snapshot');
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: _makeContainer(api),
+            child: MaterialApp(
+              debugShowCheckedModeBanner: false,
+              theme: ThemeData(
+                colorSchemeSeed: const Color(0xFF544451),
+                useMaterial3: true,
+                brightness: brightness,
+                fontFamily: output.isEmpty ? null : 'NativeSnapshot',
+              ),
+              home: const RepaintBoundary(
+                key: boundaryKey,
+                child: HomeScreen(),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(find.text('Night Bus Notes'), findsOneWidget);
+        if (output.isNotEmpty) {
+          final boundary = tester.renderObject<RenderRepaintBoundary>(
+            find.byKey(boundaryKey),
+          );
+          await tester.runAsync(() async {
+            final image = await boundary.toImage(pixelRatio: 2);
+            final bytes = await image.toByteData(
+              format: ui.ImageByteFormat.png,
+            );
+            await File(
+              '$output/native-home-${brightness.name}.png',
+            ).writeAsBytes(bytes!.buffer.asUint8List());
+            image.dispose();
+          });
+        }
+      });
+    }
+  });
+
+  group('home navigation', () {
+    testWidgets('root has no back button and one compact actions menu', (
+      tester,
+    ) async {
+      final api = FakeDjApi()..onListSessions = () async => [];
+      await _pump(tester, _makeContainer(api));
+      expect(find.byType(BackButton), findsNothing);
+      expect(find.byKey(const Key('home-actions')), findsOneWidget);
+      expect(find.byKey(const Key('active-mixes')), findsOneWidget);
+      expect(find.byKey(const Key('archived-mixes')), findsOneWidget);
+      expect(find.byKey(const Key('memories-action')), findsNothing);
+      await tester.tap(find.byKey(const Key('home-actions')));
+      await tester.pumpAndSettle();
+      for (final key in [
+        'memories-action',
+        'sources-action',
+        'sync-action',
+        'logout-action',
+      ]) {
+        expect(find.byKey(Key(key)), findsOneWidget);
+      }
+      await tester.tapAt(const Offset(10, 400));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('memories-action')), findsNothing);
+    });
+  });
+
+  group('mixes list', () {
+    testWidgets('tapping the row opens its chat without editing its name', (
       tester,
     ) async {
       final api = FakeDjApi();
-      api.onListSessions = () async => [_session(id: 's1', title: 'Sunset Drive')];
-      final container = _makeContainer(api);
-      await _pump(tester, container);
-
-      await tester.longPress(find.text('Sunset Drive'));
+      api.onListSessions = () async => [_session(title: 'Sunset Drive')];
+      api.onGetSession = (id) async => SessionDetail(
+        session: _session(id: id),
+        messages: [],
+        queue: [],
+      );
+      await _pump(tester, _makeContainer(api));
+      await tester.tap(find.text('Sunset Drive'));
       await tester.pumpAndSettle();
-
-      FilledButton confirmButton() =>
-          tester.widget<FilledButton>(find.byKey(const Key('rename-confirm')));
-      expect(confirmButton().onPressed, isNotNull); // prefilled with a non-empty title
-
-      await tester.enterText(find.byKey(const Key('rename-field')), '   ');
-      await tester.pump();
-      expect(confirmButton().onPressed, isNull);
-
-      await tester.enterText(find.byKey(const Key('rename-field')), 'Lagos Nights');
-      await tester.pump();
-      expect(confirmButton().onPressed, isNotNull);
-
-      // Dismiss before the test ends — an autofocus TextField left inside a
-      // still-open dialog when the tree tears down can corrupt focus state
-      // for whichever test in this file happens to run next.
-      await tester.tap(find.text('Cancel'));
-      await tester.pumpAndSettle();
+      expect(
+        tester.widget<ChatScreen>(find.byType(ChatScreen)).sessionId,
+        's1',
+      );
     });
 
-    testWidgets('a failed rename shows a snackbar and leaves the title unchanged', (tester) async {
-      final api = FakeDjApi();
-      api.onListSessions = () async => [_session(id: 's1', title: 'Sunset Drive')];
-      api.onRenameSession = (id, title) async => throw ApiException(500, 'boom');
-      final container = _makeContainer(api);
-      await _pump(tester, container);
-
-      await tester.longPress(find.text('Sunset Drive'));
+    testWidgets('active and archived tabs are exclusive and always visible', (
+      tester,
+    ) async {
+      final api = FakeDjApi()
+        ..onListSessions = () async => [
+          _session(title: 'Active One'),
+          _session(id: 's2', title: 'Old One', status: 'archived'),
+        ];
+      await _pump(tester, _makeContainer(api));
+      expect(find.text('Active One'), findsOneWidget);
+      expect(find.text('Old One'), findsNothing);
+      await tester.tap(find.byKey(const Key('archived-mixes')));
       await tester.pumpAndSettle();
-      await tester.enterText(find.byKey(const Key('rename-field')), 'Lagos Nights');
-      await tester.pump();
-      await tester.tap(find.byKey(const Key('rename-confirm')));
+      expect(find.text('Active One'), findsNothing);
+      expect(find.text('Old One'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('active-mixes')));
       await tester.pumpAndSettle();
-
-      expect(find.text("couldn't rename — try again"), findsOneWidget);
-      expect(find.text('Sunset Drive'), findsOneWidget);
-      expect(find.text('Lagos Nights'), findsNothing);
+      expect(find.text('Active One'), findsOneWidget);
+      expect(find.text('Old One'), findsNothing);
     });
 
-    testWidgets('cancelling the dialog makes no call and leaves the title unchanged', (tester) async {
+    testWidgets('empty state retains both tabs', (tester) async {
+      final api = FakeDjApi()..onListSessions = () async => [];
+      await _pump(tester, _makeContainer(api));
+      expect(find.byKey(const Key('sessions-empty')), findsOneWidget);
+      expect(find.byKey(const Key('active-mixes')), findsOneWidget);
+      expect(find.byKey(const Key('archived-mixes')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('archived-mixes')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('sessions-empty')), findsOneWidget);
+    });
+
+    testWidgets('archive removes the active row and Undo restores it', (
+      tester,
+    ) async {
+      var status = 'active';
+      final writes = <String>[];
       final api = FakeDjApi();
-      api.onListSessions = () async => [_session(id: 's1', title: 'Sunset Drive')];
-      final container = _makeContainer(api);
-      await _pump(tester, container);
-
-      await tester.longPress(find.text('Sunset Drive'));
+      api.onListSessions = () async => [
+        _session(title: 'Sunset Drive', status: status),
+      ];
+      api.onSetStatus = (id, next) async {
+        expect(id, 's1');
+        writes.add(next);
+        status = next;
+        return _session(title: 'Sunset Drive', status: status);
+      };
+      await _pump(tester, _makeContainer(api));
+      await _mixAction(tester, 's1', 'Archive');
+      expect(find.byKey(const Key('session-s1')), findsNothing);
+      await tester.tap(find.text('Undo'));
       await tester.pumpAndSettle();
-      await tester.enterText(find.byKey(const Key('rename-field')), 'Lagos Nights');
-      await tester.pump();
-      await tester.tap(find.text('Cancel'));
-      await tester.pumpAndSettle();
+      expect(writes, ['archived', 'active']);
+      expect(find.byKey(const Key('session-s1')), findsOneWidget);
+    });
 
+    testWidgets(
+      'archive failure keeps the active row and offers another attempt',
+      (tester) async {
+        var writes = 0;
+        final api = FakeDjApi();
+        api.onListSessions = () async => [_session(title: 'Sunset Drive')];
+        api.onSetStatus = (id, status) async {
+          writes++;
+          throw ApiException(500, 'boom');
+        };
+        await _pump(tester, _makeContainer(api));
+        await _mixAction(tester, 's1', 'Archive');
+        expect(find.byKey(const Key('session-s1')), findsOneWidget);
+        expect(find.byType(SnackBar), findsOneWidget);
+        expect(writes, 1);
+        await _mixAction(tester, 's1', 'Archive');
+        expect(writes, 2);
+      },
+    );
+
+    testWidgets('restore failure keeps the row in archived', (tester) async {
+      final api = FakeDjApi();
+      api.onListSessions = () async => [
+        _session(title: 'Old One', status: 'archived'),
+      ];
+      api.onSetStatus = (id, status) async => throw ApiException(500, 'boom');
+      await _pump(tester, _makeContainer(api));
+      await tester.tap(find.byKey(const Key('archived-mixes')));
+      await tester.pumpAndSettle();
+      await _mixAction(tester, 's1', 'Restore');
+      expect(find.byKey(const Key('session-s1')), findsOneWidget);
+      expect(find.byType(SnackBar), findsOneWidget);
+    });
+
+    testWidgets(
+      'restoring removes archived row and makes it available in Active',
+      (tester) async {
+        var status = 'archived';
+        final api = FakeDjApi();
+        api.onListSessions = () async => [
+          _session(title: 'Old One', status: status),
+        ];
+        api.onSetStatus = (id, next) async {
+          expect(next, 'active');
+          status = next;
+          return _session(title: 'Old One', status: status);
+        };
+        await _pump(tester, _makeContainer(api));
+        await tester.tap(find.byKey(const Key('archived-mixes')));
+        await tester.pumpAndSettle();
+        await _mixAction(tester, 's1', 'Restore');
+        expect(find.byKey(const Key('session-s1')), findsNothing);
+        await tester.tap(find.byKey(const Key('active-mixes')));
+        await tester.pumpAndSettle();
+        expect(find.text('Old One'), findsOneWidget);
+      },
+    );
+  });
+
+  group('inline rename from mix actions', () {
+    Finder nameField() => find.descendant(
+      of: find.byKey(const Key('session-s1')),
+      matching: find.byType(TextField),
+    );
+
+    testWidgets('Rename prefills inline input and submit saves the title', (
+      tester,
+    ) async {
+      var title = 'Sunset Drive';
+      final api = FakeDjApi();
+      api.onListSessions = () async => [_session(title: title)];
+      api.onRenameSession = (id, next) async {
+        expect(id, 's1');
+        title = next;
+        return _session(title: title);
+      };
+      await _pump(tester, _makeContainer(api));
+      await _mixAction(tester, 's1', 'Rename');
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(
+        tester.widget<TextField>(nameField()).controller!.text,
+        'Sunset Drive',
+      );
+      await tester.enterText(nameField(), 'Lagos Nights');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(title, 'Lagos Nights');
+      expect(nameField(), findsNothing);
+      expect(find.text('Lagos Nights'), findsOneWidget);
+    });
+
+    testWidgets('blank rename does not issue a request', (tester) async {
+      var calls = 0;
+      final api = FakeDjApi();
+      api.onListSessions = () async => [_session(title: 'Sunset Drive')];
+      api.onRenameSession = (id, title) async {
+        calls++;
+        return _session(title: title);
+      };
+      await _pump(tester, _makeContainer(api));
+      await _mixAction(tester, 's1', 'Rename');
+      await tester.enterText(nameField(), '   ');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(calls, 0);
+    });
+
+    testWidgets('failed rename retains draft and Retry can save it', (
+      tester,
+    ) async {
+      var calls = 0;
+      var title = 'Sunset Drive';
+      final api = FakeDjApi();
+      api.onListSessions = () async => [_session(title: title)];
+      api.onRenameSession = (id, next) async {
+        if (++calls == 1) throw ApiException(500, 'boom');
+        title = next;
+        return _session(title: title);
+      };
+      await _pump(tester, _makeContainer(api));
+      await _mixAction(tester, 's1', 'Rename');
+      await tester.enterText(nameField(), 'Lagos Nights');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(title, 'Sunset Drive');
+      expect(
+        tester.widget<TextField>(nameField()).controller!.text,
+        'Lagos Nights',
+      );
+      await tester.tap(find.text('Retry'));
+      await tester.pumpAndSettle();
+      expect(calls, 2);
+      expect(title, 'Lagos Nights');
+      expect(nameField(), findsNothing);
+    });
+
+    testWidgets('Escape cancels draft without a rename request', (
+      tester,
+    ) async {
+      var calls = 0;
+      final api = FakeDjApi();
+      api.onListSessions = () async => [_session(title: 'Sunset Drive')];
+      api.onRenameSession = (id, next) async {
+        calls++;
+        return _session(title: next);
+      };
+      await _pump(tester, _makeContainer(api));
+      await _mixAction(tester, 's1', 'Rename');
+      await tester.enterText(nameField(), 'Lagos Nights');
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(calls, 0);
+      expect(nameField(), findsNothing);
       expect(find.text('Sunset Drive'), findsOneWidget);
-      expect(find.text('Lagos Nights'), findsNothing);
     });
   });
 
   group('sessions load failure', () {
-    testWidgets('shows an error state with a retry button; retry recovers the list', (tester) async {
-      var shouldFail = true;
-      final api = FakeDjApi();
-      api.onListSessions = () async {
-        if (shouldFail) throw ApiException(500, 'listSessions boom');
-        return [_session(id: 's1', title: 'Recovered Session')];
-      };
-      final container = _makeContainer(api);
-      await _pump(tester, container);
+    testWidgets(
+      'shows an error state with a retry button; retry recovers the list',
+      (tester) async {
+        var shouldFail = true;
+        final api = FakeDjApi();
+        api.onListSessions = () async {
+          if (shouldFail) throw ApiException(500, 'listSessions boom');
+          return [_session(id: 's1', title: 'Recovered Session')];
+        };
+        final container = _makeContainer(api);
+        await _pump(tester, container);
 
-      expect(find.byKey(const Key('sessions-retry')), findsOneWidget);
-      expect(find.byKey(const Key('sessions-list')), findsNothing);
+        expect(find.byKey(const Key('sessions-retry')), findsOneWidget);
+        expect(find.byKey(const Key('sessions-list')), findsNothing);
 
-      shouldFail = false;
-      await tester.tap(find.byKey(const Key('sessions-retry')));
-      await tester.pumpAndSettle();
+        shouldFail = false;
+        await tester.tap(find.byKey(const Key('sessions-retry')));
+        await tester.pumpAndSettle();
 
-      expect(find.byKey(const Key('sessions-retry')), findsNothing);
-      expect(find.text('Recovered Session'), findsOneWidget);
-    });
+        expect(find.byKey(const Key('sessions-retry')), findsNothing);
+        expect(find.text('Recovered Session'), findsOneWidget);
+      },
+    );
 
-    testWidgets('a background refresh failure keeps showing the previously-good list, never the '
-        'full-screen error', (tester) async {
-      var shouldFail = false;
-      final api = FakeDjApi();
-      api.onListSessions = () async {
-        if (shouldFail) throw ApiException(500, 'refresh boom');
-        return [_session(id: 's1', title: 'Still Here')];
-      };
-      final container = _makeContainer(api);
-      await _pump(tester, container);
+    testWidgets(
+      'a background refresh failure keeps showing the previously-good list, never the '
+      'full-screen error',
+      (tester) async {
+        var shouldFail = false;
+        final api = FakeDjApi();
+        api.onListSessions = () async {
+          if (shouldFail) throw ApiException(500, 'refresh boom');
+          return [_session(id: 's1', title: 'Still Here')];
+        };
+        final container = _makeContainer(api);
+        await _pump(tester, container);
 
-      expect(find.text('Still Here'), findsOneWidget);
-      expect(find.byKey(const Key('sessions-retry')), findsNothing);
+        expect(find.text('Still Here'), findsOneWidget);
+        expect(find.byKey(const Key('sessions-retry')), findsNothing);
 
-      shouldFail = true;
-      container.invalidate(sessionsProvider);
-      await tester.pump();
-      await tester.pump();
-      await tester.pump();
+        shouldFail = true;
+        container.invalidate(sessionsProvider);
+        await tester.pump();
+        await tester.pump();
+        await tester.pump();
 
-      expect(find.text('Still Here'), findsOneWidget);
-      expect(find.byKey(const Key('sessions-retry')), findsNothing);
+        expect(find.text('Still Here'), findsOneWidget);
+        expect(find.byKey(const Key('sessions-retry')), findsNothing);
 
-      container.dispose();
-    });
+        container.dispose();
+      },
+    );
 
-    testWidgets('a failed pull-to-refresh keeps the list AND says so — never a silent '
-        'spinner retract', (tester) async {
+    testWidgets(
+      'a failed pull-to-refresh keeps the list AND says so — never a silent '
+      'spinner retract',
+      (tester) async {
+        var calls = 0;
+        final api = FakeDjApi();
+        api.onListSessions = () async {
+          calls += 1;
+          if (calls > 1) throw NetworkException('refresh boom');
+          return [_session(id: 's1', title: 'Test Session')];
+        };
+        final container = _makeContainer(api);
+        await _pump(tester, container);
+        expect(find.text('Test Session'), findsOneWidget);
+
+        await tester.fling(
+          find.byKey(const Key('sessions-list')),
+          const Offset(0, 300),
+          1000,
+        );
+        await tester.pumpAndSettle();
+
+        expect(calls, 2, reason: 'the pull must actually refetch');
+        expect(find.text('Test Session'), findsOneWidget);
+        expect(
+          find.text("couldn't refresh — showing what we had"),
+          findsOneWidget,
+        );
+      },
+    );
+
+    testWidgets('pull-to-refresh still works from the empty state', (
+      tester,
+    ) async {
       var calls = 0;
       final api = FakeDjApi();
       api.onListSessions = () async {
         calls += 1;
-        if (calls > 1) throw NetworkException('refresh boom');
-        return [_session(id: 's1', title: 'Test Session')];
-      };
-      final container = _makeContainer(api);
-      await _pump(tester, container);
-      expect(find.text('Test Session'), findsOneWidget);
-
-      await tester.fling(
-        find.byKey(const Key('sessions-list')),
-        const Offset(0, 300),
-        1000,
-      );
-      await tester.pumpAndSettle();
-
-      expect(calls, 2, reason: 'the pull must actually refetch');
-      expect(find.text('Test Session'), findsOneWidget);
-      expect(
-        find.text("couldn't refresh — showing what we had"),
-        findsOneWidget,
-      );
-    });
-
-    testWidgets('pull-to-refresh still works from the empty state', (tester) async {
-      var calls = 0;
-      final api = FakeDjApi();
-      api.onListSessions = () async {
-        calls += 1;
-        return calls > 1 ? [_session(id: 's1', title: 'Fresh Session')] : <DjSession>[];
+        return calls > 1
+            ? [_session(id: 's1', title: 'Fresh Session')]
+            : <DjSession>[];
       };
       final container = _makeContainer(api);
       await _pump(tester, container);
@@ -685,51 +941,66 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(calls, 2, reason: 'the empty state must still hook the RefreshIndicator');
+      expect(
+        calls,
+        2,
+        reason: 'the empty state must still hook the RefreshIndicator',
+      );
       expect(find.text('Fresh Session'), findsOneWidget);
     });
   });
 
   group('library sync relocation', () {
-    testWidgets('the sync control lives in the AppBar and still triggers a working sync', (tester) async {
-      final api = FakeDjApi();
-      api.onListSessions = () async => [];
-      final service = LibrarySyncService(
-        bridge: FakeBridge([song(1), song(2), song(3)]),
-        api: await apiWith(
-          MockClient((request) async => emptyPlaylistSyncResponse(request)),
-        ),
-      );
-      final container = _makeContainer(api, syncService: service);
-      await _pump(tester, container);
+    testWidgets(
+      'the sync control lives in the AppBar and still triggers a working sync',
+      (tester) async {
+        final api = FakeDjApi();
+        api.onListSessions = () async => [];
+        final service = LibrarySyncService(
+          bridge: FakeBridge([song(1), song(2), song(3)]),
+          api: await apiWith(
+            MockClient((request) async => emptyPlaylistSyncResponse(request)),
+          ),
+        );
+        final container = _makeContainer(api, syncService: service);
+        await _pump(tester, container);
 
-      expect(find.byKey(const Key('sync-action')), findsOneWidget);
-      expect(find.byKey(const Key('sync-library')), findsNothing);
+        await tester.tap(find.byKey(const Key('home-actions')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('sync-action')), findsOneWidget);
+        expect(find.byKey(const Key('sync-library')), findsNothing);
 
-      await tester.tap(find.byKey(const Key('sync-action')));
-      await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('sync-action')));
+        await tester.pumpAndSettle();
 
-      expect(find.byKey(const Key('sync-library')), findsOneWidget);
+        expect(find.byKey(const Key('sync-library')), findsOneWidget);
 
-      await tester.tap(find.byKey(const Key('sync-library')));
-      await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('sync-library')));
+        await tester.pumpAndSettle();
 
-      expect(
-        find.byWidgetPredicate((w) => w is Text && (w.data?.contains('Synced 3 songs') ?? false)),
-        findsOneWidget,
-      );
-      expect(find.textContaining('and 0 playlists'), findsOneWidget);
-    });
+        expect(
+          find.byWidgetPredicate(
+            (w) => w is Text && (w.data?.contains('Synced 3 songs') ?? false),
+          ),
+          findsOneWidget,
+        );
+        expect(find.textContaining('and 0 playlists'), findsOneWidget);
+      },
+    );
   });
 
   group('memories entry (P4 Task 4)', () {
-    testWidgets('the AppBar memories action navigates to "What the DJ knows"', (tester) async {
+    testWidgets('the AppBar memories action navigates to "What the DJ knows"', (
+      tester,
+    ) async {
       final api = FakeDjApi();
       api.onListSessions = () async => [];
       api.onListMemories = () async => [];
       final container = _makeContainer(api);
       await _pump(tester, container);
 
+      await tester.tap(find.byKey(const Key('home-actions')));
+      await tester.pumpAndSettle();
       expect(find.byKey(const Key('memories-action')), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('memories-action')));

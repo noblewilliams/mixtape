@@ -24,6 +24,7 @@ class PlaylistSummary {
     required this.capability,
     this.source = 'unknown',
     this.origin = 'unknown',
+    this.originKnown = true,
     this.curatorName,
     this.artworkUrlTemplate,
     this.artworkWidth,
@@ -43,6 +44,7 @@ class PlaylistSummary {
       name: _requiredString(json['name']),
       curatorName: _optionalString(json['curatorName']),
       kind: _requiredString(json['kind']),
+      originKnown: ['unknown', 'mixtape', 'user_confirmed'].contains(json['origin']),
       origin: ['mixtape', 'user_confirmed'].contains(json['origin'])
           ? json['origin'] as String
           : 'unknown',
@@ -65,6 +67,7 @@ class PlaylistSummary {
   final String? curatorName;
   final String kind;
   final String origin;
+  final bool originKnown;
   final String? artworkUrlTemplate;
   final int? artworkWidth;
   final int? artworkHeight;

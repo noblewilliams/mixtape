@@ -6,6 +6,7 @@ import '../format/source_labels.dart';
 import '../providers/onboarding_provider.dart';
 import 'import_sheet.dart';
 import 'playlist_browser_screen.dart';
+import 'spotify_request_screen.dart';
 
 const _removeFailedMessage = "couldn't remove — try again";
 
@@ -19,6 +20,23 @@ class MusicSourcesScreen extends ConsumerWidget {
 
   Future<void> _import(BuildContext context, WidgetRef ref) =>
       openImportFlow(context, ref);
+
+  Widget _addSpotify(BuildContext context, WidgetRef ref) => Align(
+    alignment: Alignment.centerLeft,
+    child: TextButton.icon(
+      key: const Key('sources-add-spotify'),
+      icon: const Icon(Icons.add),
+      label: const Text('Add Spotify music'),
+      onPressed: () async {
+        await Navigator.of(
+          context,
+        ).push(MaterialPageRoute(builder: (_) => const SpotifyRequestScreen()));
+        if (context.mounted) {
+          await ref.read(onboardingProvider.notifier).refresh();
+        }
+      },
+    ),
+  );
 
   Future<void> _remove(
     BuildContext context,
@@ -121,11 +139,12 @@ class MusicSourcesScreen extends ConsumerWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               const Text('Nothing connected yet.', key: Key('sources-empty')),
+              _addSpotify(context, ref),
               const SizedBox(height: 16),
               FilledButton(
                 key: const Key('sources-import'),
                 onPressed: () => _import(context, ref),
-                child: const Text('Import a Spotify ZIP'),
+                child: const Text('Choose Spotify files'),
               ),
             ],
           ),
@@ -134,6 +153,11 @@ class MusicSourcesScreen extends ConsumerWidget {
     }
     return ListView(
       children: [
+        if (!state.sources.any((source) => source.source == 'spotify_export'))
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: _addSpotify(context, ref),
+          ),
         for (final source in state.sources)
           _SourceRow(
             key: Key('source-${source.source}'),
@@ -171,7 +195,11 @@ class _SourceRow extends StatelessWidget {
 
   String get _detail {
     final imported = source.lastImportedAt;
-    if (imported == null) return 'Nothing imported yet';
+    if (imported == null) {
+      return source.source == 'apple_live'
+          ? 'Connected library'
+          : 'Nothing imported yet';
+    }
     final ledger = ledgerRange(source.ledgerFrom, source.ledgerTo);
     final when = 'Imported ${shortDate(imported)}';
     return ledger == null ? when : '$when · $ledger';

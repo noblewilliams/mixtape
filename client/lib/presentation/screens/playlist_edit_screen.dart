@@ -313,9 +313,6 @@ class _MessageBubble extends StatelessWidget {
               ? colors.primaryContainer
               : colors.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(16),
-          border: user || error
-              ? null
-              : Border(left: BorderSide(color: colors.primary, width: 3)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

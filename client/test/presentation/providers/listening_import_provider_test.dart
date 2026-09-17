@@ -301,7 +301,7 @@ void main() {
     expect((await failWith(NetworkException(Exception("offline")))).message, contains('connection'));
     expect(
       (await failWith(ApiException(409, '{"error":"sync_conflict"}'))).message,
-      contains('still open'),
+      contains('Review again'),
     );
     expect((await failWith(ApiException(500, 'boom'))).message, contains('our end'));
     expect(

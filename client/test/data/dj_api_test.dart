@@ -7,6 +7,7 @@ import 'package:mixtape/data/api/api_client.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/dj/dj_api.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
+import 'package:mixtape/data/playlists/playlist_context_models.dart';
 
 Map<String, dynamic> _session({
   String id = 's1',
@@ -65,6 +66,28 @@ DjApi _api({required http.Client inner, Duration timeout = const Duration(second
 
 void main() {
   group('createSession', () {
+    test('sends exact optional inspiration and preserves legacy unknown state', () async {
+      final inner = MockClient((req) async {
+        expect(jsonDecode(req.body), {'prompt': 'Night drive', 'playlistSeed': {'playlistId': 'exact-playlist-id', 'excludeSourceTracks': true}});
+        return http.Response(jsonEncode({'session': _session(), 'messages': [], 'queue': []}), 200);
+      });
+      final result = await _api(inner: inner).createSession('Night drive', playlistSeed: const InitialPlaylistSeed(playlistId: 'exact-playlist-id', excludeSourceTracks: true));
+      expect(result.playlistSeed, isNull);
+    });
+
+
+    test('parses canonical empty seed but rejects malformed seed capability', () async {
+      Map<String, dynamic>? wireSeed = {
+        'playlistId': null, 'revision': 4, 'excludeSourceTracks': false,
+        'status': 'none', 'name': null, 'source': null, 'fingerprint': null,
+        'updatedAt': null, 'entries': 0, 'resolvedEntries': 0, 'recordings': 0, 'profile': null,
+      };
+      final api = _api(inner: MockClient((_) async => http.Response(jsonEncode({'session': _session(), 'messages': [], 'queue': [], 'playlistSeed': wireSeed}), 200)));
+      expect((await api.getSession('s1')).playlistSeed!.revision, 4);
+      wireSeed = null;
+      await expectLater(api.getSession('s1'), throwsA(isA<DjApiException>()));
+    });
+
     test('POSTs prompt to /sessions and parses SessionDetail', () async {
       String? seenMethod;
       Uri? seenUrl;

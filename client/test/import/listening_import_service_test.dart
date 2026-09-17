@@ -40,6 +40,7 @@ class _Server {
 
   http.Response _answer(http.Request request) {
     final path = request.url.path;
+    if(path=='/ingest/listening/spotify/review') return http.Response(jsonEncode({'library':{'ids':[],'fingerprint':'0'*64},'playlists':[]}),200);
     if (path == '/me/funnel-events') return http.Response('{"ok":true}', 201);
     if (path == '/ingest/listening/imports') {
       beginBody = jsonDecode(request.body) as Map<String, dynamic>;
@@ -89,7 +90,7 @@ class _Server {
 
   /// `'METHOD /path'` of every protocol request, funnel events excluded.
   List<String> get protocol => requests
-      .where((r) => r.url.path != '/me/funnel-events')
+      .where((r) => r.url.path != '/me/funnel-events' && r.url.path != '/ingest/listening/spotify/review')
       .map((r) => '${r.method} ${r.url.path}')
       .toList();
 

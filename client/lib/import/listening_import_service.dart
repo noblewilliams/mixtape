@@ -1,3 +1,4 @@
+import 'collection_review.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
@@ -11,17 +12,22 @@ import 'snapshot.dart';
 import 'spotify_parser.dart';
 
 /// Parses an export archive at a path (default: [parseExportInIsolate]).
-typedef ExportParser = Future<ParsedExport> Function(String path, ParseOptions options);
+typedef ExportParser =
+    Future<ParsedExport> Function(String path, ParseOptions options);
 
 class ImportOptions {
-  const ImportOptions({required this.timeZone, this.includePrivateSessions = false});
+  const ImportOptions({
+    required this.timeZone,
+    this.includePrivateSessions = false,
+  });
 
   /// IANA zone the run records; days and hours are local to it.
   final String timeZone;
   final bool includePrivateSessions;
 
   bool sameAs(ImportOptions other) =>
-      timeZone == other.timeZone && includePrivateSessions == other.includePrivateSessions;
+      timeZone == other.timeZone &&
+      includePrivateSessions == other.includePrivateSessions;
 }
 
 /// What [ListeningImportService.inspect] hands the inventory screen: the full
@@ -32,12 +38,21 @@ class ImportOptions {
 /// changed. Holds the whole snapshot: drop it with the screen.
 class ImportPreview {
   const ImportPreview({
+    this.selection,
     required this.inventory,
     required this.snapshot,
     required this.stats,
     required this.options,
   });
 
+  final CollectionSelection? selection;
+  ImportPreview withSelection(CollectionSelection value) => ImportPreview(
+    inventory: inventory,
+    snapshot: snapshot,
+    stats: stats,
+    options: options,
+    selection: value,
+  );
   final ExportInventory inventory;
   final ListeningExportSnapshot snapshot;
   final ExportStats stats;
@@ -107,7 +122,7 @@ class ListeningImportProtocolException implements Exception {
 /// this and `LibrarySyncService.sync` at the same time.
 class ListeningImportService {
   ListeningImportService({required this.api, ExportParser? parser})
-      : _parser = parser ?? parseExportInIsolate;
+    : _parser = parser ?? parseExportInIsolate;
 
   static const int trackChunkSize = 500;
   static const int dayChunkSize = 2000;
@@ -147,17 +162,39 @@ class ListeningImportService {
   /// listener flips the private-sessions switch, the upload. An unreadable
   /// archive throws [UnreadableExportException]; [cancel] aborts with
   /// [ImportCancelled] and posts nothing.
-  Future<ImportPreview> inspect(String path, {required String timeZone}) async {
+  Future<ImportPreview> inspect(
+    String path, {
+    required String timeZone,
+    ParseProgress? onProgress,
+  }) async {
     final token = CancelToken();
     _inspectToken = token;
     final options = ImportOptions(timeZone: timeZone);
     try {
       final parsed = await _parser(
         path,
-        ParseOptions(timeZone: timeZone, includePrivateSessions: false, cancelToken: token),
+        ParseOptions(
+          timeZone: timeZone,
+          includePrivateSessions: false,
+          cancelToken: token,
+          onProgress: onProgress,
+        ),
       );
       _funnel(FunnelEventType.fileInspected);
+      final context =
+          parsed.snapshot.package == ExportPackage.spotifyExportify ||
+              parsed.snapshot.package == ExportPackage.spotifyAccount
+          ? await api.getCollectionReview()
+          : null;
+      final selection =
+          context != null &&
+              (parsed.snapshot.package == ExportPackage.spotifyExportify ||
+                  context.hasQuickImport)
+          ? CollectionSelection.initial(parsed.snapshot, context)
+          : null;
+      token.throwIfCancelled();
       return ImportPreview(
+        selection: selection,
         inventory: parsed.inventory,
         snapshot: parsed.snapshot,
         stats: parsed.stats,
@@ -190,11 +227,15 @@ class ListeningImportService {
   }) {
     final current = _inFlight;
     if (current != null && !current.cancelRequested) return current.future;
-    final settled = current?.future.then<void>((_) {}, onError: (Object _) {}) ?? Future<void>.value();
+    final settled =
+        current?.future.then<void>((_) {}, onError: (Object _) {}) ??
+        Future<void>.value();
     final job = _ImportRun();
-    job.future = settled.then((_) => _run(job, path, options, preview, onProgress)).whenComplete(() {
-      if (identical(_inFlight, job)) _inFlight = null;
-    });
+    job.future = settled
+        .then((_) => _run(job, path, options, preview, onProgress))
+        .whenComplete(() {
+          if (identical(_inFlight, job)) _inFlight = null;
+        });
     _inFlight = job;
     return job.future;
   }
@@ -208,14 +249,23 @@ class ListeningImportService {
   ) async {
     final ParsedExport parsed;
     if (preview != null && preview.options.sameAs(options)) {
-      parsed = ParsedExport(inventory: preview.inventory, snapshot: preview.snapshot, stats: preview.stats);
+      parsed = ParsedExport(
+        inventory: preview.inventory,
+        snapshot: preview.snapshot,
+        stats: preview.stats,
+      );
     } else {
       parsed = await _parse(job, path, options, onProgress);
     }
     job.checkCancelled();
     onProgress?.call(_parseStageEnd);
 
-    final snapshot = parsed.snapshot;
+    final reviewed = preview?.selection?.apply(parsed.snapshot);
+    final snapshot = reviewed?.snapshot ?? parsed.snapshot;
+    if (snapshot.package == ExportPackage.spotifyExportify &&
+        reviewed == null) {
+      throw const FormatException('Review the files before importing.');
+    }
     final canonical = snapshot.toCanonicalJson();
     final tracks = _withOrdinals(canonical['tracks']);
     final days = _withOrdinals(canonical['days']);
@@ -224,6 +274,7 @@ class ListeningImportService {
 
     final run = await api.beginImport(
       BeginListeningImport(
+        libraryReview: reviewed?.libraryReview,
         source: ListeningExportSnapshot.source,
         package: snapshot.package.wire,
         timeZone: snapshot.timeZone,
@@ -238,24 +289,35 @@ class ListeningImportService {
     );
     job.checkCancelled();
 
-    final totalRows = tracks.length + days.length + library.length + artists.length;
+    final totalRows =
+        tracks.length + days.length + library.length + artists.length;
     var uploadedRows = 0;
     void reportUpload() {
-      final ratio = totalRows == 0 ? 1.0 : (uploadedRows / totalRows).clamp(0.0, 1.0);
-      onProgress?.call(_parseStageEnd + (_uploadStageEnd - _parseStageEnd) * ratio);
+      final ratio = totalRows == 0
+          ? 1.0
+          : (uploadedRows / totalRows).clamp(0.0, 1.0);
+      onProgress?.call(
+        _parseStageEnd + (_uploadStageEnd - _parseStageEnd) * ratio,
+      );
     }
 
     Future<void> upload(
       List<Map<String, Object?>> rows,
       int chunkSize,
-      Future<int> Function(String importId, List<Map<String, Object?>> rows) put,
+      Future<int> Function(String importId, List<Map<String, Object?>> rows)
+      put,
     ) async {
       for (var offset = 0; offset < rows.length; offset += chunkSize) {
         job.checkCancelled();
-        final chunk = rows.sublist(offset, math.min(offset + chunkSize, rows.length));
+        final chunk = rows.sublist(
+          offset,
+          math.min(offset + chunkSize, rows.length),
+        );
         final accepted = await put(run.importId, chunk);
         job.checkCancelled();
-        if (accepted != chunk.length) throw const ListeningImportProtocolException();
+        if (accepted != chunk.length) {
+          throw const ListeningImportProtocolException();
+        }
         uploadedRows += chunk.length;
         reportUpload();
       }
@@ -289,9 +351,15 @@ class ListeningImportService {
     // as a throw; only a cancel still throws.
     PlaylistSyncSummary? playlistSummary;
     Object? playlistError;
-    if (snapshot.package == ExportPackage.spotifyAccount) {
+    if (snapshot.package == ExportPackage.spotifyAccount ||
+        snapshot.package == ExportPackage.spotifyExportify) {
       try {
-        playlistSummary = await _syncPlaylists(job, snapshot.playlists, onProgress);
+        playlistSummary = await _syncPlaylists(
+          job,
+          snapshot.playlists,
+          onProgress,
+          reviewed?.playlistReview,
+        );
       } on ImportCancelled {
         rethrow;
       } catch (error) {
@@ -326,7 +394,9 @@ class ListeningImportService {
           cancelToken: token,
           onProgress: (stage, file, completed, total) {
             if (stage != ParseStage.parsing || total <= 0) return;
-            onProgress?.call(_parseStageEnd * (completed / total).clamp(0.0, 1.0));
+            onProgress?.call(
+              _parseStageEnd * (completed / total).clamp(0.0, 1.0),
+            );
           },
         ),
       );
@@ -339,11 +409,17 @@ class ListeningImportService {
     _ImportRun job,
     List<SnapshotPlaylist> unordered,
     void Function(double progress)? onProgress,
+    List<Map<String, Object?>>? review,
   ) async {
-    final playlists = List.of(unordered)..sort((a, b) => a.ordinal.compareTo(b.ordinal));
-    final totalEntries = playlists.fold<int>(0, (sum, p) => sum + p.entries.length);
+    final playlists = List.of(unordered)
+      ..sort((a, b) => a.ordinal.compareTo(b.ordinal));
+    final totalEntries = playlists.fold<int>(
+      0,
+      (sum, p) => sum + p.entries.length,
+    );
 
     final sync = await api.beginPlaylistSync(
+      review: review,
       expectedPlaylists: playlists.length,
       expectedEntries: totalEntries,
     );
@@ -352,31 +428,57 @@ class ListeningImportService {
     final totalUnits = playlists.length + totalEntries;
     var completedUnits = 0;
     void reportPlaylists() {
-      final ratio = totalUnits == 0 ? 1.0 : (completedUnits / totalUnits).clamp(0.0, 1.0);
-      onProgress?.call(_uploadStageEnd + (_playlistStageEnd - _uploadStageEnd) * ratio);
+      final ratio = totalUnits == 0
+          ? 1.0
+          : (completedUnits / totalUnits).clamp(0.0, 1.0);
+      onProgress?.call(
+        _uploadStageEnd + (_playlistStageEnd - _uploadStageEnd) * ratio,
+      );
     }
 
-    for (var offset = 0; offset < playlists.length; offset += playlistChunkSize) {
+    for (
+      var offset = 0;
+      offset < playlists.length;
+      offset += playlistChunkSize
+    ) {
       job.checkCancelled();
-      final chunk = playlists.sublist(offset, math.min(offset + playlistChunkSize, playlists.length));
-      final accepted = await api.putPlaylists(sync.syncId, chunk.map(_playlistSnapshot).toList());
+      final chunk = playlists.sublist(
+        offset,
+        math.min(offset + playlistChunkSize, playlists.length),
+      );
+      final accepted = await api.putPlaylists(
+        sync.syncId,
+        chunk.map(_playlistSnapshot).toList(),
+      );
       job.checkCancelled();
-      if (accepted != chunk.length) throw const ListeningImportProtocolException();
+      if (accepted != chunk.length) {
+        throw const ListeningImportProtocolException();
+      }
       completedUnits += chunk.length;
       reportPlaylists();
 
       for (final playlist in chunk) {
-        final entries = List.of(playlist.entries)..sort((a, b) => a.position.compareTo(b.position));
-        for (var entryOffset = 0; entryOffset < entries.length; entryOffset += entryChunkSize) {
+        final entries = List.of(playlist.entries)
+          ..sort((a, b) => a.position.compareTo(b.position));
+        for (
+          var entryOffset = 0;
+          entryOffset < entries.length;
+          entryOffset += entryChunkSize
+        ) {
           job.checkCancelled();
-          final page = entries.sublist(entryOffset, math.min(entryOffset + entryChunkSize, entries.length));
+          final page = entries.sublist(
+            entryOffset,
+            math.min(entryOffset + entryChunkSize, entries.length),
+          );
           final accepted = await api.putPlaylistEntries(
             sync.syncId,
             playlist.key,
             page.map((entry) => _entrySnapshot(playlist, entry)).toList(),
           );
           job.checkCancelled();
-          if (accepted != page.length) throw const ListeningImportProtocolException();
+          if (accepted != page.length) {
+            throw const ListeningImportProtocolException();
+          }
           completedUnits += page.length;
           reportPlaylists();
         }
@@ -389,7 +491,8 @@ class ListeningImportService {
     job.checkCancelled();
     if (summary.playlists != playlists.length ||
         summary.entries != totalEntries ||
-        summary.resolvedEntries + summary.unresolvedEntries != summary.entries) {
+        summary.resolvedEntries + summary.unresolvedEntries !=
+            summary.entries) {
       throw const ListeningImportProtocolException();
     }
     return summary;
@@ -404,45 +507,49 @@ class ListeningImportService {
   static List<Map<String, Object?>> _withOrdinals(Object? canonicalRows) {
     final rows = (canonicalRows as List<Object?>).cast<Map<String, Object?>>();
     return [
-      for (var index = 0; index < rows.length; index++) {'ordinal': index, ...rows[index]},
+      for (var index = 0; index < rows.length; index++)
+        {'ordinal': index, ...rows[index]},
     ];
   }
 
   static Map<String, Object?> _playlistSnapshot(SnapshotPlaylist playlist) => {
-        'ordinal': playlist.ordinal,
-        'appleLibraryId': playlist.key,
-        'appleCatalogId': null,
-        'name': playlist.name,
-        'description': playlist.description,
-        'curatorName': null,
-        'artworkUrlTemplate': null,
-        'artworkWidth': null,
-        'artworkHeight': null,
-        'artworkBgColor': null,
-        'kind': 'user',
-        'canEdit': false,
-        'appleDateAdded': null,
-        'appleLastModifiedAt': playlist.lastModifiedAt,
-        'sourceFingerprint': playlistFingerprint(playlist.entries),
-        'entryCount': playlist.entries.length,
-      };
+    'ordinal': playlist.ordinal,
+    'appleLibraryId': playlist.key,
+    'appleCatalogId': null,
+    'name': playlist.name,
+    'description': playlist.description,
+    'curatorName': null,
+    'artworkUrlTemplate': null,
+    'artworkWidth': null,
+    'artworkHeight': null,
+    'artworkBgColor': null,
+    'kind': 'user',
+    'canEdit': false,
+    'appleDateAdded': null,
+    'appleLastModifiedAt': playlist.lastModifiedAt,
+    'sourceFingerprint': playlistFingerprint(playlist.entries),
+    'entryCount': playlist.entries.length,
+  };
 
-  static Map<String, Object?> _entrySnapshot(SnapshotPlaylist playlist, SnapshotEntry entry) => {
-        'position': entry.position,
-        'appleLibraryEntryId': '${playlist.key}:${entry.position}',
-        'appleLibraryTrackId': null,
-        'appleCatalogId': null,
-        'spotifyId': entry.platformId,
-        'isrcSnapshot': null,
-        'titleSnapshot': entry.title,
-        'artistSnapshot': entry.artist,
-        'albumSnapshot': entry.album,
-        'durationMsSnapshot': null,
-        'artworkUrlTemplateSnapshot': null,
-        'artworkWidthSnapshot': null,
-        'artworkHeightSnapshot': null,
-        'artworkBgColorSnapshot': null,
-      };
+  static Map<String, Object?> _entrySnapshot(
+    SnapshotPlaylist playlist,
+    SnapshotEntry entry,
+  ) => {
+    'position': entry.position,
+    'appleLibraryEntryId': '${playlist.key}:${entry.position}',
+    'appleLibraryTrackId': null,
+    'appleCatalogId': null,
+    'spotifyId': entry.platformId,
+    'isrcSnapshot': null,
+    'titleSnapshot': entry.title,
+    'artistSnapshot': entry.artist,
+    'albumSnapshot': entry.album,
+    'durationMsSnapshot': null,
+    'artworkUrlTemplateSnapshot': null,
+    'artworkWidthSnapshot': null,
+    'artworkHeightSnapshot': null,
+    'artworkBgColorSnapshot': null,
+  };
 }
 
 /// One [ListeningImportService.import] run: its cancel flag and parse token
@@ -463,9 +570,12 @@ class _ImportRun {
 /// lines joined with `\n`. The same value the web import service computes,
 /// so a playlist re-imported from either surface is recognised as unchanged.
 String playlistFingerprint(List<SnapshotEntry> entries) {
-  final ordered = List.of(entries)..sort((a, b) => a.position.compareTo(b.position));
+  final ordered = List.of(entries)
+    ..sort((a, b) => a.position.compareTo(b.position));
   final text = ordered
-      .map((e) => '${e.position}\t${e.platformId ?? ''}\t${e.title}\t${e.artist}')
+      .map(
+        (e) => '${e.position}\t${e.platformId ?? ''}\t${e.title}\t${e.artist}',
+      )
       .join('\n');
   return sha256.convert(utf8.encode(text)).toString();
 }

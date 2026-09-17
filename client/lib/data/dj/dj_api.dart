@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import '../api/api_client.dart';
 import '../auth/token_store.dart';
 import 'dj_models.dart';
+import '../playlists/playlist_context_models.dart';
 
 /// Thrown for DJ-domain errors the server distinguishes with a `kind` (its
 /// `error` field): 502 (upstream LLM/curation hiccup) and 409 'conflict'
@@ -86,8 +87,8 @@ class DjApi {
 
   Duration get timeout => _client.timeout;
 
-  Future<SessionDetail> createSession(String prompt) =>
-      _call(() => _client.postJson('/sessions', {'prompt': prompt}), SessionDetail.fromJson);
+  Future<SessionDetail> createSession(String prompt, {InitialPlaylistSeed? playlistSeed}) =>
+      _call(() => _client.postJson('/sessions', {'prompt': prompt, if (playlistSeed != null) 'playlistSeed': playlistSeed.toJson()}), SessionDetail.fromJson);
 
   Future<List<DjSession>> listSessions() => _call(
         () => _client.getJson('/sessions'),

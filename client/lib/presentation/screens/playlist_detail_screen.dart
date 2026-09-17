@@ -3,13 +3,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/playlists/playlist_models.dart';
 import '../providers/playlist_providers.dart';
+import '../providers/playlist_taste_provider.dart';
+import '../providers/new_mix_inspiration_provider.dart';
 import '../widgets/playlist_artwork.dart';
 import 'playlist_edit_screen.dart';
 
 class PlaylistDetailScreen extends ConsumerStatefulWidget {
-  const PlaylistDetailScreen({super.key, required this.playlistId});
+  const PlaylistDetailScreen({
+    super.key,
+    required this.playlistId,
+    this.onInspire,
+  });
 
   final String playlistId;
+  final ValueChanged<PlaylistSummary>? onInspire;
 
   @override
   ConsumerState<PlaylistDetailScreen> createState() =>
@@ -18,6 +25,7 @@ class PlaylistDetailScreen extends ConsumerStatefulWidget {
 
 class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
   bool _startingDraft = false;
+  bool _confirmingTaste = false;
 
   Future<void> _startDraft() async {
     if (_startingDraft) return;
@@ -41,6 +49,96 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     } finally {
       if (mounted) setState(() => _startingDraft = false);
     }
+  }
+
+  void _inspire(PlaylistSummary playlist) {
+    if (widget.onInspire != null) {
+      widget.onInspire!(playlist);
+      return;
+    }
+    ref.read(newMixInspirationProvider.notifier).select(playlist);
+    Navigator.of(context).popUntil((route) => route.isFirst);
+  }
+
+  Future<void> _confirmTaste() async {
+    if (_confirmingTaste) return;
+    _confirmingTaste = true;
+    bool? approved;
+    try {
+      approved = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Did you choose these songs?'),
+          content: const Text(
+            'Confirm only if you personally chose the songs in this playlist. This helps the DJ understand your taste.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Confirm'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      _confirmingTaste = false;
+    }
+    if (approved == true && mounted) {
+      await ref
+          .read(playlistTasteProvider(widget.playlistId).notifier)
+          .setConfirmed(true);
+    }
+  }
+
+  Widget _tasteControls(PlaylistTasteState taste) {
+    final notifier = ref.read(
+      playlistTasteProvider(widget.playlistId).notifier,
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Your taste', style: Theme.of(context).textTheme.labelLarge),
+        if (taste.loading || taste.writing)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Text('Checking playlist confirmation…'),
+          )
+        else if (taste.unknown) ...[
+          const Text(
+            'Playlist confirmation is unavailable. Reload before changing it.',
+          ),
+          TextButton(
+            onPressed: notifier.refresh,
+            child: const Text('Reload confirmation'),
+          ),
+        ] else if (taste.confirmed) ...[
+          const Text('You confirmed choosing these songs.'),
+          TextButton(
+            onPressed: taste.canRemove
+                ? () => notifier.setConfirmed(false)
+                : null,
+            child: const Text('Remove confirmation'),
+          ),
+        ] else if (taste.canConfirm)
+          TextButton(
+            onPressed: _confirmTaste,
+            child: const Text('I chose these songs'),
+          )
+        else
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Text('This playlist stays neutral in your taste profile.'),
+          ),
+        if (taste.error != null && !taste.unknown)
+          const Text(
+            'The confirmation was not changed. Review the current status before trying again.',
+          ),
+      ],
+    );
   }
 
   @override
@@ -72,6 +170,8 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
   }
 
   Widget _body(PlaylistDetail detail) {
+    final taste = ref.watch(playlistTasteProvider(widget.playlistId));
+    detail = taste.applyTo(detail);
     final playlist = detail.playlist;
     final source = switch (playlist.source) {
       'spotify_export' => 'Spotify export',
@@ -114,7 +214,16 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
             ),
           ],
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton(
+            onPressed: playlist.inLibrary ? () => _inspire(playlist) : null,
+            child: const Text('Make a mix inspired by this'),
+          ),
+        ),
+        _tasteControls(taste),
+        const SizedBox(height: 12),
         Card(
           child: Padding(
             padding: const EdgeInsets.all(15),

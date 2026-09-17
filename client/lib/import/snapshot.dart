@@ -9,7 +9,8 @@ import 'dart:convert';
 /// Which Spotify package a set of files classifies as.
 enum ExportPackage {
   spotifyExtended('spotify_extended'),
-  spotifyAccount('spotify_account');
+  spotifyAccount('spotify_account'),
+  spotifyExportify('spotify_exportify');
 
   const ExportPackage(this.wire);
 
@@ -23,7 +24,8 @@ int _compareNullLast(String? a, String? b) {
   return a.compareTo(b);
 }
 
-String _encode(Object? json) => '${const JsonEncoder.withIndent('  ').convert(json)}\n';
+String _encode(Object? json) =>
+    '${const JsonEncoder.withIndent('  ').convert(json)}\n';
 
 /// Two-space pretty print with a trailing newline: the fixture suite's format.
 String canonicalJsonString(Object? json) => _encode(json);
@@ -85,7 +87,9 @@ class SnapshotDay {
 /// A liked track. Spotify's library export carries no counts, so every
 /// count column is null.
 class SnapshotLibraryRow {
-  const SnapshotLibraryRow({required this.platformId});
+  const SnapshotLibraryRow({required this.platformId, this.dateAdded});
+
+  final int? dateAdded;
 
   final String platformId;
 
@@ -94,7 +98,7 @@ class SnapshotLibraryRow {
     'playCount': null,
     'skipCount': null,
     'lastPlayedAt': null,
-    'dateAdded': null,
+    'dateAdded': dateAdded,
     'likeRating': null,
   };
 }
@@ -105,7 +109,10 @@ class SnapshotArtist {
   final String name;
   final String? spotifyId;
 
-  Map<String, Object?> toCanonicalJson() => {'name': name, 'spotifyId': spotifyId};
+  Map<String, Object?> toCanonicalJson() => {
+    'name': name,
+    'spotifyId': spotifyId,
+  };
 }
 
 class SnapshotEntry {
@@ -160,9 +167,10 @@ class SnapshotPlaylist {
     'name': name,
     'description': description,
     'lastModifiedAt': lastModifiedAt,
-    'entries': (List.of(entries)..sort((a, b) => a.position.compareTo(b.position)))
-        .map((e) => e.toCanonicalJson())
-        .toList(),
+    'entries':
+        (List.of(entries)..sort((a, b) => a.position.compareTo(b.position)))
+            .map((e) => e.toCanonicalJson())
+            .toList(),
   };
 }
 
@@ -205,19 +213,24 @@ class ListeningExportSnapshot {
   final String? ledgerTo;
 
   Map<String, Object?> toCanonicalJson() {
-    final sortedTracks = List.of(tracks)..sort((a, b) => a.platformId.compareTo(b.platformId));
+    final sortedTracks = List.of(tracks)
+      ..sort((a, b) => a.platformId.compareTo(b.platformId));
     final sortedDays = List.of(days)
       ..sort((a, b) {
         final byId = a.platformId.compareTo(b.platformId);
         return byId != 0 ? byId : a.day.compareTo(b.day);
       });
-    final sortedLibrary = List.of(library)..sort((a, b) => a.platformId.compareTo(b.platformId));
+    final sortedLibrary = List.of(library)
+      ..sort((a, b) => a.platformId.compareTo(b.platformId));
     final sortedArtists = List.of(artists)
       ..sort((a, b) {
         final byName = a.name.compareTo(b.name);
-        return byName != 0 ? byName : _compareNullLast(a.spotifyId, b.spotifyId);
+        return byName != 0
+            ? byName
+            : _compareNullLast(a.spotifyId, b.spotifyId);
       });
-    final sortedPlaylists = List.of(playlists)..sort((a, b) => a.ordinal.compareTo(b.ordinal));
+    final sortedPlaylists = List.of(playlists)
+      ..sort((a, b) => a.ordinal.compareTo(b.ordinal));
     return {
       'source': source,
       'package': package.wire,
@@ -259,7 +272,11 @@ class InventoryIgnoredFile {
 }
 
 class ExportInventory {
-  const ExportInventory({required this.package, required this.read, required this.ignored});
+  const ExportInventory({
+    required this.package,
+    required this.read,
+    required this.ignored,
+  });
 
   static const empty = ExportInventory(package: null, read: [], ignored: []);
 
@@ -270,7 +287,9 @@ class ExportInventory {
   /// Base name of the first read file that failed to decode, in path order.
   String? get unreadableFile {
     for (final file in read) {
-      if (file.rows == null) return file.path.substring(file.path.lastIndexOf('/') + 1);
+      if (file.rows == null) {
+        return file.path.substring(file.path.lastIndexOf('/') + 1);
+      }
     }
     return null;
   }
@@ -280,7 +299,8 @@ class ExportInventory {
 
   Map<String, Object?> toCanonicalJson() {
     final sortedRead = List.of(read)..sort((a, b) => a.path.compareTo(b.path));
-    final sortedIgnored = List.of(ignored)..sort((a, b) => a.path.compareTo(b.path));
+    final sortedIgnored = List.of(ignored)
+      ..sort((a, b) => a.path.compareTo(b.path));
     return {
       'package': package?.wire,
       'read': sortedRead.map((f) => f.toCanonicalJson()).toList(),
@@ -327,7 +347,8 @@ class ExportDiagnostics {
   final String parserVersion;
 
   Map<String, Object?> toCanonicalJson() {
-    final sortedFiles = List.of(files)..sort((a, b) => a.path.compareTo(b.path));
+    final sortedFiles = List.of(files)
+      ..sort((a, b) => a.path.compareTo(b.path));
     return {
       'source': source,
       'files': sortedFiles.map((f) => f.toCanonicalJson()).toList(),

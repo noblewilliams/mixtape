@@ -1,3 +1,4 @@
+import 'import_sheet.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -69,7 +70,7 @@ class SpotifyRequestScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Get your Spotify history'),
+        title: const Text('Bring your Spotify music'),
         automaticallyImplyLeading: onDone == null,
       ),
       body: SafeArea(
@@ -78,49 +79,88 @@ class SpotifyRequestScreen extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(
-                'Spotify will send you your listening history. Here is how to ask for it.',
-                style: textTheme.bodyLarge,
+              Text('Export your saved music', style: textTheme.titleLarge),
+              const SizedBox(height: 8),
+              const Text(
+                '1. Open Exportify and connect Spotify.\n2. Choose Export All and save the ZIP as it is.\n3. Come back and choose the files. Mixtape will show what it found before importing.',
+              ),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton(
+                    key:const Key('open-exportify'),
+                  onPressed: () =>
+                      unawaited(openLink(Uri.parse('https://exportify.app/'))),
+                  child: const Text('Open Exportify ↗'),
+                ),
+              ),
+              const Text('Opens exportify.app outside Mixtape.'),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton(
+                    key:const Key('choose-import-files'),
+                  onPressed: () => unawaited(showImportSheet(context)),
+                  child: const Text('Choose files'),
+                ),
+              ),
+              const Text(
+                'Exportify ZIP or CSV files, or an official Spotify ZIP. Read on this device first; review before uploading.',
               ),
               const SizedBox(height: 16),
-              for (var i = 0; i < spotifyRequestSteps.length; i++)
-                _Step(
-                  number: i + 1,
-                  text: spotifyRequestSteps[i],
-                  onOpenAddress: () => unawaited(openLink(spotifyPrivacyUrl)),
+              ExpansionTile(
+                key:const Key('go-deeper'),
+                tilePadding: EdgeInsets.zero,
+                title: const Text('Go deeper with your history'),
+                subtitle: const Text(
+                  'Help the DJ learn your repeat favourites and past listening.',
                 ),
-              const SizedBox(height: 8),
-              Text(spotifyRequestIosNote, style: textTheme.bodyMedium),
-              const SizedBox(height: 24),
-              const _EmailsNote(),
-              const SizedBox(height: 24),
-              if (markedAt != null) ...[
-                Text(
-                  'Requested ${elapsedWait(markedAt)}',
-                  key: const Key('requested-elapsed'),
-                  style: textTheme.titleMedium,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  "Spotify's confirmation email comes first. Check your inbox and press "
-                  "Confirm if you haven't yet.",
-                  style: textTheme.bodySmall,
-                  textAlign: TextAlign.center,
-                ),
-              ] else ...[
-                FilledButton(
-                  key: const Key('mark-requested'),
-                  onPressed: () => _markRequested(ref),
-                  child: const Text("I've requested it"),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  "We'll remind you in three days to check your inbox.",
-                  style: textTheme.bodySmall,
-                  textAlign: TextAlign.center,
-                ),
-              ],
+                children: [
+                  Text(
+                    'Spotify will send you your listening history. Here is how to ask for it.',
+                    style: textTheme.bodyLarge,
+                  ),
+                  const SizedBox(height: 16),
+                  for (var i = 0; i < spotifyRequestSteps.length; i++)
+                    _Step(
+                      number: i + 1,
+                      text: spotifyRequestSteps[i],
+                      onOpenAddress: () =>
+                          unawaited(openLink(spotifyPrivacyUrl)),
+                    ),
+                  const SizedBox(height: 8),
+                  Text(spotifyRequestIosNote, style: textTheme.bodyMedium),
+                  const SizedBox(height: 24),
+                  const _EmailsNote(),
+                  const SizedBox(height: 24),
+                  if (markedAt != null) ...[
+                    Text(
+                      'Requested ${elapsedWait(markedAt)}',
+                      key: const Key('requested-elapsed'),
+                      style: textTheme.titleMedium,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      "Spotify's confirmation email comes first. Check your inbox and press "
+                      "Confirm if you haven't yet.",
+                      style: textTheme.bodySmall,
+                      textAlign: TextAlign.center,
+                    ),
+                  ] else ...[
+                    FilledButton(
+                      key: const Key('mark-requested'),
+                      onPressed: () => _markRequested(ref),
+                      child: const Text("I've requested it"),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      "We'll remind you in three days to check your inbox.",
+                      style: textTheme.bodySmall,
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ],
+              ),
               if (onDone != null) ...[
                 const SizedBox(height: 12),
                 OutlinedButton(

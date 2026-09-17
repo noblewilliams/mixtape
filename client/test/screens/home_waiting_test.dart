@@ -13,30 +13,68 @@ import '../helpers/fake_listening_api.dart';
 import '../helpers/onboarding_harness.dart';
 
 void main() {
+  testWidgets('Home offers Spotify import even after Apple onboarding', (
+    tester,
+  ) async {
+    final listening = FakeListeningApi(
+      onboarding: onboardingState(
+        chosenService: 'apple',
+        hasLibrary: true,
+        sources: [musicSource(source: 'apple_live')],
+      ),
+    );
+    await pumpScreen(
+      tester,
+      onboardingContainer(listening: listening),
+      const HomeScreen(),
+    );
+    await tester.tap(find.byKey(const Key('home-actions')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('spotify-import-action')));
+    await tester.pumpAndSettle();
+    expect(find.byType(SpotifyRequestScreen), findsOneWidget);
+    expect(find.byKey(const Key('open-exportify')), findsOneWidget);
+  });
+
   testWidgets('an Apple listener sees no waiting card', (tester) async {
-    final listening = FakeListeningApi(onboarding: onboardingState(chosenService: 'apple'));
-    await pumpScreen(tester, onboardingContainer(listening: listening), const HomeScreen());
+    final listening = FakeListeningApi(
+      onboarding: onboardingState(chosenService: 'apple'),
+    );
+    await pumpScreen(
+      tester,
+      onboardingContainer(listening: listening),
+      const HomeScreen(),
+    );
+    await _openSetupIfNeeded(tester);
 
     expect(find.byKey(const Key('waiting-card')), findsNothing);
     expect(find.byKey(const Key('prompt-field')), findsOneWidget);
   });
 
-  testWidgets('a Spotify choice the server never heard (dropped post) still shows the waiting '
-      'card on the next launch, through the flag kept on the device', (tester) async {
-    final prefs = InMemoryServicePreferenceStore();
-    await prefs.write('user-1', 'spotify');
-    final listening = FakeListeningApi(onboarding: onboardingState(userId: 'user-1'));
-    await pumpScreen(
-      tester,
-      onboardingContainer(listening: listening, prefs: prefs),
-      const HomeScreen(),
-    );
+  testWidgets(
+    'a Spotify choice the server never heard (dropped post) still shows the waiting '
+    'card on the next launch, through the flag kept on the device',
+    (tester) async {
+      final prefs = InMemoryServicePreferenceStore();
+      await prefs.write('user-1', 'spotify');
+      final listening = FakeListeningApi(
+        onboarding: onboardingState(userId: 'user-1'),
+      );
+      await pumpScreen(
+        tester,
+        onboardingContainer(listening: listening, prefs: prefs),
+        const HomeScreen(),
+      );
+      await _openSetupIfNeeded(tester);
 
-    expect(find.byKey(const Key('waiting-card')), findsOneWidget);
-    expect(find.text('Not requested yet'), findsOneWidget);
-  });
+      expect(find.byKey(const Key('waiting-card')), findsOneWidget);
+      expect(find.text('Ready to import'), findsOneWidget);
+    },
+  );
 
-  testWidgets('a Spotify listener with both packages in sees no waiting card', (tester) async {
+  testWidgets('a Spotify listener with both packages in sees no waiting card', (
+    tester,
+  ) async {
     final listening = FakeListeningApi(
       onboarding: onboardingState(
         chosenService: 'spotify',
@@ -51,53 +89,98 @@ void main() {
         ],
       ),
     );
-    await pumpScreen(tester, onboardingContainer(listening: listening), const HomeScreen());
+    await pumpScreen(
+      tester,
+      onboardingContainer(listening: listening),
+      const HomeScreen(),
+    );
+    await _openSetupIfNeeded(tester);
 
     expect(find.byKey(const Key('waiting-card')), findsNothing);
   });
 
-  testWidgets('one package in: the card stays with a "1 of 2 in" chip and a nudge for the other '
-      'package, and no "Not personal yet" note', (tester) async {
-    final listening = FakeListeningApi(
-      onboarding: onboardingState(
+  testWidgets(
+    'one package in: the card stays with a "1 of 2 in" chip and a nudge for the other '
+    'package, and no "Not personal yet" note',
+    (tester) async {
+      final listening = FakeListeningApi(
+        onboarding: onboardingState(
+          chosenService: 'spotify',
+          markedRequestedAt: DateTime(2026, 8, 1),
+          importCompletedAt: DateTime(2026, 8, 20),
+          sources: [
+            musicSource(
+              packages: ['spotify_extended'],
+              lastImportedAt: DateTime(2026, 8, 20),
+            ),
+          ],
+        ),
+      );
+      await pumpScreen(
+        tester,
+        onboardingContainer(listening: listening),
+        const HomeScreen(),
+      );
+      await _openSetupIfNeeded(tester);
+
+      expect(find.byKey(const Key('waiting-card')), findsOneWidget);
+      expect(find.text('1 of 2 in'), findsOneWidget);
+      expect(
+        find.textContaining('Still waiting for the account data'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Not personal yet'), findsNothing);
+      expect(find.byKey(const Key('waiting-requested')), findsNothing);
+      expectInteractiveWidgetsKeyed(find.byKey(const Key('waiting-card')));
+
+      listening.onboarding = onboardingState(
         chosenService: 'spotify',
-        markedRequestedAt: DateTime(2026, 8, 1),
-        importCompletedAt: DateTime(2026, 8, 20),
         sources: [
-          musicSource(packages: ['spotify_extended'], lastImportedAt: DateTime(2026, 8, 20)),
+          musicSource(
+            packages: ['spotify_account'],
+            lastImportedAt: DateTime(2026, 8, 20),
+          ),
         ],
-      ),
-    );
-    await pumpScreen(tester, onboardingContainer(listening: listening), const HomeScreen());
+      );
 
-    expect(find.byKey(const Key('waiting-card')), findsOneWidget);
-    expect(find.text('1 of 2 in'), findsOneWidget);
-    expect(find.textContaining('Still waiting for the account data'), findsOneWidget);
-    expect(find.textContaining('Not personal yet'), findsNothing);
-    expect(find.byKey(const Key('waiting-requested')), findsNothing);
-    expectInteractiveWidgetsKeyed(find.byKey(const Key('waiting-card')));
+      // Home refreshes onboarding on the way back from a pushed screen; drive
+      // that path through the sources screen.
+      if (find.byKey(const Key('waiting-card')).evaluate().isNotEmpty) {
+        Navigator.of(
+          tester.element(find.byKey(const Key('waiting-card'))),
+        ).pop();
+        await tester.pumpAndSettle();
+      }
+      await tester.tap(find.byKey(const Key('home-actions')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('sources-action')));
+      await tester.pumpAndSettle();
+      expect(find.byType(MusicSourcesScreen), findsOneWidget);
+      Navigator.of(tester.element(find.byType(MusicSourcesScreen))).pop();
+      await tester.pumpAndSettle();
+      await _openSetupIfNeeded(tester);
 
-    listening.onboarding = onboardingState(
-      chosenService: 'spotify',
-      sources: [musicSource(packages: ['spotify_account'], lastImportedAt: DateTime(2026, 8, 20))],
-    );
-    await tester.drag(find.byKey(const Key('sessions-empty')), const Offset(0, 300));
-    await tester.pumpAndSettle();
-    // Home refreshes onboarding on the way back from a pushed screen; drive
-    // that path through the sources screen.
-    await tester.tap(find.byKey(const Key('sources-action')));
-    await tester.pumpAndSettle();
-    expect(find.byType(MusicSourcesScreen), findsOneWidget);
-    Navigator.of(tester.element(find.byType(MusicSourcesScreen))).pop();
-    await tester.pumpAndSettle();
-
-    expect(find.textContaining('Still waiting for the extended history'), findsOneWidget);
-    expect(find.textContaining('Still waiting for the account data'), findsNothing);
-  });
+      expect(
+        find.textContaining('Still waiting for the extended history'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('Still waiting for the account data'),
+        findsNothing,
+      );
+    },
+  );
 
   testWidgets('the chip reads Not requested, then Waiting', (tester) async {
-    final listening = FakeListeningApi(onboarding: onboardingState(chosenService: 'spotify'));
-    await pumpScreen(tester, onboardingContainer(listening: listening), const HomeScreen());
+    final listening = FakeListeningApi(
+      onboarding: onboardingState(chosenService: 'spotify'),
+    );
+    await pumpScreen(
+      tester,
+      onboardingContainer(listening: listening),
+      const HomeScreen(),
+    );
+    await _openSetupIfNeeded(tester);
     expect(find.text('Not requested'), findsOneWidget);
 
     listening.onboarding = onboardingState(
@@ -111,14 +194,17 @@ void main() {
     expect(find.text('Waiting'), findsOneWidget);
   });
 
-  testWidgets('Choose a ZIP opens the import sheet and picks', (tester) async {
-    final listening = FakeListeningApi(onboarding: onboardingState(chosenService: 'spotify'));
+  testWidgets('Choose files opens the import sheet and picks', (tester) async {
+    final listening = FakeListeningApi(
+      onboarding: onboardingState(chosenService: 'spotify'),
+    );
     final picker = FakeArchivePicker(extendedArchive);
     await pumpScreen(
       tester,
       onboardingContainer(listening: listening, picker: picker),
       const HomeScreen(),
     );
+    await _openSetupIfNeeded(tester);
 
     await tester.tap(find.byKey(const Key('waiting-choose-zip')));
     await tester.pumpAndSettle();
@@ -128,98 +214,161 @@ void main() {
     expect(find.text('Upload'), findsOneWidget);
   });
 
-  testWidgets('Choose a ZIP while an upload is in flight shows where it got to, in a sheet that '
-      'cannot be swiped away, and cancels nothing', (tester) async {
-    final listening = FakeListeningApi(onboarding: onboardingState(chosenService: 'spotify'));
-    final picker = FakeArchivePicker(extendedArchive);
-    final service = FakeImportService();
+  testWidgets(
+    'Choose files while an upload is in flight shows where it got to, in a sheet that '
+    'cannot be swiped away, and cancels nothing',
+    (tester) async {
+      final listening = FakeListeningApi(
+        onboarding: onboardingState(chosenService: 'spotify'),
+      );
+      final picker = FakeArchivePicker(extendedArchive);
+      final service = FakeImportService();
+      await pumpScreen(
+        tester,
+        onboardingContainer(
+          listening: listening,
+          picker: picker,
+          importService: service,
+        ),
+        const HomeScreen(),
+      );
+      await _openSetupIfNeeded(tester);
+      await tester.tap(find.byKey(const Key('waiting-choose-zip')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('import-upload')));
+      await tester.pump();
+      expect(find.byKey(const Key('import-progress')), findsOneWidget);
+      Navigator.of(tester.element(find.byType(ImportSheet))).pop();
+      await tester.pumpAndSettle();
+      expect(find.byType(ImportSheet), findsNothing);
+      // reset() before the first pick counted one cancel; re-entry adds none.
+      final cancelsBefore = service.cancels;
+
+      await tester.tap(find.byKey(const Key('waiting-choose-zip')));
+      await tester.pumpAndSettle();
+
+      expect(service.cancels, cancelsBefore);
+      expect(service.running, isTrue);
+      expect(picker.picks, 1);
+      expect(find.byKey(const Key('import-progress')), findsOneWidget);
+      final route =
+          ModalRoute.of(tester.element(find.byType(ImportSheet)))!
+              as ModalBottomSheetRoute<void>;
+      expect(route.isDismissible, isFalse);
+      expect(route.enableDrag, isFalse);
+    },
+  );
+
+  testWidgets(
+    'the Interview done tile shows the notes and artists it produced',
+    (tester) async {
+      final listening = FakeListeningApi(
+        onboarding: onboardingState(
+          chosenService: 'spotify',
+          interviewCompletedAt: DateTime(2026, 8, 2),
+          interview: const InterviewCounts(artists: 6, notes: 5),
+        ),
+      );
+      await pumpScreen(
+        tester,
+        onboardingContainer(listening: listening),
+        const HomeScreen(),
+      );
+      await _openSetupIfNeeded(tester);
+
+      expect(find.byKey(const Key('interview-done')), findsOneWidget);
+      expect(find.text('5 notes, 6 artists'), findsOneWidget);
+    },
+  );
+
+  testWidgets('the Your music action pushes the sources screen', (
+    tester,
+  ) async {
+    final listening = FakeListeningApi(
+      onboarding: onboardingState(chosenService: 'apple'),
+    );
     await pumpScreen(
       tester,
-      onboardingContainer(listening: listening, picker: picker, importService: service),
+      onboardingContainer(listening: listening),
       const HomeScreen(),
     );
-    await tester.tap(find.byKey(const Key('waiting-choose-zip')));
+    await _openSetupIfNeeded(tester);
+
+    if (find.byKey(const Key('waiting-card')).evaluate().isNotEmpty) {
+      Navigator.of(tester.element(find.byKey(const Key('waiting-card')))).pop();
+      await tester.pumpAndSettle();
+    }
+    await tester.tap(find.byKey(const Key('home-actions')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('import-upload')));
-    await tester.pump();
-    expect(find.byKey(const Key('import-progress')), findsOneWidget);
-    Navigator.of(tester.element(find.byType(ImportSheet))).pop();
-    await tester.pumpAndSettle();
-    expect(find.byType(ImportSheet), findsNothing);
-    // reset() before the first pick counted one cancel; re-entry adds none.
-    final cancelsBefore = service.cancels;
-
-    await tester.tap(find.byKey(const Key('waiting-choose-zip')));
-    await tester.pumpAndSettle();
-
-    expect(service.cancels, cancelsBefore);
-    expect(service.running, isTrue);
-    expect(picker.picks, 1);
-    expect(find.byKey(const Key('import-progress')), findsOneWidget);
-    final route = ModalRoute.of(tester.element(find.byType(ImportSheet)))! as ModalBottomSheetRoute<void>;
-    expect(route.isDismissible, isFalse);
-    expect(route.enableDrag, isFalse);
-  });
-
-  testWidgets('the Interview done tile shows the notes and artists it produced', (tester) async {
-    final listening = FakeListeningApi(
-      onboarding: onboardingState(
-        chosenService: 'spotify',
-        interviewCompletedAt: DateTime(2026, 8, 2),
-        interview: const InterviewCounts(artists: 6, notes: 5),
-      ),
-    );
-    await pumpScreen(tester, onboardingContainer(listening: listening), const HomeScreen());
-
-    expect(find.byKey(const Key('interview-done')), findsOneWidget);
-    expect(find.text('5 notes, 6 artists'), findsOneWidget);
-  });
-
-  testWidgets('the Your music action pushes the sources screen', (tester) async {
-    final listening = FakeListeningApi(onboarding: onboardingState(chosenService: 'apple'));
-    await pumpScreen(tester, onboardingContainer(listening: listening), const HomeScreen());
-
     await tester.tap(find.byKey(const Key('sources-action')));
     await tester.pumpAndSettle();
 
     expect(find.byType(MusicSourcesScreen), findsOneWidget);
   });
 
-  testWidgets('not requested yet: the card says so and opens the request screen (pushed, '
-      'without the gate\'s Done button)', (tester) async {
-    final listening = FakeListeningApi(onboarding: onboardingState(chosenService: 'spotify'));
-    await pumpScreen(tester, onboardingContainer(listening: listening), const HomeScreen());
+  testWidgets(
+    'not requested yet: the card says so and opens the request screen (pushed, '
+    'without the gate\'s Done button)',
+    (tester) async {
+      final listening = FakeListeningApi(
+        onboarding: onboardingState(chosenService: 'spotify'),
+      );
+      await pumpScreen(
+        tester,
+        onboardingContainer(listening: listening),
+        const HomeScreen(),
+      );
+      await _openSetupIfNeeded(tester);
 
-    expect(find.byKey(const Key('waiting-card')), findsOneWidget);
-    expect(find.text('Not requested yet'), findsOneWidget);
-    expect(find.textContaining('Not personal yet'), findsOneWidget);
-    expectInteractiveWidgetsKeyed(find.byKey(const Key('waiting-card')));
+      expect(find.byKey(const Key('waiting-card')), findsOneWidget);
+      expect(find.text('Ready to import'), findsOneWidget);
+      expect(find.textContaining('Not personal yet'), findsOneWidget);
+      expectInteractiveWidgetsKeyed(find.byKey(const Key('waiting-card')));
 
-    await tester.tap(find.byKey(const Key('open-request')));
-    await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('open-request')));
+      await tester.pumpAndSettle();
 
-    expect(find.byType(SpotifyRequestScreen), findsOneWidget);
-    expect(find.byKey(const Key('request-done')), findsNothing);
-    expect(find.byKey(const Key('mark-requested')), findsOneWidget);
-  });
+      expect(find.byType(SpotifyRequestScreen), findsOneWidget);
+      expect(find.byKey(const Key('request-done')), findsNothing);
+      await tester.tap(find.byKey(const Key('go-deeper')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('mark-requested')), findsOneWidget);
+    },
+  );
 
   testWidgets('requested: the card shows the elapsed wait', (tester) async {
     final listening = FakeListeningApi(
       onboarding: onboardingState(
         chosenService: 'spotify',
-        markedRequestedAt: DateTime.now().subtract(const Duration(days: 2, hours: 1)),
+        markedRequestedAt: DateTime.now().subtract(
+          const Duration(days: 2, hours: 1),
+        ),
       ),
     );
-    await pumpScreen(tester, onboardingContainer(listening: listening), const HomeScreen());
+    await pumpScreen(
+      tester,
+      onboardingContainer(listening: listening),
+      const HomeScreen(),
+    );
+    await _openSetupIfNeeded(tester);
 
     expect(find.text('Requested 2 days ago'), findsOneWidget);
-    expect(find.text('Not requested yet'), findsNothing);
+    expect(find.text('Ready to import'), findsNothing);
     expect(find.byKey(const Key('open-request')), findsOneWidget);
   });
 
-  testWidgets('the interview card opens the interview until it is done', (tester) async {
-    final listening = FakeListeningApi(onboarding: onboardingState(chosenService: 'spotify'));
-    await pumpScreen(tester, onboardingContainer(listening: listening), const HomeScreen());
+  testWidgets('the interview card opens the interview until it is done', (
+    tester,
+  ) async {
+    final listening = FakeListeningApi(
+      onboarding: onboardingState(chosenService: 'spotify'),
+    );
+    await pumpScreen(
+      tester,
+      onboardingContainer(listening: listening),
+      const HomeScreen(),
+    );
+    await _openSetupIfNeeded(tester);
 
     expect(find.text('Tell the DJ about your taste'), findsOneWidget);
     expect(find.byKey(const Key('interview-done')), findsNothing);
@@ -239,4 +388,19 @@ void main() {
     expect(find.text('Interview done'), findsOneWidget);
     expect(find.byKey(const Key('open-interview')), findsNothing);
   });
+}
+
+// Setup is still available, but never crowds the root prompt/mix list.
+Future<void> _openSetupIfNeeded(WidgetTester tester) async {
+  expect(find.byKey(const Key('waiting-card')), findsNothing);
+  await tester.tap(find.byKey(const Key('home-actions')));
+  await tester.pumpAndSettle();
+  final setup = find.byKey(const Key('music-setup-action'));
+  if (setup.evaluate().isNotEmpty) {
+    await tester.tap(setup);
+    await tester.pumpAndSettle();
+  } else {
+    await tester.tapAt(const Offset(8, 500));
+    await tester.pumpAndSettle();
+  }
 }

@@ -3,12 +3,36 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/listening/listening_models.dart';
 import 'package:mixtape/presentation/screens/import_sheet.dart';
 import 'package:mixtape/presentation/screens/music_sources_screen.dart';
+import 'package:mixtape/presentation/screens/spotify_request_screen.dart';
 
 import '../helpers/fake_import_service.dart';
 import '../helpers/fake_listening_api.dart';
 import '../helpers/onboarding_harness.dart';
 
 void main() {
+  testWidgets('Apple listeners can add Spotify through the Exportify guide', (
+    tester,
+  ) async {
+    final listening = FakeListeningApi(
+      onboarding: onboardingState(
+        chosenService: 'apple',
+        hasLibrary: true,
+        sources: [musicSource(source: 'apple_live')],
+      ),
+    );
+    await pumpScreen(
+      tester,
+      onboardingContainer(listening: listening),
+      const MusicSourcesScreen(),
+    );
+    await tester.tap(find.byKey(const Key('sources-add-spotify')));
+    await tester.pumpAndSettle();
+    expect(find.byType(SpotifyRequestScreen), findsOneWidget);
+    expect(find.byKey(const Key('open-exportify')), findsOneWidget);
+    expect(find.text('Choose files'), findsOneWidget);
+    expect(listening.onboarding.chosenService, 'apple');
+  });
+
   final now = DateTime.now();
   final importedAt = DateTime(now.year, 9, 4, 10);
 
@@ -59,6 +83,27 @@ void main() {
       expectInteractiveWidgetsKeyed(find.byType(MusicSourcesScreen));
     },
   );
+
+  testWidgets('native library without a snapshot date stays connected', (
+    tester,
+  ) async {
+    final listening = FakeListeningApi(
+      onboarding: onboardingState(
+        chosenService: 'apple',
+        hasLibrary: true,
+        sources: [musicSource(source: 'apple_live')],
+      ),
+    );
+    await pumpScreen(
+      tester,
+      onboardingContainer(listening: listening),
+      const MusicSourcesScreen(),
+    );
+    expect(find.text('Apple Music'), findsOneWidget);
+    expect(find.text('Connected library'), findsOneWidget);
+    expect(find.text('Nothing connected yet.'), findsNothing);
+    expect(find.text('Nothing imported yet'), findsNothing);
+  });
 
   testWidgets('both packages in reads as one row named for both', (
     tester,

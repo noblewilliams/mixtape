@@ -1,6 +1,11 @@
+import 'package:mixtape/data/playlists/playlist_context_models.dart';
 import 'dart:async';
+import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/api/api_client.dart';
@@ -17,7 +22,10 @@ import 'package:mixtape/presentation/screens/memory_screen.dart';
 /// listMemories/deleteMemory, so everything else is left unwired.
 class FakeDjApi implements DjApi {
   @override
-  Future<void> recordPlaylistCreation(String sessionId, String appleLibraryId) async {}
+  Future<void> recordPlaylistCreation(
+    String sessionId,
+    String appleLibraryId,
+  ) async {}
 
   Future<List<DjMemory>> Function()? onListMemories;
   Future<void> Function(String id)? onDeleteMemory;
@@ -28,7 +36,10 @@ class FakeDjApi implements DjApi {
   Duration get timeout => const Duration(seconds: 120);
 
   @override
-  Future<SessionDetail> createSession(String prompt) => throw UnimplementedError();
+  Future<SessionDetail> createSession(
+    String prompt, {
+    InitialPlaylistSeed? playlistSeed,
+  }) => throw UnimplementedError();
 
   @override
   Future<List<DjSession>> listSessions() => throw UnimplementedError();
@@ -37,20 +48,27 @@ class FakeDjApi implements DjApi {
   Future<SessionDetail> getSession(String id) => throw UnimplementedError();
 
   @override
-  Future<TurnResult> sendMessage(String id, String text) => throw UnimplementedError();
-
-  @override
-  Future<QueueOpsResult> applyQueueOps(String id, List<QueueOp> ops, int? expectedVersion) =>
+  Future<TurnResult> sendMessage(String id, String text) =>
       throw UnimplementedError();
 
   @override
-  Future<DjSession> setStatus(String id, String status) => throw UnimplementedError();
+  Future<QueueOpsResult> applyQueueOps(
+    String id,
+    List<QueueOp> ops,
+    int? expectedVersion,
+  ) => throw UnimplementedError();
 
   @override
-  Future<DjSession> renameSession(String id, String title) => throw UnimplementedError();
+  Future<DjSession> setStatus(String id, String status) =>
+      throw UnimplementedError();
 
   @override
-  Future<void> postSessionEvent(String sessionId, String type) => throw UnimplementedError();
+  Future<DjSession> renameSession(String id, String title) =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> postSessionEvent(String sessionId, String type) =>
+      throw UnimplementedError();
 
   @override
   Future<List<DjMemory>> listMemories() {
@@ -76,10 +94,16 @@ class TestAuthNotifier extends AuthNotifier {
 
   @override
   AuthStatus build() => _initial;
+
+  @override
+  Future<void> signOut() async => state = AuthStatus.signedOut;
 }
 
-DjMemory _memory({String id = 'm1', String note = 'a note', DateTime? createdAt}) =>
-    DjMemory(id: id, note: note, createdAt: createdAt ?? DateTime.now());
+DjMemory _memory({
+  String id = 'm1',
+  String note = 'a note',
+  DateTime? createdAt,
+}) => DjMemory(id: id, note: note, createdAt: createdAt ?? DateTime.now());
 
 ProviderContainer _makeContainer(FakeDjApi api) {
   final container = ProviderContainer(
@@ -104,320 +128,393 @@ Future<void> _pump(WidgetTester tester, ProviderContainer container) async {
 }
 
 void main() {
-  testWidgets('renders notes newest-first (server order), with relative time', (tester) async {
+  testWidgets(
+    'Forget opens confirmation; backdrop, Keep note and Escape never delete',
+    (tester) async {
+      final api = FakeDjApi()
+        ..onListMemories = () async => [_memory(note: 'Gentle mornings')];
+      await _pump(tester, _makeContainer(api));
+      await tester.tap(find.byKey(const Key('forget-memory-m1')));
+      await tester.pumpAndSettle();
+      expect(find.text('Forget this preference?'), findsOneWidget);
+      expect(find.text('You can’t undo this.'), findsOneWidget);
+      await tester.tapAt(const Offset(8, 8));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      await tester.tap(find.byKey(const Key('forget-memory-m1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Keep note'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('forget-memory-m1')));
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(api.deleteCalls, isEmpty);
+      expect(find.byType(Dismissible), findsNothing);
+    },
+  );
+
+  testWidgets('confirmation reconciles the list and offers no Undo', (
+    tester,
+  ) async {
     final api = FakeDjApi();
-    api.onListMemories = () async => [
-          _memory(id: 'm2', note: 'always Wizkid on party tapes', createdAt: DateTime.now()),
-          _memory(id: 'm1', note: 'no sad songs before noon', createdAt: DateTime.now()),
-        ];
-    final container = _makeContainer(api);
-    await _pump(tester, container);
-
-    final titles = tester
-        .widgetList<Text>(find.descendant(of: find.byKey(const Key('memories-list')), matching: find.byType(Text)))
-        .map((t) => t.data)
-        .toList();
-
-    expect(titles.indexOf('always Wizkid on party tapes'), lessThan(titles.indexOf('no sad songs before noon')));
-    expect(find.textContaining('just now'), findsWidgets);
-  });
-
-  testWidgets('swiping a row hides it and shows an Undo snackbar', (tester) async {
-    final api = FakeDjApi();
-    api.onListMemories = () async => [_memory(id: 'm1', note: 'note one')];
-    final container = _makeContainer(api);
-    await _pump(tester, container);
-
-    await tester.drag(find.byKey(const Key('dismissible-memory-m1')), const Offset(-500, 0));
-    await tester.pumpAndSettle(const Duration(milliseconds: 100));
-
-    expect(find.text('note one'), findsNothing);
-    expect(find.text('Undo'), findsOneWidget);
-    expect(api.deleteCalls, isEmpty);
-  });
-
-  testWidgets('tapping Undo restores the row and never calls delete', (tester) async {
-    final api = FakeDjApi();
-    api.onListMemories = () async => [_memory(id: 'm1', note: 'note one')];
-    final container = _makeContainer(api);
-    await _pump(tester, container);
-
-    await tester.drag(find.byKey(const Key('dismissible-memory-m1')), const Offset(-500, 0));
-    await tester.pumpAndSettle(const Duration(milliseconds: 100));
-
-    await tester.tap(find.text('Undo'));
+    api.onListMemories = () async =>
+        api.deleteCalls.isEmpty ? [_memory(note: 'Gentle mornings')] : [];
+    await _pump(tester, _makeContainer(api));
+    await tester.tap(find.byKey(const Key('forget-memory-m1')));
     await tester.pumpAndSettle();
-
-    expect(find.text('note one'), findsOneWidget);
-    // Let any pending snackbar-closed future resolve — must NOT delete.
-    await tester.pump(const Duration(seconds: 6));
+    await tester.tap(find.text('Forget note'));
     await tester.pumpAndSettle();
-
-    expect(api.deleteCalls, isEmpty);
-  });
-
-  testWidgets('letting the undo window expire commits exactly one delete call', (tester) async {
-    final api = FakeDjApi();
-    api.onListMemories = () async => [_memory(id: 'm1', note: 'note one'), _memory(id: 'm2', note: 'note two')];
-    api.onDeleteMemory = (id) async {};
-    final container = _makeContainer(api);
-    await _pump(tester, container);
-
-    await tester.drag(find.byKey(const Key('dismissible-memory-m1')), const Offset(-500, 0));
-    await tester.pumpAndSettle(const Duration(milliseconds: 100));
-
-    expect(find.text('note one'), findsNothing);
-
-    // Let the 5s snackbar duration elapse and settle.
-    await tester.pump(const Duration(seconds: 6));
-    await tester.pumpAndSettle();
-
     expect(api.deleteCalls, ['m1']);
-    expect(find.text('note one'), findsNothing);
-    expect(find.text('note two'), findsOneWidget);
+    expect(find.text('Gentle mornings'), findsNothing);
+    expect(find.text('Undo'), findsNothing);
+    expect(find.textContaining('Nothing remembered yet.'), findsOneWidget);
   });
 
-  testWidgets('a delete failure on commit restores the row and shows a retry snackbar', (tester) async {
+  testWidgets(
+    'duplicate confirmations are disabled; closing does not cancel a sent delete',
+    (tester) async {
+      final api = FakeDjApi();
+      final pending = Completer<void>();
+      api.onListMemories = () async =>
+          api.deleteCalls.isEmpty ? [_memory()] : [];
+      api.onDeleteMemory = (_) => pending.future;
+      await _pump(tester, _makeContainer(api));
+      await tester.tap(find.byKey(const Key('forget-memory-m1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Forget note'));
+      await tester.pump();
+      await tester.tap(find.text('Forgetting…'));
+      await tester.tapAt(const Offset(8, 8));
+      await tester.pumpAndSettle();
+      pending.complete();
+      await tester.pumpAndSettle();
+      expect(api.deleteCalls, ['m1']);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('lost DELETE response with canonical absence still succeeds', (
+    tester,
+  ) async {
     final api = FakeDjApi();
-    api.onListMemories = () async => [_memory(id: 'm1', note: 'note one')];
-    api.onDeleteMemory = (id) async => throw ApiException(500, 'boom');
-    final container = _makeContainer(api);
-    await _pump(tester, container);
-
-    await tester.drag(find.byKey(const Key('dismissible-memory-m1')), const Offset(-500, 0));
-    await tester.pumpAndSettle(const Duration(milliseconds: 100));
-
-    await tester.pump(const Duration(seconds: 6));
+    api.onListMemories = () async => api.deleteCalls.isEmpty ? [_memory()] : [];
+    api.onDeleteMemory = (_) async => throw NetworkException('offline');
+    await _pump(tester, _makeContainer(api));
+    await tester.tap(find.byKey(const Key('forget-memory-m1')));
     await tester.pumpAndSettle();
-
-    expect(api.deleteCalls, ['m1']);
-    expect(find.text('note one'), findsOneWidget);
-    expect(find.text("couldn't forget that — try again"), findsOneWidget);
+    await tester.tap(find.text('Forget note'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(find.textContaining('Nothing remembered yet.'), findsOneWidget);
   });
 
-  testWidgets('empty state shows a friendly message', (tester) async {
-    final api = FakeDjApi();
+  testWidgets(
+    'unknown deletion closes modal, hides notes and offers canonical reload',
+    (tester) async {
+      final api = FakeDjApi();
+      api.onListMemories = () async {
+        if (api.deleteCalls.isNotEmpty) throw NetworkException('offline');
+        return [_memory(note: 'Gentle mornings')];
+      };
+      await _pump(tester, _makeContainer(api));
+      await tester.tap(find.byKey(const Key('forget-memory-m1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Forget note'));
+      await tester.pumpAndSettle();
+      expect(find.text('Gentle mornings'), findsNothing);
+      expect(
+        find.text(
+          'Couldn’t confirm the result. Reload your notes before trying again.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.byType(AlertDialog), findsNothing);
+      api.onListMemories = () async => [_memory(note: 'Still remembered')];
+      await tester.tap(find.text('Reload notes'));
+      await tester.pumpAndSettle();
+      expect(find.text('Still remembered'), findsOneWidget);
+      expect(api.deleteCalls, ['m1']);
+    },
+  );
+
+  testWidgets('canonical presence retains modal with retry', (tester) async {
+    final api = FakeDjApi()
+      ..onListMemories = () async => [_memory(note: 'Gentle mornings')];
+    await _pump(tester, _makeContainer(api));
+    await tester.tap(find.byKey(const Key('forget-memory-m1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Forget note'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(find.text('Couldn’t forget this note. Try again.'), findsOneWidget);
     api.onListMemories = () async => [];
-    final container = _makeContainer(api);
-    await _pump(tester, container);
-
-    expect(
-      find.text("the DJ hasn't learned anything yet — tell it what you like in a session"),
-      findsOneWidget,
-    );
+    await tester.tap(find.text('Forget note'));
+    await tester.pumpAndSettle();
+    expect(api.deleteCalls, ['m1', 'm1']);
+    expect(find.byType(AlertDialog), findsNothing);
   });
 
-  testWidgets('shows a spinner while loading', (tester) async {
-    final completer = Completer<List<DjMemory>>();
-    final api = FakeDjApi();
-    api.onListMemories = () => completer.future;
+  testWidgets('notes and modal fit narrow screen at 200 percent text', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 568);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = FakeDjApi()
+      ..onListMemories = () async => [
+        _memory(
+          note: 'For dinner, keep vocals in the background and start gently.',
+        ),
+      ];
     final container = _makeContainer(api);
-
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
-        child: const MaterialApp(home: MemoryScreen()),
+        child: MaterialApp(
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: TextScaler.linear(2)),
+            child: child!,
+          ),
+          home: const MemoryScreen(),
+        ),
       ),
     );
-    await tester.pump();
-
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
-
-    completer.complete([]);
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('forget-memory-m1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('forget-memory-m1')));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    await tester.ensureVisible(find.text('Keep note'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Keep note'));
+    await tester.pumpAndSettle();
+    expect(api.deleteCalls, isEmpty);
+  });
+  testWidgets('Back dismisses confirmation and restores focus to Forget', (
+    tester,
+  ) async {
+    final api = FakeDjApi()..onListMemories = () async => [_memory()];
+    await _pump(tester, _makeContainer(api));
+    await tester.tap(find.byKey(const Key('forget-memory-m1')));
+    await tester.pumpAndSettle();
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(api.deleteCalls, isEmpty);
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(
+      tester
+          .widget<TextButton>(find.byKey(const Key('forget-memory-m1')))
+          .focusNode!
+          .hasFocus,
+      isTrue,
+    );
   });
 
-  testWidgets('a load failure shows an error state with a retry button; retry recovers', (tester) async {
-    var shouldFail = true;
-    final api = FakeDjApi();
-    api.onListMemories = () async {
-      if (shouldFail) throw ApiException(500, 'boom');
-      return [_memory(id: 'm1', note: 'note one')];
-    };
+  testWidgets(
+    'popping screen during confirmed delete never touches disposed UI',
+    (tester) async {
+      final api = FakeDjApi();
+      final pending = Completer<void>();
+      api.onListMemories = () async =>
+          api.deleteCalls.isEmpty ? [_memory()] : [];
+      api.onDeleteMemory = (_) => pending.future;
+      final container = _makeContainer(api);
+      final navigator = GlobalKey<NavigatorState>();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            navigatorKey: navigator,
+            home: const Scaffold(body: Text('Home')),
+          ),
+        ),
+      );
+      navigator.currentState!.push(
+        MaterialPageRoute<void>(builder: (_) => const MemoryScreen()),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('forget-memory-m1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Forget note'));
+      await tester.pump();
+      navigator.currentState!.pop();
+      navigator.currentState!.pop();
+      await tester.pumpAndSettle();
+      pending.complete();
+      await tester.pumpAndSettle();
+      expect(api.deleteCalls, ['m1']);
+      expect(find.text('Home'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('expired session clears protected notes and confirmation', (
+    tester,
+  ) async {
+    final api = FakeDjApi()
+      ..onListMemories = () async => [_memory(note: 'Private note')];
+    api.onDeleteMemory = (_) async => throw ApiException(401, 'unauthorized');
     final container = _makeContainer(api);
-    await _pump(tester, container);
-
-    expect(find.text("couldn't load what the DJ knows"), findsOneWidget);
-    expect(find.byKey(const Key('memories-retry')), findsOneWidget);
-
-    shouldFail = false;
-    await tester.tap(find.byKey(const Key('memories-retry')));
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: Consumer(
+          builder: (context, ref, _) {
+            final auth = ref.watch(authProvider);
+            return MaterialApp(
+              key: ValueKey(auth),
+              home: auth == AuthStatus.signedIn
+                  ? const MemoryScreen()
+                  : const Scaffold(body: Text('Sign in')),
+            );
+          },
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
-
-    expect(find.text('note one'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('forget-memory-m1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Forget note'));
+    await tester.pumpAndSettle();
+    expect(find.text('Sign in'), findsOneWidget);
+    expect(find.text('Private note'), findsNothing);
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 
-  group('fix round: pending-forget lifecycle', () {
-    testWidgets(
-      'popping the route while an undo window is open still fires exactly one delete, no thrown errors',
-      (tester) async {
-        final api = FakeDjApi();
-        api.onListMemories = () async => [_memory(id: 'm1', note: 'note one')];
-        api.onDeleteMemory = (id) async {};
-        final container = _makeContainer(api);
-
-        await tester.pumpWidget(
-          UncontrolledProviderScope(
-            container: container,
-            child: MaterialApp(
-              home: Builder(
-                builder: (context) => Scaffold(
-                  body: Center(
-                    child: ElevatedButton(
-                      key: const Key('open-memories'),
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute<void>(builder: (_) => const MemoryScreen()),
-                      ),
-                      child: const Text('open'),
-                    ),
-                  ),
-                ),
+  for (final brightness in Brightness.values) {
+    testWidgets('renders approved memory controls in ${brightness.name}', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      const output = String.fromEnvironment('NATIVE_MEMORY_SNAPSHOT_DIR');
+      if (output.isNotEmpty) {
+        final icons = FontLoader('MaterialIcons')
+          ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
+        await tester.runAsync(icons.load);
+        const fontPath = String.fromEnvironment('NATIVE_MEMORY_SNAPSHOT_FONT');
+        if (fontPath.isNotEmpty) {
+          final loader = FontLoader('NativeSnapshot')
+            ..addFont(
+              Future.value(
+                ByteData.sublistView(File(fontPath).readAsBytesSync()),
               ),
+            );
+          await tester.runAsync(loader.load);
+        }
+      }
+      final api = FakeDjApi()
+        ..onListMemories = () async => [
+          _memory(id: 'm1', note: 'Prefer a gentle start to morning mixes.'),
+          _memory(id: 'm2', note: 'For dinner, keep vocals in the background.'),
+        ];
+      const boundaryKey = Key('native-memory-snapshot');
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: _makeContainer(api),
+          child: RepaintBoundary(
+            key: boundaryKey,
+            child: MaterialApp(
+              debugShowCheckedModeBanner: false,
+              theme: ThemeData(
+                colorSchemeSeed: const Color(0xFF544451),
+                useMaterial3: true,
+                brightness: brightness,
+                fontFamily: output.isEmpty ? null : 'NativeSnapshot',
+              ),
+              home: const MemoryScreen(),
             ),
           ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      Future<void> capture(String name) async {
+        if (output.isEmpty) return;
+        final boundary = tester.renderObject<RenderRepaintBoundary>(
+          find.byKey(boundaryKey),
         );
+        await tester.runAsync(() async {
+          final image = await boundary.toImage(pixelRatio: 2);
+          final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+          await File(
+            '$output/native-memory-${brightness.name}-$name.png',
+          ).writeAsBytes(bytes!.buffer.asUint8List());
+          image.dispose();
+        });
+      }
 
-        await tester.tap(find.byKey(const Key('open-memories')));
-        await tester.pumpAndSettle();
-
-        await tester.drag(find.byKey(const Key('dismissible-memory-m1')), const Offset(-500, 0));
-        await tester.pumpAndSettle(const Duration(milliseconds: 100));
-        expect(find.text('Undo'), findsOneWidget);
-
-        // Pop the route while the undo window is still open — the
-        // ScaffoldMessenger that owns the snackbar is app-scoped (above the
-        // Navigator), not route-scoped, so its `closed` future keeps running
-        // past this screen's dispose().
-        Navigator.of(tester.element(find.byType(MemoryScreen))).pop();
-        await tester.pumpAndSettle();
-
-        // Let the undo window elapse. If the fix regressed, this would
-        // surface as an unhandled riverpod StateError — pumpAndSettle turns
-        // any unhandled async error into a failing FlutterError here.
-        await tester.pump(const Duration(seconds: 6));
-        await tester.pumpAndSettle();
-
-        expect(api.deleteCalls, ['m1']);
-      },
-    );
-
-    testWidgets(
-      'two rapid swipes: the first commits immediately on the second swipe, the second keeps its own window',
-      (tester) async {
-        final api = FakeDjApi();
-        api.onListMemories = () async => [
-              _memory(id: 'm1', note: 'note one'),
-              _memory(id: 'm2', note: 'note two'),
-            ];
-        api.onDeleteMemory = (id) async {};
-        final container = _makeContainer(api);
-        await _pump(tester, container);
-
-        await tester.drag(find.byKey(const Key('dismissible-memory-m1')), const Offset(-500, 0));
-        await tester.pumpAndSettle(const Duration(milliseconds: 100));
-        expect(api.deleteCalls, isEmpty);
-
-        // Second swipe, well within the first's 5s window.
-        await tester.drag(find.byKey(const Key('dismissible-memory-m2')), const Offset(-500, 0));
-        await tester.pumpAndSettle();
-
-        // The first was finalized right on the second swipe — it never
-        // waits out its own window.
-        expect(api.deleteCalls, ['m1']);
-
-        // The second still has its own live undo window.
-        expect(find.text('Undo'), findsOneWidget);
-        await tester.tap(find.text('Undo'));
-        await tester.pumpAndSettle();
-
-        expect(find.text('note two'), findsOneWidget);
-        expect(api.deleteCalls, ['m1']);
-
-        // Letting time pass must not resurrect the second delete either —
-        // it was undone, not deferred.
-        await tester.pump(const Duration(seconds: 6));
-        await tester.pumpAndSettle();
-        expect(api.deleteCalls, ['m1']);
-      },
-    );
-
-    testWidgets('three rapid swipes leave no stranded hidden rows once everything settles', (tester) async {
-      final api = FakeDjApi();
-      api.onListMemories = () async => [
-            _memory(id: 'm1', note: 'note one'),
-            _memory(id: 'm2', note: 'note two'),
-            _memory(id: 'm3', note: 'note three'),
-            _memory(id: 'm4', note: 'note four'),
-          ];
-      api.onDeleteMemory = (id) async {};
-      final container = _makeContainer(api);
-      await _pump(tester, container);
-
-      await tester.drag(find.byKey(const Key('dismissible-memory-m1')), const Offset(-500, 0));
-      await tester.pumpAndSettle(const Duration(milliseconds: 50));
-      await tester.drag(find.byKey(const Key('dismissible-memory-m2')), const Offset(-500, 0));
-      await tester.pumpAndSettle(const Duration(milliseconds: 50));
-      await tester.drag(find.byKey(const Key('dismissible-memory-m3')), const Offset(-500, 0));
+      await capture('list');
+      await tester.tap(find.byKey(const Key('forget-memory-m1')));
       await tester.pumpAndSettle();
-
-      // m1 and m2 were superseded and finalized immediately; only m3 still
-      // has a live undo window. The never-touched m4 stays visible
-      // throughout.
-      expect(api.deleteCalls, ['m1', 'm2']);
-      expect(find.text('note four'), findsOneWidget);
-
-      await tester.pump(const Duration(seconds: 6));
-      await tester.pumpAndSettle();
-
-      expect(api.deleteCalls, ['m1', 'm2', 'm3']);
-      expect(find.text('note one'), findsNothing);
-      expect(find.text('note two'), findsNothing);
-      expect(find.text('note three'), findsNothing);
-      expect(find.text('note four'), findsOneWidget);
+      await capture('confirmation');
+      expect(tester.takeException(), isNull);
     });
+  }
+  testWidgets('preserves canonical note order and refreshes when opened', (
+    tester,
+  ) async {
+    final api = FakeDjApi();
+    var reads = 0;
+    api.onListMemories = () async {
+      reads++;
+      return [
+        _memory(id: 'new', note: 'Newest note'),
+        _memory(id: 'old', note: 'Older note'),
+      ];
+    };
+    await _pump(tester, _makeContainer(api));
+    expect(reads, 2);
+    expect(
+      tester.getTopLeft(find.text('Newest note')).dy,
+      lessThan(tester.getTopLeft(find.text('Older note')).dy),
+    );
+    expect(find.text('just now'), findsNWidgets(2));
+    await tester.drag(
+      find.byKey(const Key('memories-list')),
+      const Offset(0, 300),
+    );
+    await tester.pumpAndSettle();
+    expect(reads, 3);
   });
 
-  group('fix round: refetch on open', () {
-    testWidgets(
-      'a post-frame refresh on open picks up a note that appeared right as the screen opened',
-      (tester) async {
-        var calls = 0;
-        final api = FakeDjApi();
-        api.onListMemories = () async {
-          calls++;
-          if (calls == 1) return [_memory(id: 'm1', note: 'note one')];
-          return [
-            _memory(id: 'm2', note: 'note two', createdAt: DateTime.now()),
-            _memory(id: 'm1', note: 'note one'),
-          ];
-        };
-        final container = _makeContainer(api);
-        await _pump(tester, container);
-
-        expect(calls, 2, reason: 'build() plus the initState post-frame refresh');
-        expect(find.text('note two'), findsOneWidget);
-        expect(find.text('note one'), findsOneWidget);
-      },
+  testWidgets('initial read error offers reload and keeps route navigation', (
+    tester,
+  ) async {
+    final api = FakeDjApi()
+      ..onListMemories = () async => throw ApiException(500, 'offline');
+    final container = _makeContainer(api);
+    final navigator = GlobalKey<NavigatorState>();
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          navigatorKey: navigator,
+          home: const Scaffold(body: Text('Home')),
+        ),
+      ),
     );
-
-    testWidgets('a failed pull-to-refresh keeps the list and says so', (tester) async {
-      var calls = 0;
-      final api = FakeDjApi();
-      api.onListMemories = () async {
-        calls++;
-        if (calls > 2) throw ApiException(500, 'boom');
-        return [_memory(id: 'm1', note: 'note one')];
-      };
-      final container = _makeContainer(api);
-      await _pump(tester, container);
-      expect(calls, 2, reason: 'build() plus the initState post-frame refresh');
-
-      await tester.fling(find.byKey(const Key('memories-list')), const Offset(0, 300), 1000);
-      await tester.pumpAndSettle();
-
-      expect(calls, 3, reason: 'the pull must actually refetch');
-      expect(find.text('note one'), findsOneWidget);
-      expect(find.text("couldn't refresh — showing what we had"), findsOneWidget);
-    });
+    navigator.currentState!.push(
+      MaterialPageRoute<void>(builder: (_) => const MemoryScreen()),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Couldn’t load your notes.'), findsOneWidget);
+    expect(find.byType(BackButton), findsOneWidget);
+    api.onListMemories = () async => [];
+    await tester.tap(find.text('Reload notes'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Nothing remembered yet.'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('Home'), findsOneWidget);
   });
 }

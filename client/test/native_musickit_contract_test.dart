@@ -90,9 +90,15 @@ void main() {
       plist,
       contains('<key>LSApplicationQueriesSchemes</key>\n\t<array>\n\t\t<string>spotify</string>\n\t</array>'),
     );
-    // The share-sheet path (C5) goes through the document type above, so
-    // there is still no custom URL scheme to declare.
-    expect(plist, isNot(contains('CFBundleURLTypes')));
+    // The share-sheet path (C5) goes through the document type above, so the
+    // only URL scheme declared is Google sign-in's reversed client ID callback;
+    // no custom mixtape:// scheme exists.
+    final schemes = RegExp(r'<key>CFBundleURLSchemes</key>\s*<array>(.*?)</array>', dotAll: true)
+        .allMatches(plist)
+        .expand((m) => RegExp(r'<string>(.*?)</string>').allMatches(m.group(1)!).map((s) => s.group(1)!))
+        .toList();
+    expect(schemes, isNotEmpty);
+    expect(schemes.every((s) => s.startsWith('com.googleusercontent.apps.')), isTrue, reason: 'unexpected URL schemes: $schemes');
   });
 
   test('a ZIP handed to the app is copied out of its security scope and passed to Dart', () {

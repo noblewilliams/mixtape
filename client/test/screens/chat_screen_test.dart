@@ -1,3 +1,5 @@
+import 'package:mixtape/presentation/widgets/mix_energy_summary.dart';
+import 'package:mixtape/data/playlists/playlist_context_models.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -37,7 +39,7 @@ class FakeDjApi implements DjApi {
   Duration get timeout => const Duration(seconds: 120);
 
   @override
-  Future<SessionDetail> createSession(String prompt) {
+  Future<SessionDetail> createSession(String prompt, {InitialPlaylistSeed? playlistSeed}) {
     final impl = onCreateSession;
     if (impl == null) throw UnimplementedError('onCreateSession not wired');
     return impl(prompt);
@@ -152,6 +154,7 @@ QueueTrack _track(int position, {int? durationMs = 180000}) => QueueTrack(
 ProviderContainer _makeContainer(FakeDjApi api) {
   final container = ProviderContainer(
     overrides: [
+      mixEnergyProvider.overrideWith((ref, key) async => <String, dynamic>{}),
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
       djApiProvider.overrideWithValue(api),
       authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.signedIn)),
@@ -563,6 +566,7 @@ void main() {
     );
     final container = ProviderContainer(
       overrides: [
+      mixEnergyProvider.overrideWith((ref, key) async => <String, dynamic>{}),
         tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
         djApiProvider.overrideWithValue(FakeDjApi()),
         authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.signedIn)),

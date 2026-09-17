@@ -1,3 +1,7 @@
+import '../../data/api/api_client.dart';
+import '../providers/onboarding_provider.dart';
+import 'interview_screen.dart';
+import '../widgets/collection_review_form.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -30,15 +34,19 @@ bool get importSheetShowing => _showing > 0;
 /// A modal sheet's dismissibility is fixed when it opens, so the locked one
 /// pops itself the moment the run lands and comes straight back dismissible
 /// — nobody is left trapped in front of a result.
-Future<void> showImportSheet(BuildContext context, {bool dismissible = true}) async {
+Future<void> showImportSheet(
+  BuildContext context, {
+  bool dismissible = true,
+}) async {
   var landed = false;
   await showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     isDismissible: dismissible,
     enableDrag: dismissible,
-    builder: (_) =>
-        dismissible ? const ImportSheet() : _LockedSheet(onLanded: () => landed = true),
+    builder: (_) => dismissible
+        ? const ImportSheet()
+        : _LockedSheet(onLanded: () => landed = true),
   );
   // The locked sheet asked to come back: the route it pops is still on its
   // way out, so the count never drops to nothing in between.
@@ -174,13 +182,31 @@ class _ImportSheetState extends ConsumerState<ImportSheet> {
         padding: const EdgeInsets.all(24),
         child: switch (state) {
           ImportIdle() => _Idle(onPick: notifier.pick),
-          ImportFlowCancelled() => _Idle(onPick: notifier.pick, cancelled: true),
-          ImportInspecting(:final archive) => _Inspecting(archive: archive, onCancel: notifier.cancel),
+          ImportFlowCancelled() => _Idle(
+            onPick: notifier.pick,
+            cancelled: true,
+          ),
+          ImportInspecting(:final archive, :final file, :final progress) =>
+            _Inspecting(
+              archive: archive,
+              file: file,
+              progress: progress,
+              onCancel: notifier.cancel,
+            ),
           ImportInventory() => _Inventory(state: state, notifier: notifier),
-          ImportUploading(:final archive, :final progress) =>
-            _Uploading(archive: archive, progress: progress, onCancel: notifier.cancel),
-          ImportDone(:final result) => _Done(result: result, notifier: notifier),
-          ImportPartial(:final result) => _Partial(result: result, notifier: notifier),
+          ImportUploading(:final archive, :final progress) => _Uploading(
+            archive: archive,
+            progress: progress,
+            onCancel: notifier.cancel,
+          ),
+          ImportDone(:final result) => _Done(
+            result: result,
+            notifier: notifier,
+          ),
+          ImportPartial(:final result) => _Partial(
+            result: result,
+            notifier: notifier,
+          ),
           ImportFailed() => _Failed(state: state, notifier: notifier),
         },
       ),
@@ -189,10 +215,11 @@ class _ImportSheetState extends ConsumerState<ImportSheet> {
 }
 
 String packageName(ExportPackage? package) => switch (package) {
-      ExportPackage.spotifyExtended => 'Extended streaming history',
-      ExportPackage.spotifyAccount => 'Account data',
-      null => 'Unknown package',
-    };
+  ExportPackage.spotifyExtended => 'Extended streaming history',
+  ExportPackage.spotifyAccount => 'Account data',
+  ExportPackage.spotifyExportify => 'Exportify saved music',
+  null => 'Unknown package',
+};
 
 String _baseName(String path) => path.substring(path.lastIndexOf('/') + 1);
 
@@ -209,14 +236,16 @@ class _Idle extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          cancelled ? 'Import cancelled.' : 'Pick the ZIP Spotify sent you. Either package, in either order.',
+          cancelled
+              ? 'Import cancelled.'
+              : 'Choose an Exportify ZIP or CSV files, or an official Spotify ZIP. Review before uploading.',
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 16),
         FilledButton(
           key: const Key('import-pick'),
           onPressed: onPick,
-          child: const Text('Choose a ZIP'),
+          child: const Text('Choose files'),
         ),
       ],
     );
@@ -224,28 +253,44 @@ class _Idle extends StatelessWidget {
 }
 
 class _Inspecting extends StatelessWidget {
-  const _Inspecting({required this.archive, required this.onCancel});
-
+  const _Inspecting({
+    required this.archive,
+    required this.onCancel,
+    this.file,
+    this.progress,
+  });
   final PickedArchive archive;
+  final String? file;
+  final double? progress;
   final VoidCallback onCancel;
-
   @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const CircularProgressIndicator(),
-        const SizedBox(height: 16),
-        Text('Reading ${archive.name}…', textAlign: TextAlign.center),
-        const SizedBox(height: 16),
-        TextButton(
-          key: const Key('import-cancel'),
-          onPressed: onCancel,
-          child: const Text('Cancel'),
-        ),
-      ],
-    );
-  }
+  Widget build(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Row(
+        children: [
+          const SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Reading ${file == null ? archive.name : _baseName(file!)}…',
+            ),
+          ),
+          TextButton(
+            key: const Key('import-cancel'),
+            onPressed: onCancel,
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+      const SizedBox(height: 8),
+      LinearProgressIndicator(value: progress),
+    ],
+  );
 }
 
 class _Inventory extends StatelessWidget {
@@ -259,56 +304,101 @@ class _Inventory extends StatelessWidget {
     final theme = Theme.of(context);
     final preview = state.preview;
     final inventory = preview.inventory;
-    final snapshot = preview.snapshot;
+    var snapshot = preview.snapshot;
+    if (preview.selection != null) {
+      try {
+        snapshot = preview.selection!
+            .change(confirmed: true, confirmRemovals: true)
+            .apply(snapshot)
+            .snapshot;
+      } catch (_) {}
+    }
     final extended = preview.package == ExportPackage.spotifyExtended;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(state.archive.name, key: const Key('import-file-name'), style: theme.textTheme.titleMedium),
+        Text(
+          state.archive.name,
+          key: const Key('import-file-name'),
+          style: theme.textTheme.titleMedium,
+        ),
         Text(
           '${formatBytes(state.archive.bytes)} · ${packageName(inventory.package)}',
           key: const Key('import-file-meta'),
           style: theme.textTheme.bodySmall,
         ),
         const SizedBox(height: 12),
+        if (preview.selection != null)
+          CollectionReviewForm(
+            snapshot: preview.snapshot,
+            paths: inventory.read.map((f) => f.path).toList(),
+            selection: preview.selection!,
+            onChanged: notifier.setSelection,
+          ),
         // Every figure comes from the parse the service ran at inspect: the
         // snapshot for the counts, its stats for the drops.
-        _Fact(label: 'Tracks', value: formatCount(preview.tracks)),
-        if (extended) ...[
-          _Fact(label: 'Days with plays', value: formatCount(preview.daysWithPlays)),
-          _Fact(label: 'Years covered', value: yearsRange(snapshot.ledgerFrom, snapshot.ledgerTo) ?? '—'),
-        ] else ...[
-          _Fact(label: 'Liked songs', value: formatCount(snapshot.library.length)),
-          _Fact(label: 'Artists', value: formatCount(snapshot.artists.length)),
-          _Fact(label: 'Playlists', value: formatCount(snapshot.playlists.length)),
-        ],
-        _Fact(
-          label: 'Skipped rows',
-          value: skippedRowsLabel(podcasts: preview.skippedPodcasts, localFiles: preview.skippedLocalFiles),
-        ),
-        if (extended) ...[
-          const SizedBox(height: 4),
-          Text('Local days in ${state.timeZone}', key: const Key('import-zone'), style: theme.textTheme.bodySmall),
-        ],
-        const SizedBox(height: 12),
-        Text('Files read', style: theme.textTheme.labelLarge),
-        for (final file in inventory.read)
-          _FileLine(
-            key: Key('import-read-${_baseName(file.path)}'),
-            name: _baseName(file.path),
-            note: file.rows == null ? 'unreadable' : plural(file.rows!, 'row'),
-          ),
-        if (inventory.ignored.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          Text('Ignored · never read', style: theme.textTheme.labelLarge),
-          for (final file in inventory.ignored)
-            _FileLine(
-              key: Key('import-ignored-${_baseName(file.path)}'),
-              name: _baseName(file.path),
-              note: 'ignored',
-              struck: true,
+        if (preview.selection == null) ...[
+          _Fact(label: 'Tracks', value: formatCount(preview.tracks)),
+          if (extended) ...[
+            _Fact(
+              label: 'Days with plays',
+              value: formatCount(preview.daysWithPlays),
             ),
+            _Fact(
+              label: 'Years covered',
+              value: yearsRange(snapshot.ledgerFrom, snapshot.ledgerTo) ?? '—',
+            ),
+          ] else ...[
+            _Fact(
+              label: 'Liked songs',
+              value: formatCount(snapshot.library.length),
+            ),
+            _Fact(
+              label: 'Artists',
+              value: formatCount(snapshot.artists.length),
+            ),
+            _Fact(
+              label: 'Playlists',
+              value: formatCount(snapshot.playlists.length),
+            ),
+          ],
+          _Fact(
+            label: 'Skipped rows',
+            value: skippedRowsLabel(
+              podcasts: preview.skippedPodcasts,
+              localFiles: preview.skippedLocalFiles,
+            ),
+          ),
+          if (extended) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Local days in ${state.timeZone}',
+              key: const Key('import-zone'),
+              style: theme.textTheme.bodySmall,
+            ),
+          ],
+          const SizedBox(height: 12),
+          Text('Files read', style: theme.textTheme.labelLarge),
+          for (final file in inventory.read)
+            _FileLine(
+              key: Key('import-read-${_baseName(file.path)}'),
+              name: _baseName(file.path),
+              note: file.rows == null
+                  ? 'unreadable'
+                  : plural(file.rows!, 'row'),
+            ),
+          if (inventory.ignored.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text('Ignored · never read', style: theme.textTheme.labelLarge),
+            for (final file in inventory.ignored)
+              _FileLine(
+                key: Key('import-ignored-${_baseName(file.path)}'),
+                name: _baseName(file.path),
+                note: 'ignored',
+                struck: true,
+              ),
+          ],
         ],
         if (extended) ...[
           const SizedBox(height: 8),
@@ -316,21 +406,28 @@ class _Inventory extends StatelessWidget {
             key: const Key('import-private-sessions'),
             contentPadding: EdgeInsets.zero,
             title: const Text('Include private sessions'),
-            subtitle: Text(privateSessionsHint(preview.privatePlays), key: const Key('import-private-hint')),
+            subtitle: Text(
+              privateSessionsHint(preview.privatePlays),
+              key: const Key('import-private-hint'),
+            ),
             value: state.includePrivateSessions,
             onChanged: notifier.setIncludePrivateSessions,
           ),
         ],
         const SizedBox(height: 8),
         Text(
-          'Only these plays leave this device. Your account details, payments, and IP addresses are never read.',
+          'Only reviewed music leaves this device. Your account details, payments, and IP addresses are never read.',
           key: const Key('import-privacy'),
           style: theme.textTheme.bodySmall,
         ),
         const SizedBox(height: 16),
         FilledButton(
           key: const Key('import-upload'),
-          onPressed: notifier.upload,
+          onPressed:
+              (preview.selection?.canUpload(snapshot) ??
+                  (snapshot.package != ExportPackage.spotifyExportify))
+              ? notifier.upload
+              : null,
           child: const Text('Upload'),
         ),
         TextButton(
@@ -365,7 +462,12 @@ class _Fact extends StatelessWidget {
 }
 
 class _FileLine extends StatelessWidget {
-  const _FileLine({super.key, required this.name, required this.note, this.struck = false});
+  const _FileLine({
+    super.key,
+    required this.name,
+    required this.note,
+    this.struck = false,
+  });
 
   final String name;
   final String note;
@@ -381,7 +483,9 @@ class _FileLine extends StatelessWidget {
     );
     return Row(
       children: [
-        Expanded(child: Text(name, style: style, overflow: TextOverflow.ellipsis)),
+        Expanded(
+          child: Text(name, style: style, overflow: TextOverflow.ellipsis),
+        ),
         const SizedBox(width: 8),
         Text(note, style: theme.textTheme.bodySmall),
       ],
@@ -390,7 +494,11 @@ class _FileLine extends StatelessWidget {
 }
 
 class _Uploading extends StatelessWidget {
-  const _Uploading({required this.archive, required this.progress, required this.onCancel});
+  const _Uploading({
+    required this.archive,
+    required this.progress,
+    required this.onCancel,
+  });
 
   final PickedArchive archive;
   final double progress;
@@ -403,9 +511,26 @@ class _Uploading extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(archive.name, style: Theme.of(context).textTheme.titleMedium, textAlign: TextAlign.center),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                archive.name,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
+            TextButton(
+              key: const Key('import-cancel'),
+              onPressed: onCancel,
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
         const SizedBox(height: 16),
-        LinearProgressIndicator(key: const Key('import-progress'), value: progress),
+        LinearProgressIndicator(
+          key: const Key('import-progress'),
+          value: progress,
+        ),
         const SizedBox(height: 16),
         Semantics(
           key: const Key('import-status'),
@@ -418,25 +543,22 @@ class _Uploading extends StatelessWidget {
           style: Theme.of(context).textTheme.bodySmall,
           textAlign: TextAlign.center,
         ),
-        const SizedBox(height: 16),
-        OutlinedButton(
-          key: const Key('import-cancel'),
-          onPressed: onCancel,
-          child: const Text('Cancel'),
-        ),
       ],
     );
   }
 }
 
-class _Done extends StatelessWidget {
+class _Done extends ConsumerWidget {
   const _Done({required this.result, required this.notifier});
 
   final ListeningImportResult result;
   final ListeningImportNotifier notifier;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final needsInterview =
+        result.inventory.package == ExportPackage.spotifyExportify &&
+        ref.watch(onboardingProvider).value?.interviewCompletedAt == null;
     final theme = Theme.of(context);
     final summary = result.summary;
     final extended = result.inventory.package == ExportPackage.spotifyExtended;
@@ -455,11 +577,16 @@ class _Done extends StatelessWidget {
       children: [
         _ResultTitle(
           icon: Icons.check_circle_outline,
-          title: extended ? 'Extended history imported' : 'Account data imported',
+          title: extended
+              ? 'Extended history imported'
+              : result.inventory.package == ExportPackage.spotifyExportify
+              ? 'Spotify music imported'
+              : 'Account data imported',
         ),
         const SizedBox(height: 8),
         Text(counts, key: const Key('import-done-counts')),
-        if (ledger != null) Text('Ledger $ledger', key: const Key('import-ledger')),
+        if (ledger != null)
+          Text('Ledger $ledger', key: const Key('import-ledger')),
         if (summary.unresolvedRows > 0)
           Text(
             '${plural(summary.unresolvedRows, 'row')} skipped (podcasts, local files, no track)',
@@ -480,8 +607,23 @@ class _Done extends StatelessWidget {
         const SizedBox(height: 16),
         FilledButton(
           key: const Key('import-make-mix'),
-          onPressed: () => _makeMix(context, notifier),
-          child: const Text('Make your first mix'),
+          onPressed: () {
+            if (needsInterview) {
+              notifier.reset();
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute<void>(
+                  builder: (_) => const InterviewScreen(),
+                ),
+              );
+            } else {
+              _makeMix(context, notifier);
+            }
+          },
+          child: Text(
+            needsInterview
+                ? 'Tell the DJ about your taste'
+                : 'Make your first mix',
+          ),
         ),
         TextButton(
           key: const Key('import-other'),
@@ -489,7 +631,11 @@ class _Done extends StatelessWidget {
             notifier.reset();
             notifier.pick();
           },
-          child: Text(extended ? 'Import the account data too' : 'Import the extended history too'),
+          child: Text(
+            extended
+                ? 'Import the account data too'
+                : 'Import the extended history too',
+          ),
         ),
         const _WaitingFile(),
       ],
@@ -500,27 +646,32 @@ class _Done extends StatelessWidget {
 /// The history was published but the playlist sync after it failed. Same
 /// copy as the web's partial card; "Retry playlists" re-imports the same
 /// file (idempotent on the server) so the playlist sync runs again.
-class _Partial extends StatelessWidget {
+class _Partial extends ConsumerWidget {
   const _Partial({required this.result, required this.notifier});
 
   final ListeningImportResult result;
   final ListeningImportNotifier notifier;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final needsInterview =
+        result.inventory.package == ExportPackage.spotifyExportify &&
+        ref.watch(onboardingProvider).value?.interviewCompletedAt == null;
     final theme = Theme.of(context);
     final summary = result.summary;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const _ResultTitle(
+        _ResultTitle(
           icon: Icons.error_outline,
           title: "Account data imported, playlists didn't land",
         ),
         const SizedBox(height: 4),
         Text(
-          'Likes and followed artists are in. The playlist sync was interrupted.',
+          result.inventory.package == ExportPackage.spotifyExportify
+              ? 'The saved-song step finished. Review and retry the playlists.'
+              : 'Likes and followed artists are in. The playlist sync was interrupted.',
           key: const Key('import-partial-subtitle'),
           style: theme.textTheme.bodySmall,
         ),
@@ -538,13 +689,33 @@ class _Partial extends StatelessWidget {
         const SizedBox(height: 16),
         FilledButton(
           key: const Key('import-make-mix'),
-          onPressed: () => _makeMix(context, notifier),
-          child: const Text('Make a mix anyway'),
+          onPressed: () {
+            if (needsInterview) {
+              notifier.reset();
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute<void>(
+                  builder: (_) => const InterviewScreen(),
+                ),
+              );
+            } else {
+              _makeMix(context, notifier);
+            }
+          },
+          child: Text(
+            needsInterview
+                ? 'Tell the DJ about your taste'
+                : 'Make a mix anyway',
+          ),
         ),
         TextButton(
           key: const Key('import-retry-playlists'),
           onPressed: notifier.retryPlaylists,
-          child: const Text('Retry playlists'),
+          child: Text(
+            result.playlistError is ApiException &&
+                    (result.playlistError as ApiException).statusCode == 409
+                ? 'Review again'
+                : 'Retry playlists',
+          ),
         ),
         Text(
           'Re-uploads the file; nothing is duplicated.',
@@ -637,7 +808,9 @@ class _Failed extends StatelessWidget {
             child: Text(
               diagnostics.canonicalJsonString(),
               key: const Key('import-diagnostics'),
-              style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontFamily: 'monospace',
+              ),
             ),
           ),
           const SizedBox(height: 8),
@@ -649,14 +822,24 @@ class _Failed extends StatelessWidget {
           OutlinedButton(
             key: const Key('import-copy-report'),
             onPressed: () async {
-              await Clipboard.setData(ClipboardData(text: diagnostics.canonicalJsonString()));
+              await Clipboard.setData(
+                ClipboardData(text: diagnostics.canonicalJsonString()),
+              );
               if (!context.mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Report copied')));
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(const SnackBar(content: Text('Report copied')));
             },
             child: const Text('Copy report'),
           ),
         ],
         const SizedBox(height: 8),
+        if (state.archive != null && !unreadable)
+          TextButton(
+            key: const Key('import-review-again'),
+            onPressed: () => notifier.inspect(state.archive!),
+            child: const Text('Review again'),
+          ),
         FilledButton(
           key: const Key('import-try-another'),
           onPressed: () {

@@ -1,8 +1,19 @@
+import 'playback_screen.dart';
+import '../widgets/energy_journey.dart';
+import '../widgets/mix_energy_summary.dart';
+import 'mix_history_screen.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/dj_providers.dart';
+import '../providers/auth_provider.dart';
+import '../providers/playlist_context_provider.dart';
+import '../providers/mix_operation_gate.dart';
+import '../../data/api/api_client.dart';
+import '../../data/playlists/playlist_context_models.dart';
+import '../widgets/mix_name_editor.dart';
+import '../widgets/playlist_inspiration.dart';
 import '../widgets/queue_card.dart';
 
 /// The DJ conversation for one session (see
@@ -29,11 +40,14 @@ class ChatScreen extends ConsumerStatefulWidget {
 class _ChatScreenState extends ConsumerState<ChatScreen> {
   final _scrollController = ScrollController();
   final _textController = TextEditingController();
+  final _composerKey = GlobalKey();
 
   int _lastMessageCount = -1;
   Timer? _listeningTimer;
   bool _showListeningCaption = false;
   bool _seededInitialError = false;
+  bool _editingName = false;
+  bool _changingStatus = false;
 
   @override
   void dispose() {
@@ -80,7 +94,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   /// whatever new draft the user has since started typing).
   Future<void> _send(String text, {bool fromComposer = false}) async {
     final trimmed = text.trim();
-    if (trimmed.isEmpty) return;
+    if (trimmed.isEmpty ||
+        ref.read(mixOperationProvider(widget.sessionId)) != null ||
+        ref.read(sessionPlaylistContextProvider(widget.sessionId)).writing ||
+        ref.read(chatProvider(widget.sessionId)).value?.sending == true) {
+      return;
+    }
     if (fromComposer) _textController.clear();
     try {
       await ref.read(chatProvider(widget.sessionId).notifier).send(trimmed);
@@ -92,9 +111,170 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
   }
 
+  Future<void> _pickInspiration(BuildContext anchor) async {
+    final contextState = ref.read(
+      sessionPlaylistContextProvider(widget.sessionId),
+    );
+    if (!contextState.canSelect ||
+        ref.read(mixOperationProvider(widget.sessionId)) != null) {
+      return;
+    }
+    final seed = contextState.seed;
+    final box =
+        _composerKey.currentContext?.findRenderObject() as RenderBox? ??
+        anchor.findRenderObject() as RenderBox;
+    final initialRect = box.localToGlobal(Offset.zero) & box.size;
+    Rect composerRect() {
+      final current = _composerKey.currentContext?.findRenderObject();
+      return current is RenderBox && current.attached
+          ? current.localToGlobal(Offset.zero) & current.size
+          : initialRect;
+    }
+
+    final choice = await showPlaylistInspirationPicker(
+      context,
+      ref,
+      anchor: initialRect,
+      anchorResolver: composerRect,
+      selected: seed?.playlistId == null
+          ? null
+          : InitialPlaylistSeed(
+              playlistId: seed!.playlistId!,
+              excludeSourceTracks: seed.excludeSourceTracks,
+            ),
+    );
+    if (!mounted || choice == null) return;
+    await ref
+        .read(sessionPlaylistContextProvider(widget.sessionId).notifier)
+        .select(
+          playlistId: choice.seed.playlistId,
+          excludeSourceTracks: choice.seed.excludeSourceTracks,
+        );
+  }
+
+  Future<void> _actions(BuildContext anchor) async {
+    final box = anchor.findRenderObject() as RenderBox;
+    final overlay =
+        Navigator.of(context).overlay!.context.findRenderObject() as RenderBox;
+    final rect = box.localToGlobal(Offset.zero, ancestor: overlay) & box.size;
+    final archived =
+        ref.read(chatProvider(widget.sessionId)).value?.session.status ==
+        'archived';
+    final action = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(rect, Offset.zero & overlay.size),
+      items: [
+        const PopupMenuItem(value: 'history', child: Text('Version history')),
+        const PopupMenuItem(value: 'rename', child: Text('Rename')),
+        PopupMenuItem(
+          value: 'status',
+          child: Text(archived ? 'Restore' : 'Archive'),
+        ),
+      ],
+    );
+    if (!mounted || action == null) return;
+    if (action == 'history') {
+      await Navigator.of(context).push(MaterialPageRoute(builder: (_) => MixHistoryScreen(sessionId: widget.sessionId)));
+      return;
+    }
+    if (action == 'rename') {
+      setState(() => _editingName = true);
+      return;
+    }
+    if (_changingStatus) return;
+    setState(() => _changingStatus = true);
+    final notifier = ref.read(chatProvider(widget.sessionId).notifier);
+    final ok = await notifier.setArchived(!archived);
+    if (!mounted) return;
+    setState(() => _changingStatus = false);
+    final sessions = ref.read(sessionsProvider.notifier);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? (archived ? 'Mix restored' : 'Mix archived')
+              : 'Couldn’t update this mix. Try again.',
+        ),
+        action: ok && !archived
+            ? SnackBarAction(
+                label: 'Undo',
+                onPressed: () async {
+                  if (mounted) {
+                    await notifier.setArchived(false);
+                  } else {
+                    await sessions.unarchive(widget.sessionId);
+                  }
+                },
+              )
+            : null,
+      ),
+    );
+  }
+
+  Future<void> _expireSession(SessionPlaylistContextState expected) async {
+    if (!mounted ||
+        !identical(
+          ref.read(sessionPlaylistContextProvider(widget.sessionId)),
+          expected,
+        )) {
+      return;
+    }
+    try {
+      await ref.read(authProvider.notifier).signOut();
+    } catch (_) {
+      if (!mounted ||
+          !identical(
+            ref.read(sessionPlaylistContextProvider(widget.sessionId)),
+            expected,
+          )) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Couldn’t sign out. Try again.')),
+      );
+    }
+  }
+
+  String? _inspirationStatus(SessionPlaylistContextState contextState) {
+    if (contextState.error case ApiException(statusCode: 401)) {
+      return 'Your session expired. Sign in again.';
+    }
+    if (contextState.loading) return 'Loading inspiration…';
+    if (contextState.seed == null) {
+      return 'Couldn’t read the current inspiration.';
+    }
+    if (contextState.error != null) {
+      return 'Check the current inspiration before trying again.';
+    }
+    return switch (contextState.seed!.status) {
+      PlaylistSeedStatus.unavailable =>
+        'Playlist unavailable. Replace or detach it.',
+      PlaylistSeedStatus.insufficientProfile =>
+        'At least 3 matched recordings are needed.',
+      _ => null,
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
     final chatAsync = ref.watch(chatProvider(widget.sessionId));
+    final inspiration = ref.watch(
+      sessionPlaylistContextProvider(widget.sessionId),
+    );
+    final operation = ref.watch(mixOperationProvider(widget.sessionId));
+    ref.listen(sessionPlaylistContextProvider(widget.sessionId), (_, next) {
+      if (next.error case ApiException(statusCode: 401)) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted &&
+              identical(
+                ref.read(sessionPlaylistContextProvider(widget.sessionId)),
+                next,
+              )) {
+            _expireSession(next);
+          }
+        });
+      }
+    });
 
     ref.listen(chatProvider(widget.sessionId), (previous, next) {
       final state = next.value;
@@ -174,7 +354,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
     if (!chatAsync.hasValue) {
       return Scaffold(
-        appBar: AppBar(), // present on every state so the bar never pops in/out as loading resolves
+        appBar:
+            AppBar(), // present on every state so the bar never pops in/out as loading resolves
         body: const Center(child: CircularProgressIndicator()),
       );
     }
@@ -208,7 +389,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         _MessageBubble(
           message: message,
           onRetry: canRetry ? () => _send(precedingText) : null,
-          retryEnabled: !state.sending,
+          retryEnabled:
+              !state.sending && operation == null && !inspiration.writing,
         ),
       );
       final version = message.message.queueVersion;
@@ -219,39 +401,130 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           // with nothing under it, so skip rendering it entirely rather
           // than showing that.
           if (state.queue.isNotEmpty) {
-            items.add(QueueCard(sessionId: widget.sessionId, queue: state.queue));
+            items.add(
+              QueueCard(sessionId: widget.sessionId, queue: state.queue),
+            );
           }
         } else {
-          items.add(_QueueUpdatedChip(version: version));
+          items.add(_QueueUpdatedChip(version: version, onOpen: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => MixHistoryScreen(sessionId: widget.sessionId, initialVersion: version)))));
         }
       }
     }
     if (needsStandaloneCard) {
       items.add(QueueCard(sessionId: widget.sessionId, queue: state.queue));
     }
+    if (currentVersion > 0) items.add(MixEnergySummary(sessionId: widget.sessionId, version: currentVersion));
     if (state.sending) {
       items.add(_TypingIndicator(showCaption: _showListeningCaption));
     }
 
     return Scaffold(
-      appBar: AppBar(title: Text(state.session.title)),
+      appBar: AppBar(
+        title: Text(
+          state.session.title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        actions: [
+          Builder(
+            builder: (anchor) => IconButton(
+              key: const Key('chat-actions'),
+              tooltip: 'Mix actions',
+              onPressed: _editingName || _changingStatus
+                  ? null
+                  : () => _actions(anchor),
+              icon: const Icon(Icons.more_horiz),
+            ),
+          ),
+        ],
+      ),
       body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: ListView.builder(
-                controller: _scrollController,
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                itemCount: items.length,
-                itemBuilder: (context, index) => items[index],
+        child: LayoutBuilder(
+          builder: (context, constraints) => Column(
+            children: [
+              if (_editingName)
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: constraints.maxHeight * .4,
+                  ),
+                  child: SingleChildScrollView(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                      child: MixNameEditor(
+                        sessionId: widget.sessionId,
+                        title: state.session.title,
+                        onSave: (title) => ref
+                            .read(chatProvider(widget.sessionId).notifier)
+                            .rename(title),
+                        onFinished: () => setState(() => _editingName = false),
+                      ),
+                    ),
+                  ),
+                ),
+              Expanded(
+                child: ListView.builder(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  itemCount: items.length,
+                  itemBuilder: (context, index) => items[index],
+                ),
               ),
-            ),
-            _Composer(
-              controller: _textController,
-              enabled: !state.sending,
-              onSend: (text) => _send(text, fromComposer: true),
-            ),
-          ],
+              const PlaybackMini(),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: constraints.maxHeight * (_editingName ? .5 : .75),
+                ),
+                child: SingleChildScrollView(
+                  reverse: true,
+                  child: _Composer(
+                    key: _composerKey,
+                    controller: _textController,
+                    enabled:
+                        !state.sending &&
+                        operation == null &&
+                        !inspiration.writing,
+                    inspiration: Builder(
+                      builder: (anchor) => PlaylistInspirationAttachment(
+                        name: inspiration.seed?.playlistId == null
+                            ? null
+                            : (inspiration.seed?.name ??
+                                  'Unavailable playlist'),
+                        disabled: !inspiration.canSelect,
+                        busy:
+                            inspiration.loading ||
+                            inspiration.writing ||
+                            state.sending ||
+                            operation != null,
+                        statusMessage: _inspirationStatus(inspiration),
+                        onPick: () => _pickInspiration(anchor),
+                        onDetach: inspiration.seed?.playlistId == null
+                            ? null
+                            : () => ref
+                                  .read(
+                                    sessionPlaylistContextProvider(
+                                      widget.sessionId,
+                                    ).notifier,
+                                  )
+                                  .select(playlistId: null),
+                        onReload:
+                            inspiration.seed == null ||
+                                inspiration.error != null
+                            ? () => ref
+                                  .read(
+                                    sessionPlaylistContextProvider(
+                                      widget.sessionId,
+                                    ).notifier,
+                                  )
+                                  .refresh()
+                            : null,
+                      ),
+                    ),
+                    onSend: (text) => _send(text, fromComposer: true),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -261,7 +534,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   /// an error bubble at [index] is a response to, and what "resend" means.
   String _precedingUserText(List<ChatMessage> messages, int index) {
     for (var i = index - 1; i >= 0; i--) {
-      if (messages[i].message.role == 'user') return messages[i].message.content;
+      if (messages[i].message.role == 'user') {
+        return messages[i].message.content;
+      }
     }
     return '';
   }
@@ -275,7 +550,8 @@ class _ChatErrorScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(), // present on every state — see the hasError branch's comment
+      appBar:
+          AppBar(), // present on every state — see the hasError branch's comment
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -314,10 +590,12 @@ class _MessageBubble extends StatelessWidget {
   });
 
   final ChatMessage message;
+
   /// Null hides the retry affordance entirely (a non-error bubble, or an
   /// error bubble with no preceding user turn to resend — see the
   /// dead-retry guard at the call site).
   final VoidCallback? onRetry;
+
   /// Whether an already-visible retry button is actionable right now
   /// (false while another send is in flight) — the button still renders,
   /// just dimmed and inert, rather than disappearing.
@@ -411,7 +689,9 @@ class _MessageBubble extends StatelessWidget {
 }
 
 class _QueueUpdatedChip extends StatelessWidget {
-  const _QueueUpdatedChip({required this.version});
+  const _QueueUpdatedChip({required this.version, required this.onOpen});
+
+  final VoidCallback onOpen;
 
   final int version;
 
@@ -421,7 +701,8 @@ class _QueueUpdatedChip extends StatelessWidget {
       alignment: Alignment.centerLeft,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        child: Chip(
+        child: ActionChip(
+          onPressed: onOpen,
           key: const Key('queue-updated-chip'),
           avatar: const Icon(Icons.queue_music, size: 16),
           label: Text('queue updated · v$version'),
@@ -510,14 +791,17 @@ class _TypingIndicatorState extends State<_TypingIndicator>
 
 class _Composer extends StatelessWidget {
   const _Composer({
+    super.key,
     required this.controller,
     required this.enabled,
     required this.onSend,
+    required this.inspiration,
   });
 
   final TextEditingController controller;
   final bool enabled;
   final ValueChanged<String> onSend;
+  final Widget inspiration;
 
   static const _maxLength = 2000;
   // Silent-cap guard: the field enforces 2000 unconditionally, but the
@@ -527,48 +811,57 @@ class _Composer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      elevation: 2,
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+      decoration: BoxDecoration(
+        border: Border.all(color: Theme.of(context).colorScheme.outline),
+        borderRadius: BorderRadius.circular(16),
+      ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+        padding: const EdgeInsets.all(8),
         child: ValueListenableBuilder<TextEditingValue>(
           valueListenable: controller,
           builder: (context, value, _) {
             final hasText = value.text.trim().isNotEmpty;
             final canSend = enabled && hasText;
             final showCounter = value.text.length > _counterVisibleAt;
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
+            return Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Expanded(
-                  child: TextField(
-                    key: const Key('composer-field'),
-                    controller: controller,
-                    enabled: enabled,
-                    maxLength: _maxLength,
-                    minLines: 1,
-                    maxLines: 4,
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: canSend ? onSend : null,
-                    decoration: InputDecoration(
-                      hintText: 'Tell the DJ what you want to hear…',
-                      counterText: showCounter ? null : '',
-                      border: const OutlineInputBorder(
-                        borderRadius: BorderRadius.all(Radius.circular(24)),
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 10,
+                inspiration,
+                EnergyControl(controller: controller, enabled: enabled),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        key: const Key('composer-field'),
+                        controller: controller,
+                        enabled: enabled,
+                        maxLength: _maxLength,
+                        minLines: 1,
+                        maxLines: 4,
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: canSend ? onSend : null,
+                        decoration: InputDecoration(
+                          hintText: 'Tell the DJ what you want to hear…',
+                          counterText: showCounter ? null : '',
+                          border: InputBorder.none,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 10,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton(
-                  key: const Key('send-button'),
-                  tooltip: 'Send',
-                  onPressed: canSend ? () => onSend(controller.text) : null,
-                  icon: const Icon(Icons.send),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      key: const Key('send-button'),
+                      tooltip: 'Send',
+                      onPressed: canSend ? () => onSend(controller.text) : null,
+                      icon: const Icon(Icons.send),
+                    ),
+                  ],
                 ),
               ],
             );

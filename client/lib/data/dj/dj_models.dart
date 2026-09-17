@@ -3,6 +3,8 @@
 /// (no codegen), matching the rest of the data layer.
 library;
 
+import '../playlists/playlist_context_models.dart';
+
 class DjSession {
   const DjSession({
     required this.id,
@@ -121,8 +123,11 @@ class SessionDetail {
     required this.messages,
     required this.queue,
     this.sessionTitle,
+    this.playlistSeed,
   });
 
+  /// Missing legacy field is unknown rather than a synthetic empty seed.
+  final PlaylistSeedState? playlistSeed;
   final DjSession session;
   final List<DjMessage> messages;
   final List<QueueTrack> queue;
@@ -140,6 +145,9 @@ class SessionDetail {
             .toList(),
         queue: queueTracksFromJson(json['queue']),
         sessionTitle: json['sessionTitle'] as String?,
+        playlistSeed: json.containsKey('playlistSeed')
+            ? PlaylistSeedState.fromJson(playlistContextObject(json['playlistSeed']))
+            : null,
       );
 }
 

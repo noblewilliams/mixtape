@@ -17,6 +17,9 @@ class MixtapeApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final auth = ref.watch(authProvider);
     return MaterialApp(
+      // Replacing only `home` leaves pushed account screens and dialogs above
+      // sign-in. Give every auth state its own navigator history.
+      key: ValueKey(auth),
       title: 'mixtape',
       theme: ThemeData(colorSchemeSeed: _brandPlum, useMaterial3: true),
       darkTheme: ThemeData(
@@ -30,8 +33,7 @@ class MixtapeApp extends ConsumerWidget {
         ),
         AuthStatus.signedOut => const SignInScreen(),
         // ServiceGate resolves to Home once the listener has a service (or
-        // onboarding cannot be read); Home stays the only screen that pushes
-        // routes and hosts sign-out.
+        // onboarding cannot be read).
         AuthStatus.signedIn => const ServiceGate(),
       },
     );

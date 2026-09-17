@@ -8,11 +8,16 @@
 // watch the AsyncValue instead. A captured `.future` is a snapshot of ONE
 // build; if auth flips mid-load the provider is invalidated/rebuilt and that
 // captured future can be left never completing.
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/api/api_client.dart';
 import '../../data/dj/dj_api.dart';
 import '../../data/dj/dj_models.dart';
+import '../../data/playlists/playlist_context_models.dart';
 import 'auth_provider.dart';
+import 'mix_operation_gate.dart';
+import 'playlist_context_provider.dart';
 import 'funnel_provider.dart';
 
 /// Built over the SAME baseUrl/tokenStore as the app's shared [ApiClient]
@@ -62,70 +67,116 @@ List<DjSession> archivedSessions(List<DjSession> sessions) =>
     sessions.where((s) => s.status == 'archived').toList();
 
 class SessionsNotifier extends AsyncNotifier<List<DjSession>> {
+  int _generation = 0;
+  int _revision = 0;
+  int _readSequence = 0;
+  final _writes = <String>{};
+  final _changedAt = <String, int>{};
+
+  bool get hasPendingMetadataWrites => _writes.isNotEmpty;
+
   @override
   Future<List<DjSession>> build() async {
-    ref.watch(
-      authProvider,
-    ); // user-scoped: reload/reset on every auth transition
+    ref.watch(authProvider);
     final api = ref.watch(djApiProvider);
-    return api.listSessions();
+    final generation = ++_generation;
+    final revision = _revision;
+    _writes.clear();
+    _changedAt.clear();
+    ref.onDispose(() => _generation++);
+    try {
+      final sessions = await api.listSessions();
+      if (generation != _generation) return sessions;
+      return _mergeRead(sessions, revision);
+    } catch (_) {
+      // A PATCH can finish while this initial read is still outstanding.
+      // Its canonical value remains usable even if the old read fails.
+      if (generation == _generation &&
+          revision != _revision &&
+          state.value != null) {
+        return state.requireValue;
+      }
+      rethrow;
+    }
   }
 
-  /// Returns whether the refetch actually succeeded. On failure the state
-  /// assignment applies copyWithPrevious (a previously-good list keeps
-  /// showing), which also means callers can't detect the failure from
-  /// state alone — hasValue stays true — so user-initiated refreshes
-  /// (pull-to-refresh) must check this result and surface the failure
-  /// themselves rather than letting the spinner retract silently.
-  Future<bool> refresh() async {
+  /// Keep the last usable list on read failure. A read started before a
+  /// metadata write may update other rows, but cannot roll that write back.
+  Future<bool> refresh() => _refresh();
+
+  Future<bool> _refresh({String? preserveId}) async {
+    final generation = _generation;
+    final revision = _revision;
+    final sequence = ++_readSequence;
     final next = await AsyncValue.guard(
       () => ref.read(djApiProvider).listSessions(),
     );
-    state = next;
-    return !next.hasError;
-  }
-
-  /// Returns whether the status change actually landed. [setStatus] is the
-  /// only fallible step here — it can throw any of [DjApi]'s exit types
-  /// (DjApiException, ApiException, NetworkException) and, uncaught, that
-  /// would both surface as an unhandled async error AND silently no-op the
-  /// row (nothing else would signal the failure back to the UI). Caught here
-  /// so the row simply stays as-is and the caller can show a retry snackbar.
-  /// [refresh] never needs the same treatment — it's already
-  /// [AsyncValue.guard]-wrapped and can't throw.
-  Future<bool> archive(String id) async {
-    try {
-      await ref.read(djApiProvider).setStatus(id, 'archived');
-    } catch (_) {
+    if (generation != _generation || sequence != _readSequence) return false;
+    if (next.hasError) {
+      state = next;
       return false;
     }
-    await refresh();
+    state = AsyncData(
+      _mergeRead(next.requireValue, revision, preserveId: preserveId),
+    );
     return true;
   }
 
-  Future<bool> unarchive(String id) async {
-    try {
-      await ref.read(djApiProvider).setStatus(id, 'active');
-    } catch (_) {
-      return false;
-    }
-    await refresh();
-    return true;
+  List<DjSession> _mergeRead(
+    List<DjSession> sessions,
+    int revision, {
+    String? preserveId,
+  }) {
+    final current = state.value ?? const <DjSession>[];
+    final preserved = {
+      for (final session in current)
+        if (session.id == preserveId ||
+            (_changedAt[session.id] ?? 0) > revision)
+          session.id: session,
+    };
+    final listedIds = sessions.map((session) => session.id).toSet();
+    return [
+      for (final session in sessions) preserved[session.id] ?? session,
+      for (final session in preserved.values)
+        if (!listedIds.contains(session.id)) session,
+    ];
   }
 
-  /// Manual rename from Home (long-press a session row) — mirrors
-  /// [archive]/[unarchive]'s own hardening exactly: [DjApi.renameSession] is
-  /// the only fallible step, caught so a failed rename simply leaves the
-  /// row's title as-is and the caller can show a retry snackbar, followed by
-  /// the same unconditional [refresh] on success.
-  Future<bool> rename(String id, String title) async {
+  Future<bool> archive(String id) =>
+      _update(id, (api) => api.setStatus(id, 'archived'));
+
+  Future<bool> unarchive(String id) =>
+      _update(id, (api) => api.setStatus(id, 'active'));
+
+  Future<bool> rename(String id, String title) =>
+      _update(id, (api) => api.renameSession(id, title));
+
+  /// Adopt the complete PATCH response before any secondary read. A failed
+  /// list refresh does not turn a successful archive/rename into a failure.
+  /// One write per mix prevents conflicting actions from racing each other.
+  Future<bool> _update(
+    String id,
+    Future<DjSession> Function(DjApi api) update,
+  ) async {
+    if (!_writes.add(id)) return false;
+    final generation = _generation;
     try {
-      await ref.read(djApiProvider).renameSession(id, title);
+      final canonical = await update(ref.read(djApiProvider));
+      if (generation != _generation) return false;
+      _changedAt[id] = ++_revision;
+      final current = state.value ?? const <DjSession>[];
+      state = AsyncData([
+        for (final session in current) session.id == id ? canonical : session,
+        if (!current.any((session) => session.id == id)) canonical,
+      ]);
+      // Secondary reads must not delay Undo or keep a saved name busy.
+      unawaited(_refresh(preserveId: id));
+      return true;
     } catch (_) {
       return false;
+    } finally {
+      if (generation == _generation) _writes.remove(id);
     }
-    await refresh();
-    return true;
   }
 }
 
@@ -262,15 +313,91 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
   final String sessionId;
   int _localSeq = 0;
+  int _generation = 0;
+  int _nameRevision = 0;
+  bool _renaming = false;
+
+  Future<bool> rename(String title) async {
+    if (!ref.mounted ||
+        _renaming ||
+        state.value == null ||
+        title.trim().isEmpty) {
+      return false;
+    }
+    final generation = _generation;
+    _renaming = true;
+    ++_nameRevision;
+    try {
+      final saved = await ref
+          .read(sessionsProvider.notifier)
+          .rename(sessionId, title.trim());
+      if (!_current(generation) || !saved) return false;
+      final summaries = ref.read(sessionsProvider).value ?? const <DjSession>[];
+      final canonical = summaries
+          .where((session) => session.id == sessionId)
+          .firstOrNull;
+      if (canonical == null) return false;
+      _mergeCurrent(
+        (current) => current.copyWith(
+          session: _withTitle(current.session, canonical.title),
+        ),
+      );
+      return true;
+    } finally {
+      if (_current(generation)) _renaming = false;
+    }
+  }
+
+  Future<bool> setArchived(bool archived) async {
+    if (!ref.mounted || state.value == null) return false;
+    final generation = _generation;
+    final sessions = ref.read(sessionsProvider.notifier);
+    final saved = await (archived
+        ? sessions.archive(sessionId)
+        : sessions.unarchive(sessionId));
+    if (!_current(generation) || !saved) return false;
+    _mergeCurrent(
+      (current) => current.copyWith(
+        session: DjSession(
+          id: current.session.id,
+          title: current.session.title,
+          status: archived ? 'archived' : 'active',
+          queueVersion: current.queueVersion,
+          updatedAt: current.session.updatedAt,
+          notPersonal: current.session.notPersonal,
+        ),
+      ),
+    );
+    return true;
+  }
+
+  bool _current(int generation) => ref.mounted && generation == _generation;
 
   @override
   Future<ChatState> build() async {
     ref.watch(
       authProvider,
     ); // user-scoped: reload/reset on every auth transition
+    final generation = ++_generation;
+    _renaming = false;
+    ref.onDispose(() => _generation++);
     final api = ref.watch(djApiProvider);
+    final seedRead = _captureSeedRead();
     final detail = await api.getSession(sessionId);
+    if (_current(generation)) seedRead?.adopt(detail.playlistSeed);
     return _fromDetail(detail);
+  }
+
+  ({void Function(PlaylistSeedState?) adopt})? _captureSeedRead() {
+    final provider = sessionPlaylistContextProvider(sessionId);
+    if (!ref.exists(provider)) return null;
+    final notifier = ref.read(provider.notifier);
+    final token = notifier.readToken;
+    return (
+      adopt: (seed) {
+        notifier.adoptCanonical(seed, token);
+      },
+    );
   }
 
   ChatState _fromDetail(
@@ -313,8 +440,14 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// stick at true — not even for an [ApiException] or an entirely
   /// unforeseen exception — which would otherwise brick the composer.
   Future<void> send(String text) async {
+    final nameRevision = _nameRevision;
     final base = state.value;
     if (base == null || base.sending) return;
+    final generation = _generation;
+    final release = ref
+        .read(mixOperationProvider(sessionId).notifier)
+        .acquire(MixOperation.sending);
+    if (release == null) return;
 
     final userMessage = ChatMessage(_localMessage('user', text));
     state = AsyncData(
@@ -323,6 +456,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
     try {
       final result = await ref.read(djApiProvider).sendMessage(sessionId, text);
+      if (!_current(generation)) return;
       final newTitle = result.sessionTitle;
       _mergeCurrent((c) {
         // First bump queue+version via the `queueVersion` param (never
@@ -333,13 +467,15 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           queue: result.queue,
           queueVersion: result.queueVersion,
         );
-        if (newTitle == null) return withQueue;
+        if (newTitle == null || nameRevision != _nameRevision) return withQueue;
         // A same-turn rename (rename_session): a SECOND copyWith call, this
         // time passing `session` (never `queueVersion`, same contract) —
         // built from withQueue.session, whose queueVersion already reflects
         // the bump above, so the resulting DjSession carries BOTH the new
         // title and the turn's fresh queueVersion at once.
-        return withQueue.copyWith(session: _withTitle(withQueue.session, newTitle));
+        return withQueue.copyWith(
+          session: _withTitle(withQueue.session, newTitle),
+        );
       });
       // Lazily invalidate (never an eager refresh) so Home's list picks up
       // the new title next time it's read — same "invalidate, don't refetch
@@ -351,12 +487,20 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       // disposed ref throws a StateError (unlike `_mergeCurrent`'s own
       // internal guard above), which would otherwise silently swallow this
       // invalidation instead of just skipping it.
-      if (newTitle != null && ref.mounted) {
-        ref.invalidate(sessionsProvider);
+      if (newTitle != null && ref.mounted && nameRevision == _nameRevision) {
+        if (ref.exists(sessionsProvider) &&
+            ref.read(sessionsProvider.notifier).hasPendingMetadataWrites) {
+          // Invalidating would cancel metadata ownership while its PATCH is
+          // still in flight. Refresh merges safely with the eventual result.
+          unawaited(ref.read(sessionsProvider.notifier).refresh());
+        } else {
+          ref.invalidate(sessionsProvider);
+        }
       }
-      await _adoptSessionFlags();
-      _notePersonalMix();
+      await _adoptSessionFlags(generation);
+      if (_current(generation)) _notePersonalMix();
     } on DjApiException catch (e) {
+      if (!_current(generation)) return;
       if (e.kind == 'stale') {
         // Degraded 409 fallback (see dj_api.dart's _translate409): a
         // malformed 'stale' body couldn't be parsed into a
@@ -380,6 +524,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         ),
       );
     } on ApiException {
+      if (!_current(generation)) return;
       // 401/403/404/500/... — not part of the DJ error taxonomy, but still
       // has to resolve into SOMETHING visible rather than an unhandled
       // exception and a permanently-stuck composer.
@@ -395,6 +540,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         ),
       );
     } on NetworkException {
+      if (!_current(generation)) return;
       // Transport failure before any response — unlike the DjApiException
       // branch above, the server never saw this turn at all, so the user
       // bubble above is client-local only (no persisted duplicate risk, but
@@ -415,7 +561,10 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       // Always restored exactly once, on top of whatever is current at this
       // point (including anything the branches above just wrote) — a no-op
       // if some other path (e.g. the stale refetch) already cleared it.
-      _mergeCurrent((c) => c.sending ? c.copyWith(sending: false) : c);
+      release();
+      if (_current(generation)) {
+        _mergeCurrent((c) => c.sending ? c.copyWith(sending: false) : c);
+      }
     }
   }
 
@@ -427,12 +576,17 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// interleaved with the turn may have moved the version past what this
   /// read returns, so a wholesale replace could 409 the next op. Never
   /// throws — a dropped refetch just leaves the banner to the next full load.
-  Future<void> _adoptSessionFlags() async {
-    if (!ref.mounted) return;
+  Future<void> _adoptSessionFlags(int generation) async {
+    if (!_current(generation)) return;
+    final seedRead = _captureSeedRead();
     try {
       final detail = await ref.read(djApiProvider).getSession(sessionId);
+      if (!_current(generation)) return;
+      seedRead?.adopt(detail.playlistSeed);
       _mergeCurrent(
-        (c) => c.copyWith(session: _withNotPersonal(c.session, detail.session.notPersonal)),
+        (c) => c.copyWith(
+          session: _withNotPersonal(c.session, detail.session.notPersonal),
+        ),
       );
     } catch (_) {
       // Silent by design — see above.
@@ -445,18 +599,46 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     if (!ref.mounted) return;
     final current = state.value;
     if (current == null) return;
-    ref.read(funnelMilestonesProvider).notePersonalMix(current.session, current.queue);
+    ref
+        .read(funnelMilestonesProvider)
+        .notePersonalMix(current.session, current.queue);
   }
 
   Future<void> _refetchAfterFailedTurn() async {
+    final generation = _generation;
+    final nameRevision = _nameRevision;
+    final status = state.value?.session.status;
+    final seedRead = _captureSeedRead();
     try {
       final detail = await ref.read(djApiProvider).getSession(sessionId);
-      if (!ref.mounted) return;
-      state = AsyncData(_fromDetail(detail));
+      if (!_current(generation)) return;
+      seedRead?.adopt(detail.playlistSeed);
+      var recovered = _fromDetail(detail);
+      final current = state.value;
+      if (current != null) {
+        final session = recovered.session;
+        recovered = recovered.copyWith(
+          session: DjSession(
+            id: session.id,
+            title: nameRevision == _nameRevision
+                ? session.title
+                : current.session.title,
+            status: status == current.session.status
+                ? session.status
+                : current.session.status,
+            queueVersion: session.queueVersion,
+            updatedAt: session.updatedAt,
+            notPersonal: session.notPersonal,
+          ),
+        );
+      }
+      state = AsyncData(recovered);
     } catch (_) {
       // Refetch itself failed — fall back to just clearing the sending flag
       // rather than losing the in-flight state entirely.
-      _mergeCurrent((c) => c.copyWith(sending: false));
+      if (_current(generation)) {
+        _mergeCurrent((c) => c.copyWith(sending: false));
+      }
     }
   }
 
@@ -547,23 +729,31 @@ final chatProvider = AsyncNotifierProvider.autoDispose
 /// re-fetch to whenever something next reads [sessionsProvider] (e.g. the
 /// Home screen after navigating back), so returning the new id — and
 /// navigating to it — isn't held up by an extra round trip.
-final sessionStarterProvider = Provider<Future<String> Function(String prompt)>(
-  (ref) {
-    return (String prompt) async {
-      try {
-        final detail = await ref.read(djApiProvider).createSession(prompt);
-        ref.invalidate(sessionsProvider);
-        // The create response's session row is read after the first turn,
-        // so its notPersonal already says whether this mix was personal.
-        ref.read(funnelMilestonesProvider).notePersonalMix(detail.session, detail.queue);
-        return detail.session.id;
-      } on DjApiException {
-        ref.invalidate(sessionsProvider);
-        rethrow;
-      }
-    };
-  },
-);
+final sessionStarterProvider =
+    Provider<
+      Future<String> Function(
+        String prompt, {
+        InitialPlaylistSeed? playlistSeed,
+      })
+    >((ref) {
+      return (String prompt, {InitialPlaylistSeed? playlistSeed}) async {
+        try {
+          final detail = await ref
+              .read(djApiProvider)
+              .createSession(prompt, playlistSeed: playlistSeed);
+          ref.invalidate(sessionsProvider);
+          // The create response's session row is read after the first turn,
+          // so its notPersonal already says whether this mix was personal.
+          ref
+              .read(funnelMilestonesProvider)
+              .notePersonalMix(detail.session, detail.queue);
+          return detail.session.id;
+        } on DjApiException {
+          ref.invalidate(sessionsProvider);
+          rethrow;
+        }
+      };
+    });
 
 // ---------------------------------------------------------------------------
 // "What the DJ knows" memory notes (P4 Task 4)
@@ -574,67 +764,91 @@ final sessionStarterProvider = Provider<Future<String> Function(String prompt)>(
 /// on every auth transition. Unlike sessions, there's no archive/unarchive —
 /// just [forget], a hard delete with no server-side restore.
 class MemoriesNotifier extends AsyncNotifier<List<DjMemory>> {
+  int _generation = 0;
+  int _read = 0;
+  bool _writing = false;
+  bool _known = false;
+
+  /// Unknown results must be reloaded before another destructive action.
+  bool get canForget =>
+      ref.mounted &&
+      ref.read(authProvider) == AuthStatus.signedIn &&
+      _known &&
+      !_writing;
+
   @override
   Future<List<DjMemory>> build() async {
-    ref.watch(
-      authProvider,
-    ); // user-scoped: reload/reset on every auth transition
+    ref.watch(authProvider);
     final api = ref.watch(djApiProvider);
-    return api.listMemories();
+    final generation = ++_generation;
+    _known = false;
+    _writing = false;
+    ref.onDispose(() => _generation++);
+    final notes = await api.listMemories();
+    if (generation == _generation) _known = true;
+    return notes;
   }
 
-  /// Same contract as [SessionsNotifier.refresh]: returns whether the
-  /// refetch actually succeeded (state itself keeps showing the previously-
-  /// good list on failure via copyWithPrevious, so callers must check the
-  /// return value to surface a failure).
+  bool _current(int generation) => ref.mounted && generation == _generation;
+
+  void _unknown(Object error, StackTrace stack) {
+    _known = false;
+    // AsyncNotifier otherwise retains the previous value on an error. Clear
+    // actionable notes first: their deletion status has not been verified.
+    state = const AsyncData([]);
+    state = AsyncError(error, stack);
+  }
+
   Future<bool> refresh() async {
-    final next = await AsyncValue.guard(
-      () => ref.read(djApiProvider).listMemories(),
-    );
-    state = next;
-    return !next.hasError;
+    if (!ref.mounted || _writing) return false;
+    return _load(ref.read(djApiProvider), _generation);
   }
 
-  /// Deletes the note server-side and, only on success, drops it from local
-  /// state. The undo-window bookkeeping (optimistic hide, the deferred
-  /// commit, restoring the row on failure) is owned by MemoryScreen itself —
-  /// this method is the single point where the server call actually fires,
-  /// called only once the undo window has closed without an undo (or a
-  /// later swipe superseded this one — see MemoryScreen's pending-forget
-  /// doc comment).
-  ///
-  /// A 404 is treated as success, not failure: it means the note is already
-  /// gone server-side (e.g. deleted from another device, or a race with
-  /// itself), and the caller's intent — this row should not exist — is
-  /// already satisfied. Surfacing that as a failure would restore a row the
-  /// user was told was forgotten, which is worse than silently dropping it.
-  ///
-  /// Deliberately diverges from [SessionsNotifier], which always follows a
-  /// mutation with a full [refresh] (re-fetching the canonical list):
-  /// [forget] instead drops the row from local state directly, with no
-  /// refetch. That's safe here specifically because a hard delete's local
-  /// view (the list minus this one id) can never be wrong the way a
-  /// status-change's local view could be — there's no server-side field this
-  /// row's absence could get wrong. If memories ever grow a softer/partial
-  /// delete, revisit this shortcut and refetch like [SessionsNotifier] does.
-  Future<bool> forget(String id) async {
+  Future<bool> _load(DjApi api, int generation) async {
+    final read = ++_read;
     try {
-      await ref.read(djApiProvider).deleteMemory(id);
-    } on ApiException catch (e) {
-      if (e.statusCode != 404) return false;
-      // Already gone — fall through to the same local drop as a real
-      // success, below.
-    } catch (_) {
+      final notes = await api.listMemories();
+      if (!_current(generation) || read != _read) return false;
+      _known = true;
+      state = AsyncData(notes);
+      return true;
+    } catch (error, stack) {
+      if (!_current(generation) || read != _read) return false;
+      _unknown(error, stack);
       return false;
     }
-    final current = state.value;
-    if (current != null) {
-      state = AsyncData([for (final m in current) if (m.id != id) m]);
+  }
+
+  /// A lost DELETE response is reconciled by reading the canonical list.
+  /// Only verified absence is success; a failed read never restores a note.
+  Future<bool> forget(String id) async {
+    if (!canForget) return false;
+    final generation = _generation;
+    final api = ref.read(djApiProvider);
+    _writing = true;
+    ++_read; // Reject list reads started before this deletion.
+    try {
+      try {
+        await api.deleteMemory(id);
+      } catch (error, stack) {
+        if (!_current(generation)) return false;
+        if (error is ApiException && error.statusCode == 401) {
+          _unknown(error, stack);
+          return false;
+        }
+        // 404, transport failures and uncertain server errors all require
+        // the same canonical check. Never repeat the DELETE automatically.
+      }
+      if (!_current(generation)) return false;
+      if (!await _load(api, generation) || !_current(generation)) return false;
+      return !state.requireValue.any((note) => note.id == id);
+    } finally {
+      if (_current(generation)) _writing = false;
     }
-    return true;
   }
 }
 
-final memoriesProvider = AsyncNotifierProvider<MemoriesNotifier, List<DjMemory>>(
-  MemoriesNotifier.new,
-);
+final memoriesProvider =
+    AsyncNotifierProvider<MemoriesNotifier, List<DjMemory>>(
+      MemoriesNotifier.new,
+    );

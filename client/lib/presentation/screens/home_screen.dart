@@ -1,3 +1,5 @@
+import '../widgets/routine_suggestions.dart';
+import 'playback_screen.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -9,6 +11,8 @@ import '../../data/files/opened_archive_channel.dart';
 import '../../data/listening/listening_models.dart';
 import '../format/import_format.dart';
 import '../format/relative_time.dart';
+import '../widgets/mix_home_row.dart';
+import '../widgets/mix_prompt_input.dart';
 import '../format/source_labels.dart';
 import '../providers/auth_provider.dart';
 import '../providers/dj_providers.dart';
@@ -17,6 +21,11 @@ import '../providers/listening_import_provider.dart';
 import '../providers/onboarding_provider.dart';
 import '../providers/opened_archive_provider.dart';
 import 'chat_screen.dart';
+import 'account_screen.dart';
+import '../../data/playlists/playlist_models.dart';
+import '../../data/playlists/playlist_context_models.dart';
+import '../widgets/playlist_inspiration.dart';
+import '../providers/new_mix_inspiration_provider.dart';
 import 'import_sheet.dart';
 import 'interview_screen.dart';
 import 'memory_screen.dart';
@@ -26,7 +35,6 @@ import 'spotify_request_screen.dart';
 const _archiveFailedMessage = "couldn't archive — try again";
 const _unarchiveFailedMessage = "couldn't unarchive — try again";
 const _refreshFailedMessage = "couldn't refresh — showing what we had";
-const _renameFailedMessage = "couldn't rename — try again";
 
 const _genericStartErrorMessage = 'something went wrong on our end — try again';
 const _offlineStartErrorMessage =
@@ -39,7 +47,9 @@ const _offlineStartErrorMessage =
 /// sync (P1) moved out of the body into an AppBar action — same
 /// [librarySyncProvider]-driven UI, now presented in a bottom sheet.
 class HomeScreen extends ConsumerStatefulWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({super.key, this.initialPlaylist});
+
+  final PlaylistSummary? initialPlaylist;
 
   @override
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
@@ -47,9 +57,62 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   final _promptController = TextEditingController();
+  final _composerKey = GlobalKey();
   bool _starting = false;
   String? _error;
   bool _showArchived = false;
+  PlaylistSummary? get _inspiration =>
+      ref.read(newMixInspirationProvider)?.playlist;
+  bool get _excludeSourceTracks =>
+      ref.read(newMixInspirationProvider)?.seed.excludeSourceTracks ?? false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialPlaylist != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          ref
+              .read(newMixInspirationProvider.notifier)
+              .select(widget.initialPlaylist!);
+        }
+      });
+    }
+  }
+
+  Future<void> _pickInspiration(BuildContext anchor) async {
+    if (_starting) return;
+    final box =
+        _composerKey.currentContext?.findRenderObject() as RenderBox? ??
+        anchor.findRenderObject() as RenderBox;
+    final initialRect = box.localToGlobal(Offset.zero) & box.size;
+    Rect composerRect() {
+      final current = _composerKey.currentContext?.findRenderObject();
+      return current is RenderBox && current.attached
+          ? current.localToGlobal(Offset.zero) & current.size
+          : initialRect;
+    }
+
+    final choice = await showPlaylistInspirationPicker(
+      context,
+      ref,
+      anchor: initialRect,
+      anchorResolver: composerRect,
+      selected: _inspiration == null
+          ? null
+          : InitialPlaylistSeed(
+              playlistId: _inspiration!.id,
+              excludeSourceTracks: _excludeSourceTracks,
+            ),
+    );
+    if (!mounted || choice == null) return;
+    ref
+        .read(newMixInspirationProvider.notifier)
+        .select(
+          choice.playlist,
+          excludeSourceTracks: choice.excludeSourceTracks,
+        );
+  }
 
   /// C5 bookkeeping: the handed archive this screen has already acted on, so
   /// an unrelated rebuild does not open the sheet over and over; and whether
@@ -65,9 +128,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   /// Guarded by [_starting] so a second tap while the first create is still
   /// in flight (these calls run 20-40s) can never mint a second session.
-  Future<void> _submit() async {
+  Future<void> _submit({String? suggestedPrompt}) async {
     if (_starting) return;
-    final prompt = _promptController.text.trim();
+    final prompt = suggestedPrompt ?? _promptController.text.trim();
     if (prompt.isEmpty) return;
 
     setState(() {
@@ -75,9 +138,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       _error = null;
     });
     try {
-      final sessionId = await ref.read(sessionStarterProvider)(prompt);
+      final sessionId = await ref.read(sessionStarterProvider)(
+        prompt,
+        playlistSeed: suggestedPrompt != null || _inspiration == null
+            ? null
+            : InitialPlaylistSeed(
+                playlistId: _inspiration!.id,
+                excludeSourceTracks: _excludeSourceTracks,
+              ),
+      );
       if (!mounted) return;
       _promptController.clear();
+      ref.read(newMixInspirationProvider.notifier).clear();
       _navigateToChat(sessionId);
     } on DjApiException catch (e) {
       if (!mounted) return;
@@ -88,6 +160,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         // (seeded from e.message via initialError, since the failed turn
         // never made it into the transcript itself).
         _promptController.clear();
+        ref.read(newMixInspirationProvider.notifier).clear();
         _navigateToChat(sessionId, initialError: e.message);
       } else {
         setState(() => _error = e.message);
@@ -128,6 +201,118 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         });
   }
 
+  Future<void> _openHomeActions(
+    BuildContext anchor,
+    bool waiting,
+    bool syncing,
+  ) async {
+    final button = anchor.findRenderObject()! as RenderBox;
+    final overlay =
+        Navigator.of(context).overlay!.context.findRenderObject()! as RenderBox;
+    final rect = Rect.fromPoints(
+      button.localToGlobal(Offset.zero, ancestor: overlay),
+      button.localToGlobal(
+        button.size.bottomRight(Offset.zero),
+        ancestor: overlay,
+      ),
+    );
+    // Use a fixed anchor: signing out can replace Home during menu dismissal.
+    final action = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(rect, Offset.zero & overlay.size),
+      items: [
+        const PopupMenuItem(
+          value: 'memories',
+          key: Key('memories-action'),
+          child: Text('What the DJ knows'),
+        ),
+        const PopupMenuItem(
+          value: 'sources',
+          key: Key('sources-action'),
+          child: Text('Your music'),
+        ),
+        const PopupMenuItem(
+          value: 'spotify-import',
+          key: Key('spotify-import-action'),
+          child: Text('Add Spotify music'),
+        ),
+        PopupMenuItem(
+          value: 'sync',
+          key: const Key('sync-action'),
+          child: Text(syncing ? 'Syncing library…' : 'Sync library'),
+        ),
+        if (waiting)
+          const PopupMenuItem(
+            value: 'setup',
+            key: Key('music-setup-action'),
+            child: Text('Music setup'),
+          ),
+        const PopupMenuItem(
+          value: 'account',
+          key: Key('account-action'),
+          child: Text('Account'),
+        ),
+        const PopupMenuItem(
+          value: 'logout',
+          key: Key('logout-action'),
+          child: Text('Sign out'),
+        ),
+      ],
+    );
+    if (!mounted) return;
+    switch (action) {
+      case 'account':
+        Navigator.of(
+          context,
+        ).push(MaterialPageRoute(builder: (_) => const AccountScreen()));
+      case 'memories':
+        Navigator.of(
+          context,
+        ).push(MaterialPageRoute(builder: (_) => const MemoryScreen()));
+      case 'sources':
+        _openSources();
+      case 'spotify-import':
+        Navigator.of(context)
+            .push(
+              MaterialPageRoute(builder: (_) => const SpotifyRequestScreen()),
+            )
+            .then((_) {
+              if (mounted) ref.read(onboardingProvider.notifier).refresh();
+            });
+      case 'sync':
+        _openSyncSheet();
+      case 'setup':
+        _openMusicSetup();
+      case 'logout':
+        ref.read(authProvider.notifier).signOut();
+    }
+  }
+
+  void _openMusicSetup() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => Consumer(
+        builder: (context, ref, _) {
+          final onboarding = ref.watch(onboardingProvider).value;
+          return SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: onboarding == null
+                  ? const Text('Couldn’t load music setup. Try again.')
+                  : _SpotifyWaitingCard(
+                      onboarding: onboarding,
+                      onOpenRequest: _openRequestScreen,
+                      onOpenInterview: _openInterview,
+                      onChooseZip: _openImportSheet,
+                    ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   void _openSyncSheet() {
     showModalBottomSheet(
       context: context,
@@ -137,34 +322,38 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   void _openRequestScreen() {
-    Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => const SpotifyRequestScreen()))
-        // "I've requested it" refreshes on its own; this covers a listener
-        // who comes back after the server learned of it another way.
-        .then((_) {
-          if (!mounted) return;
-          ref.read(onboardingProvider.notifier).refresh();
-        });
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const SpotifyRequestScreen()))
+    // "I've requested it" refreshes on its own; this covers a listener
+    // who comes back after the server learned of it another way.
+    .then((_) {
+      if (!mounted) return;
+      ref.read(onboardingProvider.notifier).refresh();
+    });
   }
 
   void _openInterview() {
-    Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => const InterviewScreen()))
-        // The server records interview_completed; the card reads it back.
-        .then((_) {
-          if (!mounted) return;
-          ref.read(onboardingProvider.notifier).refresh();
-        });
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const InterviewScreen()))
+    // The server records interview_completed; the card reads it back.
+    .then((_) {
+      if (!mounted) return;
+      ref.read(onboardingProvider.notifier).refresh();
+    });
   }
 
   void _openSources() {
-    Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => const MusicSourcesScreen()))
-        // An import or a removal over there changes what the card says.
-        .then((_) {
-          if (!mounted) return;
-          ref.read(onboardingProvider.notifier).refresh();
-        });
+    ref.read(onboardingProvider.notifier).refresh();
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const MusicSourcesScreen()))
+    // An import or a removal over there changes what the card says.
+    .then((_) {
+      if (!mounted) return;
+      ref.read(onboardingProvider.notifier).refresh();
+    });
   }
 
   /// "Choose a ZIP": the sheet opens over Home and the picker comes up at
@@ -202,12 +391,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     // open sheet re-renders it from the provider rather than stacking a
     // second one. A sheet opened over an upload is locked until it lands.
     if (!importSheetShowing) {
-      unawaited(showImportSheet(context, dismissible: state is! ImportUploading));
+      unawaited(
+        showImportSheet(context, dismissible: state is! ImportUploading),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(newMixInspirationProvider);
     final sessionsAsync = ref.watch(sessionsProvider);
     final sync = ref.watch(librarySyncProvider);
     // The Spotify waiting state, until the import lands. Apple listeners
@@ -224,132 +416,141 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       // another look — the result it waited for now has somewhere to offer
       // it from. Nothing else that rebuilds Home is: [_handled] is left
       // alone, so a sheet the listener put away stays away.
-      if ((previous?.inProgress ?? false) && !next.inProgress) _scheduleHandedArchive();
+      if ((previous?.inProgress ?? false) && !next.inProgress) {
+        _scheduleHandedArchive();
+      }
     });
     if (handedArchive != null && handedArchive != _handled) {
       _handled = handedArchive;
       _scheduleHandedArchive();
     }
-    final waiting = onboarding != null &&
+    final waiting =
+        onboarding != null &&
         onboarding.chosenService == 'spotify' &&
-        spotifyPackages(onboarding).count < 2;
+        spotifyPackages(onboarding).count < 2 &&
+        !(spotifySource(onboarding)?.packages.contains('spotify_exportify') ??
+            false);
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('mixtape'),
+        automaticallyImplyLeading: false,
         actions: [
-          IconButton(
-            key: const Key('memories-action'),
-            tooltip: 'What the DJ knows',
-            icon: const Icon(Icons.psychology_outlined),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const MemoryScreen()),
+          Builder(
+            builder: (anchor) => IconButton(
+              key: const Key('home-actions'),
+              tooltip: 'Home actions',
+              icon: const Icon(Icons.more_horiz),
+              onPressed: () =>
+                  _openHomeActions(anchor, waiting, sync is SyncRunning),
             ),
-          ),
-          IconButton(
-            key: const Key('sources-action'),
-            tooltip: 'Your music',
-            icon: const Icon(Icons.library_music_outlined),
-            onPressed: _openSources,
-          ),
-          IconButton(
-            key: const Key('sync-action'),
-            tooltip: 'Sync library',
-            icon: sync is SyncRunning
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.sync),
-            onPressed: _openSyncSheet,
-          ),
-          IconButton(
-            // Sign-out is only reachable from here — Home is the sole
-            // screen that pushes ChatScreen/QueueScreen, and those pushed
-            // routes are never popped on an auth transition (only the
-            // ProviderScope container gets rebuilt/reset — see
-            // dj_providers.dart's auth-transition-safety note). That makes
-            // "sign-out only happens from Home" a load-bearing invariant:
-            // adding a sign-out entry point from a pushed screen would need
-            // its own route-popping story first.
-            icon: const Icon(Icons.logout),
-            onPressed: () => ref.read(authProvider.notifier).signOut(),
           ),
         ],
       ),
       body: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (waiting) ...[
-                    _SpotifyWaitingCard(
-                      onboarding: onboarding,
-                      onOpenRequest: _openRequestScreen,
-                      onOpenInterview: _openInterview,
-                      onChooseZip: _openImportSheet,
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  ValueListenableBuilder<TextEditingValue>(
-                    valueListenable: _promptController,
-                    builder: (context, value, _) {
-                      // Same treatment as ChatScreen's composer: cap at the
-                      // server's 2000, but only surface the counter once the
-                      // draft is close enough (>1800) for it to matter.
-                      final showCounter = value.text.length > 1800;
-                      return TextField(
-                        key: const Key('prompt-field'),
+        child: RefreshIndicator(
+          onRefresh: _refreshSessions,
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const PlaybackMini(),
+                      RoutineSuggestions(busy: _starting, onCreate: (prompt) => _submit(suggestedPrompt: prompt)),
+                      MixPromptInput(
+                        key: _composerKey,
                         controller: _promptController,
-                        enabled: !_starting,
-                        minLines: 1,
-                        maxLines: 3,
-                        maxLength: 2000,
-                        textInputAction: TextInputAction.send,
-                        onSubmitted: (_) => _submit(),
-                        decoration: InputDecoration(
-                          hintText: "what's the moment?",
-                          counterText: showCounter ? null : '',
-                          border: const OutlineInputBorder(
-                            borderRadius: BorderRadius.all(Radius.circular(16)),
+                        busy: _starting,
+                        onSubmit: _submit,
+                        attachment: _inspiration == null
+                            ? null
+                            : Builder(
+                                builder: (anchor) =>
+                                    PlaylistInspirationAttachment(
+                                      name: _inspiration!.name,
+                                      busy: _starting,
+                                      onPick: () => _pickInspiration(anchor),
+                                      onDetach: () => ref
+                                          .read(
+                                            newMixInspirationProvider.notifier,
+                                          )
+                                          .clear(),
+                                    ),
+                              ),
+                      ),
+                      if (_error != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                            _error!,
+                            key: const Key('start-error'),
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.error,
+                            ),
                           ),
                         ),
-                      );
-                    },
+                    ],
                   ),
-                  const SizedBox(height: 8),
-                  FilledButton(
-                    key: const Key('start-session'),
-                    onPressed: _starting ? null : _submit,
-                    child: _starting
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Start the tape'),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Wrap(
+                    children: [
+                      Semantics(
+                        selected: !_showArchived,
+                        child: TextButton(
+                          key: const Key('active-mixes'),
+                          onPressed: () =>
+                              setState(() => _showArchived = false),
+                          child: Text(
+                            'Active mixes',
+                            style: TextStyle(
+                              fontWeight: !_showArchived
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
+                            ),
+                          ),
+                        ),
+                      ),
+                      Semantics(
+                        selected: _showArchived,
+                        child: TextButton(
+                          key: const Key('archived-mixes'),
+                          onPressed: () => setState(() => _showArchived = true),
+                          child: Text(
+                            'Archived mixes',
+                            style: TextStyle(
+                              fontWeight: _showArchived
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  if (_error != null) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      _error!,
-                      key: const Key('start-error'),
-                      style: TextStyle(color: Theme.of(context).colorScheme.error),
-                    ),
-                  ],
-                ],
-              ),
+                ),
+                _buildSessionsBody(sessionsAsync),
+              ],
             ),
-            const Divider(height: 1),
-            Expanded(child: _buildSessionsBody(sessionsAsync)),
-          ],
+          ),
         ),
       ),
     );
+  }
+
+  Future<void> _refreshSessions() async {
+    final ok = await ref.read(sessionsProvider.notifier).refresh();
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text(_refreshFailedMessage)));
+    }
   }
 
   /// Mirrors ChatScreen's `hasError && !hasValue` pattern (see
@@ -368,30 +569,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       // pending backoff Timer is cancelled rather than left dangling —
       // refresh() would instead race it (and, in tests, trip the
       // pending-timer-at-teardown invariant).
-      return _SessionsErrorState(onRetry: () => ref.invalidate(sessionsProvider));
+      return _SessionsErrorState(
+        onRetry: () => ref.invalidate(sessionsProvider),
+      );
     }
     if (!sessionsAsync.hasValue) {
       return const Center(child: CircularProgressIndicator());
     }
-    return RefreshIndicator(
-      // A failed refetch keeps the previous list (copyWithPrevious), so
-      // without the snackbar the spinner would retract indistinguishably
-      // from "refreshed, nothing changed" — the one thing the user pulled
-      // to find out.
-      onRefresh: () async {
-        final ok = await ref.read(sessionsProvider.notifier).refresh();
-        if (!ok && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text(_refreshFailedMessage)),
-          );
-        }
-      },
-      child: _SessionsList(
-        sessions: sessionsAsync.value!,
-        showArchived: _showArchived,
-        onToggleArchived: () => setState(() => _showArchived = !_showArchived),
-        onTapSession: _navigateToChat,
-      ),
+    return _SessionsList(
+      sessions: sessionsAsync.value!,
+      showArchived: _showArchived,
+      onTapSession: _navigateToChat,
     );
   }
 }
@@ -422,9 +610,9 @@ class _SpotifyWaitingCard extends StatelessWidget {
     final when = shortDate(source.lastImportedAt ?? source.connectedAt);
     return packages.extended
         ? 'Extended history imported $when. Still waiting for the account data; check your inbox '
-            'for the second email.'
+              'for the second email.'
         : 'Account data imported $when. Still waiting for the extended history; it can take up '
-            'to 30 days.';
+              'to 30 days.';
   }
 
   @override
@@ -445,7 +633,9 @@ class _SpotifyWaitingCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    nudge == null ? 'Waiting for your Spotify data' : 'Your Spotify data',
+                    nudge == null
+                        ? 'Bring your Spotify music'
+                        : 'Your Spotify data',
                     style: textTheme.titleMedium,
                   ),
                 ),
@@ -458,15 +648,25 @@ class _SpotifyWaitingCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             if (nudge != null)
-              Text(nudge, key: const Key('waiting-nudge'), style: textTheme.bodySmall)
+              Text(
+                nudge,
+                key: const Key('waiting-nudge'),
+                style: textTheme.bodySmall,
+              )
             else
               Row(
                 children: [
-                  Icon(markedAt == null ? Icons.mail_outline : Icons.hourglass_top, size: 20),
+                  Icon(
+                    markedAt == null ? Icons.mail_outline : Icons.hourglass_top,
+                    size: 20,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: markedAt == null
-                        ? const Text('Not requested yet', key: Key('waiting-not-requested'))
+                        ? const Text(
+                            'Ready to import',
+                            key: Key('waiting-not-requested'),
+                          )
                         : Text(
                             'Requested ${elapsedWait(markedAt)}',
                             key: const Key('waiting-requested'),
@@ -475,7 +675,7 @@ class _SpotifyWaitingCard extends StatelessWidget {
                   TextButton(
                     key: const Key('open-request'),
                     onPressed: onOpenRequest,
-                    child: Text(markedAt == null ? 'Request it' : 'See the steps'),
+                    child: Text('Import steps'),
                   ),
                 ],
               ),
@@ -486,7 +686,7 @@ class _SpotifyWaitingCard extends StatelessWidget {
                 key: const Key('waiting-choose-zip'),
                 onPressed: onChooseZip,
                 icon: const Icon(Icons.folder_zip_outlined),
-                label: Text(nudge == null ? 'Choose a ZIP' : 'Choose the other ZIP'),
+                label: Text('Choose files'),
               ),
             ),
             const Divider(),
@@ -498,7 +698,9 @@ class _SpotifyWaitingCard extends StatelessWidget {
                 title: const Text('Interview done'),
                 subtitle: interview == null
                     ? null
-                    : Text('${plural(interview.notes, 'note')}, ${plural(interview.artists, 'artist')}'),
+                    : Text(
+                        '${plural(interview.notes, 'note')}, ${plural(interview.artists, 'artist')}',
+                      ),
               )
             else
               ListTile(
@@ -506,7 +708,9 @@ class _SpotifyWaitingCard extends StatelessWidget {
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.record_voice_over_outlined),
                 title: const Text('Tell the DJ about your taste'),
-                subtitle: const Text('Five quick questions so the first mixes have something to go on.'),
+                subtitle: const Text(
+                  'Five quick questions so the first mixes have something to go on.',
+                ),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: onOpenInterview,
               ),
@@ -544,7 +748,10 @@ class _SessionsErrorState extends StatelessWidget {
               color: Theme.of(context).colorScheme.error,
             ),
             const SizedBox(height: 16),
-            const Text("couldn't load your sessions", textAlign: TextAlign.center),
+            const Text(
+              "couldn't load your sessions",
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: 16),
             FilledButton(
               key: const Key('sessions-retry'),
@@ -562,194 +769,102 @@ class _SessionsList extends ConsumerWidget {
   const _SessionsList({
     required this.sessions,
     required this.showArchived,
-    required this.onToggleArchived,
     required this.onTapSession,
   });
-
   final List<DjSession> sessions;
   final bool showArchived;
-  final VoidCallback onToggleArchived;
   final ValueChanged<String> onTapSession;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final archived = archivedSessions(sessions);
-    final visible = showArchived ? sessions : nonArchivedSessions(sessions);
-    final hasToggle = archived.isNotEmpty;
-
-    if (visible.isEmpty && !hasToggle) {
-      // A scrollable (not a bare Center) so the enclosing RefreshIndicator
-      // still hooks pull-to-refresh — a user whose list came back empty
-      // needs a manual way to refetch too.
+    final visible = showArchived
+        ? archivedSessions(sessions)
+        : nonArchivedSessions(sessions);
+    if (visible.isEmpty) {
       return ListView(
         key: const Key('sessions-empty'),
-        physics: const AlwaysScrollableScrollPhysics(),
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
         children: [
           Padding(
-            padding: const EdgeInsets.all(48),
+            padding: const EdgeInsets.all(32),
             child: Text(
-              'No sessions yet — tell the DJ what you want to hear.',
+              showArchived
+                  ? 'No archived mixes.'
+                  : 'No mixes yet — tell the DJ what you want to hear.',
               textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium,
             ),
           ),
         ],
       );
     }
-
     return ListView.builder(
       key: const Key('sessions-list'),
-      itemCount: visible.length + (hasToggle ? 1 : 0),
-      itemBuilder: (context, index) {
-        if (hasToggle && index == 0) {
-          return TextButton(
-            key: const Key('toggle-archived'),
-            onPressed: onToggleArchived,
-            child: Text(
-              showArchived ? 'Hide archived' : 'Show archived (${archived.length})',
-            ),
-          );
-        }
-        final session = visible[index - (hasToggle ? 1 : 0)];
-        final isArchived = session.status == 'archived';
-        final theme = Theme.of(context);
-        return ListTile(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      itemCount: visible.length,
+      itemBuilder: (rowContext, index) {
+        final session = visible[index];
+        return MixHomeRow(
           key: Key('session-${session.id}'),
-          title: Text(
-            session.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            // Subtle dim on archived rows — the trailing action and the
-            // "Archived · " subtitle prefix below carry the rest of the
-            // distinction, this just keeps it visually de-emphasized in a
-            // mixed (toggled-open) list.
-            style: isArchived
-                ? TextStyle(color: theme.colorScheme.onSurfaceVariant)
-                : null,
-          ),
-          subtitle: Text(
-            isArchived
-                ? 'Archived · ${relativeTime(session.updatedAt)}'
-                : relativeTime(session.updatedAt),
-          ),
-          onTap: () => onTapSession(session.id),
-          onLongPress: () => _showRenameDialog(context, ref, session),
-          trailing: IconButton(
-            key: Key(isArchived ? 'unarchive-${session.id}' : 'archive-${session.id}'),
-            tooltip: isArchived ? 'Unarchive' : 'Archive',
-            icon: Icon(isArchived ? Icons.unarchive_outlined : Icons.archive_outlined),
-            onPressed: () => _setArchived(context, ref, session.id, archived: !isArchived),
-          ),
+          session: session,
+          onOpen: () => onTapSession(session.id),
+          onRename: (title) =>
+              ref.read(sessionsProvider.notifier).rename(session.id, title),
+          onArchive: () =>
+              _setArchived(context, ref, session.id, archived: true),
+          onRestore: () =>
+              _setArchived(context, ref, session.id, archived: false),
         );
       },
     );
   }
 
-  /// Long-press affordance for a manual rename: a dialog prefilled with the
-  /// row's current title, disabled while empty/whitespace-only (trimmed
-  /// before both the disabled-check and the actual call), calling
-  /// [SessionsNotifier.rename] on confirm. A failure leaves the row's title
-  /// untouched and shows a retry snackbar — same hardening as
-  /// [_setArchived] below. The dialog's own [TextEditingController] is owned
-  /// by [_RenameDialog]'s State (see its doc comment) — NOT disposed here —
-  /// so it stays alive through the dialog's exit transition.
-  Future<void> _showRenameDialog(
-    BuildContext context,
-    WidgetRef ref,
-    DjSession session,
-  ) async {
-    final newTitle = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => _RenameDialog(initialTitle: session.title),
-    );
-    if (newTitle == null || !context.mounted) return;
-
-    final ok = await ref.read(sessionsProvider.notifier).rename(session.id, newTitle);
-    if (!ok && context.mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text(_renameFailedMessage)));
-    }
-  }
-
-  Future<void> _setArchived(
+  Future<bool> _setArchived(
     BuildContext context,
     WidgetRef ref,
     String id, {
     required bool archived,
   }) async {
     final notifier = ref.read(sessionsProvider.notifier);
-    final ok = archived ? await notifier.archive(id) : await notifier.unarchive(id);
-    if (!ok && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(archived ? _archiveFailedMessage : _unarchiveFailedMessage)),
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = archived
+        ? await notifier.archive(id)
+        : await notifier.unarchive(id);
+    if (!context.mounted || !messenger.mounted) return ok;
+    messenger.hideCurrentSnackBar();
+    if (!ok) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            archived ? _archiveFailedMessage : _unarchiveFailedMessage,
+          ),
+        ),
+      );
+    } else if (archived) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: const Text('Mix archived'),
+          duration: const Duration(seconds: 3),
+          action: SnackBarAction(
+            label: 'Undo',
+            onPressed: () async {
+              if (!context.mounted) return;
+              final restored = await ref
+                  .read(sessionsProvider.notifier)
+                  .unarchive(id);
+              if (!restored && context.mounted && messenger.mounted) {
+                messenger.showSnackBar(
+                  const SnackBar(content: Text(_unarchiveFailedMessage)),
+                );
+              }
+            },
+          ),
+        ),
       );
     }
-  }
-}
-
-/// The rename dialog's own content, as a dedicated [StatefulWidget] so its
-/// [TextEditingController] is owned by ITS State — created in [initState],
-/// disposed in [dispose] — rather than a local variable [_showRenameDialog]
-/// disposes manually right after `showDialog`'s Future resolves. That manual
-/// pattern races the dialog ROUTE's own exit transition: `showDialog`
-/// resolves as soon as `Navigator.pop` is called, but the closing dialog's
-/// widget tree (fade-out) is still rebuilding for a few more frames after
-/// that — disposing the controller immediately throws "A TextEditingController
-/// was used after being disposed." Tying disposal to this widget's own
-/// lifecycle instead means Flutter only disposes it once the dialog element
-/// is well and truly gone.
-class _RenameDialog extends StatefulWidget {
-  const _RenameDialog({required this.initialTitle});
-
-  final String initialTitle;
-
-  @override
-  State<_RenameDialog> createState() => _RenameDialogState();
-}
-
-class _RenameDialogState extends State<_RenameDialog> {
-  late final TextEditingController _controller = TextEditingController(
-    text: widget.initialTitle,
-  );
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ValueListenableBuilder<TextEditingValue>(
-      valueListenable: _controller,
-      builder: (context, value, _) {
-        final canConfirm = value.text.trim().isNotEmpty;
-        return AlertDialog(
-          title: const Text('Rename session'),
-          content: TextField(
-            key: const Key('rename-field'),
-            controller: _controller,
-            autofocus: true,
-            maxLength: 60, // matches the server's display cap (dj/sanitize.ts's sanitizeTitleText)
-            decoration: const InputDecoration(hintText: 'Session name'),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              key: const Key('rename-confirm'),
-              onPressed: canConfirm
-                  ? () => Navigator.of(context).pop(_controller.text.trim())
-                  : null,
-              child: const Text('Rename'),
-            ),
-          ],
-        );
-      },
-    );
+    return ok;
   }
 }
 
@@ -766,56 +881,60 @@ class _LibrarySyncSheet extends ConsumerWidget {
         padding: const EdgeInsets.all(24),
         child: switch (sync) {
           SyncIdle() => FilledButton(
-              key: const Key('sync-library'),
-              onPressed: () => ref.read(librarySyncProvider.notifier).sync(),
-              child: const Text('Sync my library'),
-            ),
+            key: const Key('sync-library'),
+            onPressed: () => ref.read(librarySyncProvider.notifier).sync(),
+            child: const Text('Sync my library'),
+          ),
           SyncRunning(:final progress) => Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                LinearProgressIndicator(value: progress == 0 ? null : progress),
-                const SizedBox(height: 16),
-                Text(progress == 0 ? 'Syncing…' : 'Syncing… ${(progress * 100).round()}%'),
-              ],
-            ),
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              LinearProgressIndicator(value: progress == 0 ? null : progress),
+              const SizedBox(height: 16),
+              Text(
+                progress == 0
+                    ? 'Syncing…'
+                    : 'Syncing… ${(progress * 100).round()}%',
+              ),
+            ],
+          ),
           SyncDone(:final summary) => Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Synced ${summary.songs} ${summary.songs == 1 ? 'song' : 'songs'} and '
+                '${summary.playlists} ${summary.playlists == 1 ? 'playlist' : 'playlists'}. '
+                'The DJ is listening.',
+                textAlign: TextAlign.center,
+              ),
+              if (summary.unresolvedEntries > 0) ...[
+                const SizedBox(height: 8),
                 Text(
-                  'Synced ${summary.songs} ${summary.songs == 1 ? 'song' : 'songs'} and '
-                  '${summary.playlists} ${summary.playlists == 1 ? 'playlist' : 'playlists'}. '
-                  'The DJ is listening.',
+                  '${summary.unresolvedEntries} playlist '
+                  '${summary.unresolvedEntries == 1 ? 'entry is' : 'entries are'} '
+                  'still unmatched.',
                   textAlign: TextAlign.center,
                 ),
-                if (summary.unresolvedEntries > 0) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    '${summary.unresolvedEntries} playlist '
-                    '${summary.unresolvedEntries == 1 ? 'entry is' : 'entries are'} '
-                    'still unmatched.',
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-                const SizedBox(height: 16),
-                TextButton(
-                  key: const Key('sync-again'),
-                  onPressed: () => ref.read(librarySyncProvider.notifier).sync(),
-                  child: const Text('Sync again'),
-                ),
               ],
-            ),
+              const SizedBox(height: 16),
+              TextButton(
+                key: const Key('sync-again'),
+                onPressed: () => ref.read(librarySyncProvider.notifier).sync(),
+                child: const Text('Sync again'),
+              ),
+            ],
+          ),
           SyncFailed(:final message) => Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(message, textAlign: TextAlign.center),
-                const SizedBox(height: 16),
-                OutlinedButton(
-                  key: const Key('sync-retry'),
-                  onPressed: () => ref.read(librarySyncProvider.notifier).sync(),
-                  child: const Text('Try again'),
-                ),
-              ],
-            ),
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(message, textAlign: TextAlign.center),
+              const SizedBox(height: 16),
+              OutlinedButton(
+                key: const Key('sync-retry'),
+                onPressed: () => ref.read(librarySyncProvider.notifier).sync(),
+                child: const Text('Try again'),
+              ),
+            ],
+          ),
         },
       ),
     );

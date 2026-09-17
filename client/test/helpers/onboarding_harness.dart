@@ -1,3 +1,4 @@
+import 'package:mixtape/data/playlists/playlist_context_models.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -40,7 +41,7 @@ class BareDjApi implements DjApi {
   Future<List<DjSession>> listSessions() async => [];
 
   @override
-  Future<SessionDetail> createSession(String prompt) => throw UnimplementedError();
+  Future<SessionDetail> createSession(String prompt, {InitialPlaylistSeed? playlistSeed}) => throw UnimplementedError();
 
   @override
   Future<SessionDetail> getSession(String id) => throw UnimplementedError();
@@ -144,7 +145,7 @@ void expectInteractiveWidgetsKeyed(Finder root) {
   for (final element in interactive.evaluate()) {
     var nested = false;
     element.visitAncestorElements((ancestor) {
-      nested = _isInteractive(ancestor.widget);
+      nested = _isInteractive(ancestor.widget) || ancestor.widget is ExpansionTile;
       return !nested;
     });
     if (nested) continue;
