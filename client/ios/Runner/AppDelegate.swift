@@ -11,6 +11,10 @@ import UIKit
   private var pendingArchive: [String: Any]?
   private var openArchiveChannel: FlutterMethodChannel?
 
+  /// Retained so the native dock and its `mixtape/shell` channel stay alive.
+  /// Only ever built on iOS 26 — below that Flutter draws `FrostedDock`.
+  private var shellDock: ShellDock?
+
   /// Where those copies live. Everything under it is a listener's whole
   /// export — the identity and payment files the parser refuses to read
   /// included — so it is emptied at launch, and each copy again as soon as
@@ -30,6 +34,37 @@ import UIKit
     if let controller = window?.rootViewController as? FlutterViewController {
       MusicKitBridge.register(with: controller.binaryMessenger)
       registerOpenArchiveChannel(with: controller.binaryMessenger)
+      // The approved dock, in genuine Liquid Glass, on iOS 26 only.
+      //
+      // Hosted on the WINDOW, not on controller.view: that view is the
+      // FlutterView, and Flutter re-stacks the platform views it owns inside
+      // it on every composited frame — which would bury the dock under any
+      // platform view that scrolled into its band. `controller.view.window`
+      // is still nil this early, so the window is handed over directly.
+      //
+      // There is no second-best host: `controller.view` is exactly the view
+      // the compositor owns, so a dock parked there would be buried and eat
+      // taps. Without a window the dock is simply not installed, and Flutter
+      // falls back to `FrostedDock` because `isAvailable` never answers.
+      if #available(iOS 26, *) {
+        if let window {
+          shellDock = ShellDock(
+            hostView: window,
+            binaryMessenger: controller.binaryMessenger
+          )
+        } else {
+          NSLog("[mixtape] No window at launch; native shell dock not installed.")
+        }
+      }
+    }
+    // Liquid Glass for surfaces that live inside Flutter (the collapsing
+    // title bar, the Home panel). Flutter only inserts it when the dock is
+    // available, and falls back to `FrostedSurface` otherwise.
+    if let glassRegistrar = registrar(forPlugin: "mixtape.liquid_glass") {
+      glassRegistrar.register(
+        LiquidGlassViewFactory(),
+        withId: "mixtape/liquid_glass"
+      )
     }
     GeneratedPluginRegistrant.register(with: self)
     // A launch that exists only to open a file delivers it through the open
