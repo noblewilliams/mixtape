@@ -1,5 +1,7 @@
 import { and, asc, eq, inArray, sql } from 'drizzle-orm'
+import type { EnergyArc } from './energy-journey'
 import type { Db } from '../db/types'
+import { captureMixVersion } from './mix-history'
 import { djSessions, queueTracks, sessionPlaylistSeeds, tracks, userPlaylists } from '../db/schema'
 import type { OpIntent, QueueOp } from './contracts'
 
@@ -118,6 +120,7 @@ export async function replaceQueue(
   picks: ReplacementPick[],
   addedBy: 'dj' | 'user',
   guard?: QueueMutationGuard & { queueVersion: number },
+  energyArc?: EnergyArc | null,
 ): Promise<number> {
   const deduped = dedupeByTrackId(picks)
   return db.transaction(async (tx) => {
@@ -125,6 +128,7 @@ export async function replaceQueue(
     if (!session) throw new Error('queue-store: session not found')
     if (guard && session.queueVersion !== guard.queueVersion) throw new QueueVersionConflict()
     await assertSeedGuard(tx, sessionId, guard)
+    await captureMixVersion(tx, sessionId, session.queueVersion)
 
     await tx.delete(queueTracks).where(and(eq(queueTracks.sessionId, sessionId), eq(queueTracks.state, 'active')))
 
@@ -142,6 +146,7 @@ export async function replaceQueue(
 
     const newVersion = session.queueVersion + 1
     await tx.update(djSessions).set({ queueVersion: newVersion }).where(eq(djSessions.id, sessionId))
+    await captureMixVersion(tx, sessionId, newVersion, energyArc)
     return newVersion
   })
 }
@@ -438,6 +443,7 @@ export async function applyOps(
   replacementsProvider?: ReplacementsProvider,
   expectedVersion?: number,
   seedGuard?: QueueMutationGuard,
+  energyArc?: EnergyArc,
 ): Promise<ApplyOpsResult> {
   const [snapshot] = await db
     .select({ queueVersion: djSessions.queueVersion })
@@ -463,6 +469,7 @@ export async function applyOps(
     if (!session) throw new Error('queue-store: session not found')
     if (session.queueVersion !== snapshot.queueVersion) throw new QueueVersionConflict()
     await assertSeedGuard(tx, sessionId, seedGuard)
+    await captureMixVersion(tx, sessionId, session.queueVersion)
 
     const currentRows = await readActiveRows(tx, sessionId)
     const { working, removedIds } = planOps(currentRows, ops)
@@ -507,6 +514,7 @@ export async function applyOps(
 
     const newVersion = session.queueVersion + 1
     await tx.update(djSessions).set({ queueVersion: newVersion }).where(eq(djSessions.id, sessionId))
+    await captureMixVersion(tx, sessionId, newVersion, energyArc)
     return {
       version: newVersion,
       requested,

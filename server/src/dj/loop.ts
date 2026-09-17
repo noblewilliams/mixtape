@@ -1,8 +1,8 @@
 import { z } from 'zod'
-import { and, desc, eq, gt, lt } from 'drizzle-orm'
+import { and, desc, eq, gt, lt, inArray } from 'drizzle-orm'
 import type { Db } from '../db/types'
 import type { Embedder } from '../enrich/embedder'
-import { djMemories, djMessages, djSessions, queueTracks, tracks } from '../db/schema'
+import { djMemories, djMessages, djSessions, queueTracks, tracks, trackFeatures, mixVersions } from '../db/schema'
 import type { LlmClient, LlmComplete, LlmMessage } from './llm'
 import { LlmError } from './llm'
 import {
@@ -355,6 +355,15 @@ function formatMemoryBlock(notes: string[]): string | null {
 // comment above for why.
 async function buildSessionContext(db: Db, sessionId: string, userId: string): Promise<string> {
   const queue = await getActiveQueue(db, sessionId)
+  const featureRows = queue.length ? await db.select({ id: trackFeatures.trackId, energy: trackFeatures.energy })
+    .from(trackFeatures).where(inArray(trackFeatures.trackId, queue.slice(0, MAX_LISTING_LINES).map(t => t.trackId))) : []
+  const energyById = new Map(featureRows.map(f => [f.id, f.energy]))
+  const energyBlock = queue.length ? 'Measured energy by current position (0-1; unknown is not zero): ' +
+    queue.slice(0, MAX_LISTING_LINES).map((t,i) => `[${i}] ${energyById.get(t.trackId) ?? 'unknown'}`).join(', ') : null
+  const [journey] = await db.select({ energyArc: mixVersions.energyArc, energyJourney: mixVersions.energyJourney })
+    .from(mixVersions).innerJoin(djSessions, and(eq(djSessions.id, mixVersions.sessionId), eq(djSessions.queueVersion, mixVersions.version)))
+    .where(eq(mixVersions.sessionId, sessionId))
+  const journeyBlock = journey?.energyArc ? `Current energy journey: ${journey.energyArc}; assessment: ${journey.energyJourney?.status ?? 'limited'}. Later explicit listener revisions override this shape. Exclusions and pinned choices come first. Limited data cannot establish a measured shape.` : null
   const queueLine =
     queue.length === 0
       ? 'Current queue: empty.'
@@ -394,7 +403,7 @@ async function buildSessionContext(db: Db, sessionId: string, userId: string): P
   const memoryBlock = formatMemoryBlock(await loadMemoryNotes(db, userId))
 
   const seedBlock = playlistSeedContext(await readPlaylistSeed(db, sessionId, userId))
-  return [queueLine, removalLine, memoryBlock, seedBlock].filter((l): l is string => l !== null).join('\n')
+  return [queueLine, energyBlock, journeyBlock, removalLine, memoryBlock, seedBlock].filter((l): l is string => l !== null).join('\n')
 }
 
 // Playlist context is deliberately the final context block. A model may select
@@ -416,7 +425,7 @@ function toOpIntent(intent: Intent): OpIntent {
   return opIntentSchema.parse(rest)
 }
 
-const editQueueInputSchema = z.object({ ops: queueOpsSchema })
+const editQueueInputSchema = z.object({ ops: queueOpsSchema, energyArc: intentSchema.shape.energyArc })
 
 type GenerateOutcome = {
   resultText: string
@@ -480,6 +489,7 @@ async function executeGenerateQueue(
     'dj',
     { queueVersion: startVersion, seedRevision: seed.revision, playlistId: seed.status === 'ready' ? seed.playlistId : null,
       fingerprint: seed.status === 'ready' ? seed.fingerprint : null },
+    intent.energyArc ?? null,
   )
   // Flagged only once the corpus picks have actually landed in the queue —
   // a session is "not personal" because of what its queue holds, not
@@ -575,7 +585,7 @@ async function executeEditQueue(
     // toOpIntent/the userText fallback above) and `count` is already
     // validated by queueOpsSchema's own op-specific bounds, so this is a
     // plain object build, not a re-validation.
-    const fullIntent: Intent = { ...base, targetCount: count }
+    const fullIntent: Intent = { ...base, targetCount: count, ...(parsed.data.energyArc ? { energyArc: parsed.data.energyArc } : {}) }
     // Excludes the queue's OWN current tracks from the candidate pool — a
     // swap/extend replacement drawn from the active queue is a guaranteed
     // no-op (materialize's duplicate guard would just drop it), so without
@@ -596,7 +606,7 @@ async function executeEditQueue(
   try {
     const result = await applyOps(db, session.id, ops, 'dj', provider, undefined,
       needsPool ? { seedRevision: seed.revision, playlistId: seed.status === 'ready' ? seed.playlistId : null,
-        fingerprint: seed.status === 'ready' ? seed.fingerprint : null } : undefined)
+        fingerprint: seed.status === 'ready' ? seed.fingerprint : null } : undefined, parsed.data.energyArc)
     // Same rule as executeGenerateQueue: flagged after the picks landed
     // (applyOps is atomic — a throw above means nothing landed and we never
     // get here), and the model is told in the same result.

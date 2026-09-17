@@ -1,6 +1,8 @@
+import type { EnergyArc, EnergyJourney } from '../dj/energy-journey'
 import { sql } from 'drizzle-orm'
 import {
   pgTable,
+  jsonb,
   uuid,
   text,
   timestamp,
@@ -502,6 +504,7 @@ export const userMusicSources = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
     source: text('source', { enum: ['apple_live', 'apple_export', 'spotify_export'] }).notNull(),
+    quickImportedAt: timestamp('quick_imported_at', {withTimezone:true}),
     connectedAt: timestamp('connected_at', { withTimezone: true }).notNull().defaultNow(),
     lastImportedAt: timestamp('last_imported_at', { withTimezone: true }),
     ledgerFrom: date('ledger_from', { mode: 'string' }),
@@ -653,8 +656,9 @@ export const listeningImportRuns = pgTable(
     source: text('source', { enum: ['spotify_export', 'apple_export'] }).notNull(),
     // Which files the device parsed; decides which chunk types the run carries.
     package: text('package', {
-      enum: ['spotify_extended', 'spotify_account', 'apple_media'],
+      enum: ['spotify_extended', 'spotify_account', 'spotify_exportify', 'apple_media'],
     }).notNull(),
+    libraryReview: jsonb('library_review').$type<{mode:'add'} | {mode:'replace';fingerprint:string}>(),
     status: text('status', { enum: ['open', 'completed', 'failed', 'expired'] }).notNull(),
     timeZone: text('time_zone').notNull(),
     country: text('country'),
@@ -700,7 +704,7 @@ export const listeningImportRuns = pgTable(
     check('listening_import_runs_source_check', sql`${t.source} ${listeningSourceSql}`),
     check(
       'listening_import_runs_package_check',
-      sql`${t.package} IN ('spotify_extended', 'spotify_account', 'apple_media')`,
+      sql`${t.package} IN ('spotify_extended', 'spotify_account', 'spotify_exportify', 'apple_media')`,
     ),
     check(
       'listening_import_runs_status_check',
@@ -708,7 +712,7 @@ export const listeningImportRuns = pgTable(
     ),
     check(
       'listening_import_runs_package_source_check',
-      sql`(${t.source} = 'spotify_export' AND ${t.package} IN ('spotify_extended', 'spotify_account')) OR (${t.source} = 'apple_export' AND ${t.package} = 'apple_media')`,
+      sql`(${t.source} = 'spotify_export' AND ${t.package} IN ('spotify_extended', 'spotify_account', 'spotify_exportify')) OR (${t.source} = 'apple_export' AND ${t.package} = 'apple_media')`,
     ),
     // A package only expects the chunk types it carries.
     check(
@@ -723,6 +727,7 @@ export const listeningImportRuns = pgTable(
       'listening_import_runs_apple_counts_check',
       sql`${t.package} <> 'apple_media' OR ${t.expectedArtists} = 0`,
     ),
+    check('listening_import_runs_exportify_counts_check', sql`${t.package} <> 'spotify_exportify' OR (${t.expectedDays} = 0 AND ${t.expectedArtists} = 0)`),
     check('listening_import_runs_time_zone_check', sql`char_length(${t.timeZone}) <= 64`),
     check('listening_import_runs_country_check', countryOrNullSql(t.country)),
     check('listening_import_runs_expected_tracks_check', sql`${t.expectedTracks} >= 0`),
@@ -879,6 +884,7 @@ export const userPlaylists = pgTable(
       .references(() => user.id, { onDelete: 'cascade' }),
     appleLibraryId: text('apple_library_id').notNull(),
     appleCatalogId: text('apple_catalog_id'),
+    importFileHash: text('import_file_hash'),
     name: text('name').notNull(),
     description: text('description'),
     curatorName: text('curator_name'),
@@ -1269,6 +1275,7 @@ export const playlistSyncRuns = pgTable(
     source: text('source', { enum: ['ios_native', 'web_musickit', 'spotify_export'] })
       .notNull()
       .default('ios_native'),
+    review: jsonb('review').$type<{key:string; baseFingerprint:string|null; fileHash:string}[]>(),
     status: text('status', { enum: ['open', 'completed', 'failed', 'expired'] }).notNull(),
     // Null only for a Spotify export run.
     appleStorefront: text('apple_storefront'),
@@ -1421,3 +1428,60 @@ export const playlistSyncEntries = pgTable(
     ),
   ],
 )
+
+
+export type MixVersionEntry = {
+  position: number
+  trackId: string
+  reason: string | null
+  addedBy: 'dj' | 'user'
+}
+
+export const mixVersions = pgTable('mix_versions', {
+  sessionId: uuid('session_id').notNull().references(() => djSessions.id, { onDelete: 'cascade' }),
+  version: integer('version').notNull(),
+  entries: jsonb('entries').$type<MixVersionEntry[]>().notNull(),
+  energyArc: text('energy_arc').$type<EnergyArc>(),
+  energyJourney: jsonb('energy_journey').$type<EnergyJourney>(),
+  restoredFrom: integer('restored_from'),
+  requestId: text('request_id'),
+  expectedVersion: integer('expected_version'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  primaryKey({ columns: [t.sessionId, t.version] }),
+  uniqueIndex('mix_versions_restore_request_idx').on(t.sessionId, t.requestId),
+  check('mix_versions_version_positive', sql`${t.version} > 0`),
+  check('mix_versions_entries_array', sql`jsonb_typeof(${t.entries}) = 'array'`),
+])
+
+// Separate from imported history and written preferences. Epoch fences unsent
+// evidence after opt-out/clear across devices and unknown network outcomes.
+export const playbackSettings = pgTable('playback_settings', {
+  userId: text('user_id').primaryKey().references(() => user.id, { onDelete: 'cascade' }),
+  enabled: boolean('enabled').notNull().default(false),
+  revision: integer('revision').notNull().default(0),
+  lastClearId: text('last_clear_id'),
+})
+export const playbackEvidence = pgTable('playback_evidence', {
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  playbackId: uuid('playback_id').notNull(),
+  sequence: integer('sequence').notNull(),
+  sessionId: uuid('session_id').notNull().references(() => djSessions.id, { onDelete: 'cascade' }),
+  version: integer('version').notNull(),
+  position: integer('position').notNull(),
+  trackId: uuid('track_id').notNull().references(() => tracks.id, { onDelete: 'cascade' }),
+  source: text('source').notNull(),
+  kind: text('kind').notNull(),
+  observedMs: integer('observed_ms').notNull(),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  primaryKey({ columns: [t.userId, t.playbackId, t.sequence] }),
+  index('playback_evidence_user_date_idx').on(t.userId, t.occurredAt),
+])
+
+export const suggestionSettings = pgTable('suggestion_settings', {
+  userId: text('user_id').primaryKey().references(() => user.id, { onDelete: 'cascade' }),
+  enabled: boolean('enabled').notNull().default(true),
+  dismissed: jsonb('dismissed').$type<Record<string, string>>().notNull().default({}),
+})

@@ -1,3 +1,4 @@
+import { spotifyLibraryReview, reviewHash } from './collection-review'
 import { and, eq, inArray, or, sql } from 'drizzle-orm'
 import type { Db } from '../db/types'
 import { updateLibraryMembership } from '../library/membership'
@@ -68,12 +69,31 @@ export type ListeningImportStore = {
     userId: string,
     input: BeginListeningImport,
   ): Promise<{ importId: string; expiresAt: number }>
-  putTracks(userId: string, importId: string, tracks: ListeningTrackSnapshot[]): Promise<void>
-  putDays(userId: string, importId: string, days: ListeningDaySnapshot[]): Promise<void>
-  putLibrary(userId: string, importId: string, tracks: ListeningLibrarySnapshot[]): Promise<void>
-  putArtists(userId: string, importId: string, artists: ListeningArtistSnapshot[]): Promise<void>
+  putTracks(
+    userId: string,
+    importId: string,
+    tracks: ListeningTrackSnapshot[],
+  ): Promise<void>
+  putDays(
+    userId: string,
+    importId: string,
+    days: ListeningDaySnapshot[],
+  ): Promise<void>
+  putLibrary(
+    userId: string,
+    importId: string,
+    tracks: ListeningLibrarySnapshot[],
+  ): Promise<void>
+  putArtists(
+    userId: string,
+    importId: string,
+    artists: ListeningArtistSnapshot[],
+  ): Promise<void>
   complete(userId: string, importId: string): Promise<ListeningImportSummary>
-  deleteSource(userId: string, source: ListeningImportSource): Promise<DeleteSourceResult>
+  deleteSource(
+    userId: string,
+    source: ListeningImportSource,
+  ): Promise<DeleteSourceResult>
 }
 
 type StoreDeps = {
@@ -88,25 +108,38 @@ type Run = typeof listeningImportRuns.$inferSelect
 type ChunkKind = 'tracks' | 'days' | 'library' | 'artists'
 
 // Which chunk types each package carries (spec → Packages). Tracks always.
-const CHUNKS_BY_PACKAGE: Record<ListeningImportPackage, readonly ChunkKind[]> = {
-  spotify_extended: ['tracks', 'days'],
-  spotify_account: ['tracks', 'library', 'artists'],
-  apple_media: ['tracks', 'days', 'library'],
-}
+const CHUNKS_BY_PACKAGE: Record<ListeningImportPackage, readonly ChunkKind[]> =
+  {
+    spotify_extended: ['tracks', 'days'],
+    spotify_account: ['tracks', 'library', 'artists'],
+    spotify_exportify: ['tracks', 'library'],
+    apple_media: ['tracks', 'days', 'library'],
+  }
 
-const PLATFORM_ID_VALIDATORS: Record<ListeningImportSource, (value: string) => boolean> = {
+const PLATFORM_ID_VALIDATORS: Record<
+  ListeningImportSource,
+  (value: string) => boolean
+> = {
   spotify_export: isSpotifyId,
   apple_export: isAppleSongId,
 }
 
 // The tracks column a source's platform ids resolve through. Constants, never
 // input, so they are safe to splice into SQL.
-const PLATFORM_COLUMNS: Record<ListeningImportSource, ReturnType<typeof sql.raw>> = {
+const PLATFORM_COLUMNS: Record<
+  ListeningImportSource,
+  ReturnType<typeof sql.raw>
+> = {
   spotify_export: sql.raw('spotify_id'),
   apple_export: sql.raw('apple_id'),
 }
 
-const CHUNK_KINDS = ['tracks', 'days', 'library', 'artists'] as const satisfies readonly ChunkKind[]
+const CHUNK_KINDS = [
+  'tracks',
+  'days',
+  'library',
+  'artists',
+] as const satisfies readonly ChunkKind[]
 
 const CHUNK_TABLES: Record<ChunkKind, ReturnType<typeof sql.raw>> = {
   tracks: sql.raw('listening_import_tracks'),
@@ -118,23 +151,34 @@ const CHUNK_TABLES: Record<ChunkKind, ReturnType<typeof sql.raw>> = {
 const COUNTERS = {
   tracks: { received: 'receivedTracks', expected: 'expectedTracks' },
   days: { received: 'receivedDays', expected: 'expectedDays' },
-  library: { received: 'receivedLibraryTracks', expected: 'expectedLibraryTracks' },
+  library: {
+    received: 'receivedLibraryTracks',
+    expected: 'expectedLibraryTracks',
+  },
   artists: { received: 'receivedArtists', expected: 'expectedArtists' },
-} as const satisfies Record<ChunkKind, { received: keyof Run; expected: keyof Run }>
+} as const satisfies Record<
+  ChunkKind,
+  { received: keyof Run; expected: keyof Run }
+>
 
 function receivedPatch(kind: ChunkKind, value: number) {
   switch (kind) {
-    case 'tracks': return { receivedTracks: value }
-    case 'days': return { receivedDays: value }
-    case 'library': return { receivedLibraryTracks: value }
-    case 'artists': return { receivedArtists: value }
+    case 'tracks':
+      return { receivedTracks: value }
+    case 'days':
+      return { receivedDays: value }
+    case 'library':
+      return { receivedLibraryTracks: value }
+    case 'artists':
+      return { receivedArtists: value }
   }
 }
 
-const toDate = (value: number | null) => value == null ? null : new Date(value)
+const toDate = (value: number | null) =>
+  value == null ? null : new Date(value)
 const sameInstant = (value: Date | null, millis: number | null) =>
   (value?.getTime() ?? null) === millis
-const compareKeys = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0
+const compareKeys = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 // Platform ids are validated against the source (base62 or Apple's unreserved
 // alphabet) before any key is built, so '|' can never occur inside one.
 const dayKey = (platformId: string, day: string) => `${platformId}|${day}`
@@ -153,103 +197,175 @@ type ChunkSpec<TValue extends Ordered, TRow extends Ordered> = {
   insert(tx: Db, importId: string, values: TValue[]): Promise<void>
 }
 
-const trackSpec: ChunkSpec<ListeningTrackSnapshot, typeof listeningImportTracks.$inferSelect> = {
+const trackSpec: ChunkSpec<
+  ListeningTrackSnapshot,
+  typeof listeningImportTracks.$inferSelect
+> = {
   kind: 'tracks',
   key: (value) => value.platformId,
   rowKey: (row) => row.platformId,
   platformId: (value) => value.platformId,
-  same: (row, value) => row.ordinal === value.ordinal
-    && row.platformId === value.platformId
-    && row.title === value.title
-    && row.artist === value.artist
-    && row.album === value.album
-    && row.durationMs === value.durationMs,
-  existing: (tx, importId, values) => tx.select().from(listeningImportTracks).where(and(
-    eq(listeningImportTracks.importId, importId),
-    or(
-      inArray(listeningImportTracks.ordinal, values.map((value) => value.ordinal)),
-      inArray(listeningImportTracks.platformId, values.map((value) => value.platformId)),
-    ),
-  )),
+  same: (row, value) =>
+    row.ordinal === value.ordinal &&
+    row.platformId === value.platformId &&
+    row.title === value.title &&
+    row.artist === value.artist &&
+    row.album === value.album &&
+    row.durationMs === value.durationMs,
+  existing: (tx, importId, values) =>
+    tx
+      .select()
+      .from(listeningImportTracks)
+      .where(
+        and(
+          eq(listeningImportTracks.importId, importId),
+          or(
+            inArray(
+              listeningImportTracks.ordinal,
+              values.map((value) => value.ordinal),
+            ),
+            inArray(
+              listeningImportTracks.platformId,
+              values.map((value) => value.platformId),
+            ),
+          ),
+        ),
+      ),
   insert: async (tx, importId, values) => {
-    await tx.insert(listeningImportTracks).values(values.map((value) => ({ importId, ...value })))
+    await tx
+      .insert(listeningImportTracks)
+      .values(values.map((value) => ({ importId, ...value })))
   },
 }
 
-const daySpec: ChunkSpec<ListeningDaySnapshot, typeof listeningImportDays.$inferSelect> = {
+const daySpec: ChunkSpec<
+  ListeningDaySnapshot,
+  typeof listeningImportDays.$inferSelect
+> = {
   kind: 'days',
   key: (value) => dayKey(value.platformId, value.day),
   rowKey: (row) => dayKey(row.platformId, row.day),
   platformId: (value) => value.platformId,
-  same: (row, value) => row.ordinal === value.ordinal
-    && row.platformId === value.platformId
-    && row.day === value.day
-    && row.plays === value.plays
-    && row.skips === value.skips
-    && row.completes === value.completes
-    && row.msPlayed === value.msPlayed
-    && row.hoursMask === value.hoursMask,
+  same: (row, value) =>
+    row.ordinal === value.ordinal &&
+    row.platformId === value.platformId &&
+    row.day === value.day &&
+    row.plays === value.plays &&
+    row.skips === value.skips &&
+    row.completes === value.completes &&
+    row.msPlayed === value.msPlayed &&
+    row.hoursMask === value.hoursMask,
   // Match on the (platform id, day) pair, not the platform id alone: a track
   // can have hundreds of staged days and a chunk carries up to 2 000 rows.
-  existing: (tx, importId, values) => tx.select().from(listeningImportDays).where(and(
-    eq(listeningImportDays.importId, importId),
-    or(
-      inArray(listeningImportDays.ordinal, values.map((value) => value.ordinal)),
-      sql`(${listeningImportDays.platformId}, ${listeningImportDays.day}) IN (${
-        sql.join(values.map((value) => sql`(${value.platformId}, ${value.day}::date)`), sql`, `)
-      })`,
-    ),
-  )),
+  existing: (tx, importId, values) =>
+    tx
+      .select()
+      .from(listeningImportDays)
+      .where(
+        and(
+          eq(listeningImportDays.importId, importId),
+          or(
+            inArray(
+              listeningImportDays.ordinal,
+              values.map((value) => value.ordinal),
+            ),
+            sql`(${listeningImportDays.platformId}, ${listeningImportDays.day}) IN (${sql.join(
+              values.map(
+                (value) => sql`(${value.platformId}, ${value.day}::date)`,
+              ),
+              sql`, `,
+            )})`,
+          ),
+        ),
+      ),
   insert: async (tx, importId, values) => {
-    await tx.insert(listeningImportDays).values(values.map((value) => ({ importId, ...value })))
+    await tx
+      .insert(listeningImportDays)
+      .values(values.map((value) => ({ importId, ...value })))
   },
 }
 
-const librarySpec: ChunkSpec<ListeningLibrarySnapshot, typeof listeningImportLibrary.$inferSelect> = {
+const librarySpec: ChunkSpec<
+  ListeningLibrarySnapshot,
+  typeof listeningImportLibrary.$inferSelect
+> = {
   kind: 'library',
   key: (value) => value.platformId,
   rowKey: (row) => row.platformId,
   platformId: (value) => value.platformId,
-  same: (row, value) => row.ordinal === value.ordinal
-    && row.platformId === value.platformId
-    && row.playCount === value.playCount
-    && row.skipCount === value.skipCount
-    && sameInstant(row.lastPlayedAt, value.lastPlayedAt)
-    && sameInstant(row.dateAdded, value.dateAdded)
-    && row.likeRating === value.likeRating,
-  existing: (tx, importId, values) => tx.select().from(listeningImportLibrary).where(and(
-    eq(listeningImportLibrary.importId, importId),
-    or(
-      inArray(listeningImportLibrary.ordinal, values.map((value) => value.ordinal)),
-      inArray(listeningImportLibrary.platformId, values.map((value) => value.platformId)),
-    ),
-  )),
+  same: (row, value) =>
+    row.ordinal === value.ordinal &&
+    row.platformId === value.platformId &&
+    row.playCount === value.playCount &&
+    row.skipCount === value.skipCount &&
+    sameInstant(row.lastPlayedAt, value.lastPlayedAt) &&
+    sameInstant(row.dateAdded, value.dateAdded) &&
+    row.likeRating === value.likeRating,
+  existing: (tx, importId, values) =>
+    tx
+      .select()
+      .from(listeningImportLibrary)
+      .where(
+        and(
+          eq(listeningImportLibrary.importId, importId),
+          or(
+            inArray(
+              listeningImportLibrary.ordinal,
+              values.map((value) => value.ordinal),
+            ),
+            inArray(
+              listeningImportLibrary.platformId,
+              values.map((value) => value.platformId),
+            ),
+          ),
+        ),
+      ),
   insert: async (tx, importId, values) => {
-    await tx.insert(listeningImportLibrary).values(values.map((value) => ({
-      importId,
-      ...value,
-      lastPlayedAt: toDate(value.lastPlayedAt),
-      dateAdded: toDate(value.dateAdded),
-    })))
+    await tx.insert(listeningImportLibrary).values(
+      values.map((value) => ({
+        importId,
+        ...value,
+        lastPlayedAt: toDate(value.lastPlayedAt),
+        dateAdded: toDate(value.dateAdded),
+      })),
+    )
   },
 }
 
-const artistSpec: ChunkSpec<ListeningArtistSnapshot, typeof listeningImportArtists.$inferSelect> = {
+const artistSpec: ChunkSpec<
+  ListeningArtistSnapshot,
+  typeof listeningImportArtists.$inferSelect
+> = {
   kind: 'artists',
   key: (value) => value.name,
   rowKey: (row) => row.name,
-  same: (row, value) => row.ordinal === value.ordinal
-    && row.name === value.name
-    && row.spotifyId === value.spotifyId,
-  existing: (tx, importId, values) => tx.select().from(listeningImportArtists).where(and(
-    eq(listeningImportArtists.importId, importId),
-    or(
-      inArray(listeningImportArtists.ordinal, values.map((value) => value.ordinal)),
-      inArray(listeningImportArtists.name, values.map((value) => value.name)),
-    ),
-  )),
+  same: (row, value) =>
+    row.ordinal === value.ordinal &&
+    row.name === value.name &&
+    row.spotifyId === value.spotifyId,
+  existing: (tx, importId, values) =>
+    tx
+      .select()
+      .from(listeningImportArtists)
+      .where(
+        and(
+          eq(listeningImportArtists.importId, importId),
+          or(
+            inArray(
+              listeningImportArtists.ordinal,
+              values.map((value) => value.ordinal),
+            ),
+            inArray(
+              listeningImportArtists.name,
+              values.map((value) => value.name),
+            ),
+          ),
+        ),
+      ),
   insert: async (tx, importId, values) => {
-    await tx.insert(listeningImportArtists).values(values.map((value) => ({ importId, ...value })))
+    await tx
+      .insert(listeningImportArtists)
+      .values(values.map((value) => ({ importId, ...value })))
   },
 }
 
@@ -257,20 +373,21 @@ function normalizeRows(value: unknown): Record<string, unknown>[] {
   if (Array.isArray(value)) return value as Record<string, unknown>[]
   if (value && typeof value === 'object' && 'rows' in value) {
     const rows = (value as { rows?: unknown }).rows
-    return Array.isArray(rows) ? rows as Record<string, unknown>[] : []
+    return Array.isArray(rows) ? (rows as Record<string, unknown>[]) : []
   }
   return []
 }
 
 function completedSummary(run: Run): ListeningImportSummary {
   if (
-    run.resultTracks == null
-    || run.resultDays == null
-    || run.resultLibraryTracks == null
-    || run.resultArtists == null
-    || run.resultLikedRemoved == null
-    || run.resultLikedRemovalSkipped == null
-  ) throw new ListeningImportError('internal')
+    run.resultTracks == null ||
+    run.resultDays == null ||
+    run.resultLibraryTracks == null ||
+    run.resultArtists == null ||
+    run.resultLikedRemoved == null ||
+    run.resultLikedRemovalSkipped == null
+  )
+    throw new ListeningImportError('internal')
   return {
     tracks: run.resultTracks,
     days: run.resultDays,
@@ -287,7 +404,10 @@ function completedSummary(run: Run): ListeningImportSummary {
 
 // Per-user ledger aggregate, optionally restricted to a set of tracks. Recent
 // plays anchor on the database clock so the window drifts without a recompute.
-const ledgerAggregate = (userId: string, trackFilter: ReturnType<typeof sql> | null) => sql`
+const ledgerAggregate = (
+  userId: string,
+  trackFilter: ReturnType<typeof sql> | null,
+) => sql`
   SELECT
     ld.track_id,
     sum(ld.plays)::int AS plays,
@@ -299,7 +419,10 @@ const ledgerAggregate = (userId: string, trackFilter: ReturnType<typeof sql> | n
   GROUP BY ld.track_id
 `
 
-function assertUnique<TValue extends Ordered>(values: TValue[], key: (value: TValue) => string) {
+function assertUnique<TValue extends Ordered>(
+  values: TValue[],
+  key: (value: TValue) => string,
+) {
   const ordinals = new Set<number>()
   const keys = new Set<string>()
   for (const value of values) {
@@ -312,13 +435,28 @@ function assertUnique<TValue extends Ordered>(values: TValue[], key: (value: TVa
   }
 }
 
-export function createListeningImportStore(db: Db, deps: StoreDeps = {}): ListeningImportStore {
+export function createListeningImportStore(
+  db: Db,
+  deps: StoreDeps = {},
+): ListeningImportStore {
   const currentTime = () => deps.now?.() ?? new Date()
   const ttlMs = deps.ttlMs ?? LISTENING_IMPORT_DEFAULT_TTL_MS
 
-  async function lockedOpenRun(tx: Db, userId: string, importId: string, now: Date): Promise<Run> {
-    const [run] = await tx.select().from(listeningImportRuns)
-      .where(and(eq(listeningImportRuns.id, importId), eq(listeningImportRuns.userId, userId)))
+  async function lockedOpenRun(
+    tx: Db,
+    userId: string,
+    importId: string,
+    now: Date,
+  ): Promise<Run> {
+    const [run] = await tx
+      .select()
+      .from(listeningImportRuns)
+      .where(
+        and(
+          eq(listeningImportRuns.id, importId),
+          eq(listeningImportRuns.userId, userId),
+        ),
+      )
       .for('update')
     if (!run) throw new ListeningImportError('not_found')
     if (run.status !== 'open' || run.expiresAt.getTime() <= now.getTime()) {
@@ -345,7 +483,8 @@ export function createListeningImportStore(db: Db, deps: StoreDeps = {}): Listen
       if (spec.platformId) {
         const isValidId = PLATFORM_ID_VALIDATORS[run.source]
         for (const value of values) {
-          if (!isValidId(spec.platformId(value))) throw new ListeningImportError('invalid_id')
+          if (!isValidId(spec.platformId(value)))
+            throw new ListeningImportError('invalid_id')
         }
       }
       assertUnique(values, spec.key)
@@ -359,7 +498,11 @@ export function createListeningImportStore(db: Db, deps: StoreDeps = {}): Listen
         const ordinalRow = byOrdinal.get(value.ordinal)
         const keyRow = byKey.get(spec.key(value))
         if (ordinalRow || keyRow) {
-          if (!ordinalRow || ordinalRow !== keyRow || !spec.same(ordinalRow, value)) {
+          if (
+            !ordinalRow ||
+            ordinalRow !== keyRow ||
+            !spec.same(ordinalRow, value)
+          ) {
             throw new ListeningImportError('conflict')
           }
         } else {
@@ -375,7 +518,8 @@ export function createListeningImportStore(db: Db, deps: StoreDeps = {}): Listen
       if (missing.length > 0) {
         missing.sort((a, b) => compareKeys(spec.key(a), spec.key(b)))
         await spec.insert(tx, importId, missing)
-        await tx.update(listeningImportRuns)
+        await tx
+          .update(listeningImportRuns)
           .set(receivedPatch(spec.kind, received + missing.length))
           .where(eq(listeningImportRuns.id, importId))
       }
@@ -390,46 +534,63 @@ export function createListeningImportStore(db: Db, deps: StoreDeps = {}): Listen
         const expiresAt = new Date(now.getTime() + ttlMs)
         // An export-only listener has no storefront; an existing profile keeps
         // whatever storefront the library sync set.
-        await tx.insert(userMusicProfiles)
+        await tx
+          .insert(userMusicProfiles)
           .values({ userId, createdAt: now, updatedAt: now })
           .onConflictDoNothing()
-        const [profile] = await tx.select().from(userMusicProfiles)
+        const [profile] = await tx
+          .select()
+          .from(userMusicProfiles)
           .where(eq(userMusicProfiles.userId, userId))
           .for('update')
         if (!profile) throw new ListeningImportError('not_found')
-        await tx.update(userMusicProfiles)
+        await tx
+          .update(userMusicProfiles)
           .set({
             timeZone: input.timeZone,
             ...(input.country == null ? {} : { country: input.country }),
             updatedAt: now,
           })
           .where(eq(userMusicProfiles.userId, userId))
-        await tx.update(listeningImportRuns)
+        await tx
+          .update(listeningImportRuns)
           .set({ status: 'expired' })
-          .where(and(
-            eq(listeningImportRuns.userId, userId),
-            eq(listeningImportRuns.source, input.source),
-            eq(listeningImportRuns.status, 'open'),
-          ))
-        const [run] = await tx.insert(listeningImportRuns).values({
-          userId,
-          source: input.source,
-          package: input.package,
-          status: 'open',
-          timeZone: input.timeZone,
-          country: input.country,
-          expectedTracks: input.expectedTracks,
-          expectedDays: input.expectedDays,
-          expectedLibraryTracks: input.expectedLibraryTracks,
-          expectedArtists: input.expectedArtists,
-          unresolvedRows: input.unresolvedRows,
-          unresolvedPlays: input.unresolvedPlays,
-          startedAt: now,
-          expiresAt,
-        }).returning({ id: listeningImportRuns.id })
+          .where(
+            and(
+              eq(listeningImportRuns.userId, userId),
+              eq(listeningImportRuns.source, input.source),
+              eq(listeningImportRuns.status, 'open'),
+            ),
+          )
+        const [run] = await tx
+          .insert(listeningImportRuns)
+          .values({
+            userId,
+            source: input.source,
+            package: input.package,
+            libraryReview: input.libraryReview ?? null,
+            status: 'open',
+            timeZone: input.timeZone,
+            country: input.country,
+            expectedTracks: input.expectedTracks,
+            expectedDays: input.expectedDays,
+            expectedLibraryTracks: input.expectedLibraryTracks,
+            expectedArtists: input.expectedArtists,
+            unresolvedRows: input.unresolvedRows,
+            unresolvedPlays: input.unresolvedPlays,
+            startedAt: now,
+            expiresAt,
+          })
+          .returning({ id: listeningImportRuns.id })
         if (!run) throw new ListeningImportError('internal')
-        await tx.insert(userMusicSources)
-          .values({ userId, source: input.source, connectedAt: now, updatedAt: now })
+        await tx
+          .insert(userMusicSources)
+          .values({
+            userId,
+            source: input.source,
+            connectedAt: now,
+            updatedAt: now,
+          })
           .onConflictDoUpdate({
             target: [userMusicSources.userId, userMusicSources.source],
             set: { updatedAt: now },
@@ -443,17 +604,55 @@ export function createListeningImportStore(db: Db, deps: StoreDeps = {}): Listen
         const tx = rawTx as unknown as Db
         const now = currentTime()
         // Lock order matches begin() and the library sibling: profile, then run.
-        const [profile] = await tx.select().from(userMusicProfiles)
+        const [profile] = await tx
+          .select()
+          .from(userMusicProfiles)
           .where(eq(userMusicProfiles.userId, userId))
           .for('update')
         if (!profile) throw new ListeningImportError('not_found')
-        const [run] = await tx.select().from(listeningImportRuns)
-          .where(and(eq(listeningImportRuns.id, importId), eq(listeningImportRuns.userId, userId)))
+        const [run] = await tx
+          .select()
+          .from(listeningImportRuns)
+          .where(
+            and(
+              eq(listeningImportRuns.id, importId),
+              eq(listeningImportRuns.userId, userId),
+            ),
+          )
           .for('update')
         if (!run) throw new ListeningImportError('not_found')
         if (run.status === 'completed') return completedSummary(run)
         if (run.status !== 'open' || run.expiresAt.getTime() <= now.getTime()) {
           throw new ListeningImportError('invalid_state')
+        }
+        if (run.package === 'spotify_exportify' && !run.libraryReview)
+          throw new ListeningImportError('conflict')
+        if (run.package === 'spotify_account' && !run.libraryReview) {
+          const [source] = await tx
+            .select()
+            .from(userMusicSources)
+            .where(
+              and(
+                eq(userMusicSources.userId, userId),
+                eq(userMusicSources.source, 'spotify_export'),
+              ),
+            )
+          if (source?.quickImportedAt)
+            throw new ListeningImportError('conflict')
+        }
+        if (run.libraryReview?.mode === 'replace') {
+          const current = await spotifyLibraryReview(tx, userId)
+          if (current.fingerprint !== run.libraryReview.fingerprint) {
+            const incoming = await tx
+              .select({ id: listeningImportLibrary.platformId })
+              .from(listeningImportLibrary)
+              .where(eq(listeningImportLibrary.importId, importId))
+            if (
+              (await reviewHash(incoming.map((r) => r.id).sort())) !==
+              current.fingerprint
+            )
+              throw new ListeningImportError('conflict')
+          }
         }
         for (const kind of CHUNK_KINDS) {
           if (run[COUNTERS[kind].received] !== run[COUNTERS[kind].expected]) {
@@ -461,16 +660,32 @@ export function createListeningImportStore(db: Db, deps: StoreDeps = {}): Listen
           }
         }
 
+        if (run.package === 'spotify_exportify')
+          await tx
+            .update(userMusicSources)
+            .set({ quickImportedAt: now })
+            .where(
+              and(
+                eq(userMusicSources.userId, userId),
+                eq(userMusicSources.source, 'spotify_export'),
+              ),
+            )
         // Staged rows must match the expected counts with ordinals exactly
         // 0..n-1, and every day or library row must name a staged track.
-        const validation = normalizeRows(await tx.execute(sql`
+        const validation = normalizeRows(
+          await tx.execute(sql`
           SELECT
-            ${sql.join(CHUNK_KINDS.map((kind) => sql`
+            ${sql.join(
+              CHUNK_KINDS.map(
+                (kind) => sql`
               (SELECT count(*)::int FROM ${CHUNK_TABLES[kind]} WHERE import_id = ${importId})
                 AS ${sql.raw(`${kind}_count`)},
               (SELECT count(*) = 0 OR (min(ordinal) = 0 AND max(ordinal) = count(*) - 1)
                 FROM ${CHUNK_TABLES[kind]} WHERE import_id = ${importId})
-                AS ${sql.raw(`${kind}_valid`)}`), sql`,`)},
+                AS ${sql.raw(`${kind}_valid`)}`,
+              ),
+              sql`,`,
+            )},
             EXISTS (
               SELECT 1 FROM listening_import_days d
               WHERE d.import_id = ${importId} AND NOT EXISTS (
@@ -485,14 +700,20 @@ export function createListeningImportStore(db: Db, deps: StoreDeps = {}): Listen
                 WHERE t.import_id = l.import_id AND t.platform_id = l.platform_id
               )
             ) AS orphan_library
-        `))[0]
+        `),
+        )[0]
         for (const kind of CHUNK_KINDS) {
           if (
-            Number(validation?.[`${kind}_count`]) !== run[COUNTERS[kind].expected]
-            || validation?.[`${kind}_valid`] !== true
-          ) throw new ListeningImportError('count_mismatch')
+            Number(validation?.[`${kind}_count`]) !==
+              run[COUNTERS[kind].expected] ||
+            validation?.[`${kind}_valid`] !== true
+          )
+            throw new ListeningImportError('count_mismatch')
         }
-        if (validation?.orphan_days === true || validation?.orphan_library === true) {
+        if (
+          validation?.orphan_days === true ||
+          validation?.orphan_library === true
+        ) {
           throw new ListeningImportError('conflict')
         }
 
@@ -517,7 +738,7 @@ export function createListeningImportStore(db: Db, deps: StoreDeps = {}): Listen
             WHERE import_id = ${importId}
             ORDER BY platform_id
             ON CONFLICT (spotify_id) WHERE spotify_id IS NOT NULL DO UPDATE SET
-              title = excluded.title,
+              title = CASE WHEN ${run.package} = 'spotify_exportify' THEN tracks.title ELSE excluded.title END,
               artist = CASE
                 WHEN tracks.artist_source IN ('reccobeats', 'apple_catalog') THEN tracks.artist
                 ELSE excluded.artist
@@ -629,16 +850,24 @@ export function createListeningImportStore(db: Db, deps: StoreDeps = {}): Listen
         let likedRemoved = 0
         const likedRemovalSkipped = false
         if (CHUNKS_BY_PACKAGE[run.package].includes('library')) {
-          const removed = await updateLibraryMembership(tx, userId, run.source, {
-            kind: accountPackage ? 'replace' : 'add',
-            trackIds: sql`
+          const removed = await updateLibraryMembership(
+            tx,
+            userId,
+            run.source,
+            {
+              kind:
+                run.libraryReview?.mode ?? (accountPackage ? 'replace' : 'add'),
+              trackIds: sql`
               SELECT rt.track_id
               FROM listening_import_library l
               JOIN (${runTracks}) rt ON rt.platform_id = l.platform_id
               WHERE l.import_id = ${importId}
             `,
-          }, now)
-          if (accountPackage) likedRemoved = removed
+            },
+            now,
+          )
+          if (accountPackage || run.package === 'spotify_exportify')
+            likedRemoved = removed
         }
         if (accountPackage) {
           // 5. Followed artists seed the pool; a seed keeps the id it has.
@@ -673,15 +902,19 @@ export function createListeningImportStore(db: Db, deps: StoreDeps = {}): Listen
         let ledgerFrom: string | null = null
         let ledgerTo: string | null = null
         if (carriesDays) {
-          const bounds = normalizeRows(await tx.execute(sql`
+          const bounds = normalizeRows(
+            await tx.execute(sql`
             SELECT min(day)::text AS ledger_from, max(day)::text AS ledger_to
             FROM listening_days
             WHERE user_id = ${userId} AND source = ${run.source}
-          `))[0]
-          ledgerFrom = bounds?.ledger_from == null ? null : String(bounds.ledger_from)
+          `),
+          )[0]
+          ledgerFrom =
+            bounds?.ledger_from == null ? null : String(bounds.ledger_from)
           ledgerTo = bounds?.ledger_to == null ? null : String(bounds.ledger_to)
         }
-        await tx.insert(userMusicSources)
+        await tx
+          .insert(userMusicSources)
           .values({
             userId,
             source: run.source,
@@ -701,8 +934,13 @@ export function createListeningImportStore(db: Db, deps: StoreDeps = {}): Listen
           })
 
         // 8. Profile: the device's zone always, its country when it sent one.
-        await tx.update(userMusicProfiles)
-          .set({ timeZone: run.timeZone, country: run.country ?? profile.country, updatedAt: now })
+        await tx
+          .update(userMusicProfiles)
+          .set({
+            timeZone: run.timeZone,
+            country: run.country ?? profile.country,
+            updatedAt: now,
+          })
           .where(eq(userMusicProfiles.userId, userId))
 
         const summary: ListeningImportSummary = {
@@ -718,18 +956,21 @@ export function createListeningImportStore(db: Db, deps: StoreDeps = {}): Listen
           likedRemovalSkipped,
         }
         await deps.beforeCommit?.()
-        await tx.update(listeningImportRuns).set({
-          status: 'completed',
-          resultTracks: summary.tracks,
-          resultDays: summary.days,
-          resultLibraryTracks: summary.libraryTracks,
-          resultArtists: summary.artists,
-          ledgerFrom,
-          ledgerTo,
-          resultLikedRemoved: likedRemoved,
-          resultLikedRemovalSkipped: likedRemovalSkipped,
-          completedAt: now,
-        }).where(eq(listeningImportRuns.id, importId))
+        await tx
+          .update(listeningImportRuns)
+          .set({
+            status: 'completed',
+            resultTracks: summary.tracks,
+            resultDays: summary.days,
+            resultLibraryTracks: summary.libraryTracks,
+            resultArtists: summary.artists,
+            ledgerFrom,
+            ledgerTo,
+            resultLikedRemoved: likedRemoved,
+            resultLikedRemovalSkipped: likedRemovalSkipped,
+            completedAt: now,
+          })
+          .where(eq(listeningImportRuns.id, importId))
         return summary
       })
     },
@@ -743,40 +984,83 @@ export function createListeningImportStore(db: Db, deps: StoreDeps = {}): Listen
         const tx = rawTx as unknown as Db
         const now = currentTime()
         // Same profile lock as complete(), so the two never interleave.
-        await tx.insert(userMusicProfiles).values({ userId }).onConflictDoNothing()
-        await tx.select({ userId: userMusicProfiles.userId }).from(userMusicProfiles)
+        await tx
+          .insert(userMusicProfiles)
+          .values({ userId })
+          .onConflictDoNothing()
+        await tx
+          .select({ userId: userMusicProfiles.userId })
+          .from(userMusicProfiles)
           .where(eq(userMusicProfiles.userId, userId))
           .for('update')
-        await tx.update(listeningImportRuns)
+        await tx
+          .update(listeningImportRuns)
           .set({ status: 'expired' })
-          .where(and(
-            eq(listeningImportRuns.userId, userId),
-            eq(listeningImportRuns.source, source),
-            eq(listeningImportRuns.status, 'open'),
-          ))
-        const deletedDays = (await tx.delete(listeningDays)
-          .where(and(eq(listeningDays.userId, userId), eq(listeningDays.source, source)))
-          .returning({ trackId: listeningDays.trackId })).length
-        await tx.delete(userArtistSeeds)
-          .where(and(eq(userArtistSeeds.userId, userId), sql`${userArtistSeeds.source} = ${source}`))
-        await tx.delete(userMusicSources)
-          .where(and(eq(userMusicSources.userId, userId), eq(userMusicSources.source, source)))
+          .where(
+            and(
+              eq(listeningImportRuns.userId, userId),
+              eq(listeningImportRuns.source, source),
+              eq(listeningImportRuns.status, 'open'),
+            ),
+          )
+        const deletedDays = (
+          await tx
+            .delete(listeningDays)
+            .where(
+              and(
+                eq(listeningDays.userId, userId),
+                eq(listeningDays.source, source),
+              ),
+            )
+            .returning({ trackId: listeningDays.trackId })
+        ).length
+        await tx
+          .delete(userArtistSeeds)
+          .where(
+            and(
+              eq(userArtistSeeds.userId, userId),
+              sql`${userArtistSeeds.source} = ${source}`,
+            ),
+          )
+        await tx
+          .delete(userMusicSources)
+          .where(
+            and(
+              eq(userMusicSources.userId, userId),
+              eq(userMusicSources.source, source),
+            ),
+          )
 
         if (source === 'spotify_export') {
-          await tx.delete(playlistOrigins).where(and(
-            eq(playlistOrigins.userId, userId), eq(playlistOrigins.source, 'spotify_export'),
-          ))
-          await tx.update(userPlaylists)
+          await tx
+            .delete(playlistOrigins)
+            .where(
+              and(
+                eq(playlistOrigins.userId, userId),
+                eq(playlistOrigins.source, 'spotify_export'),
+              ),
+            )
+          await tx
+            .update(userPlaylists)
             .set({ inLibrary: false, updatedAt: now })
-            .where(and(
-              eq(userPlaylists.userId, userId),
-              eq(userPlaylists.source, 'spotify_export'),
-              eq(userPlaylists.inLibrary, true),
-            ))
+            .where(
+              and(
+                eq(userPlaylists.userId, userId),
+                eq(userPlaylists.source, 'spotify_export'),
+                eq(userPlaylists.inLibrary, true),
+              ),
+            )
         }
-        const unlibraried = await updateLibraryMembership(tx, userId, source, { kind: 'remove' }, now)
+        const unlibraried = await updateLibraryMembership(
+          tx,
+          userId,
+          source,
+          { kind: 'remove' },
+          now,
+        )
 
-        const deletedTracks = normalizeRows(await tx.execute(sql`
+        const deletedTracks = normalizeRows(
+          await tx.execute(sql`
           DELETE FROM user_tracks ut
           WHERE ut.user_id = ${userId}
             AND NOT ut.in_library
@@ -786,7 +1070,8 @@ export function createListeningImportStore(db: Db, deps: StoreDeps = {}): Listen
               WHERE ld.user_id = ut.user_id AND ld.track_id = ut.track_id
             )
           RETURNING ut.track_id
-        `)).length
+        `),
+        ).length
         // Survivors: recent plays from the remaining ledger; skips only where
         // ledger rows remain to say so.
         await tx.execute(sql`
@@ -810,9 +1095,12 @@ export function createListeningImportStore(db: Db, deps: StoreDeps = {}): Listen
       })
     },
 
-    putTracks: (userId, importId, tracks) => stage(userId, importId, tracks, trackSpec),
+    putTracks: (userId, importId, tracks) =>
+      stage(userId, importId, tracks, trackSpec),
     putDays: (userId, importId, days) => stage(userId, importId, days, daySpec),
-    putLibrary: (userId, importId, tracks) => stage(userId, importId, tracks, librarySpec),
-    putArtists: (userId, importId, artists) => stage(userId, importId, artists, artistSpec),
+    putLibrary: (userId, importId, tracks) =>
+      stage(userId, importId, tracks, librarySpec),
+    putArtists: (userId, importId, artists) =>
+      stage(userId, importId, artists, artistSpec),
   }
 }

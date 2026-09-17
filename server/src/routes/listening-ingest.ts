@@ -1,3 +1,4 @@
+import { spotifyCollectionReview } from '../listening/collection-review'
 import { Hono, type Context } from 'hono'
 import { z } from 'zod'
 import { zValidator } from '@hono/zod-validator'
@@ -44,6 +45,8 @@ export function listeningIngestRoutes(
   store: ListeningImportStore = createListeningImportStore(db),
 ) {
   const app = new Hono<Env>()
+
+  app.get('/listening/spotify/review', async c => c.json(await spotifyCollectionReview(db,c.get('user').id)))
 
   app.post('/listening/imports', zValidator('json', beginListeningImportSchema), async (c) => {
     try {

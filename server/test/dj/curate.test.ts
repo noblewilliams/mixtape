@@ -327,3 +327,14 @@ describe('curate', () => {
     })
   })
 })
+
+it.each(['rise', 'fall', 'steady', 'arc'] as const)('keeps %s sequencing at user altitude and returns only eligible distinct tracks', async energyArc => {
+  const pool = makePool(6)
+  const {llm, requests} = scriptedLlm([textTurn([{id:'outside'}, {id:'t2'}, {id:'t2'}, {id:'t0'}, {id:'t1'}])])
+  const result = await curate(llm, pool, intent({themes:'Keep my exclusions first',targetCount:3,energyArc}))
+  expect(new Set(result.map(t=>t.trackId)).size).toBe(result.length)
+  expect(result.every(t=>pool.some(p=>p.trackId===t.trackId))).toBe(true)
+  expect(result.map(t=>t.trackId)).toEqual(['t2','t0','t1'])
+  expect(JSON.stringify(requests[0].messages)).toContain(energyArc === 'arc' ? 'on an ARC' : energyArc === 'rise' ? 'RISING' : energyArc === 'fall' ? 'FALLING' : 'STEADY')
+  expect(JSON.stringify(requests[0].system)).not.toContain('Keep my exclusions first')
+})

@@ -26,6 +26,8 @@ import {
   listeningDays,
   userMusicSources,
   userArtistSeeds,
+  playbackEvidence,
+  playbackSettings,
 } from '../../src/db/schema'
 import type { Embedder } from '../../src/enrich/embedder'
 
@@ -1470,4 +1472,21 @@ describe('buildPool corpus mode', () => {
     expect(ids).toContain(spotifyRow.id)
     expect(ids).not.toContain(appleRow.id)
   })
+})
+
+it('bounds listening influence and requires multiple days before skips penalize an artist',async()=>{
+ const db=await createTestDb();await seedUser(db,'u1');const track=await seedTrack(db,'u1',{embedding:SAME_AS_QUERY,energy:.5})
+ const [session]=await db.insert(djSessions).values({userId:'u1',title:'Mix'}).returning()
+ const score=async()=>(await buildPool(db,fakeEmbed,'u1',intent({themes:'x'})))[0].score
+ const baseline=await score()
+ await db.insert(playbackSettings).values({userId:'u1',enabled:true,revision:1})
+ const add=async(sequence:number,kind:string,date:Date)=>db.insert(playbackEvidence).values({userId:'u1',playbackId:'00000000-0000-4000-8000-000000000001',sequence,sessionId:session.id,version:1,position:0,trackId:track.id,source:'apple_web',kind,observedMs:5000,occurredAt:date})
+ await add(0,'skip',new Date())
+ expect(await score()).toBeCloseTo(baseline,8)
+ await add(1,'skip',new Date(Date.now()-86400000))
+ expect(await score()).toBeCloseTo(baseline-.02,8)
+ for(let i=2;i<20;i++)await add(i,'skip',new Date(Date.now()-i*86400000))
+ expect(await score()).toBeCloseTo(baseline-.03,8)
+ await db.update(playbackSettings).set({enabled:false})
+ expect(await score()).toBeCloseTo(baseline,8)
 })

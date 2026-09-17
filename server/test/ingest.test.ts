@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { createTestDb, type TestDb } from './helpers/db'
 import { createApp, type AuthLike } from '../src/app'
-import { tracks, userTracks, user } from '../src/db/schema'
+import { tracks, userTracks, user, userMusicSources } from '../src/db/schema'
 
 const authed: AuthLike = {
   handler: () => new Response('ok'),
@@ -44,6 +44,23 @@ describe('POST /ingest/library', () => {
     const db = await createTestDb()
     const res = await post(db, { songs: [song()] }, { ...authed, api: { getSession: async () => null } })
     expect(res.status).toBe(401)
+  })
+
+  it('exposes native synced songs as an Apple source without a staged-sync registry row', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    expect((await post(db, { songs: [song()] })).status).toBe(200)
+    const app = createApp({ auth: authed, db })
+    const sources = await (await app.request('http://x/me/music-sources')).json() as { sources: { source: string; lastImportedAt: string | null }[] }
+    expect(sources.sources).toEqual([expect.objectContaining({ source: 'apple_live', lastImportedAt: null })])
+    const onboarding = await (await app.request('http://x/me/onboarding')).json() as { sources: unknown[] }
+    expect(onboarding.sources).toEqual(sources.sources)
+    const other = createApp({ auth: { ...authed, api: { getSession: async () => ({ user: { id: 'other-user' } }) } }, db })
+    expect(await (await other.request('http://x/me/music-sources')).json()).toEqual({ sources: [] })
+    const completedAt = new Date('2026-09-09T12:00:00Z')
+    await db.insert(userMusicSources).values({ userId: 'user-1', source: 'apple_live', connectedAt: completedAt, lastImportedAt: completedAt })
+    const registered = await (await app.request('http://x/me/music-sources')).json() as { sources: unknown[] }
+    expect(registered.sources).toEqual([expect.objectContaining({ source: 'apple_live', lastImportedAt: completedAt.toISOString() })])
   })
 
   it('inserts tracks and user_tracks', async () => {

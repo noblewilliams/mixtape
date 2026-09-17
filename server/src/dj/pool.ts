@@ -446,7 +446,7 @@ export async function buildPool(
     0.05 * COALESCE(1 - LEAST(1, ABS(t.release_year - sp.release_year) / 30.0), 0.5)
   )`
 
-  const scoreExpr = sql`(${weights.sim} * ${simFit} + ${weights.feat} * ${featureFit} + ${weights.fam} * ${famFit} + ${weights.taste} * ${tasteFit} + ${playlistWeight} * ${playlistFit} + ${seedWeight} * ${seedFit})`
+  const scoreExpr = sql`(${weights.sim} * ${simFit} + ${weights.feat} * ${featureFit} + ${weights.fam} * ${famFit} + ${weights.taste} * ${tasteFit} + ${playlistWeight} * ${playlistFit} + ${seedWeight} * ${seedFit} + COALESCE(pb.balance, 0))`
 
   // The mode switch — where candidates come from is the ONE structural
   // difference between the two modes; the score formula (bar the familiarity
@@ -610,6 +610,24 @@ export async function buildPool(
       FROM taste_signals
       GROUP BY artist
     ),
+    playback_days AS (
+      SELECT t.artist, (pe.occurred_at AT TIME ZONE 'UTC')::date AS day,
+        bool_or(pe.kind IN ('listen', 'repeat')) AS positive,
+        bool_or(pe.kind = 'skip') AS negative
+      FROM playback_evidence pe
+      JOIN playback_settings ps ON ps.user_id = pe.user_id AND ps.enabled = true
+      JOIN tracks t ON t.id = pe.track_id
+      WHERE pe.user_id = ${userId} AND pe.occurred_at > NOW() - INTERVAL '90 days'
+      GROUP BY t.artist, (pe.occurred_at AT TIME ZONE 'UTC')::date
+    ),
+    playback_balance AS (
+      SELECT artist,
+        LEAST(0.03, COUNT(*) FILTER (WHERE positive)::float8 * 0.01) -
+        CASE WHEN COUNT(*) FILTER (WHERE negative AND NOT positive) >= 2
+          THEN LEAST(0.03, COUNT(*) FILTER (WHERE negative AND NOT positive)::float8 * 0.01)
+          ELSE 0 END AS balance
+      FROM playback_days GROUP BY artist
+    ),
     recent_signal AS (
       SELECT track_id, MIN(rank) AS rank
       FROM user_recent_track_observations
@@ -705,6 +723,7 @@ export async function buildPool(
       LEFT JOIN track_features f ON f.track_id = t.id
       LEFT JOIN track_meanings tm ON tm.track_id = t.id
       LEFT JOIN artist_taste at ON at.artist = t.artist
+      LEFT JOIN playback_balance pb ON pb.artist = t.artist
       LEFT JOIN recent_signal rs ON rs.track_id = t.id
       LEFT JOIN playlist_signal ps ON ps.key = COALESCE(t.isrc, t.id::text)
       LEFT JOIN fam_plays fp ON fp.key = COALESCE(t.isrc, t.id::text)

@@ -1,3 +1,5 @@
+import { suggestionRoutes } from './routes/suggestions'
+import { playbackRoutes } from './routes/playback'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { HTTPException } from 'hono/http-exception'
@@ -108,6 +110,11 @@ export function createApp({
   }
 
   if (db) {
+    app.use('/suggestions', requireSession(auth))
+    app.use('/suggestions/*', requireSession(auth))
+    app.route('/suggestions', suggestionRoutes(db))
+    app.use('/playback/*', requireSession(auth))
+    app.route('/playback', playbackRoutes(db))
     app.use('/ingest/*', requireSession(auth))
     app.route('/ingest', ingestRoutes(db))
     app.route('/ingest', libraryIngestRoutes(db))

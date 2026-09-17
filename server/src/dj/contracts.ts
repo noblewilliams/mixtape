@@ -230,6 +230,7 @@ export const DJ_TOOLS: LlmToolDef[] = [
     input_schema: {
       type: 'object',
       properties: {
+        energyArc: { type: 'string', enum: ['rise', 'fall', 'arc', 'steady'], description: 'Set when the listener explicitly changes the energy journey, including reordering. Omit to keep the current journey. Exclusions and pinned choices come first.' },
         ops: {
           type: 'array',
           minItems: 1,

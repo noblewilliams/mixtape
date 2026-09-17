@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { mixHistoryRoutes } from './mix-history'
 import { z } from 'zod'
 import { zValidator } from '@hono/zod-validator'
 import { and, asc, desc, eq, sql } from 'drizzle-orm'
@@ -118,6 +119,7 @@ const sessionListColumns = {
 
 export function sessionRoutes(db: Db, deps: DjDeps) {
   const app = new Hono<{ Variables: AppVars }>()
+  app.route('/', mixHistoryRoutes(db))
 
   app.put('/:id/playlist-seed', bodyLimit({ maxSize: 2048 }), zValidator('json', seedSelectionSchema), async c => {
     const id = c.req.param('id')
