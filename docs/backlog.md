@@ -4,12 +4,26 @@ Single consolidated list. Detail lives in `decisions.md` (rationale) and the pla
 
 ## Owed right now
 
-- **Release playlist-inspired mixes:** the approved server contract is implemented and committed in `bba5de9`; see `superpowers/specs/2026-09-04-playlist-inspired-mixes-design.md` and migration 0024. Ordinary mix sessions can select, replace, or clear a read-only playlist reference; resolve names with clarification; persist it across follow-ups; use a bounded profile in pre-limit ranking; exclude every resolved source recording on request; and fence late curation against selection or source changes. No browse seed control is included yet. Migration 0024 and the matching Worker are deployed; device/browser validation follows `superpowers/specs/2026-09-05-listening-export-release-validation-design.md`.
+- **Native mobile parity:** [September 8 spec](superpowers/specs/2026-09-08-mobile-parity-design.md) is implemented locally: Home/conversation names and archive actions, memory confirmation, composer inspiration, playlist curation, Google SDK and Account methods. All native board surfaces are approved. **712 native tests pass**, analysis is clean, and the unsigned iOS simulator build passes. [Google public native configuration](testing/native-google-setup.md) is wired as of September 9; builds must include the documented define file. Remaining: real-provider/account acceptance, physical-device smoke and release delivery; no native UI approval/integration work remains in this scope.
 
-- **Release playlist origin + taste:** the work in `superpowers/plans/2026-09-04-playlist-origin-taste.md` is committed in `bba5de9`. It adds exact creation receipts, owner-confirmed curation, and bounded recording-level taste scoring. Unknown origin stays neutral; no playlist is silently confirmed on sync. Migration 0021 and the matching Worker are deployed; client rollout and a founder-device smoke of the typed MusicKit creation path follow the release-validation spec above. A user-facing confirmation control belongs to a later approved browse design; until then the confirmation API exists but there is no UI to enable positive evidence for old playlists.
+- **Exportify quick import:** founder approved guided ZIP/CSV import as the
+  primary Spotify route, manual refresh, and optional official history under
+  Go deeper. The 17-state web/iOS board is approved with compact actions and
+  no decorative left borders: `mockups/2026-09-08-exportify-import-states.html` and
+  `superpowers/specs/2026-09-08-exportify-import-design.md`. Parser, reviewed partial
+  collection updates, and web/native UI are implemented locally. Remaining gates
+  are real Export All/filtered-file acceptance and production rollout; see
+  `testing/2026-09-08-exportify-import.md`.
+  Filenames do not prove playlist identity or whole-library completeness.
+
+Execution started, 2026-09-08: [release completion and web controls](superpowers/specs/2026-09-08-release-completion-design.md). Includes web memory, session rename/archive/restore, playlist inspiration and taste-confirmation controls, plus release preparation and acceptance. Revision 2 of the web state board is approved; all four web controls are implemented locally, including inline rename, swipe archive/restore, modal forgetting and composer attachments. Release and external access gates remain explicit in the spec. Evidence: [release completion record](releases/2026-09-08-release-completion.md).
+
+- **Release playlist-inspired mixes:** the approved server contract is implemented and committed in `bba5de9`; see `superpowers/specs/2026-09-04-playlist-inspired-mixes-design.md` and migration 0024. Ordinary mix sessions can select, replace, or clear a read-only playlist reference; resolve names with clarification; persist it across follow-ups; use a bounded profile in pre-limit ranking; exclude every resolved source recording on request; and fence late curation against selection or source changes. The approved web browse/composer seed control is now implemented locally; release validation remains. Migration 0024 and the matching Worker are deployed; device/browser validation follows `superpowers/specs/2026-09-05-listening-export-release-validation-design.md`.
+
+- **Release playlist origin + taste:** the work in `superpowers/plans/2026-09-04-playlist-origin-taste.md` is committed in `bba5de9`. It adds exact creation receipts, owner-confirmed curation, and bounded recording-level taste scoring. Unknown origin stays neutral; no playlist is silently confirmed on sync. Migration 0021 and the matching Worker are deployed; client rollout and a founder-device smoke of the typed MusicKit creation path follow the release-validation spec above. The approved web browse confirmation control is implemented locally, with explicit confirmation, reversal and canonical refresh after uncertain responses.
 
 - **Listening-export import:** phases 1–3 are implemented and committed through `bba5de9`: staged on-device Spotify import on web/iOS, source-safe library evidence, day-ledger derivation, play-derived pools, exact ISRC linking, enrichment, and fallback artwork. The founder's real exports are still pending. Release and real-data acceptance now follow `superpowers/specs/2026-09-05-listening-export-release-validation-design.md`; Phase 4 remains evidence-gated and Apple "go deeper" remains Phase 5.
-- **Ship web sync and consumption:** source-aware song sync, MusicKit pagination, playlist upload/browse, existing mix/session flows, and the approved Your music UI are committed in `3d18a17`; their server runtime is deployed. DJ memory controls and session rename/archive/unarchive remain separate web parity work. Remaining web-production, launch-browser, and production-account checks are part of the release-validation spec above. Android Chrome remains launch-critical; do not read the founder library without action-time approval.
+- **Ship web sync and consumption:** source-aware song sync, MusicKit pagination, playlist upload/browse, existing mix/session flows, and the approved Your music UI are committed in `3d18a17`; their server runtime is deployed. DJ memory controls and session rename/archive/restore are implemented locally under the September 8 release-completion spec. Remaining web-production, launch-browser, and production-account checks are part of the release-validation spec above. Android Chrome remains launch-critical; do not read the founder library without action-time approval.
 - **Release listening export and playlist intelligence:** the combined server/music work is committed in `bba5de9`; the Your music web integration is committed in `3d18a17`; and production migrations are applied. The CDN-host repair was backported alone onto the prior deployed snapshot as `cace81e`, deployed as Worker version `f2c5014b-a199-4398-bec9-e0dd22ac0d7e`, and integrated into `origin/main` as `ebfe96d`; it did not activate the playlist-editing server follow-on. Public health, session/admin guards, and the next scheduled maintenance invocation passed. That cron had zero eligible fallback rows, zero fallback failures, and no listener-data mutation; the binding-free edge smoke remains the direct Spotify/Deezer call evidence. Web/TestFlight rollout, real Spotify archive validation, privacy checks, and the Phase 4 evidence gate remain in `superpowers/specs/2026-09-05-listening-export-release-validation-design.md`. Deezer succeeded in the edge smoke but remains a best-effort contingency because its exact-ISRC route lacks a stable public contract.
 - **Observe playlist catalog resolution:** Phase 2 collection and browse APIs shipped, with migrations 0012–0014 and founder sync verified (see the Phase 2 plan's rollout evidence). The bounded resolver, origin/taste, and explicit playlist-inspired mixes are committed in `bba5de9`; migrations 0020, 0021, and 0024 and the matching Worker are deployed. The initial bounded scheduled pass materialized 25 catalog tracks, raised linked entries from the recorded 353 baseline to 379, and left 954 for later batches. Let it drain normally and investigate only if aggregate failure/retry categories appear or progress stops across several scheduled windows. Conversational drafts, the isolated playlist DJ, and approved native review are committed. Revised-copy apply is locally implemented without a new migration; its Worker deploy, matching client install, and disposable device smoke remain gated by Cloudflare control-plane recovery and explicit production/device approval.
 - **Playlist probe side effect is inconclusive:** the founder reported that both disposable playlists currently looked ordered, but the Music-created candidate may have lost one song. There is no pre-probe snapshot to resolve it. Run no further mutation probe in Phase 2; the new read-only snapshot becomes the baseline for future conflict detection.
@@ -24,7 +38,7 @@ The remaining conversational editing contract is now isolated in `docs/superpowe
 
 ## Next big phase: v2 — "The DJ learns" (vision.md milestone 2)
 
-P4 built v2's foundation (taste term + memory). What remains, in ascending difficulty — recommended sequencing: smoke P4 → TestFlight → ~2 weeks of daily use → spec v2 starting with arcs:
+P4 built v2's foundation (taste term + memory). What remains, in ascending difficulty — recommended sequencing: TestFlight → ~2 weeks of daily use → spec v2 starting with arcs:
 
 1. **Richer arcs (warm-up → peak → cool-down).** Queues engineered as an energy journey, not just well-ordered picks. Pure server-side sequencing work over the already-scored pool (features now 100%). This is THE designated evidence case for the Opus-escalation contingency (CLAUDE.md): if Sonnet's arc ordering disappoints, escalate only the sequencing pass. Cheapest pillar, felt in every tape.
 2. **Anticipatory sessions ("your usual Friday wind-down?").** Data already exists — sessions carry timestamps + prompts. A pattern job spots time-of-day/mood habits; Home offers a one-tap suggested session instead of a blank prompt.
@@ -39,11 +53,11 @@ Then **v3 — web + reach**: first-class Apple Music web access for listeners wh
 - **UI copy → locked terminology** — align "The tape" card, "queue updated · vN" chips, and any queue-wording to the mix / play now / create-playlist vocabulary (decisions.md 2026-08-30).
 - **Mix version history (founder request, P4 smoke)** — the transcript's "queue updated · vN" chips are inert; you can't view or restore an earlier version of a mix. BLOCKER FIRST: retention — `replaceQueue` deletes the previous version's active rows on regenerate, so old versions aren't reconstructible today. Design: version-ranged queue rows (or per-version snapshots) → tappable chips showing that version → "restore" action (a new version copying an old one). Compounds with the regen bug fix above (surgical edits make versions cheap diffs).
 - **TestFlight upload / release install** — debug builds only run tethered to `flutter run`; daily use wants `flutter run --release` or TestFlight (which was always the v1 distribution plan).
-- **Git remote** — the repo has NO remote; it exists only on this machine. Push somewhere before it matters.
+- **Git remote — configured.** `origin` points to `noblewilliams/mixtape`; local `main` and the cached remote ref match at `05ba8b1`. Read-only verification outside the sandbox on 2026-09-08 confirmed remote main at the same commit.
 - **Behavioral memory distillation** — a periodic job that turns swipe/keep patterns into memory notes (founder deferred at P4 design time; the live `remember_preference` tool shipped instead).
 - **People as first-class memory ("remembered companions")** — founder request 2026-08-30, from the P4 smoke: describing a friend's taste in a session prompt ("Ose likes Tems and mellow afro house") does NOT auto-save, by the durable-vs-one-off rule — correct default, but the DJ should be able to remember named people and their tastes so "tape for me and Ose" just works without re-describing him. Works today via an explicit "remember: Ose likes…" note; the feature version = structured person-scoped memories (name → taste sketch), applied only when that person is mentioned. Bridge to v4 blends: a blend for a friend who isn't a user yet is exactly a companion memory.
 - **Profile name** — account `name` was set manually via SQL for the founder; a real profile field would feed playlist attribution (see queue_screen save dialog) and any future social surface. Apple only discloses the name at first-ever sign-in, so capture it at sign-up for future users.
-- **Web integration** — Better Auth, session/memory/playlist APIs, MusicKit JS playback and library reads, staged sync, and Apple playlist creation are wired. Apple + Google login, explicit account linking, and the last-used provider hint are implemented. The approved Your music UI now surfaces real sync and playlist browse/detail; memories and session rename/archive controls remain. Web cannot contribute native iOS per-song play counts by design; recent order and playlist membership cover that capability gap without inventing counts.
+- **Web integration** — Better Auth, session/memory/playlist APIs, MusicKit JS playback and library reads, staged sync, and Apple playlist creation are wired. Apple + Google login, explicit account linking, and the last-used provider hint are implemented. The approved Your music UI now surfaces real sync and playlist browse/detail; the September 8 web controls add memories, inline rename/archive/restore and playlist inspiration/confirmation locally. Web cannot contribute native iOS per-song play counts by design; recent order and playlist membership cover that capability gap without inventing counts.
 
 ## Deferred polish (recorded during reviews; none are gates)
 
@@ -70,3 +84,68 @@ Server / DJ:
 - GetSongBPM leg of the enrichment waterfall — currently NOT needed (features at 100%); reopens only if coverage regresses (requires visible getsongbpm.com backlink in UI).
 - Musixmatch licensed-lyrics deal at scale (lyrics stay derive-don't-display until then).
 - iTunes lookup from Workers if Apple unblocks datacenter IPs (currently residential-only; local scripts use it).
+
+
+## 2026-09-09 — Newly selected implementation program
+
+The founder has now selected all six next features, excluding existing-playlist
+editing: saved mix versions, richer energy journeys, observable playback learning,
+routine suggestions, Apple deeper-history import, private blends and opt-in taste
+twins. Recommendations on Apple in-app playback with handoff retained and private
+blends plus explicit discovery consent are approved. New visual states await review.
+Track `superpowers/specs/2026-09-09-next-features-design.md` and
+`superpowers/plans/2026-09-09-next-features.md`. Existing basic arc intent is reused.
+The core user journeys were confirmed working by the founder; this program does not
+reopen them as unverified. Earlier roadmap ordering above is superseded for this scope.
+
+
+### Native Your music source visibility — September 9
+
+Fixed the source-list gap for native paged Apple ingestion: source reads now
+recognize explicit `apple_live` library ownership when the staged-sync registry
+row is absent. This read-only fallback covers existing synced rows without a
+migration or re-sync; it preserves registered snapshot metadata and does not
+infer Apple from generic saved/Spotify rows. The fallback connection date is the
+earliest surviving library observation; the completed-sync date stays unknown.
+Native Your music labels that case “Connected library”, refreshes on entry, and
+successful library sync invalidates cached onboarding/source state. Native phone
+verification of the corrected screen remains part of smoke testing.
+
+
+### Mix-history implementation checkpoint — 2026-09-09
+
+Saved mix versions and owner/version-safe restore are now implemented locally on
+server, web and native. This supersedes the earlier retention-blocker description.
+Migration 0029 and release are pending; a mobile build using the current production
+API cannot use the new history endpoints yet. Evidence: `testing/2026-09-09-mix-history.md`.
+Energy journeys, in-app playback/feedback, suggestions, Apple history and social
+features remain pending.
+
+### 2026-09-09 — Energy journey implementation
+
+- Web/native composer presets and immutable per-version assessments implemented locally.
+  Evidence: `testing/2026-09-09-energy-journeys.md`.
+- Release gate: apply pending 0029/0030 migrations, deploy matching API/web, refresh native
+  build. Validate live musical quality separately from deterministic golden checks.
+- Next approved slice: app-owned Apple playback and observed listening feedback.
+
+### 2026-09-09 — Apple player and observed feedback
+
+- Implemented locally on web/native: app-owned Apple transport, mini-player, observed
+  listening meter, account-scoped retry outbox, learning switch/clear, version-bound
+  authenticated ingestion, and capped feedback contribution.
+- Migration 0031 and matching API/web/native release remain pending, following
+  0029/0030. New-player physical-device interruption/background/authorization
+  acceptance remains open. Existing core flows were already founder-tested.
+- Evidence and exact device script: `testing/2026-09-09-apple-player-feedback.md`.
+- Next approved slice: routine-based mix suggestions.
+
+### 2026-09-09 — Routine suggestions
+
+- Implemented locally on web/native: broad energy routines on Home, explicit creation,
+  local-day dismissal, account-wide off, time-zone and stale-availability checks.
+- Migration 0032 and matching API/web/native release remain pending after 0029–0031.
+  Verify a real qualifying account after release. Evidence:
+  `testing/2026-09-09-routine-suggestions.md`.
+- Next approved slice: Apple deeper-history archive import, followed by private blends
+  and opt-in taste twins. Existing core journeys remain founder-confirmed.

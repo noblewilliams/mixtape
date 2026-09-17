@@ -10,6 +10,10 @@ Personal-DJ app: prompt → perfect Apple Music queue for the moment. Flutter cl
 
 **Status (2026-08-30):** v1 phases P1 (auth+library sync), P2 (enrichment), P2.5 (local preview analysis — features 100%), P3 (conversational DJ, device-verified), P4 (taste learning + per-user memory, deployed) are all code-complete. Only open gate: P4 founder device smoke (script in the P4 plan §Task 5). 439 server + 216 client tests.
 
+## Terminology (locked 2026-08-30)
+
+Talking to the DJ creates a **mix**. A mix can be **played now** (added to the Apple Music queue) or **created as a playlist**. Use this vocabulary everywhere; DB naming (queue_tracks etc.) is unaffected.
+
 ## Ground rules
 
 - **Sessions-first**: the primary object is an ephemeral session queue; playlists are a conversion, not the default.
@@ -22,6 +26,7 @@ Personal-DJ app: prompt → perfect Apple Music queue for the moment. Flutter cl
 - `server/src/db/auth-schema.ts` is HAND-MAINTAINED (Better Auth CLI lags the runtime; regenerating drops `account.issuer` and breaks Apple sign-in).
 - Prod DB driver is neon-serverless Pool (neon-http has NO transactions); one-off scripts use neon-http.
 - User-scoped Riverpod providers must `ref.watch(authProvider)` in build() so auth transitions reset them; long-running services they own must cancel via `ref.onDispose`.
+- Deploys: while any parallel session may hold uncommitted changes, `wrangler deploy` from a clean `git worktree` of committed HEAD, NEVER the working tree (a working-tree deploy once shipped another session's half-finished auth code and 500'd prod for ~3 minutes).
 - Scripts touching prod: dry-run by default, `--apply` to write, fixed-string error logging (never interpolate error messages/response bodies — credential-leak lesson), `.dev.vars` loader strips surrounding quotes.
 - iTunes lookup API 403s datacenter IPs — anything needing it runs locally (see `server/scripts/`).
 

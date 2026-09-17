@@ -1,0 +1,750 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mixtape native shape and screen map</title>
+<style>
+/* ---------- Review page (outside the phone frames) ---------- */
+*{box-sizing:border-box}
+html{background:#202126}
+body{margin:0;background:#202126;color:#eee9ed;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1240px;margin:auto;padding:28px 24px 80px}
+h1{font-size:30px;line-height:1.15;margin:0 0 10px}
+h2{font-size:22px;margin:56px 0 6px;padding-top:18px;border-top:1px solid #3b393f}
+h3{font-size:16px;margin:26px 0 8px}
+p{max-width:820px}
+a{color:#c0daed}
+.kicker{font:700 11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:#c5adbd;margin:0 0 8px}
+.note{color:#cfc5d1;font-size:14px;max-width:820px}
+.callout{background:#2b2830;border:1px solid #47434c;border-radius:12px;padding:14px 16px;max-width:820px;margin:14px 0}
+.callout strong{color:#fff}
+ul.tight{margin:6px 0 0;padding-left:20px}
+ul.tight li{margin:4px 0}
+.legend{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0 0}
+.badge{display:inline-flex;align-items:center;gap:6px;font:700 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em;text-transform:uppercase;padding:5px 8px;border-radius:6px;white-space:nowrap}
+.badge::before{content:"";width:8px;height:8px;border-radius:50%;background:currentColor}
+.b-work{color:#a7d8b4;background:rgba(112,151,120,.18);border:1px solid rgba(112,151,120,.5)}
+.b-local{color:#ecd39a;background:rgba(209,138,101,.16);border:1px solid rgba(209,138,101,.5)}
+.b-plan{color:#bcd0de;background:transparent;border:1px dashed #8fa5b5}
+.b-plan::before{background:transparent;border:1.5px solid currentColor;width:6px;height:6px}
+/* Feature map */
+.map{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin-top:16px}
+.dest{background:#2a282e;border:1px solid #423f47;border-radius:14px;padding:16px 16px 12px;min-width:0}
+.dest header{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px}
+.dest h3{margin:0;font-size:17px}
+.dest .where{color:#b9aebd;font-size:12px;margin:0 0 10px}
+.scr{list-style:none;margin:0;padding:0}
+.scr li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:start;padding:8px 0;border-top:1px solid #3a373f}
+.scr li strong{display:block;font-size:14px;color:#fff}
+.scr li span{display:block;font-size:12px;color:#c3b9c6;margin-top:2px}
+.scr .badge{margin-top:2px}
+.states{margin:10px 0 0;padding:8px 0 0;border-top:1px dashed #4a464f;font-size:12px;color:#bdb2c0}
+.states b{color:#e3d8e5;font-weight:600}
+/* Option layout */
+.options{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:24px;margin-top:16px}
+.option{background:#26242a;border:1px solid #3d3a42;border-radius:16px;padding:18px}
+.option.rec{border-color:#8fa5b5}
+.option h3{margin:0 0 4px;font-size:18px;display:flex;align-items:center;gap:10px}
+.option .rec-tag{font:700 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.12em;text-transform:uppercase;color:#0f1a24;background:#bcd0de;padding:5px 7px;border-radius:5px}
+.frames{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;margin-top:14px}
+.frame{width:390px;max-width:100%}
+.frame figcaption{font-size:13px;color:#cfc5d1;margin:10px 4px 0;line-height:1.45}
+.frame figcaption b{color:#fff;font-weight:600;display:block}
+figure{margin:0}
+.tree{font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;background:#1d1c21;border:1px solid #38363c;border-radius:10px;padding:12px 14px;white-space:pre;overflow:auto;color:#d8d0da;margin:12px 0 0}
+.tree i{color:#ecd39a;font-style:normal}.tree u{color:#8fa5b5;text-decoration:none}
+.tradeoff{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px;font-size:13px}
+.tradeoff div{background:#1d1c21;border-radius:10px;padding:10px 12px}
+.tradeoff b{display:block;color:#fff;margin-bottom:4px}
+/* Foundation panels */
+.panels{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:14px}
+@media(max-width:900px){.panels{grid-template-columns:1fr}.tradeoff{grid-template-columns:1fr}}
+.panel{border-radius:16px;padding:18px;border:1px solid transparent}
+.panel h4{margin:0 0 12px;font:700 11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase}
+.swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px}
+.sw{border-radius:10px;padding:8px;min-height:68px;display:flex;flex-direction:column;justify-content:flex-end;font-size:11px;line-height:1.3;border:1px solid rgba(127,127,127,.25)}
+.sw b{font-weight:700}
+.sw code{font:11px ui-monospace,SFMono-Regular,Menlo,monospace;opacity:.8}
+.typerow{display:grid;grid-template-columns:150px minmax(0,1fr);gap:12px;align-items:baseline;padding:8px 0;border-top:1px solid rgba(127,127,127,.2)}
+.typerow small{font:11px ui-monospace,SFMono-Regular,Menlo,monospace;opacity:.75}
+.iconrow{display:flex;flex-wrap:wrap;gap:24px 6px}
+.iconrow span{width:48px;height:48px;display:grid;place-items:center;border-radius:12px;border:1px dashed rgba(127,127,127,.35);position:relative}
+.iconrow span svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.iconrow span i{position:absolute;bottom:-16px;left:0;right:0;text-align:center;font:9px ui-monospace,Menlo,monospace;font-style:normal;opacity:.7}
+.iconrow{padding-bottom:18px}
+.demo{display:flex;flex-direction:column;gap:12px}
+.demo-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.cassettes{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}
+.cassettes .cs{width:120px}
+.cassettes .cs.sm{width:56px}
+.cassettes .cs.xs{width:36px}
+.cassettes figcaption{font-size:11px;opacity:.75;margin-top:4px;text-align:center}
+.target{position:relative;display:inline-grid;place-items:center;width:48px;height:48px;border:1px dashed rgba(201,104,127,.9);border-radius:10px}
+.target svg{width:18px;height:18px}
+.target::after{content:"48×48";position:absolute;right:-42px;font:10px ui-monospace,Menlo,monospace;color:#c9687f}
+
+/* ---------- Native screen language (inside the phone frames) ---------- */
+.phone{width:390px;height:844px;max-width:100%;border-radius:46px;padding:10px;background:#0b0b0d;border:1px solid #4b4950;box-shadow:0 22px 60px rgba(0,0,0,.5);position:relative;overflow:hidden;color-scheme:light}
+.phone.short{height:640px}
+.screen{
+  --bg:#f4f3ef;--bg-rgb:244,243,239;--raised:rgba(255,255,255,.66);--sheet:#fbfaf7;
+  --text:#38333a;--plum:#544451;--smoke:#746d75;--muted:#8a838b;--hairline:rgba(66,58,65,.12);
+  --tape:#4d404b;--tape-edge:#3b3039;--tape-shadow:#2d272e;--tape-ink:#f5f0f2;
+  --pink:#c9687f;--orange:#d18a65;--yellow:#d2c76f;--green:#709778;--blue:#688fa8;
+  --stripe:linear-gradient(180deg,var(--pink),var(--orange),var(--yellow),var(--green),var(--blue));
+  --ok-ink:#1f543a;--ok-bg:#e7f3eb;--warn-ink:#7a4d12;--warn-bg:#fbf0dc;--err-ink:#7e2f46;--err-bg:#fae8ec;
+  --focus:rgba(91,146,184,.72);
+  --marker:"Noteworthy","Bradley Hand","Segoe Print",cursive;
+  position:relative;height:100%;border-radius:38px;overflow:hidden;
+  background:
+    radial-gradient(ellipse at 10% 0%,rgba(104,143,168,.13),transparent 45%),
+    radial-gradient(ellipse at 95% 100%,rgba(201,104,127,.10),transparent 45%),
+    var(--bg);
+  color:var(--text);font:16px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;
+  display:flex;flex-direction:column}
+.phone.dark{color-scheme:dark}
+.phone.dark .screen{
+  --bg:#151518;--bg-rgb:21,21,24;--raised:rgba(255,255,255,.07);--sheet:#1d1c21;
+  --text:#e7e3e7;--plum:#f0ebef;--smoke:#b0a9b1;--muted:#99939b;--hairline:rgba(255,255,255,.1);
+  --tape:#5a4957;--tape-edge:#3b3039;--tape-shadow:#1a1518;--tape-ink:#f5f0f2;
+  --ok-ink:#a7c7ae;--ok-bg:rgba(112,151,120,.18);--warn-ink:#e6c98f;--warn-bg:rgba(209,138,101,.16);--err-ink:#efb2c0;--err-bg:rgba(201,104,127,.16);
+  --focus:rgba(142,184,211,.78);
+  background:
+    radial-gradient(ellipse at 10% 0%,rgba(104,143,168,.16),transparent 45%),
+    radial-gradient(ellipse at 95% 100%,rgba(201,104,127,.09),transparent 45%),
+    var(--bg)}
+.phone.large .screen{font-size:32px;line-height:1.25}
+/* Status bar + home indicator: truthful iOS chrome, no branding */
+.statusbar{height:54px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 30px 8px;font:600 15px -apple-system,sans-serif}
+.statusbar .right{display:flex;gap:6px;align-items:center}
+.statusbar .cell{width:18px;height:11px;background:linear-gradient(to right,currentColor 0 22%,transparent 22% 27%,currentColor 27% 49%,transparent 49% 54%,currentColor 54% 76%,transparent 76% 81%,currentColor 81%);clip-path:polygon(0 70%,22% 70%,22% 45%,49% 45%,49% 25%,76% 25%,76% 0,100% 0,100% 100%,0 100%)}
+.statusbar .batt{width:26px;height:12px;border:1.5px solid currentColor;border-radius:4px;position:relative;opacity:.9}
+.statusbar .batt::after{content:"";position:absolute;inset:2px 6px 2px 2px;background:currentColor;border-radius:1.5px}
+.homebar{height:34px;flex:none;display:grid;place-items:center}
+.homebar i{width:134px;height:5px;border-radius:3px;background:var(--text);opacity:.85}
+/* Top bar */
+.topbar{flex:none;display:flex;align-items:center;gap:6px;padding:2px 12px 8px 20px;min-height:52px}
+.topbar .wordmark{font:italic 500 1.75em/1.2 var(--marker);color:var(--plum);letter-spacing:-.04em;transform:rotate(-2deg);transform-origin:left center;margin:0;flex:1;min-width:0}
+.topbar .title{flex:1;min-width:0;font:italic 450 1.35em/1.2 var(--marker);color:var(--plum);letter-spacing:-.02em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.icobtn{width:48px;height:48px;flex:none;display:grid;place-items:center;border-radius:14px;color:var(--smoke);background:transparent;border:0}
+.icobtn svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.avatar{width:32px;height:32px;border-radius:50%;background:var(--plum);color:#fff;display:grid;place-items:center;font:500 13px var(--marker)}
+.phone.dark .avatar{color:#1b181c}
+.content{flex:1;min-height:0;overflow:hidden;padding:0 16px;display:flex;flex-direction:column;gap:14px}
+/* Composer: web composer translated to native (stripe, tape corners, 48pt send) */
+.composer{position:relative;display:grid;grid-template-columns:minmax(0,1fr) 48px;align-items:center;min-height:56px;padding:2px 2px 2px 12px;background:var(--raised);border:1px solid var(--hairline);border-radius:14px 14px 20px 20px;box-shadow:0 8px 24px rgba(61,53,60,.08),inset 0 1px 0 rgba(255,255,255,.6)}
+.phone.dark .composer{box-shadow:0 8px 24px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.06)}
+.composer .stripe{position:absolute;left:9px;top:50%;transform:translateY(-50%);width:4px;height:1.8em;max-height:60%;border-radius:2px;background:var(--stripe)}
+.composer .field{margin-left:10px;min-width:0;color:var(--muted);font-size:1em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.composer .field.typed{color:var(--plum)}
+.composer.focus{border-color:transparent;outline:2px solid transparent}
+.composer.focus::after{content:"";position:absolute;inset:-2px;padding:2px;border-radius:16px 16px 22px 22px;background:linear-gradient(90deg,var(--pink),var(--orange),var(--yellow),var(--green),var(--blue));-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none}
+.composer.focus .stripe{opacity:0}
+.send{width:48px;height:48px;display:grid;place-items:center;color:var(--plum);border:0;background:transparent}
+.send i{width:34px;height:34px;display:grid;place-items:center;border-radius:9px 9px 12px 12px;background:rgba(84,68,81,.09)}
+.phone.dark .send i{background:rgba(255,255,255,.1)}
+.send svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.send.off{color:var(--muted)}.send.off i{background:transparent}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0 12px;border-radius:7px 7px 11px 11px;font-size:.85em;font-weight:650;color:var(--plum);background:rgba(247,244,239,.6);border:1px solid rgba(73,64,72,.22);box-shadow:inset 0 0 0 3px rgba(255,255,255,.28)}
+.phone.dark .chip{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.14);box-shadow:none}
+.chip .hole{width:12px;height:12px;border-radius:50%;background:radial-gradient(circle,transparent 0 28%,var(--plum) 30% 40%,transparent 42%),repeating-conic-gradient(var(--plum) 0 18deg,transparent 18deg 45deg);border:1px solid rgba(73,64,72,.35)}
+.chip svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+/* Section kicker + tabs */
+.k{margin:0;font:700 .7em/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.seg{display:flex;gap:2px}
+.seg button{min-height:44px;padding:0 12px;border:0;background:transparent;color:var(--muted);font:600 .95em -apple-system,sans-serif;border-radius:0;border-bottom:2px solid transparent}
+.seg button.on{color:var(--plum);border-bottom-color:var(--plum)}
+/* Mix rows (cassette + marker title, no dividers, no left border) */
+.mixes{display:flex;flex-direction:column;gap:2px;min-height:0;overflow:hidden}
+.mixrow{display:grid;grid-template-columns:56px minmax(0,1fr) 48px;gap:12px;align-items:center;min-height:72px;padding:6px 0 6px 6px;border-radius:14px;background:transparent}
+.mixrow.on{background:var(--raised);box-shadow:inset 0 0 0 1px var(--hairline)}
+.mixrow .cs{width:56px;filter:drop-shadow(0 2px 3px rgba(41,36,42,.18))}
+.mixrow strong{display:block;font:italic 450 1.1em/1.2 var(--marker);color:var(--plum);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mixrow small{display:block;margin-top:2px;color:var(--muted);font-size:.8em}
+.phone.large .mixrow{grid-template-columns:56px minmax(0,1fr) 48px}
+.phone.large .mixrow strong{white-space:normal;overflow-wrap:anywhere}
+/* Cards (suggestion, source) */
+.card{background:var(--raised);border:1px solid var(--hairline);border-radius:16px;padding:12px 12px 8px}
+.card p{margin:0}
+.card .why{color:var(--muted);font-size:.85em;margin-top:2px}
+.card .acts{display:flex;gap:2px;margin-top:6px;flex-wrap:wrap}
+.tbtn{min-height:44px;padding:0 12px;border:0;background:transparent;color:var(--plum);font:650 .95em -apple-system,sans-serif;border-radius:10px}
+.tbtn.quiet{color:var(--smoke);font-weight:500}
+/* Tape button (primary) */
+.tape{display:inline-flex;align-items:center;gap:8px;min-height:48px;padding:0 18px 0 10px;border-radius:7px 7px 12px 12px;color:var(--tape-ink);background:var(--tape);border:1px solid var(--tape-edge);box-shadow:0 3px 0 var(--tape-shadow),inset 0 1px 0 rgba(255,255,255,.13);font:750 .9em -apple-system,sans-serif;position:relative;overflow:hidden}
+.tape .reel{width:25px;height:25px;flex:none;border-radius:50%;background:repeating-conic-gradient(#e4e1dd 0 24deg,transparent 24deg 45deg),#262329;border:3px solid #262329}
+.tape .meter{position:absolute;inset:0 0 0 auto;width:10px;background:linear-gradient(var(--blue),var(--green),var(--yellow),var(--orange),var(--pink))}
+/* Mini-player (built locally; Apple only) */
+.mini{flex:none;margin:0 12px 6px;display:grid;grid-template-columns:44px minmax(0,1fr) 48px 48px;gap:10px;align-items:center;min-height:64px;padding:6px 4px 6px 8px;border-radius:16px;background:var(--raised);border:1px solid var(--hairline);backdrop-filter:blur(18px);box-shadow:0 8px 24px rgba(61,53,60,.1)}
+.phone.dark .mini{box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.art{width:44px;height:44px;border-radius:9px;background:radial-gradient(circle at center,transparent 0 20%,rgba(43,39,44,.7) 21% 31%,transparent 32%),repeating-conic-gradient(from 5deg,rgba(255,255,255,.64) 0 17deg,transparent 17deg 42deg),#688fa8}
+.mini strong,.mini small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mini strong{font-size:.9em;font-weight:650}
+.mini small{color:var(--muted);font-size:.78em}
+.mini .bar{height:3px;border-radius:2px;background:var(--hairline);margin-top:5px;position:relative;overflow:hidden}
+.mini .bar i{position:absolute;inset:0;width:38%;background:linear-gradient(90deg,var(--pink),var(--orange),var(--yellow),var(--green),var(--blue))}
+.phone.large .mini{grid-template-columns:44px minmax(0,1fr) 48px 48px}
+/* Bottom sheet */
+.veil{position:absolute;inset:0;background:rgba(20,16,20,.42);border-radius:38px;display:flex;flex-direction:column;justify-content:flex-end}
+.sheet{background:var(--sheet);border-radius:26px 26px 38px 38px;padding:8px 8px 22px;box-shadow:0 -12px 40px rgba(0,0,0,.25)}
+.grab{width:36px;height:5px;border-radius:3px;background:var(--hairline);margin:4px auto 10px}
+.sheet .who{display:grid;grid-template-columns:44px minmax(0,1fr);gap:10px;align-items:center;padding:6px 12px 12px}
+.sheet .who .avatar{width:44px;height:44px;font-size:17px}
+.sheet .who strong{display:block;font-size:1em}.sheet .who small{display:block;color:var(--muted);font-size:.8em}
+.srow{display:grid;grid-template-columns:44px minmax(0,1fr) 24px;gap:8px;align-items:center;min-height:56px;padding:4px 8px;border-radius:14px;color:var(--text)}
+.srow svg{width:22px;height:22px;stroke:var(--smoke);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;justify-self:center}
+.srow strong{display:block;font-weight:600;font-size:.98em}
+.srow small{display:block;color:var(--muted);font-size:.8em}
+.srow .chev{justify-self:end}
+.srow.ghost{outline:1.5px dashed var(--muted);outline-offset:-2px;color:var(--muted)}
+.srow.ghost strong{color:var(--muted)}
+.srow.ghost .tag{grid-column:3;justify-self:end;font:700 9px/1 ui-monospace,Menlo,monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);border:1px dashed var(--muted);padding:3px 5px;border-radius:4px;white-space:nowrap}
+.srow.danger strong{color:var(--err-ink)}
+.divider{height:1px;background:var(--hairline);margin:6px 12px}
+/* Conversation */
+.turns{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;gap:10px;justify-content:flex-end}
+.turn{max-width:86%;padding:12px 14px;border-radius:18px;font-size:.95em;line-height:1.4;overflow-wrap:anywhere}
+.turn.dj{align-self:flex-start;background:var(--raised);border:1px solid var(--hairline)}
+.turn.me{align-self:flex-end;background:var(--tape);color:var(--tape-ink);border-radius:18px 18px 6px 18px}
+.turn .dj-k{display:block;font:700 .7em/1.2 ui-monospace,Menlo,monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+.preview{display:grid;grid-template-columns:44px minmax(0,1fr);gap:10px;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid var(--hairline)}
+.preview strong{display:block;font:italic 450 1.05em/1.2 var(--marker);color:var(--plum)}
+.preview small{display:block;color:var(--muted);font-size:.8em}
+.preview .cs{width:44px}
+.composer-area{flex:none;padding:8px 0 4px;display:flex;flex-direction:column;gap:8px}
+.keyboard{flex:none;height:216px;margin:0 -10px -10px;background:#d1d3d9;border-radius:0 0 38px 38px;display:grid;place-items:center;color:#5c5e66;font-size:13px}
+.phone.dark .keyboard{background:#2a2a2e;color:#9a9aa2}
+/* Tab bar (alternative) */
+.tabbar{flex:none;display:grid;grid-template-columns:repeat(3,1fr);padding:6px 8px 0;border-top:1px solid var(--hairline);background:var(--raised);backdrop-filter:blur(18px)}
+.tabbar button{min-height:50px;display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;color:var(--muted);font:600 .68em -apple-system,sans-serif}
+.tabbar button svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.tabbar button.on{color:var(--plum)}
+.tabbar.four{grid-template-columns:repeat(4,1fr)}
+.tabbar button.ghost{outline:1.5px dashed var(--muted);outline-offset:-3px;border-radius:10px}
+/* Source rows for the Your music tab */
+.source{display:grid;grid-template-columns:40px minmax(0,1fr) auto;gap:10px;align-items:center;min-height:64px;padding:6px 8px;border-radius:14px;background:var(--raised);border:1px solid var(--hairline)}
+.source .mark{width:40px;height:40px;border-radius:10px;display:grid;place-items:center;background:rgba(84,68,81,.09);color:var(--plum)}
+.phone.dark .source .mark{background:rgba(255,255,255,.08)}
+.source .mark svg{width:20px;height:20px;fill:currentColor}
+.source strong{display:block;font-weight:600;font-size:.95em}.source small{display:block;color:var(--muted);font-size:.78em}
+.status{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border-radius:9px;font-size:.75em;font-weight:650}
+.status.ok{color:var(--ok-ink);background:var(--ok-bg)}
+.status.warn{color:var(--warn-ink);background:var(--warn-bg)}
+.status.err{color:var(--err-ink);background:var(--err-bg)}
+.status svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.empty{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;padding:28px 12px}
+.empty .cs{width:150px;filter:drop-shadow(0 4px 8px rgba(41,36,42,.2))}
+.empty h2{margin:12px 0 0;font:italic 450 1.35em/1.2 var(--marker);color:var(--plum);border:0;padding:0}
+.empty p{margin:0;color:var(--muted);font-size:.9em;max-width:26ch}
+.pill-list{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
+.pill-list span{min-height:40px;display:inline-flex;align-items:center;padding:0 12px;border-radius:12px;background:var(--raised);border:1px solid var(--hairline);font-size:.85em;color:var(--plum)}
+/* Cassette symbol colours via inheritance into <use> */
+.cs{display:block;aspect-ratio:200/128;--case:#3f4851;--stock:#f2ede2}
+.cs svg{width:100%;height:100%;display:block;overflow:visible}
+.cs.c2{--case:#544451}.cs.c3{--case:#45596d}.cs.c4{--case:#6f5a4d}
+.cs-case{fill:var(--case);stroke:#252328;stroke-width:2}
+.cs-edge{fill:none;stroke:rgba(255,255,255,.25);stroke-width:2}
+.cs-stock{fill:var(--stock)}
+.cs-rule{stroke:rgba(75,66,71,.34)}
+.cs-dark{fill:#17161a;stroke:#28262a;stroke-width:2}
+.cs-band{fill:#493638}
+.cs-ring{fill:#dedbd6;stroke:#28262a;stroke-width:4}
+.cs-tooth{fill:#28262a}
+.cs-hole{fill:#f4f1ec}
+.cs-guide{fill:#f2f0eb;stroke:#544e52;stroke-width:2}
+.cs-metal{fill:#9a9590;stroke:#4f4a4d;stroke-width:1.5}
+.spin .cs-hub{transform-box:fill-box;transform-origin:center;animation:hub 1.05s linear infinite}
+@keyframes hub{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.spin .cs-hub{animation:none}}
+.reduced-note{font-size:12px;color:#bdb2c0}
+</style>
+
+<!-- Cassette geometry: web/public/tape.svg and Cassette.tsx, unchanged; colours come from CSS so one symbol serves every size. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="cassette" viewBox="0 0 200 128">
+    <rect class="cs-case" x="1" y="1" width="198" height="126" rx="9"/>
+    <rect class="cs-edge" x="3" y="3" width="194" height="122" rx="7"/>
+    <rect class="cs-stock" x="14" y="12" width="172" height="73" rx="5"/>
+    <path class="cs-rule" d="M22 31h156"/>
+    <path fill="#c9687f" d="M14 39h172v5H14z"/><path fill="#d18a65" d="M14 44h172v5H14z"/><path fill="#d2c76f" d="M14 49h172v5H14z"/><path fill="#709778" d="M14 54h172v5H14z"/><path fill="#688fa8" d="M14 59h172v5H14z"/>
+    <rect class="cs-dark" x="42" y="42" width="116" height="39" rx="7"/>
+    <rect class="cs-band" x="72" y="55" width="56" height="12" rx="2"/>
+    <g transform="translate(61 61)"><g class="cs-hub"><circle class="cs-ring" r="16"/><g class="cs-tooth"><rect x="-3" y="-15" width="6" height="6" rx="1"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(45)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(90)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(135)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(180)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(225)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(270)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(315)"/></g><circle class="cs-hole" r="5"/></g></g>
+    <g transform="translate(139 61)"><g class="cs-hub"><circle class="cs-ring" r="16"/><g class="cs-tooth"><rect x="-3" y="-15" width="6" height="6" rx="1"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(45)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(90)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(135)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(180)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(225)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(270)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(315)"/></g><circle class="cs-hole" r="5"/></g></g>
+    <path class="cs-dark" d="M48 89h104l12 30H36z"/>
+    <circle class="cs-guide" cx="58" cy="105" r="6"/><circle class="cs-guide" cx="142" cy="105" r="6"/>
+    <rect class="cs-metal" x="75" y="100" width="8" height="13" rx="2"/><rect class="cs-metal" x="117" y="100" width="8" height="13" rx="2"/>
+    <circle class="cs-metal" cx="100" cy="108" r="4"/><circle class="cs-metal" cx="9" cy="9" r="3"/><circle class="cs-metal" cx="191" cy="9" r="3"/><circle class="cs-metal" cx="9" cy="119" r="3"/><circle class="cs-metal" cx="191" cy="119" r="3"/>
+  </symbol>
+  <!-- Icon geometry from web/src/components/Icons.tsx (24 grid, 1.8 stroke) plus four new glyphs drawn to the same rules. -->
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="m3.5 10 8.5-7 8.5 7v10.5h-6v-6h-5v6h-6z"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5M8 9l4-4 4 4"/></symbol>
+  <symbol id="i-queue" viewBox="0 0 24 24"><path d="M8 7h12M8 12h12M8 17h12"/><circle cx="4" cy="7" r=".8" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r=".8" fill="currentColor" stroke="none"/><circle cx="4" cy="17" r=".8" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-sync" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 8.2A7 7 0 0 1 18.4 6L20 8M4 16l1.6 2A7 7 0 0 0 18 15.8"/></symbol>
+  <symbol id="i-signout" viewBox="0 0 24 24"><path d="M10 5H5.5A1.5 1.5 0 0 0 4 6.5v11A1.5 1.5 0 0 0 5.5 19H10"/><path d="m14 8 4 4-4 4M18 12H9"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 7H4V2M4.5 7A9 9 0 1 1 3 14"/></symbol>
+  <symbol id="i-ok" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m7.8 12.2 2.8 2.8 5.8-6.1"/></symbol>
+  <symbol id="i-err" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v6M12 17h.01"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="m9 7 8 5-8 5z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 7v10M15 7v10" stroke-width="2.5"/></symbol>
+  <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></symbol>
+  <!-- new, same rules -->
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="m14.5 5-7 7 7 7"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9.5 5 7 7-7 7"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="m6 6 8 6-8 6z" fill="currentColor" stroke="none"/><path d="M18 6v12" stroke-width="2.5"/></symbol>
+  <symbol id="i-memory" viewBox="0 0 24 24"><path d="M12 3.5a5 5 0 0 1 5 5v1.2a3.5 3.5 0 0 1 .5 6.8V19a1.5 1.5 0 0 1-1.5 1.5H8A1.5 1.5 0 0 1 6.5 19v-2.5a3.5 3.5 0 0 1 .5-6.8V8.5a5 5 0 0 1 5-5z"/><path d="M9.5 20.5V17M14.5 20.5V17"/></symbol>
+  <symbol id="i-ear" viewBox="0 0 24 24"><path d="M6.5 10a5.5 5.5 0 0 1 11 0c0 3-2.5 3.5-2.5 6a2.5 2.5 0 0 1-5 0"/><path d="M9.5 10a2.5 2.5 0 0 1 5 0c0 1.5-1.5 2-1.5 3.5"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3.5 13.8 9l5.7 1.8-5.7 1.8L12 18.2l-1.8-5.6L4.5 10.8 10.2 9z"/></symbol>
+  <symbol id="i-people" viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.2"/><circle cx="16.5" cy="10" r="2.4"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0M14.8 18.5a4.2 4.2 0 0 1 5.7-3.9"/></symbol>
+  <symbol id="i-person" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 19.5a7 7 0 0 1 14 0"/></symbol>
+  <symbol id="i-apple" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M16.71 12.74c.02 2.15 1.89 2.87 1.91 2.88-.02.05-.3 1.02-.98 2.03-.59.87-1.21 1.73-2.18 1.75-.95.02-1.26-.57-2.35-.57s-1.43.55-2.33.59c-.94.03-1.65-.94-2.25-1.8-1.22-1.77-2.15-5-0.9-7.18a3.5 3.5 0 0 1 2.98-1.81c.93-.02 1.81.63 2.35.63.54 0 1.56-.78 2.63-.66.45.02 1.71.18 2.52 1.37-.07.04-1.5.88-1.4 2.77ZM14.89 7.47c.49-.6.83-1.43.74-2.26-.72.03-1.59.48-2.1 1.08-.46.53-.86 1.38-.75 2.19.8.06 1.62-.41 2.11-1.01Z"/></symbol>
+</svg>
+
+<main>
+<p class="kicker">Native iOS · shape, menu and screen map · revision 1 · synthetic data</p>
+<h1>Where everything lives on the phone.</h1>
+<p>The features work. This board decides the app's <strong>shape</strong> before any screen is styled: which destinations exist, how people move between them, and which shared visual foundation every screen will be built from. Individual screens get their own boards afterwards, in the order listed at the end.</p>
+
+<div class="callout"><strong>Three decisions are on the table.</strong>
+<ul class="tight">
+<li><strong>Shape.</strong> Option A keeps Home as the only root and moves the current overflow menu into a structured <em>You</em> sheet. Option B introduces a three-tab bar. A is recommended.</li>
+<li><strong>Foundation.</strong> Replace the Material 3 seed-generated pink palette with the web palette as native semantic tokens, keep the system font for reading, and use Noteworthy for mix titles and the wordmark. Reuse the web cassette, stripe and icon geometry.</li>
+<li><strong>Design order.</strong> Twelve screen boards, listed at the end, each covering populated, empty, loading and failure states.</li>
+</ul></div>
+
+<div class="legend">
+<span class="badge b-work">Working</span><span class="note" style="align-self:center">present in the native app and covered by the September smoke</span>
+</div>
+<div class="legend">
+<span class="badge b-local">Built locally</span><span class="note" style="align-self:center">implemented in the working tree; migrations, deployment or device gates still pending per <code>docs/decisions.md</code></span>
+</div>
+<div class="legend">
+<span class="badge b-plan">Planned</span><span class="note" style="align-self:center">approved scope with no native implementation yet; drawn as ghosted placeholders only</span>
+</div>
+
+<!-- ============================================================ -->
+<h2>1 · Feature map</h2>
+<p class="note">Every surface the phone has to hold, grouped by where it lives. Screens marked Planned reserve a place in the shape so later work does not force a re-layout. Counts under each card are the states a later board must draw.</p>
+
+<div class="map">
+
+<section class="dest"><header><h3>Getting in</h3><span class="badge b-work">Working</span></header>
+<p class="where">Before Home · shown once per install, then only after sign-out</p>
+<ul class="scr">
+<li><div><strong>Welcome / sign-in</strong><span>Apple and Google as equal logins; last-used method remembered</span></div><span class="badge b-work">Working</span></li>
+<li><div><strong>Choose your music</strong><span>Apple Music or Spotify; sets the setup path</span></div><span class="badge b-work">Working</span></li>
+<li><div><strong>Apple Music connection and library sync</strong><span>Authorization, first sync, progress sheet</span></div><span class="badge b-work">Working</span></li>
+<li><div><strong>Taste interview</strong><span>Five questions; also reachable later from You</span></div><span class="badge b-work">Working</span></li>
+</ul>
+<p class="states"><b>States:</b> idle · provider busy · cancelled · failed · authorization denied · sync running · sync failed · already signed in on relaunch</p>
+</section>
+
+<section class="dest"><header><h3>Home</h3><span class="badge b-work">Working</span></header>
+<p class="where">Root · the only place with no back control</p>
+<ul class="scr">
+<li><div><strong>New-mix composer</strong><span>Rotating example prompts; optional playlist inspiration attached from the composer</span></div><span class="badge b-work">Working</span></li>
+<li><div><strong>Active / Archived mixes</strong><span>Reopen, inline rename, swipe to archive with Undo, restore</span></div><span class="badge b-work">Working</span></li>
+<li><div><strong>Routine suggestion card</strong><span>"Your usual …?" with a reason, Make it, Not today, settings</span></div><span class="badge b-local">Built locally</span></li>
+<li><div><strong>Spotify waiting card</strong><span>Only while a Spotify listener's imports are incomplete</span></div><span class="badge b-work">Working</span></li>
+<li><div><strong>Mini-player strip</strong><span>Pinned above the composer while Apple playback is active</span></div><span class="badge b-local">Built locally</span></li>
+</ul>
+<p class="states"><b>States:</b> first run (no mixes) · populated · archived view · rename · rename failed · archive + Undo · list failed · refresh failed · start failed (offline / server) · playing</p>
+</section>
+
+<section class="dest"><header><h3>Inside a mix</h3><span class="badge b-work">Working</span></header>
+<p class="where">Pushed from Home · back returns to Home</p>
+<ul class="scr">
+<li><div><strong>Conversation</strong><span>DJ replies, clarifications, generation progress, failed-turn retry, mix preview</span></div><span class="badge b-work">Working</span></li>
+<li><div><strong>Energy journey control</strong><span>Presets write an editable sentence into the brief; send is still explicit</span></div><span class="badge b-local">Built locally</span></li>
+<li><div><strong>Arrangement (full mix)</strong><span>Ordered songs, reasons, drag to reorder, swipe to remove</span></div><span class="badge b-work">Working</span></li>
+<li><div><strong>Play now / Create playlist / Send to Music</strong><span>Apple playback handoff; Spotify links and transfer handoff</span></div><span class="badge b-work">Working</span></li>
+<li><div><strong>Play in Mixtape (app-owned player)</strong><span>Now-playing screen, transport, progress, unavailable-track handling</span></div><span class="badge b-local">Built locally</span></li>
+<li><div><strong>Version history</strong><span>List, detail, restore with confirmation and conflict recovery</span></div><span class="badge b-local">Built locally</span></li>
+</ul>
+<p class="states"><b>States:</b> generating · clarification · reply · turn failed · preview · empty arrangement · reorder · remove + Undo · stale queue conflict · not personal yet · provider unavailable · playlist name dialog · save failed · version list empty / restore confirm / restore conflict</p>
+</section>
+
+<section class="dest"><header><h3>Your music</h3><span class="badge b-work">Working</span></header>
+<p class="where">From You · sources, imports and playlists</p>
+<ul class="scr">
+<li><div><strong>Music overview</strong><span>Connected and imported sources with dates; import again; remove source data</span></div><span class="badge b-work">Working</span></li>
+<li><div><strong>Spotify import guide</strong><span>Exportify quick start, official data request, "Go deeper" history</span></div><span class="badge b-work">Working</span></li>
+<li><div><strong>Import sheet</strong><span>Pick files, review roles and private-session choice, upload, results, retry</span></div><span class="badge b-work">Working</span></li>
+<li><div><strong>Playlists</strong><span>Artwork, counts, pagination</span></div><span class="badge b-work">Working</span></li>
+<li><div><strong>Playlist detail</strong><span>Entries, unmatched labels, "Make a mix inspired by this", curation confirmation</span></div><span class="badge b-work">Working</span></li>
+<li><div><strong>Private edit draft and review</strong><span>Separate DJ draft of an existing playlist; review and apply revised copy</span></div><span class="badge b-work">Working</span></li>
+<li><div><strong>Apple "Go deeper" history import</strong><span>Same review flow; Apple archive adapters not yet written</span></div><span class="badge b-plan">Planned</span></li>
+</ul>
+<p class="states"><b>States:</b> no sources · Apple synced · Spotify partial (one package) · both landed · import in progress · partial result · failed file · remove confirmation · playlists empty / loading / failed · detail with unmatched songs · curation confirm / confirmed / neutral / unknown result</p>
+</section>
+
+<section class="dest"><header><h3>You</h3><span class="badge b-work">Working</span></header>
+<p class="where">Sheet from the avatar on Home · everything about the listener and the DJ's memory</p>
+<ul class="scr">
+<li><div><strong>What the DJ knows</strong><span>Remembered preferences; explicit Forget with confirmation</span></div><span class="badge b-work">Working</span></li>
+<li><div><strong>Listening preferences</strong><span>Learn from my listening on/off; clear learned listening</span></div><span class="badge b-local">Built locally</span></li>
+<li><div><strong>Suggestion settings</strong><span>Suggest mixes from my routines on/off</span></div><span class="badge b-local">Built locally</span></li>
+<li><div><strong>Account</strong><span>Identity, linked Apple/Google methods, last-method protection, sign out</span></div><span class="badge b-work">Working</span></li>
+<li><div><strong>Profile name</strong><span>Editable display name</span></div><span class="badge b-plan">Planned</span></li>
+</ul>
+<p class="states"><b>States:</b> notes populated / empty / offline · forget confirm · forget result unknown · learning on / off · clear confirm · methods verifying · link busy / failed · last method blocked · sign-out failed</p>
+</section>
+
+<section class="dest"><header><h3>Together</h3><span class="badge b-plan">Planned</span></header>
+<p class="where">Reserved · appears in You (Option A) or as a fourth tab (Option B) only when it ships</p>
+<ul class="scr">
+<li><div><strong>Private blends</strong><span>Create, invite preview and acceptance, members, shared mix, leave or end</span></div><span class="badge b-plan">Planned</span></li>
+<li><div><strong>Taste twins</strong><span>Explicit opt-in, taste preview, matches, block and report, privacy controls</span></div><span class="badge b-plan">Planned</span></li>
+</ul>
+<p class="states"><b>Rule carried from the approved scope:</b> discovery off until enabled; never expose raw libraries, timestamps, prompts or DJ memories to another listener.</p>
+</section>
+
+</div>
+
+<!-- ============================================================ -->
+<h2>2 · Shape</h2>
+<p class="note">The approved September 8 Home has one root and a compact overflow menu. That menu now holds seven items and the approved feature program adds at least three more, so it has to grow into something. Two ways to grow it are drawn below with the same synthetic data.</p>
+
+<div class="options">
+
+<!-- ---------------- Option A ---------------- -->
+<section class="option rec">
+<h3>Option A · Home hub and a You sheet <span class="rec-tag">Recommended</span></h3>
+<p class="note">Home stays the only root. The overflow button becomes an avatar that opens a bottom sheet named <em>You</em>, grouping Your music, the DJ's memory, listening and suggestion settings, and Account. The bottom of Home belongs to the mini-player and the composer alone.</p>
+
+<div class="frames">
+<figure class="frame">
+<div class="phone"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="topbar"><h1 class="wordmark" style="border:0;padding:0">mixtape</h1><button class="icobtn" aria-label="You"><span class="avatar">N</span></button></div>
+  <div class="content">
+    <div class="card"><p class="k">Your usual Friday wind-down?</p><p style="margin-top:4px">Slow, warm, nothing loud</p><p class="why">You have asked for this on three Fridays around this time.</p><div class="acts"><button class="tbtn">Make it</button><button class="tbtn quiet">Not today</button></div></div>
+    <div class="composer"><i class="stripe"></i><div class="field">something for a rainy commute</div><button class="send off" aria-label="Start mix"><i><svg><use href="#i-send"/></svg></i></button></div>
+    <div class="seg"><button class="on" aria-pressed="true">Active mixes</button><button aria-pressed="false">Archived</button></div>
+    <div class="mixes">
+      <div class="mixrow"><span class="cs c2"><svg><use href="#cassette"/></svg></span><div><strong>A slow way into Sunday</strong><small>12 songs · yesterday</small></div><button class="icobtn" aria-label="Mix actions"><svg><use href="#i-more"/></svg></button></div>
+      <div class="mixrow"><span class="cs c3"><svg><use href="#cassette"/></svg></span><div><strong>Night bus notes</strong><small>18 songs · Tuesday</small></div><button class="icobtn" aria-label="Mix actions"><svg><use href="#i-more"/></svg></button></div>
+      <div class="mixrow"><span class="cs"><svg><use href="#cassette"/></svg></span><div><strong>Deadline sprint, no lyrics</strong><small>22 songs · 2 weeks ago</small></div><button class="icobtn" aria-label="Mix actions"><svg><use href="#i-more"/></svg></button></div>
+      <div class="mixrow"><span class="cs c4"><svg><use href="#cassette"/></svg></span><div><strong>Kitchen, early, coffee on</strong><small>9 songs · last month</small></div><button class="icobtn" aria-label="Mix actions"><svg><use href="#i-more"/></svg></button></div>
+    </div>
+  </div>
+  <div class="mini" role="region" aria-label="Now playing in Mixtape"><span class="art" aria-hidden="true"></span><div><strong>Low Tide, Late</strong><small>Harbour Lights · A slow way into Sunday</small><div class="bar"><i></i></div></div><button class="icobtn" aria-label="Pause"><svg><use href="#i-pause"/></svg></button><button class="icobtn" aria-label="Next song"><svg><use href="#i-next"/></svg></button></div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>A1 · Home, returning listener, playing</b>Wordmark left, avatar right. Suggestion card, composer with the stripe, Active/Archived, cassette rows. The mini-player is the only pinned bottom surface; it is absent when nothing is playing.</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="topbar"><h1 class="wordmark" style="border:0;padding:0">mixtape</h1><button class="icobtn" aria-label="You"><span class="avatar">N</span></button></div>
+  <div class="content">
+    <div class="composer"><i class="stripe"></i><div class="field">something for a rainy commute</div><button class="send off"><i><svg><use href="#i-send"/></svg></i></button></div>
+    <div class="seg"><button class="on">Active mixes</button><button>Archived</button></div>
+    <div class="mixes"><div class="mixrow"><span class="cs c2"><svg><use href="#cassette"/></svg></span><div><strong>A slow way into Sunday</strong><small>12 songs · yesterday</small></div><button class="icobtn"><svg><use href="#i-more"/></svg></button></div></div>
+  </div>
+  <div class="homebar"><i></i></div>
+  <div class="veil"><section class="sheet" role="dialog" aria-modal="true" aria-label="You">
+    <div class="grab"></div>
+    <div class="who"><span class="avatar">N</span><div><strong>Nia Okafor</strong><small>Apple Music · synced 2 h ago</small></div></div>
+    <a class="srow"><svg><use href="#i-music"/></svg><div><strong>Your music</strong><small>Apple Music, Spotify import · 3 playlists</small></div><svg class="chev"><use href="#i-chev"/></svg></a>
+    <a class="srow"><svg><use href="#i-memory"/></svg><div><strong>What the DJ knows</strong><small>7 remembered preferences</small></div><svg class="chev"><use href="#i-chev"/></svg></a>
+    <a class="srow"><svg><use href="#i-ear"/></svg><div><strong>Listening</strong><small>Learning from your listening is on</small></div><svg class="chev"><use href="#i-chev"/></svg></a>
+    <a class="srow"><svg><use href="#i-spark"/></svg><div><strong>Suggestions</strong><small>Routine suggestions are on</small></div><svg class="chev"><use href="#i-chev"/></svg></a>
+    <a class="srow ghost"><svg><use href="#i-people"/></svg><div><strong>Together</strong><small>Blends and taste twins</small></div><span class="tag">Planned</span></a>
+    <div class="divider"></div>
+    <a class="srow"><svg><use href="#i-person"/></svg><div><strong>Account</strong><small>Apple and Google sign-in</small></div><svg class="chev"><use href="#i-chev"/></svg></a>
+    <a class="srow danger"><svg><use href="#i-signout"/></svg><div><strong>Sign out</strong></div><span></span></a>
+  </section></div>
+</div></div>
+<figcaption><b>A2 · The You sheet</b>Replaces the anchored overflow menu. Rows carry a live one-line status so the sheet is informative, not just a list of links. Sync and Spotify import move inside Your music. The dashed Together row is a board annotation, not shipped UI.</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="topbar"><button class="icobtn" aria-label="Back to mixes"><svg><use href="#i-back"/></svg></button><div class="title">Night bus notes</div><button class="icobtn" aria-label="Open arrangement"><svg><use href="#i-queue"/></svg></button><button class="icobtn" aria-label="Mix actions"><svg><use href="#i-more"/></svg></button></div>
+  <div class="content">
+    <div class="turns">
+      <div class="turn me">Something for the last bus home. Tired but not sad.</div>
+      <div class="turn dj"><span class="dj-k">DJ</span>Eighteen songs, quiet start and a slow lift near the end so you do not doze past your stop.<div class="preview"><span class="cs c3"><svg><use href="#cassette"/></svg></span><div><strong>Night bus notes</strong><small>18 songs · steady, then a lift</small></div></div></div>
+      <div class="turn me">Swap anything with a big chorus.</div>
+      <div class="turn dj"><span class="dj-k">DJ · working</span>Replacing four songs…</div>
+    </div>
+    <div class="composer-area">
+      <div class="chips"><span class="chip"><i class="hole"></i>Inspired by: Late nights</span><span class="chip"><svg><use href="#i-spark"/></svg>Shape</span></div>
+      <div class="composer focus"><i class="stripe"></i><div class="field typed">keep the first three as they are</div><button class="send" aria-label="Send"><i><svg><use href="#i-send"/></svg></i></button></div>
+    </div>
+  </div>
+  <div class="keyboard">keyboard</div>
+</div></div>
+<figcaption><b>A3 · Conversation, keyboard open</b>Pushed from Home with a real back control. The mini-player yields to the keyboard and returns when it closes; the composer never shares its row with anything. The focus stripe wraps the composer as it does on web.</figcaption>
+</figure>
+</div>
+
+<div class="tree">Sign in → Choose music → (Apple: connect & sync | Spotify: import guide) → Home
+<u>Home</u> ─ composer · suggestions · Active/Archived mixes · mini-player
+  ├─ Mix ─ Conversation ─ Arrangement ─ Now playing <i>(local)</i>
+  │                      └ Version history <i>(local)</i> · Create playlist · Send to Music
+  └─ <u>You</u> (sheet) ─ Your music ─ Playlists ─ Playlist detail ─ Private edit draft
+                 │              └ Spotify import guide ─ Import sheet · Sync library
+                 ├ What the DJ knows · Listening <i>(local)</i> · Suggestions <i>(local)</i>
+                 ├ Together <i>(planned)</i> ─ Blends · Taste twins
+                 └ Account · Sign out</div>
+
+<div class="tradeoff">
+<div><b>Why it fits</b>Sessions-first is preserved: the tape closet is the app. The composer keeps its approved place and the player takes the only other pinned slot, so nothing competes for the thumb zone. Matches the web sidebar's account footer without copying desktop chrome.</div>
+<div><b>What it costs</b>Your music and the DJ's memory are one tap further away than a tab would put them. Both are setup-time or occasional, not daily, so the cost is accepted. If Together ships and turns out to be daily, reopen this decision.</div>
+</div>
+</section>
+
+<!-- ---------------- Option B ---------------- -->
+<section class="option">
+<h3>Option B · Three-tab bar</h3>
+<p class="note">Mixes, Your music and You become persistent tabs. The mini-player docks above the bar, as Apple Music does. Together would become a fourth tab.</p>
+
+<div class="frames">
+<figure class="frame">
+<div class="phone"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="topbar"><h1 class="wordmark" style="border:0;padding:0">mixtape</h1></div>
+  <div class="content">
+    <div class="card"><p class="k">Your usual Friday wind-down?</p><p style="margin-top:4px">Slow, warm, nothing loud</p><p class="why">You have asked for this on three Fridays around this time.</p><div class="acts"><button class="tbtn">Make it</button><button class="tbtn quiet">Not today</button></div></div>
+    <div class="composer"><i class="stripe"></i><div class="field">something for a rainy commute</div><button class="send off"><i><svg><use href="#i-send"/></svg></i></button></div>
+    <div class="seg"><button class="on">Active mixes</button><button>Archived</button></div>
+    <div class="mixes">
+      <div class="mixrow"><span class="cs c2"><svg><use href="#cassette"/></svg></span><div><strong>A slow way into Sunday</strong><small>12 songs · yesterday</small></div><button class="icobtn"><svg><use href="#i-more"/></svg></button></div>
+      <div class="mixrow"><span class="cs c3"><svg><use href="#cassette"/></svg></span><div><strong>Night bus notes</strong><small>18 songs · Tuesday</small></div><button class="icobtn"><svg><use href="#i-more"/></svg></button></div>
+      <div class="mixrow"><span class="cs"><svg><use href="#cassette"/></svg></span><div><strong>Deadline sprint, no lyrics</strong><small>22 songs · 2 weeks ago</small></div><button class="icobtn"><svg><use href="#i-more"/></svg></button></div>
+    </div>
+  </div>
+  <div class="mini"><span class="art"></span><div><strong>Low Tide, Late</strong><small>Harbour Lights · A slow way into Sunday</small><div class="bar"><i></i></div></div><button class="icobtn" aria-label="Pause"><svg><use href="#i-pause"/></svg></button><button class="icobtn" aria-label="Next song"><svg><use href="#i-next"/></svg></button></div>
+  <nav class="tabbar four" aria-label="Main"><button class="on" aria-current="page"><svg><use href="#i-home"/></svg>Mixes</button><button><svg><use href="#i-music"/></svg>Your music</button><button class="ghost"><svg><use href="#i-people"/></svg>Together</button><button><svg><use href="#i-person"/></svg>You</button></nav>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>B1 · Home with a tab bar and the player docked</b>Two pinned surfaces stack under the list. The dashed Together tab shows the fourth slot the bar would need later; it is an annotation, not shipped UI.</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="topbar"><div class="title" style="font-style:normal;font-family:-apple-system,sans-serif;font-weight:700;font-size:1.3em">Your music</div><button class="icobtn" aria-label="Sync library"><svg><use href="#i-sync"/></svg></button></div>
+  <div class="content">
+    <p class="k">Sources</p>
+    <div class="source"><span class="mark"><svg><use href="#i-apple"/></svg></span><div><strong>Apple Music</strong><small>Library synced 2 hours ago · 4,312 songs</small></div><span class="status ok"><svg><use href="#i-ok"/></svg>Connected</span></div>
+    <div class="source"><span class="mark"><svg><use href="#i-music"/></svg></span><div><strong>Spotify import</strong><small>Account data imported 3 Sep · extended history not yet in</small></div><span class="status warn">Waiting</span></div>
+    <p class="k" style="margin-top:6px">Playlists</p>
+    <div class="mixes">
+      <div class="mixrow"><span class="art" style="width:56px;height:56px;background-color:#c9687f"></span><div><strong style="font:600 1em -apple-system,sans-serif;color:var(--text)">Late nights</strong><small>41 songs · Apple Music</small></div><span class="icobtn" aria-hidden="true"><svg><use href="#i-chev"/></svg></span></div>
+      <div class="mixrow"><span class="art" style="width:56px;height:56px;background-color:#709778"></span><div><strong style="font:600 1em -apple-system,sans-serif;color:var(--text)">Running, long</strong><small>63 songs · Spotify import · 4 unmatched</small></div><span class="icobtn" aria-hidden="true"><svg><use href="#i-chev"/></svg></span></div>
+    </div>
+  </div>
+  <div class="mini"><span class="art"></span><div><strong>Low Tide, Late</strong><small>Harbour Lights · A slow way into Sunday</small><div class="bar"><i></i></div></div><button class="icobtn" aria-label="Pause"><svg><use href="#i-pause"/></svg></button><button class="icobtn" aria-label="Next song"><svg><use href="#i-next"/></svg></button></div>
+  <nav class="tabbar four" aria-label="Main"><button><svg><use href="#i-home"/></svg>Mixes</button><button class="on" aria-current="page"><svg><use href="#i-music"/></svg>Your music</button><button class="ghost"><svg><use href="#i-people"/></svg>Together</button><button><svg><use href="#i-person"/></svg>You</button></nav>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>B2 · Your music as a tab</b>Sources with honest status pills and playlists below. The same content appears in Option A one level down from the You sheet.</figcaption>
+</figure>
+</div>
+
+<div class="tree"><u>Mixes</u> (tab) ─ composer · suggestions · Active/Archived ─ Mix ─ Conversation ─ Arrangement …
+<u>Your music</u> (tab) ─ sources · sync · Spotify import ─ Playlists ─ Playlist detail ─ Private edit draft
+<u>Together</u> (tab, <i>planned</i>) ─ Blends · Taste twins
+<u>You</u> (tab) ─ What the DJ knows · Listening · Suggestions · Account · Sign out</div>
+
+<div class="tradeoff">
+<div><b>Why it could fit</b>Familiar iOS music-app pattern; Your music is one tap away; a fourth tab has an obvious home when Together ships.</div>
+<div><b>What it costs</b>Two stacked bottom surfaces take roughly 150 points from every list. It promotes setup-time screens to daily prominence and dilutes the sessions-first rule. The conversation and arrangement screens would still need to hide the bar for the keyboard, so navigation would flicker between levels.</div>
+</div>
+</section>
+</div>
+
+<!-- ============================================================ -->
+<h2>3 · Shared foundation</h2>
+<p class="note">Values below come from <code>web/src/styles.css</code>, its dark block, <code>Cassette.tsx</code>, <code>Icons.tsx</code> and <code>tape.svg</code>. Native sizes are scaled up: the web reads at 11–13 px because it is a desktop panel; the phone reads at 16 px body with 12 px as the floor.</p>
+
+<div class="panels">
+<div class="panel" style="background:#f4f3ef;color:#38333a;border-color:#dcd9d3">
+<h4 style="color:#8a838b">Light · tokens</h4>
+<div class="swatches">
+<div class="sw" style="background:#f4f3ef"><b>bg</b><code>#f4f3ef</code></div>
+<div class="sw" style="background:#fff"><b>raised</b><code>white 66%</code></div>
+<div class="sw" style="background:#38333a;color:#fff"><b>text · graphite</b><code>#38333a</code></div>
+<div class="sw" style="background:#544451;color:#fff"><b>plum</b><code>#544451</code></div>
+<div class="sw" style="background:#746d75;color:#fff"><b>smoke</b><code>#746d75</code></div>
+<div class="sw" style="background:#8a838b;color:#fff"><b>muted</b><code>#8a838b</code></div>
+<div class="sw" style="background:#4d404b;color:#f5f0f2"><b>tape</b><code>#4d404b</code></div>
+<div class="sw" style="background:#c9687f;color:#fff"><b>pink</b><code>#c9687f</code></div>
+<div class="sw" style="background:#d18a65;color:#fff"><b>orange</b><code>#d18a65</code></div>
+<div class="sw" style="background:#d2c76f"><b>yellow</b><code>#d2c76f</code></div>
+<div class="sw" style="background:#709778;color:#fff"><b>green</b><code>#709778</code></div>
+<div class="sw" style="background:#688fa8;color:#fff"><b>blue</b><code>#688fa8</code></div>
+<div class="sw" style="background:#e7f3eb;color:#1f543a"><b>ok</b><code>#1f543a / #e7f3eb</code></div>
+<div class="sw" style="background:#fbf0dc;color:#7a4d12"><b>waiting</b><code>#7a4d12 / #fbf0dc</code></div>
+<div class="sw" style="background:#fae8ec;color:#7e2f46"><b>error</b><code>#7e2f46 / #fae8ec</code></div>
+</div>
+</div>
+<div class="panel" style="background:#151518;color:#e7e3e7;border-color:#2b2a30">
+<h4 style="color:#99939b">Dark · tokens</h4>
+<div class="swatches">
+<div class="sw" style="background:#151518"><b>bg</b><code>#151518</code></div>
+<div class="sw" style="background:#232226"><b>raised</b><code>white 7%</code></div>
+<div class="sw" style="background:#e7e3e7;color:#151518"><b>text</b><code>#e7e3e7</code></div>
+<div class="sw" style="background:#f0ebef;color:#151518"><b>plum</b><code>#f0ebef</code></div>
+<div class="sw" style="background:#b0a9b1;color:#151518"><b>smoke</b><code>#b0a9b1</code></div>
+<div class="sw" style="background:#99939b;color:#151518"><b>muted</b><code>#99939b</code></div>
+<div class="sw" style="background:#5a4957;color:#f5f0f2"><b>tape</b><code>#5a4957</code></div>
+<div class="sw" style="background:#c9687f;color:#fff"><b>pink</b><code>unchanged</code></div>
+<div class="sw" style="background:#d18a65;color:#fff"><b>orange</b><code>unchanged</code></div>
+<div class="sw" style="background:#d2c76f;color:#151518"><b>yellow</b><code>unchanged</code></div>
+<div class="sw" style="background:#709778;color:#fff"><b>green</b><code>unchanged</code></div>
+<div class="sw" style="background:#688fa8;color:#fff"><b>blue</b><code>unchanged</code></div>
+<div class="sw" style="background:rgba(112,151,120,.18);color:#a7c7ae"><b>ok</b><code>#a7c7ae</code></div>
+<div class="sw" style="background:rgba(209,138,101,.16);color:#e6c98f"><b>waiting</b><code>#e6c98f</code></div>
+<div class="sw" style="background:rgba(201,104,127,.16);color:#efb2c0"><b>error</b><code>#efb2c0</code></div>
+</div>
+</div>
+
+<div class="panel" style="background:#f4f3ef;color:#38333a;border-color:#dcd9d3">
+<h4 style="color:#8a838b">Type</h4>
+<div class="typerow"><small>wordmark · Noteworthy 28</small><span style="font:italic 500 28px/1.2 Noteworthy,'Bradley Hand',cursive;color:#544451;letter-spacing:-.04em;display:inline-block;transform:rotate(-2deg)">mixtape</span></div>
+<div class="typerow"><small>mix title · Noteworthy 18</small><span style="font:italic 450 18px/1.2 Noteworthy,'Bradley Hand',cursive;color:#544451">A slow way into Sunday</span></div>
+<div class="typerow"><small>screen title · SF 22 bold</small><span style="font:700 22px/1.2 -apple-system,sans-serif">Your music</span></div>
+<div class="typerow"><small>body · SF 16</small><span style="font:16px/1.4 -apple-system,sans-serif">Eighteen songs, quiet start and a slow lift near the end.</span></div>
+<div class="typerow"><small>secondary · SF 14</small><span style="font:14px/1.4 -apple-system,sans-serif;color:#746d75">Library synced 2 hours ago · 4,312 songs</span></div>
+<div class="typerow"><small>meta · SF 12 (floor)</small><span style="font:12px/1.4 -apple-system,sans-serif;color:#8a838b">12 songs · yesterday</span></div>
+<div class="typerow"><small>kicker · mono 11 caps</small><span style="font:700 11px/1.2 ui-monospace,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:#8a838b">Your usual Friday wind-down?</span></div>
+<p style="font-size:12px;color:#746d75;margin:12px 0 0">Noteworthy ships with iOS, so no font asset is needed; Bradley Hand is the Android fallback until a bundled face is chosen. Body text uses the system font so Dynamic Type scales it. Marker text is never used below 16 px and never for controls.</p>
+</div>
+
+<div class="panel" style="background:#f4f3ef;color:#38333a;border-color:#dcd9d3">
+<h4 style="color:#8a838b">Assets · reused geometry</h4>
+<div class="cassettes">
+<figure><span class="cs" style="width:120px"><svg><use href="#cassette"/></svg></span><figcaption>empty state · 150</figcaption></figure>
+<figure><span class="cs c2 sm" style="width:56px"><svg><use href="#cassette"/></svg></span><figcaption>mix row · 56</figcaption></figure>
+<figure><span class="cs c3 xs" style="width:44px"><svg><use href="#cassette"/></svg></span><figcaption>preview · 44</figcaption></figure>
+<figure><span class="cs c4 spin" style="width:80px"><svg><use href="#cassette"/></svg></span><figcaption>loading · hubs turn</figcaption></figure>
+</div>
+<p style="font-size:12px;color:#746d75;margin:8px 0 12px">Case colour per mix from a small fixed set (slate, plum, blue-slate, umber), assigned by mix id so a mix keeps its tape. Hubs turn only while the DJ works; with reduced motion they stand still and the text states the progress.</p>
+<div class="iconrow" style="color:#544451">
+<span><svg><use href="#i-home"/></svg><i>home</i></span><span><svg><use href="#i-plus"/></svg><i>plus</i></span><span><svg><use href="#i-send"/></svg><i>send</i></span><span><svg><use href="#i-queue"/></svg><i>queue</i></span><span><svg><use href="#i-sync"/></svg><i>sync</i></span><span><svg><use href="#i-more"/></svg><i>more</i></span><span><svg><use href="#i-undo"/></svg><i>undo</i></span><span><svg><use href="#i-ok"/></svg><i>ok</i></span><span><svg><use href="#i-err"/></svg><i>error</i></span><span><svg><use href="#i-play"/></svg><i>play</i></span><span><svg><use href="#i-pause"/></svg><i>pause</i></span><span><svg><use href="#i-music"/></svg><i>music</i></span><span><svg><use href="#i-signout"/></svg><i>sign out</i></span><span><svg><use href="#i-close"/></svg><i>close</i></span>
+<span style="border-color:#c9687f"><svg><use href="#i-back"/></svg><i>back*</i></span><span style="border-color:#c9687f"><svg><use href="#i-next"/></svg><i>next*</i></span><span style="border-color:#c9687f"><svg><use href="#i-memory"/></svg><i>memory*</i></span><span style="border-color:#c9687f"><svg><use href="#i-ear"/></svg><i>listen*</i></span><span style="border-color:#c9687f"><svg><use href="#i-spark"/></svg><i>shape*</i></span><span style="border-color:#c9687f"><svg><use href="#i-people"/></svg><i>together*</i></span><span style="border-color:#c9687f"><svg><use href="#i-person"/></svg><i>account*</i></span>
+</div>
+<p style="font-size:12px;color:#746d75;margin:0">Dashed boxes are the 48-point touch target around each 22-point glyph. Starred icons are new, drawn on the same 24-grid at 1.8 stroke; they need a matching addition to the web set.</p>
+</div>
+
+<div class="panel" style="background:#f4f3ef;color:#38333a;border-color:#dcd9d3">
+<h4 style="color:#8a838b">Controls · light</h4>
+<div class="phone" style="height:auto;border:0;background:transparent;box-shadow:none;padding:0;border-radius:0;width:auto"><div class="screen" style="background:transparent;border-radius:0;display:block;height:auto">
+<div class="demo">
+<div class="demo-row"><button class="tape"><span class="reel"></span>Play now</button><button class="tape"><span class="reel"></span>Playing<span class="meter"></span></button><span class="chip"><i class="hole"></i>Create playlist</span><button class="tbtn">Rename</button><button class="tbtn quiet">Not today</button></div>
+<div class="composer"><i class="stripe"></i><div class="field">a slow way into Sunday</div><button class="send off"><i><svg><use href="#i-send"/></svg></i></button></div>
+<div class="composer focus"><i class="stripe"></i><div class="field typed">something for a rainy comm</div><button class="send"><i><svg><use href="#i-send"/></svg></i></button></div>
+<div class="demo-row"><span class="status ok"><svg><use href="#i-ok"/></svg>Playlist created</span><span class="status warn">Waiting for the second email</span><span class="status err"><svg><use href="#i-err"/></svg>Couldn't reach the DJ</span></div>
+<div class="mixrow on"><span class="cs c2"><svg><use href="#cassette"/></svg></span><div><strong>Kitchen, early, coffee on</strong><small>9 songs · last month</small></div><button class="icobtn"><svg><use href="#i-more"/></svg></button></div>
+</div></div></div>
+<p style="font-size:12px;color:#746d75;margin:12px 0 0">Primary = tape button (dark plum, tape corners, 3-point base). Secondary = label chip with the reel hole. Tertiary = text button. Every control is at least 48 points tall; the visible chip may be shorter than its target. No decorative left borders anywhere; the composer stripe is the one accent and it is part of the control.</p>
+</div>
+
+<div class="panel" style="background:#151518;color:#e7e3e7;border-color:#2b2a30">
+<h4 style="color:#99939b">Controls · dark</h4>
+<div class="phone dark" style="height:auto;border:0;background:transparent;box-shadow:none;padding:0;border-radius:0;width:auto"><div class="screen" style="background:transparent;border-radius:0;display:block;height:auto">
+<div class="demo">
+<div class="demo-row"><button class="tape"><span class="reel"></span>Play now</button><button class="tape"><span class="reel"></span>Playing<span class="meter"></span></button><span class="chip"><i class="hole"></i>Create playlist</span><button class="tbtn">Rename</button><button class="tbtn quiet">Not today</button></div>
+<div class="composer"><i class="stripe"></i><div class="field">a slow way into Sunday</div><button class="send off"><i><svg><use href="#i-send"/></svg></i></button></div>
+<div class="composer focus"><i class="stripe"></i><div class="field typed">something for a rainy comm</div><button class="send"><i><svg><use href="#i-send"/></svg></i></button></div>
+<div class="demo-row"><span class="status ok"><svg><use href="#i-ok"/></svg>Playlist created</span><span class="status warn">Waiting for the second email</span><span class="status err"><svg><use href="#i-err"/></svg>Couldn't reach the DJ</span></div>
+<div class="mixrow on"><span class="cs c2"><svg><use href="#cassette"/></svg></span><div><strong>Kitchen, early, coffee on</strong><small>9 songs · last month</small></div><button class="icobtn"><svg><use href="#i-more"/></svg></button></div>
+</div></div></div>
+<p style="font-size:12px;color:#99939b;margin:12px 0 0">Plum lightens to near-white for text, the tape button lifts one step so it separates from the background, and the stripe colours stay identical so the cassette reads the same in both themes. Contrast checked at 4.5:1 for body and 3:1 for meta on the raised surface.</p>
+</div>
+</div>
+
+<!-- ============================================================ -->
+<h2>4 · Variants that change the decision</h2>
+<p class="note">Option A, since it is the recommendation. The same three checks apply to whichever shape is approved.</p>
+
+<div class="frames">
+<figure class="frame">
+<div class="phone dark"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="topbar"><h1 class="wordmark" style="border:0;padding:0">mixtape</h1><button class="icobtn" aria-label="You"><span class="avatar">N</span></button></div>
+  <div class="content">
+    <div class="card"><p class="k">Your usual Friday wind-down?</p><p style="margin-top:4px">Slow, warm, nothing loud</p><p class="why">You have asked for this on three Fridays around this time.</p><div class="acts"><button class="tbtn">Make it</button><button class="tbtn quiet">Not today</button></div></div>
+    <div class="composer"><i class="stripe"></i><div class="field">something for a rainy commute</div><button class="send off"><i><svg><use href="#i-send"/></svg></i></button></div>
+    <div class="seg"><button class="on">Active mixes</button><button>Archived</button></div>
+    <div class="mixes">
+      <div class="mixrow"><span class="cs c2"><svg><use href="#cassette"/></svg></span><div><strong>A slow way into Sunday</strong><small>12 songs · yesterday</small></div><button class="icobtn"><svg><use href="#i-more"/></svg></button></div>
+      <div class="mixrow"><span class="cs c3"><svg><use href="#cassette"/></svg></span><div><strong>Night bus notes</strong><small>18 songs · Tuesday</small></div><button class="icobtn"><svg><use href="#i-more"/></svg></button></div>
+      <div class="mixrow"><span class="cs"><svg><use href="#cassette"/></svg></span><div><strong>Deadline sprint, no lyrics</strong><small>22 songs · 2 weeks ago</small></div><button class="icobtn"><svg><use href="#i-more"/></svg></button></div>
+      <div class="mixrow"><span class="cs c4"><svg><use href="#cassette"/></svg></span><div><strong>Kitchen, early, coffee on</strong><small>9 songs · last month</small></div><button class="icobtn"><svg><use href="#i-more"/></svg></button></div>
+    </div>
+  </div>
+  <div class="mini"><span class="art"></span><div><strong>Low Tide, Late</strong><small>Harbour Lights · A slow way into Sunday</small><div class="bar"><i></i></div></div><button class="icobtn" aria-label="Pause"><svg><use href="#i-pause"/></svg></button><button class="icobtn" aria-label="Next song"><svg><use href="#i-next"/></svg></button></div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>Dark · system theme</b>Same layout, dark tokens. The cassette stock stays cream so tapes read as objects, not as UI.</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone large"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="topbar"><h1 class="wordmark" style="border:0;padding:0;font-size:1.2em">mixtape</h1><button class="icobtn" aria-label="You"><span class="avatar">N</span></button></div>
+  <div class="content">
+    <div class="composer"><i class="stripe"></i><div class="field" style="white-space:normal;font-size:.8em;line-height:1.2">something for a rainy commute</div><button class="send off"><i><svg><use href="#i-send"/></svg></i></button></div>
+    <div class="seg" style="flex-wrap:wrap"><button class="on" style="font-size:.7em">Active mixes</button><button style="font-size:.7em">Archived</button></div>
+    <div class="mixes">
+      <div class="mixrow"><span class="cs c2"><svg><use href="#cassette"/></svg></span><div><strong style="font-size:.85em">A slow way into Sunday</strong><small style="font-size:.6em">12 songs · yesterday</small></div><button class="icobtn"><svg><use href="#i-more"/></svg></button></div>
+      <div class="mixrow"><span class="cs c3"><svg><use href="#cassette"/></svg></span><div><strong style="font-size:.85em">Night bus notes</strong><small style="font-size:.6em">18 songs · Tuesday</small></div><button class="icobtn"><svg><use href="#i-more"/></svg></button></div>
+      <div class="mixrow"><span class="cs"><svg><use href="#cassette"/></svg></span><div><strong style="font-size:.85em">Deadline sprint, no lyrics</strong><small style="font-size:.6em">22 songs · 2 weeks ago</small></div><button class="icobtn"><svg><use href="#i-more"/></svg></button></div>
+    </div>
+  </div>
+  <div class="mini"><span class="art"></span><div><strong style="font-size:.7em;white-space:normal">Low Tide, Late</strong><small style="font-size:.55em">Harbour Lights</small><div class="bar"><i></i></div></div><button class="icobtn" aria-label="Pause"><svg><use href="#i-pause"/></svg></button><button class="icobtn" aria-label="Next song"><svg><use href="#i-next"/></svg></button></div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>200% text</b>Titles wrap instead of truncating, the suggestion card scrolls off rather than shrinking, cassettes and controls keep their size, and the mini-player drops the mix name before it drops the song.</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="topbar"><h1 class="wordmark" style="border:0;padding:0">mixtape</h1><button class="icobtn" aria-label="You"><span class="avatar">N</span></button></div>
+  <div class="content">
+    <div class="empty"><span class="cs c2"><svg><use href="#cassette"/></svg></span><h2>Your first tape</h2><p>Say what the moment needs and the DJ builds the mix from what you already love.</p>
+      <div class="pill-list"><span>a slow way into Sunday</span><span>running, long, no lyrics</span><span>dinner for four</span></div></div>
+    <div class="composer"><i class="stripe"></i><div class="field">what do you want to hear?</div><button class="send off"><i><svg><use href="#i-send"/></svg></i></button></div>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>First run · no mixes yet</b>No mini-player, no tabs, no suggestion card. The composer sits under the example pills so the first action is obvious. Examples fill the composer; they never send by themselves.</figcaption>
+</figure>
+</div>
+
+<p class="reduced-note"><strong>Reduced motion.</strong> Cassette hubs do not turn, the composer's rotating examples stop on the first example, the sheet and mini-player appear without slide. Every progress state is also written in text ("Replacing four songs…"), so the static reading is complete. <strong>Short phone (iPhone SE, 568 points).</strong> The suggestion card collapses to its kicker line and the list shows two rows before scrolling; nothing pinned changes height.</p>
+
+<!-- ============================================================ -->
+<h2>5 · What approval covers, and what comes next</h2>
+<p><strong>Approving this board locks:</strong> the shape (Option A unless you choose B), the destination list and its grouping, the token set and type rules in section 3, the reuse of the web cassette, stripe and icon geometry, the pinned-surface rule (composer and mini-player only), and the Planned placeholders' positions. It covers iOS light and dark, 390-point width with the 320 and 200% checks shown, and reduced motion.</p>
+<p><strong>It does not approve</strong> any individual screen's final layout, the Now-playing screen, Together, or copy beyond what is shown. Nothing here is implemented; the native app still runs the Material 3 seed theme today.</p>
+<p><strong>Intentionally unresolved:</strong> the Android marker font, whether the You sheet opens as a half sheet or full sheet on tablet widths, and whether the suggestion card can be dismissed for a whole day from Home or only from its settings.</p>
+<h3>Screen boards, in order</h3>
+<ol style="max-width:820px;line-height:1.6">
+<li>Home: returning, first run, archived, rename, archive and Undo, failures, playing.</li>
+<li>Conversation: prompt, replies, generation, clarifications, attachments, energy shape, retry.</li>
+<li>Arrangement: songs, reasons, reorder, remove, handoff and playlist creation.</li>
+<li>Now playing and the mini-player, including unavailable tracks and the Send to Music handoff.</li>
+<li>Version history: list, detail, restore, conflict.</li>
+<li>You sheet, What the DJ knows, Listening, Suggestions.</li>
+<li>Your music: sources and playlist browsing, playlist detail and curation confirmation.</li>
+<li>Music setup and imports: service choice, sync, Exportify, official history, review and results.</li>
+<li>Sign-in, taste interview and Account.</li>
+<li>Private playlist edit draft and review.</li>
+<li>Planned: Apple deeper history using the shared import flow.</li>
+<li>Planned: Together, with the privacy states first.</li>
+</ol>
+</main>
+</html>

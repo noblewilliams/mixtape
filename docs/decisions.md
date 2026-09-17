@@ -2,6 +2,31 @@
 
 Short ADR-style log. Newest first. Each entry: decision, why, and what would reopen it.
 
+## 2026-09-08 — Spotify quick start uses Exportify files
+
+Visual rule approved with this flow: sections and containers never use a
+decorative left border, across the entire app. Secondary actions such as
+Cancel use content-width text controls with comfortable touch targets;
+responsive action rows wrap instead of stretching every button to full width.
+
+Founder-approved direction: guided Exportify ZIP/CSV import is the default
+Spotify onboarding route, with manual refresh from new exports. Official
+Account data and Extended streaming history remain available, with history
+positioned as optional Go deeper. This removes the data-request wait from
+saved-music onboarding without claiming a live Spotify connection.
+
+Exportify files lack stable playlist IDs and a completeness manifest. The
+review must establish collection roles and replacement targets; missing files
+never delete existing music, and quick imports preserve listening history.
+The design and 17-state visual review are in
+`superpowers/specs/2026-09-08-exportify-import-design.md` and
+`mockups/2026-09-08-exportify-import-states.html`. All 17 visual states are
+approved with the corrections recorded in
+`mockups/approved/2026-09-08-exportify-import.md`; import implementation remains
+pending. **Reopens if:** a supported provider integration
+offers a reliable direct handoff, or real-export validation invalidates this
+format contract.
+
 ## 2026-09-04 — Confirmed playlist origin gates explicit taste
 Playlist collection is not proof of authorship. The existing `is_mixtape_owned` flag had no writer, native playlist kinds do not positively establish hand-built curation, and web editability is not an origin guarantee. User-approved expansion: add creation provenance on iOS/web and gate scoring conservatively. Migration 0021 adds listener/source/provider-ID origin records independent of sync snapshots. A client creation receipt must reference a mix owned by the authenticated listener; it can arrive before sync and survives rename, disappearance and reappearance. The record is client-attested, not independently Apple-verified. Mixtape receipt/legacy ownership wins over user confirmation, and names/descriptions never establish origin.
 
@@ -353,3 +378,91 @@ keeps the same operation ID, including after expiry, because a new ID could
 duplicate an unknown prior result. Only an exact verified result is confirmed;
 partial and unknown results remain visible and reconcilable. Append and rebuild
 remain disabled. No schema change is required beyond migration 0025.
+
+
+## 2026-09-09 — Six-feature scope and playback/social direction approved
+
+Founder approved mix version history, richer energy journeys, observable listening
+feedback, anticipatory mixes, Apple deeper-history import, private blends and opt-in
+taste twins. Existing-playlist editing is excluded. The founder confirms account
+creation, import/sync, mix creation, playback and playlist saving already work.
+
+Playback: add in-app Apple Music playback where supported; preserve the existing
+handoff. Spotify stays on its existing output path without invented playback
+observability. Social: discovery off by default with explicit taste-twin opt-in,
+private invite-only blends, no raw library/timestamps/conversations exposed.
+
+Scope and these recommendations are approved; new UI appearance is not yet approved.
+See `superpowers/specs/2026-09-09-next-features-design.md` and
+`mockups/2026-09-09-next-features-states.html`. The six-feature implementation remains
+pending; basic energyArc prompting already exists and will be extended.
+
+
+## 2026-09-09 — Mix history keeps immutable versions
+
+Mix generation and editing now save ordered snapshots within their queue transaction.
+Legacy sessions begin with the current recoverable version; missing earlier versions
+remain unavailable. Owner-only restore creates a new version under a session lock,
+checks the expected version and reuses an idempotency key for retries. It does not
+rewrite a saved playlist or initiate playback. Web and native history entry points
+are implemented locally; migration 0029 and the backend release are pending.
+Evidence: `testing/2026-09-09-mix-history.md`. The other five approved feature groups
+remain pending.
+
+## 2026-09-09 — Energy journeys stay in the visible brief
+
+Approved presets add an editable energy sentence to the composer and require explicit
+send before generation. Retain rise/fall/steady/arc and Sonnet curation. Store the
+resolved energy intent and coarse assessment with each immutable mix version; restore
+preserves both. Unknown energy never becomes zero. Evaluate thirds only with at least
+two known values and two-thirds coverage per group; label limited coverage honestly.
+Assessment never reorders tracks, overrides exclusions, starts playback or changes a
+saved playlist. Initial thresholds and validation limits are recorded in
+`testing/2026-09-09-energy-journeys.md`. Implemented locally; release remains pending.
+
+## 2026-09-09 — App-owned Apple playback and bounded listening learning
+
+Web/native players retain a copy of the selected mix version. Native uses
+ApplicationMusicPlayer; Send to Music retains the system-player handoff. Mix edits,
+restores and playlist saves do not replace an active player queue. Cancel and auth
+transitions fence delayed starts. Provider status, position changes and monotonic
+time determine observed listening; gaps, seeks and interruptions are not inferred
+as listening or dislikes.
+
+Learning is explicitly enabled in Listening preferences and stored separately from
+imports and written preferences. Epoch checks prevent stale uploads after off/clear;
+version ownership and idempotent occurrence IDs protect ingestion. Artist/day
+feedback is capped at +/-0.03 and one skip has no negative effect. The reasoning,
+thresholds, outbox bounds and open physical-device gates are recorded in
+`testing/2026-09-09-apple-player-feedback.md`. Local implementation; deployment and
+new-player device acceptance remain pending.
+
+## 2026-09-09 — Conservative routine suggestions
+
+Routine suggestions use repeated original energy intent in completed personal mixes,
+not private prompt excerpts or listening inferences. Three distinct local dates across
+at least 14 days are required for a weekday/six-hour-window/arc pattern, within an
+84-day and 500-session bound. Later mix revisions do not rewrite the original intent.
+Only explicit selection runs ordinary mix creation; it rechecks current eligibility
+and ignores unrelated playlist inspiration. No automatic playback, saving, notifications
+or background model spending. Suggestions default on with account-wide off and local-day
+Not today suppression. Unknown native time zones expose retry, not UTC predictions.
+Implemented locally for web/native; evidence and pending release gates are in
+`testing/2026-09-09-routine-suggestions.md`.
+
+## 2026-09-17 — Native shell: four tabs, hosted Liquid Glass, prism motif
+
+The native app moves from a single Home with a compact menu to four tabs (Home,
+Mixes, Library, You). Home is a title, empty space and a bottom panel holding the
+composer with a mic and at most three equal idea pills. Lists sit flush on a visibly
+gradient background with native controls; SF is the only typeface; the cassette's
+prism stripes are the single decorative motif. Titles and playback follow Apple
+Music: large title collapsing to a blurred small title, a floating mini-player and
+tab bar that minimise on scroll, and an Apple Music style Now Playing sheet.
+
+On iOS 26 and later the tab bar and mini-player are genuine Liquid Glass through a
+UIKit host in the iOS runner bridged to Flutter, not a Flutter replica; earlier iOS
+and Android get a frosted fallback with the same geometry. The tab bar hides inside
+a conversation and returns on Back to Mixes. Voice input is planned before launch,
+so the composer reserves the mic from the start. Evidence:
+`mockups/approved/2026-09-17-mobile-shell.md`. Implementation has not started.

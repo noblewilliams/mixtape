@@ -4,6 +4,24 @@
 
 Read with: `docs/superpowers/specs/2026-09-01-listening-export-import-design.md` (rev 3), the phase plans `docs/superpowers/plans/2026-09-01-listening-export-p1-server.md` and `docs/superpowers/plans/2026-09-02-listening-export-p2-spotify-import.md`, and the 2026-09-01 entry in `docs/decisions.md`.
 
+## Current continuation — 2026-09-17
+
+The native design program starts here. The mobile shell, Home, conversation and
+arrangement designs were approved on 2026-09-17 (`mockups/approved/2026-09-17-*.md`),
+and the implementation plan is `superpowers/plans/2026-09-17-native-design-implementation.md`.
+Phase 0 landed the whole local working tree (Google sign-in, mix history, energy
+journeys, app-owned Apple player with listening feedback, routine suggestions,
+Exportify entry, September boards and testing records) as four area commits tagged
+`native-design-baseline`, with the client (732), server (1,347) and web (394)
+suites green and the analyzer clean. Two stale client tests were updated to match
+landed behaviour (the Google callback URL scheme in Info.plist; a lazily built
+history confirmation on a short phone). Nothing in this program has been deployed
+or released.
+
+## Current continuation — 2026-09-08
+
+The approved September 8 web memory, session management, playlist inspiration, and taste-confirmation controls are implemented locally. No production deployment has been performed for these changes. See the [execution spec](superpowers/specs/2026-09-08-release-completion-design.md) and [current evidence record](releases/2026-09-08-release-completion.md). The September 5–6 production versions below are historical records, not newly verified live state. Revised-copy implementation at `05ba8b1` is newer than the provider-only deployed snapshot.
+
 ## Follow-on status — 2026-09-05
 
 Phase 3 is implemented and committed in `bba5de9`. Spotify-ID metadata/features feed the

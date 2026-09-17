@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mixtape native Home states</title>
+<style>
+/* ---------- Review page ---------- */
+*{box-sizing:border-box}
+html{background:#1d1d21}
+body{margin:0;background:#1d1d21;color:#eee9ed;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1280px;margin:auto;padding:28px 24px 80px}
+h1{font-size:30px;line-height:1.15;margin:0 0 10px}
+h2{font-size:22px;margin:60px 0 6px;padding-top:18px;border-top:1px solid #3b393f}
+h3{font-size:16px;margin:26px 0 8px}
+p{max-width:840px}
+.kicker{font:700 11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:#c5adbd;margin:0 0 8px}
+.note{color:#cfc5d1;font-size:14px;max-width:840px}
+.callout{background:#2b2830;border:1px solid #47434c;border-radius:10px;padding:14px 16px;max-width:840px;margin:14px 0}
+.callout strong{color:#fff}
+ul.tight{margin:6px 0 0;padding-left:20px}ul.tight li{margin:4px 0}
+.badge{display:inline-flex;align-items:center;gap:6px;font:700 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em;text-transform:uppercase;padding:5px 8px;border-radius:5px;white-space:nowrap}
+.badge::before{content:"";width:8px;height:8px;border-radius:50%;background:currentColor}
+.b-work{color:#a7d8b4;background:rgba(112,151,120,.18);border:1px solid rgba(112,151,120,.5)}
+.b-local{color:#ecd39a;background:rgba(209,138,101,.16);border:1px solid rgba(209,138,101,.5)}
+.b-plan{color:#bcd0de;border:1px dashed #8fa5b5}.b-plan::before{background:transparent;border:1.5px solid currentColor;width:6px;height:6px}
+.frames{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;margin-top:14px}
+.frame{width:390px;max-width:100%}.frame.wide{width:auto}
+.frame figcaption{font-size:13px;color:#cfc5d1;margin:10px 4px 0;line-height:1.45;max-width:390px}
+.frame figcaption b{color:#fff;font-weight:600;display:block}
+figure{margin:0}
+.panels{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:14px}
+@media(max-width:900px){.panels{grid-template-columns:1fr}}
+.panel{border-radius:10px;padding:18px;border:1px solid transparent}
+.panel h4{margin:0 0 12px;font:700 11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase}
+.typerow{display:grid;grid-template-columns:150px minmax(0,1fr);gap:12px;align-items:baseline;padding:8px 0;border-top:1px solid rgba(127,127,127,.2)}
+.typerow small{font:11px ui-monospace,SFMono-Regular,Menlo,monospace;opacity:.75}
+.iconrow{display:flex;flex-wrap:wrap;gap:24px 6px;padding-bottom:18px}
+.iconrow span{width:44px;height:44px;display:grid;place-items:center;border-radius:10px;border:1px dashed rgba(127,127,127,.35);position:relative}
+.iconrow span svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.iconrow span i{position:absolute;bottom:-16px;left:0;right:0;text-align:center;font:9px ui-monospace,Menlo,monospace;font-style:normal;opacity:.7}
+.demo{display:flex;flex-direction:column;gap:12px}.demo-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.cassettes{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}.cassettes figcaption{font-size:11px;opacity:.75;margin-top:4px;text-align:center}
+.q{max-width:840px;padding-left:20px}.q li{margin:8px 0}
+.crop{width:390px;max-width:100%;height:210px;border-radius:10px;overflow:hidden;position:relative;border:1px solid #4b4950}
+.flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;max-width:840px;margin-top:12px}
+.flow div{background:#26242a;border:1px solid #3d3a42;border-radius:10px;padding:10px 12px;font-size:13px}
+.flow b{display:block;color:#fff;margin-bottom:4px}
+
+/* ---------- Native language ---------- */
+.phone{width:390px;height:844px;max-width:100%;border-radius:46px;padding:10px;background:#0b0b0d;border:1px solid #4b4950;box-shadow:0 22px 60px rgba(0,0,0,.5);position:relative;overflow:hidden;color-scheme:light}
+.screen{
+  --text:#1c1a1e;--plum:#544451;--smoke:#6f686f;--muted:#8a838b;--hair:rgba(50,44,50,.14);
+  --pink:#c9687f;--orange:#d18a65;--yellow:#d2c76f;--green:#709778;--blue:#688fa8;--violet:#6e5c8f;
+  --prism:linear-gradient(135deg,var(--pink) 0%,var(--orange) 22%,var(--yellow) 42%,var(--green) 62%,var(--blue) 82%,var(--violet) 100%);
+  --prism-v:linear-gradient(180deg,var(--pink),var(--orange),var(--yellow),var(--green),var(--blue));
+  --tape:#4d404b;--tape-edge:#3b3039;--tape-shadow:#2d272e;--tape-ink:#f5f0f2;
+  --glass:rgba(255,255,255,.62);--glass-hi:rgba(255,255,255,.9);--glass-shadow:0 8px 24px rgba(30,24,30,.16);
+  --panel:rgba(255,255,255,.55);--field:rgba(255,255,255,.75);
+  --ok-ink:#1f543a;--warn-ink:#7a4d12;--err-ink:#7e2f46;
+  --bgrgb:248,246,243;
+  position:relative;height:100%;border-radius:38px;overflow:hidden;
+  background:
+    radial-gradient(ellipse 90% 45% at 50% 108%,rgba(110,92,143,.55),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 0% 92%,rgba(201,104,127,.28),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 100% 80%,rgba(104,143,168,.32),transparent 70%),
+    linear-gradient(180deg,#f9f7f4 0%,#f1eeee 45%,#e6e0ea 100%);
+  color:var(--text);font:16px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;display:flex;flex-direction:column}
+.phone.dark{color-scheme:dark}
+.phone.dark .screen{
+  --text:#f2eef1;--plum:#f0ebef;--smoke:#b0a9b1;--muted:#98929a;--hair:rgba(255,255,255,.13);
+  --tape:#5a4957;--tape-shadow:#17131a;
+  --glass:rgba(60,56,66,.5);--glass-hi:rgba(255,255,255,.2);--glass-shadow:0 8px 24px rgba(0,0,0,.5);
+  --panel:rgba(40,36,54,.55);--field:rgba(255,255,255,.1);
+  --ok-ink:#a7c7ae;--warn-ink:#e6c98f;--err-ink:#efb2c0;
+  --bgrgb:8,8,12;
+  background:
+    radial-gradient(ellipse 90% 45% at 50% 108%,rgba(96,78,170,.85),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 0% 88%,rgba(201,104,127,.35),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 100% 78%,rgba(80,120,170,.4),transparent 70%),
+    linear-gradient(180deg,#050507 0%,#0c0b12 45%,#1a1530 100%)}
+.phone.large .screen{font-size:30px;line-height:1.25}
+.statusbar{height:54px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 30px 8px;font:600 15px -apple-system,sans-serif;position:relative;z-index:5}
+.statusbar .right{display:flex;gap:6px;align-items:center}
+.statusbar .cell{width:18px;height:11px;background:currentColor;clip-path:polygon(0 70%,22% 70%,22% 45%,49% 45%,49% 25%,76% 25%,76% 0,100% 0,100% 100%,0 100%)}
+.statusbar .batt{width:26px;height:12px;border:1.5px solid currentColor;border-radius:4px;position:relative;opacity:.9}.statusbar .batt::after{content:"";position:absolute;inset:2px 6px 2px 2px;background:currentColor;border-radius:1.5px}
+.homebar{position:absolute;left:0;right:0;bottom:0;height:34px;display:grid;place-items:center;z-index:7}.homebar i{width:134px;height:5px;border-radius:3px;background:var(--text);opacity:.8}
+/* Titles */
+.large-title{flex:none;padding:30px 20px 8px;display:flex;align-items:flex-end;justify-content:space-between;gap:10px}
+.large-title h1{margin:0;font:800 2.1em/1.05 -apple-system,BlinkMacSystemFont,"SF Pro Display",sans-serif;letter-spacing:-.02em;color:var(--text);border:0;padding:0}
+.glassbtns{display:flex;gap:2px;padding:3px;border-radius:999px}
+.glassbtn{width:40px;height:40px;display:grid;place-items:center;border-radius:999px;color:var(--text);border:0;background:transparent}
+.glassbtn svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.smallbar{position:absolute;left:0;right:0;top:0;height:100px;z-index:4;pointer-events:none;-webkit-backdrop-filter:blur(18px) saturate(140%);backdrop-filter:blur(18px) saturate(140%);-webkit-mask-image:linear-gradient(to bottom,#000 0 58%,transparent 100%);mask-image:linear-gradient(to bottom,#000 0 58%,transparent 100%)}
+.smallbar::after{content:"";position:absolute;inset:0;background:linear-gradient(to bottom,rgba(var(--bgrgb),.6),rgba(var(--bgrgb),0))}
+.smalltitle{position:absolute;left:0;right:0;top:58px;z-index:5;text-align:center;font:600 1.05em/1.2 -apple-system,sans-serif;color:var(--text)}
+.navbar{flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 14px 6px;position:relative;z-index:5}
+.navbar .mid{position:absolute;left:70px;right:70px;text-align:center;font:600 1.05em/1.2 -apple-system,sans-serif;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.content{flex:1;min-height:0;overflow:hidden;padding:0 20px;display:flex;flex-direction:column;position:relative;z-index:1}
+.content.scrolled{padding-top:78px}
+.k{margin:16px 0 4px;font:700 1.2em/1.2 -apple-system,sans-serif;letter-spacing:-.01em;color:var(--text)}
+/* Flush lists (Apple Music) */
+.list{display:flex;flex-direction:column}
+.row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:14px;align-items:center;padding:10px 0;position:relative}
+.row+.row::before{content:"";position:absolute;left:calc(var(--artw,60px) + 14px);right:0;top:0;height:1px;background:var(--hair)}
+.row .art{width:var(--artw,60px);height:var(--artw,60px);border-radius:3px;background:var(--box,#e8e4e6);overflow:hidden;display:grid;place-items:center}
+.row .art .cs{width:calc(var(--artw,60px) - 6px)}
+.row strong{display:block;font-weight:500;font-size:1em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row small{display:block;color:var(--muted);font-size:.8em;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .chev{width:20px;height:20px;stroke:var(--muted);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;opacity:.6}
+.row .icobtn{color:var(--muted)}
+.phone.large .row strong{white-space:normal;overflow-wrap:anywhere}
+.icobtn{width:44px;height:44px;flex:none;display:grid;place-items:center;border-radius:999px;color:var(--smoke);background:transparent;border:0}
+.icobtn svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.status{display:inline-flex;align-items:center;gap:5px;font-size:.78em;font-weight:600}
+.status.ok{color:var(--ok-ink)}.status.warn{color:var(--warn-ink)}.status.err{color:var(--err-ink)}
+.status svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+/* Native segmented control */
+.segc{display:inline-flex;padding:2px;border-radius:9px;background:rgba(120,110,120,.16);align-self:flex-start}
+.segc button{min-height:30px;min-width:84px;padding:0 12px;border:0;border-radius:7px;background:transparent;color:var(--text);font:600 .8em -apple-system,sans-serif}
+.segc button.on{background:rgba(255,255,255,.92);box-shadow:0 1px 3px rgba(0,0,0,.14)}
+.phone.dark .segc{background:rgba(255,255,255,.12)}.phone.dark .segc button.on{background:rgba(255,255,255,.22)}
+/* Native inset-grouped list (You) */
+.group{background:rgba(255,255,255,.62);border-radius:22px;overflow:hidden;margin-bottom:16px}
+.phone.dark .group{background:rgba(255,255,255,.08)}
+.grow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;align-items:center;min-height:52px;padding:8px 16px;position:relative}
+.grow+.grow::before{content:"";position:absolute;left:52px;right:0;top:0;height:1px;background:var(--hair)}
+.grow svg{width:22px;height:22px;stroke:var(--plum);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.grow strong{display:block;font-weight:500;font-size:1em}.grow small{display:block;color:var(--muted);font-size:.78em}
+.grow .chev{stroke:var(--muted);width:18px;height:18px;opacity:.6}
+.grow.ghost{outline:1.5px dashed var(--muted);outline-offset:-4px;border-radius:14px}.grow.ghost strong,.grow.ghost small{color:var(--muted)}
+.grow .tag{font:700 9px/1 ui-monospace,Menlo,monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);border:1px dashed var(--muted);padding:3px 5px;border-radius:4px}
+.grow.danger strong{color:var(--err-ink)}
+.gnote{color:var(--muted);font-size:.78em;margin:-8px 16px 16px}
+.who{display:grid;grid-template-columns:64px minmax(0,1fr) auto;gap:14px;align-items:center;padding:12px 16px}
+.who .av{width:64px;height:64px;border-radius:4px;background:var(--prism);color:#fff;display:grid;place-items:center;font:700 24px -apple-system,sans-serif}
+.who strong{display:block;font:600 1.1em/1.15 -apple-system,sans-serif}.who small{display:block;color:var(--muted);font-size:.8em;margin-top:3px}
+.toggle{width:51px;height:31px;border-radius:16px;background:#34c759;position:relative;flex:none}.toggle::after{content:"";position:absolute;top:2px;right:2px;width:27px;height:27px;border-radius:50%;background:#fff;box-shadow:0 2px 4px rgba(0,0,0,.2)}
+.toggle.off{background:rgba(120,120,128,.32)}.toggle.off::after{right:auto;left:2px}
+/* Composer (revision 1 shape, smaller) and the bottom panel */
+.bpanel{position:absolute;left:0;right:0;bottom:0;z-index:5;padding:8px 14px 150px;border-radius:30px 30px 0 0;background:var(--panel);-webkit-backdrop-filter:blur(30px) saturate(150%);backdrop-filter:blur(30px) saturate(150%);box-shadow:0 -1px 0 rgba(255,255,255,.35) inset,0 -10px 40px rgba(30,24,40,.08)}
+.phone.dark .bpanel{box-shadow:0 -1px 0 rgba(255,255,255,.12) inset,0 -10px 40px rgba(0,0,0,.4)}
+.bpanel.chat{padding-bottom:36px;border-radius:26px 26px 0 0}
+.grab{width:36px;height:5px;border-radius:3px;background:rgba(127,120,130,.45);margin:2px auto 12px}
+.composer{position:relative;display:grid;grid-template-columns:minmax(0,1fr) 40px 40px;align-items:center;gap:6px;min-height:48px;padding:2px 4px 2px 14px;background:var(--field);border:1px solid var(--hair);border-radius:12px 12px 16px 16px;box-shadow:0 6px 18px rgba(61,53,60,.07),inset 0 1px 0 rgba(255,255,255,.7)}
+.phone.dark .composer{box-shadow:0 6px 18px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.06)}
+.composer .stripe{position:absolute;left:8px;top:50%;transform:translateY(-50%);width:4px;height:1.6em;max-height:60%;border-radius:2px;background:var(--prism-v)}
+.composer .field{min-width:0;margin-left:8px;color:var(--muted);font-size:.95em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.composer .field.typed{color:var(--text)}
+.composer.focus{border-color:transparent}
+.composer.focus::after{content:"";position:absolute;inset:-2px;padding:2px;border-radius:14px 14px 18px 18px;background:var(--prism);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none}
+.composer.focus .stripe{opacity:0}
+.mic,.send{width:40px;height:40px;display:grid;place-items:center;border:0;background:transparent;color:var(--plum);border-radius:999px}
+.mic svg,.send svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.send i{width:30px;height:30px;display:grid;place-items:center;border-radius:8px 8px 10px 10px;background:rgba(84,68,81,.1)}
+.phone.dark .send i{background:rgba(255,255,255,.12)}
+.send.off{color:var(--muted)}.send.off i{background:transparent}
+.pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.pill{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 13px;border-radius:999px;font:500 .82em -apple-system,sans-serif;color:var(--text);background:rgba(255,255,255,.55);border:1px solid var(--hair)}
+.phone.dark .pill{background:rgba(255,255,255,.1)}
+.pill svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.hintmid{flex:1;display:grid;place-items:center;text-align:center;color:var(--muted);font-size:.95em;padding:0 30px 300px}
+/* Buttons: revision 1 shapes, smaller */
+.tape{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;min-height:40px;padding:0 14px 0 8px;border-radius:6px 6px 10px 10px;color:var(--tape-ink);background:var(--tape);border:1px solid var(--tape-edge);box-shadow:0 2px 0 var(--tape-shadow),inset 0 1px 0 rgba(255,255,255,.13);font:750 .8em -apple-system,sans-serif;position:relative;overflow:hidden}
+.tape .reel{width:20px;height:20px;flex:none;border-radius:50%;background:repeating-conic-gradient(#e4e1dd 0 24deg,transparent 24deg 45deg),#262329;border:2.5px solid #262329}
+.tape .meter{position:absolute;inset:0 0 0 auto;width:8px;background:linear-gradient(var(--blue),var(--green),var(--yellow),var(--orange),var(--pink))}
+.chip{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;min-height:36px;padding:0 11px;border-radius:6px 6px 10px 10px;font:650 .8em -apple-system,sans-serif;color:var(--plum);background:rgba(247,244,239,.6);border:1px solid rgba(73,64,72,.22);box-shadow:inset 0 0 0 2px rgba(255,255,255,.3)}
+.phone.dark .chip{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.16);box-shadow:none}
+.chip .hole{width:11px;height:11px;border-radius:50%;background:radial-gradient(circle,transparent 0 28%,var(--plum) 30% 40%,transparent 42%),repeating-conic-gradient(var(--plum) 0 18deg,transparent 18deg 45deg);border:1px solid rgba(73,64,72,.35)}
+.chip svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.tbtn{min-height:36px;padding:0 8px;border:0;background:transparent;color:var(--plum);font:600 .85em -apple-system,sans-serif;border-radius:8px}
+/* Dock: liquid glass, smaller */
+.dock{position:absolute;left:0;right:0;bottom:32px;z-index:6;padding:0 22px;display:flex;flex-direction:column;gap:7px}
+.glass{background:var(--glass);-webkit-backdrop-filter:blur(26px) saturate(170%);backdrop-filter:blur(26px) saturate(170%);box-shadow:var(--glass-shadow),inset 0 1px 0 var(--glass-hi),inset 0 0 0 .5px rgba(255,255,255,.35)}
+.phone.dark .glass{box-shadow:var(--glass-shadow),inset 0 1px 0 var(--glass-hi),inset 0 0 0 .5px rgba(255,255,255,.12)}
+.fallback .glass{-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);background:rgba(250,250,248,.84);box-shadow:0 6px 18px rgba(0,0,0,.12);border:1px solid rgba(50,44,50,.12)}
+.mini{display:grid;grid-template-columns:38px minmax(0,1fr) 36px 36px;gap:9px;align-items:center;min-height:52px;padding:5px 8px 5px 7px;border-radius:999px}
+.mini .art{width:38px;height:38px;border-radius:4px;background:linear-gradient(160deg,#7fa3bd,#45596d 60%,#2c2b33)}
+.mini strong,.mini small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mini strong{font-size:.86em;font-weight:600}.mini small{color:var(--muted);font-size:.74em}
+.mini .icobtn{width:36px;height:36px;color:var(--text)}.mini .icobtn svg{stroke-width:2;width:20px;height:20px}
+.tabs{display:grid;grid-template-columns:repeat(4,1fr);border-radius:999px;padding:4px}
+.tabs button{min-height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;border:0;background:transparent;color:var(--muted);font:600 .6em -apple-system,sans-serif;border-radius:999px}
+.tabs button svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.tabs button.on{color:var(--plum);background:rgba(255,255,255,.6);box-shadow:inset 0 0 0 .5px rgba(255,255,255,.6)}
+.phone.dark .tabs button.on{background:rgba(255,255,255,.14)}
+.dock.collapsed{flex-direction:row;align-items:center}
+.dock.collapsed .tabpill{width:56px;height:52px;border-radius:999px;display:grid;place-items:center;color:var(--plum);flex:none}
+.dock.collapsed .tabpill svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.dock.collapsed .mini{flex:1;min-width:0;grid-template-columns:38px minmax(0,1fr) 36px}
+/* Conversation */
+.turns{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;gap:10px;justify-content:flex-end;padding-bottom:150px}
+.turn{max-width:86%;padding:10px 14px;border-radius:18px;font-size:.95em;line-height:1.4;overflow-wrap:anywhere}
+.turn.dj{align-self:flex-start;background:rgba(255,255,255,.62);border-radius:4px 18px 18px 18px}
+.phone.dark .turn.dj{background:rgba(255,255,255,.1)}
+.turn.me{align-self:flex-end;background:var(--tape);color:var(--tape-ink);border-radius:18px 18px 4px 18px}
+.turn .dj-k{display:block;font:700 .68em/1.2 ui-monospace,Menlo,monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+.preview{display:grid;grid-template-columns:40px minmax(0,1fr);gap:10px;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid var(--hair)}
+.preview strong{display:block;font-weight:600;font-size:.95em}.preview small{display:block;color:var(--muted);font-size:.78em}
+.preview .cs{width:40px}
+.attach{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+/* Arrangement */
+.trow{display:grid;grid-template-columns:48px minmax(0,1fr) 36px;gap:12px;align-items:center;padding:8px 0;position:relative}
+.trow+.trow::before{content:"";position:absolute;left:60px;right:0;top:0;height:1px;background:var(--hair)}
+.trow .art{width:48px;height:48px;border-radius:3px}
+.trow strong{display:block;font-weight:500;font-size:.95em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.trow small{display:block;color:var(--muted);font-size:.78em}
+.trow em{display:block;color:var(--smoke);font-size:.74em;font-style:normal;margin-top:2px}
+.grip{width:36px;height:44px;display:grid;place-items:center;color:var(--muted)}.grip i{width:16px;height:2px;background:currentColor;border-radius:1px;box-shadow:0 -5px 0 currentColor,0 5px 0 currentColor;opacity:.6}
+.actsrow{display:flex;gap:8px;align-items:center;padding:8px 0 10px}
+/* Now playing */
+.np .screen{background:radial-gradient(ellipse 90% 60% at 30% 25%,rgba(104,143,168,.55),transparent 70%),radial-gradient(ellipse 80% 60% at 80% 80%,rgba(201,104,127,.4),transparent 70%),linear-gradient(180deg,#25232c,#121117);color:#f2eef1;--text:#f2eef1;--muted:#a9a2ab;--plum:#f0ebef}
+.np .grab{background:rgba(255,255,255,.45);margin-top:8px}
+.np-art{margin:22px 26px 0;aspect-ratio:1;border-radius:8px;background:radial-gradient(circle at 30% 30%,rgba(255,255,255,.35),transparent 55%),linear-gradient(160deg,#7fa3bd,#45596d 60%,#2c2b33);box-shadow:0 20px 50px rgba(0,0,0,.5);display:grid;place-items:center;color:rgba(255,255,255,.7);font:600 12px ui-monospace,Menlo,monospace;letter-spacing:.12em;text-transform:uppercase}
+.np-meta{display:grid;grid-template-columns:minmax(0,1fr) 34px;gap:8px;align-items:center;padding:24px 26px 0}
+.np-meta strong{display:block;font-size:1.15em;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.np-meta small{display:block;color:var(--muted);font-size:.95em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.np-meta .icobtn{color:#f2eef1;background:rgba(255,255,255,.14);width:34px;height:34px}
+.np-mixline{display:flex;align-items:center;gap:8px;padding:10px 26px 0;color:var(--muted);font-size:.78em}
+.np-mixline .cs{width:22px;opacity:.9}
+.scrub{margin:18px 26px 0}.scrub .bar{height:7px;border-radius:4px;background:rgba(255,255,255,.22);position:relative;overflow:hidden}.scrub .bar i{position:absolute;inset:0;width:38%;background:var(--prism)}
+.scrub .t{display:flex;justify-content:space-between;font:600 .74em ui-monospace,Menlo,monospace;color:var(--muted);margin-top:8px}
+.transport{display:flex;justify-content:center;align-items:center;gap:36px;margin:22px 0 0}
+.transport button{border:0;background:transparent;color:#f2eef1;display:grid;place-items:center;width:64px;height:64px;border-radius:999px}
+.transport button svg{width:38px;height:38px;fill:currentColor;stroke:none}.transport button.big svg{width:48px;height:48px}
+.vol{display:grid;grid-template-columns:20px minmax(0,1fr) 20px;gap:12px;align-items:center;margin:26px 26px 0;color:var(--muted)}
+.vol .bar{height:7px;border-radius:4px;background:rgba(255,255,255,.22);position:relative;overflow:hidden}.vol .bar i{position:absolute;inset:0;width:60%;background:rgba(255,255,255,.85)}
+.vol svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.np-acts{display:flex;justify-content:center;gap:28px;margin:34px 0 0}
+.np-acts button{border:0;background:transparent;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:4px;font:600 .66em -apple-system,sans-serif;width:64px}
+.np-acts button svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.np-acts button.on{color:#f2eef1}
+/* Empty */
+.empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:8px;padding:0 12px 120px}
+.empty .cs{width:140px;filter:drop-shadow(0 6px 10px rgba(41,36,42,.22))}
+.empty h2{margin:14px 0 0;font:700 1.25em/1.15 -apple-system,sans-serif;color:var(--text);border:0;padding:0}
+.empty p{margin:0;color:var(--muted);font-size:.9em;max-width:28ch}
+/* Cassette */
+.cs{display:block;aspect-ratio:200/128;--case:#3f4851;--stock:#f2ede2}
+.cs svg{width:100%;height:100%;display:block;overflow:visible}
+.cs.c2{--case:#544451}.cs.c3{--case:#45596d}.cs.c4{--case:#6f5a4d}.cs.c5{--case:#2c2b33}
+.cs-case{fill:var(--case);stroke:#252328;stroke-width:2}.cs-edge{fill:none;stroke:rgba(255,255,255,.25);stroke-width:2}
+.cs-stock{fill:var(--stock)}.cs-rule{stroke:rgba(75,66,71,.34)}
+.cs-dark{fill:#17161a;stroke:#28262a;stroke-width:2}.cs-band{fill:#493638}
+.cs-ring{fill:#dedbd6;stroke:#28262a;stroke-width:4}.cs-tooth{fill:#28262a}.cs-hole{fill:#f4f1ec}
+.cs-guide{fill:#f2f0eb;stroke:#544e52;stroke-width:2}.cs-metal{fill:#9a9590;stroke:#4f4a4d;stroke-width:1.5}
+.spin .cs-hub{transform-box:fill-box;transform-origin:center;animation:hub 1.05s linear infinite}
+@keyframes hub{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.spin .cs-hub{animation:none}}
+.gradbox{aspect-ratio:1;border-radius:10px;border:1px solid rgba(127,127,127,.25)}
+</style>
+<style>
+.keyboard{position:absolute;left:0;right:0;bottom:0;height:216px;z-index:8;background:#d1d3d9;border-radius:0 0 38px 38px;display:grid;place-items:center;color:#5c5e66;font-size:13px}
+.phone.dark .keyboard{background:#2a2a2e;color:#9a9aa2}
+.bpanel.kb{bottom:216px;padding-bottom:14px;border-radius:26px 26px 0 0}
+.errline{display:flex;align-items:center;gap:8px;margin:10px 2px 0;color:var(--err-ink);font-size:.82em}
+.errline svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.pill.skel{color:transparent;background:rgba(127,120,130,.14);border-color:transparent;min-width:120px}
+.pill.off{opacity:.45}
+.busy{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:0 30px 300px;color:var(--muted);font-size:.95em}
+.busy .cs{width:120px;filter:drop-shadow(0 6px 10px rgba(41,36,42,.22))}
+.busy strong{display:block;color:var(--text);font-weight:600}
+.cmenu{position:absolute;left:34px;bottom:262px;z-index:11;min-width:220px;border-radius:14px;overflow:hidden;background:rgba(250,249,247,.92);-webkit-backdrop-filter:blur(30px);backdrop-filter:blur(30px);box-shadow:0 12px 40px rgba(0,0,0,.22)}
+.cmenu div{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;font-size:.95em}
+.cmenu div+div{border-top:1px solid var(--hair)}
+.cmenu svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.veil{position:absolute;inset:0;background:rgba(20,16,20,.28);z-index:8;border-radius:38px}
+.waiting{padding:6px 0 0}
+.waiting .row{--artw:44px}
+.waiting .art{color:var(--text)}
+.listen{display:flex;align-items:center;gap:8px;color:var(--plum);font-size:.95em}
+.listen i{display:inline-block;width:3px;height:14px;border-radius:2px;background:var(--prism-v);margin-right:2px}
+.listen i:nth-child(2){height:20px}.listen i:nth-child(3){height:9px}.listen i:nth-child(4){height:16px}.listen i:nth-child(5){height:11px}
+.attach .chip .x{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;margin-left:2px}
+.sheet{position:absolute;left:0;right:0;bottom:0;top:120px;z-index:9;background:var(--panel);-webkit-backdrop-filter:blur(30px) saturate(150%);backdrop-filter:blur(30px) saturate(150%);border-radius:26px 26px 0 0;padding:8px 20px 20px;display:flex;flex-direction:column;gap:10px}
+.sheet h3{margin:0;font:700 1.2em -apple-system,sans-serif}
+.search{display:flex;align-items:center;gap:8px;min-height:38px;padding:0 12px;border-radius:10px;background:rgba(120,110,120,.14);color:var(--muted);font-size:.9em}
+.sheet .row{--artw:44px}
+.sheet .row .art{border-radius:3px}
+.sheet .grow{padding:8px 0}
+</style>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="cassette" viewBox="0 0 200 128">
+    <rect class="cs-case" x="1" y="1" width="198" height="126" rx="9"/><rect class="cs-edge" x="3" y="3" width="194" height="122" rx="7"/>
+    <rect class="cs-stock" x="14" y="12" width="172" height="73" rx="5"/><path class="cs-rule" d="M22 31h156"/>
+    <path fill="#c9687f" d="M14 39h172v5H14z"/><path fill="#d18a65" d="M14 44h172v5H14z"/><path fill="#d2c76f" d="M14 49h172v5H14z"/><path fill="#709778" d="M14 54h172v5H14z"/><path fill="#688fa8" d="M14 59h172v5H14z"/>
+    <rect class="cs-dark" x="42" y="42" width="116" height="39" rx="7"/><rect class="cs-band" x="72" y="55" width="56" height="12" rx="2"/>
+    <g transform="translate(61 61)"><g class="cs-hub"><circle class="cs-ring" r="16"/><g class="cs-tooth"><rect x="-3" y="-15" width="6" height="6" rx="1"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(45)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(90)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(135)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(180)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(225)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(270)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(315)"/></g><circle class="cs-hole" r="5"/></g></g>
+    <g transform="translate(139 61)"><g class="cs-hub"><circle class="cs-ring" r="16"/><g class="cs-tooth"><rect x="-3" y="-15" width="6" height="6" rx="1"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(45)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(90)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(135)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(180)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(225)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(270)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(315)"/></g><circle class="cs-hole" r="5"/></g></g>
+    <path class="cs-dark" d="M48 89h104l12 30H36z"/><circle class="cs-guide" cx="58" cy="105" r="6"/><circle class="cs-guide" cx="142" cy="105" r="6"/>
+    <rect class="cs-metal" x="75" y="100" width="8" height="13" rx="2"/><rect class="cs-metal" x="117" y="100" width="8" height="13" rx="2"/>
+    <circle class="cs-metal" cx="100" cy="108" r="4"/><circle class="cs-metal" cx="9" cy="9" r="3"/><circle class="cs-metal" cx="191" cy="9" r="3"/><circle class="cs-metal" cx="9" cy="119" r="3"/><circle class="cs-metal" cx="191" cy="119" r="3"/>
+  </symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="m3.5 10 8.5-7 8.5 7v10.5h-6v-6h-5v6h-6z"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5M8 9l4-4 4 4"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></symbol>
+  <symbol id="i-queue" viewBox="0 0 24 24"><path d="M8 7h12M8 12h12M8 17h12"/><circle cx="4" cy="7" r=".8" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r=".8" fill="currentColor" stroke="none"/><circle cx="4" cy="17" r=".8" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-sync" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 8.2A7 7 0 0 1 18.4 6L20 8M4 16l1.6 2A7 7 0 0 0 18 15.8"/></symbol>
+  <symbol id="i-signout" viewBox="0 0 24 24"><path d="M10 5H5.5A1.5 1.5 0 0 0 4 6.5v11A1.5 1.5 0 0 0 5.5 19H10"/><path d="m14 8 4 4-4 4M18 12H9"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-ok" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m7.8 12.2 2.8 2.8 5.8-6.1"/></symbol>
+  <symbol id="i-err" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v6M12 17h.01"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 6 10 6-10 6z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 6h3v12H8zM13 6h3v12h-3z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="m4 6 8 6-8 6zM12 6l8 6-8 6z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M20 6l-8 6 8 6zM12 6l-8 6 8 6z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9.5 5 7 7-7 7"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="m14.5 5-7 7 7 7"/></symbol>
+  <symbol id="i-memory" viewBox="0 0 24 24"><path d="M12 3.5a5 5 0 0 1 5 5v1.2a3.5 3.5 0 0 1 .5 6.8V19a1.5 1.5 0 0 1-1.5 1.5H8A1.5 1.5 0 0 1 6.5 19v-2.5a3.5 3.5 0 0 1 .5-6.8V8.5a5 5 0 0 1 5-5z"/><path d="M9.5 20.5V17M14.5 20.5V17"/></symbol>
+  <symbol id="i-ear" viewBox="0 0 24 24"><path d="M6.5 10a5.5 5.5 0 0 1 11 0c0 3-2.5 3.5-2.5 6a2.5 2.5 0 0 1-5 0"/><path d="M9.5 10a2.5 2.5 0 0 1 5 0c0 1.5-1.5 2-1.5 3.5"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3.5 13.8 9l5.7 1.8-5.7 1.8L12 18.2l-1.8-5.6L4.5 10.8 10.2 9z"/></symbol>
+  <symbol id="i-people" viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.2"/><circle cx="16.5" cy="10" r="2.4"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0M14.8 18.5a4.2 4.2 0 0 1 5.7-3.9"/></symbol>
+  <symbol id="i-person" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 19.5a7 7 0 0 1 14 0"/></symbol>
+  <symbol id="i-tape" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="1.5"/><circle cx="8.5" cy="12" r="2.2"/><circle cx="15.5" cy="12" r="2.2"/><path d="M8.5 9.8h7"/></symbol>
+  <symbol id="i-library" viewBox="0 0 24 24"><path d="M4 5v14M9 5v14M14 6l5 13"/></symbol>
+  <symbol id="i-vol0" viewBox="0 0 24 24"><path d="M4 10v4h3l4 3V7l-4 3z"/></symbol>
+  <symbol id="i-vol1" viewBox="0 0 24 24"><path d="M4 10v4h3l4 3V7l-4 3z"/><path d="M15 9a4 4 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11"/></symbol>
+  <symbol id="i-shape" viewBox="0 0 24 24"><path d="M3 17c3 0 4-9 8-9s4 9 10 3"/></symbol>
+  <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 15V4M8 8l4-4 4 4"/><path d="M5 14v4.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V14"/></symbol>
+  <symbol id="i-history" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.7M4 4v5h5"/><path d="M12 8v4l3 2"/></symbol>
+  <symbol id="i-apple" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M16.71 12.74c.02 2.15 1.89 2.87 1.91 2.88-.02.05-.3 1.02-.98 2.03-.59.87-1.21 1.73-2.18 1.75-.95.02-1.26-.57-2.35-.57s-1.43.55-2.33.59c-.94.03-1.65-.94-2.25-1.8-1.22-1.77-2.15-5-0.9-7.18a3.5 3.5 0 0 1 2.98-1.81c.93-.02 1.81.63 2.35.63.54 0 1.56-.78 2.63-.66.45.02 1.71.18 2.52 1.37-.07.04-1.5.88-1.4 2.77ZM14.89 7.47c.49-.6.83-1.43.74-2.26-.72.03-1.59.48-2.1 1.08-.46.53-.86 1.38-.75 2.19.8.06 1.62-.41 2.11-1.01Z"/></symbol>
+</svg>
+<main>
+<p class="kicker">Native iOS · Home states · revision 1 · synthetic data</p>
+<h1>Home, in every state it can be in.</h1>
+<p>Home was approved as part of the <a href="2026-09-17-mobile-shell-r3.html" style="color:#c0daed">shell</a> on September 17. This board covers what changes on it: typing, the playlist attachment and its picker, starting a mix, failures, the Spotify waiting state, idea pills while they load and when there are none, the pill long-press, and the reserved voice state. The base layout, dock and gradient are the approved ones and are not up for review again here.</p>
+<div class="callout"><strong>Truth boundaries.</strong> Starting a mix currently waits on the server for the whole first turn (20–40 s) before the conversation opens, so the "starting" state stays on Home. Voice input is planned before launch; its frame is marked Planned and shows only the listening state. Import sheets opened from Home (a ZIP handed over from Files or Mail) belong to the import board.</div>
+<div class="legend" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:10px"><span class="badge b-work">Working</span><span class="badge b-local">Built locally</span><span class="badge b-plan">Planned</span></div>
+
+<h2>1 · Writing a prompt</h2>
+<div class="frames">
+<figure class="frame">
+<div class="phone"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="large-title"><h1>Home</h1></div>
+  <div class="content"><div class="hintmid" style="padding-bottom:420px">Say what the moment needs, tap an idea, or start from one of your playlists.</div></div>
+  <section class="bpanel kb">
+    <div class="grab"></div>
+    <div class="composer focus"><i class="stripe"></i><div class="field typed">something for a rainy commute, no</div><button class="mic" aria-label="Speak your idea"><svg><use href="#i-mic"/></svg></button><button class="send" aria-label="Start mix"><i><svg><use href="#i-send"/></svg></i></button></div>
+    <div class="pills"><span class="pill off">Your usual Friday wind-down?</span><span class="pill off">Kitchen, early, coffee on</span><span class="pill off">Running, long, no lyrics</span></div>
+  </section>
+  <div class="keyboard">keyboard</div>
+</div></div>
+<figcaption><b>W1 · Typing, keyboard open</b>The panel rides up on the keyboard; the dock is behind it, as the system does. Pills dim once there is text so they read as alternatives, not actions, and a tap on one replaces the text after a confirm-free undoable swap (Undo in the field's menu). Send lights when the field has text.</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="large-title"><h1>Home</h1></div>
+  <div class="content"><div class="hintmid" style="padding-bottom:330px">Say what the moment needs, tap an idea, or start from one of your playlists.</div></div>
+  <section class="bpanel">
+    <div class="grab"></div>
+    <div class="attach"><span class="chip"><i class="hole"></i>Inspired by: Late nights<svg class="x"><use href="#i-more"/></svg></span></div>
+    <div class="composer"><i class="stripe"></i><div class="field">Something like Late nights, but…</div><button class="mic" aria-label="Speak your idea"><svg><use href="#i-mic"/></svg></button><button class="send off" aria-label="Start mix"><i><svg><use href="#i-send"/></svg></i></button></div>
+    <div class="pills"><span class="pill">slower and later</span><span class="pill">for a long drive</span><span class="pill">without its songs</span></div>
+  </section>
+  <div class="dock">
+    <nav class="tabs glass"><button class="on"><svg><use href="#i-home"/></svg>Home</button><button><svg><use href="#i-tape"/></svg>Mixes</button><button><svg><use href="#i-library"/></svg>Library</button><button><svg><use href="#i-person"/></svg>You</button></nav>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>W2 · Playlist attached</b><span class="badge b-work" style="margin:4px 0">Working</span><br>Reached from a playlist's "Make a mix inspired by this" or from the pill in the picker. The chip names the exact playlist; its menu offers Replace, Exclude its songs, and Detach. The placeholder and pills change to refinements of that playlist. Nothing is sent until Send.</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="large-title"><h1>Home</h1></div>
+  <div class="content"></div>
+  <div class="veil"></div>
+  <section class="sheet" aria-label="Choose a playlist">
+    <div class="grab"></div>
+    <h3>Start from a playlist</h3>
+    <div class="search">Search your playlists</div>
+    <div class="list">
+      <div class="row"><span class="art" style="background:linear-gradient(160deg,#c9687f,#6e5c8f)"></span><div><strong>Late nights</strong><small>41 songs · Apple Music</small></div><svg class="chev"><use href="#i-chev"/></svg></div>
+      <div class="row"><span class="art" style="background:linear-gradient(160deg,#709778,#45596d)"></span><div><strong>Running, long</strong><small>63 songs · Spotify import · 4 unmatched</small></div><svg class="chev"><use href="#i-chev"/></svg></div>
+      <div class="row"><span class="art" style="background:linear-gradient(160deg,#d2c76f,#d18a65)"></span><div><strong>Sunday cooking</strong><small>27 songs · Apple Music</small></div><svg class="chev"><use href="#i-chev"/></svg></div>
+      <div class="row"><span class="art" style="background:linear-gradient(160deg,#688fa8,#2c2b33)"></span><div><strong>Old drives</strong><small>88 songs · Spotify import</small></div><svg class="chev"><use href="#i-chev"/></svg></div>
+      <div class="row"><span class="art" style="background:linear-gradient(160deg,#544451,#c9687f)"></span><div><strong>Quiet mornings</strong><small>2 matched songs · too few to use</small></div><span class="status warn">Not enough</span></div>
+    </div>
+    <div class="grow" style="padding:6px 0 0"><span></span><div><strong>Exclude the playlist's own songs</strong><small>Only songs like them, none from it</small></div><span class="toggle off" role="switch" aria-checked="false"></span></div>
+  </section>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>W3 · Picker</b><span class="badge b-work" style="margin:4px 0">Working</span><br>A sheet over Home with search, exact playlist identities and source labels, pagination on scroll, and the exclude toggle. Playlists with fewer than three matched songs stay visible but cannot be chosen. Outside tap, Back or the handle dismiss without changing the attachment.</figcaption>
+</figure>
+</div>
+
+<h2>2 · Starting and failing</h2>
+<div class="frames">
+<figure class="frame">
+<div class="phone"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="large-title"><h1>Home</h1></div>
+  <div class="content"><div class="busy"><span class="cs c2 spin"><svg><use href="#cassette"/></svg></span><strong>Making your mix</strong>Usually under a minute. You can leave this tab; it will be waiting in Mixes.</div></div>
+  <section class="bpanel">
+    <div class="grab"></div>
+    <div class="composer" style="opacity:.6"><i class="stripe"></i><div class="field typed">something for a rainy commute, no talking</div><button class="mic" disabled><svg><use href="#i-mic"/></svg></button><button class="send off" disabled><i><svg><use href="#i-send"/></svg></i></button></div>
+    <div class="pills"><span class="pill off">Your usual Friday wind-down?</span><span class="pill off">Kitchen, early, coffee on</span><span class="pill off">Running, long, no lyrics</span></div>
+  </section>
+  <div class="dock">
+    <nav class="tabs glass"><button class="on"><svg><use href="#i-home"/></svg>Home</button><button><svg><use href="#i-tape"/></svg>Mixes</button><button><svg><use href="#i-library"/></svg>Library</button><button><svg><use href="#i-person"/></svg>You</button></nav>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>S1 · Starting</b><span class="badge b-work" style="margin:4px 0">Working</span><br>The hubs turn in the open space and the text says how long. The composer locks with the prompt still visible so a second tap cannot mint a second mix. When the server answers, the conversation is pushed. With reduced motion the hubs are still and the text alone carries the state; the announcement is "Making your mix".</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="large-title"><h1>Home</h1></div>
+  <div class="content"><div class="hintmid" style="padding-bottom:330px">Say what the moment needs, tap an idea, or start from one of your playlists.</div></div>
+  <section class="bpanel">
+    <div class="grab"></div>
+    <div class="composer"><i class="stripe"></i><div class="field typed">something for a rainy commute, no talking</div><button class="mic"><svg><use href="#i-mic"/></svg></button><button class="send"><i><svg><use href="#i-send"/></svg></i></button></div>
+    <div class="errline" role="alert"><svg><use href="#i-err"/></svg>Couldn't reach the DJ. Check your connection and try again.</div>
+    <div class="pills"><span class="pill">Your usual Friday wind-down?</span><span class="pill">Kitchen, early, coffee on</span><span class="pill">Running, long, no lyrics</span></div>
+  </section>
+  <div class="dock">
+    <nav class="tabs glass"><button class="on"><svg><use href="#i-home"/></svg>Home</button><button><svg><use href="#i-tape"/></svg>Mixes</button><button><svg><use href="#i-library"/></svg>Library</button><button><svg><use href="#i-person"/></svg>You</button></nav>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>S2 · Start failed</b><span class="badge b-work" style="margin:4px 0">Working</span><br>Offline copy shown; the server variant reads "Something went wrong on our end. Try again." The prompt is kept, Send is live again, and the line is announced as an alert. If the mix row was created before the turn failed, Home opens the conversation instead and the retry lives there.</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="large-title"><h1>Home</h1></div>
+  <div class="content">
+    <div class="waiting">
+      <div class="list">
+        <div class="row"><span class="art"><svg style="width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8"><use href="#i-music"/></svg></span><div><strong>Bring your Spotify music</strong><small><span class="status warn">Requested 6 days ago</span> · waiting on Spotify</small></div><svg class="chev"><use href="#i-chev"/></svg></div>
+        <div class="row"><span class="art"><svg style="width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8"><use href="#i-ear"/></svg></span><div><strong>Tell the DJ about your taste</strong><small>Five quick questions for the first mixes</small></div><svg class="chev"><use href="#i-chev"/></svg></div>
+      </div>
+      <p style="margin:12px 2px 0;color:var(--muted);font-size:.8em">Mixes before the import are labelled "Not personal yet".</p>
+    </div>
+    <div class="hintmid" style="padding-bottom:280px"></div>
+  </div>
+  <section class="bpanel">
+    <div class="grab"></div>
+    <div class="composer"><i class="stripe"></i><div class="field">What do you want to hear?</div><button class="mic"><svg><use href="#i-mic"/></svg></button><button class="send off"><i><svg><use href="#i-send"/></svg></i></button></div>
+    <div class="pills"><span class="pill">Kitchen, early, coffee on</span><span class="pill">Running, long, no lyrics</span><span class="pill">Dinner for four, nothing loud</span></div>
+  </section>
+  <div class="dock">
+    <nav class="tabs glass"><button class="on"><svg><use href="#i-home"/></svg>Home</button><button><svg><use href="#i-tape"/></svg>Mixes</button><button><svg><use href="#i-library"/></svg>Library</button><button><svg><use href="#i-person"/></svg>You</button></nav>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>S3 · Spotify listener, imports not in</b><span class="badge b-work" style="margin:4px 0">Working</span><br>The waiting card becomes two flush rows in the open space: import status with the elapsed wait, and the interview until it is done. Both open the existing screens. Once both packages land, the rows disappear and Home is empty again. Pills omit routine suggestions because there is no history yet.</figcaption>
+</figure>
+</div>
+
+<h2>3 · Idea pills</h2>
+<div class="frames">
+<figure class="frame">
+<div class="phone"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="large-title"><h1>Home</h1></div>
+  <div class="content"><div class="hintmid" style="padding-bottom:330px">Say what the moment needs, tap an idea, or start from one of your playlists.</div></div>
+  <section class="bpanel">
+    <div class="grab"></div>
+    <div class="composer"><i class="stripe"></i><div class="field">What do you want to hear?</div><button class="mic"><svg><use href="#i-mic"/></svg></button><button class="send off"><i><svg><use href="#i-send"/></svg></i></button></div>
+    <div class="pills" aria-busy="true" aria-label="Checking your usual moments"><span class="pill skel">Your usual Friday wind-down?</span><span class="pill">Kitchen, early, coffee on</span><span class="pill">Running, long, no lyrics</span></div>
+  </section>
+  <div class="dock">
+    <nav class="tabs glass"><button class="on"><svg><use href="#i-home"/></svg>Home</button><button><svg><use href="#i-tape"/></svg>Mixes</button><button><svg><use href="#i-library"/></svg>Library</button><button><svg><use href="#i-person"/></svg>You</button></nav>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>I1 · Suggestions loading</b><span class="badge b-local" style="margin:4px 0">Built locally</span><br>Starter pills are known and show at once; only the routine slot is a skeleton, so nothing moves when it resolves. If there is no eligible routine, or the time zone is unknown, the slot fills with a third starter prompt and no error is shown here; the retry lives on You.</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="large-title"><h1>Home</h1></div>
+  <div class="content"><div class="hintmid" style="padding-bottom:330px">Say what the moment needs, tap an idea, or start from one of your playlists.</div></div>
+  <div class="veil"></div>
+  <div class="cmenu" role="menu"><div>Not today<svg><use href="#i-ok"/></svg></div><div>Why this?<svg><use href="#i-chev"/></svg></div><div>Turn off routine suggestions<svg><use href="#i-signout"/></svg></div></div>
+  <section class="bpanel" style="z-index:9">
+    <div class="grab"></div>
+    <div class="composer"><i class="stripe"></i><div class="field">What do you want to hear?</div><button class="mic"><svg><use href="#i-mic"/></svg></button><button class="send off"><i><svg><use href="#i-send"/></svg></i></button></div>
+    <div class="pills"><span class="pill" style="box-shadow:0 0 0 2px var(--plum)">Your usual Friday wind-down?</span><span class="pill">Kitchen, early, coffee on</span><span class="pill">Running, long, no lyrics</span></div>
+  </section>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>I2 · Long-press on a routine pill</b><span class="badge b-local" style="margin:4px 0">Built locally</span><br>Native context menu. "Why this?" shows the reason ("You have asked for this on three Fridays around now") in a small sheet; Not today hides it until the local day ends; the off switch is the same toggle as on You. Starter pills have no menu. With VoiceOver, the same three actions are rotor actions on the pill.</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone dark"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="large-title"><h1>Home</h1></div>
+  <div class="content"><div class="hintmid" style="padding-bottom:330px">Say what the moment needs, tap an idea, or start from one of your playlists.</div></div>
+  <section class="bpanel">
+    <div class="grab"></div>
+    <div class="composer focus"><i class="stripe"></i><div class="listen"><i></i><i></i><i></i><i></i><i></i>Listening…</div><button class="mic" style="color:var(--err-ink)" aria-label="Stop listening"><svg><use href="#i-pause"/></svg></button><button class="send off"><i><svg><use href="#i-send"/></svg></i></button></div>
+    <div class="pills"><span class="pill off">Your usual Friday wind-down?</span><span class="pill off">Kitchen, early, coffee on</span><span class="pill off">Running, long, no lyrics</span></div>
+  </section>
+  <div class="dock">
+    <nav class="tabs glass"><button class="on"><svg><use href="#i-home"/></svg>Home</button><button><svg><use href="#i-tape"/></svg>Mixes</button><button><svg><use href="#i-library"/></svg>Library</button><button><svg><use href="#i-person"/></svg>You</button></nav>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>V1 · Voice, listening</b><span class="badge b-plan" style="margin:4px 0">Planned</span><br>Reserved for the pre-launch voice feature. The mic becomes Stop, the field shows a level meter in the prism and "Listening…", and the transcript lands in the field for editing; it never sends by itself. Microphone permission denied shows the S2 line with "Allow the microphone in Settings to speak your idea."</figcaption>
+</figure>
+</div>
+
+<h2>4 · Coverage and what remains</h2>
+<p>These states join the approved shell's Home: idle light and dark, playing, first run, 200% text, reduced motion and reduced transparency. Between them every branch in <code>home_screen.dart</code> is drawn: start, in flight, offline and server failures, playlist seed attach and detach, the Spotify waiting card and interview entry, handed archives (import board), routine suggestions with Not today and settings.</p>
+<p><strong>Not decided here:</strong> whether starting a mix should push the conversation immediately with a working state instead of waiting on Home (a server contract change); and the microphone's exact copy, which waits on the voice feature.</p>
+<p><strong>Asking for approval of:</strong> the typing, attachment, picker, starting, failure, Spotify waiting, pill loading, pill menu and voice states shown, on iOS light and dark at 390 pt.</p>
+</main>
+</html>

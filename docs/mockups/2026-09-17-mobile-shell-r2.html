@@ -1,0 +1,645 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mixtape native shell · revision 2</title>
+<style>
+/* ---------- Review page (outside the phone frames) ---------- */
+*{box-sizing:border-box}
+html{background:#1d1d21}
+body{margin:0;background:#1d1d21;color:#eee9ed;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1280px;margin:auto;padding:28px 24px 80px}
+h1{font-size:30px;line-height:1.15;margin:0 0 10px}
+h2{font-size:22px;margin:60px 0 6px;padding-top:18px;border-top:1px solid #3b393f}
+h3{font-size:16px;margin:26px 0 8px}
+p{max-width:840px}
+a{color:#c0daed}
+.kicker{font:700 11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:#c5adbd;margin:0 0 8px}
+.note{color:#cfc5d1;font-size:14px;max-width:840px}
+.callout{background:#2b2830;border:1px solid #47434c;border-radius:6px;padding:14px 16px;max-width:840px;margin:14px 0}
+.callout strong{color:#fff}
+ul.tight{margin:6px 0 0;padding-left:20px}ul.tight li{margin:4px 0}
+.legend{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0 0;align-items:center}
+.badge{display:inline-flex;align-items:center;gap:6px;font:700 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em;text-transform:uppercase;padding:5px 8px;border-radius:3px;white-space:nowrap}
+.badge::before{content:"";width:8px;height:8px;border-radius:50%;background:currentColor}
+.b-work{color:#a7d8b4;background:rgba(112,151,120,.18);border:1px solid rgba(112,151,120,.5)}
+.b-local{color:#ecd39a;background:rgba(209,138,101,.16);border:1px solid rgba(209,138,101,.5)}
+.b-plan{color:#bcd0de;border:1px dashed #8fa5b5}.b-plan::before{background:transparent;border:1.5px solid currentColor;width:6px;height:6px}
+.map{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px;margin-top:16px}
+.dest{background:#2a282e;border:1px solid #423f47;border-radius:6px;padding:14px 16px 10px;min-width:0}
+.dest header{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:4px}
+.dest h3{margin:0;font-size:17px}.dest .where{color:#b9aebd;font-size:12px;margin:0 0 8px}
+.scr{list-style:none;margin:0;padding:0}
+.scr li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:start;padding:7px 0;border-top:1px solid #3a373f}
+.scr li strong{display:block;font-size:14px;color:#fff}.scr li span{display:block;font-size:12px;color:#c3b9c6;margin-top:2px}
+.frames{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;margin-top:14px}
+.frame{width:390px;max-width:100%}
+.frame.wide{width:auto}
+.frame figcaption{font-size:13px;color:#cfc5d1;margin:10px 4px 0;line-height:1.45;max-width:390px}
+.frame figcaption b{color:#fff;font-weight:600;display:block}
+figure{margin:0}
+.tradeoff{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px;font-size:13px;max-width:840px}
+.tradeoff div{background:#26242a;border:1px solid #3d3a42;border-radius:6px;padding:10px 12px}.tradeoff b{display:block;color:#fff;margin-bottom:4px}
+.panels{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:14px}
+@media(max-width:900px){.panels{grid-template-columns:1fr}.tradeoff{grid-template-columns:1fr}}
+.panel{border-radius:6px;padding:18px;border:1px solid transparent}
+.panel h4{margin:0 0 12px;font:700 11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase}
+.swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px}
+.sw{border-radius:3px;padding:8px;min-height:68px;display:flex;flex-direction:column;justify-content:flex-end;font-size:11px;line-height:1.3;border:1px solid rgba(127,127,127,.25)}
+.sw b{font-weight:700}.sw code{font:11px ui-monospace,SFMono-Regular,Menlo,monospace;opacity:.8}
+.typerow{display:grid;grid-template-columns:150px minmax(0,1fr);gap:12px;align-items:baseline;padding:8px 0;border-top:1px solid rgba(127,127,127,.2)}
+.typerow small{font:11px ui-monospace,SFMono-Regular,Menlo,monospace;opacity:.75}
+.iconrow{display:flex;flex-wrap:wrap;gap:24px 6px;padding-bottom:18px}
+.iconrow span{width:48px;height:48px;display:grid;place-items:center;border-radius:4px;border:1px dashed rgba(127,127,127,.35);position:relative}
+.iconrow span svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.iconrow span i{position:absolute;bottom:-16px;left:0;right:0;text-align:center;font:9px ui-monospace,Menlo,monospace;font-style:normal;opacity:.7}
+.demo{display:flex;flex-direction:column;gap:12px}.demo-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.cassettes{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}.cassettes figcaption{font-size:11px;opacity:.75;margin-top:4px;text-align:center}
+.q{max-width:840px;padding-left:20px}.q li{margin:8px 0}
+.crop{width:390px;max-width:100%;height:230px;border-radius:6px;overflow:hidden;position:relative;border:1px solid #4b4950}
+
+/* ---------- Native screen language ---------- */
+.phone{width:390px;height:844px;max-width:100%;border-radius:46px;padding:10px;background:#0b0b0d;border:1px solid #4b4950;box-shadow:0 22px 60px rgba(0,0,0,.5);position:relative;overflow:hidden;color-scheme:light}
+.screen{
+  --bg0:#f8f7f4;--bg1:#efedea;--tint-a:rgba(104,143,168,.14);--tint-b:rgba(201,104,127,.10);
+  --box:#efeeea;--box-2:#e6e4df;--raised:rgba(255,255,255,.72);--sheet:#fbfaf7;
+  --text:#2b272d;--plum:#544451;--smoke:#746d75;--muted:#8a838b;--hair:rgba(50,44,50,.16);--hair-soft:rgba(50,44,50,.08);
+  --pink:#c9687f;--orange:#d18a65;--yellow:#d2c76f;--green:#709778;--blue:#688fa8;--violet:#6e5c8f;
+  --prism:linear-gradient(135deg,var(--pink) 0%,var(--orange) 22%,var(--yellow) 42%,var(--green) 62%,var(--blue) 82%,var(--violet) 100%);
+  --prism-v:linear-gradient(180deg,var(--pink),var(--orange),var(--yellow),var(--green),var(--blue));
+  --glass:rgba(255,255,255,.58);--glass-hi:rgba(255,255,255,.85);--glass-shadow:0 10px 30px rgba(30,24,30,.16);
+  --ok-ink:#1f543a;--ok-bg:#e7f3eb;--warn-ink:#7a4d12;--warn-bg:#fbf0dc;--err-ink:#7e2f46;--err-bg:#fae8ec;
+  --serif:ui-serif,"New York","Iowan Old Style",Georgia,serif;
+  position:relative;height:100%;border-radius:38px;overflow:hidden;
+  background:
+    radial-gradient(ellipse 70% 40% at 0% 0%,var(--tint-a),transparent 70%),
+    radial-gradient(ellipse 70% 40% at 100% 100%,var(--tint-b),transparent 70%),
+    linear-gradient(180deg,var(--bg0) 0%,var(--bg1) 100%);
+  color:var(--text);font:16px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;display:flex;flex-direction:column}
+.phone.dark{color-scheme:dark}
+.phone.dark .screen{
+  --bg0:#121115;--bg1:#0c0c0f;--tint-a:rgba(104,143,168,.18);--tint-b:rgba(201,104,127,.12);
+  --box:#1d1c21;--box-2:#26252b;--raised:rgba(255,255,255,.06);--sheet:#1a191e;
+  --text:#ebe7ea;--plum:#f0ebef;--smoke:#b0a9b1;--muted:#99939b;--hair:rgba(255,255,255,.14);--hair-soft:rgba(255,255,255,.07);
+  --glass:rgba(40,38,44,.55);--glass-hi:rgba(255,255,255,.18);--glass-shadow:0 10px 30px rgba(0,0,0,.5);
+  --ok-ink:#a7c7ae;--ok-bg:rgba(112,151,120,.18);--warn-ink:#e6c98f;--warn-bg:rgba(209,138,101,.16);--err-ink:#efb2c0;--err-bg:rgba(201,104,127,.16)}
+.phone.large .screen{font-size:30px;line-height:1.25}
+.statusbar{height:54px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 30px 8px;font:600 15px -apple-system,sans-serif;position:relative;z-index:5}
+.statusbar .right{display:flex;gap:6px;align-items:center}
+.statusbar .cell{width:18px;height:11px;background:currentColor;clip-path:polygon(0 70%,22% 70%,22% 45%,49% 45%,49% 25%,76% 25%,76% 0,100% 0,100% 100%,0 100%)}
+.statusbar .batt{width:26px;height:12px;border:1.5px solid currentColor;border-radius:4px;position:relative;opacity:.9}.statusbar .batt::after{content:"";position:absolute;inset:2px 6px 2px 2px;background:currentColor;border-radius:1.5px}
+.homebar{position:absolute;left:0;right:0;bottom:0;height:34px;display:grid;place-items:center;z-index:6}.homebar i{width:134px;height:5px;border-radius:3px;background:var(--text);opacity:.8}
+/* Large title (Apple Music placement) and the collapsed blurred title */
+.large-title{flex:none;padding:26px 20px 10px;display:flex;align-items:flex-end;justify-content:space-between;gap:10px}
+.large-title h1{margin:0;font:600 2.1em/1.05 var(--serif);letter-spacing:-.02em;color:var(--text);border:0;padding:0}
+.large-title .sub{font-size:.8em;color:var(--muted);margin-top:4px}
+.smallbar{position:absolute;left:0;right:0;top:0;height:96px;z-index:4;pointer-events:none;
+  -webkit-backdrop-filter:blur(16px) saturate(140%);backdrop-filter:blur(16px) saturate(140%);
+  -webkit-mask-image:linear-gradient(to bottom,#000 0 62%,transparent 100%);mask-image:linear-gradient(to bottom,#000 0 62%,transparent 100%)}
+.smallbar::after{content:"";position:absolute;inset:0;background:linear-gradient(to bottom,rgba(var(--bgrgb,248,247,244),.55),rgba(var(--bgrgb,248,247,244),0))}
+.phone.dark .screen{--bgrgb:18,17,21}
+.smalltitle{position:absolute;left:0;right:0;top:56px;z-index:5;text-align:center;font:600 1.05em/1.2 var(--serif);letter-spacing:-.01em;color:var(--text)}
+.content{flex:1;min-height:0;overflow:hidden;padding:0 16px;display:flex;flex-direction:column;gap:14px;position:relative;z-index:1}
+.content.scrolled{margin-top:-140px;padding-top:0}
+/* Boxy composer with the prism stripe */
+.composer{position:relative;display:grid;grid-template-columns:minmax(0,1fr) 48px;align-items:center;min-height:56px;padding:2px 2px 2px 14px;background:var(--raised);border:1px solid var(--hair);border-radius:4px}
+.composer .stripe{position:absolute;left:0;top:-1px;bottom:-1px;width:5px;background:var(--prism-v)}
+.composer .field{margin-left:6px;min-width:0;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.composer .field.typed{color:var(--text)}
+.composer.focus{border-color:transparent;box-shadow:0 0 0 2px transparent}
+.composer.focus::after{content:"";position:absolute;inset:-2px;padding:2px;border-radius:5px;background:var(--prism);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none}
+.composer.focus .stripe{opacity:0}
+.send{width:48px;height:48px;display:grid;place-items:center;color:#fff;border:0;background:transparent}
+.send i{width:36px;height:36px;display:grid;place-items:center;border-radius:3px;background:var(--prism)}
+.send svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.send.off{color:var(--muted)}.send.off i{background:var(--box-2)}
+.hint{font-size:.72em;color:var(--muted);margin:-6px 0 0 2px}
+.k{margin:0;font:700 .68em/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+/* Idea rows (Playground-like list) */
+.ideas{display:flex;flex-direction:column;background:var(--raised);border:1px solid var(--hair);border-radius:4px;overflow:hidden}
+.idea{display:grid;grid-template-columns:52px minmax(0,1fr) 24px;gap:12px;align-items:center;min-height:64px;padding:8px 10px 8px 8px}
+.idea+.idea{border-top:1px solid var(--hair-soft)}
+.idea .tile{width:52px;height:52px;border-radius:2px;background:var(--box-2);display:grid;place-items:center;color:var(--plum);overflow:hidden}
+.idea .tile.prism{background:var(--prism)}.idea .tile svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.idea .tile .cs{width:44px}
+.idea strong{display:block;font-weight:600;font-size:.95em;overflow-wrap:anywhere}.idea small{display:block;color:var(--muted);font-size:.78em;margin-top:1px}
+.idea .chev{width:22px;height:22px;stroke:var(--muted);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;justify-self:end}
+.idea .acts{display:flex;gap:2px;margin-top:4px}
+.tbtn{min-height:40px;padding:0 10px;border:0;background:transparent;color:var(--plum);font:650 .85em -apple-system,sans-serif;border-radius:3px}.tbtn.quiet{color:var(--smoke);font-weight:500}
+/* Boxy segmented */
+.seg{display:inline-flex;border:1px solid var(--hair);border-radius:4px;overflow:hidden;background:var(--raised);align-self:flex-start}
+.seg button{min-height:40px;padding:0 14px;border:0;background:transparent;color:var(--muted);font:600 .85em -apple-system,sans-serif}
+.seg button.on{background:var(--text);color:var(--bg0)}
+/* Mix rows: boxy cards, cassette, serif title */
+.mixes{display:flex;flex-direction:column;gap:8px;min-height:0;overflow:hidden}
+.mixrow{display:grid;grid-template-columns:64px minmax(0,1fr) 44px;gap:12px;align-items:center;min-height:76px;padding:8px 4px 8px 10px;border-radius:4px;background:var(--raised);border:1px solid var(--hair)}
+.mixrow .cs{width:64px}
+.mixrow strong{display:block;font:500 1.1em/1.15 var(--serif);letter-spacing:-.01em;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mixrow small{display:block;margin-top:3px;color:var(--muted);font-size:.78em}
+.phone.large .mixrow strong{white-space:normal;overflow-wrap:anywhere}
+.icobtn{width:44px;height:44px;flex:none;display:grid;place-items:center;border-radius:4px;color:var(--smoke);background:transparent;border:0}
+.icobtn svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+/* Library tiles */
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.tile-card{display:flex;flex-direction:column;gap:6px}
+.tile-card .art{aspect-ratio:1;border-radius:3px;border:1px solid var(--hair);background:var(--box-2)}
+.tile-card strong{font-weight:600;font-size:.9em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tile-card small{color:var(--muted);font-size:.78em}
+.source{display:grid;grid-template-columns:40px minmax(0,1fr) auto;gap:10px;align-items:center;min-height:64px;padding:8px 10px;border-radius:4px;background:var(--raised);border:1px solid var(--hair)}
+.source .mark{width:40px;height:40px;border-radius:2px;display:grid;place-items:center;background:var(--box-2);color:var(--text)}.source .mark svg{width:20px;height:20px;fill:currentColor}
+.source strong{display:block;font-weight:600;font-size:.95em}.source small{display:block;color:var(--muted);font-size:.76em}
+.status{display:inline-flex;align-items:center;gap:6px;padding:5px 8px;border-radius:2px;font-size:.72em;font-weight:650}
+.status.ok{color:var(--ok-ink);background:var(--ok-bg)}.status.warn{color:var(--warn-ink);background:var(--warn-bg)}.status.err{color:var(--err-ink);background:var(--err-bg)}
+.status svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+/* Profile rows */
+.rows{display:flex;flex-direction:column;background:var(--raised);border:1px solid var(--hair);border-radius:4px;overflow:hidden}
+.srow{display:grid;grid-template-columns:40px minmax(0,1fr) 24px;gap:8px;align-items:center;min-height:56px;padding:4px 10px 4px 8px;color:var(--text);text-decoration:none}
+.srow+.srow{border-top:1px solid var(--hair-soft)}
+.srow svg{width:22px;height:22px;stroke:var(--smoke);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;justify-self:center}
+.srow strong{display:block;font-weight:600;font-size:.95em}.srow small{display:block;color:var(--muted);font-size:.78em}
+.srow .chev{justify-self:end}
+.srow.ghost{outline:1.5px dashed var(--muted);outline-offset:-3px}.srow.ghost strong,.srow.ghost small{color:var(--muted)}
+.srow.ghost .tag{grid-column:3;justify-self:end;font:700 9px/1 ui-monospace,Menlo,monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);border:1px dashed var(--muted);padding:3px 5px;border-radius:2px;white-space:nowrap}
+.srow.danger strong{color:var(--err-ink)}
+.who{display:grid;grid-template-columns:56px minmax(0,1fr);gap:12px;align-items:center;padding:4px 0 6px}
+.who .av{width:56px;height:56px;border-radius:3px;background:var(--prism);color:#fff;display:grid;place-items:center;font:600 22px var(--serif)}
+.who strong{display:block;font:500 1.25em/1.1 var(--serif)}.who small{display:block;color:var(--muted);font-size:.8em;margin-top:3px}
+/* Buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:48px;padding:0 18px;border-radius:3px;font:650 .92em -apple-system,sans-serif;border:1px solid transparent}
+.btn.primary{color:#fff;background:var(--prism);text-shadow:0 1px 1px rgba(0,0,0,.18)}
+.btn.secondary{color:var(--text);background:var(--box);border-color:var(--hair)}
+.btn.ghost{color:var(--plum);background:transparent}
+.btn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+/* Liquid glass: tab bar + mini-player. Native on iOS 26; the fallback loses the refraction highlight only. */
+.dock{position:absolute;left:0;right:0;bottom:34px;z-index:6;padding:0 14px;display:flex;flex-direction:column;gap:8px;align-items:stretch}
+.glass{background:var(--glass);-webkit-backdrop-filter:blur(26px) saturate(170%);backdrop-filter:blur(26px) saturate(170%);box-shadow:var(--glass-shadow),inset 0 1px 0 var(--glass-hi),inset 0 0 0 .5px rgba(255,255,255,.35)}
+.phone.dark .glass{box-shadow:var(--glass-shadow),inset 0 1px 0 var(--glass-hi),inset 0 0 0 .5px rgba(255,255,255,.12)}
+.fallback .glass{-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);background:rgba(250,250,248,.84);box-shadow:0 6px 20px rgba(0,0,0,.12);border:1px solid rgba(50,44,50,.12)}
+.mini{display:grid;grid-template-columns:44px minmax(0,1fr) 44px 44px;gap:10px;align-items:center;min-height:60px;padding:6px 6px 6px 8px;border-radius:999px}
+.mini .art{width:44px;height:44px;border-radius:5px;background:radial-gradient(circle at center,transparent 0 20%,rgba(43,39,44,.7) 21% 31%,transparent 32%),repeating-conic-gradient(from 5deg,rgba(255,255,255,.64) 0 17deg,transparent 17deg 42deg),#688fa8}
+.mini strong,.mini small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mini strong{font-size:.9em;font-weight:650}.mini small{color:var(--muted);font-size:.76em}
+.mini .icobtn{width:44px;height:44px;color:var(--text);border-radius:999px}.mini .icobtn svg{stroke-width:2}
+.tabs{display:grid;grid-template-columns:repeat(4,1fr);border-radius:999px;padding:6px}
+.tabs button{min-height:52px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border:0;background:transparent;color:var(--muted);font:600 .64em -apple-system,sans-serif;border-radius:999px}
+.tabs button svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.tabs button.on{color:var(--plum);background:rgba(255,255,255,.55);box-shadow:inset 0 0 0 .5px rgba(255,255,255,.6)}
+.phone.dark .tabs button.on{background:rgba(255,255,255,.14)}
+.dock.collapsed{flex-direction:row;align-items:center}
+.dock.collapsed .tabpill{width:64px;height:60px;border-radius:999px;display:grid;place-items:center;color:var(--plum);flex:none}
+.dock.collapsed .tabpill svg{width:26px;height:26px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.dock.collapsed .mini{flex:1;min-width:0;grid-template-columns:44px minmax(0,1fr) 44px}
+/* Now playing */
+.np{background:#141318;color:#f2eef1;--text:#f2eef1;--muted:#a9a2ab;--plum:#f0ebef}
+.np .screen{background:radial-gradient(ellipse 90% 60% at 30% 25%,rgba(104,143,168,.55),transparent 70%),radial-gradient(ellipse 80% 60% at 80% 80%,rgba(201,104,127,.4),transparent 70%),linear-gradient(180deg,#25232c,#121117);color:#f2eef1}
+.np .grab{width:36px;height:5px;border-radius:3px;background:rgba(255,255,255,.45);margin:6px auto 0}
+.np-art{margin:26px 26px 0;aspect-ratio:1;border-radius:6px;background:radial-gradient(circle at 30% 30%,rgba(255,255,255,.35),transparent 55%),linear-gradient(160deg,#7fa3bd,#45596d 60%,#2c2b33);box-shadow:0 20px 50px rgba(0,0,0,.5);display:grid;place-items:center;color:rgba(255,255,255,.7);font:600 12px ui-monospace,Menlo,monospace;letter-spacing:.12em;text-transform:uppercase}
+.np-meta{display:grid;grid-template-columns:minmax(0,1fr) 44px;gap:8px;align-items:center;padding:26px 26px 0}
+.np-meta strong{display:block;font-size:1.15em;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.np-meta small{display:block;color:var(--muted);font-size:.95em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.np-meta .icobtn{color:#f2eef1;background:rgba(255,255,255,.14);border-radius:999px;width:34px;height:34px}
+.scrub{margin:22px 26px 0}.scrub .bar{height:7px;border-radius:4px;background:rgba(255,255,255,.22);position:relative;overflow:hidden}.scrub .bar i{position:absolute;inset:0;width:38%;background:var(--prism)}
+.scrub .t{display:flex;justify-content:space-between;font:600 .74em ui-monospace,Menlo,monospace;color:var(--muted);margin-top:8px}
+.transport{display:flex;justify-content:center;align-items:center;gap:36px;margin:22px 0 0}
+.transport button{border:0;background:transparent;color:#f2eef1;display:grid;place-items:center;width:64px;height:64px;border-radius:999px}
+.transport button svg{width:38px;height:38px;fill:currentColor;stroke:none}.transport button.big svg{width:48px;height:48px}
+.vol{display:grid;grid-template-columns:20px minmax(0,1fr) 20px;gap:12px;align-items:center;margin:26px 26px 0;color:var(--muted)}
+.vol .bar{height:7px;border-radius:4px;background:rgba(255,255,255,.22);position:relative;overflow:hidden}.vol .bar i{position:absolute;inset:0;width:60%;background:rgba(255,255,255,.85)}
+.vol svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.np-acts{display:flex;justify-content:center;gap:28px;margin:26px 0 0}
+.np-acts button{border:0;background:transparent;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:4px;font:600 .66em -apple-system,sans-serif;width:64px}
+.np-acts button svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.np-acts button.on{color:#f2eef1}
+.np-mix{margin:22px 26px 0;padding:12px 12px;border-radius:4px;background:rgba(255,255,255,.08);display:grid;grid-template-columns:44px minmax(0,1fr);gap:10px;align-items:center}
+.np-mix .cs{width:44px}.np-mix strong{display:block;font:500 1.05em/1.15 var(--serif)}.np-mix small{display:block;color:var(--muted);font-size:.76em;margin-top:2px}
+/* Empty state */
+.empty{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;padding:12px 12px 4px}
+.empty .cs{width:150px;filter:drop-shadow(0 6px 10px rgba(41,36,42,.22))}
+.empty h2{margin:12px 0 0;font:500 1.35em/1.15 var(--serif);color:var(--text);border:0;padding:0}
+.empty p{margin:0;color:var(--muted);font-size:.9em;max-width:28ch}
+/* Prism banner (brand moment, from the reference) */
+.banner{border-radius:4px;background:var(--prism);color:#fff;display:flex;align-items:center;justify-content:center;gap:10px;min-height:72px;font:600 1.6em var(--serif);letter-spacing:-.02em}
+.banner .cs{width:64px}
+/* Cassette symbol colours */
+.cs{display:block;aspect-ratio:200/128;--case:#3f4851;--stock:#f2ede2}
+.cs svg{width:100%;height:100%;display:block;overflow:visible}
+.cs.c2{--case:#544451}.cs.c3{--case:#45596d}.cs.c4{--case:#6f5a4d}.cs.c5{--case:#2c2b33}
+.cs-case{fill:var(--case);stroke:#252328;stroke-width:2}.cs-edge{fill:none;stroke:rgba(255,255,255,.25);stroke-width:2}
+.cs-stock{fill:var(--stock)}.cs-rule{stroke:rgba(75,66,71,.34)}
+.cs-dark{fill:#17161a;stroke:#28262a;stroke-width:2}.cs-band{fill:#493638}
+.cs-ring{fill:#dedbd6;stroke:#28262a;stroke-width:4}.cs-tooth{fill:#28262a}.cs-hole{fill:#f4f1ec}
+.cs-guide{fill:#f2f0eb;stroke:#544e52;stroke-width:2}.cs-metal{fill:#9a9590;stroke:#4f4a4d;stroke-width:1.5}
+.spin .cs-hub{transform-box:fill-box;transform-origin:center;animation:hub 1.05s linear infinite}
+@keyframes hub{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.spin .cs-hub{animation:none}}
+/* prism beam demo tile */
+.beam{position:relative;overflow:hidden;background:#1c2633;border-radius:4px;aspect-ratio:2/1}
+.beam::before{content:"";position:absolute;left:-30%;top:40%;width:170%;height:38%;transform:rotate(-14deg);background:linear-gradient(180deg,#c9687f,#d18a65,#d2c76f,#709778,#688fa8,#6e5c8f);filter:blur(14px);opacity:.95}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="cassette" viewBox="0 0 200 128">
+    <rect class="cs-case" x="1" y="1" width="198" height="126" rx="9"/><rect class="cs-edge" x="3" y="3" width="194" height="122" rx="7"/>
+    <rect class="cs-stock" x="14" y="12" width="172" height="73" rx="5"/><path class="cs-rule" d="M22 31h156"/>
+    <path fill="#c9687f" d="M14 39h172v5H14z"/><path fill="#d18a65" d="M14 44h172v5H14z"/><path fill="#d2c76f" d="M14 49h172v5H14z"/><path fill="#709778" d="M14 54h172v5H14z"/><path fill="#688fa8" d="M14 59h172v5H14z"/>
+    <rect class="cs-dark" x="42" y="42" width="116" height="39" rx="7"/><rect class="cs-band" x="72" y="55" width="56" height="12" rx="2"/>
+    <g transform="translate(61 61)"><g class="cs-hub"><circle class="cs-ring" r="16"/><g class="cs-tooth"><rect x="-3" y="-15" width="6" height="6" rx="1"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(45)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(90)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(135)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(180)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(225)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(270)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(315)"/></g><circle class="cs-hole" r="5"/></g></g>
+    <g transform="translate(139 61)"><g class="cs-hub"><circle class="cs-ring" r="16"/><g class="cs-tooth"><rect x="-3" y="-15" width="6" height="6" rx="1"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(45)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(90)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(135)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(180)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(225)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(270)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(315)"/></g><circle class="cs-hole" r="5"/></g></g>
+    <path class="cs-dark" d="M48 89h104l12 30H36z"/><circle class="cs-guide" cx="58" cy="105" r="6"/><circle class="cs-guide" cx="142" cy="105" r="6"/>
+    <rect class="cs-metal" x="75" y="100" width="8" height="13" rx="2"/><rect class="cs-metal" x="117" y="100" width="8" height="13" rx="2"/>
+    <circle class="cs-metal" cx="100" cy="108" r="4"/><circle class="cs-metal" cx="9" cy="9" r="3"/><circle class="cs-metal" cx="191" cy="9" r="3"/><circle class="cs-metal" cx="9" cy="119" r="3"/><circle class="cs-metal" cx="191" cy="119" r="3"/>
+  </symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="m3.5 10 8.5-7 8.5 7v10.5h-6v-6h-5v6h-6z"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5M8 9l4-4 4 4"/></symbol>
+  <symbol id="i-queue" viewBox="0 0 24 24"><path d="M8 7h12M8 12h12M8 17h12"/><circle cx="4" cy="7" r=".8" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r=".8" fill="currentColor" stroke="none"/><circle cx="4" cy="17" r=".8" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-sync" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 8.2A7 7 0 0 1 18.4 6L20 8M4 16l1.6 2A7 7 0 0 0 18 15.8"/></symbol>
+  <symbol id="i-signout" viewBox="0 0 24 24"><path d="M10 5H5.5A1.5 1.5 0 0 0 4 6.5v11A1.5 1.5 0 0 0 5.5 19H10"/><path d="m14 8 4 4-4 4M18 12H9"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-ok" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m7.8 12.2 2.8 2.8 5.8-6.1"/></symbol>
+  <symbol id="i-err" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v6M12 17h.01"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 6 10 6-10 6z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 6h3v12H8zM13 6h3v12h-3z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="m4 6 8 6-8 6zM12 6l8 6-8 6z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M20 6l-8 6 8 6zM12 6l-8 6 8 6z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9.5 5 7 7-7 7"/></symbol>
+  <symbol id="i-memory" viewBox="0 0 24 24"><path d="M12 3.5a5 5 0 0 1 5 5v1.2a3.5 3.5 0 0 1 .5 6.8V19a1.5 1.5 0 0 1-1.5 1.5H8A1.5 1.5 0 0 1 6.5 19v-2.5a3.5 3.5 0 0 1 .5-6.8V8.5a5 5 0 0 1 5-5z"/><path d="M9.5 20.5V17M14.5 20.5V17"/></symbol>
+  <symbol id="i-ear" viewBox="0 0 24 24"><path d="M6.5 10a5.5 5.5 0 0 1 11 0c0 3-2.5 3.5-2.5 6a2.5 2.5 0 0 1-5 0"/><path d="M9.5 10a2.5 2.5 0 0 1 5 0c0 1.5-1.5 2-1.5 3.5"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3.5 13.8 9l5.7 1.8-5.7 1.8L12 18.2l-1.8-5.6L4.5 10.8 10.2 9z"/></symbol>
+  <symbol id="i-people" viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.2"/><circle cx="16.5" cy="10" r="2.4"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0M14.8 18.5a4.2 4.2 0 0 1 5.7-3.9"/></symbol>
+  <symbol id="i-person" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 19.5a7 7 0 0 1 14 0"/></symbol>
+  <symbol id="i-tape" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="1.5"/><circle cx="8.5" cy="12" r="2.2"/><circle cx="15.5" cy="12" r="2.2"/><path d="M8.5 9.8h7"/></symbol>
+  <symbol id="i-library" viewBox="0 0 24 24"><path d="M4 5v14M9 5v14M14 6l5 13"/></symbol>
+  <symbol id="i-vol0" viewBox="0 0 24 24"><path d="M4 10v4h3l4 3V7l-4 3z"/></symbol>
+  <symbol id="i-vol1" viewBox="0 0 24 24"><path d="M4 10v4h3l4 3V7l-4 3z"/><path d="M15 9a4 4 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11"/></symbol>
+  <symbol id="i-shape" viewBox="0 0 24 24"><path d="M3 17c3 0 4-9 8-9s4 9 10 3"/></symbol>
+  <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 15V4M8 8l4-4 4 4"/><path d="M5 14v4.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V14"/></symbol>
+  <symbol id="i-apple" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M16.71 12.74c.02 2.15 1.89 2.87 1.91 2.88-.02.05-.3 1.02-.98 2.03-.59.87-1.21 1.73-2.18 1.75-.95.02-1.26-.57-2.35-.57s-1.43.55-2.33.59c-.94.03-1.65-.94-2.25-1.8-1.22-1.77-2.15-5-0.9-7.18a3.5 3.5 0 0 1 2.98-1.81c.93-.02 1.81.63 2.35.63.54 0 1.56-.78 2.63-.66.45.02 1.71.18 2.52 1.37-.07.04-1.5.88-1.4 2.77ZM14.89 7.47c.49-.6.83-1.43.74-2.26-.72.03-1.59.48-2.1 1.08-.46.53-.86 1.38-.75 2.19.8.06 1.62-.41 2.11-1.01Z"/></symbol>
+</svg>
+
+<main>
+<p class="kicker">Native iOS · shell, motif and playback · revision 2 · synthetic data</p>
+<h1>Four tabs, a prism, and a boxy grid.</h1>
+<p>Revision 2 replaces the hub-and-sheet proposal after the founder's direction of September 17. The shape is now decided: <strong>Home, Mixes, Library, You</strong> on a native tab bar. This board shows how that shape looks with the reference's boxy layout, the prism gradient that comes off the cassette as the one signature motif, a gradient app background, Apple Music's large-title collapse and floating playback controls, and native Liquid Glass with a fallback for earlier iOS.</p>
+
+<div class="callout"><strong>What changed from revision 1</strong>
+<ul class="tight">
+<li>Tab bar replaces the You sheet. Your music becomes the <em>Library</em> tab; the DJ's memory, listening, suggestions and Account live under <em>You</em>.</li>
+<li>Home is reduced to the composer plus a list of ideas (routine suggestions and starter prompts), modelled on Apple's Playlist Playground sheet.</li>
+<li>Cards, tiles, buttons and inputs are boxy: 2–4 point radii, hairline borders, light grey fills. Only native chrome (tab bar, mini-player) keeps the system's pill shape.</li>
+<li>Display type moves from the handwritten marker to a serif, matching the reference. New York ships with iOS, so nothing is bundled. See question 1 at the end.</li>
+<li>The prism replaces the tape-button styling: primary buttons, the composer stripe, progress, the focused field and the brand banner carry it. Nothing else does.</li>
+</ul></div>
+
+<div class="legend"><span class="badge b-work">Working</span><span class="note">in the app and covered by the September smoke</span><span class="badge b-local">Built locally</span><span class="note">in the working tree; release gates pending</span><span class="badge b-plan">Planned</span><span class="note">approved scope, no native code; drawn ghosted</span></div>
+
+<!-- ============================================================ -->
+<h2>1 · Screen map by tab</h2>
+<div class="map">
+<section class="dest"><header><h3>Home</h3><span class="badge b-work">Working</span></header><p class="where">Tab 1 · start a mix</p>
+<ul class="scr"><li><div><strong>Composer</strong><span>Rotating example prompt; optional playlist inspiration attached from here</span></div><span class="badge b-work">Working</span></li>
+<li><div><strong>Ideas list</strong><span>Routine suggestions with a reason, then starter prompts</span></div><span class="badge b-local">Built locally</span></li>
+<li><div><strong>Spotify waiting card</strong><span>Only while a Spotify import is incomplete</span></div><span class="badge b-work">Working</span></li></ul></section>
+<section class="dest"><header><h3>Mixes</h3><span class="badge b-work">Working</span></header><p class="where">Tab 2 · the tape closet</p>
+<ul class="scr"><li><div><strong>Active / Archived</strong><span>Reopen, rename, swipe to archive with Undo, restore</span></div><span class="badge b-work">Working</span></li>
+<li><div><strong>Conversation → Arrangement</strong><span>Replies, clarifications, energy shape, reorder, remove, reasons</span></div><span class="badge b-work">Working</span></li>
+<li><div><strong>Version history</strong><span>List, detail, restore, conflict</span></div><span class="badge b-local">Built locally</span></li>
+<li><div><strong>Play in Mixtape · Send to Music · Create playlist</strong><span>App player plus the existing handoffs</span></div><span class="badge b-local">Built locally</span></li></ul></section>
+<section class="dest"><header><h3>Library</h3><span class="badge b-work">Working</span></header><p class="where">Tab 3 · sources and playlists</p>
+<ul class="scr"><li><div><strong>Sources</strong><span>Apple sync, Spotify import status, import again, remove</span></div><span class="badge b-work">Working</span></li>
+<li><div><strong>Spotify import guide and sheet</strong><span>Exportify, official data, review, results</span></div><span class="badge b-work">Working</span></li>
+<li><div><strong>Playlists → detail → private edit draft</strong><span>Inspiration, curation confirmation, DJ draft review</span></div><span class="badge b-work">Working</span></li>
+<li><div><strong>Apple "Go deeper" history</strong><span>Shared review flow; adapters not written</span></div><span class="badge b-plan">Planned</span></li></ul></section>
+<section class="dest"><header><h3>You</h3><span class="badge b-work">Working</span></header><p class="where">Tab 4 · the listener and the DJ's memory</p>
+<ul class="scr"><li><div><strong>What the DJ knows</strong><span>Notes; explicit Forget</span></div><span class="badge b-work">Working</span></li>
+<li><div><strong>Listening · Suggestions</strong><span>Learning on/off and clear; routine suggestions on/off</span></div><span class="badge b-local">Built locally</span></li>
+<li><div><strong>Account</strong><span>Apple and Google methods, sign out</span></div><span class="badge b-work">Working</span></li>
+<li><div><strong>Together</strong><span>Private blends, opt-in taste twins</span></div><span class="badge b-plan">Planned</span></li></ul></section>
+<section class="dest"><header><h3>Playback layer</h3><span class="badge b-local">Built locally</span></header><p class="where">Floats over every tab</p>
+<ul class="scr"><li><div><strong>Mini-player</strong><span>Above the tab bar while Apple playback is active; absent otherwise</span></div><span class="badge b-local">Built locally</span></li>
+<li><div><strong>Now playing</strong><span>Full-height sheet: artwork, scrubber, transport, volume, mix actions</span></div><span class="badge b-local">Built locally</span></li></ul></section>
+<section class="dest"><header><h3>Getting in</h3><span class="badge b-work">Working</span></header><p class="where">Before the tabs exist</p>
+<ul class="scr"><li><div><strong>Sign in · Choose music · Connect and sync · Interview</strong><span>Unchanged flow, restyled in the same language</span></div><span class="badge b-work">Working</span></li></ul></section>
+</div>
+
+<!-- ============================================================ -->
+<h2>2 · The shell</h2>
+<p class="note">Large title with Apple Music's top margin, collapsing on scroll into a small centred title over a progressive blur with no bottom edge. The tab bar is a floating glass pill that minimises to the active tab while scrolling, exactly as iOS 26 does natively; the mini-player rides above it and stays put.</p>
+
+<div class="frames">
+<figure class="frame">
+<div class="phone"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="large-title"><div><h1>Home</h1><div class="sub">Say what the moment needs.</div></div></div>
+  <div class="content">
+    <div class="composer"><i class="stripe"></i><div class="field">something for a rainy commute</div><button class="send off" aria-label="Start mix"><i><svg><use href="#i-send"/></svg></i></button></div>
+    <p class="hint">Mixes come from what you already love. Examples fill the field; they never send.</p>
+    <p class="k">Ideas for right now</p>
+    <div class="ideas">
+      <div class="idea"><span class="tile prism"><svg style="stroke:#fff"><use href="#i-spark"/></svg></span><div><strong>Your usual Friday wind-down?</strong><small>Asked for on three Fridays around now</small><div class="acts"><button class="tbtn">Make it</button><button class="tbtn quiet">Not today</button></div></div><span></span></div>
+      <div class="idea"><span class="tile"><span class="cs c2"><svg><use href="#cassette"/></svg></span></span><div><strong>Kitchen, early, coffee on</strong><small>Starter prompt</small></div><svg class="chev"><use href="#i-chev"/></svg></div>
+      <div class="idea"><span class="tile"><span class="cs c3"><svg><use href="#cassette"/></svg></span></span><div><strong>Running, long, no lyrics</strong><small>Starter prompt</small></div><svg class="chev"><use href="#i-chev"/></svg></div>
+      <div class="idea"><span class="tile"><span class="cs c4"><svg><use href="#cassette"/></svg></span></span><div><strong>Dinner for four, nothing loud</strong><small>Starter prompt</small></div><svg class="chev"><use href="#i-chev"/></svg></div>
+      <div class="idea"><span class="tile"><span class="cs"><svg><use href="#cassette"/></svg></span></span><div><strong>Something like my Late nights playlist</strong><small>Starts with that playlist attached</small></div><svg class="chev"><use href="#i-chev"/></svg></div>
+    </div>
+  </div>
+  <div class="dock">
+    <div class="mini glass" role="region" aria-label="Now playing in Mixtape"><span class="art" aria-hidden="true"></span><div><strong>Low Tide, Late</strong><small>Harbour Lights</small></div><button class="icobtn" aria-label="Pause"><svg><use href="#i-pause"/></svg></button><button class="icobtn" aria-label="Next song"><svg><use href="#i-next"/></svg></button></div>
+    <nav class="tabs glass" aria-label="Main"><button class="on" aria-current="page"><svg><use href="#i-home"/></svg>Home</button><button><svg><use href="#i-tape"/></svg>Mixes</button><button><svg><use href="#i-library"/></svg>Library</button><button><svg><use href="#i-person"/></svg>You</button></nav>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>S1 · Home, top of scroll, playing</b>Large serif title, one composer, one boxy list. The routine suggestion sits first with its reason; starter prompts follow with cassette tiles. Nothing else lives on Home.</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="smallbar" aria-hidden="true"></div><div class="smalltitle">Home</div>
+  <div class="content" style="padding-top:78px">
+    <div class="ideas">
+      <div class="idea"><span class="tile"><span class="cs c4"><svg><use href="#cassette"/></svg></span></span><div><strong>Dinner for four, nothing loud</strong><small>Starter prompt</small></div><svg class="chev"><use href="#i-chev"/></svg></div>
+      <div class="idea"><span class="tile"><span class="cs"><svg><use href="#cassette"/></svg></span></span><div><strong>Something like my Late nights playlist</strong><small>Starts with that playlist attached</small></div><svg class="chev"><use href="#i-chev"/></svg></div>
+      <div class="idea"><span class="tile"><span class="cs c5"><svg><use href="#cassette"/></svg></span></span><div><strong>Deadline sprint, no lyrics</strong><small>Starter prompt</small></div><svg class="chev"><use href="#i-chev"/></svg></div>
+      <div class="idea"><span class="tile"><span class="cs c2"><svg><use href="#cassette"/></svg></span></span><div><strong>A slow way into Sunday</strong><small>Starter prompt</small></div><svg class="chev"><use href="#i-chev"/></svg></div>
+    </div>
+    <div class="banner"><span class="cs"><svg><use href="#cassette"/></svg></span>mixtape</div>
+    <p class="k">Bring more of your music</p>
+    <div class="source"><span class="mark"><svg><use href="#i-music"/></svg></span><div><strong>Spotify import</strong><small>Extended history not in yet</small></div><span class="status warn">Waiting</span></div>
+  </div>
+  <div class="dock collapsed">
+    <div class="tabpill glass" aria-label="Home, current tab"><svg><use href="#i-home"/></svg></div>
+    <div class="mini glass"><span class="art"></span><div><strong>Low Tide, Late</strong><small>Harbour Lights</small></div><button class="icobtn" aria-label="Pause"><svg><use href="#i-pause"/></svg></button></div>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>S2 · Home, scrolled</b>The title shrinks to the centre over a progressive blur that fades out with no hairline. The tab bar minimises to the active tab; the mini-player widens into the freed space. Tapping the pill or scrolling up restores the four tabs.</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="large-title"><div><h1>Mixes</h1></div><div class="seg" role="tablist"><button class="on">Active</button><button>Archived</button></div></div>
+  <div class="content">
+    <div class="mixes">
+      <div class="mixrow"><span class="cs c2"><svg><use href="#cassette"/></svg></span><div><strong>A slow way into Sunday</strong><small>12 songs · yesterday · playing</small></div><button class="icobtn" aria-label="Mix actions"><svg><use href="#i-more"/></svg></button></div>
+      <div class="mixrow"><span class="cs c3"><svg><use href="#cassette"/></svg></span><div><strong>Night bus notes</strong><small>18 songs · Tuesday</small></div><button class="icobtn"><svg><use href="#i-more"/></svg></button></div>
+      <div class="mixrow"><span class="cs c5"><svg><use href="#cassette"/></svg></span><div><strong>Deadline sprint, no lyrics</strong><small>22 songs · 2 weeks ago</small></div><button class="icobtn"><svg><use href="#i-more"/></svg></button></div>
+      <div class="mixrow"><span class="cs c4"><svg><use href="#cassette"/></svg></span><div><strong>Kitchen, early, coffee on</strong><small>9 songs · last month</small></div><button class="icobtn"><svg><use href="#i-more"/></svg></button></div>
+      <div class="mixrow"><span class="cs"><svg><use href="#cassette"/></svg></span><div><strong>Long drive, no talking</strong><small>31 songs · last month</small></div><button class="icobtn"><svg><use href="#i-more"/></svg></button></div>
+    </div>
+  </div>
+  <div class="dock">
+    <div class="mini glass"><span class="art"></span><div><strong>Low Tide, Late</strong><small>Harbour Lights</small></div><button class="icobtn" aria-label="Pause"><svg><use href="#i-pause"/></svg></button><button class="icobtn" aria-label="Next song"><svg><use href="#i-next"/></svg></button></div>
+    <nav class="tabs glass"><button><svg><use href="#i-home"/></svg>Home</button><button class="on"><svg><use href="#i-tape"/></svg>Mixes</button><button><svg><use href="#i-library"/></svg>Library</button><button><svg><use href="#i-person"/></svg>You</button></nav>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>S3 · Mixes</b>Boxy cards, one per tape, serif titles. The Active/Archived switch is a boxy segmented control beside the title. Rename stays in the row actions; swipe left still archives with Undo.</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="large-title"><div><h1>Library</h1></div><button class="icobtn" aria-label="Sync library"><svg><use href="#i-sync"/></svg></button></div>
+  <div class="content">
+    <p class="k">Sources</p>
+    <div class="source"><span class="mark"><svg><use href="#i-apple"/></svg></span><div><strong>Apple Music</strong><small>Synced 2 hours ago · 4,312 songs</small></div><span class="status ok"><svg><use href="#i-ok"/></svg>Connected</span></div>
+    <div class="source"><span class="mark"><svg><use href="#i-music"/></svg></span><div><strong>Spotify import</strong><small>Account data 3 Sep · history not in yet</small></div><span class="status warn">Waiting</span></div>
+    <p class="k">Playlists</p>
+    <div class="grid2">
+      <div class="tile-card"><div class="art" style="background:linear-gradient(160deg,#c9687f,#6e5c8f)"></div><strong>Late nights</strong><small>41 songs · Apple Music</small></div>
+      <div class="tile-card"><div class="art" style="background:linear-gradient(160deg,#709778,#45596d)"></div><strong>Running, long</strong><small>63 songs · 4 unmatched</small></div>
+      <div class="tile-card"><div class="art" style="background:linear-gradient(160deg,#d2c76f,#d18a65)"></div><strong>Sunday cooking</strong><small>27 songs · Apple Music</small></div>
+      <div class="tile-card"><div class="art" style="background:linear-gradient(160deg,#688fa8,#2c2b33)"></div><strong>Old drives</strong><small>88 songs · Spotify import</small></div>
+    </div>
+  </div>
+  <div class="dock">
+    <div class="mini glass"><span class="art"></span><div><strong>Low Tide, Late</strong><small>Harbour Lights</small></div><button class="icobtn" aria-label="Pause"><svg><use href="#i-pause"/></svg></button><button class="icobtn" aria-label="Next song"><svg><use href="#i-next"/></svg></button></div>
+    <nav class="tabs glass"><button><svg><use href="#i-home"/></svg>Home</button><button><svg><use href="#i-tape"/></svg>Mixes</button><button class="on"><svg><use href="#i-library"/></svg>Library</button><button><svg><use href="#i-person"/></svg>You</button></nav>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>S4 · Library</b>Sources first with honest status, then playlists as a two-up grid like Apple Music's Recently Added, but square-cornered. Artwork tiles use real playlist art when available; the gradients here are placeholders.</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="large-title"><div><h1>You</h1></div></div>
+  <div class="content">
+    <div class="who"><span class="av">N</span><div><strong>Nia Okafor</strong><small>Apple and Google sign-in · Apple Music</small></div></div>
+    <div class="rows">
+      <a class="srow"><svg><use href="#i-memory"/></svg><div><strong>What the DJ knows</strong><small>7 remembered preferences</small></div><svg class="chev"><use href="#i-chev"/></svg></a>
+      <a class="srow"><svg><use href="#i-ear"/></svg><div><strong>Listening</strong><small>Learning from your listening is on</small></div><svg class="chev"><use href="#i-chev"/></svg></a>
+      <a class="srow"><svg><use href="#i-spark"/></svg><div><strong>Suggestions</strong><small>Routine suggestions are on</small></div><svg class="chev"><use href="#i-chev"/></svg></a>
+      <a class="srow ghost"><svg><use href="#i-people"/></svg><div><strong>Together</strong><small>Blends and taste twins</small></div><span class="tag">Planned</span></a>
+    </div>
+    <div class="rows">
+      <a class="srow"><svg><use href="#i-person"/></svg><div><strong>Account</strong><small>Login methods, linked providers</small></div><svg class="chev"><use href="#i-chev"/></svg></a>
+      <a class="srow danger"><svg><use href="#i-signout"/></svg><div><strong>Sign out</strong></div><span></span></a>
+    </div>
+  </div>
+  <div class="dock">
+    <nav class="tabs glass"><button><svg><use href="#i-home"/></svg>Home</button><button><svg><use href="#i-tape"/></svg>Mixes</button><button><svg><use href="#i-library"/></svg>Library</button><button class="on"><svg><use href="#i-person"/></svg>You</button></nav>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>S5 · You, nothing playing</b>Identity block with a prism avatar square, then two boxy groups. With no playback the tab bar stands alone; the layout does not shift when the mini-player appears because it stacks above, not inside.</figcaption>
+</figure>
+</div>
+
+<!-- ============================================================ -->
+<h2>3 · Playback controls</h2>
+<p class="note">Look and behaviour follow Apple Music: a floating mini-player that expands into a full-height Now Playing sheet with artwork-derived colour behind a blur, a thick scrubber, three large transport controls, a volume slider, and a bottom action row. Our action row carries mix actions instead of lyrics, which the product never shows.</p>
+
+<div class="frames">
+<figure class="frame">
+<div class="phone np"><div class="screen">
+  <div class="np grab"></div>
+  <div class="np-art" aria-label="Artwork">album artwork</div>
+  <div class="np-meta"><div><strong>Low Tide, Late</strong><small>Harbour Lights · Slow Water</small></div><button class="icobtn" aria-label="More"><svg><use href="#i-more"/></svg></button></div>
+  <div class="scrub"><div class="bar"><i></i></div><div class="t"><span>1:24</span><span>-2:31</span></div></div>
+  <div class="transport"><button aria-label="Previous"><svg><use href="#i-prev"/></svg></button><button class="big" aria-label="Pause"><svg><use href="#i-pause"/></svg></button><button aria-label="Next"><svg><use href="#i-next"/></svg></button></div>
+  <div class="vol"><svg><use href="#i-vol0"/></svg><div class="bar"><i></i></div><svg><use href="#i-vol1"/></svg></div>
+  <div class="np-mix"><span class="cs c2"><svg><use href="#cassette"/></svg></span><div><strong>A slow way into Sunday</strong><small>Song 5 of 12 · steady, then a lift</small></div></div>
+  <div class="np-acts"><button><svg><use href="#i-shape"/></svg>Shape</button><button class="on"><svg><use href="#i-queue"/></svg>Up next</button><button><svg><use href="#i-export"/></svg>Send to Music</button></div>
+  <div class="homebar" style="--text:#fff"><i style="background:#fff"></i></div>
+</div></div>
+<figcaption><b>P1 · Now playing</b>Sheet pulled up from the mini-player. The scrubber fill is the prism; everything else is white on the artwork's colour. Shape opens the energy assessment, Up next opens the arrangement, Send to Music hands off to the system player as today.</figcaption>
+</figure>
+
+<figure class="frame wide">
+<div style="display:flex;flex-direction:column;gap:12px">
+<div class="crop"><div class="phone" style="width:390px;height:230px;border-radius:0;padding:0;border:0;box-shadow:none"><div class="screen" style="border-radius:0"><div class="content" style="padding-top:12px"><div class="grid2"><div class="tile-card"><div class="art" style="background:linear-gradient(160deg,#c9687f,#6e5c8f)"></div></div><div class="tile-card"><div class="art" style="background:linear-gradient(160deg,#709778,#45596d)"></div></div></div></div>
+<div class="dock" style="bottom:12px"><div class="mini glass"><span class="art"></span><div><strong>Low Tide, Late</strong><small>Harbour Lights</small></div><button class="icobtn" aria-label="Play"><svg><use href="#i-play"/></svg></button><button class="icobtn" aria-label="Next song"><svg><use href="#i-next"/></svg></button></div><nav class="tabs glass"><button class="on"><svg><use href="#i-home"/></svg>Home</button><button><svg><use href="#i-tape"/></svg>Mixes</button><button><svg><use href="#i-library"/></svg>Library</button><button><svg><use href="#i-person"/></svg>You</button></nav></div></div></div></div>
+<div class="crop"><div class="phone dark" style="width:390px;height:230px;border-radius:0;padding:0;border:0;box-shadow:none"><div class="screen" style="border-radius:0"><div class="content" style="padding-top:12px"><div class="grid2"><div class="tile-card"><div class="art" style="background:linear-gradient(160deg,#c9687f,#6e5c8f)"></div></div><div class="tile-card"><div class="art" style="background:linear-gradient(160deg,#709778,#45596d)"></div></div></div></div>
+<div class="dock" style="bottom:12px"><div class="mini glass"><span class="art"></span><div><strong>Low Tide, Late</strong><small>Not available in your region</small></div><button class="icobtn" aria-label="Next song"><svg><use href="#i-next"/></svg></button><span></span></div><nav class="tabs glass"><button class="on"><svg><use href="#i-home"/></svg>Home</button><button><svg><use href="#i-tape"/></svg>Mixes</button><button><svg><use href="#i-library"/></svg>Library</button><button><svg><use href="#i-person"/></svg>You</button></nav></div></div></div></div>
+</div>
+<figcaption><b>P2 · Mini-player states</b>Paused on light: play replaces pause, nothing else moves. Unavailable track on dark: the reason is written in the subtitle and only Next remains, matching the player's rule of never inferring a skip as a dislike.</figcaption>
+</figure>
+</div>
+
+<!-- ============================================================ -->
+<h2>4 · Native glass and the fallback</h2>
+<p class="note">On iOS 26 and later the tab bar and mini-player are the system's Liquid Glass: refraction, specular top edge, minimise-on-scroll. Earlier iOS gets a frosted pill with the same size, blur and radius, a hairline edge, and no refraction highlight. Both crops sit over the same busy artwork so the difference is honest.</p>
+<div class="frames">
+<figure class="frame wide"><div class="crop"><div class="phone" style="width:390px;height:230px;border-radius:0;padding:0;border:0;box-shadow:none"><div class="screen" style="border-radius:0"><div class="content" style="padding-top:8px"><div class="grid2"><div class="tile-card"><div class="art" style="background:linear-gradient(160deg,#c9687f,#6e5c8f)"></div></div><div class="tile-card"><div class="art" style="background:linear-gradient(160deg,#d2c76f,#d18a65)"></div></div></div></div>
+<div class="dock" style="bottom:12px"><nav class="tabs glass"><button><svg><use href="#i-home"/></svg>Home</button><button class="on"><svg><use href="#i-tape"/></svg>Mixes</button><button><svg><use href="#i-library"/></svg>Library</button><button><svg><use href="#i-person"/></svg>You</button></nav></div></div></div></div>
+<figcaption><b>G1 · iOS 26+ · native Liquid Glass</b>System component. Selected tab gets the glass lozenge. Reduced Transparency makes it opaque, as the system does.</figcaption></figure>
+<figure class="frame wide"><div class="crop"><div class="phone fallback" style="width:390px;height:230px;border-radius:0;padding:0;border:0;box-shadow:none"><div class="screen" style="border-radius:0"><div class="content" style="padding-top:8px"><div class="grid2"><div class="tile-card"><div class="art" style="background:linear-gradient(160deg,#c9687f,#6e5c8f)"></div></div><div class="tile-card"><div class="art" style="background:linear-gradient(160deg,#d2c76f,#d18a65)"></div></div></div></div>
+<div class="dock" style="bottom:12px"><nav class="tabs glass"><button><svg><use href="#i-home"/></svg>Home</button><button class="on"><svg><use href="#i-tape"/></svg>Mixes</button><button><svg><use href="#i-library"/></svg>Library</button><button><svg><use href="#i-person"/></svg>You</button></nav></div></div></div></div>
+<figcaption><b>G2 · iOS 17–18 fallback</b>Same geometry, frosted blur, hairline edge, flat selected state. Minimise-on-scroll is replicated in Flutter with the same timing so behaviour matches even where the material cannot.</figcaption></figure>
+</div>
+<div class="callout"><strong>Implementation constraint to decide (question 2).</strong> Flutter draws its own widgets, so "native Liquid Glass" means one of two things: host a real UIKit tab bar and mini-player in the iOS runner and bridge tab changes to Flutter, or draw a Flutter replica of the glass. Only the first is the genuine system material and gets Apple's future refinements for free; it costs a platform-view seam. The board draws the genuine material and the fallback; the choice changes engineering, not the look approved here.</div>
+
+<!-- ============================================================ -->
+<h2>5 · Foundation</h2>
+<div class="panels">
+<div class="panel" style="background:#f8f7f4;color:#2b272d;border-color:#dcd9d3">
+<h4 style="color:#8a838b">The prism · one motif</h4>
+<div class="demo">
+<div class="beam"></div>
+<div style="height:14px;border-radius:2px;background:linear-gradient(135deg,#c9687f,#d18a65 22%,#d2c76f 42%,#709778 62%,#688fa8 82%,#6e5c8f)"></div>
+<div class="demo-row"><span class="cs" style="width:96px"><svg><use href="#cassette"/></svg></span><p style="margin:0;font-size:12px;color:#746d75;max-width:26ch">The five label stripes on the cassette are the palette. The prism is those stripes with the plum end added, run diagonally. It is the only decorative colour in the app.</p></div>
+</div>
+<p style="font-size:12px;color:#746d75;margin:12px 0 0"><strong>Where it appears:</strong> primary button fill, composer left stripe and focus ring, playback progress, the You avatar, the brand banner, and a suggestion's tile. <strong>Where it never appears:</strong> backgrounds behind text, borders on cards, tab bars, icons, or more than one element per screen.</p>
+</div>
+<div class="panel" style="background:#f8f7f4;color:#2b272d;border-color:#dcd9d3">
+<h4 style="color:#8a838b">Background · never flat</h4>
+<div class="demo-row">
+<div style="flex:1;min-width:140px;aspect-ratio:1;border-radius:4px;border:1px solid #dcd9d3;background:radial-gradient(ellipse 70% 40% at 0% 0%,rgba(104,143,168,.14),transparent 70%),radial-gradient(ellipse 70% 40% at 100% 100%,rgba(201,104,127,.10),transparent 70%),linear-gradient(180deg,#f8f7f4,#efedea)"></div>
+<div style="flex:1;min-width:140px;aspect-ratio:1;border-radius:4px;border:1px solid #2b2a30;background:radial-gradient(ellipse 70% 40% at 0% 0%,rgba(104,143,168,.18),transparent 70%),radial-gradient(ellipse 70% 40% at 100% 100%,rgba(201,104,127,.12),transparent 70%),linear-gradient(180deg,#121115,#0c0c0f)"></div>
+</div>
+<p style="font-size:12px;color:#746d75;margin:12px 0 0">Light: warm off-white falling to a cooler grey, a blue tint top-left and a pink tint bottom-right at 10–14% alpha. Dark: near-black with the same two tints. Cards sit on top as translucent white or white-at-6%, so the gradient shows through the hairline gaps. Now Playing swaps the tints for the artwork's two dominant colours.</p>
+<div class="swatches" style="margin-top:12px">
+<div class="sw" style="background:#f8f7f4"><b>bg top</b><code>#f8f7f4</code></div><div class="sw" style="background:#efedea"><b>bg bottom</b><code>#efedea</code></div><div class="sw" style="background:#efeeea"><b>box</b><code>#efeeea</code></div><div class="sw" style="background:#e6e4df"><b>box 2</b><code>#e6e4df</code></div>
+<div class="sw" style="background:#121115;color:#ebe7ea"><b>dark top</b><code>#121115</code></div><div class="sw" style="background:#0c0c0f;color:#ebe7ea"><b>dark bottom</b><code>#0c0c0f</code></div><div class="sw" style="background:#1d1c21;color:#ebe7ea"><b>dark box</b><code>#1d1c21</code></div><div class="sw" style="background:#26252b;color:#ebe7ea"><b>dark box 2</b><code>#26252b</code></div>
+</div>
+</div>
+
+<div class="panel" style="background:#f8f7f4;color:#2b272d;border-color:#dcd9d3">
+<h4 style="color:#8a838b">Type</h4>
+<div class="typerow"><small>large title · serif 34</small><span style="font:600 34px/1.05 ui-serif,'New York',Georgia,serif;letter-spacing:-.02em">Library</span></div>
+<div class="typerow"><small>small title · serif 17</small><span style="font:600 17px/1.2 ui-serif,'New York',Georgia,serif">Library</span></div>
+<div class="typerow"><small>mix title · serif 18</small><span style="font:500 18px/1.15 ui-serif,'New York',Georgia,serif;letter-spacing:-.01em">A slow way into Sunday</span></div>
+<div class="typerow"><small>body · SF 16</small><span style="font:16px/1.4 -apple-system,sans-serif">Eighteen songs, quiet start and a slow lift near the end.</span></div>
+<div class="typerow"><small>secondary · SF 14</small><span style="font:14px/1.4 -apple-system,sans-serif;color:#746d75">Synced 2 hours ago · 4,312 songs</span></div>
+<div class="typerow"><small>meta · SF 12 floor</small><span style="font:12px/1.4 -apple-system,sans-serif;color:#8a838b">12 songs · yesterday</span></div>
+<div class="typerow"><small>kicker · mono 11</small><span style="font:700 11px/1.2 ui-monospace,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:#8a838b">Ideas for right now</span></div>
+<p style="font-size:12px;color:#746d75;margin:12px 0 0">The reference's serif headings become New York, Apple's own serif, so nothing is bundled and Dynamic Type still applies. Noteworthy is retired from screen titles; it survives only as the handwritten label on the cassette artwork itself. See question 1.</p>
+</div>
+
+<div class="panel" style="background:#f8f7f4;color:#2b272d;border-color:#dcd9d3">
+<h4 style="color:#8a838b">Boxy controls · light and dark</h4>
+<div class="phone" style="height:auto;border:0;background:transparent;box-shadow:none;padding:0;border-radius:0;width:auto;overflow:visible"><div class="screen" style="background:transparent;border-radius:0;display:block;height:auto;overflow:visible">
+<div class="demo">
+<div class="demo-row"><button class="btn primary">Play now</button><button class="btn secondary">Create playlist</button><button class="btn ghost">Rename</button></div>
+<div class="composer"><i class="stripe"></i><div class="field">a slow way into Sunday</div><button class="send off"><i><svg><use href="#i-send"/></svg></i></button></div>
+<div class="composer focus"><i class="stripe"></i><div class="field typed">something for a rainy comm</div><button class="send"><i><svg><use href="#i-send"/></svg></i></button></div>
+<div class="demo-row"><span class="status ok"><svg><use href="#i-ok"/></svg>Playlist created</span><span class="status warn">Waiting for the second email</span><span class="status err"><svg><use href="#i-err"/></svg>Couldn't reach the DJ</span></div>
+</div></div></div>
+<div class="phone dark" style="height:auto;border:0;background:transparent;box-shadow:none;padding:0;border-radius:0;width:auto;margin-top:14px;overflow:visible"><div class="screen" style="background:#121115;border-radius:4px;display:block;height:auto;padding:14px;overflow:visible">
+<div class="demo">
+<div class="demo-row"><button class="btn primary">Play now</button><button class="btn secondary">Create playlist</button><button class="btn ghost">Rename</button></div>
+<div class="composer"><i class="stripe"></i><div class="field">a slow way into Sunday</div><button class="send off"><i><svg><use href="#i-send"/></svg></i></button></div>
+<div class="demo-row"><span class="status ok"><svg><use href="#i-ok"/></svg>Playlist created</span><span class="status warn">Waiting for the second email</span><span class="status err"><svg><use href="#i-err"/></svg>Couldn't reach the DJ</span></div>
+</div></div></div>
+<p style="font-size:12px;color:#746d75;margin:12px 0 0">Radii: 2 pt tiles, 3 pt buttons and status, 4 pt cards and inputs. Borders are one hairline at 16% ink. Primary is the prism with white text; secondary is a grey box; tertiary is text. Every control is 48 pt tall or has a 48 pt target. No shadows on content; only glass chrome floats.</p>
+</div>
+
+<div class="panel" style="background:#f8f7f4;color:#2b272d;border-color:#dcd9d3">
+<h4 style="color:#8a838b">Cassette · sizes</h4>
+<div class="cassettes">
+<figure><span class="cs" style="width:150px"><svg><use href="#cassette"/></svg></span><figcaption>empty state · 150</figcaption></figure>
+<figure><span class="cs c2" style="width:64px"><svg><use href="#cassette"/></svg></span><figcaption>mix row · 64</figcaption></figure>
+<figure><span class="cs c3" style="width:44px"><svg><use href="#cassette"/></svg></span><figcaption>tile · 44</figcaption></figure>
+<figure><span class="cs c4 spin" style="width:80px"><svg><use href="#cassette"/></svg></span><figcaption>loading · hubs turn</figcaption></figure>
+</div>
+<p style="font-size:12px;color:#746d75;margin:8px 0 0">Geometry unchanged from the web. Five case colours by mix id. Hubs turn only while the DJ works and stop under reduced motion.</p>
+</div>
+<div class="panel" style="background:#f8f7f4;color:#2b272d;border-color:#dcd9d3">
+<h4 style="color:#8a838b">Icons</h4>
+<div class="iconrow" style="color:#544451">
+<span><svg><use href="#i-home"/></svg><i>home</i></span><span style="border-color:#c9687f"><svg><use href="#i-tape"/></svg><i>mixes*</i></span><span style="border-color:#c9687f"><svg><use href="#i-library"/></svg><i>library*</i></span><span><svg><use href="#i-person"/></svg><i>you</i></span><span><svg><use href="#i-send"/></svg><i>send</i></span><span><svg><use href="#i-queue"/></svg><i>up next</i></span><span><svg><use href="#i-sync"/></svg><i>sync</i></span><span><svg><use href="#i-more"/></svg><i>more</i></span>
+<span><svg><use href="#i-play"/></svg><i>play</i></span><span><svg><use href="#i-pause"/></svg><i>pause</i></span><span><svg><use href="#i-next"/></svg><i>next</i></span><span><svg><use href="#i-prev"/></svg><i>previous</i></span><span style="border-color:#c9687f"><svg><use href="#i-shape"/></svg><i>shape*</i></span><span style="border-color:#c9687f"><svg><use href="#i-export"/></svg><i>send to*</i></span><span><svg><use href="#i-memory"/></svg><i>memory</i></span><span><svg><use href="#i-ear"/></svg><i>listen</i></span><span><svg><use href="#i-spark"/></svg><i>suggest</i></span><span><svg><use href="#i-people"/></svg><i>together</i></span>
+</div>
+<p style="font-size:12px;color:#746d75;margin:0">Starred glyphs are new on the same 24-grid. Transport glyphs are filled, as Apple's are; everything else is 1.8 stroke. Dashed boxes are 48-pt targets.</p>
+</div>
+</div>
+
+<!-- ============================================================ -->
+<h2>6 · Variants that change the decision</h2>
+<div class="frames">
+<figure class="frame">
+<div class="phone dark"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="large-title"><div><h1>Home</h1><div class="sub">Say what the moment needs.</div></div></div>
+  <div class="content">
+    <div class="composer"><i class="stripe"></i><div class="field">something for a rainy commute</div><button class="send off"><i><svg><use href="#i-send"/></svg></i></button></div>
+    <p class="k">Ideas for right now</p>
+    <div class="ideas">
+      <div class="idea"><span class="tile prism"><svg style="stroke:#fff"><use href="#i-spark"/></svg></span><div><strong>Your usual Friday wind-down?</strong><small>Asked for on three Fridays around now</small><div class="acts"><button class="tbtn">Make it</button><button class="tbtn quiet">Not today</button></div></div><span></span></div>
+      <div class="idea"><span class="tile"><span class="cs c2"><svg><use href="#cassette"/></svg></span></span><div><strong>Kitchen, early, coffee on</strong><small>Starter prompt</small></div><svg class="chev"><use href="#i-chev"/></svg></div>
+      <div class="idea"><span class="tile"><span class="cs c3"><svg><use href="#cassette"/></svg></span></span><div><strong>Running, long, no lyrics</strong><small>Starter prompt</small></div><svg class="chev"><use href="#i-chev"/></svg></div>
+      <div class="idea"><span class="tile"><span class="cs c4"><svg><use href="#cassette"/></svg></span></span><div><strong>Dinner for four, nothing loud</strong><small>Starter prompt</small></div><svg class="chev"><use href="#i-chev"/></svg></div>
+    </div>
+  </div>
+  <div class="dock">
+    <div class="mini glass"><span class="art"></span><div><strong>Low Tide, Late</strong><small>Harbour Lights</small></div><button class="icobtn" aria-label="Pause"><svg><use href="#i-pause"/></svg></button><button class="icobtn" aria-label="Next song"><svg><use href="#i-next"/></svg></button></div>
+    <nav class="tabs glass"><button class="on"><svg><use href="#i-home"/></svg>Home</button><button><svg><use href="#i-tape"/></svg>Mixes</button><button><svg><use href="#i-library"/></svg>Library</button><button><svg><use href="#i-person"/></svg>You</button></nav>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>Dark · system theme</b>Glass turns smoky, boxes go to white-at-6%, the prism and cassette stripes are unchanged.</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone large"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="large-title"><div><h1 style="font-size:1.5em">Home</h1></div></div>
+  <div class="content">
+    <div class="composer"><i class="stripe"></i><div class="field" style="white-space:normal;font-size:.8em;line-height:1.2">something for a rainy commute</div><button class="send off"><i><svg><use href="#i-send"/></svg></i></button></div>
+    <div class="ideas">
+      <div class="idea"><span class="tile prism"><svg style="stroke:#fff"><use href="#i-spark"/></svg></span><div><strong style="font-size:.8em;white-space:normal">Your usual Friday wind-down?</strong><small style="font-size:.6em">Three Fridays around now</small><div class="acts"><button class="tbtn" style="font-size:.7em">Make it</button><button class="tbtn quiet" style="font-size:.7em">Not today</button></div></div><span></span></div>
+      <div class="idea"><span class="tile"><span class="cs c2"><svg><use href="#cassette"/></svg></span></span><div><strong style="font-size:.8em;white-space:normal">Kitchen, early, coffee on</strong></div><svg class="chev"><use href="#i-chev"/></svg></div>
+      <div class="idea"><span class="tile"><span class="cs c3"><svg><use href="#cassette"/></svg></span></span><div><strong style="font-size:.8em;white-space:normal">Running, long, no lyrics</strong></div><svg class="chev"><use href="#i-chev"/></svg></div>
+    </div>
+  </div>
+  <div class="dock">
+    <div class="mini glass"><span class="art"></span><div><strong style="font-size:.7em">Low Tide, Late</strong><small style="font-size:.55em">Harbour Lights</small></div><button class="icobtn" aria-label="Pause"><svg><use href="#i-pause"/></svg></button><button class="icobtn" aria-label="Next song"><svg><use href="#i-next"/></svg></button></div>
+    <nav class="tabs glass"><button class="on"><svg><use href="#i-home"/></svg>Home</button><button><svg><use href="#i-tape"/></svg>Mixes</button><button><svg><use href="#i-library"/></svg>Library</button><button><svg><use href="#i-person"/></svg>You</button></nav>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>200% text</b>Titles and rows wrap; tiles, glass chrome and targets keep their size; the tab bar labels scale with the system's own limit.</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="large-title"><div><h1>Mixes</h1></div><div class="seg"><button class="on">Active</button><button>Archived</button></div></div>
+  <div class="content">
+    <div class="empty"><span class="cs c2"><svg><use href="#cassette"/></svg></span><h2>No tapes yet</h2><p>Your first mix will appear here. Start one from Home.</p><button class="btn primary" style="margin-top:8px">Start a mix</button></div>
+  </div>
+  <div class="dock">
+    <nav class="tabs glass"><button><svg><use href="#i-home"/></svg>Home</button><button class="on"><svg><use href="#i-tape"/></svg>Mixes</button><button><svg><use href="#i-library"/></svg>Library</button><button><svg><use href="#i-person"/></svg>You</button></nav>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>Mixes · first run</b>The cassette is the empty-state illustration. One prism button sends the listener to Home's composer rather than duplicating it here.</figcaption>
+</figure>
+</div>
+<p class="note"><strong>Reduced motion:</strong> hubs still, examples fixed on the first prompt, sheet and glass appear without slide, title collapse becomes a cross-fade. <strong>Reduced transparency:</strong> glass and the title blur become opaque system material; the gradient background stays because it is not transparency. <strong>Short phone (568 pt):</strong> Home shows the composer and two ideas before scrolling; the dock height is unchanged.</p>
+
+<!-- ============================================================ -->
+<h2>7 · Questions before approval</h2>
+<ol class="q">
+<li><strong>Serif display.</strong> The reference uses a serif; I have drawn New York for large titles, small titles and mix titles, and retired Noteworthy except on the cassette label art. Keep the serif, or keep Apple Music's bold sans for titles and use the serif only for mix names?</li>
+<li><strong>Native glass in Flutter.</strong> Genuine Liquid Glass requires hosting a UIKit tab bar and mini-player in the iOS runner and bridging to Flutter. A Flutter replica is cheaper but is not the system material. Which do you want engineered? The look on this board is the same either way.</li>
+<li><strong>Home contents.</strong> The Playground reference has a mic and a beta note; we have neither voice input nor a beta programme, so the board omits them. Should the ideas list mix routine suggestions and starter prompts in one list, as drawn, or keep suggestions in their own group?</li>
+<li><strong>Prism saturation.</strong> The reference's beam is more saturated than the cassette stripes. I kept the cassette's exact colours so the motif is honest to the asset. Say if you want a brighter prism for buttons and progress while the cassette keeps its own.</li>
+<li><strong>Android.</strong> New York and Liquid Glass are iOS only. The fallback shown for older iOS is also what Android would get, with Roboto Serif as the display face. Fine for now?</li>
+</ol>
+
+<h3>What approval covers</h3>
+<p>The four-tab shape and what belongs in each tab; the large-title placement and its collapsed blurred state; the floating mini-player and tab bar with their minimise behaviour; the Now Playing layout; the boxy radii, hairlines and fills; the gradient background rule; the prism's allowed uses; the serif and sans type roles; the cassette and icon set. iOS light and dark, 390-pt width, with 200% text, reduced motion and reduced transparency as described. It does not approve the conversation, arrangement, import, sign-in or account screens; those follow as individual boards in the order recorded in revision 1.</p>
+</main>
+</html>

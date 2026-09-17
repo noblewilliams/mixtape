@@ -8,6 +8,10 @@ Read before working:
 - `docs/decisions.md` — locked decisions with rationale; append here when a decision lands, don't relitigate silently
 - `docs/backlog.md` — consolidated open items, deferred polish, reopen clauses (keep current)
 
+## Terminology (locked 2026-08-30)
+
+Talking to the DJ creates a **mix**. A mix can be **played now** (added to the Apple Music queue) or **created as a playlist**. Use this vocabulary everywhere; DB naming (queue_tracks etc.) is unaffected.
+
 ## Ground rules
 
 - **Sessions-first**: the primary object is an ephemeral session queue; playlists are a conversion, not the default.
@@ -16,6 +20,7 @@ Read before working:
 - Curation LLM is Sonnet 5 (`claude-sonnet-5`); escalate only the sequencing pass to Opus 5 (`claude-opus-5`) and only with evidence. Embeddings use a dedicated embedding model, never a chat model.
 - New iOS Swift files need pbxproj target-membership (recurring lesson from goalympics).
 - GetSongBPM data requires a visible backlink to getsongbpm.com wherever we ship UI that uses it.
+- Deploys: while any parallel session may hold uncommitted changes, `wrangler deploy` from a clean `git worktree` of committed HEAD, never the working tree (a working-tree deploy once shipped another session's half-finished code and 500'd prod briefly).
 - Workers has no NODE_ENV: any library default gated on "production" (Better Auth's secret guard, rate limiting) is silently OFF — configure such things explicitly and fail fast on missing env.
 - User-scoped providers (anything caching per-account state) must ref.watch(authProvider) in build() so auth transitions reset them; long-running services they own must cancel via ref.onDispose. Revisit container-reset-on-sign-out (goalympics pattern) if these multiply.
 

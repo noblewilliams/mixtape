@@ -1,6 +1,6 @@
 # Playlist edit draft foundation implementation plan
 
-**Status:** implemented and verified locally; migration 0025 and deployment remain approval-gated
+**Status:** implemented and verified locally; migration 0025 was applied with 0026 on 2026-09-05 (see [release preflight](2026-09-04-playlist-release-preflight.md)). Matching Worker deployment remains unverified; see the [current release record](../../releases/2026-09-08-release-completion.md).
 
 **Spec:** [conversational source-playlist editing](../specs/2026-09-05-conversational-source-playlist-editing-design.md)
 
