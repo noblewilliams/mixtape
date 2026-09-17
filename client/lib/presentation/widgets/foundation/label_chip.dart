@@ -75,14 +75,18 @@ class LabelChip extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (glyph != null) ...[glyph, const SizedBox(width: 6)],
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: tokens.plum,
+          // Loose, so the label shrink-wraps when there is room and ellipsizes
+          // when there is not; the hole never shrinks.
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: tokens.plum,
+              ),
             ),
           ),
         ],

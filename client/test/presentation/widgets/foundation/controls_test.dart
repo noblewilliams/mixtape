@@ -112,6 +112,50 @@ void main() {
     );
   });
 
+  testWidgets('long labels ellipsize instead of overflowing a narrow row', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: MixtapeTheme.light(),
+        home: const MediaQuery(
+          data: MediaQueryData(textScaler: TextScaler.linear(2)),
+          child: Scaffold(
+            body: Center(
+              child: SizedBox(
+                width: 200,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    LabelChip(label: 'Create playlist'),
+                    TapeButton(label: 'Unavailable in your region'),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    for (final label in ['Create playlist', 'Unavailable in your region']) {
+      expect(
+        tester.widget<Text>(find.text(label)).overflow,
+        TextOverflow.ellipsis,
+      );
+    }
+    expect(
+      tester.getSize(find.byType(LabelChip)).width,
+      lessThanOrEqualTo(200),
+    );
+    expect(
+      tester.getSize(find.byType(TapeButton)).width,
+      lessThanOrEqualTo(200),
+    );
+  });
+
   testWidgets('a disabled tape button never calls onPressed', (tester) async {
     var taps = 0;
     await _pump(

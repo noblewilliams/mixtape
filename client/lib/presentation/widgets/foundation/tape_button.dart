@@ -83,14 +83,19 @@ class TapeButton extends StatelessWidget {
                           child: CustomPaint(painter: _ReelPainter()),
                         ),
                     const SizedBox(width: 7),
-                    Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: tokens.tapeInk,
+                    // Loose, so the label shrink-wraps when there is room and
+                    // ellipsizes when there is not; reel and meter never
+                    // shrink.
+                    Flexible(
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: tokens.tapeInk,
+                        ),
                       ),
                     ),
                   ],
