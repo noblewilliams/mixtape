@@ -4,7 +4,7 @@
 // opened while the app is already running.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mixtape/presentation/providers/dj_providers.dart';
+import 'package:mixtape/presentation/providers/new_mix_inspiration_provider.dart';
 import 'package:mixtape/presentation/providers/opened_archive_provider.dart';
 import 'package:mixtape/presentation/screens/home_screen.dart';
 import 'package:mixtape/presentation/screens/import_sheet.dart';
@@ -65,10 +65,6 @@ void main() {
         importService: service,
       );
       await pumpScreen(tester, container, const HomeScreen());
-      await tester.tap(find.byKey(const Key('home-actions')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('music-setup-action')));
-      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('waiting-choose-zip')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('import-upload')));
@@ -134,10 +130,6 @@ void main() {
         importService: service,
       );
       await pumpScreen(tester, container, const HomeScreen());
-      await tester.tap(find.byKey(const Key('home-actions')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('music-setup-action')));
-      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('waiting-choose-zip')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('import-upload')));
@@ -195,10 +187,6 @@ void main() {
         importService: service,
       );
       await pumpScreen(tester, container, const HomeScreen());
-      await tester.tap(find.byKey(const Key('home-actions')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('music-setup-action')));
-      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('waiting-choose-zip')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('import-upload')));
@@ -218,8 +206,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(ImportSheet), findsNothing);
 
-      // Anything else that rebuilds Home — the sessions list reloading, here.
-      container.invalidate(sessionsProvider);
+      // Anything else that rebuilds Home — the composer's attachment, here,
+      // now that the mix list lives in the Mixes tab.
+      container.invalidate(newMixInspirationProvider);
       await tester.pumpAndSettle();
 
       expect(
@@ -251,9 +240,11 @@ void main() {
         importService: service,
       );
       await pumpScreen(tester, container, const HomeScreen());
-      await tester.tap(find.byKey(const Key('home-actions')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('sources-action')));
+      // The Library tab owns this entry now (task 2.2); what this case is
+      // about is the one sheet, wherever it was opened from.
+      Navigator.of(tester.element(find.byType(HomeScreen))).push(
+        MaterialPageRoute<void>(builder: (_) => const MusicSourcesScreen()),
+      );
       await tester.pumpAndSettle();
       expect(find.byType(MusicSourcesScreen), findsOneWidget);
       await tester.tap(find.byKey(const Key('sources-import')));
@@ -297,10 +288,6 @@ void main() {
         importService: service,
       );
       await pumpScreen(tester, container, const HomeScreen());
-      await tester.tap(find.byKey(const Key('home-actions')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('music-setup-action')));
-      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('waiting-choose-zip')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('import-upload')));

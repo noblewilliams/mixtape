@@ -10,36 +10,52 @@ import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
 import 'package:mixtape/presentation/screens/choose_service_screen.dart';
 import 'package:mixtape/presentation/screens/home_screen.dart';
+import 'package:mixtape/presentation/screens/shell/shell_screen.dart';
+import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/screens/spotify_request_screen.dart';
 
 import '../helpers/fake_listening_api.dart';
 import '../helpers/onboarding_harness.dart';
 
+/// The gate resolves to the shell, and the shell is built from the foundation
+/// widgets — so these cases pump the app's own theme rather than the bare one
+/// `pumpScreen` uses.
+Future<void> pumpGate(WidgetTester tester, ProviderContainer container) async {
+  await tester.pumpWidget(
+    UncontrolledProviderScope(
+      container: container,
+      child: MaterialApp(theme: MixtapeTheme.light(), home: const ServiceGate()),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
 void main() {
   testWidgets('a blank listener (no service, no sources, no library) sees the gate',
       (tester) async {
     final listening = FakeListeningApi(onboarding: onboardingState());
-    await pumpScreen(tester, onboardingContainer(listening: listening), const ServiceGate());
+    await pumpGate(tester, onboardingContainer(listening: listening));
 
     expect(find.byType(ChooseServiceScreen), findsOneWidget);
-    expect(find.byType(HomeScreen), findsNothing);
+    expect(find.byType(ShellScreen), findsNothing);
     expect(find.text('Which do you use?'), findsOneWidget);
     expectInteractiveWidgetsKeyed(find.byType(ChooseServiceScreen));
   });
 
-  testWidgets('an Apple listener goes straight to Home', (tester) async {
+  testWidgets('an Apple listener goes straight to the shell, on Home', (tester) async {
     final listening = FakeListeningApi(onboarding: onboardingState(chosenService: 'apple'));
-    await pumpScreen(tester, onboardingContainer(listening: listening), const ServiceGate());
+    await pumpGate(tester, onboardingContainer(listening: listening));
 
+    expect(find.byType(ShellScreen), findsOneWidget);
     expect(find.byType(HomeScreen), findsOneWidget);
     expect(find.byType(ChooseServiceScreen), findsNothing);
   });
 
   testWidgets('a Spotify listener goes straight to Home', (tester) async {
     final listening = FakeListeningApi(onboarding: onboardingState(chosenService: 'spotify'));
-    await pumpScreen(tester, onboardingContainer(listening: listening), const ServiceGate());
+    await pumpGate(tester, onboardingContainer(listening: listening));
 
-    expect(find.byType(HomeScreen), findsOneWidget);
+    expect(find.byType(ShellScreen), findsOneWidget);
     expect(find.byType(ChooseServiceScreen), findsNothing);
   });
 
@@ -50,18 +66,18 @@ void main() {
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: onboardingContainer(listening: listening),
-        child: const MaterialApp(home: ServiceGate()),
+        child: MaterialApp(theme: MixtapeTheme.light(), home: const ServiceGate()),
       ),
     );
     await tester.pump();
 
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
-    expect(find.byType(HomeScreen), findsNothing);
+    expect(find.byType(ShellScreen), findsNothing);
     expect(find.byType(ChooseServiceScreen), findsNothing);
 
     completer.complete(onboardingState(chosenService: 'apple'));
     await tester.pumpAndSettle();
-    expect(find.byType(HomeScreen), findsOneWidget);
+    expect(find.byType(ShellScreen), findsOneWidget);
   });
 
   testWidgets('an onboarding error falls through to Home — never lock a listener out — is not '
@@ -73,9 +89,9 @@ void main() {
         return onboardingState();
       };
     final container = onboardingContainer(listening: listening);
-    await pumpScreen(tester, container, const ServiceGate());
+    await pumpGate(tester, container);
 
-    expect(find.byType(HomeScreen), findsOneWidget);
+    expect(find.byType(ShellScreen), findsOneWidget);
     expect(find.byType(ChooseServiceScreen), findsNothing);
 
     // No retry: the failed load is final (after a sign-out, a 401 must not
@@ -84,14 +100,14 @@ void main() {
     await tester.pump(const Duration(seconds: 30));
     await tester.pumpAndSettle();
     expect(calls, 1);
-    expect(find.byType(HomeScreen), findsOneWidget);
+    expect(find.byType(ShellScreen), findsOneWidget);
 
     // A refetch that now answers "no service chosen" must not swap the gate
     // in over a listener already on Home.
     expect(await container.read(onboardingProvider.notifier).refresh(), isTrue);
     await tester.pumpAndSettle();
     expect(calls, 2);
-    expect(find.byType(HomeScreen), findsOneWidget);
+    expect(find.byType(ShellScreen), findsOneWidget);
     expect(find.byType(ChooseServiceScreen), findsNothing);
   });
 
@@ -101,8 +117,8 @@ void main() {
     final listening =
         FakeListeningApi(onboarding: onboardingState(chosenService: 'apple', userId: 'a'));
     final container = onboardingContainer(listening: listening, auth: auth);
-    await pumpScreen(tester, container, const ServiceGate());
-    expect(find.byType(HomeScreen), findsOneWidget);
+    await pumpGate(tester, container);
+    expect(find.byType(ShellScreen), findsOneWidget);
 
     // A signs out: the signed-in tree, gate included, goes away.
     auth.set(AuthStatus.signedOut);
@@ -117,34 +133,30 @@ void main() {
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
-        child: const MaterialApp(home: ServiceGate()),
+        child: MaterialApp(theme: MixtapeTheme.light(), home: const ServiceGate()),
       ),
     );
     await tester.pump();
 
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
-    expect(find.byType(HomeScreen), findsNothing);
+    expect(find.byType(ShellScreen), findsNothing);
 
     completer.complete(onboardingState(userId: 'b'));
     await tester.pumpAndSettle();
     expect(find.byType(ChooseServiceScreen), findsOneWidget);
-    expect(find.byType(HomeScreen), findsNothing);
+    expect(find.byType(ShellScreen), findsNothing);
   });
 
   testWidgets('choosing Apple Music records nothing on the server, remembers the choice on '
       'the device, and lands on Home', (tester) async {
     final prefs = InMemoryServicePreferenceStore();
     final listening = FakeListeningApi(onboarding: onboardingState(userId: 'user-1'));
-    await pumpScreen(
-      tester,
-      onboardingContainer(listening: listening, prefs: prefs),
-      const ServiceGate(),
-    );
+    await pumpGate(tester, onboardingContainer(listening: listening, prefs: prefs));
 
     await tester.tap(find.byKey(const Key('choose-apple')));
     await tester.pumpAndSettle();
 
-    expect(find.byType(HomeScreen), findsOneWidget);
+    expect(find.byType(ShellScreen), findsOneWidget);
     expect(listening.funnelEvents, isEmpty);
     expect(await prefs.read('user-1'), 'apple');
   });
@@ -154,13 +166,9 @@ void main() {
     final prefs = InMemoryServicePreferenceStore();
     await prefs.write('user-1', 'apple');
     final listening = FakeListeningApi(onboarding: onboardingState(userId: 'user-1'));
-    await pumpScreen(
-      tester,
-      onboardingContainer(listening: listening, prefs: prefs),
-      const ServiceGate(),
-    );
+    await pumpGate(tester, onboardingContainer(listening: listening, prefs: prefs));
 
-    expect(find.byType(HomeScreen), findsOneWidget);
+    expect(find.byType(ShellScreen), findsOneWidget);
     expect(find.byType(ChooseServiceScreen), findsNothing);
   });
 
@@ -168,14 +176,10 @@ void main() {
     final prefs = InMemoryServicePreferenceStore();
     await prefs.write('someone-else', 'apple');
     final listening = FakeListeningApi(onboarding: onboardingState(userId: 'user-1'));
-    await pumpScreen(
-      tester,
-      onboardingContainer(listening: listening, prefs: prefs),
-      const ServiceGate(),
-    );
+    await pumpGate(tester, onboardingContainer(listening: listening, prefs: prefs));
 
     expect(find.byType(ChooseServiceScreen), findsOneWidget);
-    expect(find.byType(HomeScreen), findsNothing);
+    expect(find.byType(ShellScreen), findsNothing);
   });
 
   testWidgets(
@@ -183,11 +187,7 @@ void main() {
       'step; "Done" lands on Home without any route push', (tester) async {
     final prefs = InMemoryServicePreferenceStore();
     final listening = FakeListeningApi(onboarding: onboardingState(userId: 'user-1'));
-    await pumpScreen(
-      tester,
-      onboardingContainer(listening: listening, prefs: prefs),
-      const ServiceGate(),
-    );
+    await pumpGate(tester, onboardingContainer(listening: listening, prefs: prefs));
 
     await tester.tap(find.byKey(const Key('choose-spotify')));
     await tester.pumpAndSettle();
@@ -196,7 +196,7 @@ void main() {
     expect(await prefs.read('user-1'), 'spotify');
     expect(find.byType(SpotifyRequestScreen), findsOneWidget);
     expect(find.byType(ChooseServiceScreen), findsNothing);
-    expect(find.byType(HomeScreen), findsNothing);
+    expect(find.byType(ShellScreen), findsNothing);
     expect(find.byKey(const Key('request-done')), findsOneWidget);
 
     // The refetch after the event now says 'spotify', and the gate must keep
@@ -210,8 +210,8 @@ void main() {
     await tester.tap(find.byKey(const Key('request-done')));
     await tester.pumpAndSettle();
 
-    expect(find.byType(HomeScreen), findsOneWidget);
+    expect(find.byType(ShellScreen), findsOneWidget);
     expect(find.byType(SpotifyRequestScreen), findsNothing);
-    expect(Navigator.of(tester.element(find.byType(HomeScreen))).canPop(), isFalse);
+    expect(Navigator.of(tester.element(find.byType(ShellScreen))).canPop(), isFalse);
   });
 }

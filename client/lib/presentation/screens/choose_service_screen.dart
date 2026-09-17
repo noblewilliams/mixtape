@@ -4,16 +4,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/listening/listening_models.dart';
 import '../providers/onboarding_provider.dart';
-import 'home_screen.dart';
+import 'shell/shell_screen.dart';
 import 'spotify_request_screen.dart';
 
 /// The service gate: what a signed-in listener sees first. Sits where Home
 /// used to in main.dart's status switch and resolves to one of three
 /// siblings — a spinner while onboarding loads, [ChooseServiceScreen] for a
-/// listener with no service, sources, or library, or [HomeScreen]. Nothing
+/// listener with no service, sources, or library, or [ShellScreen]. Nothing
 /// here is a pushed route: choosing Spotify shows [SpotifyRequestScreen] as
-/// the gate's second step, and "Done, take me to the tapes" swaps in Home.
-/// Home stays the only screen that pushes routes and hosts sign-out.
+/// the gate's second step, and "Done, take me to the tapes" swaps in the
+/// shell. Every route the app pushes goes on a tab navigator inside it.
 ///
 /// The decision is latched once made: a later refetch (the `chose_spotify`
 /// event lands and onboarding starts saying 'spotify', or a manual refresh
@@ -83,7 +83,7 @@ class _ServiceGateState extends ConsumerState<ServiceGate> {
       _GateStep.request => SpotifyRequestScreen(
         onDone: () => setState(() => _step = _GateStep.home),
       ),
-      _GateStep.pending || _GateStep.home => const HomeScreen(),
+      _GateStep.pending || _GateStep.home => const ShellScreen(),
     };
   }
 }

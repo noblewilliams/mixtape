@@ -185,6 +185,7 @@ Future<void> _pump(
   Brightness brightness = Brightness.light,
   Size size = const Size(390, 844),
   double textScale = 1,
+  bool dockInset = false,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -199,12 +200,20 @@ Future<void> _pump(
             ? MixtapeTheme.dark()
             : MixtapeTheme.light(),
         home: Builder(
-          builder: (context) => MediaQuery(
-            data: MediaQuery.of(
-              context,
-            ).copyWith(textScaler: TextScaler.linear(textScale)),
-            child: const YouTab(),
-          ),
+          builder: (context) {
+            final media = MediaQuery.of(context);
+            return MediaQuery(
+              // `dockInset` stands in for the shell, which hands a tab root
+              // the dock's own height as bottom padding (task 2.2).
+              data: media.copyWith(
+                textScaler: TextScaler.linear(textScale),
+                padding: dockInset
+                    ? media.padding.copyWith(bottom: kFrostedDockHeight)
+                    : media.padding,
+              ),
+              child: const YouTab(),
+            );
+          },
         ),
       ),
     ),
@@ -272,12 +281,30 @@ void main() {
     testWidgets('leaves room under the groups for the floating dock', (
       tester,
     ) async {
-      await _pump(tester, _container());
+      await _pump(tester, _container(), dockInset: true);
 
+      // The dock's height arrives as MediaQuery padding from the shell, which
+      // LargeTitleScaffold emits at the end of its slivers; the tab adds its
+      // own row of breathing room on top, and never the dock again.
+      final media = MediaQuery.of(tester.element(find.byType(YouTab)));
+      expect(media.padding.bottom, kFrostedDockHeight);
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is SizedBox && widget.height == media.padding.bottom,
+        ),
+        findsWidgets,
+        reason: "the scaffold ends on the dock's own height",
+      );
       final bottoms = tester
           .widgetList<SliverPadding>(find.byType(SliverPadding))
           .map((padding) => padding.padding.resolve(TextDirection.ltr).bottom);
-      expect(bottoms.any((bottom) => bottom >= kFrostedDockHeight), isTrue);
+      expect(bottoms, contains(YouTab.defaultBottomInset));
+      expect(
+        media.padding.bottom + YouTab.defaultBottomInset,
+        greaterThanOrEqualTo(kFrostedDockHeight + 16),
+        reason: 'content has to clear the dock, once',
+      );
     });
 
     testWidgets('wraps rather than overflows at 200% text on a 320 pt phone', (

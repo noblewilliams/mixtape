@@ -22,7 +22,6 @@ import '../../providers/library_sync_provider.dart';
 import '../../providers/onboarding_provider.dart';
 import '../../theme/mixtape_theme.dart';
 import '../../widgets/foundation/flush_row.dart';
-import '../../widgets/foundation/frosted_dock.dart' show kFrostedDockHeight;
 import '../../widgets/foundation/glass_cluster.dart';
 import '../../widgets/foundation/gradient_background.dart';
 import '../../widgets/foundation/large_title_scaffold.dart';
@@ -34,9 +33,10 @@ import '../spotify_request_screen.dart';
 class LibraryTab extends ConsumerWidget {
   const LibraryTab({super.key});
 
-  /// The dock's own height plus a row of breathing room, so the last row
-  /// clears the floating dock instead of hiding behind it.
-  static const double defaultBottomInset = kFrostedDockHeight + 16;
+  /// A row of breathing room under the last row, on top of the dock's own
+  /// height: the shell hands that down as [MediaQuery.padding], which
+  /// [LargeTitleScaffold] already emits at the end of the slivers.
+  static const double defaultBottomInset = 16;
 
   static const Key syncButtonKey = Key('library-sync');
   static const Key yourMusicKey = Key('library-your-music');

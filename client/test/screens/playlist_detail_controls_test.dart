@@ -6,6 +6,7 @@ import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/new_mix_inspiration_provider.dart';
 import 'package:mixtape/presentation/providers/playlist_context_provider.dart';
 import 'package:mixtape/presentation/providers/playlist_providers.dart';
+import 'package:mixtape/presentation/providers/shell_providers.dart';
 import 'package:mixtape/presentation/screens/playlist_detail_screen.dart';
 import '../presentation/providers/playlist_taste_provider_test.dart'
     show TestAuth, ReadApi, WriteApi, summary;
@@ -60,10 +61,12 @@ void main() {
     },
   );
   testWidgets(
-    'browse inspiration returns to existing root with local draft attached',
+    'browse inspiration returns to existing root with local draft attached, '
+    'and switches the shell to the Home tab that holds the composer',
     (tester) async {
       final reads = ReadApi();
       final writes = WriteApi();
+      late ProviderContainer container;
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
@@ -73,29 +76,33 @@ void main() {
           ],
           child: MaterialApp(
             home: Consumer(
-              builder: (context, ref, _) => Scaffold(
-                body: Column(
-                  children: [
-                    Text(
-                      ref.watch(newMixInspirationProvider)?.playlist.id ??
-                          'No attachment',
-                    ),
-                    TextButton(
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) =>
-                              const PlaylistDetailScreen(playlistId: 'p'),
-                        ),
+              builder: (context, ref, _) {
+                container = ProviderScope.containerOf(context);
+                return Scaffold(
+                  body: Column(
+                    children: [
+                      Text(
+                        ref.watch(newMixInspirationProvider)?.playlist.id ??
+                            'No attachment',
                       ),
-                      child: const Text('Browse'),
-                    ),
-                  ],
-                ),
-              ),
+                      TextButton(
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) =>
+                                const PlaylistDetailScreen(playlistId: 'p'),
+                          ),
+                        ),
+                        child: const Text('Browse'),
+                      ),
+                    ],
+                  ),
+                );
+              },
             ),
           ),
         ),
       );
+      container.read(selectedTabProvider.notifier).selectTab(AppTab.library);
       await tester.tap(find.text('Browse'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Make a mix inspired by this'));
@@ -104,6 +111,8 @@ void main() {
       expect(find.text('p'), findsOneWidget);
       expect(find.byType(Scaffold), findsOneWidget);
       expect(writes.writes, 0);
+      // The composer that takes the attachment is Home's.
+      expect(container.read(selectedTabProvider), AppTab.home.index);
     },
   );
 }

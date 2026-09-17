@@ -25,6 +25,9 @@ void main() {
         home: Scaffold(
           body: MixHomeRow(
             session: session,
+            // The trailing actions button is opt-in since task 2.2; these two
+            // cases drive the menu through it rather than the long-press.
+            showActionsButton: true,
             onOpen: () => opens++,
             onRename: (name) async {
               names.add(name);
@@ -61,6 +64,7 @@ void main() {
         home: Scaffold(
           body: MixHomeRow(
             session: session,
+            showActionsButton: true,
             onOpen: () {},
             onRename: (_) async {
               writes++;

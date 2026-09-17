@@ -24,7 +24,6 @@ import '../../providers/auth_provider.dart';
 import '../../providers/library_sync_provider.dart' show accountNameProvider;
 import '../../providers/suggestions_provider.dart';
 import '../../theme/mixtape_theme.dart';
-import '../../widgets/foundation/frosted_dock.dart' show kFrostedDockHeight;
 import '../../widgets/foundation/gradient_background.dart';
 import '../../widgets/foundation/inset_group.dart';
 import '../../widgets/foundation/large_title_scaffold.dart';
@@ -36,8 +35,10 @@ import '../playback_screen.dart' show ListeningPreferencesScreen;
 class YouTab extends ConsumerWidget {
   const YouTab({super.key});
 
-  /// The dock's own height plus a row of breathing room.
-  static const double defaultBottomInset = kFrostedDockHeight + 16;
+  /// A row of breathing room under the last group, on top of the dock's own
+  /// height: the shell hands that down as [MediaQuery.padding], which
+  /// [LargeTitleScaffold] already emits at the end of the slivers.
+  static const double defaultBottomInset = 16;
 
   /// The square prism avatar.
   static const Key avatarKey = Key('you-avatar');

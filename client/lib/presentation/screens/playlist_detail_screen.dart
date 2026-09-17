@@ -5,6 +5,7 @@ import '../../data/playlists/playlist_models.dart';
 import '../providers/playlist_providers.dart';
 import '../providers/playlist_taste_provider.dart';
 import '../providers/new_mix_inspiration_provider.dart';
+import '../providers/shell_providers.dart';
 import '../widgets/playlist_artwork.dart';
 import 'playlist_edit_screen.dart';
 
@@ -57,6 +58,10 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
       return;
     }
     ref.read(newMixInspirationProvider.notifier).select(playlist);
+    // The composer that takes the attachment is Home's, so the shell switches
+    // tabs and this tab's navigator goes back to its own root — never a
+    // second HomeScreen pushed on top of the one already there.
+    ref.read(selectedTabProvider.notifier).selectTab(AppTab.home);
     Navigator.of(context).popUntil((route) => route.isFirst);
   }
 

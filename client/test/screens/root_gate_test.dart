@@ -1,7 +1,6 @@
 import 'package:mixtape/data/playlists/playlist_context_models.dart';
 import 'dart:async';
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
@@ -20,6 +19,7 @@ import 'package:mixtape/presentation/providers/dj_providers.dart';
 import 'package:mixtape/presentation/providers/library_sync_provider.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
 import 'package:mixtape/presentation/screens/home_screen.dart';
+import 'package:mixtape/presentation/screens/shell/shell_screen.dart';
 import 'package:mixtape/presentation/screens/sign_in_screen.dart';
 import '../helpers/fake_bridge.dart'
     show FakeBridge, song, apiWith, emptyPlaylistSyncResponse;
@@ -96,16 +96,30 @@ Future<ApiClient> _pausableApi(Completer<void> gate) async {
   );
 }
 
-bool _containsText(Widget w, String substring) =>
-    w is Text && (w.data?.contains(substring) ?? false);
+/// Home has no overflow menu since task 2.2 — sign-out is the You tab's and
+/// library sync the Library tab's. These cases are about what an auth
+/// transition does to a shared service, so they speak to the providers
+/// directly and read the sync state back rather than through a sheet.
+ProviderContainer _containerOf(WidgetTester tester) =>
+    ProviderScope.containerOf(tester.element(find.byType(MixtapeApp)));
 
-/// Opens the AppBar's sync bottom sheet — library sync moved out of Home's
-/// body behind this action (Task 6); the sheet hosts the unchanged P1 UI.
-Future<void> _openSyncSheet(WidgetTester tester) async {
-  await tester.tap(find.byKey(const Key('home-actions')));
+Future<void> _signOut(WidgetTester tester) async {
+  _containerOf(tester).read(authProvider.notifier).signOut();
   await tester.pumpAndSettle();
-  await tester.tap(find.byKey(const Key('sync-action')));
+}
+
+Future<void> _sync(WidgetTester tester) async {
+  await _containerOf(tester).read(librarySyncProvider.notifier).sync();
   await tester.pumpAndSettle();
+}
+
+SyncState _syncState(WidgetTester tester) =>
+    _containerOf(tester).read(librarySyncProvider);
+
+void _expectSyncedThreeSongs(WidgetTester tester) {
+  final state = _syncState(tester);
+  expect(state, isA<SyncDone>());
+  expect((state as SyncDone).summary.songs, 3);
 }
 
 void main() {
@@ -140,6 +154,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    expect(find.byType(ShellScreen), findsOneWidget);
     expect(find.byType(HomeScreen), findsOneWidget);
   });
 
@@ -163,10 +178,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('home-actions')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('logout-action')));
-    await tester.pumpAndSettle();
+    await _signOut(tester);
     expect(find.byType(SignInScreen), findsOneWidget);
     expect(await store.read(), isNull);
   });
@@ -204,26 +216,12 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.byType(HomeScreen), findsOneWidget);
+      expect(find.byType(ShellScreen), findsOneWidget);
 
-      await _openSyncSheet(tester);
-      await tester.tap(find.byKey(const Key('sync-library')));
-      await tester.pumpAndSettle();
-      expect(
-        find.byWidgetPredicate(
-          (w) => w is Text && (w.data?.contains('Synced 3 songs') ?? false),
-        ),
-        findsOneWidget,
-      );
+      await _sync(tester);
+      _expectSyncedThreeSongs(tester);
 
-      // Close the sheet before signing out so the next assertions look at Home/SignIn.
-      Navigator.of(tester.element(find.byType(HomeScreen))).pop();
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.byKey(const Key('home-actions')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('logout-action')));
-      await tester.pumpAndSettle();
+      await _signOut(tester);
       expect(find.byType(SignInScreen), findsOneWidget);
 
       // A new user signs in on the same device.
@@ -234,14 +232,11 @@ void main() {
       container.invalidate(authProvider);
       await tester.pumpAndSettle();
 
-      expect(find.byType(HomeScreen), findsOneWidget);
-      await _openSyncSheet(tester);
-      expect(find.byKey(const Key('sync-library')), findsOneWidget);
+      expect(find.byType(ShellScreen), findsOneWidget);
       expect(
-        find.byWidgetPredicate(
-          (w) => w is Text && (w.data?.contains('Synced 3 songs') ?? false),
-        ),
-        findsNothing,
+        _syncState(tester),
+        isA<SyncIdle>(),
+        reason: "the next user starts from idle, not the previous one's result",
       );
     },
   );
@@ -279,27 +274,15 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.byType(HomeScreen), findsOneWidget);
+      expect(find.byType(ShellScreen), findsOneWidget);
 
       // User A syncs to completion.
-      await _openSyncSheet(tester);
-      await tester.tap(find.byKey(const Key('sync-library')));
-      await tester.pumpAndSettle();
-      expect(
-        find.byWidgetPredicate(
-          (w) => w is Text && (w.data?.contains('Synced 3 songs') ?? false),
-        ),
-        findsOneWidget,
-      );
-      Navigator.of(tester.element(find.byType(HomeScreen))).pop();
-      await tester.pumpAndSettle();
+      await _sync(tester);
+      _expectSyncedThreeSongs(tester);
 
       // Sign out with nothing running — this still disposes the notifier and
       // fires cancel() on the (idle) shared service.
-      await tester.tap(find.byKey(const Key('home-actions')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('logout-action')));
-      await tester.pumpAndSettle();
+      await _signOut(tester);
       expect(find.byType(SignInScreen), findsOneWidget);
 
       // User B signs in on the same device.
@@ -309,19 +292,12 @@ void main() {
       );
       container.invalidate(authProvider);
       await tester.pumpAndSettle();
-      expect(find.byType(HomeScreen), findsOneWidget);
-      await _openSyncSheet(tester);
-      expect(find.byKey(const Key('sync-library')), findsOneWidget);
+      expect(find.byType(ShellScreen), findsOneWidget);
+      expect(_syncState(tester), isA<SyncIdle>());
 
       // User B's first sync must actually run, not silently no-op back to idle.
-      await tester.tap(find.byKey(const Key('sync-library')));
-      await tester.pumpAndSettle();
-      expect(
-        find.byWidgetPredicate(
-          (w) => w is Text && (w.data?.contains('Synced 3 songs') ?? false),
-        ),
-        findsOneWidget,
-      );
+      await _sync(tester);
+      _expectSyncedThreeSongs(tester);
     },
   );
 
@@ -360,22 +336,14 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await _openSyncSheet(tester);
-      await tester.tap(find.byKey(const Key('sync-library')));
+      // The sync lives in the provider, so nothing has to stay on screen for
+      // it to keep running. Not pumpAndSettle: it is gated mid-POST.
+      unawaited(_containerOf(tester).read(librarySyncProvider.notifier).sync());
       await tester.pump();
       await tester.pump();
-
-      // Close the sheet — the sync itself lives in the provider, not the
-      // sheet, and keeps running — so the AppBar's logout action underneath
-      // it is reachable again. Not pumpAndSettle: the running state's
-      // indeterminate LinearProgressIndicator animates forever.
-      Navigator.of(tester.element(find.byType(HomeScreen))).pop();
-      await tester.pump(const Duration(milliseconds: 400));
 
       // Sign out while the first chunk's POST is still in flight.
-      await tester.tap(find.byKey(const Key('home-actions')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('logout-action')));
+      _containerOf(tester).read(authProvider.notifier).signOut();
       await tester.pump();
       await tester.pump();
       expect(find.byType(SignInScreen), findsOneWidget);
@@ -393,13 +361,11 @@ void main() {
       container.invalidate(authProvider);
       await tester.pumpAndSettle();
 
-      expect(find.byType(HomeScreen), findsOneWidget);
-      await _openSyncSheet(tester);
-      expect(find.byKey(const Key('sync-library')), findsOneWidget);
-      expect(find.byType(LinearProgressIndicator), findsNothing);
+      expect(find.byType(ShellScreen), findsOneWidget);
       expect(
-        find.byWidgetPredicate((w) => _containsText(w, 'Synced')),
-        findsNothing,
+        _syncState(tester),
+        isA<SyncIdle>(),
+        reason: 'the cancellation never reaches the next user',
       );
     },
   );
@@ -438,20 +404,14 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await _openSyncSheet(tester);
-      await tester.tap(find.byKey(const Key('sync-library')));
+      // Same as the NON-final case: the gated POST is in flight and nothing
+      // has to be on screen for it.
+      unawaited(_containerOf(tester).read(librarySyncProvider.notifier).sync());
       await tester.pump();
       await tester.pump();
-
-      // Close the sheet before reaching the logout action underneath it — see
-      // the NON-final test's comment above for why this isn't pumpAndSettle.
-      Navigator.of(tester.element(find.byType(HomeScreen))).pop();
-      await tester.pump(const Duration(milliseconds: 400));
 
       // Sign out while the only (and final) chunk's POST is still in flight.
-      await tester.tap(find.byKey(const Key('home-actions')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('logout-action')));
+      _containerOf(tester).read(authProvider.notifier).signOut();
       await tester.pump();
       await tester.pump();
       expect(find.byType(SignInScreen), findsOneWidget);
@@ -469,13 +429,11 @@ void main() {
       container.invalidate(authProvider);
       await tester.pumpAndSettle();
 
-      expect(find.byType(HomeScreen), findsOneWidget);
-      await _openSyncSheet(tester);
-      expect(find.byKey(const Key('sync-library')), findsOneWidget);
-      expect(find.byType(LinearProgressIndicator), findsNothing);
+      expect(find.byType(ShellScreen), findsOneWidget);
       expect(
-        find.byWidgetPredicate((w) => _containsText(w, 'Synced')),
-        findsNothing,
+        _syncState(tester),
+        isA<SyncIdle>(),
+        reason: 'the cancellation never reaches the next user',
       );
     },
   );

@@ -19,7 +19,7 @@ class MixHomeRow extends StatefulWidget {
     required this.onArchive,
     required this.onRestore,
     this.isFirst,
-    this.showActionsButton = true,
+    this.showActionsButton = false,
     this.onVersionHistory,
   });
 
@@ -37,9 +37,8 @@ class MixHomeRow extends StatefulWidget {
   /// Whether the trailing slot holds a visible actions button.
   ///
   /// The approved shell shows a chevron and puts the actions on long-press, so
-  /// the Mixes tab passes false. Home still passes the default until task 2.2
-  /// takes its list away; the long-press menu is there either way.
-  // TODO(2.2): default this to false once Home no longer lists mixes.
+  /// the default is false. A host that wants the button back — a wide layout,
+  /// or a test driving the menu without a long-press — opts in.
   final bool showActionsButton;
 
   /// Overrides the push of [MixHistoryScreen] (tests, and any host that wants
