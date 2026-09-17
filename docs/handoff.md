@@ -18,6 +18,12 @@ landed behaviour (the Google callback URL scheme in Info.plist; a lazily built
 history confirmation on a short phone). Nothing in this program has been deployed
 or released.
 
+Phase 1 (foundation) is on main: tokens and theme, gradient background and frosted
+material, tape controls and the restyled composer, flush lists with the cassette painter,
+the collapsing large title with glass clusters, and a debug gallery reachable with
+`--dart-define=MIXTAPE_GALLERY=true`. Verified on the iOS 26.5 simulator in light, dark
+and 200% text. Awaiting the founder's gate review before Phase 2 (native dock).
+
 ## Current continuation — 2026-09-08
 
 The approved September 8 web memory, session management, playlist inspiration, and taste-confirmation controls are implemented locally. No production deployment has been performed for these changes. See the [execution spec](superpowers/specs/2026-09-08-release-completion-design.md) and [current evidence record](releases/2026-09-08-release-completion.md). The September 5–6 production versions below are historical records, not newly verified live state. Revised-copy implementation at `05ba8b1` is newer than the provider-only deployed snapshot.
