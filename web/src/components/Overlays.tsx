@@ -1,13 +1,15 @@
-import { useState, type FormEvent } from 'react'
+import { EnergyControl } from './EnergyJourney'
+import { useState, type FormEvent, type ReactNode } from 'react'
 import { CloseIcon, ErrorCircleIcon, SuccessCircleIcon } from './Icons'
 
 type NewTapeDialogProps = {
+  attachment?: ReactNode
   busy?: boolean
   onClose: () => void
   onCreate: (title: string) => void
 }
 
-export function NewTapeDialog({ busy = false, onClose, onCreate }: NewTapeDialogProps) {
+export function NewTapeDialog({ attachment, busy = false, onClose, onCreate }: NewTapeDialogProps) {
   const [title, setTitle] = useState('')
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -25,15 +27,17 @@ export function NewTapeDialog({ busy = false, onClose, onCreate }: NewTapeDialog
         </button>
         <h2 id="new-tape-title">Make a new tape</h2>
         <p>Describe the moment. This becomes your first message to the DJ.</p>
-        <form onSubmit={submit}>
+        <form className="wc-new-mix" onSubmit={submit}>
+          {attachment}
+          <EnergyControl text={title} onChange={setTitle} disabled={busy} />
           <label htmlFor="new-tape-name">What should this tape feel like?</label>
-          <input
+          <textarea
             id="new-tape-name"
             autoFocus
             value={title}
             onChange={(event) => setTitle(event.target.value)}
             placeholder="Late dinner with old friends"
-            maxLength={80}
+            maxLength={2000}
             disabled={busy}
           />
           <div className="dialog-actions">

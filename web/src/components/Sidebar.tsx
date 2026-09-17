@@ -1,11 +1,14 @@
 import type { AppView, DjSession } from '../domain'
 import type { AuthProvider } from '../lib/auth-provider'
-import { Cassette } from './Cassette'
+import { SessionRow } from './SessionControls'
 import { HomeIcon, MusicIcon, PlusIcon, SignOutIcon, SyncIcon } from './Icons'
 
 export type MusicLinkLabel = { text: string; tone: 'ok' | 'waiting' | 'quiet' }
 
 type SidebarProps = {
+  onRename?: (id: string, title: string) => Promise<void>
+  onArchive?: (id: string) => Promise<void>
+  onOpenArchived?: () => void
   sessions: DjSession[]
   activeSessionId: string | null
   activeView: AppView
@@ -24,7 +27,7 @@ type SidebarProps = {
 }
 
 export function Sidebar({
-  sessions,
+  sessions, onRename, onArchive, onOpenArchived,
   activeSessionId,
   activeView,
   userName,
@@ -42,6 +45,7 @@ export function Sidebar({
   return (
     <aside className="sidebar" aria-label="Mixtape navigation">
       <div className="sidebar-topline">
+        <button className="wc-text wc-mobile-account" aria-label="Account" onClick={onOpenAccount}>{userName.trim().charAt(0) || 'M'}</button>
         <button className="wordmark" type="button" onClick={onOpenHome} aria-label="Mixtape home">
           mixtape
         </button>
@@ -86,27 +90,11 @@ export function Sidebar({
 
       <nav className="session-list" aria-label="Your tapes">
         {sessions.slice(0, 8).map((session) => (
-          <button
-            className={`session-link ${activeView === 'session' && activeSessionId === session.id ? 'is-active' : ''}`}
-            type="button"
-            key={session.id}
-            onClick={() => onOpenSession(session.id)}
-          >
-            <Cassette
-              className="session-cassette"
-              title={session.title}
-              caseColor={session.caseColor}
-              stockColor={session.stockColor}
-              labelled={false}
-            />
-            <span className="session-link-copy">
-              <strong>{session.title}</strong>
-              <small>
-                {session.trackCount === 0 ? 'Blank tape' : `${session.trackCount} tracks`} · {session.ageLabel}
-              </small>
-            </span>
-          </button>
+          <SessionRow key={session.id} session={session} onOpen={() => onOpenSession(session.id)}
+            onRename={(title) => onRename?.(session.id, title) ?? Promise.resolve()}
+            onArchive={() => onArchive?.(session.id) ?? Promise.resolve()} />
         ))}
+        <button className="wc-text" onClick={onOpenArchived}>Archived mixes</button>
       </nav>
 
       <div className="sidebar-footer">

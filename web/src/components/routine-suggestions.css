@@ -1,0 +1,58 @@
+.routine-suggestions {
+  margin-block: 16px;
+  min-width: 0;
+}
+.routine-card {
+  padding: 20px;
+  border: 1px solid var(--hairline);
+  border-radius: 16px;
+  background: var(--surface);
+}
+.routine-card h2 {
+  font-size: 1.35rem;
+  margin: 8px 0;
+}
+.routine-card p {
+  overflow-wrap: anywhere;
+}
+.routine-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.routine-suggestions button {
+  min-height: 44px;
+  width: auto;
+}
+.routine-check {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+}
+.routine-check input {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+}
+.routine-actions button {
+  font: inherit;
+  font-size: 13px;
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.routine-actions .routine-primary {
+  background: #544451;
+  color: #fff;
+  border-color: #544451;
+}
+.routine-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

@@ -4,6 +4,36 @@ import type {
   PlaylistSnapshot,
 } from '../musickit/library'
 
+export type InitialPlaylistSeed = { playlistId: string; excludeSourceTracks?: boolean }
+
+export type PlaylistSeedSelection = {
+  playlistId: string | null
+  excludeSourceTracks: boolean
+  expectedRevision: number
+}
+
+export type ApiPlaylistSeed = {
+  playlistId: string | null
+  revision: number
+  excludeSourceTracks: boolean
+  status: 'none' | 'ready' | 'unavailable' | 'insufficient_profile'
+  name: string | null
+  source: 'apple' | 'spotify_export' | null
+  fingerprint: string | null
+  updatedAt: string | null
+  entries: number
+  resolvedEntries: number
+  recordings: number
+  profile: {
+    sampledRecordings: number
+    tempo: number | null
+    energy: number | null
+    releaseYear: number | null
+    artists: string[]
+    genres: string[]
+  } | null
+}
+
 export type ApiSessionStatus = 'active' | 'archived'
 
 export type ApiSession = {
@@ -46,6 +76,8 @@ export type ApiQueueTrack = {
 
 export type SessionDetailResponse = {
   session: ApiSession
+  /** Absent on older servers; absence is not a confirmed empty selection. */
+  playlistSeed?: ApiPlaylistSeed
   messages: ApiMessage[]
   queue: ApiQueueTrack[]
 }
@@ -136,9 +168,13 @@ export type PlaylistSyncSummary = {
 }
 
 export type ListeningImportSource = 'spotify_export' | 'apple_export'
-export type ListeningImportPackage = 'spotify_extended' | 'spotify_account' | 'apple_media'
+export type ListeningImportPackage = 'spotify_extended' | 'spotify_account' | 'spotify_exportify' | 'apple_media'
 
+export type LibraryReview = {mode:'add'} | {mode:'replace';fingerprint:string}
+export type PlaylistReview = {key:string;baseFingerprint:string|null;fileHash:string}[]
+export type SpotifyCollectionReview = {hasQuickImport?:boolean;library:{ids:string[];fingerprint:string};playlists:{key:string;name:string;fileHash:string|null;fingerprint:string}[]}
 export type BeginListeningImportInput = {
+  libraryReview?: LibraryReview
   source: ListeningImportSource
   package: ListeningImportPackage
   timeZone: string
@@ -273,15 +309,37 @@ export type BeginPlaylistSyncInput =
   }
   | {
     source: 'spotify_export'
+    review?: PlaylistReview
     storefront: null
     expectedPlaylists: number
     expectedEntries: number
   }
 
+export type MixVersionList = { currentVersion: number; versions: Array<{ version: number; trackCount: number; restoredFrom: number | null; createdAt: string }>; nextBefore: number | null }
+export type MixVersionDetail = { energyArc?: 'steady' | 'rise' | 'fall' | 'arc' | null; energyJourney?: {status:'limited'|'follows'|'mixed';known:number;total:number;bands:[number,number,number]|null} | null; version: number; currentVersion: number; restoredFrom: number | null; entries: Array<{ position: number; trackId: string; title: string; artist: string; reason: string | null; available: boolean }> }
+export type MixRestoreInput = { version: number; expectedVersion: number; requestId: string }
+
+export type RoutineSuggestion = { id: string; title: string; prompt: string; reason: string }
+export type SuggestionsResponse = { enabled: boolean; suggestion: RoutineSuggestion | null; dismissed: boolean }
+export type PlaybackPreferences = {enabled:boolean;revision:number;userId?:string}
+export type PlaybackObservation = {playbackId:string;sequence:number;sessionId:string;version:number;position:number;trackId:string;source:'apple_web'|'apple_native';kind:'listen'|'skip'|'repeat';observedMs:number;occurredAt:string}
 export type MixtapeApi = {
+  getSuggestions: (timeZone: string) => Promise<SuggestionsResponse>
+  selectSuggestion: (id: string, timeZone: string) => Promise<{prompt: string}>
+  dismissSuggestion: (id: string, timeZone: string) => Promise<{ok: boolean}>
+  saveSuggestionPreference: (enabled: boolean) => Promise<{enabled: boolean}>
+  playbackPreferences: () => Promise<PlaybackPreferences>
+  savePlaybackPreference: (enabled:boolean) => Promise<PlaybackPreferences>
+  clearPlaybackEvidence: (requestId:string,revision:number) => Promise<PlaybackPreferences>
+  sendPlaybackEvidence: (body:{revision:number;events:PlaybackObservation[]}) => Promise<unknown>
+
+  listMixVersions: (id: string, before?: number) => Promise<MixVersionList>
+  readMixVersion: (id: string, version: number) => Promise<MixVersionDetail>
+  restoreMixVersion: (id: string, input: MixRestoreInput) => Promise<{version:number}>
+
   listSessions: () => Promise<{ sessions: ApiSessionSummary[] }>
   getSession: (sessionId: string) => Promise<SessionDetailResponse>
-  createSession: (prompt: string) => Promise<CreateSessionResponse>
+  createSession: (prompt: string, playlistSeed?: InitialPlaylistSeed) => Promise<CreateSessionResponse>
   sendMessage: (sessionId: string, text: string) => Promise<SendMessageResponse>
   applyQueueOps: (sessionId: string, ops: QueueOp[], expectedVersion?: number) => Promise<QueueOpsResponse>
   getMusicKitToken: () => Promise<MusicKitTokenResponse>
@@ -290,9 +348,16 @@ export type MixtapeApi = {
   updateSession: (
     sessionId: string,
     updates: { title?: string; status?: ApiSessionStatus },
+    signal?: AbortSignal,
   ) => Promise<{ session: ApiSession }>
-  listMemories: () => Promise<{ memories: ApiMemory[] }>
-  deleteMemory: (memoryId: string) => Promise<{ ok: true }>
+  selectPlaylistSeed: (
+    sessionId: string,
+    selection: PlaylistSeedSelection,
+    signal?: AbortSignal,
+  ) => Promise<{ playlistSeed: ApiPlaylistSeed }>
+  listMemories: (signal?: AbortSignal) => Promise<{ memories: ApiMemory[] }>
+  deleteMemory: (memoryId: string, signal?: AbortSignal) => Promise<{ ok: true }>
+  confirmPlaylistTaste: (playlistId: string, confirmed: boolean, signal?: AbortSignal) => Promise<{ ok: true }>
   getMusicCollectionSummary: (signal?: AbortSignal) => Promise<MusicCollectionSummary>
   listPlaylists: (options?: {
     status?: 'active' | 'all'
@@ -340,6 +405,7 @@ export type MixtapeApi = {
     signal?: AbortSignal,
   ) => Promise<{ accepted: number }>
   completePlaylistSync: (syncId: string, signal?: AbortSignal) => Promise<PlaylistSyncSummary>
+  getSpotifyCollectionReview: (signal?:AbortSignal) => Promise<SpotifyCollectionReview>
   beginListeningImport: (input: BeginListeningImportInput, signal?: AbortSignal) => Promise<ListeningImportStart>
   putListeningTracks: (importId: string, tracks: ListeningTrackRow[], signal?: AbortSignal) => Promise<{ accepted: number }>
   putListeningDays: (importId: string, days: ListeningDayRow[], signal?: AbortSignal) => Promise<{ accepted: number }>
@@ -417,12 +483,23 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
   }
 
   return {
+    getSuggestions: timeZone => request(`/suggestions?timeZone=${encodeURIComponent(timeZone)}`),
+    selectSuggestion: (id,timeZone) => request('/suggestions/select',{method:'POST',body:JSON.stringify({id,timeZone})}),
+    dismissSuggestion: (id,timeZone) => request('/suggestions/dismiss',{method:'POST',body:JSON.stringify({id,timeZone})}),
+    saveSuggestionPreference: enabled => request('/suggestions/preferences',{method:'POST',body:JSON.stringify({enabled})}),
+    playbackPreferences: () => request('/playback/preferences'),
+    savePlaybackPreference: enabled => request('/playback/preferences',{method:'PUT',body:JSON.stringify({enabled})}),
+    clearPlaybackEvidence: (requestId,revision) => request('/playback/clear',{method:'POST',body:JSON.stringify({requestId,revision})}),
+    sendPlaybackEvidence: body => request('/playback/events',{method:'POST',body:JSON.stringify(body)}),
+    listMixVersions: (id, before) => request(`/sessions/${encodeURIComponent(id)}/versions${before ? `?before=${before}` : ''}`),
+    readMixVersion: (id, version) => request(`/sessions/${encodeURIComponent(id)}/versions/${version}`),
+    restoreMixVersion: (id, input) => request(`/sessions/${encodeURIComponent(id)}/versions/restore`, { method: 'POST', body: JSON.stringify(input) }),
     listSessions: () => request('/sessions'),
     getSession: (sessionId) => request(`/sessions/${encodeURIComponent(sessionId)}`),
-    createSession: (prompt) =>
+    createSession: (prompt, playlistSeed) =>
       request('/sessions', {
         method: 'POST',
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt, ...(playlistSeed ? { playlistSeed } : {}) }),
       }),
     sendMessage: (sessionId, text) =>
       request(`/sessions/${encodeURIComponent(sessionId)}/messages`, {
@@ -443,14 +520,22 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
         method: 'POST',
         body: JSON.stringify({ type }),
       }),
-    updateSession: (sessionId, updates) =>
+    updateSession: (sessionId, updates, signal) =>
       request(`/sessions/${encodeURIComponent(sessionId)}`, {
         method: 'PATCH',
-        body: JSON.stringify(updates),
+        body: JSON.stringify(updates), signal,
       }),
-    listMemories: () => request('/me/memories'),
-    deleteMemory: (memoryId) =>
-      request(`/me/memories/${encodeURIComponent(memoryId)}`, { method: 'DELETE' }),
+    selectPlaylistSeed: (sessionId, selection, signal) =>
+      request(`/sessions/${encodeURIComponent(sessionId)}/playlist-seed`, {
+        method: 'PUT', body: JSON.stringify(selection), signal,
+      }),
+    listMemories: (signal) => request('/me/memories', { signal }),
+    deleteMemory: (memoryId, signal) =>
+      request(`/me/memories/${encodeURIComponent(memoryId)}`, { method: 'DELETE', signal }),
+    confirmPlaylistTaste: (playlistId, confirmed, signal) =>
+      request(`/playlists/${encodeURIComponent(playlistId)}/taste-confirmation`, {
+        method: 'PUT', body: JSON.stringify({ confirmed }), signal,
+      }),
     getMusicCollectionSummary: (signal) => request('/playlists/summary', { signal }),
     listPlaylists: (options = {}, signal) => {
       const params = new URLSearchParams()
@@ -513,6 +598,7 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
         method: 'POST',
         signal,
       }),
+    getSpotifyCollectionReview: signal => request('/ingest/listening/spotify/review',{signal}),
     beginListeningImport: (input, signal) =>
       request('/ingest/listening/imports', {
         method: 'POST',

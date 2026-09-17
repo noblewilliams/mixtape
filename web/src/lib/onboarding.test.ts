@@ -132,7 +132,7 @@ describe('musicLinkLabel', () => {
       tone: 'ok',
     })
     expect(musicLinkLabel({ ...blank, chosenService: 'spotify' })).toEqual({
-      text: 'Spotify · not requested yet',
+      text: 'Spotify · ready to import',
       tone: 'waiting',
     })
     expect(musicLinkLabel({ ...blank, chosenService: 'spotify', markedRequestedAt: '2026-09-02T08:00:00.000Z' })).toEqual({

@@ -97,6 +97,17 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
   }
   const api: MixtapeApi = {
     listSessions: async () => ({ sessions: summaries.map((session) => ({ ...session })) }),
+    getSuggestions: async()=>({enabled:true,suggestion:null,dismissed:false}),
+    selectSuggestion: async()=>{throw new Error('No suggestion')},
+    dismissSuggestion: async()=>({ok:true}),
+    saveSuggestionPreference: async enabled=>({enabled}),
+    playbackPreferences: async()=>({enabled:false,revision:0}),
+    savePlaybackPreference: async enabled=>({enabled,revision:1}),
+    clearPlaybackEvidence: async()=>({enabled:false,revision:1}),
+    sendPlaybackEvidence: async()=>({accepted:true}),
+    listMixVersions: async () => ({ currentVersion: 1, versions: [], nextBefore: null }),
+    readMixVersion: async () => { throw new Error('No historical fixture') },
+    restoreMixVersion: async () => { throw new Error('No historical fixture') },
     getSession: async (sessionId): Promise<SessionDetailResponse> => {
       const created = createdSessions.get(sessionId)
       if (created) {
@@ -170,6 +181,8 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
       const session = summaries.find((item) => item.id === sessionId) ?? summaries[0]
       return { session: { ...session, ...updates } }
     },
+    selectPlaylistSeed: async () => { throw new Error('Configure playlist inspiration for this scenario') },
+    confirmPlaylistTaste: async () => { throw new Error('Configure taste confirmation for this scenario') },
     listMemories: async () => ({ memories: [] }),
     deleteMemory: async () => ({ ok: true }),
     getMusicCollectionSummary: async () => ({ apple: { songs: null, playlists: 0, librarySyncedAt: null }, spotify: { playlists: 0 } }),
@@ -203,6 +216,7 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
       const run = playlistSync(syncId)
       return { playlists: run.playlists, entries: run.entries, resolvedEntries: 0, unresolvedEntries: run.entries }
     },
+    getSpotifyCollectionReview: async () => ({library:{ids:[],fingerprint:'0'.repeat(64)},playlists:[]}),
     beginListeningImport: async (input): Promise<ListeningImportStart> => {
       const importId = `listening-import-${listeningImports.size + 1}`
       listeningImports.set(importId, {

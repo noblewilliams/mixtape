@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
   ApiError,
+  type ApiPlaylistSummary,
   type ListeningImportSource,
   type MixtapeApi,
   type MusicCollectionSummary,
@@ -17,6 +18,7 @@ import './your-music.css'
 
 export type MusicSection = 'auto' | 'playlists' | 'sources' | 'apple' | 'spotify'
 type Props = {
+  onInspire?: (playlist: ApiPlaylistSummary) => void
   api: MixtapeApi
   section: MusicSection
   onSection: (section: MusicSection) => void
@@ -121,6 +123,7 @@ export function YourMusicView(props: Props) {
               </div>
             ) : null}
             <PlaylistBrowser
+              onInspire={props.onInspire}
               key={revision}
               api={api}
               onSources={() => onSection('sources')}

@@ -1,3 +1,5 @@
+import { CollectionReviewUnavailable } from './import-service'
+import type { CollectionSelection } from './collection-review'
 // One file's journey from pick to summary, owned by the app for the
 // signed-in user's life rather than by the panel that shows it: leaving the
 // import page mid-upload (Home, a session, a new tape) unmounts the panel
@@ -50,12 +52,16 @@ export type ImportRunState =
   | { kind: 'pick' }
   | { kind: 'inspecting'; file: File; progress: ListeningImportProgress | null }
   | ({ kind: 'inventory' } & Loaded)
-  | ({ kind: 'uploading'; progress: ListeningImportProgress | null; percent: number } & Loaded)
+  | ({
+      kind: 'uploading'
+      progress: ListeningImportProgress | null
+      percent: number
+    } & Loaded)
   | ({ kind: 'done'; result: ListeningImportResult } & Loaded)
   | ({ kind: 'partial'; result: ListeningImportResult } & Loaded)
-  | ({ kind: 'upload-failed' } & Loaded)
+  | ({ kind: 'upload-failed'; conflict?: boolean } & Loaded)
   /** The parser itself could not run on this device (the Worker failed to load or died). */
-  | { kind: 'read-failed'; file: File }
+  | { kind: 'read-failed'; file: File; review?: boolean }
   | {
       kind: 'unreadable'
       file: File
@@ -71,11 +77,13 @@ export type ImportRun = {
   /** Read a picked or dropped file on this device; supersedes whatever was running. */
   take(file: File): void
   /** The private-sessions switch on the inventory card. */
+  setSelection(selection: CollectionSelection): void
   setIncludePrivate(value: boolean): void
   /** Upload the inventory as shown. */
   upload(): void
   /** Re-run the whole import for the partial state's file and options; idempotent server-side. */
   retry(): void
+  reviewAgain(): void
   /** Stop an upload and return to its inventory. */
   cancel(): void
   /** From upload-failed back to the inventory; from read-failed, read the same file again. */
@@ -102,7 +110,12 @@ export function deviceTimeZone(): string {
   }
 }
 
-function factsFrom({ inventory, snapshot, stats, timeZone }: InspectedExport): ImportFacts {
+function factsFrom({
+  inventory,
+  snapshot,
+  stats,
+  timeZone,
+}: InspectedExport): ImportFacts {
   return {
     package: snapshot.package,
     inventory,
@@ -124,8 +137,16 @@ type Unreadable = { file: string | null; inventory: ExportInventory }
 /** The parser's fail-closed error, whether raised in-page or revived from the Worker. */
 function asUnreadable(error: unknown): Unreadable | null {
   if (typeof error !== 'object' || error === null) return null
-  const candidate = error as { name?: unknown; file?: unknown; inventory?: unknown }
-  if (candidate.name !== 'UnreadableExportError' || typeof candidate.inventory !== 'object' || !candidate.inventory) {
+  const candidate = error as {
+    name?: unknown
+    file?: unknown
+    inventory?: unknown
+  }
+  if (
+    candidate.name !== 'UnreadableExportError' ||
+    typeof candidate.inventory !== 'object' ||
+    !candidate.inventory
+  ) {
     return null
   }
   return {
@@ -136,7 +157,9 @@ function asUnreadable(error: unknown): Unreadable | null {
 
 type ParseStep = Extract<ListeningImportProgress, { file: string | null }>
 
-export function isParseProgress(progress: ListeningImportProgress): progress is ParseStep {
+export function isParseProgress(
+  progress: ListeningImportProgress,
+): progress is ParseStep {
   return 'file' in progress
 }
 
@@ -152,7 +175,8 @@ const UPLOAD_BANDS: Record<string, [start: number, span: number]> = {
 }
 
 export function percentFor(progress: ListeningImportProgress): number {
-  const fraction = progress.total > 0 ? Math.min(1, progress.completed / progress.total) : 1
+  const fraction =
+    progress.total > 0 ? Math.min(1, progress.completed / progress.total) : 1
   if (isParseProgress(progress)) {
     if (progress.stage === 'listing') return 0
     if (progress.stage === 'reading') return Math.round(20 * fraction)
@@ -163,9 +187,19 @@ export function percentFor(progress: ListeningImportProgress): number {
   return Math.round(start + span * fraction)
 }
 
-const loadedOf = ({ file, facts, inspected, includePrivate }: Loaded): Loaded => ({ file, facts, inspected, includePrivate })
+const loadedOf = ({
+  file,
+  facts,
+  inspected,
+  includePrivate,
+}: Loaded): Loaded => ({ file, facts, inspected, includePrivate })
 
-export function createImportRun({ importService, parser, onImported, uploadGate }: ImportRunDeps): ImportRun {
+export function createImportRun({
+  importService,
+  parser,
+  onImported,
+  uploadGate,
+}: ImportRunDeps): ImportRun {
   let state: ImportRunState = { kind: 'pick' }
   let controller: AbortController | null = null
   // Bumped whenever a run is superseded (cancel, reset, dispose) so a late
@@ -203,7 +237,17 @@ export function createImportRun({ importService, parser, onImported, uploadGate 
     set({ kind: 'read-failed', file })
   }
 
-  async function fail(run: number, file: File, error: unknown, signal: AbortSignal) {
+  async function fail(
+    run: number,
+    file: File,
+    error: unknown,
+    signal: AbortSignal,
+  ) {
+    if (error instanceof CollectionReviewUnavailable) {
+      parser.terminate()
+      set({ kind: 'read-failed', file, review: true })
+      return
+    }
     if (isWorkerFailure(error)) {
       readFailed(file)
       return
@@ -212,7 +256,10 @@ export function createImportRun({ importService, parser, onImported, uploadGate 
     let report: string | null = null
     try {
       const diagnostics = await parser.diagnose(file, { signal })
-      report = formatDiagnosticsReport(diagnostics, unreadable?.inventory ?? null)
+      report = formatDiagnosticsReport(
+        diagnostics,
+        unreadable?.inventory ?? null,
+      )
     } catch (diagnoseError) {
       if (run !== generation) return
       if (isWorkerFailure(diagnoseError)) {
@@ -240,11 +287,18 @@ export function createImportRun({ importService, parser, onImported, uploadGate 
         timeZone: deviceTimeZone(),
         signal,
         onProgress: (progress) => {
-          if (run === generation && state.kind === 'inspecting') set({ ...state, progress })
+          if (run === generation && state.kind === 'inspecting')
+            set({ ...state, progress })
         },
       })
       if (run !== generation) return
-      set({ kind: 'inventory', file, facts: factsFrom(inspected), inspected, includePrivate: false })
+      set({
+        kind: 'inventory',
+        file,
+        facts: factsFrom(inspected),
+        inspected,
+        includePrivate: false,
+      })
     } catch (error) {
       if (run !== generation || signal.aborted) return
       await fail(run, file, error, signal)
@@ -254,7 +308,8 @@ export function createImportRun({ importService, parser, onImported, uploadGate 
   }
 
   async function send(loaded: Loaded) {
-    const release = uploadGate?.acquire('spotify') ?? (uploadGate ? null : () => undefined)
+    const release =
+      uploadGate?.acquire('spotify') ?? (uploadGate ? null : () => undefined)
     if (!release) return
     const { run, signal, settle } = begin()
     let percent = 0
@@ -267,18 +322,33 @@ export function createImportRun({ importService, parser, onImported, uploadGate 
         signal,
         onProgress: (progress) => {
           percent = Math.max(percent, percentFor(progress))
-          if (run === generation && state.kind === 'uploading') set({ ...state, progress, percent })
+          if (run === generation && state.kind === 'uploading')
+            set({ ...state, progress, percent })
         },
       })
       if (run !== generation) return
       parser.terminate()
-      set({ kind: result.playlistError ? 'partial' : 'done', ...loaded, result })
+      set({
+        kind: result.playlistError ? 'partial' : 'done',
+        ...loaded,
+        result,
+      })
     } catch (error) {
       if (run !== generation) return
       parser.terminate()
       if (signal.aborted) set({ kind: 'inventory', ...loaded })
-      else if (isWorkerFailure(error)) set({ kind: 'read-failed', file: loaded.file })
-      else set({ kind: 'upload-failed', ...loaded })
+      else if (isWorkerFailure(error))
+        set({ kind: 'read-failed', file: loaded.file })
+      else
+        set({
+          kind: 'upload-failed',
+          ...loaded,
+          conflict:
+            typeof error === 'object' &&
+            error !== null &&
+            'status' in error &&
+            error.status === 409,
+        })
       return
     } finally {
       settle()
@@ -304,11 +374,18 @@ export function createImportRun({ importService, parser, onImported, uploadGate 
     take(file) {
       void inspect(file)
     },
+    setSelection(selection) {
+      if (state.kind === 'inventory')
+        set({ ...state, inspected: { ...state.inspected, selection } })
+    },
     setIncludePrivate(value) {
       if (state.kind === 'inventory') set({ ...state, includePrivate: value })
     },
     upload() {
       if (state.kind === 'inventory') void send(loadedOf(state))
+    },
+    reviewAgain() {
+      if ('inspected' in state) void inspect(state.file)
     },
     retry() {
       if (state.kind === 'partial') void send(loadedOf(state))
@@ -321,8 +398,10 @@ export function createImportRun({ importService, parser, onImported, uploadGate 
       set({ kind: 'inventory', ...loaded })
     },
     tryAgain() {
-      if (state.kind === 'upload-failed') set({ kind: 'inventory', ...loadedOf(state) })
-      else if (state.kind === 'read-failed') void inspect(state.file)
+      if (state.kind === 'upload-failed') {
+        if (state.conflict) void inspect(state.file)
+        else set({ kind: 'inventory', ...loadedOf(state) })
+      } else if (state.kind === 'read-failed') void inspect(state.file)
     },
     reset() {
       supersede()

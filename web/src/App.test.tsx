@@ -135,7 +135,8 @@ describe('Mixtape web shell', () => {
 
     const closet = screen.getByRole('region', { name: 'Tape closet' })
     expect(within(closet).getAllByRole('list')).toHaveLength(1)
-    expect(within(closet).getAllByRole('button')).toHaveLength(19)
+    expect(within(closet).getAllByRole('button', { name: /^Rename / })).toHaveLength(19)
+    expect(within(closet).getAllByRole('button', { name: /^Open / })).toHaveLength(19)
     expect(closet.querySelectorAll('.tape-spine svg')).toHaveLength(0)
   })
 

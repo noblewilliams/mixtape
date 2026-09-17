@@ -82,6 +82,7 @@ export function spotifyPackages(source: ApiMusicSource | null): SpotifyPackages 
 export type StatusTone = 'neutral' | 'ok' | 'wait' | 'err'
 
 export function spotifyStatus(onboarding: OnboardingResponse): { label: string; tone: StatusTone } {
+  if (spotifySource(onboarding)?.packages.includes('spotify_exportify')) return {label:'Saved music imported',tone:'ok'}
   const { count } = spotifyPackages(spotifySource(onboarding))
   if (count === 2) return { label: 'Both in', tone: 'ok' }
   if (count === 1) return { label: '1 of 2 in', tone: 'ok' }
@@ -96,12 +97,13 @@ export function musicLinkLabel(onboarding: OnboardingResponse | null): { text: s
   const importedAt = source?.lastImportedAt ?? onboarding.importCompletedAt
   if (source && importedAt) return { text: `Spotify · imported ${shortDate(importedAt)}`, tone: 'ok' }
   if (onboarding.markedRequestedAt) return { text: 'Spotify · waiting for your data', tone: 'waiting' }
-  return { text: 'Spotify · not requested yet', tone: 'waiting' }
+  return { text: 'Spotify · ready to import', tone: 'waiting' }
 }
 
 export function sourceName(source: ApiMusicSource): string {
   switch (source.source) {
     case 'spotify_export': {
+      if(source.packages.includes('spotify_exportify')) return source.packages.includes('spotify_extended')?'Spotify · saved music and history':'Spotify · saved music'
       const { extended, account } = spotifyPackages(source)
       if (extended && account) return 'Spotify · both packages'
       if (extended) return 'Spotify · extended history'

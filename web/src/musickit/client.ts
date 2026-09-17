@@ -1,3 +1,4 @@
+import type { PlayerSample } from '../playback/meter'
 import {
   fetchMusicSnapshot,
   type MusicSnapshot,
@@ -10,6 +11,15 @@ export type MusicKitToken = {
 }
 
 export type MusicKitInstance = {
+  readonly playbackState?: number
+  readonly currentPlaybackTime?: number
+  readonly nowPlayingItem?: {id?:string;attributes?:{playParams?:{id?:string}}} | null
+  skipToNextItem?: () => Promise<unknown>
+  skipToPreviousItem?: () => Promise<unknown>
+  seekToTime?: (seconds:number) => Promise<unknown>
+  stop?: () => void | Promise<void>
+  addEventListener?: (name:string,callback:()=>void) => void
+  removeEventListener?: (name:string,callback:()=>void) => void
   readonly isAuthorized: boolean
   authorize: () => Promise<string | void>
   setQueue: (options: { songs: string[] }) => Promise<unknown>
@@ -26,6 +36,13 @@ export type MusicKitGlobal = {
 }
 
 export type MusicKitClient = {
+  resume?: () => Promise<void>
+  next?: () => Promise<void>
+  previous?: () => Promise<void>
+  seek?: (seconds:number) => Promise<void>
+  stop?: () => Promise<void>
+  observe?: (listener:(sample:PlayerSample)=>void) => (()=>void)
+
   connect: () => Promise<void>
   snapshot: (options: {
     signal: AbortSignal
@@ -146,6 +163,9 @@ export function createMusicKitClient({
   fetchImpl = fetch,
   nowSeconds = () => Math.floor(Date.now() / 1000),
 }: CreateMusicKitClientOptions): MusicKitClient {
+  let playbackGeneration=0
+  let playbackTail:Promise<unknown>=Promise.resolve()
+  let playbackIds:string[]=[]
   let configured: ConfiguredMusicKit | null = null
   let configurationPromise: Promise<ConfiguredMusicKit> | null = null
   let musicUserToken: string | null = null
@@ -252,14 +272,40 @@ export function createMusicKitClient({
       }
     },
     async play(appleIds) {
-      if (appleIds.length === 0) throw new MusicKitClientError('empty_queue', 'This mix has no Apple Music tracks.')
-      const { instance } = await requireConnection()
-      try {
-        await instance.setQueue({ songs: appleIds })
-        await Promise.resolve(instance.play())
-      } catch (error) {
-        throw asClientError(error, 'playback_failed', 'Apple Music could not play this mix.')
+      if (!appleIds.length) throw new MusicKitClientError('empty_queue','This mix has no Apple Music tracks.')
+      const generation=++playbackGeneration
+      const run=playbackTail.catch(()=>{}).then(async()=>{
+        const {instance}=await requireConnection()
+        if(generation!==playbackGeneration)return
+        await instance.setQueue({songs:appleIds})
+        if(generation!==playbackGeneration)return
+        playbackIds=[...appleIds]
+        await instance.play()
+        if(generation!==playbackGeneration)await instance.pause()
+      })
+      playbackTail=run
+      try {await run} catch(error){throw asClientError(error,'playback_failed','Apple Music could not play this mix.')}
+    },
+    async resume(){const generation=playbackGeneration;const {instance}=await requireConnection();if(generation!==playbackGeneration)return;await instance.play();if(generation!==playbackGeneration)await instance.pause()},
+    async next(){const {instance}=await requireConnection();if(!instance.skipToNextItem)throw new Error('transport unavailable');await instance.skipToNextItem()},
+    async previous(){const {instance}=await requireConnection();if(!instance.skipToPreviousItem)throw new Error('transport unavailable');await instance.skipToPreviousItem()},
+    async seek(seconds){const {instance}=await requireConnection();if(!instance.seekToTime)throw new Error('transport unavailable');await instance.seekToTime(Math.max(0,seconds))},
+    async stop(){playbackGeneration++;if(configured)await (configured.instance.stop?.() ?? configured.instance.pause())},
+    observe(listener){
+      let observed:MusicKitInstance|undefined
+      const events=['playbackStateDidChange','playbackTimeDidChange','nowPlayingItemDidChange']
+      const sample=()=>{
+        const instance=configured?.instance
+        if(!instance)return
+        if(observed!==instance){events.forEach(name=>observed?.removeEventListener?.(name,sample));observed=instance;events.forEach(name=>instance.addEventListener?.(name,sample))}
+        const id=instance.nowPlayingItem?.attributes?.playParams?.id ?? instance.nowPlayingItem?.id
+        const index=id?playbackIds.indexOf(id):-1
+        listener({index:index>=0?index:null,positionMs:Number.isFinite(instance.currentPlaybackTime)?Math.max(0,instance.currentPlaybackTime!*1000):0,status:instance.playbackState===2?'playing':instance.playbackState===3?'paused':[0,4,5].includes(instance.playbackState??-1)?'stopped':'waiting'})
       }
+      // Time callbacks are sampled at most once per second; background gaps are unknown.
+      const timer=window.setInterval(sample,1000)
+      document.addEventListener('visibilitychange',sample)
+      return ()=>{window.clearInterval(timer);document.removeEventListener('visibilitychange',sample);events.forEach(name=>observed?.removeEventListener?.(name,sample))}
     },
     async pause() {
       const { instance } = await requireConnection()

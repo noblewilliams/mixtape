@@ -225,3 +225,23 @@ function json(body: unknown, status = 200) {
     headers: { 'content-type': 'application/json' },
   })
 }
+it('uses MusicKit playback states and clears observation timers/listeners',async()=>{
+ vi.useFakeTimers()
+ const {client,instance}=setup();await client.connect();await client.play(['123'])
+ Object.assign(instance,{nowPlayingItem:{id:'123'},currentPlaybackTime:12,playbackState:2,addEventListener:vi.fn(),removeEventListener:vi.fn()})
+ vi.spyOn(document,'visibilityState','get').mockReturnValue('visible')
+ const listener=vi.fn();const stop=client.observe!(listener)
+ await vi.advanceTimersByTimeAsync(1000)
+ expect(listener).toHaveBeenLastCalledWith({index:0,positionMs:12000,status:'playing'})
+ Object.assign(instance,{playbackState:5,currentPlaybackTime:NaN});await vi.advanceTimersByTimeAsync(1000)
+ expect(listener).toHaveBeenLastCalledWith({index:0,positionMs:0,status:'stopped'})
+ stop();expect(instance.removeEventListener).toHaveBeenCalledTimes(3)
+ vi.useRealTimers();vi.restoreAllMocks()
+})
+it('cancellation during queue preparation never starts the late queue',async()=>{
+ const {client,instance}=setup();await client.connect()
+ let finish!:()=>void;vi.mocked(instance.setQueue).mockImplementation(()=>new Promise<void>(resolve=>{finish=resolve}))
+ const pending=client.play(['123']);await vi.waitFor(()=>expect(instance.setQueue).toHaveBeenCalled())
+ await client.stop!();finish();await pending
+ expect(instance.play).not.toHaveBeenCalled()
+})

@@ -1,3 +1,4 @@
+import { PlaylistTasteControls } from './PlaylistTasteControls'
 import { useEffect, useRef, useState } from 'react'
 import { ApiError, type ApiPlaylistSummary, type MixtapeApi } from '../api/client'
 import { MusicIcon } from './Icons'
@@ -58,8 +59,8 @@ export function MusicEmpty({
   )
 }
 
-type Props = { api: MixtapeApi; onSources: () => void; onSessionExpired: () => void }
-export function PlaylistBrowser({ api, onSources, onSessionExpired }: Props) {
+type Props = { onInspire?: (playlist: ApiPlaylistSummary) => void; api: MixtapeApi; onSources: () => void; onSessionExpired: () => void }
+export function PlaylistBrowser({ onInspire, api, onSources, onSessionExpired }: Props) {
   const [q, setQ] = useState('')
   const [source, setSource] = useState<'' | ApiPlaylistSummary['source']>('')
   const [data, setData] = useState<Awaited<ReturnType<MixtapeApi['listPlaylists']>> | null>(null)
@@ -133,6 +134,7 @@ export function PlaylistBrowser({ api, onSources, onSessionExpired }: Props) {
   if (selected)
     return (
       <PlaylistDetail
+        onInspire={onInspire}
         key={selected.id}
         api={api}
         initial={selected}
@@ -231,11 +233,13 @@ export function PlaylistBrowser({ api, onSources, onSessionExpired }: Props) {
 }
 
 function PlaylistDetail({
+  onInspire,
   api,
   initial,
   onBack,
   onSessionExpired,
 }: {
+  onInspire?: (playlist: ApiPlaylistSummary) => void
   api: MixtapeApi
   initial: ApiPlaylistSummary
   onBack: () => void
@@ -321,6 +325,8 @@ function PlaylistDetail({
           {playlist.syncedAt ? <p>Last synced · {musicDate(playlist.syncedAt)}</p> : null}
         </div>
       </div>
+      {data && <PlaylistTasteControls playlist={playlist} api={api} onChanged={(next) => setData(current => current ? { ...current, playlist: next } : current)} onSessionExpired={onSessionExpired} />}
+      {onInspire && <button className="wc-text" disabled={!data || !playlist.inLibrary} onClick={() => onInspire(playlist)}>Make a mix inspired by this</button>}
       {!data && failed ? (
         <MusicEmpty
           title="Couldn’t load the tracks"

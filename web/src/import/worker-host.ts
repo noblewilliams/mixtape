@@ -4,7 +4,7 @@
 import { diagnoseExport } from './diagnostics'
 import { UnreadableExportError, inspectExport, parseExport } from './spotify-parser'
 import { isWorkerRequest, type MessagePortLike, type WorkerFailure, type WorkerRequest, type WorkerResponse } from './worker-protocol'
-import { openZipArchive } from './zip-reader'
+import { openExportArchive } from './zip-reader'
 
 export type ParserWorkerHost = {
   dispose(): void
@@ -27,7 +27,7 @@ export function createParserWorkerHost(port: MessagePortLike): ParserWorkerHost 
     controllers.set(request.id, controller)
     const { signal } = controller
     try {
-      const archive = await openZipArchive(request.file)
+      const archive = await openExportArchive(request.file)
       let result: WorkerResponse & { type: 'result' }
       if (request.type === 'inspect') {
         result = { type: 'result', id: request.id, result: await inspectExport(archive, { signal }) }

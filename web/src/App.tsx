@@ -1,7 +1,13 @@
+import { RoutineSuggestions } from './components/RoutineSuggestions'
+import { PlaybackController } from './playback/controller'
+import { PlaybackPanel } from './components/PlaybackPanel'
+import { MixEnergySummary } from './components/EnergyJourney'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react'
 import {
   ApiError,
   type ApiQueueTrack,
+  type ApiPlaylistSeed,
+  type ApiPlaylistSummary,
   type InterviewResponse,
   type ListeningImportSource,
   type MixtapeApi,
@@ -15,11 +21,15 @@ import type { AuthUser } from './components/AuthGate'
 import { AccountDialog, type AccountBridge } from './components/AccountDialog'
 import { Cassette } from './components/Cassette'
 import { ChooseServiceDialog } from './components/ChooseServiceDialog'
+import { MixHistory } from './components/MixHistory'
 import { Conversation } from './components/Conversation'
 import { Home } from './components/Home'
 import { InterviewDialog } from './components/InterviewDialog'
 import { NewTapeDialog, SaveDialog, Toast } from './components/Overlays'
 import { QueuePanel } from './components/QueuePanel'
+import { PlaylistAttachment, type PlaylistAttachmentValue } from './components/PlaylistAttachment'
+import { MemoryControls } from './components/MemoryControls'
+import './components/web-controls.css'
 import { Sidebar } from './components/Sidebar'
 import { YourMusicView, type MusicSection } from './components/YourMusicView'
 import { createMusicSyncService } from './sync/music-sync-service'
@@ -113,7 +123,9 @@ function conflictSnapshot(error: unknown): { queue: ApiQueueTrack[]; queueVersio
   return { queue: payload.queue as ApiQueueTrack[], queueVersion: payload.queueVersion }
 }
 
-export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSignOut, importParser }: AppProps) {
+export function App(props: AppProps) { return <SignedInWorkspace key={props.user.id} {...props} /> }
+
+function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, user, onSignOut, importParser }: AppProps) {
   const callback = useMemo(accountCallback, [])
   const uploadGate = useMemo(createUploadGate, [user.id])
   // One parser, one import service, and one import run for the signed-in
@@ -129,11 +141,28 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
     [importService, parser, uploadGate, user.id],
   )
   useEffect(() => () => importRun.dispose(), [importRun])
+  const [playlistSeeds, setPlaylistSeeds] = useState<Record<string, ApiPlaylistSeed | undefined>>({})
+  const [newSeed, setNewSeed] = useState<PlaylistAttachmentValue | null>(null)
+  const [seedBusy, setSeedBusy] = useState<string | null>(null)
+  const seedWrites = useRef(new Set<string>())
+  const seedRevision = useRef<Record<string, number>>({})
   const [sessions, setSessions] = useState<DjSession[]>([])
+  const [historyVersion, setHistoryVersion] = useState<number | undefined>()
+  const [historySessionId, setHistorySessionId] = useState<string | null>(null)
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [activeView, setActiveView] = useState<AppView>('home')
+  useEffect(() => { if (historySessionId && (activeView !== 'session' || historySessionId !== activeSessionId)) setHistorySessionId(null) }, [activeView, activeSessionId, historySessionId])
+  const navigation = useRef({ activeSessionId, activeView })
+  navigation.current = { activeSessionId, activeView }
   const [musicSection, setMusicSection] = useState<MusicSection>('auto')
   const [musicRevision, setMusicRevision] = useState(0)
+  const [showArchived, setShowArchived] = useState(false)
+  const [archiveUndo, setArchiveUndo] = useState<string | null>(null)
+  const metadataRevision = useRef<Record<string, number>>({})
+  const sessionWrites = useRef(new Set<string>())
+  const controlLife = useRef(new AbortController())
+  useEffect(() => { controlLife.current = new AbortController(); return () => controlLife.current.abort() }, [])
+  useEffect(() => { if (!archiveUndo) return; const timer = setTimeout(() => setArchiveUndo(null), 3000); return () => clearTimeout(timer) }, [archiveUndo])
   const [collectionView, setCollectionView] = useState<CollectionView>('list')
   const [messagesBySession, setMessagesBySession] = useState<Record<string, DjMessage[]>>({})
   const [queuesBySession, setQueuesBySession] = useState<Record<string, QueueTrack[]>>({})
@@ -143,7 +172,10 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
   const [creatingTape, setCreatingTape] = useState(false)
   const [dialog, setDialog] = useState<DialogState>(callback.dialog ? 'account' : null)
   const [queueOpen, setQueueOpen] = useState(false)
-  const [playing, setPlaying] = useState(false)
+  const playback = useMemo(() => new PlaybackController(api,musicKit,user.id), [api,musicKit,user.id])
+  const playerState = useSyncExternalStore(playback.subscribe,playback.getState)
+  const playing = playerState.sample.status === 'playing' && playerState.sessionId === activeSessionId && playerState.version === sessions.find(s => s.id === activeSessionId)?.queueVersion
+  useEffect(() => {void playback.initialize();return () => playback.dispose()},[playback])
   const [playbackBusy, setPlaybackBusy] = useState(false)
   const [playlistBusy, setPlaylistBusy] = useState(false)
   const [playlistError, setPlaylistError] = useState('')
@@ -231,7 +263,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
         const active = result.sessions
           .filter((session) => session.status === 'active')
           .map((session) => toDjSession(session))
-        setSessions(active)
+        setSessions(result.sessions.map((session) => toDjSession(session)))
         setError('')
         if (active.length > 0) {
           setActiveSessionId(active[0].id)
@@ -359,8 +391,12 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
   // that flag is taken from the read: the turn's own response already carries
   // the queue and its version, and a queue op may have moved on since.
   async function refreshSessionAfterTurn(sessionId: string) {
+    const signal = controlLife.current.signal
     try {
+      const revision = seedRevision.current[sessionId] ?? 0
       const detail = await api.getSession(sessionId)
+      if (signal.aborted) return
+      if ((seedRevision.current[sessionId] ?? 0) === revision) setPlaylistSeeds(current => ({ ...current, [sessionId]: detail.playlistSeed }))
       setSessions((current) =>
         current.map((session) =>
           session.id === sessionId ? { ...session, notPersonal: detail.session.notPersonal } : session,
@@ -368,6 +404,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
       )
       notePersonalMix(detail.session, detail.queue.length)
     } catch (requestError) {
+      if (signal.aborted) return
       if (requestError instanceof ApiError && requestError.status === 401) signOut()
     }
   }
@@ -384,11 +421,13 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
   async function loadSession(sessionId: string, isCancelled: () => boolean = () => false) {
     if (messagesBySession[sessionId] && queuesBySession[sessionId]) return
     setLoadingSessionId(sessionId)
+    const metadataAtStart = metadataRevision.current[sessionId] ?? 0
     try {
       const detail = await api.getSession(sessionId)
       if (isCancelled()) return
       const mapped = detailToState(detail)
-      setSessions((current) => current.map((session) => (session.id === sessionId ? mapped.session : session)))
+      setPlaylistSeeds(current => ({ ...current, [sessionId]: detail.playlistSeed }))
+      setSessions((current) => current.map((session) => (session.id === sessionId ? { ...mapped.session, ...((metadataRevision.current[sessionId] ?? 0) !== metadataAtStart ? { title: session.title, status: session.status } : {}) } : session)))
       setMessagesBySession((current) => ({ ...current, [sessionId]: mapped.messages }))
       setQueuesBySession((current) => ({ ...current, [sessionId]: mapped.queue }))
       setError('')
@@ -400,11 +439,30 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
     }
   }
 
+  async function updateMix(id: string, updates: { title?: string; status?: 'active' | 'archived' }) {
+    if (sessionWrites.current.has(id)) throw new Error('Session update in progress')
+    sessionWrites.current.add(id)
+    metadataRevision.current[id] = (metadataRevision.current[id] ?? 0) + 1
+    const signal = controlLife.current.signal
+    try {
+      const result = await api.updateSession(id, updates, signal)
+      if (signal.aborted) return
+      metadataRevision.current[id] = (metadataRevision.current[id] ?? 0) + 1
+      setSessions((current) => current.map((session) => session.id === id ? { ...session, title: result.session.title, status: result.session.status, updatedAt: result.session.updatedAt } : session))
+      if (updates.status === 'archived') {
+        if (navigation.current.activeSessionId === id && navigation.current.activeView === 'session') { setActiveView('home'); setActiveSessionId(null) }
+        setArchiveUndo(id)
+      } else if (updates.status === 'active') setArchiveUndo(null)
+    } catch (e) {
+      if (!signal.aborted && e instanceof ApiError && e.status === 401) signOut()
+      throw e
+    } finally { sessionWrites.current.delete(id) }
+  }
+
   function openSession(id: string) {
     setActiveSessionId(id)
     setActiveView('session')
     setQueueOpen(false)
-    setPlaying(false)
     void loadSession(id)
   }
 
@@ -419,10 +477,61 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
     }
   }
 
-  async function createTape(prompt: string) {
+  function attachmentValue(seed: ApiPlaylistSeed | undefined): PlaylistAttachmentValue | null {
+    return seed?.playlistId ? { playlistId: seed.playlistId, name: seed.name ?? 'Unavailable playlist', source: seed.source ?? 'apple', excludeSourceTracks: seed.excludeSourceTracks, ...(seed.status !== 'none' ? { status: seed.status } : {}) } : null
+  }
+
+  async function reloadInspiration(id: string) {
+    const signal = controlLife.current.signal
+    const revision = seedRevision.current[id] ?? 0
+    try {
+      const detail = await api.getSession(id)
+      if (!signal.aborted && (seedRevision.current[id] ?? 0) === revision) {
+        setPlaylistSeeds(state => ({ ...state, [id]: detail.playlistSeed }))
+        if (!detail.playlistSeed) throw new Error('Inspiration is not available yet')
+      }
+    } catch (error) {
+      if (!signal.aborted && error instanceof ApiError && error.status === 401) signOut()
+      throw error
+    }
+  }
+
+  async function selectInspiration(id: string, value: PlaylistAttachmentValue | null) {
+    const current = playlistSeeds[id]
+    if (!current || seedWrites.current.has(id)) throw new Error('Inspiration not ready')
+    seedWrites.current.add(id)
+    setSeedBusy(id)
+    seedRevision.current[id] = (seedRevision.current[id] ?? 0) + 1
+    const signal = controlLife.current.signal
+    try {
+      const result = await api.selectPlaylistSeed(id, { playlistId: value?.playlistId ?? null, excludeSourceTracks: value?.excludeSourceTracks ?? false, expectedRevision: current.revision }, signal)
+      if (!signal.aborted) setPlaylistSeeds(state => ({ ...state, [id]: result.playlistSeed }))
+    } catch (e) {
+      if (!signal.aborted) {
+        if (e instanceof ApiError && e.status === 401) signOut()
+        else {
+          try { const detail = await api.getSession(id); if (!signal.aborted) setPlaylistSeeds(state => ({ ...state, [id]: detail.playlistSeed })) }
+          catch { if (!signal.aborted) setPlaylistSeeds(state => ({ ...state, [id]: undefined })) }
+        }
+      }
+      throw e
+    } finally { if (!signal.aborted) setSeedBusy(null); seedWrites.current.delete(id); seedRevision.current[id] = (seedRevision.current[id] ?? 0) + 1 }
+  }
+
+  function inspireFromPlaylist(playlist: ApiPlaylistSummary) {
+    setNewSeed({ playlistId: playlist.id, name: playlist.name, source: playlist.source, excludeSourceTracks: false })
+    setDialog('new-tape')
+  }
+
+  async function createTape(prompt: string, useInspiration = true) {
+    if (creatingTape) return
+    const signal = controlLife.current.signal
     setCreatingTape(true)
     try {
-      const response = await api.createSession(prompt)
+      const response = await api.createSession(prompt, useInspiration && newSeed ? { playlistId: newSeed.playlistId, excludeSourceTracks: newSeed.excludeSourceTracks } : undefined)
+      if (signal.aborted) return
+      setNewSeed(null)
+      setPlaylistSeeds(current => ({ ...current, [response.session.id]: response.playlistSeed }))
       const mapped = detailToState(response)
       setSessions((current) => [mapped.session, ...current.filter((session) => session.id !== mapped.session.id)])
       setMessagesBySession((current) => ({ ...current, [mapped.session.id]: mapped.messages }))
@@ -434,16 +543,19 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
       announce('Your new tape is ready.')
       notePersonalMix(response.session, response.queue.length)
     } catch (requestError) {
+      if (signal.aborted) return
       setError(errorCopy(requestError))
       if (requestError instanceof ApiError && requestError.status === 401) signOut()
     } finally {
-      setCreatingTape(false)
+      if (!signal.aborted) setCreatingTape(false)
     }
   }
 
   async function sendMessage(text: string) {
-    if (!activeSession) return
+    const signal = controlLife.current.signal
+    if (!activeSession || seedWrites.current.has(activeSession.id)) return
     const sessionId = activeSession.id
+    const metadataAtStart = metadataRevision.current[sessionId] ?? 0
     const userMessage: DjMessage = {
       id: `${sessionId}-pending-${Date.now()}`,
       role: 'user',
@@ -460,6 +572,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
 
     try {
       const response = await api.sendMessage(sessionId, text)
+      if (signal.aborted) return
       const queue = response.queue.map(toQueueTrack)
       setMessagesBySession((current) => ({
         ...current,
@@ -472,7 +585,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
             ? toDjSession(
                 {
                   ...session,
-                  title: response.sessionTitle ?? session.title,
+                  title: (metadataRevision.current[sessionId] ?? 0) === metadataAtStart ? response.sessionTitle ?? session.title : session.title,
                   queueVersion: response.queueVersion,
                   updatedAt: new Date().toISOString(),
                 },
@@ -483,6 +596,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
       )
       void refreshSessionAfterTurn(sessionId)
     } catch (requestError) {
+      if (signal.aborted) return
       const message = errorCopy(requestError)
       setMessagesBySession((current) => ({
         ...current,
@@ -493,7 +607,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
       }))
       if (requestError instanceof ApiError && requestError.status === 401) signOut()
     } finally {
-      setThinkingSessionId(null)
+      if (!signal.aborted) setThinkingSessionId(null)
     }
   }
 
@@ -573,13 +687,11 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
 
     setPlaybackBusy(true)
     try {
-      if (playing) {
-        await musicKit.pause()
-        setPlaying(false)
-      } else {
-        await musicKit.play(ids)
-        setPlaying(true)
-        void api.recordSessionEvent(sessionId, 'played').catch(() => undefined)
+      if (playing) await playback.command('pause')
+      else if(playerState.sessionId===sessionId && playerState.version===activeSession.queueVersion && playerState.tracks.length) await playback.command('resume')
+      else {
+        const started=await playback.start(sessionId,activeSession.queueVersion,activeSession.title,activeQueue)
+        if(started) void api.recordSessionEvent(sessionId, 'played').catch(() => undefined)
       }
     } catch {
       announce(`Apple Music couldn’t ${playing ? 'pause' : 'play'} this mix. Try again in a moment.`, 'error')
@@ -625,13 +737,16 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
   return (
     <div className={`app-shell ${activeView !== 'session' || !activeSession ? 'app-shell--home' : ''}`} style={shellStyle}>
       <Sidebar
-        sessions={sessions}
+        sessions={sessions.filter((session) => session.status === 'active')}
+        onRename={(id, title) => updateMix(id, { title })}
+        onArchive={(id) => updateMix(id, { status: 'archived' })}
+        onOpenArchived={() => { setShowArchived(true); setActiveView('home') }}
         activeSessionId={activeSession?.id ?? null}
         activeView={activeView}
         userName={user.name}
         musicLabel={musicLinkLabel(effectiveOnboarding)}
         onOpenSession={openSession}
-        onOpenHome={() => setActiveView('home')}
+        onOpenHome={() => { setShowArchived(false); setActiveView('home') }}
         onOpenMusic={openMusic}
         onNewTape={() => setDialog('new-tape')}
         onOpenAccount={() => setDialog('account')}
@@ -644,9 +759,10 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
         syncDisabled={importBusy}
       />
 
-      {activeView === 'music' ? (
+      {activeView === 'memories' ? <MemoryControls api={api} onClose={() => setActiveView('home')} onSessionExpired={signOut} /> : activeView === 'music' ? (
         <YourMusicView
           api={api}
+          onInspire={inspireFromPlaylist}
           importRun={importRun}
           syncRun={syncRun}
           uploadGate={uploadGate}
@@ -663,7 +779,14 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
         />
       ) : activeView !== 'session' || !activeSession ? (
         <Home
-          sessions={sessions}
+          suggestions={<RoutineSuggestions key={user.id} api={api} busy={creatingTape} onCreate={prompt => createTape(prompt, false)} />}
+          player={<PlaybackPanel controller={playback} />}
+          sessions={sessions.filter((session) => session.status === (showArchived ? 'archived' : 'active'))}
+          archived={showArchived}
+          onArchived={setShowArchived}
+          onRename={(id, title) => updateMix(id, { title })}
+          onArchive={(id) => updateMix(id, { status: 'archived' })}
+          onRestore={(id) => updateMix(id, { status: 'active' })}
           collectionView={collectionView}
           onChangeCollectionView={setCollectionView}
           onOpenSession={openSession}
@@ -671,14 +794,23 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
         />
       ) : (
         <>
-          <Conversation
+          {historySessionId && <MixHistory initialVersion={historyVersion} key={`${historySessionId}-${historyVersion ?? "list"}`} api={api} sessionId={historySessionId} onClose={() => setHistorySessionId(null)} onSessionExpired={signOut} onRestored={() => loadSession(historySessionId)} />}
+          {!historySessionId && <Conversation
+            key={activeSession.id}
+            selectionBusy={seedBusy === activeSession.id}
+            attachment={<PlaylistAttachment api={api} onReload={!playlistSeeds[activeSession.id] ? () => reloadInspiration(activeSession.id) : undefined} value={attachmentValue(playlistSeeds[activeSession.id])} disabled={!playlistSeeds[activeSession.id] || thinkingSessionId === activeSession.id} onSelect={(value) => selectInspiration(activeSession.id, value)} onSessionExpired={signOut} />}
+            onRename={(title) => updateMix(activeSession.id, { title })}
+            onArchive={() => updateMix(activeSession.id, { status: 'archived' }).catch((e) => { announce('Couldn’t archive this mix. Try again.', 'error'); throw e })}
             session={activeSession}
             messages={activeMessages}
             loading={loadingSessionId === activeSession.id}
             thinking={thinkingSessionId === activeSession.id}
+            player={<PlaybackPanel controller={playback} />}
+            energySummary={<MixEnergySummary key={`${activeSession.id}:${activeSession.queueVersion}`} api={api} sessionId={activeSession.id} version={activeSession.queueVersion} />}
             onSend={sendMessage}
+            onOpenHistory={(version) => { setHistoryVersion(version); setHistorySessionId(activeSession.id) }}
             onOpenQueue={() => setQueueOpen(true)}
-          />
+          />}
           <QueuePanel
             session={activeSession}
             tracks={activeQueue}
@@ -702,7 +834,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
 
       {error ? <p className="app-error" role="alert">{error}</p> : null}
       {dialog === 'new-tape' ? (
-        <NewTapeDialog busy={creatingTape} onClose={() => setDialog(null)} onCreate={(prompt) => void createTape(prompt)} />
+        <NewTapeDialog attachment={<PlaylistAttachment api={api} value={newSeed} onSelect={async (value) => setNewSeed(value)} disabled={creatingTape} onSessionExpired={signOut} />} busy={creatingTape} onClose={() => { setDialog(null); setNewSeed(null) }} onCreate={(prompt) => void createTape(prompt)} />
       ) : null}
       {dialog === 'save-playlist' && activeSession ? (
         <SaveDialog
@@ -721,6 +853,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
       ) : null}
       {dialog === 'account' ? (
         <AccountDialog
+          onMemories={() => { setDialog(null); setActiveView('memories') }}
           auth={accountAuth}
           lastUsed={lastSignInProvider}
           notice={callback.message}
@@ -728,6 +861,7 @@ export function App({ api, accountAuth, lastSignInProvider, musicKit, user, onSi
           onClose={() => setDialog(null)}
         />
       ) : null}
+      {archiveUndo && <div className="wc-undo" role="status">Mix archived.<button className="wc-text" onClick={() => void updateMix(archiveUndo, { status: 'active' }).catch(() => announce('Couldn’t restore the mix. Open Archived mixes to retry.', 'error'))}>Undo</button></div>}
       {toast ? <Toast message={toast.message} tone={toast.tone} /> : null}
     </div>
   )

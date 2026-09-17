@@ -4,13 +4,13 @@
 import { diagnoseExport } from './diagnostics'
 import type { PageParser } from './page-parser'
 import { inspectExport, parseExport } from './spotify-parser'
-import { openZipArchive } from './zip-reader'
+import { openExportArchive } from './zip-reader'
 
 export function createDirectParser(): PageParser {
   return {
-    inspect: async (file, options = {}) => inspectExport(await openZipArchive(file), { signal: options.signal }),
-    parse: async (file, options) => parseExport(await openZipArchive(file), options),
-    diagnose: async (file, options = {}) => diagnoseExport(await openZipArchive(file), { signal: options.signal }),
+    inspect: async (file, options = {}) => inspectExport(await openExportArchive(file), { signal: options.signal }),
+    parse: async (file, options) => parseExport(await openExportArchive(file), options),
+    diagnose: async (file, options = {}) => diagnoseExport(await openExportArchive(file), { signal: options.signal }),
     terminate() {
       // Nothing is held between calls.
     },

@@ -1,3 +1,8 @@
+import {
+  applySelection,
+  initialSelection,
+  type CollectionSelection,
+} from './collection-review'
 // Snapshot → server, modelled on sync/music-sync-service.ts: the parsed
 // listening-export snapshot goes up through the staged listening-import
 // protocol in bounded chunks, then (account package only) the playlists go
@@ -7,6 +12,7 @@
 
 import type {
   ApiError,
+  PlaylistReview,
   BeginListeningImportInput,
   ListeningArtistRow,
   ListeningDayRow,
@@ -16,11 +22,21 @@ import type {
   MixtapeApi,
   PlaylistSyncSummary,
 } from '../api/client'
-import type { PlaylistEntrySnapshot, PlaylistSnapshot } from '../musickit/library'
-import type { ExportInventory, ListeningExportSnapshot, SnapshotPlaylist, SnapshotPlaylistEntry } from './snapshot'
+import type {
+  PlaylistEntrySnapshot,
+  PlaylistSnapshot,
+} from '../musickit/library'
+import type {
+  ExportInventory,
+  ListeningExportSnapshot,
+  SnapshotPlaylist,
+  SnapshotPlaylistEntry,
+} from './snapshot'
 import type { ParseProgress, ParseResult } from './spotify-parser'
 
 // Chunk ceilings from server/src/listening/contracts.ts and playlists/contracts.ts.
+export class CollectionReviewUnavailable extends Error {}
+
 export const LISTENING_TRACK_CHUNK = 500
 export const LISTENING_DAY_CHUNK = 2_000
 export const LISTENING_LIBRARY_CHUNK = 500
@@ -30,16 +46,20 @@ export const PLAYLIST_ENTRY_CHUNK = 200
 
 /** The parser call the service needs: the Worker client on the page, the pure parser in tests. */
 export type ImportParser = {
-  parse(file: Blob, options: {
-    timeZone: string
-    includePrivateSessions: boolean
-    signal?: AbortSignal
-    onProgress?: (progress: ParseProgress) => void
-  }): Promise<ParseResult>
+  parse(
+    file: Blob,
+    options: {
+      timeZone: string
+      includePrivateSessions: boolean
+      signal?: AbortSignal
+      onProgress?: (progress: ParseProgress) => void
+    },
+  ): Promise<ParseResult>
 }
 
 /** One full parse of an archive (listing, snapshot, and drop stats) with the options it was parsed under; `upload` reuses it when those match. */
 export type InspectedExport = ParseResult & {
+  selection?: CollectionSelection
   timeZone: string
   includePrivateSessions: boolean
 }
@@ -78,19 +98,25 @@ export type ListeningImportService = {
    * default options, so the preview can show counts. Records
    * `file_inspected` without waiting on it.
    */
-  inspect(file: Blob, options: {
-    timeZone: string
-    signal?: AbortSignal
-    onProgress?: (progress: ParseProgress) => void
-  }): Promise<InspectedExport>
+  inspect(
+    file: Blob,
+    options: {
+      timeZone: string
+      signal?: AbortSignal
+      onProgress?: (progress: ParseProgress) => void
+    },
+  ): Promise<InspectedExport>
   /** Uploads `inspected` as it is when its options match; parses again only when they differ (or nothing was inspected). */
-  upload(file: Blob, options: {
-    timeZone: string
-    includePrivateSessions: boolean
-    inspected?: InspectedExport
-    signal: AbortSignal
-    onProgress: (progress: ListeningImportProgress) => void
-  }): Promise<ListeningImportResult>
+  upload(
+    file: Blob,
+    options: {
+      timeZone: string
+      includePrivateSessions: boolean
+      inspected?: InspectedExport
+      signal: AbortSignal
+      onProgress: (progress: ListeningImportProgress) => void
+    },
+  ): Promise<ListeningImportResult>
 }
 
 type ListeningImportServiceDeps = {
@@ -110,7 +136,9 @@ const encoder = new TextEncoder()
 
 async function sha256Hex(text: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', encoder.encode(text))
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('')
 }
 
 /**
@@ -119,9 +147,12 @@ async function sha256Hex(text: string): Promise<string> {
  * title \t artist`, joined by "\n". The same content on a re-import gives the
  * same fingerprint, so the server can skip an unchanged playlist.
  */
-export function playlistFingerprint(playlist: SnapshotPlaylist): Promise<string> {
+export function playlistFingerprint(
+  playlist: SnapshotPlaylist,
+): Promise<string> {
   const lines = playlist.entries.map(
-    (entry) => `${entry.position}\t${entry.platformId ?? ''}\t${entry.title}\t${entry.artist}`,
+    (entry) =>
+      `${entry.position}\t${entry.platformId ?? ''}\t${entry.title}\t${entry.artist}`,
   )
   return sha256Hex(lines.join('\n'))
 }
@@ -129,7 +160,10 @@ export function playlistFingerprint(playlist: SnapshotPlaylist): Promise<string>
 // Explicit field-by-field maps: the server schemas are strict, so a field
 // the snapshot grows later must be mapped on purpose, never spread through.
 
-function toTrackRow(track: ListeningExportSnapshot['tracks'][number], ordinal: number): ListeningTrackRow {
+function toTrackRow(
+  track: ListeningExportSnapshot['tracks'][number],
+  ordinal: number,
+): ListeningTrackRow {
   return {
     ordinal,
     platformId: track.platformId,
@@ -140,7 +174,10 @@ function toTrackRow(track: ListeningExportSnapshot['tracks'][number], ordinal: n
   }
 }
 
-function toDayRow(day: ListeningExportSnapshot['days'][number], ordinal: number): ListeningDayRow {
+function toDayRow(
+  day: ListeningExportSnapshot['days'][number],
+  ordinal: number,
+): ListeningDayRow {
   return {
     ordinal,
     platformId: day.platformId,
@@ -153,7 +190,10 @@ function toDayRow(day: ListeningExportSnapshot['days'][number], ordinal: number)
   }
 }
 
-function toLibraryRow(row: ListeningExportSnapshot['library'][number], ordinal: number): ListeningLibraryRow {
+function toLibraryRow(
+  row: ListeningExportSnapshot['library'][number],
+  ordinal: number,
+): ListeningLibraryRow {
   return {
     ordinal,
     platformId: row.platformId,
@@ -165,11 +205,17 @@ function toLibraryRow(row: ListeningExportSnapshot['library'][number], ordinal: 
   }
 }
 
-function toArtistRow(artist: ListeningExportSnapshot['artists'][number], ordinal: number): ListeningArtistRow {
+function toArtistRow(
+  artist: ListeningExportSnapshot['artists'][number],
+  ordinal: number,
+): ListeningArtistRow {
   return { ordinal, name: artist.name, spotifyId: artist.spotifyId }
 }
 
-function toPlaylistSnapshot(playlist: SnapshotPlaylist, sourceFingerprint: string): PlaylistSnapshot {
+function toPlaylistSnapshot(
+  playlist: SnapshotPlaylist,
+  sourceFingerprint: string,
+): PlaylistSnapshot {
   return {
     ordinal: playlist.ordinal,
     appleLibraryId: playlist.key,
@@ -192,7 +238,10 @@ function toPlaylistSnapshot(playlist: SnapshotPlaylist, sourceFingerprint: strin
 
 type PlaylistEntryRow = Omit<PlaylistEntrySnapshot, 'playlistAppleId'>
 
-function toPlaylistEntry(key: string, entry: SnapshotPlaylistEntry): PlaylistEntryRow {
+function toPlaylistEntry(
+  key: string,
+  entry: SnapshotPlaylistEntry,
+): PlaylistEntryRow {
   return {
     position: entry.position,
     appleLibraryEntryId: `${key}:${entry.position}`,
@@ -211,7 +260,9 @@ function toPlaylistEntry(key: string, entry: SnapshotPlaylistEntry): PlaylistEnt
   }
 }
 
-function toBeginInput(snapshot: ListeningExportSnapshot): BeginListeningImportInput {
+function toBeginInput(
+  snapshot: ListeningExportSnapshot,
+): BeginListeningImportInput {
   return {
     source: snapshot.source,
     package: snapshot.package,
@@ -229,9 +280,14 @@ function toBeginInput(snapshot: ListeningExportSnapshot): BeginListeningImportIn
 const ignore = () => undefined
 
 /** Funnel steps are counts, never a dependency: a failure to record one is dropped, whether it rejects or throws. */
-function recordFunnelStep(api: MixtapeApi, type: 'file_inspected' | 'import_completed'): void {
+function recordFunnelStep(
+  api: MixtapeApi,
+  type: 'file_inspected' | 'import_completed',
+): void {
   try {
-    void Promise.resolve(api.postFunnelEvent({ type, surface: 'web' })).catch(ignore)
+    void Promise.resolve(api.postFunnelEvent({ type, surface: 'web' })).catch(
+      ignore,
+    )
   } catch {
     // Same as a rejection: the step goes unrecorded.
   }
@@ -244,10 +300,17 @@ function recordFunnelStep(api: MixtapeApi, type: 'file_inspected' | 'import_comp
  */
 function isAbort(error: unknown, signal: AbortSignal): boolean {
   if (signal.aborted && error === signal.reason) return true
-  return typeof error === 'object' && error !== null && (error as { name?: unknown }).name === 'AbortError'
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { name?: unknown }).name === 'AbortError'
+  )
 }
 
-export function createListeningImportService({ api, parser }: ListeningImportServiceDeps): ListeningImportService {
+export function createListeningImportService({
+  api,
+  parser,
+}: ListeningImportServiceDeps): ListeningImportService {
   async function uploadRows<T>(
     rows: T[],
     size: number,
@@ -269,19 +332,29 @@ export function createListeningImportService({ api, parser }: ListeningImportSer
     playlists: SnapshotPlaylist[],
     signal: AbortSignal,
     onProgress: (progress: ListeningImportProgress) => void,
+    review?: PlaylistReview,
   ): Promise<PlaylistSyncSummary> {
     const fingerprints = await Promise.all(playlists.map(playlistFingerprint))
-    const snapshots = playlists.map((playlist, index) => toPlaylistSnapshot(playlist, fingerprints[index]))
-    const totalEntries = playlists.reduce((sum, playlist) => sum + playlist.entries.length, 0)
+    const snapshots = playlists.map((playlist, index) =>
+      toPlaylistSnapshot(playlist, fingerprints[index]),
+    )
+    const totalEntries = playlists.reduce(
+      (sum, playlist) => sum + playlist.entries.length,
+      0,
+    )
     const total = playlists.length + totalEntries
 
     signal.throwIfAborted()
-    const run = await api.beginPlaylistSync({
-      source: 'spotify_export',
-      storefront: null,
-      expectedPlaylists: playlists.length,
-      expectedEntries: totalEntries,
-    }, signal)
+    const run = await api.beginPlaylistSync(
+      {
+        source: 'spotify_export',
+        ...(review ? { review } : {}),
+        storefront: null,
+        expectedPlaylists: playlists.length,
+        expectedEntries: totalEntries,
+      },
+      signal,
+    )
     let completed = 0
     for (const chunk of chunks(snapshots, PLAYLIST_CHUNK)) {
       signal.throwIfAborted()
@@ -290,7 +363,9 @@ export function createListeningImportService({ api, parser }: ListeningImportSer
       onProgress({ stage: 'uploading_playlists', completed, total })
     }
     for (const playlist of playlists) {
-      const entries = playlist.entries.map((entry) => toPlaylistEntry(playlist.key, entry))
+      const entries = playlist.entries.map((entry) =>
+        toPlaylistEntry(playlist.key, entry),
+      )
       for (const chunk of chunks(entries, PLAYLIST_ENTRY_CHUNK)) {
         signal.throwIfAborted()
         await api.putPlaylistEntries(run.syncId, playlist.key, chunk, signal)
@@ -305,39 +380,103 @@ export function createListeningImportService({ api, parser }: ListeningImportSer
   return {
     async inspect(file, { timeZone, signal, onProgress }) {
       const includePrivateSessions = false
-      const { inventory, snapshot, stats } = await parser.parse(file, { timeZone, includePrivateSessions, signal, onProgress })
+      const { inventory, snapshot, stats } = await parser.parse(file, {
+        timeZone,
+        includePrivateSessions,
+        signal,
+        onProgress,
+      })
       recordFunnelStep(api, 'file_inspected')
-      return { inventory, snapshot, stats, timeZone, includePrivateSessions }
+      const context =
+        snapshot.package === 'spotify_exportify' ||
+        snapshot.package === 'spotify_account'
+          ? await api.getSpotifyCollectionReview(signal).catch(() => {
+              signal?.throwIfAborted()
+              throw new CollectionReviewUnavailable(
+                'Could not load current collections.',
+              )
+            })
+          : undefined
+      const selection =
+        context &&
+        (snapshot.package === 'spotify_exportify' || context.hasQuickImport)
+          ? initialSelection(snapshot, context)
+          : undefined
+      return {
+        inventory,
+        snapshot,
+        stats,
+        timeZone,
+        includePrivateSessions,
+        ...(selection ? { selection } : {}),
+      }
     },
 
-    async upload(file, { timeZone, includePrivateSessions, inspected, signal, onProgress }) {
+    async upload(
+      file,
+      { timeZone, includePrivateSessions, inspected, signal, onProgress },
+    ) {
       signal.throwIfAborted()
       const reusable =
         inspected !== undefined &&
         inspected.timeZone === timeZone &&
         inspected.includePrivateSessions === includePrivateSessions
-      const { inventory, snapshot } = reusable
+      const parsed = reusable
         ? inspected
-        : await parser.parse(file, { timeZone, includePrivateSessions, signal, onProgress })
+        : await parser.parse(file, {
+            timeZone,
+            includePrivateSessions,
+            signal,
+            onProgress,
+          })
       signal.throwIfAborted()
 
-      const run = await api.beginListeningImport(toBeginInput(snapshot), signal)
+      const reviewed = inspected?.selection
+        ? applySelection(parsed.snapshot, inspected.selection)
+        : null
+      const { inventory } = parsed
+      const snapshot = reviewed?.snapshot ?? parsed.snapshot
+      if (snapshot.package === 'spotify_exportify' && !reviewed)
+        throw new Error('Review the files before importing.')
+      const run = await api.beginListeningImport(
+        {
+          ...toBeginInput(snapshot),
+          ...(reviewed ? { libraryReview: reviewed.libraryReview } : {}),
+        },
+        signal,
+      )
       const { importId } = run
       await uploadRows(
-        snapshot.tracks.map(toTrackRow), LISTENING_TRACK_CHUNK, 'uploading_tracks',
-        (chunk) => api.putListeningTracks(importId, chunk, signal), signal, onProgress,
+        snapshot.tracks.map(toTrackRow),
+        LISTENING_TRACK_CHUNK,
+        'uploading_tracks',
+        (chunk) => api.putListeningTracks(importId, chunk, signal),
+        signal,
+        onProgress,
       )
       await uploadRows(
-        snapshot.days.map(toDayRow), LISTENING_DAY_CHUNK, 'uploading_days',
-        (chunk) => api.putListeningDays(importId, chunk, signal), signal, onProgress,
+        snapshot.days.map(toDayRow),
+        LISTENING_DAY_CHUNK,
+        'uploading_days',
+        (chunk) => api.putListeningDays(importId, chunk, signal),
+        signal,
+        onProgress,
       )
       await uploadRows(
-        snapshot.library.map(toLibraryRow), LISTENING_LIBRARY_CHUNK, 'uploading_library',
-        (chunk) => api.putListeningLibrary(importId, chunk, signal), signal, onProgress,
+        snapshot.library.map(toLibraryRow),
+        LISTENING_LIBRARY_CHUNK,
+        'uploading_library',
+        (chunk) => api.putListeningLibrary(importId, chunk, signal),
+        signal,
+        onProgress,
       )
       await uploadRows(
-        snapshot.artists.map(toArtistRow), LISTENING_ARTIST_CHUNK, 'uploading_artists',
-        (chunk) => api.putListeningArtists(importId, chunk, signal), signal, onProgress,
+        snapshot.artists.map(toArtistRow),
+        LISTENING_ARTIST_CHUNK,
+        'uploading_artists',
+        (chunk) => api.putListeningArtists(importId, chunk, signal),
+        signal,
+        onProgress,
       )
       signal.throwIfAborted()
       const summary = await api.completeListeningImport(importId, signal)
@@ -352,12 +491,23 @@ export function createListeningImportService({ api, parser }: ListeningImportSer
       // as a rejection; only a cancel still rejects.
       let playlists: PlaylistSyncSummary | null = null
       let playlistError: ApiError | Error | null = null
-      if (snapshot.package === 'spotify_account') {
+      if (
+        snapshot.package === 'spotify_account' ||
+        snapshot.package === 'spotify_exportify'
+      ) {
         try {
-          playlists = await syncPlaylists(snapshot.playlists, signal, onProgress)
+          playlists = await syncPlaylists(
+            snapshot.playlists,
+            signal,
+            onProgress,
+            reviewed?.playlistReview,
+          )
         } catch (error) {
           if (isAbort(error, signal)) throw error
-          playlistError = error instanceof Error ? error : new Error(String(error), { cause: error })
+          playlistError =
+            error instanceof Error
+              ? error
+              : new Error(String(error), { cause: error })
         }
       }
 

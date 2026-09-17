@@ -15,6 +15,7 @@ export type AccountBridge = {
 
 type AccountDialogProps = {
   auth: AccountBridge
+  onMemories?: () => void
   lastUsed: AuthProvider | null
   notice?: string
   noticeTone?: 'success' | 'error'
@@ -27,7 +28,7 @@ function providerLabel(provider: AuthProvider): string {
   return provider === 'apple' ? 'Apple' : 'Google'
 }
 
-export function AccountDialog({ auth, lastUsed, notice = '', noticeTone = 'success', onClose }: AccountDialogProps) {
+export function AccountDialog({ onMemories, auth, lastUsed, notice = '', noticeTone = 'success', onClose }: AccountDialogProps) {
   const [accounts, setAccounts] = useState<LinkedAccount[]>([])
   const [loading, setLoading] = useState(true)
   const [busyProvider, setBusyProvider] = useState<AuthProvider | null>(null)
@@ -94,6 +95,7 @@ export function AccountDialog({ auth, lastUsed, notice = '', noticeTone = 'succe
           <div>
             <p className="account-kicker">Account</p>
             <h2 id="account-dialog-title">Ways to sign in</h2>
+        {onMemories && <button className="wc-text" onClick={onMemories}>What the DJ knows</button>}
           </div>
           <button
             className="account-dialog-close"

@@ -1,9 +1,16 @@
+import { SessionRow } from './SessionControls'
 import type { CollectionView, DjSession } from '../domain'
-import type { CSSProperties } from 'react'
-import { Cassette } from './Cassette'
+import type { CSSProperties, ReactNode } from 'react'
 import { NewTapeCompactButton } from './TapeActions'
 
 type HomeProps = {
+  player?: ReactNode
+  suggestions?: ReactNode
+  archived?: boolean
+  onArchived?: (value: boolean) => void
+  onRename?: (id: string, title: string) => Promise<void>
+  onArchive?: (id: string) => Promise<void>
+  onRestore?: (id: string) => Promise<void>
   sessions: DjSession[]
   collectionView: CollectionView
   onChangeCollectionView: (view: CollectionView) => void
@@ -14,7 +21,7 @@ type HomeProps = {
 const darkSpines = new Set(['#3e4850', '#51434f', '#596454', '#76584f'])
 
 export function Home({
-  sessions,
+  player, suggestions, sessions, archived = false, onArchived, onRename, onArchive, onRestore,
   collectionView,
   onChangeCollectionView,
   onOpenSession,
@@ -22,15 +29,19 @@ export function Home({
 }: HomeProps) {
   return (
     <main className="home-panel">
+      {player}
       <header className="home-header">
         <div>
           <p className="quiet-kicker">Your collection</p>
-          <h1>Your tapes</h1>
+          <h1>{archived ? 'Archived mixes' : 'Your tapes'}</h1>
           <p>{sessions.length} sessions · sorted by last played</p>
         </div>
         <NewTapeCompactButton onClick={onNewTape} />
       </header>
 
+      {!archived && suggestions}
+      <nav className="wc-tabs"><button className="wc-text" aria-pressed={!archived} onClick={() => onArchived?.(false)}>Active mixes</button><button className="wc-text" aria-pressed={archived} onClick={() => onArchived?.(true)}>Archived mixes</button></nav>
+      {sessions.length === 0 && <p>{archived ? 'No archived mixes.' : 'No mixes yet.'}</p>}
       <div className="collection-toolbar">
         <p>Return to a moment, or start from a blank tape.</p>
         <div className="view-switch" aria-label="Collection view">
@@ -56,44 +67,28 @@ export function Home({
       {collectionView === 'list' ? (
         <section className="tape-grid" aria-label="Tape list">
           {sessions.map((session) => (
-            <button className="tape-card" type="button" key={session.id} onClick={() => onOpenSession(session.id)}>
-              <Cassette
-                title={session.title}
-                caseColor={session.caseColor}
-                stockColor={session.stockColor}
-              />
-              <span className="tape-card-copy">
-                <strong>{session.title}</strong>
-                <small>
-                  {session.trackCount === 0 ? 'Blank tape' : `${session.trackCount} tracks`} · {session.ageLabel}
-                </small>
-              </span>
-            </button>
+            <SessionRow key={session.id} session={session} onOpen={() => onOpenSession(session.id)}
+              onRename={(title) => onRename?.(session.id, title) ?? Promise.resolve()}
+              onArchive={() => onArchive?.(session.id) ?? Promise.resolve()}
+              onRestore={() => onRestore?.(session.id) ?? Promise.resolve()} />
           ))}
         </section>
       ) : (
         <section className="closet" aria-label="Tape closet">
           <ol className="closet-shelf">
             {sessions.map((session) => (
-              <li key={session.id}>
-                <button
-                  className="tape-spine"
-                  type="button"
-                  style={
-                    {
-                      '--spine-color': session.caseColor,
-                      '--spine-ink': darkSpines.has(session.caseColor) ? '#f0ece5' : '#3d3740',
-                    } as CSSProperties
-                  }
-                  onClick={() => onOpenSession(session.id)}
-                  aria-label={`Open ${session.title}`}
-                >
-                  <span>{session.title}</span>
-                </button>
+              <li key={session.id} className="wc-closet-mix" style={{
+                '--spine-color': session.caseColor,
+                '--spine-ink': darkSpines.has(session.caseColor) ? '#f0ece5' : '#3d3740',
+              } as CSSProperties}>
+                <SessionRow session={session} onOpen={() => onOpenSession(session.id)}
+                  onRename={(title) => onRename?.(session.id, title) ?? Promise.resolve()}
+                  onArchive={() => onArchive?.(session.id) ?? Promise.resolve()}
+                  onRestore={() => onRestore?.(session.id) ?? Promise.resolve()} />
               </li>
             ))}
           </ol>
-          <p className="closet-hint">Choose a spine to reopen its conversation and queue.</p>
+          <p className="closet-hint">Tap a name to edit it. Open returns to its conversation and queue.</p>
         </section>
       )}
     </main>
