@@ -52,9 +52,9 @@ import UIKit
             hostView: window,
             binaryMessenger: controller.binaryMessenger
           )
-        } else {
-          NSLog("[mixtape] No window at launch; native shell dock not installed.")
         }
+        // No window at launch means no dock; nothing is logged here because
+        // this file must stay free of logging (see the export privacy contract).
       }
     }
     // Liquid Glass for surfaces that live inside Flutter (the collapsing
