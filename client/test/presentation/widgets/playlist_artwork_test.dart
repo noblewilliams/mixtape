@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/playlist_artwork.dart';
 
 void main() {
@@ -29,5 +30,26 @@ void main() {
     );
 
     expect(find.bySemanticsLabel('Playlist artwork'), findsOneWidget);
+  });
+
+  testWidgets('the placeholder glyph stays light on a dark ground', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: MixtapeTheme.dark(),
+        home: const Scaffold(
+          body: PlaylistArtwork(urlTemplate: null, bgColor: null),
+        ),
+      ),
+    );
+
+    // The default box is white at 8%: estimated on its own it reads as white,
+    // which would paint the note dark on a dark surface.
+    final glyph = tester.widget<Icon>(find.byIcon(Icons.music_note_rounded));
+    expect(
+      ThemeData.estimateBrightnessForColor(glyph.color!),
+      Brightness.light,
+    );
   });
 }

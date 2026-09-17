@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'foundation/square_art.dart';
+
 String? playlistArtworkUrl(String? template, {int size = 320}) {
   if (template == null || template.isEmpty) return null;
   final value = template
@@ -32,51 +34,30 @@ class PlaylistArtwork extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final url = playlistArtworkUrl(urlTemplate, size: (size * 3).round());
+    final scheme = Theme.of(context).colorScheme;
     final background =
         playlistArtworkColor(bgColor) ??
-        Theme.of(context).colorScheme.surfaceContainerHighest;
-    final fallback = DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            background,
-            Color.lerp(
-              background,
-              Theme.of(context).colorScheme.primary,
-              0.34,
-            )!,
-          ],
-        ),
-      ),
-      child: Center(
-        child: Icon(
-          Icons.music_note_rounded,
-          color:
-              ThemeData.estimateBrightnessForColor(background) ==
-                  Brightness.dark
-              ? Colors.white.withValues(alpha: 0.88)
-              : Colors.black.withValues(alpha: 0.68),
-          size: size * 0.34,
-        ),
-      ),
-    );
+        SquareArt.boxColorFor(Theme.of(context).brightness);
+    final tint = Color.lerp(background, scheme.primary, 0.34)!;
+    // The placeholder box is translucent, so the glyph's contrast has to be
+    // judged against what it actually lands on, not the wash's own alpha.
+    final onSurface = Color.alphaBlend(background, scheme.surface);
     return Semantics(
       image: true,
       label: 'Playlist artwork',
       excludeSemantics: true,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(borderRadius),
-        child: SizedBox.square(
-          dimension: size,
-          child: url == null
-              ? fallback
-              : Image.network(
-                  url,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => fallback,
-                ),
+      child: SquareArt(
+        url: url,
+        size: size,
+        radius: borderRadius,
+        placeholderGradient: [background, tint],
+        child: Icon(
+          Icons.music_note_rounded,
+          color:
+              ThemeData.estimateBrightnessForColor(onSurface) == Brightness.dark
+              ? Colors.white.withValues(alpha: 0.88)
+              : Colors.black.withValues(alpha: 0.68),
+          size: size * 0.34,
         ),
       ),
     );
