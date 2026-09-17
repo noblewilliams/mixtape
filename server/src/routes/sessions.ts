@@ -220,6 +220,10 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
       session: sessionRow,
       messages,
       queue: turnResult.value.queue,
+      // Same capability flag GET /:id carries (see its comment): a mix
+      // opened straight from creation must be able to offer Undo without a
+      // refetch, so both session-detail shapes advertise it.
+      supportsInsert: true,
       playlistSeed: await readPlaylistSeed(db, session.id, userId),
       // Present ONLY when rename_session actually fired this turn — lets the
       // client adopt the new title without a refetch (see
@@ -274,7 +278,22 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
       getActiveQueue(db, session.id),
     ])
     const messages = newestFirst.reverse()
-    return c.json({ session, messages, queue, playlistSeed: await readPlaylistSeed(db, session.id, userId) })
+    // supportsInsert is a CAPABILITY flag, not session state: it tells the
+    // arrangement screen whether this server understands the `insert` queue
+    // op, i.e. whether a swipe-remove may offer Undo
+    // (docs/mockups/approved/2026-09-17-mobile-arrangement-states.md). It
+    // rides the session detail rather than the queue-ops response so the
+    // client knows BEFORE it shows the affordance — and because
+    // QueueOpsResult's shape is a settled contract the client parses
+    // strictly. A client talking to an older deploy simply never sees the
+    // key and keeps Undo hidden.
+    return c.json({
+      session,
+      messages,
+      queue,
+      supportsInsert: true,
+      playlistSeed: await readPlaylistSeed(db, session.id, userId),
+    })
   })
 
   // Archiving is client-side-only bookkeeping — no queue/message side
@@ -360,7 +379,9 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
     const { ops, expectedVersion } = c.req.valid('json')
     // Manual queue-ops never carry an LLM call — swap/extend need one (to
     // pick a replacement), so they're only reachable through a DJ message
-    // turn. Checked up front rather than left to applyOps's own
+    // turn. remove/move/insert all name exactly what they act on, so they
+    // stay here (insert is in fact manual-ONLY — see dj/contracts.ts).
+    // Checked up front rather than left to applyOps's own
     // no-replacementsProvider QueueOpError so the client gets a message
     // that tells it what to do instead of a content-free "invalid op".
     if (ops.some((op) => op.op === 'swap' || op.op === 'extend')) {

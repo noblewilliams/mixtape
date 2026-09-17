@@ -6,12 +6,13 @@ import {
   getActiveQueue,
   applyOps,
   planOps,
+  MAX_ACTIVE_QUEUE_LENGTH,
   QueueOpError,
   QueueVersionConflict,
   type ReplacementPick,
   type ReplacementsProvider,
 } from '../../src/dj/queue-store'
-import { djSessions, queueTracks, tracks, user } from '../../src/db/schema'
+import { djSessions, mixVersions, queueTracks, tracks, user } from '../../src/db/schema'
 import { opIntentSchema, type OpIntent } from '../../src/dj/contracts'
 
 function opIntent(partial: Partial<OpIntent> & { themes: string }): OpIntent {
@@ -714,6 +715,274 @@ describe('queue-store', () => {
       const untouchedAfter = after.find((r) => r.trackId === trackList[2].id)!
       expect(untouchedAfter.position).toBe(untouchedBefore.position)
       expect(untouchedAfter.updatedAt.getTime()).toBe(untouchedBefore.updatedAt.getTime())
+    })
+  })
+
+  // Task 5.1: `insert` is the op the arrangement screen's Remove-with-Undo
+  // toast needs (docs/mockups/approved/2026-09-17-mobile-arrangement-states.md)
+  // — it re-adds a specific song at the position it was taken from. Unlike
+  // swap/extend it names its own trackId, so it never touches the
+  // replacementsProvider; and it may only name a track THIS session has
+  // already held, so every case below starts from a queue with one track
+  // swiped out.
+  describe('applyOps — insert', () => {
+    async function queueWithRemovedTrack(db: TestDb, keep = 3) {
+      await seedUser(db, 'u1')
+      const session = await seedSession(db, 'u1')
+      const seeded = await seedTracks(db, keep + 1)
+      await replaceQueue(db, session.id, picksFrom(seeded), 'dj')
+      const { version } = await applyOps(db, session.id, [{ op: 'remove', position: keep }], 'user')
+      // `seeded[keep]` is the removed one; its reason from picksFrom was `r${keep}`.
+      return { session, kept: seeded.slice(0, keep), removed: seeded[keep], version }
+    }
+
+    it('re-adds the removed track at the start, shifting everything down one', async () => {
+      const db = await createTestDb()
+      const { session, kept, removed, version } = await queueWithRemovedTrack(db)
+
+      const result = await applyOps(
+        db,
+        session.id,
+        [{ op: 'insert', position: 0, trackId: removed.id }],
+        'user',
+        undefined,
+        version,
+      )
+
+      expect(result.version).toBe(version + 1)
+      expect(result.added).toBe(1)
+      expect(result.removed).toBe(0)
+      expect(result.requested).toBe(0)
+      const view = await getActiveQueue(db, session.id)
+      expect(view.map((v) => v.trackId)).toEqual([removed.id, ...kept.map((t) => t.id)])
+      expect(view.map((v) => v.position)).toEqual([0, 1, 2, 3])
+    })
+
+    it('inserts in the middle', async () => {
+      const db = await createTestDb()
+      const { session, kept, removed } = await queueWithRemovedTrack(db)
+
+      await applyOps(db, session.id, [{ op: 'insert', position: 1, trackId: removed.id }], 'user')
+
+      const view = await getActiveQueue(db, session.id)
+      expect(view.map((v) => v.trackId)).toEqual([kept[0].id, removed.id, kept[1].id, kept[2].id])
+      expect(view.map((v) => v.position)).toEqual([0, 1, 2, 3])
+    })
+
+    it('inserts at the end when position equals the queue length', async () => {
+      const db = await createTestDb()
+      const { session, kept, removed } = await queueWithRemovedTrack(db)
+
+      await applyOps(db, session.id, [{ op: 'insert', position: 3, trackId: removed.id }], 'user')
+
+      const view = await getActiveQueue(db, session.id)
+      expect(view.map((v) => v.trackId)).toEqual([...kept.map((t) => t.id), removed.id])
+    })
+
+    it('clamps a position past the end to the end (never an error)', async () => {
+      const db = await createTestDb()
+      const { session, kept, removed } = await queueWithRemovedTrack(db, 2)
+
+      await applyOps(db, session.id, [{ op: 'insert', position: 99, trackId: removed.id }], 'user')
+
+      const view = await getActiveQueue(db, session.id)
+      expect(view.map((v) => v.trackId)).toEqual([...kept.map((t) => t.id), removed.id])
+      expect(view.map((v) => v.position)).toEqual([0, 1, 2])
+    })
+
+    it('records the inserted row as added by the acting side', async () => {
+      const db = await createTestDb()
+      const { session, removed } = await queueWithRemovedTrack(db, 2)
+
+      await applyOps(db, session.id, [{ op: 'insert', position: 0, trackId: removed.id }], 'user')
+
+      const rows = await db
+        .select()
+        .from(queueTracks)
+        .where(and(eq(queueTracks.sessionId, session.id), eq(queueTracks.trackId, removed.id)))
+      const active = rows.filter((r) => r.state === 'active')
+      expect(active).toHaveLength(1)
+      expect(active[0].addedBy).toBe('user')
+      // The swiped-out row stays as history (a P4 taste signal), not replaced.
+      expect(rows.filter((r) => r.state === 'removed')).toHaveLength(1)
+    })
+
+    // The Undo case from the arrangement board: a swipe-remove followed by
+    // the toast's Undo must leave the tape exactly as it was.
+    it('insert after remove restores the original order — and the DJ note that came with the row', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const session = await seedSession(db, 'u1')
+      const trackList = await seedTracks(db, 3)
+      await replaceQueue(db, session.id, picksFrom(trackList), 'dj')
+
+      const removeResult = await applyOps(db, session.id, [{ op: 'remove', position: 1 }], 'user')
+      const undo = await applyOps(
+        db,
+        session.id,
+        [{ op: 'insert', position: 1, trackId: trackList[1].id }],
+        'user',
+        undefined,
+        removeResult.version,
+      )
+
+      expect(undo.version).toBe(removeResult.version + 1)
+      const view = await getActiveQueue(db, session.id)
+      expect(view.map((v) => v.trackId)).toEqual(trackList.map((t) => t.id))
+      expect(view.map((v) => v.position)).toEqual([0, 1, 2])
+      // 'r1' is the reason replaceQueue wrote for trackList[1] (picksFrom).
+      expect(view[1].reason).toBe('r1')
+    })
+
+    it('rejects inserting a track already active in the queue and applies nothing', async () => {
+      const db = await createTestDb()
+      const { session, kept, version } = await queueWithRemovedTrack(db)
+
+      await expect(
+        applyOps(db, session.id, [{ op: 'insert', position: 0, trackId: kept[2].id }], 'user'),
+      ).rejects.toThrow(QueueOpError)
+
+      const view = await getActiveQueue(db, session.id)
+      expect(view.map((v) => v.trackId)).toEqual(kept.map((t) => t.id))
+      const [sessionRow] = await db.select().from(djSessions).where(eq(djSessions.id, session.id))
+      expect(sessionRow.queueVersion).toBe(version)
+    })
+
+    it('rejects two inserts of the same track in one batch', async () => {
+      const db = await createTestDb()
+      const { session, removed } = await queueWithRemovedTrack(db, 2)
+
+      await expect(
+        applyOps(
+          db,
+          session.id,
+          [
+            { op: 'insert', position: 0, trackId: removed.id },
+            { op: 'insert', position: 2, trackId: removed.id },
+          ],
+          'user',
+        ),
+      ).rejects.toThrow(QueueOpError)
+
+      const view = await getActiveQueue(db, session.id)
+      expect(view).toHaveLength(2)
+    })
+
+    // The authorization boundary: insert is an Undo, not a back door for
+    // adding catalog tracks the DJ never put in this mix.
+    it('rejects a real catalog track this session has never held, and an unknown id alike', async () => {
+      const db = await createTestDb()
+      const { session, kept, version } = await queueWithRemovedTrack(db, 2)
+      // A perfectly real track row — just never part of THIS session.
+      const [stranger] = await seedTracks(db, 1)
+
+      for (const trackId of [stranger.id, '00000000-0000-4000-8000-000000000000']) {
+        await expect(
+          applyOps(db, session.id, [{ op: 'insert', position: 0, trackId }], 'user'),
+        ).rejects.toThrow(QueueOpError)
+      }
+
+      const view = await getActiveQueue(db, session.id)
+      expect(view.map((v) => v.trackId)).toEqual(kept.map((t) => t.id))
+      const [sessionRow] = await db.select().from(djSessions).where(eq(djSessions.id, session.id))
+      expect(sessionRow.queueVersion).toBe(version)
+      // No snapshot for a version that was never reached.
+      expect(await db.select().from(mixVersions)).toHaveLength(version)
+    })
+
+    it('throws QueueVersionConflict on a stale expectedVersion without touching the queue', async () => {
+      const db = await createTestDb()
+      const { session, kept, removed, version } = await queueWithRemovedTrack(db, 2)
+
+      await expect(
+        applyOps(db, session.id, [{ op: 'insert', position: 0, trackId: removed.id }], 'user', undefined, 99),
+      ).rejects.toThrow(QueueVersionConflict)
+
+      const view = await getActiveQueue(db, session.id)
+      expect(view.map((v) => v.trackId)).toEqual(kept.map((t) => t.id))
+      const [sessionRow] = await db.select().from(djSessions).where(eq(djSessions.id, session.id))
+      expect(sessionRow.queueVersion).toBe(version)
+    })
+
+    it('saves an immutable snapshot for the new version including the inserted track', async () => {
+      const db = await createTestDb()
+      const { session, kept, removed } = await queueWithRemovedTrack(db, 2)
+
+      const result = await applyOps(db, session.id, [{ op: 'insert', position: 1, trackId: removed.id }], 'user')
+
+      const versions = await db.select().from(mixVersions).where(eq(mixVersions.sessionId, session.id))
+      const saved = versions.find((v) => v.version === result.version)!
+      expect(saved).toBeDefined()
+      expect(saved.entries.map((e) => e.trackId)).toEqual([kept[0].id, removed.id, kept[1].id])
+      expect(saved.entries.map((e) => e.position)).toEqual([0, 1, 2])
+    })
+
+    it('mixes with the other ops in one batch, each op seeing the working list', async () => {
+      const db = await createTestDb()
+      const { session, kept, removed } = await queueWithRemovedTrack(db)
+
+      const result = await applyOps(
+        db,
+        session.id,
+        [
+          { op: 'remove', position: 0 },
+          { op: 'insert', position: 0, trackId: removed.id },
+          { op: 'move', from: 0, to: 2 },
+        ],
+        'user',
+      )
+
+      expect(result.added).toBe(1)
+      expect(result.removed).toBe(1)
+      const view = await getActiveQueue(db, session.id)
+      expect(view.map((v) => v.trackId)).toEqual([kept[1].id, kept[2].id, removed.id])
+      expect(view.map((v) => v.position)).toEqual([0, 1, 2])
+    })
+
+    it('re-inserting a track removed EARLIER IN THE SAME BATCH is allowed (no duplicate conflict)', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const session = await seedSession(db, 'u1')
+      const trackList = await seedTracks(db, 3)
+      await replaceQueue(db, session.id, picksFrom(trackList), 'dj')
+
+      await applyOps(
+        db,
+        session.id,
+        [
+          { op: 'remove', position: 0 },
+          { op: 'insert', position: 2, trackId: trackList[0].id },
+        ],
+        'user',
+      )
+
+      const view = await getActiveQueue(db, session.id)
+      expect(view.map((v) => v.trackId)).toEqual([trackList[1].id, trackList[2].id, trackList[0].id])
+    })
+
+    it('rejects an insert that would push the queue past MAX_ACTIVE_QUEUE_LENGTH', () => {
+      const rows = Array.from({ length: MAX_ACTIVE_QUEUE_LENGTH }, (_, i) => ({
+        id: `row-${i}`,
+        trackId: `track-${i}`,
+        reason: null,
+      }))
+      expect(() => planOps(rows, [{ op: 'insert', position: 0, trackId: 'new-track' }])).toThrow(QueueOpError)
+      expect(() => planOps(rows.slice(0, -1), [{ op: 'insert', position: 0, trackId: 'new-track' }])).not.toThrow()
+    })
+
+    it('enforces the length cap through applyOps against a real queue at the ceiling', async () => {
+      const db = await createTestDb()
+      const { session, removed } = await queueWithRemovedTrack(db, MAX_ACTIVE_QUEUE_LENGTH)
+
+      await expect(
+        applyOps(db, session.id, [{ op: 'insert', position: 0, trackId: removed.id }], 'user'),
+      ).rejects.toThrow(QueueOpError)
+
+      // One more removal makes room, and the same insert then lands.
+      await applyOps(db, session.id, [{ op: 'remove', position: 0 }], 'user')
+      const result = await applyOps(db, session.id, [{ op: 'insert', position: 0, trackId: removed.id }], 'user')
+      expect(result.added).toBe(1)
+      expect(await getActiveQueue(db, session.id)).toHaveLength(MAX_ACTIVE_QUEUE_LENGTH)
     })
   })
 

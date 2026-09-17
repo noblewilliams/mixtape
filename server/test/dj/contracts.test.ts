@@ -174,6 +174,34 @@ describe('queueOpSchema', () => {
       queueOpSchema.parse({ op: 'swap', position: 0, intent: { themes: 'x', mood: 'whatever' } }),
     ).not.toThrow()
   })
+
+  // Task 5.1 — the manual-only insert op behind arrangement Undo.
+  it('parses an insert op with a position and a track id', () => {
+    const op = { op: 'insert', position: 2, trackId: '11111111-1111-4111-8111-111111111111' }
+    expect(queueOpSchema.parse(op)).toEqual(op)
+  })
+
+  it('rejects an insert op with a negative position', () => {
+    expect(() =>
+      queueOpSchema.parse({ op: 'insert', position: -1, trackId: '11111111-1111-4111-8111-111111111111' }),
+    ).toThrow()
+  })
+
+  it('rejects an insert op with a missing or malformed track id', () => {
+    expect(() => queueOpSchema.parse({ op: 'insert', position: 0 })).toThrow()
+    expect(() => queueOpSchema.parse({ op: 'insert', position: 0, trackId: 'not-a-uuid' })).toThrow()
+  })
+
+  it('rejects an unknown property on an insert op (strict, like its peers)', () => {
+    expect(() =>
+      queueOpSchema.parse({
+        op: 'insert',
+        position: 0,
+        trackId: '11111111-1111-4111-8111-111111111111',
+        oops: true,
+      }),
+    ).toThrow()
+  })
 })
 
 describe('queueOpsSchema', () => {
@@ -423,6 +451,22 @@ const editQueueRows: OpsRow[] = [
     sample: { ops: [{ op: 'remove', position: -1 }] },
   },
 ]
+
+// insert is deliberately NOT advertised to the model: the queue listing the DJ
+// sees carries positions, titles and artists but never track ids (dj/loop.ts
+// formatQueueListing), so an op that names a trackId is unusable by the model
+// and would only invite hallucinated uuids. zod accepts it (the client sends
+// it), edit_queue's tool schema does not — asserted here so the divergence
+// stays deliberate rather than becoming an accident.
+describe('edit_queue deliberately omits the manual-only insert op', () => {
+  const schema = DJ_TOOLS.find((t) => t.name === 'edit_queue')!.input_schema
+  const sample = { ops: [{ op: 'insert', position: 0, trackId: '11111111-1111-4111-8111-111111111111' }] }
+
+  it('zod accepts it but the advertised tool schema does not', () => {
+    expect(queueOpsSchema.safeParse(sample.ops).success).toBe(true)
+    expect(matchesJsonSchema(schema, sample)).toBe(false)
+  })
+})
 
 describe('edit_queue: zod and its longhand JSON schema agree', () => {
   const schema = DJ_TOOLS.find((t) => t.name === 'edit_queue')!.input_schema

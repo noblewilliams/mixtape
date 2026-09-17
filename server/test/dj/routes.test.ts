@@ -18,7 +18,7 @@ import {
   djMemories,
 } from '../../src/db/schema'
 import { eq } from 'drizzle-orm'
-import { replaceQueue, applyOps } from '../../src/dj/queue-store'
+import { replaceQueue, applyOps, MAX_ACTIVE_QUEUE_LENGTH } from '../../src/dj/queue-store'
 import { SPOTIFY_A } from '../helpers/listening-fixtures'
 
 const DIMS = 1024
@@ -769,6 +769,211 @@ describe('session routes', () => {
 
       const res = await postJson(app, `/sessions/${sessionId}/queue-ops`, { ops: [] })
       expect(res.status).toBe(400)
+    })
+
+    // Task 5.1: the insert op behind the arrangement screen's
+    // Remove-with-Undo toast. Manual-only (the DJ never sees track ids), and
+    // it may only re-add a song THIS session has already held — these are the
+    // contract tests the client codes against.
+    async function queueTrackIds(app: ReturnType<typeof buildApp>, sessionId: string) {
+      const body = (await (await getJson(app, `/sessions/${sessionId}`)).json()) as {
+        queue: Array<{ trackId: string }>
+      }
+      return body.queue.map((t) => t.trackId)
+    }
+
+    it('applies an insert op at the given position and counts it as added', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const { sessionId, queueVersion } = await createSessionWithQueue(db, 'u1', 4)
+
+      const { llm, calls } = makeFakeLlm([{ text: 'should never be called' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+      const before = await queueTrackIds(app, sessionId)
+
+      const removeRes = await postJson(app, `/sessions/${sessionId}/queue-ops`, {
+        ops: [{ op: 'remove', position: 3 }],
+        expectedVersion: queueVersion,
+      })
+      const removeBody = (await removeRes.json()) as { queueVersion: number }
+
+      const res = await postJson(app, `/sessions/${sessionId}/queue-ops`, {
+        ops: [{ op: 'insert', position: 1, trackId: before[3] }],
+        expectedVersion: removeBody.queueVersion,
+      })
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as {
+        queueVersion: number
+        requested: number
+        added: number
+        removed: number
+        queue: Array<{ trackId: string; position: number }>
+      }
+      expect(body.queueVersion).toBe(removeBody.queueVersion + 1)
+      expect(body.added).toBe(1)
+      expect(body.removed).toBe(0)
+      expect(body.requested).toBe(0)
+      expect(body.queue).toHaveLength(4)
+      expect(body.queue[1].trackId).toBe(before[3])
+      expect(body.queue.map((t) => t.position)).toEqual([0, 1, 2, 3])
+      expect(calls).toBe(0)
+    })
+
+    it('remove then insert at the same position round-trips the queue (the Undo case)', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const { sessionId, queueVersion } = await createSessionWithQueue(db, 'u1', 3)
+      const { llm } = makeFakeLlm([{ text: 'n/a' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+      const before = await queueTrackIds(app, sessionId)
+
+      const removeRes = await postJson(app, `/sessions/${sessionId}/queue-ops`, {
+        ops: [{ op: 'remove', position: 1 }],
+        expectedVersion: queueVersion,
+      })
+      const removeBody = (await removeRes.json()) as { queueVersion: number }
+
+      const undoRes = await postJson(app, `/sessions/${sessionId}/queue-ops`, {
+        ops: [{ op: 'insert', position: 1, trackId: before[1] }],
+        expectedVersion: removeBody.queueVersion,
+      })
+      expect(undoRes.status).toBe(200)
+      const undoBody = (await undoRes.json()) as { queue: Array<{ trackId: string }> }
+      expect(undoBody.queue.map((t) => t.trackId)).toEqual(before)
+    })
+
+    it('rejects an insert of a track already in the queue with 400 invalid_ops', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const { sessionId, queueVersion, trackList } = await createSessionWithQueue(db, 'u1', 3)
+      const { llm } = makeFakeLlm([{ text: 'n/a' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+      const res = await postJson(app, `/sessions/${sessionId}/queue-ops`, {
+        ops: [{ op: 'insert', position: 0, trackId: trackList[0].id }],
+        expectedVersion: queueVersion,
+      })
+      expect(res.status).toBe(400)
+      expect((await res.json()) as { error: string }).toEqual({ error: 'invalid_ops' })
+    })
+
+    // Insert is an Undo, not a way to add catalog tracks the DJ never played:
+    // a real track this session never held is refused exactly like a
+    // nonexistent id.
+    it.each([
+      ['a real catalog track this session never held', 'stranger'],
+      ['an unknown track id', '00000000-0000-4000-8000-000000000000'],
+    ])('rejects %s with 400 invalid_ops', async (_label, idOrMarker) => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const { sessionId, queueVersion } = await createSessionWithQueue(db, 'u1', 3)
+      const stranger = await seedLibraryTrack(db, 'u1', { embedding: MATCHING_DIRECTION })
+      const { llm } = makeFakeLlm([{ text: 'n/a' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+      const res = await postJson(app, `/sessions/${sessionId}/queue-ops`, {
+        ops: [{ op: 'insert', position: 0, trackId: idOrMarker === 'stranger' ? stranger.id : idOrMarker }],
+        expectedVersion: queueVersion,
+      })
+      expect(res.status).toBe(400)
+      expect((await res.json()) as { error: string }).toEqual({ error: 'invalid_ops' })
+    })
+
+    it('rejects a malformed (non-uuid) trackId at the schema boundary, never as a 500', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const { sessionId } = await createSessionWithQueue(db, 'u1', 3)
+      const { llm } = makeFakeLlm([{ text: 'n/a' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+      const res = await postJson(app, `/sessions/${sessionId}/queue-ops`, {
+        ops: [{ op: 'insert', position: 0, trackId: 'not-a-uuid' }],
+      })
+      expect(res.status).toBe(400)
+    })
+
+    it('rejects an insert that would grow the queue past the length cap with 400 invalid_ops', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const { sessionId } = await createSessionWithQueue(db, 'u1', 3)
+      const { llm } = makeFakeLlm([{ text: 'n/a' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+      // Fill this session's queue to the ceiling directly through the store —
+      // driving it there one DJ turn at a time would prove nothing extra.
+      const many = []
+      for (let i = 0; i < MAX_ACTIVE_QUEUE_LENGTH + 1; i++) {
+        trackCounter += 1
+        const [t] = await db
+          .insert(tracks)
+          .values({ appleId: `cap-${trackCounter}`, title: `Cap ${trackCounter}`, artist: 'Artist', durationMs: 200_000 })
+          .returning()
+        many.push({ trackId: t.id, reason: 'filler' })
+      }
+      await replaceQueue(db, sessionId, many, 'dj')
+      const atCeiling = await applyOps(db, sessionId, [{ op: 'remove', position: MAX_ACTIVE_QUEUE_LENGTH }], 'user')
+
+      const res = await postJson(app, `/sessions/${sessionId}/queue-ops`, {
+        ops: [{ op: 'insert', position: 0, trackId: many[MAX_ACTIVE_QUEUE_LENGTH].trackId }],
+        expectedVersion: atCeiling.version,
+      })
+      expect(res.status).toBe(400)
+      expect((await res.json()) as { error: string }).toEqual({ error: 'invalid_ops' })
+    })
+
+    it('a stale expectedVersion on an insert returns 409 with the canonical queue', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const { sessionId, queueVersion } = await createSessionWithQueue(db, 'u1', 3)
+      const { llm } = makeFakeLlm([{ text: 'n/a' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+      const before = await queueTrackIds(app, sessionId)
+      await postJson(app, `/sessions/${sessionId}/queue-ops`, {
+        ops: [{ op: 'remove', position: 1 }],
+        expectedVersion: queueVersion,
+      })
+
+      // The Undo the listener tapped, against the version they last saw.
+      const res = await postJson(app, `/sessions/${sessionId}/queue-ops`, {
+        ops: [{ op: 'insert', position: 1, trackId: before[1] }],
+        expectedVersion: queueVersion,
+      })
+      expect(res.status).toBe(409)
+      const body = (await res.json()) as { error: string; queue: unknown[]; queueVersion: number }
+      expect(body.error).toBe('stale')
+      expect(body.queueVersion).toBe(queueVersion + 1)
+      expect(body.queue).toHaveLength(2)
+    })
+
+    it('GET /sessions/:id advertises insert support so the client can offer Undo', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const { sessionId } = await createSessionWithQueue(db, 'u1', 3)
+      const { llm } = makeFakeLlm([{ text: 'n/a' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+      const res = await getJson(app, `/sessions/${sessionId}`)
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { supportsInsert?: boolean }
+      expect(body.supportsInsert).toBe(true)
+    })
+
+    it('POST /sessions advertises insert support too — a mix opened from creation can offer Undo', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const trackList = await seedLibrary(db, 'u1', 3)
+      const { llm } = makeFakeLlm([
+        { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'x', targetCount: trackList.length })] },
+        { text: 'here you go.' },
+      ])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+      const res = await postJson(app, '/sessions', { prompt: 'give me a set' })
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { supportsInsert?: boolean }
+      expect(body.supportsInsert).toBe(true)
     })
 
     it('404s when the session belongs to another user', async () => {

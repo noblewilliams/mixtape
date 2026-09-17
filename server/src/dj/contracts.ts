@@ -46,6 +46,25 @@ const moveOp = z
     to: z.number().int().min(0),
   })
   .strict()
+// Manual-only, and the one op that names its own track: the arrangement
+// screen's Remove-with-Undo toast re-adds the song it just took out, at the
+// position it came from (docs/mockups/approved/2026-09-17-mobile-arrangement-states.md).
+// `position` is clamped to the working queue's length by the store rather
+// than rejected, so an Undo can never fail on an off-by-one. `trackId` is
+// uuid-shaped here so a malformed id is rejected at the schema boundary
+// instead of reaching a uuid-typed column comparison (the same discipline as
+// routes/sessions.ts's isUuid); a well-formed id that names no track — or one
+// already in the queue — is a QueueOpError, i.e. the route's 400 invalid_ops.
+// Deliberately absent from DJ_TOOLS' edit_queue schema below: the model never
+// sees track ids (dj/loop.ts formatQueueListing), so advertising it would only
+// invite hallucinated uuids.
+const insertOp = z
+  .object({
+    op: z.literal('insert'),
+    position: z.number().int().min(0),
+    trackId: z.uuid(),
+  })
+  .strict()
 const swapOp = z
   .object({
     op: z.literal('swap'),
@@ -61,7 +80,7 @@ const extendOp = z
   })
   .strict()
 
-export const queueOpSchema = z.discriminatedUnion('op', [removeOp, moveOp, swapOp, extendOp])
+export const queueOpSchema = z.discriminatedUnion('op', [removeOp, moveOp, insertOp, swapOp, extendOp])
 export type QueueOp = z.infer<typeof queueOpSchema>
 
 export const queueOpsSchema = z.array(queueOpSchema).min(1).max(20)

@@ -52,6 +52,15 @@ export class QueueVersionConflict extends Error {
   }
 }
 
+// Ceiling on a session's ACTIVE queue, enforced only by `insert` — the one
+// op a client can use to GROW a queue without the DJ. Generation caps itself
+// at 60 (contracts.ts targetCount), and extends can push past that, so this
+// sits generously above both: a listener undoing a removal must never be
+// refused because their tape is long, while an insert still can't grow a
+// queue without bound. A queue already longer than this (many extends) only
+// refuses further inserts; nothing existing is touched.
+export const MAX_ACTIVE_QUEUE_LENGTH = 100
+
 export type ReplacementPick = { trackId: string; reason: string }
 
 // The engine (Task 7), not the store, decides what a swap/extend actually
@@ -61,7 +70,9 @@ export type ReplacementsProvider = (count: number, intent?: OpIntent) => Promise
 export type ApplyOpsResult = {
   version: number
   requested: number // total tracks asked of the provider across this batch
-  added: number // tracks actually inserted (requested minus shortfall/duplicates)
+  // Tracks actually inserted: resolved swap/extend picks (requested minus
+  // shortfall/duplicates) plus every `insert` op, which never falls short.
+  added: number
   removed: number // rows marked removed (unconditional `remove`s + resolved swaps)
 }
 export type QueueMutationGuard = { seedRevision: number; playlistId: string | null; fingerprint: string | null }
@@ -191,6 +202,9 @@ type WorkingSlot =
       originalPosition: number
       pendingSwap?: { opIndex: number }
     }
+  // A track named outright by an `insert` op — no provider involved, so
+  // unlike 'pendingExtend' it always materializes.
+  | { kind: 'insert'; trackId: string }
   | { kind: 'pendingExtend'; opIndex: number }
 
 export type PlanRequest = {
@@ -282,6 +296,19 @@ export function planOps(
       if (op.from < 0 || op.from >= working.length || op.to < 0 || op.to >= working.length) throw new QueueOpError()
       const [item] = working.splice(op.from, 1)
       working.splice(op.to, 0, item)
+    } else if (op.op === 'insert') {
+      // Bounded (see MAX_ACTIVE_QUEUE_LENGTH) and de-duplicated against the
+      // WORKING list, so a batch that removes a track and puts it back is
+      // fine while two inserts of one track — or an insert of a track still
+      // in the queue — is not: a queue holds a track at most once, the same
+      // invariant materialize's active-set guard holds for swap/extend picks.
+      if (working.length >= MAX_ACTIVE_QUEUE_LENGTH) throw new QueueOpError()
+      if (working.some((slot) => slot.kind !== 'pendingExtend' && slot.trackId === op.trackId)) {
+        throw new QueueOpError()
+      }
+      // Clamped, not rejected: an Undo aimed one past the end of a queue
+      // that shrank underneath it should still put the song back.
+      working.splice(Math.min(op.position, working.length), 0, { kind: 'insert', trackId: op.trackId })
     } else if (op.op === 'swap') {
       if (op.position < 0 || op.position >= working.length) throw new QueueOpError()
       const target = working[op.position]
@@ -305,7 +332,7 @@ export function planOps(
 
 type MaterializeResult = {
   finalRemovedIds: string[]
-  toInsert: Array<{ position: number; trackId: string; reason: string }>
+  toInsert: Array<{ position: number; trackId: string; reason: string | null }>
   positionUpdates: Array<{ id: string; position: number }>
   added: number
 }
@@ -334,12 +361,20 @@ function materialize(
   working: WorkingSlot[],
   removedIds: string[],
   picksByOpIndex: Map<number, ReplacementPick[]>,
+  // Reason to write on each `insert`ed row, keyed by trackId — recovered
+  // from that track's own earlier row in this session (resolveInsertTracks),
+  // so Undo restores the DJ's note, not just the song. Absent means null.
+  insertReasons: Map<string, string | null>,
 ): MaterializeResult {
   const finalRemovedIds = [...removedIds]
-  const toInsert: Array<{ position: number; trackId: string; reason: string }> = []
+  const toInsert: Array<{ position: number; trackId: string; reason: string | null }> = []
   const positionUpdates: Array<{ id: string; position: number }> = []
+  // Every track the final list will hold a real row for — kept rows and
+  // `insert`ed ones alike — so a provider pick can't duplicate either.
   const active = new Set(
-    working.filter((s): s is Extract<WorkingSlot, { kind: 'keep' }> => s.kind === 'keep').map((s) => s.trackId),
+    working
+      .filter((s): s is Exclude<WorkingSlot, { kind: 'pendingExtend' }> => s.kind !== 'pendingExtend')
+      .map((s) => s.trackId),
   )
   const extendCursors = new Map<number, number>()
   let added = 0
@@ -368,6 +403,12 @@ function materialize(
       }
       if (slot.originalPosition !== position) positionUpdates.push({ id: slot.id, position })
       position += 1
+    } else if (slot.kind === 'insert') {
+      // No shortfall case: the op named the track itself, and
+      // resolveInsertTracks already proved it exists.
+      toInsert.push({ position, trackId: slot.trackId, reason: insertReasons.get(slot.trackId) ?? null })
+      added += 1
+      position += 1
     } else {
       const cursor = extendCursors.get(slot.opIndex) ?? 0
       extendCursors.set(slot.opIndex, cursor + 1)
@@ -385,6 +426,40 @@ function materialize(
   }
 
   return { finalRemovedIds, toInsert, positionUpdates, added }
+}
+
+/**
+ * Resolves every `insert` op in a batch, under the caller's transaction, from
+ * THIS SESSION'S own queue rows — one query doing two jobs:
+ *
+ *  - Authorization. An insert may only re-add a song this session has
+ *    already held (a swipe-remove the listener is undoing), so a trackId
+ *    with no row here is a QueueOpError — the route's 400 invalid_ops — no
+ *    matter how real the catalog track behind it is. A session-scoped check,
+ *    not a global existence one: the queue's own history is the record of
+ *    what the listener was shown, and anything wider would let a client
+ *    inject arbitrary catalog tracks into a mix without the DJ.
+ *  - The reason to write with the new row, taken from that track's most
+ *    recent earlier row here whatever state it's in. That's what makes Undo
+ *    restore the DJ's note along with the song; a row that never carried one
+ *    comes back with a null reason ("no notes from the DJ").
+ */
+async function resolveInsertTracks(tx: Db, sessionId: string, ops: QueueOp[]): Promise<Map<string, string | null>> {
+  const reasons = new Map<string, string | null>()
+  const ids = [...new Set(ops.filter((op) => op.op === 'insert').map((op) => op.trackId))]
+  if (ids.length === 0) return reasons
+
+  // Oldest first so the newest row for a given track is the one left in the
+  // map — a song removed and re-added more than once keeps its latest note.
+  const prior = await tx
+    .select({ trackId: queueTracks.trackId, reason: queueTracks.reason })
+    .from(queueTracks)
+    .where(and(eq(queueTracks.sessionId, sessionId), inArray(queueTracks.trackId, ids)))
+    .orderBy(asc(queueTracks.updatedAt))
+  for (const row of prior) reasons.set(row.trackId, row.reason)
+  // A null reason still registers its key, so size is the seen-count.
+  if (reasons.size !== ids.length) throw new QueueOpError()
+  return reasons
 }
 
 async function readActiveRows(db: Db, sessionId: string) {
@@ -473,7 +548,16 @@ export async function applyOps(
 
     const currentRows = await readActiveRows(tx, sessionId)
     const { working, removedIds } = planOps(currentRows, ops)
-    const { finalRemovedIds, toInsert, positionUpdates, added } = materialize(working, removedIds, picksByOpIndex)
+    // Under the lock, not in phase 1: an insert never costs a provider call,
+    // so there's nothing to fail fast for, and the existence check is only
+    // meaningful against the state this transaction will actually write to.
+    const insertReasons = await resolveInsertTracks(tx, sessionId, ops)
+    const { finalRemovedIds, toInsert, positionUpdates, added } = materialize(
+      working,
+      removedIds,
+      picksByOpIndex,
+      insertReasons,
+    )
 
     if (finalRemovedIds.length > 0) {
       await tx
