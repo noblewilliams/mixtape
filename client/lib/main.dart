@@ -6,6 +6,7 @@ import 'presentation/theme/mixtape_theme.dart';
 import 'presentation/screens/choose_service_screen.dart';
 import 'presentation/screens/debug/foundation_gallery_screen.dart';
 import 'presentation/screens/sign_in_screen.dart';
+import 'presentation/widgets/foundation/gradient_background.dart';
 
 /// Run with `flutter run --dart-define=MIXTAPE_GALLERY=true` to open the
 /// debug-only foundation gallery instead of the app.
@@ -28,6 +29,9 @@ class MixtapeApp extends ConsumerWidget {
       title: 'mixtape',
       theme: MixtapeTheme.light(),
       darkTheme: MixtapeTheme.dark(),
+      // Scaffolds are transparent by theme; the gradient paints behind every
+      // route (sign-in and onboarding included), not only inside the shell.
+      builder: (context, child) => GradientBackground(child: child!),
       home: showFoundationGallery && kDebugMode
           ? const FoundationGalleryScreen()
           : switch (auth) {

@@ -9,6 +9,7 @@ import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show SystemUiOverlayStyle;
 
 /// One radial tint in the background gradient.
 ///
@@ -682,6 +683,10 @@ abstract final class MixtapeTheme {
         centerTitle: true,
         foregroundColor: t.text,
         titleTextStyle: t.smallTitle,
+        // Status bar glyphs follow the theme, not the (transparent) app bar.
+        systemOverlayStyle: brightness == Brightness.dark
+            ? SystemUiOverlayStyle.light
+            : SystemUiOverlayStyle.dark,
       ),
       cardTheme: const CardThemeData(
         surfaceTintColor: Colors.transparent,

@@ -30,7 +30,9 @@ class ShellDock: NSObject {
   /// A route inside a mix has hidden the dock. `setMiniPlayer` then records
   /// what is playing without putting the pill back on screen; `show()`
   /// applies whatever arrived while the dock was away.
-  private var isRouteHidden = false
+  /// Starts hidden: nothing is shown until the Flutter shell mounts and
+  /// calls `show()`, so sign-in and onboarding never see the dock.
+  private var isRouteHidden = true
 
   /// What Flutter last asked the mini-player to be, regardless of whether the
   /// route currently allows it on screen.
@@ -141,6 +143,8 @@ class ShellDock: NSObject {
 
     miniPlayer.isHidden = true
     miniPlayer.alpha = 0
+    tabBar.isHidden = true
+    tabBar.alpha = 0
     miniPlayer.onTapped = { [weak self] in
       self?.channel.invokeMethod("miniPlayerTapped", arguments: nil)
     }
