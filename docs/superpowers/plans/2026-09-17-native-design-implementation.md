@@ -1,8 +1,8 @@
 # Native design implementation — 2026-09-17
 
 Status: reviewed by the founder on 2026-09-17; answers folded in below. Phase 0 landed
-(`native-design-baseline`). Phase 1 landed in seven commits (c6189df…41c9883) and awaits
-the founder's gallery review: `cd client && flutter run --dart-define=MIXTAPE_GALLERY=true
+(`native-design-baseline`). Phase 1 landed in seven commits (c6189df…41c9883) ; the founder approved the gallery gate
+on 2026-09-17 ("continue phase 2"). Gallery: `cd client && flutter run --dart-define=MIXTAPE_GALLERY=true
 --dart-define-from-file=config/google-ios.json`.
 
 ## Goal
