@@ -92,3 +92,10 @@ under `client/lib/presentation/widgets/`.
 
 Earlier records are not rewritten. Individual screen boards follow in the
 order listed in revision 1 of the shape board.
+
+## Implementation departures
+
+- 2026-09-17, task 1.1: light `smoke` #6F686F → #696269 and light `muted`
+  #8A838B → #857E86 so secondary text keeps 4.5:1 and meta text 3:1 against
+  the bottom of the light gradient (#E6E0EA). The board's values fell to 4.17:1
+  and 2.84:1 there. Dark values unchanged.

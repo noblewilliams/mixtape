@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'presentation/providers/auth_provider.dart';
+import 'presentation/theme/mixtape_theme.dart';
 import 'presentation/screens/choose_service_screen.dart';
 import 'presentation/screens/sign_in_screen.dart';
 
@@ -11,8 +12,6 @@ void main() {
 class MixtapeApp extends ConsumerWidget {
   const MixtapeApp({super.key});
 
-  static const _brandPlum = Color(0xFF544451);
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final auth = ref.watch(authProvider);
@@ -21,12 +20,8 @@ class MixtapeApp extends ConsumerWidget {
       // sign-in. Give every auth state its own navigator history.
       key: ValueKey(auth),
       title: 'mixtape',
-      theme: ThemeData(colorSchemeSeed: _brandPlum, useMaterial3: true),
-      darkTheme: ThemeData(
-        colorSchemeSeed: _brandPlum,
-        useMaterial3: true,
-        brightness: Brightness.dark,
-      ),
+      theme: MixtapeTheme.light(),
+      darkTheme: MixtapeTheme.dark(),
       home: switch (auth) {
         AuthStatus.unknown => const Scaffold(
           body: Center(child: CircularProgressIndicator()),
