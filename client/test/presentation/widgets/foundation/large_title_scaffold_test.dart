@@ -32,6 +32,7 @@ Future<ScrollController> _pumpScaffold(
   Size size = const Size(390, 844),
   double textScale = 1,
   double topInset = 0,
+  String title = _title,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -51,7 +52,7 @@ Future<ScrollController> _pumpScaffold(
           padding: EdgeInsets.only(top: topInset),
         ),
         child: LargeTitleScaffold(
-          title: _title,
+          title: title,
           controller: controller,
           trailing: trailing,
           titleAccessory: titleAccessory,
@@ -276,13 +277,15 @@ void main() {
       expect(refresh, findsOneWidget);
     });
 
-    testWidgets('wraps the title at 200% text on a 320 pt screen', (
-      tester,
-    ) async {
-      await _pumpScaffold(
+    testWidgets('never breaks the title mid-word at 200% text', (tester) async {
+      const long = 'Foundation';
+      const contentWidth = 320 - 2 * MixtapeMetrics.screenSidePadding;
+
+      final controller = await _pumpScaffold(
         tester,
         size: const Size(320, 700),
         textScale: 2,
+        title: long,
         trailing: GlassCluster(
           children: [
             GlassButton(
@@ -295,13 +298,25 @@ void main() {
       );
 
       expect(tester.takeException(), isNull);
-      // Two lines of 34 pt at 200%: taller than one scaled line, not clipped.
-      final title = tester.getSize(find.text(_title));
+
+      // The cluster has moved to its own row, so the title lays out across the
+      // full content width instead of breaking between characters.
+      final title = find.text(long);
+      expect(tester.getSize(title).width, contentWidth);
       expect(
-        title.height,
-        greaterThan(MixtapeTokens.light.largeTitle.fontSize! * 2),
+        tester.getTopLeft(find.byType(GlassCluster)).dy,
+        lessThan(tester.getTopLeft(title).dy),
       );
       expect(tester.getSize(find.byType(LargeTitleScaffold)).width, 320);
+
+      // The taller block pushes the threshold down; collapse still works.
+      controller.jumpTo(400);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(
+        find.descendant(of: _smallBar, matching: find.text(long)),
+        findsOneWidget,
+      );
     });
 
     testWidgets('collapses at the same offset under a 54 pt safe area', (

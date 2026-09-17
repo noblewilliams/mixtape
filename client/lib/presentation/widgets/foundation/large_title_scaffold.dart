@@ -66,6 +66,9 @@ class LargeTitleScaffold extends StatefulWidget {
   /// The gap between the title and the trailing cluster or accessory.
   static const double titleGap = 10;
 
+  /// At or above this text scale the accessories take a row of their own.
+  static const double stackAccessoriesScale = 1.5;
+
   static const Duration fadeDuration = Duration(milliseconds: 180);
 
   /// The blur bands down the bar, top to bottom. A `BackdropFilter` inside a
@@ -234,6 +237,63 @@ class _LargeTitleScaffoldState extends State<LargeTitleScaffold>
     final tokens = context.tokens;
     final accessory = widget.titleAccessory;
     final trailing = widget.trailing;
+    // At large text sizes the cluster leaves too little width beside the
+    // title, and a long word breaks mid-word; give it a row of its own.
+    final stacked =
+        MediaQuery.textScalerOf(context).scale(1) >=
+        LargeTitleScaffold.stackAccessoriesScale;
+
+    final title = Semantics(
+      header: true,
+      child: Text(
+        widget.title,
+        style: tokens.largeTitle,
+        softWrap: true,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+      ),
+    );
+
+    final accessories = <Widget>[
+      if (accessory != null) accessory,
+      if (trailing != null) trailing,
+    ];
+
+    final Widget block = stacked
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (accessories.isNotEmpty) ...[
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    for (var i = 0; i < accessories.length; i++) ...[
+                      if (i > 0)
+                        const SizedBox(width: LargeTitleScaffold.titleGap),
+                      accessories[i],
+                    ],
+                  ],
+                ),
+                const SizedBox(height: LargeTitleScaffold.titleBottomGap),
+              ],
+              title,
+            ],
+          )
+        : ConstrainedBox(
+            constraints: const BoxConstraints(
+              minHeight: LargeTitleScaffold.titleRowHeight,
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(child: title),
+                for (final widget in accessories) ...[
+                  const SizedBox(width: LargeTitleScaffold.titleGap),
+                  widget,
+                ],
+              ],
+            ),
+          );
 
     return Padding(
       // The title keeps the body's side padding, so both stay on one margin.
@@ -243,31 +303,9 @@ class _LargeTitleScaffoldState extends State<LargeTitleScaffold>
         side.right,
         LargeTitleScaffold.titleBottomGap,
       ),
-      child: ConstrainedBox(
-        key: _titleRowKey,
-        constraints: const BoxConstraints(
-          minHeight: LargeTitleScaffold.titleRowHeight,
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Expanded(
-              child: Semantics(
-                header: true,
-                child: Text(widget.title, style: tokens.largeTitle),
-              ),
-            ),
-            if (accessory != null) ...[
-              const SizedBox(width: LargeTitleScaffold.titleGap),
-              accessory,
-            ],
-            if (trailing != null) ...[
-              const SizedBox(width: LargeTitleScaffold.titleGap),
-              trailing,
-            ],
-          ],
-        ),
-      ),
+      // Measured for the collapse threshold: with the accessories stacked the
+      // block is taller, so the title collapses later.
+      child: KeyedSubtree(key: _titleRowKey, child: block),
     );
   }
 
