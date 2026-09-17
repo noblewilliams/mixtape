@@ -22,7 +22,7 @@ import {
   type AppleIsrcCatalogClient,
   type FetchLike,
 } from './musickit/catalog'
-import type { MusicKitWiring } from './app'
+import type { MusicKitWiring, TranscribeWiring } from './app'
 import type { ArtworkDeps } from './artwork/runner'
 import { createSpotifyOEmbedArtworkClient } from './artwork/spotify-oembed'
 import { createDeezerArtworkClient } from './artwork/deezer'
@@ -52,6 +52,7 @@ type Bindings = {
   ITUNES_STOREFRONT?: string
   AI?: { run(model: string, input: { text: string[] }): Promise<unknown> }
   ANTHROPIC_API_KEY?: string
+  GROQ_API_KEY?: string
 }
 
 // This cache holds signed server tokens only. The key is the non-secret Apple
@@ -153,6 +154,14 @@ export function buildMusicKit(
   }
 }
 
+// Checked explicitly (Workers has no NODE_ENV, so a missing key would otherwise
+// just mean a mic that silently never transcribes) but scoped to this route:
+// absent, POST /transcribe answers 503 and the rest of the API is untouched.
+export function buildTranscribe(env: { GROQ_API_KEY?: string }): TranscribeWiring {
+  if (!env.GROQ_API_KEY) console.error('GROQ_API_KEY is missing — POST /transcribe will answer 503')
+  return { apiKey: env.GROQ_API_KEY || undefined }
+}
+
 function buildArtworkDeps(
   env: Pick<Bindings, 'ITUNES_STOREFRONT'>,
   musicKit: (MusicKitWiring & { catalog: AppleCatalogClient }) | undefined,
@@ -200,7 +209,8 @@ export default {
       const enrich = env.ENRICH_ADMIN_TOKEN && (deps || artwork)
         ? { adminToken: env.ENRICH_ADMIN_TOKEN, deps, artwork }
         : undefined
-      const app = createApp({ auth, db, enrich, dj, playlistEditing, musicKit, allowedOrigins })
+      const transcribe = buildTranscribe(env)
+      const app = createApp({ auth, db, enrich, dj, playlistEditing, musicKit, transcribe, allowedOrigins })
       return await app.fetch(req, env, ctx)
     } finally {
       // Closes the pool's socket(s) after the response is built rather than

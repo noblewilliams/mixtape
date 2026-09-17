@@ -21,6 +21,8 @@ import { seedTracksRoutes, type SeedsWiring } from './routes/seed-tracks'
 import { interviewRoutes } from './routes/interview'
 import { funnelEventsRoutes } from './routes/funnel-events'
 import { musicKitRoutes } from './routes/musickit'
+import { transcribeRoutes } from './routes/transcribe'
+import type { FetchLike } from './musickit/catalog'
 import type { Db } from './db/types'
 import type { EnrichDeps } from './enrich/pipeline'
 import type { ArtworkDeps } from './artwork/runner'
@@ -41,6 +43,9 @@ export type EnrichWiring = { deps?: EnrichDeps; artwork?: ArtworkDeps; adminToke
 export type { SeedsWiring }
 export type DjWiring = { deps: DjDeps }
 export type PlaylistEditingWiring = { deps: PlaylistEditDjDeps }
+// Injectable fetch so tests can stub Groq; production leaves it unset and the
+// route uses the platform fetch.
+export type TranscribeWiring = { apiKey?: string; fetchLike?: FetchLike }
 export type MusicKitWiring = {
   allowedOrigins: string[]
   issueDeveloperToken: (origin: string) => Promise<{ developerToken: string; expiresAt: number }>
@@ -54,6 +59,7 @@ export function createApp({
   playlistEditing,
   musicKit,
   seeds,
+  transcribe,
   allowedOrigins = [],
 }: {
   auth: AuthLike
@@ -63,6 +69,7 @@ export function createApp({
   playlistEditing?: PlaylistEditingWiring
   musicKit?: MusicKitWiring
   seeds?: SeedsWiring
+  transcribe?: TranscribeWiring
   allowedOrigins?: string[]
 }) {
   const app = new Hono<{ Variables: AppVars }>()
@@ -101,12 +108,20 @@ export function createApp({
   //   /api/auth/* [P1]  /me [P1]  /ingest/* [P1]  /enrich/* [P2 live]  /sessions/* [P3 live]
   //   /me/memories/* [P4 live]  /me/music-sources  /me/onboarding [listening import]
   //   /me/artist-seeds  /me/seed-tracks/*  /me/interview  /me/funnel-events [taste seeds]
+  //   /transcribe [voice capture]
   app.all('/api/auth/*', (c) => auth.handler(c.req.raw))
   app.get('/me', requireSession(auth), (c) => c.json({ user: c.get('user') }))
 
   if (musicKit) {
     app.use('/musickit/*', requireSession(auth))
     app.route('/musickit', musicKitRoutes(musicKit))
+  }
+
+  // Voice capture is stateless — no db, only the Groq key — so it mounts
+  // outside the db block, next to /musickit.
+  if (transcribe) {
+    app.use('/transcribe', requireSession(auth))
+    app.route('/transcribe', transcribeRoutes(transcribe))
   }
 
   if (db) {

@@ -30,6 +30,7 @@
   //   MUSICKIT_PRIVATE_KEY    — Apple Music .p8 key; never reuse or commit the downloaded key file
   // ENRICH_ADMIN_TOKEN        — admin guard for /enrich/*; unset disables the route group entirely
   //   ANTHROPIC_API_KEY       — DJ engine (Sonnet 5 agent loop); unset disables /sessions/* entirely
+  //   GROQ_API_KEY            — Groq Whisper key for POST /transcribe (voice capture); unset makes that one route answer 503, rest of the API unaffected
   // Optional var (not secret):
   //   ITUNES_STOREFRONT       — iTunes storefront code for enrichment lookups (default "ng")
   // MusicKit keys also enable the server-only Apple catalog client used by artwork enrichment.
