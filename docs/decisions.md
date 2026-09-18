@@ -524,3 +524,6 @@ Reopens if Google changes which client id native iOS tokens carry, if a second
 native platform (Android) needs a third audience — at which point a list built
 from a single comma-separated var beats one var per platform — or if Better Auth
 stops treating array index 0 as the primary client id.
+
+## 2026-09-18 — Maintenance cron runs hourly, not every 5 minutes
+The Neon free plan gives 100 compute-hours a month and suspends the compute after 5 idle minutes. A cron every 5 minutes woke it on every run, so it never slept: 0.25 CU around the clock, ~108 CU-hours in 18 days, and the console showed "Limit reached" on 2026-09-18. The cron is now `0 * * * *` (`server/wrangler.jsonc`), so the compute is awake about 6 minutes an hour (~15 CU-hours a month). Batch sizes are unchanged: 3 enrichments, 300 artwork, the cleanups, once an hour, which is plenty for the current two accounts. `POST /enrich/run` still covers backfill on demand. This amends the 2026-08-29 cron decision. **Reopens if:** sign-ups make an hourly batch of 3 fall behind (then raise `CRON_BATCH` before shortening the cadence), or the project moves to a paid Neon plan.
