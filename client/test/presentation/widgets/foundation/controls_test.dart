@@ -276,6 +276,7 @@ void main() {
             controller: controller,
             busy: false,
             onSubmit: () {},
+            showVoiceInput: false,
           ),
         ),
       ),

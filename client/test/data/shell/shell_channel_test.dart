@@ -83,6 +83,7 @@ void main() {
         'artist': 'Khruangbin',
         'artworkUrl': 'https://art.example/1.jpg',
         'playing': true,
+        'unavailable': false,
       });
     });
 
@@ -95,6 +96,7 @@ void main() {
         'artist': '',
         'artworkUrl': null,
         'playing': false,
+        'unavailable': false,
       });
       expect(hidden, const MiniPlayerState(visible: false));
       expect(

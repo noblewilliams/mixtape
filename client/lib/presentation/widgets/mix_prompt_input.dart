@@ -170,6 +170,7 @@ class _MixPromptInputState extends State<MixPromptInput>
     // hold state that could still be listening behind it.
     var next = widget.showVoiceInput ? widget.voiceController : null;
     if (next == null && widget.showVoiceInput) {
+      if (_voiceFromScope && _voice != null) return;
       ProviderContainer? container;
       try {
         container = ProviderScope.containerOf(context, listen: false);
@@ -178,11 +179,36 @@ class _MixPromptInputState extends State<MixPromptInput>
         // provider that itself fails is not caught here.
         container = null;
       }
-      next = container?.read(voiceComposerControllerProvider);
+      if (container != null) {
+        // Reading the provider can create it, and a provider created while
+        // the framework is still building marks the scope dirty mid-build.
+        // Bind a frame later instead; the mic is inert for that one frame.
+        final scope = container;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted ||
+              !widget.showVoiceInput ||
+              widget.voiceController != null) {
+            return;
+          }
+          _attachVoice(
+            scope.read(voiceComposerControllerProvider),
+            fromScope: true,
+          );
+          if (mounted) setState(() {});
+        });
+      }
+      return;
     }
+    _attachVoice(next, fromScope: false);
+  }
+
+  bool _voiceFromScope = false;
+
+  void _attachVoice(VoiceComposerController? next, {required bool fromScope}) {
     if (next == _voice) return;
     _voice?.removeListener(_changed);
     _voice = next;
+    _voiceFromScope = fromScope && next != null;
     _voice?.addListener(_changed);
   }
 
