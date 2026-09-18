@@ -170,14 +170,9 @@ void main() {
     await _pump(tester, _CancellingGateway(), google: _GoogleGateway());
 
     expect(find.text('mixtape'), findsOneWidget);
-    expect(find.text('Your music, mixed for right\u00a0now.'), findsOneWidget);
-    expect(
-      find.text(
-        'Start with a mood, a memory, or one song. Mixtape builds a mix '
-        'from music you already love.',
-      ),
-      findsOneWidget,
-    );
+    // No headline or blurb: the tape and the buttons carry the screen.
+    expect(find.textContaining('Your music'), findsNothing);
+    expect(find.textContaining('Start with a mood'), findsNothing);
     expect(find.text('Continue with Apple'), findsOneWidget);
     expect(find.text('Continue with Google'), findsOneWidget);
     expect(find.text('Music access is requested separately.'), findsOneWidget);
@@ -246,10 +241,9 @@ void main() {
     expect(wordmark.style?.fontFamily, 'Noteworthy');
     expect(wordmark.style?.fontStyle, FontStyle.italic);
 
-    // The headline and the promise stay SF: the founder limited handwriting
+    // The buttons and the foot note stay SF: the founder limited handwriting
     // to the name (and the "last used" pencil note).
     for (final sf in [
-      find.text('Your music, mixed for right\u00a0now.'),
       find.text('Continue with Apple'),
       find.text('Music access is requested separately.'),
     ]) {

@@ -4,7 +4,7 @@
 ///
 /// Since 2026-09-18 this mirrors the web welcome page (`web/src/components/
 /// AuthGate.tsx`): the handwritten wordmark, a cassette with its hubs turning
-/// for as long as the screen is open, the web's promise, and two full-width
+/// for as long as the screen is open, sitting on two full-width
 /// pill buttons — the remembered method marked with a pencil note, one
 /// reserved line for waiting or failure, and the Apple Music note at the foot.
 library;
@@ -113,17 +113,25 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         _wordmark(tokens),
-                        _cassette(
-                          _tapeWidth(
-                            body: context,
-                            tokens: tokens,
-                            constraints: constraints,
-                            width: width,
-                            googleAvailable: googleAvailable,
-                            lastUsed: lastUsed,
-                          ),
+                        // The tape sits right on the buttons: one group,
+                        // centred between the wordmark and the foot note.
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _cassette(
+                              _tapeWidth(
+                                body: context,
+                                tokens: tokens,
+                                constraints: constraints,
+                                width: width,
+                                googleAvailable: googleAvailable,
+                                lastUsed: lastUsed,
+                              ),
+                            ),
+                            _promise(tokens, dark, googleAvailable, lastUsed),
+                          ],
                         ),
-                        _promise(tokens, dark, googleAvailable, lastUsed),
                         Text(
                           _footNote,
                           textAlign: TextAlign.center,
@@ -210,8 +218,6 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
     }
 
     var total = text('mixtape', tokens.wordmark, width);
-    total += text(_headline, _headlineStyle(tokens), width) + 12;
-    total += text(_blurb, _blurbStyle(tokens), width) + 28;
 
     // The pill's floor, or its label plus the padding it sits in.
     final labelStyle = ProviderSignInButton.labelStyle(tokens);
@@ -293,10 +299,6 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     mainAxisSize: MainAxisSize.min,
     children: [
-      Text(_headline, style: _headlineStyle(tokens)),
-      const SizedBox(height: 12),
-      Text(_blurb, style: _blurbStyle(tokens)),
-      const SizedBox(height: 28),
       for (final provider in AccountProvider.values) ...[
         _providerButton(provider, dark, googleAvailable),
         if (lastUsed == provider) _lastUsed(tokens),
@@ -426,21 +428,6 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
         letterSpacing: _lastUsedSize * -0.025,
         color: tokens.smoke,
       );
-
-  // A non-breaking space keeps "right now." on one line instead of an orphan.
-  static const String _headline = 'Your music, mixed for right\u00a0now.';
-
-  /// The founder's 2026-09-18 sizing: a quieter headline than the shell's
-  /// large title, and a 12 pt blurb under it.
-  static TextStyle _headlineStyle(MixtapeTokens tokens) => tokens.largeTitle
-      .copyWith(fontSize: 26, fontWeight: FontWeight.w500, letterSpacing: -0.4);
-
-  static TextStyle _blurbStyle(MixtapeTokens tokens) =>
-      tokens.body.copyWith(fontSize: 12, color: tokens.muted);
-
-  static const String _blurb =
-      'Start with a mood, a memory, or one song. Mixtape builds a mix '
-      'from music you already love.';
 
   static const String _footNote = 'Music access is requested separately.';
 
