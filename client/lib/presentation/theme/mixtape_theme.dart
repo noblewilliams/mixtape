@@ -117,6 +117,7 @@ class MixtapeTokens extends ThemeExtension<MixtapeTokens> {
     required this.secondary,
     required this.meta,
     required this.label,
+    required this.wordmark,
   });
 
   // Ink.
@@ -176,6 +177,15 @@ class MixtapeTokens extends ThemeExtension<MixtapeTokens> {
   final TextStyle meta;
   final TextStyle label;
 
+  /// The product name in the web welcome page's handwritten marker.
+  ///
+  /// The one departure from SF, and only for the wordmark and the "last used"
+  /// pencil note under the remembered sign-in method
+  /// (`docs/decisions.md` → 2026-09-18). Noteworthy is an Apple system face,
+  /// so no font asset ships; it is deliberately absent from [textStyles],
+  /// which is the SF-only scale.
+  final TextStyle wordmark;
+
   /// Every exposed style, for scale assertions and gallery screens.
   List<TextStyle> get textStyles => [
     largeTitle,
@@ -200,12 +210,8 @@ class MixtapeTokens extends ThemeExtension<MixtapeTokens> {
   LinearGradient prismGradient({
     Alignment begin = Alignment.topLeft,
     Alignment end = Alignment.bottomRight,
-  }) => LinearGradient(
-    begin: begin,
-    end: end,
-    colors: prism,
-    stops: prismStops,
-  );
+  }) =>
+      LinearGradient(begin: begin, end: end, colors: prism, stops: prismStops);
 
   /// The board's uneven prism spacing.
   static const List<double> prismStops = [0, 0.22, 0.42, 0.62, 0.82, 1];
@@ -225,6 +231,36 @@ class MixtapeTokens extends ThemeExtension<MixtapeTokens> {
     Color(0xFF688FA8),
     Color(0xFF6E5C8F),
   ];
+
+  /// The web's `.auth-wordmark`: `italic 500 28px var(--marker)` at
+  /// `letter-spacing: -0.045em`, scaled to 34 pt for the phone.
+  ///
+  /// Noteworthy ships Light and Bold faces only, so the browser's weight 500
+  /// resolves to Light — [FontWeight.w300] is what the web actually draws.
+  /// Nothing is bundled: Noteworthy is an Apple system font, and the fallbacks
+  /// carry the other platforms.
+  static const TextStyle _lightWordmark = TextStyle(
+    fontFamily: 'Noteworthy',
+    fontFamilyFallback: ['Bradley Hand', 'cursive'],
+    fontSize: 34,
+    fontWeight: FontWeight.w300,
+    fontStyle: FontStyle.italic,
+    letterSpacing: -1.53,
+    height: 1.2,
+    color: Color(0xFF42515E),
+  );
+
+  /// The same hand, in a slate light enough for the dark gradient.
+  static const TextStyle _darkWordmark = TextStyle(
+    fontFamily: 'Noteworthy',
+    fontFamilyFallback: ['Bradley Hand', 'cursive'],
+    fontSize: 34,
+    fontWeight: FontWeight.w300,
+    fontStyle: FontStyle.italic,
+    letterSpacing: -1.53,
+    height: 1.2,
+    color: Color(0xFFD5DFE7),
+  );
 
   static const Color _lightText = Color(0xFF1C1A1E);
   static const Color _lightSmoke = Color(0xFF696269);
@@ -322,6 +358,7 @@ class MixtapeTokens extends ThemeExtension<MixtapeTokens> {
       fontWeight: FontWeight.w600,
       color: _lightText,
     ),
+    wordmark: _lightWordmark,
   );
 
   static const MixtapeTokens dark = MixtapeTokens(
@@ -412,6 +449,7 @@ class MixtapeTokens extends ThemeExtension<MixtapeTokens> {
       fontWeight: FontWeight.w600,
       color: _darkText,
     ),
+    wordmark: _darkWordmark,
   );
 
   @override
@@ -449,6 +487,7 @@ class MixtapeTokens extends ThemeExtension<MixtapeTokens> {
     TextStyle? secondary,
     TextStyle? meta,
     TextStyle? label,
+    TextStyle? wordmark,
   }) => MixtapeTokens(
     text: text ?? this.text,
     plum: plum ?? this.plum,
@@ -483,6 +522,7 @@ class MixtapeTokens extends ThemeExtension<MixtapeTokens> {
     secondary: secondary ?? this.secondary,
     meta: meta ?? this.meta,
     label: label ?? this.label,
+    wordmark: wordmark ?? this.wordmark,
   );
 
   @override
@@ -525,6 +565,7 @@ class MixtapeTokens extends ThemeExtension<MixtapeTokens> {
       secondary: TextStyle.lerp(secondary, other.secondary, t)!,
       meta: TextStyle.lerp(meta, other.meta, t)!,
       label: TextStyle.lerp(label, other.label, t)!,
+      wordmark: TextStyle.lerp(wordmark, other.wordmark, t)!,
     );
   }
 
@@ -563,7 +604,8 @@ class MixtapeTokens extends ThemeExtension<MixtapeTokens> {
       other.body == body &&
       other.secondary == secondary &&
       other.meta == meta &&
-      other.label == label;
+      other.label == label &&
+      other.wordmark == wordmark;
 
   @override
   int get hashCode => Object.hashAll([
@@ -600,6 +642,7 @@ class MixtapeTokens extends ThemeExtension<MixtapeTokens> {
     secondary,
     meta,
     label,
+    wordmark,
   ]);
 }
 

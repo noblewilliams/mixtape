@@ -123,6 +123,21 @@ void _expectSyncedThreeSongs(WidgetTester tester) {
 }
 
 void main() {
+  // Sign-in's cassette turns for as long as the screen is on show, so a
+  // settle would never finish; reduced motion holds its hubs still.
+  setUp(
+    () =>
+        TestWidgetsFlutterBinding.ensureInitialized()
+            .platformDispatcher
+            .accessibilityFeaturesTestValue = const FakeAccessibilityFeatures(
+          disableAnimations: true,
+        ),
+  );
+  tearDown(
+    () => TestWidgetsFlutterBinding.ensureInitialized().platformDispatcher
+        .clearAccessibilityFeaturesTestValue(),
+  );
+
   testWidgets('shows sign-in when signed out', (tester) async {
     await tester.pumpWidget(
       ProviderScope(

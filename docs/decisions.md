@@ -483,3 +483,18 @@ recorded under each approval record's "Implementation departures". The per-phase
 founder gates were replaced by the per-task review loop at the founder's request
 (2026-09-17); one full smoke follows. Not deployed: the server insert op and
 transcription route (needs `GROQ_API_KEY`), and no TestFlight build yet.
+
+## 2026-09-18 — Handwritten type is allowed for the wordmark only
+
+Native type stays SF with two exceptions, both carried over from the web welcome
+page: the product name (`MixtapeTokens.wordmark` — system Noteworthy, italic,
+weight 300 because Noteworthy ships Light and Bold only and the browser's weight
+500 resolves to Light) and the "last used" pencil note under the remembered
+sign-in method, which is the same face at 13 pt. Nothing else — headlines, body,
+buttons, meta — may use it, and `MixtapeTokens.textStyles` stays the SF-only
+scale that the theme tests assert. No font asset ships: Noteworthy is an Apple
+system font, with "Bradley Hand" and `cursive` as fallbacks elsewhere. Rationale:
+the founder asked for the web welcome's character on the phone, where the
+previous sign-in screen read as "too boring"; limiting the hand to the name and
+one pencil note keeps the shell's SF discipline intact. Evidence:
+`mockups/approved/2026-09-17-mobile-shell.md` → Implementation departures.

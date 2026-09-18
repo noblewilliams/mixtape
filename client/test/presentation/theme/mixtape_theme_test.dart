@@ -149,10 +149,7 @@ void main() {
             scheme.onSecondaryContainer,
             scheme.secondaryContainer,
           ),
-          'onErrorContainer': (
-            scheme.onErrorContainer,
-            scheme.errorContainer,
-          ),
+          'onErrorContainer': (scheme.onErrorContainer, scheme.errorContainer),
         };
         pairs.forEach((label, pair) {
           expect(
@@ -192,6 +189,45 @@ void main() {
       expect(MixtapeTokens.light.secondary.color, MixtapeTokens.light.smoke);
       expect(MixtapeTokens.light.meta.color, MixtapeTokens.light.muted);
       expect(MixtapeTokens.light.body.color, MixtapeTokens.light.text);
+    });
+  });
+
+  group('wordmark', () {
+    test("is the web welcome page's handwritten marker", () {
+      for (final tokens in [MixtapeTokens.light, MixtapeTokens.dark]) {
+        expect(tokens.wordmark.fontFamily, 'Noteworthy');
+        expect(tokens.wordmark.fontFamilyFallback, contains('Bradley Hand'));
+        // Noteworthy ships Light and Bold only; the web's weight 500 resolves
+        // to Light, so w300 is what the browser actually draws.
+        expect(tokens.wordmark.fontWeight, FontWeight.w300);
+        expect(tokens.wordmark.fontStyle, FontStyle.italic);
+        expect(tokens.wordmark.fontSize, 34);
+      }
+      expect(MixtapeTokens.light.wordmark.color, const Color(0xFF42515E));
+      expect(
+        MixtapeTokens.dark.wordmark.color,
+        isNot(MixtapeTokens.light.wordmark.color),
+      );
+    });
+
+    test('stays out of the SF-only scale', () {
+      // `textStyles` is asserted to be system-font-only above; handwriting is
+      // allowed for the wordmark and the "last used" pencil note alone.
+      for (final tokens in [MixtapeTokens.light, MixtapeTokens.dark]) {
+        expect(tokens.textStyles, isNot(contains(tokens.wordmark)));
+      }
+    });
+
+    test('survives copyWith and lerp', () {
+      final swapped = MixtapeTokens.light.copyWith(
+        wordmark: MixtapeTokens.dark.wordmark,
+      );
+      expect(swapped.wordmark, MixtapeTokens.dark.wordmark);
+      expect(swapped.text, MixtapeTokens.light.text);
+
+      final mid = MixtapeTokens.light.lerp(MixtapeTokens.dark, 0.5);
+      expect(mid.wordmark.fontFamily, 'Noteworthy');
+      expect(mid.wordmark.fontSize, 34);
     });
   });
 
@@ -257,7 +293,10 @@ void main() {
         const Color.fromRGBO(30, 24, 30, 0.16),
       );
       expect(MixtapeTokens.light.scrimBase, const Color(0xFFF8F6F3));
-      expect(MixtapeTokens.dark.glassShadow, const Color.fromRGBO(0, 0, 0, 0.5));
+      expect(
+        MixtapeTokens.dark.glassShadow,
+        const Color.fromRGBO(0, 0, 0, 0.5),
+      );
       expect(MixtapeTokens.dark.scrimBase, const Color(0xFF08080C));
     });
   });

@@ -12,6 +12,21 @@ class ControlledAuth extends AuthNotifier {
 }
 
 void main() {
+  // Sign-in's cassette turns for as long as the screen is on show, so a
+  // settle would never finish; reduced motion holds its hubs still.
+  setUp(
+    () =>
+        TestWidgetsFlutterBinding.ensureInitialized()
+            .platformDispatcher
+            .accessibilityFeaturesTestValue = const FakeAccessibilityFeatures(
+          disableAnimations: true,
+        ),
+  );
+  tearDown(
+    () => TestWidgetsFlutterBinding.ensureInitialized().platformDispatcher
+        .clearAccessibilityFeaturesTestValue(),
+  );
+
   testWidgets('auth transition clears pushed protected routes and dialogs', (tester) async {
     final auth = ControlledAuth();
     await tester.pumpWidget(ProviderScope(

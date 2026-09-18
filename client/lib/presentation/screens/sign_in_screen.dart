@@ -2,9 +2,11 @@
 /// Google as equal logins; shell board `docs/mockups/approved/
 /// 2026-09-17-mobile-shell.md` for the type, gradient and tape controls).
 ///
-/// Two providers, side by side and equal: the wordmark, the promise, a
-/// full-width tape button each, the remembered method marked, one reserved
-/// line for waiting or failure, and the Apple Music note at the foot.
+/// Since 2026-09-18 this mirrors the web welcome page (`web/src/components/
+/// AuthGate.tsx`): the handwritten wordmark, a cassette with its hubs turning
+/// for as long as the screen is open, the web's promise, and two full-width
+/// pill buttons — the remembered method marked with a pencil note, one
+/// reserved line for waiting or failure, and the Apple Music note at the foot.
 library;
 
 import 'dart:math' as math;
@@ -17,7 +19,7 @@ import '../../data/auth/auth_repository.dart';
 import '../../data/auth/google_auth_gateway.dart';
 import '../providers/auth_provider.dart';
 import '../theme/mixtape_theme.dart';
-import '../widgets/foundation/gradient_background.dart';
+import '../widgets/foundation/cassette_tile.dart';
 
 class SignInScreen extends ConsumerStatefulWidget {
   const SignInScreen({super.key});
@@ -72,42 +74,46 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
+    final dark = Theme.of(context).brightness == Brightness.dark;
     final googleAvailable = ref.watch(googleAuthGatewayProvider).isAvailable;
     final lastUsed = ref.watch(lastSignInProvider).value;
 
-    return GradientBackground(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        body: SafeArea(
-          // Centre caps the width against the bounded screen height, so the
-          // scroll view below still knows how tall a screenful is.
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: LayoutBuilder(
-                builder: (context, constraints) => SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: MixtapeMetrics.screenSidePadding,
-                    vertical: 24,
+    // The gradient is painted app-wide by MaterialApp's builder.
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: SafeArea(
+        // Centre caps the width against the bounded screen height, so the
+        // scroll view below still knows how tall a screenful is.
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: LayoutBuilder(
+              builder: (context, constraints) => SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: MixtapeMetrics.screenSidePadding,
+                  vertical: 24,
+                ),
+                // A screenful tall, so the Apple Music note sits at the
+                // foot; taller content (200% text) scrolls instead.
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: math.max(0, constraints.maxHeight - 48),
                   ),
-                  // A screenful tall, so the Apple Music note sits at the
-                  // foot; taller content (200% text) scrolls instead.
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      minHeight: math.max(0, constraints.maxHeight - 48),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text('mixtape', style: tokens.smallTitle),
-                        _promise(tokens, googleAvailable, lastUsed),
-                        Text(
-                          'Apple Music access is requested separately.',
-                          style: tokens.meta.copyWith(color: tokens.muted),
-                        ),
-                      ],
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _wordmark(tokens),
+                      _cassette(
+                        constraints.maxWidth -
+                            MixtapeMetrics.screenSidePadding * 2,
+                      ),
+                      _promise(tokens, dark, googleAvailable, lastUsed),
+                      Text(
+                        'Apple Music access is requested separately.',
+                        style: tokens.meta.copyWith(color: tokens.muted),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -118,58 +124,125 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
     );
   }
 
+  /// The product name in the web's marker hand, tilted off the baseline.
+  Widget _wordmark(MixtapeTokens tokens) => Align(
+    alignment: Alignment.centerLeft,
+    child: Transform.rotate(
+      angle: -_wordmarkTilt,
+      alignment: Alignment.centerLeft,
+      child: Text('mixtape', style: tokens.wordmark),
+    ),
+  );
+
+  /// The web's `.auth-cassette`: turning, tilted 4°, on a soft drop shadow.
+  ///
+  /// [available] is the content width; the tilt widens the painted box, so the
+  /// tape is sized to keep its corners inside the scroll view's clip.
+  Widget _cassette(double available) {
+    final width = math.max(0.0, math.min(_cassetteWidth, available / 1.05));
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 24),
+      child: Center(
+        child: Transform.rotate(
+          angle: _cassetteTilt,
+          child: DecoratedBox(
+            // The case's rx 9 in the 200 × 128 viewBox, scaled to the width.
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(width * 9 / 200),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color.fromRGBO(47, 42, 48, 0.16),
+                  offset: Offset(0, 15),
+                  blurRadius: 20,
+                ),
+              ],
+            ),
+            child: CassetteTile(
+              width: width,
+              // The web's default case, `#3f4851`.
+              caseColor: CassetteTile.caseColors.first,
+              // Alive for as long as the screen is open; the tile holds the
+              // hubs still under reduced motion.
+              spinning: true,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _promise(
     MixtapeTokens tokens,
+    bool dark,
     bool googleAvailable,
     AccountProvider? lastUsed,
   ) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     mainAxisSize: MainAxisSize.min,
     children: [
-      const SizedBox(height: 28),
-      Text('Your music.\nYour moment.', style: tokens.largeTitle),
+      Text('Your music, mixed for right now.', style: tokens.largeTitle),
       const SizedBox(height: 12),
       Text(
-        'Sign in to keep your mixes and preferences.',
+        'Start with a mood, a memory, or one song. Mixtape builds a mix '
+        'from music you already love.',
         style: tokens.body.copyWith(color: tokens.muted),
       ),
-      const SizedBox(height: 32),
+      const SizedBox(height: 28),
       for (final provider in AccountProvider.values) ...[
-        ProviderSignInButton(
-          key: Key('${provider.name}-sign-in'),
-          label: 'Continue with ${_name(provider)}',
-          mark: provider == AccountProvider.apple
-              ? const AppleMark()
-              : const GoogleMark(),
-          onPressed:
-              _busy != null ||
-                  (provider == AccountProvider.google && !googleAvailable)
-              ? null
-              : () => _signIn(provider),
-        ),
-        if (lastUsed == provider)
-          Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: Text(
-              'Last used',
-              textAlign: TextAlign.center,
-              style: tokens.meta.copyWith(color: tokens.muted),
-            ),
-          ),
+        _providerButton(provider, dark, googleAvailable),
+        if (lastUsed == provider) _lastUsed(tokens),
         if (provider == AccountProvider.google && !googleAvailable)
           Padding(
             key: SignInScreen.googleUnavailableKey,
-            padding: const EdgeInsets.only(top: 6),
+            padding: const EdgeInsets.only(top: 8),
             child: Text(
               SignInScreen.googleUnavailable,
               textAlign: TextAlign.center,
               style: tokens.meta.copyWith(color: tokens.muted),
             ),
           ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 12),
       ],
       _status(tokens),
     ],
+  );
+
+  Widget _providerButton(
+    AccountProvider provider,
+    bool dark,
+    bool googleAvailable,
+  ) {
+    final skin = _skin(provider, dark);
+    return ProviderSignInButton(
+      key: Key('${provider.name}-sign-in'),
+      label: 'Continue with ${_name(provider)}',
+      mark: provider == AccountProvider.apple
+          ? const AppleMark(size: ProviderSignInButton.markSize)
+          : const GoogleMark(size: ProviderSignInButton.markSize),
+      background: skin.background,
+      foreground: skin.foreground,
+      borderColor: skin.border,
+      onPressed:
+          _busy != null ||
+              (provider == AccountProvider.google && !googleAvailable)
+          ? null
+          : () => _signIn(provider),
+    );
+  }
+
+  /// The web's `.auth-last-used`: a pencil note on the tape, not a label.
+  Widget _lastUsed(MixtapeTokens tokens) => Padding(
+    padding: const EdgeInsets.only(top: 8),
+    child: Center(
+      child: Transform.rotate(
+        angle: -_wordmarkTilt,
+        child: Text(
+          'Last used',
+          textAlign: TextAlign.center,
+          style: tokens.wordmark.copyWith(fontSize: 13, color: tokens.smoke),
+        ),
+      ),
+    ),
   );
 
   /// One reserved line, so a failure or a pending sheet never moves the
@@ -201,20 +274,61 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
     );
   }
 
+  /// The web's provider colours, with Apple inverted and Google on its dark
+  /// spec in the dark theme (Sign in with Apple HIG; Google branding).
+  static ({Color background, Color foreground, Color border}) _skin(
+    AccountProvider provider,
+    bool dark,
+  ) => switch ((provider, dark)) {
+    (AccountProvider.apple, false) => (
+      background: const Color(0xFF111114),
+      foreground: const Color(0xFFFFFFFF),
+      border: const Color.fromRGBO(0, 0, 0, 0.75),
+    ),
+    (AccountProvider.apple, true) => (
+      background: const Color(0xFFFFFFFF),
+      foreground: const Color(0xFF000000),
+      border: const Color.fromRGBO(255, 255, 255, 0.75),
+    ),
+    (AccountProvider.google, false) => (
+      background: const Color.fromRGBO(250, 249, 246, 0.92),
+      foreground: const Color(0xFF3D3A3E),
+      border: const Color.fromRGBO(61, 58, 62, 0.12),
+    ),
+    (AccountProvider.google, true) => (
+      background: const Color(0xFF131314),
+      foreground: const Color(0xFFFFFFFF),
+      border: const Color(0xFF8E918F),
+    ),
+  };
+
+  /// The web's `transform: rotate(-2deg)` on the wordmark and pencil note.
+  static const double _wordmarkTilt = 2 * math.pi / 180;
+
+  /// The web's `.auth-cassette` tilt.
+  static const double _cassetteTilt = 4 * math.pi / 180;
+
+  /// The tape's ceiling on a phone; narrower screens shrink it.
+  static const double _cassetteWidth = 320;
+
   static String _name(AccountProvider provider) =>
       provider == AccountProvider.apple ? 'Apple' : 'Google';
 }
 
-/// A full-width provider button in the board's tape shell.
+/// A full-width provider button, from the web's `.provider-sign-in` pill.
 ///
-/// [TapeButton] shrink-wraps to its label by design (it is the 40 pt inline
-/// mix control), so the 56 pt full-width sign-in bar is composed here from the
-/// same tokens rather than by widening the shared control.
-class ProviderSignInButton extends StatelessWidget {
+/// Stacked rather than side by side on the phone, and taller than the web's
+/// 44 px so the mark and label clear a thumb. The colours come from the
+/// caller: Apple and Google each own their button's appearance, and both
+/// invert in the dark theme.
+class ProviderSignInButton extends StatefulWidget {
   const ProviderSignInButton({
     super.key,
     required this.label,
     required this.mark,
+    required this.background,
+    required this.foreground,
+    required this.borderColor,
     this.onPressed,
   });
 
@@ -223,94 +337,109 @@ class ProviderSignInButton extends StatelessWidget {
   /// The provider's mark, drawn at [markSize].
   final Widget mark;
 
+  final Color background;
+
+  /// Label ink, and the [IconTheme] the mark inherits.
+  final Color foreground;
+
+  final Color borderColor;
+
   final VoidCallback? onPressed;
 
-  /// The board's provider button height.
-  static const double height = 56;
+  /// The provider button's height floor.
+  static const double height = 52;
 
-  static const double markSize = 20;
+  static const double markSize = 18;
 
-  static const BorderRadius _radius = BorderRadius.only(
-    topLeft: Radius.circular(MixtapeMetrics.tapeRadiusTop),
-    topRight: Radius.circular(MixtapeMetrics.tapeRadiusTop),
-    bottomLeft: Radius.circular(MixtapeMetrics.tapeRadiusBottom),
-    bottomRight: Radius.circular(MixtapeMetrics.tapeRadiusBottom),
-  );
+  /// The web's `opacity: 0.66` on a disabled provider button.
+  static const double disabledOpacity = 0.66;
+
+  /// The press dip, short enough to read as a tap and not a transition.
+  static const Duration pressDuration = Duration(milliseconds: 90);
+
+  static const double pressedScale = 0.98;
+
+  @override
+  State<ProviderSignInButton> createState() => _ProviderSignInButtonState();
+}
+
+class _ProviderSignInButtonState extends State<ProviderSignInButton> {
+  bool _pressed = false;
+
+  void _setPressed(bool pressed) {
+    if (_pressed == pressed) return;
+    setState(() => _pressed = pressed);
+  }
 
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
-    final enabled = onPressed != null;
+    final enabled = widget.onPressed != null;
 
     return Semantics(
       button: true,
       enabled: enabled,
-      label: label,
+      label: widget.label,
       excludeSemantics: true,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: onPressed,
-        child: Opacity(
-          opacity: enabled ? 1 : 0.5,
-          // A floor, not a fixed height: the label must grow at 200% text.
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: height),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: tokens.tapeFill,
-                borderRadius: _radius,
-                border: Border.all(color: tokens.tapeEdge),
-                boxShadow: enabled
-                    ? [
-                        BoxShadow(
-                          color: tokens.tapeShadow,
-                          offset: const Offset(0, 2),
-                          blurRadius: 0,
-                        ),
-                      ]
-                    : null,
+        onTapDown: enabled ? (_) => _setPressed(true) : null,
+        onTapUp: enabled ? (_) => _setPressed(false) : null,
+        onTapCancel: enabled ? () => _setPressed(false) : null,
+        onTap: widget.onPressed,
+        child: AnimatedScale(
+          scale: _pressed ? ProviderSignInButton.pressedScale : 1,
+          duration: ProviderSignInButton.pressDuration,
+          curve: Curves.easeOut,
+          child: Opacity(
+            opacity: enabled ? 1 : ProviderSignInButton.disabledOpacity,
+            // A floor, not a fixed height: the label must grow at 200% text.
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                minHeight: ProviderSignInButton.height,
               ),
-              child: ClipRRect(
-                borderRadius: _radius,
-                child: Stack(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 10,
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          IconTheme.merge(
-                            data: IconThemeData(color: tokens.tapeInk),
-                            child: mark,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: widget.background,
+                  borderRadius: BorderRadius.circular(
+                    MixtapeMetrics.pillRadius,
+                  ),
+                  border: Border.all(color: widget.borderColor),
+                  boxShadow: enabled
+                      ? const [
+                          BoxShadow(
+                            color: Color.fromRGBO(39, 32, 39, 0.16),
+                            offset: Offset(0, 5),
+                            blurRadius: 12,
                           ),
-                          const SizedBox(width: 10),
-                          Flexible(
-                            child: Text(
-                              label,
-                              textAlign: TextAlign.center,
-                              style: tokens.rowTitle.copyWith(
-                                fontWeight: FontWeight.w600,
-                                color: tokens.tapeInk,
-                              ),
-                            ),
+                        ]
+                      : null,
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 10,
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      IconTheme.merge(
+                        data: IconThemeData(color: widget.foreground),
+                        child: widget.mark,
+                      ),
+                      const SizedBox(width: 10),
+                      Flexible(
+                        child: Text(
+                          widget.label,
+                          textAlign: TextAlign.center,
+                          style: tokens.rowTitle.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: widget.foreground,
                           ),
-                        ],
+                        ),
                       ),
-                    ),
-                    // The board's top highlight on the tape shell.
-                    Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      child: Container(
-                        height: 1,
-                        color: Colors.white.withValues(alpha: 0.13),
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),

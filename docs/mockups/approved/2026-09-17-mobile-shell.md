@@ -104,3 +104,15 @@ order listed in revision 1 of the shape board.
   because tracks carry no album; Shape opens the energy assessment sheet, not
   the brief dialog, and is disabled when the version has no arc; the sheet
   forces dark tokens in both system themes for light text on artwork colours.
+- 2026-09-18, sign-in: at the founder's request the screen now mirrors the web
+  auth gate (`web/src/components/AuthGate.tsx`) rather than the board's plain
+  wordmark-and-tape-buttons layout. It carries the product name in the web's
+  handwritten marker (system Noteworthy, italic, tilted -2°), a cassette whose
+  hubs turn continuously (stopped by reduced motion) tilted 4° on a soft drop
+  shadow, the web's copy — "Your music, mixed for right now." and its blurb —
+  and full-width pill provider buttons on the web's colours: Apple white-on-
+  #111114 in the light theme and inverted to black-on-white in the dark one
+  (Sign in with Apple HIG), Google on its own light and #131314 dark specs. The
+  "Last used" note becomes the web's pencil note in the same marker at 13 pt.
+  The reserved status line, the Google-unavailable reason and the Apple Music
+  foot note are unchanged. SF remains the typeface everywhere else.

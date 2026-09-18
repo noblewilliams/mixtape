@@ -76,6 +76,21 @@ Future<void> _teardown(WidgetTester tester) async {
 }
 
 void main() {
+  // Sign-in's cassette turns for as long as the screen is on show, so a
+  // settle would never finish; reduced motion holds its hubs still.
+  setUp(
+    () =>
+        TestWidgetsFlutterBinding.ensureInitialized()
+            .platformDispatcher
+            .accessibilityFeaturesTestValue = const FakeAccessibilityFeatures(
+          disableAnimations: true,
+        ),
+  );
+  tearDown(
+    () => TestWidgetsFlutterBinding.ensureInitialized().platformDispatcher
+        .clearAccessibilityFeaturesTestValue(),
+  );
+
   for (final brightness in Brightness.values) {
     testWidgets('the gallery renders every section in ${brightness.name}', (
       tester,
