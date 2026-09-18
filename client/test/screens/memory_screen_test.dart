@@ -6,6 +6,8 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:flutter/cupertino.dart'
+    show CupertinoActionSheet, CupertinoAlertDialog, CupertinoDialogAction;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -26,6 +28,7 @@ import 'package:mixtape/presentation/screens/interview_screen.dart';
 import 'package:mixtape/presentation/screens/memory_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
+import 'package:mixtape/presentation/widgets/foundation/mixtape_menu.dart';
 
 import '../data/playback/playback_controller_test.dart'
     show FakeApi, FakeBridge;
@@ -155,10 +158,10 @@ Future<void> _pump(
   await tester.pumpAndSettle();
 }
 
-/// `AlertDialog.adaptive` builds a private subclass of [AlertDialog] on the
-/// Material platforms, which `find.byType` (an exact runtime-type match)
-/// would miss.
-final _dialog = find.byWidgetPredicate((widget) => widget is AlertDialog);
+/// The confirmation is the native alert now (smoke round three, note 8).
+final _dialog = find.byWidgetPredicate(
+  (widget) => widget is CupertinoAlertDialog,
+);
 
 void main() {
   setUp(() => FlutterSecureStorage.setMockInitialValues({}));
@@ -472,10 +475,36 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(MemoryScreen.clearLearnedKey));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(TextButton, MemoryScreen.clearLearned));
+      await tester.tap(
+        find.widgetWithText(CupertinoDialogAction, MemoryScreen.clearLearned),
+      );
       await tester.pumpAndSettle();
 
       expect(find.text(MemoryScreen.cleared), findsOneWidget);
+    });
+
+    testWidgets('is a native action sheet, not a Material popup', (
+      tester,
+    ) async {
+      final api = FakeDjApi()..onListMemories = () async => [_memory()];
+      await _pump(tester, _makeContainer(api));
+
+      await tester.tap(find.byKey(MemoryScreen.moreKey));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(CupertinoActionSheet), findsOneWidget);
+      expect(
+        find.byType(PopupMenuItem<Object?>),
+        findsNothing,
+        reason: 'the Material popup box is gone',
+      );
+      expect(find.byKey(MemoryScreen.clearLearnedKey), findsOneWidget);
+      expect(find.byKey(MemoryScreen.interviewKey), findsOneWidget);
+      expect(find.byKey(mixtapeMenuCancelKey), findsOneWidget);
+
+      await tester.tap(find.byKey(mixtapeMenuCancelKey));
+      await tester.pumpAndSettle();
+      expect(find.byType(CupertinoActionSheet), findsNothing);
     });
 
     testWidgets('opens the taste interview', (tester) async {

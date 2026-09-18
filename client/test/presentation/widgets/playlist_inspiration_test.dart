@@ -10,6 +10,7 @@ import 'package:mixtape/presentation/providers/playlist_providers.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/status_word.dart';
 import 'package:mixtape/presentation/widgets/playlist_inspiration.dart';
+import 'package:mixtape/presentation/widgets/foundation/mixtape_menu.dart';
 
 class SignedIn extends AuthNotifier {
   @override
@@ -211,10 +212,10 @@ void main() {
       await tester.tap(find.byKey(InspirationChip.chipKey));
       await tester.pumpAndSettle();
 
-      final item = tester.widget<CheckedPopupMenuItem<Object?>>(
+      final item = tester.widget<MixtapeMenuItem<Object?>>(
         find.byKey(InspirationChip.excludeItemKey),
       );
-      expect(item.checked, isTrue);
+      expect(item.action.isSelected, isTrue);
     });
 
     testWidgets('an unavailable chip keeps its name and offers no exclude', (
@@ -261,9 +262,10 @@ void main() {
       // The header is a note, not an action.
       expect(
         tester
-            .widget<PopupMenuItem<Object?>>(
+            .widget<MixtapeMenuItem<Object?>>(
               find.byKey(InspirationChip.menuNoteKey),
             )
+            .action
             .enabled,
         isFalse,
       );

@@ -573,3 +573,99 @@ chrome of their own; sheets that had a handle key (`LibrarySyncSheet`,
 second smoke: sheets read as translucent and huddled on a near-black room, and
 each one sat differently. **Reopens if:** a sheet needs genuine glass over live
 content behind it (then the helper grows a mode, not a second presentation).
+
+## 2026-09-18 — The type scale steps down one notch, and rows get more air
+Alongside the 28 pt large title above, the founder's third smoke found the rest
+of the scale still too big for a phone held at arm's length. `smallTitle` drops
+17 → 16, `rowTitle` 16 → 15, `body` 16 → 15 and `secondary` 13 → 12 in both
+themes (`largeTitle` 28, `meta` 12 and `label` 10 are unchanged, so nothing
+falls under the 10 pt floor). A sheet's heading is `smallTitle` rather than
+`section`, its subtitle `meta`, and the heading block clears the first row by a
+further 8 pt (`MixtapeSheet.headingGap`). Smaller type wants looser rows, so
+`FlushRow` and `InsetRow` both pad 12 pt above and below — `FlushRow` was 10 and
+`InsetRow` 8, which is why the You screen's grouped rows were the tightest
+thing in the app. Rationale: founder, smoke round three, note 4 — "smaller
+type, more air". **Reopens if:** a screen's densest list (the queue) reads as
+too loose at the new padding, or accessibility text sizes make 15 pt body
+crowd the 44 pt target.
+
+## 2026-09-18 — Sheets are painted one solid colour, not a blend
+`MixtapeTokens` gains `sheetSurface` — `0xFFFBFAF8` light, `0xFF1C1A22` dark —
+and `MixtapeSheet.surfaceColorOf` returns it. The second smoke's fix layered
+`tokens.panel` over `tokens.scrimBase` with `Color.alphaBlend`: opaque by the
+numbers, but a translucent tint resolved against a ground still reads as glass,
+and the founder could make out the screen behind a sheet. There is no
+`BackdropFilter` anywhere in the sheet chrome. This amends the 2026-09-18 "One
+sheet chrome" entry's "an opaque panel" clause. **Reopens if:** a sheet needs
+genuine glass over live content behind it — still the same reopen as that
+entry, and still a mode on the helper rather than a second presentation.
+
+## 2026-09-18 — The energy shape is state on the chip; Home composes the sentence at send
+Choosing a shape used to append "Energy journey: <shape>." to the composer's
+draft and toast. It no longer touches the draft: the Home panel holds an
+`EnergyArc?`, the Shape chip wears the chosen arc's label and its own wave (the
+generic wave and the word "Shape" when there is none), the sheet opens
+preselected and carries a Clear action, and nothing toasts. When the listener
+sends the first prompt from Home, `energyBrief` composes the field text plus the
+sentence and that composed string is what `POST /sessions` receives; the
+transcript therefore shows the composed brief, which is accepted. The 2,000
+character guard applies to the composed message — over it, the sheet's existing
+"Shorten your brief to make room for the shape." line appears under the composer
+and nothing is sent. The chip clears with the draft once a mix starts.
+
+This is client-side composition because the server has no field for it on
+session start: `energyArc` lives inside the DJ's inferred intent, not on the
+create request. The conversation's own Shape chip is unchanged — a later turn
+has no session-start message to fold a sentence into, so it still writes into
+the draft and toasts; making it state too is in `backlog.md`.
+
+The sheet's blurb changes with it: "Adds a sentence to your brief" described
+something the listener could no longer see happen, so it reads "Goes out with
+your brief. You still send it yourself."
+
+Founder direction, smoke round three, note 5: "shape is state on the chip, not
+text in the field." **Reopens if:** a `POST /sessions` `energyArc` field lands —
+it replaces the sentence outright.
+
+## 2026-09-18 — One empty state, anchored on its cassette
+`client/lib/presentation/widgets/foundation/empty_state.dart` holds the app's
+only empty state (cassette at 150 pt, title in `smallTitle`, one `secondary`
+line, an optional `TapeButton`) and its only placement, `EmptyStateSliver`:
+`SliverFillRemaining(hasScrollBody: false)` over a band measured **on the
+screen** — under the large title's collapsed bar (`LargeTitleScaffold.barHeight`)
+and above the dock (`MediaQuery.padding.bottom`, which the shell hands each tab
+root, plus 16). Mixes, Library and "What the DJ knows" all use it.
+
+Two things are deliberate. The band is screen-relative rather than "whatever
+this tab's title row left", because Mixes carries a segmented control beside its
+title and Library a glass cluster — a 12 pt difference that put the two blocks
+at visibly different heights. And the **cassette**, not the whole block, is
+centred on the band, so a second line of copy on one tab cannot lift the
+illustration off the height its neighbour puts it at; when the block is too tall
+for that (200% text on a short phone) the placement falls back to centring the
+whole block. Founder, smoke round three, note 7: the two empty states centred
+differently. **Reopens if:** an empty state needs to scroll (then it is a list
+with a header, not this).
+
+## 2026-09-18 — Menus and alerts are Cupertino, app-wide
+Every anchored Material popup (`showMenu`, `PopupMenuButton`) and every
+`AlertDialog` in `client/lib` is gone. Menus go through one helper —
+`showMixtapeMenu` in
+`client/lib/presentation/widgets/foundation/mixtape_menu.dart` — which presents
+a `CupertinoActionSheet` over `showCupertinoModalPopup`, with destructive
+entries marked and always a Cancel; alerts are `showCupertinoDialog` with a
+`CupertinoAlertDialog` and `CupertinoDialogAction`s, and the two dialogs that
+take typed input use `CupertinoTextField`. Every key and action label survives
+the move: an entry's key now rides on its `MixtapeMenuItem`, which also carries
+the entry's `enabled` and `isSelected` (the stand-ins for a disabled
+`PopupMenuItem` and a `CheckedPopupMenuItem`).
+
+Two details worth keeping. `showCupertinoDialog` defaults to a non-dismissible
+barrier where Material's `showDialog` does not, so every migrated alert that
+was dismissible passes `barrierDismissible: true` rather than quietly losing a
+way out. And `AlertDialog.adaptive` only rendered Cupertino on iOS, so the
+widget tests were exercising the Material branch of dialogs that shipped as
+Cupertino; they now test what ships. Founder, smoke round three, note 8: the
+memory screen's More menu "is a Material popup box that clashes". **Reopens
+if:** Android becomes a target (then the helper grows a platform switch, not a
+second call site).

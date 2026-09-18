@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoAlertDialog;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -92,7 +93,7 @@ void main() {
       expect(writes.writes, 0);
       await tester.tap(find.text('I chose these songs'));
       await tester.pumpAndSettle();
-      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.byType(CupertinoAlertDialog), findsOneWidget);
       expect(find.text('Did you choose these songs?'), findsOneWidget);
       await tester.tapAt(const Offset(10, 10));
       await tester.pumpAndSettle();

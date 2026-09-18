@@ -5,6 +5,7 @@ import 'dart:async';
 import '../helpers/auth_ui_snapshot.dart';
 import '../presentation/widgets/playlist_inspiration_test.dart' show BrowseApi;
 import 'package:mixtape/presentation/providers/playlist_providers.dart';
+import 'package:flutter/cupertino.dart' show CupertinoTextField;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -91,7 +92,9 @@ void main() {
     await tester.tap(find.text('Rename'));
     await tester.pumpAndSettle();
 
-    final field = tester.widget<TextField>(find.byKey(const Key('chat-rename-field')));
+    final field = tester.widget<CupertinoTextField>(
+      find.byKey(const Key('chat-rename-field')),
+    );
     expect(field.controller!.text, 'Sunday');
     expect(field.controller!.selection.baseOffset, 0);
     expect(field.controller!.selection.extentOffset, 'Sunday'.length);

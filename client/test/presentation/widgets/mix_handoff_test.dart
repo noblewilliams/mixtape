@@ -5,6 +5,8 @@
 // itself, so a copy change has exactly one place to break.
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart'
+    show CupertinoActivityIndicator, CupertinoDialogAction, CupertinoTextField;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -337,14 +339,14 @@ void main() {
 
       expect(
         tester
-            .widget<TextField>(find.byKey(MixHandoffKeys.arrangement.nameField))
+            .widget<CupertinoTextField>(find.byKey(MixHandoffKeys.arrangement.nameField))
             .controller!
             .text,
         'Late drive',
       );
       expect(
         tester
-            .widget<TextField>(find.byKey(MixHandoffKeys.arrangement.authorField))
+            .widget<CupertinoTextField>(find.byKey(MixHandoffKeys.arrangement.authorField))
             .controller!
             .text,
         'Noble',
@@ -522,14 +524,21 @@ void main() {
       // unhandled async error the discarded future would swallow.
       expect(tester.takeException(), isStateError);
       expect(attempts, 1);
-      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.byType(CupertinoActivityIndicator), findsNothing);
       expect(
-        tester.widget<FilledButton>(find.byKey(keys.saveConfirm)).onPressed,
+        tester.widget<CupertinoDialogAction>(find.byKey(keys.saveConfirm)).onPressed,
         isNotNull,
       );
-      expect(tester.widget<TextField>(find.byKey(keys.nameField)).enabled, isTrue);
       expect(
-        tester.widget<TextButton>(find.widgetWithText(TextButton, 'Cancel')).onPressed,
+        tester.widget<CupertinoTextField>(find.byKey(keys.nameField)).enabled,
+        isTrue,
+      );
+      expect(
+        tester
+            .widget<CupertinoDialogAction>(
+              find.widgetWithText(CupertinoDialogAction, 'Cancel'),
+            )
+            .onPressed,
         isNotNull,
       );
 

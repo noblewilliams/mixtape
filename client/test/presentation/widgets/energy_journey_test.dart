@@ -19,6 +19,29 @@ ThemeData nativeSnapshotTheme(Brightness brightness) =>
       ],
     );
 
+/// Home's half of the contract: the chip's state lives above it, and the
+/// draft is never written to (smoke round three, note 5).
+class _ChipHost extends StatefulWidget {
+  const _ChipHost({required this.controller, this.initial});
+
+  final TextEditingController controller;
+  final EnergyArc? initial;
+
+  @override
+  State<_ChipHost> createState() => _ChipHostState();
+}
+
+class _ChipHostState extends State<_ChipHost> {
+  late EnergyArc? arc = widget.initial;
+
+  @override
+  Widget build(BuildContext context) => EnergyControl(
+    controller: widget.controller,
+    selectedArc: arc,
+    onArcChanged: (next) => setState(() => arc = next),
+  );
+}
+
 void main() {
   testWidgets('captures the native energy sheet', (tester) async {
     await loadAuthSnapshotFonts(tester);
@@ -59,7 +82,7 @@ void main() {
 
     expect(find.text('Give the mix a shape.'), findsOneWidget);
     expect(
-      find.text('Adds a sentence to your brief. You still send it yourself.'),
+      find.text(energySheetBlurb),
       findsOneWidget,
     );
     for (final arc in EnergyArc.values) {
@@ -126,7 +149,7 @@ void main() {
           ).copyWith(textScaler: TextScaler.linear(2)),
           child: child!,
         ),
-        home: Scaffold(body: EnergyControl(controller: controller)),
+        home: Scaffold(body: _ChipHost(controller: controller)),
       ),
     );
     await tester.tap(find.byKey(EnergyControl.chipKey));
@@ -135,21 +158,23 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.tap(find.byKey(EnergyControl.confirmKey));
     await tester.pumpAndSettle();
-    expect(controller.text, contains('Build, then settle'));
+    expect(controller.text, 'Sunday', reason: 'the draft is never written to');
     await tester.pumpWidget(const SizedBox());
     controller.dispose();
   });
 
-  testWidgets('choosing a shape only changes the brief after confirmation', (
+  testWidgets('a chosen shape lands on the chip, not in the field', (
     tester,
   ) async {
     final controller = TextEditingController(text: 'Sunday morning');
     await tester.pumpWidget(
       MaterialApp(
         theme: MixtapeTheme.light(),
-        home: Scaffold(body: EnergyControl(controller: controller)),
+        home: Scaffold(body: _ChipHost(controller: controller)),
       ),
     );
+    expect(find.text(EnergyControl.unsetLabel), findsOneWidget);
+
     await tester.tap(find.byKey(EnergyControl.chipKey));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(EnergyControl.presetKey(EnergyArc.fall)));
@@ -157,14 +182,79 @@ void main() {
     expect(controller.text, 'Sunday morning');
     await tester.tap(find.byKey(EnergyControl.confirmKey));
     await tester.pumpAndSettle();
-    expect(controller.text, 'Sunday morning\nEnergy journey: Wind down.');
-    expect(find.text('Shape added to your brief. Send when ready.'), findsOneWidget);
 
+    // The chip wears the arc; the draft is untouched and nothing toasts.
+    expect(find.text(EnergyArc.fall.label), findsOneWidget);
+    expect(find.text(EnergyControl.unsetLabel), findsNothing);
+    expect(controller.text, 'Sunday morning');
+    expect(find.text(energyShapeToast), findsNothing);
+
+    // Reopening preselects it, and Cancel changes nothing.
     await tester.tap(find.byKey(EnergyControl.chipKey));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
-    expect(controller.text, 'Sunday morning\nEnergy journey: Wind down.');
+    expect(find.text(EnergyArc.fall.label), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
+  testWidgets('Clear only appears with a shape set, and takes it off', (
+    tester,
+  ) async {
+    final controller = TextEditingController(text: 'Sunday morning');
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: MixtapeTheme.light(),
+        home: Scaffold(body: _ChipHost(controller: controller)),
+      ),
+    );
+    await tester.tap(find.byKey(EnergyControl.chipKey));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(EnergyControl.clearKey),
+      findsNothing,
+      reason: 'nothing to clear yet',
+    );
+    await tester.tap(find.byKey(EnergyControl.presetKey(EnergyArc.rise)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(EnergyControl.confirmKey));
+    await tester.pumpAndSettle();
+    expect(find.text(EnergyArc.rise.label), findsOneWidget);
+
+    await tester.tap(find.byKey(EnergyControl.chipKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(EnergyControl.clearKey));
+    await tester.pumpAndSettle();
+
+    expect(find.text(EnergyControl.unsetLabel), findsOneWidget);
+    expect(find.text(EnergyArc.rise.label), findsNothing);
+    expect(controller.text, 'Sunday morning');
+
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
+  testWidgets('the sheet opens on the shape the chip is already wearing', (
+    tester,
+  ) async {
+    final controller = TextEditingController(text: 'Sunday morning');
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: MixtapeTheme.light(),
+        home: Scaffold(
+          body: _ChipHost(controller: controller, initial: EnergyArc.steady),
+        ),
+      ),
+    );
+    await tester.tap(find.byKey(EnergyControl.chipKey));
+    await tester.pumpAndSettle();
+    // Confirming without touching a preset keeps the current shape.
+    await tester.tap(find.byKey(EnergyControl.confirmKey));
+    await tester.pumpAndSettle();
+    expect(find.text(EnergyArc.steady.label), findsOneWidget);
+
     await tester.pumpWidget(const SizedBox());
     controller.dispose();
   });

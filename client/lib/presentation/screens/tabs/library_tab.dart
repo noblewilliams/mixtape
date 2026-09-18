@@ -21,7 +21,7 @@ import '../../format/source_labels.dart';
 import '../../providers/onboarding_provider.dart';
 import '../../providers/playlist_providers.dart';
 import '../../theme/mixtape_theme.dart';
-import '../../widgets/foundation/cassette_tile.dart';
+import '../../widgets/foundation/empty_state.dart';
 import '../../widgets/foundation/flush_row.dart';
 import '../../widgets/foundation/glass_cluster.dart';
 import '../../widgets/foundation/gradient_background.dart';
@@ -238,21 +238,10 @@ class _LibraryTabState extends ConsumerState<LibraryTab> {
             ],
           ),
           slivers: [
-            // Nothing to list: the block sits in the middle of the space
-            // between the large title and the dock, not up against the title
-            // (smoke round two, note 8).
+            // Nothing to list: the shared placement puts the block at the
+            // same height Mixes puts its own (smoke round three, note 7).
             if (noSources)
-              SliverFillRemaining(
-                hasScrollBody: false,
-                child: Padding(
-                  padding: EdgeInsets.only(
-                    bottom:
-                        MediaQuery.paddingOf(context).bottom +
-                        LibraryTab.defaultBottomInset,
-                  ),
-                  child: Center(child: _sources(onboarding, state)),
-                ),
-              )
+              EmptyStateSliver(child: _sources(onboarding, state))
             else ...[
               SliverToBoxAdapter(child: _sources(onboarding, state)),
               if (hasSources) ...[
@@ -312,26 +301,15 @@ class _LibraryTabState extends ConsumerState<LibraryTab> {
     }
 
     if (state.sources.isEmpty) {
-      return Column(
+      return EmptyState(
         key: LibraryTab.emptyKey,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const CassetteTile(width: 140),
-          const SizedBox(height: 20),
-          Text(LibraryTab.emptyTitle, style: tokens.section),
-          const SizedBox(height: 6),
-          Text(
-            LibraryTab.emptyBody,
-            textAlign: TextAlign.center,
-            style: tokens.secondary,
-          ),
-          const SizedBox(height: 20),
-          TapeButton(
-            key: LibraryTab.emptySetupKey,
-            label: 'Add your music',
-            onPressed: () => _push(const SpotifyRequestScreen()),
-          ),
-        ],
+        title: LibraryTab.emptyTitle,
+        body: LibraryTab.emptyBody,
+        action: TapeButton(
+          key: LibraryTab.emptySetupKey,
+          label: 'Add your music',
+          onPressed: () => _push(const SpotifyRequestScreen()),
+        ),
       );
     }
 

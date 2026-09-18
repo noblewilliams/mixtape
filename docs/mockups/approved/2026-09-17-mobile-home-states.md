@@ -53,10 +53,22 @@ routine_suggestions}.dart`, `client/lib/presentation/providers/
 
 ## Implementation departures
 
-- 2026-09-18, Phase 3: the routine pill's long-press menu is a Material
-  anchored menu and "Why this?" a bottom sheet, not a native context menu,
-  because a Cupertino context menu cannot preview a pill inside the glass
-  panel. The three actions and their custom semantics actions match the record.
+- 2026-09-18, Phase 3: the routine pill's long-press menu is not a native
+  context menu, because a Cupertino context menu cannot preview a pill inside
+  the glass panel. It is a `CupertinoActionSheet` through `showMixtapeMenu`
+  (smoke round three, note 8 — it was a Material anchored menu until then) and
+  "Why this?" a bottom sheet. The three actions and their custom semantics
+  actions match the record.
+- 2026-09-18, smoke round three: the energy **shape is state on the Shape
+  chip, not text in the field**. The board wrote "Energy journey: <shape>."
+  into the composer's draft on confirmation and toasted; the founder read that
+  as the app typing for them. The chip now wears the chosen arc's name and its
+  own wave, the draft is never written to, there is no toast, and the sheet
+  gains a Clear action. Home folds the sentence into the outgoing message at
+  send instead, so the transcript still shows the composed brief and the 2,000
+  character guard still applies — to the composed message, with the sheet's
+  existing "Shorten your brief…" line shown under the composer when it would
+  not fit. See `docs/decisions.md` → 2026-09-18 for the reopen clause.
 - 2026-09-18, Phase 3.3: the picker marks a playlist "Not enough" when it has
   fewer than three entries in total, because the summary carries no matched
   count (the board shows "2 matched songs · too few to use"); at 200% text the

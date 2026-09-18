@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoDialogAction;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -8,7 +9,6 @@ import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
 import 'package:mixtape/presentation/widgets/foundation/status_word.dart';
 import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
-import 'package:mixtape/presentation/widgets/foundation/text_action.dart';
 
 import '../helpers/auth_ui_snapshot.dart';
 
@@ -203,9 +203,9 @@ void main() {
       expect(find.text('Cancel'), findsOneWidget);
       expect(
         tester
-            .widget<TextAction>(find.ancestor(
+            .widget<CupertinoDialogAction>(find.ancestor(
               of: find.text('Cancel'),
-              matching: find.byType(TextAction),
+              matching: find.byType(CupertinoDialogAction),
             ))
             .onPressed,
         isNotNull,
@@ -237,9 +237,9 @@ void main() {
     // The way out stays open while the answer is unknown.
     expect(
       tester
-          .widget<TextAction>(find.ancestor(
+          .widget<CupertinoDialogAction>(find.ancestor(
             of: find.text('Close'),
-            matching: find.byType(TextAction),
+            matching: find.byType(CupertinoDialogAction),
           ))
           .onPressed,
       isNotNull,

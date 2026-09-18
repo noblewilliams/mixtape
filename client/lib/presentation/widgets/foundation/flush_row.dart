@@ -94,6 +94,9 @@ class FlushRow extends StatelessWidget {
   /// The gap between the leading column and the text.
   static const double gap = 14;
 
+  /// The row's own vertical padding.
+  static const double verticalPadding = 12;
+
   /// Titles wrap rather than ellipsise from this text scale up.
   static const double wrapScale = 1.5;
 
@@ -126,7 +129,9 @@ class FlushRow extends StatelessWidget {
               ));
 
     final content = Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
+      // 12, not 10: looser rows to go with the smaller type (smoke round
+      // three, note 4).
+      padding: const EdgeInsets.symmetric(vertical: FlushRow.verticalPadding),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [

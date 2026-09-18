@@ -14,6 +14,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../theme/mixtape_theme.dart';
+import 'energy_journey.dart';
 import 'foundation/idea_pill.dart';
 import 'foundation/liquid_glass_surface.dart';
 import 'mix_prompt_input.dart';
@@ -45,6 +46,8 @@ class HomePanel extends StatefulWidget {
     this.starterPrompts = MixPromptInput.examples,
     this.placeholder,
     this.refinements,
+    this.selectedArc,
+    this.onArcChanged,
   });
 
   /// The composer's draft, which the pills fill.
@@ -82,13 +85,19 @@ class HomePanel extends StatefulWidget {
   /// routine suggestion stands down — the board shows exactly three.
   final List<HomeRefinement>? refinements;
 
+  /// The energy shape the panel's Shape chip is wearing, null for none, and
+  /// who to tell when it changes. The draft never carries the shape: Home
+  /// folds its sentence in at send (smoke round three, note 5).
+  final EnergyArc? selectedArc;
+  final ValueChanged<EnergyArc?>? onArcChanged;
+
   /// The board's `.bpanel` top radius.
   static const double topRadius = 30;
 
   /// The panel floats: it is inset from both screen edges and rounded on all
   /// four corners (smoke round two, note 5).
   static const double sideInset = 12;
-  static const double floatingRadius = 24;
+  static const double floatingRadius = 32;
 
   /// `.bpanel` side padding.
   static const double sidePadding = 14;
@@ -104,8 +113,14 @@ class HomePanel extends StatefulWidget {
   static const double handleHeight = 5;
   static const Color handleColor = Color.fromRGBO(127, 120, 130, 0.45);
 
-  /// `.pills`: 8 pt gaps, 12 pt above the row.
+  /// `.pills`: 8 pt between pills on a row, 12 pt above the row.
   static const double pillGap = 8;
+
+  /// The gap between pill rows. Now that pills shrink-wrap, three of them wrap
+  /// onto three rows; 4 pt keeps them reading as one group rather than as a
+  /// list (smoke round three, note 6).
+  static const double pillRunGap = 4;
+
   static const double pillsTopGap = 12;
 
   /// The board never shows a fourth pill.
@@ -243,6 +258,8 @@ class _HomePanelState extends State<HomePanel> {
                       onSubmit: widget.onSubmit,
                       attachment: widget.attachment,
                       placeholder: widget.placeholder,
+                      energyArc: widget.selectedArc,
+                      onEnergyArcChanged: widget.onArcChanged,
                       // The pills hold these; the rotating hint skips them so
                       // the field never repeats a pill below it. Refinements
                       // are not prompts, so they reserve nothing.
@@ -270,7 +287,7 @@ class _HomePanelState extends State<HomePanel> {
                                 return Wrap(
                                   key: HomePanel.pillsKey,
                                   spacing: HomePanel.pillGap,
-                                  runSpacing: HomePanel.pillGap,
+                                  runSpacing: HomePanel.pillRunGap,
                                   children: [
                                     if (pill != null) pill,
                                     for (
@@ -302,7 +319,7 @@ class _HomePanelState extends State<HomePanel> {
   Widget _refinementPills({required bool dimmed}) => Wrap(
     key: HomePanel.pillsKey,
     spacing: HomePanel.pillGap,
-    runSpacing: HomePanel.pillGap,
+    runSpacing: HomePanel.pillRunGap,
     children: [
       for (var i = 0; i < widget.refinements!.length; i++)
         IdeaPill(

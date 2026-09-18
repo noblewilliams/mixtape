@@ -1,4 +1,6 @@
 import 'package:mixtape/data/playlists/playlist_context_models.dart';
+import 'package:flutter/cupertino.dart'
+    show CupertinoDialogAction, CupertinoTextField;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -129,6 +131,10 @@ Future<void> pumpScreen(WidgetTester tester, ProviderContainer container, Widget
 bool _isInteractive(Widget w) =>
     w is ButtonStyleButton ||
     w is TextField ||
+    // The native alerts and fields the app moved to (smoke round three,
+    // note 8) are audited by the same house rule.
+    w is CupertinoDialogAction ||
+    w is CupertinoTextField ||
     w is IconButton ||
     w is InputChip ||
     w is ListTile ||

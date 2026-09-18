@@ -1,6 +1,7 @@
 import 'package:mixtape/data/playlists/playlist_context_models.dart';
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart' show CupertinoTextField;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -575,7 +576,9 @@ void main() {
     await tester.tap(find.byKey(const Key('save-button')));
     await tester.pumpAndSettle();
 
-    final field = tester.widget<TextField>(find.byKey(const Key('playlist-name-field')));
+    final field = tester.widget<CupertinoTextField>(
+      find.byKey(const Key('playlist-name-field')),
+    );
     expect(field.controller!.text, 'Road Trip');
 
     await tester.enterText(find.byKey(const Key('playlist-name-field')), '  My Mix  ');
@@ -614,7 +617,9 @@ void main() {
     // Reopening the dialog prefills the remembered name.
     await tester.tap(find.byKey(const Key('save-button')));
     await tester.pumpAndSettle();
-    final authorField = tester.widget<TextField>(find.byKey(const Key('playlist-author-field')));
+    final authorField = tester.widget<CupertinoTextField>(
+      find.byKey(const Key('playlist-author-field')),
+    );
     expect(authorField.controller!.text, 'Noble');
   });
 
@@ -629,7 +634,9 @@ void main() {
 
     await tester.tap(find.byKey(const Key('save-button')));
     await tester.pumpAndSettle();
-    final authorField = tester.widget<TextField>(find.byKey(const Key('playlist-author-field')));
+    final authorField = tester.widget<CupertinoTextField>(
+      find.byKey(const Key('playlist-author-field')),
+    );
     expect(authorField.controller!.text, 'Noble');
 
     await tester.tap(find.byKey(const Key('save-confirm-button')));
@@ -651,7 +658,9 @@ void main() {
 
     await tester.tap(find.byKey(const Key('save-button')));
     await tester.pumpAndSettle();
-    final authorField = tester.widget<TextField>(find.byKey(const Key('playlist-author-field')));
+    final authorField = tester.widget<CupertinoTextField>(
+      find.byKey(const Key('playlist-author-field')),
+    );
     expect(authorField.controller!.text, 'DJ Noble');
   });
 

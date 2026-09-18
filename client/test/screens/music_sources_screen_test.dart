@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoAlertDialog;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -305,7 +306,7 @@ void main() {
         ),
         findsOneWidget,
       );
-      expectInteractiveWidgetsKeyed(find.byType(AlertDialog));
+      expectInteractiveWidgetsKeyed(find.byType(CupertinoAlertDialog));
 
       await tester.tap(find.byKey(const Key('remove-keep')));
       await tester.pumpAndSettle();

@@ -21,6 +21,7 @@ import '../providers/suggestions_provider.dart';
 import 'foundation/idea_pill.dart';
 import 'foundation/mixtape_sheet.dart';
 import '../theme/mixtape_theme.dart';
+import 'foundation/mixtape_menu.dart';
 
 /// Home's first idea pill: the eligible routine suggestion, a skeleton while
 /// it loads, or [fallback] when there is nothing to suggest.
@@ -231,31 +232,26 @@ class _RoutinePillBodyState extends State<_RoutinePillBody>
     );
   }
 
-  /// The board's native context menu, anchored on the pill.
+  /// The board's native context menu on the pill, as an action sheet.
   Future<void> _openMenu(RoutineSuggestion suggestion) async {
-    final box = context.findRenderObject() as RenderBox?;
-    final overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox?;
-    if (box == null || overlay == null || !box.hasSize) return;
-    final anchor = box.localToGlobal(Offset.zero, ancestor: overlay) & box.size;
-    final choice = await showMenu<_RoutineAction>(
-      context: context,
-      position: RelativeRect.fromRect(anchor, Offset.zero & overlay.size),
-      items: const [
-        PopupMenuItem(
+    final choice = await showMixtapeMenu<_RoutineAction>(
+      context,
+      actions: const [
+        MixtapeMenuAction(
           key: RoutinePillSlot.notTodayKey,
           value: _RoutineAction.notToday,
-          child: Text(RoutinePillSlot.notTodayLabel),
+          label: RoutinePillSlot.notTodayLabel,
         ),
-        PopupMenuItem(
+        MixtapeMenuAction(
           key: RoutinePillSlot.whyKey,
           value: _RoutineAction.why,
-          child: Text(RoutinePillSlot.whyLabel),
+          label: RoutinePillSlot.whyLabel,
         ),
-        PopupMenuItem(
+        MixtapeMenuAction(
           key: RoutinePillSlot.turnOffKey,
           value: _RoutineAction.turnOff,
-          child: Text(RoutinePillSlot.turnOffLabel),
+          label: RoutinePillSlot.turnOffLabel,
+          isDestructive: true,
         ),
       ],
     );

@@ -171,8 +171,11 @@ void main() {
         expect(tokens.largeTitle.fontSize, 28);
         expect(tokens.largeTitle.letterSpacing, -0.56);
         expect(tokens.largeTitle.fontWeight, FontWeight.w800);
-        expect(tokens.body.fontSize, 16);
-        expect(tokens.secondary.fontSize, 13);
+        // The founder's smoke-round-three step-down: smaller type, more air.
+        expect(tokens.smallTitle.fontSize, 16);
+        expect(tokens.rowTitle.fontSize, 15);
+        expect(tokens.body.fontSize, 15);
+        expect(tokens.secondary.fontSize, 12);
       }
     });
 

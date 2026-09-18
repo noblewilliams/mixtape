@@ -12,7 +12,12 @@ library;
 
 import 'dart:math';
 
-import 'package:flutter/cupertino.dart' show CupertinoIcons;
+import 'package:flutter/cupertino.dart'
+    show
+        CupertinoAlertDialog,
+        CupertinoDialogAction,
+        CupertinoIcons,
+        showCupertinoDialog;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -205,9 +210,8 @@ class _MixHistoryScreenState extends ConsumerState<MixHistoryScreen> {
     final detail = _detail;
     if (detail == null || _busy || _confirming) return;
     _confirming = true;
-    await showDialog<void>(
+    await showCupertinoDialog<void>(
       context: context,
-      barrierDismissible: false,
       builder: (_) => _WithTokens(
         child: _ConfirmRestoreDialog(
           version: detail['version'] as int,
@@ -605,15 +609,13 @@ class _ConfirmRestoreDialogState extends State<_ConfirmRestoreDialog> {
     final tokens = context.tokens;
     return PopScope(
       canPop: !_busy,
-      child: AlertDialog(
-        backgroundColor: tokens.panel,
-        surfaceTintColor: Colors.transparent,
-        scrollable: true,
-        title: Text('Use version ${widget.version}?', style: tokens.section),
+      child: CupertinoAlertDialog(
+        title: Text('Use version ${widget.version}?'),
         content: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
+            const SizedBox(height: 8),
             Text(_confirmBody, style: tokens.body),
             if (_busy)
               Padding(
@@ -639,20 +641,20 @@ class _ConfirmRestoreDialogState extends State<_ConfirmRestoreDialog> {
               ),
           ],
         ),
-        actionsAlignment: MainAxisAlignment.end,
-        actionsOverflowAlignment: OverflowBarAlignment.end,
         actions: [
-          TextAction(
+          CupertinoDialogAction(
             // "Cancel" would read as "it did not happen", which is exactly
             // what an unconfirmed restore cannot promise: the request id is
             // kept on the screen, so closing leaves the retry available.
-            label: _retry ? 'Close' : 'Cancel',
-            quiet: true,
             onPressed: _busy ? null : () => Navigator.of(context).pop(),
+            child: Text(_retry ? 'Close' : 'Cancel'),
           ),
-          TapeButton(
-            label: _retry ? 'Retry restore' : 'Use version ${widget.version}',
+          CupertinoDialogAction(
+            isDefaultAction: true,
             onPressed: _busy ? null : _run,
+            child: Text(
+              _retry ? 'Retry restore' : 'Use version ${widget.version}',
+            ),
           ),
         ],
       ),

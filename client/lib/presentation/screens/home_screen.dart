@@ -17,6 +17,7 @@ import '../widgets/foundation/label_chip.dart';
 import '../widgets/foundation/large_title_scaffold.dart';
 import '../widgets/foundation/square_art.dart';
 import '../widgets/foundation/status_word.dart';
+import '../widgets/energy_journey.dart';
 import '../widgets/home_panel.dart';
 import '../format/source_labels.dart';
 import '../providers/dj_providers.dart';
@@ -93,6 +94,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   bool _measuring = false;
   bool _starting = false;
   String? _error;
+
+  /// The Shape chip's state. Never written into the draft — the sentence is
+  /// folded into the outgoing message at send (smoke round three, note 5).
+  EnergyArc? _arc;
   PlaylistSummary? get _inspiration =>
       ref.read(newMixInspirationProvider)?.playlist;
   bool get _excludeSourceTracks =>
@@ -183,8 +188,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   /// in flight (these calls run 20-40s) can never mint a second session.
   Future<void> _submit() async {
     if (_starting) return;
-    final prompt = _promptController.text.trim();
-    if (prompt.isEmpty) return;
+    final draft = _promptController.text.trim();
+    if (draft.isEmpty) return;
+
+    // The shape rides out with the message, not in the field. The server has
+    // no `energyArc` on session start, so the sentence is composed here; the
+    // length guard is the sheet's own.
+    final arc = _arc;
+    final prompt = arc == null ? draft : energyBrief(draft, arc);
+    if (prompt == null) {
+      setState(() => _error = energySheetTooLong);
+      return;
+    }
 
     setState(() {
       _starting = true;
@@ -202,6 +217,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       );
       if (!mounted) return;
       _promptController.clear();
+      _arc = null;
       ref.read(newMixInspirationProvider.notifier).clear();
       _navigateToChat(sessionId);
     } on DjApiException catch (e) {
@@ -213,6 +229,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         // (seeded from e.message via initialError, since the failed turn
         // never made it into the transcript itself).
         _promptController.clear();
+        _arc = null;
         ref.read(newMixInspirationProvider.notifier).clear();
         _navigateToChat(sessionId, initialError: e.message);
       } else {
@@ -411,6 +428,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   busy: _starting,
                   error: _error,
                   onSubmit: _submit,
+                  selectedArc: _arc,
+                  onArcChanged: (arc) => setState(() {
+                    _arc = arc;
+                    // A shape the listener just changed clears a stale
+                    // "too long" line from an earlier attempt.
+                    if (_error == energySheetTooLong) _error = null;
+                  }),
                   placeholder: _inspiration == null
                       ? null
                       : 'Something like ${_inspiration!.name}, but…',

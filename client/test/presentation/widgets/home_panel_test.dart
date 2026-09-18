@@ -15,6 +15,7 @@ import 'package:mixtape/presentation/providers/device_providers.dart';
 import 'package:mixtape/presentation/providers/suggestions_provider.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/idea_pill.dart';
+import 'package:mixtape/presentation/widgets/foundation/liquid_glass_surface.dart';
 import 'package:mixtape/presentation/widgets/home_panel.dart';
 import 'package:mixtape/presentation/widgets/mix_prompt_input.dart';
 import 'package:mixtape/presentation/widgets/routine_suggestions.dart';
@@ -103,6 +104,52 @@ List<IdeaPill> _pills(WidgetTester tester) =>
     tester.widgetList<IdeaPill>(find.byType(IdeaPill)).toList();
 
 void main() {
+  testWidgets('the panel is as round as a bottom sheet', (tester) async {
+    // The founder's smoke round three, note 2: 24 read like a card.
+    expect(HomePanel.floatingRadius, 32);
+
+    await _pumpPanel(tester);
+    await tester.pumpAndSettle();
+
+    final surface = tester.widget<LiquidGlassSurface>(
+      find.byKey(HomePanel.surfaceKey),
+    );
+    expect(
+      surface.borderRadius,
+      BorderRadius.circular(HomePanel.floatingRadius),
+    );
+  });
+
+  testWidgets('wrapped pill rows sit 4 pt apart', (tester) async {
+    // Three shrink-wrapped pills wrap onto three rows; 4 pt keeps them one
+    // group (smoke round three, note 6).
+    await _pumpPanel(tester);
+    await tester.pumpAndSettle();
+
+    final wrap = tester.widget<Wrap>(find.byKey(HomePanel.pillsKey));
+    expect(wrap.spacing, HomePanel.pillGap, reason: 'horizontal is unchanged');
+    expect(wrap.runSpacing, 4);
+
+    final rects = find
+        .byType(IdeaPill)
+        .evaluate()
+        .map((e) => tester.getRect(find.byWidget(e.widget)))
+        .toList();
+    expect(rects.length, 3);
+    // Every pill that starts a new row clears the one above it by 4 pt.
+    var rows = 0;
+    for (var i = 1; i < rects.length; i++) {
+      if (rects[i].top <= rects[i - 1].top + 0.5) continue;
+      rows += 1;
+      expect(
+        rects[i].top - rects[i - 1].bottom,
+        closeTo(4, 0.5),
+        reason: 'the gap between pill rows',
+      );
+    }
+    expect(rows, greaterThan(0), reason: 'the pills do wrap at this width');
+  });
+
   testWidgets('the panel draws a handle, the composer and three pills', (
     tester,
   ) async {

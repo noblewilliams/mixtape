@@ -27,9 +27,11 @@ import 'package:mixtape/presentation/screens/music_sources_screen.dart';
 import 'package:mixtape/presentation/screens/playlist_browser_screen.dart';
 import 'package:mixtape/presentation/screens/playlist_detail_screen.dart';
 import 'package:mixtape/presentation/screens/spotify_request_screen.dart';
+import 'package:mixtape/presentation/screens/mixes_screen.dart';
 import 'package:mixtape/presentation/screens/tabs/library_tab.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
+import 'package:mixtape/presentation/widgets/foundation/empty_state.dart';
 import 'package:mixtape/presentation/widgets/foundation/flush_row.dart';
 import 'package:mixtape/presentation/widgets/foundation/frosted_dock.dart'
     show kFrostedDockHeight;
@@ -385,7 +387,7 @@ void main() {
       expect(find.byType(SpotifyRequestScreen), findsOneWidget);
     });
 
-    testWidgets('the empty block is centred between the title and the dock', (
+    testWidgets('the cassette sits mid-band, under the bar and over the dock', (
       tester,
     ) async {
       final listening = FakeListeningApi(
@@ -393,14 +395,77 @@ void main() {
       );
       await _pump(tester, _container(listening: listening), dockInset: true);
 
-      final empty = tester.getRect(find.byKey(LibraryTab.emptyKey));
-      final title = tester.getRect(find.text('Library'));
+      // The band is measured on the screen, not on this tab's own title row
+      // (smoke round three, note 7), so every tab agrees on it.
+      final cassette = tester.getRect(find.byKey(EmptyState.cassetteKey));
       const dockTop = 844 - kFrostedDockHeight;
-      final middle = (title.bottom + dockTop) / 2;
+      const middle = (EmptyStateSliver.topOffset + dockTop) / 2;
       expect(
-        (empty.center.dy - middle).abs(),
-        lessThan(24),
-        reason: 'it no longer hugs the top of the open space',
+        (cassette.center.dy - middle).abs(),
+        lessThanOrEqualTo(1),
+        reason: 'it neither hugs the title nor drifts onto the dock',
+      );
+      final empty = tester.getRect(find.byKey(LibraryTab.emptyKey));
+      expect(empty.top, lessThan(cassette.center.dy));
+      expect(empty.bottom, lessThan(dockTop));
+    });
+
+    testWidgets('Mixes and Library centre their empty block at the same y', (
+      tester,
+    ) async {
+      // Smoke round three, note 7: one block, one placement rule, so the
+      // cassette does not jump when the listener switches tabs.
+      const size = Size(390, 844);
+      Future<Rect> cassetteIn(Widget tab) async {
+        final listening = FakeListeningApi(
+          onboarding: onboardingState(chosenService: 'spotify'),
+        );
+        final container = _container(listening: listening);
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: MaterialApp(
+              theme: MixtapeTheme.light(),
+              home: Builder(
+                builder: (context) {
+                  final media = MediaQuery.of(context);
+                  return MediaQuery(
+                    // The shell hands each tab root the dock as bottom
+                    // padding; both tabs get exactly the same one here.
+                    data: media.copyWith(
+                      padding: media.padding.copyWith(
+                        bottom: kFrostedDockHeight,
+                      ),
+                    ),
+                    child: tab,
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byKey(EmptyState.cassetteKey), findsOneWidget);
+        final rect = tester.getRect(find.byKey(EmptyState.cassetteKey));
+        await tester.pumpWidget(const SizedBox());
+        return rect;
+      }
+
+      final library = await cassetteIn(const LibraryTab());
+      // Both tabs carry an action, as they do in the shell — Mixes only
+      // offers "Start a mix" when the shell can switch tabs for it.
+      final mixes = await cassetteIn(MixesScreen(onStartMix: () {}));
+
+      expect(library.width, EmptyState.cassetteWidth);
+      expect(mixes.width, EmptyState.cassetteWidth);
+      expect(
+        (library.center.dy - mixes.center.dy).abs(),
+        lessThanOrEqualTo(1),
+        reason: 'the two tabs put the block in the same place',
       );
     });
 

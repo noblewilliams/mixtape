@@ -12,6 +12,12 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart'
+    show
+        CupertinoAlertDialog,
+        CupertinoDialogAction,
+        CupertinoTextField,
+        showCupertinoDialog;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -39,6 +45,7 @@ import '../widgets/playlist_inspiration.dart';
 import '../widgets/queue_card.dart';
 import 'mix_history_screen.dart';
 import 'queue_screen.dart';
+import '../widgets/foundation/mixtape_menu.dart';
 
 /// The toast a selection changed somewhere else earns: the canonical seed is
 /// adopted, the arrangement and the unsent draft are left alone, and the
@@ -240,22 +247,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   /// The board's More menu: Version history, Rename, Archive or Restore.
   Future<void> _actions(BuildContext anchor) async {
-    final box = anchor.findRenderObject();
-    final overlay = Navigator.of(context).overlay?.context.findRenderObject();
-    if (box is! RenderBox || overlay is! RenderBox) return;
-    final rect = box.localToGlobal(Offset.zero, ancestor: overlay) & box.size;
     final archived =
         ref.read(chatProvider(widget.sessionId)).value?.session.status ==
         'archived';
-    final action = await showMenu<String>(
-      context: context,
-      position: RelativeRect.fromRect(rect, Offset.zero & overlay.size),
-      items: [
-        const PopupMenuItem(value: 'history', child: Text('Version history')),
-        const PopupMenuItem(value: 'rename', child: Text('Rename')),
-        PopupMenuItem(
+    final action = await showMixtapeMenu<String>(
+      context,
+      actions: [
+        const MixtapeMenuAction(value: 'history', label: 'Version history'),
+        const MixtapeMenuAction(value: 'rename', label: 'Rename'),
+        MixtapeMenuAction(
           value: 'status',
-          child: Text(archived ? 'Restore' : 'Archive'),
+          label: archived ? 'Restore' : 'Archive',
+          isDestructive: !archived,
         ),
       ],
     );
@@ -298,8 +301,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   Future<void> _rename() async {
     final current =
         ref.read(chatProvider(widget.sessionId)).value?.session.title ?? '';
-    final name = await showDialog<String>(
+    final name = await showCupertinoDialog<String>(
       context: context,
+      barrierDismissible: true,
       builder: (_) => _RenameDialog(title: current),
     );
     if (!mounted || name == null || name.trim().isEmpty) return;
@@ -838,7 +842,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             key: const Key('chat-shape-chip'),
             label: 'Shape',
             hole: false,
-            leading: const EnergyWave(arc: EnergyArc.arc, width: 18, height: 12),
+            leading: const EnergyWave(
+              arc: EnergyArc.arc,
+              width: 18,
+              height: 12,
+            ),
             onPressed: enabled
                 ? () => showEnergyShapeSheet(context, _textController)
                 : null,
@@ -1147,22 +1155,26 @@ class _RenameDialogState extends State<_RenameDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
+  Widget build(BuildContext context) => CupertinoAlertDialog(
     title: const Text('Rename mix'),
-    content: TextField(
-      key: const Key('chat-rename-field'),
-      controller: _controller,
-      autofocus: true,
-      onSubmitted: (value) => Navigator.of(context).pop(value),
-      decoration: const InputDecoration(labelText: 'Mix name'),
+    content: Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: CupertinoTextField(
+        key: const Key('chat-rename-field'),
+        controller: _controller,
+        autofocus: true,
+        onSubmitted: (value) => Navigator.of(context).pop(value),
+        placeholder: 'Mix name',
+      ),
     ),
     actions: [
-      TextButton(
+      CupertinoDialogAction(
         onPressed: () => Navigator.of(context).pop(),
         child: const Text('Cancel'),
       ),
-      FilledButton(
+      CupertinoDialogAction(
         key: const Key('chat-rename-confirm'),
+        isDefaultAction: true,
         onPressed: () => Navigator.of(context).pop(_controller.text),
         child: const Text('Save'),
       ),

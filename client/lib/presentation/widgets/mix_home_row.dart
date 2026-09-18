@@ -7,6 +7,7 @@ import '../screens/mix_history_screen.dart' show MixHistoryScreen;
 import '../theme/mixtape_theme.dart';
 import 'foundation/cassette_tile.dart';
 import 'foundation/flush_row.dart';
+import 'foundation/mixtape_menu.dart';
 import 'foundation/square_art.dart';
 
 /// Home owns canonical session state; this row only owns an unsaved name.
@@ -89,34 +90,25 @@ class _MixHomeRowState extends State<MixHomeRow> {
 
   /// Rename, Version history and Archive/Restore — the approved row menu,
   /// shared by the long-press and the legacy trailing button.
-  List<PopupMenuEntry<String>> _menuItems(bool archived) => [
-    const PopupMenuItem(value: MixHomeRow.renameAction, child: Text('Rename')),
-    const PopupMenuItem(
+  List<MixtapeMenuAction<String>> _menuItems(bool archived) => [
+    const MixtapeMenuAction(value: MixHomeRow.renameAction, label: 'Rename'),
+    const MixtapeMenuAction(
       value: MixHomeRow.versionHistoryAction,
-      child: Text('Version history'),
+      label: 'Version history',
     ),
-    PopupMenuItem(
+    MixtapeMenuAction(
       value: MixHomeRow.statusAction,
-      child: Text(archived ? 'Restore' : 'Archive'),
+      label: archived ? 'Restore' : 'Archive',
+      isDestructive: !archived,
     ),
   ];
 
-  /// The board's long-press: the same menu, anchored on the row.
+  /// The board's long-press: the same menu, as the app's action sheet.
   Future<void> _openActionsMenu(BuildContext rowContext, bool archived) async {
-    final box = rowContext.findRenderObject() as RenderBox?;
-    final overlay =
-        Navigator.of(rowContext).overlay?.context.findRenderObject()
-            as RenderBox?;
-    if (box == null || overlay == null || !box.hasSize) return;
-    final rect = Rect.fromPoints(
-      box.localToGlobal(Offset.zero, ancestor: overlay),
-      box.localToGlobal(box.size.bottomRight(Offset.zero), ancestor: overlay),
-    );
-    final action = await showMenu<String>(
-      context: rowContext,
-      position: RelativeRect.fromRect(rect, Offset.zero & overlay.size),
-      constraints: const BoxConstraints(minWidth: 180),
-      items: _menuItems(archived),
+    final action = await showMixtapeMenu<String>(
+      rowContext,
+      title: widget.session.title,
+      actions: _menuItems(archived),
     );
     if (action != null && mounted) _handleAction(action);
   }
@@ -205,18 +197,18 @@ class _MixHomeRowState extends State<MixHomeRow> {
         isFirst: widget.isFirst,
         onTap: _busy ? null : widget.onOpen,
         trailing: widget.showActionsButton
-            ? PopupMenuButton<String>(
+            ? IconButton(
                 key: ValueKey('mix-actions-${widget.session.id}'),
                 tooltip: 'Mix actions',
-                enabled: !_busy,
-                constraints: const BoxConstraints(minWidth: 180),
-                onSelected: _handleAction,
-                itemBuilder: (_) => _menuItems(archived),
-                child: SizedBox(
-                  width: 48,
-                  height: 48,
-                  child: Icon(Icons.more_horiz, color: context.tokens.muted),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(
+                  minWidth: 48,
+                  minHeight: 48,
                 ),
+                onPressed: _busy
+                    ? null
+                    : () => _openActionsMenu(context, archived),
+                icon: Icon(Icons.more_horiz, color: context.tokens.muted),
               )
             : null,
       ),

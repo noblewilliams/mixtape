@@ -29,6 +29,7 @@ import 'package:mixtape/presentation/screens/playback_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
 import 'package:mixtape/presentation/widgets/foundation/idea_pill.dart';
+import 'package:mixtape/presentation/widgets/energy_journey.dart';
 import 'package:mixtape/presentation/widgets/home_panel.dart';
 import '../helpers/fake_listening_api.dart';
 import 'routine_suggestions_test.dart' show FakeSuggestions;
@@ -254,6 +255,146 @@ void main() {
         expect(find.byType(ChatScreen), findsOneWidget);
         final pushed = tester.widget<ChatScreen>(find.byType(ChatScreen));
         expect(pushed.sessionId, 'new-1');
+      },
+    );
+
+    testWidgets(
+      'a shape on the chip rides out with the message, not in the field',
+      (tester) async {
+        final api = FakeDjApi();
+        api.onListSessions = () async => [];
+        String? capturedPrompt;
+        api.onCreateSession = (prompt) async {
+          capturedPrompt = prompt;
+          return SessionDetail(
+            session: _session(id: 'new-1'),
+            messages: [],
+            queue: [],
+          );
+        };
+        api.onGetSession = (id) async =>
+            SessionDetail(session: _session(id: id), messages: [], queue: []);
+        await _pump(tester, _makeContainer(api));
+
+        await tester.enterText(
+          find.byKey(const Key('prompt-field')),
+          'chill sunset drive',
+        );
+        await tester.pump();
+
+        await tester.tap(find.byKey(EnergyControl.chipKey));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(EnergyControl.presetKey(EnergyArc.fall)));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(EnergyControl.confirmKey));
+        await tester.pumpAndSettle();
+
+        // The chip wears it; the field is exactly what was typed.
+        expect(find.text(EnergyArc.fall.label), findsOneWidget);
+        expect(
+          tester
+              .widget<TextField>(find.byKey(const Key('prompt-field')))
+              .controller!
+              .text,
+          'chill sunset drive',
+        );
+
+        await tester.tap(find.byKey(const Key('start-session')));
+        await tester.pumpAndSettle();
+
+        expect(
+          capturedPrompt,
+          'chill sunset drive\nEnergy journey: ${EnergyArc.fall.label}.',
+          reason: 'the sentence is composed on the way out',
+        );
+      },
+    );
+
+    testWidgets('with no shape set, the raw draft is what is sent', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onListSessions = () async => [];
+      String? capturedPrompt;
+      api.onCreateSession = (prompt) async {
+        capturedPrompt = prompt;
+        return SessionDetail(
+          session: _session(id: 'new-1'),
+          messages: [],
+          queue: [],
+        );
+      };
+      api.onGetSession = (id) async =>
+          SessionDetail(session: _session(id: id), messages: [], queue: []);
+      await _pump(tester, _makeContainer(api));
+
+      await tester.enterText(
+        find.byKey(const Key('prompt-field')),
+        'chill sunset drive',
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('start-session')));
+      await tester.pumpAndSettle();
+
+      expect(capturedPrompt, 'chill sunset drive');
+    });
+
+    testWidgets('Clear takes the shape back off the chip', (tester) async {
+      final api = FakeDjApi();
+      api.onListSessions = () async => [];
+      await _pump(tester, _makeContainer(api));
+
+      await tester.tap(find.byKey(EnergyControl.chipKey));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(EnergyControl.presetKey(EnergyArc.rise)));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(EnergyControl.confirmKey));
+      await tester.pumpAndSettle();
+      expect(find.text(EnergyArc.rise.label), findsOneWidget);
+
+      await tester.tap(find.byKey(EnergyControl.chipKey));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(EnergyControl.clearKey));
+      await tester.pumpAndSettle();
+
+      expect(find.text(EnergyControl.unsetLabel), findsOneWidget);
+      expect(find.text(EnergyArc.rise.label), findsNothing);
+    });
+
+    testWidgets(
+      'a composed message with no room says so under the composer and sends '
+      'nothing',
+      (tester) async {
+        final api = FakeDjApi();
+        api.onListSessions = () async => [];
+        var creates = 0;
+        api.onCreateSession = (prompt) async {
+          creates += 1;
+          return SessionDetail(
+            session: _session(id: 'new-1'),
+            messages: [],
+            queue: [],
+          );
+        };
+        await _pump(tester, _makeContainer(api));
+
+        await tester.tap(find.byKey(EnergyControl.chipKey));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(EnergyControl.presetKey(EnergyArc.rise)));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(EnergyControl.confirmKey));
+        await tester.pumpAndSettle();
+
+        await tester.enterText(
+          find.byKey(const Key('prompt-field')),
+          'x' * 2000,
+        );
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('start-session')));
+        await tester.pumpAndSettle();
+
+        expect(creates, 0);
+        expect(find.text(energySheetTooLong), findsOneWidget);
       },
     );
 

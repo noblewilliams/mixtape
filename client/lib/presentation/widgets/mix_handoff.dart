@@ -28,6 +28,14 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart'
+    show
+        CupertinoActivityIndicator,
+        CupertinoAlertDialog,
+        CupertinoTheme,
+        CupertinoDialogAction,
+        CupertinoTextField,
+        showCupertinoDialog;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -302,8 +310,9 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
       }
       if (!mounted) return;
       final accountName = ref.read(accountNameProvider).value;
-      await showDialog<void>(
+      await showCupertinoDialog<void>(
         context: context,
+        barrierDismissible: true,
         builder: (dialogContext) => MixSaveDialog(
           keys: keys,
           defaultName: defaultName,
@@ -617,43 +626,54 @@ class _MixSaveDialogState extends State<MixSaveDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog.adaptive(
+    // Not `context.tokens`: this alert is pumped by hosts that build a bare
+    // `MaterialApp`, and a helper line is not worth an assertion.
+    final helper = CupertinoTheme.of(
+      context,
+    ).textTheme.tabLabelTextStyle.copyWith(fontSize: 12);
+    return CupertinoAlertDialog(
       title: Text(widget.keys.saveDialogTitle),
       content: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          TextField(
+          const SizedBox(height: 14),
+          CupertinoTextField(
             key: widget.keys.nameField,
             controller: _name,
             autofocus: true,
             enabled: !_submitting,
-            decoration: const InputDecoration(labelText: 'Playlist name'),
+            placeholder: 'Playlist name',
           ),
-          const SizedBox(height: 12),
-          TextField(
+          const SizedBox(height: 10),
+          CupertinoTextField(
             key: widget.keys.authorField,
             controller: _author,
             enabled: !_submitting,
-            decoration: const InputDecoration(
-              labelText: 'Your name',
-              helperText: 'Shown under the playlist in Apple Music',
-            ),
+            placeholder: 'Your name',
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Shown under the playlist in Apple Music',
+            textAlign: TextAlign.start,
+            style: helper,
           ),
         ],
       ),
       actions: [
-        TextButton(
+        CupertinoDialogAction(
           onPressed: _submitting ? null : () => Navigator.of(context).pop(),
           child: const Text('Cancel'),
         ),
-        FilledButton(
+        CupertinoDialogAction(
           key: widget.keys.saveConfirm,
+          isDefaultAction: true,
           onPressed: _submitting ? null : _submit,
           child: _submitting
               ? const SizedBox(
                   width: 16,
                   height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+                  child: CupertinoActivityIndicator(radius: 8),
                 )
               : const Text('Save'),
         ),

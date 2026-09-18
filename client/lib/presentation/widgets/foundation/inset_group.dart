@@ -100,6 +100,9 @@ class InsetRow extends StatelessWidget {
   /// Draws the title in err ink (Sign out, Forget, Delete).
   final bool destructive;
 
+  /// The row's own vertical padding.
+  static const double verticalPadding = 12;
+
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
@@ -116,7 +119,12 @@ class InsetRow extends StatelessWidget {
     final row = ConstrainedBox(
       constraints: const BoxConstraints(minHeight: InsetGroup.rowInset),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+        // 12, not 8: looser rows to go with the smaller type (smoke round
+        // three, note 4).
+        padding: const EdgeInsets.symmetric(
+          vertical: InsetRow.verticalPadding,
+          horizontal: 16,
+        ),
         child: Row(
           children: [
             if (leading != null) ...[

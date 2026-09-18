@@ -194,6 +194,45 @@ void main() {
     );
   });
 
+  testWidgets('the tape button wears the prism along its bottom edge', (
+    tester,
+  ) async {
+    await _pump(
+      tester,
+      TapeButton(label: 'Play now', onPressed: () {}),
+    );
+
+    final stripe = find.descendant(
+      of: find.byType(TapeButton),
+      matching: find.byKey(TapeButton.stripeKey),
+    );
+    expect(stripe, findsOneWidget, reason: 'the prism is inside the shell');
+
+    final button = tester.getRect(find.byType(TapeButton));
+    final shell = tester.getRect(
+      find.descendant(
+        of: find.byType(TapeButton),
+        matching: find.byType(ClipRRect),
+      ),
+    );
+    final rect = tester.getRect(stripe);
+    expect(
+      rect.bottom,
+      closeTo(shell.bottom, 0.5),
+      reason: 'it sits at the bottom of the shell',
+    );
+    expect(rect.height, TapeButton.stripeHeight);
+    expect(
+      rect.width,
+      closeTo(shell.width, 0.5),
+      reason: 'full width, edge to edge',
+    );
+    // The label is still centred over it, not pushed off.
+    final label = tester.getRect(find.text('Play now'));
+    expect(label.center.dx, closeTo(button.center.dx, 0.5));
+    expect(label.bottom, lessThanOrEqualTo(rect.top + 1));
+  });
+
   testWidgets('a disabled tape button never calls onPressed', (tester) async {
     var taps = 0;
     await _pump(

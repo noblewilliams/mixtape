@@ -6,6 +6,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../../theme/mixtape_theme.dart';
+import 'prism_stripe.dart';
 
 /// The primary mix action: 40 pt of tape shell with a centred label.
 ///
@@ -42,6 +43,13 @@ class TapeButton extends StatelessWidget {
 
   /// Balanced side padding around a label that now stands on its own.
   static const double _sidePadding = 14;
+
+  /// The prism the dark shell wears along its bottom edge, full width and
+  /// clipped by the shell's own radius (smoke round three, note 1).
+  static const double stripeHeight = 3;
+
+  /// That stripe, for tests.
+  static const Key stripeKey = Key('tape-button-prism');
 
   @override
   Widget build(BuildContext context) {
@@ -114,6 +122,20 @@ class TapeButton extends StatelessWidget {
                 child: Container(
                   height: 1,
                   color: Colors.white.withValues(alpha: 0.13),
+                ),
+              ),
+              // Full width along the bottom, under the label: the one
+              // colourful mark on the app's primary action.
+              const Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: PrismStripe(
+                  key: stripeKey,
+                  horizontal: true,
+                  height: stripeHeight,
+                  width: double.infinity,
+                  borderRadius: BorderRadius.zero,
                 ),
               ),
               if (playing)

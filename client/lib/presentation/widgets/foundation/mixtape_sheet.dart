@@ -57,12 +57,28 @@ abstract final class MixtapeSheet {
       ? darkBarrier
       : lightBarrier;
 
-  /// The panel tint laid over the app's own base, so the surface is opaque:
-  /// nothing behind the sheet shows through to muddy its text.
-  static Color surfaceColorOf(BuildContext context) {
+  /// The sheet's own solid colour.
+  ///
+  /// A blend of the translucent panel over the app's base was opaque by the
+  /// numbers and still read as glass — the founder could make out the screen
+  /// behind it (smoke round three, note 3). One flat colour instead, and no
+  /// [BackdropFilter] anywhere in this chrome.
+  static Color surfaceColorOf(BuildContext context) =>
+      tokensOf(context).sheetSurface;
+
+  /// A sheet's heading, one step down the scale from the section word it used
+  /// to be (smoke round three, note 4).
+  static TextStyle headingOf(BuildContext context) => tokensOf(context).smallTitle;
+
+  /// The line under a heading: the 12 pt floor, in muted ink.
+  static TextStyle subtitleOf(BuildContext context) {
     final tokens = tokensOf(context);
-    return Color.alphaBlend(tokens.panel, tokens.scrimBase);
+    return tokens.meta.copyWith(color: tokens.muted);
   }
+
+  /// The extra air the founder asked for between a sheet's heading block and
+  /// the first row under it (smoke round three, note 4).
+  static const double headingGap = 8;
 }
 
 /// Presents [builder] as the app's standard sheet.

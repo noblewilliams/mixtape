@@ -10,7 +10,12 @@
 /// Apple source row.
 library;
 
-import 'package:flutter/cupertino.dart' show CupertinoIcons;
+import 'package:flutter/cupertino.dart'
+    show
+        CupertinoAlertDialog,
+        CupertinoDialogAction,
+        CupertinoIcons,
+        showCupertinoDialog;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/listening/listening_models.dart';
@@ -358,19 +363,21 @@ Future<void> removeSourceFlow(
 ///
 /// Copy unchanged from the September 4 approval: what goes, what stays.
 Future<bool?> confirmSourceRemoval(BuildContext context, MusicSource source) =>
-    showDialog<bool>(
+    showCupertinoDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
+      barrierDismissible: true,
+      builder: (dialogContext) => CupertinoAlertDialog(
         title: Text('Remove ${sourceName(source)}?'),
         content: Text(removalCopyFor(source)),
         actions: [
-          TextButton(
+          CupertinoDialogAction(
             key: const Key('remove-keep'),
             onPressed: () => Navigator.of(dialogContext).pop(false),
             child: const Text('Keep it'),
           ),
-          FilledButton(
+          CupertinoDialogAction(
             key: const Key('remove-confirm'),
+            isDestructiveAction: true,
             onPressed: () => Navigator.of(dialogContext).pop(true),
             child: const Text('Remove'),
           ),

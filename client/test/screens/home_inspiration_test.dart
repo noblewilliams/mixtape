@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/services.dart';
+import 'package:flutter/cupertino.dart' show CupertinoAlertDialog;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -19,6 +20,7 @@ import 'package:mixtape/presentation/screens/playlist_detail_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/home_panel.dart';
 import 'package:mixtape/presentation/widgets/playlist_inspiration.dart';
+import 'package:mixtape/presentation/widgets/foundation/mixtape_menu.dart';
 import '../helpers/auth_ui_snapshot.dart';
 import '../helpers/fake_listening_api.dart';
 import '../presentation/providers/playlist_context_provider_test.dart'
@@ -192,10 +194,11 @@ void main() {
     await openChipMenu(tester);
     expect(
       tester
-          .widget<CheckedPopupMenuItem<Object?>>(
+          .widget<MixtapeMenuItem<Object?>>(
             find.byKey(InspirationChip.excludeItemKey),
           )
-          .checked,
+          .action
+          .isSelected,
       isFalse,
     );
     await tester.tap(find.byKey(InspirationChip.excludeItemKey));
@@ -209,10 +212,11 @@ void main() {
     await openChipMenu(tester);
     expect(
       tester
-          .widget<CheckedPopupMenuItem<Object?>>(
+          .widget<MixtapeMenuItem<Object?>>(
             find.byKey(InspirationChip.excludeItemKey),
           )
-          .checked,
+          .action
+          .isSelected,
       isTrue,
     );
     await tester.tap(find.byKey(InspirationChip.excludeItemKey));
@@ -397,7 +401,7 @@ void main() {
       );
       await tester.tap(find.text('I chose these songs'));
       await tester.pumpAndSettle();
-      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.byType(CupertinoAlertDialog), findsOneWidget);
       await captureAuthSnapshot(
         tester,
         'native-playlist-taste-${brightness.name}',

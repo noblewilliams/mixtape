@@ -112,4 +112,38 @@ void main() {
     );
     expect(material.color?.a, 1, reason: 'the panel is opaque');
   });
+
+  testWidgets('the surface is a solid colour, with no blur behind it', (
+    tester,
+  ) async {
+    for (final (brightness, expected) in [
+      (Brightness.light, MixtapeTokens.light.sheetSurface),
+      (Brightness.dark, MixtapeTokens.dark.sheetSurface),
+    ]) {
+      await _open(tester, brightness: brightness);
+
+      final surface = find.byKey(MixtapeSheet.surfaceKey);
+      final material = tester.widget<Material>(
+        find.ancestor(of: surface, matching: find.byType(Material)).first,
+      );
+      // Not a blend over the app's ground: one flat colour, fully opaque
+      // (smoke round three, note 3).
+      expect(material.color, expected);
+      expect(
+        (material.color!.a * 255).round(),
+        255,
+        reason: 'nothing behind the sheet shows through',
+      );
+      expect(
+        find.descendant(
+          of: find.byType(MixtapeSheetChrome),
+          matching: find.byType(BackdropFilter),
+        ),
+        findsNothing,
+        reason: 'no glass in the sheet chrome',
+      );
+
+      await tester.pumpWidget(const SizedBox());
+    }
+  });
 }

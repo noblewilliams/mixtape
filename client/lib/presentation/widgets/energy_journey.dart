@@ -3,8 +3,10 @@
 /// shape sheet; frame A1 and `.sheet` / `.preset` on
 /// `docs/mockups/2026-09-17-mobile-conversation-states.html`).
 ///
-/// The sheet only ever writes a sentence into the composer's draft — nothing
-/// generates until the listener sends it themselves.
+/// The shape is state on the chip, not text in the field (smoke round three,
+/// note 5): the chip wears the chosen arc, the draft is never touched, and
+/// Home folds the sentence in only when the listener sends. Nothing generates
+/// until they do.
 library;
 
 import 'package:flutter/material.dart';
@@ -79,8 +81,10 @@ String? energyLine(Map<String, dynamic> detail) {
 
 /// The sheet's own copy.
 const String energySheetTitle = 'Give the mix a shape.';
+/// The shape no longer lands in the field, so the blurb no longer promises it
+/// will (smoke round three, note 5).
 const String energySheetBlurb =
-    'Adds a sentence to your brief. You still send it yourself.';
+    'Goes out with your brief. You still send it yourself.';
 const String energySheetTooLong =
     'Shorten your brief to make room for the shape.';
 const String energyShapeToast = 'Shape added to your brief. Send when ready.';
@@ -111,16 +115,53 @@ class EnergyControlVisibility extends InheritedWidget {
       oldWidget.visible != visible;
 }
 
+/// What the shape sheet answers with.
+///
+/// A null result from the sheet itself is a dismissal and changes nothing; a
+/// choice carrying a null [arc] is the listener pressing Clear.
+@immutable
+class EnergyShapeChoice {
+  const EnergyShapeChoice(this.arc);
+
+  final EnergyArc? arc;
+
+  @override
+  bool operator ==(Object other) =>
+      other is EnergyShapeChoice && other.arc == arc;
+
+  @override
+  int get hashCode => arc.hashCode;
+}
+
 /// The board's `Shape` chip: a 36 pt label chip marked with the wave glyph.
+///
+/// With no shape chosen it reads "Shape" over the generic wave; with one it
+/// wears that arc's own name and its own wave, and the sheet opens on it.
 class EnergyControl extends StatelessWidget {
   const EnergyControl({
     super.key,
     required this.controller,
     this.enabled = true,
+    this.selectedArc,
+    this.onArcChanged,
   });
 
+  /// The draft, which the sheet reads to judge the composed message's length.
+  /// It is never written to.
   final TextEditingController controller;
   final bool enabled;
+
+  /// The shape the chip is wearing, or null for none.
+  final EnergyArc? selectedArc;
+
+  /// Told the new shape, or null when the listener clears it.
+  final ValueChanged<EnergyArc?>? onArcChanged;
+
+  /// What the chip says with nothing chosen.
+  static const String unsetLabel = 'Shape';
+
+  /// The wave the unset chip wears.
+  static const EnergyArc genericArc = EnergyArc.arc;
 
   static const Key chipKey = Key('energy-shape-chip');
 
@@ -128,42 +169,66 @@ class EnergyControl extends StatelessWidget {
   /// to look for them.
   static const Key sheetKey = Key('energy-shape-sheet');
   static const Key confirmKey = Key('energy-shape-confirm');
+  static const Key clearKey = Key('energy-shape-clear');
   static const Key tooLongKey = Key('energy-shape-too-long');
 
   static Key presetKey(EnergyArc arc) => ValueKey('energy-preset-${arc.name}');
 
+  Future<void> _open(BuildContext context) async {
+    final choice = await pickEnergyShape(
+      context,
+      controller,
+      selected: selectedArc,
+    );
+    if (choice == null) return;
+    onArcChanged?.call(choice.arc);
+  }
+
   @override
   Widget build(BuildContext context) {
     if (!EnergyControlVisibility.of(context)) return const SizedBox.shrink();
+    final arc = selectedArc;
     return Align(
       alignment: Alignment.centerLeft,
       child: Padding(
         padding: const EdgeInsets.only(bottom: 2),
         child: LabelChip(
           key: chipKey,
-          label: 'Shape',
+          label: arc?.label ?? unsetLabel,
           hole: false,
-          leading: const EnergyWave(arc: EnergyArc.arc, width: 18, height: 12),
-          onPressed: enabled
-              ? () => showEnergyShapeSheet(context, controller)
-              : null,
+          leading: EnergyWave(
+            arc: arc ?? genericArc,
+            width: 18,
+            height: 12,
+          ),
+          onPressed: enabled ? () => _open(context) : null,
         ),
       ),
     );
   }
 }
 
-/// Opens the shape sheet and, on confirmation, writes the sentence into
-/// [controller] and toasts. Nothing is sent.
+/// Opens the shape sheet on [selected] and returns what the listener did.
+Future<EnergyShapeChoice?> pickEnergyShape(
+  BuildContext context,
+  TextEditingController controller, {
+  EnergyArc? selected,
+}) => showMixtapeSheet<EnergyShapeChoice>(
+  context,
+  isScrollControlled: true,
+  builder: (_) =>
+      _EnergyShapeSheet(controller: controller, selected: selected),
+);
+
+/// The conversation's chip: there is no session-start message to fold the
+/// sentence into on a later turn, so choosing a shape mid-conversation still
+/// writes it into the draft and toasts. Nothing is sent.
 Future<void> showEnergyShapeSheet(
   BuildContext context,
   TextEditingController controller,
 ) async {
-  final result = await showMixtapeSheet<EnergyArc>(
-    context,
-    isScrollControlled: true,
-    builder: (_) => _EnergyShapeSheet(controller: controller),
-  );
+  final choice = await pickEnergyShape(context, controller);
+  final result = choice?.arc;
   if (!context.mounted || result == null) return;
   final next = energyBrief(controller.text, result);
   if (next == null) return;
@@ -181,16 +246,20 @@ Future<void> showEnergyShapeSheet(
 }
 
 class _EnergyShapeSheet extends StatefulWidget {
-  const _EnergyShapeSheet({required this.controller});
+  const _EnergyShapeSheet({required this.controller, this.selected});
 
   final TextEditingController controller;
+
+  /// The shape the chip is already wearing, which the radio opens on and
+  /// which is what makes Clear worth offering.
+  final EnergyArc? selected;
 
   @override
   State<_EnergyShapeSheet> createState() => _EnergyShapeSheetState();
 }
 
 class _EnergyShapeSheetState extends State<_EnergyShapeSheet> {
-  EnergyArc arc = EnergyArc.arc;
+  late EnergyArc arc = widget.selected ?? EnergyControl.genericArc;
 
   @override
   Widget build(BuildContext context) {
@@ -208,13 +277,17 @@ class _EnergyShapeSheetState extends State<_EnergyShapeSheet> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(energySheetTitle, style: tokens.section),
+              Text(energySheetTitle, style: MixtapeSheet.headingOf(context)),
               const SizedBox(height: 2),
               Padding(
-                padding: const EdgeInsets.only(bottom: 8),
+                // The heading block's own gap plus the founder's extra air
+                // above the first row (smoke round three, note 4).
+                padding: const EdgeInsets.only(
+                  bottom: 8 + MixtapeSheet.headingGap,
+                ),
                 child: Text(
                   energySheetBlurb,
-                  style: tokens.secondary.copyWith(color: tokens.muted),
+                  style: MixtapeSheet.subtitleOf(context),
                 ),
               ),
               for (var i = 0; i < energyArcOrder.length; i++)
@@ -236,10 +309,27 @@ class _EnergyShapeSheetState extends State<_EnergyShapeSheet> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    TextAction(
-                      label: 'Cancel',
-                      quiet: true,
-                      onPressed: () => Navigator.of(context).pop(),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        TextAction(
+                          label: 'Cancel',
+                          quiet: true,
+                          onPressed: () => Navigator.of(context).pop(),
+                        ),
+                        // Only worth offering once there is a shape to take
+                        // off the chip.
+                        if (widget.selected != null) ...[
+                          const SizedBox(width: 4),
+                          TextAction(
+                            key: EnergyControl.clearKey,
+                            label: 'Clear',
+                            onPressed: () => Navigator.of(
+                              context,
+                            ).pop(const EnergyShapeChoice(null)),
+                          ),
+                        ],
+                      ],
                     ),
                     Flexible(
                       child: TapeButton(
@@ -247,7 +337,9 @@ class _EnergyShapeSheetState extends State<_EnergyShapeSheet> {
                         label: 'Use this shape',
                         onPressed: tooLong
                             ? null
-                            : () => Navigator.of(context).pop(arc),
+                            : () => Navigator.of(
+                                context,
+                              ).pop(EnergyShapeChoice(arc)),
                       ),
                     ),
                   ],

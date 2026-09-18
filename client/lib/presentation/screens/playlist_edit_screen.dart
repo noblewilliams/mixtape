@@ -29,6 +29,7 @@ import '../widgets/home_panel.dart' show HomePanel;
 import '../widgets/mix_prompt_input.dart';
 import '../widgets/playlist_artwork.dart';
 import '../widgets/foundation/mixtape_sheet.dart';
+import '../widgets/foundation/mixtape_menu.dart';
 
 class PlaylistEditScreen extends ConsumerStatefulWidget {
   const PlaylistEditScreen({super.key, required this.draftId});
@@ -89,15 +90,10 @@ class _PlaylistEditScreenState extends ConsumerState<PlaylistEditScreen> {
   }
 
   Future<void> _openMore(BuildContext anchor) async {
-    final box = anchor.findRenderObject();
-    final overlay = Navigator.of(context).overlay?.context.findRenderObject();
-    if (box is! RenderBox || overlay is! RenderBox) return;
-    final rect = box.localToGlobal(Offset.zero, ancestor: overlay) & box.size;
-    final action = await showMenu<String>(
-      context: context,
-      position: RelativeRect.fromRect(rect, Offset.zero & overlay.size),
-      items: const [
-        PopupMenuItem(value: 'refresh', child: Text('Refresh draft')),
+    final action = await showMixtapeMenu<String>(
+      context,
+      actions: const [
+        MixtapeMenuAction(value: 'refresh', label: 'Refresh draft'),
       ],
     );
     if (!mounted || action != 'refresh') return;

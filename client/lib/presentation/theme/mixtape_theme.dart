@@ -97,6 +97,7 @@ class MixtapeTokens extends ThemeExtension<MixtapeTokens> {
     required this.glass,
     required this.glassHighlight,
     required this.panel,
+    required this.sheetSurface,
     required this.field,
     required this.glassShadow,
     required this.scrimBase,
@@ -142,6 +143,14 @@ class MixtapeTokens extends ThemeExtension<MixtapeTokens> {
   final Color glass;
   final Color glassHighlight;
   final Color panel;
+
+  /// The one opaque colour every modal sheet's surface is painted in.
+  ///
+  /// Not [panel] over [scrimBase]: a blend of a translucent tint over a ground
+  /// still reads as glass when the room behind it is busy, and the founder
+  /// could see the screen through it (smoke round three, note 3).
+  final Color sheetSurface;
+
   final Color field;
 
   /// Drop shadow under floating glass (dock, clusters).
@@ -284,6 +293,7 @@ class MixtapeTokens extends ThemeExtension<MixtapeTokens> {
     glass: Color.fromRGBO(255, 255, 255, 0.62),
     glassHighlight: Color.fromRGBO(255, 255, 255, 0.90),
     panel: Color.fromRGBO(255, 255, 255, 0.55),
+    sheetSurface: Color(0xFFFBFAF8),
     field: Color.fromRGBO(255, 255, 255, 0.75),
     glassShadow: Color.fromRGBO(30, 24, 30, 0.16),
     scrimBase: Color.fromRGBO(248, 246, 243, 1),
@@ -319,7 +329,7 @@ class MixtapeTokens extends ThemeExtension<MixtapeTokens> {
       color: _lightText,
     ),
     smallTitle: TextStyle(
-      fontSize: 17,
+      fontSize: 16,
       fontWeight: FontWeight.w600,
       height: 1.2,
       color: _lightText,
@@ -331,19 +341,19 @@ class MixtapeTokens extends ThemeExtension<MixtapeTokens> {
       color: _lightText,
     ),
     rowTitle: TextStyle(
-      fontSize: 16,
+      fontSize: 15,
       fontWeight: FontWeight.w500,
       height: 1.3,
       color: _lightText,
     ),
     body: TextStyle(
-      fontSize: 16,
+      fontSize: 15,
       fontWeight: FontWeight.w400,
       height: 1.4,
       color: _lightText,
     ),
     secondary: TextStyle(
-      fontSize: 13,
+      fontSize: 12,
       fontWeight: FontWeight.w400,
       height: 1.4,
       color: _lightSmoke,
@@ -375,6 +385,7 @@ class MixtapeTokens extends ThemeExtension<MixtapeTokens> {
     glass: Color.fromRGBO(60, 56, 66, 0.50),
     glassHighlight: Color.fromRGBO(255, 255, 255, 0.20),
     panel: Color.fromRGBO(40, 36, 54, 0.55),
+    sheetSurface: Color(0xFF1C1A22),
     field: Color.fromRGBO(255, 255, 255, 0.10),
     glassShadow: Color.fromRGBO(0, 0, 0, 0.5),
     scrimBase: Color.fromRGBO(8, 8, 12, 1),
@@ -410,7 +421,7 @@ class MixtapeTokens extends ThemeExtension<MixtapeTokens> {
       color: _darkText,
     ),
     smallTitle: TextStyle(
-      fontSize: 17,
+      fontSize: 16,
       fontWeight: FontWeight.w600,
       height: 1.2,
       color: _darkText,
@@ -422,19 +433,19 @@ class MixtapeTokens extends ThemeExtension<MixtapeTokens> {
       color: _darkText,
     ),
     rowTitle: TextStyle(
-      fontSize: 16,
+      fontSize: 15,
       fontWeight: FontWeight.w500,
       height: 1.3,
       color: _darkText,
     ),
     body: TextStyle(
-      fontSize: 16,
+      fontSize: 15,
       fontWeight: FontWeight.w400,
       height: 1.4,
       color: _darkText,
     ),
     secondary: TextStyle(
-      fontSize: 13,
+      fontSize: 12,
       fontWeight: FontWeight.w400,
       height: 1.4,
       color: _darkSmoke,
@@ -467,6 +478,7 @@ class MixtapeTokens extends ThemeExtension<MixtapeTokens> {
     Color? glass,
     Color? glassHighlight,
     Color? panel,
+    Color? sheetSurface,
     Color? field,
     Color? glassShadow,
     Color? scrimBase,
@@ -502,6 +514,7 @@ class MixtapeTokens extends ThemeExtension<MixtapeTokens> {
     glass: glass ?? this.glass,
     glassHighlight: glassHighlight ?? this.glassHighlight,
     panel: panel ?? this.panel,
+    sheetSurface: sheetSurface ?? this.sheetSurface,
     field: field ?? this.field,
     glassShadow: glassShadow ?? this.glassShadow,
     scrimBase: scrimBase ?? this.scrimBase,
@@ -545,6 +558,7 @@ class MixtapeTokens extends ThemeExtension<MixtapeTokens> {
       glass: Color.lerp(glass, other.glass, t)!,
       glassHighlight: Color.lerp(glassHighlight, other.glassHighlight, t)!,
       panel: Color.lerp(panel, other.panel, t)!,
+      sheetSurface: Color.lerp(sheetSurface, other.sheetSurface, t)!,
       field: Color.lerp(field, other.field, t)!,
       glassShadow: Color.lerp(glassShadow, other.glassShadow, t)!,
       scrimBase: Color.lerp(scrimBase, other.scrimBase, t)!,
@@ -585,6 +599,7 @@ class MixtapeTokens extends ThemeExtension<MixtapeTokens> {
       other.glass == glass &&
       other.glassHighlight == glassHighlight &&
       other.panel == panel &&
+      other.sheetSurface == sheetSurface &&
       other.field == field &&
       other.glassShadow == glassShadow &&
       other.scrimBase == scrimBase &&
@@ -622,6 +637,7 @@ class MixtapeTokens extends ThemeExtension<MixtapeTokens> {
     glass,
     glassHighlight,
     panel,
+    sheetSurface,
     field,
     glassShadow,
     scrimBase,

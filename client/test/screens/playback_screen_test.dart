@@ -453,7 +453,14 @@ void main() {
     await tester.pump();
     await tester.tap(find.byKey(PlaybackScreen.moreKey));
     await tester.pumpAndSettle();
-    expect(find.text('Cancel'), findsOneWidget);
+    // The sheet has a Cancel of its own, so the entry is found by its key.
+    expect(
+      find.descendant(
+        of: find.byKey(PlaybackScreen.stopActionKey),
+        matching: find.text('Cancel'),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('Stop'), findsNothing);
   });
 

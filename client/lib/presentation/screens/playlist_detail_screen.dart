@@ -13,6 +13,8 @@
 /// assumes it is the app root.
 library;
 
+import 'package:flutter/cupertino.dart'
+    show CupertinoAlertDialog, CupertinoDialogAction, showCupertinoDialog;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -32,6 +34,7 @@ import '../widgets/foundation/tape_button.dart';
 import '../widgets/foundation/text_action.dart';
 import '../widgets/playlist_artwork.dart';
 import 'playlist_edit_screen.dart';
+import '../widgets/foundation/mixtape_menu.dart';
 
 class PlaylistDetailScreen extends ConsumerStatefulWidget {
   const PlaylistDetailScreen({
@@ -146,19 +149,21 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     _confirmingTaste = true;
     bool? approved;
     try {
-      approved = await showDialog<bool>(
+      approved = await showCupertinoDialog<bool>(
         context: context,
-        builder: (context) => AlertDialog(
+        barrierDismissible: true,
+        builder: (context) => CupertinoAlertDialog(
           title: const Text('Did you choose these songs?'),
           content: const Text(
             'Confirm only if you personally chose the songs in this playlist. This helps the DJ understand your taste.',
           ),
           actions: [
-            TextButton(
+            CupertinoDialogAction(
               onPressed: () => Navigator.of(context).pop(false),
               child: const Text('Cancel'),
             ),
-            TextButton(
+            CupertinoDialogAction(
+              isDefaultAction: true,
               onPressed: () => Navigator.of(context).pop(true),
               child: const Text('Confirm'),
             ),
@@ -178,35 +183,15 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
   /// The one overflow entry: the private draft. Kept out of the body so the
   /// screen reads as the playlist, not as an editing surface.
   Future<void> _openMore(BuildContext anchor) async {
-    final box = anchor.findRenderObject();
-    final overlay = Navigator.of(context).overlay?.context.findRenderObject();
-    if (box is! RenderBox || overlay is! RenderBox) return;
-    final rect = box.localToGlobal(Offset.zero, ancestor: overlay) & box.size;
-    final action = await showMenu<String>(
-      context: context,
-      position: RelativeRect.fromRect(rect, Offset.zero & overlay.size),
-      items: [
-        PopupMenuItem(
+    final action = await showMixtapeMenu<String>(
+      context,
+      actions: [
+        MixtapeMenuAction(
           key: PlaylistDetailScreen.editWithDjKey,
           value: 'edit',
           enabled: !_startingDraft,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 240),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('Edit with the DJ'),
-                const SizedBox(height: 2),
-                Text(
-                  PlaylistDetailScreen.draftPromise,
-                  style: context.tokens.meta.copyWith(
-                    color: context.tokens.muted,
-                  ),
-                ),
-              ],
-            ),
-          ),
+          label: 'Edit with the DJ',
+          subtitle: PlaylistDetailScreen.draftPromise,
         ),
       ],
     );
@@ -444,7 +429,10 @@ class _TasteBlock extends StatelessWidget {
         ..add(
           Align(
             alignment: Alignment.centerLeft,
-            child: TextAction(label: 'Reload confirmation', onPressed: onReload),
+            child: TextAction(
+              label: 'Reload confirmation',
+              onPressed: onReload,
+            ),
           ),
         );
     } else if (taste.confirmed) {
@@ -600,9 +588,17 @@ class _Skeleton extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            _Bar(width: 170, height: 14, color: tokens.hairline),
+                            _Bar(
+                              width: 170,
+                              height: 14,
+                              color: tokens.hairline,
+                            ),
                             const SizedBox(height: 8),
-                            _Bar(width: 100, height: 11, color: tokens.hairline),
+                            _Bar(
+                              width: 100,
+                              height: 11,
+                              color: tokens.hairline,
+                            ),
                           ],
                         ),
                       ),

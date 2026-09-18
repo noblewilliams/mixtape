@@ -24,6 +24,7 @@ import 'foundation/inset_group.dart';
 import 'foundation/mixtape_sheet.dart';
 import 'foundation/status_word.dart';
 import 'playlist_artwork.dart';
+import 'foundation/mixtape_menu.dart';
 
 class PlaylistInspirationChoice {
   const PlaylistInspirationChoice(
@@ -209,44 +210,38 @@ class InspirationChip extends StatelessWidget {
       (onPick != null || onDetach != null);
 
   Future<void> _openMenu(BuildContext context) async {
-    final box = context.findRenderObject();
-    final overlay = Navigator.of(context).overlay?.context.findRenderObject();
-    if (box is! RenderBox || overlay is! RenderBox) return;
-    final rect = box.localToGlobal(Offset.zero, ancestor: overlay) & box.size;
-    final tokens = context.tokens;
-    final action = await showMenu<_ChipAction>(
-      context: context,
-      position: RelativeRect.fromRect(rect, Offset.zero & overlay.size),
-      items: [
+    final action = await showMixtapeMenu<_ChipAction>(
+      context,
+      actions: [
+        // Not an action but a word of explanation, which the sheet can only
+        // carry as a disabled entry; kept keyed as the menu item was.
         if (tone == InspirationChipTone.insufficient)
-          PopupMenuItem<_ChipAction>(
+          const MixtapeMenuAction(
             key: menuNoteKey,
             enabled: false,
-            child: Text(
-              insufficientNote,
-              style: tokens.secondary.copyWith(color: tokens.errInk),
-            ),
+            isDestructive: true,
+            label: insufficientNote,
           ),
         if (onPick != null)
-          const PopupMenuItem<_ChipAction>(
+          const MixtapeMenuAction(
             key: replaceItemKey,
             value: _ChipAction.replace,
-            child: Text(replaceLabel),
+            label: replaceLabel,
           ),
         // Excluding the source only means anything while the playlist can
         // still be read.
         if (tone == InspirationChipTone.ready)
-          CheckedPopupMenuItem<_ChipAction>(
+          MixtapeMenuAction(
             key: excludeItemKey,
             value: _ChipAction.exclude,
-            checked: excludeSourceTracks,
-            child: const Text(excludeLabel),
+            isSelected: excludeSourceTracks,
+            label: excludeLabel,
           ),
         if (onDetach != null)
-          const PopupMenuItem<_ChipAction>(
+          const MixtapeMenuAction(
             key: detachItemKey,
             value: _ChipAction.detach,
-            child: Text(detachLabel),
+            label: detachLabel,
           ),
       ],
     );

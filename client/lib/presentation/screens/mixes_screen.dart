@@ -18,7 +18,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/dj/dj_models.dart';
 import '../providers/dj_providers.dart';
 import '../theme/mixtape_theme.dart';
-import '../widgets/foundation/cassette_tile.dart';
+import '../widgets/foundation/empty_state.dart';
 import '../widgets/foundation/flush_row.dart';
 import '../widgets/foundation/frosted_dock.dart' show kFrostedDockHeight;
 import '../widgets/foundation/gradient_background.dart';
@@ -61,8 +61,8 @@ class MixesScreen extends ConsumerStatefulWidget {
   /// What a screen reader is told while they are up.
   static const String loadingLabel = 'Loading your mixes';
 
-  /// The empty state's illustration size.
-  static const double emptyCassetteWidth = 140;
+  /// The empty state's illustration size — the app's one size (note 7).
+  static const double emptyCassetteWidth = EmptyState.cassetteWidth;
 
   @override
   ConsumerState<MixesScreen> createState() => _MixesScreenState();
@@ -163,12 +163,7 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
               onChanged: (value) => setState(() => _showArchived = value),
             ),
             onRefresh: _refresh,
-            slivers: [
-              SliverPadding(
-                padding: widget.bottomInset,
-                sliver: _body(sessionsAsync),
-              ),
-            ],
+            slivers: [_body(sessionsAsync)],
           ),
         ),
       ),
@@ -180,14 +175,24 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
   /// previously-good list keeps the list and says so in a SnackBar.
   Widget _body(AsyncValue<List<DjSession>> sessionsAsync) {
     if (sessionsAsync.hasError && !sessionsAsync.hasValue) {
+      // The list's states keep the dock inset as list padding; the empty
+      // state below takes its own from the shared placement rule instead.
       // invalidate, not refresh(): reaching this branch means build() itself
       // failed, which leaves Riverpod's retry backoff scheduled on this
       // element. invalidate() replaces the element, cancelling that timer.
-      return _SessionsErrorState(
-        onRetry: () => ref.invalidate(sessionsProvider),
+      return SliverPadding(
+        padding: widget.bottomInset,
+        sliver: _SessionsErrorState(
+          onRetry: () => ref.invalidate(sessionsProvider),
+        ),
       );
     }
-    if (!sessionsAsync.hasValue) return const _SessionsSkeleton();
+    if (!sessionsAsync.hasValue) {
+      return SliverPadding(
+        padding: widget.bottomInset,
+        sliver: const _SessionsSkeleton(),
+      );
+    }
 
     final sessions = sessionsAsync.requireValue;
     final visible = _showArchived
@@ -201,26 +206,30 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
       );
     }
 
-    return SliverList.builder(
-      key: const Key('sessions-list'),
-      itemCount: visible.length,
-      itemBuilder: (context, index) {
-        final session = visible[index];
-        return MixHomeRow(
-          key: Key('session-${session.id}'),
-          session: session,
-          // Lazily built rows have no FlushList above them, so the first row
-          // has to be told it opens the list or it draws a hairline there.
-          isFirst: index == 0,
-          // The board's row: chevron only, actions on long-press.
-          showActionsButton: false,
-          onOpen: () => _openConversation(session.id),
-          onRename: (title) =>
-              ref.read(sessionsProvider.notifier).rename(session.id, title),
-          onArchive: () => _setArchived(session.id, archived: true),
-          onRestore: () => _setArchived(session.id, archived: false),
-        );
-      },
+    return SliverPadding(
+      padding: widget.bottomInset,
+      sliver: SliverList.builder(
+        key: const Key('sessions-list'),
+        itemCount: visible.length,
+        itemBuilder: (context, index) {
+          final session = visible[index];
+          return MixHomeRow(
+            key: Key('session-${session.id}'),
+            session: session,
+            // Lazily built rows have no FlushList above them, so the first
+            // row has to be told it opens the list or it draws a hairline
+            // there.
+            isFirst: index == 0,
+            // The board's row: chevron only, actions on long-press.
+            showActionsButton: false,
+            onOpen: () => _openConversation(session.id),
+            onRename: (title) =>
+                ref.read(sessionsProvider.notifier).rename(session.id, title),
+            onArchive: () => _setArchived(session.id, archived: true),
+            onRestore: () => _setArchived(session.id, archived: false),
+          );
+        },
+      ),
     );
   }
 }
@@ -435,40 +444,16 @@ class _SessionsEmptyState extends StatelessWidget {
   final VoidCallback? onStartMix;
 
   @override
-  Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    return SliverFillRemaining(
-      key: const Key('sessions-empty'),
-      hasScrollBody: false,
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CassetteTile(width: MixesScreen.emptyCassetteWidth),
-              const SizedBox(height: 18),
-              Text(
-                archived ? 'Nothing archived' : 'No tapes yet',
-                textAlign: TextAlign.center,
-                style: tokens.section,
-              ),
-              const SizedBox(height: 6),
-              Text(
-                archived
-                    ? 'Swipe a mix left to archive it.'
-                    : 'Your first mix will appear here. Start one from Home.',
-                textAlign: TextAlign.center,
-                style: tokens.secondary,
-              ),
-              if (!archived && onStartMix != null) ...[
-                const SizedBox(height: 10),
-                TapeButton(label: 'Start a mix', onPressed: onStartMix),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => EmptyStateSliver(
+    key: const Key('sessions-empty'),
+    child: EmptyState(
+      title: archived ? 'Nothing archived' : 'No tapes yet',
+      body: archived
+          ? 'Swipe a mix left to archive it.'
+          : 'Your first mix will appear here. Start one from Home.',
+      action: !archived && onStartMix != null
+          ? TapeButton(label: 'Start a mix', onPressed: onStartMix)
+          : null,
+    ),
+  );
 }

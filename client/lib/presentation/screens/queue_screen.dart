@@ -24,6 +24,12 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart'
+    show
+        CupertinoAlertDialog,
+        CupertinoDialogAction,
+        CupertinoTextField,
+        showCupertinoDialog;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -39,6 +45,7 @@ import '../widgets/foundation/tape_button.dart';
 import '../widgets/mix_handoff.dart';
 import '../widgets/track_row.dart';
 import 'mix_history_screen.dart';
+import '../widgets/foundation/mixtape_menu.dart';
 
 /// The conflict copy from the approved board. The provider's own
 /// [staleQueueTransientMessage] is shared with the conversation screen, so it
@@ -272,18 +279,17 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
   /// The More menu the conversation already carries, minus Version history —
   /// which has its own button in the cluster here.
   Future<void> _openMore(BuildContext anchor) async {
-    final box = anchor.findRenderObject();
-    final overlay = Navigator.of(context).overlay?.context.findRenderObject();
-    if (box is! RenderBox || overlay is! RenderBox) return;
-    final rect = box.localToGlobal(Offset.zero, ancestor: overlay) & box.size;
     final archived =
         ref.read(chatProvider(widget.sessionId)).value?.session.status == 'archived';
-    final action = await showMenu<String>(
-      context: context,
-      position: RelativeRect.fromRect(rect, Offset.zero & overlay.size),
-      items: [
-        const PopupMenuItem(value: 'rename', child: Text('Rename')),
-        PopupMenuItem(value: 'status', child: Text(archived ? 'Restore' : 'Archive')),
+    final action = await showMixtapeMenu<String>(
+      context,
+      actions: [
+        const MixtapeMenuAction(value: 'rename', label: 'Rename'),
+        MixtapeMenuAction(
+          value: 'status',
+          label: archived ? 'Restore' : 'Archive',
+          isDestructive: !archived,
+        ),
       ],
     );
     if (!mounted || action == null) return;
@@ -302,23 +308,28 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
   Future<void> _openRenameDialog() async {
     final current = ref.read(chatProvider(widget.sessionId)).value?.session.title ?? '';
     final controller = TextEditingController(text: current);
-    final name = await showDialog<String>(
+    final name = await showCupertinoDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
+      barrierDismissible: true,
+      builder: (dialogContext) => CupertinoAlertDialog(
         title: const Text('Rename mix'),
-        content: TextField(
-          key: const Key('rename-field'),
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(labelText: 'Mix name'),
+        content: Padding(
+          padding: const EdgeInsets.only(top: 14),
+          child: CupertinoTextField(
+            key: const Key('rename-field'),
+            controller: controller,
+            autofocus: true,
+            placeholder: 'Mix name',
+          ),
         ),
         actions: [
-          TextButton(
+          CupertinoDialogAction(
             onPressed: () => Navigator.of(dialogContext).pop(),
             child: const Text('Cancel'),
           ),
-          FilledButton(
+          CupertinoDialogAction(
             key: const Key('rename-confirm-button'),
+            isDefaultAction: true,
             onPressed: () => Navigator.of(dialogContext).pop(controller.text),
             child: const Text('Save'),
           ),

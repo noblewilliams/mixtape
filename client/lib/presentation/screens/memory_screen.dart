@@ -16,6 +16,11 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart'
+    show
+        CupertinoAlertDialog,
+        CupertinoDialogAction,
+        showCupertinoDialog;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -27,8 +32,9 @@ import '../providers/auth_provider.dart';
 import '../providers/dj_providers.dart';
 import '../providers/playback_provider.dart';
 import '../theme/mixtape_theme.dart';
-import '../widgets/foundation/cassette_tile.dart';
+import '../widgets/foundation/empty_state.dart';
 import '../widgets/foundation/glass_cluster.dart';
+import '../widgets/foundation/mixtape_menu.dart';
 import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/large_title_scaffold.dart';
 import '../widgets/foundation/tape_button.dart';
@@ -70,8 +76,8 @@ class MemoryScreen extends ConsumerStatefulWidget {
   static const String clearUnconfirmed =
       'Could not confirm clearing. Retry to check the same request.';
 
-  /// The illustration on the empty state.
-  static const double emptyCassetteWidth = 140;
+  /// The illustration on the empty state — the app's one size (note 7).
+  static const double emptyCassetteWidth = EmptyState.cassetteWidth;
 
   @override
   ConsumerState<MemoryScreen> createState() => _MemoryScreenState();
@@ -130,8 +136,11 @@ class _MemoryScreenState extends ConsumerState<MemoryScreen> {
   Future<void> _openConfirmation(DjMemory memory, FocusNode origin) async {
     if (_dialogOpen || _forgetting) return;
     _dialogOpen = true;
-    await showDialog<void>(
+    await showCupertinoDialog<void>(
       context: context,
+      // Material's showDialog dismissed on the barrier; the approved
+      // confirmation keeps that way out.
+      barrierDismissible: true,
       builder: (_) =>
           _ForgetDialog(memory: memory, onConfirm: () => _forget(memory)),
     );
@@ -187,23 +196,19 @@ class _MemoryScreenState extends ConsumerState<MemoryScreen> {
   // --- The More cluster -----------------------------------------------
 
   Future<void> _openMore(BuildContext anchor) async {
-    final box = anchor.findRenderObject();
-    final overlay = Navigator.of(context).overlay?.context.findRenderObject();
-    if (box is! RenderBox || overlay is! RenderBox) return;
-    final rect = box.localToGlobal(Offset.zero, ancestor: overlay) & box.size;
-    final action = await showMenu<_MoreAction>(
-      context: context,
-      position: RelativeRect.fromRect(rect, Offset.zero & overlay.size),
-      items: const [
-        PopupMenuItem(
+    final action = await showMixtapeMenu<_MoreAction>(
+      context,
+      actions: const [
+        MixtapeMenuAction(
           key: MemoryScreen.clearLearnedKey,
           value: _MoreAction.clearLearned,
-          child: Text(MemoryScreen.clearLearned),
+          label: MemoryScreen.clearLearned,
+          isDestructive: true,
         ),
-        PopupMenuItem(
+        MixtapeMenuAction(
           key: MemoryScreen.interviewKey,
           value: _MoreAction.interview,
-          child: Text(MemoryScreen.tellTheDj),
+          label: MemoryScreen.tellTheDj,
         ),
       ],
     );
@@ -222,17 +227,19 @@ class _MemoryScreenState extends ConsumerState<MemoryScreen> {
   /// controller so there is one implementation of the action, not two.
   Future<void> _clearLearnedListening() async {
     if (_clearing) return;
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showCupertinoDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog.adaptive(
+      barrierDismissible: true,
+      builder: (dialogContext) => CupertinoAlertDialog(
         title: const Text(MemoryScreen.clearTitle),
         content: const Text(MemoryScreen.clearBody),
         actions: [
-          TextButton(
+          CupertinoDialogAction(
             onPressed: () => Navigator.of(dialogContext).pop(false),
             child: const Text('Cancel'),
           ),
-          TextButton(
+          CupertinoDialogAction(
+            isDestructiveAction: true,
             onPressed: () => Navigator.of(dialogContext).pop(true),
             child: const Text(MemoryScreen.clearLearned),
           ),
@@ -407,38 +414,17 @@ class _MemoryNotice extends StatelessWidget {
   }
 }
 
-/// Nothing remembered yet: the one cassette on this screen.
+/// Nothing remembered yet: the app's one empty state, in its one place.
 class _MemoryEmptyState extends StatelessWidget {
   const _MemoryEmptyState();
 
   @override
-  Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    return SliverFillRemaining(
-      hasScrollBody: false,
-      child: Padding(
-        padding: const EdgeInsets.only(top: 24, bottom: 48),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const CassetteTile(width: MemoryScreen.emptyCassetteWidth),
-            const SizedBox(height: 20),
-            Text(
-              MemoryScreen.emptyTitle,
-              style: tokens.section,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 6),
-            Text(
-              MemoryScreen.emptyBody,
-              style: tokens.secondary,
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => const EmptyStateSliver(
+    child: EmptyState(
+      title: MemoryScreen.emptyTitle,
+      body: MemoryScreen.emptyBody,
+    ),
+  );
 }
 
 /// One remembered note: a 22 pt memory glyph, the note, when it was
@@ -566,14 +552,12 @@ class _ForgetDialogState extends State<_ForgetDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog.adaptive(
-    scrollable: true,
-    insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+  Widget build(BuildContext context) => CupertinoAlertDialog(
     title: const Text('Forget this preference?'),
     content: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
+        const SizedBox(height: 8),
         Text(widget.memory.note),
         const SizedBox(height: 16),
         const Text('The DJ will stop using this note.'),
@@ -586,12 +570,12 @@ class _ForgetDialogState extends State<_ForgetDialog> {
       ],
     ),
     actions: [
-      TextButton(
-        autofocus: true,
+      CupertinoDialogAction(
         onPressed: () => Navigator.of(context).pop(),
         child: Text(_busy ? 'Close' : 'Keep note'),
       ),
-      TextButton(
+      CupertinoDialogAction(
+        isDestructiveAction: true,
         onPressed: _busy ? null : _confirm,
         child: Text(_busy ? 'Forgetting…' : 'Forget note'),
       ),

@@ -14,6 +14,10 @@
 /// than the ambient theme.
 library;
 
+import 'dart:async';
+
+import 'package:flutter/cupertino.dart'
+    show CupertinoAlertDialog, CupertinoDialogAction, showCupertinoDialog;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -37,6 +41,7 @@ import '../widgets/foundation/square_art.dart';
 import '../widgets/foundation/tape_button.dart';
 import 'queue_screen.dart';
 import '../widgets/foundation/mixtape_sheet.dart';
+import '../widgets/foundation/mixtape_menu.dart';
 
 /// What the More menu offers.
 enum _NowPlayingMenu { repeat, stop, listening }
@@ -77,6 +82,10 @@ class PlaybackScreen extends ConsumerWidget {
 
   static const Key dragHandleKey = Key('now-playing-handle');
   static const Key closeKey = Key('now-playing-close');
+  /// The More menu's Stop entry, which reads Cancel while a command is in
+  /// flight — and so needs finding by something other than its word.
+  static const Key stopActionKey = Key('now-playing-stop');
+
   static const Key moreKey = Key('now-playing-more');
   static const Key previousKey = Key('now-playing-previous');
   static const Key playPauseKey = Key('now-playing-play-pause');
@@ -428,49 +437,66 @@ class _NowPlaying extends StatelessWidget {
     );
   }
 
-  Widget _more(BuildContext context) {
-    final tokens = context.tokens;
-    return PopupMenuButton<_NowPlayingMenu>(
-      key: PlaybackScreen.moreKey,
-      tooltip: 'More',
-      padding: EdgeInsets.zero,
-      position: PopupMenuPosition.under,
-      onSelected: (value) => switch (value) {
-        _NowPlayingMenu.repeat => player.command('repeat'),
-        _NowPlayingMenu.stop => player.stop(),
-        _NowPlayingMenu.listening => Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) => const ListeningPreferencesScreen(),
-          ),
-        ),
-      },
-      itemBuilder: (context) => [
-        const PopupMenuItem(
+  Future<void> _openMore(BuildContext context) async {
+    final navigator = Navigator.of(context);
+    final action = await showMixtapeMenu<_NowPlayingMenu>(
+      context,
+      actions: [
+        const MixtapeMenuAction(
           value: _NowPlayingMenu.repeat,
-          child: Text('Repeat song'),
+          label: 'Repeat song',
         ),
-        PopupMenuItem(
+        MixtapeMenuAction(
+          key: PlaybackScreen.stopActionKey,
           value: _NowPlayingMenu.stop,
           // While a command is in flight, stopping is how it is cancelled —
           // the word HEAD's player used for exactly this call.
-          child: Text(player.busy ? 'Cancel' : 'Stop'),
+          label: player.busy ? 'Cancel' : 'Stop',
+          isDestructive: true,
         ),
-        const PopupMenuItem(
+        const MixtapeMenuAction(
           value: _NowPlayingMenu.listening,
-          child: Text('Listening preferences'),
+          label: 'Listening preferences',
         ),
       ],
-      child: SizedBox.square(
-        dimension: MixtapeMetrics.minTarget,
-        child: Center(
-          child: Container(
-            width: PlaybackScreen.moreDiameter,
-            height: PlaybackScreen.moreDiameter,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.14),
-              shape: BoxShape.circle,
+    );
+    switch (action) {
+      case _NowPlayingMenu.repeat:
+        await player.command('repeat');
+      case _NowPlayingMenu.stop:
+        await player.stop();
+      case _NowPlayingMenu.listening:
+        await navigator.push(
+          MaterialPageRoute<void>(
+            builder: (_) => const ListeningPreferencesScreen(),
+          ),
+        );
+      case null:
+        break;
+    }
+  }
+
+  Widget _more(BuildContext context) {
+    final tokens = context.tokens;
+    return Semantics(
+      button: true,
+      label: 'More',
+      child: GestureDetector(
+        key: PlaybackScreen.moreKey,
+        behavior: HitTestBehavior.opaque,
+        onTap: () => unawaited(_openMore(context)),
+        child: SizedBox.square(
+          dimension: MixtapeMetrics.minTarget,
+          child: Center(
+            child: Container(
+              width: PlaybackScreen.moreDiameter,
+              height: PlaybackScreen.moreDiameter,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.14),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.more_horiz, size: 20, color: tokens.text),
             ),
-            child: Icon(Icons.more_horiz, size: 20, color: tokens.text),
           ),
         ),
       ),
@@ -877,19 +903,21 @@ class _ListeningPreferencesState
   }
 
   Future<void> clear() async {
-    final yes = await showDialog<bool>(
+    final yes = await showCupertinoDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      barrierDismissible: true,
+      builder: (context) => CupertinoAlertDialog(
         title: const Text('Clear learned listening?'),
         content: const Text(
           'Remove listening activity collected for learning. Imported history, mixes and written preferences stay.',
         ),
         actions: [
-          TextButton(
+          CupertinoDialogAction(
             onPressed: () => Navigator.pop(context, false),
             child: const Text('Cancel'),
           ),
-          FilledButton(
+          CupertinoDialogAction(
+            isDestructiveAction: true,
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Clear learned listening'),
           ),

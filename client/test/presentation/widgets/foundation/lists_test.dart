@@ -427,6 +427,43 @@ void main() {
     });
   });
 
+  group('row air', () {
+    // The founder's smoke round three, note 4: smaller type wants looser
+    // rows. Both list rows breathe by the same 12 pt.
+    Finder verticalPadding(Type row, double value) => find.descendant(
+      of: find.byType(row),
+      matching: find.byWidgetPredicate(
+        (widget) =>
+            widget is Padding &&
+            widget.padding is EdgeInsets &&
+            (widget.padding as EdgeInsets).top == value &&
+            (widget.padding as EdgeInsets).bottom == value,
+      ),
+    );
+
+    testWidgets('a flush row pads 12 pt above and below', (tester) async {
+      expect(FlushRow.verticalPadding, 12);
+      await _pump(
+        tester,
+        const FlushList(
+          children: [
+            FlushRow(leading: SizedBox.square(dimension: 60), title: 'One'),
+          ],
+        ),
+      );
+      expect(verticalPadding(FlushRow, 12), findsWidgets);
+    });
+
+    testWidgets('an inset row pads 12 pt above and below', (tester) async {
+      expect(InsetRow.verticalPadding, 12);
+      await _pump(
+        tester,
+        const InsetGroup(children: [InsetRow(title: 'Account')]),
+      );
+      expect(verticalPadding(InsetRow, 12), findsWidgets);
+    });
+  });
+
   group('InsetGroup', () {
     testWidgets('rows are at least 52 pt and destructive rows use err ink', (
       tester,

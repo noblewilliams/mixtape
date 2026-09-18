@@ -5,6 +5,7 @@ import 'package:mixtape/presentation/widgets/mix_energy_summary.dart';
 import 'package:mixtape/data/playlists/playlist_context_models.dart';
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart' show CupertinoTextField;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -1169,14 +1170,14 @@ void main() {
 
       expect(
         tester
-            .widget<TextField>(find.byKey(const Key('chat-playlist-author')))
+            .widget<CupertinoTextField>(find.byKey(const Key('chat-playlist-author')))
             .controller!
             .text,
         'Ada',
       );
       expect(
         tester
-            .widget<TextField>(find.byKey(const Key('chat-playlist-name')))
+            .widget<CupertinoTextField>(find.byKey(const Key('chat-playlist-name')))
             .controller!
             .text,
         'Night bus notes',
@@ -1202,7 +1203,7 @@ void main() {
 
       expect(
         tester
-            .widget<TextField>(find.byKey(const Key('chat-playlist-author')))
+            .widget<CupertinoTextField>(find.byKey(const Key('chat-playlist-author')))
             .controller!
             .text,
         'Grace',
