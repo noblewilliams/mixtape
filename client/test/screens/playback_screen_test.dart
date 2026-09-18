@@ -8,6 +8,7 @@ import 'package:mixtape/data/musickit/musickit_bridge.dart';
 import 'package:mixtape/data/playback/listening_meter.dart';
 import 'package:mixtape/data/playback/playback_controller.dart';
 import 'package:mixtape/data/playback/player_bridge.dart';
+import 'package:mixtape/data/shell/mini_player_state.dart';
 import 'package:mixtape/presentation/providers/library_sync_provider.dart';
 import 'package:mixtape/presentation/providers/playback_provider.dart';
 import 'package:mixtape/presentation/screens/playback_screen.dart';
@@ -255,7 +256,7 @@ void main() {
       energy: const {'energyArc': 'rise', 'energyJourney': {'status': 'follows'}},
     );
 
-    expect(find.text(PlaybackScreen.unavailableLine), findsOneWidget);
+    expect(find.text(MiniPlayerState.unavailableLine), findsOneWidget);
     expect(find.text('Harbour Lights'), findsNothing);
 
     for (final label in const [

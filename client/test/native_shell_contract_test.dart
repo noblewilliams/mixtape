@@ -40,6 +40,18 @@ void main() {
     }
   });
 
+  test('the mini-player honours the unavailable flag', () {
+    // The key travels in the setMiniPlayer map (MiniPlayerState.toMap).
+    expect(dock, contains('args["unavailable"] as? Bool ?? false'));
+    // Play/pause goes dead and dim; Next is the way out, so it stays live.
+    expect(dock, contains('playPauseButton.isEnabled = !unavailable'));
+    expect(dock, contains('playPauseButton.alpha = unavailable ? 0.35 : 1'));
+    expect(dock, contains('nextButton.isEnabled = true'));
+    // Same line the pill and Now Playing say.
+    expect(dock, contains('"Not available in your region"'));
+    expect(dock, contains('playPauseButton.accessibilityHint'));
+  });
+
   test('the dock carries the four approved tabs', () {
     for (final title in ['Home', 'Mixes', 'Library', 'You']) {
       expect(dock, contains('title: "$title"'));

@@ -364,7 +364,8 @@ class ShellDock: NSObject {
       title: args["title"] as? String ?? "",
       artist: args["artist"] as? String ?? "",
       artworkUrl: args["artworkUrl"] as? String,
-      playing: args["playing"] as? Bool ?? false
+      playing: args["playing"] as? Bool ?? false,
+      unavailable: args["unavailable"] as? Bool ?? false
     )
 
     // Inside a mix the dock is gone: keep the state, reveal nothing. `show()`
@@ -524,11 +525,16 @@ final class MiniPlayerView: UIView {
     return super.hitTest(point, with: event)
   }
 
+  /// The line the pill says where the artist goes when Apple Music will not
+  /// play the track here. `MiniPlayerState.unavailableLine` says the same.
+  static let unavailableHint = "Not available in your region"
+
   func apply(
     title: String,
     artist: String,
     artworkUrl: String?,
-    playing: Bool
+    playing: Bool,
+    unavailable: Bool
   ) {
     titleLabel.text = title
     artistLabel.text = artist
@@ -539,6 +545,14 @@ final class MiniPlayerView: UIView {
       for: .normal)
     playPauseButton.accessibilityLabel = playing ? "Pause" : "Play"
     nextButton.accessibilityLabel = "Next"
+
+    // Apple Music refused this track: play/pause is dead and says why, while
+    // Next — the way out — stays live (board → Dock; plan task 6.2).
+    playPauseButton.isEnabled = !unavailable
+    playPauseButton.alpha = unavailable ? 0.35 : 1
+    playPauseButton.accessibilityHint = unavailable ? Self.unavailableHint : nil
+    nextButton.isEnabled = true
+
     loadArtwork(artworkUrl)
   }
 

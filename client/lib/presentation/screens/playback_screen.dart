@@ -20,6 +20,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/dj/dj_models.dart';
 import '../../data/playback/playback_controller.dart';
+import '../../data/shell/mini_player_state.dart';
 import '../providers/library_sync_provider.dart';
 import '../providers/playback_provider.dart';
 import '../theme/mixtape_theme.dart';
@@ -44,10 +45,6 @@ class PlaybackScreen extends ConsumerWidget {
 
   /// The board's empty-artwork mark, mono and capitalised.
   static const String artworkPlaceholder = 'ALBUM ARTWORK';
-
-  /// The mini-player's rule, on the bigger surface: a track Apple Music will
-  /// not play here says so where the artist would be, and only Next works.
-  static const String unavailableLine = 'Not available in your region';
 
   static const String sentToMusicMessage =
       'Playing in Music. Listening there is not observed.';
@@ -417,7 +414,7 @@ class _NowPlaying extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                _unavailable ? PlaybackScreen.unavailableLine : track.artist,
+                _unavailable ? MiniPlayerState.unavailableLine : track.artist,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: tokens.body.copyWith(color: tokens.muted),
