@@ -973,6 +973,9 @@ class _VersionChip extends StatelessWidget {
       child: Semantics(
         button: true,
         label: 'Version $version',
+        // `excludeSemantics` drops the detector's own tap action, and a node
+        // with no action cannot be activated by VoiceOver. Declare it here.
+        onTap: onOpen,
         excludeSemantics: true,
         child: GestureDetector(
           key: keyFor(version),

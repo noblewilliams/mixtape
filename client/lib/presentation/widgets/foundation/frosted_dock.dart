@@ -191,6 +191,9 @@ class _TabItem extends StatelessWidget {
       button: true,
       selected: selected,
       container: true,
+      // `excludeSemantics` drops the detector's own tap action, and a node
+      // with no action cannot be activated by VoiceOver. Declare it here.
+      onTap: onTap,
       // The glyph and its 10 pt label are decoration; one node per tab.
       excludeSemantics: true,
       child: GestureDetector(
@@ -352,6 +355,10 @@ class _MiniButton extends StatelessWidget {
     button: true,
     enabled: enabled,
     container: true,
+    // `excludeSemantics` drops the detector's own tap action, and a node with
+    // no action cannot be activated by VoiceOver. Declare it here — and only
+    // when the control is live, so a disabled one offers nothing.
+    onTap: enabled ? onTap : null,
     excludeSemantics: true,
     child: GestureDetector(
       key: buttonKey,

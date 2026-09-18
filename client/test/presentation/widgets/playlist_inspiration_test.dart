@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/playlists/playlist_api.dart';
@@ -283,6 +284,23 @@ void main() {
       await tester.tap(find.byKey(InspirationChip.detachKey));
       await tester.pumpAndSettle();
       expect(detaches, 1);
+    });
+
+    testWidgets('the cross is a button VoiceOver can activate', (tester) async {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(chipHost(onPick: () {}, onDetach: () {}));
+
+      final data = tester
+          .getSemantics(find.bySemanticsLabel('Detach playlist inspiration'))
+          .getSemanticsData();
+      expect(
+        data.hasAction(SemanticsAction.tap),
+        isTrue,
+        reason: 'a node with no tap action cannot be activated by VoiceOver',
+      );
+      expect(data.flagsCollection.isButton, isTrue);
+
+      handle.dispose();
     });
   });
 

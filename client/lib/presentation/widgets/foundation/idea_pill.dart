@@ -72,6 +72,9 @@ class IdeaPill extends StatelessWidget {
       button: !skeleton,
       enabled: enabled,
       label: skeleton ? skeletonLabel : label,
+      // `excludeSemantics` drops the detector's own tap action, and a node
+      // with no action cannot be activated by VoiceOver. Declare it here.
+      onTap: enabled ? onPressed : null,
       excludeSemantics: true,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,

@@ -319,6 +319,10 @@ class InspirationChip extends StatelessWidget {
             Semantics(
               button: true,
               label: 'Detach playlist inspiration',
+              // `excludeSemantics` drops the detector's own tap action, and a
+              // node with no action cannot be activated by VoiceOver. Declare
+              // it here.
+              onTap: onDetach,
               excludeSemantics: true,
               child: GestureDetector(
                 key: detachKey,

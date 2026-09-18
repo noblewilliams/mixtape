@@ -191,6 +191,33 @@ void main() {
     expect(opened, 1);
   });
 
+  testWidgets('Open in Spotify is a button VoiceOver can activate', (
+    tester,
+  ) async {
+    final handle = tester.ensureSemantics();
+    await _pump(
+      tester,
+      TrackRow(
+        number: 1,
+        track: _track(appleId: null, spotifyId: 'sp1'),
+        expanded: false,
+        onOpenInSpotify: () {},
+      ),
+    );
+
+    final data = tester
+        .getSemantics(find.bySemanticsLabel('Open in Spotify: Low Tide, Late'))
+        .getSemanticsData();
+    expect(
+      data.hasAction(SemanticsAction.tap),
+      isTrue,
+      reason: 'a node with no tap action cannot be activated by VoiceOver',
+    );
+    expect(data.flagsCollection.isButton, isTrue);
+
+    handle.dispose();
+  });
+
   testWidgets("the grip is the board's 36 x 44 target", (tester) async {
     await _pump(
       tester,

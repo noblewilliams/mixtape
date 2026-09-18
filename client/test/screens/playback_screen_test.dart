@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
@@ -281,6 +282,70 @@ void main() {
     await tester.tap(_action('Next song'));
     await tester.pump();
     expect(bridge.actions, ['next']);
+  });
+
+  testWidgets('every transport and action control is one VoiceOver can '
+      'activate', (tester) async {
+    final handle = tester.ensureSemantics();
+    await _pump(
+      tester,
+      _player(RecordingBridge()),
+      energy: const {
+        'energyArc': 'rise',
+        'energyJourney': {'status': 'follows'},
+      },
+    );
+
+    for (final label in const [
+      'Previous song',
+      'Pause',
+      'Next song',
+      'Up next',
+      'Send to Music',
+    ]) {
+      final data = tester.getSemantics(_action(label)).getSemanticsData();
+      expect(
+        data.hasAction(SemanticsAction.tap),
+        isTrue,
+        reason: '$label: a node with no tap action cannot be activated by '
+            'VoiceOver',
+      );
+      expect(data.flagsCollection.isButton, isTrue);
+    }
+
+    handle.dispose();
+  });
+
+  testWidgets('a disabled transport control offers VoiceOver no action', (
+    tester,
+  ) async {
+    final handle = tester.ensureSemantics();
+    await _pump(tester, _player(RecordingBridge(), unavailableIndex: 4));
+
+    for (final label in const [
+      'Previous song',
+      'Pause',
+      'Shape',
+      'Up next',
+      'Send to Music',
+    ]) {
+      expect(
+        tester.getSemantics(_action(label)).getSemanticsData().hasAction(
+          SemanticsAction.tap,
+        ),
+        isFalse,
+        reason: '$label is disabled here and must offer no action',
+      );
+    }
+    // Next is the one way out of an unavailable track and stays live.
+    expect(
+      tester.getSemantics(_action('Next song')).getSemanticsData().hasAction(
+        SemanticsAction.tap,
+      ),
+      isTrue,
+    );
+
+    handle.dispose();
   });
 
   testWidgets('Send to Music hands the queue over and says what that means', (

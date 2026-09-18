@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/shell/mini_player_state.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
@@ -129,6 +130,74 @@ void main() {
       expect(size.width, greaterThanOrEqualTo(MixtapeMetrics.minTarget));
       expect(size.height, greaterThanOrEqualTo(MixtapeMetrics.minTarget));
     }
+  });
+
+  testWidgets('every dock control is one VoiceOver can activate', (
+    tester,
+  ) async {
+    final handle = tester.ensureSemantics();
+    await _pump(
+      tester,
+      FrostedDock(
+        currentIndex: 1,
+        onTap: (_) {},
+        mini: _mini,
+        onMiniPlayPause: () {},
+        onMiniNext: () {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    for (final label in [..._tabs, 'Pause', 'Next']) {
+      final data = tester
+          .getSemantics(find.bySemanticsLabel(RegExp('^$label\$')))
+          .getSemanticsData();
+      expect(
+        data.hasAction(SemanticsAction.tap),
+        isTrue,
+        reason: '$label: a node with no tap action cannot be activated by '
+            'VoiceOver',
+      );
+      expect(data.flagsCollection.isButton, isTrue);
+    }
+
+    handle.dispose();
+  });
+
+  testWidgets('an unavailable track offers VoiceOver no play/pause', (
+    tester,
+  ) async {
+    final handle = tester.ensureSemantics();
+    await _pump(
+      tester,
+      FrostedDock(
+        currentIndex: 1,
+        onTap: (_) {},
+        mini: _mini.copyWith(unavailable: true),
+        onMiniPlayPause: () {},
+        onMiniNext: () {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .getSemantics(find.bySemanticsLabel(RegExp('^Pause\$')))
+          .getSemanticsData()
+          .hasAction(SemanticsAction.tap),
+      isFalse,
+      reason: 'play/pause is disabled on a track Apple Music will not play',
+    );
+    // Next is the one way out of it and stays live.
+    expect(
+      tester
+          .getSemantics(find.bySemanticsLabel(RegExp('^Next\$')))
+          .getSemanticsData()
+          .hasAction(SemanticsAction.tap),
+      isTrue,
+    );
+
+    handle.dispose();
   });
 
   testWidgets('minimized shrinks the tab bar to 70% from the bottom', (

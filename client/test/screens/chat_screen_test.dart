@@ -6,6 +6,7 @@ import 'package:mixtape/data/playlists/playlist_context_models.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/api/api_client.dart';
@@ -459,6 +460,34 @@ void main() {
 
       final pushed = tester.widget<MixHistoryScreen>(find.byType(MixHistoryScreen));
       expect(pushed.initialVersion, 1);
+    });
+
+    testWidgets('a Version chip is a button VoiceOver can activate', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(queueVersion: 3),
+        messages: [
+          _msg('m1', 'dj', 'first cut', queueVersion: 1),
+          _msg('m2', 'dj', 'third cut', queueVersion: 3),
+        ],
+        queue: [_track(0)],
+      );
+      await _pump(tester, _makeContainer(api));
+
+      final data = tester
+          .getSemantics(find.bySemanticsLabel('Version 1'))
+          .getSemanticsData();
+      expect(
+        data.hasAction(SemanticsAction.tap),
+        isTrue,
+        reason: 'a node with no tap action cannot be activated by VoiceOver',
+      );
+      expect(data.flagsCollection.isButton, isTrue);
+
+      handle.dispose();
     });
 
     testWidgets('the energy line states the shape against the ask', (tester) async {

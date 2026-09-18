@@ -136,6 +136,9 @@ class TrackRow extends StatelessWidget {
     child: Semantics(
       button: true,
       label: 'Open in Spotify: ${track.title}',
+      // `excludeSemantics` drops the detector's own tap action, and a node
+      // with no action cannot be activated by VoiceOver. Declare it here.
+      onTap: onOpenInSpotify,
       excludeSemantics: true,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,

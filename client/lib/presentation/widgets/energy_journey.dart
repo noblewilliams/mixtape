@@ -290,6 +290,9 @@ class _EnergyShapeSheetState extends State<_EnergyShapeSheet> {
       inMutuallyExclusiveGroup: true,
       selected: selected,
       label: '${option.label}. ${option.description}',
+      // `excludeSemantics` drops the detector's own tap action, and a node
+      // with no action cannot be activated by VoiceOver. Declare it here.
+      onTap: () => setState(() => arc = option),
       excludeSemantics: true,
       child: GestureDetector(
         key: EnergyControl.presetKey(option),

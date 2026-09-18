@@ -703,6 +703,9 @@ class _TransportButton extends StatelessWidget {
       button: true,
       enabled: enabled,
       label: label,
+      // `excludeSemantics` drops the detector's own tap action, and a node
+      // with no action cannot be activated by VoiceOver. Declare it here.
+      onTap: onPressed,
       excludeSemantics: true,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
@@ -750,6 +753,9 @@ class _NowPlayingAction extends StatelessWidget {
       button: true,
       enabled: enabled,
       label: label,
+      // `excludeSemantics` drops the detector's own tap action, and a node
+      // with no action cannot be activated by VoiceOver. Declare it here.
+      onTap: onPressed,
       excludeSemantics: true,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,

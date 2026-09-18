@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/idea_pill.dart';
@@ -176,6 +177,74 @@ void main() {
     final semantics = tester.getSemantics(find.byType(TapeButton).last);
     expect(semantics.flagsCollection.isButton, isTrue);
     expect(semantics.flagsCollection.isEnabled, isFalse);
+  });
+
+  testWidgets('every control is one VoiceOver can activate', (tester) async {
+    final handle = tester.ensureSemantics();
+    await _pump(
+      tester,
+      const Wrap(
+        children: [
+          TapeButton(label: 'Play now', onPressed: _noop),
+          LabelChip(label: 'Create playlist', onPressed: _noop),
+          TextAction(label: 'Rename', onPressed: _noop),
+          IdeaPill(label: 'Kitchen, early, coffee on', onPressed: _noop),
+        ],
+      ),
+    );
+
+    for (final label in [
+      'Play now',
+      'Create playlist',
+      'Rename',
+      'Kitchen, early, coffee on',
+    ]) {
+      final data = tester
+          .getSemantics(find.bySemanticsLabel(label))
+          .getSemanticsData();
+      expect(
+        data.hasAction(SemanticsAction.tap),
+        isTrue,
+        reason: '$label: a node with no tap action cannot be activated by '
+            'VoiceOver',
+      );
+      expect(data.flagsCollection.isButton, isTrue);
+    }
+
+    handle.dispose();
+  });
+
+  testWidgets('a disabled control offers VoiceOver no action', (tester) async {
+    final handle = tester.ensureSemantics();
+    await _pump(
+      tester,
+      const Wrap(
+        children: [
+          TapeButton(label: 'Locked'),
+          LabelChip(label: 'Unavailable'),
+          TextAction(label: 'Quiet'),
+          IdeaPill(label: 'Ignored', skeleton: true),
+        ],
+      ),
+    );
+
+    for (final label in [
+      'Locked',
+      'Unavailable',
+      'Quiet',
+      IdeaPill.skeletonLabel,
+    ]) {
+      final data = tester
+          .getSemantics(find.bySemanticsLabel(label))
+          .getSemanticsData();
+      expect(
+        data.hasAction(SemanticsAction.tap),
+        isFalse,
+        reason: '$label is disabled and must offer no action',
+      );
+    }
+
+    handle.dispose();
   });
 
   testWidgets('a playing tape button is wider than the same idle button', (

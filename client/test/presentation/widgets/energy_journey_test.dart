@@ -2,6 +2,7 @@
 // `.preset` on `docs/mockups/2026-09-17-mobile-conversation-states.html`).
 import '../../helpers/auth_ui_snapshot.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/energy_journey.dart';
@@ -73,6 +74,38 @@ void main() {
 
     await tester.pumpWidget(const SizedBox());
     controller.dispose();
+  });
+
+  testWidgets('every preset is one VoiceOver can activate', (tester) async {
+    final handle = tester.ensureSemantics();
+    final controller = TextEditingController();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: MixtapeTheme.light(),
+        home: Scaffold(body: EnergyControl(controller: controller)),
+      ),
+    );
+    await tester.tap(find.byKey(EnergyControl.chipKey));
+    await tester.pumpAndSettle();
+
+    for (final arc in EnergyArc.values) {
+      final data = tester
+          .getSemantics(
+            find.bySemanticsLabel('${arc.label}. ${arc.description}'),
+          )
+          .getSemanticsData();
+      expect(
+        data.hasAction(SemanticsAction.tap),
+        isTrue,
+        reason: '${arc.label}: a node with no tap action cannot be activated '
+            'by VoiceOver',
+      );
+      expect(data.flagsCollection.isButton, isTrue);
+    }
+
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+    handle.dispose();
   });
 
   testWidgets('shape controls fit a short phone with large text', (

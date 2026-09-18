@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/api/api_client.dart';
@@ -169,6 +170,29 @@ void main() {
     expect(find.text('Sade'), findsNothing);
 
     expectInteractiveWidgetsKeyed(find.byType(InterviewScreen));
+  });
+
+  testWidgets('an artist chip is a button VoiceOver can activate', (
+    tester,
+  ) async {
+    final handle = tester.ensureSemantics();
+    final listening = FakeListeningApi(
+      onboarding: onboardingState(chosenService: 'spotify'),
+    );
+    await _pumpScreen(tester, onboardingContainer(listening: listening));
+    await _addArtist(tester, 'Sade');
+
+    final data = tester
+        .getSemantics(find.bySemanticsLabel('Remove Sade'))
+        .getSemanticsData();
+    expect(
+      data.hasAction(SemanticsAction.tap),
+      isTrue,
+      reason: 'a node with no tap action cannot be activated by VoiceOver',
+    );
+    expect(data.flagsCollection.isButton, isTrue);
+
+    handle.dispose();
   });
 
   testWidgets('submit posts the five answers on the ios surface, refreshes onboarding, '
