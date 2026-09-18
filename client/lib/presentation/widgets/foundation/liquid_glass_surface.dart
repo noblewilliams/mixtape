@@ -37,8 +37,12 @@ class LiquidGlassSurface extends StatefulWidget {
   /// material and ignores it.
   final Color? fallbackTint;
 
-  /// Applies to the fallback only — the platform view clips itself.
+  /// The surface's corners. The fallback clips to the full [BorderRadius];
+  /// the native view takes one radius (its top-left) as `cornerRadius`.
   final BorderRadius? borderRadius;
+
+  /// What the native view is asked to round its corners by.
+  double get nativeCornerRadius => borderRadius?.topLeft.x ?? 0;
 
   /// Set false while a Flutter sheet or dialog is open: a `UiKitView`
   /// composites above route barriers and would punch through the dim.
@@ -86,6 +90,7 @@ class _LiquidGlassSurfaceState extends State<LiquidGlassSurface> {
       // The effect view resolves its material against the iOS *system*
       // appearance, so the app's own brightness is handed over at creation.
       final isDark = Theme.of(context).brightness == Brightness.dark;
+      final radius = widget.nativeCornerRadius;
       return Stack(
         fit: StackFit.passthrough,
         children: [
@@ -93,10 +98,13 @@ class _LiquidGlassSurfaceState extends State<LiquidGlassSurface> {
             child: UiKitView(
               // Creation params are read once, so a theme flip has to build a
               // fresh view — hence the brightness-derived key.
-              key: ValueKey<bool>(isDark),
+              key: ValueKey<String>('$isDark-$radius'),
               viewType: LiquidGlassSurface.viewType,
               hitTestBehavior: PlatformViewHitTestBehavior.transparent,
-              creationParams: <String, Object?>{'isDark': isDark},
+              creationParams: <String, Object?>{
+                'isDark': isDark,
+                'cornerRadius': radius,
+              },
               creationParamsCodec: const StandardMessageCodec(),
             ),
           ),

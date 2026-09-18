@@ -599,8 +599,10 @@ final class LiquidGlassViewFactory: NSObject, FlutterPlatformViewFactory {
   ) -> FlutterPlatformView {
     // Flutter passes its resolved brightness so the glass follows the in-app
     // theme rather than the iOS system appearance.
-    let isDark = (args as? [String: Any])?["isDark"] as? Bool
-    return LiquidGlassPlatformView(frame: frame, isDark: isDark)
+    let params = args as? [String: Any]
+    let isDark = params?["isDark"] as? Bool
+    let cornerRadius = (params?["cornerRadius"] as? NSNumber)?.doubleValue ?? 0
+    return LiquidGlassPlatformView(frame: frame, isDark: isDark, cornerRadius: cornerRadius)
   }
 
   func createArgsCodec() -> FlutterMessageCodec & NSObjectProtocol {
@@ -611,7 +613,7 @@ final class LiquidGlassViewFactory: NSObject, FlutterPlatformViewFactory {
 final class LiquidGlassPlatformView: NSObject, FlutterPlatformView {
   private let effectView: UIVisualEffectView
 
-  init(frame: CGRect, isDark: Bool?) {
+  init(frame: CGRect, isDark: Bool?, cornerRadius: Double) {
     if #available(iOS 26, *) {
       effectView = UIVisualEffectView(effect: UIGlassEffect())
     } else {
@@ -624,6 +626,13 @@ final class LiquidGlassPlatformView: NSObject, FlutterPlatformView {
     }
     effectView.frame = frame
     effectView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    // Flutter's clip does not reach a platform view, so the glass rounds
+    // itself to the radius the widget was given (the Home panel's 32 pt).
+    if cornerRadius > 0 {
+      effectView.layer.cornerRadius = CGFloat(cornerRadius)
+      effectView.layer.cornerCurve = .continuous
+      effectView.clipsToBounds = true
+    }
     super.init()
   }
 

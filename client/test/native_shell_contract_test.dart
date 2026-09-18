@@ -104,6 +104,11 @@ void main() {
     expect(dock, contains('LiquidGlassViewFactory'));
     expect(dock, contains('isDark'));
     expect(dock, contains('systemThinMaterial'));
+    // Flutter's clip never reaches a platform view: the glass must round
+    // itself to the radius the widget hands over (the Home panel's corners).
+    expect(dock, contains('"cornerRadius"'));
+    expect(dock, contains('effectView.layer.cornerRadius'));
+    expect(dock, contains('effectView.clipsToBounds = true'));
     expect(appDelegate, contains('mixtape/liquid_glass'));
     expect(appDelegate, contains('LiquidGlassViewFactory()'));
   });
