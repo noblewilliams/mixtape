@@ -99,3 +99,8 @@ order listed in revision 1 of the shape board.
   #8A838B → #857E86 so secondary text keeps 4.5:1 and meta text 3:1 against
   the bottom of the light gradient (#E6E0EA). The board's values fell to 4.17:1
   and 2.84:1 there. Dark values unchanged.
+- 2026-09-18, task 6.1 (Now Playing): the volume row is omitted because the
+  app player exposes no volume control (backlog); the meta line is artist only
+  because tracks carry no album; Shape opens the energy assessment sheet, not
+  the brief dialog, and is disabled when the version has no arc; the sheet
+  forces dark tokens in both system themes for light text on artwork colours.

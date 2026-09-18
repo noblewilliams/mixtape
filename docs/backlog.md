@@ -161,3 +161,5 @@ features remain pending.
   entry under You in Phase 8.
 - Native tab bar is inset 22 pt like the mini-player; confirm on an iOS 26 device
   whether the system already insets a bare `UITabBar` and drop the inset if so.
+- Now Playing has no volume row: the app player bridge exposes no volume
+  control. Add one if a volume slider is wanted on the sheet.
