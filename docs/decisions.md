@@ -556,3 +556,6 @@ too big on every screen. `LargeTitleScaffold`'s geometry is unaffected: the
 title row's 46 pt minimum is the board's glass-cluster height, not a multiple of
 the type size, so the collapse threshold is unchanged. The sign-in headline
 overrides `fontSize` on top of `largeTitle` and is unchanged at 18 pt.
+
+## 2026-09-18 — Transport glyphs are the app's action icons
+Where an action needs a glyph, the native app uses playback-transport symbols rather than generic UI arrows: Skip on the service gate fast-forwards (⏩), Sign out stops (⏹). Founder direction during the first smoke: "use playback icons throughout the app to drive home the music thing." Navigation chevrons, the tab bar's SF symbols and the mini-player's own transport keep their native meaning. An audit of every remaining `Icon(` in `client/lib` for a transport equivalent is in `backlog.md`. **Reopens if:** a transport glyph is read as a playback control where it is not one (then that action gets a word, not a different arrow).

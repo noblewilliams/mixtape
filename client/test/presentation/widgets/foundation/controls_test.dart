@@ -67,13 +67,13 @@ void main() {
             children: [
               TextAction(
                 label: 'Skip',
-                icon: Icons.arrow_forward,
+                icon: Icons.fast_forward_rounded,
                 iconAfter: true,
                 onPressed: _noop,
               ),
               TextAction(
                 label: 'Sign out',
-                icon: Icons.logout,
+                icon: Icons.stop_rounded,
                 onPressed: _noop,
               ),
             ],
@@ -82,13 +82,13 @@ void main() {
       ),
     );
     final skipWord = tester.getRect(find.text('Skip'));
-    final forward = tester.getRect(find.byIcon(Icons.arrow_forward));
+    final forward = tester.getRect(find.byIcon(Icons.fast_forward_rounded));
     expect(forward.left, greaterThan(skipWord.right), reason: 'after the word');
     final outWord = tester.getRect(find.text('Sign out'));
-    final logout = tester.getRect(find.byIcon(Icons.logout));
+    final logout = tester.getRect(find.byIcon(Icons.stop_rounded));
     expect(logout.right, lessThan(outWord.left), reason: 'before the word');
     expect(
-      tester.widget<Icon>(find.byIcon(Icons.logout)).size,
+      tester.widget<Icon>(find.byIcon(Icons.stop_rounded)).size,
       TextAction.iconSize,
     );
   });

@@ -226,7 +226,7 @@ class ChooseServiceScreen extends StatelessWidget {
                     child: TextAction(
                       key: skipKey,
                       label: 'Skip',
-                      icon: Icons.arrow_forward,
+                      icon: Icons.fast_forward_rounded,
                       iconAfter: true,
                       onPressed: onSkip,
                     ),
@@ -241,7 +241,8 @@ class ChooseServiceScreen extends StatelessWidget {
               ),
             ),
             // Sign out lives at the foot, bottom-left: the way out of an
-            // account, away from the choices. Fills the screen so it sits on
+            // account, away from the choices. Transport glyphs throughout
+            // (founder, 2026-09-18): Skip fast-forwards, Sign out stops. Fills the screen so it sits on
             // the bottom edge; on a short screen it scrolls into view.
             SliverFillRemaining(
               hasScrollBody: false,
@@ -268,7 +269,7 @@ class ChooseServiceScreen extends StatelessWidget {
                       TextAction(
                         key: signOutKey,
                         label: 'Sign out',
-                        icon: Icons.logout,
+                        icon: Icons.stop_rounded,
                         quiet: true,
                         onPressed: onSignOut,
                       ),

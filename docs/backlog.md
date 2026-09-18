@@ -152,6 +152,8 @@ features remain pending.
 
 ## Native design program follow-ups (2026-09-17)
 
+- **Transport-glyph audit (founder, 2026-09-18).** Every `Icon(` in `client/lib` that is not a navigation chevron or a genuine playback control gets a playback-transport equivalent where one reads naturally: eject for detach/remove, record for start/voice, pause for hold states, previous/next for back/forward steps, stop for sign-out and cancel. Decision entry the same day. Do it screen by screen with a board note, not as a blind find-and-replace.
+
 - Home still renders `PlaybackMini` above the dock's mini-player; remove in Phase 6.2.
 - `LibraryTab` duplicates Home's library sync sheet and `YouTab` duplicates the
   suggestion settings screen; extract shared widgets in Phase 8.

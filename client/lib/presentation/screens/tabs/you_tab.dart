@@ -476,7 +476,7 @@ class _SignOutRowState extends ConsumerState<_SignOutRow> {
   @override
   Widget build(BuildContext context) => InsetRow(
     key: const Key('you-signout'),
-    leading: Icon(Icons.logout, color: context.tokens.errInk),
+    leading: Icon(Icons.stop_rounded, color: context.tokens.errInk),
     title: 'Sign out',
     destructive: true,
     trailing: const SizedBox.shrink(),
