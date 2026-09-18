@@ -466,3 +466,20 @@ and Android get a frosted fallback with the same geometry. The tab bar hides ins
 a conversation and returns on Back to Mixes. Voice input is planned before launch,
 so the composer reserves the mic from the start. Evidence:
 `mockups/approved/2026-09-17-mobile-shell.md`. Implementation has not started.
+
+## 2026-09-18 — Native design program implemented end to end
+
+Phases 1–8 of `superpowers/plans/2026-09-17-native-design-implementation.md` are on
+main: tokens and theme, gradient and frosted materials, tape controls, flush lists and
+the cassette painter, the collapsing large title with a pinned leading cluster; the
+four-tab shell with the hosted UIKit Liquid Glass dock and its Flutter fallback; Home
+with the bottom panel, idea pills, attachment menu and picker sheet; the conversation
+with the tape card, version chips and energy sheet; the arrangement with Undo through
+the new server insert op; the Now Playing sheet and mini-player wiring; voice input
+(recorded clip → server Groq route → on-device fallback, composer listening state);
+and the restyled Library, You, memory, sign-in, Account, playlist detail and edit,
+Spotify import, version history and interview screens. Departures from the boards are
+recorded under each approval record's "Implementation departures". The per-phase
+founder gates were replaced by the per-task review loop at the founder's request
+(2026-09-17); one full smoke follows. Not deployed: the server insert op and
+transcription route (needs `GROQ_API_KEY`), and no TestFlight build yet.
