@@ -35,7 +35,7 @@ class SignInScreen extends ConsumerStatefulWidget {
       'Google sign-in is not available in this build.';
 
   /// The tape's width where the screen has room for all of it.
-  static const double cassetteWidth = 320;
+  static const double cassetteWidth = 272;
 
   @override
   ConsumerState<SignInScreen> createState() => _SignInScreenState();
@@ -115,6 +115,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                         _wordmark(tokens),
                         _cassette(
                           _tapeWidth(
+                            body: context,
                             tokens: tokens,
                             constraints: constraints,
                             width: width,
@@ -125,6 +126,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                         _promise(tokens, dark, googleAvailable, lastUsed),
                         Text(
                           _footNote,
+                          textAlign: TextAlign.center,
                           style: tokens.meta.copyWith(color: tokens.muted),
                         ),
                       ],
@@ -153,6 +155,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
   /// content (200% text) therefore drops the tape and scrolls, which is what
   /// the reserved status line and foot note expect.
   double _tapeWidth({
+    required BuildContext body,
     required MixtapeTokens tokens,
     required BoxConstraints constraints,
     required double width,
@@ -164,6 +167,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
         _scrollPadding * 2 -
         _cassetteGap * 2 -
         _fixedHeight(
+          body: body,
           tokens: tokens,
           width: width,
           googleAvailable: googleAvailable,
@@ -181,15 +185,22 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
 
   /// Every row but the tape, laid out at [width] and the ambient text scale.
   double _fixedHeight({
+    required BuildContext body,
     required MixtapeTokens tokens,
     required double width,
     required bool googleAvailable,
     required AccountProvider? lastUsed,
   }) {
-    final scaler = MediaQuery.textScalerOf(context);
+    final scaler = MediaQuery.textScalerOf(body);
+    // A [Text] merges its style over the ambient default, which carries a
+    // line height the tokens without one (meta, the pencil note) inherit;
+    // measuring the raw token would come up short by a line or two. [body]
+    // is the scroll view's context, inside the Scaffold's Material, where
+    // that default is the one the rows actually see.
+    final ambient = DefaultTextStyle.of(body).style;
     double text(String value, TextStyle style, double maxWidth) {
       final painter = TextPainter(
-        text: TextSpan(text: value, style: style),
+        text: TextSpan(text: value, style: ambient.merge(style)),
         textDirection: TextDirection.ltr,
         textScaler: scaler,
       )..layout(maxWidth: math.max(0, maxWidth));
@@ -199,11 +210,11 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
     }
 
     var total = text('mixtape', tokens.wordmark, width);
-    total += text(_headline, tokens.largeTitle, width) + 12;
-    total += text(_blurb, tokens.body, width) + 28;
+    total += text(_headline, _headlineStyle(tokens), width) + 12;
+    total += text(_blurb, _blurbStyle(tokens), width) + 28;
 
     // The pill's floor, or its label plus the padding it sits in.
-    final labelStyle = tokens.rowTitle.copyWith(fontWeight: FontWeight.w600);
+    final labelStyle = ProviderSignInButton.labelStyle(tokens);
     final labelWidth = width - 40 - ProviderSignInButton.markSize - 10;
     for (final provider in AccountProvider.values) {
       total += math.max(
@@ -212,7 +223,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
               ProviderSignInButton.markSize,
               text('Continue with ${_name(provider)}', labelStyle, labelWidth),
             ) +
-            20,
+            ProviderSignInButton.verticalPadding * 2,
       );
       if (lastUsed == provider) {
         total += 8 + text('Last used', _lastUsedStyle(tokens), width);
@@ -229,11 +240,9 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
   }
 
   /// The product name in the web's marker hand, tilted off the baseline.
-  Widget _wordmark(MixtapeTokens tokens) => Align(
-    alignment: Alignment.centerLeft,
+  Widget _wordmark(MixtapeTokens tokens) => Center(
     child: Transform.rotate(
       angle: -_wordmarkTilt,
-      alignment: Alignment.centerLeft,
       child: Text('mixtape', style: tokens.wordmark),
     ),
   );
@@ -284,9 +293,9 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     mainAxisSize: MainAxisSize.min,
     children: [
-      Text(_headline, style: tokens.largeTitle),
+      Text(_headline, style: _headlineStyle(tokens)),
       const SizedBox(height: 12),
-      Text(_blurb, style: tokens.body.copyWith(color: tokens.muted)),
+      Text(_blurb, style: _blurbStyle(tokens)),
       const SizedBox(height: 28),
       for (final provider in AccountProvider.values) ...[
         _providerButton(provider, dark, googleAvailable),
@@ -420,11 +429,19 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
 
   static const String _headline = 'Your music, mixed for right now.';
 
+  /// The founder's 2026-09-18 sizing: a quieter headline than the shell's
+  /// large title, and a 12 pt blurb under it.
+  static TextStyle _headlineStyle(MixtapeTokens tokens) => tokens.largeTitle
+      .copyWith(fontSize: 26, fontWeight: FontWeight.w500, letterSpacing: -0.4);
+
+  static TextStyle _blurbStyle(MixtapeTokens tokens) =>
+      tokens.body.copyWith(fontSize: 12, color: tokens.muted);
+
   static const String _blurb =
       'Start with a mood, a memory, or one song. Mixtape builds a mix '
       'from music you already love.';
 
-  static const String _footNote = 'Apple Music access is requested separately.';
+  static const String _footNote = 'Music access is requested separately.';
 
   /// The scroll view's own vertical padding, top and bottom.
   static const double _scrollPadding = 24;
@@ -478,7 +495,14 @@ class ProviderSignInButton extends StatefulWidget {
   final VoidCallback? onPressed;
 
   /// The provider button's height floor.
-  static const double height = 52;
+  static const double height = 44;
+
+  /// The label's inset above and below, inside [height].
+  static const double verticalPadding = 8;
+
+  /// The pill's label: one step under the row title.
+  static TextStyle labelStyle(MixtapeTokens tokens) =>
+      tokens.rowTitle.copyWith(fontSize: 14, fontWeight: FontWeight.w600);
 
   static const double markSize = 18;
 
@@ -553,7 +577,7 @@ class _ProviderSignInButtonState extends State<ProviderSignInButton> {
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 20,
-                    vertical: 10,
+                    vertical: ProviderSignInButton.verticalPadding,
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -567,10 +591,9 @@ class _ProviderSignInButtonState extends State<ProviderSignInButton> {
                         child: Text(
                           widget.label,
                           textAlign: TextAlign.center,
-                          style: tokens.rowTitle.copyWith(
-                            fontWeight: FontWeight.w600,
-                            color: widget.foreground,
-                          ),
+                          style: ProviderSignInButton.labelStyle(
+                            tokens,
+                          ).copyWith(color: widget.foreground),
                         ),
                       ),
                     ],

@@ -180,10 +180,7 @@ void main() {
     );
     expect(find.text('Continue with Apple'), findsOneWidget);
     expect(find.text('Continue with Google'), findsOneWidget);
-    expect(
-      find.text('Apple Music access is requested separately.'),
-      findsOneWidget,
-    );
+    expect(find.text('Music access is requested separately.'), findsOneWidget);
     // Both marks are drawn, and neither provider outranks the other.
     expect(find.byType(AppleMark), findsOneWidget);
     expect(find.byType(GoogleMark), findsOneWidget);
@@ -193,9 +190,7 @@ void main() {
     // The note sits at the foot of the screen, not under the buttons.
     expect(
       tester
-          .getBottomLeft(
-            find.text('Apple Music access is requested separately.'),
-          )
+          .getBottomLeft(find.text('Music access is requested separately.'))
           .dy,
       greaterThan(tester.getSize(find.byType(SignInScreen)).height - 60),
     );
@@ -203,7 +198,7 @@ void main() {
       tester.getSize(find.byKey(const Key('apple-sign-in'))).height,
       greaterThanOrEqualTo(ProviderSignInButton.height),
     );
-    expect(ProviderSignInButton.height, 52);
+    expect(ProviderSignInButton.height, 44);
     // Stacked, not side by side: each button spans the content width.
     expect(
       tester.getSize(find.byKey(const Key('apple-sign-in'))).width,
@@ -256,7 +251,7 @@ void main() {
     for (final sf in [
       find.text('Your music, mixed for right now.'),
       find.text('Continue with Apple'),
-      find.text('Apple Music access is requested separately.'),
+      find.text('Music access is requested separately.'),
     ]) {
       expect(tester.widget<Text>(sf).style?.fontFamily, isNull);
     }
@@ -327,7 +322,7 @@ void main() {
       'the Apple button': find.byKey(const Key('apple-sign-in')),
       'the Google button': find.byKey(const Key('google-sign-in')),
       'the Apple Music note': find.text(
-        'Apple Music access is requested separately.',
+        'Music access is requested separately.',
       ),
     }.entries) {
       final rect = tester.getRect(entry.value);
@@ -338,8 +333,12 @@ void main() {
         reason: '${entry.key} is below the fold',
       );
     }
-    // The tape gave up its room to do it, rather than showing a stub.
-    expect(find.byType(CassetteTile), findsNothing);
+    // The quieter type leaves room for the tape itself, above its floor.
+    expect(find.byType(CassetteTile), findsOneWidget);
+    expect(
+      tester.widget<CassetteTile>(find.byType(CassetteTile)).width,
+      greaterThanOrEqualTo(120),
+    );
   });
 
   testWidgets('the Apple button is dark on light in the light theme', (
@@ -615,7 +614,7 @@ void main() {
       );
       // The screen scrolls rather than clipping: the foot note is still
       // reachable under the taller type.
-      final foot = find.text('Apple Music access is requested separately.');
+      final foot = find.text('Music access is requested separately.');
       await tester.scrollUntilVisible(foot, 80);
       await tester.pumpAndSettle();
       expect(foot.hitTestable(), findsOneWidget);
