@@ -28,24 +28,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/dj/dj_models.dart';
-import '../../data/listening/listening_models.dart';
-import '../../data/musickit/musickit_bridge.dart';
-import '../providers/device_providers.dart';
 import '../providers/dj_providers.dart';
-import '../providers/funnel_provider.dart';
 import '../providers/library_sync_provider.dart';
 import '../providers/onboarding_provider.dart';
-import '../providers/playback_provider.dart';
 import '../theme/mixtape_theme.dart';
 import '../widgets/foundation/cassette_tile.dart';
 import '../widgets/foundation/glass_cluster.dart';
 import '../widgets/foundation/gradient_background.dart';
-import '../widgets/foundation/label_chip.dart';
 import '../widgets/foundation/tape_button.dart';
-import '../widgets/foundation/text_action.dart';
+import '../widgets/mix_handoff.dart';
 import '../widgets/track_row.dart';
 import 'mix_history_screen.dart';
-import 'playback_screen.dart';
 
 /// The conflict copy from the approved board. The provider's own
 /// [staleQueueTransientMessage] is shared with the conversation screen, so it
@@ -71,7 +64,8 @@ class QueueScreen extends ConsumerStatefulWidget {
   ConsumerState<QueueScreen> createState() => _QueueScreenState();
 }
 
-class _QueueScreenState extends ConsumerState<QueueScreen> {
+class _QueueScreenState extends ConsumerState<QueueScreen>
+    with MixHandoff<QueueScreen> {
   final Set<String> _expandedTrackIds = {};
 
   /// Rows filtered out of the render even though the server still has them.
@@ -97,9 +91,11 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
   final List<_QueueIntent> _intents = [];
   bool _draining = false;
 
-  bool _playing = false;
-  bool _saving = false;
-  bool _sharing = false;
+  @override
+  String get mixSessionId => widget.sessionId;
+
+  @override
+  void showMixSnack(String message) => _showSnack(context, message);
 
   void _toggleReason(String trackId) {
     setState(() {
@@ -232,34 +228,6 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     );
   }
 
-  /// Fire-and-forget `POST /sessions/:id/events` — see
-  /// `docs/superpowers/plans/2026-08-30-p4-taste-learning.md` Task 4. Posted
-  /// exactly once per SUCCESSFUL play/save (never on failure, never on a
-  /// rebuild — both call sites fire this only from their success branch, not
-  /// from build()), and any failure here is swallowed silently: the server
-  /// endpoint is purely a taste-learning signal, never allowed to degrade
-  /// the Play/Save UX that already succeeded on the user's device. The save
-  /// call site additionally only fires this when `result.added > 0` (see
-  /// [_confirmSave]) — a save that added zero tracks isn't evidence the
-  /// user liked anything in this queue, and would be a false taste signal.
-  void _postEvent(String type) {
-    unawaited(() async {
-      try {
-        await ref.read(djApiProvider).postSessionEvent(widget.sessionId, type);
-      } catch (_) {
-        // Silent by design — no retry, no surfaced error.
-      }
-    }());
-  }
-
-  /// The once-only `first_output` funnel milestone: the FIRST SPOTIFY output
-  /// action (plan: funnel events) — an "Open in Spotify" tap or a share the
-  /// listener carried through. Play and Save are Apple outputs and post
-  /// nothing here; they have their own session events. Same fire-and-forget
-  /// contract as [_postEvent]; the once-ness lives in [FunnelMilestones].
-  void _noteOutput() =>
-      ref.read(funnelMilestonesProvider).recordOnce(FunnelEventType.firstOutput);
-
   /// `spotify:track:<id>` when the Spotify app answers the probe (the scheme
   /// is declared under LSApplicationQueriesSchemes in Info.plist, or iOS
   /// says no regardless), else the https link, which Safari or the App Store
@@ -286,225 +254,12 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
       if (screenContext.mounted) _showSnack(screenContext, "couldn't open Spotify");
       return;
     }
-    _noteOutput();
-  }
-
-  /// Text handoff for a Spotify mix: one "Artist – Title" per track (en
-  /// dash), every visible track — a transfer tool searches Spotify by name,
-  /// so a track with no id at all still belongs in the list. Once the sheet
-  /// reports the text went somewhere, the tool's own page opens, the same
-  /// way the web rail opens it in a new tab: TuneMyMusic is the tool of the
-  /// two on the approved board whose transfer page accepts pasted text
-  /// without an account, so the listener lands where they can paste.
-  Future<void> _handleShare(
-    BuildContext screenContext,
-    BuildContext buttonContext,
-    List<QueueTrack> queue,
-    String title,
-  ) async {
-    if (_sharing) return;
-    setState(() => _sharing = true);
-    try {
-      final text = [for (final t in queue) '${t.artist} – ${t.title}'].join('\n');
-      final handedOff = await ref.read(textSharerProvider).share(
-            text,
-            subject: 'Mixtape · $title',
-            origin: _shareOrigin(buttonContext, screenContext),
-          );
-      if (!mounted || !handedOff) return; // a dismissed sheet is no output
-      _noteOutput();
-      try {
-        await ref.read(linkOpenerProvider)(_transferToolUrl);
-      } catch (_) {
-        // The text is already in the listener's hands; a browser that won't
-        // open isn't worth a second message on top of the confirmation.
-      }
-      if (!mounted || !screenContext.mounted) return;
-      _showSnack(screenContext, _shareSuccessMessage(queue.length));
-    } catch (_) {
-      if (!screenContext.mounted) return;
-      _showSnack(screenContext, "couldn't open the share sheet");
-    } finally {
-      if (mounted) setState(() => _sharing = false);
-    }
-  }
-
-  /// The anchor the share sheet points at. On iPad the sheet is a popover
-  /// and UIKit raises without a source rect, so this is the share button's
-  /// own rect in global logical coordinates ([buttonContext] is the Builder
-  /// wrapping it, whose first render object is the button). A button that
-  /// has left the tree falls back to the whole screen, which centres it.
-  Rect _shareOrigin(BuildContext buttonContext, BuildContext screenContext) {
-    final box = buttonContext.findRenderObject();
-    if (box is RenderBox && box.hasSize && !box.size.isEmpty) {
-      return box.localToGlobal(Offset.zero) & box.size;
-    }
-    return Offset.zero & MediaQuery.sizeOf(screenContext);
-  }
-
-  /// Play now: the app-owned Apple player takes the arrangement and the Now
-  /// Playing screen opens over it. The button then reads Playing (see
-  /// [_isPlayingThisMix]); nothing on the list changes.
-  void _playHere(ChatState state, List<QueueTrack> queue) {
-    final player = ref.read(playbackProvider);
-    unawaited(
-      player.start(widget.sessionId, state.queueVersion, state.session.title, queue),
-    );
-    Navigator.push(
-      context,
-      MaterialPageRoute<void>(builder: (_) => const PlaybackScreen()),
-    );
-  }
-
-  bool _isPlayingThisMix() {
-    final player = ref.read(playbackProvider);
-    return player.sessionId == widget.sessionId &&
-        (player.sample.status == 'playing' || player.sample.status == 'waiting');
-  }
-
-  Future<void> _handlePlay(BuildContext screenContext, List<QueueTrack> queue) async {
-    if (_playing) return;
-    setState(() => _playing = true);
-    try {
-      final ids = [for (final t in queue) if (t.appleId != null) t.appleId!];
-      final skipped = queue.length - ids.length;
-      await ref.read(musicKitBridgeProvider).playQueue(ids);
-      _postEvent('played');
-      if (!screenContext.mounted) return;
-      _showSnack(screenContext, _playSuccessMessage(skipped));
-    } on MusicKitException catch (e) {
-      if (!screenContext.mounted) return;
-      _showSnack(screenContext, "Couldn't play — ${e.message}");
-    } finally {
-      if (mounted) setState(() => _playing = false);
-    }
-  }
-
-  Future<void> _openSaveDialog(
-    BuildContext screenContext,
-    List<QueueTrack> queue,
-    String defaultName,
-  ) async {
-    if (_saving) return;
-    setState(() => _saving = true);
-    try {
-      // Author prefill: the name typed on this device last time wins, then
-      // the account's display name (GET /me — read non-blocking: the fetch
-      // was started by build()'s watch, and a still-loading/absent value
-      // just means an empty field; per dj_providers' warning we never await
-      // a provider future across auth transitions). Blank falls back to
-      // 'mixtape' on save.
-      final storedAuthor = await ref.read(authorStoreProvider).read();
-      if (!screenContext.mounted) return;
-      final accountName = ref.read(accountNameProvider).value;
-      await showDialog<void>(
-        context: screenContext,
-        builder: (dialogContext) => _SaveDialog(
-          defaultName: defaultName,
-          defaultAuthor:
-              (storedAuthor != null && storedAuthor.isNotEmpty ? storedAuthor : accountName) ?? '',
-          onConfirm: (name, author) =>
-              _confirmSave(screenContext, dialogContext, queue, name, defaultName, author),
-        ),
-      );
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  /// Runs the actual bridge call for a confirmed save — called by
-  /// [_SaveDialog] itself, which owns the double-tap guard on its Save
-  /// button (each tap would otherwise create a NEW playlist; there's no way
-  /// to dedupe after the fact). Always resolves the dialog (pops it) on
-  /// both success and failure, then reports the outcome as a snackbar on
-  /// the screen underneath.
-  Future<void> _confirmSave(
-    BuildContext screenContext,
-    BuildContext dialogContext,
-    List<QueueTrack> queue,
-    String rawName,
-    String defaultName,
-    String rawAuthor,
-  ) async {
-    final trimmed = rawName.trim();
-    final name = trimmed.isEmpty ? defaultName : trimmed;
-    // Attribution: without an explicit author Apple shows the Xcode product
-    // name ("Runner"). The user's typed name wins; blank falls back to the
-    // app name. Remembered (even if the save then fails) so the next
-    // dialog prefills it — it's the user's name, not per-playlist data.
-    final trimmedAuthor = rawAuthor.trim();
-    final author = trimmedAuthor.isEmpty ? 'mixtape' : trimmedAuthor;
-    if (trimmedAuthor.isNotEmpty) {
-      await ref.read(authorStoreProvider).write(trimmedAuthor);
-    }
-    final ids = [for (final t in queue) if (t.appleId != null) t.appleId!];
-    final creationApi = ref.read(djApiProvider);
-    final creationSessionId = widget.sessionId;
-    try {
-      final result = await ref.read(musicKitBridgeProvider).createPlaylist(
-            name,
-            ids,
-            author: author,
-            description: 'made by mixtape',
-            onCreated: (libraryId) {
-              // Bind to the originating mix, not a screen/account that may
-              // have changed while Apple was creating the playlist.
-              unawaited(creationApi.recordPlaylistCreation(creationSessionId, libraryId)
-                  .catchError((Object _) {}));
-            },
-          );
-      // A zero-added save is a false taste signal, not evidence of a like —
-      // see _postEvent's doc comment.
-      if (result.added > 0) _postEvent('saved_playlist');
-      if (dialogContext.mounted) Navigator.of(dialogContext).pop();
-      if (!screenContext.mounted) return;
-      _showSnack(screenContext, _saveSuccessMessage(result.added, result.failed));
-    } on MusicKitException catch (e) {
-      if (dialogContext.mounted) Navigator.of(dialogContext).pop();
-      if (!screenContext.mounted) return;
-      // The bridge's message carries Apple's actual failure reason (see
-      // MusicKitBridge._fromPlatform) — hiding it behind a generic string
-      // made real device failures undiagnosable.
-      _showSnack(screenContext, "Couldn't save the playlist — ${e.message}");
-    }
+    noteSpotifyOutput();
   }
 
   void _showSnack(BuildContext context, String message) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
-
-  String _playSuccessMessage(int skipped) => skipped > 0
-      ? 'Playing in Apple Music · $skipped song${skipped == 1 ? '' : 's'} skipped (not in Apple Music)'
-      : 'Playing in Apple Music';
-
-  String _saveSuccessMessage(int added, int failed) => failed > 0
-      ? 'Saved $added songs to Apple Music ($failed failed)'
-      : 'Saved $added songs to Apple Music';
-
-  String _shareSuccessMessage(int count) =>
-      'Shared $count song${count == 1 ? '' : 's'} · TuneMyMusic makes the playlist in Spotify';
-
-  /// Null when Play/Create are actionable; otherwise the reason they are
-  /// not, written beside them rather than hidden in a tooltip: a queue whose
-  /// tracks are ALL missing an Apple Music match can't be played or saved at
-  /// all (a partial match still works — the filtered track count is reported
-  /// in the success snackbar instead). An empty queue needs no reason: the
-  /// actions row isn't built at all, per the board. Not consulted for a
-  /// Spotify-only queue, which shows no Play/Create — see [_hasAppleActions].
-  String? _actionsDisabledReason(List<QueueTrack> queue) =>
-      queue.every((t) => t.appleId == null) ? "these tracks aren't in Apple Music" : null;
-
-  /// Each platform's controls appear when the queue has anything that
-  /// platform can act on (plan: Outputs), so a mixed mix shows both — Apple
-  /// first, since Play is still the primary action for a mix Apple Music can
-  /// play. A queue with no Spotify ids at all shows no transfer handoff, and
-  /// one with no ids of either kind (or none at all) keeps the disabled
-  /// Play/Create pair carrying [_actionsDisabledReason] rather than an empty
-  /// bar.
-  bool _hasSpotifyActions(List<QueueTrack> queue) => queue.any((t) => t.spotifyId != null);
-
-  bool _hasAppleActions(List<QueueTrack> queue) =>
-      queue.any((t) => t.appleId != null) || !_hasSpotifyActions(queue);
 
   void _openHistory() {
     Navigator.of(context).push(
@@ -764,80 +519,31 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     );
   }
 
+  /// The shared handoff row (`widgets/mix_handoff.dart`), which the
+  /// conversation draws too. This screen has no busy gate of its own, so the
+  /// row is always live; [MixActionsRow] applies the Apple/Spotify rules.
   Widget _actionsRow(ChatState state, List<QueueTrack> visibleQueue) {
-    final tokens = context.tokens;
-    final disabledReason = _actionsDisabledReason(visibleQueue);
-    final spotifyActions = _hasSpotifyActions(visibleQueue);
-    final appleActions = _hasAppleActions(visibleQueue);
-    final muted = tokens.meta.copyWith(color: tokens.muted);
-
-    return ListenableBuilder(
-      listenable: ref.read(playbackProvider),
-      builder: (context, _) {
-        final playingHere = _isPlayingThisMix();
-        return Padding(
-          padding: const EdgeInsets.only(top: 2, bottom: 10),
-          child: Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              if (appleActions) ...[
-                TapeButton(
-                  key: const Key('play-here-button'),
-                  label: playingHere ? 'Playing' : 'Play now',
-                  playing: playingHere,
-                  onPressed: disabledReason == null
-                      ? () => _playHere(state, visibleQueue)
-                      : null,
-                ),
-                LabelChip(
-                  key: const Key('save-button'),
-                  label: 'Create playlist',
-                  onPressed: (disabledReason == null && !_saving)
-                      ? () => _openSaveDialog(context, visibleQueue, state.session.title)
-                      : null,
-                ),
-                TextAction(
-                  key: const Key('play-button'),
-                  label: 'Send to Music',
-                  onPressed: (disabledReason == null && !_playing)
-                      ? () => _handlePlay(context, visibleQueue)
-                      : null,
-                ),
-              ],
-              // The Builder is the share sheet's popover anchor on iPad: its
-              // context resolves to the button's own render object.
-              if (spotifyActions)
-                Builder(
-                  builder: (buttonContext) => TapeButton(
-                    key: const Key('share-button'),
-                    label: 'Send to a transfer tool',
-                    onPressed: _sharing
-                        ? null
-                        : () => _handleShare(
-                              context,
-                              buttonContext,
-                              visibleQueue,
-                              state.session.title,
-                            ),
-                  ),
-                ),
-              if (appleActions && disabledReason != null)
-                Text(key: const Key('actions-reason'), disabledReason, style: muted),
-              if (!appleActions)
-                SizedBox(
-                  width: double.infinity,
-                  child: Text(
-                    'Play now and Create playlist need Apple Music',
-                    key: const Key('apple-needed-reason'),
-                    style: muted,
-                  ),
-                ),
-            ],
-          ),
-        );
-      },
+    return MixActionsRow(
+      keys: MixHandoffKeys.arrangement,
+      queue: visibleQueue,
+      enabled: true,
+      padding: const EdgeInsets.only(top: 2, bottom: 10),
+      isPlayingThisMix: isPlayingThisMix,
+      onPlayNow: () => playHere(state, visibleQueue),
+      onCreatePlaylist: () => createPlaylist(
+        queue: visibleQueue,
+        defaultName: state.session.title,
+        keys: MixHandoffKeys.arrangement,
+      ),
+      onSendToMusic: () => sendToMusic(visibleQueue),
+      onShare: (buttonContext) => shareToTransferTool(
+        buttonContext,
+        visibleQueue,
+        state.session.title,
+      ),
+      saving: savingPlaylist,
+      sendingToMusic: sendingToMusic,
+      sharing: sharingMix,
     );
   }
 
@@ -886,10 +592,6 @@ String? _durationLabel(List<QueueTrack> queue) {
   if (minutes < 60) return '$minutes min';
   return '${minutes ~/ 60} h ${(minutes % 60).toString().padLeft(2, '0')}';
 }
-
-/// The transfer tool the handoff opens, matching the web rail's
-/// TRANSFER_TOOL_URL (`web/src/components/QueuePanel.tsx`).
-final _transferToolUrl = Uri.https('www.tunemymusic.com', '/transfer');
 
 /// One queued queue-mutation, held in terms of TRACK IDS rather than
 /// positions. The gesture that creates it knows what the user meant ("drop
@@ -1230,94 +932,6 @@ class _NotPersonalBlock extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-/// P3's native alert: the mix title as the default name, and "Your name"
-/// remembered for next time.
-class _SaveDialog extends StatefulWidget {
-  const _SaveDialog({
-    required this.defaultName,
-    required this.defaultAuthor,
-    required this.onConfirm,
-  });
-
-  final String defaultName;
-  final String defaultAuthor;
-  final Future<void> Function(String name, String author) onConfirm;
-
-  @override
-  State<_SaveDialog> createState() => _SaveDialogState();
-}
-
-class _SaveDialogState extends State<_SaveDialog> {
-  late final TextEditingController _controller = TextEditingController(text: widget.defaultName);
-  late final TextEditingController _authorController =
-      TextEditingController(text: widget.defaultAuthor);
-  bool _submitting = false;
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    _authorController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _submit() async {
-    if (_submitting) return; // guards a double-tap: each tap would otherwise create a NEW playlist
-    setState(() => _submitting = true);
-    await widget.onConfirm(_controller.text, _authorController.text);
-    // widget.onConfirm always pops this dialog itself (success or failure)
-    // before returning, so in practice this widget is already gone by the
-    // time control reaches here and the line below never runs — kept only
-    // so _submitting can't get stuck at true if that contract ever changes.
-    if (mounted) setState(() => _submitting = false);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog.adaptive(
-      title: const Text('Save as playlist'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            key: const Key('playlist-name-field'),
-            controller: _controller,
-            autofocus: true,
-            enabled: !_submitting,
-            decoration: const InputDecoration(labelText: 'Playlist name'),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            key: const Key('playlist-author-field'),
-            controller: _authorController,
-            enabled: !_submitting,
-            decoration: const InputDecoration(
-              labelText: 'Your name',
-              helperText: 'Shown under the playlist in Apple Music',
-            ),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: _submitting ? null : () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          key: const Key('save-confirm-button'),
-          onPressed: _submitting ? null : _submit,
-          child: _submitting
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Text('Save'),
-        ),
-      ],
     );
   }
 }

@@ -16,17 +16,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/api/api_client.dart';
-import '../../data/dj/dj_models.dart';
-import '../../data/musickit/musickit_bridge.dart';
 import '../../data/playlists/playlist_context_models.dart';
 import '../providers/dj_providers.dart';
 import '../providers/auth_provider.dart';
-import '../../data/listening/listening_models.dart' show FunnelEventType;
-import '../providers/device_providers.dart';
-import '../providers/funnel_provider.dart';
 import '../providers/library_sync_provider.dart';
-import '../providers/onboarding_provider.dart';
-import '../providers/playback_provider.dart';
 import '../providers/playlist_context_provider.dart';
 import '../providers/mix_operation_gate.dart';
 import '../theme/mixtape_theme.dart';
@@ -40,11 +33,11 @@ import '../widgets/foundation/tape_button.dart';
 import '../widgets/foundation/text_action.dart';
 import '../widgets/home_panel.dart' show HomePanel;
 import '../widgets/mix_energy_summary.dart';
+import '../widgets/mix_handoff.dart';
 import '../widgets/mix_prompt_input.dart';
 import '../widgets/playlist_inspiration.dart';
 import '../widgets/queue_card.dart';
 import 'mix_history_screen.dart';
-import 'playback_screen.dart';
 import 'queue_screen.dart';
 
 /// The toast a selection changed somewhere else earns: the canonical seed is
@@ -53,10 +46,6 @@ import 'queue_screen.dart';
 String inspirationChangedMessage(String? name) =>
     '${name ?? 'The inspiration'} changed elsewhere. '
     'Showing the current selection.';
-
-/// The transfer tool the handoff opens, matching the arrangement's own
-/// TRANSFER_TOOL_URL.
-final _transferToolUrl = Uri.https('www.tunemymusic.com', '/transfer');
 
 class ChatScreen extends ConsumerStatefulWidget {
   const ChatScreen({super.key, required this.sessionId, this.initialError});
@@ -76,7 +65,8 @@ class ChatScreen extends ConsumerStatefulWidget {
   ConsumerState<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends ConsumerState<ChatScreen> {
+class _ChatScreenState extends ConsumerState<ChatScreen>
+    with MixHandoff<ChatScreen> {
   final _scrollController = ScrollController();
   final _textController = TextEditingController();
   final _promptFocus = FocusNode();
@@ -88,9 +78,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   bool _showListeningCaption = false;
   bool _seededInitialError = false;
   bool _changingStatus = false;
-  bool _playing = false;
-  bool _saving = false;
-  bool _sharing = false;
+
+  @override
+  String get mixSessionId => widget.sessionId;
+
+  @override
+  void showMixSnack(String message) => _snack(message);
 
   /// The panel's measured height, which the transcript pads for. The panel
   /// floats over the transcript (and rides the keyboard), so the list cannot
@@ -371,214 +364,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           InspirationChipTone.insufficient,
         _ => InspirationChipTone.ready,
       };
-
-  void _postEvent(String type) {
-    unawaited(() async {
-      try {
-        await ref.read(djApiProvider).postSessionEvent(widget.sessionId, type);
-      } catch (_) {
-        // Silent by design — no retry, no surfaced error.
-      }
-    }());
-  }
-
-  bool _isPlayingThisMix() {
-    final player = ref.read(playbackProvider);
-    return player.sessionId == widget.sessionId &&
-        (player.sample.status == 'playing' ||
-            player.sample.status == 'waiting');
-  }
-
-  /// Play now: the app-owned Apple player takes the arrangement and the Now
-  /// Playing screen opens over it — the same handler the arrangement uses.
-  void _playHere(ChatState state) {
-    final player = ref.read(playbackProvider);
-    unawaited(
-      player.start(
-        widget.sessionId,
-        state.queueVersion,
-        state.session.title,
-        state.queue,
-      ),
-    );
-    Navigator.push(
-      context,
-      MaterialPageRoute<void>(builder: (_) => const PlaybackScreen()),
-    );
-  }
-
-  /// The Spotify handoff, exactly as the arrangement runs it: one
-  /// "Artist – Title" per track, then the transfer tool's own page.
-  ///
-  /// FOLLOW-UP: this, [_sendToMusic] and [_createPlaylist] duplicate
-  /// QueueScreen's private handlers verbatim. Task 5.3 owns the extraction
-  /// into one shared file; until it lands the copy and conditions are kept
-  /// identical on purpose.
-  Future<void> _share(BuildContext buttonContext, ChatState state) async {
-    if (_sharing) return;
-    setState(() => _sharing = true);
-    try {
-      final queue = state.queue;
-      final text = [
-        for (final t in queue) '${t.artist} – ${t.title}',
-      ].join('\n');
-      final handedOff = await ref
-          .read(textSharerProvider)
-          .share(
-            text,
-            subject: 'Mixtape · ${state.session.title}',
-            origin: _shareOrigin(buttonContext),
-          );
-      if (!mounted || !handedOff) return; // a dismissed sheet is no output
-      _noteOutput();
-      try {
-        await ref.read(linkOpenerProvider)(_transferToolUrl);
-      } catch (_) {
-        // The text is already in the listener's hands; a browser that won't
-        // open isn't worth a second message on top of the confirmation.
-      }
-      if (!mounted) return;
-      _snack(
-        'Shared ${queue.length} song${queue.length == 1 ? '' : 's'} · '
-        'TuneMyMusic makes the playlist in Spotify',
-      );
-    } catch (_) {
-      if (!mounted) return;
-      _snack("couldn't open the share sheet");
-    } finally {
-      if (mounted) setState(() => _sharing = false);
-    }
-  }
-
-  /// The share sheet's iPad popover anchor: the button's own rect, falling
-  /// back to the screen (which centres it).
-  Rect _shareOrigin(BuildContext buttonContext) {
-    final box = buttonContext.findRenderObject();
-    if (box is RenderBox && box.hasSize && !box.size.isEmpty) {
-      return box.localToGlobal(Offset.zero) & box.size;
-    }
-    return Offset.zero & MediaQuery.sizeOf(context);
-  }
-
-  /// The once-only `first_output` funnel milestone: the first SPOTIFY output.
-  void _noteOutput() =>
-      ref.read(funnelMilestonesProvider).recordOnce(FunnelEventType.firstOutput);
-
-  /// Send to Music: the queue goes to Apple Music's own player.
-  Future<void> _sendToMusic(List<QueueTrack> queue) async {
-    if (_playing) return;
-    setState(() => _playing = true);
-    try {
-      final ids = [
-        for (final t in queue)
-          if (t.appleId != null) t.appleId!,
-      ];
-      final skipped = queue.length - ids.length;
-      await ref.read(musicKitBridgeProvider).playQueue(ids);
-      _postEvent('played');
-      if (!mounted) return;
-      _snack(
-        skipped > 0
-            ? 'Playing in Apple Music · $skipped song${skipped == 1 ? '' : 's'} skipped (not in Apple Music)'
-            : 'Playing in Apple Music',
-      );
-    } on MusicKitException catch (e) {
-      if (!mounted) return;
-      _snack("Couldn't play — ${e.message}");
-    } finally {
-      if (mounted) setState(() => _playing = false);
-    }
-  }
-
-  /// Create playlist: the arrangement becomes a real Apple Music playlist.
-  /// The same call, guards and copy the arrangement screen uses; task 5.3
-  /// gives the alert its final native form in one place.
-  Future<void> _createPlaylist(ChatState state) async {
-    if (_saving) return;
-    setState(() => _saving = true);
-    try {
-      // Author prefill: the name typed on this device last time wins, then
-      // the account's display name — read non-blocking, so a still-loading
-      // value just means an empty field.
-      String? storedAuthor;
-      try {
-        storedAuthor = await ref.read(authorStoreProvider).read();
-      } catch (_) {
-        storedAuthor = null;
-      }
-      if (!mounted) return;
-      final accountName = ref.read(accountNameProvider).value;
-      await showDialog<void>(
-        context: context,
-        builder: (dialogContext) => _SaveDialog(
-          defaultName: state.session.title,
-          defaultAuthor:
-              (storedAuthor != null && storedAuthor.isNotEmpty
-                  ? storedAuthor
-                  : accountName) ??
-              '',
-          onConfirm: (name, author) =>
-              _confirmSave(dialogContext, state, name, author),
-        ),
-      );
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  Future<void> _confirmSave(
-    BuildContext dialogContext,
-    ChatState state,
-    String rawName,
-    String rawAuthor,
-  ) async {
-    final trimmed = rawName.trim();
-    final name = trimmed.isEmpty ? state.session.title : trimmed;
-    final trimmedAuthor = rawAuthor.trim();
-    final author = trimmedAuthor.isEmpty ? 'mixtape' : trimmedAuthor;
-    if (trimmedAuthor.isNotEmpty) {
-      try {
-        await ref.read(authorStoreProvider).write(trimmedAuthor);
-      } catch (_) {
-        // Remembering the name is a nicety; never block the save on it.
-      }
-    }
-    final ids = [
-      for (final t in state.queue)
-        if (t.appleId != null) t.appleId!,
-    ];
-    final creationApi = ref.read(djApiProvider);
-    final creationSessionId = widget.sessionId;
-    try {
-      final result = await ref
-          .read(musicKitBridgeProvider)
-          .createPlaylist(
-            name,
-            ids,
-            author: author,
-            description: 'made by mixtape',
-            onCreated: (libraryId) {
-              unawaited(
-                creationApi
-                    .recordPlaylistCreation(creationSessionId, libraryId)
-                    .catchError((Object _) {}),
-              );
-            },
-          );
-      if (result.added > 0) _postEvent('saved_playlist');
-      if (dialogContext.mounted) Navigator.of(dialogContext).pop();
-      if (!mounted) return;
-      _snack(
-        result.failed > 0
-            ? 'Saved ${result.added} songs to Apple Music (${result.failed} failed)'
-            : 'Saved ${result.added} songs to Apple Music',
-      );
-    } on MusicKitException catch (e) {
-      if (dialogContext.mounted) Navigator.of(dialogContext).pop();
-      if (!mounted) return;
-      _snack("Couldn't save the playlist — ${e.message}");
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -976,28 +761,39 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                           _send(_textController.text, fromComposer: true),
                     ),
                   ),
-                  _MixActions(
-                    // The arrangement's own conditions, replicated: a mix
-                    // Apple Music cannot touch drops Play/Create and says
-                    // why; anything with a Spotify id gains the transfer
-                    // handoff. FOLLOW-UP with the handlers above — task 5.3
-                    // extracts both into one shared file.
+                  // The shared handoff row (`widgets/mix_handoff.dart`),
+                  // which the arrangement draws too: a mix Apple Music
+                  // cannot touch drops Play/Create and says why; anything
+                  // with a Spotify id gains the transfer handoff.
+                  MixActionsRow(
+                    keys: MixHandoffKeys.conversation,
                     queue: state?.queue ?? const [],
                     enabled: enabled,
-                    isPlayingThisMix: _isPlayingThisMix,
-                    onPlayNow: state == null ? null : () => _playHere(state),
+                    padding: const EdgeInsets.only(top: 8),
+                    isPlayingThisMix: isPlayingThisMix,
+                    onPlayNow: state == null
+                        ? null
+                        : () => playHere(state, state.queue),
                     onCreatePlaylist: state == null
                         ? null
-                        : () => _createPlaylist(state),
+                        : () => createPlaylist(
+                            queue: state.queue,
+                            defaultName: state.session.title,
+                            keys: MixHandoffKeys.conversation,
+                          ),
                     onSendToMusic: state == null
                         ? null
-                        : () => _sendToMusic(state.queue),
+                        : () => sendToMusic(state.queue),
                     onShare: state == null
                         ? null
-                        : (buttonContext) => _share(buttonContext, state),
-                    saving: _saving,
-                    sendingToMusic: _playing,
-                    sharing: _sharing,
+                        : (buttonContext) => shareToTransferTool(
+                            buttonContext,
+                            state.queue,
+                            state.session.title,
+                          ),
+                    saving: savingPlaylist,
+                    sendingToMusic: sendingToMusic,
+                    sharing: sharingMix,
                   ),
                 ],
               ),
@@ -1221,123 +1017,6 @@ class _VersionChip extends StatelessWidget {
   }
 }
 
-/// The mix actions row: Play now, Create playlist, Send to Music — the same
-/// three the arrangement carries, with the same Apple/Spotify gating, wrapping
-/// before any of them truncates.
-class _MixActions extends ConsumerWidget {
-  const _MixActions({
-    required this.queue,
-    required this.enabled,
-    required this.isPlayingThisMix,
-    required this.onPlayNow,
-    required this.onCreatePlaylist,
-    required this.onSendToMusic,
-    required this.onShare,
-    required this.saving,
-    required this.sendingToMusic,
-    required this.sharing,
-  });
-
-  /// The arrangement this mix currently has; empty until the DJ makes one.
-  final List<QueueTrack> queue;
-
-  /// False while a turn, an arrangement op or an inspiration write is in
-  /// flight — the whole row goes inert in place.
-  final bool enabled;
-  final bool Function() isPlayingThisMix;
-  final VoidCallback? onPlayNow;
-  final VoidCallback? onCreatePlaylist;
-  final VoidCallback? onSendToMusic;
-
-  /// Takes the button's own context: the share sheet's iPad popover anchor.
-  final void Function(BuildContext buttonContext)? onShare;
-  final bool saving;
-  final bool sendingToMusic;
-  final bool sharing;
-
-  static const Key reasonKey = Key('chat-actions-reason');
-  static const Key appleNeededKey = Key('chat-apple-needed-reason');
-
-  /// Null when Play/Create are actionable; otherwise the reason they are not,
-  /// written beside them rather than hidden in a tooltip. An arrangement that
-  /// does not exist yet needs no reason — the board draws the actions simply
-  /// disabled.
-  String? get disabledReason => queue.isNotEmpty && queue.every((t) => t.appleId == null)
-      ? "these tracks aren't in Apple Music"
-      : null;
-
-  bool get hasSpotifyActions => queue.any((t) => t.spotifyId != null);
-
-  bool get hasAppleActions =>
-      queue.any((t) => t.appleId != null) || !hasSpotifyActions;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final tokens = context.tokens;
-    final muted = tokens.meta.copyWith(color: tokens.muted);
-    final reason = disabledReason;
-    final live = enabled && queue.isNotEmpty && reason == null;
-
-    return ListenableBuilder(
-      listenable: ref.read(playbackProvider),
-      builder: (context, _) {
-        final playingHere = isPlayingThisMix();
-        return Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              if (hasAppleActions) ...[
-                TapeButton(
-                  key: const Key('chat-play-now'),
-                  label: playingHere ? 'Playing' : 'Play now',
-                  playing: playingHere,
-                  onPressed: live ? onPlayNow : null,
-                ),
-                LabelChip(
-                  key: const Key('chat-create-playlist'),
-                  label: 'Create playlist',
-                  onPressed: live && !saving ? onCreatePlaylist : null,
-                ),
-                TextAction(
-                  key: const Key('chat-send-to-music'),
-                  label: 'Send to Music',
-                  onPressed: live && !sendingToMusic ? onSendToMusic : null,
-                ),
-              ],
-              // The Builder is the share sheet's popover anchor on iPad: its
-              // context resolves to the button's own render object.
-              if (hasSpotifyActions)
-                Builder(
-                  builder: (buttonContext) => TapeButton(
-                    key: const Key('chat-share'),
-                    label: 'Send to a transfer tool',
-                    onPressed: enabled && !sharing && onShare != null
-                        ? () => onShare!(buttonContext)
-                        : null,
-                  ),
-                ),
-              if (hasAppleActions && reason != null)
-                Text(key: reasonKey, reason, style: muted),
-              if (!hasAppleActions)
-                SizedBox(
-                  width: double.infinity,
-                  child: Text(
-                    'Play now and Create playlist need Apple Music',
-                    key: appleNeededKey,
-                    style: muted,
-                  ),
-                ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
 /// F2: the transcript's own loading state. The chrome and the panel are
 /// already drawn around it, so nothing pops in when the turns resolve.
 class _SkeletonTurns extends StatelessWidget {
@@ -1435,80 +1114,6 @@ class _CouldNotOpen extends StatelessWidget {
       ),
     );
   }
-}
-
-/// The save alert: the mix title as the default name, and "Your name"
-/// remembered for next time. Task 5.3 gives this its final native form.
-class _SaveDialog extends StatefulWidget {
-  const _SaveDialog({
-    required this.defaultName,
-    required this.defaultAuthor,
-    required this.onConfirm,
-  });
-
-  final String defaultName;
-  final String defaultAuthor;
-  final Future<void> Function(String name, String author) onConfirm;
-
-  @override
-  State<_SaveDialog> createState() => _SaveDialogState();
-}
-
-class _SaveDialogState extends State<_SaveDialog> {
-  late final TextEditingController _name = TextEditingController(
-    text: widget.defaultName,
-  );
-  late final TextEditingController _author = TextEditingController(
-    text: widget.defaultAuthor,
-  );
-  bool _saving = false;
-
-  @override
-  void dispose() {
-    _name.dispose();
-    _author.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Create playlist'),
-    content: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        TextField(
-          key: const Key('chat-playlist-name'),
-          controller: _name,
-          autofocus: true,
-          decoration: const InputDecoration(labelText: 'Playlist name'),
-        ),
-        TextField(
-          key: const Key('chat-playlist-author'),
-          controller: _author,
-          decoration: const InputDecoration(labelText: 'Your name'),
-        ),
-      ],
-    ),
-    actions: [
-      TextButton(
-        onPressed: _saving ? null : () => Navigator.of(context).pop(),
-        child: const Text('Cancel'),
-      ),
-      FilledButton(
-        key: const Key('chat-playlist-save'),
-        // Guarded here: each tap would otherwise create a NEW playlist, and
-        // there is no way to dedupe after the fact.
-        onPressed: _saving
-            ? null
-            : () async {
-                setState(() => _saving = true);
-                await widget.onConfirm(_name.text, _author.text);
-                if (mounted) setState(() => _saving = false);
-              },
-        child: const Text('Save'),
-      ),
-    ],
-  );
 }
 
 /// The rename alert. The controller belongs to the dialog rather than the
