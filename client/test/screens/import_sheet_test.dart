@@ -10,10 +10,51 @@ import 'package:mixtape/data/api/api_client.dart';
 import 'package:mixtape/presentation/providers/listening_import_provider.dart';
 import 'package:mixtape/presentation/providers/opened_archive_provider.dart';
 import 'package:mixtape/presentation/screens/import_sheet.dart';
+import 'package:flutter/cupertino.dart' show CupertinoSlidingSegmentedControl;
+import 'package:mixtape/presentation/theme/mixtape_theme.dart';
+import 'package:mixtape/presentation/widgets/foundation/inset_group.dart';
+import 'package:mixtape/presentation/widgets/foundation/label_chip.dart';
+import 'package:mixtape/presentation/widgets/foundation/status_word.dart';
+import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
+import 'package:mixtape/presentation/widgets/foundation/text_action.dart';
 
 import '../helpers/fake_import_service.dart';
 import '../helpers/fake_listening_api.dart';
 import '../helpers/onboarding_harness.dart';
+
+/// House rule on the native controls: every one carries a Key and a 44 pt
+/// target. Replaces `expectInteractiveWidgetsKeyed`, which audits the Material
+/// controls these screens no longer build. Covers the foundation controls, the
+/// inset rows, the adaptive switches, the segmented controls and the inline
+/// privacy link.
+void expectNativeControls(WidgetTester tester, Finder root) {
+  final controls = find.descendant(
+    of: root,
+    matching: find.byWidgetPredicate(
+      (w) =>
+          w is TapeButton ||
+          w is LabelChip ||
+          w is TextAction ||
+          w is InsetRow ||
+          w is Switch ||
+          w is CupertinoSlidingSegmentedControl ||
+          (w is InkWell && w.key == const Key('link-spotify-privacy')),
+    ),
+  );
+  expect(controls, findsWidgets);
+  for (final element in controls.evaluate()) {
+    expect(
+      element.widget.key,
+      isNotNull,
+      reason: '${element.widget.runtimeType} without a Key',
+    );
+    expect(
+      tester.getSize(find.byWidget(element.widget)).height,
+      greaterThanOrEqualTo(44),
+      reason: '${element.widget.key} under 44 pt',
+    );
+  }
+}
 
 /// A Home stand-in that opens the sheet the way Home and the sources screen
 /// do, so "Make your first mix" has a first route to pop back to.
@@ -55,27 +96,89 @@ void main() {
     return onboardingContainer(listening: listening, importService: service, picker: picker);
   }
 
-  Future<void> open(WidgetTester tester, ProviderContainer c) async {
-    await pumpScreen(tester, c, const _Host());
+  /// `pumpScreen` builds a bare `MaterialApp`; every foundation control reads
+  /// `MixtapeTokens` off the ambient theme, so the host carries one.
+  Future<void> pumpHost(
+    WidgetTester tester,
+    ProviderContainer c, {
+    Brightness brightness = Brightness.light,
+    double textScale = 1,
+    Size? surface,
+  }) async {
+    if (surface != null) {
+      tester.view.physicalSize = surface;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+    }
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: c,
+        child: MaterialApp(
+          theme: brightness == Brightness.dark
+              ? MixtapeTheme.dark()
+              : MixtapeTheme.light(),
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: TextScaler.linear(textScale)),
+            child: child!,
+          ),
+          home: const _Host(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> open(
+    WidgetTester tester,
+    ProviderContainer c, {
+    Brightness brightness = Brightness.light,
+    double textScale = 1,
+    Size? surface,
+  }) async {
+    await pumpHost(
+      tester,
+      c,
+      brightness: brightness,
+      textScale: textScale,
+      surface: surface,
+    );
     await tester.tap(find.byKey(const Key('open')));
     await tester.pumpAndSettle();
   }
 
   Finder sheet() => find.byType(ImportSheet);
 
+  /// The sheet scrolls inside itself, so a control can sit below the fold —
+  /// bring it into view the way a finger would before tapping it.
+  Future<void> tapInSheet(WidgetTester tester, Key key) async {
+    final finder = find.byKey(key);
+    await tester.ensureVisible(finder);
+    await tester.pump();
+    await tester.tap(finder);
+  }
+
   testWidgets('idle: Choose files picks and inspects, then the inventory shows the file, the '
       'package, the counts, the zone, the files, and the private toggle off', (tester) async {
     final c = container();
     await open(tester, c);
     expect(find.text('Choose files'), findsOneWidget);
-    expectInteractiveWidgetsKeyed(sheet());
+    expectNativeControls(tester, sheet());
 
-    await tester.tap(find.byKey(const Key('import-pick')));
+    await tapInSheet(tester, const Key('import-pick'));
     await tester.pumpAndSettle();
 
     expect(picker.picks, 1);
     expect(find.text('my_spotify_data_extended.zip'), findsOneWidget);
-    expect(find.text('38.4 MB · Extended streaming history'), findsOneWidget);
+    expect(find.text('38.4 MB'), findsOneWidget);
+    expect(
+      tester
+          .widget<StatusWord>(find.byKey(const Key('import-file-package')))
+          .label,
+      'Extended streaming history',
+    );
     expect(find.text('Tracks'), findsOneWidget);
     expect(find.text('1,203'), findsOneWidget);
     expect(find.text('Days with plays'), findsOneWidget);
@@ -92,7 +195,9 @@ void main() {
     expect(find.text('ReadMeFirst_ExtendedStreamingHistory.pdf'), findsOneWidget);
     expect(find.text('ignored'), findsNWidgets(2));
     expect(find.text('Ignored · never read'), findsOneWidget);
-    final toggle = tester.widget<SwitchListTile>(find.byKey(const Key('import-private-sessions')));
+    final toggle = tester.widget<Switch>(
+      find.byKey(const Key('import-private-sessions')),
+    );
     expect(toggle.value, isFalse);
     expect(
       find.text('5 plays hidden from followers stay out unless you choose otherwise.'),
@@ -105,28 +210,39 @@ void main() {
     );
     expect(find.text('Upload'), findsOneWidget);
     expect(find.text('Choose a different file'), findsOneWidget);
-    expectInteractiveWidgetsKeyed(sheet());
+    expectNativeControls(tester, sheet());
   });
 
   testWidgets('the private toggle flips the provider; the account package has none', (tester) async {
     final c = container();
     await open(tester, c);
-    await tester.tap(find.byKey(const Key('import-pick')));
+    await tapInSheet(tester, const Key('import-pick'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('import-private-sessions')));
+    await tapInSheet(tester, const Key('import-private-sessions'));
     await tester.pumpAndSettle();
     expect((c.read(listeningImportProvider) as ImportInventory).includePrivateSessions, isTrue);
-    expect(tester.widget<SwitchListTile>(find.byKey(const Key('import-private-sessions'))).value, isTrue);
+    expect(
+      tester
+          .widget<Switch>(find.byKey(const Key('import-private-sessions')))
+          .value,
+      isTrue,
+    );
 
     service.preview = accountPreview;
     picker.next = accountArchive;
-    await tester.tap(find.byKey(const Key('import-pick-other')));
+    await tapInSheet(tester, const Key('import-pick-other'));
     await tester.pumpAndSettle();
 
     expect(picker.picks, 2);
     expect(find.text('my_spotify_data.zip'), findsOneWidget);
-    expect(find.text('1.2 MB · Account data'), findsOneWidget);
+    expect(find.text('1.2 MB'), findsOneWidget);
+    expect(
+      tester
+          .widget<StatusWord>(find.byKey(const Key('import-file-package')))
+          .label,
+      'Account data',
+    );
     expect(find.text('Tracks'), findsOneWidget);
     expect(find.text('226'), findsOneWidget);
     expect(find.text('Liked songs'), findsOneWidget);
@@ -151,7 +267,7 @@ void main() {
     final c = container();
     service.preview = preview;
     await open(tester, c);
-    await tester.tap(find.byKey(const Key('import-pick')));
+    await tapInSheet(tester, const Key('import-pick'));
     await tester.pumpAndSettle();
   }
 
@@ -163,12 +279,17 @@ void main() {
       findsOneWidget,
     );
 
-    await tester.tap(find.byKey(const Key('import-pick-other')));
+    await tapInSheet(tester, const Key('import-pick-other'));
     service.preview = extendedPreviewWith(privatePlays: 0);
     await tester.pumpAndSettle();
     expect(find.text('No private-session plays in this file.'), findsOneWidget);
     expect(find.textContaining('hidden from followers'), findsNothing);
-    expect(tester.widget<SwitchListTile>(find.byKey(const Key('import-private-sessions'))).value, isFalse);
+    expect(
+      tester
+          .widget<Switch>(find.byKey(const Key('import-private-sessions')))
+          .value,
+      isFalse,
+    );
   });
 
   testWidgets('skipped rows omit zero parts, read None when nothing was skipped, and years '
@@ -176,12 +297,12 @@ void main() {
     await inventoryFor(tester, extendedPreviewWith(localFiles: 0));
     expect(find.text('12 podcasts'), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('import-pick-other')));
+    await tapInSheet(tester, const Key('import-pick-other'));
     service.preview = extendedPreviewWith(podcasts: 0, localFiles: 1);
     await tester.pumpAndSettle();
     expect(find.text('1 local file'), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('import-pick-other')));
+    await tapInSheet(tester, const Key('import-pick-other'));
     service.preview = extendedPreviewWith(
       podcasts: 0,
       localFiles: 0,
@@ -199,14 +320,14 @@ void main() {
     final c = container();
     service.holdInspect = true;
     await open(tester, c);
-    await tester.tap(find.byKey(const Key('import-pick')));
+    await tapInSheet(tester, const Key('import-pick'));
     await tester.pump();
 
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
     expect(find.textContaining('my_spotify_data_extended.zip'), findsOneWidget);
-    expectInteractiveWidgetsKeyed(sheet());
+    expectNativeControls(tester, sheet());
 
-    await tester.tap(find.byKey(const Key('import-cancel')));
+    await tapInSheet(tester, const Key('import-cancel'));
     await tester.pumpAndSettle();
 
     expect(find.text('Import cancelled.'), findsOneWidget);
@@ -217,25 +338,39 @@ void main() {
       'cancel', (tester) async {
     final c = container();
     await open(tester, c);
-    await tester.tap(find.byKey(const Key('import-pick')));
+    await tapInSheet(tester, const Key('import-pick'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('import-upload')));
+    await tapInSheet(tester, const Key('import-upload'));
     await tester.pump();
 
-    expect(tester.widget<LinearProgressIndicator>(find.byKey(const Key('import-progress'))).value, 0);
+    expect(
+      tester
+          .widget<LinearProgressIndicator>(
+            find.byKey(const Key('import-progress')),
+          )
+          .value,
+      0,
+    );
     expect(find.text('Uploading … · 0%'), findsOneWidget);
 
     service.report(0.62);
     await tester.pump();
 
-    expect(tester.widget<LinearProgressIndicator>(find.byKey(const Key('import-progress'))).value, 0.62);
+    expect(
+      tester
+          .widget<LinearProgressIndicator>(
+            find.byKey(const Key('import-progress')),
+          )
+          .value,
+      0.62,
+    );
     expect(find.text('Uploading … · 62%'), findsOneWidget);
     final status = tester.widget<Semantics>(find.byKey(const Key('import-status')));
     expect(status.properties.liveRegion, isTrue);
     expect(find.byKey(const Key('import-private-sessions')), findsNothing);
-    expectInteractiveWidgetsKeyed(sheet());
+    expectNativeControls(tester, sheet());
 
-    await tester.tap(find.byKey(const Key('import-cancel')));
+    await tapInSheet(tester, const Key('import-cancel'));
     await tester.pumpAndSettle();
 
     expect(service.cancels, 1);
@@ -246,16 +381,20 @@ void main() {
       'Import the account data too picks again', (tester) async {
     final c = container();
     await open(tester, c);
-    await tester.tap(find.byKey(const Key('import-pick')));
+    await tapInSheet(tester, const Key('import-pick'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('import-upload')));
+    await tapInSheet(tester, const Key('import-upload'));
     await tester.pump();
     service.finish(extendedResult());
     await tester.pumpAndSettle();
 
     expect(find.text('Extended history imported'), findsOneWidget);
     expect(find.text('4,812 tracks · 1,903 days with plays'), findsOneWidget);
-    expect(find.text('Ledger Mar 2018 → Aug 2026'), findsOneWidget);
+    expect(find.text('Ledger'), findsOneWidget);
+    expect(
+      tester.widget<Text>(find.byKey(const Key('import-ledger'))).data,
+      'Mar 2018 → Aug 2026',
+    );
     expect(find.text('9 rows skipped (podcasts, local files, no track)'), findsOneWidget);
     expect(
       find.text('The DJ starts with what it knows best. More detail arrives over the next hours '
@@ -264,18 +403,18 @@ void main() {
     );
     expect(find.text('Make your first mix'), findsOneWidget);
     expect(find.text('Import the account data too'), findsOneWidget);
-    expectInteractiveWidgetsKeyed(sheet());
+    expectNativeControls(tester, sheet());
 
-    await tester.tap(find.byKey(const Key('import-other')));
+    await tapInSheet(tester, const Key('import-other'));
     await tester.pumpAndSettle();
     expect(picker.picks, 2);
     expect(find.text('Upload'), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('import-upload')));
+    await tapInSheet(tester, const Key('import-upload'));
     await tester.pump();
     service.finish(extendedResult());
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('import-make-mix')));
+    await tapInSheet(tester, const Key('import-make-mix'));
     await tester.pumpAndSettle();
 
     expect(sheet(), findsNothing);
@@ -289,9 +428,9 @@ void main() {
     service.preview = accountPreview;
     picker.next = accountArchive;
     await open(tester, c);
-    await tester.tap(find.byKey(const Key('import-pick')));
+    await tapInSheet(tester, const Key('import-pick'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('import-upload')));
+    await tapInSheet(tester, const Key('import-upload'));
     await tester.pump();
     service.finish(accountResult());
     await tester.pumpAndSettle();
@@ -309,9 +448,9 @@ void main() {
     service.preview = accountPreview;
     picker.next = accountArchive;
     await open(tester, c);
-    await tester.tap(find.byKey(const Key('import-pick')));
+    await tapInSheet(tester, const Key('import-pick'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('import-upload')));
+    await tapInSheet(tester, const Key('import-upload'));
     await tester.pump();
     service.finish(accountResult(playlistError: const ListeningImportProtocolException()));
     await tester.pumpAndSettle();
@@ -331,10 +470,10 @@ void main() {
     expect(find.text('Retry playlists'), findsOneWidget);
     expect(find.text('Re-uploads the file; nothing is duplicated.'), findsOneWidget);
     expect(find.byKey(const Key('import-other')), findsNothing);
-    expectInteractiveWidgetsKeyed(sheet());
+    expectNativeControls(tester, sheet());
 
     service.importedPath = null;
-    await tester.tap(find.byKey(const Key('import-retry-playlists')));
+    await tapInSheet(tester, const Key('import-retry-playlists'));
     await tester.pump();
     expect(find.byKey(const Key('import-progress')), findsOneWidget);
     expect(service.importedPath, accountArchive.path);
@@ -343,7 +482,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Account data imported'), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('import-make-mix')));
+    await tapInSheet(tester, const Key('import-make-mix'));
     await tester.pumpAndSettle();
     expect(sheet(), findsNothing);
   });
@@ -361,7 +500,7 @@ void main() {
       diagnoser: (_) => report.future,
     );
     await open(tester, c);
-    await tester.tap(find.byKey(const Key('import-pick')));
+    await tapInSheet(tester, const Key('import-pick'));
     await tester.pumpAndSettle();
 
     expect(find.text("Couldn't read this export"), findsOneWidget);
@@ -395,7 +534,7 @@ void main() {
       () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null),
     );
     await open(tester, c);
-    await tester.tap(find.byKey(const Key('import-pick')));
+    await tapInSheet(tester, const Key('import-pick'));
     await tester.pumpAndSettle();
 
     expect(find.text("Couldn't read this export"), findsOneWidget);
@@ -412,18 +551,16 @@ void main() {
           'personal data.'),
       findsOneWidget,
     );
-    expectInteractiveWidgetsKeyed(sheet());
+    expectNativeControls(tester, sheet());
 
-    await tester.ensureVisible(find.byKey(const Key('import-copy-report')));
-    await tester.tap(find.byKey(const Key('import-copy-report')));
+    await tapInSheet(tester, const Key('import-copy-report'));
     await tester.pumpAndSettle();
     expect(clipboard, [brokenDiagnostics.canonicalJsonString()]);
     expect(clipboard.single, isNot(contains('spotify_track_uri": "')));
     expect(find.text('Report copied'), findsOneWidget);
 
     service.inspectError = null;
-    await tester.ensureVisible(find.byKey(const Key('import-try-another')));
-    await tester.tap(find.byKey(const Key('import-try-another')));
+    await tapInSheet(tester, const Key('import-try-another'));
     await tester.pumpAndSettle();
     expect(picker.picks, 2);
     expect(find.text('Upload'), findsOneWidget);
@@ -433,9 +570,9 @@ void main() {
       (tester) async {
     final c = container();
     await open(tester, c);
-    await tester.tap(find.byKey(const Key('import-pick')));
+    await tapInSheet(tester, const Key('import-pick'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('import-upload')));
+    await tapInSheet(tester, const Key('import-upload'));
     await tester.pump();
     service.fail(const ListeningImportProtocolException());
     await tester.pumpAndSettle();
@@ -451,7 +588,7 @@ void main() {
   testWidgets('the sheet says it is showing while it is up, wherever it was opened from',
       (tester) async {
     final c = container();
-    await pumpScreen(tester, c, const _Host());
+    await pumpHost(tester, c);
     expect(importSheetShowing, isFalse);
 
     await tester.tap(find.byKey(const Key('open')));
@@ -467,9 +604,9 @@ void main() {
       'moment the run lands — with the result still on it', (tester) async {
     final c = container();
     await open(tester, c);
-    await tester.tap(find.byKey(const Key('import-pick')));
+    await tapInSheet(tester, const Key('import-pick'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('import-upload')));
+    await tapInSheet(tester, const Key('import-upload'));
     await tester.pump();
     // The listener puts the sheet away mid-upload, and a file handed to the
     // app brings it back over the run still going.
@@ -510,9 +647,9 @@ void main() {
       opened: opened,
     );
     await open(tester, c);
-    await tester.tap(find.byKey(const Key('import-pick')));
+    await tapInSheet(tester, const Key('import-pick'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('import-upload')));
+    await tapInSheet(tester, const Key('import-upload'));
     await tester.pump();
     service.finish(extendedResult());
     await tester.pumpAndSettle();
@@ -522,9 +659,9 @@ void main() {
       tester.widget<Text>(find.byKey(const Key('import-waiting-file'))).data,
       'Another file is waiting: ${handedOverArchive.name}',
     );
-    expectInteractiveWidgetsKeyed(sheet());
+    expectNativeControls(tester, sheet());
 
-    await tester.tap(find.byKey(const Key('import-waiting-start')));
+    await tapInSheet(tester, const Key('import-waiting-start'));
     await tester.pumpAndSettle();
 
     expect(service.inspected, [extendedArchive.path, handedOverArchive.path]);
@@ -546,7 +683,7 @@ void main() {
       opened: opened,
     );
     await open(tester, c);
-    await tester.tap(find.byKey(const Key('import-pick')));
+    await tapInSheet(tester, const Key('import-pick'));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('import-failed-title')), findsOneWidget);
 
@@ -561,11 +698,70 @@ void main() {
       'Another file is waiting: my_spotify_data.zip',
     );
 
-    await tester.tap(find.byKey(const Key('import-waiting-start')));
+    await tapInSheet(tester, const Key('import-waiting-start'));
     await tester.pumpAndSettle();
 
     expect(service.inspected, [extendedArchive.path], reason: 'there is no file to read');
     expect(find.text("Couldn't read this export"), findsOneWidget);
     expect(find.textContaining('my_spotify_data.zip'), findsOneWidget);
+  });
+
+  testWidgets('the inventory renders in dark and scrolls inside the sheet at '
+      '200% text on a 320 pt screen', (tester) async {
+    final c = container();
+    await open(
+      tester,
+      c,
+      brightness: Brightness.dark,
+      textScale: 2,
+      surface: const Size(320, 700),
+    );
+    await tapInSheet(tester, const Key('import-pick'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('my_spotify_data_extended.zip'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    // The sheet itself never grows past its share of the screen; the content
+    // scrolls inside it.
+    expect(
+      tester.getSize(sheet()).height,
+      lessThanOrEqualTo(700 * ImportSheet.maxHeightFactor + 1),
+    );
+    expect(
+      find.descendant(of: sheet(), matching: find.byType(Scrollable)),
+      findsWidgets,
+    );
+    await tester.ensureVisible(find.byKey(const Key('import-upload')));
+    await tester.pump();
+    expectNativeControls(tester, sheet());
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('fits a 390 pt sheet without overflowing and lifts its content '
+      'clear of the keyboard', (tester) async {
+    final c = container();
+    await open(tester, c, surface: const Size(390, 844));
+    await tapInSheet(tester, const Key('import-pick'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('my_spotify_data_extended.zip'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    expect(tester.getSize(sheet()).width, lessThanOrEqualTo(390));
+    expectNativeControls(tester, sheet());
+
+    // The keyboard's inset becomes padding under the content, so a field at
+    // the bottom of the review scrolls above it rather than behind it.
+    final scroll = tester.widget<SingleChildScrollView>(
+      find.descendant(of: sheet(), matching: find.byType(SingleChildScrollView)),
+    );
+    final before = (scroll.padding! as EdgeInsets).bottom;
+    tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+    addTearDown(tester.view.resetViewInsets);
+    await tester.pumpAndSettle();
+    final lifted = tester.widget<SingleChildScrollView>(
+      find.descendant(of: sheet(), matching: find.byType(SingleChildScrollView)),
+    );
+    expect((lifted.padding! as EdgeInsets).bottom, before + 300);
+    expect(tester.takeException(), isNull);
   });
 }

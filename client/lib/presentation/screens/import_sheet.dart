@@ -1,17 +1,38 @@
-import '../../data/api/api_client.dart';
-import '../providers/onboarding_provider.dart';
-import 'interview_screen.dart';
-import '../widgets/collection_review_form.dart';
+/// The Spotify import flow as a modal sheet: pick a ZIP → inventory and
+/// review → upload with progress → done / partial / failed / cancelled.
+///
+/// Behaviour is the September 8 Exportify approval
+/// (`docs/mockups/approved/2026-09-08-exportify-import.md`) over the September
+/// 4 web import record; plan task 8.7 restyles it onto the September 17 shell
+/// (`docs/mockups/approved/2026-09-17-mobile-shell.md`): a frosted sheet with
+/// a handle, flush rows, status words, a prism progress bar, and tape/chip/
+/// text controls. Every fact shown still comes from the inventory or the
+/// summary; never a track, artist, or playlist name.
+library;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../data/api/api_client.dart';
 import '../../data/files/archive_picker.dart';
 import '../../data/files/opened_archive_channel.dart';
 import '../../import/listening_import_service.dart';
 import '../../import/snapshot.dart';
 import '../format/import_format.dart';
 import '../providers/listening_import_provider.dart';
+import '../providers/onboarding_provider.dart';
 import '../providers/opened_archive_provider.dart';
+import '../theme/mixtape_theme.dart';
+import '../widgets/collection_review_form.dart';
+import '../widgets/foundation/frosted_surface.dart';
+import '../widgets/foundation/inset_group.dart';
+import '../widgets/foundation/label_chip.dart';
+import '../widgets/foundation/section_word.dart';
+import '../widgets/foundation/status_word.dart';
+import '../widgets/foundation/tape_button.dart';
+import '../widgets/foundation/text_action.dart';
+import 'interview_screen.dart';
 
 /// How many import sheets are on screen. Home and the sources screen both
 /// open one, and a file handed to the app can arrive over either, so the
@@ -44,6 +65,7 @@ Future<void> showImportSheet(
     isScrollControlled: true,
     isDismissible: dismissible,
     enableDrag: dismissible,
+    backgroundColor: Colors.transparent,
     builder: (_) => dismissible
         ? const ImportSheet()
         : _LockedSheet(onLanded: () => landed = true),
@@ -137,24 +159,29 @@ class _WaitingFile extends ConsumerWidget {
         Text(
           'Another file is waiting: ${waiting.name}',
           key: const Key('import-waiting-file'),
-          style: Theme.of(context).textTheme.bodySmall,
+          style: context.tokens.meta,
         ),
-        const SizedBox(height: 8),
-        FilledButton(
-          key: const Key('import-waiting-start'),
-          onPressed: () => startHandedArchive(ref, waiting),
-          child: const Text('Import it'),
+        const SizedBox(height: 4),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TapeButton(
+            key: const Key('import-waiting-start'),
+            label: 'Import it',
+            onPressed: () => startHandedArchive(ref, waiting),
+          ),
         ),
       ],
     );
   }
 }
 
-/// The Spotify import flow: pick a ZIP → inventory → upload with progress →
-/// done / partial / failed / cancelled. Every fact shown comes from the
-/// inventory or the summary; never a track, artist, or playlist name.
+/// The Spotify import flow, in a frosted sheet with a handle.
 class ImportSheet extends ConsumerStatefulWidget {
   const ImportSheet({super.key});
+
+  /// The fraction of the screen the sheet may take before it scrolls inside
+  /// itself — the 200% text case.
+  static const double maxHeightFactor = 0.9;
 
   @override
   ConsumerState<ImportSheet> createState() => _ImportSheetState();
@@ -177,41 +204,86 @@ class _ImportSheetState extends ConsumerState<ImportSheet> {
   Widget build(BuildContext context) {
     final state = ref.watch(listeningImportProvider);
     final notifier = ref.read(listeningImportProvider.notifier);
+    final body = switch (state) {
+      ImportIdle() => _Idle(onPick: notifier.pick),
+      ImportFlowCancelled() => _Idle(onPick: notifier.pick, cancelled: true),
+      ImportInspecting(:final archive, :final file, :final progress) =>
+        _Inspecting(
+          archive: archive,
+          file: file,
+          progress: progress,
+          onCancel: notifier.cancel,
+        ),
+      ImportInventory() => _Inventory(state: state, notifier: notifier),
+      ImportUploading(:final archive, :final progress) => _Uploading(
+        archive: archive,
+        progress: progress,
+        onCancel: notifier.cancel,
+      ),
+      ImportDone(:final result) => _Done(result: result, notifier: notifier),
+      ImportPartial(:final result) => _Partial(
+        result: result,
+        notifier: notifier,
+      ),
+      ImportFailed() => _Failed(state: state, notifier: notifier),
+    };
+
     return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: switch (state) {
-          ImportIdle() => _Idle(onPick: notifier.pick),
-          ImportFlowCancelled() => _Idle(
-            onPick: notifier.pick,
-            cancelled: true,
+      top: false,
+      child: FrostedSurface(
+        borderRadius: const BorderRadius.vertical(
+          top: Radius.circular(MixtapeMetrics.groupRadius),
+        ),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight:
+                MediaQuery.sizeOf(context).height *
+                ImportSheet.maxHeightFactor,
           ),
-          ImportInspecting(:final archive, :final file, :final progress) =>
-            _Inspecting(
-              archive: archive,
-              file: file,
-              progress: progress,
-              onCancel: notifier.cancel,
-            ),
-          ImportInventory() => _Inventory(state: state, notifier: notifier),
-          ImportUploading(:final archive, :final progress) => _Uploading(
-            archive: archive,
-            progress: progress,
-            onCancel: notifier.cancel,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const _SheetHandle(),
+              Flexible(
+                child: SingleChildScrollView(
+                  // The review stage has text fields: the keyboard's inset is
+                  // padding, not a clip, so "Save as" scrolls above it.
+                  padding: EdgeInsets.fromLTRB(
+                    20,
+                    4,
+                    20,
+                    24 + MediaQuery.viewInsetsOf(context).bottom,
+                  ),
+                  child: body,
+                ),
+              ),
+            ],
           ),
-          ImportDone(:final result) => _Done(
-            result: result,
-            notifier: notifier,
-          ),
-          ImportPartial(:final result) => _Partial(
-            result: result,
-            notifier: notifier,
-          ),
-          ImportFailed() => _Failed(state: state, notifier: notifier),
-        },
+        ),
       ),
     );
   }
+}
+
+/// The grab handle at the top of the sheet.
+class _SheetHandle extends StatelessWidget {
+  const _SheetHandle();
+
+  static const double width = 36;
+  static const double height = 5;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: 8, bottom: 6),
+    child: Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: context.tokens.muted.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(MixtapeMetrics.pillRadius),
+      ),
+    ),
+  );
 }
 
 String packageName(ExportPackage? package) => switch (package) {
@@ -222,6 +294,99 @@ String packageName(ExportPackage? package) => switch (package) {
 };
 
 String _baseName(String path) => path.substring(path.lastIndexOf('/') + 1);
+
+/// The upload's prism-filled bar: the board's stripe, laid flat.
+///
+/// The indicator itself stays a [LinearProgressIndicator] — the progress is a
+/// platform fact a screen reader and the tests both read off it — with the
+/// track drawn behind it and the prism painted through its value bar.
+class ImportProgressBar extends StatelessWidget {
+  const ImportProgressBar({super.key, required this.value, this.indicatorKey});
+
+  /// 0…1, or null while the work reports no fraction yet.
+  final double? value;
+
+  /// Goes on the [LinearProgressIndicator] itself.
+  final Key? indicatorKey;
+
+  /// The board's stripe thickness.
+  static const double thickness = 7;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    final radius = BorderRadius.circular(MixtapeMetrics.pillRadius);
+    return ClipRRect(
+      borderRadius: radius,
+      child: SizedBox(
+        height: thickness,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            ColoredBox(color: tokens.hairline),
+            ShaderMask(
+              blendMode: BlendMode.srcIn,
+              shaderCallback: (bounds) =>
+                  LinearGradient(colors: tokens.prism).createShader(bounds),
+              child: LinearProgressIndicator(
+                key: indicatorKey,
+                value: value,
+                minHeight: thickness,
+                backgroundColor: Colors.transparent,
+                valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A flush fact row: label on the left, value on the right, a hairline above
+/// every row but the first.
+class _FactRow extends StatelessWidget {
+  const _FactRow({
+    required this.label,
+    this.value,
+    this.valueWidget,
+    this.isFirst = false,
+  });
+
+  final String label;
+  final String? value;
+  final Widget? valueWidget;
+  final bool isFirst;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    return Container(
+      constraints: const BoxConstraints(minHeight: 40),
+      decoration: isFirst
+          ? null
+          : BoxDecoration(
+              border: Border(top: BorderSide(color: tokens.hairline)),
+            ),
+      padding: const EdgeInsets.symmetric(vertical: 9),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(child: Text(label, style: tokens.body)),
+          const SizedBox(width: 12),
+          valueWidget ??
+              Flexible(
+                child: Text(
+                  value ?? '',
+                  textAlign: TextAlign.end,
+                  style: tokens.rowTitle,
+                ),
+              ),
+        ],
+      ),
+    );
+  }
+}
 
 class _Idle extends StatelessWidget {
   const _Idle({required this.onPick, this.cancelled = false});
@@ -239,13 +404,16 @@ class _Idle extends StatelessWidget {
           cancelled
               ? 'Import cancelled.'
               : 'Choose an Exportify ZIP or CSV files, or an official Spotify ZIP. Review before uploading.',
-          textAlign: TextAlign.center,
+          style: context.tokens.body,
         ),
-        const SizedBox(height: 16),
-        FilledButton(
-          key: const Key('import-pick'),
-          onPressed: onPick,
-          child: const Text('Choose files'),
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TapeButton(
+            key: const Key('import-pick'),
+            label: 'Choose files',
+            onPressed: onPick,
+          ),
         ),
       ],
     );
@@ -259,13 +427,16 @@ class _Inspecting extends StatelessWidget {
     this.file,
     this.progress,
   });
+
   final PickedArchive archive;
   final String? file;
   final double? progress;
   final VoidCallback onCancel;
+
   @override
   Widget build(BuildContext context) => Column(
     mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       Row(
         children: [
@@ -278,17 +449,20 @@ class _Inspecting extends StatelessWidget {
           Expanded(
             child: Text(
               'Reading ${file == null ? archive.name : _baseName(file!)}…',
+              style: context.tokens.body,
             ),
           ),
-          TextButton(
+          // The approval's compact Cancel: beside the heading, no row of its
+          // own, still a 44 pt target.
+          TextAction(
             key: const Key('import-cancel'),
+            label: 'Cancel',
             onPressed: onCancel,
-            child: const Text('Cancel'),
           ),
         ],
       ),
-      const SizedBox(height: 8),
-      LinearProgressIndicator(value: progress),
+      const SizedBox(height: 10),
+      ImportProgressBar(value: progress),
     ],
   );
 }
@@ -301,7 +475,7 @@ class _Inventory extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final tokens = context.tokens;
     final preview = state.preview;
     final inventory = preview.inventory;
     var snapshot = preview.snapshot;
@@ -318,17 +492,38 @@ class _Inventory extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          state.archive.name,
-          key: const Key('import-file-name'),
-          style: theme.textTheme.titleMedium,
+        _FactRow(
+          label: 'File',
+          isFirst: true,
+          valueWidget: Flexible(
+            child: Text(
+              state.archive.name,
+              key: const Key('import-file-name'),
+              textAlign: TextAlign.end,
+              style: tokens.rowTitle,
+            ),
+          ),
         ),
-        Text(
-          '${formatBytes(state.archive.bytes)} · ${packageName(inventory.package)}',
-          key: const Key('import-file-meta'),
-          style: theme.textTheme.bodySmall,
+        _FactRow(
+          label: 'Size',
+          valueWidget: Text(
+            formatBytes(state.archive.bytes),
+            key: const Key('import-file-meta'),
+            style: tokens.rowTitle,
+          ),
         ),
-        const SizedBox(height: 12),
+        _FactRow(
+          label: 'Package',
+          valueWidget: Flexible(
+            child: StatusWord(
+              key: const Key('import-file-package'),
+              label: packageName(inventory.package),
+              kind: inventory.package == null
+                  ? StatusKind.warn
+                  : StatusKind.ok,
+            ),
+          ),
+        ),
         if (preview.selection != null)
           CollectionReviewForm(
             snapshot: preview.snapshot,
@@ -339,31 +534,28 @@ class _Inventory extends StatelessWidget {
         // Every figure comes from the parse the service ran at inspect: the
         // snapshot for the counts, its stats for the drops.
         if (preview.selection == null) ...[
-          _Fact(label: 'Tracks', value: formatCount(preview.tracks)),
+          _FactRow(label: 'Tracks', value: formatCount(preview.tracks)),
           if (extended) ...[
-            _Fact(
+            _FactRow(
               label: 'Days with plays',
               value: formatCount(preview.daysWithPlays),
             ),
-            _Fact(
+            _FactRow(
               label: 'Years covered',
               value: yearsRange(snapshot.ledgerFrom, snapshot.ledgerTo) ?? '—',
             ),
           ] else ...[
-            _Fact(
+            _FactRow(
               label: 'Liked songs',
               value: formatCount(snapshot.library.length),
             ),
-            _Fact(
-              label: 'Artists',
-              value: formatCount(snapshot.artists.length),
-            ),
-            _Fact(
+            _FactRow(label: 'Artists', value: formatCount(snapshot.artists.length)),
+            _FactRow(
               label: 'Playlists',
               value: formatCount(snapshot.playlists.length),
             ),
           ],
-          _Fact(
+          _FactRow(
             label: 'Skipped rows',
             value: skippedRowsLabel(
               podcasts: preview.skippedPodcasts,
@@ -371,91 +563,87 @@ class _Inventory extends StatelessWidget {
             ),
           ),
           if (extended) ...[
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             Text(
               'Local days in ${state.timeZone}',
               key: const Key('import-zone'),
-              style: theme.textTheme.bodySmall,
+              style: tokens.meta,
             ),
           ],
-          const SizedBox(height: 12),
-          Text('Files read', style: theme.textTheme.labelLarge),
-          for (final file in inventory.read)
+          const SectionWord('Files read'),
+          for (var i = 0; i < inventory.read.length; i++)
             _FileLine(
-              key: Key('import-read-${_baseName(file.path)}'),
-              name: _baseName(file.path),
-              note: file.rows == null
+              key: Key('import-read-${_baseName(inventory.read[i].path)}'),
+              name: _baseName(inventory.read[i].path),
+              note: inventory.read[i].rows == null
                   ? 'unreadable'
-                  : plural(file.rows!, 'row'),
+                  : plural(inventory.read[i].rows!, 'row'),
+              isFirst: i == 0,
             ),
           if (inventory.ignored.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text('Ignored · never read', style: theme.textTheme.labelLarge),
-            for (final file in inventory.ignored)
+            const SectionWord('Ignored · never read'),
+            for (var i = 0; i < inventory.ignored.length; i++)
               _FileLine(
-                key: Key('import-ignored-${_baseName(file.path)}'),
-                name: _baseName(file.path),
+                key: Key(
+                  'import-ignored-${_baseName(inventory.ignored[i].path)}',
+                ),
+                name: _baseName(inventory.ignored[i].path),
                 note: 'ignored',
                 struck: true,
+                isFirst: i == 0,
               ),
           ],
         ],
         if (extended) ...[
-          const SizedBox(height: 8),
-          SwitchListTile(
-            key: const Key('import-private-sessions'),
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Include private sessions'),
-            subtitle: Text(
-              privateSessionsHint(preview.privatePlays),
-              key: const Key('import-private-hint'),
-            ),
-            value: state.includePrivateSessions,
-            onChanged: notifier.setIncludePrivateSessions,
+          const SizedBox(height: 12),
+          InsetGroup(
+            children: [
+              InsetRow(
+                key: const Key('import-private-row'),
+                title: 'Include private sessions',
+                subtitle: privateSessionsHint(preview.privatePlays),
+                trailing: Switch.adaptive(
+                  key: const Key('import-private-sessions'),
+                  value: state.includePrivateSessions,
+                  onChanged: notifier.setIncludePrivateSessions,
+                ),
+                onTap: () => notifier.setIncludePrivateSessions(
+                  !state.includePrivateSessions,
+                ),
+              ),
+            ],
           ),
         ],
-        const SizedBox(height: 8),
+        const SizedBox(height: 4),
         Text(
           'Only reviewed music leaves this device. Your account details, payments, and IP addresses are never read.',
           key: const Key('import-privacy'),
-          style: theme.textTheme.bodySmall,
+          style: tokens.meta,
         ),
         const SizedBox(height: 16),
-        FilledButton(
-          key: const Key('import-upload'),
-          onPressed:
-              (preview.selection?.canUpload(snapshot) ??
-                  (snapshot.package != ExportPackage.spotifyExportify))
-              ? notifier.upload
-              : null,
-          child: const Text('Upload'),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TapeButton(
+            key: const Key('import-upload'),
+            label: 'Upload',
+            onPressed:
+                (preview.selection?.canUpload(snapshot) ??
+                    (snapshot.package != ExportPackage.spotifyExportify))
+                ? notifier.upload
+                : null,
+          ),
         ),
-        TextButton(
-          key: const Key('import-pick-other'),
-          onPressed: () {
-            notifier.reset();
-            notifier.pick();
-          },
-          child: const Text('Choose a different file'),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextAction(
+            key: const Key('import-pick-other'),
+            label: 'Choose a different file',
+            onPressed: () {
+              notifier.reset();
+              notifier.pick();
+            },
+          ),
         ),
-      ],
-    );
-  }
-}
-
-class _Fact extends StatelessWidget {
-  const _Fact({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      children: [
-        Expanded(child: Text(label, style: theme.textTheme.bodyMedium)),
-        Text(value, style: theme.textTheme.titleMedium),
       ],
     );
   }
@@ -467,28 +655,38 @@ class _FileLine extends StatelessWidget {
     required this.name,
     required this.note,
     this.struck = false,
+    this.isFirst = false,
   });
 
   final String name;
   final String note;
   final bool struck;
+  final bool isFirst;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final style = theme.textTheme.bodySmall?.copyWith(
+    final tokens = context.tokens;
+    final style = tokens.meta.copyWith(
       fontFamily: 'monospace',
       decoration: struck ? TextDecoration.lineThrough : null,
-      color: struck ? theme.colorScheme.onSurfaceVariant : null,
+      color: struck ? tokens.muted : null,
     );
-    return Row(
-      children: [
-        Expanded(
-          child: Text(name, style: style, overflow: TextOverflow.ellipsis),
-        ),
-        const SizedBox(width: 8),
-        Text(note, style: theme.textTheme.bodySmall),
-      ],
+    return Container(
+      decoration: isFirst
+          ? null
+          : BoxDecoration(
+              border: Border(top: BorderSide(color: tokens.hairline)),
+            ),
+      padding: const EdgeInsets.symmetric(vertical: 7),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(name, style: style, overflow: TextOverflow.ellipsis),
+          ),
+          const SizedBox(width: 8),
+          Text(note, style: tokens.meta),
+        ],
+      ),
     );
   }
 }
@@ -506,6 +704,7 @@ class _Uploading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.tokens;
     final percent = (progress * 100).round();
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -513,35 +712,29 @@ class _Uploading extends StatelessWidget {
       children: [
         Row(
           children: [
-            Expanded(
-              child: Text(
-                archive.name,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-            ),
-            TextButton(
+            Expanded(child: Text(archive.name, style: tokens.rowTitle)),
+            TextAction(
               key: const Key('import-cancel'),
+              label: 'Cancel',
               onPressed: onCancel,
-              child: const Text('Cancel'),
             ),
           ],
         ),
-        const SizedBox(height: 16),
-        LinearProgressIndicator(
-          key: const Key('import-progress'),
+        const SizedBox(height: 14),
+        ImportProgressBar(
+          indicatorKey: const Key('import-progress'),
           value: progress,
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 14),
         Semantics(
           key: const Key('import-status'),
           liveRegion: true,
-          child: Text('Uploading … · $percent%', textAlign: TextAlign.center),
+          child: Text('Uploading … · $percent%', style: tokens.body),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
         Text(
           'Reading and uploading on this device. Nothing needs to stay open in Spotify.',
-          style: Theme.of(context).textTheme.bodySmall,
-          textAlign: TextAlign.center,
+          style: tokens.meta,
         ),
       ],
     );
@@ -559,7 +752,7 @@ class _Done extends ConsumerWidget {
     final needsInterview =
         result.inventory.package == ExportPackage.spotifyExportify &&
         ref.watch(onboardingProvider).value?.interviewCompletedAt == null;
-    final theme = Theme.of(context);
+    final tokens = context.tokens;
     final summary = result.summary;
     final extended = result.inventory.package == ExportPackage.spotifyExtended;
     final playlists = result.playlistSummary;
@@ -575,66 +768,99 @@ class _Done extends ConsumerWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _ResultTitle(
-          icon: Icons.check_circle_outline,
-          title: extended
+        SectionWord(
+          extended
               ? 'Extended history imported'
               : result.inventory.package == ExportPackage.spotifyExportify
               ? 'Spotify music imported'
               : 'Account data imported',
+          key: const Key('import-done-title'),
         ),
-        const SizedBox(height: 8),
-        Text(counts, key: const Key('import-done-counts')),
+        _FactRow(
+          label: 'Imported',
+          isFirst: true,
+          valueWidget: Flexible(
+            child: Semantics(
+              liveRegion: true,
+              child: StatusWord(
+                key: const Key('import-done-counts'),
+                label: counts,
+                kind: StatusKind.ok,
+              ),
+            ),
+          ),
+        ),
         if (ledger != null)
-          Text('Ledger $ledger', key: const Key('import-ledger')),
+          _FactRow(
+            label: 'Ledger',
+            valueWidget: Text(
+              ledger,
+              key: const Key('import-ledger'),
+              style: tokens.rowTitle,
+            ),
+          ),
         if (summary.unresolvedRows > 0)
-          Text(
-            '${plural(summary.unresolvedRows, 'row')} skipped (podcasts, local files, no track)',
-            style: theme.textTheme.bodySmall,
+          _FactRow(
+            label: 'Skipped',
+            valueWidget: Flexible(
+              child: StatusWord(
+                label:
+                    '${plural(summary.unresolvedRows, 'row')} skipped (podcasts, local files, no track)',
+                kind: StatusKind.warn,
+              ),
+            ),
           ),
         if (playlists != null && playlists.unresolvedEntries > 0)
-          Text(
-            '${playlists.unresolvedEntries} playlist '
-            '${playlists.unresolvedEntries == 1 ? 'entry is' : 'entries are'} still unmatched.',
-            style: theme.textTheme.bodySmall,
+          _FactRow(
+            label: 'Unmatched',
+            valueWidget: Flexible(
+              child: StatusWord(
+                label:
+                    '${playlists.unresolvedEntries} playlist '
+                    '${playlists.unresolvedEntries == 1 ? 'entry is' : 'entries are'} still unmatched.',
+                kind: StatusKind.warn,
+              ),
+            ),
           ),
         const SizedBox(height: 12),
         Text(
           'The DJ starts with what it knows best. More detail arrives over the next hours as '
           'tracks are enriched.',
-          style: theme.textTheme.bodySmall,
+          style: tokens.meta,
         ),
         const SizedBox(height: 16),
-        FilledButton(
-          key: const Key('import-make-mix'),
-          onPressed: () {
-            if (needsInterview) {
-              notifier.reset();
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute<void>(
-                  builder: (_) => const InterviewScreen(),
-                ),
-              );
-            } else {
-              _makeMix(context, notifier);
-            }
-          },
-          child: Text(
-            needsInterview
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TapeButton(
+            key: const Key('import-make-mix'),
+            label: needsInterview
                 ? 'Tell the DJ about your taste'
                 : 'Make your first mix',
+            onPressed: () {
+              if (needsInterview) {
+                notifier.reset();
+                Navigator.of(context).pushReplacement(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const InterviewScreen(),
+                  ),
+                );
+              } else {
+                _makeMix(context, notifier);
+              }
+            },
           ),
         ),
-        TextButton(
-          key: const Key('import-other'),
-          onPressed: () {
-            notifier.reset();
-            notifier.pick();
-          },
-          child: Text(
-            extended
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextAction(
+            key: const Key('import-other'),
+            label: extended
                 ? 'Import the account data too'
                 : 'Import the extended history too',
+            onPressed: () {
+              notifier.reset();
+              notifier.pick();
+            },
           ),
         ),
         const _WaitingFile(),
@@ -657,71 +883,93 @@ class _Partial extends ConsumerWidget {
     final needsInterview =
         result.inventory.package == ExportPackage.spotifyExportify &&
         ref.watch(onboardingProvider).value?.interviewCompletedAt == null;
-    final theme = Theme.of(context);
+    final tokens = context.tokens;
     final summary = result.summary;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _ResultTitle(
-          icon: Icons.error_outline,
-          title: "Account data imported, playlists didn't land",
+        Semantics(
+          liveRegion: true,
+          child: const SectionWord(
+            "Account data imported, playlists didn't land",
+            key: Key('import-done-title'),
+          ),
         ),
-        const SizedBox(height: 4),
         Text(
           result.inventory.package == ExportPackage.spotifyExportify
               ? 'The saved-song step finished. Review and retry the playlists.'
               : 'Likes and followed artists are in. The playlist sync was interrupted.',
           key: const Key('import-partial-subtitle'),
-          style: theme.textTheme.bodySmall,
+          style: tokens.meta,
         ),
         const SizedBox(height: 8),
-        Text(
-          '${plural(summary.libraryTracks, 'liked song')} · ${plural(summary.artists, 'artist')}',
-          key: const Key('import-done-counts'),
+        _FactRow(
+          label: 'Imported',
+          isFirst: true,
+          valueWidget: Flexible(
+            child: Semantics(
+              liveRegion: true,
+              child: StatusWord(
+                key: const Key('import-done-counts'),
+                label:
+                    '${plural(summary.libraryTracks, 'liked song')} · ${plural(summary.artists, 'artist')}',
+                kind: StatusKind.ok,
+              ),
+            ),
+          ),
+        ),
+        _FactRow(
+          label: 'Playlists',
+          valueWidget: const StatusWord(
+            label: "didn't land",
+            kind: StatusKind.err,
+          ),
         ),
         const SizedBox(height: 12),
         Text(
           'Your liked songs and artists are safe on the server. Nothing is lost and nothing needs '
           're-uploading; the playlists can follow later.',
-          style: theme.textTheme.bodySmall,
+          style: tokens.meta,
         ),
         const SizedBox(height: 16),
-        FilledButton(
-          key: const Key('import-make-mix'),
-          onPressed: () {
-            if (needsInterview) {
-              notifier.reset();
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute<void>(
-                  builder: (_) => const InterviewScreen(),
-                ),
-              );
-            } else {
-              _makeMix(context, notifier);
-            }
-          },
-          child: Text(
-            needsInterview
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TapeButton(
+            key: const Key('import-make-mix'),
+            label: needsInterview
                 ? 'Tell the DJ about your taste'
                 : 'Make a mix anyway',
+            onPressed: () {
+              if (needsInterview) {
+                notifier.reset();
+                Navigator.of(context).pushReplacement(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const InterviewScreen(),
+                  ),
+                );
+              } else {
+                _makeMix(context, notifier);
+              }
+            },
           ),
         ),
-        TextButton(
-          key: const Key('import-retry-playlists'),
-          onPressed: notifier.retryPlaylists,
-          child: Text(
-            result.playlistError is ApiException &&
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextAction(
+            key: const Key('import-retry-playlists'),
+            label:
+                result.playlistError is ApiException &&
                     (result.playlistError as ApiException).statusCode == 409
                 ? 'Review again'
                 : 'Retry playlists',
+            onPressed: notifier.retryPlaylists,
           ),
         ),
         Text(
           'Re-uploads the file; nothing is duplicated.',
           key: const Key('import-retry-note'),
-          style: theme.textTheme.bodySmall,
-          textAlign: TextAlign.center,
+          style: tokens.meta,
         ),
         const _WaitingFile(),
       ],
@@ -734,30 +982,6 @@ void _makeMix(BuildContext context, ListeningImportNotifier notifier) {
   Navigator.of(context).popUntil((route) => route.isFirst);
 }
 
-class _ResultTitle extends StatelessWidget {
-  const _ResultTitle({required this.icon, required this.title});
-
-  final IconData icon;
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            title,
-            key: const Key('import-done-title'),
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class _Failed extends StatelessWidget {
   const _Failed({required this.state, required this.notifier});
 
@@ -766,26 +990,27 @@ class _Failed extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final tokens = context.tokens;
     final diagnostics = state.diagnostics;
     final unreadable = state.unreadable;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          unreadable ? "Couldn't read this export" : 'Import failed',
-          key: const Key('import-failed-title'),
-          style: theme.textTheme.titleMedium,
+        Semantics(
+          liveRegion: true,
+          child: SectionWord(
+            unreadable ? "Couldn't read this export" : 'Import failed',
+            key: const Key('import-failed-title'),
+          ),
         ),
-        const SizedBox(height: 8),
-        Text(state.message),
+        StatusWord(label: state.message, kind: StatusKind.err),
         if (unreadable) ...[
           const SizedBox(height: 8),
           Text(
             'Expected files: $expectedExportFiles.',
             key: const Key('import-expected'),
-            style: theme.textTheme.bodySmall,
+            style: tokens.meta,
           ),
         ],
         if (state.diagnosing) ...[
@@ -793,7 +1018,7 @@ class _Failed extends StatelessWidget {
           Text(
             'Building the report…',
             key: const Key('import-diagnosing'),
-            style: theme.textTheme.bodySmall,
+            style: tokens.meta,
           ),
         ],
         if (diagnostics != null) ...[
@@ -802,51 +1027,58 @@ class _Failed extends StatelessWidget {
             width: double.infinity,
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(8),
+              color: tokens.panel,
+              borderRadius: BorderRadius.circular(10),
             ),
             child: Text(
               diagnostics.canonicalJsonString(),
               key: const Key('import-diagnostics'),
-              style: theme.textTheme.bodySmall?.copyWith(
-                fontFamily: 'monospace',
-              ),
+              style: tokens.meta.copyWith(fontFamily: 'monospace'),
             ),
           ),
           const SizedBox(height: 8),
           Text(
             'The report lists file names, sizes, and row counts only. No song, artist, or personal data.',
-            style: theme.textTheme.bodySmall,
+            style: tokens.meta,
           ),
-          const SizedBox(height: 16),
-          OutlinedButton(
-            key: const Key('import-copy-report'),
-            onPressed: () async {
-              await Clipboard.setData(
-                ClipboardData(text: diagnostics.canonicalJsonString()),
-              );
-              if (!context.mounted) return;
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(const SnackBar(content: Text('Report copied')));
-            },
-            child: const Text('Copy report'),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: LabelChip(
+              key: const Key('import-copy-report'),
+              label: 'Copy report',
+              onPressed: () async {
+                await Clipboard.setData(
+                  ClipboardData(text: diagnostics.canonicalJsonString()),
+                );
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('Report copied')));
+              },
+            ),
           ),
         ],
         const SizedBox(height: 8),
         if (state.archive != null && !unreadable)
-          TextButton(
-            key: const Key('import-review-again'),
-            onPressed: () => notifier.inspect(state.archive!),
-            child: const Text('Review again'),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextAction(
+              key: const Key('import-review-again'),
+              label: 'Review again',
+              onPressed: () => notifier.inspect(state.archive!),
+            ),
           ),
-        FilledButton(
-          key: const Key('import-try-another'),
-          onPressed: () {
-            notifier.reset();
-            notifier.pick();
-          },
-          child: const Text('Try another file'),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextAction(
+            key: const Key('import-try-another'),
+            label: 'Try another file',
+            onPressed: () {
+              notifier.reset();
+              notifier.pick();
+            },
+          ),
         ),
         const _WaitingFile(),
       ],
