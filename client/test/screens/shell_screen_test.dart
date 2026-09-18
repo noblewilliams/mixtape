@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/dj/dj_api.dart';
@@ -56,6 +57,37 @@ class RecordingBridge extends AppPlayerBridge {
   Future<void> command(String action, {double? seconds}) async {
     commands.add(action);
   }
+}
+
+/// A bridge whose first start fails the way an unplayable track does: a
+/// `PlatformException` carrying the index Apple Music stopped on.
+class UnavailableBridge extends RecordingBridge {
+  int starts = 0;
+  bool refuse = true;
+
+  @override
+  Future<void> start(List<String> ids) async {
+    starts++;
+    if (refuse) {
+      throw PlatformException(
+        code: 'unavailable',
+        details: <String, Object?>{'index': 0},
+      );
+    }
+  }
+}
+
+/// A controller on a fake bridge, torn down with the test.
+({PlaybackController player, T bridge}) livePlayer<T extends RecordingBridge>(
+  T bridge,
+) {
+  FlutterSecureStorage.setMockInitialValues({});
+  final player = PlaybackController(FakeApi(), bridge);
+  addTearDown(() async {
+    player.dispose();
+    await bridge.events.close();
+  });
+  return (player: player, bridge: bridge);
 }
 
 /// A DJ that answers the Mixes tab with nothing and refuses the rest.
@@ -628,6 +660,76 @@ void main() {
       expect(bridge.commands, ['pause', 'next']);
     });
 
+    iosWidgets('miniPlayerPlayPause resumes a player that is paused', (
+      tester,
+    ) async {
+      final bridge = RecordingBridge();
+      final player = PlaybackController(FakeApi(), bridge)
+        ..sessionId = 'mix'
+        ..title = 'A mix'
+        ..tracks = [song]
+        ..sample = const PlayerSample(
+          index: 0,
+          positionMs: 4000,
+          status: 'paused',
+        );
+      await pumpShell(tester, shellContainer(nativeDock: true, player: player));
+
+      await fromDock('miniPlayerPlayPause');
+      await tester.pumpAndSettle();
+
+      expect(bridge.commands, ['resume']);
+    });
+
+    iosWidgets('a second miniPlayerTapped does not open Now Playing twice', (
+      tester,
+    ) async {
+      await pumpShell(tester, shellContainer(nativeDock: true));
+
+      await fromDock('miniPlayerTapped');
+      await tester.pumpAndSettle();
+      await fromDock('miniPlayerTapped');
+      await tester.pumpAndSettle();
+
+      // The route below an opaque one stays in the tree, so a second push
+      // would be found here.
+      expect(
+        find.byType(PlaybackScreen, skipOffstage: false),
+        findsOneWidget,
+      );
+
+      tabNavigator(tester, AppTab.home).pop();
+      await tester.pumpAndSettle();
+      expect(find.byType(PlaybackScreen, skipOffstage: false), findsNothing);
+      expect(find.byType(HomeScreen), findsOneWidget);
+    });
+
+    iosWidgets('an unavailable track refuses play/pause and keeps Next', (
+      tester,
+    ) async {
+      final (:player, :bridge) = livePlayer(UnavailableBridge());
+      await pumpShell(tester, shellContainer(nativeDock: true, player: player));
+
+      await player.start('mix', 1, 'A mix', [song]);
+      await tester.pumpAndSettle();
+      final pushed = callsTo('setMiniPlayer').last.arguments as Map;
+      expect(pushed['unavailable'], true);
+      expect(pushed['artist'], MiniPlayerState.unavailableLine);
+      expect(pushed['playing'], false);
+
+      final startsSoFar = bridge.starts;
+      await fromDock('miniPlayerPlayPause');
+      await tester.pumpAndSettle();
+      expect(bridge.commands, isEmpty);
+      expect(bridge.starts, startsSoFar);
+
+      // Next is the one way out of a track that will not play.
+      bridge.refuse = false;
+      await fromDock('miniPlayerNext');
+      await tester.pumpAndSettle();
+      expect(bridge.starts, greaterThan(startsSoFar));
+    });
+
     iosWidgets('reduceTransparencyChanged makes the glass opaque', (
       tester,
     ) async {
@@ -648,6 +750,92 @@ void main() {
         ).reduceTransparency,
         isTrue,
       );
+    });
+  });
+
+  group('the mini-player', () {
+    iosWidgets('Play now fills the reserved band without moving the content', (
+      tester,
+    ) async {
+      final (:player, :bridge) = livePlayer(RecordingBridge());
+      await pumpShell(tester, shellContainer(player: player));
+
+      double bottomInset() => MediaQuery.of(
+        tester.element(find.byType(HomeScreen)),
+      ).padding.bottom;
+      final before = bottomInset();
+      expect(
+        find.descendant(
+          of: find.byType(FrostedDock),
+          matching: find.text('Song'),
+        ),
+        findsNothing,
+      );
+
+      // The arrangement's Play now, through the controller the shell watches.
+      await player.start('mix', 1, 'A mix', [song]);
+      bridge.events.add(
+        const PlayerSample(index: 0, positionMs: 0, status: 'playing'),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.descendant(
+          of: find.byType(FrostedDock),
+          matching: find.text('Song'),
+        ),
+        findsOneWidget,
+      );
+      // The band was always reserved: the tab content did not move.
+      expect(bottomInset(), before);
+    });
+
+    iosWidgets('a position tick alone says nothing to the native dock', (
+      tester,
+    ) async {
+      final (:player, :bridge) = livePlayer(RecordingBridge());
+      await pumpShell(tester, shellContainer(nativeDock: true, player: player));
+
+      await player.start('mix', 1, 'A mix', [song]);
+      bridge.events.add(
+        const PlayerSample(index: 0, positionMs: 0, status: 'playing'),
+      );
+      await tester.pumpAndSettle();
+      expect(callsTo('setMiniPlayer'), isNotEmpty);
+      calls.clear();
+
+      for (var ms = 1000; ms <= 5000; ms += 1000) {
+        bridge.events.add(
+          PlayerSample(index: 0, positionMs: ms.toDouble(), status: 'playing'),
+        );
+      }
+      await tester.pumpAndSettle();
+
+      expect(callsTo('setMiniPlayer'), isEmpty);
+    });
+
+    iosWidgets('the Flutter dock says why a track will not play', (
+      tester,
+    ) async {
+      final (:player, :bridge) = livePlayer(UnavailableBridge());
+      await pumpShell(tester, shellContainer(player: player));
+
+      await player.start('mix', 1, 'A mix', [song]);
+      await tester.pumpAndSettle();
+
+      expect(find.text(MiniPlayerState.unavailableLine), findsOneWidget);
+      expect(find.text('Artist'), findsNothing);
+
+      final startsSoFar = bridge.starts;
+      await tester.tap(find.byKey(FrostedDock.playPauseKey));
+      await tester.pumpAndSettle();
+      expect(bridge.commands, isEmpty);
+      expect(bridge.starts, startsSoFar);
+
+      bridge.refuse = false;
+      await tester.tap(find.byKey(FrostedDock.nextKey));
+      await tester.pumpAndSettle();
+      expect(bridge.starts, greaterThan(startsSoFar));
     });
   });
 

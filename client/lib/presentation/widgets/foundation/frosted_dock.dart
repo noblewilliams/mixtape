@@ -303,7 +303,10 @@ class _MiniPlayer extends StatelessWidget {
                 icon: mini.playing
                     ? CupertinoIcons.pause_fill
                     : CupertinoIcons.play_fill,
-                color: tokens.text,
+                // A track Apple Music will not play here has no play/pause;
+                // Next, the one way out of it, stays live (board → Dock).
+                enabled: !mini.unavailable,
+                color: mini.unavailable ? tokens.muted : tokens.text,
                 onTap: onPlayPause,
               ),
               _MiniButton(
@@ -330,6 +333,7 @@ class _MiniButton extends StatelessWidget {
     required this.icon,
     required this.color,
     required this.onTap,
+    this.enabled = true,
   });
 
   final Key buttonKey;
@@ -338,16 +342,21 @@ class _MiniButton extends StatelessWidget {
   final Color color;
   final VoidCallback? onTap;
 
+  /// A disabled control still claims its tap — letting it fall through would
+  /// open Now Playing from a button that is meant to do nothing.
+  final bool enabled;
+
   @override
   Widget build(BuildContext context) => Semantics(
     label: semanticsLabel,
     button: true,
+    enabled: enabled,
     container: true,
     excludeSemantics: true,
     child: GestureDetector(
       key: buttonKey,
       behavior: HitTestBehavior.opaque,
-      onTap: onTap,
+      onTap: enabled ? onTap : () {},
       child: SizedBox.square(
         dimension: MixtapeMetrics.minTarget,
         child: Center(

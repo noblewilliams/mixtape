@@ -108,11 +108,15 @@ class MiniPlayerNotifier extends Notifier<MiniPlayerState> {
 
   /// The player's current track as the dock's one line of identity.
   ///
-  /// `unavailableIndex` first, exactly as `PlaybackScreen` and `PlaybackMini`
-  /// resolve it: a track the player could not play is still the one the
-  /// listener is looking at.
+  /// `unavailableIndex` first, exactly as `PlaybackScreen` resolves it: a
+  /// track the player could not play is still the one the listener is looking
+  /// at, and it says so where the artist goes.
+  ///
+  /// Position is deliberately absent: the dock draws no progress, so a tick a
+  /// second would otherwise cross the channel for nothing.
   static MiniPlayerState stateOf(PlaybackController player) {
     if (player.sessionId == null) return const MiniPlayerState.hidden();
+    final unavailable = player.unavailableIndex != null;
     final index = player.unavailableIndex ?? player.sample.index ?? 0;
     final QueueTrack? track = index >= 0 && index < player.tracks.length
         ? player.tracks[index]
@@ -121,10 +125,21 @@ class MiniPlayerNotifier extends Notifier<MiniPlayerState> {
     return MiniPlayerState(
       visible: true,
       title: track.title,
-      artist: track.artist,
-      artworkUrl: track.artworkUrl,
-      playing: player.sample.status == 'playing',
+      artist: unavailable ? MiniPlayerState.unavailableLine : track.artist,
+      artworkUrl: _artworkFor(track),
+      // A track Apple Music refused is not coming out of the speakers,
+      // whatever the last sample said before it gave up.
+      playing: !unavailable && player.sample.status == 'playing',
+      unavailable: unavailable,
     );
+  }
+
+  /// Only https artwork reaches either dock — the native side loads the URL
+  /// as given, and `SquareArt` applies the same rule in Flutter.
+  static String? _artworkFor(QueueTrack track) {
+    final url = track.artworkUrl;
+    if (url == null || url.isEmpty) return null;
+    return Uri.tryParse(url)?.scheme == 'https' ? url : null;
   }
 }
 

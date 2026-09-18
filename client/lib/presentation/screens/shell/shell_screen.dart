@@ -152,17 +152,27 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
   /// The native dock drove the change; same rule.
   void _onDockTab(int index) => _onTabTapped(index);
 
+  /// Now Playing is already up on some tab, and a second tap on the
+  /// mini-player must not stack another copy on top of it. Cleared when the
+  /// route is popped, whichever way it was dismissed.
+  bool _nowPlayingOpen = false;
+
   void _openNowPlaying() {
-    _navigatorOf(
-      _currentIndex,
-    )?.push(MaterialPageRoute<void>(builder: (_) => const PlaybackScreen()));
+    if (_nowPlayingOpen) return;
+    final navigator = _navigatorOf(_currentIndex);
+    if (navigator == null) return;
+    _nowPlayingOpen = true;
+    navigator
+        .push(MaterialPageRoute<void>(builder: (_) => const PlaybackScreen()))
+        .whenComplete(() => _nowPlayingOpen = false);
   }
 
   void _playPause() {
-    final player = ref.read(playbackProvider);
-    player.command(
-      ref.read(miniPlayerStateProvider).playing ? 'pause' : 'resume',
-    );
+    final mini = ref.read(miniPlayerStateProvider);
+    // A track Apple Music refused has no transport but Next — the board's
+    // rule, and the native dock does not enforce it for us.
+    if (!mini.visible || mini.unavailable) return;
+    ref.read(playbackProvider).command(mini.playing ? 'pause' : 'resume');
   }
 
   void _next() => ref.read(playbackProvider).command('next');
