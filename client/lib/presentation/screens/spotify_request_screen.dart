@@ -18,8 +18,7 @@ library;
 
 import 'dart:async';
 
-import 'package:flutter/cupertino.dart'
-    show CupertinoIcons, CupertinoSlidingSegmentedControl;
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -36,6 +35,7 @@ import '../widgets/foundation/inset_group.dart';
 import '../widgets/foundation/label_chip.dart';
 import '../widgets/foundation/large_title_scaffold.dart';
 import '../widgets/foundation/section_word.dart';
+import '../widgets/foundation/segmented_toggle.dart';
 import '../widgets/foundation/status_word.dart';
 import '../widgets/foundation/tape_button.dart';
 import '../widgets/foundation/text_action.dart';
@@ -150,6 +150,13 @@ class SpotifyRequestScreen extends ConsumerStatefulWidget {
   /// The service toggle under the title.
   static const Key segmentKey = Key('add-music-segment');
 
+  /// Its two segments.
+  static const Key appleSegmentKey = Key('add-music-apple');
+  static const Key spotifySegmentKey = Key('add-music-spotify');
+
+  /// "Open Exportify ↗" and "Choose files", which share one row.
+  static const Key exportifyRowKey = Key('exportify-row');
+
   /// The Apple pane's "Sync your library".
   static const Key appleSyncKey = Key('add-music-apple-sync');
 
@@ -261,15 +268,16 @@ class _SpotifyRequestScreenState extends ConsumerState<SpotifyRequestScreen> {
     );
   }
 
-  /// Full width under the large title, the way iOS puts one there: centred and
-  /// shrink-wrapped it floated over left-aligned copy.
-  Widget _segmentedControl(int segment) => SizedBox(
-    width: double.infinity,
-    child: CupertinoSlidingSegmentedControl<int>(
+  /// The house toggle, hugging its own labels on the left margin under the
+  /// title rather than stretching across the screen (smoke round five,
+  /// note 3).
+  Widget _segmentedControl(int segment) => Align(
+    alignment: Alignment.centerLeft,
+    child: SegmentedToggle<int>(
       key: SpotifyRequestScreen.segmentKey,
-      groupValue: segment,
-      onValueChanged: (value) {
-        if (value == null || value == segment) return;
+      value: segment,
+      onChanged: (value) {
+        if (value == segment) return;
         setState(() {
           _segment = value;
           // The other pane's deeper block is not this one's; a switch that
@@ -277,11 +285,47 @@ class _SpotifyRequestScreenState extends ConsumerState<SpotifyRequestScreen> {
           _deeperOpen = false;
         });
       },
-      children: const {
-        SpotifyRequestScreen.appleSegment: _SegmentLabel('Apple Music'),
-        SpotifyRequestScreen.spotifySegment: _SegmentLabel('Spotify'),
-      },
+      options: const [
+        SegmentedOption(
+          value: SpotifyRequestScreen.appleSegment,
+          label: 'Apple Music',
+          key: SpotifyRequestScreen.appleSegmentKey,
+        ),
+        SegmentedOption(
+          value: SpotifyRequestScreen.spotifySegment,
+          label: 'Spotify',
+          key: SpotifyRequestScreen.spotifySegmentKey,
+        ),
+      ],
     ),
+  );
+
+  /// One row, not two stacked blocks: open the exporter, then choose what it
+  /// gave you (smoke round four, note 4). The two now sit on opposite edges of
+  /// the row rather than huddling on the left (smoke round five, note 2), and
+  /// still stack once the text is too large for both to share a line.
+  Widget _exportifyRow(Future<bool> Function(Uri) openLink) => Wrap(
+    key: SpotifyRequestScreen.exportifyRowKey,
+    // `spaceBetween`, so a run that holds both puts the tape button on the
+    // left margin and the chip on the right instead of huddling them. A run
+    // that holds one — the stacked case at large text — is simply left
+    // aligned, exactly as the plain wrap was.
+    alignment: WrapAlignment.spaceBetween,
+    spacing: 8,
+    runSpacing: 8,
+    crossAxisAlignment: WrapCrossAlignment.center,
+    children: [
+      TapeButton(
+        key: const Key('open-exportify'),
+        label: 'Open Exportify ↗',
+        onPressed: () => unawaited(openLink(exportifyUrl)),
+      ),
+      LabelChip(
+        key: const Key('choose-import-files'),
+        label: 'Choose files',
+        onPressed: () => unawaited(showImportSheet(context)),
+      ),
+    ],
   );
 
   /// Apple: sync the live library, then the optional Media Services export.
@@ -343,26 +387,7 @@ class _SpotifyRequestScreenState extends ConsumerState<SpotifyRequestScreen> {
             child: Text(exportifyQuickStartSteps[i], style: tokens.body),
           ),
         const SizedBox(height: 12),
-        // One row, not two stacked blocks: open the exporter, then choose what
-        // it gave you (smoke round four, note 4). It wraps only when the text
-        // is too large for both to sit side by side.
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            TapeButton(
-              key: const Key('open-exportify'),
-              label: 'Open Exportify ↗',
-              onPressed: () => unawaited(openLink(exportifyUrl)),
-            ),
-            LabelChip(
-              key: const Key('choose-import-files'),
-              label: 'Choose files',
-              onPressed: () => unawaited(showImportSheet(context)),
-            ),
-          ],
-        ),
+        _exportifyRow(openLink),
         Text(exportifyRowNote, style: tokens.meta),
         const SizedBox(height: 20),
         InsetGroup(
@@ -394,33 +419,6 @@ class _SpotifyRequestScreenState extends ConsumerState<SpotifyRequestScreen> {
       ],
     );
   }
-}
-
-/// One segment's label. Padded to a 44 pt control: the house rule audits the
-/// segmented control like every other native control on the screen.
-class _SegmentLabel extends StatelessWidget {
-  const _SegmentLabel(this.text);
-
-  final String text;
-
-  /// The control adds 2 pt above and below, which makes 44.
-  static const double minHeight = 40;
-
-  @override
-  Widget build(BuildContext context) => ConstrainedBox(
-    constraints: const BoxConstraints(minHeight: minHeight),
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-      child: Center(
-        widthFactor: 1,
-        child: Text(
-          text,
-          textAlign: TextAlign.center,
-          style: context.tokens.rowTitle,
-        ),
-      ),
-    ),
-  );
 }
 
 /// Where the Apple library sync got to, under the Sync button: the run this

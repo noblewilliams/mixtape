@@ -422,6 +422,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
               removeBottom: true,
               child: LargeTitleScaffold(
                 title: 'Home',
+                // The Shape control lives beside the title, in the slot
+                // Library gives its glass cluster (smoke round five, note 1).
+                // Its state stays here: the sentence is folded into the first
+                // prompt at send, never into the draft.
+                trailing: EnergyControl(
+                  controller: _promptController,
+                  enabled: !_starting,
+                  selectedArc: _arc,
+                  onArcChanged: (arc) => setState(() {
+                    _arc = arc;
+                    // A shape the listener just changed clears a stale
+                    // "too long" line from an earlier attempt.
+                    if (_error == energySheetTooLong) _error = null;
+                  }),
+                ),
                 // No pull-to-refresh on Home: there is no list to refresh.
                 slivers: [
                   SliverLayoutBuilder(
@@ -465,13 +480,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
                   busy: _starting,
                   error: _error,
                   onSubmit: _submit,
-                  selectedArc: _arc,
-                  onArcChanged: (arc) => setState(() {
-                    _arc = arc;
-                    // A shape the listener just changed clears a stale
-                    // "too long" line from an earlier attempt.
-                    if (_error == energySheetTooLong) _error = null;
-                  }),
                   placeholder: _inspiration == null
                       ? null
                       : 'Something like ${_inspiration!.name}, but…',

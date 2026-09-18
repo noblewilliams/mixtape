@@ -6,7 +6,6 @@
 // in task 2.2 read the same way they did on Home.
 import 'dart:async';
 
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart' show SemanticsData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -22,6 +21,7 @@ import 'package:mixtape/presentation/screens/chat_screen.dart';
 import 'package:mixtape/presentation/screens/mixes_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
+import 'package:mixtape/presentation/widgets/foundation/segmented_toggle.dart';
 import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
 import 'package:mixtape/presentation/widgets/mix_home_row.dart';
 
@@ -183,10 +183,7 @@ void main() {
       await tester.pump();
 
       expect(find.text('Mixes'), findsOneWidget);
-      expect(
-        find.byType(CupertinoSlidingSegmentedControl<bool>),
-        findsOneWidget,
-      );
+      expect(find.byType(SegmentedToggle<bool>), findsOneWidget);
       expect(find.byKey(const Key('active-mixes')), findsOneWidget);
       expect(find.byKey(const Key('archived-mixes')), findsOneWidget);
       for (var index = 0; index < MixesScreen.skeletonRows; index++) {

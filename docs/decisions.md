@@ -692,3 +692,43 @@ shows; the title is "Add your music" everywhere else. Founder, smoke round
 four, note 4: Library offered "Add your music" and landed on a Spotify guide.
 **Reopens if:** a third service arrives (two segments is a toggle, five is a
 list).
+
+## 2026-09-18 — One segmented control, app-wide, and the Shape control leaves the panel
+Two smoke-round-five notes that share a cause: controls that were "whatever the
+platform gives you" read as three different apps.
+
+`client/lib/presentation/widgets/foundation/segmented_toggle.dart` is now the
+app's only segmented control. `SegmentedToggle<T>` takes
+`SegmentedOption<T>{value, label, key}` and draws a pill track (radius 999,
+`tokens.hairline` edge, `tokens.field` fill, 32 pt tall, 4 pt inset) with a
+thumb that slides one segment in 180 ms ease-out — one frame under reduced
+motion — under 13 pt labels, w600 `tokens.text` for the selected segment and
+w500 `tokens.smoke` for the rest. It **hugs its content**: the segments are
+equal width and the track is their sum plus its own chrome, never the screen's
+width. Every `CupertinoSlidingSegmentedControl` on a screen is gone: "Add your
+music" (Apple Music | Spotify, left-aligned under the title) and Mixes
+(Active | Archived, still the title row's trailing accessory) both wear it, and
+every key survives — `SpotifyRequestScreen.segmentKey`, `active-mixes`,
+`archived-mixes`. Two details are deliberate. The thumb is `tokens.sheetSurface`
+in light but raised white at 22% in dark, because that token is *darker* than
+the dark track and would read as a hole rather than a thumb. And the track is
+32 pt, under the app's 44 pt rule, at the founder's explicit measurement — the
+one control audited against its own floor (`expectNativeControls`); the
+segments themselves are still full-width tap targets. The collection review
+form's own control is untouched (it is inside a sheet, not screen chrome) and
+is the remaining Cupertino one.
+
+Home's **Shape** control moves out of the bottom panel into the large title's
+trailing slot — the slot Library gives its glass cluster — as a glass pill
+carrying the arc's `EnergyWave` and its label. The panel is composer and pills
+again; the shape's state still lives in `HomeScreen`, still never touches the
+draft, and is still folded into the first prompt at send (the 2026-09-18 energy
+decision above is otherwise unchanged). Because nothing else put the chip in a
+composer, `MixPromptInput` no longer builds one and `EnergyControlVisibility` —
+the inherited widget the conversation and the playlist draft used to hide it
+with — is deleted; the conversation still draws its own chip in its attachment
+row. Founder, smoke round five, notes 1 and 3: the chip stretched the panel,
+and the two segmented controls "aren't ours". **Reopens if:** a segmented
+control needs more than labels (icons, a badge) — then the option grows a
+child, not a second control — or a screen needs the Shape control somewhere a
+title row cannot reach.

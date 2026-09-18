@@ -10,9 +10,7 @@
 /// pushes go to the nearest [Navigator] and there is no app bar of its own.
 library;
 
-import 'package:flutter/cupertino.dart' show CupertinoSlidingSegmentedControl;
 import 'package:flutter/material.dart';
-import 'package:flutter/semantics.dart' show SemanticsRole;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/dj/dj_models.dart';
@@ -24,6 +22,7 @@ import '../widgets/foundation/frosted_dock.dart' show kFrostedDockHeight;
 import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/square_art.dart';
 import '../widgets/foundation/large_title_scaffold.dart';
+import '../widgets/foundation/segmented_toggle.dart';
 import '../widgets/foundation/tape_button.dart';
 import '../widgets/mix_home_row.dart';
 import 'chat_screen.dart';
@@ -234,12 +233,13 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
   }
 }
 
-/// The board's `.segc`: Active / Archived in the native sliding control, with
-/// the token background and thumb.
+/// The board's `.segc`: Active / Archived in the house toggle
+/// (`widgets/foundation/segmented_toggle.dart`), which "Add your music" wears
+/// too — one segmented control, app-wide (smoke round five, note 3).
 ///
 /// No `SemanticsRole.tabBar` wrapper: Flutter's debug role check requires a
-/// tab bar's direct children to be tab nodes, and Cupertino's own per-segment
-/// semantics sit in between, so the role goes on the segments alone.
+/// tab bar's direct children to be tab nodes, and the toggle's own per-segment
+/// semantics sit in between, so the segments stay plain selected buttons.
 class _ArchiveSegmentedControl extends StatelessWidget {
   const _ArchiveSegmentedControl({
     required this.showArchived,
@@ -249,76 +249,39 @@ class _ArchiveSegmentedControl extends StatelessWidget {
   final bool showArchived;
   final ValueChanged<bool> onChanged;
 
-  /// `rgba(120,110,120,.16)`; dark white at 12%.
-  static Color trackColor(Brightness brightness) =>
-      brightness == Brightness.dark
-      ? const Color.fromRGBO(255, 255, 255, 0.12)
-      : const Color.fromRGBO(120, 110, 120, 0.16);
-
-  /// White at 92%; dark white at 22%.
-  static Color thumbColorFor(Brightness brightness) =>
-      brightness == Brightness.dark
-      ? const Color.fromRGBO(255, 255, 255, 0.22)
-      : const Color.fromRGBO(255, 255, 255, 0.92);
-
-  Widget _segment(BuildContext context, String label, {required bool value}) {
-    // The Cupertino control already gives each segment a button with its
-    // selected state and a tap action; the tab role names what the pair is.
-    return Semantics(
-      role: SemanticsRole.tab,
-      selected: showArchived == value,
-      onTap: () => onChanged(value),
-      child: KeyedSubtree(
-        key: Key(value ? 'archived-mixes' : 'active-mixes'),
-        child: ConstrainedBox(
-          // The segment sizes itself to its label, and the title row gives its
-          // accessories no flex, so an unbounded label would push the control
-          // past a 320 pt screen. This is the ceiling; the label ellipsizes
-          // rather than overflowing beyond it.
-          constraints: const BoxConstraints(maxWidth: maxLabelWidth),
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: context.tokens.text),
-          ),
-        ),
-      ),
-    );
-  }
-
   /// The control is chrome beside the title, so its labels stop growing here —
   /// as `UISegmentedControl` does — rather than pushing the control wider than
   /// a 320 pt phone. The rows themselves still scale all the way up.
   static const double maxLabelScale = 1.3;
 
-  /// Each label's ceiling: both segments plus the control's own padding stay
-  /// inside a 320 pt screen's content width at any text scale.
-  static const double maxLabelWidth = 108;
+  /// The title row hands its accessories unbounded width, so the ceiling is
+  /// the control's own: both segments and the track's chrome stay inside a
+  /// 320 pt screen's content width, and a label that would pass it ellipsises.
+  static const double maxWidth = 240;
 
   @override
-  Widget build(BuildContext context) {
-    final brightness = Theme.of(context).brightness;
-    return MediaQuery.withClampedTextScaling(
-      maxScaleFactor: maxLabelScale,
-      child: _control(context, brightness),
-    );
-  }
-
-  Widget _control(BuildContext context, Brightness brightness) {
-    return CupertinoSlidingSegmentedControl<bool>(
-      groupValue: showArchived,
-      backgroundColor: trackColor(brightness),
-      thumbColor: thumbColorFor(brightness),
-      onValueChanged: (value) {
-        if (value != null) onChanged(value);
-      },
-      children: {
-        false: _segment(context, 'Active', value: false),
-        true: _segment(context, 'Archived', value: true),
-      },
-    );
-  }
+  Widget build(BuildContext context) => MediaQuery.withClampedTextScaling(
+    maxScaleFactor: maxLabelScale,
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: maxWidth),
+      child: SegmentedToggle<bool>(
+        value: showArchived,
+        onChanged: onChanged,
+        options: const [
+          SegmentedOption(
+            value: false,
+            label: 'Active',
+            key: Key('active-mixes'),
+          ),
+          SegmentedOption(
+            value: true,
+            label: 'Archived',
+            key: Key('archived-mixes'),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 /// Three placeholder rows under the live chrome: the 60 pt art box and two

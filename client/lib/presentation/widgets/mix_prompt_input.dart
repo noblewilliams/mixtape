@@ -1,4 +1,3 @@
-import 'energy_journey.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -22,8 +21,6 @@ class MixPromptInput extends StatefulWidget {
     this.reservedExamples = const [],
     this.showVoiceInput = voiceInputEnabled,
     this.voiceController,
-    this.energyArc,
-    this.onEnergyArcChanged,
   });
   final TextEditingController controller;
   final bool busy;
@@ -54,12 +51,6 @@ class MixPromptInput extends StatefulWidget {
   /// the Riverpod scope around it, so Home and a conversation share one
   /// microphone; tests hand one in directly.
   final VoiceComposerController? voiceController;
-
-  /// The shape the Shape chip is wearing, and who to tell when it changes.
-  /// The chip is state, not text: neither of these touches [controller]
-  /// (smoke round three, note 5).
-  final EnergyArc? energyArc;
-  final ValueChanged<EnergyArc?>? onEnergyArcChanged;
 
   /// The rotating placeholders, in order.
   ///
@@ -488,12 +479,6 @@ class _MixPromptInputState extends State<MixPromptInput>
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (widget.attachment != null) widget.attachment!,
-          EnergyControl(
-            controller: widget.controller,
-            enabled: !widget.busy,
-            selectedArc: widget.energyArc,
-            onArcChanged: widget.onEnergyArcChanged,
-          ),
           Container(
             padding: const EdgeInsets.all(2),
             decoration: BoxDecoration(

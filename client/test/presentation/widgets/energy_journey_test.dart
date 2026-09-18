@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/energy_journey.dart';
 import 'package:mixtape/presentation/widgets/foundation/mixtape_sheet.dart';
+import 'package:mixtape/presentation/widgets/mix_prompt_input.dart';
 
 /// The snapshot theme (seeded colours, the synthetic font) plus the design
 /// tokens every native widget reads off the ambient theme.
@@ -359,17 +360,20 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('a screen that draws the chip itself suppresses the composer copy', (
-    tester,
-  ) async {
+  // The chip used to be built by the composer and hidden by the screens that
+  // drew their own; it now lives in Home's title row, so the composer draws
+  // none at all (smoke round five, note 1).
+  testWidgets('the composer draws no Shape control of its own', (tester) async {
     final controller = TextEditingController();
     await tester.pumpWidget(
       MaterialApp(
         theme: MixtapeTheme.light(),
         home: Scaffold(
-          body: EnergyControlVisibility(
-            visible: false,
-            child: EnergyControl(controller: controller),
+          body: MixPromptInput(
+            controller: controller,
+            busy: false,
+            onSubmit: () {},
+            showVoiceInput: false,
           ),
         ),
       ),

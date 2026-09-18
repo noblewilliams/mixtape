@@ -657,6 +657,39 @@ void main() {
       expect(find.byKey(const Key('sessions-empty')), findsNothing);
     });
 
+    testWidgets('the Shape control rides the title row, not the panel', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = FakeDjApi()..onListSessions = () async => [];
+      await _pump(tester, _makeContainer(api));
+
+      final control = find.byKey(EnergyControl.chipKey);
+      expect(control, findsOneWidget);
+      // Out of the panel entirely: the panel is composer and pills.
+      expect(
+        find.descendant(of: find.byType(HomePanel), matching: control),
+        findsNothing,
+      );
+
+      final rect = tester.getRect(control);
+      expect(
+        rect.bottom,
+        lessThan(tester.getRect(find.byType(HomePanel)).top),
+        reason: 'the control is up in the title row, above the panel',
+      );
+      // Right-aligned on the screen margin, where Library's glass cluster sits.
+      expect(
+        rect.right,
+        moreOrLessEquals(390 - MixtapeMetrics.screenSidePadding, epsilon: 0.5),
+      );
+      // …and to the right of the title itself.
+      expect(rect.left, greaterThan(tester.getRect(find.text('Home')).right));
+    });
+
     testWidgets('Home does not scroll while the panel fits', (tester) async {
       tester.view.physicalSize = const Size(390, 844);
       tester.view.devicePixelRatio = 1;

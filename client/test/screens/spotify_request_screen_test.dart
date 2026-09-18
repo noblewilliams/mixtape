@@ -4,10 +4,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/listening/listening_models.dart';
 import 'package:mixtape/presentation/screens/spotify_request_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
-import 'package:flutter/cupertino.dart' show CupertinoSlidingSegmentedControl;
 import 'package:mixtape/presentation/widgets/foundation/inset_group.dart';
 import 'package:mixtape/presentation/widgets/foundation/label_chip.dart';
 import 'package:mixtape/presentation/widgets/foundation/section_word.dart';
+import 'package:mixtape/presentation/widgets/foundation/segmented_toggle.dart';
 import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
 import 'package:mixtape/presentation/widgets/foundation/text_action.dart';
 import 'package:mixtape/presentation/widgets/library_sync_sheet.dart';
@@ -67,7 +67,7 @@ void expectNativeControls(WidgetTester tester, Finder root) {
           w is TextAction ||
           w is InsetRow ||
           w is Switch ||
-          w is CupertinoSlidingSegmentedControl ||
+          w is SegmentedToggle ||
           (w is InkWell && w.key == const Key('link-spotify-privacy')),
     ),
   );
@@ -78,10 +78,15 @@ void expectNativeControls(WidgetTester tester, Finder root) {
       isNotNull,
       reason: '${element.widget.runtimeType} without a Key',
     );
+    // The house segmented toggle is drawn to the founder's 32 pt track
+    // (smoke round five, note 3); everything else keeps the 44 pt rule.
+    final floor = element.widget is SegmentedToggle
+        ? SegmentedToggle.trackHeight
+        : 44.0;
     expect(
       tester.getSize(find.byWidget(element.widget)).height,
-      greaterThanOrEqualTo(44),
-      reason: '${element.widget.key} under 44 pt',
+      greaterThanOrEqualTo(floor),
+      reason: '${element.widget.key} under $floor pt',
     );
   }
 }
@@ -365,10 +370,10 @@ void main() {
 
   group('the Apple Music / Spotify toggle', () {
     int segmentOf(WidgetTester tester) => tester
-        .widget<CupertinoSlidingSegmentedControl<int>>(
+        .widget<SegmentedToggle<int>>(
           find.byKey(SpotifyRequestScreen.segmentKey),
         )
-        .groupValue!;
+        .value;
 
     testWidgets('the gate preselects Spotify and keeps its own copy', (
       tester,
@@ -463,7 +468,8 @@ void main() {
     );
 
     testWidgets(
-      'Open Exportify and Choose files share a row at 1x and stack at 2x',
+      'Open Exportify and Choose files spread across one row at 1x and stack '
+      'at 2x',
       (tester) async {
         final listening = FakeListeningApi(
           onboarding: onboardingState(chosenService: 'spotify'),
@@ -479,10 +485,16 @@ void main() {
           const SpotifyRequestScreen(),
         );
 
+        final row = tester.getRect(
+          find.byKey(SpotifyRequestScreen.exportifyRowKey),
+        );
         var button = tester.getRect(find.byKey(const Key('open-exportify')));
         var chip = tester.getRect(find.byKey(const Key('choose-import-files')));
-        expect(chip.left, greaterThanOrEqualTo(button.right));
-        expect(chip.left - button.right, moreOrLessEquals(8, epsilon: 0.5));
+        // Spread to both edges, not huddled on the left (smoke round five,
+        // note 2).
+        expect(button.left, moreOrLessEquals(row.left, epsilon: 0.5));
+        expect(chip.right, moreOrLessEquals(row.right, epsilon: 0.5));
+        expect(chip.left, greaterThan(button.right));
         expect(chip.center.dy, moreOrLessEquals(button.center.dy, epsilon: 1));
 
         await pumpRequest(

@@ -127,3 +127,19 @@ order listed in revision 1 of the shape board.
   the glass cluster carries the Apple Music note mark rather than the board's
   generic sync arrows — it is Apple Music's sync, and `GlassButton` now takes
   a drawn `child` as an alternative to an icon.
+- 2026-09-18, smoke round five: three shell corrections. Home's **Shape**
+  control leaves the bottom panel — which it stretched — for the large title's
+  trailing accessory slot, the one Library gives its glass cluster, drawn as a
+  glass pill carrying the arc's wave and its label; the panel is composer and
+  pills again, and the shape is still state that Home folds into the first
+  prompt at send. "Add your music" puts "Open Exportify ↗" on the row's left
+  edge and "Choose files" on its right instead of huddling the pair, still
+  stacking when the text is too large for one line. And both screen-level
+  segmented controls — Apple Music | Spotify, and Mixes' Active | Archived —
+  become one house control,
+  `client/lib/presentation/widgets/foundation/segmented_toggle.dart`: a
+  32 pt pill track with a thumb that slides in 180 ms, hugging its own labels
+  rather than stretching. Its 32 pt height is under the board's 44 pt control
+  rule at the founder's own measurement; each segment is still a full-height
+  tap target with a `selected` button role. See `docs/decisions.md`,
+  2026-09-18, "One segmented control, app-wide".

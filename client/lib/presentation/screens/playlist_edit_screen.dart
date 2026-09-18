@@ -18,7 +18,6 @@ import '../../data/playlists/playlist_edit_models.dart';
 import '../providers/playlist_providers.dart';
 import '../theme/mixtape_theme.dart';
 import '../widgets/conversation_turn.dart';
-import '../widgets/energy_journey.dart' show EnergyControlVisibility;
 import '../widgets/foundation/glass_cluster.dart';
 import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/liquid_glass_surface.dart';
@@ -279,21 +278,15 @@ class _PlaylistEditScreenState extends ConsumerState<PlaylistEditScreen> {
                   ],
                 ),
               ),
-            // The composer draws its own Shape chip for Home; a playlist draft
-            // has no energy journey to shape.
-            //
             // `busy` is the composer's own lock: it makes the field read-only
             // and guards `_submit`, so neither the send key nor Return can
             // start a turn while a turn is in flight OR while an apply result
             // stands unreconciled.
-            EnergyControlVisibility(
-              visible: false,
-              child: MixPromptInput(
-                key: PlaylistEditScreen.composerKey,
-                controller: _controller,
-                busy: !composerEnabled,
-                onSubmit: _send,
-              ),
+            MixPromptInput(
+              key: PlaylistEditScreen.composerKey,
+              controller: _controller,
+              busy: !composerEnabled,
+              onSubmit: _send,
             ),
             const SizedBox(height: 10),
             TapeButton(

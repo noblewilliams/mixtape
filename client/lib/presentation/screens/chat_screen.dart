@@ -752,18 +752,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                         ),
                       ),
                   ],
-                  // The composer draws its own Shape chip for Home; here the
-                  // chip lives in the attachment row above, so it is hidden.
-                  EnergyControlVisibility(
-                    visible: false,
-                    child: MixPromptInput(
-                      key: _composerKey,
-                      controller: _textController,
-                      focusNode: _promptFocus,
-                      busy: !enabled,
-                      onSubmit: () =>
-                          _send(_textController.text, fromComposer: true),
-                    ),
+                  // The Shape chip lives in the attachment row above; the
+                  // composer itself draws none (Home's is in its title row).
+                  MixPromptInput(
+                    key: _composerKey,
+                    controller: _textController,
+                    focusNode: _promptFocus,
+                    busy: !enabled,
+                    onSubmit: () =>
+                        _send(_textController.text, fromComposer: true),
                   ),
                   // The shared handoff row (`widgets/mix_handoff.dart`),
                   // which the arrangement draws too: a mix Apple Music

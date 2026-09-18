@@ -14,7 +14,6 @@ library;
 import 'package:flutter/material.dart';
 
 import '../theme/mixtape_theme.dart';
-import 'energy_journey.dart';
 import 'foundation/idea_pill.dart';
 import 'foundation/liquid_glass_surface.dart';
 import 'mix_prompt_input.dart';
@@ -46,8 +45,6 @@ class HomePanel extends StatefulWidget {
     this.starterPrompts = MixPromptInput.examples,
     this.placeholder,
     this.refinements,
-    this.selectedArc,
-    this.onArcChanged,
     this.obscured = false,
   });
 
@@ -85,12 +82,6 @@ class HomePanel extends StatefulWidget {
   /// With a playlist attached, the pills become refinements of it and the
   /// routine suggestion stands down — the board shows exactly three.
   final List<HomeRefinement>? refinements;
-
-  /// The energy shape the panel's Shape chip is wearing, null for none, and
-  /// who to tell when it changes. The draft never carries the shape: Home
-  /// folds its sentence in at send (smoke round three, note 5).
-  final EnergyArc? selectedArc;
-  final ValueChanged<EnergyArc?>? onArcChanged;
 
   /// A modal route is over Home (smoke round four, note 2). The panel fades
   /// out rather than showing its top edge and handle above the sheet under the
@@ -279,8 +270,6 @@ class _HomePanelState extends State<HomePanel> {
                         onSubmit: widget.onSubmit,
                         attachment: widget.attachment,
                         placeholder: widget.placeholder,
-                        energyArc: widget.selectedArc,
-                        onEnergyArcChanged: widget.onArcChanged,
                         // The pills hold these; the rotating hint skips them so
                         // the field never repeats a pill below it. Refinements
                         // are not prompts, so they reserve nothing.

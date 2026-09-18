@@ -12,7 +12,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../theme/mixtape_theme.dart';
-import 'foundation/label_chip.dart';
+import 'foundation/frosted_surface.dart';
 import 'foundation/mixtape_sheet.dart';
 import 'foundation/tape_button.dart';
 import 'foundation/text_action.dart';
@@ -89,32 +89,6 @@ const String energySheetTooLong =
     'Shorten your brief to make room for the shape.';
 const String energyShapeToast = 'Shape added to your brief. Send when ready.';
 
-/// Hides the composer's own Shape chip for screens that draw it themselves.
-///
-/// [MixPromptInput] always builds an [EnergyControl] under the attachment
-/// slot, which is right for Home. The conversation puts the chip in its own
-/// attachment row beside the playlist chip (the board's single `.attach` row),
-/// so it wraps the composer in this and draws the chip itself.
-class EnergyControlVisibility extends InheritedWidget {
-  const EnergyControlVisibility({
-    super.key,
-    required this.visible,
-    required super.child,
-  });
-
-  final bool visible;
-
-  static bool of(BuildContext context) =>
-      context
-          .dependOnInheritedWidgetOfExactType<EnergyControlVisibility>()
-          ?.visible ??
-      true;
-
-  @override
-  bool updateShouldNotify(EnergyControlVisibility oldWidget) =>
-      oldWidget.visible != visible;
-}
-
 /// What the shape sheet answers with.
 ///
 /// A null result from the sheet itself is a dismissal and changes nothing; a
@@ -133,10 +107,14 @@ class EnergyShapeChoice {
   int get hashCode => arc.hashCode;
 }
 
-/// The board's `Shape` chip: a 36 pt label chip marked with the wave glyph.
+/// Home's `Shape` control: a glass pill marked with the wave glyph, sitting in
+/// the large-title row's trailing slot beside the title — the same slot
+/// Library's glass cluster uses (founder, smoke round five, note 1).
 ///
 /// With no shape chosen it reads "Shape" over the generic wave; with one it
-/// wears that arc's own name and its own wave, and the sheet opens on it.
+/// wears that arc's own name and its own wave, and the sheet opens on it. It
+/// used to sit inside the bottom panel above the composer, which stretched the
+/// panel.
 class EnergyControl extends StatelessWidget {
   const EnergyControl({
     super.key,
@@ -165,6 +143,17 @@ class EnergyControl extends StatelessWidget {
 
   static const Key chipKey = Key('energy-shape-chip');
 
+  /// The glass pill's own geometry: the board's 46 pt title-row cluster around
+  /// a 44 pt target, and the wave that marks it.
+  static const double pillHeight = MixtapeMetrics.minTarget;
+  static const double pillSidePadding = 12;
+  static const double waveWidth = 18;
+  static const double waveHeight = 12;
+  static const double waveGap = 6;
+
+  /// The label stops growing here rather than pushing the title off its row.
+  static const double maxLabelWidth = 132;
+
   /// The sheet's own keys, published here so callers and tests have one place
   /// to look for them.
   static const Key sheetKey = Key('energy-shape-sheet');
@@ -186,22 +175,61 @@ class EnergyControl extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!EnergyControlVisibility.of(context)) return const SizedBox.shrink();
+    final tokens = context.tokens;
     final arc = selectedArc;
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 2),
-        child: LabelChip(
-          key: chipKey,
-          label: arc?.label ?? unsetLabel,
-          hole: false,
-          leading: EnergyWave(
-            arc: arc ?? genericArc,
-            width: 18,
-            height: 12,
+    final label = arc?.label ?? unsetLabel;
+
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: label,
+      // `excludeSemantics` drops the detector's own tap action, and a node
+      // with no action cannot be activated by VoiceOver. Declare it here.
+      onTap: enabled ? () => _open(context) : null,
+      excludeSemantics: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: enabled ? () => _open(context) : null,
+        child: Opacity(
+          opacity: enabled ? 1 : 0.4,
+          child: FrostedSurface(
+            key: chipKey,
+            borderRadius: BorderRadius.circular(MixtapeMetrics.pillRadius),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: pillHeight),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: pillSidePadding,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    EnergyWave(
+                      arc: arc ?? genericArc,
+                      width: waveWidth,
+                      height: waveHeight,
+                    ),
+                    const SizedBox(width: waveGap),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(
+                        maxWidth: maxLabelWidth,
+                      ),
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: tokens.text,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ),
-          onPressed: enabled ? () => _open(context) : null,
         ),
       ),
     );

@@ -21,6 +21,7 @@ import '../../widgets/foundation/large_title_scaffold.dart';
 import '../../widgets/foundation/prism_stripe.dart';
 import '../../widgets/foundation/reason_band.dart';
 import '../../widgets/foundation/section_word.dart';
+import '../../widgets/foundation/segmented_toggle.dart';
 import '../../widgets/foundation/square_art.dart';
 import '../../widgets/foundation/status_word.dart';
 import '../../widgets/foundation/tape_button.dart';
@@ -283,14 +284,35 @@ class _Type extends StatelessWidget {
   }
 }
 
-class _Controls extends StatelessWidget {
+class _Controls extends StatefulWidget {
   const _Controls();
+
+  @override
+  State<_Controls> createState() => _ControlsState();
+}
+
+class _ControlsState extends State<_Controls> {
+  /// The gallery's live segmented toggle, so the thumb can be watched sliding
+  /// on device in both themes and at every text scale.
+  bool _archived = false;
 
   @override
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       const SectionWord('Controls'),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: SegmentedToggle<bool>(
+          value: _archived,
+          onChanged: (value) => setState(() => _archived = value),
+          options: const [
+            SegmentedOption(value: false, label: 'Active'),
+            SegmentedOption(value: true, label: 'Archived'),
+          ],
+        ),
+      ),
+      const SizedBox(height: 10),
       // A scrolling strip, not a Wrap: `TapeButton` and `LabelChip` lay their
       // label out unbounded inside a min-size Row, so on a 320 pt screen at
       // 200% text they run past a bounded parent instead of ellipsising.
