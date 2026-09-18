@@ -1,15 +1,15 @@
 /// The You tab (`docs/mockups/approved/2026-09-17-mobile-shell.md` → You;
-/// plan `docs/superpowers/plans/2026-09-17-native-design-implementation.md`
-/// task 2.4).
+/// frame Y1 in `docs/mockups/2026-09-17-mobile-shell-r3.html`; plan
+/// `docs/superpowers/plans/2026-09-17-native-design-implementation.md` task
+/// 8.3).
 ///
-/// A skeleton on purpose: the identity block with the square prism avatar and
-/// native inset-grouped rows that reach the shipped screens, so the shell is
-/// navigable end to end. The board's toggles ("Learn from my listening",
-/// "Suggest mixes from my routines") and the Together ghost arrive in Phase 8;
-/// rows are enough now.
+/// Native inset-grouped lists: the identity block with the 64 pt square prism
+/// avatar, then What the DJ knows and the board's two real toggles ("Learn
+/// from my listening", "Suggest mixes from my routines") — which is why
+/// Listening and Suggestions no longer have screens of their own — the
+/// Together ghost, and finally Account and Sign out.
 ///
-/// Everything Home's overflow menu offered about the listener lands here: what
-/// the DJ knows, listening, suggestions, account and sign out.
+/// Clear learned listening lives under What the DJ knows, as the board says.
 ///
 /// It lives inside a tab `Navigator`, so it never assumes it is the app root.
 library;
@@ -18,18 +18,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../data/auth/account_api.dart';
-import '../../../data/suggestions/suggestions_api.dart';
+import '../../../data/playback/playback_controller.dart'
+    show PlaybackController;
+import '../../../data/listening/listening_models.dart';
 import '../../providers/account_provider.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/dj_providers.dart' show memoriesProvider;
 import '../../providers/library_sync_provider.dart' show accountNameProvider;
-import '../../providers/suggestions_provider.dart';
+import '../../providers/onboarding_provider.dart' show onboardingProvider;
+import '../../providers/playback_provider.dart';
 import '../../theme/mixtape_theme.dart';
 import '../../widgets/foundation/gradient_background.dart';
 import '../../widgets/foundation/inset_group.dart';
 import '../../widgets/foundation/large_title_scaffold.dart';
+import '../../widgets/suggestion_settings.dart';
 import '../account_screen.dart';
 import '../memory_screen.dart';
-import '../playback_screen.dart' show ListeningPreferencesScreen;
 
 /// The You tab.
 class YouTab extends ConsumerWidget {
@@ -49,14 +53,25 @@ class YouTab extends ConsumerWidget {
 
   static const String signOutFailed = 'Couldn’t sign out. Try again.';
 
+  /// The board's note under the preferences group.
+  static const String learningFootnote =
+      'Learning stays on this account only. Clear learned listening from '
+      'What the DJ knows.';
+
+  /// The Together ghost's accessibility label; the row is not tappable.
+  static const String togetherLabel = 'Together, planned';
+
   void _push(BuildContext context, Widget Function() screen) {
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen()));
   }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final tokens = context.tokens;
     final name = ref.watch(accountNameProvider).value;
     final accounts = ref.watch(accountProvider).accounts;
+    final onboarding = ref.watch(onboardingProvider).value;
+    final memories = ref.watch(memoriesProvider).value;
     final displayName = (name == null || name.trim().isEmpty)
         ? unnamedListener
         : name.trim();
@@ -78,7 +93,7 @@ class YouTab extends ConsumerWidget {
                         InsetRow(
                           leading: _PrismAvatar(initial: _initialOf(name)),
                           title: displayName,
-                          subtitle: _methodsLine(accounts),
+                          subtitle: identitySubtitle(accounts, onboarding),
                         ),
                       ],
                     ),
@@ -86,28 +101,35 @@ class YouTab extends ConsumerWidget {
                       children: [
                         InsetRow(
                           key: const Key('you-memories'),
+                          leading: const Icon(Icons.psychology_outlined),
                           title: 'What the DJ knows',
+                          subtitle: rememberedLine(memories?.length),
                           onTap: () => _push(context, MemoryScreen.new),
                         ),
-                        InsetRow(
-                          key: const Key('you-listening'),
-                          title: 'Listening',
-                          onTap: () =>
-                              _push(context, ListeningPreferencesScreen.new),
-                        ),
-                        InsetRow(
-                          key: const Key('you-suggestions'),
-                          title: 'Suggestions',
-                          onTap: () =>
-                              _push(context, SuggestionSettingsScreen.new),
-                        ),
+                        const _LearningRow(),
+                        const SuggestionSettings(),
                       ],
+                    ),
+                    // A block of its own: the ghost is not one of the live
+                    // rows, and no hairline should tie it to them.
+                    const InsetGroup(children: [_TogetherRow()]),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                      child: Text(
+                        learningFootnote,
+                        style: tokens.meta.copyWith(
+                          fontSize: 12.5,
+                          color: tokens.muted,
+                        ),
+                      ),
                     ),
                     InsetGroup(
                       children: [
                         InsetRow(
                           key: const Key('you-account'),
+                          leading: const Icon(Icons.person_outline),
                           title: 'Account',
+                          subtitle: 'Login methods, linked providers',
                           onTap: () => _push(context, AccountScreen.new),
                         ),
                         const _SignOutRow(),
@@ -130,11 +152,33 @@ class YouTab extends ConsumerWidget {
     return trimmed[0].toUpperCase();
   }
 
-  /// "Apple", "Apple and Google" — the sign-in methods when the account
-  /// provider knows them, and a plain word while it does not (null is
-  /// unknown, not an account with no methods).
-  static String _methodsLine(List<LinkedAccount>? accounts) {
-    if (accounts == null || accounts.isEmpty) return 'Account';
+  /// The board's "7 remembered preferences". Null while the list has not
+  /// loaded: a count nobody has read yet is not a fact about this listener.
+  @visibleForTesting
+  static String? rememberedLine(int? count) => switch (count) {
+    null => null,
+    0 => 'Nothing remembered yet',
+    1 => '1 remembered preference',
+    final n => '$n remembered preferences',
+  };
+
+  /// The board's "Apple and Google sign-in · Apple Music": the linked sign-in
+  /// methods, then the music service, each dropped while it is unknown (null
+  /// is unknown, not an account with nothing linked).
+  @visibleForTesting
+  static String identitySubtitle(
+    List<LinkedAccount>? accounts,
+    OnboardingState? onboarding,
+  ) {
+    final parts = <String>[
+      if (accounts != null && accounts.isNotEmpty)
+        '${_methodsLine(accounts)} sign-in',
+      if (_serviceName(onboarding) != null) _serviceName(onboarding)!,
+    ];
+    return parts.isEmpty ? 'Account' : parts.join(' · ');
+  }
+
+  static String _methodsLine(List<LinkedAccount> accounts) {
     final names = accounts.map(_methodName).toList();
     if (names.length == 1) return names.single;
     return '${names.take(names.length - 1).join(', ')} and ${names.last}';
@@ -146,6 +190,255 @@ class YouTab extends ConsumerWidget {
         'google' => 'Google',
         final other => other,
       };
+
+  static String? _serviceName(OnboardingState? onboarding) =>
+      switch (onboarding?.chosenService) {
+        'apple' => 'Apple Music',
+        'spotify' => 'Spotify',
+        _ => null,
+      };
+}
+
+/// "Learn from my listening", bound to the same controller call the Listening
+/// preferences screen writes (`playback_screen.dart` → `setLearning`).
+class _LearningRow extends ConsumerStatefulWidget {
+  const _LearningRow();
+
+  static const Key switchKey = Key('you-learning-switch');
+  static const String title = 'Learn from my listening';
+
+  /// Shown while the setting has not been read (or a read failed): the switch
+  /// must never show "off" as though the listener had chosen it.
+  static const String unavailable = 'Not available right now';
+  static const String saving = 'Saving…';
+
+  /// `playback_screen.dart`'s failure line, kept word for word.
+  static const String saveFailed =
+      'Could not save. Collection is paused until you try again.';
+
+  @override
+  ConsumerState<_LearningRow> createState() => _LearningRowState();
+}
+
+class _LearningRowState extends ConsumerState<_LearningRow> {
+  bool _saving = false;
+
+  /// The value being written, so the switch holds it while the write is in
+  /// flight instead of snapping back to nothing.
+  bool? _pending;
+  String? _error;
+
+  /// The canonical setting read back after a failed write: the controller
+  /// clears its own copy before saving, so a throw would otherwise leave this
+  /// row with nothing to show and no way to try again.
+  Map<String, dynamic>? _readback;
+
+  @override
+  void initState() {
+    super.initState();
+    Future.microtask(() {
+      if (mounted) ref.read(playbackProvider).initialize();
+    });
+  }
+
+  /// What the switch shows: the write in flight, then the controller's own
+  /// answer, then the value read back after a failure.
+  bool? _value(PlaybackController player) =>
+      _pending ??
+      player.preferences?['enabled'] as bool? ??
+      _readback?['enabled'] as bool?;
+
+  Future<void> _save(bool enabled) async {
+    if (_saving) return;
+    final player = ref.read(playbackProvider);
+    setState(() {
+      _saving = true;
+      _pending = enabled;
+      _error = null;
+    });
+    try {
+      await player.setLearning(enabled);
+      if (mounted) setState(() => _readback = null);
+    } catch (_) {
+      Map<String, dynamic>? current;
+      try {
+        current = await player.api.preferences();
+      } catch (_) {
+        // Still unreachable; the row stays on what it last knew.
+      }
+      if (mounted) {
+        setState(() {
+          _readback = current ?? _readback;
+          _error = _LearningRow.saveFailed;
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _pending = null;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final player = ref.watch(playbackProvider);
+    return ListenableBuilder(
+      listenable: player,
+      builder: (context, _) {
+        final value = _value(player);
+        final subtitle = _saving
+            ? _LearningRow.saving
+            : _error ?? (value == null ? _LearningRow.unavailable : null);
+
+        return InsetRow(
+          leading: const Icon(Icons.hearing_outlined),
+          title: _LearningRow.title,
+          subtitle: subtitle,
+          trailing: Switch.adaptive(
+            key: _LearningRow.switchKey,
+            value: value ?? false,
+            // Disabled only while a write is in flight: a failed save must
+            // stay retryable.
+            onChanged: _saving || value == null ? null : _save,
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Together, drawn as the board's planned ghost: dashed outline, muted ink, a
+/// Planned tag, and no tap of any kind.
+class _TogetherRow extends StatelessWidget {
+  const _TogetherRow();
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+
+    return Semantics(
+      key: const Key('you-together'),
+      container: true,
+      label: YouTab.togetherLabel,
+      excludeSemantics: true,
+      child: CustomPaint(
+        painter: _DashedOutline(color: tokens.muted),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: InsetGroup.rowInset),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+            child: Row(
+              children: [
+                Icon(Icons.people_outline, size: 22, color: tokens.muted),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Together',
+                        style: tokens.rowTitle.copyWith(color: tokens.muted),
+                      ),
+                      Text(
+                        'Blends and taste twins',
+                        style: tokens.meta.copyWith(
+                          fontSize: 12.5,
+                          color: tokens.muted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                _PlannedTag(color: tokens.muted),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The board's `.tag`: a small dashed box holding one uppercase word.
+class _PlannedTag extends StatelessWidget {
+  const _PlannedTag({required this.color});
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => CustomPaint(
+    painter: _DashedOutline(color: color, radius: 4, inset: 0, strokeWidth: 1),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+      child: Text(
+        'PLANNED',
+        style: TextStyle(
+          fontSize: 9,
+          height: 1,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.9,
+          color: color,
+        ),
+      ),
+    ),
+  );
+}
+
+/// The board's `outline: 1.5px dashed` — Flutter has no dashed border, so the
+/// rounded rectangle is walked and stroked in segments.
+class _DashedOutline extends CustomPainter {
+  const _DashedOutline({
+    required this.color,
+    this.radius = 14,
+    this.inset = 4,
+    this.strokeWidth = 1.5,
+  });
+
+  final Color color;
+  final double radius;
+  final double inset;
+  final double strokeWidth;
+
+  /// The board's dash rhythm.
+  static const double dash = 4;
+  static const double gap = 3;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Rect.fromLTWH(
+      inset,
+      inset,
+      size.width - inset * 2,
+      size.height - inset * 2,
+    );
+    if (rect.isEmpty) return;
+    final path = Path()
+      ..addRRect(RRect.fromRectAndRadius(rect, Radius.circular(radius)));
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..color = color;
+    for (final metric in path.computeMetrics()) {
+      var start = 0.0;
+      while (start < metric.length) {
+        final end = (start + dash).clamp(0.0, metric.length);
+        canvas.drawPath(metric.extractPath(start, end), paint);
+        start = end + gap;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DashedOutline oldDelegate) =>
+      oldDelegate.color != color ||
+      oldDelegate.radius != radius ||
+      oldDelegate.inset != inset ||
+      oldDelegate.strokeWidth != strokeWidth;
 }
 
 /// Sign out, disabled while it is in flight so a second tap cannot start a
@@ -180,6 +473,7 @@ class _SignOutRowState extends ConsumerState<_SignOutRow> {
   @override
   Widget build(BuildContext context) => InsetRow(
     key: const Key('you-signout'),
+    leading: Icon(Icons.logout, color: context.tokens.errInk),
     title: 'Sign out',
     destructive: true,
     trailing: const SizedBox.shrink(),
@@ -210,132 +504,6 @@ class _PrismAvatar extends StatelessWidget {
           initial,
           style: tokens.section.copyWith(color: Colors.white),
         ),
-      ),
-    );
-  }
-}
-
-/// Suggestion settings, reachable from the You tab.
-///
-/// Gap (task 2.4): the shipped settings screen is private to
-/// `routine_suggestions.dart` (`_SuggestionSettings`, pushed by the Home
-/// card), which this task may not edit, so this reproduces its toggle, its
-/// copy, its save and its account-change guard.
-// TODO(Phase 8): extract one shared suggestion toggle and delete the private
-// copy in routine_suggestions.dart.
-class SuggestionSettingsScreen extends ConsumerStatefulWidget {
-  const SuggestionSettingsScreen({super.key});
-
-  static const Key toggleKey = Key('you-suggestions-toggle');
-  static const Key saveKey = Key('you-suggestions-save');
-
-  /// What the screen says once the account behind the API has changed — an
-  /// in-flight toggle must never be written against another listener's
-  /// account (`routine_suggestions.dart`'s guard, verbatim).
-  static const String accountChanged =
-      'Your account changed. Return to Home to update suggestions.';
-
-  @override
-  ConsumerState<SuggestionSettingsScreen> createState() =>
-      _SuggestionSettingsScreenState();
-}
-
-class _SuggestionSettingsScreenState
-    extends ConsumerState<SuggestionSettingsScreen> {
-  bool? _enabled;
-  bool _saving = false;
-  String? _error;
-
-  /// The API this screen loaded against. A new one means a new account.
-  late final SuggestionsApi _api;
-
-  @override
-  void initState() {
-    super.initState();
-    _api = ref.read(suggestionsApiProvider);
-    _load();
-  }
-
-  Future<void> _load() async {
-    final api = _api;
-    final readZone = ref.read(suggestionTimeZoneProvider);
-    try {
-      final zone = await readZone();
-      final data = await api.load(zone);
-      if (mounted) setState(() => _enabled = data.enabled);
-    } catch (_) {
-      if (mounted) {
-        setState(() => _error = 'Could not load suggestions. Try again.');
-      }
-    }
-  }
-
-  Future<void> _save() async {
-    final api = _api;
-    if (!identical(ref.read(suggestionsApiProvider), api)) return;
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
-    try {
-      await api.save(_enabled!);
-      if (mounted) Navigator.of(context).pop(_enabled);
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _saving = false;
-          _error = 'Could not save. Try again.';
-        });
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final enabled = _enabled;
-    if (!identical(ref.watch(suggestionsApiProvider), _api)) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Suggestion settings')),
-        body: const Padding(
-          padding: EdgeInsets.all(16),
-          child: Text(SuggestionSettingsScreen.accountChanged),
-        ),
-      );
-    }
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Suggestion settings')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Text(
-            'Suggestions, on your terms.',
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
-          SwitchListTile(
-            key: SuggestionSettingsScreen.toggleKey,
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Suggest mixes from my routines'),
-            value: enabled ?? false,
-            onChanged: enabled == null || _saving
-                ? null
-                : (value) => setState(() => _enabled = value),
-          ),
-          const Text(
-            'Suggestions appear in Mixtape. They never start playing by '
-            'themselves.',
-          ),
-          if (_error != null) Semantics(liveRegion: true, child: Text(_error!)),
-          const SizedBox(height: 16),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: FilledButton(
-              key: SuggestionSettingsScreen.saveKey,
-              onPressed: enabled == null || _saving ? null : _save,
-              child: Text(_saving ? 'Saving…' : 'Save'),
-            ),
-          ),
-        ],
       ),
     );
   }

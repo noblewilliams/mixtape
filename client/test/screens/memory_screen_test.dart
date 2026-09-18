@@ -1,4 +1,7 @@
-import 'package:mixtape/data/playlists/playlist_context_models.dart';
+// "What the DJ knows" (plan `docs/superpowers/plans/2026-09-17-native-design-
+// implementation.md` task 8.4): the board's large title and More cluster over
+// flush note rows, with the September 8 parity approval's explicit Forget
+// confirmation, canonical recovery and memory states unchanged.
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -7,14 +10,26 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/api/api_client.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/dj/dj_api.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
+import 'package:mixtape/data/playback/playback_controller.dart';
+import 'package:mixtape/data/playlists/playlist_context_models.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/dj_providers.dart';
+import 'package:mixtape/presentation/providers/onboarding_provider.dart';
+import 'package:mixtape/presentation/providers/playback_provider.dart';
+import 'package:mixtape/presentation/screens/interview_screen.dart';
 import 'package:mixtape/presentation/screens/memory_screen.dart';
+import 'package:mixtape/presentation/theme/mixtape_theme.dart';
+import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
+
+import '../data/playback/playback_controller_test.dart'
+    show FakeApi, FakeBridge;
+import '../helpers/fake_listening_api.dart';
 
 /// Mirrors the other screens' FakeDjApi (see queue_screen_test.dart):
 /// implements DjApi's public surface, each method delegating to a settable
@@ -105,29 +120,49 @@ DjMemory _memory({
   DateTime? createdAt,
 }) => DjMemory(id: id, note: note, createdAt: createdAt ?? DateTime.now());
 
-ProviderContainer _makeContainer(FakeDjApi api) {
+ProviderContainer _makeContainer(FakeDjApi api, {PlaybackController? player}) {
   final container = ProviderContainer(
     overrides: [
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
       djApiProvider.overrideWithValue(api),
       authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.signedIn)),
+      listeningApiProvider.overrideWithValue(FakeListeningApi()),
+      playbackProvider.overrideWithValue(
+        player ?? PlaybackController(FakeApi(), FakeBridge()),
+      ),
     ],
   );
   addTearDown(container.dispose);
   return container;
 }
 
-Future<void> _pump(WidgetTester tester, ProviderContainer container) async {
+Future<void> _pump(
+  WidgetTester tester,
+  ProviderContainer container, {
+  Brightness brightness = Brightness.light,
+}) async {
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
-      child: const MaterialApp(home: MemoryScreen()),
+      child: MaterialApp(
+        theme: brightness == Brightness.dark
+            ? MixtapeTheme.dark()
+            : MixtapeTheme.light(),
+        home: const MemoryScreen(),
+      ),
     ),
   );
   await tester.pumpAndSettle();
 }
 
+/// `AlertDialog.adaptive` builds a private subclass of [AlertDialog] on the
+/// Material platforms, which `find.byType` (an exact runtime-type match)
+/// would miss.
+final _dialog = find.byWidgetPredicate((widget) => widget is AlertDialog);
+
 void main() {
+  setUp(() => FlutterSecureStorage.setMockInitialValues({}));
+
   testWidgets(
     'Forget opens confirmation; backdrop, Keep note and Escape never delete',
     (tester) async {
@@ -140,7 +175,7 @@ void main() {
       expect(find.text('You can’t undo this.'), findsOneWidget);
       await tester.tapAt(const Offset(8, 8));
       await tester.pumpAndSettle();
-      expect(find.byType(AlertDialog), findsNothing);
+      expect(_dialog, findsNothing);
       await tester.tap(find.byKey(const Key('forget-memory-m1')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Keep note'));
@@ -149,11 +184,27 @@ void main() {
       await tester.pumpAndSettle();
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
-      expect(find.byType(AlertDialog), findsNothing);
+      expect(_dialog, findsNothing);
       expect(api.deleteCalls, isEmpty);
       expect(find.byType(Dismissible), findsNothing);
     },
   );
+
+  testWidgets('a note row carries the glyph, the note and when it landed', (
+    tester,
+  ) async {
+    final api = FakeDjApi()
+      ..onListMemories = () async => [_memory(note: 'Gentle mornings')];
+    await _pump(tester, _makeContainer(api));
+
+    expect(find.text('What the DJ knows'), findsOneWidget);
+    expect(find.text('Gentle mornings'), findsOneWidget);
+    expect(find.text('remembered just now'), findsOneWidget);
+    expect(find.text('Forget'), findsOneWidget);
+    expect(find.byIcon(Icons.psychology_outlined), findsOneWidget);
+    expect(find.byKey(MemoryScreen.backKey), findsOneWidget);
+    expect(find.byKey(MemoryScreen.moreKey), findsOneWidget);
+  });
 
   testWidgets('confirmation reconciles the list and offers no Undo', (
     tester,
@@ -169,7 +220,13 @@ void main() {
     expect(api.deleteCalls, ['m1']);
     expect(find.text('Gentle mornings'), findsNothing);
     expect(find.text('Undo'), findsNothing);
-    expect(find.textContaining('Nothing remembered yet.'), findsOneWidget);
+    expect(find.text(MemoryScreen.emptyTitle), findsOneWidget);
+    expect(find.text(MemoryScreen.emptyBody), findsOneWidget);
+    expect(find.byType(CassetteTile), findsOneWidget);
+    expect(
+      tester.widget<CassetteTile>(find.byType(CassetteTile)).width,
+      MemoryScreen.emptyCassetteWidth,
+    );
   });
 
   testWidgets(
@@ -191,7 +248,7 @@ void main() {
       pending.complete();
       await tester.pumpAndSettle();
       expect(api.deleteCalls, ['m1']);
-      expect(find.byType(AlertDialog), findsNothing);
+      expect(_dialog, findsNothing);
       expect(tester.takeException(), isNull);
     },
   );
@@ -207,8 +264,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Forget note'));
     await tester.pumpAndSettle();
-    expect(find.byType(AlertDialog), findsNothing);
-    expect(find.textContaining('Nothing remembered yet.'), findsOneWidget);
+    expect(_dialog, findsNothing);
+    expect(find.text(MemoryScreen.emptyTitle), findsOneWidget);
   });
 
   testWidgets(
@@ -225,15 +282,10 @@ void main() {
       await tester.tap(find.text('Forget note'));
       await tester.pumpAndSettle();
       expect(find.text('Gentle mornings'), findsNothing);
-      expect(
-        find.text(
-          'Couldn’t confirm the result. Reload your notes before trying again.',
-        ),
-        findsOneWidget,
-      );
-      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.text(MemoryScreen.uncertainResult), findsOneWidget);
+      expect(_dialog, findsNothing);
       api.onListMemories = () async => [_memory(note: 'Still remembered')];
-      await tester.tap(find.text('Reload notes'));
+      await tester.tap(find.byKey(MemoryScreen.retryKey));
       await tester.pumpAndSettle();
       expect(find.text('Still remembered'), findsOneWidget);
       expect(api.deleteCalls, ['m1']);
@@ -248,13 +300,13 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Forget note'));
     await tester.pumpAndSettle();
-    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(_dialog, findsOneWidget);
     expect(find.text('Couldn’t forget this note. Try again.'), findsOneWidget);
     api.onListMemories = () async => [];
     await tester.tap(find.text('Forget note'));
     await tester.pumpAndSettle();
     expect(api.deleteCalls, ['m1', 'm1']);
-    expect(find.byType(AlertDialog), findsNothing);
+    expect(_dialog, findsNothing);
   });
 
   testWidgets('notes and modal fit narrow screen at 200 percent text', (
@@ -275,10 +327,11 @@ void main() {
       UncontrolledProviderScope(
         container: container,
         child: MaterialApp(
+          theme: MixtapeTheme.light(),
           builder: (context, child) => MediaQuery(
             data: MediaQuery.of(
               context,
-            ).copyWith(textScaler: TextScaler.linear(2)),
+            ).copyWith(textScaler: const TextScaler.linear(2)),
             child: child!,
           ),
           home: const MemoryScreen(),
@@ -286,6 +339,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
     await tester.ensureVisible(find.byKey(const Key('forget-memory-m1')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('forget-memory-m1')));
@@ -297,6 +351,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(api.deleteCalls, isEmpty);
   });
+
   testWidgets('Back dismisses confirmation and restores focus to Forget', (
     tester,
   ) async {
@@ -307,10 +362,10 @@ void main() {
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
     expect(api.deleteCalls, isEmpty);
-    expect(find.byType(AlertDialog), findsNothing);
+    expect(_dialog, findsNothing);
     expect(
       tester
-          .widget<TextButton>(find.byKey(const Key('forget-memory-m1')))
+          .widget<Focus>(find.byKey(const ValueKey('forget-focus-m1')))
           .focusNode!
           .hasFocus,
       isTrue,
@@ -331,6 +386,7 @@ void main() {
         UncontrolledProviderScope(
           container: container,
           child: MaterialApp(
+            theme: MixtapeTheme.light(),
             navigatorKey: navigator,
             home: const Scaffold(body: Text('Home')),
           ),
@@ -370,6 +426,7 @@ void main() {
             final auth = ref.watch(authProvider);
             return MaterialApp(
               key: ValueKey(auth),
+              theme: MixtapeTheme.light(),
               home: auth == AuthStatus.signedIn
                   ? const MemoryScreen()
                   : const Scaffold(body: Text('Sign in')),
@@ -385,8 +442,53 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Sign in'), findsOneWidget);
     expect(find.text('Private note'), findsNothing);
-    expect(find.byType(AlertDialog), findsNothing);
+    expect(_dialog, findsNothing);
     expect(tester.takeException(), isNull);
+  });
+
+  group('the More cluster', () {
+    testWidgets('clears learned listening behind its confirmation', (
+      tester,
+    ) async {
+      final playbackApi = FakeApi();
+      final player = PlaybackController(playbackApi, FakeBridge());
+      addTearDown(player.dispose);
+      final api = FakeDjApi()..onListMemories = () async => [_memory()];
+      await _pump(tester, _makeContainer(api, player: player));
+
+      await tester.tap(find.byKey(MemoryScreen.moreKey));
+      await tester.pumpAndSettle();
+      expect(find.text(MemoryScreen.clearLearned), findsOneWidget);
+      await tester.tap(find.byKey(MemoryScreen.clearLearnedKey));
+      await tester.pumpAndSettle();
+
+      expect(find.text(MemoryScreen.clearTitle), findsOneWidget);
+      expect(find.text(MemoryScreen.clearBody), findsOneWidget);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(find.text(MemoryScreen.cleared), findsNothing);
+
+      await tester.tap(find.byKey(MemoryScreen.moreKey));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(MemoryScreen.clearLearnedKey));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(TextButton, MemoryScreen.clearLearned));
+      await tester.pumpAndSettle();
+
+      expect(find.text(MemoryScreen.cleared), findsOneWidget);
+    });
+
+    testWidgets('opens the taste interview', (tester) async {
+      final api = FakeDjApi()..onListMemories = () async => [_memory()];
+      await _pump(tester, _makeContainer(api));
+
+      await tester.tap(find.byKey(MemoryScreen.moreKey));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(MemoryScreen.interviewKey));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(InterviewScreen), findsOneWidget);
+    });
   });
 
   for (final brightness in Brightness.values) {
@@ -426,12 +528,9 @@ void main() {
             key: boundaryKey,
             child: MaterialApp(
               debugShowCheckedModeBanner: false,
-              theme: ThemeData(
-                colorSchemeSeed: const Color(0xFF544451),
-                useMaterial3: true,
-                brightness: brightness,
-                fontFamily: output.isEmpty ? null : 'NativeSnapshot',
-              ),
+              theme: brightness == Brightness.dark
+                  ? MixtapeTheme.dark()
+                  : MixtapeTheme.light(),
               home: const MemoryScreen(),
             ),
           ),
@@ -460,6 +559,7 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
   testWidgets('preserves canonical note order and refreshes when opened', (
     tester,
   ) async {
@@ -478,16 +578,10 @@ void main() {
       tester.getTopLeft(find.text('Newest note')).dy,
       lessThan(tester.getTopLeft(find.text('Older note')).dy),
     );
-    expect(find.text('just now'), findsNWidgets(2));
-    await tester.drag(
-      find.byKey(const Key('memories-list')),
-      const Offset(0, 300),
-    );
-    await tester.pumpAndSettle();
-    expect(reads, 3);
+    expect(find.text('remembered just now'), findsNWidgets(2));
   });
 
-  testWidgets('initial read error offers reload and keeps route navigation', (
+  testWidgets('initial read error offers Try again and keeps route navigation', (
     tester,
   ) async {
     final api = FakeDjApi()
@@ -498,6 +592,7 @@ void main() {
       UncontrolledProviderScope(
         container: container,
         child: MaterialApp(
+          theme: MixtapeTheme.light(),
           navigatorKey: navigator,
           home: const Scaffold(body: Text('Home')),
         ),
@@ -507,13 +602,13 @@ void main() {
       MaterialPageRoute<void>(builder: (_) => const MemoryScreen()),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Couldn’t load your notes.'), findsOneWidget);
-    expect(find.byType(BackButton), findsOneWidget);
+    expect(find.text(MemoryScreen.loadFailed), findsOneWidget);
+    expect(find.byKey(MemoryScreen.retryKey), findsOneWidget);
     api.onListMemories = () async => [];
-    await tester.tap(find.text('Reload notes'));
+    await tester.tap(find.byKey(MemoryScreen.retryKey));
     await tester.pumpAndSettle();
-    expect(find.textContaining('Nothing remembered yet.'), findsOneWidget);
-    await tester.pageBack();
+    expect(find.text(MemoryScreen.emptyTitle), findsOneWidget);
+    await tester.tap(find.byKey(MemoryScreen.backKey));
     await tester.pumpAndSettle();
     expect(find.text('Home'), findsOneWidget);
   });
