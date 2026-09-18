@@ -219,7 +219,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
 
     var total = text('mixtape', tokens.wordmark, width);
 
-    total += text(_headline, _headlineStyle(tokens), width) + 24;
+    total += text(_headline, _headlineStyle(tokens), width) + _headlineGap;
 
     // The pill's floor, or its label plus the padding it sits in.
     final labelStyle = ProviderSignInButton.labelStyle(tokens);
@@ -306,7 +306,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
         textAlign: TextAlign.center,
         style: _headlineStyle(tokens),
       ),
-      const SizedBox(height: 24),
+      const SizedBox(height: _headlineGap),
       for (final provider in AccountProvider.values) ...[
         _providerButton(provider, dark, googleAvailable),
         if (lastUsed == provider) _lastUsed(tokens),
@@ -443,7 +443,10 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
   /// The founder's 2026-09-18 sizing: centred, a step under the large title
   /// in size, a step over it in quietness (w600, not w800).
   static TextStyle _headlineStyle(MixtapeTokens tokens) => tokens.largeTitle
-      .copyWith(fontSize: 22, fontWeight: FontWeight.w600, letterSpacing: -0.3);
+      .copyWith(fontSize: 18, fontWeight: FontWeight.w600, letterSpacing: -0.2);
+
+  /// The air between the headline and the first button.
+  static const double _headlineGap = 36;
 
   static const String _footNote = 'Music access is requested separately.';
 
@@ -451,7 +454,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
   static const double _scrollPadding = 24;
 
   /// The air around the tape, top and bottom.
-  static const double _cassetteGap = 16;
+  static const double _cassetteGap = 24;
 
   /// The web's `.auth-cassette` tilt.
   static const double _cassetteTilt = 4 * math.pi / 180;

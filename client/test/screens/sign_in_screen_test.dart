@@ -175,7 +175,7 @@ void main() {
       find.text('Your music, mixed for right\u00a0now.'),
     );
     expect(headline.textAlign, TextAlign.center);
-    expect(headline.style?.fontSize, 22);
+    expect(headline.style?.fontSize, 18);
     expect(headline.style?.fontWeight, FontWeight.w600);
     expect(find.textContaining('Start with a mood'), findsNothing);
     expect(find.text('Continue with Apple'), findsOneWidget);
