@@ -15,6 +15,15 @@ import UIKit
   /// Only ever built on iOS 26 — below that Flutter draws `FrostedDock`.
   private var shellDock: ShellDock?
 
+  /// Retained so the `mixtape/speech` channel — the on-device transcriber
+  /// Dart falls back to — stays alive for the life of the app.
+  private var speechTranscriber: SpeechTranscriber?
+
+  /// Retained for the same reason: `mixtape/audio_session`, which Dart calls
+  /// before recording so the session is ours, or so recording is refused
+  /// while our own MusicKit queue is playing.
+  private var audioSessionChannel: FlutterMethodChannel?
+
   /// Where those copies live. Everything under it is a listener's whole
   /// export — the identity and payment files the parser refuses to read
   /// included — so it is emptied at launch, and each copy again as soon as
@@ -34,6 +43,7 @@ import UIKit
     if let controller = window?.rootViewController as? FlutterViewController {
       MusicKitBridge.register(with: controller.binaryMessenger)
       registerOpenArchiveChannel(with: controller.binaryMessenger)
+      registerVoiceChannels(with: controller.binaryMessenger)
       // The approved dock, in genuine Liquid Glass, on iOS 26 only.
       //
       // Hosted on the WINDOW, not on controller.view: that view is the
@@ -86,6 +96,21 @@ import UIKit
     }
     receive(url)
     return true
+  }
+
+  /// Voice input: the on-device transcriber and the audio session it and the
+  /// recorder both need. Neither logs anything — a clip and a transcript are
+  /// the listener's own words, like an export's file name above.
+  private func registerVoiceChannels(with messenger: FlutterBinaryMessenger) {
+    speechTranscriber = SpeechTranscriber(binaryMessenger: messenger)
+    let channel = FlutterMethodChannel(
+      name: "mixtape/audio_session",
+      binaryMessenger: messenger
+    )
+    channel.setMethodCallHandler { call, result in
+      AudioSessionBridge.handle(call, result: result)
+    }
+    audioSessionChannel = channel
   }
 
   private func registerOpenArchiveChannel(with messenger: FlutterBinaryMessenger) {
