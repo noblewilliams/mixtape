@@ -43,8 +43,10 @@ class SegmentedToggle<T> extends StatelessWidget {
   /// The gap between the track's edge and the thumb.
   static const double inset = 4;
 
-  /// The track's hairline.
-  static const double borderWidth = 1;
+  /// No hairline: the track is a flat tint and the thumb carries the state
+  /// (founder, 2026-09-18 smoke round six: less shadow and border, a clearer
+  /// active state).
+  static const double borderWidth = 0;
 
   /// Everything between a segment and the outside world, per side — what a
   /// hugging control adds to the sum of its segments.
@@ -59,9 +61,6 @@ class SegmentedToggle<T> extends StatelessWidget {
 
   /// How long the thumb takes to slide. Instant under reduced motion.
   static const Duration thumbDuration = Duration(milliseconds: 180);
-
-  /// `0 1 3 rgba(39,32,39,.18)` under the thumb.
-  static const Color thumbShadow = Color.fromRGBO(39, 32, 39, 0.18);
 
   /// The track and the thumb, for tests.
   static const Key trackKey = Key('segmented-toggle-track');
@@ -89,9 +88,8 @@ class SegmentedToggle<T> extends StatelessWidget {
       child: Container(
         key: trackKey,
         decoration: BoxDecoration(
-          color: tokens.field,
+          color: _trackColor(tokens),
           borderRadius: BorderRadius.circular(MixtapeMetrics.pillRadius),
-          border: Border.all(color: tokens.hairline, width: borderWidth),
         ),
         padding: const EdgeInsets.all(inset),
         child: Stack(
@@ -110,17 +108,10 @@ class SegmentedToggle<T> extends StatelessWidget {
                     child: DecoratedBox(
                       key: thumbKey,
                       decoration: BoxDecoration(
-                        color: _thumbColor(context, tokens),
+                        color: tokens.tapeFill,
                         borderRadius: BorderRadius.circular(
                           MixtapeMetrics.pillRadius,
                         ),
-                        boxShadow: const [
-                          BoxShadow(
-                            color: thumbShadow,
-                            blurRadius: 3,
-                            offset: Offset(0, 1),
-                          ),
-                        ],
                       ),
                     ),
                   ),
@@ -140,13 +131,11 @@ class SegmentedToggle<T> extends StatelessWidget {
     );
   }
 
-  /// The sheet's own surface in light. In dark that token is darker than the
-  /// track, which would read as a hole rather than a raised thumb, so the dark
-  /// thumb is the raised white the app's other dark chrome uses.
-  Color _thumbColor(BuildContext context, MixtapeTokens tokens) =>
-      Theme.of(context).brightness == Brightness.dark
-      ? const Color.fromRGBO(255, 255, 255, 0.22)
-      : tokens.sheetSurface;
+  /// A flat tint of the text ink: visible on the gradient in both themes,
+  /// with no edge or shadow. The thumb is the tape fill, so the active
+  /// segment reads like a pressed tape button.
+  static Color _trackColor(MixtapeTokens tokens) =>
+      tokens.text.withValues(alpha: 0.08);
 
   Widget _segment(BuildContext context, MixtapeTokens tokens, int index) {
     final option = options[index];
@@ -184,7 +173,7 @@ class SegmentedToggle<T> extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                    color: selected ? tokens.text : tokens.smoke,
+                    color: selected ? tokens.tapeInk : tokens.smoke,
                   ),
                 ),
               ),
