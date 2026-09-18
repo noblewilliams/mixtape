@@ -1,15 +1,13 @@
 /// The Library tab (`docs/mockups/approved/2026-09-17-mobile-shell.md` →
-/// Library; plan `docs/superpowers/plans/2026-09-17-native-design-
-/// implementation.md` task 2.4).
+/// Library; board frame L1 in `docs/mockups/2026-09-17-mobile-shell-r3.html`;
+/// plan `docs/superpowers/plans/2026-09-17-native-design-implementation.md`
+/// task 8.1).
 ///
-/// A skeleton on purpose: it carries the board's large title and glass Sync
-/// cluster, and reaches the shipped screens through flush rows so the shell is
-/// navigable end to end. Phase 8 restyles the hosted screens and brings the
-/// Playlists section in.
-///
-/// The music entries Home's overflow menu offered land here: Your music, Add
-/// Spotify music and Sync library. Music setup stays on Home's waiting card,
-/// which owns the interview and the ZIP import.
+/// Two flush lists under bold section words: the sources the listener has
+/// connected or imported, each with a status word, and the playlists they
+/// own. The glass cluster at the title carries Sync library and More; More
+/// holds the full "Your music" screen, so nothing the September 4 approval
+/// shipped is out of reach.
 ///
 /// It lives inside a tab `Navigator`, so it never assumes it is the app root:
 /// pushes go to the nearest [Navigator] and it draws no app bar of its own.
@@ -18,19 +16,27 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../providers/library_sync_provider.dart';
+import '../../../data/listening/listening_models.dart';
+import '../../format/source_labels.dart';
 import '../../providers/onboarding_provider.dart';
+import '../../providers/playlist_providers.dart';
 import '../../theme/mixtape_theme.dart';
+import '../../widgets/foundation/cassette_tile.dart';
 import '../../widgets/foundation/flush_row.dart';
+import '../../widgets/foundation/frosted_surface.dart';
 import '../../widgets/foundation/glass_cluster.dart';
 import '../../widgets/foundation/gradient_background.dart';
 import '../../widgets/foundation/large_title_scaffold.dart';
 import '../../widgets/foundation/section_word.dart';
+import '../../widgets/foundation/tape_button.dart';
+import '../../widgets/library_sync_sheet.dart';
+import '../import_sheet.dart';
 import '../music_sources_screen.dart';
+import '../playlist_browser_screen.dart';
 import '../spotify_request_screen.dart';
 
 /// The Library tab.
-class LibraryTab extends ConsumerWidget {
+class LibraryTab extends ConsumerStatefulWidget {
   const LibraryTab({super.key});
 
   /// A row of breathing room under the last row, on top of the dock's own
@@ -39,43 +45,176 @@ class LibraryTab extends ConsumerWidget {
   static const double defaultBottomInset = 16;
 
   static const Key syncButtonKey = Key('library-sync');
+  static const Key moreButtonKey = Key('library-more');
+
+  /// The More menu's entry to the full Your music screen.
   static const Key yourMusicKey = Key('library-your-music');
+
   static const Key addSpotifyKey = Key('library-add-spotify');
 
-  /// The sync sheet's start action.
-  static const Key syncStartKey = Key('library-sync-start');
-  static const Key syncAgainKey = Key('library-sync-again');
-  static const Key syncRetryKey = Key('library-sync-retry');
+  /// The no-sources empty state's action.
+  static const Key emptySetupKey = Key('library-empty-setup');
+  static const Key emptyKey = Key('library-sources-empty');
 
-  /// The leading column's width for these icon rows, and so the hairline's
-  /// inset.
-  static const double rowIconColumn = 28;
+  /// The sources list failed to load.
+  static const Key sourcesRetryKey = Key('library-sources-retry');
 
-  void _openSources(BuildContext context, WidgetRef ref) {
-    ref.read(onboardingProvider.notifier).refresh();
-    Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => const MusicSourcesScreen()))
-        // An import or a removal over there changes what the sources say.
-        .then((_) => ref.read(onboardingProvider.notifier).refresh());
+  /// The skeleton shown while the sources are in flight.
+  static const Key sourcesSkeletonKey = Key('library-sources-skeleton');
+
+  /// A source's own row, and the actions its sheet offers.
+  static Key sourceRowKey(String source) => Key('library-source-$source');
+  static Key sourceImportAgainKey(String source) =>
+      Key('library-source-import-again-$source');
+  static Key sourceRemoveKey(String source) =>
+      Key('library-source-remove-$source');
+
+  /// The empty state's words.
+  static const String emptyTitle = 'No music yet';
+  static const String emptyBody =
+      'Connect Apple Music or add your Spotify export.';
+
+  /// The next page is fetched this far from the bottom.
+  static const double loadMoreMargin = 400;
+
+  /// The retry after a page failed; scrolling alone will not try again.
+  static const Key loadMoreKey = kPlaylistsLoadMoreRetryKey;
+
+  @override
+  ConsumerState<LibraryTab> createState() => _LibraryTabState();
+}
+
+class _LibraryTabState extends ConsumerState<LibraryTab> {
+  final ScrollController _controller = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(_onScroll);
   }
 
-  void _openSpotifyRequest(BuildContext context, WidgetRef ref) {
-    Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => const SpotifyRequestScreen()))
-        .then((_) => ref.read(onboardingProvider.notifier).refresh());
+  @override
+  void dispose() {
+    _controller.removeListener(_onScroll);
+    _controller.dispose();
+    super.dispose();
   }
 
-  void _openSync(BuildContext context) {
-    showModalBottomSheet(
+  /// The playlists page as the list nears its end: the board has no "Load
+  /// more" button on this screen, and the collection provider already guards
+  /// re-entry and a missing cursor.
+  ///
+  /// Two guards of its own: nothing is asked for unless the Playlists section
+  /// is actually on screen — an overscroll over the empty or failed sources
+  /// state would otherwise spin the autoDispose provider up for a request
+  /// nobody can see — and a page that failed waits for the listener's
+  /// [LibraryTab.loadMoreKey] rather than retrying itself on every tick.
+  void _onScroll() {
+    if (!_controller.hasClients) return;
+    final position = _controller.position;
+    if (position.pixels <
+        position.maxScrollExtent - LibraryTab.loadMoreMargin) {
+      return;
+    }
+    if (!_playlistsShown) return;
+    if (ref.read(playlistCollectionProvider).value?.loadMoreFailed ?? false) {
+      return;
+    }
+    ref.read(playlistCollectionProvider.notifier).loadMore();
+  }
+
+  /// Whether this build put the Playlists section in the tree.
+  bool _playlistsShown = false;
+
+  Future<void> _push(Widget screen) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => screen),
+    );
+    // An import or a removal over there changes what the sources say.
+    if (mounted) await ref.read(onboardingProvider.notifier).refresh();
+  }
+
+  void _openMore() {
+    showModalBottomSheet<void>(
       context: context,
-      isScrollControlled: true,
-      builder: (_) => const _LibrarySyncSheet(),
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      builder: (sheetContext) => _LibrarySheet(
+        children: [
+          FlushRow(
+            key: LibraryTab.yourMusicKey,
+            leading: const SizedBox.square(
+              dimension: kSourceMarkSize,
+              child: Center(child: Icon(Icons.library_music_outlined)),
+            ),
+            leadingSize: kSourceMarkSize,
+            title: 'Your music',
+            subtitle: 'Sources, imports and playlists',
+            onTap: () {
+              Navigator.of(sheetContext).pop();
+              _push(const MusicSourcesScreen());
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// A source row's detail: the Apple library opens Your music, an imported
+  /// source offers what can be done to it.
+  void _openSource(MusicSource source) {
+    final removable =
+        source.source == 'spotify_export' || source.source == 'apple_export';
+    if (!removable) {
+      _push(const MusicSourcesScreen());
+      return;
+    }
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      builder: (sheetContext) => _LibrarySheet(
+        children: [
+          if (source.source == 'spotify_export')
+            FlushRow(
+              key: LibraryTab.sourceImportAgainKey(source.source),
+              leading: const SizedBox.square(
+                dimension: kSourceMarkSize,
+                child: Center(child: Icon(Icons.file_upload_outlined)),
+              ),
+              leadingSize: kSourceMarkSize,
+              title: 'Import again',
+              trailing: const SizedBox.shrink(),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                openImportFlow(context, ref);
+              },
+            ),
+          FlushRow(
+            key: LibraryTab.sourceRemoveKey(source.source),
+            leading: const SizedBox.square(
+              dimension: kSourceMarkSize,
+              child: Center(child: Icon(Icons.delete_outline)),
+            ),
+            leadingSize: kSourceMarkSize,
+            title: 'Remove',
+            trailing: const SizedBox.shrink(),
+            onTap: () {
+              Navigator.of(sheetContext).pop();
+              removeSourceFlow(context, ref, source);
+            },
+          ),
+        ],
+      ),
     );
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final tokens = context.tokens;
+  Widget build(BuildContext context) {
+    final onboarding = ref.watch(onboardingProvider);
+    final state = onboarding.value;
+    final hasSources = state != null && state.sources.isNotEmpty;
+    _playlistsShown = hasSources;
 
     return GradientBackground(
       // A transparent Scaffold with no app bar: the large title is the chrome,
@@ -84,154 +223,173 @@ class LibraryTab extends ConsumerWidget {
         backgroundColor: Colors.transparent,
         body: LargeTitleScaffold(
           title: 'Library',
+          controller: _controller,
           trailing: GlassCluster(
             children: [
               GlassButton(
-                key: syncButtonKey,
+                key: LibraryTab.syncButtonKey,
                 icon: Icons.sync,
                 label: 'Sync library',
-                onPressed: () => _openSync(context),
+                onPressed: () => LibrarySyncSheet.show(context),
+              ),
+              GlassButton(
+                key: LibraryTab.moreButtonKey,
+                icon: Icons.more_horiz,
+                label: 'More',
+                onPressed: _openMore,
               ),
             ],
           ),
           slivers: [
-            SliverPadding(
-              padding: const EdgeInsets.only(bottom: defaultBottomInset),
-              sliver: SliverToBoxAdapter(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const SectionWord('Sources'),
-                    FlushList(
-                      children: [
-                        FlushRow(
-                          key: yourMusicKey,
-                          leading: _RowIcon(
-                            Icons.library_music_outlined,
-                            color: tokens.plum,
-                          ),
-                          leadingSize: rowIconColumn,
-                          title: 'Your music',
-                          subtitle: 'Sources, imports and playlists',
-                          onTap: () => _openSources(context, ref),
-                        ),
-                        FlushRow(
-                          key: addSpotifyKey,
-                          leading: _RowIcon(
-                            Icons.playlist_add,
-                            color: tokens.plum,
-                          ),
-                          leadingSize: rowIconColumn,
-                          title: 'Add Spotify music',
-                          subtitle: 'Bring a Spotify export across',
-                          onTap: () => _openSpotifyRequest(context, ref),
-                        ),
-                        // No "Music setup" row: the real setup sheet (the
-                        // interview and Choose a ZIP) stays on Home's waiting
-                        // card, which Home keeps for Spotify listeners until
-                        // both imports land.
-                        // TODO(Phase 8): interview entry under You
-                      ],
-                    ),
-                  ],
-                ),
+            SliverToBoxAdapter(child: _sources(onboarding, state)),
+            if (hasSources) ...[
+              const SliverToBoxAdapter(child: SectionWord('Playlists')),
+              playlistCollectionSliver(
+                ref,
+                ref.watch(playlistCollectionProvider),
+                // The list pages on scroll; no button stands at its end.
+                loadMoreButton: false,
               ),
+            ],
+            const SliverToBoxAdapter(
+              child: SizedBox(height: LibraryTab.defaultBottomInset),
             ),
           ],
         ),
       ),
     );
   }
-}
 
-/// A row's leading glyph, in the leading column's width so the hairline lines
-/// up with the text.
-class _RowIcon extends StatelessWidget {
-  const _RowIcon(this.icon, {required this.color});
+  Widget _sources(
+    AsyncValue<OnboardingState> onboarding,
+    OnboardingState? state,
+  ) {
+    final tokens = context.tokens;
 
-  final IconData icon;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) => SizedBox.square(
-    dimension: LibraryTab.rowIconColumn,
-    child: Center(child: Icon(icon, size: 22, color: color)),
-  );
-}
-
-/// The P1 library-sync UI, reproduced here for the Sync cluster.
-///
-/// Gap (task 2.4): Home's own `_LibrarySyncSheet` is private to
-/// `home_screen.dart`, which another agent owns this phase, so reaching it
-/// would have meant editing that file. The states, copy and actions match it.
-// TODO(Phase 8): extract one shared library-sync sheet and delete Home's copy.
-class _LibrarySyncSheet extends ConsumerWidget {
-  const _LibrarySyncSheet();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final sync = ref.watch(librarySyncProvider);
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: switch (sync) {
-          SyncIdle() => FilledButton(
-            key: LibraryTab.syncStartKey,
-            onPressed: () => ref.read(librarySyncProvider.notifier).sync(),
-            child: const Text('Sync my library'),
-          ),
-          SyncRunning(:final progress) => Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              LinearProgressIndicator(value: progress == 0 ? null : progress),
-              const SizedBox(height: 16),
-              Text(
-                progress == 0
-                    ? 'Syncing…'
-                    : 'Syncing… ${(progress * 100).round()}%',
-              ),
-            ],
-          ),
-          SyncDone(:final summary) => Column(
-            mainAxisSize: MainAxisSize.min,
+    if (state == null) {
+      // Riverpod retries a failed provider, which parks it back in loading
+      // with the error still attached: failure is "no value and an error".
+      if (onboarding.hasError) {
+        return Padding(
+          padding: const EdgeInsets.only(top: 40),
+          child: Column(
             children: [
               Text(
-                'Synced ${summary.songs} ${summary.songs == 1 ? 'song' : 'songs'} and '
-                '${summary.playlists} ${summary.playlists == 1 ? 'playlist' : 'playlists'}. '
-                'The DJ is listening.',
+                "couldn't load your sources",
                 textAlign: TextAlign.center,
+                style: tokens.body,
               ),
-              if (summary.unresolvedEntries > 0) ...[
-                const SizedBox(height: 8),
-                Text(
-                  '${summary.unresolvedEntries} playlist '
-                  '${summary.unresolvedEntries == 1 ? 'entry is' : 'entries are'} '
-                  'still unmatched.',
-                  textAlign: TextAlign.center,
-                ),
-              ],
               const SizedBox(height: 16),
-              TextButton(
-                key: LibraryTab.syncAgainKey,
-                onPressed: () => ref.read(librarySyncProvider.notifier).sync(),
-                child: const Text('Sync again'),
+              TapeButton(
+                key: LibraryTab.sourcesRetryKey,
+                label: 'Try again',
+                onPressed: () =>
+                    ref.read(onboardingProvider.notifier).refresh(),
               ),
             ],
           ),
-          SyncFailed(:final message) => Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(message, textAlign: TextAlign.center),
-              const SizedBox(height: 16),
-              OutlinedButton(
-                key: LibraryTab.syncRetryKey,
-                onPressed: () => ref.read(librarySyncProvider.notifier).sync(),
-                child: const Text('Try again'),
+        );
+      }
+      return const Padding(
+        key: LibraryTab.sourcesSkeletonKey,
+        padding: EdgeInsets.only(top: 16),
+        child: PlaylistSkeletonRows(rows: 3),
+      );
+    }
+
+    if (state.sources.isEmpty) {
+      return Padding(
+        key: LibraryTab.emptyKey,
+        padding: const EdgeInsets.only(top: 32),
+        child: Column(
+          children: [
+            const CassetteTile(width: 140),
+            const SizedBox(height: 20),
+            Text(LibraryTab.emptyTitle, style: tokens.section),
+            const SizedBox(height: 6),
+            Text(
+              LibraryTab.emptyBody,
+              textAlign: TextAlign.center,
+              style: tokens.secondary,
+            ),
+            const SizedBox(height: 20),
+            TapeButton(
+              key: LibraryTab.emptySetupKey,
+              label: 'Add your music',
+              onPressed: () => _push(const SpotifyRequestScreen()),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SectionWord('Sources'),
+        FlushList(
+          children: [
+            for (final source in state.sources)
+              FlushRow(
+                key: LibraryTab.sourceRowKey(source.source),
+                leading: SourceMark(source: source.source),
+                leadingSize: kSourceMarkSize,
+                title: sourceName(source),
+                subtitleWidget: SourceSubtitle(source: source, state: state),
+                onTap: () => _openSource(source),
               ),
-            ],
-          ),
-        },
-      ),
+            FlushRow(
+              key: LibraryTab.addSpotifyKey,
+              leading: const SizedBox.square(
+                dimension: kSourceMarkSize,
+                child: Center(child: Icon(Icons.add, size: 22)),
+              ),
+              leadingSize: kSourceMarkSize,
+              title: 'Add Spotify music',
+              subtitle: 'Bring a Spotify export across',
+              onTap: () => _push(const SpotifyRequestScreen()),
+            ),
+          ],
+        ),
+      ],
     );
   }
+}
+
+/// The tab's own action sheets: the approved frosted material with a handle.
+class _LibrarySheet extends StatelessWidget {
+  const _LibrarySheet({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+    child: FrostedSurface(
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: context.tokens.muted.withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              FlushList(children: children),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 }

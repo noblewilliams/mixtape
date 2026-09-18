@@ -285,7 +285,7 @@ void main() {
       // waiting all along opens the flow — once.
       await tester.tapAt(const Offset(10, 10));
       await tester.pumpAndSettle();
-      await tester.pageBack();
+      await tester.tap(find.byKey(MusicSourcesScreen.backKey));
       await tester.pumpAndSettle();
 
       expect(find.byType(ImportSheet), findsOneWidget);
