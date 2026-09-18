@@ -174,6 +174,62 @@ describe('auth mounting', () => {
     })
   })
 
+  // The iOS google_sign_in SDK stamps the *iOS* client id as the ID token's
+  // `aud` (the server client id only rides along in `azp` / the server auth
+  // code), so a server that knows the web client id alone rejects every native
+  // token as an audience mismatch. Better Auth's Google provider takes
+  // `clientId: string | string[]`; index 0 stays the primary that pairs with
+  // the client secret for the web authorization-code flow, later entries are
+  // accepted as additional ID token audiences only.
+  it('accepts both the web and the iOS client id as Google token audiences', async () => {
+    const auth = createAuth(await createTestDb(), {
+      ...testEnv,
+      GOOGLE_IOS_CLIENT_ID: 'google-ios-client-id.apps.googleusercontent.com',
+    })
+
+    expect(auth.options.socialProviders?.google?.clientId).toEqual([
+      testEnv.GOOGLE_CLIENT_ID,
+      'google-ios-client-id.apps.googleusercontent.com',
+    ])
+
+    // The built provider is what verification actually reads; assert the
+    // audience there too, so a Better Auth change that stops threading the
+    // array through fails here rather than in production.
+    const ctx = await auth.$context
+    const googleIdToken = ctx.socialProviders.find((p) => p.id === 'google')?.idToken
+    expect(googleIdToken && 'audience' in googleIdToken ? googleIdToken.audience : undefined).toEqual([
+      testEnv.GOOGLE_CLIENT_ID,
+      'google-ios-client-id.apps.googleusercontent.com',
+    ])
+  })
+
+  it('keeps the single web client id when no iOS client id is configured', async () => {
+    const auth = createAuth(await createTestDb(), testEnv)
+    expect(auth.options.socialProviders?.google?.clientId).toBe(testEnv.GOOGLE_CLIENT_ID)
+  })
+
+  it('treats an empty GOOGLE_IOS_CLIENT_ID as absent', async () => {
+    const auth = createAuth(await createTestDb(), { ...testEnv, GOOGLE_IOS_CLIENT_ID: '' })
+    expect(auth.options.socialProviders?.google?.clientId).toBe(testEnv.GOOGLE_CLIENT_ID)
+  })
+
+  it('still starts the Google web redirect flow with the iOS id configured', async () => {
+    const auth = createAuth(await createTestDb(), {
+      ...testEnv,
+      GOOGLE_IOS_CLIENT_ID: 'google-ios-client-id.apps.googleusercontent.com',
+    })
+    const response = await auth.handler(new Request('http://localhost:8787/api/auth/sign-in/social', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'http://localhost:4176' },
+      body: JSON.stringify({ provider: 'google', callbackURL: 'http://localhost:4176' }),
+    }))
+
+    expect(response.status).toBe(200)
+    const body = await response.json() as { redirect: boolean; url: string }
+    // The web flow must keep using the web client id as its primary.
+    expect(new URL(body.url).searchParams.get('client_id')).toBe(testEnv.GOOGLE_CLIENT_ID)
+  })
+
   it('bearer path rejects a bogus token without erroring', async () => {
     const auth = createAuth(await createTestDb(), testEnv)
     const res = await auth.handler(new Request('http://localhost:8787/api/auth/get-session', {

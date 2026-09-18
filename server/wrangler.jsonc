@@ -12,6 +12,14 @@
   },
   "triggers": {
     "crons": ["*/5 * * * *"]
+  },
+  "vars": {
+    // Public OAuth identifier, not a secret — it ships with `wrangler deploy`,
+    // no `wrangler secret put` needed. Native iOS google_sign_in stamps this
+    // as the ID token's `aud`, so Better Auth must accept it alongside the web
+    // GOOGLE_CLIENT_ID secret. Keep it equal to GOOGLE_IOS_CLIENT_ID in
+    // client/config/google-ios.json.
+    "GOOGLE_IOS_CLIENT_ID": "403264926110-000q34va63qouvvtvb11co0je53867gb.apps.googleusercontent.com"
   }
   // Secrets required at runtime (set via `wrangler secret put` / .dev.vars locally) —
   // createAuth fails fast if any is missing:
@@ -31,7 +39,9 @@
   // ENRICH_ADMIN_TOKEN        — admin guard for /enrich/*; unset disables the route group entirely
   //   ANTHROPIC_API_KEY       — DJ engine (Sonnet 5 agent loop); unset disables /sessions/* entirely
   //   GROQ_API_KEY            — Groq Whisper key for POST /transcribe (voice capture); unset makes that one route answer 503, rest of the API unaffected
-  // Optional var (not secret):
+  // Optional vars (not secrets):
   //   ITUNES_STOREFRONT       — iTunes storefront code for enrichment lookups (default "ng")
+  //   GOOGLE_IOS_CLIENT_ID    — iOS OAuth client id, declared under "vars" above; accepted as an
+  //                             additional Google ID token audience for native sign-in
   // MusicKit keys also enable the server-only Apple catalog client used by artwork enrichment.
 }

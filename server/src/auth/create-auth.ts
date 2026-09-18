@@ -15,6 +15,11 @@ export type AuthEnv = {
   APPLE_PRIVATE_KEY: string
   GOOGLE_CLIENT_ID: string
   GOOGLE_CLIENT_SECRET: string
+  // Optional, and a public identifier rather than a secret: the iOS OAuth
+  // client id. Native google_sign_in stamps it as the ID token's `aud`, so
+  // without it every native exchange fails an audience check. Unset (or
+  // empty) leaves the web-only behaviour untouched.
+  GOOGLE_IOS_CLIENT_ID?: string
   WEB_ORIGINS: string
 }
 
@@ -80,6 +85,14 @@ export function createAuth(db: object, env: AuthEnv) {
 
   const webOrigins = parseWebOrigins(env.WEB_ORIGINS)
 
+  // Index 0 is Better Auth's "primary" client id: it pairs with the client
+  // secret for the web authorization-code flow. Any later entry is only an
+  // additionally accepted ID token audience, so the web flow is unchanged and
+  // no audience check is relaxed — the set of accepted ones just grows by one.
+  const googleClientId = env.GOOGLE_IOS_CLIENT_ID
+    ? [env.GOOGLE_CLIENT_ID, env.GOOGLE_IOS_CLIENT_ID]
+    : env.GOOGLE_CLIENT_ID
+
   return betterAuth({
     baseURL: env.BETTER_AUTH_URL,
     secret: env.BETTER_AUTH_SECRET,
@@ -98,7 +111,9 @@ export function createAuth(db: object, env: AuthEnv) {
         appBundleIdentifier: env.APPLE_BUNDLE_ID,
       }),
       google: {
-        clientId: env.GOOGLE_CLIENT_ID,
+        // Native iOS tokens carry the iOS client id as their audience while
+        // the web redirect flow above uses the web client id.
+        clientId: googleClientId,
         clientSecret: env.GOOGLE_CLIENT_SECRET,
       },
     },

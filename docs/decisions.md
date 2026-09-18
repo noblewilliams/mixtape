@@ -498,3 +498,29 @@ the founder asked for the web welcome's character on the phone, where the
 previous sign-in screen read as "too boring"; limiting the hand to the name and
 one pencil note keeps the shell's SF discipline intact. Evidence:
 `mockups/approved/2026-09-17-mobile-shell.md` → Implementation departures.
+
+## 2026-09-18 — Google native tokens verify against the web *and* iOS client ids
+
+Better Auth's Google provider is configured with
+`clientId: [GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID]` whenever the optional
+`GOOGLE_IOS_CLIENT_ID` is set, and with the single web id otherwise (an empty
+string counts as unset). Index 0 remains Better Auth's primary — the id that
+pairs with `GOOGLE_CLIENT_SECRET` for the web authorization-code flow — and
+later entries are only additional accepted ID token audiences, so nothing about
+the web flow or any audience check is relaxed; the accepted set simply grows by
+one. Why: the iOS `google_sign_in` SDK stamps the **iOS** client id as the ID
+token's `aud` (the server client id rides in `azp` and the server auth code),
+so a server knowing only the web id rejected every native exchange after the
+Google sheet succeeded.
+
+`GOOGLE_IOS_CLIENT_ID` is a public OAuth identifier, not a secret, so it is
+declared under `vars` in `server/wrangler.jsonc` rather than set with
+`wrangler secret put`; it ships with an ordinary `wrangler deploy`. It must stay
+equal to `GOOGLE_IOS_CLIENT_ID` in `client/config/google-ios.json`. The
+`GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` fail-fast checks are unchanged
+(Workers has no NODE_ENV, so every env stays explicit).
+
+Reopens if Google changes which client id native iOS tokens carry, if a second
+native platform (Android) needs a third audience — at which point a list built
+from a single comma-separated var beats one var per platform — or if Better Auth
+stops treating array index 0 as the primary client id.

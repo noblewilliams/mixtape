@@ -112,14 +112,25 @@ Ranked causes of an attempt that *runs and then fails*:
    the server but Better Auth refused the ID token — a non-2xx becomes the same
    fixed sentence. Read the Worker log for the actual status before guessing.
    Two sub-causes, in order:
-   - **Audience.** `server/src/auth/create-auth.ts` verifies the token against
-     `GOOGLE_CLIENT_ID` alone. The client sends `GOOGLE_SERVER_CLIENT_ID`, which
-     equals the `GOOGLE_CLIENT_ID` in `server/.dev.vars` — but *which* client id
-     the iOS SDK stamps as `aud` (server client, or the iOS client with the
-     server client only in `azp`) is **not verifiable from this repository**.
-     Mitigation, as a **server follow-up** (not changed here): Better Auth's
-     Google provider takes `clientId: string | string[]`, so listing **both**
-     the server and the iOS client ids makes the exchange correct either way.
+   - **Audience.** `server/src/auth/create-auth.ts` used to verify the token
+     against `GOOGLE_CLIENT_ID` alone. The client sends
+     `GOOGLE_SERVER_CLIENT_ID`, which equals the `GOOGLE_CLIENT_ID` in
+     `server/.dev.vars` — but *which* client id the iOS SDK stamps as `aud`
+     (server client, or the iOS client with the server client only in `azp`)
+     is **not verifiable from this repository**. **Fixed on 2026-09-18**: the
+     server now reads an optional `GOOGLE_IOS_CLIENT_ID` and, when it is set
+     and non-empty, configures Better Auth's Google provider with
+     `clientId: [GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID]`. Index 0 stays the
+     primary that pairs with the client secret for the web authorization-code
+     flow; later entries are accepted as additional ID token audiences only, so
+     the exchange is correct either way and the web flow is unchanged. The var
+     is a **public identifier, not a secret**: it is declared under `vars` in
+     `server/wrangler.jsonc` (kept equal to `GOOGLE_IOS_CLIENT_ID` in
+     `client/config/google-ios.json`), so it ships with a normal
+     `wrangler deploy` from a clean worktree of committed HEAD — no
+     `wrangler secret put`, nothing to add to `server/.dev.vars`. Pinned by
+     `server/test/auth.test.ts` (both ids configured, web-only default, empty
+     string treated as absent, and the web redirect still using the web id).
    - **A deployed secret that differs.** The Worker's `GOOGLE_CLIENT_ID` secret
      is not in the repo; confirm it is the same web client as
      `config/google-ios.json`'s `GOOGLE_SERVER_CLIENT_ID`.
