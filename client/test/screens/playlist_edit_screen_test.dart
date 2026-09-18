@@ -12,6 +12,12 @@ import 'package:mixtape/presentation/providers/playlist_providers.dart';
 import 'package:mixtape/presentation/screens/playlist_browser_screen.dart';
 import 'package:mixtape/presentation/screens/playlist_detail_screen.dart';
 import 'package:mixtape/presentation/screens/playlist_edit_screen.dart';
+import 'package:mixtape/presentation/theme/mixtape_theme.dart';
+import 'package:mixtape/presentation/widgets/conversation_turn.dart';
+import 'package:mixtape/presentation/widgets/foundation/glass_cluster.dart';
+import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
+import 'package:mixtape/presentation/widgets/foundation/text_action.dart';
+import 'package:mixtape/presentation/widgets/mix_prompt_input.dart';
 
 class TestAuthNotifier extends AuthNotifier {
   @override
@@ -47,36 +53,47 @@ class FakePlaylistEditApi implements PlaylistEditApi {
   PlaylistEditView view;
   List<PlaylistEditMessage> messages;
   Object? sendError;
+  Object? threadError;
   int starts = 0;
+  int sends = 0;
   int prepares = 0;
   int confirms = 0;
 
   @override
   Duration get timeout => const Duration(seconds: 120);
 
+  Duration startDelay = Duration.zero;
+
   @override
   Future<PlaylistEditView> createOrResume(String playlistId) async {
     starts++;
+    if (startDelay > Duration.zero) await Future<void>.delayed(startDelay);
     return view;
   }
 
   @override
-  Future<PlaylistEditThread> getThread(String draftId) async =>
-      PlaylistEditThread(
-        draft: view.draft,
-        entries: view.entries,
-        diff: view.diff,
-        review: view.review,
-        capability: view.capability,
-        messages: messages,
-      );
+  Future<PlaylistEditThread> getThread(String draftId) async {
+    final failure = threadError;
+    if (failure != null) throw failure;
+    return PlaylistEditThread(
+      draft: view.draft,
+      entries: view.entries,
+      diff: view.diff,
+      review: view.review,
+      capability: view.capability,
+      messages: messages,
+    );
+  }
 
   @override
   Future<PlaylistEditTurnResult> sendMessage(
     String draftId,
     String content,
     int expectedVersion,
-  ) async => throw sendError ?? UnimplementedError();
+  ) async {
+    sends++;
+    throw sendError ?? UnimplementedError();
+  }
 
   @override
   Future<PlaylistApplyPlan> prepareApply(
@@ -321,18 +338,45 @@ ProviderContainer _container(
 Future<void> _pump(
   WidgetTester tester,
   ProviderContainer container,
-  Widget screen,
-) async {
-  tester.view.physicalSize = const Size(390, 844);
+  Widget screen, {
+  Brightness brightness = Brightness.light,
+  double textScale = 1,
+  Size size = const Size(390, 844),
+}) async {
+  tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
-      child: MaterialApp(theme: ThemeData(useMaterial3: true), home: screen),
+      child: MaterialApp(
+        theme: brightness == Brightness.dark
+            ? MixtapeTheme.dark()
+            : MixtapeTheme.light(),
+        home: MediaQuery(
+          data: MediaQueryData(textScaler: TextScaler.linear(textScale)),
+          child: screen,
+        ),
+      ),
     ),
   );
+  await tester.pumpAndSettle();
+}
+
+/// Pumps a bounded number of frames: a locked composer spins its send key
+/// indefinitely, so `pumpAndSettle` would time out.
+Future<void> _pumpFrames(WidgetTester tester, [int frames = 16]) async {
+  for (var i = 0; i < frames; i++) {
+    await tester.pump(const Duration(milliseconds: 40));
+  }
+}
+
+/// Types into the composer the restyled screen carries.
+Future<void> _compose(WidgetTester tester, String text) async {
+  await tester.enterText(find.byKey(const Key('prompt-field')), text);
+  await tester.pump();
+  await tester.tap(find.byKey(const Key('start-session')));
   await tester.pumpAndSettle();
 }
 
@@ -394,9 +438,30 @@ void main() {
 
       expect(find.text('Window Seat'), findsNWidgets(2));
       expect(find.text('Local or unmatched'), findsOneWidget);
-      expect(find.byKey(const Key('edit-with-dj')), findsOneWidget);
 
+      // The entry carries the approved promise about the source.
+      await tester.tap(find.byKey(const Key('playlist-detail-more')));
+      await tester.pumpAndSettle();
+      expect(
+        find.text(
+          'Your source playlist will not change until you review and confirm.',
+        ),
+        findsOneWidget,
+      );
+
+      // The menu closes on the tap, so the screen carries the wait.
+      edit.startDelay = const Duration(seconds: 2);
       await tester.tap(find.byKey(const Key('edit-with-dj')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('Starting private draft…'), findsOneWidget);
+      expect(
+        tester
+            .widget<GlassButton>(find.byKey(const Key('playlist-detail-more')))
+            .onPressed,
+        isNull,
+      );
+      await tester.pump(const Duration(seconds: 3));
       await tester.pumpAndSettle();
 
       expect(edit.starts, 1);
@@ -427,10 +492,28 @@ void main() {
         ),
       );
 
-      expect(find.text('Source'), findsOneWidget);
-      expect(find.text('Private draft'), findsOneWidget);
+      // The frame: a glass back cluster, the draft's base name as the small
+      // title, and the Review/More cluster on the right.
+      expect(find.byKey(const Key('playlist-edit-back')), findsOneWidget);
+      expect(find.text('Night Bus Notes'), findsWidgets);
+      expect(find.byKey(const Key('playlist-edit-more')), findsOneWidget);
       expect(find.text('1 change'), findsWidgets);
+
+      // Flush turns, no cards.
+      expect(find.byKey(ConversationTurn.userKey), findsOneWidget);
+      expect(find.byKey(ConversationTurn.djKey), findsOneWidget);
       expect(find.text('I placed them where they fit best.'), findsOneWidget);
+
+      final review = tester.widget<GlassButton>(
+        find.byKey(const Key('review-draft')),
+      );
+      expect(review.onPressed, isNotNull);
+      expect(
+        tester
+            .widget<TapeButton>(find.byKey(const Key('review-draft-action')))
+            .label,
+        'Review',
+      );
 
       await tester.tap(find.byKey(const Key('review-draft')));
       await tester.pumpAndSettle();
@@ -445,11 +528,15 @@ void main() {
         find.textContaining('After “After the Last Train”'),
         findsOneWidget,
       );
-      final apply = tester.widget<FilledButton>(
+      final apply = tester.widget<TapeButton>(
         find.byKey(const Key('apply-draft')),
       );
       expect(apply.onPressed, isNotNull);
-      expect(find.text('Create revised playlist'), findsOneWidget);
+      expect(apply.label, 'Create revised playlist');
+      expect(
+        tester.widget<TextAction>(find.byKey(const Key('keep-editing'))).label,
+        'Keep editing',
+      );
     },
   );
 
@@ -472,7 +559,7 @@ void main() {
     await tester.tap(find.byKey(const Key('review-draft')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('apply-draft')));
-    await tester.pumpAndSettle();
+    await _pumpFrames(tester);
 
     expect(apply.fingerprints, 1);
     expect(apply.creates, 1);
@@ -505,19 +592,32 @@ void main() {
       await tester.tap(find.byKey(const Key('review-draft')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('apply-draft')));
-      await tester.pumpAndSettle();
+      await _pumpFrames(tester);
 
       expect(edit.confirms, 0);
       expect(find.text('Result needs checking'), findsOneWidget);
       expect(find.text('Reconcile result'), findsOneWidget);
+      // Locked for real: read-only field and a guarded submit, so neither
+      // the send key nor Return can start a turn.
       expect(
         tester
-            .widget<TextField>(
+            .widget<MixPromptInput>(
               find.byKey(const Key('playlist-edit-composer')),
             )
-            .enabled,
-        isFalse,
+            .busy,
+        isTrue,
       );
+      expect(
+        tester.widget<TextField>(find.byKey(const Key('prompt-field'))).readOnly,
+        isTrue,
+      );
+      await tester.enterText(
+        find.byKey(const Key('prompt-field')),
+        'try again please',
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.send);
+      await _pumpFrames(tester, 4);
+      expect(edit.sends, 0);
     },
   );
 
@@ -565,21 +665,130 @@ void main() {
       const PlaylistEditScreen(draftId: '00000000-0000-4000-8000-000000000010'),
     );
 
-    await tester.enterText(
-      find.byKey(const Key('playlist-edit-composer')),
-      'move the closer later',
-    );
-    await tester.tap(find.byKey(const Key('playlist-edit-send')));
-    await tester.pumpAndSettle();
+    await _compose(tester, 'move the closer later');
     final thread = container
         .read(
           playlistEditThreadProvider('00000000-0000-4000-8000-000000000010'),
         )
         .requireValue;
     expect(thread.messages.last.retryContent, 'move the closer later');
-    await tester.drag(find.byType(ListView), const Offset(0, -280));
     await tester.pumpAndSettle();
 
-    expect(find.text('Try that request again'), findsOneWidget);
+    expect(find.byKey(ConversationTurn.errorKey), findsOneWidget);
+    final retry = find.byKey(const Key('retry-request'));
+    expect(tester.widget<TextAction>(retry).label, 'Try that request again');
+  });
+
+  testWidgets('Review stays inert until the draft differs from the source', (
+    tester,
+  ) async {
+    final summary = _summary();
+    final playlists = FakePlaylistApi(
+      page: PlaylistPage(playlists: [summary]),
+      detail: PlaylistDetail(playlist: summary, entries: const []),
+    );
+    final edit = FakePlaylistEditApi(view: _editView(changed: false));
+    await _pump(
+      tester,
+      _container(playlists, edit),
+      const PlaylistEditScreen(draftId: '00000000-0000-4000-8000-000000000010'),
+    );
+
+    expect(
+      tester
+          .widget<GlassButton>(find.byKey(const Key('review-draft')))
+          .onPressed,
+      isNull,
+    );
+    expect(
+      tester
+          .widget<TapeButton>(find.byKey(const Key('review-draft-action')))
+          .onPressed,
+      isNull,
+    );
+  });
+
+  testWidgets('the review sheet inks added, removed and moved songs', (
+    tester,
+  ) async {
+    final summary = _summary();
+    final playlists = FakePlaylistApi(
+      page: PlaylistPage(playlists: [summary]),
+      detail: PlaylistDetail(playlist: summary, entries: const []),
+    );
+    final edit = FakePlaylistEditApi()..view = _editView();
+    await _pump(
+      tester,
+      _container(playlists, edit),
+      const PlaylistEditScreen(draftId: '00000000-0000-4000-8000-000000000010'),
+    );
+
+    await tester.tap(find.byKey(const Key('review-draft-action')));
+    await tester.pumpAndSettle();
+
+    final tokens = MixtapeTokens.light;
+    final row = tester.widget<Icon>(
+      find.descendant(
+        of: find.byKey(const Key('review-row-added-0')),
+        matching: find.byType(Icon),
+      ),
+    );
+    expect(row.color, tokens.okInk);
+    expect(find.text('Streetcar'), findsOneWidget);
+  });
+
+  testWidgets('a draft that will not refresh says so and changes nothing', (
+    tester,
+  ) async {
+    final summary = _summary();
+    final playlists = FakePlaylistApi(
+      page: PlaylistPage(playlists: [summary]),
+      detail: PlaylistDetail(playlist: summary, entries: const []),
+    );
+    final edit = FakePlaylistEditApi()
+      ..view = _editView()
+      ..messages = [_message('dj', 'Your private draft is ready.', version: 1)];
+    await _pump(
+      tester,
+      _container(playlists, edit),
+      const PlaylistEditScreen(draftId: '00000000-0000-4000-8000-000000000010'),
+    );
+
+    edit.threadError = NetworkException(StateError('offline'));
+    await tester.tap(find.byKey(const Key('playlist-edit-more')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Refresh draft'));
+    await tester.pumpAndSettle();
+
+    expect(find.text("Couldn't refresh this private draft."), findsOneWidget);
+    expect(find.text('Your private draft is ready.'), findsOneWidget);
+  });
+
+  testWidgets('dark and 200% text at 320 pt keep the conversation legible', (
+    tester,
+  ) async {
+    final summary = _summary();
+    final playlists = FakePlaylistApi(
+      page: PlaylistPage(playlists: [summary]),
+      detail: PlaylistDetail(playlist: summary, entries: const []),
+    );
+    final edit = FakePlaylistEditApi()
+      ..view = _editView()
+      ..messages = [
+        _message('user', 'Add a couple more Daniel Caesar songs.'),
+        _message('dj', 'I placed them where they fit best.', version: 1),
+      ];
+    await _pump(
+      tester,
+      _container(playlists, edit),
+      const PlaylistEditScreen(draftId: '00000000-0000-4000-8000-000000000010'),
+      brightness: Brightness.dark,
+      textScale: 2,
+      size: const Size(320, 800),
+    );
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('I placed them where they fit best.'), findsOneWidget);
+    expect(find.byKey(const Key('playlist-edit-back')), findsOneWidget);
   });
 }

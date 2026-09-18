@@ -1,14 +1,64 @@
+/// The private DJ draft of one playlist, restyled onto the native design
+/// (`docs/mockups/approved/2026-09-17-mobile-shell.md` → conversation frame;
+/// plan `docs/superpowers/plans/2026-09-17-native-design-implementation.md`
+/// task 8.2).
+///
+/// Behaviour is the September 6 editing approval's: the source is never
+/// written, the draft's canonical version and exact change summary ride the
+/// conversation, Review shows the real operation before anything is applied,
+/// and partial or unknown Apple outcomes reconcile before any retry.
+///
+/// Pushed inside a tab `Navigator`: glass back and action clusters, no app bar.
+library;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/playlists/playlist_edit_models.dart';
 import '../providers/playlist_providers.dart';
+import '../theme/mixtape_theme.dart';
+import '../widgets/conversation_turn.dart';
+import '../widgets/energy_journey.dart' show EnergyControlVisibility;
+import '../widgets/foundation/frosted_surface.dart';
+import '../widgets/foundation/glass_cluster.dart';
+import '../widgets/foundation/gradient_background.dart';
+import '../widgets/foundation/liquid_glass_surface.dart';
+import '../widgets/foundation/square_art.dart';
+import '../widgets/foundation/tape_button.dart';
+import '../widgets/foundation/text_action.dart';
+import '../widgets/home_panel.dart' show HomePanel;
+import '../widgets/mix_prompt_input.dart';
 import '../widgets/playlist_artwork.dart';
 
 class PlaylistEditScreen extends ConsumerStatefulWidget {
   const PlaylistEditScreen({super.key, required this.draftId});
 
   final String draftId;
+
+  static const Key backKey = Key('playlist-edit-back');
+  static const Key moreKey = Key('playlist-edit-more');
+
+  /// The Review glyph in the title cluster — keyed as it was when Review was a
+  /// button in the truth bar.
+  static const Key reviewKey = Key('review-draft');
+
+  /// The panel's Review action.
+  static const Key reviewActionKey = Key('review-draft-action');
+
+  static const Key composerKey = Key('playlist-edit-composer');
+  static const Key applyKey = Key('apply-draft');
+  static const Key keepEditingKey = Key('keep-editing');
+  static const Key retryKey = Key('retry-request');
+
+  /// The DJ's opening line when a fresh draft has no turns yet.
+  static const String opener =
+      'Tell me what you want to add, remove, replace, or move.';
+
+  /// The review row's artwork.
+  static const double reviewArtSize = 38;
+
+  /// Said when the draft could not be read again; nothing was changed.
+  static const String refreshFailed = "Couldn't refresh this private draft.";
 
   @override
   ConsumerState<PlaylistEditScreen> createState() => _PlaylistEditScreenState();
@@ -17,6 +67,10 @@ class PlaylistEditScreen extends ConsumerStatefulWidget {
 class _PlaylistEditScreenState extends ConsumerState<PlaylistEditScreen> {
   final _controller = TextEditingController();
   final _scrollController = ScrollController();
+
+  /// A `UiKitView` composites above a route barrier, so the panel's native
+  /// glass stands down while the review sheet is open.
+  bool _reviewOpen = false;
 
   @override
   void dispose() {
@@ -32,6 +86,32 @@ class _PlaylistEditScreenState extends ConsumerState<PlaylistEditScreen> {
     await ref
         .read(playlistEditThreadProvider(widget.draftId).notifier)
         .send(text);
+  }
+
+  Future<void> _openMore(BuildContext anchor) async {
+    final box = anchor.findRenderObject();
+    final overlay = Navigator.of(context).overlay?.context.findRenderObject();
+    if (box is! RenderBox || overlay is! RenderBox) return;
+    final rect = box.localToGlobal(Offset.zero, ancestor: overlay) & box.size;
+    final action = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(rect, Offset.zero & overlay.size),
+      items: const [
+        PopupMenuItem(value: 'refresh', child: Text('Refresh draft')),
+      ],
+    );
+    if (!mounted || action != 'refresh') return;
+    try {
+      await ref
+          .read(playlistEditThreadProvider(widget.draftId).notifier)
+          .refresh();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text(PlaylistEditScreen.refreshFailed)),
+        );
+      }
+    }
   }
 
   @override
@@ -59,324 +139,312 @@ class _PlaylistEditScreenState extends ConsumerState<PlaylistEditScreen> {
         });
       }
     });
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(thread.value?.view.draft.baseName ?? 'Playlist edit'),
+
+    final state = thread.value;
+    return _frame(
+      title: state?.view.draft.baseName ?? 'Playlist edit',
+      state: state,
+      body: thread.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (_, __) => _Failure(
+          onRetry: () =>
+              ref.invalidate(playlistEditThreadProvider(widget.draftId)),
+        ),
+        data: _transcript,
       ),
-      body: SafeArea(
-        child: thread.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (_, __) => Center(
+    );
+  }
+
+  /// Chrome shared by every state: the gradient, the glass clusters, the
+  /// floating SnackBars (no dock on this route) and the bottom panel.
+  Widget _frame({
+    required String title,
+    required Widget body,
+    required PlaylistEditThreadState? state,
+  }) {
+    final theme = Theme.of(context);
+    final changes = state?.view.diff.changeCount ?? 0;
+    return GradientBackground(
+      child: Theme(
+        data: theme.copyWith(
+          snackBarTheme: theme.snackBarTheme.copyWith(
+            behavior: SnackBarBehavior.floating,
+            insetPadding: const EdgeInsets.all(16),
+          ),
+        ),
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          body: SafeArea(
+            bottom: false,
             child: Column(
-              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text("Couldn't load this private draft."),
-                const SizedBox(height: 12),
-                FilledButton(
-                  onPressed: () => ref.invalidate(
-                    playlistEditThreadProvider(widget.draftId),
-                  ),
-                  child: const Text('Try again'),
+                _TopBar(
+                  title: title,
+                  onBack: () => Navigator.of(context).maybePop(),
+                  onReview: state != null && changes > 0
+                      ? () => _openReview(state.view)
+                      : null,
+                  onMore: state == null ? null : _openMore,
                 ),
+                Expanded(child: body),
+                if (state != null) _panel(state),
               ],
             ),
           ),
-          data: _body,
         ),
       ),
     );
   }
 
-  Widget _body(PlaylistEditThreadState state) {
+  /// The turns, flush on the gradient.
+  Widget _transcript(PlaylistEditThreadState state) {
+    final changes = state.view.diff.changeCount;
+    return ListView(
+      controller: _scrollController,
+      padding: const EdgeInsets.fromLTRB(
+        MixtapeMetrics.screenSidePadding,
+        8,
+        MixtapeMetrics.screenSidePadding,
+        12,
+      ),
+      children: [
+        if (state.messages.isEmpty)
+          const ConversationTurn(
+            text: PlaylistEditScreen.opener,
+            kind: ConversationTurnKind.dj,
+          ),
+        for (final message in state.messages)
+          if (message.isError)
+            _FailedTurn(
+              text: message.message.content,
+              onRetry: message.retryContent == null || state.sending
+                  ? null
+                  : () => ref
+                        .read(
+                          playlistEditThreadProvider(widget.draftId).notifier,
+                        )
+                        .send(message.retryContent!),
+            )
+          else
+            ConversationTurn(
+              text: message.message.content,
+              kind: message.message.role == 'user'
+                  ? ConversationTurnKind.user
+                  : ConversationTurnKind.dj,
+            ),
+        if (changes > 0) _ChangeSummary(view: state.view),
+        if (state.sending) const WorkingIndicator(showCaption: false),
+      ],
+    );
+  }
+
+  /// The bottom panel: the composer and Review, on the shell's glass.
+  Widget _panel(PlaylistEditThreadState state) {
+    final tokens = context.tokens;
+    final media = MediaQuery.of(context);
     final changes = state.view.diff.changeCount;
     final composerEnabled =
         !state.sending && state.applyStatus == PlaylistApplyUiStatus.idle;
-    return Column(
-      children: [
-        _TruthHeader(view: state.view),
-        Expanded(
-          child: ListView(
-            controller: _scrollController,
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-            children: [
-              if (state.messages.isEmpty)
-                const _MessageBubble(
-                  message:
-                      'Tell me what you want to add, remove, replace, or move.',
-                  role: 'dj',
-                ),
-              for (final message in state.messages)
-                _MessageBubble(
-                  message: message.message.content,
-                  role: message.message.role,
-                  error: message.isError,
-                  onRetry: message.retryContent == null
-                      ? null
-                      : () => ref
-                            .read(
-                              playlistEditThreadProvider(
-                                widget.draftId,
-                              ).notifier,
-                            )
-                            .send(message.retryContent!),
-                ),
-              if (changes > 0) _ChangeSummary(view: state.view),
-              if (state.sending) const _ThinkingBubble(),
-            ],
-          ),
-        ),
-        if (changes > 0)
-          Material(
-            elevation: 4,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 9, 12, 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('$changes ${changes == 1 ? 'change' : 'changes'}'),
-                        Text(
-                          'Source untouched',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ],
-                    ),
-                  ),
-                  FilledButton(
-                    key: const Key('review-draft'),
-                    onPressed: () => _openReview(state.view),
-                    child: const Text('Review'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        Material(
-          elevation: 2,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Expanded(
-                  child: TextField(
-                    key: const Key('playlist-edit-composer'),
-                    controller: _controller,
-                    enabled: composerEnabled,
-                    minLines: 1,
-                    maxLines: 4,
-                    maxLength: 2000,
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: composerEnabled ? (_) => _send() : null,
-                    decoration: const InputDecoration(
-                      hintText: 'Tell the DJ what to change…',
-                      counterText: '',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.all(Radius.circular(24)),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton.filled(
-                  key: const Key('playlist-edit-send'),
-                  tooltip: 'Send',
-                  onPressed: composerEnabled ? _send : null,
-                  icon: const Icon(Icons.arrow_upward_rounded),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
 
-  Future<void> _openReview(PlaylistEditView view) => showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    showDragHandle: true,
-    builder: (context) => _ReviewSheet(draftId: widget.draftId, view: view),
-  );
-}
-
-class _TruthHeader extends StatelessWidget {
-  const _TruthHeader({required this.view});
-
-  final PlaylistEditView view;
-
-  @override
-  Widget build(BuildContext context) {
-    final changes = view.diff.changeCount;
-    final source = view.draft.sourceType == 'spotify_export'
-        ? 'Spotify export'
-        : 'Apple source';
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
-        border: Border(
-          bottom: BorderSide(color: Theme.of(context).dividerColor),
-        ),
+    return LiquidGlassSurface(
+      allowNative: !_reviewOpen,
+      borderRadius: const BorderRadius.vertical(
+        top: Radius.circular(HomePanel.topRadius),
       ),
+      fallbackBlurSigma: 30,
+      fallbackTint: tokens.panel,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 11),
-        child: Row(
+        padding: EdgeInsets.fromLTRB(
+          HomePanel.sidePadding,
+          10,
+          HomePanel.sidePadding,
+          media.padding.bottom + 8,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Expanded(
-              child: _TruthCell(
-                label: 'Source',
-                value: view.draft.baseName,
-                detail:
-                    '$source · ${view.entries.length - view.diff.added.length + view.diff.removed.length} songs',
+            if (changes > 0)
+              Padding(
+                padding: const EdgeInsets.only(left: 2, bottom: 8),
+                child: Wrap(
+                  spacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      '$changes ${changes == 1 ? 'change' : 'changes'}',
+                      style: tokens.meta,
+                    ),
+                    Text(
+                      'Source untouched',
+                      style: tokens.meta.copyWith(color: tokens.muted),
+                    ),
+                  ],
+                ),
+              ),
+            // The composer draws its own Shape chip for Home; a playlist draft
+            // has no energy journey to shape.
+            //
+            // `busy` is the composer's own lock: it makes the field read-only
+            // and guards `_submit`, so neither the send key nor Return can
+            // start a turn while a turn is in flight OR while an apply result
+            // stands unreconciled.
+            EnergyControlVisibility(
+              visible: false,
+              child: MixPromptInput(
+                key: PlaylistEditScreen.composerKey,
+                controller: _controller,
+                busy: !composerEnabled,
+                onSubmit: _send,
               ),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: _TruthCell(
-                label: 'Private draft',
-                value: changes == 0
-                    ? 'No changes'
-                    : '$changes ${changes == 1 ? 'change' : 'changes'}',
-                detail: 'v${view.draft.version} · private only',
-              ),
+            const SizedBox(height: 10),
+            TapeButton(
+              key: PlaylistEditScreen.reviewActionKey,
+              label: 'Review',
+              onPressed: changes > 0 ? () => _openReview(state.view) : null,
             ),
           ],
         ),
       ),
     );
   }
+
+  Future<void> _openReview(PlaylistEditView view) async {
+    setState(() => _reviewOpen = true);
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (context) => _ReviewSheet(draftId: widget.draftId, view: view),
+      );
+    } finally {
+      if (mounted) setState(() => _reviewOpen = false);
+    }
+  }
 }
 
-class _TruthCell extends StatelessWidget {
-  const _TruthCell({
-    required this.label,
-    required this.value,
-    required this.detail,
+/// Back on the left, the draft's base name centred, Review and More on the
+/// right — all in the board's glass clusters, with no app bar.
+class _TopBar extends StatelessWidget {
+  const _TopBar({
+    required this.title,
+    required this.onBack,
+    required this.onReview,
+    required this.onMore,
   });
 
-  final String label;
-  final String value;
-  final String detail;
+  final String title;
+  final VoidCallback onBack;
+  final VoidCallback? onReview;
+  final Future<void> Function(BuildContext anchor)? onMore;
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(11),
-    decoration: BoxDecoration(
-      border: Border.all(color: Theme.of(context).dividerColor),
-      borderRadius: BorderRadius.circular(13),
-      color: Theme.of(context).colorScheme.surface,
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: Theme.of(context).textTheme.labelSmall),
-        const SizedBox(height: 4),
-        Text(value, maxLines: 1, overflow: TextOverflow.ellipsis),
-        const SizedBox(height: 2),
-        Text(detail, style: Theme.of(context).textTheme.bodySmall),
-      ],
-    ),
-  );
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+      child: Row(
+        children: [
+          GlassCluster(
+            children: [
+              GlassButton(
+                key: PlaylistEditScreen.backKey,
+                icon: Icons.arrow_back_ios_new,
+                label: 'Back',
+                onPressed: onBack,
+              ),
+            ],
+          ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Text(
+                title,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: tokens.smallTitle,
+              ),
+            ),
+          ),
+          GlassCluster(
+            children: [
+              GlassButton(
+                key: PlaylistEditScreen.reviewKey,
+                icon: Icons.checklist_rounded,
+                label: 'Review',
+                onPressed: onReview,
+              ),
+              Builder(
+                builder: (anchor) => GlassButton(
+                  key: PlaylistEditScreen.moreKey,
+                  icon: Icons.more_horiz,
+                  label: 'More',
+                  onPressed: onMore == null ? null : () => onMore!(anchor),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({
-    required this.message,
-    required this.role,
-    this.error = false,
-    this.onRetry,
-  });
+/// A DJ turn that failed, with the exact request offered again beneath it.
+class _FailedTurn extends StatelessWidget {
+  const _FailedTurn({required this.text, required this.onRetry});
 
-  final String message;
-  final String role;
-  final bool error;
+  final String text;
   final VoidCallback? onRetry;
 
   @override
-  Widget build(BuildContext context) {
-    final user = role == 'user';
-    final colors = Theme.of(context).colorScheme;
-    return Align(
-      alignment: user ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.sizeOf(context).width * 0.8,
-        ),
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
-        decoration: BoxDecoration(
-          color: error
-              ? colors.errorContainer
-              : user
-              ? colors.primaryContainer
-              : colors.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(message),
-            if (onRetry != null) ...[
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: onRetry,
-                icon: const Icon(Icons.refresh_rounded),
-                label: const Text('Try that request again'),
-              ),
-            ],
-          ],
-        ),
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      ConversationTurn(text: text, kind: ConversationTurnKind.error),
+      TextAction(
+        key: PlaylistEditScreen.retryKey,
+        label: 'Try that request again',
+        onPressed: onRetry,
       ),
-    );
-  }
+    ],
+  );
 }
 
-class _ThinkingBubble extends StatelessWidget {
-  const _ThinkingBubble();
-
-  @override
-  Widget build(BuildContext context) =>
-      const _MessageBubble(message: 'The DJ is arranging…', role: 'dj');
-}
-
+/// The canonical draft version and the compact exact change summary, flush on
+/// the gradient under the turn that produced them.
 class _ChangeSummary extends StatelessWidget {
   const _ChangeSummary({required this.view});
 
   final PlaylistEditView view;
 
   @override
-  Widget build(BuildContext context) => Card(
-    margin: const EdgeInsets.only(top: 8),
-    child: Padding(
-      padding: const EdgeInsets.all(13),
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    return Padding(
+      padding: const EdgeInsets.only(top: 10, left: 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Text(
             'Draft updated · v${view.draft.version}',
-            style: Theme.of(context).textTheme.labelLarge,
+            style: tokens.meta.copyWith(fontWeight: FontWeight.w600),
           ),
-          const SizedBox(height: 7),
+          const SizedBox(height: 3),
           Text(
             _summary(view.diff),
-            style: Theme.of(context).textTheme.bodySmall,
+            style: tokens.meta.copyWith(color: tokens.muted),
           ),
-          for (final entry in view.review.added) ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                const Icon(Icons.add_circle_outline, size: 19),
-                const SizedBox(width: 8),
-                Expanded(child: Text('${entry.title} · ${entry.artist}')),
-              ],
-            ),
-          ],
         ],
       ),
-    ),
-  );
+    );
+  }
 }
 
 String _summary(PlaylistEditDiff diff) {
@@ -396,6 +464,7 @@ class _ReviewSheet extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final tokens = context.tokens;
     final thread = ref.watch(playlistEditThreadProvider(draftId)).value;
     final currentView = thread?.view ?? view;
     final applyStatus = thread?.applyStatus ?? PlaylistApplyUiStatus.idle;
@@ -404,114 +473,121 @@ class _ReviewSheet extends ConsumerWidget {
     final unresolved = currentView.entries
         .where((entry) => !entry.resolved)
         .length;
-    return SafeArea(
-      child: SingleChildScrollView(
-        padding: EdgeInsets.fromLTRB(
-          18,
-          0,
-          18,
-          18 + MediaQuery.viewInsetsOf(context).bottom,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Review private draft',
-              style: Theme.of(context).textTheme.labelMedium,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Create a revised copy',
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(13),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.secondaryContainer,
-                borderRadius: BorderRadius.circular(12),
+
+    return FrostedSurface(
+      borderRadius: const BorderRadius.vertical(
+        top: Radius.circular(HomePanel.topRadius),
+      ),
+      blurSigma: 30,
+      shadow: false,
+      child: SafeArea(
+        child: SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(
+            18,
+            18,
+            18,
+            18 + MediaQuery.viewInsetsOf(context).bottom,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Review private draft',
+                style: tokens.meta.copyWith(color: tokens.muted),
               ),
-              child: Text(
+              const SizedBox(height: 4),
+              Text('Create a revised copy', style: tokens.smallTitle),
+              const SizedBox(height: 12),
+              Text(
                 spotify
                     ? 'This Spotify export stays untouched. A later apply step can create an Apple Music copy after every song is matched.'
                     : 'Apple Music cannot safely place structural edits into the middle of this source. Mixtape will create a revised copy and leave “${currentView.draft.baseName}” untouched.',
+                style: tokens.body,
               ),
-            ),
-            const SizedBox(height: 17),
-            Text(
-              _summary(currentView.diff),
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 10),
-            for (final entry in currentView.review.added)
-              _ReviewRow(
-                icon: Icons.add_rounded,
-                entry: entry,
-                detail: _placement(currentView.entries, entry.position),
+              const SizedBox(height: 17),
+              Text(_summary(currentView.diff), style: tokens.rowTitle),
+              const SizedBox(height: 10),
+              for (var i = 0; i < currentView.review.added.length; i++)
+                _ReviewRow(
+                  key: ValueKey('review-row-added-$i'),
+                  icon: Icons.add_rounded,
+                  ink: tokens.okInk,
+                  entry: currentView.review.added[i],
+                  detail: _placement(
+                    currentView.entries,
+                    currentView.review.added[i].position,
+                  ),
+                ),
+              for (var i = 0; i < currentView.review.removed.length; i++)
+                _ReviewRow(
+                  key: ValueKey('review-row-removed-$i'),
+                  icon: Icons.remove_rounded,
+                  ink: tokens.errInk,
+                  entry: currentView.review.removed[i],
+                  detail:
+                      'Removed from position ${currentView.review.removed[i].position + 1}',
+                ),
+              for (var i = 0; i < currentView.review.moved.length; i++)
+                _ReviewRow(
+                  key: ValueKey('review-row-moved-$i'),
+                  icon: Icons.swap_vert_rounded,
+                  ink: tokens.muted,
+                  entry: currentView.review.moved[i],
+                  detail:
+                      'Moved from ${currentView.review.moved[i].fromPosition! + 1} to ${currentView.review.moved[i].position + 1}',
+                ),
+              for (var i = 0; i < currentView.review.replaced.length; i++)
+                _ReviewRow(
+                  key: ValueKey('review-row-replaced-$i'),
+                  icon: Icons.sync_alt_rounded,
+                  ink: tokens.muted,
+                  entry: currentView.review.replaced[i].after,
+                  detail:
+                      'Replaces “${currentView.review.replaced[i].before.title}” at position ${currentView.review.replaced[i].after.position + 1}',
+                ),
+              if (unresolved > 0) ...[
+                const SizedBox(height: 12),
+                Text(
+                  '$unresolved local or unmatched ${unresolved == 1 ? 'song blocks' : 'songs block'} apply. Mixtape will not leave anything out.',
+                  style: tokens.body.copyWith(color: tokens.errInk),
+                ),
+              ],
+              if (applyStatus != PlaylistApplyUiStatus.idle) ...[
+                const SizedBox(height: 12),
+                _ApplyStatus(status: applyStatus),
+              ],
+              const SizedBox(height: 18),
+              TapeButton(
+                key: PlaylistEditScreen.applyKey,
+                label: _applyLabel(applyStatus, supported),
+                leading: applyStatus.busy
+                    ? const SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : null,
+                onPressed:
+                    supported &&
+                        currentView.capability.applyAvailable &&
+                        !applyStatus.busy &&
+                        applyStatus != PlaylistApplyUiStatus.applied
+                    ? () => ref
+                          .read(playlistEditThreadProvider(draftId).notifier)
+                          .applyRevisedCopy()
+                    : null,
               ),
-            for (final entry in currentView.review.removed)
-              _ReviewRow(
-                icon: Icons.remove_rounded,
-                entry: entry,
-                detail: 'Removed from position ${entry.position + 1}',
-              ),
-            for (final entry in currentView.review.moved)
-              _ReviewRow(
-                icon: Icons.swap_vert_rounded,
-                entry: entry,
-                detail:
-                    'Moved from ${entry.fromPosition! + 1} to ${entry.position + 1}',
-              ),
-            for (final replacement in currentView.review.replaced)
-              _ReviewRow(
-                icon: Icons.sync_alt_rounded,
-                entry: replacement.after,
-                detail:
-                    'Replaces “${replacement.before.title}” at position ${replacement.after.position + 1}',
-              ),
-            if (unresolved > 0) ...[
-              const SizedBox(height: 12),
-              Text(
-                '$unresolved local or unmatched ${unresolved == 1 ? 'song blocks' : 'songs block'} apply. Mixtape will not leave anything out.',
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              const SizedBox(height: 4),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextAction(
+                  key: PlaylistEditScreen.keepEditingKey,
+                  label: 'Keep editing',
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
               ),
             ],
-            if (applyStatus != PlaylistApplyUiStatus.idle) ...[
-              const SizedBox(height: 12),
-              _ApplyStatus(status: applyStatus),
-            ],
-            const SizedBox(height: 18),
-            FilledButton(
-              key: const Key('apply-draft'),
-              onPressed:
-                  supported &&
-                      currentView.capability.applyAvailable &&
-                      !applyStatus.busy &&
-                      applyStatus != PlaylistApplyUiStatus.applied
-                  ? () => ref
-                        .read(playlistEditThreadProvider(draftId).notifier)
-                        .applyRevisedCopy()
-                  : null,
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(48),
-              ),
-              child: applyStatus.busy
-                  ? const SizedBox.square(
-                      dimension: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Text(_applyLabel(applyStatus, supported)),
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton(
-              onPressed: () => Navigator.of(context).pop(),
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size.fromHeight(46),
-              ),
-              child: const Text('Keep editing'),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -551,6 +627,7 @@ class _ApplyStatus extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.tokens;
     final (title, detail, icon) = switch (status) {
       PlaylistApplyUiStatus.applied => (
         'Created in Apple Music',
@@ -584,75 +661,119 @@ class _ApplyStatus extends StatelessWidget {
       ),
       _ => ('Working…', 'Keep Mixtape open for a moment.', Icons.sync_rounded),
     };
+    final ink = switch (status) {
+      PlaylistApplyUiStatus.applied => tokens.okInk,
+      PlaylistApplyUiStatus.partial ||
+      PlaylistApplyUiStatus.unknown ||
+      PlaylistApplyUiStatus.sourceConflict => tokens.warnInk,
+      PlaylistApplyUiStatus.blocked ||
+      PlaylistApplyUiStatus.failed => tokens.errInk,
+      _ => tokens.muted,
+    };
     return Semantics(
       liveRegion: true,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(13),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, size: 21),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: Theme.of(context).textTheme.titleSmall),
-                  const SizedBox(height: 2),
-                  Text(detail, style: Theme.of(context).textTheme.bodySmall),
-                ],
-              ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 19, color: ink),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: tokens.rowTitle.copyWith(fontSize: 14, color: ink),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  detail,
+                  style: tokens.meta.copyWith(color: tokens.muted),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 }
 
+/// One line of the source/draft comparison: the operation's mark in its own
+/// ink, the song, and where it lands.
 class _ReviewRow extends StatelessWidget {
   const _ReviewRow({
+    super.key,
     required this.icon,
+    required this.ink,
     required this.entry,
     required this.detail,
   });
 
   final IconData icon;
+  final Color ink;
   final PlaylistEditReviewEntry entry;
   final String detail;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 6),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 21),
-        const SizedBox(width: 10),
-        PlaylistArtwork(
-          urlTemplate: entry.artworkUrlTemplate,
-          bgColor: entry.artworkBgColor,
-          size: 38,
-          borderRadius: 8,
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(entry.title, style: Theme.of(context).textTheme.titleSmall),
-              Text(entry.artist, style: Theme.of(context).textTheme.bodySmall),
-              const SizedBox(height: 3),
-              Text(detail, style: Theme.of(context).textTheme.bodySmall),
-            ],
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 19, color: ink),
+          const SizedBox(width: 10),
+          SquareArt(
+            url: playlistArtworkUrl(
+              entry.artworkUrlTemplate,
+              size: (PlaylistEditScreen.reviewArtSize * 3).round(),
+            ),
+            placeholder: playlistArtworkColor(entry.artworkBgColor),
+            size: PlaylistEditScreen.reviewArtSize,
           ),
-        ),
-      ],
-    ),
-  );
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(entry.title, style: tokens.rowTitle),
+                Text(
+                  entry.artist,
+                  style: tokens.meta.copyWith(color: tokens.muted),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  detail,
+                  style: tokens.meta.copyWith(color: tokens.muted),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Failure extends StatelessWidget {
+  const _Failure({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text("Couldn't load this private draft.", style: tokens.body),
+          const SizedBox(height: 14),
+          TapeButton(label: 'Try again', onPressed: onRetry),
+        ],
+      ),
+    );
+  }
 }
