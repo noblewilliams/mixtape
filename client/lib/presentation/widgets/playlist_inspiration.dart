@@ -1,3 +1,13 @@
+/// Starting a mix from a playlist: the attachment chip both Home and the
+/// conversation wear, and the picker sheet behind its Replace action
+/// (`docs/mockups/approved/2026-09-17-mobile-home-states.md` → Playlist
+/// attached, Picker; frames W2 and W3 on
+/// `docs/mockups/2026-09-17-mobile-home-states.html`; plan task 3.3).
+///
+/// Reading and choosing never writes: the picker returns a choice and the
+/// caller decides what to do with it. Null means dismissed, never detach.
+library;
+
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -9,6 +19,11 @@ import '../../data/playlists/playlist_models.dart';
 import '../providers/auth_provider.dart';
 import '../providers/playlist_providers.dart';
 import '../theme/mixtape_theme.dart';
+import 'foundation/flush_row.dart';
+import 'foundation/frosted_surface.dart';
+import 'foundation/inset_group.dart';
+import 'foundation/status_word.dart';
+import 'playlist_artwork.dart';
 
 class PlaylistInspirationChoice {
   const PlaylistInspirationChoice(
@@ -23,13 +38,60 @@ class PlaylistInspirationChoice {
   );
 }
 
+/// The board's source label on a picker row ("Apple Music", "Spotify import").
 String playlistSourceLabel(String? source) => switch (source) {
   'apple' => 'Apple Music',
-  'spotify_export' => 'Spotify export',
+  'spotify_export' => 'Spotify import',
   _ => 'Imported playlist',
 };
 
-/// Reading and choosing never writes. Null means dismissed, never detach.
+/// `41 songs · Apple Music`.
+String playlistInspirationSubtitle(PlaylistSummary playlist) =>
+    '${playlist.entryCount} ${playlist.entryCount == 1 ? 'song' : 'songs'} · '
+    '${playlistSourceLabel(playlist.source)}';
+
+/// The picker sheet's copy, keys and rules, so screens and tests name the
+/// same things.
+abstract final class PlaylistPicker {
+  static const String title = 'Start from a playlist';
+  static const String searchHint = 'Search your playlists';
+  static const String excludeLabel = "Exclude the playlist's own songs";
+  static const String excludeHint = 'Only songs like them, none from it';
+  static const String notEnoughLabel = 'Not enough';
+  static const String emptyLabel = 'No matching playlists.';
+  static const String failedLabel = 'Couldn’t load playlists.';
+
+  /// Fewer matched songs than this and a playlist stays visible but cannot be
+  /// chosen — the same floor the conversation's seed status uses.
+  static const int minimumSongs = 3;
+
+  static const Key sheetKey = Key('playlist-picker-sheet');
+  static const Key handleKey = Key('playlist-picker-handle');
+  static const Key listKey = Key('playlist-picker-list');
+  static const Key searchKey = Key('playlist-search');
+  static const Key excludeKey = Key('playlist-exclude');
+  static const Key retryKey = Key('playlist-picker-retry');
+
+  /// `.sheet`: a 26 pt top radius over Home.
+  static const double topRadius = 26;
+
+  /// The strip of Home the sheet leaves showing.
+  static const double topInset = 84;
+
+  /// `.sheet .row`: the 44 pt square motif.
+  static const double artSize = 44;
+
+  static Key rowKey(String id) => ValueKey('playlist-choice-$id');
+
+  static bool canChoose(PlaylistSummary playlist) =>
+      playlist.entryCount >= minimumSongs;
+}
+
+/// Opens the picker over the current screen.
+///
+/// [anchor] and [anchorResolver] are ignored: the picker was a floating panel
+/// anchored to the composer until task 3.3 made it the board's sheet. They stay
+/// in the signature so callers that still measure their composer keep working.
 Future<PlaylistInspirationChoice?> showPlaylistInspirationPicker(
   BuildContext context,
   WidgetRef ref, {
@@ -38,85 +100,13 @@ Future<PlaylistInspirationChoice?> showPlaylistInspirationPicker(
   InitialPlaylistSeed? selected,
 }) {
   final api = ref.read(playlistApiProvider);
-  return showDialog<PlaylistInspirationChoice>(
+  return showModalBottomSheet<PlaylistInspirationChoice>(
     context: context,
-    useSafeArea: false,
-    builder: (_) => _PlaylistPicker(
-      api: api,
-      selected: selected,
-      anchor: anchor,
-      anchorResolver: anchorResolver,
-    ),
-  );
-}
-
-class PlaylistInspirationAttachment extends StatelessWidget {
-  const PlaylistInspirationAttachment({
-    super.key,
-    required this.name,
-    this.source,
-    this.busy = false,
-    this.disabled = false,
-    this.statusMessage,
-    required this.onPick,
-    this.onDetach,
-    this.onReload,
-    this.reloadLabel = 'Reload inspiration',
-  });
-  final String? name;
-  final String? source;
-  final bool busy;
-  final bool disabled;
-  final String? statusMessage;
-  final VoidCallback onPick;
-  final VoidCallback? onDetach;
-  final VoidCallback? onReload;
-  final String reloadLabel;
-
-  @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Row(
-        children: [
-          Flexible(
-            child: TextButton(
-              key: const Key('playlist-inspiration-attachment'),
-              onPressed: busy || disabled ? null : onPick,
-              child: Text(
-                name == null ? '+ Playlist' : 'Inspired by $name',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ),
-          if (name != null && onDetach != null)
-            IconButton(
-              tooltip: 'Detach playlist inspiration',
-              onPressed: busy || disabled ? null : onDetach,
-              icon: const Icon(Icons.close, size: 18),
-              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-            ),
-          if (busy)
-            const SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-        ],
-      ),
-      if (statusMessage != null)
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Text(
-            statusMessage!,
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ),
-      if (onReload != null)
-        TextButton(onPressed: busy ? null : onReload, child: Text(reloadLabel)),
-    ],
+    isScrollControlled: true,
+    useSafeArea: true,
+    backgroundColor: Colors.transparent,
+    elevation: 0,
+    builder: (_) => _PlaylistPicker(api: api, selected: selected),
   );
 }
 
@@ -134,13 +124,17 @@ enum InspirationChipTone {
   insufficient,
 }
 
-/// The conversation's attachment chip
-/// (`docs/mockups/approved/2026-09-17-mobile-conversation-states.md` →
-/// Attachment chips).
+enum _ChipAction { replace, exclude, detach }
+
+/// The attachment chip Home and the conversation share
+/// (`docs/mockups/approved/2026-09-17-mobile-home-states.md` → Playlist
+/// attached; frame W2).
 ///
-/// Additive: Home keeps [PlaylistInspirationAttachment]. This is the native
-/// chip for the conversation's `.attach` row, in the tone the seed's status
-/// calls for, with the detach cross inside it.
+/// A tape label with the reel hole naming the exact playlist. Given
+/// [onToggleExclude] it carries the board's menu — Replace, Exclude its songs
+/// (checked when the flag is on), Detach — and tapping it opens that menu;
+/// without one it stays the plain chip the conversation has today, tapping
+/// through to [onPick] with a detach cross of its own.
 class InspirationChip extends StatelessWidget {
   const InspirationChip({
     super.key,
@@ -148,6 +142,8 @@ class InspirationChip extends StatelessWidget {
     this.tone = InspirationChipTone.ready,
     this.onPick,
     this.onDetach,
+    this.excludeSourceTracks = false,
+    this.onToggleExclude,
   });
 
   /// Null asks for a playlist ("+ Playlist"); a name offers to replace it.
@@ -157,12 +153,30 @@ class InspirationChip extends StatelessWidget {
   /// Pick or replace. Null makes the chip inert (busy, or writes blocked).
   final VoidCallback? onPick;
 
-  /// Detach. Null hides the cross — an insufficient selection still offers it,
-  /// per the record; a busy one does not.
+  /// Detach. Null hides it — an insufficient selection still offers it, per
+  /// the record; a busy one does not.
   final VoidCallback? onDetach;
+
+  /// Whether the mix is being asked to leave the playlist's own songs out.
+  final bool excludeSourceTracks;
+
+  /// Flips [excludeSourceTracks]. Null leaves the chip without a menu.
+  final VoidCallback? onToggleExclude;
 
   static const Key chipKey = Key('inspiration-chip');
   static const Key detachKey = Key('inspiration-detach');
+  static const Key replaceItemKey = Key('inspiration-replace');
+  static const Key excludeItemKey = Key('inspiration-exclude');
+  static const Key detachItemKey = Key('inspiration-detach-item');
+  static const Key menuNoteKey = Key('inspiration-menu-note');
+
+  static const String replaceLabel = 'Replace';
+  static const String excludeLabel = 'Exclude its songs';
+  static const String detachLabel = 'Detach';
+
+  /// The header on an unsendable selection's menu.
+  static const String insufficientNote =
+      'Too few matched songs to send — replace it.';
 
   /// The board's warm paper, borrowed from `LabelChip` so the chips match.
   static const Color _lightFill = Color.fromRGBO(247, 244, 239, 0.60);
@@ -188,15 +202,77 @@ class InspirationChip extends StatelessWidget {
     InspirationChipTone.insufficient => context.tokens.errInk,
   };
 
+  /// The menu only exists for a selection that can be replaced or let go.
+  bool get _hasMenu =>
+      name != null &&
+      onToggleExclude != null &&
+      (onPick != null || onDetach != null);
+
+  Future<void> _openMenu(BuildContext context) async {
+    final box = context.findRenderObject();
+    final overlay = Navigator.of(context).overlay?.context.findRenderObject();
+    if (box is! RenderBox || overlay is! RenderBox) return;
+    final rect = box.localToGlobal(Offset.zero, ancestor: overlay) & box.size;
+    final tokens = context.tokens;
+    final action = await showMenu<_ChipAction>(
+      context: context,
+      position: RelativeRect.fromRect(rect, Offset.zero & overlay.size),
+      items: [
+        if (tone == InspirationChipTone.insufficient)
+          PopupMenuItem<_ChipAction>(
+            key: menuNoteKey,
+            enabled: false,
+            child: Text(
+              insufficientNote,
+              style: tokens.secondary.copyWith(color: tokens.errInk),
+            ),
+          ),
+        if (onPick != null)
+          const PopupMenuItem<_ChipAction>(
+            key: replaceItemKey,
+            value: _ChipAction.replace,
+            child: Text(replaceLabel),
+          ),
+        // Excluding the source only means anything while the playlist can
+        // still be read.
+        if (tone == InspirationChipTone.ready)
+          CheckedPopupMenuItem<_ChipAction>(
+            key: excludeItemKey,
+            value: _ChipAction.exclude,
+            checked: excludeSourceTracks,
+            child: const Text(excludeLabel),
+          ),
+        if (onDetach != null)
+          const PopupMenuItem<_ChipAction>(
+            key: detachItemKey,
+            value: _ChipAction.detach,
+            child: Text(detachLabel),
+          ),
+      ],
+    );
+    switch (action) {
+      case _ChipAction.replace:
+        onPick?.call();
+      case _ChipAction.exclude:
+        onToggleExclude?.call();
+      case _ChipAction.detach:
+        onDetach?.call();
+      case null:
+        break;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final tint = ink(context);
-    final enabled = onPick != null;
+    final menu = _hasMenu;
+    final enabled = menu || onPick != null;
+    final cross = !menu && onDetach != null;
 
     final chip = Container(
       constraints: const BoxConstraints(minHeight: MixtapeMetrics.chipHeight),
-      padding: EdgeInsets.only(left: 11, right: onDetach == null ? 11 : 2),
+      padding: EdgeInsets.only(left: 11, right: cross ? 2 : 11),
       decoration: BoxDecoration(
         color: isDark ? Colors.white.withValues(alpha: 0.08) : _lightFill,
         borderRadius: _radius,
@@ -209,6 +285,14 @@ class InspirationChip extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(right: 6),
               child: Icon(Icons.error_outline, size: 14, color: tint),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: SizedBox.square(
+                dimension: 11,
+                child: CustomPaint(painter: _ReelHole(tint)),
+              ),
             ),
           Flexible(
             child: ExcludeSemantics(
@@ -224,7 +308,14 @@ class InspirationChip extends StatelessWidget {
               ),
             ),
           ),
-          if (onDetach != null)
+          // The board's `.attach .chip .x`: the more glyph, because the chip
+          // opens a menu rather than detaching on the spot.
+          if (menu)
+            Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: Icon(Icons.more_horiz, size: 16, color: tint),
+            ),
+          if (cross)
             Semantics(
               button: true,
               label: 'Detach playlist inspiration',
@@ -235,7 +326,9 @@ class InspirationChip extends StatelessWidget {
                 onTap: onDetach,
                 child: SizedBox.square(
                   dimension: MixtapeMetrics.chipHeight,
-                  child: Center(child: Icon(Icons.close, size: 16, color: tint)),
+                  child: Center(
+                    child: Icon(Icons.close, size: 16, color: tint),
+                  ),
                 ),
               ),
             ),
@@ -250,7 +343,7 @@ class InspirationChip extends StatelessWidget {
       child: GestureDetector(
         key: chipKey,
         behavior: HitTestBehavior.opaque,
-        onTap: onPick,
+        onTap: enabled ? (menu ? () => _openMenu(context) : onPick) : null,
         child: ConstrainedBox(
           constraints: const BoxConstraints(
             minHeight: MixtapeMetrics.minTarget,
@@ -265,23 +358,60 @@ class InspirationChip extends StatelessWidget {
   }
 }
 
+/// The tape reel's hole, as `LabelChip` draws it, in the chip's own ink.
+class _ReelHole extends CustomPainter {
+  const _ReelHole(this.ink);
+
+  final Color ink;
+
+  static const Color _edge = Color.fromRGBO(73, 64, 72, 0.35);
+  static const int _spokes = 8;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    final radius = size.shortestSide / 2;
+    final wedge = Rect.fromCircle(center: center, radius: radius - 1);
+    final paint = Paint()..color = ink;
+    const sweep = 18 * math.pi / 180;
+    const step = 2 * math.pi / _spokes;
+    for (var i = 0; i < _spokes; i++) {
+      canvas.drawArc(wedge, i * step, sweep, true, paint);
+    }
+    canvas.drawCircle(
+      center,
+      radius * 0.35,
+      Paint()
+        ..color = ink
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = radius * 0.2,
+    );
+    canvas.drawCircle(
+      center,
+      radius - 0.5,
+      Paint()
+        ..color = _edge
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_ReelHole oldDelegate) => oldDelegate.ink != ink;
+}
+
+/// The picker, as the board's sheet: search, the playlists as flush rows with
+/// their exact identities, pagination on scroll, and the exclude toggle at the
+/// foot. Dismissal — outside tap, drag down, Back — returns null.
 class _PlaylistPicker extends ConsumerStatefulWidget {
-  const _PlaylistPicker({
-    required this.api,
-    this.selected,
-    this.anchor,
-    this.anchorResolver,
-  });
+  const _PlaylistPicker({required this.api, this.selected});
   final PlaylistApi api;
   final InitialPlaylistSeed? selected;
-  final Rect? anchor;
-  final Rect Function()? anchorResolver;
   @override
   ConsumerState<_PlaylistPicker> createState() => _PlaylistPickerState();
 }
 
-class _PlaylistPickerState extends ConsumerState<_PlaylistPicker>
-    with WidgetsBindingObserver {
+class _PlaylistPickerState extends ConsumerState<_PlaylistPicker> {
   final _search = TextEditingController();
   Timer? _debounce;
   List<PlaylistSummary> _playlists = [];
@@ -291,49 +421,12 @@ class _PlaylistPickerState extends ConsumerState<_PlaylistPicker>
   bool _exclude = false;
   int _request = 0;
   bool _closing = false;
-  Rect? _liveAnchor;
-  bool _anchorMeasurePending = false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    _liveAnchor = widget.anchor;
-    _scheduleAnchorMeasure();
     _exclude = widget.selected?.excludeSourceTracks ?? false;
     _load(reset: true);
-  }
-
-  @override
-  void didChangeMetrics() => _scheduleAnchorMeasure();
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _scheduleAnchorMeasure();
-  }
-
-  void _scheduleAnchorMeasure() {
-    if (widget.anchorResolver == null || _anchorMeasurePending) return;
-    _anchorMeasurePending = true;
-    // Keyboard metrics arrive before the underlying composer is laid out.
-    // Measure afterwards so the popup protects its new position, not the
-    // rectangle captured before the keyboard opened.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _anchorMeasurePending = false;
-      if (!mounted || _closing) return;
-      Rect measured;
-      try {
-        measured = widget.anchorResolver!();
-      } catch (_) {
-        // The originating composer may have been removed while this route
-        // was open. A picker without its destination must not return a choice.
-        _closing = true;
-        Navigator.of(context).pop();
-        return;
-      }
-      if (_liveAnchor != measured) setState(() => _liveAnchor = measured);
-    });
   }
 
   bool get _signedIn => ref.read(authProvider) == AuthStatus.signedIn;
@@ -373,6 +466,13 @@ class _PlaylistPickerState extends ConsumerState<_PlaylistPicker>
     }
   }
 
+  /// The board's pagination: the next page comes in as the list runs out,
+  /// with no button to press.
+  void _loadMoreOnScroll() {
+    if (_loading || _failed || _cursor == null) return;
+    _load(reset: false);
+  }
+
   void _query(String _) {
     _debounce?.cancel();
     _request++;
@@ -390,7 +490,6 @@ class _PlaylistPickerState extends ConsumerState<_PlaylistPicker>
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     _request++;
     _debounce?.cancel();
     _search.dispose();
@@ -407,131 +506,233 @@ class _PlaylistPickerState extends ConsumerState<_PlaylistPicker>
       });
     }
     final media = MediaQuery.of(context);
-    final minTop = media.padding.top + 16;
-    final bottom =
-        media.size.height -
-        math.max(media.padding.bottom, media.viewInsets.bottom) -
-        16;
-    final width = math.min(
-      350.0,
-      media.size.width - media.padding.horizontal - 32,
+    final tokens = context.tokens;
+    final keyboard = media.viewInsets.bottom;
+    // Whatever is left under the keyboard, less the strip of Home the board
+    // keeps visible above the sheet.
+    final available = media.size.height - keyboard;
+    // A sheet under 200% text keeps the board's strip of Home above it; one
+    // that has to fit AX text with the keyboard up takes what it needs.
+    final maxHeight = math.max(
+      200.0,
+      available -
+          (MediaQuery.textScalerOf(context).scale(20) > 30
+              ? 24
+              : PlaylistPicker.topInset),
     );
-    final anchor = _liveAnchor;
-    var top = minTop;
-    var available = math.max(0.0, bottom - minTop);
-    if (anchor != null) {
-      final above = math.max(0.0, math.min(anchor.top - 8, bottom) - minTop);
-      final belowTop = math.max(minTop, anchor.bottom + 8);
-      final below = math.max(0.0, bottom - belowTop);
-      if (above >= below) {
-        available = above;
-        top = math.min(anchor.top - 8, bottom) - math.min(460.0, above);
-      } else {
-        available = below;
-        top = belowTop;
-      }
-    }
-    final height = math.min(460.0, available);
-    final left = (anchor?.left ?? media.padding.left + 16).clamp(
-      media.padding.left + 16,
-      math.max(
-        media.padding.left + 16,
-        media.size.width - media.padding.right - width - 16,
-      ),
-    );
-    return Dialog(
-      alignment: Alignment.topLeft,
-      insetPadding: EdgeInsets.fromLTRB(
-        left.toDouble(),
-        top.toDouble(),
-        16,
-        16,
-      ),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: SizedBox(
-        width: width,
-        height: height,
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: ListView(
-            padding: EdgeInsets.zero,
-            children: [
-              Row(
-                children: [
-                  const Expanded(child: Text('Playlist inspiration')),
-                  IconButton(
-                    tooltip: 'Close playlist picker',
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close),
+    // Too little room for both the title and the list — a short sheet, or a
+    // title that has grown to five lines at 200% text: the title goes, as
+    // Home's hint does when the panel crowds it.
+    final compact =
+        maxHeight < 320 || MediaQuery.textScalerOf(context).scale(20) > 30;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: keyboard),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: maxHeight),
+        child: FrostedSurface(
+          key: PlaylistPicker.sheetKey,
+          borderRadius: const BorderRadius.vertical(
+            top: Radius.circular(PlaylistPicker.topRadius),
+          ),
+          blurSigma: 30,
+          tint: tokens.panel,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              MixtapeMetrics.screenSidePadding,
+              8,
+              MixtapeMetrics.screenSidePadding,
+              media.padding.bottom + 12,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    key: PlaylistPicker.handleKey,
+                    width: 36,
+                    height: 5,
+                    margin: const EdgeInsets.only(bottom: 10),
+                    decoration: const BoxDecoration(
+                      color: Color.fromRGBO(127, 120, 130, 0.45),
+                      borderRadius: BorderRadius.all(Radius.circular(3)),
+                    ),
                   ),
-                ],
-              ),
-              TextField(
-                key: const Key('playlist-search'),
-                controller: _search,
-                maxLength: 200,
-                onChanged: _query,
-                decoration: const InputDecoration(
-                  hintText: 'Find a playlist',
-                  counterText: '',
-                  prefixIcon: Icon(Icons.search),
                 ),
-              ),
-              CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                controlAffinity: ListTileControlAffinity.leading,
-                title: const Text('Use different songs'),
-                value: _exclude,
-                onChanged: (value) => setState(() => _exclude = value ?? false),
-              ),
-              if (_playlists.isEmpty && !_loading && !_failed)
-                const Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Text('No matching playlists.'),
-                ),
-              for (final playlist in _playlists)
-                ListTile(
-                  key: ValueKey('playlist-choice-${playlist.id}'),
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(playlist.name),
-                  subtitle: Text(
-                    '${playlistSourceLabel(playlist.source)} · ${playlist.entryCount} songs',
+                if (!compact)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Text(PlaylistPicker.title, style: tokens.section),
                   ),
-                  trailing: widget.selected?.playlistId == playlist.id
-                      ? const Icon(Icons.check, size: 18)
-                      : null,
-                  onTap: () {
-                    if (_signedIn) {
-                      Navigator.of(context).pop(
-                        PlaylistInspirationChoice(
-                          playlist,
-                          excludeSourceTracks: _exclude,
-                        ),
-                      );
-                    }
-                  },
-                ),
-              if (_loading)
-                const Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Center(child: CircularProgressIndicator()),
-                ),
-              if (_failed) ...[
-                const Text('Couldn’t load playlists.'),
-                TextButton(
-                  onPressed: () => _load(reset: _playlists.isEmpty),
-                  child: const Text('Retry'),
-                ),
+                _searchField(tokens),
+                Flexible(child: _list(tokens)),
+                _excludeRow(compact: compact),
               ],
-              if (!_loading && !_failed && _cursor != null)
-                TextButton(
-                  onPressed: () => _load(reset: false),
-                  child: const Text('Load more'),
-                ),
-            ],
+            ),
           ),
         ),
       ),
     );
+  }
+
+  /// `.search`: a quiet capsule, not a bordered form field.
+  Widget _searchField(MixtapeTokens tokens) => Container(
+    constraints: const BoxConstraints(minHeight: 38),
+    padding: const EdgeInsets.symmetric(horizontal: 12),
+    decoration: BoxDecoration(
+      color: const Color.fromRGBO(120, 110, 120, 0.14),
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: Row(
+      children: [
+        Icon(Icons.search, size: 18, color: tokens.muted),
+        const SizedBox(width: 8),
+        Expanded(
+          child: TextField(
+            key: PlaylistPicker.searchKey,
+            controller: _search,
+            maxLength: 200,
+            onChanged: _query,
+            style: tokens.body,
+            cursorColor: tokens.plum,
+            decoration: InputDecoration(
+              hintText: PlaylistPicker.searchHint,
+              hintStyle: tokens.body.copyWith(color: tokens.muted),
+              counterText: '',
+              isDense: true,
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(vertical: 9),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _list(MixtapeTokens tokens) =>
+      NotificationListener<ScrollNotification>(
+        onNotification: (note) {
+          if (note.metrics.axis == Axis.vertical &&
+              note.metrics.extentAfter < 240) {
+            _loadMoreOnScroll();
+          }
+          return false;
+        },
+        child: ListView(
+          key: PlaylistPicker.listKey,
+          padding: const EdgeInsets.only(top: 4),
+          children: [
+            for (var i = 0; i < _playlists.length; i++)
+              _row(_playlists[i], isFirst: i == 0),
+            if (_playlists.isEmpty && !_loading && !_failed)
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  PlaylistPicker.emptyLabel,
+                  style: tokens.secondary.copyWith(color: tokens.muted),
+                ),
+              ),
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Center(child: CircularProgressIndicator()),
+              ),
+            if (_failed) ...[
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text(
+                  PlaylistPicker.failedLabel,
+                  style: tokens.secondary.copyWith(color: tokens.errInk),
+                ),
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  key: PlaylistPicker.retryKey,
+                  onPressed: () => _load(reset: _playlists.isEmpty),
+                  child: const Text('Retry'),
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+
+  /// One playlist: exact identity, its source, and — under the floor — the
+  /// warn word that says why it cannot be chosen.
+  Widget _row(PlaylistSummary playlist, {required bool isFirst}) {
+    final tokens = context.tokens;
+    final enough = PlaylistPicker.canChoose(playlist);
+    final selected = widget.selected?.playlistId == playlist.id;
+    final row = FlushRow(
+      key: PlaylistPicker.rowKey(playlist.id),
+      isFirst: isFirst,
+      leading: PlaylistArtwork(
+        urlTemplate: playlist.artworkUrlTemplate,
+        bgColor: playlist.artworkBgColor,
+        size: PlaylistPicker.artSize,
+        borderRadius: MixtapeMetrics.tileRadius,
+      ),
+      leadingSize: PlaylistPicker.artSize,
+      title: playlist.name,
+      subtitle: playlistInspirationSubtitle(playlist),
+      trailing: enough
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (selected) Icon(Icons.check, size: 18, color: tokens.plum),
+                Icon(
+                  Icons.chevron_right,
+                  size: 20,
+                  color: tokens.muted.withValues(alpha: 0.6),
+                ),
+              ],
+            )
+          : const StatusWord(
+              label: PlaylistPicker.notEnoughLabel,
+              kind: StatusKind.warn,
+            ),
+      onTap: enough
+          ? () {
+              if (!_signedIn) return;
+              Navigator.of(context).pop(
+                PlaylistInspirationChoice(
+                  playlist,
+                  excludeSourceTracks: _exclude,
+                ),
+              );
+            }
+          : null,
+    );
+    // Visible, readable, and plainly not on offer.
+    return enough ? row : Opacity(opacity: 0.55, child: row);
+  }
+
+  /// The board's `.grow` row: the exclude flag the choice carries with it.
+  /// Drawn on the sheet itself, not on a group's own surface.
+  ///
+  /// The toggle stays at the foot of the sheet whatever the text scale, so
+  /// [compact] trades the row's second line — and the last of its growth —
+  /// for keeping both it and the list on screen.
+  Widget _excludeRow({required bool compact}) {
+    final row = Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: InsetRow(
+        title: PlaylistPicker.excludeLabel,
+        subtitle: compact ? null : PlaylistPicker.excludeHint,
+        onTap: () => setState(() => _exclude = !_exclude),
+        trailing: Switch.adaptive(
+          key: PlaylistPicker.excludeKey,
+          value: _exclude,
+          onChanged: (value) => setState(() => _exclude = value),
+        ),
+      ),
+    );
+    return compact
+        ? MediaQuery.withClampedTextScaling(maxScaleFactor: 1.4, child: row)
+        : row;
   }
 }

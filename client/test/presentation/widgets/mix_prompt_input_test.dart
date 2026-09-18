@@ -42,6 +42,30 @@ void main() {
       controller.dispose();
     },
   );
+  testWidgets('a given placeholder replaces the rotating hints and stays put', (
+    tester,
+  ) async {
+    final controller = TextEditingController();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MixPromptInput(
+            controller: controller,
+            busy: false,
+            placeholder: 'Something like Late nights, but…',
+            onSubmit: () {},
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Something like Late nights, but…'), findsOneWidget);
+    expect(find.text('A slow Sunday morning'), findsNothing);
+    await tester.pump(const Duration(seconds: 9));
+    expect(find.text('Something like Late nights, but…'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
   testWidgets('reduced motion freezes examples and blank input cannot submit', (
     tester,
   ) async {

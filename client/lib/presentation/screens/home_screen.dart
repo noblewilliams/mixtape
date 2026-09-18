@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/api/api_client.dart';
@@ -10,8 +11,12 @@ import '../format/import_format.dart';
 import '../format/relative_time.dart';
 import '../theme/mixtape_theme.dart';
 import '../widgets/foundation/cassette_tile.dart';
+import '../widgets/foundation/flush_row.dart';
 import '../widgets/foundation/gradient_background.dart';
+import '../widgets/foundation/label_chip.dart';
 import '../widgets/foundation/large_title_scaffold.dart';
+import '../widgets/foundation/square_art.dart';
+import '../widgets/foundation/status_word.dart';
 import '../widgets/home_panel.dart';
 import '../format/source_labels.dart';
 import '../providers/dj_providers.dart';
@@ -61,6 +66,15 @@ class HomeScreen extends ConsumerStatefulWidget {
   /// The starting state's cassette.
   static const double startingCassetteWidth = 120;
 
+  /// With a playlist attached the pills refine it instead of proposing a
+  /// moment; the third one flips the exclude flag rather than filling the
+  /// field (`docs/mockups/2026-09-17-mobile-home-states.html`, frame W2).
+  static const List<String> refinementPrompts = [
+    'slower and later',
+    'for a long drive',
+  ];
+  static const String excludeRefinement = 'without its songs';
+
   static const Key hintKey = Key('home-hint');
   static const Key startingKey = Key('home-starting');
 
@@ -98,24 +112,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
   }
 
-  Future<void> _pickInspiration(BuildContext anchor) async {
+  /// Replace (or attach): the picker is a sheet over Home, and a dismissal
+  /// leaves whatever was attached exactly as it was.
+  Future<void> _pickInspiration() async {
     if (_starting) return;
-    final box =
-        _composerKey.currentContext?.findRenderObject() as RenderBox? ??
-        anchor.findRenderObject() as RenderBox;
-    final initialRect = box.localToGlobal(Offset.zero) & box.size;
-    Rect composerRect() {
-      final current = _composerKey.currentContext?.findRenderObject();
-      return current is RenderBox && current.attached
-          ? current.localToGlobal(Offset.zero) & current.size
-          : initialRect;
-    }
-
     final choice = await showPlaylistInspirationPicker(
       context,
       ref,
-      anchor: initialRect,
-      anchorResolver: composerRect,
       selected: _inspiration == null
           ? null
           : InitialPlaylistSeed(
@@ -130,6 +133,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           choice.playlist,
           excludeSourceTracks: choice.excludeSourceTracks,
         );
+  }
+
+  List<HomeRefinement> _refinements() => [
+    for (final prompt in HomeScreen.refinementPrompts) HomeRefinement(prompt),
+    HomeRefinement(HomeScreen.excludeRefinement, onTap: _toggleExclude),
+  ];
+
+  /// "Exclude its songs", from the chip's menu or the third pill. Local like
+  /// the rest of the attachment: nothing is sent until Send.
+  void _toggleExclude() {
+    final playlist = _inspiration;
+    if (playlist == null || _starting) return;
+    ref
+        .read(newMixInspirationProvider.notifier)
+        .select(playlist, excludeSourceTracks: !_excludeSourceTracks);
   }
 
   /// C5 bookkeeping: the handed archive this screen has already acted on, so
@@ -393,17 +411,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   busy: _starting,
                   error: _error,
                   onSubmit: _submit,
+                  placeholder: _inspiration == null
+                      ? null
+                      : 'Something like ${_inspiration!.name}, but…',
+                  refinements: _inspiration == null ? null : _refinements(),
                   attachment: _inspiration == null
                       ? null
-                      : Builder(
-                          builder: (anchor) => PlaylistInspirationAttachment(
-                            name: _inspiration!.name,
-                            busy: _starting,
-                            onPick: () => _pickInspiration(anchor),
-                            onDetach: () => ref
-                                .read(newMixInspirationProvider.notifier)
-                                .clear(),
-                          ),
+                      : InspirationChip(
+                          name: _inspiration!.name,
+                          excludeSourceTracks: _excludeSourceTracks,
+                          onPick: _starting ? null : _pickInspiration,
+                          onToggleExclude: _starting ? null : _toggleExclude,
+                          onDetach: _starting
+                              ? null
+                              : () => ref
+                                    .read(newMixInspirationProvider.notifier)
+                                    .clear(),
                         ),
                 ),
               ),
@@ -424,12 +447,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }) {
     if (_starting) return const _StartingState();
     if (waiting && onboarding != null) {
-      // Task 3.3 turns this into the board's two flush rows; it only moves
-      // into the open space here.
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _SpotifyWaitingCard(
+          _SpotifyWaitingRows(
             onboarding: onboarding,
             onOpenRequest: _openRequestScreen,
             onOpenInterview: _openInterview,
@@ -496,13 +517,14 @@ class _StartingState extends StatelessWidget {
 }
 
 /// Home's waiting state for a Spotify listener until both packages have
-/// landed: the status chip, the elapsed wait since "I've requested it" (or
-/// the way to the request screen) until the first package is in and the
-/// nudge for the other package after, "Choose a ZIP", the interview card
-/// with what it produced, and the "Not personal yet" note while nothing has
-/// landed. Route pushes stay with Home via the callbacks.
-class _SpotifyWaitingCard extends StatelessWidget {
-  const _SpotifyWaitingCard({
+/// landed (`docs/mockups/approved/2026-09-17-mobile-home-states.md` →
+/// Spotify listener before imports land; frame S3): two flush rows in the
+/// open space — the import status with the elapsed wait since "I've
+/// requested it", and the interview until it is done — the way to choose the
+/// files, and the "Not personal yet" note while nothing has landed. Route
+/// pushes stay with Home via the callbacks.
+class _SpotifyWaitingRows extends StatelessWidget {
+  const _SpotifyWaitingRows({
     required this.onboarding,
     required this.onOpenRequest,
     required this.onOpenInterview,
@@ -514,6 +536,20 @@ class _SpotifyWaitingCard extends StatelessWidget {
   final VoidCallback onOpenInterview;
   final VoidCallback onChooseZip;
 
+  static const String importTitle = 'Bring your Spotify music';
+  static const String interviewTitle = 'Tell the DJ about your taste';
+  static const String interviewSubtitle =
+      'Five quick questions for the first mixes';
+  static const String readyLabel = 'Ready to import';
+  static const String waitingTail = 'waiting on Spotify';
+  static const String chooseFilesLabel = 'Choose files';
+  static const String notPersonalNote =
+      'Mixes before the import are labelled "Not personal yet".';
+
+  /// `.waiting .row`: the 44 pt square motif with a glyph rather than art.
+  static const double artSize = 44;
+
+  /// What is still missing once the first package has landed.
   String? get _nudge {
     final source = spotifySource(onboarding);
     final packages = packagesOf(source);
@@ -528,114 +564,105 @@ class _SpotifyWaitingCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = Theme.of(context).textTheme;
-    final markedAt = onboarding.markedRequestedAt;
-    final interviewDone = onboarding.interviewCompletedAt != null;
+    final tokens = context.tokens;
     final interview = onboarding.interview;
+    final interviewDone = onboarding.interviewCompletedAt != null;
     final nudge = _nudge;
-    return Card(
+    return Padding(
       key: const Key('waiting-card'),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 16, 8, 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    nudge == null
-                        ? 'Bring your Spotify music'
-                        : 'Your Spotify data',
-                    style: textTheme.titleMedium,
-                  ),
+      padding: const EdgeInsets.only(top: 4, bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FlushList(
+            children: [
+              FlushRow(
+                key: const Key('open-request'),
+                leading: _glyph(context, CupertinoIcons.music_note),
+                leadingSize: artSize,
+                title: importTitle,
+                subtitleWidget: _status(context, nudge: nudge),
+                onTap: onOpenRequest,
+              ),
+              // The interview row is the second one until it is done; after
+              // that a quiet line below says what it produced.
+              if (!interviewDone)
+                FlushRow(
+                  key: const Key('open-interview'),
+                  leading: _glyph(context, CupertinoIcons.ear),
+                  leadingSize: artSize,
+                  title: interviewTitle,
+                  subtitle: interviewSubtitle,
+                  onTap: onOpenInterview,
                 ),
-                Chip(
-                  key: const Key('waiting-chip'),
-                  label: Text(spotifyStatusLabel(onboarding)),
-                  visualDensity: VisualDensity.compact,
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            if (nudge != null)
-              Text(
-                nudge,
-                key: const Key('waiting-nudge'),
-                style: textTheme.bodySmall,
-              )
-            else
-              Row(
-                children: [
-                  Icon(
-                    markedAt == null ? Icons.mail_outline : Icons.hourglass_top,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: markedAt == null
-                        ? const Text(
-                            'Ready to import',
-                            key: Key('waiting-not-requested'),
-                          )
-                        : Text(
-                            'Requested ${elapsedWait(markedAt)}',
-                            key: const Key('waiting-requested'),
-                          ),
-                  ),
-                  TextButton(
-                    key: const Key('open-request'),
-                    onPressed: onOpenRequest,
-                    child: Text('Import steps'),
-                  ),
-                ],
-              ),
-            const SizedBox(height: 4),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: FilledButton.tonalIcon(
-                key: const Key('waiting-choose-zip'),
-                onPressed: onChooseZip,
-                icon: const Icon(Icons.folder_zip_outlined),
-                label: Text('Choose files'),
-              ),
-            ),
-            const Divider(),
-            if (interviewDone)
-              ListTile(
-                key: const Key('interview-done'),
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.check_circle_outline),
-                title: const Text('Interview done'),
-                subtitle: interview == null
-                    ? null
-                    : Text(
-                        '${plural(interview.notes, 'note')}, ${plural(interview.artists, 'artist')}',
-                      ),
-              )
-            else
-              ListTile(
-                key: const Key('open-interview'),
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.record_voice_over_outlined),
-                title: const Text('Tell the DJ about your taste'),
-                subtitle: const Text(
-                  'Five quick questions so the first mixes have something to go on.',
-                ),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: onOpenInterview,
-              ),
-            if (nudge == null) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Mixes before the import are labeled "Not personal yet".',
-                key: const Key('not-personal-note'),
-                style: textTheme.bodySmall,
-              ),
             ],
-          ],
-        ),
+          ),
+          if (interviewDone)
+            Padding(
+              key: const Key('interview-done'),
+              padding: const EdgeInsets.only(top: 10, left: 2),
+              child: Text(
+                interview == null
+                    ? 'Interview done'
+                    : 'Interview done · ${plural(interview.notes, 'note')}, '
+                          '${plural(interview.artists, 'artist')}',
+                style: tokens.secondary.copyWith(color: tokens.muted),
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: LabelChip(
+                key: const Key('waiting-choose-zip'),
+                label: chooseFilesLabel,
+                onPressed: onChooseZip,
+              ),
+            ),
+          ),
+          if (nudge == null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8, left: 2),
+              child: Text(
+                notPersonalNote,
+                key: const Key('not-personal-note'),
+                style: tokens.meta.copyWith(color: tokens.muted),
+              ),
+            ),
+        ],
       ),
+    );
+  }
+
+  Widget _glyph(BuildContext context, IconData icon) => SquareArt(
+    size: artSize,
+    child: Icon(icon, size: 22, color: context.tokens.text),
+  );
+
+  /// The board's subtitle: a warn word for where the request has got to, then
+  /// what is being waited on — or the nudge for the package still missing.
+  Widget _status(BuildContext context, {required String? nudge}) {
+    final tokens = context.tokens;
+    final markedAt = onboarding.markedRequestedAt;
+    return Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        StatusWord(
+          key: markedAt == null
+              ? const Key('waiting-not-requested')
+              : const Key('waiting-requested'),
+          label: markedAt == null
+              ? readyLabel
+              : 'Requested ${elapsedWait(markedAt)}',
+          kind: StatusKind.warn,
+        ),
+        Text(
+          ' · ${nudge ?? waitingTail}',
+          key: nudge == null ? null : const Key('waiting-nudge'),
+          style: tokens.meta.copyWith(fontSize: 12.5, color: tokens.muted),
+        ),
+      ],
     );
   }
 }

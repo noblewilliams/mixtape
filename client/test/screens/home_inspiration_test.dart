@@ -17,6 +17,8 @@ import 'package:mixtape/presentation/providers/playlist_providers.dart';
 import 'package:mixtape/presentation/screens/home_screen.dart';
 import 'package:mixtape/presentation/screens/playlist_detail_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
+import 'package:mixtape/presentation/widgets/home_panel.dart';
+import 'package:mixtape/presentation/widgets/playlist_inspiration.dart';
 import '../helpers/auth_ui_snapshot.dart';
 import '../helpers/fake_listening_api.dart';
 import '../presentation/providers/playlist_context_provider_test.dart'
@@ -87,6 +89,31 @@ ThemeData nativeSnapshotTheme(Brightness brightness) =>
       ],
     );
 
+Future<void> pumpHome(
+  WidgetTester tester,
+  ProviderContainer container, {
+  Brightness brightness = Brightness.light,
+}) async {
+  await tester.pumpWidget(
+    UncontrolledProviderScope(
+      container: container,
+      child: MaterialApp(
+        theme: brightness == Brightness.dark
+            ? MixtapeTheme.dark()
+            : MixtapeTheme.light(),
+        home: const HomeScreen(),
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+/// Opens the attachment chip's menu.
+Future<void> openChipMenu(WidgetTester tester) async {
+  await tester.tap(find.byKey(InspirationChip.chipKey));
+  await tester.pumpAndSettle();
+}
+
 void main() {
   testWidgets(
     'browse handoff keeps Home draft, sends exact selection only on submit, and retains failure',
@@ -94,16 +121,7 @@ void main() {
       final dj = RecordingDj()..onListSessions = () async => [];
       final container = makeContainer(dj);
       addTearDown(container.dispose);
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: container,
-          child: MaterialApp(
-            theme: MixtapeTheme.light(),
-            home: const HomeScreen(),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
+      await pumpHome(tester, container);
       await tester.enterText(
         find.byKey(const Key('prompt-field')),
         '  A softer night drive  ',
@@ -125,22 +143,27 @@ void main() {
             .text,
         '  A softer night drive  ',
       );
-      expect(find.text('Inspired by Night Bus Notes'), findsOneWidget);
+      expect(find.text('Inspired by: Night Bus Notes'), findsOneWidget);
       expect(dj.creates, 0);
-      await tester.tap(find.text('Inspired by Night Bus Notes'));
+
+      // Replace, from the chip's menu, opens the picker sheet.
+      await openChipMenu(tester);
+      await tester.tap(find.byKey(InspirationChip.replaceItemKey));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Use different songs'));
+      expect(find.text(PlaylistPicker.title), findsOneWidget);
+      await tester.tap(find.byKey(PlaylistPicker.excludeKey));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('playlist-choice-exact-playlist')));
+      await tester.tap(find.byKey(PlaylistPicker.rowKey('exact-playlist')));
       await tester.pumpAndSettle();
       expect(dj.creates, 0);
+
       await tester.tap(find.byKey(const Key('start-session')));
       await tester.pumpAndSettle();
       expect(dj.creates, 1);
       expect(dj.prompt, 'A softer night drive');
       expect(dj.seed!.playlistId, 'exact-playlist');
       expect(dj.seed!.excludeSourceTracks, true);
-      expect(find.text('Inspired by Night Bus Notes'), findsOneWidget);
+      expect(find.text('Inspired by: Night Bus Notes'), findsOneWidget);
       expect(
         tester
             .widget<TextField>(find.byKey(const Key('prompt-field')))
@@ -148,13 +171,141 @@ void main() {
             .text,
         '  A softer night drive  ',
       );
-      await tester.tap(find.byTooltip('Detach playlist inspiration'));
+
+      await openChipMenu(tester);
+      await tester.tap(find.byKey(InspirationChip.detachItemKey));
       await tester.pumpAndSettle();
       expect(container.read(newMixInspirationProvider), isNull);
       expect(dj.creates, 1);
-      expect(find.text('+ Playlist'), findsNothing);
+      expect(find.byKey(InspirationChip.chipKey), findsNothing);
     },
   );
+
+  testWidgets('the chip menu toggles exclude both ways', (tester) async {
+    final dj = RecordingDj()..onListSessions = () async => [];
+    final container = makeContainer(dj);
+    addTearDown(container.dispose);
+    await pumpHome(tester, container);
+    container.read(newMixInspirationProvider.notifier).select(chosen);
+    await tester.pumpAndSettle();
+
+    await openChipMenu(tester);
+    expect(
+      tester
+          .widget<CheckedPopupMenuItem<Object?>>(
+            find.byKey(InspirationChip.excludeItemKey),
+          )
+          .checked,
+      isFalse,
+    );
+    await tester.tap(find.byKey(InspirationChip.excludeItemKey));
+    await tester.pumpAndSettle();
+    expect(
+      container.read(newMixInspirationProvider)!.excludeSourceTracks,
+      true,
+    );
+    expect(container.read(newMixInspirationProvider)!.playlist.id, chosen.id);
+
+    await openChipMenu(tester);
+    expect(
+      tester
+          .widget<CheckedPopupMenuItem<Object?>>(
+            find.byKey(InspirationChip.excludeItemKey),
+          )
+          .checked,
+      isTrue,
+    );
+    await tester.tap(find.byKey(InspirationChip.excludeItemKey));
+    await tester.pumpAndSettle();
+    expect(
+      container.read(newMixInspirationProvider)!.excludeSourceTracks,
+      false,
+    );
+    expect(dj.creates, 0);
+  });
+
+  testWidgets(
+    'attaching turns the pills into refinements, and the last one toggles exclude',
+    (tester) async {
+      final dj = RecordingDj()..onListSessions = () async => [];
+      final container = makeContainer(dj);
+      addTearDown(container.dispose);
+      await pumpHome(tester, container);
+
+      expect(find.text(HomeScreen.refinementPrompts.first), findsNothing);
+      container.read(newMixInspirationProvider.notifier).select(chosen);
+      await tester.pumpAndSettle();
+
+      for (final label in HomeScreen.refinementPrompts) {
+        expect(find.text(label), findsOneWidget);
+      }
+      expect(find.text(HomeScreen.excludeRefinement), findsOneWidget);
+      expect(find.byKey(HomePanel.pillsKey), findsOneWidget);
+
+      // The field asks for a refinement of the playlist by name.
+      expect(find.text('Something like ${chosen.name}, but…'), findsOneWidget);
+
+      // A wording pill fills the field and sends nothing.
+      await tester.tap(find.text(HomeScreen.refinementPrompts.first));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('prompt-field')))
+            .controller!
+            .text,
+        HomeScreen.refinementPrompts.first,
+      );
+      expect(dj.creates, 0);
+      expect(
+        container.read(newMixInspirationProvider)!.excludeSourceTracks,
+        false,
+      );
+
+      // "without its songs" is the exclude flag, not a phrase for the field.
+      await tester.tap(find.text(HomeScreen.excludeRefinement));
+      await tester.pumpAndSettle();
+      expect(
+        container.read(newMixInspirationProvider)!.excludeSourceTracks,
+        true,
+      );
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('prompt-field')))
+            .controller!
+            .text,
+        HomeScreen.refinementPrompts.first,
+      );
+      expect(dj.creates, 0);
+    },
+  );
+
+  testWidgets('dismissing the picker leaves the attachment alone', (
+    tester,
+  ) async {
+    final dj = RecordingDj()..onListSessions = () async => [];
+    final container = makeContainer(dj);
+    addTearDown(container.dispose);
+    await pumpHome(tester, container);
+    container
+        .read(newMixInspirationProvider.notifier)
+        .select(chosen, excludeSourceTracks: true);
+    await tester.pumpAndSettle();
+
+    await openChipMenu(tester);
+    await tester.tap(find.byKey(InspirationChip.replaceItemKey));
+    await tester.pumpAndSettle();
+    expect(find.text(PlaylistPicker.title), findsOneWidget);
+    Navigator.of(tester.element(find.byKey(PlaylistPicker.sheetKey))).pop();
+    await tester.pumpAndSettle();
+
+    expect(find.text(PlaylistPicker.title), findsNothing);
+    expect(container.read(newMixInspirationProvider)!.playlist.id, chosen.id);
+    expect(
+      container.read(newMixInspirationProvider)!.excludeSourceTracks,
+      true,
+    );
+    expect(find.text('Inspired by: Night Bus Notes'), findsOneWidget);
+  });
 
   for (final brightness in Brightness.values) {
     testWidgets('captures attached Home and taste detail ${brightness.name}', (

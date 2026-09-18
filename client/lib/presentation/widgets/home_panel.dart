@@ -19,6 +19,19 @@ import 'foundation/liquid_glass_surface.dart';
 import 'mix_prompt_input.dart';
 import 'routine_suggestions.dart';
 
+/// One of the three pills a playlist attachment turns the idea pills into
+/// (`docs/mockups/approved/2026-09-17-mobile-home-states.md` → Playlist
+/// attached; frame W2).
+class HomeRefinement {
+  const HomeRefinement(this.label, {this.onTap});
+
+  final String label;
+
+  /// What the pill does instead of filling the field — "without its songs"
+  /// flips the exclude flag rather than typing anything.
+  final VoidCallback? onTap;
+}
+
 class HomePanel extends StatefulWidget {
   const HomePanel({
     super.key,
@@ -31,6 +44,7 @@ class HomePanel extends StatefulWidget {
     this.attachment,
     this.starterPrompts = MixPromptInput.examples,
     this.placeholder,
+    this.refinements,
   });
 
   /// The composer's draft, which the pills fill.
@@ -59,8 +73,14 @@ class HomePanel extends StatefulWidget {
   /// Home never invents a second set of prompts.
   final List<String> starterPrompts;
 
-  /// The placeholder the composer is showing, which the starters leave out.
+  /// The placeholder the composer shows instead of its rotating hints, which
+  /// the starters also leave out. With a playlist attached the board reads
+  /// `Something like <name>, but…`.
   final String? placeholder;
+
+  /// With a playlist attached, the pills become refinements of it and the
+  /// routine suggestion stands down — the board shows exactly three.
+  final List<HomeRefinement>? refinements;
 
   /// The board's `.bpanel` top radius.
   static const double topRadius = 30;
@@ -93,6 +113,9 @@ class HomePanel extends StatefulWidget {
   static const Key errorKey = Key('start-error');
 
   static Key starterPillKey(int index) => ValueKey('home-panel-starter-$index');
+
+  static Key refinementPillKey(int index) =>
+      ValueKey('home-panel-refinement-$index');
 
   @override
   State<HomePanel> createState() => _HomePanelState();
@@ -208,41 +231,49 @@ class _HomePanelState extends State<HomePanel> {
                     busy: widget.busy,
                     onSubmit: widget.onSubmit,
                     attachment: widget.attachment,
+                    placeholder: widget.placeholder,
                     // The pills hold these; the rotating hint skips them so
-                    // the field never repeats a pill below it.
-                    reservedExamples: starters,
+                    // the field never repeats a pill below it. Refinements
+                    // are not prompts, so they reserve nothing.
+                    reservedExamples: widget.refinements == null
+                        ? starters
+                        : const [],
                   ),
                   if (error != null) _errorLine(tokens, error),
                   Padding(
                     padding: const EdgeInsets.only(top: HomePanel.pillsTopGap),
-                    // The routine suggestion owns the first slot; with nothing
-                    // eligible the two known starters stay where they are and a
-                    // third joins them at the end, so nothing moves when the
-                    // routine resolves.
-                    child: RoutinePillSlot(
-                      onFill: _fill,
-                      dimmed: dimmed,
-                      enabled: !widget.busy,
-                      builder: (context, pill) {
-                        final shown = pill == null
-                            ? HomePanel.maxPills
-                            : HomePanel.maxPills - 1;
-                        return Wrap(
-                          key: HomePanel.pillsKey,
-                          spacing: HomePanel.pillGap,
-                          runSpacing: HomePanel.pillGap,
-                          children: [
-                            if (pill != null) pill,
-                            for (
-                              var i = 0;
-                              i < shown && i < starters.length;
-                              i++
-                            )
-                              _starterPill(i, starters[i], dimmed: dimmed),
-                          ],
-                        );
-                      },
-                    ),
+                    // With a playlist attached the three pills are refinements
+                    // of it, and no routine suggestion competes with them.
+                    child: widget.refinements != null
+                        ? _refinementPills(dimmed: dimmed)
+                        : RoutinePillSlot(
+                            onFill: _fill,
+                            dimmed: dimmed,
+                            enabled: !widget.busy,
+                            builder: (context, pill) {
+                              final shown = pill == null
+                                  ? HomePanel.maxPills
+                                  : HomePanel.maxPills - 1;
+                              return Wrap(
+                                key: HomePanel.pillsKey,
+                                spacing: HomePanel.pillGap,
+                                runSpacing: HomePanel.pillGap,
+                                children: [
+                                  if (pill != null) pill,
+                                  for (
+                                    var i = 0;
+                                    i < shown && i < starters.length;
+                                    i++
+                                  )
+                                    _starterPill(
+                                      i,
+                                      starters[i],
+                                      dimmed: dimmed,
+                                    ),
+                                ],
+                              );
+                            },
+                          ),
                   ),
                 ],
               ),
@@ -252,6 +283,25 @@ class _HomePanelState extends State<HomePanel> {
       ),
     );
   }
+
+  /// The attached playlist's three refinements, in the board's order.
+  Widget _refinementPills({required bool dimmed}) => Wrap(
+    key: HomePanel.pillsKey,
+    spacing: HomePanel.pillGap,
+    runSpacing: HomePanel.pillGap,
+    children: [
+      for (var i = 0; i < widget.refinements!.length; i++)
+        IdeaPill(
+          key: HomePanel.refinementPillKey(i),
+          label: widget.refinements![i].label,
+          dimmed: dimmed,
+          onPressed: widget.busy
+              ? null
+              : (widget.refinements![i].onTap ??
+                    () => _fill(widget.refinements![i].label)),
+        ),
+    ],
+  );
 
   Widget _starterPill(int index, String prompt, {required bool dimmed}) =>
       IdeaPill(

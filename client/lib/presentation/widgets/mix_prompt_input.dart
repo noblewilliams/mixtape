@@ -18,6 +18,7 @@ class MixPromptInput extends StatefulWidget {
     required this.onSubmit,
     this.attachment,
     this.focusNode,
+    this.placeholder,
     this.reservedExamples = const [],
     this.showVoiceInput = voiceInputEnabled,
     this.voiceController,
@@ -30,6 +31,13 @@ class MixPromptInput extends StatefulWidget {
   /// The field's focus, when the owner needs it — Home's idea pills fill the
   /// field and focus it. Absent, the composer keeps one of its own.
   final FocusNode? focusNode;
+
+  /// A fixed hint that replaces the rotating ones, and stops the rotation.
+  ///
+  /// Home's, while a playlist is attached: `Something like <name>, but…`
+  /// (`docs/mockups/approved/2026-09-17-mobile-home-states.md` → Playlist
+  /// attached).
+  final String? placeholder;
 
   /// Placeholders the rotation must leave alone — Home's panel reserves the
   /// prompts its idea pills are showing, so the hint never repeats a pill
@@ -117,6 +125,8 @@ class _MixPromptInputState extends State<MixPromptInput>
       if (!mounted ||
           !_resumed ||
           widget.busy ||
+          // A fixed placeholder is the caller's, and does not rotate.
+          widget.placeholder != null ||
           // A hint that changed under the level meter would be a second
           // thing moving while someone is talking.
           _listening ||
@@ -317,7 +327,7 @@ class _MixPromptInputState extends State<MixPromptInput>
       cursorColor: tokens.plum,
       style: tokens.body,
       decoration: InputDecoration(
-        hintText: _rotation[_example % _rotation.length],
+        hintText: widget.placeholder ?? _rotation[_example % _rotation.length],
         hintStyle: tokens.body.copyWith(color: tokens.muted),
         counterText: '',
         isDense: true,
