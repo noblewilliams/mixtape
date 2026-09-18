@@ -20,11 +20,11 @@ import '../../import/snapshot.dart';
 import '../format/import_format.dart';
 import '../theme/mixtape_theme.dart';
 import 'foundation/inset_group.dart';
+import 'foundation/label_chip.dart';
 import 'foundation/mixtape_menu.dart';
 import 'foundation/mixtape_sheet.dart';
 import 'foundation/section_word.dart';
 import 'foundation/segmented_toggle.dart';
-import 'foundation/text_action.dart';
 
 class CollectionReviewForm extends StatelessWidget {
   const CollectionReviewForm({
@@ -145,33 +145,38 @@ class CollectionReviewForm extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (selected != null)
-          Text(
-            '${formatCount(selected.tracks.length)} songs · '
-            '${formatCount(selected.library.length)} liked · '
-            '${formatCount(selected.playlists.length)} playlists',
-            key: const Key('collection-summary'),
-            style: tokens.secondary,
-          ),
-        if (selected == null)
-          Text(
-            'Choose at least one nonempty collection, valid names, distinct '
-            'replacement targets, and no more than one Liked Songs file.',
-            key: const Key('collection-invalid'),
-            style: tokens.meta.copyWith(color: tokens.warnInk),
-          ),
-        Align(
-          alignment: Alignment.centerLeft,
-          // Back out the action's own 8 pt of target padding so the word
-          // starts on the same edge as the lines above and below it.
-          child: Transform.translate(
-            offset: const Offset(-8, 0),
-            child: TextAction(
+        // The counts, and the one control that changes all of them, on one
+        // line (smoke round seven, note 3): a chip, so it reads as something
+        // to press rather than a word in the copy.
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Flexible(
+              child: selected != null
+                  ? Text(
+                      '${formatCount(selected.tracks.length)} songs · '
+                      '${formatCount(selected.library.length)} liked · '
+                      '${formatCount(selected.playlists.length)} playlists',
+                      key: const Key('collection-summary'),
+                      style: tokens.secondary,
+                    )
+                  : Text(
+                      'Choose at least one nonempty collection, valid names, '
+                      'distinct replacement targets, and no more than one '
+                      'Liked Songs file.',
+                      key: const Key('collection-invalid'),
+                      style: tokens.meta.copyWith(color: tokens.warnInk),
+                    ),
+            ),
+            const SizedBox(width: 12),
+            LabelChip(
               key: setAllKey,
               label: 'Set all…',
+              hole: false,
               onPressed: () => _setAll(context),
             ),
-          ),
+          ],
         ),
         Text(
           'Files suggest names, not playlist identities. Choose what each file '
@@ -229,9 +234,14 @@ class CollectionReviewForm extends StatelessWidget {
       index < paths.length ? paths[index] : playlist.name,
     ).toUpperCase();
     final maybeLiked = playlist.name.toLowerCase() == 'liked';
+    final caption = tokens.label.copyWith(
+      color: tokens.muted,
+      letterSpacing: 0.6,
+    );
 
     return InsetGroup(
       key: ValueKey('collection-file-$index'),
+      outlined: true,
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
@@ -239,16 +249,30 @@ class CollectionReviewForm extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              // The tiny "just information" line: the file and how much is in
-              // it, never a track or an artist.
-              Text(
-                '$name · '
-                '${plural(playlist.entries.length, 'entry', 'entries').toUpperCase()}',
+              // The tiny "just information" line: the file on the left and
+              // how much is in it on the right, never a track or an artist.
+              Row(
                 key: ValueKey('collection-caption-$index'),
-                style: tokens.label.copyWith(
-                  color: tokens.muted,
-                  letterSpacing: 0.6,
-                ),
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Flexible(
+                    child: Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: caption,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    plural(
+                      playlist.entries.length,
+                      'entry',
+                      'entries',
+                    ).toUpperCase(),
+                    style: caption,
+                  ),
+                ],
               ),
               if (maybeLiked)
                 Text(
@@ -281,7 +305,9 @@ class CollectionReviewForm extends StatelessWidget {
           ),
         ),
         ..._roleChoice(context, index, file),
-        if (file.role == 'playlist')
+        // Nothing to attach to means nothing to choose: the file creates a
+        // new playlist and the row is not drawn (smoke round seven, note 5).
+        if (file.role == 'playlist' && selection.context.playlists.isNotEmpty)
           _TargetField(
             index: index,
             selection: selection,
@@ -319,7 +345,9 @@ class CollectionReviewForm extends StatelessWidget {
       ConstrainedBox(
         constraints: const BoxConstraints(minHeight: InsetGroup.rowInset),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          // 12, not the group's 16: three segments and a border need every
+          // point they can get before "Liked Songs" ellipsises at 390 pt.
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Align(
             alignment: Alignment.centerLeft,
             child: SegmentedToggle<String>(

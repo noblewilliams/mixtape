@@ -248,7 +248,7 @@ void main() {
 
   testWidgets(
     'a handed file never stacks a second sheet over the one the sources screen opened, '
-    'and is dealt with when the listener comes back',
+    'and waits while that review is still open',
     (tester) async {
       final opened = FakeOpenedArchiveSource();
       final service = FakeImportService();
@@ -257,7 +257,9 @@ void main() {
           onboarding: onboardingState(chosenService: 'spotify'),
         ),
         opened: opened,
-        picker: FakeArchivePicker(),
+        // The picker comes first now, so the sources screen's sheet is the
+        // sheet over a file it actually read (smoke round seven, note 1).
+        picker: FakeArchivePicker(extendedArchive),
         importService: service,
       );
       await pumpHome(tester, container);
@@ -281,16 +283,18 @@ void main() {
         reason: 'one sheet, wherever it came from',
       );
 
-      // Put the sources screen's sheet away, go back, and the file that was
-      // waiting all along opens the flow — once.
+      // Put the sources screen's sheet away and go back: the review that is
+      // still open is a run in progress, so the handed file waits rather
+      // than throwing it away, and the one sheet comes back to where the run
+      // got to.
       await tester.tapAt(const Offset(10, 10));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(MusicSourcesScreen.backKey));
       await tester.pumpAndSettle();
 
       expect(find.byType(ImportSheet), findsOneWidget);
-      expect(service.inspected, [accountArchive.path]);
-      expect(container.read(openedArchiveProvider), isNull);
+      expect(service.inspected, [extendedArchive.path]);
+      expect(container.read(openedArchiveProvider), handed(accountArchive));
     },
   );
 

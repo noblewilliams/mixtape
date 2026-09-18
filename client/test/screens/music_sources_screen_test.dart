@@ -180,7 +180,7 @@ void main() {
     final listening = FakeListeningApi(
       onboarding: onboardingState(chosenService: 'spotify'),
     );
-    final picker = FakeArchivePicker();
+    final picker = FakeArchivePicker(extendedArchive);
     await _pumpSources(tester, onboardingContainer(listening: listening, picker: picker));
 
     expect(find.text('Nothing connected yet.'), findsOneWidget);
@@ -192,8 +192,9 @@ void main() {
     await tester.tap(find.byKey(const Key('sources-import')));
     await tester.pumpAndSettle();
 
-    expect(find.byType(ImportSheet), findsOneWidget);
+    // The picker first; the sheet follows the file it gave back.
     expect(picker.picks, 1);
+    expect(find.byType(ImportSheet), findsOneWidget);
   });
 
   testWidgets('Import again opens the import sheet and picks', (tester) async {

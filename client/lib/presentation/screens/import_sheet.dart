@@ -105,18 +105,24 @@ class _LockedSheetState extends ConsumerState<_LockedSheet> {
   }
 }
 
-/// Home's "Choose a ZIP" and the sources screen's "Import again": the sheet
-/// opens and the picker comes up at once, so the listener is not asked
-/// twice. A run in progress (a file being read, an inventory, an upload) is
-/// shown where it got to instead; starting over would cancel it.
-Future<void> openImportFlow(BuildContext context, WidgetRef ref) {
+/// Every "Choose files" chip, Home's "Choose a ZIP", and the sources screen's
+/// "Import again": the document picker comes up straight away and the sheet
+/// follows only once there is a file to show (smoke round seven, note 1). A
+/// dismissed picker leaves nothing behind — no sheet, no changed state.
+///
+/// A run in progress (a file being read, an inventory, an upload) is shown
+/// where it got to instead; starting over would cancel it.
+Future<void> openImportFlow(BuildContext context, WidgetRef ref) async {
   final state = ref.read(listeningImportProvider);
-  if (!state.inProgress) {
-    final notifier = ref.read(listeningImportProvider.notifier);
-    notifier.reset();
-    notifier.pick();
+  if (state.inProgress) {
+    return showImportSheet(context, dismissible: state is! ImportUploading);
   }
-  return showImportSheet(context, dismissible: state is! ImportUploading);
+  final chosen = await ref.read(listeningImportProvider.notifier).chooseFile();
+  if (!chosen || !context.mounted) return;
+  await showImportSheet(
+    context,
+    dismissible: ref.read(listeningImportProvider) is! ImportUploading,
+  );
 }
 
 /// The share-sheet path (C5): the listener already chose the file in Files
@@ -198,6 +204,8 @@ class ImportSheet extends ConsumerStatefulWidget {
 }
 
 class _ImportSheetState extends ConsumerState<ImportSheet> {
+  bool _popping = false;
+
   @override
   void initState() {
     super.initState();
@@ -214,9 +222,23 @@ class _ImportSheetState extends ConsumerState<ImportSheet> {
   Widget build(BuildContext context) {
     final state = ref.watch(listeningImportProvider);
     final notifier = ref.read(listeningImportProvider.notifier);
+
+    // Nothing chosen and nothing read: there is no step to show, so the sheet
+    // goes rather than offering a "Choose files" button of its own (smoke
+    // round seven, note 1 — the picker is the way in now). This is the state
+    // a cancelled read or upload lands on.
+    if (state is ImportIdle || state is ImportFlowCancelled) {
+      if (!_popping) {
+        _popping = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) Navigator.of(context).maybePop();
+        });
+      }
+      return const SizedBox.shrink();
+    }
+
     final body = switch (state) {
-      ImportIdle() => _Idle(onPick: notifier.pick),
-      ImportFlowCancelled() => _Idle(onPick: notifier.pick, cancelled: true),
+      ImportIdle() || ImportFlowCancelled() => const SizedBox.shrink(),
       ImportInspecting(:final archive, :final file, :final progress) =>
         _Inspecting(
           archive: archive,
@@ -272,6 +294,10 @@ class _ImportSheetState extends ConsumerState<ImportSheet> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Flexible(
+              // Tight while reviewing: the footer is pinned to the bottom of
+              // the sheet, so the list takes the whole of the rest even when
+              // it has less to show than that.
+              fit: reviewing ? FlexFit.tight : FlexFit.loose,
               child: SingleChildScrollView(
                 // The review stage has text fields: the keyboard's inset is
                 // padding, not a clip, so "Save as" scrolls above it.
@@ -342,10 +368,7 @@ class _ReviewFooter extends StatelessWidget {
           LabelChip(
             key: ImportSheet.newFileKey,
             label: 'New file',
-            onPressed: () {
-              notifier.reset();
-              notifier.pick();
-            },
+            onPressed: notifier.pick,
           ),
         ],
       ),
@@ -455,38 +478,6 @@ class _FactRow extends StatelessWidget {
   }
 }
 
-class _Idle extends StatelessWidget {
-  const _Idle({required this.onPick, this.cancelled = false});
-
-  final VoidCallback onPick;
-  final bool cancelled;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          cancelled
-              ? 'Import cancelled.'
-              : 'Choose an Exportify ZIP or CSV files, or an official Spotify ZIP. Review before uploading.',
-          style: context.tokens.body,
-        ),
-        const SizedBox(height: 12),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TapeButton(
-            key: const Key('import-pick'),
-            label: 'Choose files',
-            onPressed: onPick,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class _Inspecting extends StatelessWidget {
   const _Inspecting({
     required this.archive,
@@ -556,10 +547,11 @@ class _Inventory extends StatelessWidget {
     }
     final extended = preview.package == ExportPackage.spotifyExtended;
     final reviewing = preview.selection != null;
+    final unknownPackage = inventory.package == null;
     final package = StatusWord(
       key: const Key('import-file-package'),
       label: packageName(inventory.package),
-      kind: inventory.package == null ? StatusKind.warn : StatusKind.ok,
+      kind: unknownPackage ? StatusKind.warn : StatusKind.ok,
     );
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -592,11 +584,14 @@ class _Inventory extends StatelessWidget {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               Text(
-                '${state.archive.name} · ${formatBytes(state.archive.bytes)} · ',
+                '${state.archive.name} · ${formatBytes(state.archive.bytes)}'
+                '${unknownPackage ? ' · ' : ''}',
                 key: const Key('import-file-name'),
                 style: tokens.meta,
               ),
-              package,
+              // A package that read cleanly says nothing; only an unknown or
+              // partial one is worth a word (smoke round seven, note 4).
+              if (unknownPackage) package,
             ],
           ),
           const SizedBox(height: 6),
@@ -743,10 +738,8 @@ class _Inventory extends StatelessWidget {
             child: TextAction(
               key: ImportSheet.newFileKey,
               label: 'Choose a different file',
-              onPressed: () {
-                notifier.reset();
-                notifier.pick();
-              },
+              // A dismissed picker leaves this step exactly as it was.
+              onPressed: notifier.pick,
             ),
           ),
         ],
@@ -963,10 +956,7 @@ class _Done extends ConsumerWidget {
             label: extended
                 ? 'Import the account data too'
                 : 'Import the extended history too',
-            onPressed: () {
-              notifier.reset();
-              notifier.pick();
-            },
+            onPressed: notifier.pick,
           ),
         ),
         const _WaitingFile(),
@@ -1180,10 +1170,7 @@ class _Failed extends StatelessWidget {
           child: TextAction(
             key: const Key('import-try-another'),
             label: 'Try another file',
-            onPressed: () {
-              notifier.reset();
-              notifier.pick();
-            },
+            onPressed: notifier.pick,
           ),
         ),
         const _WaitingFile(),

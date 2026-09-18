@@ -160,3 +160,18 @@ order listed in revision 1 of the shape board.
   collection roles" checkbox goes with the bottom buttons — pressing Upload is
   the review (the Liked Songs replacement tick stays). Only this step is full
   height; the other steps still hug their content.
+- 2026-09-18, smoke round seven: the import flow loses its idle step. Every
+  "Choose files" chip — the Spotify pane's, the Apple steps', Home's "Choose a
+  ZIP", Library's and the sources screen's "Import again" — now opens the
+  **document picker straight away** through `openImportFlow`, and the sheet
+  appears only once a file has been read (inspecting → review → uploading). A
+  dismissed picker leaves nothing behind, and a cancelled read or upload closes
+  the sheet rather than landing on a "Choose files" step, so `_Idle` is gone.
+  In the review step: every file entry is an **outlined** `InsetGroup`
+  (`outlined: true`, a `tokens.hairline` border on the rounded fill — other
+  groups are unchanged), its caption spreads file name left and entry count
+  right, **Set all…** becomes a `LabelChip` on the right of the counts line,
+  the header's meta line is just name · size (a package `StatusWord` appears
+  only for an unknown or partial package), and the **Playlist action** row is
+  drawn only when there is an existing playlist to attach to — with nothing to
+  choose between, the file simply creates a new playlist.

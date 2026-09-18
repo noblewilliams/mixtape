@@ -187,26 +187,49 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
   /// Opens the document picker; a dismissed picker changes nothing, and a
   /// picker that cannot open fails the flow with nothing to report.
   Future<void> pick() async {
+    final archive = await _runPicker();
+    if (archive != null) await inspect(archive);
+  }
+
+  /// The picker on its own, for the entry points that put the picker up
+  /// before any sheet (smoke round seven, note 1): the inspection runs on
+  /// from here rather than being waited for, so the caller can show the
+  /// sheet over the file being read.
+  ///
+  /// True when there is something for a sheet to show — a file being read,
+  /// or the failure of a picker that could not open. False when the listener
+  /// dismissed the picker, which is not an event: nothing changed.
+  Future<bool> chooseFile() async {
+    final before = state;
+    final archive = await _runPicker();
+    if (archive == null) return !identical(state, before);
+    unawaited(inspect(archive));
+    return true;
+  }
+
+  /// Runs the platform picker. Null when the listener dismissed it or it
+  /// could not open — [state] carries the failure in the second case.
+  Future<PickedArchive?> _runPicker() async {
     final PickedArchive? archive;
     try {
       archive = await ref.read(archivePickerProvider).pick();
     } catch (error) {
       if (kDebugMode) debugPrint('import pick failed: ${error.runtimeType}');
-      if (!ref.mounted || state is ImportUploading) return;
+      if (!ref.mounted || state is ImportUploading) return null;
       _generation++;
       state = const ImportFailed(
         archive: null,
         message: "Couldn't open the file picker. Try again.",
         diagnostics: null,
       );
-      return;
+      return null;
     }
-    if (archive == null) return;
+    if (archive == null) return null;
     if (!ref.mounted) {
       await archive.discardTemporaryCopy();
-      return;
+      return null;
     }
-    await inspect(archive);
+    return archive;
   }
 
   /// Parses the archive for the inventory, with days local to the device

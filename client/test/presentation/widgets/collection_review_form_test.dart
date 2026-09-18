@@ -9,6 +9,7 @@ import 'package:mixtape/import/zip_reader.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/collection_review_form.dart';
 import 'package:mixtape/presentation/widgets/foundation/inset_group.dart';
+import 'package:mixtape/presentation/widgets/foundation/label_chip.dart';
 import 'package:mixtape/presentation/widgets/foundation/mixtape_menu.dart';
 import 'package:mixtape/presentation/widgets/foundation/segmented_toggle.dart';
 
@@ -112,6 +113,14 @@ Future<CollectionSelection Function()> pumpForm(
   return () => selection;
 }
 
+/// A collection already imported, so a file has something to attach to.
+const attachCandidate = ImportedCollection(
+  key: 'spotify:playlist:1',
+  name: 'Late night',
+  fingerprint: 'f1',
+  fileHash: null,
+);
+
 CollectionSelection selectionFor(
   ListeningExportSnapshot snapshot, {
   List<String> ids = const [],
@@ -180,7 +189,7 @@ void main() {
     final current = await pumpForm(
       tester,
       parsed.snapshot,
-      selectionFor(parsed.snapshot),
+      selectionFor(parsed.snapshot, playlists: const [attachCandidate]),
     );
 
     expect(find.byType(SegmentedToggle<String>), findsOneWidget);
@@ -188,7 +197,8 @@ void main() {
     expect(find.text('Playlist'), findsOneWidget);
     expect(find.text('Liked Songs'), findsOneWidget);
     expect(find.text('Skip'), findsOneWidget);
-    // A playlist file names where it lands, as a flush row in the same group.
+    // With something to attach to, the file names where it lands, as a flush
+    // row in the same group.
     expect(find.byKey(const ValueKey('collection-target-0')), findsOneWidget);
     expect(find.text('Create new playlist'), findsOneWidget);
     expect(
@@ -226,18 +236,42 @@ void main() {
       sidePadding: 20,
     );
 
-    expect(find.text('DOPAMINE.CSV · 1 ENTRY'), findsOneWidget);
-    expect(find.text('LATE_NIGHT.CSV · 1 ENTRY'), findsOneWidget);
+    // The caption spreads: file name on the left, count on the right.
+    expect(find.text('DOPAMINE.CSV'), findsOneWidget);
+    expect(find.text('LATE_NIGHT.CSV'), findsOneWidget);
+    expect(find.text('1 ENTRY'), findsNWidgets(2));
+    final name = tester.getRect(find.text('DOPAMINE.CSV'));
+    final count = tester.getRect(find.text('1 ENTRY').first);
+    expect(name.left, lessThan(count.left));
+    // The count is pushed to the far edge of its own entry, not tucked in
+    // behind the name.
+    expect(count.left - name.right, greaterThan(100));
+    expect(
+      count.right,
+      greaterThan(tester.getRect(find.text('LATE_NIGHT.CSV')).right),
+    );
+    // Every entry is a bordered card, and nothing is left to choose about
+    // where a playlist lands, so that row is not drawn at all.
+    for (var i = 0; i < 2; i++) {
+      expect(
+        tester
+            .widget<InsetGroup>(find.byKey(ValueKey('collection-file-$i')))
+            .outlined,
+        isTrue,
+      );
+      expect(find.byKey(ValueKey('collection-target-$i')), findsNothing);
+    }
     // No track or artist name anywhere: file names, counts and the playlist
     // names the listener is naming themselves.
     expect(find.textContaining('T0'), findsNothing);
     expect(find.text('Use as'), findsNothing, reason: 'the toggle says it');
 
+    // The bordered box itself, inside the group's own bottom margin.
     Rect surfaceOf(int i) => tester.getRect(
       find
           .descendant(
             of: find.byKey(ValueKey('collection-file-$i')),
-            matching: find.byType(ClipRRect),
+            matching: find.byType(DecoratedBox),
           )
           .first,
     );
@@ -261,6 +295,49 @@ void main() {
         findsOneWidget,
       );
     }
+    expect(tester.takeException(), isNull);
+  });
+
+
+  testWidgets('with nothing to attach to, the file still creates a new '
+      'playlist and shows no action row', (tester) async {
+    final snapshot = snapshotOf(['Dopamine']);
+    final current = await pumpForm(tester, snapshot, selectionFor(snapshot));
+
+    expect(find.byKey(const ValueKey('collection-target-0')), findsNothing);
+    expect(find.text('Create new playlist'), findsNothing);
+    expect(current().files.single.target, isNull, reason: 'a new playlist');
+    final applied = current().change(confirmed: true).apply(snapshot);
+    expect(applied.snapshot.playlists.single.name, 'Dopamine');
+    expect(applied.playlistReview.single['baseFingerprint'], isNull);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Set all is a chip on the counts line, not a word', (
+    tester,
+  ) async {
+    final snapshot = snapshotOf(['Dopamine', 'Late night']);
+    await pumpForm(
+      tester,
+      snapshot,
+      selectionFor(snapshot),
+      surface: const Size(390, 1400),
+      sidePadding: 20,
+    );
+
+    final chip = tester.widget<LabelChip>(
+      find.byKey(CollectionReviewForm.setAllKey),
+    );
+    expect(chip.label, 'Set all…');
+    expect(chip.hole, isFalse, reason: 'no reel hole on an action chip');
+    final counts = tester.getRect(find.byKey(const Key('collection-summary')));
+    final chipRect = tester.getRect(find.byKey(CollectionReviewForm.setAllKey));
+    expect(chipRect.left, greaterThan(counts.right));
+    expect(
+      chipRect.center.dy,
+      moreOrLessEquals(counts.center.dy, epsilon: 2),
+      reason: 'on the same line as the counts',
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -320,14 +397,7 @@ void main() {
     final parsed = await parseSample(tester);
     final initial = selectionFor(
       parsed.snapshot,
-      playlists: const [
-        ImportedCollection(
-          key: 'spotify:playlist:1',
-          name: 'Late night',
-          fingerprint: 'f1',
-          fileHash: null,
-        ),
-      ],
+      playlists: const [attachCandidate],
     );
     final current = await pumpForm(tester, parsed.snapshot, initial);
 

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/listening/listening_models.dart';
+import 'package:mixtape/presentation/screens/import_sheet.dart';
 import 'package:mixtape/presentation/screens/spotify_request_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/inset_group.dart';
@@ -12,6 +13,7 @@ import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
 import 'package:mixtape/presentation/widgets/foundation/text_action.dart';
 import 'package:mixtape/presentation/widgets/library_sync_sheet.dart';
 
+import '../helpers/fake_import_service.dart';
 import '../helpers/fake_listening_api.dart';
 import '../helpers/onboarding_harness.dart';
 
@@ -514,5 +516,69 @@ void main() {
         expect(tester.takeException(), isNull);
       },
     );
+  });
+
+  group('Choose files goes straight to the picker (smoke round seven)', () {
+    testWidgets('the chip picks with no sheet in between, and a dismissed '
+        'picker leaves nothing on screen', (tester) async {
+      final picker = FakeArchivePicker();
+      final service = FakeImportService();
+      await pumpRequest(
+        tester,
+        onboardingContainer(
+          listening: FakeListeningApi(
+            onboarding: onboardingState(chosenService: 'spotify'),
+          ),
+          picker: picker,
+          importService: service,
+        ),
+        const SpotifyRequestScreen(),
+      );
+
+      await tester.tap(find.byKey(const Key('choose-import-files')));
+      await tester.pumpAndSettle();
+
+      expect(picker.picks, 1, reason: 'the picker opened straight away');
+      expect(find.byType(ImportSheet), findsNothing);
+      expect(service.inspected, isEmpty);
+    });
+
+    testWidgets('a chosen file brings the sheet up on the reading step', (
+      tester,
+    ) async {
+      final picker = FakeArchivePicker(extendedArchive);
+      final service = FakeImportService()..holdInspect = true;
+      await pumpRequest(
+        tester,
+        onboardingContainer(
+          listening: FakeListeningApi(
+            onboarding: onboardingState(chosenService: 'spotify'),
+          ),
+          picker: picker,
+          importService: service,
+        ),
+        const SpotifyRequestScreen(),
+      );
+
+      await tester.tap(find.byKey(const Key('choose-import-files')));
+      // Not settled: the spinner over a file still being read never settles.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(find.byType(ImportSheet), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(
+        find.textContaining('my_spotify_data_extended.zip'),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(ImportSheet),
+          matching: find.text('Choose files'),
+        ),
+        findsNothing,
+        reason: 'the sheet has no idle step of its own',
+      );
+    });
   });
 }

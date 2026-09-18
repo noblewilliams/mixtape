@@ -323,7 +323,9 @@ class _SpotifyRequestScreenState extends ConsumerState<SpotifyRequestScreen> {
       LabelChip(
         key: const Key('choose-import-files'),
         label: 'Choose files',
-        onPressed: () => unawaited(showImportSheet(context)),
+        // Straight to the picker; the sheet follows the file (smoke round
+        // seven, note 1).
+        onPressed: () => unawaited(openImportFlow(context, ref)),
       ),
     ],
   );
@@ -463,13 +465,13 @@ class _AppleSyncStatus extends ConsumerWidget {
 
 /// Apple's request steps and the way back in with the ZIP, inside the deeper
 /// group.
-class _AppleSteps extends StatelessWidget {
+class _AppleSteps extends ConsumerWidget {
   const _AppleSteps({required this.onOpenAddress});
 
   final VoidCallback onOpenAddress;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final tokens = context.tokens;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
@@ -499,7 +501,7 @@ class _AppleSteps extends StatelessWidget {
             child: LabelChip(
               key: const Key('choose-apple-files'),
               label: 'Choose files',
-              onPressed: () => unawaited(showImportSheet(context)),
+              onPressed: () => unawaited(openImportFlow(context, ref)),
             ),
           ),
           Text(appleFileNote, style: tokens.meta),

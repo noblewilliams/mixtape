@@ -7,12 +7,23 @@ import '../../theme/mixtape_theme.dart';
 ///
 /// `docs/mockups/2026-09-17-mobile-shell-r3.html` → `.group`, `.grow`.
 class InsetGroup extends StatelessWidget {
-  const InsetGroup({super.key, required this.children, this.header});
+  const InsetGroup({
+    super.key,
+    required this.children,
+    this.header,
+    this.outlined = false,
+  });
 
   final List<Widget> children;
 
   /// Usually a `SectionWord`, drawn above the surface.
   final Widget? header;
+
+  /// Draws a hairline around the rounded surface, so a group reads as a card
+  /// rather than a tint — the import review's file entries (founder, smoke
+  /// round seven, note 2). Off everywhere else, which is the board's own
+  /// borderless group.
+  final bool outlined;
 
   /// The rule between rows.
   static const Key hairlineKey = Key('inset-group-hairline');
@@ -59,6 +70,9 @@ class InsetGroup extends StatelessWidget {
           decoration: BoxDecoration(
             color: surfaceColorFor(Theme.of(context).brightness),
             borderRadius: BorderRadius.circular(MixtapeMetrics.groupRadius),
+            border: outlined
+                ? Border.all(color: tokens.hairline, width: 1)
+                : null,
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(MixtapeMetrics.groupRadius),

@@ -59,18 +59,20 @@ void expectNativeControls(WidgetTester tester, Finder root) {
 
 /// A Home stand-in that opens the sheet the way Home and the sources screen
 /// do, so "Make your first mix" has a first route to pop back to.
-class _Host extends StatelessWidget {
+class _Host extends ConsumerWidget {
   const _Host();
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context, WidgetRef ref) => Scaffold(
         key: const Key('host'),
         body: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
+            // The "Choose files" chip's path: the picker first, the sheet
+            // only once there is a file (smoke round seven, note 1).
             TextButton(
               key: const Key('open'),
-              onPressed: () => showImportSheet(context),
+              onPressed: () => openImportFlow(context, ref),
               child: const Text('open'),
             ),
             // How Home opens it over a run in flight, when a file handed to
@@ -132,12 +134,16 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  /// Taps the host's chip: the picker runs, and the sheet follows it when a
+  /// file was chosen. [settle] is false while an inspection is held open — a
+  /// spinner never settles.
   Future<void> open(
     WidgetTester tester,
     ProviderContainer c, {
     Brightness brightness = Brightness.light,
     double textScale = 1,
     Size? surface,
+    bool settle = true,
   }) async {
     await pumpHost(
       tester,
@@ -147,7 +153,12 @@ void main() {
       surface: surface,
     );
     await tester.tap(find.byKey(const Key('open')));
-    await tester.pumpAndSettle();
+    if (settle) {
+      await tester.pumpAndSettle();
+    } else {
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+    }
   }
 
   Finder sheet() => find.byType(ImportSheet);
@@ -161,15 +172,10 @@ void main() {
     await tester.tap(finder);
   }
 
-  testWidgets('idle: Choose files picks and inspects, then the inventory shows the file, the '
+  testWidgets('the chip picks and inspects, then the inventory shows the file, the '
       'package, the counts, the zone, the files, and the private toggle off', (tester) async {
     final c = container();
     await open(tester, c);
-    expect(find.text('Choose files'), findsOneWidget);
-    expectNativeControls(tester, sheet());
-
-    await tapInSheet(tester, const Key('import-pick'));
-    await tester.pumpAndSettle();
 
     expect(picker.picks, 1);
     expect(find.text('my_spotify_data_extended.zip'), findsOneWidget);
@@ -217,9 +223,6 @@ void main() {
   testWidgets('the private toggle flips the provider; the account package has none', (tester) async {
     final c = container();
     await open(tester, c);
-    await tapInSheet(tester, const Key('import-pick'));
-    await tester.pumpAndSettle();
-
     await tapInSheet(tester, const Key('import-private-sessions'));
     await tester.pumpAndSettle();
     expect((c.read(listeningImportProvider) as ImportInventory).includePrivateSessions, isTrue);
@@ -268,8 +271,6 @@ void main() {
     final c = container();
     service.preview = preview;
     await open(tester, c);
-    await tapInSheet(tester, const Key('import-pick'));
-    await tester.pumpAndSettle();
   }
 
   testWidgets('one private play reads in the singular; none replaces the hint and keeps the switch',
@@ -316,13 +317,11 @@ void main() {
     expect(find.textContaining('podcast'), findsNothing);
   });
 
-  testWidgets('inspecting shows the file name with a spinner and a Cancel that lands on cancelled',
+  testWidgets('inspecting shows the file name with a spinner and a Cancel that closes the sheet',
       (tester) async {
     final c = container();
     service.holdInspect = true;
-    await open(tester, c);
-    await tapInSheet(tester, const Key('import-pick'));
-    await tester.pump();
+    await open(tester, c, settle: false);
 
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
     expect(find.textContaining('my_spotify_data_extended.zip'), findsOneWidget);
@@ -331,16 +330,16 @@ void main() {
     await tapInSheet(tester, const Key('import-cancel'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Import cancelled.'), findsOneWidget);
-    expect(find.byKey(const Key('import-pick')), findsOneWidget);
+    // Nothing was read, so there is nothing to show: the sheet goes with it.
+    expect(sheet(), findsNothing);
+    expect(importSheetShowing, isFalse);
+    expect(c.read(listeningImportProvider), isA<ImportFlowCancelled>());
   });
 
   testWidgets('uploading shows real progress, announces the status as a live region, and can '
       'cancel', (tester) async {
     final c = container();
     await open(tester, c);
-    await tapInSheet(tester, const Key('import-pick'));
-    await tester.pumpAndSettle();
     await tapInSheet(tester, const Key('import-upload'));
     await tester.pump();
 
@@ -375,15 +374,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(service.cancels, 1);
-    expect(find.text('Import cancelled.'), findsOneWidget);
+    expect(sheet(), findsNothing, reason: 'a cancelled run shows nothing');
   });
 
   testWidgets('done: counts, ledger range, the enrichment note, Make your first mix pops to Home, '
       'Import the account data too picks again', (tester) async {
     final c = container();
     await open(tester, c);
-    await tapInSheet(tester, const Key('import-pick'));
-    await tester.pumpAndSettle();
     await tapInSheet(tester, const Key('import-upload'));
     await tester.pump();
     service.finish(extendedResult());
@@ -429,8 +426,6 @@ void main() {
     service.preview = accountPreview;
     picker.next = accountArchive;
     await open(tester, c);
-    await tapInSheet(tester, const Key('import-pick'));
-    await tester.pumpAndSettle();
     await tapInSheet(tester, const Key('import-upload'));
     await tester.pump();
     service.finish(accountResult());
@@ -449,8 +444,6 @@ void main() {
     service.preview = accountPreview;
     picker.next = accountArchive;
     await open(tester, c);
-    await tapInSheet(tester, const Key('import-pick'));
-    await tester.pumpAndSettle();
     await tapInSheet(tester, const Key('import-upload'));
     await tester.pump();
     service.finish(accountResult(playlistError: const ListeningImportProtocolException()));
@@ -501,9 +494,6 @@ void main() {
       diagnoser: (_) => report.future,
     );
     await open(tester, c);
-    await tapInSheet(tester, const Key('import-pick'));
-    await tester.pumpAndSettle();
-
     expect(find.text("Couldn't read this export"), findsOneWidget);
     expect(find.textContaining('Expected files'), findsOneWidget);
     expect(find.text('Building the report…'), findsOneWidget);
@@ -535,9 +525,6 @@ void main() {
       () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null),
     );
     await open(tester, c);
-    await tapInSheet(tester, const Key('import-pick'));
-    await tester.pumpAndSettle();
-
     expect(find.text("Couldn't read this export"), findsOneWidget);
     expect(find.textContaining("Streaming_History_Audio_2021-2023_1.json couldn't be read"), findsOneWidget);
     expect(
@@ -571,8 +558,6 @@ void main() {
       (tester) async {
     final c = container();
     await open(tester, c);
-    await tapInSheet(tester, const Key('import-pick'));
-    await tester.pumpAndSettle();
     await tapInSheet(tester, const Key('import-upload'));
     await tester.pump();
     service.fail(const ListeningImportProtocolException());
@@ -605,8 +590,6 @@ void main() {
       'moment the run lands — with the result still on it', (tester) async {
     final c = container();
     await open(tester, c);
-    await tapInSheet(tester, const Key('import-pick'));
-    await tester.pumpAndSettle();
     await tapInSheet(tester, const Key('import-upload'));
     await tester.pump();
     // The listener puts the sheet away mid-upload, and a file handed to the
@@ -648,8 +631,6 @@ void main() {
       opened: opened,
     );
     await open(tester, c);
-    await tapInSheet(tester, const Key('import-pick'));
-    await tester.pumpAndSettle();
     await tapInSheet(tester, const Key('import-upload'));
     await tester.pump();
     service.finish(extendedResult());
@@ -684,8 +665,6 @@ void main() {
       opened: opened,
     );
     await open(tester, c);
-    await tapInSheet(tester, const Key('import-pick'));
-    await tester.pumpAndSettle();
     expect(find.byKey(const Key('import-failed-title')), findsOneWidget);
 
     // The file could not even be copied out of its security scope: there is
@@ -717,9 +696,6 @@ void main() {
       textScale: 2,
       surface: const Size(320, 700),
     );
-    await tapInSheet(tester, const Key('import-pick'));
-    await tester.pumpAndSettle();
-
     expect(find.text('my_spotify_data_extended.zip'), findsOneWidget);
     expect(tester.takeException(), isNull);
     // The sheet itself never grows past its share of the screen; the content
@@ -742,9 +718,6 @@ void main() {
       'clear of the keyboard', (tester) async {
     final c = container();
     await open(tester, c, surface: const Size(390, 844));
-    await tapInSheet(tester, const Key('import-pick'));
-    await tester.pumpAndSettle();
-
     expect(find.text('my_spotify_data_extended.zip'), findsOneWidget);
     expect(tester.takeException(), isNull);
     expect(tester.getSize(sheet()).width, lessThanOrEqualTo(390));
@@ -770,7 +743,9 @@ void main() {
     'the review step wears one header block and a footer pinned to the '
     'bottom of the sheet while the list scrolls under it',
     (tester) async {
-      tester.view.physicalSize = const Size(390, 844);
+      // A short screen, so the entries outrun the sheet and the list has
+      // somewhere to scroll under the footer.
+      tester.view.physicalSize = const Size(390, 520);
       tester.view.devicePixelRatio = 1;
       tester.view.padding = const FakeViewPadding(bottom: 34);
       tester.view.viewPadding = const FakeViewPadding(bottom: 34);
@@ -780,21 +755,19 @@ void main() {
       service.preview = exportifyPreview();
       picker.next = exportifyArchive;
       await open(tester, c);
-      await tapInSheet(tester, const Key('import-pick'));
-      await tester.pumpAndSettle();
+        await tester.pumpAndSettle();
 
       // One header block: the sheet heading, one line of file facts, the
       // counts, and a Cancel on the heading row's right edge.
       expect(find.text('Review your music'), findsOneWidget);
       expect(
         tester.widget<Text>(find.byKey(const Key('import-file-name'))).data,
-        startsWith('spotify_playlists.zip · 1.2 MB'),
+        'spotify_playlists.zip · 1.2 MB',
       );
       expect(
-        tester
-            .widget<StatusWord>(find.byKey(const Key('import-file-package')))
-            .label,
-        'Exportify saved music',
+        find.byKey(const Key('import-file-package')),
+        findsNothing,
+        reason: 'a package that read cleanly is not worth a word',
       );
       expect(
         tester.widget<Text>(find.byKey(const Key('collection-summary'))).data,
@@ -830,7 +803,7 @@ void main() {
       expect(
         footer.bottom,
         moreOrLessEquals(
-          844 - (34 + ImportSheet.contentBottomPadding),
+          520 - (34 + ImportSheet.contentBottomPadding),
           epsilon: 1,
         ),
       );
@@ -863,9 +836,6 @@ void main() {
     service.preview = exportifyPreview();
     picker.next = exportifyArchive;
     await open(tester, c);
-    await tapInSheet(tester, const Key('import-pick'));
-    await tester.pumpAndSettle();
-
     await tapInSheet(tester, const Key('import-cancel'));
     await tester.pumpAndSettle();
 
@@ -895,13 +865,12 @@ void main() {
       final surface = tester.getRect(find.byKey(MixtapeSheet.surfaceKey));
       expect(surface.bottom, moreOrLessEquals(900, epsilon: 0.5));
 
-      // The idle step hugs its content: what is under "Choose files" is the
-      // sheet's own bottom padding and the home indicator, nothing else.
-      final content = tester.getRect(find.byKey(const Key('import-pick')));
-      expect(
-        surface.bottom - content.bottom,
-        lessThanOrEqualTo(34 + ImportSheet.contentBottomPadding + 1),
+      // One inset under the content: the sheet's own bottom padding clears
+      // the home indicator and nothing clears it a second time.
+      final content = tester.getRect(
+        find.descendant(of: sheet(), matching: find.byType(SingleChildScrollView)),
       );
+      expect(surface.bottom - content.bottom, moreOrLessEquals(34, epsilon: 1));
     },
   );
 }
