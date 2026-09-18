@@ -24,6 +24,7 @@ class LargeTitleScaffold extends StatefulWidget {
     super.key,
     required this.title,
     required this.slivers,
+    this.leading,
     this.trailing,
     this.titleAccessory,
     this.controller,
@@ -36,7 +37,13 @@ class LargeTitleScaffold extends StatefulWidget {
   /// The body. Each sliver is wrapped in [contentPadding].
   final List<Widget> slivers;
 
-  /// Bottom-aligned beside the title — normally a `GlassCluster`.
+  /// A glass cluster (normally Back) pinned at the top-left, above the large
+  /// title and always visible, as Apple Music's pushed screens do. When set,
+  /// [trailing] is pinned on the same row and the title starts below it.
+  final Widget? leading;
+
+  /// Bottom-aligned beside the title — normally a `GlassCluster`. Pinned on
+  /// the [leading] row instead when a leading cluster is given.
   final Widget? trailing;
 
   /// Bottom-aligned beside the title — normally a segmented control.
@@ -52,6 +59,9 @@ class LargeTitleScaffold extends StatefulWidget {
 
   /// The collapsed bar, for tests.
   static const Key smallBarKey = ValueKey('largeTitleScaffold.smallBar');
+
+  /// The pinned leading/trailing row, for tests.
+  static const Key pinnedRowKey = ValueKey('largeTitleScaffold.pinnedRow');
 
   /// The title row's resting height — the board's 46 pt glass cluster.
   static const double titleRowHeight = 46;
@@ -229,6 +239,22 @@ class _LargeTitleScaffoldState extends State<LargeTitleScaffold>
                 : _collapsedBar(context, padding.top),
           ),
         ),
+        if (widget.leading != null)
+          Positioned(
+            top: padding.top,
+            left: content.left,
+            right: content.right,
+            height: LargeTitleScaffold.barHeight,
+            child: Row(
+              key: LargeTitleScaffold.pinnedRowKey,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                widget.leading!,
+                const Spacer(),
+                if (widget.trailing != null) widget.trailing!,
+              ],
+            ),
+          ),
       ],
     );
   }
@@ -254,9 +280,11 @@ class _LargeTitleScaffoldState extends State<LargeTitleScaffold>
       ),
     );
 
+    // With a pinned leading row the trailing cluster lives up there.
+    final pinned = widget.leading != null;
     final accessories = <Widget>[
       if (accessory != null) accessory,
-      if (trailing != null) trailing,
+      if (trailing != null && !pinned) trailing,
     ];
 
     final Widget block = stacked
@@ -299,7 +327,13 @@ class _LargeTitleScaffoldState extends State<LargeTitleScaffold>
       // The title keeps the body's side padding, so both stay on one margin.
       padding: EdgeInsets.fromLTRB(
         side.left,
-        topInset + MixtapeMetrics.largeTitleTopPadding,
+        topInset +
+            MixtapeMetrics.largeTitleTopPadding +
+            // The pinned row sits where the top padding was; keep the title
+            // clear of it.
+            (pinned
+                ? LargeTitleScaffold.barHeight + LargeTitleScaffold.titleGap
+                : 0),
         side.right,
         LargeTitleScaffold.titleBottomGap,
       ),
@@ -344,7 +378,9 @@ class _LargeTitleScaffoldState extends State<LargeTitleScaffold>
                   child: IgnorePointer(
                     child: Center(
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 56),
+                        padding: EdgeInsets.symmetric(
+                          horizontal: widget.leading != null ? 104 : 56,
+                        ),
                         child: Text(
                           widget.title,
                           textAlign: TextAlign.center,

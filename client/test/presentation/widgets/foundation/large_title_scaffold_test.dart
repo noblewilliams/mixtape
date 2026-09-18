@@ -88,6 +88,7 @@ Future<void> _collapse(WidgetTester tester, ScrollController controller) async {
 }
 
 void main() {
+  _leadingTests();
   group('LargeTitleScaffold', () {
     testWidgets('shows the large title and no small bar at offset 0', (
       tester,
@@ -439,5 +440,45 @@ void main() {
       expect(icon.size, 20);
       expect(icon.color, MixtapeTokens.light.text);
     });
+  });
+}
+
+void _leadingTests() {
+  testWidgets('a leading cluster is pinned above the title and survives collapse', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    var backs = 0;
+    final controller = ScrollController();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(MaterialApp(
+      theme: MixtapeTheme.light(),
+      home: Scaffold(
+        body: LargeTitleScaffold(
+          title: 'Playlist',
+          controller: controller,
+          leading: GlassCluster(children: [
+            GlassButton(icon: Icons.chevron_left, label: 'Back', onPressed: () => backs++),
+          ]),
+          trailing: GlassCluster(children: [
+            GlassButton(icon: Icons.more_horiz, label: 'More', onPressed: () {}),
+          ]),
+          slivers: [SliverToBoxAdapter(child: SizedBox(height: 2000))],
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    final row = find.byKey(LargeTitleScaffold.pinnedRowKey);
+    expect(row, findsOneWidget);
+    final title = find.text('Playlist').first;
+    expect(tester.getTopLeft(title).dy, greaterThan(tester.getBottomLeft(row).dy));
+    await tester.tap(find.bySemanticsLabel('Back'));
+    expect(backs, 1);
+    controller.jumpTo(600);
+    await tester.pumpAndSettle();
+    expect(find.byKey(LargeTitleScaffold.smallBarKey), findsOneWidget);
+    await tester.tap(find.bySemanticsLabel('Back'), warnIfMissed: true);
+    expect(backs, 2);
   });
 }

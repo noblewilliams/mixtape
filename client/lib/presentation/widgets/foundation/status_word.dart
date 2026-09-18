@@ -8,7 +8,7 @@ import 'package:flutter/material.dart';
 import '../../theme/mixtape_theme.dart';
 
 /// Which status ink the word carries.
-enum StatusKind { ok, warn, err }
+enum StatusKind { ok, warn, err, muted }
 
 /// An inline coloured word with an optional 14 pt mark.
 ///
@@ -30,12 +30,14 @@ class StatusWord extends StatelessWidget {
     StatusKind.ok => tokens.okInk,
     StatusKind.warn => tokens.warnInk,
     StatusKind.err => tokens.errInk,
+    StatusKind.muted => tokens.muted,
   };
 
   IconData? get _glyph => switch (kind) {
     StatusKind.ok => CupertinoIcons.check_mark_circled,
     StatusKind.err => CupertinoIcons.exclamationmark_circle,
     StatusKind.warn => null,
+    StatusKind.muted => null,
   };
 
   @override
