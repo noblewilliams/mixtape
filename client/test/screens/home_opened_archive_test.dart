@@ -3,16 +3,37 @@
 // cold start (the archive was waiting when Home mounted) and for a file
 // opened while the app is already running.
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/presentation/providers/new_mix_inspiration_provider.dart';
 import 'package:mixtape/presentation/providers/opened_archive_provider.dart';
 import 'package:mixtape/presentation/screens/home_screen.dart';
+import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/screens/import_sheet.dart';
 import 'package:mixtape/presentation/screens/music_sources_screen.dart';
 
 import '../helpers/fake_import_service.dart';
 import '../helpers/fake_listening_api.dart';
 import '../helpers/onboarding_harness.dart';
+
+/// Home under the native theme, on a surface tall enough that the whole
+/// waiting card clears the bottom panel (task 3.3 turns the card into the
+/// board's two flush rows; here it only moved into the open space). The width
+/// is the test default, so the sheets these tests open keep the room they
+/// were written against.
+Future<void> pumpHome(WidgetTester tester, ProviderContainer container) async {
+  tester.view.physicalSize = const Size(800, 1000);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  await tester.pumpWidget(
+    UncontrolledProviderScope(
+      container: container,
+      child: MaterialApp(theme: MixtapeTheme.light(), home: const HomeScreen()),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
 
 void main() {
   testWidgets(
@@ -29,7 +50,7 @@ void main() {
         picker: picker,
         importService: service,
       );
-      await pumpScreen(tester, container, const HomeScreen());
+      await pumpHome(tester, container);
 
       expect(find.byType(ImportSheet), findsOneWidget);
       expect(
@@ -64,7 +85,7 @@ void main() {
         picker: FakeArchivePicker(extendedArchive),
         importService: service,
       );
-      await pumpScreen(tester, container, const HomeScreen());
+      await pumpHome(tester, container);
       await tester.tap(find.byKey(const Key('waiting-choose-zip')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('import-upload')));
@@ -129,7 +150,7 @@ void main() {
         picker: FakeArchivePicker(extendedArchive),
         importService: service,
       );
-      await pumpScreen(tester, container, const HomeScreen());
+      await pumpHome(tester, container);
       await tester.tap(find.byKey(const Key('waiting-choose-zip')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('import-upload')));
@@ -186,7 +207,7 @@ void main() {
         picker: FakeArchivePicker(extendedArchive),
         importService: service,
       );
-      await pumpScreen(tester, container, const HomeScreen());
+      await pumpHome(tester, container);
       await tester.tap(find.byKey(const Key('waiting-choose-zip')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('import-upload')));
@@ -239,7 +260,7 @@ void main() {
         picker: FakeArchivePicker(),
         importService: service,
       );
-      await pumpScreen(tester, container, const HomeScreen());
+      await pumpHome(tester, container);
       // The Library tab owns this entry now (task 2.2); what this case is
       // about is the one sheet, wherever it was opened from.
       Navigator.of(tester.element(find.byType(HomeScreen))).push(
@@ -287,7 +308,7 @@ void main() {
         picker: FakeArchivePicker(extendedArchive),
         importService: service,
       );
-      await pumpScreen(tester, container, const HomeScreen());
+      await pumpHome(tester, container);
       await tester.tap(find.byKey(const Key('waiting-choose-zip')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('import-upload')));

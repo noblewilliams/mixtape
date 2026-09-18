@@ -1,59 +1,124 @@
-import 'dart:async';
-import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../data/suggestions/suggestions_api.dart';
-import '../providers/suggestions_provider.dart';
-import '../providers/device_providers.dart';
+/// The routine suggestion as Home's first idea pill
+/// (`docs/mockups/approved/2026-09-17-mobile-home-states.md` → Pills; frames
+/// I1/I2 in `docs/mockups/2026-09-17-mobile-home-states.html`; plan task 3.2).
+///
+/// The September 9 suggestion card is gone: what is left is one pill in the
+/// panel's first slot. It fills the composer and never sends, it is a skeleton
+/// while the routine loads, and it steps aside for a third starter prompt when
+/// nothing is eligible — Home shows no suggestion error at all, the retry
+/// lives on You.
+library;
 
-class RoutineSuggestions extends ConsumerWidget {
-  const RoutineSuggestions({
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart' show CustomSemanticsAction;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../data/suggestions/suggestions_api.dart';
+import '../providers/device_providers.dart';
+import '../providers/suggestions_provider.dart';
+import '../theme/mixtape_theme.dart';
+import 'foundation/idea_pill.dart';
+
+/// Home's first idea pill: the eligible routine suggestion, a skeleton while
+/// it loads, or [fallback] when there is nothing to suggest.
+class RoutinePillSlot extends ConsumerWidget {
+  const RoutinePillSlot({
     super.key,
-    required this.onCreate,
-    this.busy = false,
+    required this.onFill,
+    required this.builder,
+    this.dimmed = false,
+    this.enabled = true,
   });
-  final Future<void> Function(String) onCreate;
-  final bool busy;
+
+  /// Called with the suggestion's prompt. Filling the field is all a tap ever
+  /// does — the mix is not started until Send.
+  final ValueChanged<String> onFill;
+
+  /// Builds the row around the pill: the skeleton while the routine loads,
+  /// the routine pill once one is eligible, and `null` when none is — which
+  /// is the panel's cue to show a third starter prompt instead.
+  final Widget Function(BuildContext context, Widget? pill) builder;
+
+  /// The typing state — the field already has text.
+  final bool dimmed;
+
+  /// False while a mix is being created: the pill neither fills nor opens.
+  final bool enabled;
+
+  static const Key pillKey = Key('routine-pill');
+  static const Key skeletonKey = Key('routine-pill-skeleton');
+  static const Key notTodayKey = Key('routine-not-today');
+  static const Key whyKey = Key('routine-why');
+  static const Key turnOffKey = Key('routine-turn-off');
+  static const Key whySheetKey = Key('routine-why-sheet');
+
+  static const String notTodayLabel = 'Not today';
+  static const String whyLabel = 'Why this?';
+  static const String turnOffLabel = 'Turn off routine suggestions';
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final api = ref.watch(suggestionsApiProvider);
-    return _RoutineBody(
+    // Keyed on the API so a sign-in or sign-out starts a fresh load instead of
+    // leaving another account's suggestion on the pill.
+    return _RoutinePillBody(
       key: ObjectKey(api),
       api: api,
       readZone: ref.watch(suggestionTimeZoneProvider),
-      onCreate: onCreate,
-      busy: busy,
+      onFill: onFill,
+      builder: builder,
+      dimmed: dimmed,
+      enabled: enabled,
     );
   }
 }
 
-class _RoutineBody extends StatefulWidget {
-  const _RoutineBody({
+class _RoutinePillBody extends StatefulWidget {
+  const _RoutinePillBody({
     super.key,
     required this.api,
     required this.readZone,
-    required this.onCreate,
-    required this.busy,
+    required this.onFill,
+    required this.builder,
+    required this.dimmed,
+    required this.enabled,
   });
+
   final SuggestionsApi api;
   final TimeZoneReader readZone;
-  final Future<void> Function(String) onCreate;
-  final bool busy;
+  final ValueChanged<String> onFill;
+  final Widget Function(BuildContext context, Widget? pill) builder;
+  final bool dimmed;
+  final bool enabled;
+
   @override
-  State<_RoutineBody> createState() => _RoutineBodyState();
+  State<_RoutinePillBody> createState() => _RoutinePillBodyState();
 }
 
-class _RoutineBodyState extends State<_RoutineBody>
+enum _RoutineAction { notToday, why, turnOff }
+
+class _RoutinePillBodyState extends State<_RoutinePillBody>
     with WidgetsBindingObserver {
   SuggestionsData? _data;
-  String? _error;
+
+  /// The first load, which is the only one the skeleton stands in for: a
+  /// later refresh must never blank a pill that is already up.
+  bool _loading = true;
   bool _working = false;
+
+  /// Answers a load only if it is still the most recent one asked for.
   int _read = 0;
   Timer? _timer;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     unawaited(_refresh());
+    // A routine is time-of-day eligible, so the pill is re-checked while Home
+    // sits open — the same minute tick the September 9 card used.
     _timer = Timer.periodic(const Duration(minutes: 1), (_) {
       if (!_working &&
           WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed &&
@@ -75,6 +140,9 @@ class _RoutineBodyState extends State<_RoutineBody>
     super.dispose();
   }
 
+  /// A failure — a server error, or a device with no time zone to ask about —
+  /// leaves the slot empty, which the panel fills with a starter: the board
+  /// shows no suggestion error on Home at all.
   Future<void> _refresh() async {
     final request = ++_read;
     try {
@@ -84,226 +152,165 @@ class _RoutineBodyState extends State<_RoutineBody>
       if (mounted && request == _read) {
         setState(() {
           _data = data;
-          _error = null;
+          _loading = false;
         });
       }
     } catch (_) {
       if (mounted && request == _read) {
-        setState(() => _error = 'Could not load suggestions. Try again.');
+        setState(() {
+          _data = null;
+          _loading = false;
+        });
       }
     }
   }
 
+  /// One action at a time, and a failure is swallowed: Home has nowhere to say
+  /// so, and the pill going quiet is the whole consequence.
   Future<void> _act(Future<void> Function() action) async {
-    if (_working || widget.busy) return;
-    _read++;
-    setState(() {
-      _working = true;
-      _error = null;
-    });
+    if (_working || !widget.enabled) return;
+    _read++; // a load in flight must not overwrite what this action leaves
+    setState(() => _working = true);
     try {
       await action();
     } catch (_) {
-      if (mounted) {
-        setState(
-          () => _error =
-              'Could not complete that action. Refresh suggestions and try again.',
-        );
-      }
+      // Deliberately silent; see the doc comment.
     } finally {
       if (mounted) setState(() => _working = false);
     }
   }
 
-  Future<void> _settings() async {
-    final enabled = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) =>
-            _SuggestionSettings(api: widget.api, enabled: _data!.enabled),
+  /// `select` is what records the choice server-side, and it answers with the
+  /// prompt — which goes into the field, never to the DJ.
+  Future<void> _fill(RoutineSuggestion suggestion) => _act(() async {
+    final zone = await widget.readZone();
+    if (!mounted) return;
+    final prompt = await widget.api.select(suggestion.id, zone);
+    if (!mounted) return;
+    widget.onFill(prompt);
+  });
+
+  Future<void> _notToday(RoutineSuggestion suggestion) => _act(() async {
+    final zone = await widget.readZone();
+    if (!mounted) return;
+    await widget.api.dismiss(suggestion.id, zone);
+    if (!mounted) return;
+    setState(
+      () => _data = SuggestionsData(
+        enabled: _data?.enabled ?? true,
+        dismissed: true,
       ),
     );
-    if (!mounted || enabled == null) return;
-    setState(() => _data = SuggestionsData(enabled: enabled, dismissed: false));
-    await _refresh();
-  }
+  });
 
-  @override
-  Widget build(BuildContext context) {
-    final suggestion = _data?.suggestion;
-    final disabled = _working || widget.busy;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (suggestion != null)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: Theme.of(context).colorScheme.outlineVariant,
-                ),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'A familiar moment',
-                    style: Theme.of(context).textTheme.labelMedium,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    suggestion.title,
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(suggestion.reason),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      FilledButton(
-                        onPressed: disabled
-                            ? null
-                            : () => _act(() async {
-                                final zone = await widget.readZone();
-                                if (!mounted) return;
-                                final prompt = await widget.api.select(
-                                  suggestion.id,
-                                  zone,
-                                );
-                                if (mounted) await widget.onCreate(prompt);
-                              }),
-                        child: Text(
-                          widget.busy ? 'Making your mix…' : 'Make this mix',
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: disabled
-                            ? null
-                            : () => _act(() async {
-                                final zone = await widget.readZone();
-                                if (!mounted) return;
-                                await widget.api.dismiss(suggestion.id, zone);
-                                if (mounted) {
-                                  setState(
-                                    () => _data = SuggestionsData(
-                                      enabled: _data!.enabled,
-                                      dismissed: true,
-                                    ),
-                                  );
-                                }
-                              }),
-                        child: const Text('Not today'),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          if (suggestion == null && _data?.enabled == true)
-            Text(
-              _data!.dismissed
-                  ? 'That suggestion is hidden for today.'
-                  : 'Your usual moments will appear here as Mixtape gets to know your routines.',
-            ),
-          if (_data == null && _error == null)
-            const Text('Checking your usual moments…'),
-          if (_error != null) ...[
-            Semantics(liveRegion: true, child: Text(_error!)),
-            TextButton(
-              onPressed: disabled ? null : _refresh,
-              child: const Text('Refresh suggestions'),
-            ),
+  Future<void> _turnOff() => _act(() async {
+    await widget.api.save(false);
+    if (!mounted) return;
+    setState(
+      () => _data = const SuggestionsData(enabled: false, dismissed: false),
+    );
+  });
+
+  Future<void> _why(RoutineSuggestion suggestion) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => Padding(
+        key: RoutinePillSlot.whySheetKey,
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(suggestion.title, style: context.tokens.section),
+            const SizedBox(height: 8),
+            Text(suggestion.reason, style: context.tokens.body),
           ],
-          TextButton(
-            onPressed: _data == null || disabled ? null : _settings,
-            child: const Text('Suggestion settings'),
-          ),
-        ],
+        ),
       ),
     );
   }
-}
 
-class _SuggestionSettings extends ConsumerStatefulWidget {
-  const _SuggestionSettings({required this.api, required this.enabled});
-  final SuggestionsApi api;
-  final bool enabled;
-  @override
-  ConsumerState<_SuggestionSettings> createState() =>
-      _SuggestionSettingsState();
-}
-
-class _SuggestionSettingsState extends ConsumerState<_SuggestionSettings> {
-  late bool _enabled = widget.enabled;
-  bool _saving = false;
-  String? _error;
-  @override
-  Widget build(BuildContext context) {
-    final currentApi = ref.watch(suggestionsApiProvider);
-    if (!identical(currentApi, widget.api)) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Suggestion settings')),
-        body: const Padding(
-          padding: EdgeInsets.all(16),
-          child: Text(
-            'Your account changed. Return to Home to update suggestions.',
-          ),
+  /// The board's native context menu, anchored on the pill.
+  Future<void> _openMenu(RoutineSuggestion suggestion) async {
+    final box = context.findRenderObject() as RenderBox?;
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (box == null || overlay == null || !box.hasSize) return;
+    final anchor = box.localToGlobal(Offset.zero, ancestor: overlay) & box.size;
+    final choice = await showMenu<_RoutineAction>(
+      context: context,
+      position: RelativeRect.fromRect(anchor, Offset.zero & overlay.size),
+      items: const [
+        PopupMenuItem(
+          key: RoutinePillSlot.notTodayKey,
+          value: _RoutineAction.notToday,
+          child: Text(RoutinePillSlot.notTodayLabel),
         ),
+        PopupMenuItem(
+          key: RoutinePillSlot.whyKey,
+          value: _RoutineAction.why,
+          child: Text(RoutinePillSlot.whyLabel),
+        ),
+        PopupMenuItem(
+          key: RoutinePillSlot.turnOffKey,
+          value: _RoutineAction.turnOff,
+          child: Text(RoutinePillSlot.turnOffLabel),
+        ),
+      ],
+    );
+    if (!mounted || choice == null) return;
+    switch (choice) {
+      case _RoutineAction.notToday:
+        await _notToday(suggestion);
+      case _RoutineAction.why:
+        await _why(suggestion);
+      case _RoutineAction.turnOff:
+        await _turnOff();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(context, _pill());
+
+  Widget? _pill() {
+    if (_loading) {
+      return IdeaPill(
+        key: RoutinePillSlot.skeletonKey,
+        label: IdeaPill.skeletonLabel,
+        skeleton: true,
+        dimmed: widget.dimmed,
       );
     }
-    return Scaffold(
-      appBar: AppBar(title: const Text('Suggestion settings')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Text(
-            'Suggestions, on your terms.',
-            style: Theme.of(context).textTheme.headlineSmall,
+    final suggestion = _data?.suggestion;
+    if (suggestion == null) return null;
+
+    final live = widget.enabled && !_working;
+    // Merged so the label, the button and the three actions land on one node:
+    // VoiceOver reads the pill and offers the same three as rotor actions.
+    return MergeSemantics(
+      child: Semantics(
+        customSemanticsActions: <CustomSemanticsAction, VoidCallback>{
+          const CustomSemanticsAction(
+            label: RoutinePillSlot.notTodayLabel,
+          ): () =>
+              unawaited(_notToday(suggestion)),
+          const CustomSemanticsAction(label: RoutinePillSlot.whyLabel): () =>
+              unawaited(_why(suggestion)),
+          const CustomSemanticsAction(
+            label: RoutinePillSlot.turnOffLabel,
+          ): () =>
+              unawaited(_turnOff()),
+        },
+        child: GestureDetector(
+          onLongPress: live ? () => unawaited(_openMenu(suggestion)) : null,
+          child: IdeaPill(
+            key: RoutinePillSlot.pillKey,
+            label: suggestion.title,
+            dimmed: widget.dimmed,
+            onPressed: live ? () => unawaited(_fill(suggestion)) : null,
           ),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Suggest mixes from my routines'),
-            value: _enabled,
-            onChanged: _saving
-                ? null
-                : (value) => setState(() => _enabled = value),
-          ),
-          const Text(
-            'Suggestions appear in Mixtape. They never start playing by themselves.',
-          ),
-          if (_error != null) Semantics(liveRegion: true, child: Text(_error!)),
-          const SizedBox(height: 16),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: FilledButton(
-              onPressed: _saving
-                  ? null
-                  : () async {
-                      setState(() {
-                        _saving = true;
-                        _error = null;
-                      });
-                      try {
-                        await widget.api.save(_enabled);
-                        if (context.mounted) Navigator.pop(context, _enabled);
-                      } catch (_) {
-                        if (mounted) {
-                          setState(() {
-                            _saving = false;
-                            _error = 'Could not save. Try again.';
-                          });
-                        }
-                      }
-                    },
-              child: Text(_saving ? 'Saving…' : 'Save'),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

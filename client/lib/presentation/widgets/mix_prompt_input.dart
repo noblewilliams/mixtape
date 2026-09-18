@@ -13,6 +13,8 @@ class MixPromptInput extends StatefulWidget {
     required this.busy,
     required this.onSubmit,
     this.attachment,
+    this.focusNode,
+    this.reservedExamples = const [],
     this.showVoiceInput = voiceInputEnabled,
   });
   final TextEditingController controller;
@@ -20,17 +22,24 @@ class MixPromptInput extends StatefulWidget {
   final VoidCallback onSubmit;
   final Widget? attachment;
 
+  /// The field's focus, when the owner needs it — Home's idea pills fill the
+  /// field and focus it. Absent, the composer keeps one of its own.
+  final FocusNode? focusNode;
+
+  /// Placeholders the rotation must leave alone — Home's panel reserves the
+  /// prompts its idea pills are showing, so the hint never repeats a pill
+  /// sitting right below it.
+  final List<String> reservedExamples;
+
   /// Draws the mic between the field and send. Defaults to the build flag;
   /// Phase 7 turns the flag on and gives the mic its behaviour.
   final bool showVoiceInput;
 
-  @override
-  State<MixPromptInput> createState() => _MixPromptInputState();
-}
-
-class _MixPromptInputState extends State<MixPromptInput>
-    with WidgetsBindingObserver {
-  static const _examples = [
+  /// The rotating placeholders, in order.
+  ///
+  /// Public so Home's panel can draw its starter pills from the same list
+  /// (plan task 3.2) instead of inventing a second set of prompts.
+  static const List<String> examples = [
     'A slow Sunday morning',
     'High-energy songs for my workout',
     'Dinner with friends, soft vocals',
@@ -38,6 +47,18 @@ class _MixPromptInputState extends State<MixPromptInput>
     'A rainy drive home',
     'Instrumentals to help me focus',
   ];
+
+  /// The placeholder a fresh composer opens on — the one Home's starter pills
+  /// leave out, so a pill never repeats the hint beside it.
+  static String get initialPlaceholder => examples.first;
+
+  @override
+  State<MixPromptInput> createState() => _MixPromptInputState();
+}
+
+class _MixPromptInputState extends State<MixPromptInput>
+    with WidgetsBindingObserver {
+  static const _examples = MixPromptInput.examples;
 
   /// The composer's own shape: 12 pt top corners, 16 pt bottom.
   static const BorderRadius _fieldRadius = BorderRadius.only(
@@ -63,7 +84,9 @@ class _MixPromptInputState extends State<MixPromptInput>
     bottomRight: Radius.circular(10),
   );
 
-  final _focus = FocusNode();
+  /// Only built when the owner did not hand one down, and only disposed then.
+  FocusNode? _ownFocus;
+  FocusNode get _focus => widget.focusNode ?? (_ownFocus ??= FocusNode());
   late final Timer _timer;
   int _example = 0;
   bool _resumed = true;
@@ -87,8 +110,19 @@ class _MixPromptInputState extends State<MixPromptInput>
           !(ModalRoute.of(context)?.isCurrent ?? true)) {
         return;
       }
-      setState(() => _example = (_example + 1) % _examples.length);
+      setState(() => _example = (_example + 1) % _rotation.length);
     });
+  }
+
+  /// The placeholders left once the pills have taken theirs. Everything is
+  /// reserved only if a caller reserves the whole list, in which case the
+  /// hint falls back to rotating them all rather than showing nothing.
+  List<String> get _rotation {
+    final free = [
+      for (final example in _examples)
+        if (!widget.reservedExamples.contains(example)) example,
+    ];
+    return free.isEmpty ? _examples : free;
   }
 
   void _changed() {
@@ -102,6 +136,10 @@ class _MixPromptInputState extends State<MixPromptInput>
       oldWidget.controller.removeListener(_changed);
       widget.controller.addListener(_changed);
     }
+    if (oldWidget.focusNode != widget.focusNode) {
+      (oldWidget.focusNode ?? _ownFocus)?.removeListener(_changed);
+      _focus.addListener(_changed);
+    }
   }
 
   @override
@@ -114,7 +152,7 @@ class _MixPromptInputState extends State<MixPromptInput>
     WidgetsBinding.instance.removeObserver(this);
     widget.controller.removeListener(_changed);
     _focus.removeListener(_changed);
-    _focus.dispose();
+    _ownFocus?.dispose();
     super.dispose();
   }
 
@@ -163,7 +201,7 @@ class _MixPromptInputState extends State<MixPromptInput>
       cursorColor: tokens.plum,
       style: tokens.body,
       decoration: InputDecoration(
-        hintText: _examples[_example],
+        hintText: _rotation[_example % _rotation.length],
         hintStyle: tokens.body.copyWith(color: tokens.muted),
         counterText: '',
         isDense: true,

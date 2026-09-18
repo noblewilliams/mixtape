@@ -16,6 +16,7 @@ import 'package:mixtape/presentation/providers/playlist_context_provider.dart';
 import 'package:mixtape/presentation/providers/playlist_providers.dart';
 import 'package:mixtape/presentation/screens/home_screen.dart';
 import 'package:mixtape/presentation/screens/playlist_detail_screen.dart';
+import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import '../helpers/auth_ui_snapshot.dart';
 import '../helpers/fake_listening_api.dart';
 import '../presentation/providers/playlist_context_provider_test.dart'
@@ -75,6 +76,17 @@ ProviderContainer makeContainer(RecordingDj dj) {
   );
 }
 
+/// The snapshot theme (seeded colours, the synthetic font) plus the design
+/// tokens every native widget reads off the ambient theme.
+ThemeData nativeSnapshotTheme(Brightness brightness) =>
+    authSnapshotTheme(brightness).copyWith(
+      extensions: [
+        brightness == Brightness.dark
+            ? MixtapeTokens.dark
+            : MixtapeTokens.light,
+      ],
+    );
+
 void main() {
   testWidgets(
     'browse handoff keeps Home draft, sends exact selection only on submit, and retains failure',
@@ -85,7 +97,10 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(home: HomeScreen()),
+          child: MaterialApp(
+            theme: MixtapeTheme.light(),
+            home: const HomeScreen(),
+          ),
         ),
       );
       await tester.pumpAndSettle();
@@ -191,7 +206,7 @@ void main() {
             key: authSnapshotKey,
             child: MaterialApp(
               debugShowCheckedModeBanner: false,
-              theme: authSnapshotTheme(brightness),
+              theme: nativeSnapshotTheme(brightness),
               home: const HomeScreen(),
             ),
           ),

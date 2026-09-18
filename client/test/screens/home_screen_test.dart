@@ -1,3 +1,10 @@
+// The Home tab in the native shell (plan `docs/superpowers/plans/
+// 2026-09-17-native-design-implementation.md` task 3.1; the approved Home
+// records of 2026-09-17).
+//
+// Home is a large title over open space with one hint line, plus the bottom
+// panel that holds everything you can do. The mix list moved to Mixes (task
+// 2.3) and the menu's destinations to Library and You (task 2.2).
 import 'package:mixtape/data/playlists/playlist_context_models.dart';
 import 'dart:async';
 import 'dart:io';
@@ -15,9 +22,16 @@ import 'package:mixtape/data/dj/dj_models.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/dj_providers.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
+import 'package:mixtape/presentation/providers/suggestions_provider.dart';
 import 'package:mixtape/presentation/screens/chat_screen.dart';
 import 'package:mixtape/presentation/screens/home_screen.dart';
+import 'package:mixtape/presentation/screens/playback_screen.dart';
+import 'package:mixtape/presentation/theme/mixtape_theme.dart';
+import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
+import 'package:mixtape/presentation/widgets/foundation/idea_pill.dart';
+import 'package:mixtape/presentation/widgets/home_panel.dart';
 import '../helpers/fake_listening_api.dart';
+import 'routine_suggestions_test.dart' show FakeSuggestions;
 
 /// Mirrors chat_screen_test.dart's FakeDjApi: implements DjApi's public
 /// surface (not `extends`, since DjApi's constructor builds a real
@@ -50,7 +64,10 @@ class FakeDjApi implements DjApi {
   Duration get timeout => const Duration(seconds: 120);
 
   @override
-  Future<SessionDetail> createSession(String prompt, {InitialPlaylistSeed? playlistSeed}) {
+  Future<SessionDetail> createSession(
+    String prompt, {
+    InitialPlaylistSeed? playlistSeed,
+  }) {
     final impl = onCreateSession;
     if (impl == null) throw UnimplementedError('onCreateSession not wired');
     return impl(prompt);
@@ -152,13 +169,19 @@ DjSession _session({
   updatedAt: updatedAt ?? DateTime.now(),
 );
 
-ProviderContainer _makeContainer(FakeDjApi api) {
+ProviderContainer _makeContainer(
+  FakeDjApi api, {
+  FakeSuggestions? suggestions,
+}) {
   final overrides = [
     tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
     djApiProvider.overrideWithValue(api),
     // Home watches onboarding for the Spotify waiting card; an Apple
     // listener keeps every existing assertion untouched.
     listeningApiProvider.overrideWithValue(FakeListeningApi()),
+    // The panel's first idea pill. No platform time zone channel in a test.
+    suggestionsApiProvider.overrideWithValue(suggestions ?? FakeSuggestions()),
+    suggestionTimeZoneProvider.overrideWithValue(() async => 'UTC'),
     authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.signedIn)),
   ];
   final container = ProviderContainer(overrides: overrides);
@@ -166,14 +189,32 @@ ProviderContainer _makeContainer(FakeDjApi api) {
   return container;
 }
 
-Future<void> _pump(WidgetTester tester, ProviderContainer container) async {
+Future<void> _pump(
+  WidgetTester tester,
+  ProviderContainer container, {
+  Brightness brightness = Brightness.light,
+  double textScale = 1,
+  bool settle = true,
+}) async {
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
-      child: const MaterialApp(home: HomeScreen()),
+      child: MaterialApp(
+        theme: brightness == Brightness.dark
+            ? MixtapeTheme.dark()
+            : MixtapeTheme.light(),
+        home: Builder(
+          builder: (context) => MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: TextScaler.linear(textScale)),
+            child: const HomeScreen(),
+          ),
+        ),
+      ),
     ),
   );
-  await tester.pumpAndSettle();
+  if (settle) await tester.pumpAndSettle();
 }
 
 void main() {
@@ -306,8 +347,8 @@ void main() {
     );
 
     testWidgets(
-      'a create failure without a sessionId shows an inline error and '
-      'preserves the prompt draft',
+      'a create failure without a sessionId shows the alert line in the panel '
+      'and preserves the prompt draft',
       (tester) async {
         final api = FakeDjApi();
         api.onListSessions = () async => [];
@@ -328,6 +369,14 @@ void main() {
 
         expect(find.byType(ChatScreen), findsNothing);
         expect(find.text('try a shorter prompt'), findsOneWidget);
+        // Inside the panel, under the composer.
+        expect(
+          find.descendant(
+            of: find.byType(HomePanel),
+            matching: find.byKey(HomePanel.errorKey),
+          ),
+          findsOneWidget,
+        );
         final field = tester.widget<TextField>(
           find.byKey(const Key('prompt-field')),
         );
@@ -433,7 +482,141 @@ void main() {
     );
   });
 
-  group('responsive native layout', () {
+  group('native layout', () {
+    testWidgets('a large title over open space, with the panel at the bottom', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = FakeDjApi()..onListSessions = () async => [];
+      await _pump(tester, _makeContainer(api));
+
+      expect(find.text('Home'), findsOneWidget);
+      expect(find.byType(AppBar), findsNothing);
+      expect(find.byKey(HomeScreen.hintKey), findsOneWidget);
+      expect(find.text(HomeScreen.hintText), findsOneWidget);
+      expect(find.byType(HomePanel), findsOneWidget);
+      // The dock's mini-player replaces Home's own (task 2.1).
+      expect(find.byType(PlaybackMini), findsNothing);
+      // Three idea pills, and the hint above them.
+      expect(find.byType(IdeaPill), findsNWidgets(3));
+      expect(
+        tester.getRect(find.byKey(HomeScreen.hintKey)).bottom,
+        lessThan(tester.getRect(find.byType(HomePanel)).top),
+      );
+      // Nothing of the old Home is left.
+      expect(find.byType(BackButton), findsNothing);
+      expect(find.byKey(const Key('home-actions')), findsNothing);
+      expect(find.byKey(const Key('sessions-list')), findsNothing);
+      expect(find.byKey(const Key('sessions-empty')), findsNothing);
+    });
+
+    testWidgets('Home does not scroll while the panel fits', (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = FakeDjApi()..onListSessions = () async => [];
+      await _pump(tester, _makeContainer(api));
+
+      final scrollable = tester.widget<Scrollable>(
+        find.byType(Scrollable).first,
+      );
+      expect(scrollable.controller!.position.maxScrollExtent, 0);
+      // No pull-to-refresh on Home.
+      expect(find.byType(RefreshProgressIndicator), findsNothing);
+    });
+
+    testWidgets('the keyboard lifts the panel and drops the hint', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetViewInsets);
+      final api = FakeDjApi()..onListSessions = () async => [];
+      await _pump(tester, _makeContainer(api));
+      final resting = tester.getRect(find.byType(HomePanel));
+
+      tester.view.viewInsets = const FakeViewPadding(bottom: 500);
+      await tester.pumpAndSettle();
+
+      final composer = tester.getRect(find.byKey(const Key('prompt-field')));
+      expect(composer.bottom, lessThanOrEqualTo(844 - 500));
+      expect(tester.getRect(find.byType(HomePanel)).top, lessThan(resting.top));
+      // Too little space left for it.
+      expect(find.byKey(HomeScreen.hintKey), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('starting a mix turns the hubs and locks the composer', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final completer = Completer<SessionDetail>();
+      final api = FakeDjApi();
+      api.onListSessions = () async => [];
+      api.onCreateSession = (prompt) => completer.future;
+      api.onGetSession = (id) async => SessionDetail(
+        session: _session(id: id),
+        messages: [],
+        queue: [],
+      );
+      await _pump(tester, _makeContainer(api));
+
+      await tester.enterText(
+        find.byKey(const Key('prompt-field')),
+        'a slow wind-down',
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('start-session')));
+      await tester.pump();
+
+      expect(find.byKey(HomeScreen.startingKey), findsOneWidget);
+      expect(find.text(HomeScreen.startingTitle), findsOneWidget);
+      expect(find.text(HomeScreen.startingHint), findsOneWidget);
+      expect(find.byType(CassetteTile), findsOneWidget);
+      expect(find.byKey(HomeScreen.hintKey), findsNothing);
+      // The prompt is still there, and the field is locked.
+      final field = tester.widget<TextField>(
+        find.byKey(const Key('prompt-field')),
+      );
+      expect(field.readOnly, isTrue);
+      expect(field.controller!.text, 'a slow wind-down');
+      // Pills go dim and inert.
+      expect(
+        tester
+            .widgetList<IdeaPill>(find.byType(IdeaPill))
+            .every((pill) => pill.dimmed),
+        isTrue,
+      );
+      // Announced, per the approved record.
+      expect(
+        tester
+            .getSemantics(find.byKey(HomeScreen.startingKey))
+            .getSemanticsData()
+            .flagsCollection
+            .isLiveRegion,
+        isTrue,
+      );
+
+      completer.complete(
+        SessionDetail(
+          session: _session(id: 'new-3'),
+          messages: [],
+          queue: [],
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(ChatScreen), findsOneWidget);
+    });
+
     testWidgets(
       'short narrow screen supports large text and keyboard draft without overflow',
       (tester) async {
@@ -444,22 +627,9 @@ void main() {
         addTearDown(tester.view.resetDevicePixelRatio);
         addTearDown(tester.view.resetViewInsets);
         final api = FakeDjApi()..onListSessions = () async => [];
-        await tester.pumpWidget(
-          UncontrolledProviderScope(
-            container: _makeContainer(api),
-            child: MaterialApp(
-              builder: (context, child) => MediaQuery(
-                data: MediaQuery.of(
-                  context,
-                ).copyWith(textScaler: const TextScaler.linear(2)),
-                child: child!,
-              ),
-              home: const HomeScreen(),
-            ),
-          ),
-        );
-        await tester.pumpAndSettle();
+        await _pump(tester, _makeContainer(api), textScale: 2);
         expect(tester.takeException(), isNull);
+
         tester.view.viewInsets = const FakeViewPadding(bottom: 260);
         await tester.enterText(
           find.byKey(const Key('prompt-field')),
@@ -474,8 +644,6 @@ void main() {
               .text,
           'Quiet soul\nfor my evening\nwith warm vocals',
         );
-        await tester.ensureVisible(find.byKey(const Key('start-session')));
-        await tester.pumpAndSettle();
         expect(
           find.byKey(const Key('start-session')).hitTestable(),
           findsOneWidget,
@@ -515,12 +683,9 @@ void main() {
             container: _makeContainer(api),
             child: MaterialApp(
               debugShowCheckedModeBanner: false,
-              theme: ThemeData(
-                colorSchemeSeed: const Color(0xFF544451),
-                useMaterial3: true,
-                brightness: brightness,
-                fontFamily: output.isEmpty ? null : 'NativeSnapshot',
-              ),
+              theme: brightness == Brightness.dark
+                  ? MixtapeTheme.dark()
+                  : MixtapeTheme.light(),
               home: const RepaintBoundary(
                 key: boundaryKey,
                 child: HomeScreen(),
@@ -531,6 +696,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
         expect(find.byKey(const Key('prompt-field')), findsOneWidget);
+        expect(find.byType(IdeaPill), findsNWidgets(3));
         if (output.isNotEmpty) {
           final boundary = tester.renderObject<RenderRepaintBoundary>(
             find.byKey(boundaryKey),
@@ -549,28 +715,4 @@ void main() {
       });
     }
   });
-
-  group('home navigation', () {
-    testWidgets(
-      'Home is a tab root: no back button, no overflow menu and no mix list',
-      (tester) async {
-        final api = FakeDjApi()
-          ..onListSessions = () async => [_session(title: 'Sunset Drive')];
-        await _pump(tester, _makeContainer(api));
-
-        expect(find.byType(BackButton), findsNothing);
-        // The menu's destinations are the Library and You tabs now (task 2.2),
-        // and the list is the Mixes tab (task 2.3).
-        expect(find.byKey(const Key('home-actions')), findsNothing);
-        expect(find.byKey(const Key('active-mixes')), findsNothing);
-        expect(find.byKey(const Key('archived-mixes')), findsNothing);
-        expect(find.byKey(const Key('sessions-list')), findsNothing);
-        expect(find.byKey(const Key('sessions-empty')), findsNothing);
-        expect(find.text('Sunset Drive'), findsNothing);
-        // The composer is what is left.
-        expect(find.byKey(const Key('prompt-field')), findsOneWidget);
-      },
-    );
-  });
-
 }

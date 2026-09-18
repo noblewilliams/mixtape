@@ -1,5 +1,3 @@
-import '../widgets/routine_suggestions.dart';
-import 'playback_screen.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -10,7 +8,11 @@ import '../../data/files/opened_archive_channel.dart';
 import '../../data/listening/listening_models.dart';
 import '../format/import_format.dart';
 import '../format/relative_time.dart';
-import '../widgets/mix_prompt_input.dart';
+import '../theme/mixtape_theme.dart';
+import '../widgets/foundation/cassette_tile.dart';
+import '../widgets/foundation/gradient_background.dart';
+import '../widgets/foundation/large_title_scaffold.dart';
+import '../widgets/home_panel.dart';
 import '../format/source_labels.dart';
 import '../providers/dj_providers.dart';
 import '../providers/listening_import_provider.dart';
@@ -29,16 +31,38 @@ const _genericStartErrorMessage = 'something went wrong on our end — try again
 const _offlineStartErrorMessage =
     "couldn't reach the DJ — check your connection and try again";
 
-/// Sessions-first Home (see
-/// `docs/superpowers/plans/2026-08-29-p3b-dj-client.md` Task 6): a one-shot
-/// prompt that starts a new DJ session via [sessionStarterProvider], and the
-/// list of existing sessions (from [sessionsProvider]) below it. Library
-/// sync (P1) moved out of the body into an AppBar action — same
-/// [librarySyncProvider]-driven UI, now presented in a bottom sheet.
+/// The Home tab (`docs/mockups/approved/2026-09-17-mobile-shell.md` → Home;
+/// `docs/mockups/approved/2026-09-17-mobile-home-states.md`; plan task 3.1).
+///
+/// A large title over open space with one hint line, and everything you can
+/// do in a bottom panel above the dock: the composer, the start-failure line
+/// and three idea pills. Starting a mix turns the cassette's hubs in the open
+/// space. The mix list is the Mixes tab (task 2.3) and the old menu's
+/// destinations are the Library and You tabs (task 2.2), so Home has no
+/// chrome of its own beyond the title.
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key, this.initialPlaylist});
 
   final PlaylistSummary? initialPlaylist;
+
+  /// The board's one line of open-space copy.
+  static const String hintText =
+      'Say what the moment needs, tap an idea, or start from one of your '
+      'playlists.';
+
+  /// Below this much open space the hint is dropped rather than squeezed.
+  static const double minHintSpace = 80;
+
+  static const String startingTitle = 'Making your mix';
+  static const String startingHint =
+      'Usually under a minute. You can leave this tab; it will be waiting in '
+      'Mixes.';
+
+  /// The starting state's cassette.
+  static const double startingCassetteWidth = 120;
+
+  static const Key hintKey = Key('home-hint');
+  static const Key startingKey = Key('home-starting');
 
   @override
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
@@ -46,7 +70,13 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   final _promptController = TextEditingController();
+  final _promptFocus = FocusNode();
   final _composerKey = GlobalKey();
+  final _panelKey = GlobalKey();
+
+  /// The panel's measured height, which the open space above it reserves.
+  double _panelHeight = 0;
+  bool _measuring = false;
   bool _starting = false;
   String? _error;
   PlaylistSummary? get _inspiration =>
@@ -111,14 +141,31 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   void dispose() {
     _promptController.dispose();
+    _promptFocus.dispose();
     super.dispose();
+  }
+
+  /// The panel is drawn outside the scroll view (it rides the keyboard and
+  /// floats over the dock), so the open space cannot lay itself out against
+  /// it — it is measured after the frame instead and reserved on the next.
+  void _measurePanel() {
+    if (_measuring) return;
+    _measuring = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _measuring = false;
+      if (!mounted) return;
+      final box = _panelKey.currentContext?.findRenderObject() as RenderBox?;
+      if (box == null || !box.hasSize) return;
+      if ((box.size.height - _panelHeight).abs() < 0.5) return;
+      setState(() => _panelHeight = box.size.height);
+    });
   }
 
   /// Guarded by [_starting] so a second tap while the first create is still
   /// in flight (these calls run 20-40s) can never mint a second session.
-  Future<void> _submit({String? suggestedPrompt}) async {
+  Future<void> _submit() async {
     if (_starting) return;
-    final prompt = suggestedPrompt ?? _promptController.text.trim();
+    final prompt = _promptController.text.trim();
     if (prompt.isEmpty) return;
 
     setState(() {
@@ -128,7 +175,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     try {
       final sessionId = await ref.read(sessionStarterProvider)(
         prompt,
-        playlistSeed: suggestedPrompt != null || _inspiration == null
+        playlistSeed: _inspiration == null
             ? null
             : InitialPlaylistSeed(
                 playlistId: _inspiration!.id,
@@ -285,80 +332,163 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         !(spotifySource(onboarding)?.packages.contains('spotify_exportify') ??
             false);
 
-    return Scaffold(
-      // Phase 3 restyles this into the board's large title; task 2.2 only
-      // takes the overflow menu away — its destinations are the Library and
-      // You tabs now.
-      appBar: AppBar(
-        title: const Text('mixtape'),
-        automaticallyImplyLeading: false,
-      ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const PlaybackMini(),
-                    RoutineSuggestions(
-                      busy: _starting,
-                      onCreate: (prompt) => _submit(suggestedPrompt: prompt),
-                    ),
-                    MixPromptInput(
-                      key: _composerKey,
-                      controller: _promptController,
-                      busy: _starting,
-                      onSubmit: _submit,
-                      attachment: _inspiration == null
-                          ? null
-                          : Builder(
-                              builder: (anchor) =>
-                                  PlaylistInspirationAttachment(
-                                    name: _inspiration!.name,
-                                    busy: _starting,
-                                    onPick: () => _pickInspiration(anchor),
-                                    onDetach: () => ref
-                                        .read(
-                                          newMixInspirationProvider.notifier,
-                                        )
-                                        .clear(),
-                                  ),
-                            ),
-                    ),
-                    if (_error != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Text(
-                          _error!,
-                          key: const Key('start-error'),
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
+    _measurePanel();
+
+    return GradientBackground(
+      // No app bar: the large title is Home's only chrome, and the panel is
+      // laid over the scroll view rather than inside it, so the keyboard
+      // carries it while the open space stays put.
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        resizeToAvoidBottomInset: false,
+        body: Stack(
+          children: [
+            // The dock's inset is the panel's business, not the scroll
+            // view's: left in, the title's scaffold would pad a dock the
+            // panel already clears.
+            MediaQuery.removePadding(
+              context: context,
+              removeBottom: true,
+              child: LargeTitleScaffold(
+                title: 'Home',
+                // No pull-to-refresh on Home: there is no list to refresh.
+                slivers: [
+                  SliverLayoutBuilder(
+                    builder: (context, constraints) {
+                      final open =
+                          constraints.viewportMainAxisExtent -
+                          constraints.precedingScrollExtent -
+                          _panelHeight;
+                      return SliverToBoxAdapter(
+                        child: ConstrainedBox(
+                          // The open space is whatever the title and the
+                          // panel leave; content taller than it scrolls, and
+                          // nothing else on Home ever does.
+                          constraints: BoxConstraints(
+                            minHeight: open < 0 ? 0 : open,
+                          ),
+                          child: _openSpace(
+                            context,
+                            open: open,
+                            waiting: waiting,
+                            onboarding: onboarding,
                           ),
                         ),
-                      ),
-                  ],
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: KeyedSubtree(
+                key: _panelKey,
+                child: HomePanel(
+                  composerKey: _composerKey,
+                  controller: _promptController,
+                  focusNode: _promptFocus,
+                  busy: _starting,
+                  error: _error,
+                  onSubmit: _submit,
+                  attachment: _inspiration == null
+                      ? null
+                      : Builder(
+                          builder: (anchor) => PlaylistInspirationAttachment(
+                            name: _inspiration!.name,
+                            busy: _starting,
+                            onPick: () => _pickInspiration(anchor),
+                            onDetach: () => ref
+                                .read(newMixInspirationProvider.notifier)
+                                .clear(),
+                          ),
+                        ),
                 ),
               ),
-              // Music setup for a Spotify listener, on Home until their
-              // data lands. Phase 3.3 restyles it into the board's two
-              // flush rows; task 2.2 only moves it out of the menu that
-              // used to hold it.
-              if (waiting)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                  child: _SpotifyWaitingCard(
-                    onboarding: onboarding,
-                    onOpenRequest: _openRequestScreen,
-                    onOpenInterview: _openInterview,
-                    onChooseZip: _openImportSheet,
-                  ),
-                ),
-            ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// What the space between the title and the panel holds: the starting
+  /// state, the Spotify waiting rows, or the one hint line.
+  Widget _openSpace(
+    BuildContext context, {
+    required double open,
+    required bool waiting,
+    required OnboardingState? onboarding,
+  }) {
+    if (_starting) return const _StartingState();
+    if (waiting && onboarding != null) {
+      // Task 3.3 turns this into the board's two flush rows; it only moves
+      // into the open space here.
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _SpotifyWaitingCard(
+            onboarding: onboarding,
+            onOpenRequest: _openRequestScreen,
+            onOpenInterview: _openInterview,
+            onChooseZip: _openImportSheet,
           ),
+          const SizedBox(height: 16),
+        ],
+      );
+    }
+    // Squeezed by the keyboard or a tall panel, the hint goes rather than
+    // crowding the composer.
+    if (open < HomeScreen.minHintSpace) return const SizedBox.shrink();
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        child: Text(
+          HomeScreen.hintText,
+          key: HomeScreen.hintKey,
+          textAlign: TextAlign.center,
+          // The board's `.hintmid`: secondary size in muted ink.
+          style: context.tokens.secondary.copyWith(color: context.tokens.muted),
+        ),
+      ),
+    );
+  }
+}
+
+/// The board's starting state: the hubs turn in the open space (still under
+/// reduced motion, where the text alone carries it), the duration hint says
+/// where the mix will be, and the whole thing announces itself.
+class _StartingState extends StatelessWidget {
+  const _StartingState();
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    return Center(
+      child: Semantics(
+        key: HomeScreen.startingKey,
+        liveRegion: true,
+        label: HomeScreen.startingTitle,
+        container: true,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CassetteTile(
+              width: HomeScreen.startingCassetteWidth,
+              spinning: true,
+            ),
+            const SizedBox(height: 10),
+            Text(HomeScreen.startingTitle, style: tokens.section),
+            const SizedBox(height: 10),
+            Text(
+              HomeScreen.startingHint,
+              textAlign: TextAlign.center,
+              // `.busy`: muted around the section-weight line above it.
+              style: tokens.secondary.copyWith(color: tokens.muted),
+            ),
+          ],
         ),
       ),
     );
