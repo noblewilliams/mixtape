@@ -85,3 +85,76 @@ can remove this workaround. The original interceptor is backed up at
 diagnostics were removed. Restart Wrangler after the workaround; Flutter does
 not need rebuilding. A durable dev-tooling fix remains before relying on fresh
 installs for this local sign-in path.
+
+## Diagnosis 2026-09-18 — "tried signing in with google but it failed"
+
+Checked against the code and the checked-in configuration (task 8.5). **No code
+defect was found in `google_auth_gateway.dart`; it is untouched.**
+
+**Free first check, not a failure mode.** A build without
+`--dart-define-from-file=config/google-ios.json` compiles Google *off*:
+`GoogleAuthConfiguration` reads `String.fromEnvironment` /
+`bool.fromEnvironment`, so with no defines `isAvailable` is false. That state
+presents as a **greyed Google button with the visible reason** "Google sign-in
+is not available in this build." under it (key `google-unavailable`), not as an
+attempt that failed. Rule it out in one glance; pinned by
+`test/data/google_auth_gateway_test.dart` → "a build with no dart-defines
+reports no configuration at all".
+
+Ranked causes of an attempt that *runs and then fails*:
+
+1. **The API was unreachable.** `AppConfig.apiBaseUrl` defaults to
+   `http://localhost:8787`. On a device that is the phone itself; on the
+   simulator it resolves only while `wrangler dev` runs in `server/`. The native
+   Google sheet succeeds, the exchange never lands, and the screen says
+   "Sign-in failed. Try again." Most likely cause by a distance.
+2. **The token exchange was rejected.** `POST /api/auth/sign-in/social` reached
+   the server but Better Auth refused the ID token — a non-2xx becomes the same
+   fixed sentence. Read the Worker log for the actual status before guessing.
+   Two sub-causes, in order:
+   - **Audience.** `server/src/auth/create-auth.ts` verifies the token against
+     `GOOGLE_CLIENT_ID` alone. The client sends `GOOGLE_SERVER_CLIENT_ID`, which
+     equals the `GOOGLE_CLIENT_ID` in `server/.dev.vars` — but *which* client id
+     the iOS SDK stamps as `aud` (server client, or the iOS client with the
+     server client only in `azp`) is **not verifiable from this repository**.
+     Mitigation, as a **server follow-up** (not changed here): Better Auth's
+     Google provider takes `clientId: string | string[]`, so listing **both**
+     the server and the iOS client ids makes the exchange correct either way.
+   - **A deployed secret that differs.** The Worker's `GOOGLE_CLIENT_ID` secret
+     is not in the repo; confirm it is the same web client as
+     `config/google-ios.json`'s `GOOGLE_SERVER_CLIENT_ID`.
+3. **The native chooser was dismissed, or the simulator has no Google session.**
+   `authenticate()` opens Google in `ASWebAuthenticationSession`; a dismissal
+   maps to `GoogleSignInCancelled`, which is deliberately quiet — nothing
+   happens, which reads as a failure. Not a defect; sign in to Google in the
+   simulator's Safari first.
+
+Checked and consistent, so **not** the cause:
+
+- `GOOGLE_IOS_CLIENT_ID` ↔ the reversed scheme in
+  `client/ios/Runner/Info.plist` (now pinned by a test).
+- `PRODUCT_BUNDLE_IDENTIFIER` is `com.noble.mixtape` in every Runner
+  configuration. Not verifiable from the repo: that the Google console's iOS
+  client lists that bundle id.
+- `GoogleService-Info.plist` is absent and is not needed; the client id goes to
+  `initialize` directly.
+- `google_sign_in` 7.x initialization. `RealGoogleAuthGateway.getIdentityToken`
+  awaits `GoogleSignIn.instance.initialize(clientId:, serverClientId:)` once
+  (guarded against a second, differing initialization), checks
+  `supportsAuthenticate()`, then calls `authenticate()`.
+
+If the exchange 500s against a **local** server, re-read the September 9 Apple
+note above: the Miniflare outbound interceptor adds `CF-Worker` to provider key
+fetches, which broke Apple's JWKS endpoint and could break Google's.
+
+### The command to run
+
+```sh
+cd client
+flutter run --dart-define-from-file=config/google-ios.json \
+  --dart-define=API_BASE_URL=https://<the backend origin>
+```
+
+Omit `API_BASE_URL` only on the simulator against `wrangler dev` (the default is
+`http://localhost:8787`). Without the first define, Google sign-in is off by
+construction and the screen says so under the greyed button.

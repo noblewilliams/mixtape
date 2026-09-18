@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -34,6 +36,66 @@ const configured = GoogleAuthConfiguration(
 );
 
 void main() {
+  // Diagnosis 2026-09-18: the commonest native Google failure is a build run
+  // without `--dart-define-from-file=config/google-ios.json`. These tests pin
+  // both halves of that contract: the defines the gateway reads, and the file
+  // and Info.plist that supply them.
+  group('build-time configuration', () {
+    test('a build with no dart-defines reports no configuration at all', () {
+      // This suite runs without defines, so the defaults are the empty
+      // environment — exactly what a plain `flutter run` compiles in.
+      const config = GoogleAuthConfiguration();
+      expect(config.iosClientId, isEmpty);
+      expect(config.serverClientId, isEmpty);
+      expect(config.callbackConfigured, isFalse);
+      expect(config.isConfigured, isFalse);
+      expect(
+        RealGoogleAuthGateway(
+          configuration: config,
+          supportedPlatform: true,
+        ).isAvailable,
+        isFalse,
+      );
+    });
+
+    test('config/google-ios.json carries all three defines as strings', () {
+      final file = File('config/google-ios.json');
+      expect(file.existsSync(), isTrue, reason: 'the define file must exist');
+      final values = (jsonDecode(file.readAsStringSync()) as Map)
+          .cast<String, Object?>();
+      expect(values['GOOGLE_IOS_CLIENT_ID'], isA<String>());
+      expect(values['GOOGLE_SERVER_CLIENT_ID'], isA<String>());
+      // `bool.fromEnvironment` reads the literal string, so only 'true' arms
+      // the callback flag.
+      expect(values['GOOGLE_IOS_CALLBACK_CONFIGURED'], 'true');
+      expect(
+        GoogleAuthConfiguration(
+          iosClientId: values['GOOGLE_IOS_CLIENT_ID']! as String,
+          serverClientId: values['GOOGLE_SERVER_CLIENT_ID']! as String,
+          callbackConfigured:
+              values['GOOGLE_IOS_CALLBACK_CONFIGURED'] == 'true',
+        ).isConfigured,
+        isTrue,
+      );
+    });
+
+    test('Info.plist registers the reversed iOS client id as a URL scheme', () {
+      final ios =
+          (jsonDecode(File('config/google-ios.json').readAsStringSync())
+                  as Map)['GOOGLE_IOS_CLIENT_ID']
+              as String;
+      const suffix = '.apps.googleusercontent.com';
+      expect(ios, endsWith(suffix));
+      final scheme =
+          'com.googleusercontent.apps.'
+          '${ios.substring(0, ios.length - suffix.length)}';
+      expect(
+        File('ios/Runner/Info.plist').readAsStringSync(),
+        contains('<string>$scheme</string>'),
+      );
+    });
+  });
+
   test(
     'missing public configuration is unavailable before calling the SDK',
     () async {

@@ -7,7 +7,12 @@ import 'package:mixtape/data/auth/account_api.dart';
 import 'package:mixtape/data/auth/google_auth_gateway.dart';
 import 'package:mixtape/presentation/providers/account_provider.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
+import 'package:mixtape/presentation/providers/library_sync_provider.dart'
+    show accountNameProvider;
 import 'package:mixtape/presentation/screens/account_screen.dart';
+import 'package:mixtape/presentation/theme/mixtape_theme.dart';
+import 'package:mixtape/presentation/widgets/foundation/status_word.dart';
+import 'package:mixtape/presentation/widgets/foundation/text_action.dart';
 
 class _Auth extends AuthNotifier {
   int signsOut = 0;
@@ -77,10 +82,15 @@ const _google = LinkedAccount(
   accountId: 'google-sub',
   providerId: 'google',
 );
+
+TextAction _action(WidgetTester tester, String key) =>
+    tester.widget<TextAction>(find.byKey(Key(key)));
+
 Future<ProviderContainer> _pump(
   WidgetTester tester,
   _Accounts accounts, {
   bool googleAvailable = true,
+  String? name = 'Noble',
   double scale = 1,
   Brightness brightness = Brightness.light,
 }) async {
@@ -92,6 +102,7 @@ Future<ProviderContainer> _pump(
         _Google(isAvailable: googleAvailable),
       ),
       lastSignInProvider.overrideWith((_) async => AccountProvider.apple),
+      accountNameProvider.overrideWith((_) async => name),
     ],
   );
   addTearDown(container.dispose);
@@ -99,7 +110,9 @@ Future<ProviderContainer> _pump(
     UncontrolledProviderScope(
       container: container,
       child: MaterialApp(
-        theme: authSnapshotTheme(brightness),
+        theme: brightness == Brightness.dark
+            ? MixtapeTheme.dark()
+            : MixtapeTheme.light(),
         builder: (context, child) => MediaQuery(
           data: MediaQuery.of(
             context,
@@ -118,27 +131,65 @@ Future<ProviderContainer> _pump(
 }
 
 void main() {
-  testWidgets('linked methods are canonical and final removal is unavailable', (
+  testWidgets('the identity block names the listener and the title is large', (
     tester,
   ) async {
-    final accounts = _Accounts(const AccountState(accounts: [_apple]));
-    await _pump(tester, accounts);
-    expect(
-      tester
-          .widget<TextButton>(find.byKey(const Key('remove-apple')))
-          .onPressed,
-      isNull,
-    );
-    expect(find.text('Last used'), findsOneWidget);
-    await tester.tap(find.byKey(const Key('link-google')));
-    await tester.pumpAndSettle();
-    expect(accounts.links, 1);
-    expect(find.byKey(const Key('remove-google')), findsOneWidget);
-    await tester.tap(find.byKey(const Key('remove-google')));
-    await tester.pumpAndSettle();
-    expect(accounts.removals, 1);
-    expect(find.byKey(const Key('link-google')), findsOneWidget);
+    await _pump(tester, _Accounts(const AccountState(accounts: [_apple])));
+
+    expect(find.text('Account'), findsWidgets);
+    expect(find.byKey(const Key('account-back')), findsOneWidget);
+    expect(find.text('Noble'), findsOneWidget);
+    expect(find.byKey(AccountScreen.avatarKey), findsOneWidget);
+    expect(find.text('Login methods'), findsOneWidget);
   });
+
+  testWidgets(
+    'each method shows its mark, status and action; the last one cannot be unlinked',
+    (tester) async {
+      final accounts = _Accounts(const AccountState(accounts: [_apple]));
+      await _pump(tester, accounts);
+
+      expect(find.text('Apple'), findsOneWidget);
+      expect(find.text('Google'), findsOneWidget);
+      final statuses = tester
+          .widgetList<StatusWord>(find.byType(StatusWord))
+          .toList();
+      expect(statuses.map((word) => word.label), ['Linked', 'Not linked']);
+      expect(statuses.map((word) => word.kind), [
+        StatusKind.ok,
+        StatusKind.muted,
+      ]);
+      expect(find.text('Last used'), findsOneWidget);
+
+      // Apple is the only method: unlinking is refused, with the reason.
+      expect(_action(tester, 'remove-apple').onPressed, isNull);
+      expect(find.text('Add another method first'), findsOneWidget);
+      expect(_action(tester, 'link-google').label, 'Link');
+      expect(_action(tester, 'remove-apple').label, 'Unlink');
+
+      await tester.tap(find.byKey(const Key('link-google')));
+      await tester.pumpAndSettle();
+      expect(accounts.links, 1);
+      expect(find.text('Add another method first'), findsNothing);
+
+      await tester.tap(find.byKey(const Key('remove-google')));
+      await tester.pumpAndSettle();
+      expect(accounts.removals, 1);
+      expect(find.byKey(const Key('link-google')), findsOneWidget);
+    },
+  );
+
+  testWidgets('methods being verified say so and refuse mutations', (
+    tester,
+  ) async {
+    final accounts = _Accounts(const AccountState(loading: true));
+    await _pump(tester, accounts);
+
+    expect(find.text('Verifying your login methods…'), findsOneWidget);
+    expect(_action(tester, 'link-apple').onPressed, isNull);
+    expect(_action(tester, 'link-google').onPressed, isNull);
+  });
+
   testWidgets('missing Google configuration remains visible and disabled', (
     tester,
   ) async {
@@ -147,15 +198,14 @@ void main() {
       _Accounts(const AccountState(accounts: [_apple])),
       googleAvailable: false,
     );
-    expect(
-      tester.widget<TextButton>(find.byKey(const Key('link-google'))).onPressed,
-      isNull,
-    );
+
+    expect(_action(tester, 'link-google').onPressed, isNull);
     expect(
       find.text('Google sign-in is not available in this build.'),
       findsOneWidget,
     );
   });
+
   testWidgets('unknown methods require reload before another mutation', (
     tester,
   ) async {
@@ -163,45 +213,49 @@ void main() {
       AccountState(error: AccountApiException(503, 'private', null)),
     );
     await _pump(tester, accounts);
-    expect(
-      tester.widget<TextButton>(find.byKey(const Key('link-apple'))).onPressed,
-      isNull,
-    );
+
+    expect(_action(tester, 'link-apple').onPressed, isNull);
+    expect(find.text('Not yet verified'), findsWidgets);
+
     await tester.tap(find.byKey(const Key('refresh-methods')));
     await tester.pumpAndSettle();
+
     expect(accounts.reads, 1);
     expect(find.byKey(const Key('remove-apple')), findsOneWidget);
     expect(find.textContaining('private'), findsNothing);
   });
+
   testWidgets('linking blocks duplicate link and removal requests', (
     tester,
   ) async {
     final accounts = _Accounts(const AccountState(accounts: [_apple]))
       ..linking = Completer<bool>();
     await _pump(tester, accounts);
+
     await tester.tap(find.byKey(const Key('link-google')));
     await tester.pump();
-    expect(
-      tester.widget<TextButton>(find.byKey(const Key('link-google'))).onPressed,
-      isNull,
-    );
+    expect(_action(tester, 'link-google').onPressed, isNull);
     await tester.tap(find.byKey(const Key('link-google')));
     expect(accounts.links, 1);
+
     accounts.emit(const AccountState(accounts: [_apple]));
     accounts.linking!.complete(false);
     await tester.pumpAndSettle();
   });
+
   testWidgets(
-    'current401 expires auth but a replaced error cannot sign out later account',
+    'current 401 expires auth but a replaced error cannot sign out a later account',
     (tester) async {
       final accounts = _Accounts(const AccountState(accounts: [_apple]));
       final container = await _pump(tester, accounts);
+
       accounts.emit(
         AccountState(error: AccountApiException(401, 'private', null)),
       );
       accounts.emit(const AccountState(accounts: [_apple]));
       await tester.pumpAndSettle();
       expect((container.read(authProvider.notifier) as _Auth).signsOut, 0);
+
       accounts.emit(
         AccountState(error: AccountApiException(401, 'private', null)),
       );
@@ -209,6 +263,7 @@ void main() {
       expect((container.read(authProvider.notifier) as _Auth).signsOut, 1);
     },
   );
+
   testWidgets(
     'fresh-session rejection offers deliberate sign-in without automatic logout',
     (tester) async {
@@ -223,15 +278,17 @@ void main() {
         ),
       );
       final container = await _pump(tester, accounts);
+
       expect(
         find.text('Sign in again before removing a login method.'),
         findsOneWidget,
       );
-      expect(find.text('Sign in again'), findsOneWidget);
+      expect(_action(tester, 'account-sign-out').label, 'Sign in again');
       expect((container.read(authProvider.notifier) as _Auth).signsOut, 0);
       expect(find.textContaining('private-sentinel'), findsNothing);
     },
   );
+
   testWidgets(
     'already-linked conflict explains unchanged account without exposing diagnostics',
     (tester) async {
@@ -248,6 +305,7 @@ void main() {
           ),
         ),
       );
+
       expect(
         find.text(
           'That login method belongs to another account. Your current account is unchanged.',
@@ -258,27 +316,30 @@ void main() {
       expect(find.textContaining('private-sentinel'), findsNothing);
     },
   );
+
   testWidgets(
-    'failed expiration cleanup attempts once and permits deliberate retry',
+    'sign out lives on You: Account offers it only after a failed expiry',
     (tester) async {
       final accounts = _Accounts(const AccountState(accounts: [_apple]));
       final container = await _pump(tester, accounts);
+      expect(find.byKey(const Key('account-sign-out')), findsNothing);
+
       final auth = container.read(authProvider.notifier) as _Auth;
       auth.failSignOut = true;
       accounts.emit(
         AccountState(error: AccountApiException(401, 'private', null)),
       );
-      await tester.pump();
-      await tester.pump();
-      await tester.pump();
+      await tester.pumpAndSettle();
       expect(auth.signsOut, 1);
       expect(find.text('Couldn’t sign out. Try again.'), findsOneWidget);
+
       auth.failSignOut = false;
       await tester.tap(find.byKey(const Key('account-sign-out')));
       await tester.pumpAndSettle();
       expect(auth.signsOut, 2);
     },
   );
+
   for (final brightness in Brightness.values) {
     testWidgets('native account snapshot in ${brightness.name}', (
       tester,
@@ -297,6 +358,7 @@ void main() {
       await captureAuthSnapshot(tester, 'native-account-${brightness.name}');
     });
   }
+
   for (final brightness in Brightness.values) {
     testWidgets('Account fits narrow large text in ${brightness.name}', (
       tester,
@@ -312,9 +374,10 @@ void main() {
         brightness: brightness,
       );
       expect(tester.takeException(), isNull);
-      await tester.ensureVisible(find.byKey(const Key('account-sign-out')));
+      await tester.ensureVisible(find.byKey(const Key('refresh-methods')));
+      await tester.pumpAndSettle();
       expect(
-        find.byKey(const Key('account-sign-out')).hitTestable(),
+        find.byKey(const Key('refresh-methods')).hitTestable(),
         findsOneWidget,
       );
     });
