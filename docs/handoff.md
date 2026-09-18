@@ -55,6 +55,13 @@ worktree; the ledger holds 33 entries. Worker `02ba81e` shipped as version
 secret; `GOOGLE_IOS_CLIENT_ID` ships as a var. Health, the transcribe guard and the
 auth session endpoint answered after deploy. The founder's single smoke is next.
 
+Later on 2026-09-18 the Neon console showed "Limit reached" (105.9 of 100 free
+CU-hours). Cause: the maintenance cron ran every 5 minutes, so the compute never hit
+Neon's 5-minute autosuspend. Cron is now hourly (`d0408e1`, decision entry the same
+day), shipped as Worker version `a769dbb3-847c-428c-84ab-be9dd34a5ff6` with
+`schedule: 0 * * * *` confirmed in the deploy output. The database still answered at
+the time; Neon may still enforce the limit until the month resets on October 1.
+
 ## Current continuation — 2026-09-08
 
 The approved September 8 web memory, session management, playlist inspiration, and taste-confirmation controls are implemented locally. No production deployment has been performed for these changes. See the [execution spec](superpowers/specs/2026-09-08-release-completion-design.md) and [current evidence record](releases/2026-09-08-release-completion.md). The September 5–6 production versions below are historical records, not newly verified live state. Revised-copy implementation at `05ba8b1` is newer than the provider-only deployed snapshot.
