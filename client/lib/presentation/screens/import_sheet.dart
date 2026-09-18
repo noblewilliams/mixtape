@@ -284,7 +284,16 @@ class _ImportSheetState extends ConsumerState<ImportSheet> {
                 child: body,
               ),
             ),
-            if (reviewing) _ReviewFooter(state: state, notifier: notifier),
+            // The footer's own air sits under it, not inside it, so its edge
+            // lands one inset above the home indicator — the chrome's safe
+            // area — rather than stacking a second inset on top of it.
+            if (reviewing)
+              Padding(
+                padding: const EdgeInsets.only(
+                  bottom: ImportSheet.contentBottomPadding,
+                ),
+                child: _ReviewFooter(state: state, notifier: notifier),
+              ),
           ],
         ),
       ),
@@ -316,12 +325,7 @@ class _ReviewFooter extends StatelessWidget {
       decoration: BoxDecoration(
         border: Border(top: BorderSide(color: tokens.hairline)),
       ),
-      padding: const EdgeInsets.fromLTRB(
-        20,
-        8,
-        20,
-        ImportSheet.contentBottomPadding,
-      ),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [

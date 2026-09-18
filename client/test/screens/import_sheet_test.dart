@@ -824,11 +824,16 @@ void main() {
         lessThan(tester.getRect(newFile).left),
       );
 
-      // The footer sits on the sheet's bottom padding edge, and stays there
-      // when the list scrolls.
-      final surface = tester.getRect(find.byKey(MixtapeSheet.surfaceKey));
+      // The footer sits on the safe area — one inset above the home
+      // indicator, not two — and stays there when the list scrolls.
       final footer = tester.getRect(find.byKey(ImportSheet.footerKey));
-      expect(footer.bottom, moreOrLessEquals(surface.bottom - 34, epsilon: 0.5));
+      expect(
+        footer.bottom,
+        moreOrLessEquals(
+          844 - (34 + ImportSheet.contentBottomPadding),
+          epsilon: 1,
+        ),
+      );
 
       final before = tester.getRect(find.byKey(const Key('collection-summary')));
       await tester.drag(
