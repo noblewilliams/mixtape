@@ -1,10 +1,14 @@
 import 'energy_journey.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/config.dart';
+import '../providers/voice_providers.dart';
 import '../theme/mixtape_theme.dart';
 import 'foundation/prism_stripe.dart';
+import 'foundation/text_action.dart';
+import 'voice_level_meter.dart';
 
 class MixPromptInput extends StatefulWidget {
   const MixPromptInput({
@@ -16,6 +20,7 @@ class MixPromptInput extends StatefulWidget {
     this.focusNode,
     this.reservedExamples = const [],
     this.showVoiceInput = voiceInputEnabled,
+    this.voiceController,
   });
   final TextEditingController controller;
   final bool busy;
@@ -32,8 +37,13 @@ class MixPromptInput extends StatefulWidget {
   final List<String> reservedExamples;
 
   /// Draws the mic between the field and send. Defaults to the build flag;
-  /// Phase 7 turns the flag on and gives the mic its behaviour.
+  /// Phase 7.4 removes the flag.
   final bool showVoiceInput;
+
+  /// The microphone's state. Left out, the composer takes the app's own from
+  /// the Riverpod scope around it, so Home and a conversation share one
+  /// microphone; tests hand one in directly.
+  final VoiceComposerController? voiceController;
 
   /// The rotating placeholders, in order.
   ///
@@ -91,6 +101,9 @@ class _MixPromptInputState extends State<MixPromptInput>
   int _example = 0;
   bool _resumed = true;
 
+  /// The microphone, once the tree has been walked for it.
+  VoiceComposerController? _voice;
+
   @override
   void initState() {
     super.initState();
@@ -104,6 +117,9 @@ class _MixPromptInputState extends State<MixPromptInput>
       if (!mounted ||
           !_resumed ||
           widget.busy ||
+          // A hint that changed under the level meter would be a second
+          // thing moving while someone is talking.
+          _listening ||
           _focus.hasFocus ||
           widget.controller.text.isNotEmpty ||
           MediaQuery.disableAnimationsOf(context) ||
@@ -130,6 +146,82 @@ class _MixPromptInputState extends State<MixPromptInput>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _bindVoice();
+  }
+
+  /// The mic's state comes from the caller, or from the app's own provider
+  /// when there is a scope to read it from — widget tests of the composer
+  /// pump a bare `MaterialApp`, and a composer with no voice is just a
+  /// composer with a dead mic, not a crash.
+  void _bindVoice() {
+    // No mic, no microphone: a composer that does not draw the key must not
+    // hold state that could still be listening behind it.
+    var next = widget.showVoiceInput ? widget.voiceController : null;
+    if (next == null && widget.showVoiceInput) {
+      ProviderContainer? container;
+      try {
+        container = ProviderScope.containerOf(context, listen: false);
+      } on StateError {
+        // No scope: a composer pumped on its own in a widget test. A
+        // provider that itself fails is not caught here.
+        container = null;
+      }
+      next = container?.read(voiceComposerControllerProvider);
+    }
+    if (next == _voice) return;
+    _voice?.removeListener(_changed);
+    _voice = next;
+    _voice?.addListener(_changed);
+  }
+
+  bool get _listening =>
+      _voice != null &&
+      (_voice!.state == VoiceComposerState.listening ||
+          _voice!.state == VoiceComposerState.transcribing);
+
+  /// Open the microphone, or close it and land what was said.
+  Future<void> _toggleVoice() async {
+    final voice = _voice;
+    if (voice == null || widget.busy) return;
+    if (voice.state == VoiceComposerState.listening) {
+      final transcript = await voice.stop();
+      if (!mounted || transcript == null) return;
+      _insert(transcript);
+      return;
+    }
+    if (voice.busy) return;
+    await voice.start();
+  }
+
+  /// Land a transcript where the cursor is, and hand the field back with the
+  /// cursor after it. Nothing sends: it is a draft like any other.
+  void _insert(String transcript) {
+    final text = widget.controller.text;
+    final selection = widget.controller.selection;
+    final at = selection.isValid
+        ? selection.end.clamp(0, text.length)
+        : text.length;
+    final before = text.substring(0, at);
+    final after = text.substring(at);
+    final opened = before.isNotEmpty && !before.endsWith(' ')
+        ? ' $transcript'
+        : transcript;
+    // The cursor stays at the end of what was said, in front of the space
+    // that keeps it apart from whatever the field already held.
+    final cursor = before.length + opened.length;
+    final closed = after.isNotEmpty && !after.startsWith(' ')
+        ? '$opened '
+        : opened;
+    widget.controller.value = TextEditingValue(
+      text: '$before$closed$after',
+      selection: TextSelection.collapsed(offset: cursor),
+    );
+    _focus.requestFocus();
+  }
+
+  @override
   void didUpdateWidget(MixPromptInput oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
@@ -140,7 +232,19 @@ class _MixPromptInputState extends State<MixPromptInput>
       (oldWidget.focusNode ?? _ownFocus)?.removeListener(_changed);
       _focus.addListener(_changed);
     }
+    if (oldWidget.voiceController != widget.voiceController ||
+        oldWidget.showVoiceInput != widget.showVoiceInput) {
+      final dropped = _voice;
+      _bindVoice();
+      if (dropped != null && dropped != _voice) unawaited(dropped.cancel());
+    }
+    // The composer locked while someone was talking — a mix is starting, or
+    // the owner took the field away. The clip goes rather than the mic
+    // staying open behind a field nobody can reach.
+    if (widget.busy && !oldWidget.busy) unawaited(_voice?.cancel() ?? _idle);
   }
+
+  static final Future<void> _idle = Future<void>.value();
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) =>
@@ -149,6 +253,12 @@ class _MixPromptInputState extends State<MixPromptInput>
   @override
   void dispose() {
     _timer.cancel();
+    // The screen is going: the microphone goes back with it, and the clip
+    // is thrown away rather than transcribed into a field that is gone.
+    final voice = _voice;
+    _voice = null;
+    voice?.removeListener(_changed);
+    unawaited(voice?.cancel() ?? Future<void>.value());
     WidgetsBinding.instance.removeObserver(this);
     widget.controller.removeListener(_changed);
     _focus.removeListener(_changed);
@@ -186,7 +296,13 @@ class _MixPromptInputState extends State<MixPromptInput>
     final tokens = context.tokens;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final hasText = widget.controller.text.trim().isNotEmpty;
-    final focused = _focus.hasFocus;
+    final voice = _voice;
+    final listening = _listening;
+    final transcribing = voice?.state == VoiceComposerState.transcribing;
+    // The board shows the composer lit while the mic is open, even though the
+    // field itself is out of the tree and holds no focus.
+    final focused = _focus.hasFocus || listening;
+    final failure = voice?.failure;
 
     final field = TextField(
       key: const Key('prompt-field'),
@@ -223,20 +339,30 @@ class _MixPromptInputState extends State<MixPromptInput>
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.only(left: 8),
-                    child: field,
+                    child: listening
+                        ? _listeningLine(tokens, transcribing: transcribing)
+                        : field,
                   ),
                 ),
                 if (widget.showVoiceInput)
                   _iconKey(
                     key: const Key('voice-input'),
-                    tooltip: 'Speak your idea',
-                    onPressed: widget.busy ? null : () {},
-                    child: Icon(Icons.mic_none, size: 18, color: tokens.plum),
+                    tooltip: listening ? 'Stop listening' : 'Speak your idea',
+                    onPressed: widget.busy || transcribing
+                        ? null
+                        : () => unawaited(_toggleVoice()),
+                    child: Icon(
+                      listening ? Icons.pause : Icons.mic_none,
+                      size: 18,
+                      color: listening ? tokens.errInk : tokens.plum,
+                    ),
                   ),
                 _iconKey(
                   key: const Key('start-session'),
                   tooltip: 'Start new mix',
-                  onPressed: widget.busy || !hasText ? null : _submit,
+                  onPressed: widget.busy || listening || !hasText
+                      ? null
+                      : _submit,
                   child: widget.busy
                       ? const SizedBox(
                           width: 20,
@@ -332,10 +458,75 @@ class _MixPromptInputState extends State<MixPromptInput>
               child: surface,
             ),
           ),
+          if (failure != null && widget.showVoiceInput)
+            _failureLine(tokens, voice!, failure),
         ],
       ),
     );
   }
+
+  /// What the field says while the mic is open: the board's prism meter and
+  /// one word of state, in plum.
+  Widget _listeningLine(MixtapeTokens tokens, {required bool transcribing}) =>
+      Semantics(
+        container: true,
+        label: transcribing ? 'Transcribing' : 'Listening',
+        excludeSemantics: true,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              VoiceLevelMeter(level: _voice?.level ?? 0),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  transcribing ? 'Transcribing…' : 'Listening…',
+                  style: tokens.body.copyWith(color: tokens.plum),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+  /// The one sentence a failed attempt leaves under the field, and — for a
+  /// microphone only Settings can give back — the way there.
+  Widget _failureLine(
+    MixtapeTokens tokens,
+    VoiceComposerController voice,
+    VoiceInputException failure,
+  ) => Padding(
+    padding: const EdgeInsets.only(top: 10, left: 2, right: 2),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(Icons.error_outline, size: 16, color: tokens.errInk),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Semantics(
+            key: const Key('voice-failure'),
+            container: true,
+            liveRegion: true,
+            label: failure.message,
+            child: ExcludeSemantics(
+              child: Text(
+                failure.message,
+                style: tokens.secondary.copyWith(color: tokens.errInk),
+              ),
+            ),
+          ),
+        ),
+        if (failure.failure == VoiceInputFailure.permissionDenied &&
+            voice.settingsAvailable)
+          TextAction(
+            label: 'Open Settings',
+            onPressed: () => unawaited(voice.openSettings()),
+          ),
+      ],
+    ),
+  );
 
   /// A 40 pt key inside a 44 pt target, per the board's composer grid.
   ///
