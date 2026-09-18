@@ -4,13 +4,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/api/api_client.dart';
+import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/listening/listening_models.dart';
+import 'package:mixtape/data/onboarding/funnel_once_store.dart';
 import 'package:mixtape/data/onboarding/service_preference_store.dart';
+import 'package:mixtape/main.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
+import 'package:mixtape/presentation/providers/device_providers.dart';
+import 'package:mixtape/presentation/providers/dj_providers.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
 import 'package:mixtape/presentation/screens/choose_service_screen.dart';
 import 'package:mixtape/presentation/screens/home_screen.dart';
 import 'package:mixtape/presentation/screens/shell/shell_screen.dart';
+import 'package:mixtape/presentation/screens/sign_in_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/screens/spotify_request_screen.dart';
 
@@ -180,6 +186,86 @@ void main() {
 
     expect(find.byType(ChooseServiceScreen), findsOneWidget);
     expect(find.byType(ShellScreen), findsNothing);
+  });
+
+  testWidgets('skipping remembers the skip on the device, posts nothing, and lands on the '
+      'shell', (tester) async {
+    final prefs = InMemoryServicePreferenceStore();
+    final listening = FakeListeningApi(onboarding: onboardingState(userId: 'user-1'));
+    await pumpGate(tester, onboardingContainer(listening: listening, prefs: prefs));
+
+    await tester.ensureVisible(find.byKey(ChooseServiceScreen.skipKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(ChooseServiceScreen.skipKey));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ShellScreen), findsOneWidget);
+    expect(find.byType(ChooseServiceScreen), findsNothing);
+    expect(listening.funnelEvents, isEmpty);
+    expect(await prefs.read('user-1'), 'skipped');
+  });
+
+  testWidgets('a skip remembered on this device goes straight to the shell next launch',
+      (tester) async {
+    final prefs = InMemoryServicePreferenceStore();
+    await prefs.write('user-1', 'skipped');
+    final listening = FakeListeningApi(onboarding: onboardingState(userId: 'user-1'));
+    await pumpGate(tester, onboardingContainer(listening: listening, prefs: prefs));
+
+    expect(find.byType(ShellScreen), findsOneWidget);
+    expect(find.byType(ChooseServiceScreen), findsNothing);
+  });
+
+  testWidgets("another account's remembered skip does not skip the gate", (tester) async {
+    final prefs = InMemoryServicePreferenceStore();
+    await prefs.write('someone-else', 'skipped');
+    final listening = FakeListeningApi(onboarding: onboardingState(userId: 'user-1'));
+    await pumpGate(tester, onboardingContainer(listening: listening, prefs: prefs));
+
+    expect(find.byType(ChooseServiceScreen), findsOneWidget);
+    expect(find.byType(ShellScreen), findsNothing);
+  });
+
+  testWidgets('signing out from the gate returns to the sign-in screen', (tester) async {
+    // Sign-in's cassette turns for as long as the screen is on show, so a
+    // settle would never finish; reduced motion holds its hubs still
+    // (root_gate_test.dart does the same).
+    TestWidgetsFlutterBinding.ensureInitialized().platformDispatcher
+        .accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(disableAnimations: true);
+    addTearDown(
+      () => TestWidgetsFlutterBinding.ensureInitialized().platformDispatcher
+          .clearAccessibilityFeaturesTestValue(),
+    );
+
+    final store = InMemoryTokenStore();
+    await store.write('tok');
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          tokenStoreProvider.overrideWithValue(store),
+          djApiProvider.overrideWithValue(BareDjApi()),
+          // No service chosen: the gate stops on "Which do you use?".
+          listeningApiProvider.overrideWithValue(
+            FakeListeningApi(onboarding: onboardingState()),
+          ),
+          reminderSchedulerProvider.overrideWithValue(FakeReminderScheduler()),
+          servicePreferenceStoreProvider
+              .overrideWithValue(InMemoryServicePreferenceStore()),
+          funnelOnceStoreProvider.overrideWithValue(InMemoryFunnelOnceStore()),
+        ],
+        child: const MixtapeApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(ChooseServiceScreen), findsOneWidget);
+
+    await tester.tap(find.byKey(ChooseServiceScreen.signOutKey));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(SignInScreen), findsOneWidget);
+    expect(find.byType(ChooseServiceScreen), findsNothing);
+    expect(await store.read(), isNull);
   });
 
   testWidgets(

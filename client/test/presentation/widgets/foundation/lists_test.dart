@@ -235,6 +235,62 @@ void main() {
       expect(find.text('Ready'), findsOneWidget);
     });
 
+    testWidgets('the subtitle keeps to one line unless the row asks for more', (
+      tester,
+    ) async {
+      const long =
+          'Bring your saved music with an Exportify ZIP or CSV, however long.';
+
+      await _pump(
+        tester,
+        const FlushRow(leading: SquareArt(), title: 'Spotify', subtitle: long),
+        width: 300,
+      );
+      expect(tester.widget<Text>(find.text(long)).maxLines, 1);
+      final oneLine = tester.getSize(find.text(long)).height;
+
+      await _pump(
+        tester,
+        const FlushRow(
+          leading: SquareArt(),
+          title: 'Spotify',
+          subtitle: long,
+          subtitleMaxLines: 2,
+        ),
+        width: 300,
+      );
+      final subtitle = tester.widget<Text>(find.text(long));
+      expect(subtitle.maxLines, 2);
+      expect(subtitle.overflow, TextOverflow.ellipsis);
+      expect(
+        tester.getSize(find.text(long)).height,
+        greaterThan(oneLine),
+        reason: 'the long subtitle should actually run onto a second line',
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('the leading mark stays centred on a two-line row', (
+      tester,
+    ) async {
+      const long =
+          'Bring your saved music with an Exportify ZIP or CSV, however long.';
+      await _pump(
+        tester,
+        const FlushRow(
+          leading: SquareArt(),
+          title: 'Spotify',
+          subtitle: long,
+          subtitleMaxLines: 2,
+        ),
+        width: 300,
+      );
+
+      final row = tester.getRect(find.byType(FlushRow));
+      final mark = tester.getRect(find.byType(SquareArt));
+      expect(mark.center.dy, moreOrLessEquals(row.center.dy, epsilon: 0.5));
+    });
+
     testWidgets('the title ellipsises at the default text size', (
       tester,
     ) async {

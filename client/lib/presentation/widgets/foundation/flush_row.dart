@@ -50,6 +50,7 @@ class FlushRow extends StatelessWidget {
     required this.title,
     this.subtitle,
     this.subtitleWidget,
+    this.subtitleMaxLines = 1,
     this.trailing,
     this.onTap,
     this.leadingSize = 60,
@@ -63,6 +64,11 @@ class FlushRow extends StatelessWidget {
 
   /// Takes precedence over [subtitle] (a status word, a meta line with ink).
   final Widget? subtitleWidget;
+
+  /// How many lines [subtitle] may take below [wrapScale]; at or above it the
+  /// subtitle wraps freely, as the title does. Ignored by [subtitleWidget],
+  /// which brings its own Text.
+  final int subtitleMaxLines;
 
   /// Replaces the default chevron.
   final Widget? trailing;
@@ -106,7 +112,7 @@ class FlushRow extends StatelessWidget {
                   fontSize: 12.5,
                   color: tokens.muted,
                 ),
-                maxLines: wraps ? null : 1,
+                maxLines: wraps ? null : subtitleMaxLines,
                 overflow: wraps ? null : TextOverflow.ellipsis,
               ));
     final end =

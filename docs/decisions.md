@@ -527,3 +527,28 @@ stops treating array index 0 as the primary client id.
 
 ## 2026-09-18 — Maintenance cron runs hourly, not every 5 minutes
 The Neon free plan gives 100 compute-hours a month and suspends the compute after 5 idle minutes. A cron every 5 minutes woke it on every run, so it never slept: 0.25 CU around the clock, ~108 CU-hours in 18 days, and the console showed "Limit reached" on 2026-09-18. The cron is now `0 * * * *` (`server/wrangler.jsonc`), so the compute is awake about 6 minutes an hour (~15 CU-hours a month). Batch sizes are unchanged: 3 enrichments, 300 artwork, the cleanups, once an hour, which is plenty for the current two accounts. `POST /enrich/run` still covers backfill on demand. This amends the 2026-08-29 cron decision. **Reopens if:** sign-ups make an hourly batch of 3 fall behind (then raise `CRON_BATCH` before shortening the cadence), or the project moves to a paid Neon plan.
+
+## 2026-09-18 — The service gate has a way out: Skip, Sign out, and `skipped` as an answer
+`chosenService` takes a third value, `skipped`, alongside `apple` and `spotify`.
+"Skip for now" on the service gate remembers it on the device through the
+existing per-user `ServicePreferenceStore` (no server post, exactly like the
+Apple path — a skip is not a funnel step) and opens the shell; a relaunch for
+the same account goes straight to the shell, another account still sees the
+gate. Consumers read it as an answer, not as a missing one: Home's Spotify
+waiting rows still key off `== 'spotify'` only, and You's identity line says
+"No service connected". The gate also carries a **Sign out** action in its title
+bar, with `account_screen.dart`'s busy guard and failure line. Rationale: the
+listener is already signed in at the gate and a relaunch returns them to it, so
+without these two the screen was a dead end for anyone who uses neither service
+— or who signed in with the wrong account. **Reopens if:** the server starts
+recording a skip of its own (then the device flag becomes a cache, not the
+record), or a third answer ("I'll paste songs") makes a free-text value better
+than an enum-by-convention string.
+
+## 2026-09-18 — The large title is 28 pt, app-wide
+`MixtapeTokens.largeTitle` drops from 34 pt to 28 pt (weight stays w800,
+`letterSpacing` scales with it to -0.56) in both themes. The founder found 34
+too big on every screen. `LargeTitleScaffold`'s geometry is unaffected: the
+title row's 46 pt minimum is the board's glass-cluster height, not a multiple of
+the type size, so the collapse threshold is unchanged. The sign-in headline
+overrides `fontSize` on top of `largeTitle` and is unchanged at 18 pt.

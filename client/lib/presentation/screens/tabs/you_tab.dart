@@ -195,6 +195,9 @@ class YouTab extends ConsumerWidget {
       switch (onboarding?.chosenService) {
         'apple' => 'Apple Music',
         'spotify' => 'Spotify',
+        // Skipped the service gate: an answer, and one worth showing — add a
+        // source from Library whenever they are ready.
+        'skipped' => 'No service connected',
         _ => null,
       };
 }

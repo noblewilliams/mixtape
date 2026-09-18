@@ -312,9 +312,9 @@ class MixtapeTokens extends ThemeExtension<MixtapeTokens> {
       radiusY: 0.35,
     ),
     largeTitle: TextStyle(
-      fontSize: 34,
+      fontSize: 28,
       fontWeight: FontWeight.w800,
-      letterSpacing: -0.68,
+      letterSpacing: -0.56,
       height: 1.05,
       color: _lightText,
     ),
@@ -403,9 +403,9 @@ class MixtapeTokens extends ThemeExtension<MixtapeTokens> {
       radiusY: 0.35,
     ),
     largeTitle: TextStyle(
-      fontSize: 34,
+      fontSize: 28,
       fontWeight: FontWeight.w800,
-      letterSpacing: -0.68,
+      letterSpacing: -0.56,
       height: 1.05,
       color: _darkText,
     ),

@@ -89,6 +89,19 @@ class OnboardingNotifier extends AsyncNotifier<OnboardingState> {
     state = AsyncData(current.withChosenService('apple'));
   }
 
+  /// The listener skipped the service gate. Nothing is posted — a skip is
+  /// not a funnel step, and the server infers a service from what actually
+  /// lands — so, like Apple, the answer lives on this device and the state
+  /// takes it directly. It is a real answer, not the absence of one: the
+  /// gate must not ask again on the next launch.
+  Future<void> markSkipped() async {
+    final current = state.unwrapPrevious().value;
+    if (current == null) return;
+    await _remember(current.userId, 'skipped');
+    if (!ref.mounted) return;
+    state = AsyncData(current.withChosenService('skipped'));
+  }
+
   /// The listener picked Spotify at the service gate: remembered on the
   /// device before the post, so a dropped `chose_spotify` still shows the
   /// waiting state on the next launch.

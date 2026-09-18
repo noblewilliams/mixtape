@@ -282,7 +282,8 @@ class OnboardingState {
   final List<MusicSource> sources;
   final bool hasLibrary;
 
-  /// `spotify`, `apple`, or null when the listener has not chosen yet.
+  /// `spotify`, `apple`, `skipped` (the listener declined the gate on this
+  /// device), or null when the listener has not answered yet.
   final String? chosenService;
   final DateTime? markedRequestedAt;
   final DateTime? interviewCompletedAt;

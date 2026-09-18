@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart' show SemanticsAction;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/presentation/screens/choose_service_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
@@ -8,6 +9,8 @@ Future<void> _pump(
   WidgetTester tester, {
   VoidCallback? onApple,
   VoidCallback? onSpotify,
+  VoidCallback? onSignOut,
+  VoidCallback? onSkip,
   double scale = 1,
   Brightness brightness = Brightness.light,
 }) async {
@@ -25,6 +28,8 @@ Future<void> _pump(
       home: ChooseServiceScreen(
         onApple: onApple ?? () {},
         onSpotify: onSpotify ?? () {},
+        onSignOut: onSignOut ?? () {},
+        onSkip: onSkip ?? () {},
       ),
     ),
   );
@@ -48,6 +53,10 @@ void main() {
       tester.getSize(find.byKey(ChooseServiceScreen.appleMarkKey)).width,
       ChooseServiceScreen.markSize,
     );
+    expect(
+      tester.getSize(find.byKey(ChooseServiceScreen.spotifyMarkKey)).width,
+      ChooseServiceScreen.markSize,
+    );
   });
 
   testWidgets('each row reports its choice once', (tester) async {
@@ -63,6 +72,83 @@ void main() {
     await tester.tap(find.byKey(const Key('choose-spotify')));
     await tester.pump();
     expect(spotify, 1);
+  });
+
+  testWidgets('the intro line is meta-sized muted type', (tester) async {
+    await _pump(tester);
+
+    final intro = tester.widget<Text>(find.text(ChooseServiceScreen.intro));
+    expect(intro.style?.fontSize, MixtapeTokens.light.meta.fontSize);
+    expect(intro.style?.fontSize, 12);
+    expect(intro.style?.color, MixtapeTokens.light.muted);
+    expect(intro.style?.height, closeTo(1.4, 0.001));
+  });
+
+  testWidgets("the Spotify row's subtitle is allowed a second line", (
+    tester,
+  ) async {
+    await _pump(tester);
+
+    final subtitle = tester.widget<Text>(
+      find.text('Bring your saved music with an Exportify ZIP or CSV.'),
+    );
+    expect(subtitle.maxLines, 2);
+  });
+
+  testWidgets('the rows sit 32 pt below the intro line', (tester) async {
+    await _pump(tester);
+
+    final intro = tester.getRect(find.text(ChooseServiceScreen.intro));
+    final firstRow = tester.getRect(find.byType(FlushRow).first);
+    expect(firstRow.top - intro.bottom, moreOrLessEquals(32, epsilon: 0.5));
+  });
+
+  testWidgets('sign out and skip are offered and report once each', (
+    tester,
+  ) async {
+    var signedOut = 0;
+    var skipped = 0;
+    await _pump(
+      tester,
+      onSignOut: () => signedOut++,
+      onSkip: () => skipped++,
+    );
+
+    expect(find.byKey(ChooseServiceScreen.signOutKey), findsOneWidget);
+    expect(find.byKey(ChooseServiceScreen.skipKey), findsOneWidget);
+    expect(find.text(ChooseServiceScreen.skipNote), findsOneWidget);
+
+    await tester.tap(find.byKey(ChooseServiceScreen.signOutKey));
+    await tester.pump();
+    expect(signedOut, 1);
+    expect(skipped, 0);
+
+    await tester.tap(find.byKey(ChooseServiceScreen.skipKey));
+    await tester.pump();
+    expect(skipped, 1);
+    expect(signedOut, 1);
+  });
+
+  testWidgets('every control is one VoiceOver can activate', (tester) async {
+    final handle = tester.ensureSemantics();
+    await _pump(tester);
+
+    for (final finder in [
+      find.byKey(const Key('choose-apple')),
+      find.byKey(const Key('choose-spotify')),
+      find.byKey(ChooseServiceScreen.signOutKey),
+      find.byKey(ChooseServiceScreen.skipKey),
+    ]) {
+      expect(
+        tester.getSemantics(finder).getSemanticsData().hasAction(
+          SemanticsAction.tap,
+        ),
+        isTrue,
+        reason: 'a node with no tap action cannot be activated by VoiceOver',
+      );
+    }
+
+    handle.dispose();
   });
 
   for (final brightness in Brightness.values) {

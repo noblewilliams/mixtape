@@ -167,7 +167,9 @@ void main() {
       for (final tokens in [MixtapeTokens.light, MixtapeTokens.dark]) {
         expect(tokens.meta.fontSize, 12);
         expect(tokens.label.fontSize, 10);
-        expect(tokens.largeTitle.fontSize, 34);
+        // The founder's 2026-09-18 sizing: 34 read too big everywhere.
+        expect(tokens.largeTitle.fontSize, 28);
+        expect(tokens.largeTitle.letterSpacing, -0.56);
         expect(tokens.largeTitle.fontWeight, FontWeight.w800);
         expect(tokens.body.fontSize, 16);
         expect(tokens.secondary.fontSize, 13);

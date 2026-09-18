@@ -1,15 +1,17 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/listening/listening_models.dart';
+import '../providers/auth_provider.dart';
 import '../providers/onboarding_provider.dart';
 import '../theme/mixtape_theme.dart';
 import '../widgets/foundation/flush_row.dart';
 import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/large_title_scaffold.dart';
+import '../widgets/foundation/text_action.dart';
 import 'shell/shell_screen.dart';
-import 'sign_in_screen.dart' show AppleMark;
 import 'spotify_request_screen.dart';
 
 /// The service gate: what a signed-in listener sees first. Sits where Home
@@ -40,6 +42,12 @@ enum _GateStep { pending, choose, request, home }
 class _ServiceGateState extends ConsumerState<ServiceGate> {
   _GateStep _step = _GateStep.pending;
 
+  /// Same busy guard and failure line as `account_screen.dart`'s `_signOut`:
+  /// a second tap while the first is in flight does nothing, and a throw
+  /// leaves the listener here with something to read rather than silence.
+  bool _signingOut = false;
+  String? _signOutError;
+
   /// Null while onboarding is still loading. An error falls through to Home:
   /// a listener is never locked out of the tapes by an unreadable
   /// onboarding state.
@@ -65,6 +73,29 @@ class _ServiceGateState extends ConsumerState<ServiceGate> {
     setState(() => _step = _GateStep.request);
   }
 
+  void _skip() {
+    // Like Apple: remembered on the device, nothing posted, shell right away.
+    unawaited(ref.read(onboardingProvider.notifier).markSkipped());
+    setState(() => _step = _GateStep.home);
+  }
+
+  Future<void> _signOut() async {
+    if (_signingOut) return;
+    setState(() {
+      _signingOut = true;
+      _signOutError = null;
+    });
+    try {
+      await ref.read(authProvider.notifier).signOut();
+    } catch (_) {
+      if (mounted) {
+        setState(() => _signOutError = 'Couldn’t sign out. Try again.');
+      }
+    } finally {
+      if (mounted) setState(() => _signingOut = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     ref.listen(onboardingProvider, (previous, next) {
@@ -84,6 +115,9 @@ class _ServiceGateState extends ConsumerState<ServiceGate> {
       _GateStep.choose => ChooseServiceScreen(
         onApple: _chooseApple,
         onSpotify: _chooseSpotify,
+        onSignOut: _signingOut ? null : _signOut,
+        onSkip: _skip,
+        signOutError: _signOutError,
       ),
       _GateStep.request => SpotifyRequestScreen(
         onDone: () => setState(() => _step = _GateStep.home),
@@ -94,24 +128,48 @@ class _ServiceGateState extends ConsumerState<ServiceGate> {
 }
 
 /// "Which do you use?" — Apple Music records nothing (the existing library
-/// sync from Home is the Apple path); Spotify starts the request flow.
+/// sync from Home is the Apple path); Spotify starts the request flow;
+/// skipping remembers that answer and opens the shell anyway.
 ///
 /// Two flush rows under a large title, each with its service mark and the one
-/// line that says what choosing it does.
+/// line that says what choosing it does, then the way past them. The listener
+/// is already signed in here and a relaunch brings them back, so Sign out
+/// rides the title bar: this screen is never a dead end.
 class ChooseServiceScreen extends StatelessWidget {
   const ChooseServiceScreen({
     super.key,
     required this.onApple,
     required this.onSpotify,
+    required this.onSkip,
+    this.onSignOut,
+    this.signOutError,
   });
 
   final VoidCallback onApple;
   final VoidCallback onSpotify;
+  final VoidCallback onSkip;
+
+  /// Null while a sign-out is in flight, which dims the action and drops its
+  /// tap target — the gate's busy guard, shown.
+  final VoidCallback? onSignOut;
+
+  /// Set when the last sign-out threw.
+  final String? signOutError;
 
   /// The service marks, and the hairline's inset past them.
   static const double markSize = 44;
   static const Key appleMarkKey = Key('choose-apple-mark');
   static const Key spotifyMarkKey = Key('choose-spotify-mark');
+  static const Key signOutKey = Key('choose-service-sign-out');
+  static const Key skipKey = Key('choose-service-skip');
+
+  static const String intro =
+      'Mixtape builds each mix from what you already listen to.';
+  static const String skipNote =
+      'You can connect a service later from Library.';
+
+  /// The air the founder asked for between the intro line and the first row.
+  static const double introGap = 32;
 
   @override
   Widget build(BuildContext context) {
@@ -122,16 +180,24 @@ class ChooseServiceScreen extends StatelessWidget {
         body: LargeTitleScaffold(
           // Kept from the shipped screen: `service_gate_test` pins this copy.
           title: 'Which do you use?',
+          trailing: TextAction(
+            key: signOutKey,
+            label: 'Sign out',
+            onPressed: onSignOut,
+          ),
           slivers: [
             SliverToBoxAdapter(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    'Mixtape builds each mix from what you already listen to.',
-                    style: tokens.body.copyWith(color: tokens.muted),
+                    intro,
+                    style: tokens.meta.copyWith(
+                      color: tokens.muted,
+                      height: 1.4,
+                    ),
                   ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: introGap),
                   FlushList(
                     children: [
                       _ServiceRow(
@@ -151,6 +217,27 @@ class ChooseServiceScreen extends StatelessWidget {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 20),
+                  Center(
+                    child: TextAction(
+                      key: skipKey,
+                      label: 'Skip for now',
+                      onPressed: onSkip,
+                    ),
+                  ),
+                  Text(
+                    skipNote,
+                    textAlign: TextAlign.center,
+                    style: tokens.meta.copyWith(color: tokens.muted),
+                  ),
+                  if (signOutError != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      signOutError!,
+                      textAlign: TextAlign.center,
+                      style: tokens.meta.copyWith(color: tokens.errInk),
+                    ),
+                  ],
                   const SizedBox(height: 24),
                 ],
               ),
@@ -197,6 +284,8 @@ class _ServiceRow extends StatelessWidget {
       leadingSize: ChooseServiceScreen.markSize,
       title: title,
       subtitle: subtitle,
+      // The Spotify line is a full sentence; ellipsising it hid half of it.
+      subtitleMaxLines: 2,
       trailing: Icon(
         Icons.chevron_right,
         size: 20,
@@ -206,25 +295,19 @@ class _ServiceRow extends StatelessWidget {
   );
 }
 
-/// Apple Music: the Apple mark on the board's tile.
+/// Apple Music, as the app icon draws it: the beamed double eighth note in
+/// white on the pink-to-red tile.
 class _AppleMusicMark extends StatelessWidget {
   const _AppleMusicMark();
 
   @override
-  Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    return Container(
-      key: ChooseServiceScreen.appleMarkKey,
-      width: ChooseServiceScreen.markSize,
-      height: ChooseServiceScreen.markSize,
-      decoration: BoxDecoration(
-        color: tokens.tapeFill,
-        border: Border.all(color: tokens.tapeEdge),
-        borderRadius: BorderRadius.circular(MixtapeMetrics.tileRadius),
-      ),
-      child: Center(child: AppleMark(size: 22, color: tokens.tapeInk)),
-    );
-  }
+  Widget build(BuildContext context) => SizedBox.square(
+    key: ChooseServiceScreen.appleMarkKey,
+    dimension: ChooseServiceScreen.markSize,
+    child: const ExcludeSemantics(
+      child: CustomPaint(painter: _AppleMusicMarkPainter()),
+    ),
+  );
 }
 
 /// Spotify: the three waves on their green disc.
@@ -241,29 +324,134 @@ class _SpotifyMark extends StatelessWidget {
   );
 }
 
+/// Both marks are drawn in a 24 × 24 box and scaled to the mark's size, the
+/// same way `sign_in_screen.dart` draws the Apple and Google marks.
+const double _viewBox = 24;
+
+class _AppleMusicMarkPainter extends CustomPainter {
+  const _AppleMusicMarkPainter();
+
+  /// The tile's vertical gradient, top to bottom.
+  static const Color _tileTop = Color(0xFFFB5C74);
+  static const Color _tileBottom = Color(0xFFFA233B);
+
+  /// iOS's icon shape: the corner radius is a fixed share of the side.
+  static const double _cornerFraction = 0.22;
+
+  /// The glyph's share of the tile.
+  static const double _glyphFraction = 0.55;
+
+  /// Left stem, right stem — the right one is shorter, as the mark draws it.
+  static const Rect _leftStem = Rect.fromLTRB(8.6, 4.3, 10.6, 18.0);
+  static const Rect _rightStem = Rect.fromLTRB(19.4, 6.4, 21.4, 16.2);
+
+  /// The beam joining the stem tops, slanting down to the right.
+  static const List<Offset> _beam = [
+    Offset(8.6, 2.7),
+    Offset(21.4, 5.1),
+    Offset(21.4, 8.7),
+    Offset(8.6, 6.3),
+  ];
+
+  /// Note heads: centre, radii, and the tilt every music face gives them.
+  static const Offset _leftHead = Offset(6.6, 17.6);
+  static const Offset _rightHead = Offset(17.6, 15.8);
+  static const Size _leftHeadRadii = Size(4.0, 3.15);
+  static const Size _rightHeadRadii = Size(3.8, 3.0);
+  static const double _headTilt = -0.33;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final side = size.shortestSide;
+    final tile = Rect.fromLTWH(0, 0, side, side);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(tile, Radius.circular(side * _cornerFraction)),
+      Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [_tileTop, _tileBottom],
+        ).createShader(tile),
+    );
+
+    final glyph = side * _glyphFraction;
+    canvas.save();
+    canvas.translate((side - glyph) / 2, (side - glyph) / 2);
+    canvas.scale(glyph / _viewBox);
+
+    final ink = Paint()..color = const Color(0xFFFFFFFF);
+    canvas.drawPath(
+      Path()
+        ..addRect(_leftStem)
+        ..addRect(_rightStem)
+        ..addPolygon(_beam, true),
+      ink,
+    );
+    _drawHead(canvas, ink, _leftHead, _leftHeadRadii);
+    _drawHead(canvas, ink, _rightHead, _rightHeadRadii);
+
+    canvas.restore();
+  }
+
+  void _drawHead(Canvas canvas, Paint ink, Offset center, Size radii) {
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    canvas.rotate(_headTilt);
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: Offset.zero,
+        width: radii.width * 2,
+        height: radii.height * 2,
+      ),
+      ink,
+    );
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_AppleMusicMarkPainter oldDelegate) => false;
+}
+
 class _SpotifyMarkPainter extends CustomPainter {
   const _SpotifyMarkPainter();
 
-  static const Color _green = Color(0xFF1DB954);
-  static const Color _ink = Color(0xFF121212);
+  static const Color _green = Color(0xFF1ED760);
+  static const Color _ink = Color(0xFF000000);
 
-  /// Radius, stroke and sweep of each wave, in the mark's own 24 pt box.
+  /// Every wave bows the same share of its own width, so the three read as
+  /// one family rather than as nested rings — concentric arcs about a single
+  /// centre make the short bottom one curl up like a wifi glyph, which the
+  /// logo's does not.
+  static const double _bow = 0.30;
+
+  /// Where each wave's apex sits, half the chord it spans, and its stroke —
+  /// the official proportions, as fractions of the 24 pt disc: the top wave
+  /// is the widest (66% of the diameter) and the thickest (9%), the bottom
+  /// the shortest (46%) and the thinnest (7%), the apexes evenly spaced and
+  /// the group centred a touch above the disc's own centre.
   static const List<(double, double, double)> _waves = [
-    (8.0, 2.2, 0.62),
-    (5.9, 1.9, 0.66),
-    (3.9, 1.6, 0.70),
+    (6.6, 7.92, 2.16),
+    (10.3, 6.72, 1.92),
+    (14.0, 5.52, 1.68),
   ];
 
   @override
   void paint(Canvas canvas, Size size) {
     canvas.save();
-    canvas.scale(size.shortestSide / 24);
+    canvas.scale(size.shortestSide / _viewBox);
     canvas.drawCircle(const Offset(12, 12), 12, Paint()..color = _green);
-    for (final (radius, stroke, sweep) in _waves) {
+    for (final (apex, halfChord, stroke) in _waves) {
+      // Bowed upward in the middle: the apex is the top of a circle whose
+      // centre hangs below the disc, far enough that the wave rises [_bow]
+      // of its half-chord above the line joining its ends.
+      final sagitta = halfChord * _bow;
+      final radius =
+          (halfChord * halfChord + sagitta * sagitta) / (2 * sagitta);
+      final sweep = 2 * math.asin(halfChord / radius);
       canvas.drawArc(
-        Rect.fromCircle(center: const Offset(12, 15.5), radius: radius),
-        -3.14159 * (0.5 + sweep / 2),
-        3.14159 * sweep,
+        Rect.fromCircle(center: Offset(12, apex + radius), radius: radius),
+        -math.pi / 2 - sweep / 2,
+        sweep,
         false,
         Paint()
           ..color = _ink
