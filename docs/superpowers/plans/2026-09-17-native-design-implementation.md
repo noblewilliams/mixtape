@@ -1,9 +1,14 @@
 # Native design implementation — 2026-09-17
 
 Status: reviewed by the founder on 2026-09-17; answers folded in below. Phase 0 landed
-(`native-design-baseline`). Phase 1 landed in seven commits (c6189df…41c9883) ; the founder approved the gallery gate
-on 2026-09-17 ("continue phase 2"). Gallery: `cd client && flutter run --dart-define=MIXTAPE_GALLERY=true
---dart-define-from-file=config/google-ios.json`.
+(`native-design-baseline`). Phase 1 landed (c6189df…41c9883); the founder approved the
+gallery gate. Phase 2 landed (72a4304…48fd3a8), verified to sign-in on the iOS 26.5 and
+18.2 simulators. On 2026-09-17 the founder asked for all remaining phases to complete
+before a single smoke (Google sign-in failed for them; see Phase 8.5). Per-phase gates
+are therefore replaced by the per-task review loop; Fable verifies on the simulators
+where sign-in is not required. Server 5.1 (insert op) and 7.1 (transcription) landed
+(7926d77, cfedaa0); Phases 3–9 in progress. Gallery: `cd client && flutter run
+--dart-define=MIXTAPE_GALLERY=true --dart-define-from-file=config/google-ios.json`.
 
 ## Goal
 
@@ -280,7 +285,7 @@ approval; founder refines in the simulator. Each task updates its screen test.
 
 7.1 Library (sources and playlists) · 7.2 Playlist detail and private edit
 draft/review · 7.3 You (inset groups, toggles, Together ghost) · 7.4 What the
-DJ knows and Forget · 7.5 Account and sign-in · 7.6 Choose service, Apple
+DJ knows and Forget · 7.5 Account and sign-in (including diagnosing the founder's failed native Google sign-in: dart-define config, URL scheme, server client id) · 7.6 Choose service, Apple
 connection and sync sheet · 7.7 Spotify import guide, import sheet and results
 · 7.8 Version history and taste interview.
 
