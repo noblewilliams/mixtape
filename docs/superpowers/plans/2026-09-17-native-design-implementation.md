@@ -8,7 +8,8 @@ before a single smoke (Google sign-in failed for them; see Phase 8.5). Per-phase
 are therefore replaced by the per-task review loop; Fable verifies on the simulators
 where sign-in is not required. Server 5.1 (insert op) and 7.1 (transcription) landed
 (7926d77, cfedaa0); Phases 3–8 landed on 2026-09-18 (see the decisions entry of that
-date); Phase 9 docs and the founder's single smoke remain. Gallery: `cd client && flutter run
+date); Phase 9 docs landed (`testing/2026-09-18-native-design-program.md`); the founder's
+single smoke and the TestFlight build remain. Gallery: `cd client && flutter run
 --dart-define=MIXTAPE_GALLERY=true --dart-define-from-file=config/google-ios.json`.
 
 ## Goal

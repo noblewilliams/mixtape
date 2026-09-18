@@ -31,8 +31,16 @@ navigators and dock hide/show/minimise wiring, the Mixes tab, and Library and Yo
 skeletons. Home lost its list and overflow menu. Two follow-ups are recorded in the
 plan's backlog notes: Home still renders `PlaybackMini` above the dock's mini-player
 (Phase 6.2) and Library/You duplicate the sync sheet and suggestion settings (Phase 8).
-Verified on the iOS 26.5 and iOS 18.2 simulators up to sign-in; the signed-in smoke
-is the founder's Phase 2 gate.
+Verified on the iOS 26.5 and iOS 18.2 simulators up to sign-in.
+
+On 2026-09-17 the founder asked for every phase to complete before one smoke. Phases
+3–8 landed on 2026-09-18 with the same per-task review loop: Home panel and pills,
+attachment menu and picker sheet; conversation; arrangement with Undo (server insert
+op); Now Playing and mini-player wiring; voice input end to end (server Groq route,
+recorder, on-device fallback, composer listening state, flag on); and the restyled
+Library, You, memory, sign-in, Account, playlist detail and edit, Spotify import,
+history and interview screens. Evidence and the smoke checklist:
+`testing/2026-09-18-native-design-program.md`. Decisions: the 2026-09-18 entry.
 
 ## Current continuation — 2026-09-08
 
