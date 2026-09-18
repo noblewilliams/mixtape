@@ -416,7 +416,7 @@ void main() {
       await tester.tap(find.text('Sunset Drive'));
       await tester.pumpAndSettle();
       expect(find.byType(ChatScreen), findsOneWidget);
-      await tester.pageBack();
+      await tester.tap(find.byKey(const Key('chat-back')));
       await tester.pumpAndSettle();
       expect(reads, greaterThan(before));
     });

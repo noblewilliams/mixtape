@@ -1,24 +1,63 @@
-import 'playback_screen.dart';
-import '../widgets/energy_journey.dart';
-import '../widgets/mix_energy_summary.dart';
-import 'mix_history_screen.dart';
+/// The conversation: talking to the DJ about one mix
+/// (`docs/mockups/approved/2026-09-17-mobile-conversation-states.md`, frames
+/// C1–C3 / F1–F3 / A1–A3 in
+/// `docs/mockups/2026-09-17-mobile-conversation-states.html`; the frame itself
+/// is locked by `docs/mockups/approved/2026-09-17-mobile-shell.md`).
+///
+/// Glass back and action clusters over a small title, flush turns on the
+/// gradient, and a bottom panel holding the attachments, the composer and the
+/// mix actions. Pushed inside a tab [Navigator] — the shell hides the dock for
+/// it — so it draws its own chrome and never assumes it is the root route.
+library;
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../data/api/api_client.dart';
+import '../../data/dj/dj_models.dart';
+import '../../data/musickit/musickit_bridge.dart';
+import '../../data/playlists/playlist_context_models.dart';
 import '../providers/dj_providers.dart';
 import '../providers/auth_provider.dart';
+import '../../data/listening/listening_models.dart' show FunnelEventType;
+import '../providers/device_providers.dart';
+import '../providers/funnel_provider.dart';
+import '../providers/library_sync_provider.dart';
+import '../providers/onboarding_provider.dart';
+import '../providers/playback_provider.dart';
 import '../providers/playlist_context_provider.dart';
 import '../providers/mix_operation_gate.dart';
-import '../../data/api/api_client.dart';
-import '../../data/playlists/playlist_context_models.dart';
-import '../widgets/mix_name_editor.dart';
+import '../theme/mixtape_theme.dart';
+import '../widgets/conversation_turn.dart';
+import '../widgets/energy_journey.dart';
+import '../widgets/foundation/glass_cluster.dart';
+import '../widgets/foundation/gradient_background.dart';
+import '../widgets/foundation/label_chip.dart';
+import '../widgets/foundation/liquid_glass_surface.dart';
+import '../widgets/foundation/tape_button.dart';
+import '../widgets/foundation/text_action.dart';
+import '../widgets/home_panel.dart' show HomePanel;
+import '../widgets/mix_energy_summary.dart';
+import '../widgets/mix_prompt_input.dart';
 import '../widgets/playlist_inspiration.dart';
 import '../widgets/queue_card.dart';
+import 'mix_history_screen.dart';
+import 'playback_screen.dart';
+import 'queue_screen.dart';
 
-/// The DJ conversation for one session (see
-/// `docs/superpowers/plans/2026-08-29-p3b-dj-client.md` Task 4): transcript
-/// + inline queue card + composer, over [chatProvider].
+/// The toast a selection changed somewhere else earns: the canonical seed is
+/// adopted, the arrangement and the unsent draft are left alone, and the
+/// listener is told (approved record → Attachment chips).
+String inspirationChangedMessage(String? name) =>
+    '${name ?? 'The inspiration'} changed elsewhere. '
+    'Showing the current selection.';
+
+/// The transfer tool the handoff opens, matching the arrangement's own
+/// TRANSFER_TOOL_URL.
+final _transferToolUrl = Uri.https('www.tunemymusic.com', '/transfer');
+
 class ChatScreen extends ConsumerStatefulWidget {
   const ChatScreen({super.key, required this.sessionId, this.initialError});
 
@@ -28,9 +67,9 @@ class ChatScreen extends ConsumerStatefulWidget {
   /// still persisted a session row (see `dj_providers.dart`'s
   /// `sessionStarterProvider` doc comment) — the server's error message,
   /// which never made it into the transcript itself. Seeded once, as a
-  /// synthetic error bubble, right after the initial load (see
-  /// [_ChatScreenState.build]'s `ref.listen`). Does not change the
-  /// screen's contract otherwise: every other caller passes null.
+  /// synthetic error turn, right after the initial load (see
+  /// [_ChatScreenState.build]'s one-shot seed). Does not change the screen's
+  /// contract otherwise: every other caller passes null.
   final String? initialError;
 
   @override
@@ -40,21 +79,45 @@ class ChatScreen extends ConsumerStatefulWidget {
 class _ChatScreenState extends ConsumerState<ChatScreen> {
   final _scrollController = ScrollController();
   final _textController = TextEditingController();
+  final _promptFocus = FocusNode();
   final _composerKey = GlobalKey();
+  final _panelKey = GlobalKey();
 
   int _lastMessageCount = -1;
   Timer? _listeningTimer;
   bool _showListeningCaption = false;
   bool _seededInitialError = false;
-  bool _editingName = false;
   bool _changingStatus = false;
+  bool _playing = false;
+  bool _saving = false;
+  bool _sharing = false;
+
+  /// The panel's measured height, which the transcript pads for. The panel
+  /// floats over the transcript (and rides the keyboard), so the list cannot
+  /// lay itself out against it — it is measured after the frame instead.
+  double _panelHeight = 0;
+  bool _measuring = false;
 
   @override
   void dispose() {
     _scrollController.dispose();
     _textController.dispose();
+    _promptFocus.dispose();
     _listeningTimer?.cancel();
     super.dispose();
+  }
+
+  void _measurePanel() {
+    if (_measuring) return;
+    _measuring = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _measuring = false;
+      if (!mounted) return;
+      final box = _panelKey.currentContext?.findRenderObject() as RenderBox?;
+      if (box == null || !box.hasSize) return;
+      if ((box.size.height - _panelHeight).abs() < 0.5) return;
+      setState(() => _panelHeight = box.size.height);
+    });
   }
 
   void _scrollToBottom() {
@@ -83,15 +146,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   /// Unforeseen-exception guard: [ChatNotifier.send] already resolves every
-  /// error type it knows about into an error bubble and never rethrows —
-  /// this catch-all exists purely so an entirely unanticipated exception
-  /// can't become an unhandled async error with a bricked composer.
+  /// error type it knows about into an error turn and never rethrows — this
+  /// catch-all exists purely so an entirely unanticipated exception can't
+  /// become an unhandled async error with a bricked composer.
   ///
   /// [fromComposer] gates clearing the draft: true when the composer's own
-  /// send button/submit fired this (the just-sent text IS the draft, safe
-  /// to clear), false for a retry (which resends a DIFFERENT, already-sent
-  /// turn's text — clearing the controller here would silently wipe
-  /// whatever new draft the user has since started typing).
+  /// send fired this (the just-sent text IS the draft, safe to clear), false
+  /// for a resend (which resends a DIFFERENT, already-sent turn's text —
+  /// clearing the controller here would silently wipe whatever new draft the
+  /// user has since started typing).
   Future<void> _send(String text, {bool fromComposer = false}) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty ||
@@ -105,13 +168,25 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       await ref.read(chatProvider(widget.sessionId).notifier).send(trimmed);
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('something unexpected happened')),
-      );
+      _snack('something unexpected happened');
     }
   }
 
-  Future<void> _pickInspiration(BuildContext anchor) async {
+  /// Floating, 16 pt in: there is no dock on this route for a toast to clear,
+  /// and the app-level [ScaffoldMessenger] builds the bar against the app's
+  /// own theme, so the geometry is set here rather than in a local theme.
+  void _snack(String message, {SnackBarAction? action}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        action: action,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(16),
+      ),
+    );
+  }
+
+  Future<void> _pickInspiration() async {
     final contextState = ref.read(
       sessionPlaylistContextProvider(widget.sessionId),
     );
@@ -120,9 +195,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       return;
     }
     final seed = contextState.seed;
-    final box =
-        _composerKey.currentContext?.findRenderObject() as RenderBox? ??
-        anchor.findRenderObject() as RenderBox;
+    final box = _composerKey.currentContext?.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return;
     final initialRect = box.localToGlobal(Offset.zero) & box.size;
     Rect composerRect() {
       final current = _composerKey.currentContext?.findRenderObject();
@@ -152,10 +226,30 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         );
   }
 
+  void _openArrangement() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => QueueScreen(sessionId: widget.sessionId),
+      ),
+    );
+  }
+
+  void _openHistory({int? version}) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => MixHistoryScreen(
+          sessionId: widget.sessionId,
+          initialVersion: version,
+        ),
+      ),
+    );
+  }
+
+  /// The board's More menu: Version history, Rename, Archive or Restore.
   Future<void> _actions(BuildContext anchor) async {
-    final box = anchor.findRenderObject() as RenderBox;
-    final overlay =
-        Navigator.of(context).overlay!.context.findRenderObject() as RenderBox;
+    final box = anchor.findRenderObject();
+    final overlay = Navigator.of(context).overlay?.context.findRenderObject();
+    if (box is! RenderBox || overlay is! RenderBox) return;
     final rect = box.localToGlobal(Offset.zero, ancestor: overlay) & box.size;
     final archived =
         ref.read(chatProvider(widget.sessionId)).value?.session.status ==
@@ -173,14 +267,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       ],
     );
     if (!mounted || action == null) return;
-    if (action == 'history') {
-      await Navigator.of(context).push(MaterialPageRoute(builder: (_) => MixHistoryScreen(sessionId: widget.sessionId)));
-      return;
-    }
-    if (action == 'rename') {
-      setState(() => _editingName = true);
-      return;
-    }
+    if (action == 'history') return _openHistory();
+    if (action == 'rename') return _rename();
+    await _setArchived(archived);
+  }
+
+  /// Archiving changes status only: the conversation stays open and editable,
+  /// and Undo puts it back.
+  Future<void> _setArchived(bool archived) async {
     if (_changingStatus) return;
     setState(() => _changingStatus = true);
     final notifier = ref.read(chatProvider(widget.sessionId).notifier);
@@ -188,27 +282,39 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     if (!mounted) return;
     setState(() => _changingStatus = false);
     final sessions = ref.read(sessionsProvider.notifier);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          ok
-              ? (archived ? 'Mix restored' : 'Mix archived')
-              : 'Couldn’t update this mix. Try again.',
-        ),
-        action: ok && !archived
-            ? SnackBarAction(
-                label: 'Undo',
-                onPressed: () async {
-                  if (mounted) {
-                    await notifier.setArchived(false);
-                  } else {
-                    await sessions.unarchive(widget.sessionId);
-                  }
-                },
-              )
-            : null,
-      ),
+    _snack(
+      ok
+          ? (archived ? 'Mix restored' : 'Mix archived')
+          : 'Couldn’t update this mix. Try again.',
+      action: ok && !archived
+          ? SnackBarAction(
+              label: 'Undo',
+              onPressed: () async {
+                if (mounted) {
+                  await notifier.setArchived(false);
+                } else {
+                  await sessions.unarchive(widget.sessionId);
+                }
+              },
+            )
+          : null,
     );
+  }
+
+  /// The native alert, with the current title preselected.
+  Future<void> _rename() async {
+    final current =
+        ref.read(chatProvider(widget.sessionId)).value?.session.title ?? '';
+    final name = await showDialog<String>(
+      context: context,
+      builder: (_) => _RenameDialog(title: current),
+    );
+    if (!mounted || name == null || name.trim().isEmpty) return;
+    final ok = await ref
+        .read(chatProvider(widget.sessionId).notifier)
+        .rename(name);
+    if (!mounted || ok) return;
+    _snack('Couldn’t rename this mix. Try again.');
   }
 
   Future<void> _expireSession(SessionPlaylistContextState expected) async {
@@ -229,12 +335,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           )) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Couldn’t sign out. Try again.')),
-      );
+      _snack('Couldn’t sign out. Try again.');
     }
   }
 
+  /// The line under the attachment row when the chip alone cannot say it.
   String? _inspirationStatus(SessionPlaylistContextState contextState) {
     if (contextState.error case ApiException(statusCode: 401)) {
       return 'Your session expired. Sign in again.';
@@ -247,12 +352,232 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       return 'Check the current inspiration before trying again.';
     }
     return switch (contextState.seed!.status) {
-      PlaylistSeedStatus.unavailable =>
-        'Playlist unavailable. Replace or detach it.',
+      PlaylistSeedStatus.unavailable => 'Replace or detach it to use one.',
       PlaylistSeedStatus.insufficientProfile =>
         'At least 3 matched recordings are needed.',
       _ => null,
     };
+  }
+
+  /// The seed could not be read (or its last read failed): offer another
+  /// read rather than letting the listener write blind.
+  bool _canReloadInspiration(SessionPlaylistContextState state) =>
+      state.seed == null || state.error != null;
+
+  InspirationChipTone _chipTone(SessionPlaylistContextState state) =>
+      switch (state.seed?.status) {
+        PlaylistSeedStatus.unavailable => InspirationChipTone.unavailable,
+        PlaylistSeedStatus.insufficientProfile =>
+          InspirationChipTone.insufficient,
+        _ => InspirationChipTone.ready,
+      };
+
+  void _postEvent(String type) {
+    unawaited(() async {
+      try {
+        await ref.read(djApiProvider).postSessionEvent(widget.sessionId, type);
+      } catch (_) {
+        // Silent by design — no retry, no surfaced error.
+      }
+    }());
+  }
+
+  bool _isPlayingThisMix() {
+    final player = ref.read(playbackProvider);
+    return player.sessionId == widget.sessionId &&
+        (player.sample.status == 'playing' ||
+            player.sample.status == 'waiting');
+  }
+
+  /// Play now: the app-owned Apple player takes the arrangement and the Now
+  /// Playing screen opens over it — the same handler the arrangement uses.
+  void _playHere(ChatState state) {
+    final player = ref.read(playbackProvider);
+    unawaited(
+      player.start(
+        widget.sessionId,
+        state.queueVersion,
+        state.session.title,
+        state.queue,
+      ),
+    );
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(builder: (_) => const PlaybackScreen()),
+    );
+  }
+
+  /// The Spotify handoff, exactly as the arrangement runs it: one
+  /// "Artist – Title" per track, then the transfer tool's own page.
+  ///
+  /// FOLLOW-UP: this, [_sendToMusic] and [_createPlaylist] duplicate
+  /// QueueScreen's private handlers verbatim. Task 5.3 owns the extraction
+  /// into one shared file; until it lands the copy and conditions are kept
+  /// identical on purpose.
+  Future<void> _share(BuildContext buttonContext, ChatState state) async {
+    if (_sharing) return;
+    setState(() => _sharing = true);
+    try {
+      final queue = state.queue;
+      final text = [
+        for (final t in queue) '${t.artist} – ${t.title}',
+      ].join('\n');
+      final handedOff = await ref
+          .read(textSharerProvider)
+          .share(
+            text,
+            subject: 'Mixtape · ${state.session.title}',
+            origin: _shareOrigin(buttonContext),
+          );
+      if (!mounted || !handedOff) return; // a dismissed sheet is no output
+      _noteOutput();
+      try {
+        await ref.read(linkOpenerProvider)(_transferToolUrl);
+      } catch (_) {
+        // The text is already in the listener's hands; a browser that won't
+        // open isn't worth a second message on top of the confirmation.
+      }
+      if (!mounted) return;
+      _snack(
+        'Shared ${queue.length} song${queue.length == 1 ? '' : 's'} · '
+        'TuneMyMusic makes the playlist in Spotify',
+      );
+    } catch (_) {
+      if (!mounted) return;
+      _snack("couldn't open the share sheet");
+    } finally {
+      if (mounted) setState(() => _sharing = false);
+    }
+  }
+
+  /// The share sheet's iPad popover anchor: the button's own rect, falling
+  /// back to the screen (which centres it).
+  Rect _shareOrigin(BuildContext buttonContext) {
+    final box = buttonContext.findRenderObject();
+    if (box is RenderBox && box.hasSize && !box.size.isEmpty) {
+      return box.localToGlobal(Offset.zero) & box.size;
+    }
+    return Offset.zero & MediaQuery.sizeOf(context);
+  }
+
+  /// The once-only `first_output` funnel milestone: the first SPOTIFY output.
+  void _noteOutput() =>
+      ref.read(funnelMilestonesProvider).recordOnce(FunnelEventType.firstOutput);
+
+  /// Send to Music: the queue goes to Apple Music's own player.
+  Future<void> _sendToMusic(List<QueueTrack> queue) async {
+    if (_playing) return;
+    setState(() => _playing = true);
+    try {
+      final ids = [
+        for (final t in queue)
+          if (t.appleId != null) t.appleId!,
+      ];
+      final skipped = queue.length - ids.length;
+      await ref.read(musicKitBridgeProvider).playQueue(ids);
+      _postEvent('played');
+      if (!mounted) return;
+      _snack(
+        skipped > 0
+            ? 'Playing in Apple Music · $skipped song${skipped == 1 ? '' : 's'} skipped (not in Apple Music)'
+            : 'Playing in Apple Music',
+      );
+    } on MusicKitException catch (e) {
+      if (!mounted) return;
+      _snack("Couldn't play — ${e.message}");
+    } finally {
+      if (mounted) setState(() => _playing = false);
+    }
+  }
+
+  /// Create playlist: the arrangement becomes a real Apple Music playlist.
+  /// The same call, guards and copy the arrangement screen uses; task 5.3
+  /// gives the alert its final native form in one place.
+  Future<void> _createPlaylist(ChatState state) async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      // Author prefill: the name typed on this device last time wins, then
+      // the account's display name — read non-blocking, so a still-loading
+      // value just means an empty field.
+      String? storedAuthor;
+      try {
+        storedAuthor = await ref.read(authorStoreProvider).read();
+      } catch (_) {
+        storedAuthor = null;
+      }
+      if (!mounted) return;
+      final accountName = ref.read(accountNameProvider).value;
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => _SaveDialog(
+          defaultName: state.session.title,
+          defaultAuthor:
+              (storedAuthor != null && storedAuthor.isNotEmpty
+                  ? storedAuthor
+                  : accountName) ??
+              '',
+          onConfirm: (name, author) =>
+              _confirmSave(dialogContext, state, name, author),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _confirmSave(
+    BuildContext dialogContext,
+    ChatState state,
+    String rawName,
+    String rawAuthor,
+  ) async {
+    final trimmed = rawName.trim();
+    final name = trimmed.isEmpty ? state.session.title : trimmed;
+    final trimmedAuthor = rawAuthor.trim();
+    final author = trimmedAuthor.isEmpty ? 'mixtape' : trimmedAuthor;
+    if (trimmedAuthor.isNotEmpty) {
+      try {
+        await ref.read(authorStoreProvider).write(trimmedAuthor);
+      } catch (_) {
+        // Remembering the name is a nicety; never block the save on it.
+      }
+    }
+    final ids = [
+      for (final t in state.queue)
+        if (t.appleId != null) t.appleId!,
+    ];
+    final creationApi = ref.read(djApiProvider);
+    final creationSessionId = widget.sessionId;
+    try {
+      final result = await ref
+          .read(musicKitBridgeProvider)
+          .createPlaylist(
+            name,
+            ids,
+            author: author,
+            description: 'made by mixtape',
+            onCreated: (libraryId) {
+              unawaited(
+                creationApi
+                    .recordPlaylistCreation(creationSessionId, libraryId)
+                    .catchError((Object _) {}),
+              );
+            },
+          );
+      if (result.added > 0) _postEvent('saved_playlist');
+      if (dialogContext.mounted) Navigator.of(dialogContext).pop();
+      if (!mounted) return;
+      _snack(
+        result.failed > 0
+            ? 'Saved ${result.added} songs to Apple Music (${result.failed} failed)'
+            : 'Saved ${result.added} songs to Apple Music',
+      );
+    } on MusicKitException catch (e) {
+      if (dialogContext.mounted) Navigator.of(dialogContext).pop();
+      if (!mounted) return;
+      _snack("Couldn't save the playlist — ${e.message}");
+    }
   }
 
   @override
@@ -262,7 +587,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       sessionPlaylistContextProvider(widget.sessionId),
     );
     final operation = ref.watch(mixOperationProvider(widget.sessionId));
-    ref.listen(sessionPlaylistContextProvider(widget.sessionId), (_, next) {
+    // Kick off the /me fetch as soon as the conversation opens, so the
+    // account name is resolved by the time the save dialog reads it
+    // non-blocking (see [_createPlaylist]). Any failure resolves to null.
+    ref.watch(accountNameProvider);
+    _measurePanel();
+
+    ref.listen(sessionPlaylistContextProvider(widget.sessionId), (
+      previous,
+      next,
+    ) {
       if (next.error case ApiException(statusCode: 401)) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted &&
@@ -274,6 +608,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           }
         });
       }
+      // A selection made somewhere else: the canonical seed has already been
+      // adopted (the arrangement and the unsent draft are untouched), so the
+      // only thing left is to say so. A write from THIS screen is excluded by
+      // `previous.writing` — that transition is the listener's own doing.
+      final before = previous?.seed;
+      final after = next.seed;
+      if (before != null &&
+          after != null &&
+          !(previous?.writing ?? false) &&
+          !next.writing &&
+          after.revision != before.revision &&
+          ModalRoute.of(context)?.isCurrent == true) {
+        _snack(inspirationChangedMessage(after.name ?? before.name));
+      }
     });
 
     ref.listen(chatProvider(widget.sessionId), (previous, next) {
@@ -281,17 +629,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       if (state == null) return;
 
       // Display guarded on being the top route: QueueScreen watches the
-      // same provider and runs the same listener, so with the queue pushed
-      // over this screen one error would otherwise queue two identical
-      // snackbars. Clearing is unconditional — a transientError left in
-      // state gets carried forward by copyWith and would surface later
-      // against an unrelated event. Both listeners see the same captured
-      // `state`, so either clearing first can't hide it from the other.
+      // same provider and runs the same listener, so with the arrangement
+      // pushed over this screen one error would otherwise queue two
+      // identical snackbars. Clearing is unconditional — a transientError
+      // left in state gets carried forward by copyWith and would surface
+      // later against an unrelated event. Both listeners see the same
+      // captured `state`, so either clearing first can't hide it from the
+      // other.
       if (state.transientError != null) {
         if (ModalRoute.of(context)?.isCurrent == true) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text(state.transientError!)));
+          _snack(state.transientError!);
         }
         ref.read(chatProvider(widget.sessionId).notifier).clearTransientError();
       }
@@ -309,16 +656,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       }
     });
 
-    // One-shot initialError seeding, done from build() rather than the
-    // listener above: ref.listen only fires on CHANGES, so if the provider
-    // were already warm at mount (a live listener elsewhere kept it alive)
-    // a listener-based seed would sit dormant and then land on the next
-    // unrelated emission — appending the error bubble out of order, after
-    // turns it doesn't belong to. build() sees the current state on the
-    // very first frame, so the seed lands right after the loaded transcript
-    // no matter how the value arrived. Post-frame because mutating a
-    // provider during build is illegal; the flag flips synchronously first,
-    // so re-entrant rebuilds can never schedule a duplicate.
+    // One-shot initialError seeding, done from build() rather than a
+    // listener: ref.listen only fires on CHANGES, so if the provider were
+    // already warm at mount a listener-based seed would sit dormant and then
+    // land on the next unrelated emission — appending the error turn out of
+    // order. build() sees the current state on the very first frame.
+    // Post-frame because mutating a provider during build is illegal; the
+    // flag flips synchronously first, so re-entrant rebuilds can never
+    // schedule a duplicate.
     if (!_seededInitialError &&
         widget.initialError != null &&
         chatAsync.hasValue) {
@@ -331,40 +676,106 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       });
     }
 
-    // Riverpod 3 retries a throwing build() with backoff; during that
-    // retry the state is technically AsyncLoading but still carries the
-    // last error forward (AsyncValue.hasError / .error, per
-    // isReloading/copyWithPrevious). Checking hasError FIRST — rather than
-    // isLoading — means the user sees the error+retry screen immediately
-    // instead of a spinner that silently retries for several seconds before
-    // ever admitting anything is wrong. This is screen-only: chatProvider
-    // itself is untouched.
+    // Riverpod 3 retries a throwing build() with backoff; during that retry
+    // the state is technically AsyncLoading but still carries the last error
+    // forward. Checking hasError FIRST — rather than isLoading — means the
+    // listener sees the could-not-open state immediately instead of a
+    // skeleton that silently retries for several seconds.
     //
     // `!chatAsync.hasValue` is load-bearing: the SAME retrying AsyncLoading
-    // state also retains a PREVIOUS value when one exists (e.g. a live
-    // transcript already on screen whose background refetch just failed).
-    // Only fall back to the full-screen error when there is truly nothing
-    // to show instead — never let a failed refetch blank out a transcript
-    // the user is already looking at.
+    // state also retains a PREVIOUS value when one exists (a live transcript
+    // whose background refetch just failed). Never let a failed refetch blank
+    // out a transcript the listener is already looking at — that surfaces as
+    // a brief toast instead (the transientError listener above).
     if (chatAsync.hasError && !chatAsync.hasValue) {
-      return _ChatErrorScreen(
-        onRetry: () => ref.invalidate(chatProvider(widget.sessionId)),
+      return _frame(
+        title: '',
+        body: _CouldNotOpen(
+          onRetry: () => ref.invalidate(chatProvider(widget.sessionId)),
+        ),
       );
     }
 
     if (!chatAsync.hasValue) {
-      return Scaffold(
-        appBar:
-            AppBar(), // present on every state so the bar never pops in/out as loading resolves
-        body: const Center(child: CircularProgressIndicator()),
+      // F2: chrome from the first frame, skeleton turns only. The title comes
+      // from the Mixes list the listener just tapped, so it is already there
+      // while the transcript loads — the board's "Opening <title>".
+      final title = _knownTitle();
+      return _frame(
+        title: title ?? '',
+        body: _SkeletonTurns(title: title),
+        panel: _panel(state: null, inspiration: inspiration, busy: true),
       );
     }
 
     final state = chatAsync.value!;
+    final busy = state.sending || operation != null || inspiration.writing;
+
+    return _frame(
+      title: state.session.title,
+      notPersonal: state.session.notPersonal,
+      onArrangement: _openArrangement,
+      onMore: _changingStatus ? null : _actions,
+      body: _transcript(state, busy: busy),
+      panel: _panel(state: state, inspiration: inspiration, busy: busy),
+    );
+  }
+
+  /// Chrome shared by every state: the gradient, the glass clusters, the
+  /// floating SnackBars (no dock on this route, so they sit 16 pt in) and the
+  /// panel floating over the transcript.
+  Widget _frame({
+    required String title,
+    required Widget body,
+    bool notPersonal = false,
+    VoidCallback? onArrangement,
+    Future<void> Function(BuildContext anchor)? onMore,
+    Widget? panel,
+  }) {
+    return GradientBackground(
+      child: Builder(
+        builder: (context) => Scaffold(
+          backgroundColor: Colors.transparent,
+          // The panel rides the keyboard itself, as Home's does.
+          resizeToAvoidBottomInset: false,
+          body: Stack(
+            children: [
+              SafeArea(
+                bottom: false,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _TopBar(
+                      title: title,
+                      notPersonal: notPersonal,
+                      onBack: () => Navigator.of(context).maybePop(),
+                      onArrangement: onArrangement,
+                      onMore: onMore,
+                    ),
+                    Expanded(child: body),
+                  ],
+                ),
+              ),
+              if (panel != null)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: KeyedSubtree(key: _panelKey, child: panel),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// The turns, flush on the gradient, scrolled to the last one.
+  Widget _transcript(ChatState state, {required bool busy}) {
     final currentVersion = state.queueVersion;
 
-    // The LATEST message whose queueVersion matches the current one gets
-    // the live card; every OTHER queue-bearing message gets a compact chip.
+    // The LATEST message whose queueVersion matches the current one carries
+    // the tape card; every OTHER version-bearing message gets a Version chip.
     int? liveQueueMessageIndex;
     for (var i = state.messages.length - 1; i >= 0; i--) {
       if (state.messages[i].message.queueVersion == currentVersion) {
@@ -378,160 +789,283 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final items = <Widget>[];
     for (var i = 0; i < state.messages.length; i++) {
       final message = state.messages[i];
-      // A dead retry (no preceding user turn to resend — shouldn't happen
-      // in practice, but a synthesized/edge-case transcript could lack
-      // one) hides the button entirely rather than wiring it to a no-op.
+      // A dead resend (no preceding user turn — a synthesized transcript
+      // could lack one) hides the button entirely rather than wiring it to a
+      // no-op.
       final precedingText = message.isError
           ? _precedingUserText(state.messages, i)
           : '';
-      final canRetry = message.isError && precedingText.isNotEmpty;
       items.add(
-        _MessageBubble(
-          message: message,
-          onRetry: canRetry ? () => _send(precedingText) : null,
-          retryEnabled:
-              !state.sending && operation == null && !inspiration.writing,
+        ConversationTurn(
+          text: message.message.content,
+          kind: message.isError
+              ? ConversationTurnKind.error
+              : (message.message.role == 'user'
+                    ? ConversationTurnKind.user
+                    : ConversationTurnKind.dj),
+          onResend: message.isError && precedingText.isNotEmpty
+              ? () => _send(precedingText)
+              : null,
+          resendEnabled: !busy,
         ),
       );
       final version = message.message.queueVersion;
       if (version != null) {
         if (i == liveQueueMessageIndex) {
-          // The server tags version-changed messages even when a turn
-          // EMPTIES the queue — an empty live card would just be a header
-          // with nothing under it, so skip rendering it entirely rather
-          // than showing that.
-          if (state.queue.isNotEmpty) {
-            items.add(
-              QueueCard(sessionId: widget.sessionId, queue: state.queue),
-            );
-          }
+          // The server tags version-changed messages even when a turn EMPTIES
+          // the queue — an empty tape card would be a header with nothing
+          // under it, so it is skipped entirely.
+          if (state.queue.isNotEmpty) items.addAll(_tapeCard(state));
         } else {
-          items.add(_QueueUpdatedChip(version: version, onOpen: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => MixHistoryScreen(sessionId: widget.sessionId, initialVersion: version)))));
+          items.add(
+            _VersionChip(
+              version: version,
+              onOpen: () => _openHistory(version: version),
+            ),
+          );
         }
       }
     }
-    if (needsStandaloneCard) {
-      items.add(QueueCard(sessionId: widget.sessionId, queue: state.queue));
-    }
-    if (currentVersion > 0) items.add(MixEnergySummary(sessionId: widget.sessionId, version: currentVersion));
+    if (needsStandaloneCard) items.addAll(_tapeCard(state));
+    // C3's one quiet line under the last turn, in the words the arrangement's
+    // own corpus-mode block uses. The title carries "Not personal yet"; this
+    // is the explanation that goes with it.
+    if (state.session.notPersonal) items.add(const _NotPersonalLine());
     if (state.sending) {
-      items.add(_TypingIndicator(showCaption: _showListeningCaption));
+      items.add(WorkingIndicator(showCaption: _showListeningCaption));
     }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          state.session.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        actions: [
-          Builder(
-            builder: (anchor) => IconButton(
-              key: const Key('chat-actions'),
-              tooltip: 'Mix actions',
-              onPressed: _editingName || _changingStatus
-                  ? null
-                  : () => _actions(anchor),
-              icon: const Icon(Icons.more_horiz),
-            ),
-          ),
-        ],
+    return ListView.builder(
+      controller: _scrollController,
+      padding: EdgeInsets.fromLTRB(
+        MixtapeMetrics.screenSidePadding,
+        8,
+        MixtapeMetrics.screenSidePadding,
+        _panelHeight + 8,
       ),
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) => Column(
-            children: [
-              if (_editingName)
-                ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxHeight: constraints.maxHeight * .4,
-                  ),
-                  child: SingleChildScrollView(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                      child: MixNameEditor(
-                        sessionId: widget.sessionId,
-                        title: state.session.title,
-                        onSave: (title) => ref
-                            .read(chatProvider(widget.sessionId).notifier)
-                            .rename(title),
-                        onFinished: () => setState(() => _editingName = false),
+      itemCount: items.length,
+      itemBuilder: (context, index) => items[index],
+    );
+  }
+
+  /// The tape card and, under it, the energy line for the same version.
+  List<Widget> _tapeCard(ChatState state) => [
+    QueueCard(
+      sessionId: widget.sessionId,
+      queue: state.queue,
+      version: state.queueVersion,
+    ),
+    if (state.queueVersion > 0)
+      MixEnergySummary(
+        sessionId: widget.sessionId,
+        version: state.queueVersion,
+      ),
+  ];
+
+  /// The bottom panel: the drag handle, the attachment row, the composer and
+  /// the mix actions, on HomePanel's glass.
+  Widget _panel({
+    required ChatState? state,
+    required SessionPlaylistContextState inspiration,
+    required bool busy,
+  }) {
+    final tokens = context.tokens;
+    final media = MediaQuery.of(context);
+    final keyboard = media.viewInsets.bottom;
+    // Over the keyboard when it is up; otherwise clear of the home
+    // indicator. No dock inside a mix, so nothing else to clear.
+    final bottom = keyboard > 0 ? keyboard : media.padding.bottom + 8;
+    final enabled = state != null && !busy;
+    final status = _inspirationStatus(inspiration);
+
+    return ConstrainedBox(
+      // At 200% text with the keyboard up the panel wants more room than the
+      // phone has; capped here, its content scrolls inside instead of
+      // climbing off the top of the screen.
+      constraints: BoxConstraints(
+        maxHeight: (media.size.height - media.padding.top).clamp(
+          0.0,
+          double.infinity,
+        ),
+      ),
+      child: LiquidGlassSurface(
+        borderRadius: const BorderRadius.vertical(
+          top: Radius.circular(HomePanel.topRadius),
+        ),
+        fallbackBlurSigma: 30,
+        fallbackTint: tokens.panel,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(
+            HomePanel.sidePadding,
+            8,
+            HomePanel.sidePadding,
+            bottom,
+          ),
+          // The panel's own overflow is its own business: a scroll in here
+          // must not move the transcript.
+          child: NotificationListener<ScrollNotification>(
+            onNotification: (_) => true,
+            child: SingleChildScrollView(
+              reverse: true,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      key: HomePanel.handleKey,
+                      width: HomePanel.handleWidth,
+                      height: HomePanel.handleHeight,
+                      margin: const EdgeInsets.only(top: 2, bottom: 12),
+                      decoration: const BoxDecoration(
+                        color: HomePanel.handleColor,
+                        borderRadius: BorderRadius.all(Radius.circular(3)),
                       ),
                     ),
                   ),
-                ),
-              Expanded(
-                child: ListView.builder(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  itemCount: items.length,
-                  itemBuilder: (context, index) => items[index],
-                ),
-              ),
-              const PlaybackMini(),
-              ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxHeight: constraints.maxHeight * (_editingName ? .5 : .75),
-                ),
-                child: SingleChildScrollView(
-                  reverse: true,
-                  child: _Composer(
-                    key: _composerKey,
-                    controller: _textController,
-                    enabled:
-                        !state.sending &&
-                        operation == null &&
-                        !inspiration.writing,
-                    inspiration: Builder(
-                      builder: (anchor) => PlaylistInspirationAttachment(
-                        name: inspiration.seed?.playlistId == null
-                            ? null
-                            : (inspiration.seed?.name ??
-                                  'Unavailable playlist'),
-                        disabled: !inspiration.canSelect,
-                        busy:
-                            inspiration.loading ||
-                            inspiration.writing ||
-                            state.sending ||
-                            operation != null,
-                        statusMessage: _inspirationStatus(inspiration),
-                        onPick: () => _pickInspiration(anchor),
-                        onDetach: inspiration.seed?.playlistId == null
-                            ? null
-                            : () => ref
-                                  .read(
-                                    sessionPlaylistContextProvider(
-                                      widget.sessionId,
-                                    ).notifier,
-                                  )
-                                  .select(playlistId: null),
-                        onReload:
-                            inspiration.seed == null ||
-                                inspiration.error != null
-                            ? () => ref
-                                  .read(
-                                    sessionPlaylistContextProvider(
-                                      widget.sessionId,
-                                    ).notifier,
-                                  )
-                                  .refresh()
-                            : null,
+                  if (state != null) ...[
+                    _attachments(inspiration, enabled: enabled),
+                    if (status != null)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 2, bottom: 4),
+                        // A Wrap, not a Row: at 200% text the message and
+                        // the action do not fit on one line, and each needs
+                        // the whole width to wrap into.
+                        child: Wrap(
+                          spacing: 8,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Text(
+                              status,
+                              key: const Key('inspiration-status'),
+                              style: tokens.meta.copyWith(color: tokens.muted),
+                            ),
+                            // A selection that cannot be read is a READ
+                            // failure: the way out is another read, never a
+                            // write against a revision we do not have.
+                            if (_canReloadInspiration(inspiration))
+                              TextAction(
+                                key: const Key('inspiration-reload'),
+                                label: 'Reload inspiration',
+                                quiet: true,
+                                onPressed:
+                                    inspiration.loading || inspiration.writing
+                                    ? null
+                                    : () => ref
+                                          .read(
+                                            sessionPlaylistContextProvider(
+                                              widget.sessionId,
+                                            ).notifier,
+                                          )
+                                          .refresh(),
+                              ),
+                          ],
+                        ),
                       ),
+                  ],
+                  // The composer draws its own Shape chip for Home; here the
+                  // chip lives in the attachment row above, so it is hidden.
+                  EnergyControlVisibility(
+                    visible: false,
+                    child: MixPromptInput(
+                      key: _composerKey,
+                      controller: _textController,
+                      focusNode: _promptFocus,
+                      busy: !enabled,
+                      onSubmit: () =>
+                          _send(_textController.text, fromComposer: true),
                     ),
-                    onSend: (text) => _send(text, fromComposer: true),
                   ),
-                ),
+                  _MixActions(
+                    // The arrangement's own conditions, replicated: a mix
+                    // Apple Music cannot touch drops Play/Create and says
+                    // why; anything with a Spotify id gains the transfer
+                    // handoff. FOLLOW-UP with the handlers above — task 5.3
+                    // extracts both into one shared file.
+                    queue: state?.queue ?? const [],
+                    enabled: enabled,
+                    isPlayingThisMix: _isPlayingThisMix,
+                    onPlayNow: state == null ? null : () => _playHere(state),
+                    onCreatePlaylist: state == null
+                        ? null
+                        : () => _createPlaylist(state),
+                    onSendToMusic: state == null
+                        ? null
+                        : () => _sendToMusic(state.queue),
+                    onShare: state == null
+                        ? null
+                        : (buttonContext) => _share(buttonContext, state),
+                    saving: _saving,
+                    sendingToMusic: _playing,
+                    sharing: _sharing,
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  /// The text of the nearest USER message before [index] — that's the turn
-  /// an error bubble at [index] is a response to, and what "resend" means.
+  /// `.attach`: the playlist chip and the Shape chip on one wrapping row.
+  Widget _attachments(
+    SessionPlaylistContextState inspiration, {
+    required bool enabled,
+  }) {
+    final attached = inspiration.seed?.playlistId != null;
+    final canWrite = enabled && inspiration.canSelect;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          InspirationChip(
+            name: attached
+                ? (inspiration.seed?.name ?? 'Unavailable playlist')
+                : null,
+            tone: _chipTone(inspiration),
+            onPick: canWrite ? _pickInspiration : null,
+            onDetach: attached && canWrite
+                ? () => ref
+                      .read(
+                        sessionPlaylistContextProvider(
+                          widget.sessionId,
+                        ).notifier,
+                      )
+                      .select(playlistId: null)
+                : null,
+          ),
+          LabelChip(
+            key: const Key('chat-shape-chip'),
+            label: 'Shape',
+            hole: false,
+            leading: const EnergyWave(arc: EnergyArc.arc, width: 18, height: 12),
+            onPressed: enabled
+                ? () => showEnergyShapeSheet(context, _textController)
+                : null,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// This mix's title before its own transcript has loaded: the summary the
+  /// Mixes list already holds. Null when this conversation was opened
+  /// without that list ever being read.
+  String? _knownTitle() {
+    final summaries = ref.watch(sessionsProvider).value;
+    final match = summaries
+        ?.where((session) => session.id == widget.sessionId)
+        .firstOrNull;
+    final title = match?.title.trim();
+    return (title == null || title.isEmpty) ? null : title;
+  }
+
+  /// The text of the nearest USER message before [index] — that's the turn an
+  /// error turn at [index] answers, and what "resend" means.
   String _precedingUserText(List<ChatMessage> messages, int index) {
     for (var i = index - 1; i >= 0; i--) {
       if (messages[i].message.role == 'user') {
@@ -542,192 +1076,461 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 }
 
-class _ChatErrorScreen extends StatelessWidget {
-  const _ChatErrorScreen({required this.onRetry});
+/// The board's `.navbar`: the back cluster, the centred title (with the
+/// corpus-mode subtitle under it) and the Arrangement / More cluster.
+class _TopBar extends StatelessWidget {
+  const _TopBar({
+    required this.title,
+    required this.notPersonal,
+    required this.onBack,
+    required this.onArrangement,
+    required this.onMore,
+  });
+
+  final String title;
+  final bool notPersonal;
+  final VoidCallback onBack;
+  final VoidCallback? onArrangement;
+  final Future<void> Function(BuildContext anchor)? onMore;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 6, 14, 6),
+      child: Row(
+        children: [
+          GlassCluster(
+            children: [
+              GlassButton(
+                key: const Key('chat-back'),
+                icon: Icons.arrow_back_ios_new,
+                label: 'Back to Mixes',
+                onPressed: onBack,
+              ),
+            ],
+          ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: tokens.smallTitle,
+                  ),
+                  if (notPersonal)
+                    Text(
+                      'Not personal yet',
+                      key: const Key('chat-not-personal'),
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: tokens.meta.copyWith(color: tokens.muted),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          GlassCluster(
+            children: [
+              GlassButton(
+                key: const Key('chat-arrangement'),
+                icon: Icons.queue_music,
+                label: 'Arrangement',
+                onPressed: onArrangement,
+              ),
+              Builder(
+                builder: (anchor) => GlassButton(
+                  key: const Key('chat-actions'),
+                  icon: Icons.more_horiz,
+                  label: 'More',
+                  onPressed: onMore == null ? null : () => onMore!(anchor),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// `.vchip`: an earlier arrangement, opening history at that version.
+class _VersionChip extends StatelessWidget {
+  const _VersionChip({required this.version, required this.onOpen});
+
+  final int version;
+  final VoidCallback onOpen;
+
+  static Key keyFor(int version) => ValueKey('version-chip-$version');
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Semantics(
+        button: true,
+        label: 'Version $version',
+        excludeSemantics: true,
+        child: GestureDetector(
+          key: keyFor(version),
+          behavior: HitTestBehavior.opaque,
+          onTap: onOpen,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              minHeight: MixtapeMetrics.minTarget,
+            ),
+            child: Center(
+              widthFactor: 1,
+              child: Container(
+                constraints: const BoxConstraints(minHeight: 30),
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                decoration: const BoxDecoration(
+                  color: Color.fromRGBO(120, 110, 120, 0.14),
+                  borderRadius: BorderRadius.all(
+                    Radius.circular(MixtapeMetrics.pillRadius),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.history, size: 14, color: tokens.plum),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Version $version',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: tokens.plum,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The mix actions row: Play now, Create playlist, Send to Music — the same
+/// three the arrangement carries, with the same Apple/Spotify gating, wrapping
+/// before any of them truncates.
+class _MixActions extends ConsumerWidget {
+  const _MixActions({
+    required this.queue,
+    required this.enabled,
+    required this.isPlayingThisMix,
+    required this.onPlayNow,
+    required this.onCreatePlaylist,
+    required this.onSendToMusic,
+    required this.onShare,
+    required this.saving,
+    required this.sendingToMusic,
+    required this.sharing,
+  });
+
+  /// The arrangement this mix currently has; empty until the DJ makes one.
+  final List<QueueTrack> queue;
+
+  /// False while a turn, an arrangement op or an inspiration write is in
+  /// flight — the whole row goes inert in place.
+  final bool enabled;
+  final bool Function() isPlayingThisMix;
+  final VoidCallback? onPlayNow;
+  final VoidCallback? onCreatePlaylist;
+  final VoidCallback? onSendToMusic;
+
+  /// Takes the button's own context: the share sheet's iPad popover anchor.
+  final void Function(BuildContext buttonContext)? onShare;
+  final bool saving;
+  final bool sendingToMusic;
+  final bool sharing;
+
+  static const Key reasonKey = Key('chat-actions-reason');
+  static const Key appleNeededKey = Key('chat-apple-needed-reason');
+
+  /// Null when Play/Create are actionable; otherwise the reason they are not,
+  /// written beside them rather than hidden in a tooltip. An arrangement that
+  /// does not exist yet needs no reason — the board draws the actions simply
+  /// disabled.
+  String? get disabledReason => queue.isNotEmpty && queue.every((t) => t.appleId == null)
+      ? "these tracks aren't in Apple Music"
+      : null;
+
+  bool get hasSpotifyActions => queue.any((t) => t.spotifyId != null);
+
+  bool get hasAppleActions =>
+      queue.any((t) => t.appleId != null) || !hasSpotifyActions;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tokens = context.tokens;
+    final muted = tokens.meta.copyWith(color: tokens.muted);
+    final reason = disabledReason;
+    final live = enabled && queue.isNotEmpty && reason == null;
+
+    return ListenableBuilder(
+      listenable: ref.read(playbackProvider),
+      builder: (context, _) {
+        final playingHere = isPlayingThisMix();
+        return Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              if (hasAppleActions) ...[
+                TapeButton(
+                  key: const Key('chat-play-now'),
+                  label: playingHere ? 'Playing' : 'Play now',
+                  playing: playingHere,
+                  onPressed: live ? onPlayNow : null,
+                ),
+                LabelChip(
+                  key: const Key('chat-create-playlist'),
+                  label: 'Create playlist',
+                  onPressed: live && !saving ? onCreatePlaylist : null,
+                ),
+                TextAction(
+                  key: const Key('chat-send-to-music'),
+                  label: 'Send to Music',
+                  onPressed: live && !sendingToMusic ? onSendToMusic : null,
+                ),
+              ],
+              // The Builder is the share sheet's popover anchor on iPad: its
+              // context resolves to the button's own render object.
+              if (hasSpotifyActions)
+                Builder(
+                  builder: (buttonContext) => TapeButton(
+                    key: const Key('chat-share'),
+                    label: 'Send to a transfer tool',
+                    onPressed: enabled && !sharing && onShare != null
+                        ? () => onShare!(buttonContext)
+                        : null,
+                  ),
+                ),
+              if (hasAppleActions && reason != null)
+                Text(key: reasonKey, reason, style: muted),
+              if (!hasAppleActions)
+                SizedBox(
+                  width: double.infinity,
+                  child: Text(
+                    'Play now and Create playlist need Apple Music',
+                    key: appleNeededKey,
+                    style: muted,
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// F2: the transcript's own loading state. The chrome and the panel are
+/// already drawn around it, so nothing pops in when the turns resolve.
+class _SkeletonTurns extends StatelessWidget {
+  const _SkeletonTurns({this.title});
+
+  /// Announced as "Opening <title>" when the Mixes list already knows it.
+  final String? title;
+
+  static const Key skeletonKey = Key('chat-skeleton');
+
+  /// Alignment and height of each placeholder turn, as the board draws them.
+  static const List<(bool, double)> _rows = [
+    (true, 40),
+    (false, 56),
+    (false, 60),
+    (true, 40),
+    (false, 56),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    return Semantics(
+      key: skeletonKey,
+      container: true,
+      liveRegion: true,
+      label: title == null ? 'Opening this mix' : 'Opening $title',
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(
+          MixtapeMetrics.screenSidePadding,
+          10,
+          MixtapeMetrics.screenSidePadding,
+          10,
+        ),
+        children: [
+          for (final (mine, height) in _rows)
+            Align(
+              alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+              child: FractionallySizedBox(
+                alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+                widthFactor: mine ? 0.5 : 0.7,
+                child: Container(
+                  height: height,
+                  margin: const EdgeInsets.symmetric(vertical: 5),
+                  decoration: BoxDecoration(
+                    color: tokens.hairline,
+                    borderRadius: mine
+                        ? ConversationTurn.userRadius
+                        : ConversationTurn.djRadius,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// F3: only when there is nothing to show at all. Back still works.
+class _CouldNotOpen extends StatelessWidget {
+  const _CouldNotOpen({required this.onRetry});
 
   final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar:
-          AppBar(), // present on every state — see the hasError branch's comment
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.cloud_off,
-                size: 48,
-                color: Theme.of(context).colorScheme.error,
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                "couldn't load this conversation",
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              FilledButton(
-                key: const Key('chat-retry'),
-                onPressed: onRetry,
-                child: const Text('Try again'),
-              ),
-            ],
-          ),
+    final tokens = context.tokens;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.error_outline, size: 36, color: tokens.errInk),
+            const SizedBox(height: 14),
+            Text(
+              "Couldn't open this mix",
+              textAlign: TextAlign.center,
+              style: tokens.section,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Check your connection and try again. Nothing here has been lost.',
+              textAlign: TextAlign.center,
+              style: tokens.secondary,
+            ),
+            const SizedBox(height: 12),
+            KeyedSubtree(
+              key: const Key('chat-retry'),
+              child: TapeButton(label: 'Try again', onPressed: onRetry),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({
-    required this.message,
-    this.onRetry,
-    this.retryEnabled = true,
+/// The save alert: the mix title as the default name, and "Your name"
+/// remembered for next time. Task 5.3 gives this its final native form.
+class _SaveDialog extends StatefulWidget {
+  const _SaveDialog({
+    required this.defaultName,
+    required this.defaultAuthor,
+    required this.onConfirm,
   });
 
-  final ChatMessage message;
-
-  /// Null hides the retry affordance entirely (a non-error bubble, or an
-  /// error bubble with no preceding user turn to resend — see the
-  /// dead-retry guard at the call site).
-  final VoidCallback? onRetry;
-
-  /// Whether an already-visible retry button is actionable right now
-  /// (false while another send is in flight) — the button still renders,
-  /// just dimmed and inert, rather than disappearing.
-  final bool retryEnabled;
+  final String defaultName;
+  final String defaultAuthor;
+  final Future<void> Function(String name, String author) onConfirm;
 
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isUser = message.message.role == 'user';
-    final Color background;
-    final Color foreground;
-    // The DJ's own voice (and its error apologies) gets a thin tinted
-    // accent bar — never the user's own bubble, which stays plain.
-    Color? accent;
-    if (message.isError) {
-      background = theme.colorScheme.errorContainer;
-      foreground = theme.colorScheme.onErrorContainer;
-      accent = theme.colorScheme.error;
-    } else if (isUser) {
-      background = theme.colorScheme.primaryContainer;
-      foreground = theme.colorScheme.onPrimaryContainer;
-    } else {
-      background = theme.colorScheme.surfaceContainerHighest;
-      // onSurface, not the muted onSurfaceVariant — the DJ's voice should
-      // read as a first-class speaker, not de-emphasized Material grey.
-      foreground = theme.colorScheme.onSurface;
-      accent = theme.colorScheme.primary;
-    }
+  State<_SaveDialog> createState() => _SaveDialogState();
+}
 
-    return Align(
-      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        key: message.isError ? const Key('error-bubble') : null,
-        margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.78,
-        ),
-        decoration: BoxDecoration(
-          color: background,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        // IntrinsicHeight: `stretch` needs a bounded cross-axis (height) to
-        // fill, which this Row otherwise doesn't have (its Container has no
-        // explicit height, so height is normally content-driven) — without
-        // it, `stretch` forces an infinite-height layout crash.
-        child: IntrinsicHeight(
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (accent != null) ...[
-                Container(
-                  key: const Key('dj-accent-bar'),
-                  width: 3.5,
-                  decoration: BoxDecoration(
-                    color: accent,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                ),
-                const SizedBox(width: 8),
-              ],
-              Flexible(
-                child: Text(
-                  message.message.content,
-                  style: TextStyle(color: foreground),
-                ),
-              ),
-              if (onRetry != null) ...[
-                const SizedBox(width: 4),
-                IconButton(
-                  key: const Key('retry-message'),
-                  tooltip: 'Resend',
-                  visualDensity: VisualDensity.compact,
-                  icon: Icon(
-                    Icons.refresh,
-                    size: 18,
-                    color: retryEnabled
-                        ? foreground
-                        : foreground.withValues(alpha: 0.4),
-                  ),
-                  onPressed: retryEnabled ? onRetry : null,
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
+class _SaveDialogState extends State<_SaveDialog> {
+  late final TextEditingController _name = TextEditingController(
+    text: widget.defaultName,
+  );
+  late final TextEditingController _author = TextEditingController(
+    text: widget.defaultAuthor,
+  );
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _author.dispose();
+    super.dispose();
   }
-}
-
-class _QueueUpdatedChip extends StatelessWidget {
-  const _QueueUpdatedChip({required this.version, required this.onOpen});
-
-  final VoidCallback onOpen;
-
-  final int version;
 
   @override
-  Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        child: ActionChip(
-          onPressed: onOpen,
-          key: const Key('queue-updated-chip'),
-          avatar: const Icon(Icons.queue_music, size: 16),
-          label: Text('queue updated · v$version'),
-          visualDensity: VisualDensity.compact,
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Create playlist'),
+    content: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        TextField(
+          key: const Key('chat-playlist-name'),
+          controller: _name,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Playlist name'),
         ),
+        TextField(
+          key: const Key('chat-playlist-author'),
+          controller: _author,
+          decoration: const InputDecoration(labelText: 'Your name'),
+        ),
+      ],
+    ),
+    actions: [
+      TextButton(
+        onPressed: _saving ? null : () => Navigator.of(context).pop(),
+        child: const Text('Cancel'),
       ),
-    );
-  }
+      FilledButton(
+        key: const Key('chat-playlist-save'),
+        // Guarded here: each tap would otherwise create a NEW playlist, and
+        // there is no way to dedupe after the fact.
+        onPressed: _saving
+            ? null
+            : () async {
+                setState(() => _saving = true);
+                await widget.onConfirm(_name.text, _author.text);
+                if (mounted) setState(() => _saving = false);
+              },
+        child: const Text('Save'),
+      ),
+    ],
+  );
 }
 
-class _TypingIndicator extends StatefulWidget {
-  const _TypingIndicator({required this.showCaption});
+/// The rename alert. The controller belongs to the dialog rather than the
+/// caller so it outlives the route's own exit transition — a controller
+/// disposed the moment `showDialog` returns is still being read by the
+/// fading-out field.
+class _RenameDialog extends StatefulWidget {
+  const _RenameDialog({required this.title});
 
-  final bool showCaption;
+  final String title;
 
   @override
-  State<_TypingIndicator> createState() => _TypingIndicatorState();
+  State<_RenameDialog> createState() => _RenameDialogState();
 }
 
-class _TypingIndicatorState extends State<_TypingIndicator>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 900),
-  )..repeat();
+class _RenameDialogState extends State<_RenameDialog> {
+  late final TextEditingController _controller =
+      TextEditingController(text: widget.title)
+        ..selection = TextSelection(
+          baseOffset: 0,
+          extentOffset: widget.title.length,
+        );
 
   @override
   void dispose() {
@@ -736,137 +1539,51 @@ class _TypingIndicatorState extends State<_TypingIndicator>
   }
 
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Align(
-      key: const Key('typing-indicator'),
-      alignment: Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            AnimatedBuilder(
-              animation: _controller,
-              builder: (context, _) => Row(
-                mainAxisSize: MainAxisSize.min,
-                children: List.generate(3, (i) {
-                  final t = (_controller.value + i / 3) % 1.0;
-                  final opacity =
-                      0.3 + 0.7 * (1 - (t - 0.5).abs() * 2).clamp(0.0, 1.0);
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 2),
-                    child: Opacity(
-                      opacity: opacity,
-                      child: Icon(
-                        Icons.circle,
-                        size: 8,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  );
-                }),
-              ),
-            ),
-            if (widget.showCaption) ...[
-              const SizedBox(height: 4),
-              Text(
-                'the DJ is listening…',
-                key: const Key('listening-caption'),
-                style: theme.textTheme.bodySmall,
-              ),
-            ],
-          ],
-        ),
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Rename mix'),
+    content: TextField(
+      key: const Key('chat-rename-field'),
+      controller: _controller,
+      autofocus: true,
+      onSubmitted: (value) => Navigator.of(context).pop(value),
+      decoration: const InputDecoration(labelText: 'Mix name'),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('Cancel'),
       ),
-    );
-  }
+      FilledButton(
+        key: const Key('chat-rename-confirm'),
+        onPressed: () => Navigator.of(context).pop(_controller.text),
+        child: const Text('Save'),
+      ),
+    ],
+  );
 }
 
-class _Composer extends StatelessWidget {
-  const _Composer({
-    super.key,
-    required this.controller,
-    required this.enabled,
-    required this.onSend,
-    required this.inspiration,
-  });
+/// C3's explanatory line for a Spotify listener before their import lands:
+/// the mix came from the shared catalog and the interview, not their plays.
+/// Live so a screen reader hears it when a turn flips the flag.
+class _NotPersonalLine extends StatelessWidget {
+  const _NotPersonalLine();
 
-  final TextEditingController controller;
-  final bool enabled;
-  final ValueChanged<String> onSend;
-  final Widget inspiration;
+  static const Key lineKey = Key('chat-not-personal-line');
 
-  static const _maxLength = 2000;
-  // Silent-cap guard: the field enforces 2000 unconditionally, but the
-  // counter itself only shows up once it's actually relevant, rather than
-  // nagging from character zero.
-  static const _counterVisibleAt = 1800;
+  static const String copy =
+      "Built from Mixtape's catalog and your interview, not your listening. "
+      'Import your Spotify data for the real thing.';
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-      decoration: BoxDecoration(
-        border: Border.all(color: Theme.of(context).colorScheme.outline),
-        borderRadius: BorderRadius.circular(16),
-      ),
+    final tokens = context.tokens;
+    return Semantics(
+      key: lineKey,
+      container: true,
+      liveRegion: true,
       child: Padding(
-        padding: const EdgeInsets.all(8),
-        child: ValueListenableBuilder<TextEditingValue>(
-          valueListenable: controller,
-          builder: (context, value, _) {
-            final hasText = value.text.trim().isNotEmpty;
-            final canSend = enabled && hasText;
-            final showCounter = value.text.length > _counterVisibleAt;
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                inspiration,
-                EnergyControl(controller: controller, enabled: enabled),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        key: const Key('composer-field'),
-                        controller: controller,
-                        enabled: enabled,
-                        maxLength: _maxLength,
-                        minLines: 1,
-                        maxLines: 4,
-                        textInputAction: TextInputAction.send,
-                        onSubmitted: canSend ? onSend : null,
-                        decoration: InputDecoration(
-                          hintText: 'Tell the DJ what you want to hear…',
-                          counterText: showCounter ? null : '',
-                          border: InputBorder.none,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 10,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    IconButton(
-                      key: const Key('send-button'),
-                      tooltip: 'Send',
-                      onPressed: canSend ? () => onSend(controller.text) : null,
-                      icon: const Icon(Icons.send),
-                    ),
-                  ],
-                ),
-              ],
-            );
-          },
-        ),
+        padding: const EdgeInsets.only(left: 2, top: 6, bottom: 4),
+        child: Text(copy, style: tokens.meta.copyWith(color: tokens.muted)),
       ),
     );
   }

@@ -8,6 +8,7 @@ import '../../data/playlists/playlist_context_models.dart';
 import '../../data/playlists/playlist_models.dart';
 import '../providers/auth_provider.dart';
 import '../providers/playlist_providers.dart';
+import '../theme/mixtape_theme.dart';
 
 class PlaylistInspirationChoice {
   const PlaylistInspirationChoice(
@@ -117,6 +118,151 @@ class PlaylistInspirationAttachment extends StatelessWidget {
         TextButton(onPressed: busy ? null : onReload, child: Text(reloadLabel)),
     ],
   );
+}
+
+/// What an attachment chip is saying (`.attach .chip`, `.chip.warn` and
+/// `.chip.err` on `docs/mockups/2026-09-17-mobile-conversation-states.html`,
+/// frame A2).
+enum InspirationChipTone {
+  /// "Inspired by: Late nights" — a usable selection.
+  ready,
+
+  /// The playlist is gone. Its name stays visible and Replace/Detach remain.
+  unavailable,
+
+  /// Too few matched songs to use as inspiration; it cannot be sent.
+  insufficient,
+}
+
+/// The conversation's attachment chip
+/// (`docs/mockups/approved/2026-09-17-mobile-conversation-states.md` →
+/// Attachment chips).
+///
+/// Additive: Home keeps [PlaylistInspirationAttachment]. This is the native
+/// chip for the conversation's `.attach` row, in the tone the seed's status
+/// calls for, with the detach cross inside it.
+class InspirationChip extends StatelessWidget {
+  const InspirationChip({
+    super.key,
+    required this.name,
+    this.tone = InspirationChipTone.ready,
+    this.onPick,
+    this.onDetach,
+  });
+
+  /// Null asks for a playlist ("+ Playlist"); a name offers to replace it.
+  final String? name;
+  final InspirationChipTone tone;
+
+  /// Pick or replace. Null makes the chip inert (busy, or writes blocked).
+  final VoidCallback? onPick;
+
+  /// Detach. Null hides the cross — an insufficient selection still offers it,
+  /// per the record; a busy one does not.
+  final VoidCallback? onDetach;
+
+  static const Key chipKey = Key('inspiration-chip');
+  static const Key detachKey = Key('inspiration-detach');
+
+  /// The board's warm paper, borrowed from `LabelChip` so the chips match.
+  static const Color _lightFill = Color.fromRGBO(247, 244, 239, 0.60);
+
+  static const BorderRadius _radius = BorderRadius.only(
+    topLeft: Radius.circular(MixtapeMetrics.tapeRadiusTop),
+    topRight: Radius.circular(MixtapeMetrics.tapeRadiusTop),
+    bottomLeft: Radius.circular(MixtapeMetrics.tapeRadiusBottom),
+    bottomRight: Radius.circular(MixtapeMetrics.tapeRadiusBottom),
+  );
+
+  /// The chip's own words, so the caller never has to assemble them.
+  String get label => switch ((name, tone)) {
+    (null, _) => '+ Playlist',
+    (final n?, InspirationChipTone.ready) => 'Inspired by: $n',
+    (final n?, InspirationChipTone.unavailable) => '$n · unavailable',
+    (final n?, InspirationChipTone.insufficient) => '$n · too few songs',
+  };
+
+  Color ink(BuildContext context) => switch (tone) {
+    InspirationChipTone.ready => context.tokens.plum,
+    InspirationChipTone.unavailable => context.tokens.warnInk,
+    InspirationChipTone.insufficient => context.tokens.errInk,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final tint = ink(context);
+    final enabled = onPick != null;
+
+    final chip = Container(
+      constraints: const BoxConstraints(minHeight: MixtapeMetrics.chipHeight),
+      padding: EdgeInsets.only(left: 11, right: onDetach == null ? 11 : 2),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withValues(alpha: 0.08) : _lightFill,
+        borderRadius: _radius,
+        border: Border.all(color: tint.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (tone == InspirationChipTone.insufficient)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: Icon(Icons.error_outline, size: 14, color: tint),
+            ),
+          Flexible(
+            child: ExcludeSemantics(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: tint,
+                ),
+              ),
+            ),
+          ),
+          if (onDetach != null)
+            Semantics(
+              button: true,
+              label: 'Detach playlist inspiration',
+              excludeSemantics: true,
+              child: GestureDetector(
+                key: detachKey,
+                behavior: HitTestBehavior.opaque,
+                onTap: onDetach,
+                child: SizedBox.square(
+                  dimension: MixtapeMetrics.chipHeight,
+                  child: Center(child: Icon(Icons.close, size: 16, color: tint)),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: label,
+      child: GestureDetector(
+        key: chipKey,
+        behavior: HitTestBehavior.opaque,
+        onTap: onPick,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(
+            minHeight: MixtapeMetrics.minTarget,
+          ),
+          child: Center(
+            widthFactor: 1,
+            child: Opacity(opacity: enabled ? 1 : 0.5, child: chip),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _PlaylistPicker extends ConsumerStatefulWidget {

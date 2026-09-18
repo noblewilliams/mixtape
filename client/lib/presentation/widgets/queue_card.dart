@@ -1,82 +1,96 @@
+/// The tape card: the arrangement one DJ reply produced, drawn under that
+/// reply (`docs/mockups/approved/2026-09-17-mobile-conversation-states.md`;
+/// `.tapecard` and frame C1 on
+/// `docs/mockups/2026-09-17-mobile-conversation-states.html`).
+///
+/// Only the latest reply whose version is the current one carries it; earlier
+/// versions are "Version n" chips into history.
+library;
+
 import 'package:flutter/material.dart';
+
 import '../../data/dj/dj_models.dart';
 import '../screens/queue_screen.dart';
+import '../theme/mixtape_theme.dart';
+import 'foundation/cassette_tile.dart';
+import 'foundation/label_chip.dart';
 
-/// Compact preview of the current tape, rendered inline in the chat
-/// transcript (see `docs/superpowers/plans/2026-08-29-p3b-dj-client.md`
-/// Task 4). The whole card is one tap target that pushes [QueueScreen] for
-/// the full reorder/remove/play/save experience (Task 5).
 class QueueCard extends StatelessWidget {
-  const QueueCard({super.key, required this.sessionId, required this.queue});
+  const QueueCard({
+    super.key,
+    required this.sessionId,
+    required this.queue,
+    required this.version,
+  });
 
   final String sessionId;
   final List<QueueTrack> queue;
 
+  /// The version this arrangement is, written into the meta line.
+  final int version;
+
+  /// `.tapecard .cs { width: 52px }` — kept at 52 pt even at 200% text, per
+  /// the board's large-text variant.
+  static const double cassetteWidth = 52;
+
+  static const Key cardKey = Key('queue-card');
+  static const Key openKey = Key('queue-card-open');
+
+  /// "18 songs · 1 h 12 · version 2". The duration is dropped when any track's
+  /// length is unknown rather than reported short — the same rule the
+  /// arrangement's own meta line uses.
+  static String metaLine(List<QueueTrack> queue, int version) => [
+    '${queue.length} song${queue.length == 1 ? '' : 's'}',
+    if (durationLabel(queue) != null) durationLabel(queue)!,
+    'version $version',
+  ].join(' · ');
+
+  static String? durationLabel(List<QueueTrack> queue) {
+    if (queue.isEmpty || queue.any((t) => t.durationMs == null)) return null;
+    final minutes = queue.fold<int>(0, (sum, t) => sum + t.durationMs!) ~/ 60000;
+    if (minutes < 60) return '$minutes min';
+    return '${minutes ~/ 60} h ${(minutes % 60).toString().padLeft(2, '0')}';
+  }
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final preview = queue.take(3).toList();
-    final remaining = queue.length - preview.length;
-    // Only worth summing/showing a duration when the queue isn't empty of
-    // them entirely — a queue with zero known durations shouldn't render a
-    // misleading "~0 min".
-    final hasAnyDuration = queue.any((t) => t.durationMs != null);
-    final totalMinutes = hasAnyDuration
-        ? (queue.fold<int>(0, (sum, t) => sum + (t.durationMs ?? 0)) / 60000)
-              .round()
-        : null;
-
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        key: const Key('queue-card'),
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => QueueScreen(sessionId: sessionId)),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    Icons.queue_music,
-                    size: 18,
-                    color: theme.colorScheme.primary,
-                  ),
-                  const SizedBox(width: 6),
-                  Text('The tape', style: theme.textTheme.labelLarge),
-                ],
-              ),
-              const SizedBox(height: 8),
-              for (final track in preview)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 2),
-                  child: Text(
-                    '${track.position + 1}. ${track.title} — ${track.artist}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                ),
-              if (remaining > 0) ...[
-                const SizedBox(height: 6),
+    final tokens = context.tokens;
+    return Container(
+      key: cardKey,
+      padding: const EdgeInsets.only(top: 10, bottom: 4),
+      child: Row(
+        children: [
+          // The same case colour this mix wears everywhere else.
+          CassetteTile(width: cassetteWidth, seedId: sessionId),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
                 Text(
-                  totalMinutes != null
-                      ? '+$remaining more · ~$totalMinutes min'
-                      : '+$remaining more',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
+                  'The tape',
+                  style: tokens.rowTitle.copyWith(fontWeight: FontWeight.w600),
+                ),
+                Text(
+                  metaLine(queue, version),
+                  key: const Key('queue-card-meta'),
+                  style: tokens.meta.copyWith(color: tokens.muted),
                 ),
               ],
-            ],
+            ),
           ),
-        ),
+          const SizedBox(width: 12),
+          LabelChip(
+            key: openKey,
+            label: 'Open',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => QueueScreen(sessionId: sessionId),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
