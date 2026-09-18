@@ -152,6 +152,7 @@ features remain pending.
 
 ## Native design program follow-ups (2026-09-17)
 
+- **Conversation Shape chip parity (2026-09-18, smoke round three).** Home's Shape chip is now state (label + wave on the chip, sentence composed into the outgoing prompt at send). The conversation's Shape chip still writes the sentence into the draft and toasts, because a mid-conversation turn has no session-start message to fold it into. Bring it to the same model once the turn path can carry a shape, ideally with the `POST /sessions` / turn `energyArc` field noted in `decisions.md`.
 - **Transport-glyph audit (founder, 2026-09-18).** Every `Icon(` in `client/lib` that is not a navigation chevron or a genuine playback control gets a playback-transport equivalent where one reads naturally: eject for detach/remove, record for start/voice, pause for hold states, previous/next for back/forward steps, stop for sign-out and cancel. Decision entry the same day. Do it screen by screen with a board note, not as a blind find-and-replace.
 
 - Home still renders `PlaybackMini` above the dock's mini-player; remove in Phase 6.2.
