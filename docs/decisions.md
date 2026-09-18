@@ -559,3 +559,17 @@ overrides `fontSize` on top of `largeTitle` and is unchanged at 18 pt.
 
 ## 2026-09-18 — Transport glyphs are the app's action icons
 Where an action needs a glyph, the native app uses playback-transport symbols rather than generic UI arrows: Skip on the service gate fast-forwards (⏩), Sign out stops (⏹). Founder direction during the first smoke: "use playback icons throughout the app to drive home the music thing." Navigation chevrons, the tab bar's SF symbols and the mini-player's own transport keep their native meaning. An audit of every remaining `Icon(` in `client/lib` for a transport equivalent is in `backlog.md`. **Reopens if:** a transport glyph is read as a playback control where it is not one (then that action gets a word, not a different arrow).
+
+## 2026-09-18 — One sheet chrome, app-wide
+Every modal sheet goes through `showMixtapeSheet` in
+`client/lib/presentation/widgets/foundation/mixtape_sheet.dart`: full width, no
+side margin, flush to the bottom edge (the sheet's own padding absorbs
+`MediaQuery.padding.bottom`, so `useSafeArea` is false), 20 pt top corners, one
+grab handle, an opaque panel — `Color.alphaBlend(tokens.panel,
+tokens.scrimBase)` — and a lighter scrim than Material's (black at 0.25 in
+light, 0.5 in dark). The ten call sites keep their content and keys and drew no
+chrome of their own; sheets that had a handle key (`LibrarySyncSheet`,
+`PlaylistPicker`) now alias `MixtapeSheet.handleKey`. Founder direction from the
+second smoke: sheets read as translucent and huddled on a near-black room, and
+each one sat differently. **Reopens if:** a sheet needs genuine glass over live
+content behind it (then the helper grows a mode, not a second presentation).

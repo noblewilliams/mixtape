@@ -19,6 +19,7 @@ import '../../import/snapshot.dart';
 import '../theme/mixtape_theme.dart';
 import 'foundation/inset_group.dart';
 import 'foundation/section_word.dart';
+import 'foundation/mixtape_sheet.dart';
 
 class CollectionReviewForm extends StatelessWidget {
   const CollectionReviewForm({
@@ -296,28 +297,26 @@ class _TargetField extends StatelessWidget {
   }
 
   Future<void> _pick(BuildContext context) async {
-    final chosen = await showModalBottomSheet<String>(
-      context: context,
+    final chosen = await showMixtapeSheet<String>(
+      context,
       isScrollControlled: true,
-      builder: (sheetContext) => SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: InsetGroup(
-            header: const SectionWord('Playlist action'),
-            children: [
+      builder: (sheetContext) => SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+        child: InsetGroup(
+          header: const SectionWord('Playlist action'),
+          children: [
+            InsetRow(
+              key: ValueKey('collection-target-$index-option-new'),
+              title: CollectionReviewForm.newPlaylistLabel,
+              onTap: () => Navigator.of(sheetContext).pop(''),
+            ),
+            for (final p in selection.context.playlists)
               InsetRow(
-                key: ValueKey('collection-target-$index-option-new'),
-                title: CollectionReviewForm.newPlaylistLabel,
-                onTap: () => Navigator.of(sheetContext).pop(''),
+                key: ValueKey('collection-target-$index-option-${p.key}'),
+                title: 'Replace: ${p.name}',
+                onTap: () => Navigator.of(sheetContext).pop(p.key),
               ),
-              for (final p in selection.context.playlists)
-                InsetRow(
-                  key: ValueKey('collection-target-$index-option-${p.key}'),
-                  title: 'Replace: ${p.name}',
-                  onTap: () => Navigator.of(sheetContext).pop(p.key),
-                ),
-            ],
-          ),
+          ],
         ),
       ),
     );

@@ -3,13 +3,11 @@
 /// `docs/mockups/2026-09-17-mobile-shell-r3.html`).
 library;
 
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 
 import '../../theme/mixtape_theme.dart';
 
-/// The primary mix action: 40 pt of tape shell with a turning reel.
+/// The primary mix action: 40 pt of tape shell with a centred label.
 ///
 /// [playing] adds the prism meter on the trailing edge; the meter is static
 /// here, animation arrives with the player so reduced motion is handled in one
@@ -27,7 +25,8 @@ class TapeButton extends StatelessWidget {
   final VoidCallback? onPressed;
   final bool playing;
 
-  /// Replaces the reel glyph when a different leading mark is wanted.
+  /// A leading mark, when a caller wants one. Nothing is drawn by default —
+  /// the reel the board once showed is gone (smoke round two, note 2).
   final Widget? leading;
 
   static const BorderRadius _radius = BorderRadius.only(
@@ -40,6 +39,9 @@ class TapeButton extends StatelessWidget {
   /// The meter overlaps the trailing inset, so the label needs the room.
   static const double _meterWidth = 8;
   static const double _playingRightPadding = 24;
+
+  /// Balanced side padding around a label that now stands on its own.
+  static const double _sidePadding = 14;
 
   @override
   Widget build(BuildContext context) {
@@ -67,24 +69,27 @@ class TapeButton extends StatelessWidget {
         ),
         child: ClipRRect(
           borderRadius: _radius,
+          // Centred: the row fills the shell's height whatever the shell
+          // grows to, so the label never hugs the top.
           child: Stack(
+            alignment: Alignment.center,
             children: [
               Padding(
                 padding: EdgeInsets.only(
-                  left: 8,
-                  right: playing ? _playingRightPadding : 14,
+                  left: _sidePadding,
+                  right: playing ? _playingRightPadding : _sidePadding,
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    leading ??
-                        const SizedBox.square(
-                          dimension: 20,
-                          child: CustomPaint(painter: _ReelPainter()),
-                        ),
-                    const SizedBox(width: 7),
+                    if (leading != null) ...[
+                      leading!,
+                      const SizedBox(width: 7),
+                    ],
                     // Loose, so the label shrink-wraps when there is room and
-                    // ellipsizes when there is not; reel and meter never
+                    // ellipsizes when there is not; mark and meter never
                     // shrink.
                     Flexible(
                       child: Text(
@@ -163,31 +168,4 @@ class TapeButton extends StatelessWidget {
       ),
     );
   }
-}
-
-/// The tape reel: a dark disc behind eight light spokes inside a 2.5 px ring.
-class _ReelPainter extends CustomPainter {
-  const _ReelPainter();
-
-  static const Color _disc = Color(0xFF262329);
-  static const Color _spoke = Color(0xFFE4E1DD);
-  static const double _ring = 2.5;
-  static const int _spokes = 8;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = size.center(Offset.zero);
-    final radius = size.shortestSide / 2;
-    canvas.drawCircle(center, radius, Paint()..color = _disc);
-    final inner = Rect.fromCircle(center: center, radius: radius - _ring);
-    final paint = Paint()..color = _spoke;
-    const sweep = 24 * math.pi / 180;
-    const step = 2 * math.pi / _spokes;
-    for (var i = 0; i < _spokes; i++) {
-      canvas.drawArc(inner, i * step, sweep, true, paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(_ReelPainter oldDelegate) => false;
 }

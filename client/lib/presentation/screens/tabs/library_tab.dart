@@ -23,7 +23,6 @@ import '../../providers/playlist_providers.dart';
 import '../../theme/mixtape_theme.dart';
 import '../../widgets/foundation/cassette_tile.dart';
 import '../../widgets/foundation/flush_row.dart';
-import '../../widgets/foundation/frosted_surface.dart';
 import '../../widgets/foundation/glass_cluster.dart';
 import '../../widgets/foundation/gradient_background.dart';
 import '../../widgets/foundation/large_title_scaffold.dart';
@@ -34,6 +33,7 @@ import '../import_sheet.dart';
 import '../music_sources_screen.dart';
 import '../playlist_browser_screen.dart';
 import '../spotify_request_screen.dart';
+import '../../widgets/foundation/mixtape_sheet.dart';
 
 /// The Library tab.
 class LibraryTab extends ConsumerStatefulWidget {
@@ -127,18 +127,16 @@ class _LibraryTabState extends ConsumerState<LibraryTab> {
   bool _playlistsShown = false;
 
   Future<void> _push(Widget screen) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => screen),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => screen));
     // An import or a removal over there changes what the sources say.
     if (mounted) await ref.read(onboardingProvider.notifier).refresh();
   }
 
   void _openMore() {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      elevation: 0,
+    showMixtapeSheet<void>(
+      context,
       builder: (sheetContext) => _LibrarySheet(
         children: [
           FlushRow(
@@ -169,10 +167,8 @@ class _LibraryTabState extends ConsumerState<LibraryTab> {
       _push(const MusicSourcesScreen());
       return;
     }
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      elevation: 0,
+    showMixtapeSheet<void>(
+      context,
       builder: (sheetContext) => _LibrarySheet(
         children: [
           if (source.source == 'spotify_export')
@@ -214,6 +210,7 @@ class _LibraryTabState extends ConsumerState<LibraryTab> {
     final onboarding = ref.watch(onboardingProvider);
     final state = onboarding.value;
     final hasSources = state != null && state.sources.isNotEmpty;
+    final noSources = state != null && state.sources.isEmpty;
     _playlistsShown = hasSources;
 
     return GradientBackground(
@@ -241,19 +238,36 @@ class _LibraryTabState extends ConsumerState<LibraryTab> {
             ],
           ),
           slivers: [
-            SliverToBoxAdapter(child: _sources(onboarding, state)),
-            if (hasSources) ...[
-              const SliverToBoxAdapter(child: SectionWord('Playlists')),
-              playlistCollectionSliver(
-                ref,
-                ref.watch(playlistCollectionProvider),
-                // The list pages on scroll; no button stands at its end.
-                loadMoreButton: false,
+            // Nothing to list: the block sits in the middle of the space
+            // between the large title and the dock, not up against the title
+            // (smoke round two, note 8).
+            if (noSources)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    bottom:
+                        MediaQuery.paddingOf(context).bottom +
+                        LibraryTab.defaultBottomInset,
+                  ),
+                  child: Center(child: _sources(onboarding, state)),
+                ),
+              )
+            else ...[
+              SliverToBoxAdapter(child: _sources(onboarding, state)),
+              if (hasSources) ...[
+                const SliverToBoxAdapter(child: SectionWord('Playlists')),
+                playlistCollectionSliver(
+                  ref,
+                  ref.watch(playlistCollectionProvider),
+                  // The list pages on scroll; no button stands at its end.
+                  loadMoreButton: false,
+                ),
+              ],
+              const SliverToBoxAdapter(
+                child: SizedBox(height: LibraryTab.defaultBottomInset),
               ),
             ],
-            const SliverToBoxAdapter(
-              child: SizedBox(height: LibraryTab.defaultBottomInset),
-            ),
           ],
         ),
       ),
@@ -298,28 +312,26 @@ class _LibraryTabState extends ConsumerState<LibraryTab> {
     }
 
     if (state.sources.isEmpty) {
-      return Padding(
+      return Column(
         key: LibraryTab.emptyKey,
-        padding: const EdgeInsets.only(top: 32),
-        child: Column(
-          children: [
-            const CassetteTile(width: 140),
-            const SizedBox(height: 20),
-            Text(LibraryTab.emptyTitle, style: tokens.section),
-            const SizedBox(height: 6),
-            Text(
-              LibraryTab.emptyBody,
-              textAlign: TextAlign.center,
-              style: tokens.secondary,
-            ),
-            const SizedBox(height: 20),
-            TapeButton(
-              key: LibraryTab.emptySetupKey,
-              label: 'Add your music',
-              onPressed: () => _push(const SpotifyRequestScreen()),
-            ),
-          ],
-        ),
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const CassetteTile(width: 140),
+          const SizedBox(height: 20),
+          Text(LibraryTab.emptyTitle, style: tokens.section),
+          const SizedBox(height: 6),
+          Text(
+            LibraryTab.emptyBody,
+            textAlign: TextAlign.center,
+            style: tokens.secondary,
+          ),
+          const SizedBox(height: 20),
+          TapeButton(
+            key: LibraryTab.emptySetupKey,
+            label: 'Add your music',
+            onPressed: () => _push(const SpotifyRequestScreen()),
+          ),
+        ],
       );
     }
 
@@ -356,7 +368,8 @@ class _LibraryTabState extends ConsumerState<LibraryTab> {
   }
 }
 
-/// The tab's own action sheets: the approved frosted material with a handle.
+/// The tab's own action sheets. The shared sheet supplies the material, the
+/// handle and the bottom inset; this is only the rows.
 class _LibrarySheet extends StatelessWidget {
   const _LibrarySheet({required this.children});
 
@@ -364,32 +377,7 @@ class _LibrarySheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-    child: FrostedSurface(
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Center(
-                child: Container(
-                  width: 36,
-                  height: 5,
-                  decoration: BoxDecoration(
-                    color: context.tokens.muted.withValues(alpha: 0.4),
-                    borderRadius: BorderRadius.circular(3),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              FlushList(children: children),
-            ],
-          ),
-        ),
-      ),
-    ),
+    padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+    child: FlushList(children: children),
   );
 }

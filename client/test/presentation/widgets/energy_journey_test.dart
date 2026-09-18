@@ -6,6 +6,7 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/energy_journey.dart';
+import 'package:mixtape/presentation/widgets/foundation/mixtape_sheet.dart';
 
 /// The snapshot theme (seeded colours, the synthetic font) plus the design
 /// tokens every native widget reads off the ambient theme.
@@ -164,6 +165,64 @@ void main() {
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     expect(controller.text, 'Sunday morning\nEnergy journey: Wind down.');
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
+  testWidgets('Cancel sits at the left edge and the tape button at the right', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final controller = TextEditingController(text: 'Sunday morning');
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: MixtapeTheme.light(),
+        home: Scaffold(body: EnergyControl(controller: controller)),
+      ),
+    );
+    await tester.tap(find.byKey(EnergyControl.chipKey));
+    await tester.pumpAndSettle();
+
+    final sheet = tester.getRect(find.byKey(EnergyControl.sheetKey));
+    final cancel = tester.getRect(find.text('Cancel'));
+    final confirm = tester.getRect(find.byKey(EnergyControl.confirmKey));
+    expect(cancel.center.dx, lessThan(sheet.center.dx));
+    expect(confirm.center.dx, greaterThan(sheet.center.dx));
+
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
+  testWidgets('the shape sheet is opaque, full width and bottom flush', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final controller = TextEditingController(text: 'Sunday morning');
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: MixtapeTheme.light(),
+        home: Scaffold(body: EnergyControl(controller: controller)),
+      ),
+    );
+    await tester.tap(find.byKey(EnergyControl.chipKey));
+    await tester.pumpAndSettle();
+
+    final surface = tester.getRect(find.byKey(MixtapeSheet.surfaceKey));
+    expect(surface.left, 0);
+    expect(surface.right, 390);
+    expect(surface.bottom, 844);
+    final barrier = tester
+        .widgetList<ModalBarrier>(find.byType(ModalBarrier))
+        .where((b) => b.color != null)
+        .last;
+    expect(barrier.color, MixtapeSheet.lightBarrier);
+
     await tester.pumpWidget(const SizedBox());
     controller.dispose();
   });

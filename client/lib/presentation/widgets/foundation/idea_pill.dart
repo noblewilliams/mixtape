@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../../theme/mixtape_theme.dart';
 
-/// 34 pt of starter prompt or routine suggestion.
+/// 34 pt of starter prompt or routine suggestion, as wide as its own label.
 ///
 /// [dimmed] is the typing state (the field already has text); [skeleton] is
 /// the routine slot while it loads, which carries the label for VoiceOver but
@@ -44,7 +44,6 @@ class IdeaPill extends StatelessWidget {
         minWidth: skeleton ? _skeletonMinWidth : 0,
       ),
       padding: skeleton ? null : const EdgeInsets.symmetric(horizontal: 13),
-      alignment: Alignment.center,
       decoration: BoxDecoration(
         color: skeleton
             ? _skeletonFill
@@ -54,18 +53,25 @@ class IdeaPill extends StatelessWidget {
         ),
         border: skeleton ? null : Border.all(color: tokens.hairline),
       ),
-      child: skeleton
-          ? const SizedBox.shrink()
-          : Text(
-              label,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: tokens.text,
+      // `Align` with a width factor rather than the container's own
+      // `alignment`, which would expand the pill to the whole row: the board's
+      // pills take only the width their label needs (smoke round two, note 6).
+      child: Align(
+        alignment: Alignment.center,
+        widthFactor: 1,
+        child: skeleton
+            ? const SizedBox.shrink()
+            : Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: tokens.text,
+                ),
               ),
-            ),
+      ),
     );
 
     return Semantics(

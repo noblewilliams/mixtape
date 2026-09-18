@@ -224,6 +224,74 @@ void main() {
     expect(harness.submits, 0);
   });
 
+  testWidgets('the panel floats 12 pt in from both screen edges', (
+    tester,
+  ) async {
+    await _pumpPanel(tester);
+    await tester.pumpAndSettle();
+
+    final panel = tester.getRect(find.byKey(HomePanel.surfaceKey));
+    expect(panel.left, HomePanel.sideInset);
+    expect(panel.right, 390 - HomePanel.sideInset);
+  });
+
+  testWidgets('a short idea pill takes only the width its label needs', (
+    tester,
+  ) async {
+    await _pumpPanel(tester);
+    await tester.pumpAndSettle();
+
+    final panel = tester.getRect(find.byKey(HomePanel.surfaceKey));
+    final pills = tester.getRect(find.byKey(HomePanel.pillsKey));
+    for (final pill in find.byType(IdeaPill).evaluate()) {
+      final rect = tester.getRect(find.byWidget(pill.widget));
+      expect(
+        rect.width,
+        lessThan(panel.width),
+        reason: 'a pill never spans the panel',
+      );
+      expect(rect.left, greaterThanOrEqualTo(pills.left - 0.01));
+    }
+  });
+
+  testWidgets('an idea pill is as wide as its own text, not its row', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: MixtapeTheme.light(),
+        home: const Scaffold(
+          body: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: 360,
+              child: Wrap(
+                spacing: HomePanel.pillGap,
+                children: [IdeaPill(label: 'Coffee'), IdeaPill(label: 'Rain')],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final first = tester.getRect(find.byType(IdeaPill).first);
+    final second = tester.getRect(find.byType(IdeaPill).last);
+    final label = tester.getSize(find.text('Coffee'));
+    expect(first.width, lessThan(360));
+    expect(
+      first.width,
+      closeTo(label.width + 28, 0.5),
+      reason: 'the shell is the label, 13 pt of padding and a hairline a side',
+    );
+    expect(
+      second.left,
+      closeTo(first.right + HomePanel.pillGap, 0.5),
+      reason: 'pills sit side by side on one row',
+    );
+  });
+
   testWidgets('starter pills have no context menu', (tester) async {
     await _pumpPanel(tester);
     await tester.pumpAndSettle();

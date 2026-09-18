@@ -46,7 +46,7 @@ class YouTab extends ConsumerWidget {
 
   /// The square prism avatar.
   static const Key avatarKey = Key('you-avatar');
-  static const double avatarSize = 64;
+  static const double avatarSize = 48;
 
   /// Shown until `/me` answers with a name (it never blocks the tab).
   static const String unnamedListener = 'Your account';
@@ -484,8 +484,8 @@ class _SignOutRowState extends ConsumerState<_SignOutRow> {
   );
 }
 
-/// The identity block's square prism avatar: the one prism instance on this
-/// screen, at the board's 3 pt tile radius.
+/// The identity block's round prism avatar: the one prism instance on this
+/// screen, clipped to a 48 pt circle (smoke round two, note 7).
 class _PrismAvatar extends StatelessWidget {
   const _PrismAvatar({required this.initial});
 
@@ -500,7 +500,7 @@ class _PrismAvatar extends StatelessWidget {
       height: YouTab.avatarSize,
       decoration: BoxDecoration(
         gradient: tokens.prismGradient(),
-        borderRadius: BorderRadius.circular(MixtapeMetrics.tileRadius),
+        shape: BoxShape.circle,
       ),
       child: Center(
         child: Text(

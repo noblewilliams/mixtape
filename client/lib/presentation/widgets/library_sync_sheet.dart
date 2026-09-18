@@ -14,16 +14,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers/library_sync_provider.dart';
 import '../theme/mixtape_theme.dart';
-import 'foundation/frosted_surface.dart';
 import 'foundation/tape_button.dart';
 import 'foundation/text_action.dart';
+import 'foundation/mixtape_sheet.dart';
 
 /// The sync sheet: idle, running, done, failed.
 class LibrarySyncSheet extends ConsumerWidget {
   const LibrarySyncSheet({super.key});
 
   /// The drag handle above the sheet's content.
-  static const Key handleKey = Key('library-sync-handle');
+  static const Key handleKey = MixtapeSheet.handleKey;
 
   /// Idle: start a run.
   static const Key startKey = Key('library-sync-start');
@@ -31,6 +31,8 @@ class LibrarySyncSheet extends ConsumerWidget {
   /// Running: the progress line and its bar.
   static const Key progressKey = Key('library-sync-progress');
 
+  /// The shared sheet draws the handle now; the key stays so the tab's own
+  /// tests keep one name for it.
   /// Done: run it again.
   static const Key againKey = Key('library-sync-again');
 
@@ -38,47 +40,22 @@ class LibrarySyncSheet extends ConsumerWidget {
   static const Key retryKey = Key('library-sync-retry');
 
   /// Opens the sheet over [context]'s nearest navigator.
-  static Future<void> show(BuildContext context) => showModalBottomSheet<void>(
-    context: context,
+  static Future<void> show(BuildContext context) => showMixtapeSheet<void>(
+    context,
     isScrollControlled: true,
-    // The frosted surface is the sheet's own material; Material's would sit
-    // opaque behind the blur.
-    backgroundColor: Colors.transparent,
-    elevation: 0,
     builder: (_) => const LibrarySyncSheet(),
   );
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final sync = ref.watch(librarySyncProvider);
-    final tokens = context.tokens;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-      child: FrostedSurface(
-        child: SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Container(
-                  key: handleKey,
-                  width: 36,
-                  height: 5,
-                  decoration: BoxDecoration(
-                    color: tokens.muted.withValues(alpha: 0.4),
-                    borderRadius: BorderRadius.circular(3),
-                  ),
-                ),
-                const SizedBox(height: 18),
-                _body(context, ref, sync),
-              ],
-            ),
-          ),
-        ),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [_body(context, ref, sync)],
       ),
     );
   }
@@ -99,11 +76,7 @@ class LibrarySyncSheet extends ConsumerWidget {
               style: tokens.secondary,
             ),
             const SizedBox(height: 18),
-            TapeButton(
-              key: startKey,
-              label: 'Sync library',
-              onPressed: run,
-            ),
+            TapeButton(key: startKey, label: 'Sync library', onPressed: run),
           ],
         );
       case SyncRunning(:final progress):

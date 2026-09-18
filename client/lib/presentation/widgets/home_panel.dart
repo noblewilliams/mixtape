@@ -4,11 +4,11 @@
 /// `.grab`, `.pills` and `.errline` on the Home states board; plan tasks 3.1
 /// and 3.2).
 ///
-/// Glass with a 30 pt top radius and a drag-handle glyph, holding the
-/// composer, the start-failure line and at most three idea pills of equal
-/// weight. It is anchored to the bottom of the screen above the dock and rides
-/// the keyboard, so it is drawn outside the scroll view Home's open space
-/// lives in.
+/// Glass inset from both screen edges, rounded on all four corners, with a
+/// drag-handle glyph, holding the composer, the start-failure line and at most
+/// three idea pills of equal weight. It floats at the bottom of the screen
+/// above the dock and rides the keyboard, so it is drawn outside the scroll
+/// view Home's open space lives in.
 library;
 
 import 'package:flutter/material.dart';
@@ -85,6 +85,11 @@ class HomePanel extends StatefulWidget {
   /// The board's `.bpanel` top radius.
   static const double topRadius = 30;
 
+  /// The panel floats: it is inset from both screen edges and rounded on all
+  /// four corners (smoke round two, note 5).
+  static const double sideInset = 12;
+  static const double floatingRadius = 24;
+
   /// `.bpanel` side padding.
   static const double sidePadding = 14;
 
@@ -107,6 +112,9 @@ class HomePanel extends StatefulWidget {
   static const int maxPills = 3;
 
   static const Key handleKey = Key('home-panel-handle');
+
+  /// The glass itself, so a test can measure where the panel sits.
+  static const Key surfaceKey = Key('home-panel-surface');
   static const Key pillsKey = Key('home-panel-pills');
 
   /// The failure line, keyed as the pre-native error was.
@@ -190,92 +198,98 @@ class _HomePanelState extends State<HomePanel> {
           double.infinity,
         ),
       ),
-      child: LiquidGlassSurface(
-        borderRadius: const BorderRadius.vertical(
-          top: Radius.circular(HomePanel.topRadius),
-        ),
-        fallbackBlurSigma: 30,
-        fallbackTint: tokens.panel,
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(
-            HomePanel.sidePadding,
-            8,
-            HomePanel.sidePadding,
-            bottom,
-          ),
-          // The panel's own overflow is its own business: a scroll in here
-          // must not minimise the shell's dock.
-          child: NotificationListener<ScrollNotification>(
-            onNotification: (_) => true,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Center(
-                    child: Container(
-                      key: HomePanel.handleKey,
-                      width: HomePanel.handleWidth,
-                      height: HomePanel.handleHeight,
-                      margin: const EdgeInsets.only(top: 2, bottom: 12),
-                      decoration: const BoxDecoration(
-                        color: HomePanel.handleColor,
-                        borderRadius: BorderRadius.all(Radius.circular(3)),
+      child: Padding(
+        // The dock relationship is unchanged: the gap below still comes out
+        // of the panel's own bottom padding.
+        padding: const EdgeInsets.symmetric(horizontal: HomePanel.sideInset),
+        child: LiquidGlassSurface(
+          key: HomePanel.surfaceKey,
+          borderRadius: BorderRadius.circular(HomePanel.floatingRadius),
+          fallbackBlurSigma: 30,
+          fallbackTint: tokens.panel,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              HomePanel.sidePadding,
+              8,
+              HomePanel.sidePadding,
+              bottom,
+            ),
+            // The panel's own overflow is its own business: a scroll in here
+            // must not minimise the shell's dock.
+            child: NotificationListener<ScrollNotification>(
+              onNotification: (_) => true,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Center(
+                      child: Container(
+                        key: HomePanel.handleKey,
+                        width: HomePanel.handleWidth,
+                        height: HomePanel.handleHeight,
+                        margin: const EdgeInsets.only(top: 2, bottom: 12),
+                        decoration: const BoxDecoration(
+                          color: HomePanel.handleColor,
+                          borderRadius: BorderRadius.all(Radius.circular(3)),
+                        ),
                       ),
                     ),
-                  ),
-                  MixPromptInput(
-                    key: widget.composerKey,
-                    controller: widget.controller,
-                    focusNode: widget.focusNode,
-                    busy: widget.busy,
-                    onSubmit: widget.onSubmit,
-                    attachment: widget.attachment,
-                    placeholder: widget.placeholder,
-                    // The pills hold these; the rotating hint skips them so
-                    // the field never repeats a pill below it. Refinements
-                    // are not prompts, so they reserve nothing.
-                    reservedExamples: widget.refinements == null
-                        ? starters
-                        : const [],
-                  ),
-                  if (error != null) _errorLine(tokens, error),
-                  Padding(
-                    padding: const EdgeInsets.only(top: HomePanel.pillsTopGap),
-                    // With a playlist attached the three pills are refinements
-                    // of it, and no routine suggestion competes with them.
-                    child: widget.refinements != null
-                        ? _refinementPills(dimmed: dimmed)
-                        : RoutinePillSlot(
-                            onFill: _fill,
-                            dimmed: dimmed,
-                            enabled: !widget.busy,
-                            builder: (context, pill) {
-                              final shown = pill == null
-                                  ? HomePanel.maxPills
-                                  : HomePanel.maxPills - 1;
-                              return Wrap(
-                                key: HomePanel.pillsKey,
-                                spacing: HomePanel.pillGap,
-                                runSpacing: HomePanel.pillGap,
-                                children: [
-                                  if (pill != null) pill,
-                                  for (
-                                    var i = 0;
-                                    i < shown && i < starters.length;
-                                    i++
-                                  )
-                                    _starterPill(
-                                      i,
-                                      starters[i],
-                                      dimmed: dimmed,
-                                    ),
-                                ],
-                              );
-                            },
-                          ),
-                  ),
-                ],
+                    MixPromptInput(
+                      key: widget.composerKey,
+                      controller: widget.controller,
+                      focusNode: widget.focusNode,
+                      busy: widget.busy,
+                      onSubmit: widget.onSubmit,
+                      attachment: widget.attachment,
+                      placeholder: widget.placeholder,
+                      // The pills hold these; the rotating hint skips them so
+                      // the field never repeats a pill below it. Refinements
+                      // are not prompts, so they reserve nothing.
+                      reservedExamples: widget.refinements == null
+                          ? starters
+                          : const [],
+                    ),
+                    if (error != null) _errorLine(tokens, error),
+                    Padding(
+                      padding: const EdgeInsets.only(
+                        top: HomePanel.pillsTopGap,
+                      ),
+                      // With a playlist attached the three pills are refinements
+                      // of it, and no routine suggestion competes with them.
+                      child: widget.refinements != null
+                          ? _refinementPills(dimmed: dimmed)
+                          : RoutinePillSlot(
+                              onFill: _fill,
+                              dimmed: dimmed,
+                              enabled: !widget.busy,
+                              builder: (context, pill) {
+                                final shown = pill == null
+                                    ? HomePanel.maxPills
+                                    : HomePanel.maxPills - 1;
+                                return Wrap(
+                                  key: HomePanel.pillsKey,
+                                  spacing: HomePanel.pillGap,
+                                  runSpacing: HomePanel.pillGap,
+                                  children: [
+                                    if (pill != null) pill,
+                                    for (
+                                      var i = 0;
+                                      i < shown && i < starters.length;
+                                      i++
+                                    )
+                                      _starterPill(
+                                        i,
+                                        starters[i],
+                                        dimmed: dimmed,
+                                      ),
+                                  ],
+                                );
+                              },
+                            ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

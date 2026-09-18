@@ -1,5 +1,5 @@
 // The shared library-sync sheet (plan `docs/superpowers/plans/2026-09-17-
-// native-design-implementation.md` task 8.1): one sheet on a FrostedSurface
+// native-design-implementation.md` task 8.1): one sheet on the shared sheet
 // with a handle, opened from the Library tab and from Your music. The states
 // and copy are the ones the P1 sheet shipped; the keys are the
 // `library-sync-` ones the tab already published.
@@ -9,7 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/library/library_sync_service.dart';
 import 'package:mixtape/presentation/providers/library_sync_provider.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
-import 'package:mixtape/presentation/widgets/foundation/frosted_surface.dart';
+import 'package:mixtape/presentation/widgets/foundation/mixtape_sheet.dart';
 import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
 import 'package:mixtape/presentation/widgets/library_sync_sheet.dart';
 
@@ -90,13 +90,13 @@ Future<void> _pump(
 }
 
 void main() {
-  testWidgets('idle offers the tape button on a frosted surface with a handle', (
+  testWidgets('idle offers the tape button on the shared sheet with a handle', (
     tester,
   ) async {
     final sync = _PinnedSync(const SyncIdle());
     await _pump(tester, _container(sync));
 
-    expect(find.byType(FrostedSurface), findsOneWidget);
+    expect(find.byKey(MixtapeSheet.surfaceKey), findsOneWidget);
     expect(find.byKey(LibrarySyncSheet.handleKey), findsOneWidget);
     expect(find.byKey(LibrarySyncSheet.startKey), findsOneWidget);
     expect(find.byType(TapeButton), findsOneWidget);

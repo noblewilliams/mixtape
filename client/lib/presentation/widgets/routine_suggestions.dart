@@ -18,8 +18,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/suggestions/suggestions_api.dart';
 import '../providers/device_providers.dart';
 import '../providers/suggestions_provider.dart';
-import '../theme/mixtape_theme.dart';
 import 'foundation/idea_pill.dart';
+import 'foundation/mixtape_sheet.dart';
+import '../theme/mixtape_theme.dart';
 
 /// Home's first idea pill: the eligible routine suggestion, a skeleton while
 /// it loads, or [fallback] when there is nothing to suggest.
@@ -212,9 +213,8 @@ class _RoutinePillBodyState extends State<_RoutinePillBody>
   });
 
   Future<void> _why(RoutineSuggestion suggestion) async {
-    await showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
+    await showMixtapeSheet<void>(
+      context,
       builder: (context) => Padding(
         key: RoutinePillSlot.whySheetKey,
         padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),

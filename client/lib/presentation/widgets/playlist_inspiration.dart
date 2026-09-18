@@ -20,8 +20,8 @@ import '../providers/auth_provider.dart';
 import '../providers/playlist_providers.dart';
 import '../theme/mixtape_theme.dart';
 import 'foundation/flush_row.dart';
-import 'foundation/frosted_surface.dart';
 import 'foundation/inset_group.dart';
+import 'foundation/mixtape_sheet.dart';
 import 'foundation/status_word.dart';
 import 'playlist_artwork.dart';
 
@@ -66,7 +66,10 @@ abstract final class PlaylistPicker {
   static const int minimumSongs = 3;
 
   static const Key sheetKey = Key('playlist-picker-sheet');
-  static const Key handleKey = Key('playlist-picker-handle');
+
+  /// The shared sheet draws the handle now; the key points at it so callers
+  /// and tests keep one name.
+  static const Key handleKey = MixtapeSheet.handleKey;
   static const Key listKey = Key('playlist-picker-list');
   static const Key searchKey = Key('playlist-search');
   static const Key excludeKey = Key('playlist-exclude');
@@ -100,12 +103,9 @@ Future<PlaylistInspirationChoice?> showPlaylistInspirationPicker(
   InitialPlaylistSeed? selected,
 }) {
   final api = ref.read(playlistApiProvider);
-  return showModalBottomSheet<PlaylistInspirationChoice>(
-    context: context,
+  return showMixtapeSheet<PlaylistInspirationChoice>(
+    context,
     isScrollControlled: true,
-    useSafeArea: true,
-    backgroundColor: Colors.transparent,
-    elevation: 0,
     builder: (_) => _PlaylistPicker(api: api, selected: selected),
   );
 }
@@ -533,47 +533,28 @@ class _PlaylistPickerState extends ConsumerState<_PlaylistPicker> {
     return Padding(
       padding: EdgeInsets.only(bottom: keyboard),
       child: ConstrainedBox(
+        key: PlaylistPicker.sheetKey,
         constraints: BoxConstraints(maxHeight: maxHeight),
-        child: FrostedSurface(
-          key: PlaylistPicker.sheetKey,
-          borderRadius: const BorderRadius.vertical(
-            top: Radius.circular(PlaylistPicker.topRadius),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            MixtapeMetrics.screenSidePadding,
+            2,
+            MixtapeMetrics.screenSidePadding,
+            12,
           ),
-          blurSigma: 30,
-          tint: tokens.panel,
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(
-              MixtapeMetrics.screenSidePadding,
-              8,
-              MixtapeMetrics.screenSidePadding,
-              media.padding.bottom + 12,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Center(
-                  child: Container(
-                    key: PlaylistPicker.handleKey,
-                    width: 36,
-                    height: 5,
-                    margin: const EdgeInsets.only(bottom: 10),
-                    decoration: const BoxDecoration(
-                      color: Color.fromRGBO(127, 120, 130, 0.45),
-                      borderRadius: BorderRadius.all(Radius.circular(3)),
-                    ),
-                  ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (!compact)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Text(PlaylistPicker.title, style: tokens.section),
                 ),
-                if (!compact)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: Text(PlaylistPicker.title, style: tokens.section),
-                  ),
-                _searchField(tokens),
-                Flexible(child: _list(tokens)),
-                _excludeRow(compact: compact),
-              ],
-            ),
+              _searchField(tokens),
+              Flexible(child: _list(tokens)),
+              _excludeRow(compact: compact),
+            ],
           ),
         ),
       ),

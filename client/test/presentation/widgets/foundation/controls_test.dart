@@ -285,6 +285,62 @@ void main() {
     handle.dispose();
   });
 
+  testWidgets('a tape button centres its label in the shell at 1x and 2x text', (
+    tester,
+  ) async {
+    for (final scale in [1.0, 2.0]) {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: MixtapeTheme.light(),
+          home: MediaQuery(
+            data: MediaQueryData(textScaler: TextScaler.linear(scale)),
+            child: const Scaffold(
+              body: Center(child: TapeButton(label: 'Start a mix')),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final button = tester.getRect(find.byType(TapeButton));
+      final label = tester.getRect(find.text('Start a mix'));
+      expect(
+        (label.center.dy - button.center.dy).abs(),
+        lessThan(0.5),
+        reason: 'the label rides the middle of the shell at ${scale}x text',
+      );
+    }
+  });
+
+  testWidgets('a tape button draws no glyph unless one is handed to it', (
+    tester,
+  ) async {
+    await _pump(
+      tester,
+      const Wrap(children: [TapeButton(label: 'Start a mix')]),
+    );
+    expect(
+      find.descendant(
+        of: find.byType(TapeButton),
+        matching: find.byType(CustomPaint),
+      ),
+      findsNothing,
+      reason: 'the reel is gone from the default tape button',
+    );
+
+    await _pump(
+      tester,
+      const Wrap(
+        children: [
+          TapeButton(
+            label: 'Start a mix',
+            leading: Icon(Icons.play_arrow, key: Key('given-leading')),
+          ),
+        ],
+      ),
+    );
+    expect(find.byKey(const Key('given-leading')), findsOneWidget);
+  });
+
   testWidgets('a playing tape button is wider than the same idle button', (
     tester,
   ) async {
@@ -370,7 +426,7 @@ void main() {
     expect(tester.getSize(find.byType(PrismStripe)), const Size(4, 26));
   });
 
-  testWidgets('the composer hides the mic and lights send only with text', (
+  testWidgets('the composer hides the mic and shows send only with text', (
     tester,
   ) async {
     final controller = TextEditingController();
@@ -401,9 +457,11 @@ void main() {
       return (box.decoration as BoxDecoration).color;
     }
 
-    expect(surfaceColor(), Colors.transparent);
+    // Nothing to send: the key is not drawn at all (smoke round two, note 9).
+    expect(find.byKey(const Key('send-surface')), findsNothing);
     await tester.enterText(find.byKey(const Key('prompt-field')), 'A drive');
     await tester.pump();
+    expect(find.byKey(const Key('send-surface')), findsOneWidget);
     expect(surfaceColor(), isNot(Colors.transparent));
     expect(stripeOpacity(), 0, reason: 'focus hands the field to the ring');
     await tester.pumpWidget(const SizedBox());

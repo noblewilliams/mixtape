@@ -305,6 +305,16 @@ void main() {
         expect(find.text('You'), findsOneWidget);
         expect(find.text('Ada'), findsOneWidget);
         expect(find.byKey(YouTab.avatarKey), findsOneWidget);
+        final avatar = tester.getSize(find.byKey(YouTab.avatarKey));
+        expect(avatar, const Size(48, 48), reason: '48 pt, not 64');
+        expect(
+          (tester
+                      .widget<Container>(find.byKey(YouTab.avatarKey))
+                      .decoration
+                  as BoxDecoration)
+              .shape,
+          BoxShape.circle,
+        );
         expect(find.text('A'), findsOneWidget, reason: 'the avatar initial');
         expect(
           find.byType(InsetGroup),

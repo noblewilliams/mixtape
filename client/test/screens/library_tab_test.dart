@@ -385,6 +385,25 @@ void main() {
       expect(find.byType(SpotifyRequestScreen), findsOneWidget);
     });
 
+    testWidgets('the empty block is centred between the title and the dock', (
+      tester,
+    ) async {
+      final listening = FakeListeningApi(
+        onboarding: onboardingState(chosenService: 'spotify'),
+      );
+      await _pump(tester, _container(listening: listening), dockInset: true);
+
+      final empty = tester.getRect(find.byKey(LibraryTab.emptyKey));
+      final title = tester.getRect(find.text('Library'));
+      const dockTop = 844 - kFrostedDockHeight;
+      final middle = (title.bottom + dockTop) / 2;
+      expect(
+        (empty.center.dy - middle).abs(),
+        lessThan(24),
+        reason: 'it no longer hugs the top of the open space',
+      );
+    });
+
     testWidgets('a failed sources load offers Try again', (tester) async {
       final listening = FakeListeningApi();
       listening.onGetOnboarding = () async => throw StateError('boom');

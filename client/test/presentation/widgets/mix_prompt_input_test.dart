@@ -42,6 +42,77 @@ void main() {
       controller.dispose();
     },
   );
+  testWidgets('the send key appears only once the field has text', (
+    tester,
+  ) async {
+    final controller = TextEditingController();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: MixtapeTheme.light(),
+        home: Scaffold(
+          body: MixPromptInput(
+            controller: controller,
+            busy: false,
+            onSubmit: () {},
+            showVoiceInput: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('send-surface')), findsNothing);
+    expect(find.byKey(const Key('start-session')), findsNothing);
+    expect(
+      find.byKey(const Key('voice-input')),
+      findsOneWidget,
+      reason: 'the mic stays where it is',
+    );
+
+    await tester.enterText(find.byKey(const Key('prompt-field')), 'focus');
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('send-surface')), findsOneWidget);
+    final mic = tester.getRect(find.byKey(const Key('voice-input')));
+    final send = tester.getRect(find.byKey(const Key('start-session')));
+    expect(send.left, greaterThanOrEqualTo(mic.right - 0.01));
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('the field sits a step down from body text on tighter padding', (
+    tester,
+  ) async {
+    final controller = TextEditingController();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: MixtapeTheme.light(),
+        home: Scaffold(
+          body: MixPromptInput(
+            controller: controller,
+            busy: false,
+            onSubmit: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final field = tester.widget<TextField>(find.byKey(const Key('prompt-field')));
+    final body = MixtapeTokens.light.body.fontSize!;
+    expect(field.style?.fontSize, body - 1);
+    expect(field.decoration?.hintStyle?.fontSize, body - 1);
+    expect(
+      field.decoration?.contentPadding,
+      const EdgeInsets.symmetric(vertical: MixPromptInput.fieldVerticalPadding),
+    );
+    expect(MixPromptInput.fieldVerticalPadding, 9);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('a given placeholder replaces the rotating hints and stays put', (
     tester,
   ) async {
@@ -87,7 +158,8 @@ void main() {
     );
     await tester.pump(const Duration(seconds: 9));
     expect(find.text('A slow Sunday morning'), findsOneWidget);
-    await tester.tap(find.byKey(const Key('start-session')));
+    // Nothing to send: the key is not drawn at all.
+    expect(find.byKey(const Key('start-session')), findsNothing);
     expect(submits, 0);
     await tester.pumpWidget(const SizedBox());
     controller.dispose();

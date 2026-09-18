@@ -33,6 +33,7 @@ import '../widgets/foundation/status_word.dart';
 import '../widgets/foundation/tape_button.dart';
 import '../widgets/foundation/text_action.dart';
 import 'interview_screen.dart';
+import '../widgets/foundation/mixtape_sheet.dart';
 
 /// How many import sheets are on screen. Home and the sources screen both
 /// open one, and a file handed to the app can arrive over either, so the
@@ -60,12 +61,11 @@ Future<void> showImportSheet(
   bool dismissible = true,
 }) async {
   var landed = false;
-  await showModalBottomSheet<void>(
-    context: context,
+  await showMixtapeSheet<void>(
+    context,
     isScrollControlled: true,
     isDismissible: dismissible,
     enableDrag: dismissible,
-    backgroundColor: Colors.transparent,
     builder: (_) => dismissible
         ? const ImportSheet()
         : _LockedSheet(onLanded: () => landed = true),
@@ -237,8 +237,7 @@ class _ImportSheetState extends ConsumerState<ImportSheet> {
         child: ConstrainedBox(
           constraints: BoxConstraints(
             maxHeight:
-                MediaQuery.sizeOf(context).height *
-                ImportSheet.maxHeightFactor,
+                MediaQuery.sizeOf(context).height * ImportSheet.maxHeightFactor,
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -518,9 +517,7 @@ class _Inventory extends StatelessWidget {
             child: StatusWord(
               key: const Key('import-file-package'),
               label: packageName(inventory.package),
-              kind: inventory.package == null
-                  ? StatusKind.warn
-                  : StatusKind.ok,
+              kind: inventory.package == null ? StatusKind.warn : StatusKind.ok,
             ),
           ),
         ),
@@ -549,7 +546,10 @@ class _Inventory extends StatelessWidget {
               label: 'Liked songs',
               value: formatCount(snapshot.library.length),
             ),
-            _FactRow(label: 'Artists', value: formatCount(snapshot.artists.length)),
+            _FactRow(
+              label: 'Artists',
+              value: formatCount(snapshot.artists.length),
+            ),
             _FactRow(
               label: 'Playlists',
               value: formatCount(snapshot.playlists.length),

@@ -19,7 +19,6 @@ import '../providers/playlist_providers.dart';
 import '../theme/mixtape_theme.dart';
 import '../widgets/conversation_turn.dart';
 import '../widgets/energy_journey.dart' show EnergyControlVisibility;
-import '../widgets/foundation/frosted_surface.dart';
 import '../widgets/foundation/glass_cluster.dart';
 import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/liquid_glass_surface.dart';
@@ -29,6 +28,7 @@ import '../widgets/foundation/text_action.dart';
 import '../widgets/home_panel.dart' show HomePanel;
 import '../widgets/mix_prompt_input.dart';
 import '../widgets/playlist_artwork.dart';
+import '../widgets/foundation/mixtape_sheet.dart';
 
 class PlaylistEditScreen extends ConsumerStatefulWidget {
   const PlaylistEditScreen({super.key, required this.draftId});
@@ -314,10 +314,9 @@ class _PlaylistEditScreenState extends ConsumerState<PlaylistEditScreen> {
   Future<void> _openReview(PlaylistEditView view) async {
     setState(() => _reviewOpen = true);
     try {
-      await showModalBottomSheet<void>(
-        context: context,
+      await showMixtapeSheet<void>(
+        context,
         isScrollControlled: true,
-        backgroundColor: Colors.transparent,
         builder: (context) => _ReviewSheet(draftId: widget.draftId, view: view),
       );
     } finally {
@@ -474,121 +473,112 @@ class _ReviewSheet extends ConsumerWidget {
         .where((entry) => !entry.resolved)
         .length;
 
-    return FrostedSurface(
-      borderRadius: const BorderRadius.vertical(
-        top: Radius.circular(HomePanel.topRadius),
+    return SingleChildScrollView(
+      padding: EdgeInsets.fromLTRB(
+        18,
+        6,
+        18,
+        18 + MediaQuery.viewInsetsOf(context).bottom,
       ),
-      blurSigma: 30,
-      shadow: false,
-      child: SafeArea(
-        child: SingleChildScrollView(
-          padding: EdgeInsets.fromLTRB(
-            18,
-            18,
-            18,
-            18 + MediaQuery.viewInsetsOf(context).bottom,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Review private draft',
+            style: tokens.meta.copyWith(color: tokens.muted),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Review private draft',
-                style: tokens.meta.copyWith(color: tokens.muted),
-              ),
-              const SizedBox(height: 4),
-              Text('Create a revised copy', style: tokens.smallTitle),
-              const SizedBox(height: 12),
-              Text(
-                spotify
-                    ? 'This Spotify export stays untouched. A later apply step can create an Apple Music copy after every song is matched.'
-                    : 'Apple Music cannot safely place structural edits into the middle of this source. Mixtape will create a revised copy and leave “${currentView.draft.baseName}” untouched.',
-                style: tokens.body,
-              ),
-              const SizedBox(height: 17),
-              Text(_summary(currentView.diff), style: tokens.rowTitle),
-              const SizedBox(height: 10),
-              for (var i = 0; i < currentView.review.added.length; i++)
-                _ReviewRow(
-                  key: ValueKey('review-row-added-$i'),
-                  icon: Icons.add_rounded,
-                  ink: tokens.okInk,
-                  entry: currentView.review.added[i],
-                  detail: _placement(
-                    currentView.entries,
-                    currentView.review.added[i].position,
-                  ),
-                ),
-              for (var i = 0; i < currentView.review.removed.length; i++)
-                _ReviewRow(
-                  key: ValueKey('review-row-removed-$i'),
-                  icon: Icons.remove_rounded,
-                  ink: tokens.errInk,
-                  entry: currentView.review.removed[i],
-                  detail:
-                      'Removed from position ${currentView.review.removed[i].position + 1}',
-                ),
-              for (var i = 0; i < currentView.review.moved.length; i++)
-                _ReviewRow(
-                  key: ValueKey('review-row-moved-$i'),
-                  icon: Icons.swap_vert_rounded,
-                  ink: tokens.muted,
-                  entry: currentView.review.moved[i],
-                  detail:
-                      'Moved from ${currentView.review.moved[i].fromPosition! + 1} to ${currentView.review.moved[i].position + 1}',
-                ),
-              for (var i = 0; i < currentView.review.replaced.length; i++)
-                _ReviewRow(
-                  key: ValueKey('review-row-replaced-$i'),
-                  icon: Icons.sync_alt_rounded,
-                  ink: tokens.muted,
-                  entry: currentView.review.replaced[i].after,
-                  detail:
-                      'Replaces “${currentView.review.replaced[i].before.title}” at position ${currentView.review.replaced[i].after.position + 1}',
-                ),
-              if (unresolved > 0) ...[
-                const SizedBox(height: 12),
-                Text(
-                  '$unresolved local or unmatched ${unresolved == 1 ? 'song blocks' : 'songs block'} apply. Mixtape will not leave anything out.',
-                  style: tokens.body.copyWith(color: tokens.errInk),
-                ),
-              ],
-              if (applyStatus != PlaylistApplyUiStatus.idle) ...[
-                const SizedBox(height: 12),
-                _ApplyStatus(status: applyStatus),
-              ],
-              const SizedBox(height: 18),
-              TapeButton(
-                key: PlaylistEditScreen.applyKey,
-                label: _applyLabel(applyStatus, supported),
-                leading: applyStatus.busy
-                    ? const SizedBox.square(
-                        dimension: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : null,
-                onPressed:
-                    supported &&
-                        currentView.capability.applyAvailable &&
-                        !applyStatus.busy &&
-                        applyStatus != PlaylistApplyUiStatus.applied
-                    ? () => ref
-                          .read(playlistEditThreadProvider(draftId).notifier)
-                          .applyRevisedCopy()
-                    : null,
-              ),
-              const SizedBox(height: 4),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextAction(
-                  key: PlaylistEditScreen.keepEditingKey,
-                  label: 'Keep editing',
-                  onPressed: () => Navigator.of(context).pop(),
-                ),
-              ),
-            ],
+          const SizedBox(height: 4),
+          Text('Create a revised copy', style: tokens.smallTitle),
+          const SizedBox(height: 12),
+          Text(
+            spotify
+                ? 'This Spotify export stays untouched. A later apply step can create an Apple Music copy after every song is matched.'
+                : 'Apple Music cannot safely place structural edits into the middle of this source. Mixtape will create a revised copy and leave “${currentView.draft.baseName}” untouched.',
+            style: tokens.body,
           ),
-        ),
+          const SizedBox(height: 17),
+          Text(_summary(currentView.diff), style: tokens.rowTitle),
+          const SizedBox(height: 10),
+          for (var i = 0; i < currentView.review.added.length; i++)
+            _ReviewRow(
+              key: ValueKey('review-row-added-$i'),
+              icon: Icons.add_rounded,
+              ink: tokens.okInk,
+              entry: currentView.review.added[i],
+              detail: _placement(
+                currentView.entries,
+                currentView.review.added[i].position,
+              ),
+            ),
+          for (var i = 0; i < currentView.review.removed.length; i++)
+            _ReviewRow(
+              key: ValueKey('review-row-removed-$i'),
+              icon: Icons.remove_rounded,
+              ink: tokens.errInk,
+              entry: currentView.review.removed[i],
+              detail:
+                  'Removed from position ${currentView.review.removed[i].position + 1}',
+            ),
+          for (var i = 0; i < currentView.review.moved.length; i++)
+            _ReviewRow(
+              key: ValueKey('review-row-moved-$i'),
+              icon: Icons.swap_vert_rounded,
+              ink: tokens.muted,
+              entry: currentView.review.moved[i],
+              detail:
+                  'Moved from ${currentView.review.moved[i].fromPosition! + 1} to ${currentView.review.moved[i].position + 1}',
+            ),
+          for (var i = 0; i < currentView.review.replaced.length; i++)
+            _ReviewRow(
+              key: ValueKey('review-row-replaced-$i'),
+              icon: Icons.sync_alt_rounded,
+              ink: tokens.muted,
+              entry: currentView.review.replaced[i].after,
+              detail:
+                  'Replaces “${currentView.review.replaced[i].before.title}” at position ${currentView.review.replaced[i].after.position + 1}',
+            ),
+          if (unresolved > 0) ...[
+            const SizedBox(height: 12),
+            Text(
+              '$unresolved local or unmatched ${unresolved == 1 ? 'song blocks' : 'songs block'} apply. Mixtape will not leave anything out.',
+              style: tokens.body.copyWith(color: tokens.errInk),
+            ),
+          ],
+          if (applyStatus != PlaylistApplyUiStatus.idle) ...[
+            const SizedBox(height: 12),
+            _ApplyStatus(status: applyStatus),
+          ],
+          const SizedBox(height: 18),
+          TapeButton(
+            key: PlaylistEditScreen.applyKey,
+            label: _applyLabel(applyStatus, supported),
+            leading: applyStatus.busy
+                ? const SizedBox.square(
+                    dimension: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : null,
+            onPressed:
+                supported &&
+                    currentView.capability.applyAvailable &&
+                    !applyStatus.busy &&
+                    applyStatus != PlaylistApplyUiStatus.applied
+                ? () => ref
+                      .read(playlistEditThreadProvider(draftId).notifier)
+                      .applyRevisedCopy()
+                : null,
+          ),
+          const SizedBox(height: 4),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextAction(
+              key: PlaylistEditScreen.keepEditingKey,
+              label: 'Keep editing',
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -686,10 +676,7 @@ class _ApplyStatus extends StatelessWidget {
                   style: tokens.rowTitle.copyWith(fontSize: 14, color: ink),
                 ),
                 const SizedBox(height: 2),
-                Text(
-                  detail,
-                  style: tokens.meta.copyWith(color: tokens.muted),
-                ),
+                Text(detail, style: tokens.meta.copyWith(color: tokens.muted)),
               ],
             ),
           ),
@@ -744,10 +731,7 @@ class _ReviewRow extends StatelessWidget {
                   style: tokens.meta.copyWith(color: tokens.muted),
                 ),
                 const SizedBox(height: 3),
-                Text(
-                  detail,
-                  style: tokens.meta.copyWith(color: tokens.muted),
-                ),
+                Text(detail, style: tokens.meta.copyWith(color: tokens.muted)),
               ],
             ),
           ),

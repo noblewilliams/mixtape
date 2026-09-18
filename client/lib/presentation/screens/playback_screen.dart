@@ -36,6 +36,7 @@ import '../widgets/foundation/section_word.dart';
 import '../widgets/foundation/square_art.dart';
 import '../widgets/foundation/tape_button.dart';
 import 'queue_screen.dart';
+import '../widgets/foundation/mixtape_sheet.dart';
 
 /// What the More menu offers.
 enum _NowPlayingMenu { repeat, stop, listening }
@@ -220,8 +221,9 @@ class _NowPlaying extends StatelessWidget {
   /// play first, exactly as the mini-player resolves it.
   int get _index => player.unavailableIndex ?? player.sample.index ?? 0;
 
-  QueueTrack? get _track =>
-      _index >= 0 && _index < player.tracks.length ? player.tracks[_index] : null;
+  QueueTrack? get _track => _index >= 0 && _index < player.tracks.length
+      ? player.tracks[_index]
+      : null;
 
   bool get _unavailable => player.unavailableIndex != null;
 
@@ -252,9 +254,7 @@ class _NowPlaying extends StatelessWidget {
             children: [
               _header(context),
               Expanded(
-                child: showPlayer
-                    ? _player(context, track)
-                    : _connect(context),
+                child: showPlayer ? _player(context, track) : _connect(context),
               ),
             ],
           ),
@@ -576,10 +576,7 @@ class _NowPlaying extends StatelessWidget {
           builder: (context, ref, _) {
             final energy = enabled
                 ? ref.watch(
-                    mixEnergyProvider((
-                      id: sessionId,
-                      version: player.version,
-                    )),
+                    mixEnergyProvider((id: sessionId, version: player.version)),
                   )
                 : null;
             final detail = energy != null && energy.hasValue
@@ -634,25 +631,22 @@ class _NowPlaying extends StatelessWidget {
   }
 
   void _openShape(BuildContext context, Map<String, dynamic> detail) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(
-            PlaybackScreen.sidePadding,
-            8,
-            PlaybackScreen.sidePadding,
-            20,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const SectionWord('Shape'),
-              EnergyAssessment(detail: detail),
-            ],
-          ),
+    showMixtapeSheet<void>(
+      context,
+      builder: (sheetContext) => Padding(
+        padding: const EdgeInsets.fromLTRB(
+          PlaybackScreen.sidePadding,
+          0,
+          PlaybackScreen.sidePadding,
+          20,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SectionWord('Shape'),
+            EnergyAssessment(detail: detail),
+          ],
         ),
       ),
     );

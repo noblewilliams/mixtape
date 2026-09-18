@@ -10,8 +10,8 @@ library;
 import 'package:flutter/material.dart';
 
 import '../theme/mixtape_theme.dart';
-import 'foundation/frosted_surface.dart';
 import 'foundation/label_chip.dart';
+import 'foundation/mixtape_sheet.dart';
 import 'foundation/tape_button.dart';
 import 'foundation/text_action.dart';
 
@@ -144,7 +144,9 @@ class EnergyControl extends StatelessWidget {
           label: 'Shape',
           hole: false,
           leading: const EnergyWave(arc: EnergyArc.arc, width: 18, height: 12),
-          onPressed: enabled ? () => showEnergyShapeSheet(context, controller) : null,
+          onPressed: enabled
+              ? () => showEnergyShapeSheet(context, controller)
+              : null,
         ),
       ),
     );
@@ -157,10 +159,8 @@ Future<void> showEnergyShapeSheet(
   BuildContext context,
   TextEditingController controller,
 ) async {
-  final result = await showModalBottomSheet<EnergyArc>(
-    context: context,
-    backgroundColor: Colors.transparent,
-    elevation: 0,
+  final result = await showMixtapeSheet<EnergyArc>(
+    context,
     isScrollControlled: true,
     builder: (_) => _EnergyShapeSheet(controller: controller),
   );
@@ -192,11 +192,6 @@ class _EnergyShapeSheet extends StatefulWidget {
 class _EnergyShapeSheetState extends State<_EnergyShapeSheet> {
   EnergyArc arc = EnergyArc.arc;
 
-  /// `.sheet { border-radius: 26px 26px 0 0 }`.
-  static const BorderRadius _radius = BorderRadius.vertical(
-    top: Radius.circular(26),
-  );
-
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
@@ -206,76 +201,59 @@ class _EnergyShapeSheetState extends State<_EnergyShapeSheet> {
       key: EnergyControl.sheetKey,
       container: true,
       label: energySheetTitle,
-      child: FrostedSurface(
-        borderRadius: _radius,
-        blurSigma: 30,
-        tint: tokens.panel,
-        child: SafeArea(
-          top: false,
-          child: SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 36,
-                      height: 5,
-                      margin: const EdgeInsets.only(top: 2, bottom: 12),
-                      decoration: const BoxDecoration(
-                        color: Color.fromRGBO(127, 120, 130, 0.45),
-                        borderRadius: BorderRadius.all(Radius.circular(3)),
-                      ),
-                    ),
-                  ),
-                  Text(energySheetTitle, style: tokens.section),
-                  const SizedBox(height: 2),
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Text(
-                      energySheetBlurb,
-                      style: tokens.secondary.copyWith(color: tokens.muted),
-                    ),
-                  ),
-                  for (var i = 0; i < energyArcOrder.length; i++)
-                    _preset(tokens, energyArcOrder[i], separated: i > 0),
-                  if (tooLong)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(
-                        energySheetTooLong,
-                        key: EnergyControl.tooLongKey,
-                        style: tokens.secondary.copyWith(color: tokens.errInk),
-                      ),
-                    ),
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: Wrap(
-                      alignment: WrapAlignment.end,
-                      spacing: 8,
-                      runSpacing: 8,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        TextAction(
-                          label: 'Cancel',
-                          quiet: true,
-                          onPressed: () => Navigator.of(context).pop(),
-                        ),
-                        TapeButton(
-                          key: EnergyControl.confirmKey,
-                          label: 'Use this shape',
-                          onPressed: tooLong
-                              ? null
-                              : () => Navigator.of(context).pop(arc),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(energySheetTitle, style: tokens.section),
+              const SizedBox(height: 2),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  energySheetBlurb,
+                  style: tokens.secondary.copyWith(color: tokens.muted),
+                ),
               ),
-            ),
+              for (var i = 0; i < energyArcOrder.length; i++)
+                _preset(tokens, energyArcOrder[i], separated: i > 0),
+              if (tooLong)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    energySheetTooLong,
+                    key: EnergyControl.tooLongKey,
+                    style: tokens.secondary.copyWith(color: tokens.errInk),
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                // Cancel at the left edge, the action at the right: the
+                // two are not a huddle (smoke round two, note 3).
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    TextAction(
+                      label: 'Cancel',
+                      quiet: true,
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                    Flexible(
+                      child: TapeButton(
+                        key: EnergyControl.confirmKey,
+                        label: 'Use this shape',
+                        onPressed: tooLong
+                            ? null
+                            : () => Navigator.of(context).pop(arc),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -283,7 +261,11 @@ class _EnergyShapeSheetState extends State<_EnergyShapeSheet> {
   }
 
   /// `.preset`: the wave glyph, the label and its description, and the radio.
-  Widget _preset(MixtapeTokens tokens, EnergyArc option, {required bool separated}) {
+  Widget _preset(
+    MixtapeTokens tokens,
+    EnergyArc option, {
+    required bool separated,
+  }) {
     final selected = option == arc;
     return Semantics(
       button: true,
@@ -308,7 +290,12 @@ class _EnergyShapeSheetState extends State<_EnergyShapeSheet> {
               : null,
           child: Row(
             children: [
-              EnergyWave(arc: option, width: 44, height: 28, color: tokens.plum),
+              EnergyWave(
+                arc: option,
+                width: 44,
+                height: 28,
+                color: tokens.plum,
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -317,7 +304,9 @@ class _EnergyShapeSheetState extends State<_EnergyShapeSheet> {
                   children: [
                     Text(
                       option.label,
-                      style: tokens.rowTitle.copyWith(fontWeight: FontWeight.w600),
+                      style: tokens.rowTitle.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     Text(
                       option.description,
@@ -366,7 +355,9 @@ class EnergyWave extends StatelessWidget {
   Widget build(BuildContext context) => SizedBox(
     width: width,
     height: height,
-    child: CustomPaint(painter: _WavePainter(arc, color ?? context.tokens.plum)),
+    child: CustomPaint(
+      painter: _WavePainter(arc, color ?? context.tokens.plum),
+    ),
   );
 }
 

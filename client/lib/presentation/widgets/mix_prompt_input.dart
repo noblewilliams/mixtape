@@ -70,6 +70,13 @@ class MixPromptInput extends StatefulWidget {
   /// leave out, so a pill never repeats the hint beside it.
   static String get initialPlaceholder => examples.first;
 
+  /// The field's own vertical padding, tightened with its type (smoke round
+  /// two, note 9).
+  static const double fieldVerticalPadding = 9;
+
+  /// How the field's type sits below body text — one step down.
+  static const double fieldFontStepDown = 1;
+
   @override
   State<MixPromptInput> createState() => _MixPromptInputState();
 }
@@ -340,6 +347,10 @@ class _MixPromptInputState extends State<MixPromptInput>
     final focused = _focus.hasFocus || listening;
     final failure = voice?.failure;
 
+    final fieldStyle = tokens.body.copyWith(
+      fontSize: (tokens.body.fontSize ?? 16) - MixPromptInput.fieldFontStepDown,
+    );
+
     final field = TextField(
       key: const Key('prompt-field'),
       controller: widget.controller,
@@ -351,16 +362,18 @@ class _MixPromptInputState extends State<MixPromptInput>
       textInputAction: TextInputAction.send,
       onSubmitted: (_) => _submit(),
       cursorColor: tokens.plum,
-      style: tokens.body,
+      style: fieldStyle,
       decoration: InputDecoration(
         hintText: widget.placeholder ?? _rotation[_example % _rotation.length],
-        hintStyle: tokens.body.copyWith(color: tokens.muted),
+        hintStyle: fieldStyle.copyWith(color: tokens.muted),
         counterText: '',
         isDense: true,
         border: InputBorder.none,
         enabledBorder: InputBorder.none,
         focusedBorder: InputBorder.none,
-        contentPadding: const EdgeInsets.symmetric(vertical: 12),
+        contentPadding: const EdgeInsets.symmetric(
+          vertical: MixPromptInput.fieldVerticalPadding,
+        ),
       ),
     );
 
@@ -393,40 +406,41 @@ class _MixPromptInputState extends State<MixPromptInput>
                       color: listening ? tokens.errInk : tokens.plum,
                     ),
                   ),
-                _iconKey(
-                  key: const Key('start-session'),
-                  tooltip: 'Start new mix',
-                  onPressed: widget.busy || listening || !hasText
-                      ? null
-                      : _submit,
-                  child: widget.busy
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : DecoratedBox(
-                          key: const Key('send-surface'),
-                          decoration: BoxDecoration(
-                            color: hasText
-                                ? (isDark
-                                      ? Colors.white.withValues(alpha: 0.12)
-                                      : tokens.plum.withValues(alpha: 0.10))
-                                : Colors.transparent,
-                            borderRadius: _sendRadius,
-                          ),
-                          child: SizedBox.square(
-                            dimension: 30,
-                            child: Center(
-                              child: Icon(
-                                Icons.arrow_upward,
-                                size: 18,
-                                color: hasText ? tokens.plum : tokens.muted,
+                // Nothing to send, nothing drawn: the key arrives beside the
+                // mic with the first character (smoke round two, note 9).
+                if (hasText || widget.busy)
+                  _iconKey(
+                    key: const Key('start-session'),
+                    tooltip: 'Start new mix',
+                    onPressed: widget.busy || listening || !hasText
+                        ? null
+                        : _submit,
+                    child: widget.busy
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : DecoratedBox(
+                            key: const Key('send-surface'),
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? Colors.white.withValues(alpha: 0.12)
+                                  : tokens.plum.withValues(alpha: 0.10),
+                              borderRadius: _sendRadius,
+                            ),
+                            child: SizedBox.square(
+                              dimension: 30,
+                              child: Center(
+                                child: Icon(
+                                  Icons.arrow_upward,
+                                  size: 18,
+                                  color: tokens.plum,
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                ),
+                  ),
               ],
             ),
           ),
