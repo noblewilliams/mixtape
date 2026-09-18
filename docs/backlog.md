@@ -163,3 +163,8 @@ features remain pending.
   whether the system already insets a bare `UITabBar` and drop the inset if so.
 - Now Playing has no volume row: the app player bridge exposes no volume
   control. Add one if a volume slider is wanted on the sheet.
+- Shared mix handoff (Phase 5.3): the conversation now uses the arrangement's
+  save alert (adaptive dialog, "Shown under the playlist in Apple Music" helper,
+  saving spinner) and the arrangement swallows author-store failures like the
+  conversation did. The two alerts still carry different titles ("Save as
+  playlist" vs "Create playlist"); pick one at the smoke.
