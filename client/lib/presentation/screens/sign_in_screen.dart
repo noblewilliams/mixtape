@@ -34,6 +34,9 @@ class SignInScreen extends ConsumerStatefulWidget {
   static const String googleUnavailable =
       'Google sign-in is not available in this build.';
 
+  /// The tape's width where the screen has room for all of it.
+  static const double cassetteWidth = 320;
+
   @override
   ConsumerState<SignInScreen> createState() => _SignInScreenState();
 }
@@ -88,40 +91,141 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 420),
             child: LayoutBuilder(
-              builder: (context, constraints) => SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: MixtapeMetrics.screenSidePadding,
-                  vertical: 24,
-                ),
-                // A screenful tall, so the Apple Music note sits at the
-                // foot; taller content (200% text) scrolls instead.
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    minHeight: math.max(0, constraints.maxHeight - 48),
+              builder: (context, constraints) {
+                final width =
+                    constraints.maxWidth - MixtapeMetrics.screenSidePadding * 2;
+                return SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: MixtapeMetrics.screenSidePadding,
+                    vertical: _scrollPadding,
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      _wordmark(tokens),
-                      _cassette(
-                        constraints.maxWidth -
-                            MixtapeMetrics.screenSidePadding * 2,
+                  // A screenful tall, so the Apple Music note sits at the
+                  // foot; taller content (200% text) scrolls instead.
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minHeight: math.max(
+                        0,
+                        constraints.maxHeight - _scrollPadding * 2,
                       ),
-                      _promise(tokens, dark, googleAvailable, lastUsed),
-                      Text(
-                        'Apple Music access is requested separately.',
-                        style: tokens.meta.copyWith(color: tokens.muted),
-                      ),
-                    ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        _wordmark(tokens),
+                        _cassette(
+                          _tapeWidth(
+                            tokens: tokens,
+                            constraints: constraints,
+                            width: width,
+                            googleAvailable: googleAvailable,
+                            lastUsed: lastUsed,
+                          ),
+                        ),
+                        _promise(tokens, dark, googleAvailable, lastUsed),
+                        Text(
+                          _footNote,
+                          style: tokens.meta.copyWith(color: tokens.muted),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ),
+                );
+              },
             ),
           ),
         ),
       ),
     );
+  }
+
+  /// The tape's width for this screen: what the fixed rows leave, in the
+  /// cassette's 200 : 128 ratio, between [_minCassetteWidth] and
+  /// [_cassetteWidth] — or 0 when even the floor would not fit.
+  ///
+  /// Nothing in the column can be [Expanded] — a scroll view gives it
+  /// unbounded height — so the fixed rows are measured with a [TextPainter] at
+  /// the same width, styles and text scale the build uses, and the tape takes
+  /// the remainder. On a short phone it shrinks rather than pushing the
+  /// buttons past the fold; below [_minCassetteWidth] it is dropped outright,
+  /// because a stub tape reads as clutter and a listener who cannot see a
+  /// sign-in button is worse off than one who cannot see the motif. Very tall
+  /// content (200% text) therefore drops the tape and scrolls, which is what
+  /// the reserved status line and foot note expect.
+  double _tapeWidth({
+    required MixtapeTokens tokens,
+    required BoxConstraints constraints,
+    required double width,
+    required bool googleAvailable,
+    required AccountProvider? lastUsed,
+  }) {
+    final budget =
+        constraints.maxHeight -
+        _scrollPadding * 2 -
+        _cassetteGap * 2 -
+        _fixedHeight(
+          tokens: tokens,
+          width: width,
+          googleAvailable: googleAvailable,
+          lastUsed: lastUsed,
+        );
+    final fits = budget * 200 / 128;
+    if (fits < _minCassetteWidth) return 0;
+    return math.min(
+      // The 4° tilt widens the painted box, so cap it to keep the tape's
+      // corners inside the scroll view's clip on a narrow screen.
+      math.min(_cassetteWidth, math.max(0, width) / 1.05),
+      fits,
+    );
+  }
+
+  /// Every row but the tape, laid out at [width] and the ambient text scale.
+  double _fixedHeight({
+    required MixtapeTokens tokens,
+    required double width,
+    required bool googleAvailable,
+    required AccountProvider? lastUsed,
+  }) {
+    final scaler = MediaQuery.textScalerOf(context);
+    double text(String value, TextStyle style, double maxWidth) {
+      final painter = TextPainter(
+        text: TextSpan(text: value, style: style),
+        textDirection: TextDirection.ltr,
+        textScaler: scaler,
+      )..layout(maxWidth: math.max(0, maxWidth));
+      final height = painter.height;
+      painter.dispose();
+      return height;
+    }
+
+    var total = text('mixtape', tokens.wordmark, width);
+    total += text(_headline, tokens.largeTitle, width) + 12;
+    total += text(_blurb, tokens.body, width) + 28;
+
+    // The pill's floor, or its label plus the padding it sits in.
+    final labelStyle = tokens.rowTitle.copyWith(fontWeight: FontWeight.w600);
+    final labelWidth = width - 40 - ProviderSignInButton.markSize - 10;
+    for (final provider in AccountProvider.values) {
+      total += math.max(
+        ProviderSignInButton.height,
+        math.max(
+              ProviderSignInButton.markSize,
+              text('Continue with ${_name(provider)}', labelStyle, labelWidth),
+            ) +
+            20,
+      );
+      if (lastUsed == provider) {
+        total += 8 + text('Last used', _lastUsedStyle(tokens), width);
+      }
+      if (provider == AccountProvider.google && !googleAvailable) {
+        total += 8 + text(SignInScreen.googleUnavailable, tokens.meta, width);
+      }
+      total += 12;
+    }
+
+    // The reserved status line, then the Apple Music note.
+    total += scaler.scale(17) * 2;
+    return total + text(_footNote, tokens.meta, width);
   }
 
   /// The product name in the web's marker hand, tilted off the baseline.
@@ -136,12 +240,12 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
 
   /// The web's `.auth-cassette`: turning, tilted 4°, on a soft drop shadow.
   ///
-  /// [available] is the content width; the tilt widens the painted box, so the
-  /// tape is sized to keep its corners inside the scroll view's clip.
-  Widget _cassette(double available) {
-    final width = math.max(0.0, math.min(_cassetteWidth, available / 1.05));
+  /// [width] comes from [_tapeWidth], which is what the rest of the screen
+  /// leaves.
+  Widget _cassette(double width) {
+    if (width <= 0) return const SizedBox.shrink();
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 24),
+      padding: const EdgeInsets.symmetric(vertical: _cassetteGap),
       child: Center(
         child: Transform.rotate(
           angle: _cassetteTilt,
@@ -180,13 +284,9 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     mainAxisSize: MainAxisSize.min,
     children: [
-      Text('Your music, mixed for right now.', style: tokens.largeTitle),
+      Text(_headline, style: tokens.largeTitle),
       const SizedBox(height: 12),
-      Text(
-        'Start with a mood, a memory, or one song. Mixtape builds a mix '
-        'from music you already love.',
-        style: tokens.body.copyWith(color: tokens.muted),
-      ),
+      Text(_blurb, style: tokens.body.copyWith(color: tokens.muted)),
       const SizedBox(height: 28),
       for (final provider in AccountProvider.values) ...[
         _providerButton(provider, dark, googleAvailable),
@@ -239,7 +339,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
         child: Text(
           'Last used',
           textAlign: TextAlign.center,
-          style: tokens.wordmark.copyWith(fontSize: 13, color: tokens.smoke),
+          style: _lastUsedStyle(tokens),
         ),
       ),
     ),
@@ -305,11 +405,42 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
   /// The web's `transform: rotate(-2deg)` on the wordmark and pencil note.
   static const double _wordmarkTilt = 2 * math.pi / 180;
 
+  /// The pencil note's size: the web's 11 px, up for the phone.
+  static const double _lastUsedSize = 13;
+
+  /// The tracking has to come down with the size: `wordmark` carries the 34 pt
+  /// style's -0.045em as a flat -1.53, which at 13 pt would be -0.118em and
+  /// crush the word. The note's own is -0.025em.
+  static TextStyle _lastUsedStyle(MixtapeTokens tokens) =>
+      tokens.wordmark.copyWith(
+        fontSize: _lastUsedSize,
+        letterSpacing: _lastUsedSize * -0.025,
+        color: tokens.smoke,
+      );
+
+  static const String _headline = 'Your music, mixed for right now.';
+
+  static const String _blurb =
+      'Start with a mood, a memory, or one song. Mixtape builds a mix '
+      'from music you already love.';
+
+  static const String _footNote = 'Apple Music access is requested separately.';
+
+  /// The scroll view's own vertical padding, top and bottom.
+  static const double _scrollPadding = 24;
+
+  /// The air around the tape, top and bottom.
+  static const double _cassetteGap = 16;
+
   /// The web's `.auth-cassette` tilt.
   static const double _cassetteTilt = 4 * math.pi / 180;
 
-  /// The tape's ceiling on a phone; narrower screens shrink it.
-  static const double _cassetteWidth = 320;
+  /// The tape's floor: below this it reads as an icon, not the motif, so a
+  /// screen with no room left scrolls instead.
+  static const double _minCassetteWidth = 120;
+
+  /// The tape's ceiling on a phone; shorter screens shrink it.
+  static const double _cassetteWidth = SignInScreen.cassetteWidth;
 
   static String _name(AccountProvider provider) =>
       provider == AccountProvider.apple ? 'Apple' : 'Google';
@@ -380,6 +511,10 @@ class _ProviderSignInButtonState extends State<ProviderSignInButton> {
       button: true,
       enabled: enabled,
       label: widget.label,
+      // `excludeSemantics` drops the detector's own tap action, and a node
+      // with no action cannot be activated by VoiceOver — on this screen that
+      // would leave no way in at all. Declare it here.
+      onTap: widget.onPressed,
       excludeSemantics: true,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,

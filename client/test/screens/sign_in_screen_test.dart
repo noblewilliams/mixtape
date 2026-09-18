@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import '../helpers/auth_ui_snapshot.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/auth/apple_auth_gateway.dart';
@@ -127,6 +128,15 @@ Future<void> _tap(WidgetTester tester, String key) async {
   await tester.tap(button);
 }
 
+/// Sizes the test view to a phone, since the tape is height-aware and the
+/// default 800 x 600 surface is shorter than every phone we target.
+void _phone(WidgetTester tester, [Size size = const Size(390, 844)]) {
+  tester.view.physicalSize = size;
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+}
+
 CassetteTileState _cassette(WidgetTester tester) =>
     tester.state<CassetteTileState>(find.byType(CassetteTile));
 
@@ -205,6 +215,35 @@ void main() {
     );
   });
 
+  testWidgets('each provider is a button VoiceOver can activate', (
+    tester,
+  ) async {
+    final handle = tester.ensureSemantics();
+    await _pump(
+      tester,
+      _CancellingGateway(),
+      google: _GoogleGateway(isAvailable: false),
+    );
+
+    final apple = tester.getSemantics(
+      find.bySemanticsLabel('Continue with Apple'),
+    );
+    expect(
+      apple.getSemanticsData().hasAction(SemanticsAction.tap),
+      isTrue,
+      reason: 'a node with no tap action cannot be activated by VoiceOver',
+    );
+    expect(apple.getSemanticsData().flagsCollection.isButton, isTrue);
+
+    // The unavailable one announces itself disabled and offers no action.
+    final google = tester.getSemantics(
+      find.bySemanticsLabel('Continue with Google'),
+    );
+    expect(google.getSemanticsData().hasAction(SemanticsAction.tap), isFalse);
+
+    handle.dispose();
+  });
+
   testWidgets('the name is handwritten and nothing else is', (tester) async {
     await _pump(tester, _CancellingGateway(), google: _GoogleGateway());
 
@@ -224,6 +263,7 @@ void main() {
   });
 
   testWidgets('the cassette turns while the screen is open', (tester) async {
+    _phone(tester);
     await tester.pumpWidget(
       _app(
         _CancellingGateway(),
@@ -242,10 +282,64 @@ void main() {
   });
 
   testWidgets('the hubs rest under reduced motion', (tester) async {
+    _phone(tester);
     await _pump(tester, _CancellingGateway(), google: _GoogleGateway());
 
     expect(find.byType(CassetteTile), findsOneWidget);
     expect(_cassette(tester).isSpinning, isFalse);
+  });
+
+  testWidgets('the tape takes its full width where there is room', (
+    tester,
+  ) async {
+    _phone(tester);
+    // A first-run listener: no pencil note under either button.
+    await _pump(
+      tester,
+      _CancellingGateway(),
+      google: _GoogleGateway(),
+      lastUsed: null,
+    );
+
+    expect(
+      tester.getSize(find.byType(CassetteTile)).width,
+      SignInScreen.cassetteWidth,
+    );
+  });
+
+  testWidgets('an SE-class phone still shows every control in one screenful', (
+    tester,
+  ) async {
+    _phone(tester, const Size(375, 667));
+    await _pump(tester, _CancellingGateway(), google: _GoogleGateway());
+
+    final screen = tester.getSize(find.byType(SignInScreen));
+    expect(screen.height, 667);
+    // Nothing here is reached by scrolling: there is nowhere to scroll to.
+    expect(
+      tester
+          .state<ScrollableState>(find.byType(Scrollable))
+          .position
+          .maxScrollExtent,
+      0,
+    );
+    for (final entry in {
+      'the Apple button': find.byKey(const Key('apple-sign-in')),
+      'the Google button': find.byKey(const Key('google-sign-in')),
+      'the Apple Music note': find.text(
+        'Apple Music access is requested separately.',
+      ),
+    }.entries) {
+      final rect = tester.getRect(entry.value);
+      expect(rect.top, greaterThanOrEqualTo(0), reason: '${entry.key} is cut');
+      expect(
+        rect.bottom,
+        lessThanOrEqualTo(screen.height),
+        reason: '${entry.key} is below the fold',
+      );
+    }
+    // The tape gave up its room to do it, rather than showing a stub.
+    expect(find.byType(CassetteTile), findsNothing);
   });
 
   testWidgets('the Apple button is dark on light in the light theme', (
@@ -310,6 +404,13 @@ void main() {
     expect(note.style?.fontFamily, 'Noteworthy');
     expect(note.style?.fontSize, 13);
     expect(note.style?.color, MixtapeTokens.light.smoke);
+    // Its own tracking, not the 34 pt wordmark's: -0.025em, not -0.045em of
+    // a size four times larger.
+    expect(note.style?.letterSpacing, closeTo(13 * -0.025, 0.001));
+    expect(
+      note.style?.letterSpacing,
+      greaterThan(MixtapeTokens.light.wordmark.letterSpacing!),
+    );
   });
 
   testWidgets('no remembered method shows no last-used line', (tester) async {
@@ -515,7 +616,7 @@ void main() {
       // The screen scrolls rather than clipping: the foot note is still
       // reachable under the taller type.
       final foot = find.text('Apple Music access is requested separately.');
-      await tester.ensureVisible(foot);
+      await tester.scrollUntilVisible(foot, 80);
       await tester.pumpAndSettle();
       expect(foot.hitTestable(), findsOneWidget);
     });
