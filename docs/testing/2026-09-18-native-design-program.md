@@ -29,12 +29,16 @@ once; Fable orchestrated and verified.
 Run on an iOS 26 device (genuine glass) and the iOS 18.2 simulator (fallback):
 
 ```bash
-cd client && flutter run --dart-define-from-file=config/google-ios.json --dart-define=API_BASE_URL=https://<backend origin>
+cd client && flutter run --dart-define-from-file=config/google-ios.json --dart-define=API_BASE_URL=https://mixtape-api.goalympics.workers.dev
 ```
 
-1. Sign in with Apple or Google (see `native-google-setup.md`, "Diagnosis
-   2026-09-18": without `API_BASE_URL` the app talks to localhost and every
-   sign-in fails after the provider returns).
+1. Sign in with Apple or Google. Production (Worker version `2ef544fd`, deployed
+   2026-09-18) accepts the iOS Google client id as audience; the earlier failure
+   is diagnosed in `native-google-setup.md`. Without `API_BASE_URL` the app
+   talks to localhost and every sign-in fails after the provider returns.
+   The restyled sign-in itself: handwritten wordmark, cassette hubs turning
+   (still under Reduce Motion), black Apple and white Google pills, everything
+   in one screenful on an SE-size phone.
 2. Home: empty space, bottom panel, three pills, mic; speak an idea (needs the
    server secret) and see it land in the field.
 3. Start a mix; the conversation opens with the dock hidden; Back restores it.

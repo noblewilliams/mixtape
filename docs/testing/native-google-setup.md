@@ -163,7 +163,7 @@ fetches, which broke Apple's JWKS endpoint and could break Google's.
 ```sh
 cd client
 flutter run --dart-define-from-file=config/google-ios.json \
-  --dart-define=API_BASE_URL=https://<the backend origin>
+  --dart-define=API_BASE_URL=https://mixtape-api.goalympics.workers.dev
 ```
 
 Omit `API_BASE_URL` only on the simulator against `wrangler dev` (the default is

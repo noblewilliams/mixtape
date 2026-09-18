@@ -16,7 +16,7 @@ Exportify entry, September boards and testing records) as four area commits tagg
 suites green and the analyzer clean. Two stale client tests were updated to match
 landed behaviour (the Google callback URL scheme in Info.plist; a lazily built
 history confirmation on a short phone). Nothing in this program has been deployed
-or released.
+or released until the 2026-09-18 release below.
 
 Phase 1 (foundation) is on main: tokens and theme, gradient background and frosted
 material, tape controls and the restyled composer, flush lists with the cassette painter,
@@ -41,6 +41,19 @@ recorder, on-device fallback, composer listening state, flag on); and the restyl
 Library, You, memory, sign-in, Account, playlist detail and edit, Spotify import,
 history and interview screens. Evidence and the smoke checklist:
 `testing/2026-09-18-native-design-program.md`. Decisions: the 2026-09-18 entry.
+
+Released 2026-09-18, on the founder's go. Sign-in was restyled after the web
+welcome (Noteworthy wordmark, turning cassette, pill provider buttons; `0ba39e1`,
+`f91d8bf`), the VoiceOver tap-action defect was swept across every excluded-semantics
+button (`02ba81e`), and the server now verifies Google ID tokens against the web and
+iOS client ids (`a434b10`, the cause of the founder's native Google failure).
+Migrations 0029–0032 (mix_versions, energy fields, playback_evidence,
+playback_settings, suggestion_settings; all additive) were applied from a clean
+worktree; the ledger holds 33 entries. Worker `02ba81e` shipped as version
+`2ef544fd-ea2c-4fb7-99c4-adcc6b4487f6`; rollback version `75fcf284-0ec7-48f3-ab8d-f13676a0a932`
+(the secret-change redeploy of the previous code). `GROQ_API_KEY` is set as a
+secret; `GOOGLE_IOS_CLIENT_ID` ships as a var. Health, the transcribe guard and the
+auth session endpoint answered after deploy. The founder's single smoke is next.
 
 ## Current continuation — 2026-09-08
 
