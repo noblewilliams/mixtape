@@ -50,3 +50,10 @@ there.
 `client/lib/presentation/widgets/{mix_prompt_input,playlist_inspiration,
 routine_suggestions}.dart`, `client/lib/presentation/providers/
 {new_mix_inspiration_provider,suggestions_provider}.dart`.
+
+## Implementation departures
+
+- 2026-09-18, Phase 3: the routine pill's long-press menu is a Material
+  anchored menu and "Why this?" a bottom sheet, not a native context menu,
+  because a Cupertino context menu cannot preview a pill inside the glass
+  panel. The three actions and their custom semantics actions match the record.
