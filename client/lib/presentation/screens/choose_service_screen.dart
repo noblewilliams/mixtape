@@ -164,8 +164,9 @@ class ChooseServiceScreen extends StatelessWidget {
   /// Set when the last sign-out threw.
   final String? signOutError;
 
-  /// The service marks, and the hairline's inset past them.
-  static const double markSize = 44;
+  /// The service marks, and the hairline's inset past them. Single-tone and
+  /// small (founder, 2026-09-18): a glyph in the row's ink, not the app icons.
+  static const double markSize = 28;
   static const Key appleMarkKey = Key('choose-apple-mark');
   static const Key spotifyMarkKey = Key('choose-spotify-mark');
   static const Key signOutKey = Key('choose-service-sign-out');
@@ -188,11 +189,6 @@ class ChooseServiceScreen extends StatelessWidget {
         body: LargeTitleScaffold(
           // Kept from the shipped screen: `service_gate_test` pins this copy.
           title: 'Which do you use?',
-          trailing: TextAction(
-            key: signOutKey,
-            label: 'Sign out',
-            onPressed: onSignOut,
-          ),
           slivers: [
             SliverToBoxAdapter(
               child: Column(
@@ -229,7 +225,9 @@ class ChooseServiceScreen extends StatelessWidget {
                   Center(
                     child: TextAction(
                       key: skipKey,
-                      label: 'Skip for now',
+                      label: 'Skip',
+                      icon: Icons.arrow_forward,
+                      iconAfter: true,
                       onPressed: onSkip,
                     ),
                   ),
@@ -238,16 +236,45 @@ class ChooseServiceScreen extends StatelessWidget {
                     textAlign: TextAlign.center,
                     style: tokens.meta.copyWith(color: tokens.muted),
                   ),
-                  if (signOutError != null) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      signOutError!,
-                      textAlign: TextAlign.center,
-                      style: tokens.meta.copyWith(color: tokens.errInk),
-                    ),
-                  ],
                   const SizedBox(height: 24),
                 ],
+              ),
+            ),
+            // Sign out lives at the foot, bottom-left: the way out of an
+            // account, away from the choices. Fills the screen so it sits on
+            // the bottom edge; on a short screen it scrolls into view.
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: Align(
+                alignment: Alignment.bottomLeft,
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    bottom: MediaQuery.paddingOf(context).bottom + 16,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (signOutError != null) ...[
+                        Padding(
+                          padding: const EdgeInsets.only(left: 8),
+                          child: Text(
+                            signOutError!,
+                            style: tokens.meta.copyWith(color: tokens.errInk),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                      ],
+                      TextAction(
+                        key: signOutKey,
+                        label: 'Sign out',
+                        icon: Icons.logout,
+                        quiet: true,
+                        onPressed: onSignOut,
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
           ],
@@ -303,8 +330,8 @@ class _ServiceRow extends StatelessWidget {
   );
 }
 
-/// Apple Music, as the app icon draws it: the beamed double eighth note in
-/// white on the pink-to-red tile.
+/// Apple Music: the beamed double eighth note from the app icon, drawn
+/// alone in the row's ink (no tile, no red).
 class _AppleMusicMark extends StatelessWidget {
   const _AppleMusicMark();
 
@@ -312,13 +339,13 @@ class _AppleMusicMark extends StatelessWidget {
   Widget build(BuildContext context) => SizedBox.square(
     key: ChooseServiceScreen.appleMarkKey,
     dimension: ChooseServiceScreen.markSize,
-    child: const ExcludeSemantics(
-      child: CustomPaint(painter: _AppleMusicMarkPainter()),
+    child: ExcludeSemantics(
+      child: CustomPaint(painter: _AppleMusicMarkPainter(context.tokens.text)),
     ),
   );
 }
 
-/// Spotify: the three waves on their green disc.
+/// Spotify: the disc with its three waves knocked out, in the row's ink.
 class _SpotifyMark extends StatelessWidget {
   const _SpotifyMark();
 
@@ -326,8 +353,8 @@ class _SpotifyMark extends StatelessWidget {
   Widget build(BuildContext context) => SizedBox.square(
     key: ChooseServiceScreen.spotifyMarkKey,
     dimension: ChooseServiceScreen.markSize,
-    child: const ExcludeSemantics(
-      child: CustomPaint(painter: _SpotifyMarkPainter()),
+    child: ExcludeSemantics(
+      child: CustomPaint(painter: _SpotifyMarkPainter(context.tokens.text)),
     ),
   );
 }
@@ -337,17 +364,12 @@ class _SpotifyMark extends StatelessWidget {
 const double _viewBox = 24;
 
 class _AppleMusicMarkPainter extends CustomPainter {
-  const _AppleMusicMarkPainter();
+  const _AppleMusicMarkPainter(this.ink);
 
-  /// The tile's vertical gradient, top to bottom.
-  static const Color _tileTop = Color(0xFFFB5C74);
-  static const Color _tileBottom = Color(0xFFFA233B);
+  final Color ink;
 
-  /// iOS's icon shape: the corner radius is a fixed share of the side.
-  static const double _cornerFraction = 0.22;
-
-  /// The glyph's share of the tile.
-  static const double _glyphFraction = 0.55;
+  /// The glyph's share of the box: the same optical size as the disc beside it.
+  static const double _glyphFraction = 0.82;
 
   /// Left stem, right stem — the right one is shorter, as the mark draws it.
   static const Rect _leftStem = Rect.fromLTRB(8.6, 4.3, 10.6, 18.0);
@@ -371,32 +393,21 @@ class _AppleMusicMarkPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final side = size.shortestSide;
-    final tile = Rect.fromLTWH(0, 0, side, side);
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(tile, Radius.circular(side * _cornerFraction)),
-      Paint()
-        ..shader = const LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [_tileTop, _tileBottom],
-        ).createShader(tile),
-    );
-
     final glyph = side * _glyphFraction;
     canvas.save();
     canvas.translate((side - glyph) / 2, (side - glyph) / 2);
     canvas.scale(glyph / _viewBox);
 
-    final ink = Paint()..color = const Color(0xFFFFFFFF);
+    final paint = Paint()..color = ink;
     canvas.drawPath(
       Path()
         ..addRect(_leftStem)
         ..addRect(_rightStem)
         ..addPolygon(_beam, true),
-      ink,
+      paint,
     );
-    _drawHead(canvas, ink, _leftHead, _leftHeadRadii);
-    _drawHead(canvas, ink, _rightHead, _rightHeadRadii);
+    _drawHead(canvas, paint, _leftHead, _leftHeadRadii);
+    _drawHead(canvas, paint, _rightHead, _rightHeadRadii);
 
     canvas.restore();
   }
@@ -417,14 +428,15 @@ class _AppleMusicMarkPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_AppleMusicMarkPainter oldDelegate) => false;
+  bool shouldRepaint(_AppleMusicMarkPainter oldDelegate) =>
+      oldDelegate.ink != ink;
 }
 
 class _SpotifyMarkPainter extends CustomPainter {
-  const _SpotifyMarkPainter();
+  const _SpotifyMarkPainter(this.ink);
 
-  static const Color _green = Color(0xFF1ED760);
-  static const Color _ink = Color(0xFF000000);
+  /// One tone: the disc is [ink] and the waves are cut out of it.
+  final Color ink;
 
   /// Every wave bows the same share of its own width, so the three read as
   /// one family rather than as nested rings — concentric arcs about a single
@@ -445,9 +457,10 @@ class _SpotifyMarkPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.save();
+    // A layer, so the waves knock through to whatever is behind the mark.
+    canvas.saveLayer(Offset.zero & size, Paint());
     canvas.scale(size.shortestSide / _viewBox);
-    canvas.drawCircle(const Offset(12, 12), 12, Paint()..color = _green);
+    canvas.drawCircle(const Offset(12, 12), 12, Paint()..color = ink);
     for (final (apex, halfChord, stroke) in _waves) {
       // Bowed upward in the middle: the apex is the top of a circle whose
       // centre hangs below the disc, far enough that the wave rises [_bow]
@@ -462,7 +475,7 @@ class _SpotifyMarkPainter extends CustomPainter {
         sweep,
         false,
         Paint()
-          ..color = _ink
+          ..blendMode = BlendMode.clear
           ..style = PaintingStyle.stroke
           ..strokeWidth = stroke
           ..strokeCap = StrokeCap.round,
@@ -472,5 +485,5 @@ class _SpotifyMarkPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_SpotifyMarkPainter oldDelegate) => false;
+  bool shouldRepaint(_SpotifyMarkPainter oldDelegate) => oldDelegate.ink != ink;
 }

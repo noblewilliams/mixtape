@@ -56,6 +56,43 @@ double _targetHeight(WidgetTester tester, Finder control) => tester
     .height;
 
 void main() {
+  testWidgets('TextAction draws its glyph on the side asked for', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: MixtapeTheme.light(),
+        home: const Scaffold(
+          body: Column(
+            children: [
+              TextAction(
+                label: 'Skip',
+                icon: Icons.arrow_forward,
+                iconAfter: true,
+                onPressed: _noop,
+              ),
+              TextAction(
+                label: 'Sign out',
+                icon: Icons.logout,
+                onPressed: _noop,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    final skipWord = tester.getRect(find.text('Skip'));
+    final forward = tester.getRect(find.byIcon(Icons.arrow_forward));
+    expect(forward.left, greaterThan(skipWord.right), reason: 'after the word');
+    final outWord = tester.getRect(find.text('Sign out'));
+    final logout = tester.getRect(find.byIcon(Icons.logout));
+    expect(logout.right, lessThan(outWord.left), reason: 'before the word');
+    expect(
+      tester.widget<Icon>(find.byIcon(Icons.logout)).size,
+      TextAction.iconSize,
+    );
+  });
+
   testWidgets('every control renders in both themes without exceptions', (
     tester,
   ) async {
@@ -205,7 +242,8 @@ void main() {
       expect(
         data.hasAction(SemanticsAction.tap),
         isTrue,
-        reason: '$label: a node with no tap action cannot be activated by '
+        reason:
+            '$label: a node with no tap action cannot be activated by '
             'VoiceOver',
       );
       expect(data.flagsCollection.isButton, isTrue);

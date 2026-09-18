@@ -13,11 +13,21 @@ class TextAction extends StatelessWidget {
     required this.label,
     this.onPressed,
     this.quiet = false,
+    this.icon,
+    this.iconAfter = false,
   });
 
   final String label;
   final VoidCallback? onPressed;
   final bool quiet;
+
+  /// An optional glyph beside the word, in the same ink; [iconAfter] puts it
+  /// on the right (a forward arrow) instead of the left (a sign-out mark).
+  final IconData? icon;
+  final bool iconAfter;
+
+  static const double iconSize = 16;
+  static const double _iconGap = 6;
 
   @override
   Widget build(BuildContext context) {
@@ -46,13 +56,34 @@ class TextAction extends StatelessWidget {
               // Shrink-wrap: the target is 44 pt tall, not wider than the word.
               child: Center(
                 widthFactor: 1,
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: quiet ? FontWeight.w500 : FontWeight.w600,
-                    color: quiet ? tokens.smoke : tokens.plum,
-                  ),
+                child: Builder(
+                  builder: (context) {
+                    final ink = quiet ? tokens.smoke : tokens.plum;
+                    final word = Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: quiet ? FontWeight.w500 : FontWeight.w600,
+                        color: ink,
+                      ),
+                    );
+                    if (icon == null) return word;
+                    final glyph = Icon(icon, size: iconSize, color: ink);
+                    return Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (!iconAfter) ...[
+                          glyph,
+                          const SizedBox(width: _iconGap),
+                        ],
+                        word,
+                        if (iconAfter) ...[
+                          const SizedBox(width: _iconGap),
+                          glyph,
+                        ],
+                      ],
+                    );
+                  },
                 ),
               ),
             ),
