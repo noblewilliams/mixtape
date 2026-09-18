@@ -392,6 +392,14 @@ void main() {
         YouTab.identitySubtitle(null, onboardingState(chosenService: 'apple')),
         'Apple Music',
       );
+      expect(
+        YouTab.identitySubtitle(
+          const [_apple],
+          onboardingState(chosenService: 'skipped'),
+        ),
+        'Apple sign-in · No service connected',
+        reason: 'a skipped gate is an answer, not a service we do not know',
+      );
     });
 
     testWidgets('leaves room under the groups for the floating dock', (

@@ -537,7 +537,11 @@ the same account goes straight to the shell, another account still sees the
 gate. Consumers read it as an answer, not as a missing one: Home's Spotify
 waiting rows still key off `== 'spotify'` only, and You's identity line says
 "No service connected". The gate also carries a **Sign out** action in its title
-bar, with `account_screen.dart`'s busy guard and failure line. Rationale: the
+bar, with `account_screen.dart`'s busy guard and failure line. That guard
+stands the whole gate down, not just its own action: every answer here writes
+the per-user device flag and the sign-out clears it, so an answer given
+mid-sign-out could land after the clear and leave the next sign-in silently
+past the gate. Rationale: the
 listener is already signed in at the gate and a relaunch returns them to it, so
 without these two the screen was a dead end for anyone who uses neither service
 — or who signed in with the wrong account. **Reopens if:** the server starts

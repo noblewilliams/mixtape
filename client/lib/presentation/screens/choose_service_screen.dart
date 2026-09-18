@@ -61,19 +61,27 @@ class _ServiceGateState extends ConsumerState<ServiceGate> {
     return null;
   }
 
+  /// Every answer on this screen writes the device's per-user service flag,
+  /// and a sign-out clears that flag for the departing listener — so an
+  /// answer given while the sign-out is in flight could land after the clear
+  /// and leave the next sign-in silently past the gate. The busy guard covers
+  /// the whole screen, not just its own action.
   void _chooseApple() {
+    if (_signingOut) return;
     // Remembered on the device only (nothing to post), then Home right away.
     unawaited(ref.read(onboardingProvider.notifier).markChoseApple());
     setState(() => _step = _GateStep.home);
   }
 
   void _chooseSpotify() {
+    if (_signingOut) return;
     // Fire-and-forget funnel step, then the request screen right away.
     unawaited(ref.read(onboardingProvider.notifier).markChoseSpotify());
     setState(() => _step = _GateStep.request);
   }
 
   void _skip() {
+    if (_signingOut) return;
     // Like Apple: remembered on the device, nothing posted, shell right away.
     unawaited(ref.read(onboardingProvider.notifier).markSkipped());
     setState(() => _step = _GateStep.home);
@@ -116,7 +124,7 @@ class _ServiceGateState extends ConsumerState<ServiceGate> {
         onApple: _chooseApple,
         onSpotify: _chooseSpotify,
         onSignOut: _signingOut ? null : _signOut,
-        onSkip: _skip,
+        onSkip: _signingOut ? null : _skip,
         signOutError: _signOutError,
       ),
       _GateStep.request => SpotifyRequestScreen(
@@ -147,10 +155,10 @@ class ChooseServiceScreen extends StatelessWidget {
 
   final VoidCallback onApple;
   final VoidCallback onSpotify;
-  final VoidCallback onSkip;
 
-  /// Null while a sign-out is in flight, which dims the action and drops its
-  /// tap target — the gate's busy guard, shown.
+  /// Both null while a sign-out is in flight, which dims the action and drops
+  /// its tap target — the gate's busy guard, shown.
+  final VoidCallback? onSkip;
   final VoidCallback? onSignOut;
 
   /// Set when the last sign-out threw.

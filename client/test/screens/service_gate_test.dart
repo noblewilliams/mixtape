@@ -23,6 +23,23 @@ import 'package:mixtape/presentation/screens/spotify_request_screen.dart';
 import '../helpers/fake_listening_api.dart';
 import '../helpers/onboarding_harness.dart';
 
+/// A sign-out held open until [finish] completes, then doing what the real
+/// one does: flipping to signed out and dropping the departing listener's
+/// device-local service flag.
+class SlowSignOutAuth extends AuthNotifier {
+  final finish = Completer<void>();
+
+  @override
+  AuthStatus build() => AuthStatus.signedIn;
+
+  @override
+  Future<void> signOut() async {
+    await finish.future;
+    state = AuthStatus.signedOut;
+    await ref.read(servicePreferenceStoreProvider).clear();
+  }
+}
+
 /// The gate resolves to the shell, and the shell is built from the foundation
 /// widgets — so these cases pump the app's own theme rather than the bare one
 /// `pumpScreen` uses.
@@ -266,6 +283,42 @@ void main() {
     expect(find.byType(SignInScreen), findsOneWidget);
     expect(find.byType(ChooseServiceScreen), findsNothing);
     expect(await store.read(), isNull);
+  });
+
+  testWidgets('a sign-out in flight stands the whole gate down, not just its own '
+      'action', (tester) async {
+    // Every answer here writes the per-user service flag, and the sign-out
+    // clears it: an answer given mid-sign-out could land after the clear and
+    // leave the next sign-in silently past the gate.
+    final prefs = InMemoryServicePreferenceStore();
+    final auth = SlowSignOutAuth();
+    final listening = FakeListeningApi(onboarding: onboardingState(userId: 'user-1'));
+    await pumpGate(
+      tester,
+      onboardingContainer(listening: listening, prefs: prefs, auth: auth),
+    );
+
+    await tester.ensureVisible(find.byKey(ChooseServiceScreen.signOutKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(ChooseServiceScreen.signOutKey));
+    await tester.pump();
+
+    final gate = tester.widget<ChooseServiceScreen>(
+      find.byType(ChooseServiceScreen),
+    );
+    expect(gate.onSignOut, isNull, reason: 'the busy guard, shown');
+    expect(gate.onSkip, isNull, reason: 'Skip must stand down with it');
+
+    // Tapping anyway changes nothing: the gate stays put and writes no flag.
+    await tester.tap(find.byKey(ChooseServiceScreen.skipKey));
+    await tester.tap(find.byKey(const Key('choose-apple')));
+    await tester.pump();
+    expect(find.byType(ChooseServiceScreen), findsOneWidget);
+
+    auth.finish.complete();
+    await tester.pumpAndSettle();
+    expect(await prefs.read('user-1'), isNull);
+    expect(listening.funnelEvents, isEmpty);
   });
 
   testWidgets(
