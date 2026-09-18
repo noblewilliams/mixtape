@@ -427,7 +427,8 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
         color: tokens.smoke,
       );
 
-  static const String _headline = 'Your music, mixed for right now.';
+  // A non-breaking space keeps "right now." on one line instead of an orphan.
+  static const String _headline = 'Your music, mixed for right\u00a0now.';
 
   /// The founder's 2026-09-18 sizing: a quieter headline than the shell's
   /// large title, and a 12 pt blurb under it.
