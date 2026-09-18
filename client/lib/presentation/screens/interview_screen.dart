@@ -1,10 +1,18 @@
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/api/api_client.dart';
 import '../../data/listening/listening_models.dart';
 import '../providers/onboarding_provider.dart';
+import '../theme/mixtape_theme.dart';
+import '../widgets/foundation/frosted_surface.dart';
+import '../widgets/foundation/glass_cluster.dart';
+import '../widgets/foundation/gradient_background.dart';
+import '../widgets/foundation/large_title_scaffold.dart';
+import '../widgets/foundation/section_word.dart';
+import '../widgets/foundation/tape_button.dart';
 
 const _genericErrorMessage = 'something went wrong on our end — try again';
 const _offlineErrorMessage =
@@ -17,6 +25,10 @@ const _offlineErrorMessage =
 /// `ios` surface; the server stores the notes and seeds and records
 /// `interview_completed` itself — this screen never posts that event.
 /// Pushed from Home, which refreshes onboarding on return.
+///
+/// Restyled for the native shell (`docs/mockups/approved/2026-09-17-mobile-shell.md`):
+/// the large title, each question a section word over a composer-shaped field,
+/// and the save action pinned in a frosted bar that rides the keyboard.
 class InterviewScreen extends ConsumerStatefulWidget {
   const InterviewScreen({super.key});
 
@@ -125,112 +137,295 @@ class _InterviewScreenState extends ConsumerState<InterviewScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final atCap = _artists.length >= InterviewScreen.maxArtists;
-    return Scaffold(
-      appBar: AppBar(title: const Text('Tell the DJ about your taste')),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Five quick questions. Name at least one artist; the other four are '
-                'optional — the DJ works with what it gets.',
-                style: theme.textTheme.bodyLarge,
-              ),
-              const SizedBox(height: 24),
-              Text(
-                'Artists you would never skip',
-                style: theme.textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                key: const Key('interview-artist-field'),
-                controller: _artistController,
-                enabled: !_submitting && !atCap,
-                textInputAction: TextInputAction.done,
-                onSubmitted: (_) => _addArtist(),
-                decoration: InputDecoration(
-                  hintText: atCap
-                      ? 'That is ${InterviewScreen.maxArtists} — plenty'
-                      : 'Add an artist',
-                  helperText: atCap
-                      ? null
-                      : 'Up to ${InterviewScreen.maxArtists}',
-                  errorText: _artistError,
-                  border: const OutlineInputBorder(),
-                  suffixIcon: IconButton(
-                    key: const Key('interview-add-artist'),
-                    tooltip: 'Add',
-                    icon: const Icon(Icons.add),
-                    onPressed: _submitting || atCap ? null : _addArtist,
-                  ),
-                ),
-              ),
-              if (_artists.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 4,
+    return GradientBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        // The save bar is the last row of the body, so the Scaffold's own
+        // keyboard inset carries it above the keyboard.
+        body: Column(
+          children: [
+            Expanded(
+              child: LargeTitleScaffold(
+                title: 'Tell the DJ about your taste',
+                leading: GlassCluster(
                   children: [
-                    for (var i = 0; i < _artists.length; i++)
-                      InputChip(
-                        key: Key('interview-artist-$i'),
-                        label: Text(_artists[i]),
-                        onDeleted: _submitting
-                            ? null
-                            : () => setState(() => _artists.removeAt(i)),
-                      ),
+                    GlassButton(
+                      key: const Key('interview-back'),
+                      icon: CupertinoIcons.chevron_left,
+                      label: 'Back',
+                      onPressed: _submitting
+                          ? null
+                          : () => Navigator.of(context).maybePop(),
+                    ),
                   ],
                 ),
-              ],
-              const SizedBox(height: 24),
-              _Answer(
-                fieldKey: const Key('interview-plays-most'),
-                controller: _playsMost,
-                enabled: !_submitting,
-                label: 'What do you play most these days?',
+                slivers: [SliverToBoxAdapter(child: _form(context))],
               ),
-              _Answer(
-                fieldKey: const Key('interview-listens-when'),
-                controller: _listensWhen,
-                enabled: !_submitting,
-                label: 'When do you listen, and to what?',
-              ),
-              _Answer(
-                fieldKey: const Key('interview-never-wants'),
-                controller: _neverWants,
-                enabled: !_submitting,
-                label: 'Anything you never want to hear?',
-              ),
-              _Answer(
-                fieldKey: const Key('interview-era'),
-                controller: _era,
-                enabled: !_submitting,
-                label: 'An era you keep returning to',
-              ),
-              if (_error != null) ...[
-                Text(
-                  _error!,
-                  key: const Key('interview-error'),
-                  style: TextStyle(color: theme.colorScheme.error),
+            ),
+            _SaveBar(
+              error: _error,
+              onSave: _submitting || _artists.isEmpty ? null : _submit,
+              submitting: _submitting,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _form(BuildContext context) {
+    final tokens = context.tokens;
+    final atCap = _artists.length >= InterviewScreen.maxArtists;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const SizedBox(height: 4),
+        Text(
+          'Five quick questions. Name at least one artist; the other four are '
+          'optional — the DJ works with what it gets.',
+          style: tokens.body.copyWith(color: tokens.smoke),
+        ),
+        const SectionWord('Artists you would never skip'),
+        _FieldShell(
+          child: Row(
+            children: [
+              Expanded(
+                child: _fieldText(
+                  context,
+                  key: const Key('interview-artist-field'),
+                  controller: _artistController,
+                  enabled: !_submitting && !atCap,
+                  hint: atCap
+                      ? 'That is ${InterviewScreen.maxArtists} — plenty'
+                      : 'Add an artist',
+                  textInputAction: TextInputAction.done,
+                  onSubmitted: (_) => _addArtist(),
                 ),
-                const SizedBox(height: 8),
-              ],
-              FilledButton(
-                key: const Key('interview-submit'),
-                onPressed: _submitting || _artists.isEmpty ? null : _submit,
-                child: _submitting
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('Save my answers'),
+              ),
+              IconButton(
+                key: const Key('interview-add-artist'),
+                tooltip: 'Add',
+                icon: Icon(Icons.add, size: 20, color: tokens.plum),
+                onPressed: _submitting || atCap ? null : _addArtist,
               ),
             ],
+          ),
+        ),
+        if (_artistError != null)
+          _InlineNote(text: _artistError!, ink: tokens.errInk, live: true)
+        else if (!atCap)
+          _InlineNote(
+            text: 'Up to ${InterviewScreen.maxArtists}',
+            ink: tokens.muted,
+          ),
+        if (_artists.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (var i = 0; i < _artists.length; i++)
+                  InterviewArtistChip(
+                    key: Key('interview-artist-$i'),
+                    label: _artists[i],
+                    onRemove: _submitting
+                        ? null
+                        : () => setState(() => _artists.removeAt(i)),
+                  ),
+              ],
+            ),
+          ),
+        _Answer(
+          fieldKey: const Key('interview-plays-most'),
+          controller: _playsMost,
+          enabled: !_submitting,
+          label: 'What do you play most these days?',
+        ),
+        _Answer(
+          fieldKey: const Key('interview-listens-when'),
+          controller: _listensWhen,
+          enabled: !_submitting,
+          label: 'When do you listen, and to what?',
+        ),
+        _Answer(
+          fieldKey: const Key('interview-never-wants'),
+          controller: _neverWants,
+          enabled: !_submitting,
+          label: 'Anything you never want to hear?',
+        ),
+        _Answer(
+          fieldKey: const Key('interview-era'),
+          controller: _era,
+          enabled: !_submitting,
+          label: 'An era you keep returning to',
+        ),
+        const SizedBox(height: 16),
+      ],
+    );
+  }
+}
+
+/// The composer's own text treatment, without its chrome: no border of its
+/// own, the shell around it draws the field.
+TextField _fieldText(
+  BuildContext context, {
+  required Key key,
+  required TextEditingController controller,
+  required bool enabled,
+  String? hint,
+  int minLines = 1,
+  int maxLines = 1,
+  int? maxLength,
+  TextInputAction? textInputAction,
+  TextCapitalization textCapitalization = TextCapitalization.sentences,
+  ValueChanged<String>? onSubmitted,
+}) {
+  final tokens = context.tokens;
+  return TextField(
+    key: key,
+    controller: controller,
+    enabled: enabled,
+    minLines: minLines,
+    maxLines: maxLines,
+    maxLength: maxLength,
+    textInputAction: textInputAction,
+    textCapitalization: textCapitalization,
+    onSubmitted: onSubmitted,
+    cursorColor: tokens.plum,
+    style: tokens.body,
+    decoration: InputDecoration(
+      hintText: hint,
+      hintStyle: tokens.body.copyWith(color: tokens.muted),
+      counterText: '',
+      isDense: true,
+      border: InputBorder.none,
+      enabledBorder: InputBorder.none,
+      focusedBorder: InputBorder.none,
+      disabledBorder: InputBorder.none,
+      contentPadding: const EdgeInsets.symmetric(vertical: 12),
+    ),
+  );
+}
+
+/// The composer's shape around a field: the field tint, a hairline edge and
+/// 12 pt top / 16 pt bottom corners.
+class _FieldShell extends StatelessWidget {
+  const _FieldShell({required this.child});
+
+  final Widget child;
+
+  static const BorderRadius radius = BorderRadius.only(
+    topLeft: Radius.circular(MixtapeMetrics.composerRadiusTop),
+    topRight: Radius.circular(MixtapeMetrics.composerRadiusTop),
+    bottomLeft: Radius.circular(MixtapeMetrics.composerRadiusBottom),
+    bottomRight: Radius.circular(MixtapeMetrics.composerRadiusBottom),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    return Container(
+      constraints: const BoxConstraints(
+        minHeight: MixtapeMetrics.composerHeight,
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      decoration: BoxDecoration(
+        color: tokens.field,
+        borderRadius: radius,
+        border: Border.all(color: tokens.hairline),
+      ),
+      child: child,
+    );
+  }
+}
+
+/// A quiet line under a field: the artist cap, or the name-length refusal.
+class _InlineNote extends StatelessWidget {
+  const _InlineNote({required this.text, required this.ink, this.live = false});
+
+  final String text;
+  final Color ink;
+  final bool live;
+
+  @override
+  Widget build(BuildContext context) {
+    final line = Padding(
+      padding: const EdgeInsets.only(top: 6, left: 2),
+      child: Text(text, style: context.tokens.secondary.copyWith(color: ink)),
+    );
+    return live ? Semantics(liveRegion: true, child: line) : line;
+  }
+}
+
+/// One named artist, as the Home pill shaped for removal: the whole chip is
+/// the remove target, with the glyph as its affordance, so the 44 pt rule
+/// holds on a 34 pt pill.
+class InterviewArtistChip extends StatelessWidget {
+  const InterviewArtistChip({
+    super.key,
+    required this.label,
+    required this.onRemove,
+  });
+
+  final String label;
+  final VoidCallback? onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Semantics(
+      button: true,
+      enabled: onRemove != null,
+      label: 'Remove $label',
+      excludeSemantics: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onRemove,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(
+            minHeight: MixtapeMetrics.minTarget,
+          ),
+          child: Center(
+            widthFactor: 1,
+            child: Opacity(
+              opacity: onRemove == null ? 0.5 : 1,
+              child: Container(
+                constraints: const BoxConstraints(
+                  minHeight: MixtapeMetrics.pillHeight,
+                ),
+                padding: const EdgeInsets.fromLTRB(13, 0, 9, 0),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: isDark ? 0.10 : 0.55),
+                  borderRadius: const BorderRadius.all(
+                    Radius.circular(MixtapeMetrics.pillRadius),
+                  ),
+                  border: Border.all(color: tokens.hairline),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: tokens.text,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Icon(Icons.close, size: 14, color: tokens.smoke),
+                  ],
+                ),
+              ),
+            ),
           ),
         ),
       ),
@@ -253,19 +448,85 @@ class _Answer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: TextField(
-        key: fieldKey,
-        controller: controller,
-        enabled: enabled,
-        minLines: 1,
-        maxLines: 3,
-        maxLength: InterviewScreen.maxAnswerLength,
-        textCapitalization: TextCapitalization.sentences,
-        decoration: InputDecoration(
-          labelText: label,
-          border: const OutlineInputBorder(),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SectionWord(label),
+        _FieldShell(
+          child: _fieldText(
+            context,
+            key: fieldKey,
+            controller: controller,
+            enabled: enabled,
+            minLines: 1,
+            maxLines: 3,
+            maxLength: InterviewScreen.maxAnswerLength,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// The pinned save bar: the inline error over the tape button, on glass.
+class _SaveBar extends StatelessWidget {
+  const _SaveBar({
+    required this.error,
+    required this.onSave,
+    required this.submitting,
+  });
+
+  final String? error;
+  final VoidCallback? onSave;
+  final bool submitting;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    return FrostedSurface(
+      borderRadius: BorderRadius.zero,
+      shadow: false,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            MixtapeMetrics.screenSidePadding,
+            10,
+            MixtapeMetrics.screenSidePadding,
+            10,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (error != null)
+                Semantics(
+                  liveRegion: true,
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      error!,
+                      key: const Key('interview-error'),
+                      style: tokens.secondary.copyWith(color: tokens.errInk),
+                    ),
+                  ),
+                ),
+              Align(
+                child: TapeButton(
+                  key: const Key('interview-submit'),
+                  label: 'Save my answers',
+                  onPressed: onSave,
+                  leading: submitting
+                      ? const SizedBox.square(
+                          dimension: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : null,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
