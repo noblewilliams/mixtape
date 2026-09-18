@@ -124,6 +124,7 @@ class SessionDetail {
     required this.queue,
     this.sessionTitle,
     this.playlistSeed,
+    this.supportsInsert = false,
   });
 
   /// Missing legacy field is unknown rather than a synthetic empty seed.
@@ -138,6 +139,13 @@ class SessionDetail {
   /// need of this field; it exists for parity with [TurnResult]'s own.
   final String? sessionTitle;
 
+  /// Whether this server understands the `insert` queue op — a CAPABILITY
+  /// flag, not session state (server: `routes/sessions.ts`). The arrangement
+  /// screen offers Undo on a swipe-remove only when it is true, so a client
+  /// talking to an older deploy (which never sends the key) simply never
+  /// shows an affordance the server would reject.
+  final bool supportsInsert;
+
   factory SessionDetail.fromJson(Map<String, dynamic> json) => SessionDetail(
         session: DjSession.fromJson(json['session'] as Map<String, dynamic>),
         messages: (json['messages'] as List)
@@ -145,6 +153,7 @@ class SessionDetail {
             .toList(),
         queue: queueTracksFromJson(json['queue']),
         sessionTitle: json['sessionTitle'] as String?,
+        supportsInsert: json['supportsInsert'] as bool? ?? false,
         playlistSeed: json.containsKey('playlistSeed')
             ? PlaylistSeedState.fromJson(playlistContextObject(json['playlistSeed']))
             : null,
@@ -218,13 +227,20 @@ class DjMemory {
       );
 }
 
-/// Manual queue-ops are remove/move only (0-based positions) — swap/extend
+/// Manual queue-ops are remove/move/insert (0-based positions) — swap/extend
 /// need the DJ and are rejected by the server with a 400 `dj_required`.
 sealed class QueueOp {
   const QueueOp();
 
   const factory QueueOp.remove(int position) = _RemoveOp;
   const factory QueueOp.move(int from, int to) = _MoveOp;
+
+  /// Puts a track the user just removed back where it was — the arrangement
+  /// screen's Undo (`docs/mockups/approved/2026-09-17-mobile-arrangement-states.md`).
+  /// Manual-only: the DJ never sees track ids, so it is absent from the
+  /// model's own edit_queue schema. [position] is clamped server-side to
+  /// `[0, length]`, so an Undo can't fail on an off-by-one.
+  const factory QueueOp.insert(int position, String trackId) = _InsertOp;
 
   Map<String, dynamic> toJson();
 }
@@ -235,6 +251,19 @@ class _RemoveOp extends QueueOp {
 
   @override
   Map<String, dynamic> toJson() => {'op': 'remove', 'position': position};
+}
+
+class _InsertOp extends QueueOp {
+  const _InsertOp(this.position, this.trackId);
+  final int position;
+  final String trackId;
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'op': 'insert',
+        'position': position,
+        'trackId': trackId,
+      };
 }
 
 class _MoveOp extends QueueOp {

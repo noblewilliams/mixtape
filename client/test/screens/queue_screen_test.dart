@@ -2,11 +2,15 @@ import 'package:mixtape/data/playlists/playlist_context_models.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/api/api_client.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/dj/dj_api.dart';
+import 'package:mixtape/data/playback/listening_meter.dart' show PlayerSample;
+import 'package:mixtape/data/playback/playback_controller.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
 import 'package:mixtape/data/listening/listening_models.dart';
 import 'package:mixtape/data/musickit/musickit_bridge.dart';
@@ -19,11 +23,21 @@ import 'package:mixtape/presentation/providers/dj_providers.dart';
 import 'package:mixtape/presentation/providers/library_sync_provider.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
 import 'package:mixtape/presentation/screens/chat_screen.dart';
+import 'package:mixtape/presentation/providers/playback_provider.dart';
+import 'package:mixtape/presentation/screens/mix_history_screen.dart';
+import 'package:mixtape/presentation/screens/playback_screen.dart';
 import 'package:mixtape/presentation/screens/queue_screen.dart';
+import 'package:mixtape/presentation/theme/mixtape_theme.dart';
+import 'package:mixtape/presentation/widgets/foundation/label_chip.dart';
+import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
+import 'package:mixtape/presentation/widgets/foundation/text_action.dart';
+import 'package:mixtape/presentation/widgets/track_row.dart';
 
+import '../data/playback/playback_controller_test.dart' as playback
+    show FakeApi, FakeBridge;
 import '../helpers/fake_listening_api.dart';
 import '../helpers/fake_text_sharer.dart';
-import '../helpers/onboarding_harness.dart' show FakeLinkOpener, expectInteractiveWidgetsKeyed;
+import '../helpers/onboarding_harness.dart' show FakeLinkOpener;
 
 /// Mirrors chat_screen_test.dart's FakeDjApi: implements DjApi's public
 /// surface (not `extends`, since DjApi's constructor builds a real
@@ -276,6 +290,19 @@ class _QueueSim {
       if (json['op'] == 'remove') {
         next.removeAt(json['position'] as int);
         removed += 1;
+      } else if (json['op'] == 'insert') {
+        final position = (json['position'] as int).clamp(0, next.length);
+        next.insert(
+          position,
+          QueueTrack(
+            position: position,
+            trackId: json['trackId'] as String,
+            appleId: 'apple-restored',
+            title: 'Restored',
+            artist: 'Restored',
+            durationMs: 180000,
+          ),
+        );
       } else {
         final moved = next.removeAt(json['from'] as int);
         next.insert(json['to'] as int, moved);
@@ -303,6 +330,7 @@ ProviderContainer _makeContainer(
   FakeLinkOpener? links,
   LinkProbe? probe,
   FakeTextSharer? sharer,
+  PlaybackController? player,
 }) {
   final container = ProviderContainer(
     overrides: [
@@ -324,13 +352,24 @@ ProviderContainer _makeContainer(
       linkOpenerProvider.overrideWithValue((links ?? FakeLinkOpener()).call),
       linkProbeProvider.overrideWithValue(probe ?? (_) async => false),
       textSharerProvider.overrideWithValue(sharer ?? FakeTextSharer()),
+      // The real controller reaches the player method channel and GET
+      // /playback; the screen watches it to know whether THIS mix is playing.
+      playbackProvider.overrideWithValue(
+        player ?? PlaybackController(playback.FakeApi(), playback.FakeBridge()),
+      ),
     ],
   );
   addTearDown(container.dispose);
   return container;
 }
 
-Future<void> _pump(WidgetTester tester, ProviderContainer container, {String sessionId = 's1'}) async {
+Future<void> _pump(
+  WidgetTester tester,
+  ProviderContainer container, {
+  String sessionId = 's1',
+  ThemeData? theme,
+  TextScaler textScaler = TextScaler.noScaling,
+}) async {
   // A second container in one test: tear the first tree down first, or the
   // same-typed root is updated in place and the old screen's state lingers.
   if (find.byType(QueueScreen).evaluate().isNotEmpty) {
@@ -339,10 +378,24 @@ Future<void> _pump(WidgetTester tester, ProviderContainer container, {String ses
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
-      child: MaterialApp(home: QueueScreen(sessionId: sessionId)),
+      child: MaterialApp(
+      theme: theme ?? MixtapeTheme.light(),
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(textScaler: textScaler),
+        child: child!,
+      ),
+      home: QueueScreen(sessionId: sessionId),
+    ),
     ),
   );
   await tester.pumpAndSettle();
+}
+
+/// Whether [a] comes before [b] in reading order (row, then position).
+bool _precedes(WidgetTester tester, Finder a, Finder b) {
+  final first = tester.getTopLeft(a);
+  final second = tester.getTopLeft(b);
+  return first.dy < second.dy || (first.dy == second.dy && first.dx < second.dx);
 }
 
 void main() {
@@ -409,8 +462,10 @@ void main() {
     // 2 and the op must carry the corrected 1. Four rows, so BOTH the
     // corrected target and the raw one are valid in-range positions and the
     // assertion below can actually tell them apart.
+    // The grip lifts on a long press, per the approved record, so the
+    // gesture has to hold before it moves.
     final gesture = await tester.startGesture(tester.getCenter(handle));
-    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 600));
     await gesture.moveBy(Offset(0, rowHeight * 2.5));
     await tester.pump(const Duration(milliseconds: 50));
     await gesture.up();
@@ -436,7 +491,7 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(find.text('queue was updated — showing the latest'), findsOneWidget);
+    expect(find.text(arrangementConflictMessage), findsOneWidget);
     expect(find.text('Title 0'), findsOneWidget);
     expect(find.text('Title 1'), findsOneWidget);
   });
@@ -456,7 +511,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(bridge.playCalls.single, ['apple-0', 'apple-1', 'apple-2']);
-    expect(find.text('playing in Apple Music'), findsOneWidget);
+    expect(find.text('Playing in Apple Music'), findsOneWidget);
   });
 
   testWidgets('tracks with no Apple Music match are filtered before playing, and the skip count is reported', (
@@ -476,7 +531,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(bridge.playCalls.single, ['apple-0', 'apple-2']);
-    expect(find.textContaining('1 track skipped (not in Apple Music)'), findsOneWidget);
+    expect(find.text('Playing in Apple Music · 1 song skipped (not in Apple Music)'), findsOneWidget);
   });
 
   testWidgets('when every track lacks an Apple Music match, play and save are disabled', (tester) async {
@@ -489,12 +544,20 @@ void main() {
     final container = _makeContainer(api);
     await _pump(tester, container);
 
-    final playButton = tester.widget<IconButton>(find.byKey(const Key('play-button')));
-    final saveButton = tester.widget<IconButton>(find.byKey(const Key('save-button')));
-    expect(playButton.onPressed, isNull);
-    expect(saveButton.onPressed, isNull);
-    expect(playButton.tooltip, isNotEmpty);
-    expect(saveButton.tooltip, isNotEmpty);
+    expect(
+      tester.widget<TextAction>(find.byKey(const Key('play-button'))).onPressed,
+      isNull,
+    );
+    expect(
+      tester.widget<LabelChip>(find.byKey(const Key('save-button'))).onPressed,
+      isNull,
+    );
+    expect(
+      tester.widget<TapeButton>(find.byKey(const Key('play-here-button'))).onPressed,
+      isNull,
+    );
+    // The reason is written beside the actions, never left to a tooltip.
+    expect(find.text("these tracks aren't in Apple Music"), findsOneWidget);
     // Without a Spotify id either, there is nothing to send anywhere.
     expect(find.byKey(const Key('share-button')), findsNothing);
   });
@@ -525,7 +588,7 @@ void main() {
     // playlist with the Xcode product name ("Runner").
     expect(bridge.createCalls.single.author, 'mixtape');
     expect(bridge.createCalls.single.description, 'made by mixtape');
-    expect(find.text('saved 2 songs to Apple Music'), findsOneWidget);
+    expect(find.text('Saved 2 songs to Apple Music'), findsOneWidget);
   });
 
   testWidgets('a typed author is stamped on the playlist and remembered for the next save', (
@@ -651,7 +714,25 @@ void main() {
 
     completer.complete((added: 1, failed: 0));
     await tester.pumpAndSettle();
-    expect(find.text('saved 1 songs to Apple Music'), findsOneWidget);
+    expect(find.text('Saved 1 songs to Apple Music'), findsOneWidget);
+  });
+
+  testWidgets('a save Apple refuses reports the reason it gave', (tester) async {
+    final api = FakeDjApi();
+    api.onGetSession = (_) async =>
+        SessionDetail(session: _session(), messages: [], queue: [_track(0)]);
+    final bridge = FakeBridge();
+    bridge.onCreatePlaylist = (name, ids) async =>
+        throw MusicKitException('not authorized');
+    await _pump(tester, _makeContainer(api, bridge: bridge));
+
+    await tester.tap(find.byKey(const Key('save-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('save-confirm-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('playlist-name-field')), findsNothing);
+    expect(find.text("Couldn't save the playlist — not authorized"), findsOneWidget);
   });
 
   testWidgets('tapping a row reveals its reason; a row without one shows a placeholder', (tester) async {
@@ -667,11 +748,11 @@ void main() {
     expect(find.text('you loved this one last summer'), findsNothing);
     expect(find.text('no notes from the DJ'), findsNothing);
 
-    await tester.tap(find.byKey(const Key('queue-row-tap-t0')));
+    await tester.tap(find.byKey(TrackRow.rowKey('t0')));
     await tester.pumpAndSettle();
     expect(find.text('you loved this one last summer'), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('queue-row-tap-t1')));
+    await tester.tap(find.byKey(TrackRow.rowKey('t1')));
     await tester.pumpAndSettle();
     expect(find.text('no notes from the DJ'), findsOneWidget);
   });
@@ -682,7 +763,12 @@ void main() {
     final container = _makeContainer(api);
     await _pump(tester, container);
 
-    expect(find.text('ask the DJ for a tape'), findsOneWidget);
+    expect(find.byKey(const Key('queue-empty')), findsOneWidget);
+    expect(find.text('Nothing on the tape yet'), findsOneWidget);
+    expect(find.text('Ask the DJ for a mix and it will show up here.'), findsOneWidget);
+    // Actions are hidden rather than disabled: there is nothing to act on.
+    expect(find.byKey(const Key('play-here-button')), findsNothing);
+    expect(find.byKey(const Key('save-button')), findsNothing);
   });
 
   testWidgets('a failed (non-stale) removal un-hides the swiped row instead of losing it', (
@@ -796,7 +882,7 @@ void main() {
 
     // The bridge message (Apple's actual failure reason) must reach the
     // user — a generic string made device failures undiagnosable.
-    expect(find.text("couldn't play — boom"), findsOneWidget);
+    expect(find.text("Couldn't play — boom"), findsOneWidget);
   });
 
   testWidgets('a partially-failed save reports the failure count', (tester) async {
@@ -813,7 +899,7 @@ void main() {
     await tester.tap(find.byKey(const Key('save-confirm-button')));
     await tester.pumpAndSettle();
 
-    expect(find.text('saved 1 songs to Apple Music (1 failed)'), findsOneWidget);
+    expect(find.text('Saved 1 songs to Apple Music (1 failed)'), findsOneWidget);
   });
 
   group('session events (P4 Task 4)', () {
@@ -865,7 +951,7 @@ void main() {
       await tester.tap(find.byKey(const Key('save-confirm-button')));
       await tester.pumpAndSettle();
 
-      expect(find.text('saved 0 songs to Apple Music (1 failed)'), findsOneWidget);
+      expect(find.text('Saved 0 songs to Apple Music (1 failed)'), findsOneWidget);
       expect(api.postedEvents, isEmpty);
     });
 
@@ -895,7 +981,7 @@ void main() {
 
       // The event post failed (silently — never awaited by the UI), but the
       // bridge succeeded, so the normal success snackbar must still show.
-      expect(find.text('playing in Apple Music'), findsOneWidget);
+      expect(find.text('Playing in Apple Music'), findsOneWidget);
       // Nothing unhandled — pumpAndSettle above would have surfaced a
       // FlutterError from an uncaught async exception otherwise.
     });
@@ -932,7 +1018,10 @@ void main() {
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
-        child: const MaterialApp(home: ChatScreen(sessionId: 's1')),
+        child: MaterialApp(
+          theme: MixtapeTheme.light(),
+          home: const ChatScreen(sessionId: 's1'),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -945,14 +1034,14 @@ void main() {
     await container.read(chatProvider('s1').notifier).applyOps([const QueueOp.remove(0)]);
     await tester.pumpAndSettle();
 
-    expect(find.text('queue was updated — showing the latest'), findsOneWidget);
+    expect(find.text(arrangementConflictMessage), findsOneWidget);
 
     // Both screens' listeners fired; only the top route may show/clear the
     // one-shot error. If the covered ChatScreen showed one too, a SECOND
     // snackbar would be queued behind this one and surface as it expires.
     await tester.pump(const Duration(seconds: 6));
     await tester.pumpAndSettle();
-    expect(find.text('queue was updated — showing the latest'), findsNothing);
+    expect(find.text(arrangementConflictMessage), findsNothing);
   });
 
   group('Spotify outputs (C4)', () {
@@ -974,16 +1063,18 @@ void main() {
       expect(find.byKey(const Key('open-in-spotify-t1')), findsNothing);
       // "Open in Spotify: <title>" — the visible label is a prefix of the
       // accessible name, so voice control matches what a listener reads.
-      expect(tester.widget<IconButton>(action).tooltip, 'Open in Spotify: Title 0');
       expect(find.bySemanticsLabel('Open in Spotify: Title 0'), findsOneWidget);
       final size = tester.getSize(action);
       expect(size.width, greaterThanOrEqualTo(44));
       expect(size.height, greaterThanOrEqualTo(44));
       // The row still expands on tap and still reorders from its handle.
-      await tester.tap(find.byKey(const Key('queue-row-tap-t0')));
+      await tester.tap(find.byKey(TrackRow.rowKey('t0')));
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('queue-row-reason-t0')), findsOneWidget);
-      expect(find.byKey(const Key('drag-handle-t0')), findsOneWidget);
+      expect(find.byKey(TrackRow.reasonKey('t0')), findsOneWidget);
+      // A Spotify row trades its grip for the open action; the Apple row
+      // keeps the grip.
+      expect(find.byKey(TrackRow.gripKey('t0')), findsNothing);
+      expect(find.byKey(TrackRow.gripKey('t1')), findsOneWidget);
       handle.dispose();
     });
 
@@ -1046,9 +1137,13 @@ void main() {
       expect(find.byKey(const Key('save-button')), findsNothing);
       final share = find.byKey(const Key('share-button'));
       expect(share, findsOneWidget);
-      expect(tester.widget<IconButton>(share).tooltip, 'Send to a transfer tool');
-      expect(tester.widget<IconButton>(share).onPressed, isNotNull);
-      expectInteractiveWidgetsKeyed(find.byType(QueueScreen));
+      expect(tester.widget<TapeButton>(share).label, 'Send to a transfer tool');
+      expect(tester.widget<TapeButton>(share).onPressed, isNotNull);
+      // The reason the Apple actions are absent is written beside it.
+      expect(
+        find.text('Play now and Create playlist need Apple Music'),
+        findsOneWidget,
+      );
     });
 
     testWidgets('a mixed Apple + Spotify queue shows BOTH sets of actions, Apple first', (tester) async {
@@ -1061,15 +1156,16 @@ void main() {
       final play = find.byKey(const Key('play-button'));
       final save = find.byKey(const Key('save-button'));
       final share = find.byKey(const Key('share-button'));
-      expect(tester.widget<IconButton>(play).onPressed, isNotNull);
-      expect(tester.widget<IconButton>(save).onPressed, isNotNull);
+      expect(tester.widget<TextAction>(play).onPressed, isNotNull);
+      expect(tester.widget<LabelChip>(save).onPressed, isNotNull);
       // The Spotify half of a mixed mix is reachable too (plan: Outputs).
-      expect(tester.widget<IconButton>(share).onPressed, isNotNull);
-      expect(tester.getTopLeft(play).dx, lessThan(tester.getTopLeft(share).dx));
-      expect(tester.getTopLeft(save).dx, lessThan(tester.getTopLeft(share).dx));
+      expect(tester.widget<TapeButton>(share).onPressed, isNotNull);
+      // Apple first in reading order — the actions row wraps at narrow
+      // widths, so "first" is by run and then by position within it.
+      expect(_precedes(tester, play, share), isTrue);
+      expect(_precedes(tester, save, share), isTrue);
       expect(find.byKey(const Key('open-in-spotify-t0')), findsNothing);
       expect(find.byKey(const Key('open-in-spotify-t1')), findsOneWidget);
-      expectInteractiveWidgetsKeyed(find.byType(QueueScreen));
     });
 
     testWidgets('an Apple-only queue offers no transfer handoff', (tester) async {
@@ -1078,7 +1174,10 @@ void main() {
           SessionDetail(session: _session(), messages: [], queue: [_track(0), _track(1)]);
       await _pump(tester, _makeContainer(api));
 
-      expect(tester.widget<IconButton>(find.byKey(const Key('play-button'))).onPressed, isNotNull);
+      expect(
+        tester.widget<TextAction>(find.byKey(const Key('play-button'))).onPressed,
+        isNotNull,
+      );
       expect(find.byKey(const Key('share-button')), findsNothing);
     });
 
@@ -1116,7 +1215,7 @@ void main() {
       // so the listener has somewhere to paste what they just shared.
       expect(links.opened, [Uri.parse('https://www.tunemymusic.com/transfer')]);
       expect(
-        find.text('shared 3 songs — TuneMyMusic makes the playlist in Spotify'),
+        find.text('Shared 3 songs · TuneMyMusic makes the playlist in Spotify'),
         findsOneWidget,
       );
     });
@@ -1209,10 +1308,419 @@ void main() {
       await tester.tap(find.byKey(const Key('play-button')));
       await tester.pumpAndSettle();
 
-      expect(find.text('playing in Apple Music'), findsOneWidget);
+      expect(find.text('Playing in Apple Music'), findsOneWidget);
       // The session event still lands; only the funnel milestone is Spotify's.
       expect(api.postedEvents.map((e) => e.type), ['played']);
       expect(listening.funnelEvents, isEmpty);
+    });
+  });
+
+  group('chrome, meta and version history', () {
+    testWidgets('the top bar carries Back, the centred title, history and More', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(title: 'Night bus notes'),
+        messages: [],
+        queue: [_track(0)],
+      );
+      await _pump(tester, _makeContainer(api));
+
+      expect(find.byKey(const Key('arrangement-back')), findsOneWidget);
+      expect(find.byKey(const Key('arrangement-history')), findsOneWidget);
+      expect(find.byKey(const Key('arrangement-more')), findsOneWidget);
+      expect(find.byType(AppBar), findsNothing);
+      final title = find.text('Night bus notes');
+      expect(title, findsOneWidget);
+      expect(tester.widget<Text>(title).overflow, TextOverflow.ellipsis);
+      // Centred: the title box sits between the two clusters.
+      final back = tester.getTopRight(find.byKey(const Key('arrangement-back')));
+      final history = tester.getTopLeft(
+        find.byKey(const Key('arrangement-history')),
+      );
+      expect(tester.getCenter(title).dx, greaterThan(back.dx));
+      expect(tester.getCenter(title).dx, lessThan(history.dx));
+    });
+
+    testWidgets('Version history pushes the history screen', (tester) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(), messages: [], queue: [_track(0)]);
+      await _pump(tester, _makeContainer(api));
+
+      await tester.tap(find.byKey(const Key('arrangement-history')));
+      // A single pump, not pumpAndSettle: the history screen's own load is
+      // not this screen's business (and reaches a real client here).
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(find.byType(MixHistoryScreen), findsOneWidget);
+    });
+
+    testWidgets('the meta line counts songs, sums the durations and names the version', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(queueVersion: 2),
+        messages: [],
+        // 3 x 3 min.
+        queue: [_track(0), _track(1), _track(2)],
+      );
+      await _pump(tester, _makeContainer(api));
+
+      expect(find.text('3 songs · 9 min · version 2'), findsOneWidget);
+      expect(find.text('Tap a song for its note'), findsOneWidget);
+    });
+
+    testWidgets('an hour or more reads as "H h MM"', (tester) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(queueVersion: 5),
+        messages: [],
+        queue: [
+          for (var i = 0; i < 24; i++) _track(i, durationMs: 180000),
+        ],
+      );
+      await _pump(tester, _makeContainer(api));
+
+      // 24 x 3 min = 72 min.
+      expect(find.text('24 songs · 1 h 12 · version 5'), findsOneWidget);
+    });
+
+    testWidgets('an unknown duration is omitted rather than reported short', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(queueVersion: 1),
+        messages: [],
+        queue: [_track(0), _track(1, durationMs: null)],
+      );
+      await _pump(tester, _makeContainer(api));
+
+      expect(find.text('2 songs · version 1'), findsOneWidget);
+    });
+  });
+
+  group('Play now', () {
+    testWidgets('hands the arrangement to the app player and opens Now Playing', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(queueVersion: 3, title: 'Night bus'),
+        messages: [],
+        queue: [_track(0), _track(1)],
+      );
+      // The controller persists its pending listening events; without this
+      // the keychain channel hangs under testWidgets.
+      FlutterSecureStorage.setMockInitialValues({});
+      final player = PlaybackController(playback.FakeApi(), playback.FakeBridge());
+      addTearDown(player.dispose);
+      await _pump(tester, _makeContainer(api, player: player));
+
+      await tester.tap(find.byKey(const Key('play-here-button')));
+      // Now Playing animates its meter, so a settle would never finish;
+      // the controller's own start() awaits a couple of futures first.
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+
+      expect(player.sessionId, 's1');
+      expect(player.version, 3);
+      expect(find.byType(PlaybackScreen), findsOneWidget);
+    });
+
+    testWidgets('reads Playing while the app player is on THIS mix', (tester) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(), messages: [], queue: [_track(0)]);
+      final player = PlaybackController(playback.FakeApi(), playback.FakeBridge())
+        ..sessionId = 's1'
+        ..sample = const PlayerSample(index: 0, positionMs: 0, status: 'playing');
+      addTearDown(player.dispose);
+      await _pump(tester, _makeContainer(api, player: player));
+
+      final button = tester.widget<TapeButton>(
+        find.byKey(const Key('play-here-button')),
+      );
+      expect(button.label, 'Playing');
+      expect(button.playing, isTrue);
+    });
+
+    testWidgets('another mix playing leaves this button as Play now', (tester) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(), messages: [], queue: [_track(0)]);
+      final player = PlaybackController(playback.FakeApi(), playback.FakeBridge())
+        ..sessionId = 'another'
+        ..sample = const PlayerSample(index: 0, positionMs: 0, status: 'playing');
+      addTearDown(player.dispose);
+      await _pump(tester, _makeContainer(api, player: player));
+
+      final button = tester.widget<TapeButton>(
+        find.byKey(const Key('play-here-button')),
+      );
+      expect(button.label, 'Play now');
+      expect(button.playing, isFalse);
+    });
+  });
+
+  group('remove with Undo', () {
+    testWidgets('a removal toasts the song and Undo re-inserts it at its old position', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      final sim = _QueueSim([_track(0), _track(1), _track(2)], 4);
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(queueVersion: 4),
+        messages: [],
+        queue: [...sim.tracks],
+        supportsInsert: true,
+      );
+      final ops = <QueueOp>[];
+      final versions = <int?>[];
+      api.onApplyQueueOps = (id, posted, expectedVersion) async {
+        ops.addAll(posted);
+        versions.add(expectedVersion);
+        return sim.apply(posted, expectedVersion);
+      };
+      await _pump(tester, _makeContainer(api));
+
+      await tester.drag(find.byKey(const Key('dismissible-t1')), const Offset(-500, 0));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Removed "Title 1"'), findsOneWidget);
+      expect(ops.single.toJson(), {'op': 'remove', 'position': 1});
+
+      await tester.tap(find.text('Undo'));
+      await tester.pumpAndSettle();
+
+      expect(ops.last.toJson(), {'op': 'insert', 'position': 1, 'trackId': 't1'});
+      // Posted against the version the removal produced, not the stale one.
+      expect(versions, [4, 5]);
+    });
+
+    testWidgets('a second removal replaces the first toast, and Undo restores the latest', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      final sim = _QueueSim([_track(0), _track(1), _track(2)], 1);
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(queueVersion: 1),
+        messages: [],
+        queue: [...sim.tracks],
+        supportsInsert: true,
+      );
+      final ops = <QueueOp>[];
+      api.onApplyQueueOps = (id, posted, expectedVersion) async {
+        ops.addAll(posted);
+        return sim.apply(posted, expectedVersion);
+      };
+      await _pump(tester, _makeContainer(api));
+
+      await tester.drag(find.byKey(const Key('dismissible-t0')), const Offset(-500, 0));
+      await tester.pumpAndSettle();
+      await tester.drag(find.byKey(const Key('dismissible-t1')), const Offset(-500, 0));
+      await tester.pumpAndSettle();
+
+      // One toast, naming the song that just went.
+      expect(find.text('Removed "Title 0"'), findsNothing);
+      expect(find.text('Removed "Title 1"'), findsOneWidget);
+      expect(find.text('Undo'), findsOneWidget);
+
+      await tester.tap(find.text('Undo'));
+      await tester.pumpAndSettle();
+
+      // Resolved against the queue as it stands (only t2 is left), not
+      // against the position t1 held before the first removal.
+      expect(ops.last.toJson(), {'op': 'insert', 'position': 0, 'trackId': 't1'});
+    });
+
+    testWidgets('without server support the toast names the song but offers no Undo', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(queueVersion: 1),
+        messages: [],
+        queue: [_track(0), _track(1)],
+      );
+      api.onApplyQueueOps = (id, ops, expectedVersion) async => QueueOpsResult(
+        queueVersion: 2,
+        requested: 1,
+        added: 0,
+        removed: 1,
+        queue: [_track(0)],
+      );
+      await _pump(tester, _makeContainer(api));
+
+      await tester.drag(find.byKey(const Key('dismissible-t1')), const Offset(-500, 0));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Removed "Title 1"'), findsOneWidget);
+      expect(find.text('Undo'), findsNothing);
+    });
+
+    testWidgets('a stale Undo refreshes to the server arrangement and says so', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(queueVersion: 1),
+        messages: [],
+        queue: [_track(0), _track(1)],
+        supportsInsert: true,
+      );
+      var call = 0;
+      api.onApplyQueueOps = (id, ops, expectedVersion) async {
+        call += 1;
+        if (call == 1) {
+          return QueueOpsResult(
+            queueVersion: 2,
+            requested: 1,
+            added: 0,
+            removed: 1,
+            queue: [_track(0)],
+          );
+        }
+        // Someone else moved the mix on while the toast was up.
+        throw StaleQueueException(
+          queue: [_track(0), _track(7)],
+          queueVersion: 9,
+        );
+      };
+      await _pump(tester, _makeContainer(api));
+
+      await tester.drag(find.byKey(const Key('dismissible-t1')), const Offset(-500, 0));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Undo'));
+      await tester.pumpAndSettle();
+
+      expect(find.text(arrangementConflictMessage), findsOneWidget);
+      // The canonical arrangement is on screen.
+      expect(find.text('Title 7'), findsOneWidget);
+      expect(find.text('Title 1'), findsNothing);
+    });
+  });
+
+  group('VoiceOver reordering', () {
+    testWidgets('Move up applies a move op against the current version', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      final api = FakeDjApi();
+      final sim = _QueueSim([_track(0), _track(1), _track(2)], 2);
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(queueVersion: 2),
+        messages: [],
+        queue: [...sim.tracks],
+      );
+      List<QueueOp>? captured;
+      int? version;
+      api.onApplyQueueOps = (id, ops, expectedVersion) async {
+        captured = ops;
+        version = expectedVersion;
+        return sim.apply(ops, expectedVersion);
+      };
+      await _pump(tester, _makeContainer(api));
+
+      final node = tester.getSemantics(find.byKey(TrackRow.rowKey('t2')));
+      // ignore: deprecated_member_use
+      tester.binding.pipelineOwner.semanticsOwner!.performAction(
+        node.id,
+        SemanticsAction.customAction,
+        CustomSemanticsAction.getIdentifier(TrackRow.moveUpAction),
+      );
+      await tester.pumpAndSettle();
+
+      expect(captured!.single.toJson(), {'op': 'move', 'from': 2, 'to': 1});
+      expect(version, 2);
+      handle.dispose();
+    });
+  });
+
+  group('states', () {
+    testWidgets('a failed load with nothing on screen offers Try again', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      var offline = true;
+      api.onGetSession = (_) async {
+        if (offline) throw Exception('offline');
+        return SessionDetail(session: _session(), messages: [], queue: [_track(0)]);
+      };
+      await _pump(tester, _makeContainer(api));
+
+      expect(find.text("Couldn't load this tape"), findsOneWidget);
+      expect(
+        find.text('Check your connection and try again. The mix itself is safe.'),
+        findsOneWidget,
+      );
+
+      offline = false;
+      await tester.tap(find.byKey(const Key('queue-retry')));
+      await tester.pumpAndSettle();
+      expect(find.text('Title 0'), findsOneWidget);
+    });
+
+    testWidgets('the not-personal block sits above the list with a hairline', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(notPersonal: true),
+        messages: [],
+        queue: [_track(0)],
+      );
+      await _pump(tester, _makeContainer(api));
+
+      final block = find.byKey(const Key('not-personal-banner'));
+      expect(block, findsOneWidget);
+      expect(find.text('Not personal yet'), findsOneWidget);
+      expect(
+        tester.getBottomLeft(block).dy,
+        lessThanOrEqualTo(tester.getTopLeft(find.text('Title 0')).dy),
+      );
+    });
+
+    testWidgets('renders at 320 with 200% text without overflowing', (tester) async {
+      tester.view.physicalSize = const Size(320, 640);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(notPersonal: true),
+        messages: [],
+        queue: [_track(0), _spotifyTrack(1)],
+      );
+      await _pump(
+        tester,
+        _makeContainer(api),
+        textScaler: const TextScaler.linear(2),
+      );
+
+      expect(tester.takeException(), isNull);
+      // The header is taller than a 320 x 640 phone at 200%, so the rows sit
+      // below the fold — reachable by scrolling, never clipped off the list.
+      await tester.drag(find.byType(CustomScrollView), const Offset(0, -400));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('Title 0'), findsOneWidget);
+    });
+
+    testWidgets('renders in the dark theme', (tester) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(), messages: [], queue: [_track(0)]);
+      await _pump(tester, _makeContainer(api), theme: MixtapeTheme.dark());
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Title 0'), findsOneWidget);
+      expect(find.byKey(const Key('play-here-button')), findsOneWidget);
     });
   });
 }

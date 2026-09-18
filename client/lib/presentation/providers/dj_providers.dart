@@ -33,7 +33,10 @@ final djApiProvider = Provider<DjApi>((ref) {
 const _genericApiErrorMessage = 'something went wrong on our end — try again';
 const _offlineErrorMessage =
     "couldn't reach the DJ — check your connection and try again";
-const _staleTransientMessage = 'queue was updated — showing the latest';
+/// Shown when an edit loses a version race. Public so a screen with its own
+/// approved conflict copy (the arrangement's "This mix changed elsewhere.")
+/// can recognise it rather than string-matching a private constant.
+const staleQueueTransientMessage = 'queue was updated — showing the latest';
 
 /// Never adopt a queueVersion without its matching queue, or vice versa — a
 /// version whose queue is unknown (or a queue with an unknown version) is
@@ -210,12 +213,19 @@ class ChatState {
     required this.queue,
     this.sending = false,
     this.transientError,
+    this.supportsInsert = false,
   });
 
   final DjSession session;
   final List<ChatMessage> messages;
   final List<QueueTrack> queue;
   final bool sending;
+
+  /// Whether the server understands the `insert` queue op (see
+  /// [SessionDetail.supportsInsert]) — the arrangement screen offers Undo on
+  /// a removal only when it does. A capability of the deploy, so it rides the
+  /// session load and never changes under an edit.
+  final bool supportsInsert;
 
   /// One-shot: the UI clears this via [ChatNotifier.clearTransientError]
   /// after showing it (e.g. in a snackbar) so it doesn't reappear on an
@@ -239,6 +249,7 @@ class ChatState {
     bool? sending,
     String? transientError,
     bool clearTransientError = false,
+    bool? supportsInsert,
   }) {
     assert(
       session == null || queueVersion == null,
@@ -258,6 +269,7 @@ class ChatState {
       transientError: clearTransientError
           ? null
           : (transientError ?? this.transientError),
+      supportsInsert: supportsInsert ?? this.supportsInsert,
     );
   }
 }
@@ -410,6 +422,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     queue: detail.queue,
     sending: sending,
     transientError: transientError,
+    supportsInsert: detail.supportsInsert,
   );
 
   DjMessage _localMessage(String role, String content) => DjMessage(
@@ -663,7 +676,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         (c) => c.copyWith(
           queue: e.queue,
           queueVersion: e.queueVersion,
-          transientError: _staleTransientMessage,
+          transientError: staleQueueTransientMessage,
         ),
       );
     } on DjApiException catch (e) {

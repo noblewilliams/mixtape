@@ -1,9 +1,32 @@
-import 'playback_screen.dart';
-import '../providers/playback_provider.dart';
+/// The arrangement: the ordered mix behind one conversation
+/// (`docs/mockups/approved/2026-09-17-mobile-arrangement-states.md`, frames
+/// R1–R3 / P1–P3 / E1–E4 in
+/// `docs/mockups/2026-09-17-mobile-arrangement-states.html`).
+///
+/// Reorder, remove (with Undo), read the DJ's reasons, then play it here,
+/// send it to Music, or turn it into a playlist. Server-canonical, like every
+/// other queue mutation in this app: reorder/remove/insert post an op and
+/// re-render from the response rather than editing local state optimistically.
+///
+/// Spotify listeners (plan `2026-09-02-listening-export-p2-spotify-import.md`,
+/// Outputs): a row with a Spotify id trades its grip for "Open in Spotify";
+/// any queue with a Spotify id gains "Send to a transfer tool" (and one Apple
+/// Music can do nothing with drops Play/Create entirely, with the reason
+/// written beside the action that remains); a corpus-mode session carries the
+/// "Not personal yet" block above the list.
+///
+/// Every mutation goes through one FIFO of [_QueueIntent]s rather than
+/// firing straight at the provider — see [_QueueScreenState._enqueue] for
+/// the invariants that buys (one op in flight at a time, positions resolved
+/// against the queue as it stands when the op is posted, and rows un-hidden
+/// when their own op settles rather than on a version change).
+library;
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../data/dj/dj_models.dart';
 import '../../data/listening/listening_models.dart';
 import '../../data/musickit/musickit_bridge.dart';
@@ -12,30 +35,37 @@ import '../providers/dj_providers.dart';
 import '../providers/funnel_provider.dart';
 import '../providers/library_sync_provider.dart';
 import '../providers/onboarding_provider.dart';
+import '../providers/playback_provider.dart';
+import '../theme/mixtape_theme.dart';
+import '../widgets/foundation/cassette_tile.dart';
+import '../widgets/foundation/glass_cluster.dart';
+import '../widgets/foundation/gradient_background.dart';
+import '../widgets/foundation/label_chip.dart';
+import '../widgets/foundation/tape_button.dart';
+import '../widgets/foundation/text_action.dart';
+import '../widgets/track_row.dart';
+import 'mix_history_screen.dart';
+import 'playback_screen.dart';
 
-/// The full tape for one session (see
-/// `docs/superpowers/plans/2026-08-29-p3b-dj-client.md` Task 5): reorder,
-/// remove, reveal the DJ's reasons, then hand off to Apple Music (play) or
-/// save (playlist) — over the same [chatProvider] the chat screen and
-/// [QueueCard] already watch. Server-canonical, like every other queue
-/// mutation in this app: reorder/remove post an op and re-render from the
-/// response rather than editing local state optimistically.
-///
-/// Spotify listeners (plan `2026-09-02-listening-export-p2-spotify-import.md`,
-/// Outputs): a row with a Spotify id gets "Open in Spotify"; any queue with
-/// a Spotify id gains "Send to a transfer tool" (and one Apple Music can do
-/// nothing with drops Play/Save entirely); a corpus-mode session carries the
-/// "Not personal yet" band above the list.
-///
-/// Every mutation goes through one FIFO of [_QueueIntent]s rather than
-/// firing straight at the provider — see [_QueueScreenState._enqueue] for
-/// the invariants that buys (one op in flight at a time, positions resolved
-/// against the queue as it stands when the op is posted, and rows un-hidden
-/// when their own op settles rather than on a version change).
+/// The conflict copy from the approved board. The provider's own
+/// [staleQueueTransientMessage] is shared with the conversation screen, so it
+/// is translated here rather than changed underneath that screen.
+const arrangementConflictMessage =
+    'This mix changed elsewhere. Showing the latest version.';
+
+/// The arrangement screen, pushed inside a tab [Navigator] (the shell hides
+/// the dock for it), so it draws its own chrome and never assumes it is the
+/// root route.
 class QueueScreen extends ConsumerStatefulWidget {
   const QueueScreen({super.key, required this.sessionId});
 
   final String sessionId;
+
+  /// The empty state's illustration size, as on Mixes.
+  static const double emptyCassetteWidth = 140;
+
+  /// How long Undo stays on screen after a removal.
+  static const Duration undoDuration = Duration(seconds: 5);
 
   @override
   ConsumerState<QueueScreen> createState() => _QueueScreenState();
@@ -135,26 +165,61 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     }
   }
 
-  void _handleDismiss(QueueTrack track) {
+  /// A full swipe removes at once and the toast offers Undo, which re-adds
+  /// the song where it was through the same versioned op — but only when the
+  /// server understands `insert` ([ChatState.supportsInsert]); against an
+  /// older deploy the toast simply names the song.
+  void _handleDismiss(QueueTrack track, {required bool supportsInsert}) {
+    final canonical =
+        ref.read(chatProvider(widget.sessionId)).value?.queue ?? const <QueueTrack>[];
+    final oldPosition = canonical.indexWhere((t) => t.trackId == track.trackId);
+    // An ANCHOR, not a number: the song that followed this one (null when it
+    // was last). An earlier removal still in flight would shift a bare
+    // position, so [_InsertIntent] resolves this against the queue as it
+    // stands when the Undo is actually posted, exactly as a move does.
+    final followerId = (oldPosition >= 0 && oldPosition + 1 < canonical.length)
+        ? canonical[oldPosition + 1].trackId
+        : null;
     setState(() => _hiddenTrackIds.add(track.trackId));
     _enqueue(_RemoveIntent(track.trackId));
+
+    final canUndo = supportsInsert && oldPosition >= 0;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('Removed "${track.title}"'),
+          duration: QueueScreen.undoDuration,
+          action: canUndo
+              ? SnackBarAction(
+                  label: 'Undo',
+                  onPressed: () => _enqueue(
+                    _InsertIntent(track.trackId, beforeTrackId: followerId),
+                  ),
+                )
+              : null,
+        ),
+      );
   }
 
   /// [newIndex] arrives in [ReorderableListView]'s own pre-removal indexing:
   /// moving an item DOWN reports an index one past where it actually lands
   /// once the dragged item is taken out of the list, so it's decremented by
   /// one in that case.
-  ///
-  /// The result is turned into an ANCHOR (the id of the row the dragged one
+  void _handleReorder(List<QueueTrack> visible, int oldIndex, int newIndex) {
+    var adjusted = newIndex;
+    if (adjusted > oldIndex) adjusted -= 1;
+    _moveTo(visible, oldIndex, adjusted);
+  }
+
+  /// The move is expressed as an ANCHOR (the id of the row the dragged one
   /// should land in front of, or null for "at the end") rather than a bare
   /// index, because [visible] is the on-screen list — which omits any row
   /// hidden by an intent that hasn't settled yet — while the op needs a
   /// position in the server's full queue. [_MoveIntent] re-derives that
   /// position from the current queue when it runs.
-  void _handleReorder(List<QueueTrack> visible, int oldIndex, int newIndex) {
-    var adjusted = newIndex;
-    if (adjusted > oldIndex) adjusted -= 1;
-    if (adjusted == oldIndex) return;
+  void _moveTo(List<QueueTrack> visible, int oldIndex, int newIndex) {
+    if (newIndex == oldIndex) return;
     final rest = [
       for (var i = 0; i < visible.length; i++)
         if (i != oldIndex) visible[i].trackId,
@@ -162,7 +227,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     _enqueue(
       _MoveIntent(
         visible[oldIndex].trackId,
-        beforeTrackId: adjusted < rest.length ? rest[adjusted] : null,
+        beforeTrackId: newIndex < rest.length ? rest[newIndex] : null,
       ),
     );
   }
@@ -277,6 +342,26 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     return Offset.zero & MediaQuery.sizeOf(screenContext);
   }
 
+  /// Play now: the app-owned Apple player takes the arrangement and the Now
+  /// Playing screen opens over it. The button then reads Playing (see
+  /// [_isPlayingThisMix]); nothing on the list changes.
+  void _playHere(ChatState state, List<QueueTrack> queue) {
+    final player = ref.read(playbackProvider);
+    unawaited(
+      player.start(widget.sessionId, state.queueVersion, state.session.title, queue),
+    );
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(builder: (_) => const PlaybackScreen()),
+    );
+  }
+
+  bool _isPlayingThisMix() {
+    final player = ref.read(playbackProvider);
+    return player.sessionId == widget.sessionId &&
+        (player.sample.status == 'playing' || player.sample.status == 'waiting');
+  }
+
   Future<void> _handlePlay(BuildContext screenContext, List<QueueTrack> queue) async {
     if (_playing) return;
     setState(() => _playing = true);
@@ -289,7 +374,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
       _showSnack(screenContext, _playSuccessMessage(skipped));
     } on MusicKitException catch (e) {
       if (!screenContext.mounted) return;
-      _showSnack(screenContext, "couldn't play — ${e.message}");
+      _showSnack(screenContext, "Couldn't play — ${e.message}");
     } finally {
       if (mounted) setState(() => _playing = false);
     }
@@ -380,7 +465,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
       // The bridge's message carries Apple's actual failure reason (see
       // MusicKitBridge._fromPlatform) — hiding it behind a generic string
       // made real device failures undiagnosable.
-      _showSnack(screenContext, "couldn't save the playlist — ${e.message}");
+      _showSnack(screenContext, "Couldn't save the playlist — ${e.message}");
     }
   }
 
@@ -389,40 +474,106 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
   }
 
   String _playSuccessMessage(int skipped) => skipped > 0
-      ? 'playing in Apple Music — $skipped track${skipped == 1 ? '' : 's'} skipped (not in Apple Music)'
-      : 'playing in Apple Music';
+      ? 'Playing in Apple Music · $skipped song${skipped == 1 ? '' : 's'} skipped (not in Apple Music)'
+      : 'Playing in Apple Music';
 
   String _saveSuccessMessage(int added, int failed) => failed > 0
-      ? 'saved $added songs to Apple Music ($failed failed)'
-      : 'saved $added songs to Apple Music';
+      ? 'Saved $added songs to Apple Music ($failed failed)'
+      : 'Saved $added songs to Apple Music';
 
   String _shareSuccessMessage(int count) =>
-      'shared $count song${count == 1 ? '' : 's'} — TuneMyMusic makes the playlist in Spotify';
+      'Shared $count song${count == 1 ? '' : 's'} · TuneMyMusic makes the playlist in Spotify';
 
-  /// Null when Play/Save are actionable; otherwise the tooltip explaining
-  /// why they're disabled — an empty queue has nothing to act on, and a
-  /// queue whose tracks are ALL missing an Apple Music match can't be
-  /// played or saved at all (a partial match still works: the filtered
-  /// track count is reported in the success snackbar instead). Not
-  /// consulted for a Spotify-only queue, which shows no Play/Save at all —
-  /// see [_hasAppleActions].
-  String? _actionsDisabledReason(List<QueueTrack> queue) {
-    if (queue.isEmpty) return 'nothing queued yet';
-    if (queue.every((t) => t.appleId == null)) return "these tracks aren't in Apple Music";
-    return null;
-  }
+  /// Null when Play/Create are actionable; otherwise the reason they are
+  /// not, written beside them rather than hidden in a tooltip: a queue whose
+  /// tracks are ALL missing an Apple Music match can't be played or saved at
+  /// all (a partial match still works — the filtered track count is reported
+  /// in the success snackbar instead). An empty queue needs no reason: the
+  /// actions row isn't built at all, per the board. Not consulted for a
+  /// Spotify-only queue, which shows no Play/Create — see [_hasAppleActions].
+  String? _actionsDisabledReason(List<QueueTrack> queue) =>
+      queue.every((t) => t.appleId == null) ? "these tracks aren't in Apple Music" : null;
 
   /// Each platform's controls appear when the queue has anything that
   /// platform can act on (plan: Outputs), so a mixed mix shows both — Apple
   /// first, since Play is still the primary action for a mix Apple Music can
   /// play. A queue with no Spotify ids at all shows no transfer handoff, and
   /// one with no ids of either kind (or none at all) keeps the disabled
-  /// Play/Save pair carrying [_actionsDisabledReason] rather than an empty
+  /// Play/Create pair carrying [_actionsDisabledReason] rather than an empty
   /// bar.
   bool _hasSpotifyActions(List<QueueTrack> queue) => queue.any((t) => t.spotifyId != null);
 
   bool _hasAppleActions(List<QueueTrack> queue) =>
       queue.any((t) => t.appleId != null) || !_hasSpotifyActions(queue);
+
+  void _openHistory() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => MixHistoryScreen(sessionId: widget.sessionId),
+      ),
+    );
+  }
+
+  /// The More menu the conversation already carries, minus Version history —
+  /// which has its own button in the cluster here.
+  Future<void> _openMore(BuildContext anchor) async {
+    final box = anchor.findRenderObject();
+    final overlay = Navigator.of(context).overlay?.context.findRenderObject();
+    if (box is! RenderBox || overlay is! RenderBox) return;
+    final rect = box.localToGlobal(Offset.zero, ancestor: overlay) & box.size;
+    final archived =
+        ref.read(chatProvider(widget.sessionId)).value?.session.status == 'archived';
+    final action = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(rect, Offset.zero & overlay.size),
+      items: [
+        const PopupMenuItem(value: 'rename', child: Text('Rename')),
+        PopupMenuItem(value: 'status', child: Text(archived ? 'Restore' : 'Archive')),
+      ],
+    );
+    if (!mounted || action == null) return;
+    if (action == 'rename') return _openRenameDialog();
+    final notifier = ref.read(chatProvider(widget.sessionId).notifier);
+    final ok = await notifier.setArchived(!archived);
+    if (!mounted) return;
+    _showSnack(
+      context,
+      ok
+          ? (archived ? 'Mix restored' : 'Mix archived')
+          : "Couldn't update this mix. Try again.",
+    );
+  }
+
+  Future<void> _openRenameDialog() async {
+    final current = ref.read(chatProvider(widget.sessionId)).value?.session.title ?? '';
+    final controller = TextEditingController(text: current);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Rename mix'),
+        content: TextField(
+          key: const Key('rename-field'),
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Mix name'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const Key('rename-confirm-button'),
+            onPressed: () => Navigator.of(dialogContext).pop(controller.text),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (!mounted || name == null || name.trim().isEmpty) return;
+    await ref.read(chatProvider(widget.sessionId).notifier).rename(name);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -461,9 +612,13 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
       // non-top screen clearing first can't stop the top one from showing.
       if (state.transientError != null) {
         if (ModalRoute.of(context)?.isCurrent == true) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text(state.transientError!)));
+          // A version conflict says so in the arrangement's own words.
+          final message = state.transientError == staleQueueTransientMessage
+              ? arrangementConflictMessage
+              : state.transientError!;
+          ScaffoldMessenger.of(context)
+            ..hideCurrentSnackBar()
+            ..showSnackBar(SnackBar(content: Text(message)));
         }
         ref.read(chatProvider(widget.sessionId).notifier).clearTransientError();
       }
@@ -474,112 +629,262 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     // bare spinner, and hasValue checked so a live list mid-background-
     // refresh-failure never blanks out to the full-screen error.
     if (chatAsync.hasError && !chatAsync.hasValue) {
-      return _QueueErrorScreen(onRetry: () => ref.invalidate(chatProvider(widget.sessionId)));
+      return _shell(
+        title: '',
+        body: _ErrorState(
+          onRetry: () => ref.invalidate(chatProvider(widget.sessionId)),
+        ),
+      );
     }
 
     if (!chatAsync.hasValue) {
-      return Scaffold(
-        appBar: AppBar(), // present on every state, see ChatScreen's identical comment
-        body: const Center(child: CircularProgressIndicator()),
-      );
+      return _shell(title: '', body: const Center(child: CircularProgressIndicator()));
     }
 
     final state = chatAsync.value!;
 
     // [visibleQueue] — not state.queue — drives EVERY surface on this
-    // screen: the list, the empty state, whether Play/Save are actionable,
+    // screen: the list, the empty state, whether Play/Create are actionable,
     // and the ids handed to Apple Music. A row the user has just swiped
     // away shouldn't play or be saved into a playlist just because its
     // removal hasn't round-tripped yet.
     final visibleQueue = state.queue.where((t) => !_hiddenTrackIds.contains(t.trackId)).toList();
-    final disabledReason = _actionsDisabledReason(visibleQueue);
-    final spotifyActions = _hasSpotifyActions(visibleQueue);
-    final appleActions = _hasAppleActions(visibleQueue);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(state.session.title),
-        actions: [
-          if (appleActions) ...[
-            IconButton(key:const Key('play-here-button'),tooltip:disabledReason??'Play in Mixtape',icon:const Icon(Icons.play_circle_filled),onPressed:disabledReason==null?(){
-              final player=ref.read(playbackProvider);
-              unawaited(player.start(widget.sessionId,state.queueVersion,state.session.title,visibleQueue));
-              Navigator.push(context,MaterialPageRoute(builder:(_)=>const PlaybackScreen()));
-            }:null),
-            IconButton(
-              key: const Key('play-button'),
-              tooltip: disabledReason ?? 'Send to Music',
-              onPressed: (disabledReason == null && !_playing)
-                  ? () => _handlePlay(context, visibleQueue)
-                  : null,
-              icon: const Icon(Icons.open_in_new),
+    final reducedMotion = MediaQuery.disableAnimationsOf(context);
+
+    return _shell(
+      title: state.session.title,
+      hasContent: true,
+      // One scroll view, not a Column with a fixed header: at 200% text the
+      // meta line and the wrapped actions are taller than a small phone, and
+      // a header that cannot scroll would overflow the list off the screen.
+      body: CustomScrollView(
+        slivers: [
+          if (state.session.notPersonal)
+            const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.symmetric(
+                  horizontal: MixtapeMetrics.screenSidePadding,
+                ),
+                child: _NotPersonalBlock(),
+              ),
             ),
-            IconButton(
-              key: const Key('save-button'),
-              tooltip: disabledReason ?? 'Save as playlist',
-              onPressed: (disabledReason == null && !_saving)
-                  ? () => _openSaveDialog(context, visibleQueue, state.session.title)
-                  : null,
-              icon: const Icon(Icons.playlist_add),
+          if (visibleQueue.isNotEmpty)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: MixtapeMetrics.screenSidePadding,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _MetaLine(
+                      songs: visibleQueue.length,
+                      version: state.queueVersion,
+                      durationLabel: _durationLabel(visibleQueue),
+                    ),
+                    _actionsRow(state, visibleQueue),
+                  ],
+                ),
+              ),
             ),
-          ],
-          // The Builder is the share sheet's popover anchor on iPad: its
-          // context resolves to the button's own render object.
-          if (spotifyActions)
-            Builder(
-              builder: (buttonContext) => IconButton(
-                key: const Key('share-button'),
-                tooltip: 'Send to a transfer tool',
-                onPressed: _sharing
-                    ? null
-                    : () => _handleShare(
-                          context,
-                          buttonContext,
-                          visibleQueue,
-                          state.session.title,
-                        ),
-                icon: const Icon(Icons.ios_share),
+          if (visibleQueue.isEmpty)
+            const SliverFillRemaining(hasScrollBody: false, child: _EmptyState())
+          else
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(
+                MixtapeMetrics.screenSidePadding,
+                0,
+                MixtapeMetrics.screenSidePadding,
+                24,
+              ),
+              sliver: SliverReorderableList(
+                itemCount: visibleQueue.length,
+                onReorder: (oldIndex, newIndex) =>
+                    _handleReorder(visibleQueue, oldIndex, newIndex),
+                // The board's lifted row, rebuilt rather than wrapped so the
+                // raised treatment belongs to the row itself. Reduced motion
+                // drops the spring: the row simply appears lifted.
+                proxyDecorator: (child, index, animation) =>
+                    // The list can ask for a proxy one frame after a removal
+                    // shortened the queue; the child it hands back is still
+                    // the right thing to draw.
+                    index >= visibleQueue.length
+                    ? child
+                    : _row(
+                        state,
+                        visibleQueue,
+                        index,
+                        lifted: true,
+                        reducedMotion: reducedMotion,
+                      ),
+                itemBuilder: (context, index) =>
+                    _row(state, visibleQueue, index, reducedMotion: reducedMotion),
               ),
             ),
         ],
       ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            if (state.session.notPersonal) const _NotPersonalBanner(),
-            Expanded(
-              child: visibleQueue.isEmpty
-                  ? const _EmptyQueue()
-                  : ReorderableListView.builder(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      itemCount: visibleQueue.length,
-                      // Each row supplies its own ReorderableDragStartListener on
-                      // the drag handle — the default handles would add a second,
-                      // duplicate one on every row.
-                      buildDefaultDragHandles: false,
-                      onReorder: (oldIndex, newIndex) =>
-                          _handleReorder(visibleQueue, oldIndex, newIndex),
-                      itemBuilder: (context, index) {
-                        final track = visibleQueue[index];
-                        return _QueueRow(
-                          key: ValueKey('queue-row-${track.trackId}'),
-                          index: index,
-                          track: track,
-                          expanded: _expandedTrackIds.contains(track.trackId),
-                          onToggle: () => _toggleReason(track.trackId),
-                          onDismissed: () => _handleDismiss(track),
-                          onOpenInSpotify: track.spotifyId == null
-                              ? null
-                              : () => _openInSpotify(context, track),
-                        );
-                      },
-                    ),
+    );
+  }
+
+  /// Chrome shared by every state: the gradient, the glass clusters and the
+  /// floating SnackBars (no dock on this route, so they sit 16 pt in).
+  Widget _shell({
+    required String title,
+    required Widget body,
+    bool hasContent = false,
+  }) {
+    final theme = Theme.of(context);
+    return GradientBackground(
+      child: Theme(
+        data: theme.copyWith(
+          snackBarTheme: theme.snackBarTheme.copyWith(
+            behavior: SnackBarBehavior.floating,
+            insetPadding: const EdgeInsets.all(16),
+          ),
+        ),
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          body: SafeArea(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _TopBar(
+                  title: title,
+                  onBack: () => Navigator.of(context).maybePop(),
+                  onHistory: hasContent ? _openHistory : null,
+                  onMore: hasContent ? _openMore : null,
+                ),
+                Expanded(child: body),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
   }
+
+  Widget _actionsRow(ChatState state, List<QueueTrack> visibleQueue) {
+    final tokens = context.tokens;
+    final disabledReason = _actionsDisabledReason(visibleQueue);
+    final spotifyActions = _hasSpotifyActions(visibleQueue);
+    final appleActions = _hasAppleActions(visibleQueue);
+    final muted = tokens.meta.copyWith(color: tokens.muted);
+
+    return ListenableBuilder(
+      listenable: ref.read(playbackProvider),
+      builder: (context, _) {
+        final playingHere = _isPlayingThisMix();
+        return Padding(
+          padding: const EdgeInsets.only(top: 2, bottom: 10),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              if (appleActions) ...[
+                TapeButton(
+                  key: const Key('play-here-button'),
+                  label: playingHere ? 'Playing' : 'Play now',
+                  playing: playingHere,
+                  onPressed: disabledReason == null
+                      ? () => _playHere(state, visibleQueue)
+                      : null,
+                ),
+                LabelChip(
+                  key: const Key('save-button'),
+                  label: 'Create playlist',
+                  onPressed: (disabledReason == null && !_saving)
+                      ? () => _openSaveDialog(context, visibleQueue, state.session.title)
+                      : null,
+                ),
+                TextAction(
+                  key: const Key('play-button'),
+                  label: 'Send to Music',
+                  onPressed: (disabledReason == null && !_playing)
+                      ? () => _handlePlay(context, visibleQueue)
+                      : null,
+                ),
+              ],
+              // The Builder is the share sheet's popover anchor on iPad: its
+              // context resolves to the button's own render object.
+              if (spotifyActions)
+                Builder(
+                  builder: (buttonContext) => TapeButton(
+                    key: const Key('share-button'),
+                    label: 'Send to a transfer tool',
+                    onPressed: _sharing
+                        ? null
+                        : () => _handleShare(
+                              context,
+                              buttonContext,
+                              visibleQueue,
+                              state.session.title,
+                            ),
+                  ),
+                ),
+              if (appleActions && disabledReason != null)
+                Text(key: const Key('actions-reason'), disabledReason, style: muted),
+              if (!appleActions)
+                SizedBox(
+                  width: double.infinity,
+                  child: Text(
+                    'Play now and Create playlist need Apple Music',
+                    key: const Key('apple-needed-reason'),
+                    style: muted,
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _row(
+    ChatState state,
+    List<QueueTrack> visibleQueue,
+    int index, {
+    bool lifted = false,
+    required bool reducedMotion,
+  }) {
+    final track = visibleQueue[index];
+    final row = TrackRow(
+      number: index + 1,
+      track: track,
+      expanded: _expandedTrackIds.contains(track.trackId),
+      onTap: () => _toggleReason(track.trackId),
+      isFirst: index == 0,
+      lifted: lifted,
+      dragIndex: (lifted || track.spotifyId != null) ? null : index,
+      onOpenInSpotify:
+          track.spotifyId == null ? null : () => _openInSpotify(context, track),
+      onMoveUp: index == 0 ? null : () => _moveTo(visibleQueue, index, index - 1),
+      onMoveDown: index == visibleQueue.length - 1
+          ? null
+          : () => _moveTo(visibleQueue, index, index + 1),
+    );
+    if (lifted) return KeyedSubtree(key: ValueKey('lifted-${track.trackId}'), child: row);
+    return Dismissible(
+      key: ValueKey('dismissible-${track.trackId}'),
+      direction: DismissDirection.endToStart,
+      movementDuration:
+          reducedMotion ? Duration.zero : const Duration(milliseconds: 200),
+      background: const _RemoveBand(),
+      onDismissed: (_) =>
+          _handleDismiss(track, supportsInsert: state.supportsInsert),
+      child: row,
+    );
+  }
+}
+
+/// "18 songs · 1 h 12 · version 2" — the duration is dropped when any track's
+/// length is unknown rather than reported short.
+String? _durationLabel(List<QueueTrack> queue) {
+  if (queue.isEmpty || queue.any((t) => t.durationMs == null)) return null;
+  final minutes = queue.fold<int>(0, (sum, t) => sum + t.durationMs!) ~/ 60000;
+  if (minutes < 60) return '$minutes min';
+  return '${minutes ~/ 60} h ${(minutes % 60).toString().padLeft(2, '0')}';
 }
 
 /// The transfer tool the handoff opens, matching the web rail's
@@ -615,6 +920,26 @@ class _RemoveIntent extends _QueueIntent {
   }
 }
 
+/// Undo: put the removed track back in front of whatever followed it. The
+/// intent is dropped if the track is somehow back already — inserting a
+/// duplicate is a 400, not a no-op — and an anchor that has itself since
+/// left the queue lands the song at the end rather than losing the Undo.
+class _InsertIntent extends _QueueIntent {
+  const _InsertIntent(super.trackId, {required this.beforeTrackId});
+
+  /// The track the restored one should land in front of; null means "at the
+  /// end of the queue".
+  final String? beforeTrackId;
+
+  @override
+  QueueOp? resolve(List<QueueTrack> queue) {
+    if (queue.any((t) => t.trackId == trackId)) return null;
+    final anchor =
+        beforeTrackId == null ? -1 : queue.indexWhere((t) => t.trackId == beforeTrackId);
+    return QueueOp.insert(anchor < 0 ? queue.length : anchor, trackId);
+  }
+}
+
 class _MoveIntent extends _QueueIntent {
   const _MoveIntent(super.trackId, {required this.beforeTrackId});
 
@@ -645,53 +970,187 @@ class _MoveIntent extends _QueueIntent {
   }
 }
 
-class _QueueErrorScreen extends StatelessWidget {
-  const _QueueErrorScreen({required this.onRetry});
+/// Back on the left, the mix title centred, Version history and More on the
+/// right — all in the board's glass clusters, with no app bar.
+class _TopBar extends StatelessWidget {
+  const _TopBar({
+    required this.title,
+    required this.onBack,
+    required this.onHistory,
+    required this.onMore,
+  });
 
-  final VoidCallback onRetry;
+  final String title;
+  final VoidCallback onBack;
+  final VoidCallback? onHistory;
+  final Future<void> Function(BuildContext anchor)? onMore;
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+    final tokens = context.tokens;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+      child: Row(
+        children: [
+          GlassCluster(
             children: [
-              Icon(Icons.cloud_off, size: 48, color: Theme.of(context).colorScheme.error),
-              const SizedBox(height: 16),
-              const Text("couldn't load this queue", textAlign: TextAlign.center),
-              const SizedBox(height: 16),
-              FilledButton(
-                key: const Key('queue-retry'),
-                onPressed: onRetry,
-                child: const Text('Try again'),
+              GlassButton(
+                key: const Key('arrangement-back'),
+                icon: Icons.arrow_back_ios_new,
+                label: 'Back',
+                onPressed: onBack,
               ),
             ],
           ),
-        ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Text(
+                title,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: tokens.smallTitle,
+              ),
+            ),
+          ),
+          GlassCluster(
+            children: [
+              GlassButton(
+                key: const Key('arrangement-history'),
+                icon: Icons.history,
+                label: 'Version history',
+                onPressed: onHistory,
+              ),
+              Builder(
+                builder: (anchor) => GlassButton(
+                  key: const Key('arrangement-more'),
+                  icon: Icons.more_horiz,
+                  label: 'More',
+                  onPressed: onMore == null ? null : () => onMore!(anchor),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
 }
 
-class _EmptyQueue extends StatelessWidget {
-  const _EmptyQueue();
+/// "18 songs · 1 h 12 · version 2" on the left, the tap hint on the right.
+/// The hint steps aside at large text rather than squeezing the counts.
+class _MetaLine extends StatelessWidget {
+  const _MetaLine({
+    required this.songs,
+    required this.version,
+    required this.durationLabel,
+  });
+
+  final int songs;
+  final int version;
+  final String? durationLabel;
+
+  static const String hint = 'Tap a song for its note';
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final tokens = context.tokens;
+    final style = tokens.meta.copyWith(color: tokens.muted);
+    final crowded = MediaQuery.textScalerOf(context).scale(100) / 100 >= 1.5;
+    final line = [
+      '$songs song${songs == 1 ? '' : 's'}',
+      if (durationLabel != null) durationLabel!,
+      'version $version',
+    ].join(' · ');
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 2, bottom: 6),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              line,
+              key: const Key('arrangement-meta'),
+              style: style,
+              maxLines: crowded ? null : 1,
+              overflow: crowded ? null : TextOverflow.ellipsis,
+            ),
+          ),
+          if (!crowded) ...[
+            const SizedBox(width: 8),
+            Text(hint, style: style, maxLines: 1, overflow: TextOverflow.ellipsis),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// The red band a swipe reveals under a row.
+class _RemoveBand extends StatelessWidget {
+  const _RemoveBand();
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    return Container(
+      color: tokens.errInk,
+      alignment: Alignment.centerRight,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Remove',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          SizedBox(width: 6),
+          Icon(Icons.close, size: 18, color: Colors.white),
+        ],
+      ),
+    );
+  }
+}
+
+/// E4: only when there is nothing on screen at all — a list already shown
+/// survives a failed refresh with a toast.
+class _ErrorState extends StatelessWidget {
+  const _ErrorState({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.queue_music, size: 48, color: theme.colorScheme.onSurfaceVariant),
-            const SizedBox(height: 16),
-            const Text('ask the DJ for a tape', textAlign: TextAlign.center),
+            Icon(Icons.error_outline, size: 36, color: tokens.errInk),
+            const SizedBox(height: 14),
+            Text(
+              "Couldn't load this tape",
+              textAlign: TextAlign.center,
+              style: tokens.section,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Check your connection and try again. The mix itself is safe.',
+              textAlign: TextAlign.center,
+              style: tokens.secondary,
+            ),
+            const SizedBox(height: 12),
+            KeyedSubtree(
+              key: const Key('queue-retry'),
+              child: TapeButton(label: 'Try again', onPressed: onRetry),
+            ),
           ],
         ),
       ),
@@ -699,153 +1158,84 @@ class _EmptyQueue extends StatelessWidget {
   }
 }
 
-/// The corpus-mode band (plan: Copy — "Not personal yet" wherever a session
-/// has `notPersonal`): the mix came from the shared catalog and the
-/// interview, not this listener's plays. Text only — Home is the only screen
-/// that pushes routes, so the import itself is reached from there. A live
-/// region so a screen reader announces it when a turn flips the flag.
-class _NotPersonalBanner extends StatelessWidget {
-  const _NotPersonalBanner();
+/// E3: a conversation that has not produced an arrangement yet.
+class _EmptyState extends StatelessWidget {
+  const _EmptyState();
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final color = theme.colorScheme.onSecondaryContainer;
+    final tokens = context.tokens;
+    return Center(
+      key: const Key('queue-empty'),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CassetteTile(width: QueueScreen.emptyCassetteWidth),
+            const SizedBox(height: 18),
+            Text(
+              'Nothing on the tape yet',
+              textAlign: TextAlign.center,
+              style: tokens.section,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Ask the DJ for a mix and it will show up here.',
+              textAlign: TextAlign.center,
+              style: tokens.secondary,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The corpus-mode block (plan: Copy — "Not personal yet" wherever a session
+/// has `notPersonal`): the mix came from the shared catalog and the
+/// interview, not this listener's plays. A flush line with a hairline under
+/// it, per the board — text only, since Home is the only screen that pushes
+/// the import. A live region so a screen reader announces it when a turn
+/// flips the flag.
+class _NotPersonalBlock extends StatelessWidget {
+  const _NotPersonalBlock();
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
     return Semantics(
       key: const Key('not-personal-banner'),
       container: true,
       liveRegion: true,
-      child: Material(
-        color: theme.colorScheme.secondaryContainer,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Not personal yet', style: theme.textTheme.titleSmall?.copyWith(color: color)),
-              const SizedBox(height: 4),
-              Text(
-                "Built from Mixtape's catalog and your interview, not your listening. "
-                'Import your Spotify data for the real thing.',
-                style: theme.textTheme.bodySmall?.copyWith(color: color),
-              ),
-            ],
-          ),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(0, 8, 0, 10),
+        margin: const EdgeInsets.only(bottom: 4),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: tokens.hairline)),
         ),
-      ),
-    );
-  }
-}
-
-class _QueueRow extends StatelessWidget {
-  const _QueueRow({
-    super.key,
-    required this.index,
-    required this.track,
-    required this.expanded,
-    required this.onToggle,
-    required this.onDismissed,
-    required this.onOpenInSpotify,
-  });
-
-  final int index;
-  final QueueTrack track;
-  final bool expanded;
-  final VoidCallback onToggle;
-  final VoidCallback onDismissed;
-
-  /// Set only when the track has a Spotify id — the row then shows "Open in
-  /// Spotify" ahead of its drag handle (a 48pt IconButton, over the 44pt
-  /// floor).
-  final VoidCallback? onOpenInSpotify;
-
-  Widget _dismissBackground(ThemeData theme, Alignment alignment) => Container(
-    color: theme.colorScheme.errorContainer,
-    alignment: alignment,
-    padding: const EdgeInsets.symmetric(horizontal: 20),
-    child: Icon(Icons.delete_outline, color: theme.colorScheme.onErrorContainer),
-  );
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final hasReason = track.reason != null && track.reason!.trim().isNotEmpty;
-
-    return Dismissible(
-      key: ValueKey('dismissible-${track.trackId}'),
-      background: _dismissBackground(theme, Alignment.centerLeft),
-      secondaryBackground: _dismissBackground(theme, Alignment.centerRight),
-      onDismissed: (_) => onDismissed(),
-      child: Material(
-        color: theme.colorScheme.surface,
-        child: InkWell(
-          key: Key('queue-row-tap-${track.trackId}'),
-          onTap: onToggle,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    SizedBox(width: 28, child: Text('${index + 1}', style: theme.textTheme.bodyMedium)),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(track.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                          Text(
-                            track.artist,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (onOpenInSpotify != null)
-                      IconButton(
-                        key: Key('open-in-spotify-${track.trackId}'),
-                        tooltip: 'Open in Spotify: ${track.title}',
-                        onPressed: onOpenInSpotify,
-                        icon: Icon(
-                          Icons.open_in_new,
-                          semanticLabel: 'Open in Spotify: ${track.title}',
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ReorderableDragStartListener(
-                      index: index,
-                      child: Padding(
-                        key: Key('drag-handle-${track.trackId}'),
-                        padding: const EdgeInsets.only(left: 8),
-                        child: Icon(Icons.drag_handle, color: theme.colorScheme.onSurfaceVariant),
-                      ),
-                    ),
-                  ],
-                ),
-                if (expanded) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    hasReason ? track.reason! : 'no notes from the DJ',
-                    key: Key('queue-row-reason-${track.trackId}'),
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      fontStyle: hasReason ? FontStyle.normal : FontStyle.italic,
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ],
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Not personal yet',
+              style: tokens.rowTitle.copyWith(fontWeight: FontWeight.w700),
             ),
-          ),
+            const SizedBox(height: 2),
+            Text(
+              "Built from Mixtape's catalog and your interview, not your listening. "
+              'Import your Spotify data for the real thing.',
+              style: tokens.meta.copyWith(color: tokens.muted),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
+/// P3's native alert: the mix title as the default name, and "Your name"
+/// remembered for next time.
 class _SaveDialog extends StatefulWidget {
   const _SaveDialog({
     required this.defaultName,
@@ -887,7 +1277,7 @@ class _SaveDialogState extends State<_SaveDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
+    return AlertDialog.adaptive(
       title: const Text('Save as playlist'),
       content: Column(
         mainAxisSize: MainAxisSize.min,
@@ -906,7 +1296,7 @@ class _SaveDialogState extends State<_SaveDialog> {
             enabled: !_submitting,
             decoration: const InputDecoration(
               labelText: 'Your name',
-              helperText: 'shown under the playlist in Apple Music',
+              helperText: 'Shown under the playlist in Apple Music',
             ),
           ),
         ],

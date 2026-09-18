@@ -377,6 +377,48 @@ void main() {
       expect(state.queue, hasLength(1));
       expect(state.queueVersion, 1);
       expect(state.sending, isFalse);
+      // No key on the wire — Undo stays hidden against an older deploy.
+      expect(state.supportsInsert, isFalse);
+    });
+
+    test('the insert capability rides the session load into the state', () async {
+      final api = FakeDjApi();
+      api.onGetSession = (id) async => SessionDetail(
+        session: _session(id: id, queueVersion: 1),
+        messages: [],
+        queue: [_track(0)],
+        supportsInsert: true,
+      );
+      final container = _makeContainer(api);
+
+      final state = await container.read(chatProvider('s1').future);
+
+      expect(state.supportsInsert, isTrue);
+    });
+
+    test('a queue edit keeps the capability flag', () async {
+      final api = FakeDjApi();
+      api.onGetSession = (id) async => SessionDetail(
+        session: _session(id: id, queueVersion: 1),
+        messages: [],
+        queue: [_track(0), _track(1)],
+        supportsInsert: true,
+      );
+      api.onApplyQueueOps = (id, ops, expectedVersion) async => QueueOpsResult(
+        queueVersion: 2,
+        requested: 1,
+        added: 0,
+        removed: 1,
+        queue: [_track(0)],
+      );
+      final container = _makeContainer(api);
+      await container.read(chatProvider('s1').future);
+
+      await container
+          .read(chatProvider('s1').notifier)
+          .applyOps([const QueueOp.remove(1)]);
+
+      expect(container.read(chatProvider('s1')).value!.supportsInsert, isTrue);
     });
 
     test(

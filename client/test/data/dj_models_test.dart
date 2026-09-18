@@ -19,6 +19,13 @@ Map<String, dynamic> _session({Object? notPersonal = 'x'}) => {
       if (notPersonal != 'x') 'notPersonal': notPersonal,
     };
 
+Map<String, dynamic> _detail({Object? supportsInsert = 'x'}) => {
+      'session': _session(),
+      'messages': <Map<String, dynamic>>[],
+      'queue': [_track()],
+      if (supportsInsert != 'x') 'supportsInsert': supportsInsert,
+    };
+
 void main() {
   group('QueueTrack.spotifyId', () {
     test('parses a Spotify id as a peer of appleId', () {
@@ -49,6 +56,49 @@ void main() {
         updatedAt: DateTime.utc(2026),
       );
       expect(session.notPersonal, isFalse);
+    });
+  });
+
+  group('QueueOp.insert', () {
+    test('serialises the op, the 0-based position and the track id', () {
+      expect(const QueueOp.insert(3, 'a2f0c9d4-0000-4000-8000-000000000001').toJson(), {
+        'op': 'insert',
+        'position': 3,
+        'trackId': 'a2f0c9d4-0000-4000-8000-000000000001',
+      });
+    });
+
+    test('position 0 rides the wire as 0, not as an omitted field', () {
+      expect(const QueueOp.insert(0, 't').toJson(), {
+        'op': 'insert',
+        'position': 0,
+        'trackId': 't',
+      });
+    });
+
+    test('remove and move are untouched', () {
+      expect(const QueueOp.remove(2).toJson(), {'op': 'remove', 'position': 2});
+      expect(const QueueOp.move(1, 4).toJson(), {'op': 'move', 'from': 1, 'to': 4});
+    });
+  });
+
+  group('SessionDetail.supportsInsert', () {
+    test('parses the server capability flag', () {
+      expect(SessionDetail.fromJson(_detail(supportsInsert: true)).supportsInsert, isTrue);
+    });
+
+    test('defaults to false when absent (an older deploy) or false on the wire', () {
+      expect(SessionDetail.fromJson(_detail()).supportsInsert, isFalse);
+      expect(SessionDetail.fromJson(_detail(supportsInsert: false)).supportsInsert, isFalse);
+    });
+
+    test('defaults to false in the constructor', () {
+      final detail = SessionDetail(
+        session: DjSession.fromJson(_session()),
+        messages: const [],
+        queue: const [],
+      );
+      expect(detail.supportsInsert, isFalse);
     });
   });
 }
