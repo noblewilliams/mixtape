@@ -4,7 +4,7 @@
 ///
 /// Since 2026-09-18 this mirrors the web welcome page (`web/src/components/
 /// AuthGate.tsx`): the handwritten wordmark, a cassette with its hubs turning
-/// for as long as the screen is open, sitting on two full-width
+/// for as long as the screen is open, one centred line, and two full-width
 /// pill buttons — the remembered method marked with a pencil note, one
 /// reserved line for waiting or failure, and the Apple Music note at the foot.
 library;
@@ -219,6 +219,8 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
 
     var total = text('mixtape', tokens.wordmark, width);
 
+    total += text(_headline, _headlineStyle(tokens), width) + 24;
+
     // The pill's floor, or its label plus the padding it sits in.
     final labelStyle = ProviderSignInButton.labelStyle(tokens);
     final labelWidth = width - 40 - ProviderSignInButton.markSize - 10;
@@ -299,6 +301,12 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     mainAxisSize: MainAxisSize.min,
     children: [
+      Text(
+        _headline,
+        textAlign: TextAlign.center,
+        style: _headlineStyle(tokens),
+      ),
+      const SizedBox(height: 24),
       for (final provider in AccountProvider.values) ...[
         _providerButton(provider, dark, googleAvailable),
         if (lastUsed == provider) _lastUsed(tokens),
@@ -428,6 +436,14 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
         letterSpacing: _lastUsedSize * -0.025,
         color: tokens.smoke,
       );
+
+  // A non-breaking space keeps "right now." on one line instead of an orphan.
+  static const String _headline = 'Your music, mixed for right\u00a0now.';
+
+  /// The founder's 2026-09-18 sizing: centred, a step under the large title
+  /// in size, a step over it in quietness (w600, not w800).
+  static TextStyle _headlineStyle(MixtapeTokens tokens) => tokens.largeTitle
+      .copyWith(fontSize: 22, fontWeight: FontWeight.w600, letterSpacing: -0.3);
 
   static const String _footNote = 'Music access is requested separately.';
 
