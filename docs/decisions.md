@@ -669,3 +669,26 @@ Cupertino; they now test what ships. Founder, smoke round three, note 8: the
 memory screen's More menu "is a Material popup box that clashes". **Reopens
 if:** Android becomes a target (then the helper grows a platform switch, not a
 second call site).
+
+## 2026-09-18 — The Spotify request screen doubles as "Add your music"
+`client/lib/presentation/screens/spotify_request_screen.dart` is now one
+screen for both services, with a native `CupertinoSlidingSegmentedControl`
+under the title: **Apple Music | Spotify**. The Apple pane is "Sync your
+library" (the same `LibrarySyncSheet` the Library tab's cluster opens) with a
+status word under it — running, failed, synced just now, or the date the
+account last synced — over the optional **Apple Media Services** export behind
+the same "Go deeper with your history" row the Spotify pane uses. The Spotify
+pane is what shipped, with "Open Exportify ↗" and "Choose files" on one row
+and their two helper lines merged into one.
+
+Which segment opens is a rule, not a memory: Spotify when the service gate is
+showing the screen (`onDone != null`) or the listener told the gate they use
+Spotify, Apple Music otherwise — and the rows that name a service themselves
+("Add Spotify music" on the Library tab and on Your music) pass
+`initialSegment` and open on Spotify whoever the listener is. The class name,
+every key, and the gate's own copy ("Bring your Spotify music", "Done, take me
+to the tapes") are unchanged, so the gate's tests still pin what the gate
+shows; the title is "Add your music" everywhere else. Founder, smoke round
+four, note 4: Library offered "Add your music" and landed on a Spotify guide.
+**Reopens if:** a third service arrives (two segments is a toggle, five is a
+list).

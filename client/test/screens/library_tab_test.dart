@@ -36,6 +36,7 @@ import 'package:mixtape/presentation/widgets/foundation/flush_row.dart';
 import 'package:mixtape/presentation/widgets/foundation/frosted_dock.dart'
     show kFrostedDockHeight;
 import 'package:mixtape/presentation/widgets/foundation/glass_cluster.dart';
+import 'package:mixtape/presentation/widgets/foundation/service_marks.dart';
 import 'package:mixtape/presentation/widgets/foundation/status_word.dart';
 import 'package:mixtape/presentation/widgets/library_sync_sheet.dart';
 
@@ -253,6 +254,15 @@ void main() {
         expect(find.text('Playlists'), findsOneWidget);
         expect(find.byType(GlassCluster), findsOneWidget);
         expect(find.byKey(LibraryTab.syncButtonKey), findsOneWidget);
+        // It syncs Apple Music, so it wears Apple Music's mark rather than
+        // the generic sync arrows (smoke round four, note 3).
+        expect(
+          find.descendant(
+            of: find.byKey(LibraryTab.syncButtonKey),
+            matching: find.byType(AppleMusicMark),
+          ),
+          findsOneWidget,
+        );
         expect(find.byKey(LibraryTab.moreButtonKey), findsOneWidget);
         expect(tester.takeException(), isNull);
       });

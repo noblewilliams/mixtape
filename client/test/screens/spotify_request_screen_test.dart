@@ -10,6 +10,7 @@ import 'package:mixtape/presentation/widgets/foundation/label_chip.dart';
 import 'package:mixtape/presentation/widgets/foundation/section_word.dart';
 import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
 import 'package:mixtape/presentation/widgets/foundation/text_action.dart';
+import 'package:mixtape/presentation/widgets/library_sync_sheet.dart';
 
 import '../helpers/fake_listening_api.dart';
 import '../helpers/onboarding_harness.dart';
@@ -99,7 +100,9 @@ void main() {
         const SpotifyRequestScreen(),
       );
 
-      expect(find.text('Bring your Spotify music'), findsOneWidget);
+      // Pushed from the Library tab, the screen is "Add your music"; the
+      // gate's own copy is pinned by its own test below.
+      expect(find.text('Add your music'), findsOneWidget);
       expect(find.byKey(const Key('link-spotify-privacy')), findsNothing);
       await tester.tap(find.byKey(const Key('go-deeper')));
       await tester.pumpAndSettle();
@@ -185,20 +188,16 @@ void main() {
         tester.widget<TapeButton>(find.byKey(const Key('open-exportify'))).label,
         'Open Exportify ↗',
       );
-      expect(find.text('Opens exportify.app outside Mixtape.'), findsOneWidget);
       expect(
         tester
             .widget<LabelChip>(find.byKey(const Key('choose-import-files')))
             .label,
         'Choose files',
       );
-      expect(
-        find.text(
-          'Exportify ZIP or CSV files, or an official Spotify ZIP. Read on this '
-          'device first; review before uploading.',
-        ),
-        findsOneWidget,
-      );
+      // The two helper lines under the row are one muted line now (smoke
+      // round four, note 4).
+      expect(find.text(exportifyRowNote), findsOneWidget);
+      expect(find.text('Opens exportify.app outside Mixtape.'), findsNothing);
       // The deeper block is one inset group, not a bordered card.
       expect(find.byType(InsetGroup), findsOneWidget);
       expectNativeControls(tester, find.byType(SpotifyRequestScreen));
@@ -335,7 +334,7 @@ void main() {
       brightness: Brightness.dark,
     );
 
-    expect(find.text('Bring your Spotify music'), findsOneWidget);
+    expect(find.text('Add your music'), findsOneWidget);
     await tester.tap(find.byKey(const Key('go-deeper')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('mark-requested')), findsOneWidget);
@@ -354,7 +353,7 @@ void main() {
       surface: const Size(320, 900),
     );
 
-    expect(find.text('Opens exportify.app outside Mixtape.'), findsOneWidget);
+    expect(find.text(exportifyRowNote), findsOneWidget);
     await tester.ensureVisible(find.byKey(const Key('go-deeper')));
     await tester.pump();
     await tester.tap(find.byKey(const Key('go-deeper')));
@@ -362,5 +361,146 @@ void main() {
     expect(find.text('spotify.com/account/privacy'), findsOneWidget);
     expectNativeControls(tester, find.byType(SpotifyRequestScreen));
     expect(tester.takeException(), isNull);
+  });
+
+  group('the Apple Music / Spotify toggle', () {
+    int segmentOf(WidgetTester tester) => tester
+        .widget<CupertinoSlidingSegmentedControl<int>>(
+          find.byKey(SpotifyRequestScreen.segmentKey),
+        )
+        .groupValue!;
+
+    testWidgets('the gate preselects Spotify and keeps its own copy', (
+      tester,
+    ) async {
+      final listening = FakeListeningApi(
+        onboarding: onboardingState(chosenService: 'spotify'),
+      );
+      await pumpRequest(
+        tester,
+        onboardingContainer(listening: listening),
+        SpotifyRequestScreen(onDone: () {}),
+      );
+
+      expect(find.text('Bring your Spotify music'), findsOneWidget);
+      expect(segmentOf(tester), SpotifyRequestScreen.spotifySegment);
+      // The Apple segment is still there to switch to.
+      expect(find.text('Apple Music'), findsOneWidget);
+      expect(find.byKey(const Key('open-exportify')), findsOneWidget);
+      expectNativeControls(tester, find.byType(SpotifyRequestScreen));
+    });
+
+    testWidgets('a Spotify listener lands on the Spotify pane from Library', (
+      tester,
+    ) async {
+      final listening = FakeListeningApi(
+        onboarding: onboardingState(chosenService: 'spotify'),
+      );
+      await pumpRequest(
+        tester,
+        onboardingContainer(listening: listening),
+        const SpotifyRequestScreen(),
+      );
+
+      expect(segmentOf(tester), SpotifyRequestScreen.spotifySegment);
+      expect(find.byKey(const Key('open-exportify')), findsOneWidget);
+      expect(find.byKey(SpotifyRequestScreen.appleSyncKey), findsNothing);
+    });
+
+    testWidgets('everyone else lands on the Apple pane', (tester) async {
+      final listening = FakeListeningApi(
+        onboarding: onboardingState(chosenService: 'apple'),
+      );
+      await pumpRequest(
+        tester,
+        onboardingContainer(listening: listening),
+        const SpotifyRequestScreen(),
+      );
+
+      expect(segmentOf(tester), SpotifyRequestScreen.appleSegment);
+      expect(find.byKey(SpotifyRequestScreen.appleSyncKey), findsOneWidget);
+      expect(find.byKey(const Key('open-exportify')), findsNothing);
+      expectNativeControls(tester, find.byType(SpotifyRequestScreen));
+    });
+
+    testWidgets(
+      'the Apple pane syncs the library and carries the Apple steps; the '
+      'Spotify segment swaps the pane over',
+      (tester) async {
+        final listening = FakeListeningApi(
+          onboarding: onboardingState(chosenService: 'apple'),
+        );
+        await pumpRequest(
+          tester,
+          onboardingContainer(listening: listening),
+          const SpotifyRequestScreen(),
+        );
+
+        // The same sheet the Library tab's Sync button opens.
+        await tester.tap(find.byKey(SpotifyRequestScreen.appleSyncKey));
+        await tester.pumpAndSettle();
+        expect(find.byType(LibrarySyncSheet), findsOneWidget);
+        await tester.tapAt(const Offset(10, 10));
+        await tester.pumpAndSettle();
+
+        // Apple's own request steps, behind the same disclosure row.
+        await tester.tap(find.byKey(SpotifyRequestScreen.goDeeperKey));
+        await tester.pumpAndSettle();
+        expect(find.text('privacy.apple.com'), findsNWidgets(2));
+        expect(
+          find.textContaining('Apple Media Services information'),
+          findsOneWidget,
+        );
+        expect(find.byKey(const Key('choose-apple-files')), findsOneWidget);
+        // Counts only: the pane never promises to show what it read.
+        expect(find.text(appleFileNote), findsOneWidget);
+
+        await tester.tap(find.text('Spotify'));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('open-exportify')), findsOneWidget);
+        expect(find.byKey(SpotifyRequestScreen.appleSyncKey), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'Open Exportify and Choose files share a row at 1x and stack at 2x',
+      (tester) async {
+        final listening = FakeListeningApi(
+          onboarding: onboardingState(chosenService: 'spotify'),
+        );
+        // The default surface, not a phone's: the test font draws every
+        // glyph one em wide, so both labels measure about twice what SF gives
+        // them on the device. The pair sharing a row on a 390 pt phone is the
+        // simulator's job (smoke round four captures); what is pinned here is
+        // that they share one when they fit, and stack when they do not.
+        await pumpRequest(
+          tester,
+          onboardingContainer(listening: listening),
+          const SpotifyRequestScreen(),
+        );
+
+        var button = tester.getRect(find.byKey(const Key('open-exportify')));
+        var chip = tester.getRect(find.byKey(const Key('choose-import-files')));
+        expect(chip.left, greaterThanOrEqualTo(button.right));
+        expect(chip.left - button.right, moreOrLessEquals(8, epsilon: 0.5));
+        expect(chip.center.dy, moreOrLessEquals(button.center.dy, epsilon: 1));
+
+        await pumpRequest(
+          tester,
+          onboardingContainer(
+            listening: FakeListeningApi(
+              onboarding: onboardingState(chosenService: 'spotify'),
+            ),
+          ),
+          const SpotifyRequestScreen(),
+          textScale: 2,
+          surface: const Size(320, 1400),
+        );
+        button = tester.getRect(find.byKey(const Key('open-exportify')));
+        chip = tester.getRect(find.byKey(const Key('choose-import-files')));
+        expect(chip.top, greaterThanOrEqualTo(button.bottom));
+        expect(tester.takeException(), isNull);
+      },
+    );
   });
 }

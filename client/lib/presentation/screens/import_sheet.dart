@@ -4,8 +4,8 @@
 /// Behaviour is the September 8 Exportify approval
 /// (`docs/mockups/approved/2026-09-08-exportify-import.md`) over the September
 /// 4 web import record; plan task 8.7 restyles it onto the September 17 shell
-/// (`docs/mockups/approved/2026-09-17-mobile-shell.md`): a frosted sheet with
-/// a handle, flush rows, status words, a prism progress bar, and tape/chip/
+/// (`docs/mockups/approved/2026-09-17-mobile-shell.md`): the shared sheet
+/// chrome, flush rows, status words, a prism progress bar, and tape/chip/
 /// text controls. Every fact shown still comes from the inventory or the
 /// summary; never a track, artist, or playlist name.
 library;
@@ -25,7 +25,6 @@ import '../providers/onboarding_provider.dart';
 import '../providers/opened_archive_provider.dart';
 import '../theme/mixtape_theme.dart';
 import '../widgets/collection_review_form.dart';
-import '../widgets/foundation/frosted_surface.dart';
 import '../widgets/foundation/inset_group.dart';
 import '../widgets/foundation/label_chip.dart';
 import '../widgets/foundation/section_word.dart';
@@ -175,13 +174,18 @@ class _WaitingFile extends ConsumerWidget {
   }
 }
 
-/// The Spotify import flow, in a frosted sheet with a handle.
+/// The Spotify import flow, inside the shared sheet chrome.
 class ImportSheet extends ConsumerStatefulWidget {
   const ImportSheet({super.key});
 
   /// The fraction of the screen the sheet may take before it scrolls inside
   /// itself — the 200% text case.
   static const double maxHeightFactor = 0.9;
+
+  /// The air under the sheet's own content. The home indicator is cleared by
+  /// [MixtapeSheetChrome]'s bottom padding, not by a second inset here
+  /// (smoke round four, note 1: the sheet wore two handles and a dead band).
+  static const double contentBottomPadding = 12;
 
   @override
   ConsumerState<ImportSheet> createState() => _ImportSheetState();
@@ -228,61 +232,31 @@ class _ImportSheetState extends ConsumerState<ImportSheet> {
       ImportFailed() => _Failed(state: state, notifier: notifier),
     };
 
-    return SafeArea(
-      top: false,
-      child: FrostedSurface(
-        borderRadius: const BorderRadius.vertical(
-          top: Radius.circular(MixtapeMetrics.groupRadius),
+    // No handle, no surface and no safe area of its own: the shared chrome
+    // draws one handle, paints the sheet and clears the home indicator, and a
+    // second copy of each is what the founder read as a transparent sheet
+    // with a dead band under it (smoke round four, note 1). The height is
+    // whatever the step needs — the long review scrolls, the idle "Choose
+    // files" step hugs its content.
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        maxHeight:
+            MediaQuery.sizeOf(context).height * ImportSheet.maxHeightFactor,
+      ),
+      child: SingleChildScrollView(
+        // The review stage has text fields: the keyboard's inset is padding,
+        // not a clip, so "Save as" scrolls above it.
+        padding: EdgeInsets.fromLTRB(
+          20,
+          4,
+          20,
+          ImportSheet.contentBottomPadding +
+              MediaQuery.viewInsetsOf(context).bottom,
         ),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight:
-                MediaQuery.sizeOf(context).height * ImportSheet.maxHeightFactor,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const _SheetHandle(),
-              Flexible(
-                child: SingleChildScrollView(
-                  // The review stage has text fields: the keyboard's inset is
-                  // padding, not a clip, so "Save as" scrolls above it.
-                  padding: EdgeInsets.fromLTRB(
-                    20,
-                    4,
-                    20,
-                    24 + MediaQuery.viewInsetsOf(context).bottom,
-                  ),
-                  child: body,
-                ),
-              ),
-            ],
-          ),
-        ),
+        child: body,
       ),
     );
   }
-}
-
-/// The grab handle at the top of the sheet.
-class _SheetHandle extends StatelessWidget {
-  const _SheetHandle();
-
-  static const double width = 36;
-  static const double height = 5;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(top: 8, bottom: 6),
-    child: Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        color: context.tokens.muted.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(MixtapeMetrics.pillRadius),
-      ),
-    ),
-  );
 }
 
 String packageName(ExportPackage? package) => switch (package) {

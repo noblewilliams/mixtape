@@ -194,9 +194,14 @@ class MusicSourcesScreen extends ConsumerWidget {
       openImportFlow(context, ref);
 
   Future<void> _addSpotify(BuildContext context, WidgetRef ref) async {
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => const SpotifyRequestScreen()));
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        // The row names the service, so it opens on that pane.
+        builder: (_) => const SpotifyRequestScreen(
+          initialSegment: SpotifyRequestScreen.spotifySegment,
+        ),
+      ),
+    );
     if (context.mounted) {
       await ref.read(onboardingProvider.notifier).refresh();
     }
@@ -463,9 +468,6 @@ class _Centred extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(top: 64),
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: children,
-    ),
+    child: Column(mainAxisSize: MainAxisSize.min, children: children),
   );
 }

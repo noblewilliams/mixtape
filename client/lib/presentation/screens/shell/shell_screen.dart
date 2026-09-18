@@ -32,6 +32,7 @@ import '../mixes_screen.dart';
 import '../playback_screen.dart';
 import '../tabs/library_tab.dart';
 import '../tabs/you_tab.dart';
+import 'shell_route_observer.dart';
 
 class ShellScreen extends ConsumerStatefulWidget {
   const ShellScreen({super.key});
@@ -254,18 +255,22 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
       AppTab.library => const LibraryTab(),
       AppTab.you => const YouTab(),
     };
-    return Builder(
-      builder: (context) {
-        final media = MediaQuery.of(context);
-        return MediaQuery(
-          data: media.copyWith(
-            padding: media.padding.copyWith(
-              bottom: media.padding.bottom + kFrostedDockHeight,
+    return ShellRouteObserverScope(
+      // The tab's own observer, so a root can watch what lands above it.
+      observer: _observers[tab.index],
+      child: Builder(
+        builder: (context) {
+          final media = MediaQuery.of(context);
+          return MediaQuery(
+            data: media.copyWith(
+              padding: media.padding.copyWith(
+                bottom: media.padding.bottom + kFrostedDockHeight,
+              ),
             ),
-          ),
-          child: root,
-        );
-      },
+            child: root,
+          );
+        },
+      ),
     );
   }
 
@@ -374,7 +379,11 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
 ///
 /// Sheets and dialogs opened from inside a tab go on that tab's navigator, so
 /// they count too: the dock must not float over a sheet.
-class _TabRouteObserver extends NavigatorObserver {
+///
+/// It is a [ShellRouteObserver] as well as a counter, so a tab root can
+/// subscribe to it as a [RouteAware] and learn the same fact about itself —
+/// Home's panel has to go while a modal is over it (smoke round four, note 2).
+class _TabRouteObserver extends ShellRouteObserver {
   _TabRouteObserver({required this.onChanged});
 
   final VoidCallback onChanged;
@@ -386,22 +395,25 @@ class _TabRouteObserver extends NavigatorObserver {
   /// something the listener pushed.
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    super.didPush(route, previousRoute);
     if (previousRoute == null) return;
     _change(1);
   }
 
   @override
-  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) =>
-      _change(-1);
-
-  @override
-  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) =>
-      _change(-1);
-
-  @override
-  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
-    // A replacement keeps the depth: one route left, one arrived.
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    super.didPop(route, previousRoute);
+    _change(-1);
   }
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    super.didRemove(route, previousRoute);
+    _change(-1);
+  }
+
+  // A replacement keeps the depth (one route left, one arrived), so
+  // `didReplace` is left to [RouteObserver], which moves the subscriptions.
 
   void _change(int delta) {
     final next = _depth + delta;

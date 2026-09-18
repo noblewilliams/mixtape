@@ -116,3 +116,14 @@ order listed in revision 1 of the shape board.
   "Last used" note becomes the web's pencil note in the same marker at 13 pt.
   The reserved status line, the Google-unavailable reason and the Apple Music
   foot note are unchanged. SF remains the typeface everywhere else.
+- 2026-09-18, smoke round four: Library's "Add your music" is one screen for
+  both services — `spotify_request_screen.dart` grew a
+  `CupertinoSlidingSegmentedControl` (Apple Music | Spotify) under the title,
+  with the Apple pane carrying the library sync and the optional Apple Media
+  Services export. The board drew a Spotify-only guide. The title is "Add your
+  music" from Library and stays "Bring your Spotify music" when the service
+  gate shows it; the rows that name a service ("Add Spotify music" on the
+  Library tab and on Your music) open on that pane. Library's Sync button in
+  the glass cluster carries the Apple Music note mark rather than the board's
+  generic sync arrows — it is Apple Music's sync, and `GlassButton` now takes
+  a drawn `child` as an alternative to an icon.

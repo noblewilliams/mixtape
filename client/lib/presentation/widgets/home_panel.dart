@@ -48,6 +48,7 @@ class HomePanel extends StatefulWidget {
     this.refinements,
     this.selectedArc,
     this.onArcChanged,
+    this.obscured = false,
   });
 
   /// The composer's draft, which the pills fill.
@@ -90,6 +91,19 @@ class HomePanel extends StatefulWidget {
   /// folds its sentence in at send (smoke round three, note 5).
   final EnergyArc? selectedArc;
   final ValueChanged<EnergyArc?>? onArcChanged;
+
+  /// A modal route is over Home (smoke round four, note 2). The panel fades
+  /// out rather than showing its top edge and handle above the sheet under the
+  /// scrim, and gives up its native glass while it is gone: a `UiKitView`
+  /// composites above a route barrier and would punch a hole in the dim.
+  final bool obscured;
+
+  /// How long the panel takes to go and come back. Instant under reduced
+  /// motion.
+  static const Duration veilDuration = Duration(milliseconds: 120);
+
+  /// The fade itself, for tests.
+  static const Key veilKey = Key('home-panel-veil');
 
   /// The board's `.bpanel` top radius.
   static const double topRadius = 30;
@@ -217,95 +231,103 @@ class _HomePanelState extends State<HomePanel> {
         // The dock relationship is unchanged: the gap below still comes out
         // of the panel's own bottom padding.
         padding: const EdgeInsets.symmetric(horizontal: HomePanel.sideInset),
-        child: LiquidGlassSurface(
-          key: HomePanel.surfaceKey,
-          borderRadius: BorderRadius.circular(HomePanel.floatingRadius),
-          fallbackBlurSigma: 30,
-          fallbackTint: tokens.panel,
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(
-              HomePanel.sidePadding,
-              8,
-              HomePanel.sidePadding,
-              bottom,
-            ),
-            // The panel's own overflow is its own business: a scroll in here
-            // must not minimise the shell's dock.
-            child: NotificationListener<ScrollNotification>(
-              onNotification: (_) => true,
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Center(
-                      child: Container(
-                        key: HomePanel.handleKey,
-                        width: HomePanel.handleWidth,
-                        height: HomePanel.handleHeight,
-                        margin: const EdgeInsets.only(top: 2, bottom: 12),
-                        decoration: const BoxDecoration(
-                          color: HomePanel.handleColor,
-                          borderRadius: BorderRadius.all(Radius.circular(3)),
+        child: AnimatedOpacity(
+          key: HomePanel.veilKey,
+          opacity: widget.obscured ? 0 : 1,
+          duration: media.disableAnimations
+              ? Duration.zero
+              : HomePanel.veilDuration,
+          child: LiquidGlassSurface(
+            key: HomePanel.surfaceKey,
+            borderRadius: BorderRadius.circular(HomePanel.floatingRadius),
+            fallbackBlurSigma: 30,
+            fallbackTint: tokens.panel,
+            allowNative: !widget.obscured,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                HomePanel.sidePadding,
+                8,
+                HomePanel.sidePadding,
+                bottom,
+              ),
+              // The panel's own overflow is its own business: a scroll in here
+              // must not minimise the shell's dock.
+              child: NotificationListener<ScrollNotification>(
+                onNotification: (_) => true,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Center(
+                        child: Container(
+                          key: HomePanel.handleKey,
+                          width: HomePanel.handleWidth,
+                          height: HomePanel.handleHeight,
+                          margin: const EdgeInsets.only(top: 2, bottom: 12),
+                          decoration: const BoxDecoration(
+                            color: HomePanel.handleColor,
+                            borderRadius: BorderRadius.all(Radius.circular(3)),
+                          ),
                         ),
                       ),
-                    ),
-                    MixPromptInput(
-                      key: widget.composerKey,
-                      controller: widget.controller,
-                      focusNode: widget.focusNode,
-                      busy: widget.busy,
-                      onSubmit: widget.onSubmit,
-                      attachment: widget.attachment,
-                      placeholder: widget.placeholder,
-                      energyArc: widget.selectedArc,
-                      onEnergyArcChanged: widget.onArcChanged,
-                      // The pills hold these; the rotating hint skips them so
-                      // the field never repeats a pill below it. Refinements
-                      // are not prompts, so they reserve nothing.
-                      reservedExamples: widget.refinements == null
-                          ? starters
-                          : const [],
-                    ),
-                    if (error != null) _errorLine(tokens, error),
-                    Padding(
-                      padding: const EdgeInsets.only(
-                        top: HomePanel.pillsTopGap,
+                      MixPromptInput(
+                        key: widget.composerKey,
+                        controller: widget.controller,
+                        focusNode: widget.focusNode,
+                        busy: widget.busy,
+                        onSubmit: widget.onSubmit,
+                        attachment: widget.attachment,
+                        placeholder: widget.placeholder,
+                        energyArc: widget.selectedArc,
+                        onEnergyArcChanged: widget.onArcChanged,
+                        // The pills hold these; the rotating hint skips them so
+                        // the field never repeats a pill below it. Refinements
+                        // are not prompts, so they reserve nothing.
+                        reservedExamples: widget.refinements == null
+                            ? starters
+                            : const [],
                       ),
-                      // With a playlist attached the three pills are refinements
-                      // of it, and no routine suggestion competes with them.
-                      child: widget.refinements != null
-                          ? _refinementPills(dimmed: dimmed)
-                          : RoutinePillSlot(
-                              onFill: _fill,
-                              dimmed: dimmed,
-                              enabled: !widget.busy,
-                              builder: (context, pill) {
-                                final shown = pill == null
-                                    ? HomePanel.maxPills
-                                    : HomePanel.maxPills - 1;
-                                return Wrap(
-                                  key: HomePanel.pillsKey,
-                                  spacing: HomePanel.pillGap,
-                                  runSpacing: HomePanel.pillRunGap,
-                                  children: [
-                                    if (pill != null) pill,
-                                    for (
-                                      var i = 0;
-                                      i < shown && i < starters.length;
-                                      i++
-                                    )
-                                      _starterPill(
-                                        i,
-                                        starters[i],
-                                        dimmed: dimmed,
-                                      ),
-                                  ],
-                                );
-                              },
-                            ),
-                    ),
-                  ],
+                      if (error != null) _errorLine(tokens, error),
+                      Padding(
+                        padding: const EdgeInsets.only(
+                          top: HomePanel.pillsTopGap,
+                        ),
+                        // With a playlist attached the three pills are refinements
+                        // of it, and no routine suggestion competes with them.
+                        child: widget.refinements != null
+                            ? _refinementPills(dimmed: dimmed)
+                            : RoutinePillSlot(
+                                onFill: _fill,
+                                dimmed: dimmed,
+                                enabled: !widget.busy,
+                                builder: (context, pill) {
+                                  final shown = pill == null
+                                      ? HomePanel.maxPills
+                                      : HomePanel.maxPills - 1;
+                                  return Wrap(
+                                    key: HomePanel.pillsKey,
+                                    spacing: HomePanel.pillGap,
+                                    runSpacing: HomePanel.pillRunGap,
+                                    children: [
+                                      if (pill != null) pill,
+                                      for (
+                                        var i = 0;
+                                        i < shown && i < starters.length;
+                                        i++
+                                      )
+                                        _starterPill(
+                                          i,
+                                          starters[i],
+                                          dimmed: dimmed,
+                                        ),
+                                    ],
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),

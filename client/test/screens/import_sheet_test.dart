@@ -17,6 +17,7 @@ import 'package:mixtape/presentation/widgets/foundation/label_chip.dart';
 import 'package:mixtape/presentation/widgets/foundation/status_word.dart';
 import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
 import 'package:mixtape/presentation/widgets/foundation/text_action.dart';
+import 'package:mixtape/presentation/widgets/foundation/mixtape_sheet.dart';
 
 import '../helpers/fake_import_service.dart';
 import '../helpers/fake_listening_api.dart';
@@ -764,4 +765,35 @@ void main() {
     expect((lifted.padding! as EdgeInsets).bottom, before + 300);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'the sheet wears the shared chrome only: one handle, and no dead band '
+    'between its content and the bottom of the screen',
+    (tester) async {
+      tester.view.physicalSize = const Size(400, 900);
+      tester.view.devicePixelRatio = 1;
+      // A phone with a home indicator: the chrome clears it, the sheet does
+      // not clear it a second time (smoke round four, note 1).
+      tester.view.padding = const FakeViewPadding(bottom: 34);
+      tester.view.viewPadding = const FakeViewPadding(bottom: 34);
+      addTearDown(tester.view.reset);
+
+      final c = container();
+      await open(tester, c);
+
+      // One handle in the tree: the shared chrome's.
+      expect(find.byKey(MixtapeSheet.handleKey), findsOneWidget);
+
+      final surface = tester.getRect(find.byKey(MixtapeSheet.surfaceKey));
+      expect(surface.bottom, moreOrLessEquals(900, epsilon: 0.5));
+
+      // The idle step hugs its content: what is under "Choose files" is the
+      // sheet's own bottom padding and the home indicator, nothing else.
+      final content = tester.getRect(find.byKey(const Key('import-pick')));
+      expect(
+        surface.bottom - content.bottom,
+        lessThanOrEqualTo(34 + ImportSheet.contentBottomPadding + 1),
+      );
+    },
+  );
 }

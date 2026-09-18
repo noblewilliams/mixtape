@@ -50,12 +50,22 @@ class GlassCluster extends StatelessWidget {
 class GlassButton extends StatelessWidget {
   const GlassButton({
     super.key,
-    required this.icon,
+    this.icon,
+    this.child,
     required this.label,
     this.onPressed,
-  });
+  }) : assert(
+         (icon == null) != (child == null),
+         'a GlassButton carries either an icon or a child, never both',
+       );
 
-  final IconData icon;
+  /// The glyph, for the buttons that wear one of Material's.
+  final IconData? icon;
+
+  /// A drawn mark instead of [icon] — the Library tab's Sync button carries
+  /// the Apple Music note (smoke round four, note 3). Sized and inked by the
+  /// caller; everything else about the button is unchanged.
+  final Widget? child;
 
   /// The accessibility label; the button itself is a glyph.
   final String label;
@@ -87,7 +97,8 @@ class GlassButton extends StatelessWidget {
               child: SizedBox.square(
                 dimension: diameter,
                 child: Center(
-                  child: Icon(icon, size: iconSize, color: tokens.text),
+                  child:
+                      child ?? Icon(icon, size: iconSize, color: tokens.text),
                 ),
               ),
             ),

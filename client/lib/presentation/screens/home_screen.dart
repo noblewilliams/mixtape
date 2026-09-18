@@ -30,6 +30,7 @@ import '../../data/playlists/playlist_context_models.dart';
 import '../widgets/playlist_inspiration.dart';
 import '../providers/new_mix_inspiration_provider.dart';
 import 'import_sheet.dart';
+import 'shell/shell_route_observer.dart';
 import 'interview_screen.dart';
 import 'spotify_request_screen.dart';
 
@@ -83,7 +84,7 @@ class HomeScreen extends ConsumerStatefulWidget {
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends ConsumerState<HomeScreen> {
+class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
   final _promptController = TextEditingController();
   final _promptFocus = FocusNode();
   final _composerKey = GlobalKey();
@@ -161,8 +162,43 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   HandedArchive? _handled;
   bool _openingHandedArchive = false;
 
+  /// The tab's route observer and the route this screen is on, while
+  /// subscribed to them. Both null outside the shell — a bare pump in a test,
+  /// or a Home built without a scope — and the panel then simply never hides.
+  ShellRouteObserver? _routeObserver;
+  ModalRoute<dynamic>? _route;
+
+  /// A modal route (a sheet, a Cupertino action sheet, a dialog) is above
+  /// Home. The panel goes while it is (smoke round four, note 2).
+  bool _obscured = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final observer = ShellRouteObserverScope.maybeOf(context);
+    final route = ModalRoute.of(context);
+    if (observer == _routeObserver && route == _route) return;
+    _routeObserver?.unsubscribe(this);
+    _routeObserver = observer;
+    _route = route;
+    if (observer != null && route != null) observer.subscribe(this, route);
+  }
+
+  /// Something was pushed over Home.
+  @override
+  void didPushNext() {
+    if (mounted && !_obscured) setState(() => _obscured = true);
+  }
+
+  /// …and it is gone again.
+  @override
+  void didPopNext() {
+    if (mounted && _obscured) setState(() => _obscured = false);
+  }
+
   @override
   void dispose() {
+    _routeObserver?.unsubscribe(this);
     _promptController.dispose();
     _promptFocus.dispose();
     super.dispose();
@@ -423,6 +459,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 key: _panelKey,
                 child: HomePanel(
                   composerKey: _composerKey,
+                  obscured: _obscured,
                   controller: _promptController,
                   focusNode: _promptFocus,
                   busy: _starting,

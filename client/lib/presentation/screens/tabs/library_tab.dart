@@ -27,6 +27,7 @@ import '../../widgets/foundation/glass_cluster.dart';
 import '../../widgets/foundation/gradient_background.dart';
 import '../../widgets/foundation/large_title_scaffold.dart';
 import '../../widgets/foundation/section_word.dart';
+import '../../widgets/foundation/service_marks.dart';
 import '../../widgets/foundation/tape_button.dart';
 import '../../widgets/library_sync_sheet.dart';
 import '../import_sheet.dart';
@@ -45,6 +46,10 @@ class LibraryTab extends ConsumerStatefulWidget {
   static const double defaultBottomInset = 16;
 
   static const Key syncButtonKey = Key('library-sync');
+
+  /// The Apple Music note on the Sync button: a touch smaller than the
+  /// cluster's 20 pt glyphs, which the drawn mark out-weighs at the same side.
+  static const double syncMarkSize = 18;
   static const Key moreButtonKey = Key('library-more');
 
   /// The More menu's entry to the full Your music screen.
@@ -225,9 +230,14 @@ class _LibraryTabState extends ConsumerState<LibraryTab> {
             children: [
               GlassButton(
                 key: LibraryTab.syncButtonKey,
-                icon: Icons.sync,
                 label: 'Sync library',
                 onPressed: () => LibrarySyncSheet.show(context),
+                // It is Apple Music's sync, so it wears Apple Music's mark
+                // rather than the generic arrows (smoke round four, note 3).
+                child: AppleMusicMark(
+                  size: LibraryTab.syncMarkSize,
+                  color: context.tokens.text,
+                ),
               ),
               GlassButton(
                 key: LibraryTab.moreButtonKey,
@@ -337,7 +347,12 @@ class _LibraryTabState extends ConsumerState<LibraryTab> {
               leadingSize: kSourceMarkSize,
               title: 'Add Spotify music',
               subtitle: 'Bring a Spotify export across',
-              onTap: () => _push(const SpotifyRequestScreen()),
+              // The row names the service, so it opens on that pane.
+              onTap: () => _push(
+                const SpotifyRequestScreen(
+                  initialSegment: SpotifyRequestScreen.spotifySegment,
+                ),
+              ),
             ),
           ],
         ),

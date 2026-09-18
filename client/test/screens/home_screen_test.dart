@@ -31,6 +31,9 @@ import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
 import 'package:mixtape/presentation/widgets/foundation/idea_pill.dart';
 import 'package:mixtape/presentation/widgets/energy_journey.dart';
 import 'package:mixtape/presentation/widgets/home_panel.dart';
+import 'package:mixtape/presentation/screens/shell/shell_route_observer.dart';
+import 'package:mixtape/presentation/widgets/foundation/liquid_glass_surface.dart';
+import 'package:mixtape/presentation/widgets/foundation/mixtape_sheet.dart';
 import '../helpers/fake_listening_api.dart';
 import 'routine_suggestions_test.dart' show FakeSuggestions;
 
@@ -855,5 +858,70 @@ void main() {
         }
       });
     }
+  });
+
+  group('the panel under a modal', () {
+    /// Home inside a tab's route-observer scope, the way the shell builds it.
+    Future<ShellRouteObserver> pumpInShell(
+      WidgetTester tester,
+      ProviderContainer container,
+    ) async {
+      final observer = ShellRouteObserver();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            theme: MixtapeTheme.light(),
+            navigatorObservers: [observer],
+            home: ShellRouteObserverScope(
+              observer: observer,
+              child: const HomeScreen(),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      return observer;
+    }
+
+    double panelOpacity(WidgetTester tester) => tester
+        .widget<AnimatedOpacity>(find.byKey(HomePanel.veilKey))
+        .opacity;
+
+    bool panelAllowsNative(WidgetTester tester) => tester
+        .widget<LiquidGlassSurface>(find.byKey(HomePanel.surfaceKey))
+        .allowNative;
+
+    testWidgets(
+      'the panel fades out and drops its native glass while a sheet is over '
+      'Home, and comes back when it pops',
+      (tester) async {
+        final api = FakeDjApi();
+        api.onListSessions = () async => [];
+        final container = _makeContainer(api);
+        await pumpInShell(tester, container);
+
+        expect(panelOpacity(tester), 1);
+        expect(panelAllowsNative(tester), isTrue);
+
+        final context = tester.element(find.byType(HomePanel));
+        unawaited(
+          showMixtapeSheet<void>(
+            context,
+            builder: (_) => const SizedBox(height: 120),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(panelOpacity(tester), 0);
+        expect(panelAllowsNative(tester), isFalse);
+
+        Navigator.of(context).pop();
+        await tester.pumpAndSettle();
+
+        expect(panelOpacity(tester), 1);
+        expect(panelAllowsNative(tester), isTrue);
+      },
+    );
   });
 }
