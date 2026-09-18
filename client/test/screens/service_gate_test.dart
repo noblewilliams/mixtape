@@ -206,7 +206,14 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(SpotifyRequestScreen), findsOneWidget);
 
-    await tester.ensureVisible(find.byKey(const Key('request-done')));
+    // The restyled request screen scrolls inside a LargeTitleScaffold, so
+    // bring the button fully into the 600 pt test viewport before tapping.
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('request-done')),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('request-done')));
     await tester.pumpAndSettle();
 
