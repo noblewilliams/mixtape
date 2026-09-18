@@ -143,3 +143,20 @@ order listed in revision 1 of the shape board.
   rule at the founder's own measurement; each segment is still a full-height
   tap target with a `selected` button role. See `docs/decisions.md`,
   2026-09-18, "One segmented control, app-wide".
+- 2026-09-18, smoke round six: the import sheet's **review step** is rebuilt as
+  a grouped list. One header block replaces the stacked File / Size / Package
+  fact rows and the old "Review your music" section word: the sheet heading
+  with **Cancel** on its right edge, one `meta` line of archive name · size ·
+  the package as a `StatusWord`, then the counts (`843 songs · 0 liked ·
+  12 playlists`), a **Set all…** action, and the "files suggest names" sentence
+  dropped to `meta`. Every file then gets its **own inset group**, 16 pt apart,
+  captioned with a 10 pt upper-case `DOPAMINE.CSV · 22 ENTRIES` line — file
+  name and count only, never a track or artist — over the "Save as" field, the
+  house `SegmentedToggle` (Playlist | Liked Songs | Skip; the last
+  `CupertinoSlidingSegmentedControl` in the app is gone), and the Playlist
+  action row. The standalone "Use as" header word is dropped. Upload and **New
+  file** move to a **sticky footer** pinned to the sheet's bottom padding edge
+  with a hairline over the scrolling list, and the old "I reviewed the
+  collection roles" checkbox goes with the bottom buttons — pressing Upload is
+  the review (the Liked Songs replacement tick stays). Only this step is full
+  height; the other steps still hug their content.

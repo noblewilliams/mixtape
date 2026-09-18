@@ -3,23 +3,28 @@
 /// represents, where a playlist lands, and the explicit confirmation before a
 /// Liked Songs replacement.
 ///
-/// Plan task 8.7 restyles it onto the September 17 shell — flush rows with
-/// hairlines, sliding segmented controls for the two- and three-way choices,
-/// replacement targets as inset rows with a chevron. The fields, the
-/// validation and the copy are unchanged.
+/// Smoke round six reworks it file by file: every file is its own inset
+/// group, captioned with its name and entry count, holding the "Save as"
+/// field, the house segmented toggle for what it represents, and — for a
+/// playlist — where it lands. "Set all…" sets every file at once. The sheet's
+/// own heading, the file facts and the Upload / New file footer live on the
+/// import sheet around this form.
 library;
 
 import 'dart:math';
 
-import 'package:flutter/cupertino.dart' show CupertinoSlidingSegmentedControl;
 import 'package:flutter/material.dart';
 
 import '../../import/collection_review.dart';
 import '../../import/snapshot.dart';
+import '../format/import_format.dart';
 import '../theme/mixtape_theme.dart';
 import 'foundation/inset_group.dart';
-import 'foundation/section_word.dart';
+import 'foundation/mixtape_menu.dart';
 import 'foundation/mixtape_sheet.dart';
+import 'foundation/section_word.dart';
+import 'foundation/segmented_toggle.dart';
+import 'foundation/text_action.dart';
 
 class CollectionReviewForm extends StatelessWidget {
   const CollectionReviewForm({
@@ -35,26 +40,92 @@ class CollectionReviewForm extends StatelessWidget {
   final CollectionSelection selection;
   final ValueChanged<CollectionSelection> onChanged;
 
-  /// Above this text scale the segmented controls give way to stacked rows:
-  /// three side-by-side labels cannot hold 320 pt at 200%.
+  /// Above this text scale the toggles give way to stacked rows: three
+  /// side-by-side labels cannot hold 320 pt at 200%.
   static const double stackChoicesScale = 1.5;
 
   /// What a playlist file with no replacement target reads as.
   static const String newPlaylistLabel = 'Create new playlist';
 
-  @override
-  Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    void fileChanged(int i, CollectionFile file) => onChanged(
+  /// The bulk action over the file groups. It only ever changes the choices
+  /// on screen — nothing is uploaded until Upload is pressed.
+  static const Key setAllKey = Key('collection-set-all');
+
+  /// What each file may be, in the order the toggle shows them.
+  static const Map<String, String> roleOptions = {
+    'playlist': 'Playlist',
+    'liked': 'Liked Songs',
+    'skip': 'Skip',
+  };
+
+  static String _baseName(String path) =>
+      path.substring(path.lastIndexOf('/') + 1);
+
+  bool _stacked(BuildContext context) =>
+      MediaQuery.textScalerOf(context).scale(1) >= stackChoicesScale;
+
+  void _fileChanged(int index, CollectionFile file) => onChanged(
+    selection.change(
+      files: [
+        for (var j = 0; j < selection.files.length; j++)
+          j == index ? file : selection.files[j],
+      ],
+      confirmed: false,
+      confirmRemovals: false,
+    ),
+  );
+
+  /// One choice over every file at once (smoke round six, note 4). "As
+  /// detected" is the suggestion the parse itself made, file by file.
+  Future<void> _setAll(BuildContext context) async {
+    final choice = await showMixtapeMenu<String>(
+      context,
+      title: 'Set all files',
+      actions: const [
+        MixtapeMenuAction(
+          key: Key('collection-set-all-detected'),
+          label: 'As detected',
+          value: 'detected',
+        ),
+        MixtapeMenuAction(
+          key: Key('collection-set-all-playlist'),
+          label: 'All as playlists',
+          value: 'playlist',
+        ),
+        MixtapeMenuAction(
+          key: Key('collection-set-all-liked'),
+          label: 'All as liked songs',
+          value: 'liked',
+        ),
+        MixtapeMenuAction(
+          key: Key('collection-set-all-skip'),
+          label: 'Skip all',
+          value: 'skip',
+        ),
+      ],
+    );
+    if (choice == null) return;
+    final detected = CollectionSelection.initial(
+      snapshot,
+      selection.context,
+    ).files;
+    onChanged(
       selection.change(
         files: [
-          for (var j = 0; j < selection.files.length; j++)
-            j == i ? file : selection.files[j],
+          for (var i = 0; i < selection.files.length; i++)
+            choice == 'detected'
+                ? detected[i]
+                : selection.files[i].change(role: choice),
         ],
         confirmed: false,
         confirmRemovals: false,
       ),
     );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
     final hasLikes =
         snapshot.package == ExportPackage.spotifyAccount ||
         selection.files.any((f) => f.role == 'liked');
@@ -74,19 +145,13 @@ class CollectionReviewForm extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SectionWord('Review your music'),
-        Text(
-          'Files suggest names, not playlist identities. Choose what each file '
-          'represents. Other playlists and history stay as they are.',
-          style: tokens.secondary,
-        ),
-        const SizedBox(height: 6),
         if (selected != null)
           Text(
-            '${selected.tracks.length} unique songs · ${selected.library.length} '
-            'liked songs · ${selected.playlists.length} playlists',
+            '${formatCount(selected.tracks.length)} songs · '
+            '${formatCount(selected.library.length)} liked · '
+            '${formatCount(selected.playlists.length)} playlists',
             key: const Key('collection-summary'),
-            style: tokens.meta,
+            style: tokens.secondary,
           ),
         if (selected == null)
           Text(
@@ -95,63 +160,27 @@ class CollectionReviewForm extends StatelessWidget {
             key: const Key('collection-invalid'),
             style: tokens.meta.copyWith(color: tokens.warnInk),
           ),
-        for (var i = 0; i < selection.files.length; i++) ...[
-          const SizedBox(height: 16),
-          Text(
-            '${i < paths.length ? paths[i] : snapshot.playlists[i].name} · '
-            '${snapshot.playlists[i].entries.length} entries',
-            style: tokens.rowTitle,
-          ),
-          if (snapshot.playlists[i].name.toLowerCase() == 'liked')
-            Text(
-              'This may be Liked Songs. Confirm its role below.',
-              style: tokens.meta,
+        Align(
+          alignment: Alignment.centerLeft,
+          // Back out the action's own 8 pt of target padding so the word
+          // starts on the same edge as the lines above and below it.
+          child: Transform.translate(
+            offset: const Offset(-8, 0),
+            child: TextAction(
+              key: setAllKey,
+              label: 'Set all…',
+              onPressed: () => _setAll(context),
             ),
-          const SizedBox(height: 8),
-          TextFormField(
-            key: ValueKey('collection-name-$i'),
-            initialValue: selection.files[i].name,
-            enabled: selection.files[i].role == 'playlist',
-            maxLength: 500,
-            style: tokens.body,
-            decoration: const InputDecoration(
-              labelText: 'Save as',
-              counterText: '',
-            ),
-            onChanged: (name) =>
-                fileChanged(i, selection.files[i].change(name: name)),
           ),
-          const SizedBox(height: 10),
-          _ChoiceField(
-            label: 'Use as',
-            controlKey: ValueKey('collection-role-$i'),
-            optionKey: (value) => ValueKey('collection-role-$i-$value'),
-            value: selection.files[i].role,
-            options: const {
-              'playlist': 'Playlist',
-              'liked': 'Liked Songs',
-              'skip': 'Skip',
-            },
-            onChanged: (role) =>
-                fileChanged(i, selection.files[i].change(role: role)),
-          ),
-          if (selection.files[i].role == 'playlist')
-            _TargetField(
-              index: i,
-              selection: selection,
-              onPick: (key) => fileChanged(
-                i,
-                selection.files[i].change(
-                  action: key,
-                  newKey: key.isEmpty
-                      ? 'exportify:new:${List.generate(16, (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0')).join()}'
-                      : null,
-                ),
-              ),
-            ),
-        ],
+        ),
+        Text(
+          'Files suggest names, not playlist identities. Choose what each file '
+          'represents. Other playlists and history stay as they are.',
+          style: tokens.meta,
+        ),
+        const SizedBox(height: 12),
+        for (var i = 0; i < selection.files.length; i++) _fileGroup(context, i),
         if (hasLikes) ...[
-          const SizedBox(height: 16),
           _ChoiceField(
             label: 'Liked Songs update',
             controlKey: const ValueKey('collection-mode'),
@@ -179,13 +208,8 @@ class CollectionReviewForm extends StatelessWidget {
                   'providers stay unchanged.',
               onChanged: (v) => onChanged(selection.change(confirmRemovals: v)),
             ),
+          const SizedBox(height: 12),
         ],
-        _ConfirmRow(
-          rowKey: const Key('collection-confirmed'),
-          value: selection.confirmed,
-          label: 'I reviewed the collection roles and replacement targets.',
-          onChanged: (v) => onChanged(selection.change(confirmed: v)),
-        ),
         Text(
           'This file contains saved music, not listening history. Add history '
           'later with Go deeper.',
@@ -194,10 +218,133 @@ class CollectionReviewForm extends StatelessWidget {
       ],
     );
   }
+
+  /// One file: its caption, its name, what it represents, and — when it is a
+  /// playlist — where it lands, in a single inset group.
+  Widget _fileGroup(BuildContext context, int index) {
+    final tokens = context.tokens;
+    final file = selection.files[index];
+    final playlist = snapshot.playlists[index];
+    final name = _baseName(
+      index < paths.length ? paths[index] : playlist.name,
+    ).toUpperCase();
+    final maybeLiked = playlist.name.toLowerCase() == 'liked';
+
+    return InsetGroup(
+      key: ValueKey('collection-file-$index'),
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // The tiny "just information" line: the file and how much is in
+              // it, never a track or an artist.
+              Text(
+                '$name · '
+                '${plural(playlist.entries.length, 'entry', 'entries').toUpperCase()}',
+                key: ValueKey('collection-caption-$index'),
+                style: tokens.label.copyWith(
+                  color: tokens.muted,
+                  letterSpacing: 0.6,
+                ),
+              ),
+              if (maybeLiked)
+                Text(
+                  'This may be Liked Songs. Confirm its role below.',
+                  style: tokens.meta,
+                ),
+              TextFormField(
+                key: ValueKey('collection-name-$index'),
+                initialValue: file.name,
+                enabled: file.role == 'playlist',
+                maxLength: 500,
+                style: tokens.rowTitle,
+                // No underline of its own: the group's hairline under the row
+                // is the only rule the field needs.
+                decoration: InputDecoration(
+                  labelText: 'Save as',
+                  labelStyle: tokens.meta,
+                  counterText: '',
+                  isDense: true,
+                  contentPadding: EdgeInsets.zero,
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  disabledBorder: InputBorder.none,
+                ),
+                onChanged: (value) =>
+                    _fileChanged(index, file.change(name: value)),
+              ),
+            ],
+          ),
+        ),
+        ..._roleChoice(context, index, file),
+        if (file.role == 'playlist')
+          _TargetField(
+            index: index,
+            selection: selection,
+            onPick: (key) => _fileChanged(
+              index,
+              file.change(
+                action: key,
+                newKey: key.isEmpty
+                    ? 'exportify:new:${List.generate(16, (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0')).join()}'
+                    : null,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// What the file represents, as a flush toggle row — or, once the text is
+  /// too large for three segments, as rows inside the same group.
+  List<Widget> _roleChoice(BuildContext context, int index, CollectionFile file) {
+    void choose(String role) => _fileChanged(index, file.change(role: role));
+    final key = ValueKey('collection-role-$index');
+    if (_stacked(context)) {
+      return [
+        _StackedChoice(
+          groupKey: key,
+          optionKey: (value) => ValueKey('collection-role-$index-$value'),
+          value: file.role,
+          options: roleOptions,
+          onChanged: choose,
+        ),
+      ];
+    }
+    return [
+      ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: InsetGroup.rowInset),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: SegmentedToggle<String>(
+              key: key,
+              value: file.role,
+              options: [
+                for (final entry in roleOptions.entries)
+                  SegmentedOption(
+                    value: entry.key,
+                    label: entry.value,
+                    key: ValueKey('collection-role-$index-${entry.key}'),
+                  ),
+              ],
+              onChanged: choose,
+            ),
+          ),
+        ),
+      ),
+    ];
+  }
 }
 
-/// A labelled two- or three-way choice: the native sliding segmented control,
-/// or stacked rows once the text is too large for segments to fit 320 pt.
+/// A labelled two- or three-way choice outside a file group: the house
+/// toggle, or stacked rows once the text is too large for segments to fit
+/// 320 pt.
 class _ChoiceField extends StatelessWidget {
   const _ChoiceField({
     required this.label,
@@ -229,42 +376,31 @@ class _ChoiceField extends StatelessWidget {
         const SizedBox(height: 6),
         if (stacked)
           InsetGroup(
-            key: controlKey,
             children: [
-              for (final entry in options.entries)
-                InsetRow(
-                  key: optionKey(entry.key),
-                  title: entry.value,
-                  trailing: entry.key == value
-                      ? Icon(Icons.check, size: 18, color: tokens.plum)
-                      : const SizedBox.shrink(),
-                  onTap: () => onChanged(entry.key),
-                ),
+              _StackedChoice(
+                groupKey: controlKey,
+                optionKey: optionKey,
+                value: value,
+                options: options,
+                onChanged: onChanged,
+              ),
             ],
           )
         else
-          ConstrainedBox(
-            constraints: const BoxConstraints(
-              minHeight: MixtapeMetrics.minTarget,
-            ),
-            child: CupertinoSlidingSegmentedControl<String>(
+          Align(
+            alignment: Alignment.centerLeft,
+            child: SegmentedToggle<String>(
               key: controlKey,
-              groupValue: value,
-              children: {
+              value: value,
+              options: [
                 for (final entry in options.entries)
-                  entry.key: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 11),
-                    child: Text(
-                      entry.value,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: tokens.meta.copyWith(color: tokens.text),
-                    ),
+                  SegmentedOption(
+                    value: entry.key,
+                    label: entry.value,
+                    key: optionKey(entry.key),
                   ),
-              },
-              onValueChanged: (v) {
-                if (v != null) onChanged(v);
-              },
+              ],
+              onChanged: onChanged,
             ),
           ),
       ],
@@ -272,8 +408,59 @@ class _ChoiceField extends StatelessWidget {
   }
 }
 
+/// The large-text fallback for a choice: one ticked row per option, with the
+/// group's own hairline between them, as a single child of its group.
+class _StackedChoice extends StatelessWidget {
+  const _StackedChoice({
+    required this.groupKey,
+    required this.optionKey,
+    required this.value,
+    required this.options,
+    required this.onChanged,
+  });
+
+  final Key groupKey;
+  final Key Function(String value) optionKey;
+  final String value;
+  final Map<String, String> options;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    final entries = options.entries.toList();
+    return Column(
+      key: groupKey,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < entries.length; i++) ...[
+          if (i > 0)
+            Padding(
+              padding: const EdgeInsets.only(left: InsetGroup.rowInset),
+              child: Container(
+                key: InsetGroup.hairlineKey,
+                height: 1,
+                color: tokens.hairline,
+              ),
+            ),
+          InsetRow(
+            key: optionKey(entries[i].key),
+            title: entries[i].value,
+            trailing: entries[i].key == value
+                ? Icon(Icons.check, size: 18, color: tokens.plum)
+                : const SizedBox.shrink(),
+            onTap: () => onChanged(entries[i].key),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 /// Where a playlist file lands: a new playlist, or one of the collections
-/// already imported. An inset row with a chevron, over a sheet of the targets.
+/// already imported. A flush row in the file's own group, over a sheet of the
+/// targets.
 class _TargetField extends StatelessWidget {
   const _TargetField({
     required this.index,
@@ -324,18 +511,11 @@ class _TargetField extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(top: 10),
-    child: InsetGroup(
-      children: [
-        InsetRow(
-          key: ValueKey('collection-target-$index'),
-          title: 'Playlist action',
-          subtitle: _label,
-          onTap: () => _pick(context),
-        ),
-      ],
-    ),
+  Widget build(BuildContext context) => InsetRow(
+    key: ValueKey('collection-target-$index'),
+    title: 'Playlist action',
+    subtitle: _label,
+    onTap: () => _pick(context),
   );
 }
 

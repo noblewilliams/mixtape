@@ -767,6 +767,109 @@ void main() {
   });
 
   testWidgets(
+    'the review step wears one header block and a footer pinned to the '
+    'bottom of the sheet while the list scrolls under it',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      tester.view.padding = const FakeViewPadding(bottom: 34);
+      tester.view.viewPadding = const FakeViewPadding(bottom: 34);
+      addTearDown(tester.view.reset);
+
+      final c = container();
+      service.preview = exportifyPreview();
+      picker.next = exportifyArchive;
+      await open(tester, c);
+      await tapInSheet(tester, const Key('import-pick'));
+      await tester.pumpAndSettle();
+
+      // One header block: the sheet heading, one line of file facts, the
+      // counts, and a Cancel on the heading row's right edge.
+      expect(find.text('Review your music'), findsOneWidget);
+      expect(
+        tester.widget<Text>(find.byKey(const Key('import-file-name'))).data,
+        startsWith('spotify_playlists.zip · 1.2 MB'),
+      );
+      expect(
+        tester
+            .widget<StatusWord>(find.byKey(const Key('import-file-package')))
+            .label,
+        'Exportify saved music',
+      );
+      expect(
+        tester.widget<Text>(find.byKey(const Key('collection-summary'))).data,
+        '31 songs · 0 liked · 2 playlists',
+      );
+      expect(find.byKey(const Key('import-cancel')), findsOneWidget);
+      expect(find.text('File'), findsNothing, reason: 'no stacked fact rows');
+      expect(find.text('Size'), findsNothing);
+      expect(find.text('Package'), findsNothing);
+
+      // Both footer actions, Upload on the left and New file on the right.
+      final upload = find.byKey(const Key('import-upload'));
+      final newFile = find.byKey(ImportSheet.newFileKey);
+      expect(
+        find.descendant(of: find.byKey(ImportSheet.footerKey), matching: upload),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(ImportSheet.footerKey),
+          matching: newFile,
+        ),
+        findsOneWidget,
+      );
+      expect(
+        tester.getRect(upload).left,
+        lessThan(tester.getRect(newFile).left),
+      );
+
+      // The footer sits on the sheet's bottom padding edge, and stays there
+      // when the list scrolls.
+      final surface = tester.getRect(find.byKey(MixtapeSheet.surfaceKey));
+      final footer = tester.getRect(find.byKey(ImportSheet.footerKey));
+      expect(footer.bottom, moreOrLessEquals(surface.bottom - 34, epsilon: 0.5));
+
+      final before = tester.getRect(find.byKey(const Key('collection-summary')));
+      await tester.drag(
+        find.descendant(of: sheet(), matching: find.byType(Scrollable)).first,
+        const Offset(0, -160),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.getRect(find.byKey(const Key('collection-summary'))).top,
+        lessThan(before.top),
+        reason: 'the list scrolled',
+      );
+      expect(
+        tester.getRect(find.byKey(ImportSheet.footerKey)),
+        footer,
+        reason: 'the footer is pinned',
+      );
+      expectNativeControls(tester, sheet());
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('Cancel on the review step closes the sheet and uploads nothing', (
+    tester,
+  ) async {
+    final c = container();
+    service.preview = exportifyPreview();
+    picker.next = exportifyArchive;
+    await open(tester, c);
+    await tapInSheet(tester, const Key('import-pick'));
+    await tester.pumpAndSettle();
+
+    await tapInSheet(tester, const Key('import-cancel'));
+    await tester.pumpAndSettle();
+
+    expect(sheet(), findsNothing);
+    expect(service.importedPath, isNull);
+    expect(c.read(listeningImportProvider), isA<ImportIdle>());
+  });
+
+  testWidgets(
     'the sheet wears the shared chrome only: one handle, and no dead band '
     'between its content and the bottom of the screen',
     (tester) async {

@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:flutter/cupertino.dart' show CupertinoSlidingSegmentedControl;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/import/collection_review.dart';
@@ -10,6 +9,8 @@ import 'package:mixtape/import/zip_reader.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/collection_review_form.dart';
 import 'package:mixtape/presentation/widgets/foundation/inset_group.dart';
+import 'package:mixtape/presentation/widgets/foundation/mixtape_menu.dart';
+import 'package:mixtape/presentation/widgets/foundation/segmented_toggle.dart';
 
 Future<ParsedExport> parseSample(WidgetTester tester) async {
   final archive = openExportArchive(File('../fixtures/exportify/sample.csv'));
@@ -19,6 +20,51 @@ Future<ParsedExport> parseSample(WidgetTester tester) async {
   await archive.close();
   return parsed;
 }
+
+/// An Exportify parse of [names], one CSV each, so the grouped review has
+/// more than one file to set at once.
+ListeningExportSnapshot snapshotOf(List<String> names) =>
+    ListeningExportSnapshot(
+      package: ExportPackage.spotifyExportify,
+      timeZone: 'UTC',
+      country: null,
+      tracks: [
+        for (var i = 0; i < names.length; i++)
+          SnapshotTrack(
+            platformId: 'track$i',
+            title: 'T$i',
+            artist: 'A',
+            album: null,
+            durationMs: null,
+          ),
+      ],
+      days: const [],
+      library: const [],
+      artists: const [],
+      playlists: [
+        for (var i = 0; i < names.length; i++)
+          SnapshotPlaylist(
+            ordinal: i,
+            key: 'hash$i',
+            name: names[i],
+            description: null,
+            lastModifiedAt: null,
+            entries: [
+              SnapshotEntry(
+                position: 0,
+                platformId: 'track$i',
+                title: 'T$i',
+                artist: 'A',
+                album: null,
+                addedAt: null,
+              ),
+            ],
+          ),
+      ],
+      unresolved: const SnapshotUnresolved(rows: 0, plays: 0),
+      ledgerFrom: null,
+      ledgerTo: null,
+    );
 
 /// Pumps the form under the native theme, holding the selection so the widget
 /// sees each change the way the import sheet feeds it back.
@@ -30,6 +76,7 @@ Future<CollectionSelection Function()> pumpForm(
   double textScale = 1,
   Size? surface,
   double sidePadding = 0,
+  List<String> paths = const ['sample.csv'],
 }) async {
   if (surface != null) {
     tester.view.physicalSize = surface;
@@ -51,7 +98,7 @@ Future<CollectionSelection Function()> pumpForm(
             child: StatefulBuilder(
               builder: (context, setState) => CollectionReviewForm(
                 snapshot: snapshot,
-                paths: const ['sample.csv'],
+                paths: paths,
                 selection: selection,
                 onChanged: (value) => setState(() => selection = value),
               ),
@@ -65,19 +112,21 @@ Future<CollectionSelection Function()> pumpForm(
   return () => selection;
 }
 
+CollectionSelection selectionFor(
+  ListeningExportSnapshot snapshot, {
+  List<String> ids = const [],
+  List<ImportedCollection> playlists = const [],
+}) => CollectionSelection.initial(
+  snapshot,
+  CollectionContext(ids: ids, fingerprint: 'current', playlists: playlists),
+);
+
 void main() {
   testWidgets(
     'review stays usable on a narrow screen with large text and requires explicit likes replacement',
     (tester) async {
       final parsed = await parseSample(tester);
-      var selection = CollectionSelection.initial(
-        parsed.snapshot,
-        const CollectionContext(
-          ids: ['old'],
-          fingerprint: 'current',
-          playlists: [],
-        ),
-      );
+      var selection = selectionFor(parsed.snapshot, ids: ['old']);
       selection = selection.change(
         files: [selection.files.single.change(role: 'liked')],
         mode: 'replace',
@@ -93,57 +142,62 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.textContaining('Remove 1 songs'), findsOneWidget);
       expect(current().canUpload(parsed.snapshot), isFalse);
-      // Above 150% text the segmented controls stack into inset rows, so the
-      // three-way choice still fits 320 pt.
-      expect(
-        find.byType(CupertinoSlidingSegmentedControl<String>),
-        findsNothing,
-      );
+      // Above 150% text the toggles stack into rows, so the three-way choice
+      // still fits 320 pt.
+      expect(find.byType(SegmentedToggle<String>), findsNothing);
       expect(find.byKey(const ValueKey('collection-role-0')), findsOneWidget);
 
-      for (final key in const [
-        Key('collection-confirm-removals'),
-        Key('collection-confirmed'),
-      ]) {
-        await tester.ensureVisible(find.byKey(key));
-        await tester.pump();
-        await tester.tap(find.byKey(key));
-        await tester.pumpAndSettle();
-      }
-      expect(current().canUpload(parsed.snapshot), isTrue);
+      await tester.ensureVisible(
+        find.byKey(const Key('collection-confirm-removals')),
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('collection-confirm-removals')));
+      await tester.pumpAndSettle();
+
+      // Upload itself is the review now, so nothing else is left to tick.
       expect(
-        current().apply(parsed.snapshot).snapshot.library.single.dateAdded,
+        current().change(confirmed: true).canUpload(parsed.snapshot),
+        isTrue,
+      );
+      expect(
+        current()
+            .change(confirmed: true)
+            .apply(parsed.snapshot)
+            .snapshot
+            .library
+            .single
+            .dateAdded,
         isNull,
       );
       expect(tester.takeException(), isNull);
     },
   );
 
-  testWidgets('the role choice is a sliding segmented control at normal text', (
+  testWidgets('the role choice is the house segmented toggle at normal text', (
     tester,
   ) async {
     final parsed = await parseSample(tester);
-    final initial = CollectionSelection.initial(
+    final current = await pumpForm(
+      tester,
       parsed.snapshot,
-      const CollectionContext(
-        ids: [],
-        fingerprint: 'current',
-        playlists: [],
-      ),
+      selectionFor(parsed.snapshot),
     );
-    final current = await pumpForm(tester, parsed.snapshot, initial);
 
-    expect(
-      find.byType(CupertinoSlidingSegmentedControl<String>),
-      findsOneWidget,
-    );
+    expect(find.byType(SegmentedToggle<String>), findsOneWidget);
     expect(current().files.single.role, 'playlist');
     expect(find.text('Playlist'), findsOneWidget);
     expect(find.text('Liked Songs'), findsOneWidget);
     expect(find.text('Skip'), findsOneWidget);
-    // A playlist file names where it lands, as an inset row with a chevron.
+    // A playlist file names where it lands, as a flush row in the same group.
     expect(find.byKey(const ValueKey('collection-target-0')), findsOneWidget);
     expect(find.text('Create new playlist'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('collection-file-0')),
+        matching: find.byKey(const ValueKey('collection-target-0')),
+      ),
+      findsOneWidget,
+    );
 
     await tester.tap(find.text('Liked Songs'));
     await tester.pumpAndSettle();
@@ -151,12 +205,112 @@ void main() {
     // Choosing Liked Songs brings the update choice and clears the target row.
     expect(find.byKey(const ValueKey('collection-mode')), findsOneWidget);
     expect(find.byKey(const ValueKey('collection-target-0')), findsNothing);
-    expect(current().confirmed, isFalse, reason: 'a role change re-opens the review');
 
-    await tester.tap(find.byKey(const Key('collection-confirmed')));
+    expect(current().change(confirmed: true).canUpload(parsed.snapshot), isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('every file is its own group, under a caption of file and count', (
+    tester,
+  ) async {
+    final snapshot = snapshotOf(['Dopamine', 'Late night']);
+    await pumpForm(
+      tester,
+      snapshot,
+      selectionFor(snapshot),
+      paths: const [
+        'spotify_playlists/dopamine.csv',
+        'spotify_playlists/late_night.csv',
+      ],
+      surface: const Size(390, 1400),
+      sidePadding: 20,
+    );
+
+    expect(find.text('DOPAMINE.CSV · 1 ENTRY'), findsOneWidget);
+    expect(find.text('LATE_NIGHT.CSV · 1 ENTRY'), findsOneWidget);
+    // No track or artist name anywhere: file names, counts and the playlist
+    // names the listener is naming themselves.
+    expect(find.textContaining('T0'), findsNothing);
+    expect(find.text('Use as'), findsNothing, reason: 'the toggle says it');
+
+    Rect surfaceOf(int i) => tester.getRect(
+      find
+          .descendant(
+            of: find.byKey(ValueKey('collection-file-$i')),
+            matching: find.byType(ClipRRect),
+          )
+          .first,
+    );
+    expect(
+      surfaceOf(1).top - surfaceOf(0).bottom,
+      moreOrLessEquals(InsetGroup.bottomMargin, epsilon: 0.5),
+    );
+    for (var i = 0; i < 2; i++) {
+      expect(
+        find.descendant(
+          of: find.byKey(ValueKey('collection-file-$i')),
+          matching: find.byKey(ValueKey('collection-role-$i')),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(ValueKey('collection-file-$i')),
+          matching: find.byKey(ValueKey('collection-name-$i')),
+        ),
+        findsOneWidget,
+      );
+    }
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Set all applies one choice to every file, and As detected puts '
+      'the suggestions back', (tester) async {
+    final snapshot = snapshotOf(['Dopamine', 'Late night', 'Rain']);
+    final current = await pumpForm(
+      tester,
+      snapshot,
+      selectionFor(snapshot),
+      surface: const Size(390, 1800),
+      sidePadding: 20,
+      paths: const ['a.csv', 'b.csv', 'c.csv'],
+    );
+
+    Future<void> setAll(String label) async {
+      await tester.ensureVisible(find.byKey(CollectionReviewForm.setAllKey));
+      await tester.pump();
+      await tester.tap(find.byKey(CollectionReviewForm.setAllKey));
+      await tester.pumpAndSettle();
+      expect(find.byKey(mixtapeMenuCancelKey), findsOneWidget);
+      await tester.tap(find.text(label));
+      await tester.pumpAndSettle();
+    }
+
+    await setAll('All as liked songs');
+    expect(current().files.map((f) => f.role), everyElement('liked'));
+
+    await setAll('Skip all');
+    expect(current().files.map((f) => f.role), everyElement('skip'));
+
+    await setAll('All as playlists');
+    expect(current().files.map((f) => f.role), everyElement('playlist'));
+
+    // A file renamed and set aside comes back to its own suggestion.
+    await tester.enterText(
+      find.byKey(const ValueKey('collection-name-1')),
+      'Something else',
+    );
     await tester.pumpAndSettle();
-    expect(current().confirmed, isTrue);
-    expect(current().canUpload(parsed.snapshot), isTrue);
+    await setAll('Skip all');
+    expect(current().files[1].name, 'Something else');
+
+    await setAll('As detected');
+    expect(current().files.map((f) => f.role), everyElement('playlist'));
+    expect(current().files.map((f) => f.name), [
+      'Dopamine',
+      'Late night',
+      'Rain',
+    ]);
     expect(tester.takeException(), isNull);
   });
 
@@ -164,31 +318,31 @@ void main() {
     tester,
   ) async {
     final parsed = await parseSample(tester);
-    final initial = CollectionSelection.initial(
+    final initial = selectionFor(
       parsed.snapshot,
-      const CollectionContext(
-        ids: [],
-        fingerprint: 'current',
-        playlists: [
-          ImportedCollection(
-            key: 'spotify:playlist:1',
-            name: 'Late night',
-            fingerprint: 'f1',
-            fileHash: null,
-          ),
-        ],
-      ),
+      playlists: const [
+        ImportedCollection(
+          key: 'spotify:playlist:1',
+          name: 'Late night',
+          fingerprint: 'f1',
+          fileHash: null,
+        ),
+      ],
     );
     final current = await pumpForm(tester, parsed.snapshot, initial);
 
-    await tester.ensureVisible(find.byKey(const ValueKey('collection-target-0')));
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('collection-target-0')),
+    );
     await tester.pump();
     await tester.tap(find.byKey(const ValueKey('collection-target-0')));
     await tester.pumpAndSettle();
 
     expect(find.byType(InsetGroup), findsWidgets);
     await tester.tap(
-      find.byKey(const ValueKey('collection-target-0-option-spotify:playlist:1')),
+      find.byKey(
+        const ValueKey('collection-target-0-option-spotify:playlist:1'),
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -199,22 +353,15 @@ void main() {
 
   testWidgets('renders in dark', (tester) async {
     final parsed = await parseSample(tester);
-    final initial = CollectionSelection.initial(
-      parsed.snapshot,
-      const CollectionContext(
-        ids: [],
-        fingerprint: 'current',
-        playlists: [],
-      ),
-    );
     await pumpForm(
       tester,
       parsed.snapshot,
-      initial,
+      selectionFor(parsed.snapshot),
       brightness: Brightness.dark,
     );
 
-    expect(find.text('Review your music'), findsOneWidget);
+    expect(find.byKey(CollectionReviewForm.setAllKey), findsOneWidget);
+    expect(find.byKey(const ValueKey('collection-file-0')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -222,20 +369,17 @@ void main() {
     tester,
   ) async {
     final parsed = await parseSample(tester);
-    var selection = CollectionSelection.initial(
+    var selection = selectionFor(
       parsed.snapshot,
-      const CollectionContext(
-        ids: ['old'],
-        fingerprint: 'current',
-        playlists: [
-          ImportedCollection(
-            key: 'spotify:playlist:1',
-            name: 'Songs for the long drive home, part two',
-            fingerprint: 'f1',
-            fileHash: null,
-          ),
-        ],
-      ),
+      ids: ['old'],
+      playlists: const [
+        ImportedCollection(
+          key: 'spotify:playlist:1',
+          name: 'Songs for the long drive home, part two',
+          fingerprint: 'f1',
+          fileHash: null,
+        ),
+      ],
     );
     selection = selection.change(
       files: [selection.files.single.change(role: 'liked')],
@@ -264,7 +408,6 @@ void main() {
       );
       expect(tester.takeException(), isNull, reason: 'at ${scale}x');
     }
-    expect(find.text('Review your music'), findsOneWidget);
     expect(find.textContaining('Remove 1 songs'), findsOneWidget);
     expect(
       tester.getSize(find.byType(CollectionReviewForm)).width,

@@ -187,6 +187,12 @@ class ImportSheet extends ConsumerStatefulWidget {
   /// (smoke round four, note 1: the sheet wore two handles and a dead band).
   static const double contentBottomPadding = 12;
 
+  /// The review step's pinned footer, and the "pick another file" action on
+  /// it. The key is the one the bottom action carried before the footer
+  /// existed, so the flow's tests and automation still find it.
+  static const Key footerKey = Key('import-footer');
+  static const Key newFileKey = Key('import-pick-other');
+
   @override
   ConsumerState<ImportSheet> createState() => _ImportSheetState();
 }
@@ -232,28 +238,112 @@ class _ImportSheetState extends ConsumerState<ImportSheet> {
       ImportFailed() => _Failed(state: state, notifier: notifier),
     };
 
+    // The review step is the one step with a pinned footer: it fills the
+    // sheet, its list scrolls, and Upload / New file stay on the bottom edge
+    // (smoke round six, note 5).
+    final reviewing =
+        state is ImportInventory && state.preview.selection != null;
+    final keyboard = MediaQuery.viewInsetsOf(context).bottom;
+
     // No handle, no surface and no safe area of its own: the shared chrome
     // draws one handle, paints the sheet and clears the home indicator, and a
     // second copy of each is what the founder read as a transparent sheet
     // with a dead band under it (smoke round four, note 1). The height is
-    // whatever the step needs — the long review scrolls, the idle "Choose
+    // whatever the step needs — the review fills the sheet, the idle "Choose
     // files" step hugs its content.
+    // Measured from the height under the status bar, not the whole screen: at
+    // 90% of the screen the full-height review pushed its own grab handle up
+    // behind the Dynamic Island (smoke round six). The sheet route clears
+    // both `padding.top` and `viewPadding.top` on the way in (`useSafeArea:
+    // false`), so the inset is read off the window itself.
+    final topInset = MediaQueryData.fromView(View.of(context)).padding.top;
     return ConstrainedBox(
       constraints: BoxConstraints(
         maxHeight:
-            MediaQuery.sizeOf(context).height * ImportSheet.maxHeightFactor,
+            (MediaQuery.sizeOf(context).height - topInset) *
+            ImportSheet.maxHeightFactor,
       ),
-      child: SingleChildScrollView(
-        // The review stage has text fields: the keyboard's inset is padding,
-        // not a clip, so "Save as" scrolls above it.
-        padding: EdgeInsets.fromLTRB(
-          20,
-          4,
-          20,
-          ImportSheet.contentBottomPadding +
-              MediaQuery.viewInsetsOf(context).bottom,
+      // The review's footer rides above the keyboard; every other step lets
+      // its content scroll clear of it instead.
+      child: Padding(
+        padding: EdgeInsets.only(bottom: reviewing ? keyboard : 0),
+        child: Column(
+          mainAxisSize: reviewing ? MainAxisSize.max : MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Flexible(
+              child: SingleChildScrollView(
+                // The review stage has text fields: the keyboard's inset is
+                // padding, not a clip, so "Save as" scrolls above it.
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  4,
+                  20,
+                  ImportSheet.contentBottomPadding + (reviewing ? 0 : keyboard),
+                ),
+                child: body,
+              ),
+            ),
+            if (reviewing) _ReviewFooter(state: state, notifier: notifier),
+          ],
         ),
-        child: body,
+      ),
+    );
+  }
+}
+
+/// The review step's pinned footer: Upload on the left, New file on the
+/// right, a hairline between it and the list scrolling under it.
+class _ReviewFooter extends StatelessWidget {
+  const _ReviewFooter({required this.state, required this.notifier});
+
+  final ImportInventory state;
+  final ListeningImportNotifier notifier;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    final preview = state.preview;
+    final selection = preview.selection!;
+    // Pressing Upload is the review: the old "I reviewed the collection
+    // roles" checkbox is gone (smoke round six, note 5). Everything else the
+    // selection must satisfy — a nonempty collection, valid names, distinct
+    // targets, and the explicit tick before Liked Songs are replaced — still
+    // gates the button.
+    final reviewed = selection.change(confirmed: true);
+    return Container(
+      key: ImportSheet.footerKey,
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: tokens.hairline)),
+      ),
+      padding: const EdgeInsets.fromLTRB(
+        20,
+        8,
+        20,
+        ImportSheet.contentBottomPadding,
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          TapeButton(
+            key: const Key('import-upload'),
+            label: 'Upload',
+            onPressed: reviewed.canUpload(preview.snapshot)
+                ? () {
+                    notifier.setSelection(reviewed);
+                    notifier.upload();
+                  }
+                : null,
+          ),
+          LabelChip(
+            key: ImportSheet.newFileKey,
+            label: 'New file',
+            onPressed: () {
+              notifier.reset();
+              notifier.pick();
+            },
+          ),
+        ],
       ),
     );
   }
@@ -461,40 +551,77 @@ class _Inventory extends StatelessWidget {
       } catch (_) {}
     }
     final extended = preview.package == ExportPackage.spotifyExtended;
+    final reviewing = preview.selection != null;
+    final package = StatusWord(
+      key: const Key('import-file-package'),
+      label: packageName(inventory.package),
+      kind: inventory.package == null ? StatusKind.warn : StatusKind.ok,
+    );
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _FactRow(
-          label: 'File',
-          isFirst: true,
-          valueWidget: Flexible(
-            child: Text(
-              state.archive.name,
-              key: const Key('import-file-name'),
-              textAlign: TextAlign.end,
+        // One header block for the review step: the sheet's heading with a
+        // Cancel on its right edge, then the file's own facts on one line
+        // (smoke round six, note 3). Packages with nothing to review keep the
+        // stacked fact rows, which are all they have.
+        if (reviewing) ...[
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Review your music',
+                  style: MixtapeSheet.headingOf(context),
+                ),
+              ),
+              TextAction(
+                key: const Key('import-cancel'),
+                label: 'Cancel',
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  notifier.reset();
+                },
+              ),
+            ],
+          ),
+          Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(
+                '${state.archive.name} · ${formatBytes(state.archive.bytes)} · ',
+                key: const Key('import-file-name'),
+                style: tokens.meta,
+              ),
+              package,
+            ],
+          ),
+          const SizedBox(height: 6),
+        ] else ...[
+          _FactRow(
+            label: 'File',
+            isFirst: true,
+            valueWidget: Flexible(
+              child: Text(
+                state.archive.name,
+                key: const Key('import-file-name'),
+                textAlign: TextAlign.end,
+                style: tokens.rowTitle,
+              ),
+            ),
+          ),
+          _FactRow(
+            label: 'Size',
+            valueWidget: Text(
+              formatBytes(state.archive.bytes),
+              key: const Key('import-file-meta'),
               style: tokens.rowTitle,
             ),
           ),
-        ),
-        _FactRow(
-          label: 'Size',
-          valueWidget: Text(
-            formatBytes(state.archive.bytes),
-            key: const Key('import-file-meta'),
-            style: tokens.rowTitle,
+          _FactRow(
+            label: 'Package',
+            valueWidget: Flexible(child: package),
           ),
-        ),
-        _FactRow(
-          label: 'Package',
-          valueWidget: Flexible(
-            child: StatusWord(
-              key: const Key('import-file-package'),
-              label: packageName(inventory.package),
-              kind: inventory.package == null ? StatusKind.warn : StatusKind.ok,
-            ),
-          ),
-        ),
+        ],
         if (preview.selection != null)
           CollectionReviewForm(
             snapshot: preview.snapshot,
@@ -594,30 +721,31 @@ class _Inventory extends StatelessWidget {
           key: const Key('import-privacy'),
           style: tokens.meta,
         ),
-        const SizedBox(height: 16),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TapeButton(
-            key: const Key('import-upload'),
-            label: 'Upload',
-            onPressed:
-                (preview.selection?.canUpload(snapshot) ??
-                    (snapshot.package != ExportPackage.spotifyExportify))
-                ? notifier.upload
-                : null,
+        // The review step carries these on its pinned footer instead.
+        if (!reviewing) ...[
+          const SizedBox(height: 16),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TapeButton(
+              key: const Key('import-upload'),
+              label: 'Upload',
+              onPressed: snapshot.package != ExportPackage.spotifyExportify
+                  ? notifier.upload
+                  : null,
+            ),
           ),
-        ),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextAction(
-            key: const Key('import-pick-other'),
-            label: 'Choose a different file',
-            onPressed: () {
-              notifier.reset();
-              notifier.pick();
-            },
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextAction(
+              key: ImportSheet.newFileKey,
+              label: 'Choose a different file',
+              onPressed: () {
+                notifier.reset();
+                notifier.pick();
+              },
+            ),
           ),
-        ),
+        ],
       ],
     );
   }

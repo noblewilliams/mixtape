@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:mixtape/data/files/archive_picker.dart';
 import 'package:mixtape/data/files/opened_archive_channel.dart';
 import 'package:mixtape/data/listening/listening_models.dart';
+import 'package:mixtape/import/collection_review.dart';
 import 'package:mixtape/import/listening_import_service.dart';
 import 'package:mixtape/import/snapshot.dart';
 import 'package:mixtape/import/spotify_parser.dart';
@@ -482,3 +483,75 @@ ListeningImportResult accountResult({Object? playlistError}) =>
           : null,
       playlistError: playlistError,
     );
+
+/// The Exportify ZIP the founder walks through: two playlist CSVs, 31 songs
+/// between them, reviewed file by file before anything is uploaded.
+const exportifyArchive = PickedArchive(
+  path: '/tmp/spotify_playlists.zip',
+  name: 'spotify_playlists.zip',
+  bytes: 1258291,
+);
+
+const exportifyInventory = ExportInventory(
+  package: ExportPackage.spotifyExportify,
+  read: [
+    InventoryReadFile(path: 'spotify_playlists/dopamine.csv', rows: 22),
+    InventoryReadFile(path: 'spotify_playlists/late_night.csv', rows: 9),
+  ],
+  ignored: [],
+);
+
+ImportPreview exportifyPreview() {
+  final snapshot = ListeningExportSnapshot(
+    package: ExportPackage.spotifyExportify,
+    timeZone: 'Africa/Lagos',
+    country: 'NG',
+    tracks: _tracks(31),
+    days: const [],
+    library: const [],
+    artists: const [],
+    playlists: [
+      SnapshotPlaylist(
+        ordinal: 0,
+        key: 'a' * 64,
+        name: 'Dopamine',
+        description: null,
+        lastModifiedAt: null,
+        entries: _entries(22, 0),
+      ),
+      SnapshotPlaylist(
+        ordinal: 1,
+        key: 'b' * 64,
+        name: 'Late night',
+        description: null,
+        lastModifiedAt: null,
+        entries: _entries(9, 22),
+      ),
+    ],
+    unresolved: const SnapshotUnresolved(rows: 0, plays: 0),
+    ledgerFrom: null,
+    ledgerTo: null,
+  );
+  return ImportPreview(
+    inventory: exportifyInventory,
+    snapshot: snapshot,
+    stats: ExportStats.zero,
+    options: const ImportOptions(timeZone: 'Africa/Lagos'),
+    selection: CollectionSelection.initial(
+      snapshot,
+      const CollectionContext(ids: [], fingerprint: 'current', playlists: []),
+    ),
+  );
+}
+
+List<SnapshotEntry> _entries(int count, int offset) => [
+  for (var i = 0; i < count; i++)
+    SnapshotEntry(
+      position: i,
+      platformId: 'track${(offset + i).toString().padLeft(18, '0')}',
+      title: 'T${offset + i}',
+      artist: 'A',
+      album: null,
+      addedAt: null,
+    ),
+];
