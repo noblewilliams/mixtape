@@ -57,3 +57,9 @@ routine_suggestions}.dart`, `client/lib/presentation/providers/
   anchored menu and "Why this?" a bottom sheet, not a native context menu,
   because a Cupertino context menu cannot preview a pill inside the glass
   panel. The three actions and their custom semantics actions match the record.
+- 2026-09-18, Phase 3.3: the picker marks a playlist "Not enough" when it has
+  fewer than three entries in total, because the summary carries no matched
+  count (the board shows "2 matched songs · too few to use"); at 200% text the
+  picker sheet drops its title and the exclude row's subtitle so the toggle
+  stays reachable; the waiting rows carry a "Choose files" chip that frame S3
+  does not draw, keeping the import entry reachable from Home.
