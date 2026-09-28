@@ -1,0 +1,216 @@
+.closet-tape {
+  box-sizing: border-box;
+  position: relative;
+  display: block;
+  flex: none;
+  width: 44px;
+  height: 244px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid #5b605c42;
+  border-top-color: #ffffff6b;
+  border-bottom-color: #8d958b52;
+  border-radius: 3px;
+  box-shadow: 1px 3px 3px #191b1833;
+  backdrop-filter: brightness(1.035);
+  overflow: hidden;
+  isolation: isolate;
+  cursor: default;
+  z-index: 1;
+  transition:
+    transform 0.24s ease,
+    box-shadow 0.24s ease;
+}
+.closet-insert {
+  position: absolute;
+  inset: 7px 3px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--case);
+  color: var(--ink);
+  box-shadow: 0 0 1px #1b1b1855;
+}
+.closet-tape:before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  pointer-events: none;
+  border-radius: 2px;
+  border-left: 1px solid #ffffff78;
+  border-right: 1px solid #fafff04a;
+  background:
+    linear-gradient(
+      90deg,
+      transparent 0 1px,
+      #232b2229 2px,
+      transparent 3px calc(100% - 3px),
+      #faffee5c calc(100% - 2px),
+      transparent
+    ),
+    linear-gradient(
+      180deg,
+      #fbfff329,
+      transparent 6px,
+      transparent calc(100% - 6px),
+      #ebf6e526
+    );
+}
+.closet-tape:after {
+  content: "";
+  position: absolute;
+  inset: 7px 3px;
+  pointer-events: none;
+  background: linear-gradient(180deg, #19191ecc, #111116 75%);
+  opacity: 0.2;
+  z-index: 6;
+  transition: opacity 0.24s ease;
+}
+.closet-name {
+  position: absolute;
+  left: 50%;
+  top: 34px;
+  bottom: 32px;
+  width: 1.2em;
+  transform: translateX(-50%);
+  font:
+    400 13px/1.2 "Noteworthy",
+    "Bradley Hand",
+    cursive;
+  text-align: center;
+  writing-mode: vertical-rl;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.closet-print-top,
+.closet-print-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 3px 1px;
+  font:
+    700 18px/1 Arial,
+    sans-serif;
+}
+.closet-print-top {
+  top: 0;
+  height: 29px;
+  background: var(--cap);
+  color: var(--cap-ink);
+}
+.closet-print-bottom {
+  bottom: 0;
+  height: 27px;
+  background: var(--endcap);
+  color: var(--end-ink);
+  font-size: 17px;
+}
+.closet-print-top b,
+.closet-print-bottom b {
+  font: inherit;
+}
+.closet-print-top small {
+  font:
+    3.5px/1.2 Arial,
+    sans-serif;
+  writing-mode: vertical-rl;
+}
+.closet-print-bottom small {
+  font:
+    3px/1.3 Arial,
+    sans-serif;
+  letter-spacing: 0.1px;
+  text-align: left;
+}
+.closet-variant-0 .closet-print-top b {
+  border: 1px solid currentColor;
+  padding: 0 1px;
+}
+.closet-variant-1 .closet-print-top b {
+  font-size: 12px;
+  -webkit-text-stroke: 0.5px var(--cap-ink);
+  color: transparent;
+}
+.closet-variant-3 .closet-print-bottom {
+  font-size: 14px;
+}
+.closet-reflection {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      90deg,
+      #faffed12,
+      transparent 3px calc(100% - 3px),
+      #ffffff12
+    ),
+    linear-gradient(
+      151deg,
+      transparent 12%,
+      #fff8df0a 29%,
+      #fffbe72b 30%,
+      #fff8df0a 39%,
+      transparent 48% 76%,
+      #fff8df0a 89%,
+      transparent
+    );
+  border-top: 1px solid #fffce370;
+  opacity: 0.7;
+  transition: opacity 0.24s ease;
+}
+.footer-closet {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 3px;
+  width: calc(100% - 48px);
+  margin: 55px auto 0;
+  padding: 0;
+  height: 260px;
+}
+.footer-closet .closet-tape {
+  height: 244px;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+@media (max-width: 799px) {
+  .footer-closet {
+    width: calc(100% - 24px);
+    margin-top: 30px;
+  }
+}
+.footer-closet {
+  width: 100%;
+  gap: 3px;
+}
+.footer-closet .closet-tape {
+  flex: 1 1 44px;
+  min-width: 0;
+}
+.closet-tape:hover {
+  transform: translateY(-10px);
+  box-shadow: 2px 10px 7px #191b1838;
+  z-index: 5;
+}
+.closet-tape:hover:after {
+  opacity: 0;
+}
+.closet-tape:hover .closet-reflection {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .closet-tape {
+    transition: none;
+  }
+  .closet-tape:hover {
+    transform: none;
+  }
+}

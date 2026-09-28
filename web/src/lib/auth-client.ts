@@ -1,3 +1,4 @@
+import { appReturnUrl } from './app-url'
 import { createAuthClient } from 'better-auth/react'
 import { AUTH_URL } from '../config'
 import type { AuthBridge } from '../components/AuthGate'
@@ -41,8 +42,8 @@ export const browserAuth: AuthBridge & AccountBridge = {
     try {
       const result = await authClient.signIn.social({
         provider,
-        callbackURL: window.location.origin,
-        errorCallbackURL: `${window.location.origin}/?auth_error=${provider}`,
+        callbackURL: appReturnUrl(window.location.origin, import.meta.env.BASE_URL),
+        errorCallbackURL: appReturnUrl(window.location.origin, import.meta.env.BASE_URL, { auth_error: provider }),
       })
       return result.error ? { error: result.error.message || `${providerLabel(provider)} sign-in did not finish.` } : {}
     } catch {
@@ -58,8 +59,8 @@ export const browserAuth: AuthBridge & AccountBridge = {
     try {
       const result = await authClient.linkSocial({
         provider,
-        callbackURL: `${window.location.origin}/?account=linked&provider=${provider}`,
-        errorCallbackURL: `${window.location.origin}/?account_error=${provider}`,
+        callbackURL: appReturnUrl(window.location.origin, import.meta.env.BASE_URL, { account: 'linked', provider }),
+        errorCallbackURL: appReturnUrl(window.location.origin, import.meta.env.BASE_URL, { account_error: provider }),
       })
       return result.error ? { error: result.error.message || `Could not link ${providerLabel(provider)}.` } : {}
     } catch {

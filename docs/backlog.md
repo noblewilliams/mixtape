@@ -171,3 +171,5 @@ features remain pending.
   saving spinner) and the arrangement swallows author-store failures like the
   conversation did. The two alerts still carry different titles ("Save as
   playlist" vs "Create playlist"); pick one at the smoke.
+
+- **Landing release (2026-09-28):** same-domain build and routing implemented (`/` landing, `/app/` browser app). Configure the real native download destination when available; retain the unavailable-link dialog until then. Authenticated OAuth and account-link round trips need a signed-in deployment smoke check.

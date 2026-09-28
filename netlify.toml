@@ -1,0 +1,8 @@
+[build]
+  base = "web"
+  command = "npm ci --prefix ../landing --include=dev && node ../scripts/build-site.mjs"
+  publish = "../dist"
+
+[build.environment]
+  NODE_VERSION = "24"
+  VITE_API_URL = "https://mixtape-api.goalympics.workers.dev"
