@@ -16,7 +16,6 @@ await cp(join(root, 'web/dist'), join(output, 'app'), { recursive: true })
 await rm(join(output, 'app/_redirects'), { force: true })
 await writeFile(join(output, '_redirects'), [
   '/api/auth/* https://mixtape-api.goalympics.workers.dev/api/auth/:splat 200!',
-  '/app /app/ 301!',
   '/app/* /app/index.html 200',
   '/* /index.html 200',
   '',

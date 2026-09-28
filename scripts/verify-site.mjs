@@ -12,5 +12,5 @@ for (const html of [landing, app]) {
     assert.ok(existsSync(`${root}${path.slice(1)}`), `Missing built asset: ${path}`)
   }
 }
-assert.equal(readFileSync(`${root}_redirects`, 'utf8'), '/api/auth/* https://mixtape-api.goalympics.workers.dev/api/auth/:splat 200!\n/app /app/ 301!\n/app/* /app/index.html 200\n/* /index.html 200\n')
+assert.equal(readFileSync(`${root}_redirects`, 'utf8'), '/api/auth/* https://mixtape-api.goalympics.workers.dev/api/auth/:splat 200!\n/app/* /app/index.html 200\n/* /index.html 200\n')
 console.log('Verified both entry points, asset paths and auth routing')
