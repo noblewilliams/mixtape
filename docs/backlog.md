@@ -4,6 +4,8 @@ Single consolidated list. Detail lives in `decisions.md` (rationale) and the pla
 
 ## Owed right now
 
+- **Playlist candidates and honest empty mixes (2026-10-03):** implemented locally per `superpowers/plans/2026-10-03-playlist-candidates-honest-empty.md` (decision 2026-10-03). Remaining: commit and deploy the Worker, then run `scripts/reprioritize-playlist-tracks.ts --apply` once so already-imported playlist songs move up the enrichment queue (a founder-approved production write), and confirm the Exportify test account's enriched count climbs over the following cron runs. Until enrichment catches up, theme matching for that account ranks mostly on the ~120 songs already enriched. Em dashes are removed from the DJ's replies only; app copy in `web/` and `client/` still uses them.
+
 - **Native mobile parity:** [September 8 spec](superpowers/specs/2026-09-08-mobile-parity-design.md) is implemented locally: Home/conversation names and archive actions, memory confirmation, composer inspiration, playlist curation, Google SDK and Account methods. All native board surfaces are approved. **712 native tests pass**, analysis is clean, and the unsigned iOS simulator build passes. [Google public native configuration](testing/native-google-setup.md) is wired as of September 9; builds must include the documented define file. Remaining: real-provider/account acceptance, physical-device smoke and release delivery; no native UI approval/integration work remains in this scope.
 
 - **Exportify quick import:** founder approved guided ZIP/CSV import as the

@@ -569,7 +569,7 @@ describe('session routes', () => {
       // code (e.g. from LlmError('boom', 503) above), only the apology copy.
       expect(body.message).not.toMatch(/dj:/)
       expect(body.message).not.toMatch(/503/)
-      expect(body.message).toBe('the line to the booth dropped — try that again?')
+      expect(body.message).toBe('the line to the booth dropped. try that again?')
       // DjError.detail (the upstream status/error name, for server-side
       // observability only) is never in djErrorBody's whitelist — confirm
       // it can't leak into the client-facing body.

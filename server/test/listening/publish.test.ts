@@ -2,7 +2,9 @@ import { asc, eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import {
   listeningDays,
+  playlistEntries,
   tracks,
+  userPlaylists,
   userArtistSeeds,
   userMusicProfiles,
   userMusicSources,
@@ -534,6 +536,30 @@ describe('ListeningImportStore.complete', () => {
     expect(priorities.get(SPOTIFY_A)).toBe(6)
     expect(priorities.get(SPOTIFY_B)).toBe(2)
     expect(priorities.get(SPOTIFY_C)).toBe(9)
+  })
+
+  it('raises enrich_priority for tracks already in an active candidate-kind playlist of the listener', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const store = createListeningImportStore(db, { now: () => now })
+    const [listed, editorialOnly] = await db.insert(tracks).values([
+      { spotifyId: SPOTIFY_A, title: 'Song', artist: 'Artist' },
+      { spotifyId: SPOTIFY_B, title: 'Second', artist: 'Artist' },
+    ]).returning()
+    for (const [key, kind, trackId] of [['mine', 'user', listed.id], ['theirs', 'editorial', editorialOnly.id]] as const) {
+      const [p] = await db.insert(userPlaylists).values({ userId: 'u1', appleLibraryId: key, name: key, kind,
+        source: 'spotify_export', sourceFingerprint: 'a'.repeat(64) }).returning()
+      await db.insert(playlistEntries).values({ playlistId: p.id, position: 0, appleLibraryEntryId: 'e',
+        trackId, titleSnapshot: 'T', artistSnapshot: 'A' })
+    }
+
+    await publish(store, 'u1', begin(), { tracks: twoTracks() })
+
+    const priorities = new Map(
+      (await db.select().from(tracks)).map((row) => [row.spotifyId, row.enrichPriority]),
+    )
+    expect(priorities.get(SPOTIFY_A)).toBe(1)
+    expect(priorities.get(SPOTIFY_B)).toBe(0)
   })
 
   it('keeps live-sync titles on Apple upserts and corrected artists on Spotify upserts', async () => {

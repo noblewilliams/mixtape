@@ -1,7 +1,7 @@
 import type { LlmClient, LlmMessage, LlmRequest } from './llm'
 import type { PoolTrack } from './pool'
 import type { Intent } from './contracts'
-import { sanitizeForPrompt } from './sanitize'
+import { sanitizeForPrompt, stripEmDashes } from './sanitize'
 
 export type CuratedTrack = { trackId: string; reason: string }
 
@@ -108,13 +108,13 @@ const SYSTEM_PROMPT = [
     '- Spread the artists — at most two tracks by any one artist, unless the request is about ' +
     'that artist.',
   'Reasons: each pick carries one short line shown to the listener under the track title. ' +
-    'Write it the way a DJ leans over and says why this one, now — lowercase, two to six words, ' +
-    'a fragment, no closing punctuation. Vary what each reason is about across the queue: the ' +
-    'sound, the mood a lyric carries, why it follows the track before it, where it sits in the ' +
-    'arc. Never repeat a reason. Never name the track or the artist — the listener can already ' +
-    'see those. Never restate the request back at them: "matches your vibe", "fits the mood", ' +
-    '"great choice" are failures. "slow burn opener", "keeps the pulse up", "the comedown", ' +
-    '"lands after that chorus" are the register.',
+    'Write it the way a DJ leans over and says why this one, now: lowercase, two to six words, ' +
+    'a fragment, no closing punctuation, no em dashes. Vary what each reason is about across the ' +
+    'queue: the sound, the mood a lyric carries, why it follows the track before it, where it ' +
+    'sits in the arc. Never repeat a reason. Never name the track or the artist; the listener ' +
+    'can already see those. Never restate the request back at them: "matches your vibe", "fits ' +
+    'the mood", "great choice" are failures. "slow burn opener", "keeps the pulse up", "the ' +
+    'comedown", "lands after that chorus" are the register.',
   'Output STRICT JSON ONLY: one array, [{"id":"<pool id>","reason":"<short reason>"}, ...], in ' +
     'play order. Begin your response with [ and end it with ]. No prose, no markdown, no code ' +
     'fences, nothing before or after the array.',
@@ -228,7 +228,10 @@ function normalizePicks(raw: unknown[], poolIds: Set<string>): CuratedTrack[] {
     // Array.from(...).slice(...).join('') caps by CODE POINT, not UTF-16
     // code unit — a plain .slice could bisect a surrogate pair (emoji, rare
     // scripts) and hand back a malformed half-character to the UI.
-    const reason = typeof reasonRaw === 'string' ? Array.from(reasonRaw.trim()).slice(0, MAX_REASON_LENGTH).join('') : ''
+    // Em dashes go before the cap, so the cap measures what the listener sees.
+    const reason = typeof reasonRaw === 'string'
+      ? Array.from(stripEmDashes(reasonRaw.trim())).slice(0, MAX_REASON_LENGTH).join('')
+      : ''
     picks.push({ trackId: id, reason })
   }
   return picks

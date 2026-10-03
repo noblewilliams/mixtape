@@ -10,6 +10,7 @@ import {
   user,
   userMusicProfiles,
   userPlaylists,
+  userTracks,
 } from '../../src/db/schema'
 import {
   PlaylistSyncError,
@@ -369,6 +370,37 @@ describe('PlaylistSyncStore', () => {
     const [profile] = await db.select().from(userMusicProfiles)
     expect(profile.appleStorefront).toBeNull()
     expect(profile.playlistsSyncedAt?.getTime()).toBe(now.getTime())
+  })
+
+  it('raises enrich_priority for the listener\'s rows its playlists make pool candidates, never lowering it', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    // The shape a quick import leaves behind: the listening import already
+    // wrote user_tracks rows, none in the library, before the playlists land.
+    const [listed, high, unowned] = await db.insert(tracks).values([
+      { spotifyId: SPOTIFY_ID_A, title: 'Listed', artist: 'A' },
+      { spotifyId: SPOTIFY_ID_B, title: 'High', artist: 'B', enrichPriority: 9 },
+      { spotifyId: SPOTIFY_ID_C, title: 'Unowned', artist: 'C' },
+    ]).returning()
+    await db.insert(userTracks).values([
+      { userId: 'u1', trackId: listed.id, inLibrary: false, playCountRecent: 2 },
+      { userId: 'u1', trackId: high.id, inLibrary: false },
+    ])
+    const store = createPlaylistSyncStore(db, { now: () => now })
+    const started = await store.begin('u1', null, 1, 3, 'spotify_export')
+    await store.putPlaylists('u1', started.syncId, [playlist({ appleLibraryId: KEY, kind: 'user', entryCount: 3 })])
+    await store.putEntries('u1', started.syncId, KEY, [
+      spotifyEntry(0, { spotifyId: SPOTIFY_ID_A }),
+      spotifyEntry(1, { spotifyId: SPOTIFY_ID_B }),
+      spotifyEntry(2, { spotifyId: SPOTIFY_ID_C }),
+    ])
+
+    await store.complete('u1', started.syncId)
+
+    const priorities = new Map((await db.select().from(tracks)).map((row) => [row.id, row.enrichPriority]))
+    expect(priorities.get(listed.id)).toBe(3)
+    expect(priorities.get(high.id)).toBe(9)
+    expect(priorities.get(unowned.id)).toBe(0)
   })
 
   it('re-links and re-snapshots Spotify entries by position slot on a shifted resync', async () => {

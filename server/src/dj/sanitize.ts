@@ -41,3 +41,27 @@ export function sanitizeTitleText(text: string, maxLength = 60): string {
     .slice(0, maxLength)
     .trim()
 }
+
+// The founder does not want em dashes (U+2014) in anything the DJ says.
+// Applied to model-authored text a listener reads (dj/loop.ts and
+// playlist-editing/loop.ts final replies, dj/curate.ts reasons), never to
+// titles or anything fed back into a prompt. A run of em dashes with its
+// surrounding spaces becomes ", ". At the start or end of the text or of a
+// line, or just inside an opening bracket or quote, it is dropped, and next
+// to punctuation it yields to that punctuation, so the result never reads
+// ", ," or "word ,". En dashes and hyphens stay.
+const EM_DASH_RUN = /[ \t]*—(?:[ \t]*—)*[ \t]*/g
+const PUNCTUATION = /[,.;:!?]/
+const LINE_EDGE = /^[\r\n]?$/
+const OPENER = /[(\[{"“‘]/
+
+export function stripEmDashes(text: string): string {
+  return text.replace(EM_DASH_RUN, (match: string, offset: number, whole: string) => {
+    const prev = whole.slice(0, offset).slice(-1)
+    const next = whole.charAt(offset + match.length)
+    if (LINE_EDGE.test(prev) || LINE_EDGE.test(next) || OPENER.test(prev)) return ''
+    if (PUNCTUATION.test(next)) return ''
+    if (PUNCTUATION.test(prev)) return ' '
+    return ', '
+  })
+}

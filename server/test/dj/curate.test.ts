@@ -126,6 +126,15 @@ describe('curate', () => {
     expect(result.every((r) => r.reason === '')).toBe(true)
   })
 
+  it('strips em dashes from a reason', async () => {
+    const pool = makePool(3)
+    const { llm } = scriptedLlm([textTurn([{ id: pool[0].trackId, reason: 'slow burn — the opener' }])])
+
+    const result = await curate(llm, pool, intent({ themes: 'x', targetCount: 3 }))
+
+    expect(result[0].reason).toBe('slow burn, the opener')
+  })
+
   it('caps an overlong reason to 140 chars', async () => {
     const pool = makePool(3)
     const longReason = 'x'.repeat(300)

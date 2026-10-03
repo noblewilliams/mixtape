@@ -2,6 +2,7 @@ import { spotifyLibraryReview, reviewHash } from './collection-review'
 import { and, eq, inArray, or, sql } from 'drizzle-orm'
 import type { Db } from '../db/types'
 import { updateLibraryMembership } from '../library/membership'
+import { playlistCandidateTracksSql } from '../dj/pool'
 import {
   listeningDays,
   listeningImportArtists,
@@ -882,13 +883,17 @@ export function createListeningImportStore(
           `)
         }
 
-        // 6. Enrichment order: pool candidates first, by recent plays.
+        // 6. Enrichment order: pool candidates first, by recent plays. The
+        // playlist leg here only sees playlists synced before this run: the
+        // client syncs an export's playlists after this commits, so
+        // playlists/sync-store.ts raises the same priority once they land.
         await tx.execute(sql`
           UPDATE tracks tr
           SET enrich_priority = greatest(
             tr.enrich_priority,
             CASE
               WHEN ut.in_library OR ut.seeded OR ut.play_count_recent >= 3
+                OR ut.track_id IN (${playlistCandidateTracksSql(userId)})
                 THEN 1 + ut.play_count_recent
               ELSE 0
             END

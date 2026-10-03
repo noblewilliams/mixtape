@@ -1,5 +1,49 @@
 # Decision Log
 
+## 2026-10-03 — Playlist songs are pool candidates; empty mixes say so; no em dashes in DJ replies
+
+Reopens the 2026-09-04 rule that playlist membership "does not admit
+playlist-only tracks". That rule predates Exportify becoming the default
+Spotify route (2026-09-08), where Playlist is the default role for every file.
+A listener who imported eleven playlists (830 songs, none marked Liked Songs,
+no history) resolved to `personal` with zero candidates, and every mix came
+back empty behind a "no tracks match those constraints" tool result.
+
+**Candidate rule.** A `user_tracks` row is now a personal candidate when it is
+in the library, seeded, has three counted plays in 730 days, **or sits in one
+of the listener's active playlists** of kind `user`, `external`, `user_shared`
+or `unknown` whose origin is not `mixtape`. Editorial, personal-mix and replay
+playlists admit nothing, and neither does the DJ's own output. This is
+eligibility only: the 0.10 playlist taste term still needs `user_confirmed`
+origin, no weight changes, and corpus mode and `resolvePoolMode` are untouched.
+Admission still needs a `user_tracks` row, which the Spotify imports write and
+Apple playlist sync does not, so Apple listeners' pools do not change.
+Enrichment priority follows the same rule, so an import's playlist songs are
+enriched with the other candidates instead of behind the whole backlog;
+`scripts/reprioritize-playlist-tracks.ts` backfills imports that already
+landed (dry run unless `--apply`).
+
+**Honest empty.** When a personal pool is empty because the listener has no
+candidates at all, `generate_queue`/`edit_queue` return `EMPTY_LIBRARY_TEXT`:
+changing the brief will not help, do not retry, tell the listener. The
+constraints text is kept for filters that empty a real library. The
+`MAX_TURNS` fallback no longer claims it "landed" anything when the queue did
+not move (`FALLBACK_UNCHANGED_TEXT`).
+
+**No em dashes in what the DJ says.** Founder preference. Canned replies and
+persona prompts are written without them, the personas say so, and
+`stripEmDashes` rewrites any that still come back in a chat reply, a
+playlist-edit reply or a pick reason. Titles and the `Title — Artist` listing
+format are not replies and are unchanged. App copy outside the DJ's voice is
+not covered.
+
+Plan: `superpowers/plans/2026-10-03-playlist-candidates-honest-empty.md`.
+**Reopens if:** followed or shared playlists flood pools with songs the
+listener does not recognise (then narrow the kinds or require confirmation),
+Apple playlist-only songs should be admitted (needs `user_tracks` rows or a
+wider candidate source), or a personal listener with no candidates should fall
+back to a corpus mix rather than be told to import more.
+
 Short ADR-style log. Newest first. Each entry: decision, why, and what would reopen it.
 
 ## 2026-09-08 — Spotify quick start uses Exportify files

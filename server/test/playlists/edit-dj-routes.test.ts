@@ -171,6 +171,20 @@ describe('playlist edit DJ route', () => {
       .toEqual(['user', 'dj'])
   })
 
+  it('strips em dashes from the final reply before persisting it', async () => {
+    const db = await createTestDb()
+    const draft = await seedDraft(db)
+    const llm: LlmClient = vi.fn(async () =>
+      turn([{ type: 'text', text: 'nothing changed yet — tell me which songs to move.' }]))
+
+    const response = await request(db, 'u1', { llm, catalog: { searchSongs: vi.fn(async () => []) } },
+      draft.draft.id, { content: 'hmm', expectedVersion: 0 })
+
+    expect(response.status).toBe(200)
+    expect(((await response.json()) as any).djMessage.content)
+      .toBe('nothing changed yet, tell me which songs to move.')
+  })
+
   it('never lets the model mutate with an internal track id it did not discover this turn', async () => {
     const db = await createTestDb()
     const draft = await seedDraft(db)

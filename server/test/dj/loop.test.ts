@@ -5,6 +5,8 @@ import {
   runDjTurn,
   DjError,
   FALLBACK_TEXT,
+  FALLBACK_UNCHANGED_TEXT,
+  EMPTY_LIBRARY_TEXT,
   INSUFFICIENT_SEEDS_TEXT,
   CORPUS_NOTICE,
   type DjDeps,
@@ -21,6 +23,9 @@ import {
   trackMeanings,
   userTracks,
   userArtistSeeds,
+  userMusicSources,
+  userPlaylists,
+  playlistEntries,
   user,
 } from '../../src/db/schema'
 import type { Embedder } from '../../src/enrich/embedder'
@@ -302,6 +307,19 @@ describe('runDjTurn', () => {
     expect(result.queue).toHaveLength(0)
     expect(result.djMessage.content).toBe('just chatting, no queue changes.')
     expect(result.djMessage.queueVersion).toBeNull()
+  })
+
+  it('strips em dashes from the final reply before persisting it', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const session = await seedSession(db, 'u1')
+    const sessionRef: DjSessionRef = { id: session.id, userId: 'u1' }
+    const { llm } = makeFakeLlm([{ text: 'all good here — what are we playing?' }])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'hey')
+
+    expect(result.djMessage.content).toBe('all good here, what are we playing?')
+    expect((await readMessages(db, session.id)).at(-1)!.content).toBe('all good here, what are we playing?')
   })
 
   it('MAX_TURNS bound: a model that always returns tool_use gets a fallback reply, never an infinite loop', async () => {
@@ -1116,7 +1134,7 @@ describe('runDjTurn', () => {
       expect(error).toBeInstanceOf(DjError)
       const djError = error as DjError
       expect(djError.kind).toBe('internal')
-      expect(djError.message).toBe('something skipped on my end — try that again?')
+      expect(djError.message).toBe('something skipped on my end. try that again?')
       expect(djError.detail).toBe('curation budget')
 
       // Nothing from the offending batch committed — applyOps's phase 1
@@ -1779,5 +1797,134 @@ describe('pool mode gating', () => {
     expect(result.queue).toHaveLength(5)
     expect(await readNotPersonal(db, session.id)).toBe(false)
     expect(toolResultTextFrom(conversationRequests(requests)[1])).not.toContain(CORPUS_NOTICE)
+  })
+})
+
+// --- 2026-10-03: playlist candidates and honest empty mixes ----------------
+
+// A listener whose import landed but left only rows nothing vouches for: not
+// in the library, not seeded, no ledger, no playlist. resolvePoolMode reads
+// them as personal; the candidate rule admits none.
+async function seedLandedButEmpty(db: TestDb, userId: string, n = 3) {
+  await db.insert(userMusicSources).values({ userId, source: 'spotify_export', lastImportedAt: new Date() })
+  const out = []
+  for (let i = 0; i < n; i++) {
+    trackCounter += 1
+    const [t] = await db.insert(tracks)
+      .values({ appleId: `orphan-${trackCounter}`, title: `Orphan ${trackCounter}`, artist: 'Artist', durationMs: 200_000 })
+      .returning()
+    await db.insert(trackMeanings).values({ trackId: t.id, embedding: MATCHING_DIRECTION, lyricsSource: 'lrclib' })
+    await db.insert(userTracks).values({ userId, trackId: t.id, inLibrary: false })
+    out.push(t)
+  }
+  return out
+}
+
+describe('empty personal library', () => {
+  it('generate_queue against zero candidates returns EMPTY_LIBRARY_TEXT and spends no curation', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedLandedButEmpty(db, 'u1')
+    const session = await seedSession(db, 'u1')
+    const sessionRef: DjSessionRef = { id: session.id, userId: 'u1' }
+    const { llm, requests } = makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'late night', targetCount: 5 })] },
+      { text: 'nothing of yours to pick from yet.' },
+    ])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'play me something')
+
+    expect(toolResultTextFrom(conversationRequests(requests)[1])).toBe(EMPTY_LIBRARY_TEXT)
+    expect(curateRequests(requests)).toHaveLength(0)
+    expect(result.queue).toHaveLength(0)
+    expect(result.djMessage.queueVersion).toBeNull()
+  })
+
+  it('a swap against zero candidates returns EMPTY_LIBRARY_TEXT with no partial application and no version bump', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const orphans = await seedLandedButEmpty(db, 'u1')
+    const session = await seedSession(db, 'u1')
+    const v1 = await replaceQueue(db, session.id, orphans.map((t) => ({ trackId: t.id, reason: '' })), 'dj')
+    const sessionRef: DjSessionRef = { id: session.id, userId: 'u1' }
+    const { llm, requests } = makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'edit_queue', { ops: [{ op: 'remove', position: 2 }, { op: 'swap', position: 0 }] })] },
+      { text: 'nothing to swap in yet.' },
+    ])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'drop the last, swap the first')
+
+    expect(toolResultTextFrom(conversationRequests(requests)[1])).toBe(EMPTY_LIBRARY_TEXT)
+    expect(curateRequests(requests)).toHaveLength(0)
+    expect(result.queue.map((t) => t.trackId)).toEqual(orphans.map((t) => t.id))
+    expect(result.queueVersion).toBe(v1)
+  })
+
+  it('a remove-only edit needs no pool and still applies', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const orphans = await seedLandedButEmpty(db, 'u1')
+    const session = await seedSession(db, 'u1')
+    await replaceQueue(db, session.id, orphans.map((t) => ({ trackId: t.id, reason: '' })), 'dj')
+    const sessionRef: DjSessionRef = { id: session.id, userId: 'u1' }
+    const { llm } = makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'edit_queue', { ops: [{ op: 'remove', position: 0 }] })] },
+      { text: 'gone.' },
+    ])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'drop the first one')
+
+    expect(result.queue.map((t) => t.trackId)).toEqual(orphans.slice(1).map((t) => t.id))
+  })
+
+  it('a reply that is nothing but an em dash falls back instead of persisting an empty message', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const session = await seedSession(db, 'u1')
+    const sessionRef: DjSessionRef = { id: session.id, userId: 'u1' }
+    const { llm } = makeFakeLlm([{ text: ' \u2014 ' }])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'hey')
+
+    expect(result.djMessage.content).toBe(FALLBACK_UNCHANGED_TEXT)
+  })
+
+  it('the same listener with those rows in an active playlist of theirs gets a mix', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const orphans = await seedLandedButEmpty(db, 'u1')
+    const [p] = await db.insert(userPlaylists).values({ userId: 'u1', appleLibraryId: 'k', name: 'Mine', kind: 'user',
+      source: 'spotify_export', sourceFingerprint: 'a'.repeat(64) }).returning()
+    await db.insert(playlistEntries).values(orphans.map((t, position) => ({ playlistId: p.id, position,
+      appleLibraryEntryId: `k:${position}`, trackId: t.id, titleSnapshot: 'T', artistSnapshot: 'A' })))
+    const session = await seedSession(db, 'u1')
+    const sessionRef: DjSessionRef = { id: session.id, userId: 'u1' }
+    const { llm } = makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'late night', targetCount: 3 })] },
+      { text: 'here you go.' },
+    ])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'play me something')
+
+    expect(result.queue.map((t) => t.trackId).sort()).toEqual(orphans.map((t) => t.id).sort())
+  })
+
+  it('a MAX_TURNS turn that changed nothing persists FALLBACK_UNCHANGED_TEXT, which claims nothing landed', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedLandedButEmpty(db, 'u1')
+    const session = await seedSession(db, 'u1')
+    const sessionRef: DjSessionRef = { id: session.id, userId: 'u1' }
+    const { llm, requests } = makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'late night', targetCount: 5 })] },
+    ])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'play me something')
+
+    expect(conversationRequests(requests)).toHaveLength(4)
+    expect(result.djMessage.content).toBe(FALLBACK_UNCHANGED_TEXT)
+    expect(result.djMessage.queueVersion).toBeNull()
+    expect(FALLBACK_UNCHANGED_TEXT).not.toBe(FALLBACK_TEXT)
+    expect(FALLBACK_UNCHANGED_TEXT).not.toMatch(/landed|here's|queued/i)
   })
 })

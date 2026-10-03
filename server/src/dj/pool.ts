@@ -42,15 +42,87 @@ export type BuildPoolOptions = {
 
 // Candidate rule, personal mode (spec 2026-09-01 → Pool): a user_tracks row
 // is a candidate when it is in the library, was seeded (pasted/interview),
-// OR the listening ledger counts at least RECENT_PLAY_MIN plays for it
-// inside the last RECENT_PLAY_WINDOW_DAYS. Three plays in two years is the
-// founder's threshold. Computed live from listening_days on every call — the
-// window drifts with the calendar and needs no recompute job. Accepted edge:
-// an Apple listener's removed library song that still had three plays in the
-// window re-enters the pool; session removals still penalize it (the taste
-// term below).
+// the listening ledger counts at least RECENT_PLAY_MIN plays for it inside
+// the last RECENT_PLAY_WINDOW_DAYS, OR it sits in one of the listener's own
+// active playlists (decision 2026-10-03: a playlist import is taste, so its
+// songs are candidates even when nothing else vouches for them). Three plays
+// in two years is the founder's threshold. Computed live from listening_days
+// on every call, so the window drifts with the calendar and needs no
+// recompute job. Accepted edge: an Apple listener's removed library song
+// that still had three plays in the window re-enters the pool; session
+// removals still penalize it (the taste term below).
 export const RECENT_PLAY_WINDOW_DAYS = 730
 export const RECENT_PLAY_MIN = 3
+
+// Playlist kinds that count as the listener's own curation, read by both the
+// playlist candidate leg and the confirmed-playlist taste term so the two
+// cannot drift. Editorial, replay and personal_mix playlists are Apple's
+// picks, not the listener's.
+const CANDIDATE_PLAYLIST_KINDS = ['user', 'external', 'user_shared', 'unknown'] as const
+const candidatePlaylistKindsSql = sql.join(CANDIDATE_PLAYLIST_KINDS.map((k) => sql`${k}`), sql`, `)
+
+// The personal candidate CTEs, shared by buildPool and hasPersonalCandidates
+// so "is there anything to pick from" and "what can be picked" are one rule.
+//  - recent_plays, the ledger leg: tracks this listener played at least
+//    RECENT_PLAY_MIN times, summed across every day and every source, inside
+//    the window. Aggregated once here; the rule reads it as a plain IN.
+//  - playlist_tracks, the playlist leg: tracks in any of the listener's
+//    active playlists of a candidate kind that Mixtape did not make.
+//    Eligibility only: confirmation is not required here (it still gates the
+//    0.10 taste term), and the candidate source stays user_tracks, so an
+//    entry with no user_tracks row for this listener stays out.
+function personalCandidateCtes(userId: string): SQL {
+  return sql`
+    recent_plays AS (
+      SELECT track_id
+      FROM listening_days
+      WHERE user_id = ${userId}
+        AND day >= CURRENT_DATE - ${RECENT_PLAY_WINDOW_DAYS}::int
+      GROUP BY track_id
+      HAVING SUM(plays) >= ${RECENT_PLAY_MIN}
+    ),
+    playlist_tracks AS (${playlistCandidateTracksSql(userId)})`
+}
+
+// The playlist leg as a bare SELECT of track_id. Exported so enrichment
+// priority (listening/import-store.ts, playlists/sync-store.ts) follows the
+// same rule the pool admits by.
+export function playlistCandidateTracksSql(userId: string): SQL {
+  return sql`
+    SELECT DISTINCT pe.track_id
+    FROM playlist_entries pe
+    JOIN user_playlists up ON up.id = pe.playlist_id
+    WHERE up.user_id = ${userId}
+      AND up.in_library = true
+      AND up.kind IN (${candidatePlaylistKindsSql})
+      AND ${playlistOriginSql} <> 'mixtape'
+      AND pe.track_id IS NOT NULL`
+}
+
+// The rule itself, over a user_tracks row aliased `ut`.
+const PERSONAL_CANDIDATE_RULE = sql`(ut.in_library OR ut.seeded
+  OR ut.track_id IN (SELECT track_id FROM recent_plays)
+  OR ut.track_id IN (SELECT track_id FROM playlist_tracks))`
+
+/**
+ * Whether the personal candidate rule admits any of the listener's
+ * user_tracks rows, with no intent filters. False means a personal-mode
+ * listener has nothing the DJ can pick from at all, whatever the brief, which
+ * dj/loop.ts tells apart from "nothing matched these constraints". EXISTS,
+ * not a count: only zero matters, and a library row answers it without
+ * reading the ledger or the playlists.
+ */
+export async function hasPersonalCandidates(db: Db, userId: string): Promise<boolean> {
+  const res = await db.execute(sql`
+    WITH ${personalCandidateCtes(userId)}
+    SELECT EXISTS (
+      SELECT 1 FROM user_tracks ut
+      WHERE ut.user_id = ${userId} AND ${PERSONAL_CANDIDATE_RULE}
+    ) AS has_candidates
+  `)
+  const [row] = normalizeRows(res)
+  return row?.has_candidates === true
+}
 
 // Corpus-mode gate (spec → Before the data arrives): a "not personal yet"
 // mix unlocks only once the listener's seeds match at least MIN_SEED_TRACKS
@@ -453,8 +525,9 @@ export async function buildPool(
   // term above), the hard filters below, and the recording dedupe are all
   // shared, so a corpus mix is scored by exactly the rules a personal one is.
   //  - personal: the listener's own user_tracks rows, gated by the candidate
-  //    rule (in_library OR seeded OR counted plays in the window — see
-  //    RECENT_PLAY_* above). recent_plays is ONE aggregated CTE over
+  //    rule (in_library OR seeded OR counted plays in the window OR an
+  //    active playlist of theirs; see RECENT_PLAY_* and
+  //    personalCandidateCtes above). recent_plays is ONE aggregated CTE over
   //    listening_days, never a correlated subquery: a 20k-row lifetime
   //    history must not pay a per-candidate ledger lookup.
   //  - corpus: every track with a track_features or track_meanings row (an
@@ -469,10 +542,7 @@ export async function buildPool(
   const filters: SQL[] =
     mode === 'corpus'
       ? [sql`(f.track_id IS NOT NULL OR tm.track_id IS NOT NULL)`]
-      : [
-          sql`ut.user_id = ${userId}`,
-          sql`(ut.in_library OR ut.seeded OR ut.track_id IN (SELECT track_id FROM recent_plays))`,
-        ]
+      : [sql`ut.user_id = ${userId}`, PERSONAL_CANDIDATE_RULE]
   // Only a real two-bound window hard-filters — see the tempo comment above.
   // NULL tempo PASSES (consistent with releaseYear/explicit below): unknown
   // is not the same as out-of-window, and excluding it would just mean this
@@ -511,9 +581,10 @@ export async function buildPool(
 
   const whereClause = sql.join(filters, sql` AND `)
 
-  // recent_plays and seed_names are each read by only one mode (the personal
-  // candidate rule and the corpus familiarity term respectively); Postgres
-  // never evaluates an unreferenced CTE, so the other one costs nothing.
+  // The personal candidate CTEs and seed_names are each read by only one mode
+  // (the personal candidate rule and the corpus familiarity term
+  // respectively); Postgres never evaluates an unreferenced CTE, so the other
+  // side costs nothing.
   const res = await db.execute(sql`
     WITH seed_deduped AS (
       SELECT DISTINCT ON (COALESCE(st.isrc, st.id::text))
@@ -641,22 +712,12 @@ export async function buildPool(
       JOIN tracks pt ON pt.id = pe.track_id
       WHERE up.user_id = ${userId}
         AND up.in_library = true
-        AND up.kind IN ('user', 'external', 'user_shared', 'unknown')
+        AND up.kind IN (${candidatePlaylistKindsSql})
         AND ${playlistOriginSql} = 'user_confirmed'
       GROUP BY 1
     ),
-    -- Candidate rule, the ledger leg (see RECENT_PLAY_* above): tracks this
-    -- listener played at least RECENT_PLAY_MIN times, summed across every
-    -- day and every source, inside the window. Aggregated once here; the
-    -- personal candidate filter reads it as a plain IN.
-    recent_plays AS (
-      SELECT track_id
-      FROM listening_days
-      WHERE user_id = ${userId}
-        AND day >= CURRENT_DATE - ${RECENT_PLAY_WINDOW_DAYS}::int
-      GROUP BY track_id
-      HAVING SUM(plays) >= ${RECENT_PLAY_MIN}
-    ),
+    -- Candidate rule, the ledger and playlist legs (personalCandidateCtes).
+    ${personalCandidateCtes(userId)},
     seed_names AS (
       SELECT DISTINCT lower(btrim(name)) AS name
       FROM user_artist_seeds

@@ -2,7 +2,7 @@ import { and, desc, eq, lt } from 'drizzle-orm'
 import type { Db } from '../db/types'
 import { playlistEditMessages } from '../db/schema'
 import type { LlmClient, LlmMessage } from '../dj/llm'
-import { sanitizeForPrompt } from '../dj/sanitize'
+import { sanitizeForPrompt, stripEmDashes } from '../dj/sanitize'
 import type { AppleCatalogSearchClient } from '../musickit/catalog'
 import {
   PLAYLIST_EDIT_TOOLS,
@@ -17,7 +17,7 @@ const MAX_ROUNDS = 4
 const MAX_TOOL_CALLS = 8
 const MAX_HISTORY = 40
 const MAX_CONTEXT_ENTRIES = 160
-const FALLBACK = 'I could not finish arranging that edit. Try asking again.'
+export const PLAYLIST_EDIT_FALLBACK = 'I could not finish arranging that edit. Try asking again.'
 
 export type PlaylistEditDjDeps = {
   llm: LlmClient
@@ -47,7 +47,8 @@ Use only exact trackId values returned by search_catalog. Never invent identifie
 Artist and album constraints are hard requirements. Do not substitute a similarly named artist.
 "A couple" means exactly two. Do not add a song already present unless the listener explicitly requests a duplicate.
 When the listener asks where songs fit best, set placementIntent to best_fit and omit anchors; code chooses the final gap.
-Do not claim the source playlist changed. Explain that changes are in the draft until the listener reviews and applies them.`
+Do not claim the source playlist changed. Explain that changes are in the draft until the listener reviews and applies them.
+Never use em dashes in your replies. Use a comma or a full stop instead.`
 
 function contextFor(draft: PlaylistEditDraftView): string {
   const entries = draft.entries.length <= MAX_CONTEXT_ENTRIES
@@ -132,7 +133,8 @@ export async function runPlaylistEditTurn(
       })
       liveMessages.push({ role: 'assistant', content: turn.raw })
       if (!turn.toolCalls.length) {
-        finalText = turn.text.trim() || FALLBACK
+        // No em dashes in what the listener reads (dj/sanitize.ts).
+        finalText = stripEmDashes(turn.text.trim()) || PLAYLIST_EDIT_FALLBACK
         break
       }
 
@@ -235,7 +237,7 @@ export async function runPlaylistEditTurn(
   const [djMessage] = await db.insert(playlistEditMessages).values({
     draftId: ref.draftId,
     role: 'dj',
-    content: finalText ?? FALLBACK,
+    content: finalText ?? PLAYLIST_EDIT_FALLBACK,
     draftVersion: draft.draft.version,
   }).returning()
   console.log('playlist edit turn', JSON.stringify({

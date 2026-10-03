@@ -374,6 +374,8 @@ recent_plays AS (
 -- candidate when ut.in_library OR ut.seeded OR ut.track_id IN recent_plays
 ```
 
+Amended 2026-10-03: a track in one of the listener's active user-curated playlists (kinds `user`, `external`, `user_shared`, `unknown`; origin not `mixtape`) is also a candidate, and enrichment priority follows the same rule. See `../../decisions.md` → 2026-10-03.
+
 Three counted plays within the last two years is the founder's threshold. Computed live, so the window drifts with time and needs no recompute job. Accepted edge: an Apple listener's removed library song that still had three plays in the window re-enters the pool; session removals still penalize it.
 
 **Recording dedupe.** Spotify relinks tracks across re-releases and regions, and Apple reissues catalog ids, so one recording can hold several `tracks` rows in a lifetime history. Rows group on `COALESCE(t.isrc, t.id::text)`: familiarity uses the summed play count across the group, and only the best-scoring row of each group survives into the pool, preferring a row with an `apple_id` for Apple listeners and a `spotify_id` for Spotify listeners.

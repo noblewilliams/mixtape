@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import {
   buildPool,
+  hasPersonalCandidates,
   resolvePoolMode,
   MIN_SEED_ARTISTS,
   MIN_SEED_TRACKS,
@@ -297,7 +298,7 @@ describe('buildPool', () => {
     }
   })
 
-  it('does not admit playlist-only songs or override prompt filters, and ignores confirmation in corpus mode', async () => {
+  it('does not admit playlist songs the listener has no user_tracks row for or override prompt filters, and ignores confirmation in corpus mode', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')
     const plain = await seedTrack(db, 'u1', { tempo: 100 })
@@ -998,6 +999,136 @@ describe('buildPool candidate rule (personal mode)', () => {
     const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' }))
 
     expect(pool.map((p) => p.trackId)).not.toContain(t.id)
+  })
+})
+
+// Puts `trackId` in a fresh playlist owned by `opts.userId` (default u1),
+// active, user-kind and unconfirmed unless told otherwise.
+async function seedPlaylistWith(
+  db: TestDb,
+  trackId: string,
+  opts: { userId?: string; kind?: string; inLibrary?: boolean; isMixtapeOwned?: boolean; origin?: 'mixtape' | 'user_confirmed' } = {},
+) {
+  counter += 1
+  const userId = opts.userId ?? 'u1'
+  const [p] = await db.insert(userPlaylists).values({ userId, appleLibraryId: `p-leg-${counter}`,
+    name: 'Playlist', kind: (opts.kind ?? 'user') as 'user', inLibrary: opts.inLibrary ?? true,
+    isMixtapeOwned: opts.isMixtapeOwned ?? false, sourceFingerprint: 'a'.repeat(64) }).returning()
+  if (opts.origin) await db.insert(playlistOrigins).values({ userId, source: 'apple', libraryId: p.appleLibraryId, origin: opts.origin })
+  await db.insert(playlistEntries).values({ playlistId: p.id, position: 0, appleLibraryEntryId: 'e',
+    trackId, titleSnapshot: 'T', artistSnapshot: 'A' })
+  return p
+}
+
+describe('buildPool candidate rule: the playlist leg', () => {
+  it('a playlist-only row (not in library, not seeded, no ledger) in an active user playlist is a candidate', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const t = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY, inLibrary: false })
+    await seedPlaylistWith(db, t.id)
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' }))
+
+    expect(pool.map((p) => p.trackId)).toContain(t.id)
+  })
+
+  it('external, user_shared and unknown kinds admit too', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const admitted = []
+    for (const kind of ['external', 'user_shared', 'unknown']) {
+      const t = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY, inLibrary: false })
+      await seedPlaylistWith(db, t.id, { kind })
+      admitted.push(t.id)
+    }
+
+    const ids = (await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' }))).map((p) => p.trackId)
+
+    expect(ids).toEqual(expect.arrayContaining(admitted))
+  })
+
+  it('stays out when the playlist is editorial, removed, another listener\'s, or Mixtape-made', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedUser(db, 'u2')
+    const variants = [
+      { kind: 'editorial' }, { kind: 'replay' }, { kind: 'personal_mix' }, { inLibrary: false },
+      { userId: 'u2' }, { isMixtapeOwned: true }, { origin: 'mixtape' as const },
+    ]
+    const excluded = []
+    for (const variant of variants) {
+      const t = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY, inLibrary: false })
+      await seedPlaylistWith(db, t.id, variant)
+      excluded.push(t.id)
+    }
+
+    const ids = (await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' }))).map((p) => p.trackId)
+
+    for (const id of excluded) expect(ids).not.toContain(id)
+  })
+
+  it('a playlist entry with no user_tracks row for the listener stays out', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY })
+    const unowned = await seedCorpusTrack(db, { embedding: SAME_AS_QUERY })
+    await seedPlaylistWith(db, unowned.id)
+
+    const ids = (await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' }))).map((p) => p.trackId)
+
+    expect(ids).not.toContain(unowned.id)
+  })
+
+  it('an unconfirmed playlist admits but earns no playlist taste term; confirming it does', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const plain = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY })
+    const listed = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY, inLibrary: false })
+    const p = await seedPlaylistWith(db, listed.id)
+    const delta = async () => {
+      const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' }))
+      return pool.find((t) => t.trackId === listed.id)!.score - pool.find((t) => t.trackId === plain.id)!.score
+    }
+
+    expect(await delta()).toBeCloseTo(0, 10)
+    await db.insert(playlistOrigins).values({ userId: 'u1', source: 'apple', libraryId: p.appleLibraryId, origin: 'user_confirmed' })
+    expect(await delta()).toBeCloseTo(0.05, 8)
+  })
+})
+
+describe('hasPersonalCandidates', () => {
+  it('is true for each leg of the candidate rule with no intent filters, and for nothing else', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedUser(db, 'u2')
+    await seedUser(db, 'lib')
+    await seedUser(db, 'seeded')
+    await seedUser(db, 'played')
+    await seedUser(db, 'listed')
+    await seedTrack(db, 'u1', { inLibrary: false }) // no leg at all
+    await seedTrack(db, 'u2', { inLibrary: true }) // another listener's
+    expect(await hasPersonalCandidates(db, 'u1')).toBe(false)
+
+    await seedTrack(db, 'lib', { inLibrary: true, explicit: true, tempo: 300 })
+    await seedTrack(db, 'seeded', { inLibrary: false, seeded: true })
+    const played = await seedTrack(db, 'played', { inLibrary: false })
+    await seedPlays(db, 'played', played.id, await dbDay(db, 3), RECENT_PLAY_MIN)
+    const listed = await seedTrack(db, 'listed', { inLibrary: false })
+    await seedPlaylistWith(db, listed.id, { userId: 'listed' })
+
+    for (const id of ['lib', 'seeded', 'played', 'listed']) {
+      expect(await hasPersonalCandidates(db, id), id).toBe(true)
+    }
+    expect(await hasPersonalCandidates(db, 'u1')).toBe(false)
+  })
+
+  it('is false for a playlist import whose playlists are all removed', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const t = await seedTrack(db, 'u1', { inLibrary: false })
+    await seedPlaylistWith(db, t.id, { inLibrary: false })
+
+    expect(await hasPersonalCandidates(db, 'u1')).toBe(false)
   })
 })
 

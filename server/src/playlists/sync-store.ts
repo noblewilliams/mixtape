@@ -1,6 +1,7 @@
 import { and, eq, inArray, or, sql } from 'drizzle-orm'
 import { playlistReviewFingerprint } from '../listening/collection-review'
 import type { Db } from '../db/types'
+import { playlistCandidateTracksSql } from '../dj/pool'
 import {
   playlistSyncEntries,
   playlistSyncPlaylists,
@@ -724,6 +725,19 @@ export function createPlaylistSyncStore(
                 AND se.apple_playlist_id = up.apple_library_id
                 AND se.apple_library_entry_id = pe.apple_library_entry_id
             )
+        `)
+        // Enrichment order follows the pool's playlist leg (dj/pool.ts). An
+        // export's listening import commits before its playlists arrive, so
+        // its own priority pass could not see them; this is where they land.
+        // Only rows the listener already has count, as in the pool.
+        await tx.execute(sql`
+          UPDATE tracks tr
+          SET enrich_priority = greatest(tr.enrich_priority, 1 + ut.play_count_recent)
+          FROM user_tracks ut
+          WHERE ut.user_id = ${userId}
+            AND ut.track_id = tr.id
+            AND ut.track_id IN (${playlistCandidateTracksSql(userId)})
+            AND tr.enrich_priority < 1 + ut.play_count_recent
         `)
         const result = normalizeRows(
           await tx.execute(sql`

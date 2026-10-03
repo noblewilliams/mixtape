@@ -468,6 +468,10 @@ to avoid double-counting. Corpus-mode weights and eligibility are unchanged.
 No playlist-only songs enter the personal pool until a separate candidate/seed
 contract is approved. See `../plans/2026-09-04-playlist-origin-taste.md`.
 
+Superseded 2026-10-03: songs in the listener's active user-curated playlists are
+now personal candidates (eligibility only; this taste term is unchanged). See
+`../../decisions.md` → 2026-10-03.
+
 ### Negative and neutral behavior
 
 - A track removed through an applied Mixtape playlist edit is an explicit negative signal, weaker than a durable "never play" memory but stronger than passive non-membership.
