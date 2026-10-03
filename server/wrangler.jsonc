@@ -10,8 +10,11 @@
   "ai": {
     "binding": "AI"
   },
+  // Maintenance on the hour, then enrichment two minutes later while Postgres
+  // is still awake. Dispatched on event.cron (src/enrich/scheduled.ts); keep
+  // the two in step. The free plan allows 5 triggers per account.
   "triggers": {
-    "crons": ["0 * * * *"]
+    "crons": ["0 * * * *", "2 * * * *"]
   },
   "vars": {
     // Public OAuth identifier, not a secret — it ships with `wrangler deploy`,

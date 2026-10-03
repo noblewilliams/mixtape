@@ -1,5 +1,39 @@
 # Decision Log
 
+## 2026-10-03 — Mixes may include songs the listener does not own
+
+Founder-approved; pulls forward vision.md's "Catalog discovery". Supersedes
+"v1's pool is deliberately library-bound" for listeners in personal mode.
+Spec: `superpowers/specs/2026-10-03-outside-library-picks-design.md`. Plan:
+`superpowers/plans/2026-10-03-outside-library-picks.md`. Not implemented yet.
+
+- **Default on, capped by the familiarity dial.** comfort: none. mix (the
+  default): at most 20% of the mix. adventurous: at most 40%. The cap is
+  enforced in code after curation. `allowOutside: false` on the intent (the
+  listener or a saved preference asks for their own music only) means none.
+- **Source is our own enriched catalogue,** the nearest songs to the brief
+  that the listener does not already have (judged by recording, through ISRC
+  twins) and can play. One extra query per pool build; no extra model call,
+  embedding call or Worker invocation.
+- **Always labelled.** Each pick is marked "new to you" and the DJ says so.
+  The mark needs an approved state board before client work.
+- **Spotify-only listeners get none for now.** A pick must be playable, their
+  rows need a Spotify ID, and the only Spotify IDs we hold come from imports.
+  Spotify's API is closed to us, so Apple rows cannot be converted.
+- **Catalogue growth from Apple's catalogue is deferred** until outside picks
+  have run on real mixes.
+- **Free-plan rule.** Two prerequisites ship first: enrichment throughput
+  sized by measurement inside the 50-subrequest and 10 ms CPU limits with no
+  new database wake-ups, and ISRC carried at import so an Apple row and a
+  Spotify row of one song are known twins. Twin rows are linked by ISRC, not
+  merged.
+
+**Reopens if:** outside picks are removed far more often than own picks
+(lower the caps or make them opt-in), a source of Spotify IDs for Apple rows
+proves reliable (then Spotify-only listeners get picks too), listener count
+makes "a song exists in the catalogue" a privacy leak, or the free limits
+leave no room for the measured batch.
+
 ## 2026-10-03 — Playlist songs are pool candidates; empty mixes say so; no em dashes in DJ replies
 
 Reopens the 2026-09-04 rule that playlist membership "does not admit

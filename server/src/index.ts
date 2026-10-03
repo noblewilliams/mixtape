@@ -10,7 +10,7 @@ import { fetchLyrics } from './enrich/lrclib'
 import { workersAiEmbedder } from './enrich/embedder'
 import type { EnrichDeps } from './enrich/pipeline'
 import type { Db } from './db/types'
-import { handleScheduled } from './enrich/scheduled'
+import { handleScheduled, jobsForCron } from './enrich/scheduled'
 import { anthropicLlm, anthropicComplete, buildAnthropic } from './dj/llm'
 import type { DjDeps } from './dj/loop'
 import { generateMusicKitDeveloperToken } from './musickit/token'
@@ -220,7 +220,13 @@ export default {
       ctx.waitUntil(pool.end())
     }
   },
-  async scheduled(_event: ScheduledController, env: Bindings, ctx: ExecutionContext) {
+  async scheduled(event: ScheduledController, env: Bindings, ctx: ExecutionContext) {
+    // Dispatch before any wiring so an unrecognised trigger opens no pool.
+    const jobs = jobsForCron(event.cron)
+    if (!jobs) {
+      console.log('maintenance cron', JSON.stringify({ jobs: 'unknown' }))
+      return
+    }
     const deps = buildDeps(env)
     const musicKit = buildMusicKit(env, [])
     const artwork = buildArtworkDeps(env, musicKit)
@@ -229,12 +235,12 @@ export default {
     try {
       // Counts and fixed failure markers only — no track/playlist data, Apple payloads,
       // lyric/embedding content, tokens, or exception messages.
-      console.log('maintenance cron', JSON.stringify(await handleScheduled(db, {
+      console.log('maintenance cron', JSON.stringify({ jobs, ...await handleScheduled(db, jobs, {
         enrichment: deps,
         artwork,
         appleIsrc: musicKit ? { catalog: musicKit.catalog } : undefined,
         spotifyArtwork,
-      })))
+      }) }))
     } finally {
       ctx.waitUntil(pool.end())
     }

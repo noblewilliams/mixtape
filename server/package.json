@@ -13,6 +13,7 @@
     "dj": "tsx scripts/dj-chat.ts",
     "retitle-sessions": "tsx scripts/retitle-sessions.ts",
     "reprioritize-playlist-tracks": "tsx scripts/reprioritize-playlist-tracks.ts",
+    "drain-enrichment": "tsx scripts/drain-enrichment.ts",
     "funnel-report": "tsx scripts/funnel-report.ts",
     "analyze-previews": "tsx scripts/analyze-previews.ts"
   },

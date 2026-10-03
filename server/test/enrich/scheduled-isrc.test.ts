@@ -12,7 +12,7 @@ import { createDeezerArtworkClient } from '../../src/artwork/deezer'
 const empty = { processed: 0, linked: 0, missing: 0, ambiguous: 0, conflicts: 0, failed: 0, skipped: 0 }
 
 describe('scheduled Apple ISRC linking', () => {
-  it('carries a freshly observed Spotify ISRC through the real adapters in one maintenance pass', async () => {
+  it('carries a freshly observed Spotify ISRC through the real adapters in one enrichment pass', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')
     await db.insert(userMusicProfiles).values({ userId: 'u1', country: 'GB' })
@@ -37,7 +37,7 @@ describe('scheduled Apple ISRC linking', () => {
       } }] })
     }
     const catalog = createAppleCatalogClient({ fetchLike, issueServerToken: async () => ({ developerToken: 'server-token', expiresAt: 9999999999 }) })
-    const result = await handleScheduled(db, {
+    const result = await handleScheduled(db, 'enrichment', {
       enrichment: { ...okDeps, spotify: {
         tracks: ids => fetchTracksBySpotifyIds(ids, fetchLike),
         features: ids => fetchAudioFeaturesBySpotifyIds(ids, fetchLike),
@@ -58,7 +58,7 @@ describe('scheduled Apple ISRC linking', () => {
     expect(await db.select().from(userTracks)).toMatchObject([{ playCount: 5, inLibrary: false }])
   })
 
-  it('runs after metadata enrichment, before artwork, even without the AI binding', async () => {
+  it('runs after metadata enrichment and before the Spotify fallback, even without the AI binding; Apple artwork stays in maintenance', async () => {
     const db = await createTestDb()
     const order: string[] = []
     const appleIsrc = vi.fn(async () => { order.push('isrc'); return empty })
@@ -74,27 +74,31 @@ describe('scheduled Apple ISRC linking', () => {
       spotifyArtwork: { spotify: { getArtwork: async () => null } },
       artwork: { storefront: 'ng', catalog },
     }
-    const result = await handleScheduled(db, deps, { appleIsrc, enrichment, spotifyArtwork, artwork })
-    expect(order).toEqual(['metadata', 'isrc', 'spotify-artwork', 'artwork'])
+    const twinCopy = vi.fn(async () => ({ features: 0, meanings: 0 }))
+    const runners = { appleIsrc, enrichment, spotifyArtwork, artwork, twinCopy }
+    const result = await handleScheduled(db, 'enrichment', deps, runners)
+    expect(order).toEqual(['metadata', 'isrc', 'spotify-artwork'])
     expect(result.appleIsrc).toEqual(empty)
     expect(appleIsrc).toHaveBeenCalledWith(db, deps.appleIsrc)
-    await handleScheduled(db, { appleIsrc: { catalog } }, { appleIsrc })
+    await handleScheduled(db, 'enrichment', { appleIsrc: { catalog } }, { appleIsrc, twinCopy })
+    expect(appleIsrc).toHaveBeenCalledTimes(2)
+    order.length = 0
+    await handleScheduled(db, 'maintenance', deps, runners)
+    expect(order).toEqual(['artwork'])
     expect(appleIsrc).toHaveBeenCalledTimes(2)
   })
 
-  it('keeps artwork running after an ISRC failure without exposing the exception', async () => {
+  it('reports an ISRC failure without exposing the exception', async () => {
     const db = await createTestDb()
-    const artwork = vi.fn(async () => ({ processed: 0, matched: 0, missing: 0, failed: 0, remaining: 0 }))
     const catalog = { getSongs: async () => new Map(), getSongsByIsrc: async () => new Map() }
-    const result = await handleScheduled(db, { appleIsrc: { catalog }, artwork: { storefront: 'ng', catalog } }, {
-      appleIsrc: async () => { throw new Error('private provider response') }, artwork,
+    const result = await handleScheduled(db, 'enrichment', { appleIsrc: { catalog } }, {
+      appleIsrc: async () => { throw new Error('private provider response') },
     })
     expect(result.appleIsrc).toEqual({ error: 'failed' })
-    expect(artwork).toHaveBeenCalledOnce()
     expect(JSON.stringify(result)).not.toContain('private provider response')
   })
 
-  it('stores oEmbed artwork in the same pass when Apple has no exact match', async () => {
+  it('stores oEmbed artwork in the same enrichment pass when Apple has no exact match', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')
     await db.insert(userMusicProfiles).values({ userId: 'u1', country: 'GB' })
@@ -119,14 +123,15 @@ describe('scheduled Apple ISRC linking', () => {
       issueServerToken: async () => ({ developerToken: 'server-token', expiresAt: 9999999999 }),
     })
 
-    const result = await handleScheduled(db, {
+    const deps = {
       appleIsrc: { catalog, now: () => now },
       spotifyArtwork: {
         spotify: createSpotifyOEmbedArtworkClient({ fetchLike }),
         deezer: createDeezerArtworkClient({ fetchLike }),
         now: () => now,
       },
-    })
+    }
+    const result = await handleScheduled(db, 'enrichment', deps)
 
     expect(result.appleIsrc).toMatchObject({ processed: 1, missing: 1 })
     expect(result.spotifyArtwork).toMatchObject({ processed: 1, matched: 1, spotify: 1 })
@@ -134,11 +139,11 @@ describe('scheduled Apple ISRC linking', () => {
     expect(fetchLike).toHaveBeenCalledTimes(2)
   })
 
-  it('isolates fallback failure from Apple artwork and hides provider details', async () => {
+  it('reports a fallback failure without provider details, and never runs Apple artwork in the enrichment set', async () => {
     const db = await createTestDb()
     const artwork = vi.fn(async () => ({ processed: 0, matched: 0, missing: 0, failed: 0, remaining: 0 }))
     const catalog = { getSongs: async () => new Map(), getSongsByIsrc: async () => new Map() }
-    const result = await handleScheduled(db, {
+    const result = await handleScheduled(db, 'enrichment', {
       spotifyArtwork: { spotify: { getArtwork: async () => null } },
       artwork: { storefront: 'ng', catalog },
     }, {
@@ -146,7 +151,7 @@ describe('scheduled Apple ISRC linking', () => {
       artwork,
     })
     expect(result.spotifyArtwork).toEqual({ error: 'failed' })
-    expect(artwork).toHaveBeenCalledOnce()
+    expect(artwork).not.toHaveBeenCalled()
     expect(JSON.stringify(result)).not.toContain('private provider response')
   })
 })

@@ -33,9 +33,11 @@ describe('playlist catalog resolution', () => {
     const db = await createTestDb()
     await seed(db, ['123'])
     const catalog = { getSongs: async () => new Map([['123', song('123')]]) }
-    const result = await handleScheduled(db, { enrichment: okDeps, artwork: { catalog, storefront: 'ng', now: () => NOW } })
-    expect(result.playlistCatalog).toMatchObject({ matched: 1, linkedEntries: 1 })
-    expect(result.enrichment).toMatchObject({ processed: 1, features: 1, meaning: 1 })
+    const deps = { enrichment: okDeps, artwork: { catalog, storefront: 'ng', now: () => NOW } }
+    const maintenance = await handleScheduled(db, 'maintenance', deps)
+    expect(maintenance.playlistCatalog).toMatchObject({ matched: 1, linkedEntries: 1 })
+    const enrichment = await handleScheduled(db, 'enrichment', deps)
+    expect(enrichment.enrichment).toMatchObject({ processed: 1, features: 1, meaning: 1 })
     expect(await db.select().from(trackFeatures)).toHaveLength(1)
     expect(await db.select().from(userTracks)).toEqual([])
   })

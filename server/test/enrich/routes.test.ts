@@ -3,6 +3,7 @@ import { createTestDb } from '../helpers/db'
 import { okDeps } from '../helpers/enrich-fixtures'
 import { createApp, type AuthLike } from '../../src/app'
 import { tracks } from '../../src/db/schema'
+import { MAX_BATCH } from '../../src/routes/enrich'
 import type { ArtworkDeps } from '../../src/artwork/runner'
 import type { CatalogSong } from '../../src/musickit/catalog'
 
@@ -79,7 +80,7 @@ describe('/enrich routes', () => {
       method: 'POST',
       headers: { 'X-Admin-Token': 'secret' },
     })
-    expect(((await run.json()) as { processed: number }).processed).toBe(3)
+    expect(((await run.json()) as { processed: number }).processed).toBe(MAX_BATCH)
   })
 
   it('clamps a fractional limit down to an integer', async () => {

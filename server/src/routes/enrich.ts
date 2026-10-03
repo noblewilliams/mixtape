@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { runEnrichmentBatch, enrichmentStatus } from '../enrich/runner'
 import type { EnrichDeps } from '../enrich/pipeline'
+import { ENRICH_BATCH_STEP, largestEnrichBatch } from '../enrich/scheduled'
 import type { Db } from '../db/types'
 import {
   artworkStatus,
@@ -9,10 +10,12 @@ import {
   type ArtworkDeps,
 } from '../artwork/runner'
 
-// Free-plan Workers ceiling is 50 subrequests/invocation; each track costs
-// ~13 worst-case (external calls + every neon-http query). 3×13+2 batch
-// queries ≈ 41. On a paid plan (1000/invocation) this can be raised to ~8.
-export const MAX_BATCH = 3
+// One request is one invocation with the free plan's 50-subrequest ceiling.
+// Database statements do not count (WebSocket pool, see buildDb); external
+// calls do, and their measured worst case lives beside CRON_BATCH in
+// enrich/scheduled.ts. Same step-up rule: ship at ENRICH_BATCH_STEP until a
+// day of logs shows no CPU-limit kills.
+export const MAX_BATCH = Math.min(largestEnrichBatch(0), ENRICH_BATCH_STEP)
 
 export type EnrichRouteDeps = {
   deps?: EnrichDeps
