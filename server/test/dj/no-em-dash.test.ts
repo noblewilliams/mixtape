@@ -10,8 +10,14 @@ import {
   INSUFFICIENT_SEEDS_TEXT,
   INTERNAL_APOLOGY,
   LLM_APOLOGY,
+  NEW_MARKER_LEGEND,
+  OUTSIDE_PERSONA_LINE,
   PERSONA_PROMPT,
+  PERSONA_PROMPT_WITH_OUTSIDE,
+  outsidePicksNotice,
 } from '../../src/dj/loop'
+import { OUTSIDE_LEGEND_LINE, OUTSIDE_SYSTEM_INTRO } from '../../src/dj/curate'
+import { DJ_TOOLS_WITH_OUTSIDE } from '../../src/dj/contracts'
 import { PLAYLIST_EDIT_FALLBACK, PLAYLIST_EDIT_PERSONA } from '../../src/playlist-editing/loop'
 
 const EM = '—'
@@ -68,6 +74,15 @@ describe('no em dashes in canned DJ text or persona prompts', () => {
     ['LLM_APOLOGY', LLM_APOLOGY],
     ['INTERNAL_APOLOGY', INTERNAL_APOLOGY],
     ['PERSONA_PROMPT', PERSONA_PROMPT],
+    ['OUTSIDE_PERSONA_LINE', OUTSIDE_PERSONA_LINE],
+    ['NEW_MARKER_LEGEND', NEW_MARKER_LEGEND],
+    ['outsidePicksNotice (one)', outsidePicksNotice([2])],
+    ['outsidePicksNotice (several)', outsidePicksNotice([0, 5, 9])],
+    ['OUTSIDE_LEGEND_LINE', OUTSIDE_LEGEND_LINE],
+    ['OUTSIDE_SYSTEM_INTRO', OUTSIDE_SYSTEM_INTRO],
+    ['allowOutside description', JSON.stringify(
+      (DJ_TOOLS_WITH_OUTSIDE.find((t) => t.name === 'generate_queue')!.input_schema.properties as Record<string, unknown>).allowOutside,
+    )],
     ['PLAYLIST_EDIT_FALLBACK', PLAYLIST_EDIT_FALLBACK],
     ['PLAYLIST_EDIT_PERSONA', PLAYLIST_EDIT_PERSONA],
   ])('%s', (_name, text) => {
@@ -76,6 +91,7 @@ describe('no em dashes in canned DJ text or persona prompts', () => {
 
   it('both personas tell the model not to use them', () => {
     expect(PERSONA_PROMPT).toMatch(/em dash/i)
+    expect(PERSONA_PROMPT_WITH_OUTSIDE).toMatch(/em dash/i)
     expect(PLAYLIST_EDIT_PERSONA).toMatch(/em dash/i)
   })
 })

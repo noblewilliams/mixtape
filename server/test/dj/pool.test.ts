@@ -9,6 +9,11 @@ import {
   MIN_SEED_TRACKS,
   RECENT_PLAY_MIN,
   RECENT_PLAY_WINDOW_DAYS,
+  OUTSIDE_NEAREST,
+  OUTSIDE_POOL_MAX,
+  OUTSIDE_SHARE,
+  outsideCap,
+  outsideNearestSql,
 } from '../../src/dj/pool'
 import { intentSchema, type Intent } from '../../src/dj/contracts'
 import {
@@ -1620,4 +1625,321 @@ it('bounds listening influence and requires multiple days before skips penalize 
  expect(await score()).toBeCloseTo(baseline-.03,8)
  await db.update(playbackSettings).set({enabled:false})
  expect(await score()).toBeCloseTo(baseline,8)
+})
+
+// --- Outside picks (plan 2026-10-03, Task 9) -------------------------------
+
+// Counts raw statements, so "no outside query" can be asserted directly
+// rather than inferred from an empty result.
+function countingDb(db: TestDb): { db: TestDb; executes: () => number } {
+  let n = 0
+  const wrapped = new Proxy(db, {
+    get(target, prop, receiver) {
+      if (prop === 'execute') {
+        return (...args: unknown[]) => {
+          n += 1
+          return (target.execute as (...a: unknown[]) => unknown)(...args)
+        }
+      }
+      return Reflect.get(target, prop, receiver)
+    },
+  })
+  return { db: wrapped, executes: () => n }
+}
+
+describe('outsideCap', () => {
+  it('is none for comfort or allowOutside false, 20% of the mix for mix and 40% for adventurous, rounded down', () => {
+    expect(outsideCap(intent({ themes: 'x', familiarity: 'comfort', targetCount: 30 }))).toBe(0)
+    expect(outsideCap(intent({ themes: 'x', familiarity: 'adventurous', allowOutside: false, targetCount: 30 }))).toBe(0)
+    expect(outsideCap(intent({ themes: 'x', familiarity: 'mix', targetCount: 15 }))).toBe(3)
+    expect(outsideCap(intent({ themes: 'x', familiarity: 'mix', targetCount: 4 }))).toBe(0)
+    expect(outsideCap(intent({ themes: 'x', familiarity: 'adventurous', targetCount: 15 }))).toBe(6)
+    expect(outsideCap(intent({ themes: 'x', targetCount: 17 }))).toBe(3)
+    expect(OUTSIDE_SHARE).toEqual({ comfort: 0, mix: 0.2, adventurous: 0.4 })
+  })
+
+  it('allowOutside is optional and absent counts as true', () => {
+    expect(intent({ themes: 'x' })).not.toHaveProperty('allowOutside')
+    expect(outsideCap(intent({ themes: 'x', targetCount: 15 }))).toBe(3)
+  })
+})
+
+describe('buildPool outside picks', () => {
+  const mix15 = () => intent({ themes: 'x', familiarity: 'mix', targetCount: 15 })
+
+  async function appleListener(db: TestDb, id = 'u1') {
+    await seedUser(db, id)
+    await seedSource(db, id, 'apple_live', new Date())
+    return seedTrack(db, id, { embedding: SAME_AS_QUERY, tempo: 120, artist: 'Mine' })
+  }
+
+  it('appends outside rows after the personal ones, flagged, and personal rows are unflagged', async () => {
+    const db = await createTestDb()
+    const mine = await appleListener(db)
+    const other = await seedCorpusTrack(db, { embedding: SAME_AS_QUERY, tempo: 120 })
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', mix15(), undefined, { outsideCap: 3 })
+
+    expect(pool.map((p) => p.trackId)).toEqual([mine.id, other.id])
+    expect(pool.map((p) => p.outside)).toEqual([false, true])
+  })
+
+  it('no option, cap 0, or corpus mode issue no outside query and return exactly the personal pool', async () => {
+    const db = await createTestDb()
+    await appleListener(db)
+    await seedCorpusTrack(db, { embedding: SAME_AS_QUERY, tempo: 120 })
+
+    const plain = countingDb(db)
+    const baseline = await buildPool(plain.db, fakeEmbed, 'u1', mix15())
+    const zero = countingDb(db)
+    const capped = await buildPool(zero.db, fakeEmbed, 'u1', mix15(), undefined, { outsideCap: 0 })
+
+    expect(plain.executes()).toBe(1)
+    expect(zero.executes()).toBe(1)
+    expect(capped).toEqual(baseline)
+    expect(baseline.every((p) => p.outside === false)).toBe(true)
+
+    const corpus = countingDb(db)
+    const corpusPool = await buildPool(corpus.db, fakeEmbed, 'u1', mix15(), undefined, { mode: 'corpus', outsideCap: 3 })
+    expect(corpus.executes()).toBe(1)
+    expect(corpusPool.every((p) => p.outside === false)).toBe(true)
+  })
+
+  it('embeds once per pool build, outside query included', async () => {
+    const db = await createTestDb()
+    await appleListener(db)
+    await seedCorpusTrack(db, { embedding: SAME_AS_QUERY, tempo: 120 })
+    let calls = 0
+    const counting: Embedder = async (t) => { calls += 1; return fakeEmbed(t) }
+
+    const pool = await buildPool(db, counting, 'u1', mix15(), undefined, { outsideCap: 3 })
+
+    expect(pool.some((p) => p.outside)).toBe(true)
+    expect(calls).toBe(1)
+  })
+
+  it('offers nothing outside when the personal pool is empty, so an empty library still reads as empty', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedSource(db, 'u1', 'apple_live', new Date())
+    await seedCorpusTrack(db, { embedding: SAME_AS_QUERY, tempo: 120 })
+
+    expect(await buildPool(db, fakeEmbed, 'u1', mix15(), undefined, { outsideCap: 3 })).toEqual([])
+  })
+
+  it("never offers the listener's own recording, including through an ISRC twin, or anything they hold in any row", async () => {
+    const db = await createTestDb()
+    await appleListener(db)
+    // Owned as a Spotify row; the Apple twin elsewhere in the catalogue is the same song.
+    await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY, isrc: 'USOWN2400001', appleId: null, spotifyId: spotifyId() })
+    const appleTwin = await seedCorpusTrack(db, { embedding: SAME_AS_QUERY, isrc: 'USOWN2400001' })
+    // A row they hold but which is not a candidate (out of library, no plays) is still theirs.
+    const heldNotCandidate = await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY, inLibrary: false })
+    const fresh = await seedCorpusTrack(db, { embedding: SAME_AS_QUERY })
+
+    const outside = (await buildPool(db, fakeEmbed, 'u1', mix15(), undefined, { outsideCap: 3 })).filter((p) => p.outside)
+
+    const ids = outside.map((p) => p.trackId)
+    expect(ids).toContain(fresh.id)
+    expect(ids).not.toContain(appleTwin.id)
+    expect(ids).not.toContain(heldNotCandidate.id)
+  })
+
+  it('an Apple listener gets only rows with an Apple id, with a playable ISRC twin standing in for a Spotify-only neighbour', async () => {
+    const db = await createTestDb()
+    await appleListener(db)
+    const spotifyOnly = await seedCorpusTrack(db, { embedding: SAME_AS_QUERY, appleId: null, spotifyId: spotifyId() })
+    // The Spotify row is the near neighbour (it has the meaning); its Apple twin has none of its own.
+    const nearSpotify = await seedCorpusTrack(db, { embedding: SAME_AS_QUERY, isrc: 'USTWN2400001', appleId: null, spotifyId: spotifyId() })
+    const appleTwin = await seedCorpusTrack(db, { isrc: 'USTWN2400001' })
+
+    const outside = (await buildPool(db, fakeEmbed, 'u1', mix15(), undefined, { outsideCap: 3 })).filter((p) => p.outside)
+
+    const ids = outside.map((p) => p.trackId)
+    expect(ids).toEqual([appleTwin.id])
+    expect(ids).not.toContain(spotifyOnly.id)
+    expect(ids).not.toContain(nearSpotify.id)
+    expect(outside.every((p) => p.appleId !== null)).toBe(true)
+  })
+
+  it('a legacy Apple library with no source row follows the Apple rule too', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY })
+    const spotifyOnly = await seedCorpusTrack(db, { embedding: SAME_AS_QUERY, appleId: null, spotifyId: spotifyId() })
+    const apple = await seedCorpusTrack(db, { embedding: SAME_AS_QUERY })
+
+    const ids = (await buildPool(db, fakeEmbed, 'u1', mix15(), undefined, { outsideCap: 3 })).filter((p) => p.outside).map((p) => p.trackId)
+
+    expect(ids).toEqual([apple.id])
+    expect(ids).not.toContain(spotifyOnly.id)
+  })
+
+  it('a Spotify-only listener gets only rows with a Spotify id', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedSource(db, 'u1', 'spotify_export', new Date())
+    await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY, appleId: null, spotifyId: spotifyId() })
+    const appleOnly = await seedCorpusTrack(db, { embedding: SAME_AS_QUERY })
+    const spotify = await seedCorpusTrack(db, { embedding: SAME_AS_QUERY, appleId: null, spotifyId: spotifyId() })
+
+    const outside = (await buildPool(db, fakeEmbed, 'u1', mix15(), undefined, { outsideCap: 3 })).filter((p) => p.outside)
+
+    expect(outside.map((p) => p.trackId)).toEqual([spotify.id])
+    expect(outside.map((p) => p.trackId)).not.toContain(appleOnly.id)
+  })
+
+  it('applies the hard filters and the queue exclusion exactly as for personal rows', async () => {
+    const db = await createTestDb()
+    await appleListener(db)
+    const ok = await seedCorpusTrack(db, { embedding: SAME_AS_QUERY, tempo: 100 })
+    const fast = await seedCorpusTrack(db, { embedding: SAME_AS_QUERY, tempo: 200 })
+    const unknownTempo = await seedCorpusTrack(db, { embedding: SAME_AS_QUERY })
+    const queued = await seedCorpusTrack(db, { embedding: SAME_AS_QUERY, tempo: 100, isrc: 'USQUE2400001' })
+    const queuedTwin = await seedCorpusTrack(db, { embedding: SAME_AS_QUERY, tempo: 100, isrc: 'USQUE2400001' })
+    const [old] = await db.insert(tracks).values({ appleId: 'old-1', title: 'old', artist: 'A', releaseYear: 1970 }).returning()
+    await db.insert(trackFeatures).values({ trackId: old.id, tempo: 100, source: 'reccobeats' })
+    await db.insert(trackMeanings).values({ trackId: old.id, embedding: SAME_AS_QUERY, lyricsSource: 'lrclib' })
+    const [rude] = await db.insert(tracks).values({ appleId: 'rude-1', title: 'rude', artist: 'A', explicit: true }).returning()
+    await db.insert(trackFeatures).values({ trackId: rude.id, tempo: 100, source: 'reccobeats' })
+    await db.insert(trackMeanings).values({ trackId: rude.id, embedding: SAME_AS_QUERY, lyricsSource: 'lrclib' })
+
+    const brief = intent({ themes: 'x', tempoMin: 90, tempoMax: 130, eraFrom: 1990, allowExplicit: false, targetCount: 15 })
+    const ids = (await buildPool(db, fakeEmbed, 'u1', brief, [queued.id], { outsideCap: 3 })).filter((p) => p.outside).map((p) => p.trackId)
+
+    expect(ids).toContain(ok.id)
+    expect(ids).toContain(unknownTempo.id)
+    for (const gone of [fast.id, queued.id, queuedTwin.id, old.id, rude.id]) expect(ids).not.toContain(gone)
+  })
+
+  it('returns at most min(60, 4 x cap) rows', async () => {
+    const db = await createTestDb()
+    await appleListener(db)
+    for (let i = 0; i < 70; i++) await seedCorpusTrack(db, { embedding: SAME_AS_QUERY })
+
+    const count = async (cap: number) =>
+      (await buildPool(db, fakeEmbed, 'u1', mix15(), undefined, { outsideCap: cap })).filter((p) => p.outside).length
+
+    expect(await count(2)).toBe(8)
+    expect(await count(15)).toBe(OUTSIDE_POOL_MAX)
+    expect(OUTSIDE_POOL_MAX).toBe(60)
+  })
+
+  it('takes candidates only from the nearest neighbours of the brief', async () => {
+    const db = await createTestDb()
+    await appleListener(db)
+    // Fill the nearest set with rows the listener cannot play (Spotify-only),
+    // so a playable row further away never reaches the candidate step.
+    for (let i = 0; i < OUTSIDE_NEAREST; i++) await seedCorpusTrack(db, { embedding: SAME_AS_QUERY, appleId: null, spotifyId: spotifyId() })
+    const far = await seedCorpusTrack(db, { embedding: ORTHOGONAL_TO_QUERY })
+
+    const outside = (await buildPool(db, fakeEmbed, 'u1', mix15(), undefined, { outsideCap: 3 })).filter((p) => p.outside)
+
+    expect(OUTSIDE_NEAREST).toBe(200)
+    expect(outside.map((p) => p.trackId)).not.toContain(far.id)
+  })
+
+  it('the nearest step runs on the HNSW index and still yields more than its default 40 rows', async () => {
+    const db = await createTestDb()
+    await appleListener(db)
+    for (let i = 0; i < 80; i++) await seedCorpusTrack(db, { embedding: vec({ 0: 1, 2: i / 100 }) })
+    // A tiny table would otherwise be seq-scanned; forcing the index is the
+    // production shape, where hnsw.ef_search (default 40) caps what one scan
+    // can return unless the query raises it.
+    await db.execute(sql`SET enable_seqscan = off`)
+
+    const plan = await db.execute(sql`EXPLAIN ${outsideNearestSql('[' + QUERY_DIRECTION.join(',') + ']')}`)
+    const text = (plan as unknown as { rows: Array<Record<string, string>> }).rows.map((r) => Object.values(r)[0]).join('\n')
+    expect(text).toContain('track_meanings_embedding_hnsw_idx')
+
+    const outside = (await buildPool(db, fakeEmbed, 'u1', mix15(), undefined, { outsideCap: 15 })).filter((p) => p.outside)
+    expect(outside).toHaveLength(OUTSIDE_POOL_MAX)
+  })
+
+  it('scores with the corpus formula: 0.7 familiarity for an artist the listener already has, 0 otherwise', async () => {
+    const db = await createTestDb()
+    await appleListener(db)
+    const known = await seedCorpusTrack(db, { embedding: SAME_AS_QUERY, artist: ' mine ' })
+    const stranger = await seedCorpusTrack(db, { embedding: SAME_AS_QUERY, artist: 'Stranger' })
+
+    const outside = (await buildPool(db, fakeEmbed, 'u1', mix15(), undefined, { outsideCap: 3 })).filter((p) => p.outside)
+    const byId = (id: string) => outside.find((p) => p.trackId === id)!
+
+    // Corpus weights for mix: 0.396 sim + 0.22 * 0.5 tempo + 0.264 fam + 0.12 * 0.5 taste.
+    expect(byId(stranger.id).score).toBeCloseTo(0.566, 5)
+    expect(byId(known.id).score).toBeCloseTo(0.566 + 0.264 * 0.7, 5)
+    expect(outside[0].trackId).toBe(known.id)
+  })
+
+  it('learned artist taste moves outside rows as it does personal ones', async () => {
+    const db = await createTestDb()
+    await appleListener(db)
+    const disliked = await seedCorpusTrack(db, { embedding: SAME_AS_QUERY, artist: 'Disliked' })
+    const neutral = await seedCorpusTrack(db, { embedding: SAME_AS_QUERY, artist: 'Neutral' })
+    const removedOne = await seedCorpusTrack(db, { artist: 'Disliked' })
+    const s = await seedSession(db, 'u1')
+    await seedQueueTrack(db, s.id, removedOne.id, { state: 'removed', removedBy: 'user' })
+
+    const outside = (await buildPool(db, fakeEmbed, 'u1', mix15(), undefined, { outsideCap: 3 })).filter((p) => p.outside)
+    const byId = (id: string) => outside.find((p) => p.trackId === id)!
+
+    expect(byId(disliked.id).score).toBeLessThan(byId(neutral.id).score)
+  })
+})
+
+describe('buildPool outside picks: playlists the listener keeps', () => {
+  it('a song only in their active playlist (any kind, or through a twin) is never offered as outside; a removed playlist does not count', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedSource(db, 'u1', 'apple_live', new Date())
+    await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY })
+    const inPlaylist = await seedCorpusTrack(db, { embedding: SAME_AS_QUERY })
+    await seedPlaylistWith(db, inPlaylist.id)
+    const inEditorial = await seedCorpusTrack(db, { embedding: SAME_AS_QUERY })
+    await seedPlaylistWith(db, inEditorial.id, { kind: 'editorial' })
+    const appleTwin = await seedCorpusTrack(db, { embedding: SAME_AS_QUERY, isrc: 'USPLT2600001' })
+    const spotifyTwin = await seedCorpusTrack(db, { isrc: 'USPLT2600001', appleId: null, spotifyId: spotifyId() })
+    await seedPlaylistWith(db, spotifyTwin.id)
+    const inRemoved = await seedCorpusTrack(db, { embedding: SAME_AS_QUERY })
+    await seedPlaylistWith(db, inRemoved.id, { inLibrary: false })
+
+    const ids = (await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', targetCount: 15 }), undefined, { outsideCap: 3 }))
+      .filter((p) => p.outside).map((p) => p.trackId)
+
+    for (const theirs of [inPlaylist.id, inEditorial.id, appleTwin.id]) expect(ids).not.toContain(theirs)
+    expect(ids).toContain(inRemoved.id)
+  })
+
+  it('an artist known only from their playlists counts as familiar', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedSource(db, 'u1', 'apple_live', new Date())
+    await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY })
+    const listed = await seedCorpusTrack(db, { artist: 'Listed', embedding: ORTHOGONAL_TO_QUERY })
+    await seedPlaylistWith(db, listed.id)
+    const known = await seedCorpusTrack(db, { artist: 'Listed', embedding: SAME_AS_QUERY })
+    const stranger = await seedCorpusTrack(db, { artist: 'Stranger', embedding: SAME_AS_QUERY })
+
+    const outside = (await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', targetCount: 15 }), undefined, { outsideCap: 3 })).filter((p) => p.outside)
+    const byId = (id: string) => outside.find((p) => p.trackId === id)!
+
+    expect(byId(known.id).score).toBeGreaterThan(byId(stranger.id).score)
+  })
+
+  it('a meaning row with no embedding is never an outside candidate', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedSource(db, 'u1', 'apple_live', new Date())
+    await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY })
+    const blank = await seedCorpusTrack(db)
+    await db.insert(trackMeanings).values({ trackId: blank.id, embedding: null, lyricsSource: 'lrclib' })
+    // A sequential plan, where a NULL distance would otherwise sort into the
+    // nearest set (the HNSW index holds no NULLs).
+    await db.execute(sql`SET enable_indexscan = off`)
+
+    const ids = (await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', targetCount: 15 }), undefined, { outsideCap: 3 }))
+      .filter((p) => p.outside).map((p) => p.trackId)
+
+    expect(ids).not.toContain(blank.id)
+  })
 })

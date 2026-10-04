@@ -9,6 +9,12 @@ const intentBase = z.object({
   eraFrom: z.number().int().min(1900).max(2100).optional(),
   eraTo: z.number().int().min(1900).max(2100).optional(),
   allowExplicit: z.boolean().default(true),
+  // Outside picks (decision 2026-10-03): false when the listener, or a saved
+  // preference, wants only their own music. Absent means true. Optional
+  // rather than defaulted so a parsed intent carries no new key unless the
+  // model sent one. Accepted whatever OUTSIDE_PICKS says; only the advertised
+  // tool schema below depends on the flag.
+  allowOutside: z.boolean().optional(),
   familiarity: z.enum(['comfort', 'mix', 'adventurous']).default('mix'),
   targetCount: z.number().int().min(3).max(60).default(15),
 })
@@ -171,19 +177,33 @@ const targetCountProperty = {
     'Number of tracks to queue. Convert any requested duration to a count at ~3.5 minutes per track (e.g. "an hour" is about 17 tracks). Defaults to 15.',
 }
 
-// generate_queue's full intent, including targetCount.
-const intentJsonSchema = Object.freeze({
-  type: 'object' as const,
-  properties: { ...intentPropertiesBase, targetCount: targetCountProperty },
-  required: ['themes'],
-})
+// Advertised only with OUTSIDE_PICKS on (DJ_TOOLS_WITH_OUTSIDE below), so
+// the flag off sends today's tool definitions byte for byte.
+const allowOutsideProperty = {
+  type: 'boolean',
+  description:
+    'Whether the mix may include a few songs the listener does not own yet. Defaults to true. ' +
+    'Set false when the listener, or a saved preference, wants only their own music.',
+}
 
-// swap/extend's replacement intent — no targetCount, mirroring opIntentSchema.
-const opIntentJsonSchema = Object.freeze({
-  type: 'object' as const,
-  properties: intentPropertiesBase,
-  required: ['themes'],
-})
+type IntentJsonSchemas = { full: LlmToolDef['input_schema']; op: LlmToolDef['input_schema'] }
+
+function intentJsonSchemas(properties: Record<string, unknown>): IntentJsonSchemas {
+  return {
+    // generate_queue's full intent, including targetCount.
+    full: Object.freeze({
+      type: 'object' as const,
+      properties: { ...properties, targetCount: targetCountProperty },
+      required: ['themes'],
+    }),
+    // swap/extend's replacement intent, no targetCount, mirroring opIntentSchema.
+    op: Object.freeze({
+      type: 'object' as const,
+      properties,
+      required: ['themes'],
+    }),
+  }
+}
 
 // remember_preference's longhand JSON Schema — mirrors rememberPreferenceInputSchema
 // (an agreement test in contracts.test.ts checks both against each other, same as
@@ -222,116 +242,125 @@ const renameSessionJsonSchema = Object.freeze({
   required: ['title'],
 })
 
-export const DJ_TOOLS: LlmToolDef[] = [
-  {
-    name: 'find_playlists',
-    description: 'Look up this listener’s active playlists by name before selecting inspiration. Use only when they explicitly refer to a playlist without an exact id. If several plausible matches return, ask which one; never guess.',
-    input_schema: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 120 } }, required: ['query'], additionalProperties: false },
-  },
-  {
-    name: 'set_playlist_inspiration',
-    description: 'Select, replace, or clear the playlist inspiring this ordinary mix. This never edits the playlist or queue. playlistId null clears it. Call only on an explicit request and use the selection revision from context.',
-    input_schema: { type: 'object', properties: {
-      playlistId: { oneOf: [{ type: 'string', format: 'uuid' }, { type: 'null' }] },
-      excludeSourceTracks: { type: 'boolean' }, expectedRevision: { type: 'integer', minimum: 0, maximum: 2147483646 },
-    }, required: ['playlistId', 'expectedRevision'], additionalProperties: false },
-  },
-  {
-    name: 'generate_queue',
-    description:
-      "Create a fresh queue for this session from the listener's request. DESTRUCTIVE: replaces the ENTIRE existing queue — never use it to remove/swap/adjust individual tracks (that's edit_queue). Only for a brand-new brief or an explicit start-over. Convert requested durations to a track count (~3.5 min per track). themes: a rich free-text description of mood, meaning and vibe used for semantic matching against lyric meaning.",
-    input_schema: intentJsonSchema,
-  },
-  {
-    name: 'edit_queue',
-    description:
-      "THE tool for any change to an existing queue — removals, swaps, reorders, extensions. Prefer this over generate_queue whenever a queue exists: the listener has been shaping it, so make the smallest change that satisfies the request and leave everything else in place. Modify the current queue in place. ops run in order, and each op sees the queue exactly as the PRECEDING ops left it — positions are working-relative, not fixed to the queue you started with. A remove shifts every later track down one position; if you want to remove several tracks, list them in DESCENDING position order (e.g. remove 5 then remove 2, never the reverse) so earlier removals don't shift the positions you listed later. Use swap/extend with an intent when the listener asked for a different flavour; omit intent to stay on the session's current vibe.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        energyArc: { type: 'string', enum: ['rise', 'fall', 'arc', 'steady'], description: 'Set when the listener explicitly changes the energy journey, including reordering. Omit to keep the current journey. Exclusions and pinned choices come first.' },
-        ops: {
-          type: 'array',
-          minItems: 1,
-          maxItems: 20,
-          description:
-            'Queue edit operations, applied in order: remove(position), move(from,to), swap(position, intent?), extend(count, intent?). ' +
-              'Positions are working-relative — each op sees the list as the ones before it left it. List multiple removes in descending position order. ' +
-              'Positions are 0-based indices into the current queue listing shown in context; listeners speak 1-based ("track 5" = position 4) — translate carefully.',
-          items: {
-            // If live smoke shows malformed ops from the model, the known fix is
-            // flattening to one object (op enum + all fields optional) with zod
-            // enforcing legal combos — see Task 3 review.
-            oneOf: [
-              {
-                type: 'object',
-                properties: {
-                  op: { type: 'string', enum: ['remove'] },
-                  position: { type: 'integer', minimum: 0, description: 'Zero-based queue position to remove.' },
-                },
-                required: ['op', 'position'],
-                additionalProperties: false,
-              },
-              {
-                type: 'object',
-                properties: {
-                  op: { type: 'string', enum: ['move'] },
-                  from: { type: 'integer', minimum: 0, description: 'Zero-based queue position to move from.' },
-                  to: { type: 'integer', minimum: 0, description: 'Zero-based queue position to move to.' },
-                },
-                required: ['op', 'from', 'to'],
-                additionalProperties: false,
-              },
-              {
-                type: 'object',
-                properties: {
-                  op: { type: 'string', enum: ['swap'] },
-                  position: { type: 'integer', minimum: 0, description: 'Zero-based queue position to replace.' },
-                  intent: opIntentJsonSchema,
-                },
-                required: ['op', 'position'],
-                additionalProperties: false,
-              },
-              {
-                type: 'object',
-                properties: {
-                  op: { type: 'string', enum: ['extend'] },
-                  count: {
-                    type: 'integer',
-                    minimum: 1,
-                    maximum: 20,
-                    description: 'Number of additional tracks to append.',
+function buildDjTools(intents: IntentJsonSchemas): LlmToolDef[] {
+  const tools: LlmToolDef[] = [
+    {
+      name: 'find_playlists',
+      description: 'Look up this listener’s active playlists by name before selecting inspiration. Use only when they explicitly refer to a playlist without an exact id. If several plausible matches return, ask which one; never guess.',
+      input_schema: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 120 } }, required: ['query'], additionalProperties: false },
+    },
+    {
+      name: 'set_playlist_inspiration',
+      description: 'Select, replace, or clear the playlist inspiring this ordinary mix. This never edits the playlist or queue. playlistId null clears it. Call only on an explicit request and use the selection revision from context.',
+      input_schema: { type: 'object', properties: {
+        playlistId: { oneOf: [{ type: 'string', format: 'uuid' }, { type: 'null' }] },
+        excludeSourceTracks: { type: 'boolean' }, expectedRevision: { type: 'integer', minimum: 0, maximum: 2147483646 },
+      }, required: ['playlistId', 'expectedRevision'], additionalProperties: false },
+    },
+    {
+      name: 'generate_queue',
+      description:
+        "Create a fresh queue for this session from the listener's request. DESTRUCTIVE: replaces the ENTIRE existing queue — never use it to remove/swap/adjust individual tracks (that's edit_queue). Only for a brand-new brief or an explicit start-over. Convert requested durations to a track count (~3.5 min per track). themes: a rich free-text description of mood, meaning and vibe used for semantic matching against lyric meaning.",
+      input_schema: intents.full,
+    },
+    {
+      name: 'edit_queue',
+      description:
+        "THE tool for any change to an existing queue — removals, swaps, reorders, extensions. Prefer this over generate_queue whenever a queue exists: the listener has been shaping it, so make the smallest change that satisfies the request and leave everything else in place. Modify the current queue in place. ops run in order, and each op sees the queue exactly as the PRECEDING ops left it — positions are working-relative, not fixed to the queue you started with. A remove shifts every later track down one position; if you want to remove several tracks, list them in DESCENDING position order (e.g. remove 5 then remove 2, never the reverse) so earlier removals don't shift the positions you listed later. Use swap/extend with an intent when the listener asked for a different flavour; omit intent to stay on the session's current vibe.",
+      input_schema: {
+        type: 'object',
+        properties: {
+          energyArc: { type: 'string', enum: ['rise', 'fall', 'arc', 'steady'], description: 'Set when the listener explicitly changes the energy journey, including reordering. Omit to keep the current journey. Exclusions and pinned choices come first.' },
+          ops: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 20,
+            description:
+              'Queue edit operations, applied in order: remove(position), move(from,to), swap(position, intent?), extend(count, intent?). ' +
+                'Positions are working-relative — each op sees the list as the ones before it left it. List multiple removes in descending position order. ' +
+                'Positions are 0-based indices into the current queue listing shown in context; listeners speak 1-based ("track 5" = position 4) — translate carefully.',
+            items: {
+              // If live smoke shows malformed ops from the model, the known fix is
+              // flattening to one object (op enum + all fields optional) with zod
+              // enforcing legal combos — see Task 3 review.
+              oneOf: [
+                {
+                  type: 'object',
+                  properties: {
+                    op: { type: 'string', enum: ['remove'] },
+                    position: { type: 'integer', minimum: 0, description: 'Zero-based queue position to remove.' },
                   },
-                  intent: opIntentJsonSchema,
+                  required: ['op', 'position'],
+                  additionalProperties: false,
                 },
-                required: ['op', 'count'],
-                additionalProperties: false,
-              },
-            ],
+                {
+                  type: 'object',
+                  properties: {
+                    op: { type: 'string', enum: ['move'] },
+                    from: { type: 'integer', minimum: 0, description: 'Zero-based queue position to move from.' },
+                    to: { type: 'integer', minimum: 0, description: 'Zero-based queue position to move to.' },
+                  },
+                  required: ['op', 'from', 'to'],
+                  additionalProperties: false,
+                },
+                {
+                  type: 'object',
+                  properties: {
+                    op: { type: 'string', enum: ['swap'] },
+                    position: { type: 'integer', minimum: 0, description: 'Zero-based queue position to replace.' },
+                    intent: intents.op,
+                  },
+                  required: ['op', 'position'],
+                  additionalProperties: false,
+                },
+                {
+                  type: 'object',
+                  properties: {
+                    op: { type: 'string', enum: ['extend'] },
+                    count: {
+                      type: 'integer',
+                      minimum: 1,
+                      maximum: 20,
+                      description: 'Number of additional tracks to append.',
+                    },
+                    intent: intents.op,
+                  },
+                  required: ['op', 'count'],
+                  additionalProperties: false,
+                },
+              ],
+            },
           },
         },
+        required: ['ops'],
       },
-      required: ['ops'],
     },
-  },
-  {
-    name: 'remember_preference',
-    description:
-      "Save a durable listening preference the listener EXPLICITLY STATES as lasting — not a one-off request " +
-      "for this session alone. Use it for things like a favorite or avoided artist/genre, or a hard rule " +
-      '("never play explicit", "always include a Wizkid track on party mixes"). Skip it for ordinary in-the-moment ' +
-      'requests ("play something upbeat right now") — those go through generate_queue/edit_queue instead, not ' +
-      'this tool.',
-    input_schema: rememberPreferenceJsonSchema,
-  },
-  {
-    name: 'rename_session',
-    description:
-      'Rename this listening session to a new title — e.g. "call this tape Lagos Nights" or "rename this to ' +
-      'Sunday Chill". Use ONLY when the listener explicitly asks for a name change; never call this on your own ' +
-      'initiative, and never as a side effect of any other request.',
-    input_schema: renameSessionJsonSchema,
-  },
-]
+    {
+      name: 'remember_preference',
+      description:
+        "Save a durable listening preference the listener EXPLICITLY STATES as lasting — not a one-off request " +
+        "for this session alone. Use it for things like a favorite or avoided artist/genre, or a hard rule " +
+        '("never play explicit", "always include a Wizkid track on party mixes"). Skip it for ordinary in-the-moment ' +
+        'requests ("play something upbeat right now") — those go through generate_queue/edit_queue instead, not ' +
+        'this tool.',
+      input_schema: rememberPreferenceJsonSchema,
+    },
+    {
+      name: 'rename_session',
+      description:
+        'Rename this listening session to a new title — e.g. "call this tape Lagos Nights" or "rename this to ' +
+        'Sunday Chill". Use ONLY when the listener explicitly asks for a name change; never call this on your own ' +
+        'initiative, and never as a side effect of any other request.',
+      input_schema: renameSessionJsonSchema,
+    },
+  ]
+  Object.freeze(tools)
+  return tools
+}
 
-Object.freeze(DJ_TOOLS)
+export const DJ_TOOLS: LlmToolDef[] = buildDjTools(intentJsonSchemas(intentPropertiesBase))
+
+// OUTSIDE_PICKS on: the same tools, with allowOutside on every intent.
+export const DJ_TOOLS_WITH_OUTSIDE: LlmToolDef[] = buildDjTools(
+  intentJsonSchemas({ ...intentPropertiesBase, allowOutside: allowOutsideProperty }),
+)

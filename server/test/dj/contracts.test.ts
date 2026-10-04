@@ -9,6 +9,7 @@ import {
   findPlaylistInputSchema,
   setPlaylistSeedInputSchema,
   DJ_TOOLS,
+  DJ_TOOLS_WITH_OUTSIDE,
 } from '../../src/dj/contracts'
 
 describe('intentSchema', () => {
@@ -537,5 +538,36 @@ describe('rename_session: zod and its longhand JSON schema agree', () => {
   it('the table actually exercises both valid and invalid samples', () => {
     expect(results.some((r) => r.zod)).toBe(true)
     expect(results.some((r) => !r.zod)).toBe(true)
+  })
+})
+
+describe('DJ_TOOLS_WITH_OUTSIDE (OUTSIDE_PICKS on)', () => {
+  const withOutside = (name: string) => DJ_TOOLS_WITH_OUTSIDE.find((t) => t.name === name)!.input_schema
+
+  it('offers the same tools, frozen, and differs from DJ_TOOLS only by allowOutside', () => {
+    expect(DJ_TOOLS_WITH_OUTSIDE.map((t) => t.name)).toEqual(DJ_TOOLS.map((t) => t.name))
+    expect(Object.isFrozen(DJ_TOOLS_WITH_OUTSIDE)).toBe(true)
+    expect(JSON.stringify(DJ_TOOLS)).not.toContain('allowOutside')
+    const stripped = JSON.parse(JSON.stringify(DJ_TOOLS_WITH_OUTSIDE), (k, v) => (k === 'allowOutside' ? undefined : v))
+    expect(stripped).toEqual(JSON.parse(JSON.stringify(DJ_TOOLS)))
+  })
+
+  it('advertises allowOutside on generate_queue and on swap/extend intents', () => {
+    const gen = withOutside('generate_queue') as { properties: Record<string, { type: string; description: string }> }
+    expect(gen.properties.allowOutside.type).toBe('boolean')
+    expect(gen.properties.allowOutside.description).toMatch(/only their own music/)
+    const ops = withOutside('edit_queue').properties.ops as { items: { oneOf: Array<{ properties: { intent?: { properties: Record<string, unknown> } } }> } }
+    expect(ops.items.oneOf[2].properties.intent!.properties).toHaveProperty('allowOutside')
+    expect(ops.items.oneOf[3].properties.intent!.properties).toHaveProperty('allowOutside')
+  })
+
+  const rows: Row[] = [
+    ...generateQueueRows,
+    { label: 'allowOutside false is valid', sample: { themes: 'x', allowOutside: false } },
+    { label: 'allowOutside true is valid', sample: { themes: 'x', allowOutside: true } },
+    { label: 'allowOutside as a string is invalid', sample: { themes: 'x', allowOutside: 'no' } },
+  ]
+  it.each(rows)('generate_queue agrees with zod: $label', ({ sample }) => {
+    expect(matchesJsonSchema(withOutside('generate_queue'), sample)).toBe(intentSchema.safeParse(sample).success)
   })
 })

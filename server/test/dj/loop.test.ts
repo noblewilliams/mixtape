@@ -9,11 +9,17 @@ import {
   EMPTY_LIBRARY_TEXT,
   INSUFFICIENT_SEEDS_TEXT,
   CORPUS_NOTICE,
+  OUTSIDE_PERSONA_LINE,
+  NEW_MARKER_LEGEND,
+  PERSONA_PROMPT,
+  PERSONA_PROMPT_WITH_OUTSIDE,
+  outsidePicksNotice,
   type DjDeps,
   type DjSessionRef,
 } from '../../src/dj/loop'
 import { LlmError, type LlmClient, type LlmRequest, type LlmTurn, type LlmAssistantBlock, type LlmToolCall } from '../../src/dj/llm'
 import { replaceQueue, applyOps, getActiveQueue } from '../../src/dj/queue-store'
+import { DJ_TOOLS, DJ_TOOLS_WITH_OUTSIDE } from '../../src/dj/contracts'
 import {
   djMemories,
   djMessages,
@@ -1926,5 +1932,322 @@ describe('empty personal library', () => {
     expect(result.djMessage.queueVersion).toBeNull()
     expect(FALLBACK_UNCHANGED_TEXT).not.toBe(FALLBACK_TEXT)
     expect(FALLBACK_UNCHANGED_TEXT).not.toMatch(/landed|here's|queued/i)
+  })
+})
+
+// --- Outside picks (plan 2026-10-03, Task 10) ------------------------------
+
+// A curate responder that reaches for outside rows first, the worst case for
+// the cap: every row the pool block marks "| new", then the rest, up to the
+// requested count.
+function greedyOutsideLlm(conversationScript: ScriptedTurn[]): { llm: LlmClient; requests: LlmRequest[] } {
+  const inner = makeFakeLlm(conversationScript)
+  const llm: LlmClient = async (req) => {
+    if (req.tools.length > 0) return inner.llm(req)
+    inner.requests.push(req)
+    const [poolText, intentText] = (req.messages[0].content as Array<{ text: string }>).map((b) => b.text)
+    const lines = poolText.split('\n').filter((l) => /^[0-9a-f-]{36} \|/.test(l))
+    const ordered = [...lines.filter((l) => l.endsWith(' | new')), ...lines.filter((l) => !l.endsWith(' | new'))]
+    const count = Number(intentText.match(/Pick exactly (\d+) tracks/)![1])
+    const picks = ordered.slice(0, count).map((l) => ({ id: l.slice(0, 36), reason: 'fits' }))
+    return { text: JSON.stringify(picks), toolCalls: [], raw: [], stopReason: 'end_turn', usage: null }
+  }
+  return { llm, requests: inner.requests }
+}
+
+async function seedOutsideWorld(db: TestDb, own: number, outside: number) {
+  await seedUser(db, 'u1')
+  const session = await seedSession(db, 'u1')
+  const library = await seedLibrary(db, 'u1', own)
+  const catalogue = []
+  for (let i = 0; i < outside; i++) catalogue.push(await seedCorpusTrack(db))
+  return { session, sessionRef: { id: session.id, userId: 'u1' } as DjSessionRef, library, catalogue }
+}
+
+function poolBlocks(requests: LlmRequest[]): string[] {
+  return curateRequests(requests).map((r) => (r.messages[0].content as Array<{ text: string }>)[0].text)
+}
+
+describe('outside picks', () => {
+  it('flag off: the model sees today\'s tools and persona, no outside rows reach curation, and the tool result has no new line', async () => {
+    const db = await createTestDb()
+    const { sessionRef } = await seedOutsideWorld(db, 12, 8)
+    const { llm, requests } = greedyOutsideLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'drive', targetCount: 10, familiarity: 'adventurous' })] },
+      { text: 'done.' },
+    ])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'surprise me')
+
+    for (const req of conversationRequests(requests)) {
+      expect(req.tools).toBe(DJ_TOOLS)
+      expect(req.system).toBe(PERSONA_PROMPT)
+    }
+    expect(poolBlocks(requests).every((b) => !b.includes('| new'))).toBe(true)
+    expect(result.queue.every((t) => t.newToYou === false)).toBe(true)
+    const text = toolResultTextFrom(conversationRequests(requests)[1])
+    expect(text.split('\n')[0]).toBe(`queue generated: 10 tracks (now version ${result.queueVersion})`)
+    expect(text).not.toMatch(/do not have yet/)
+  })
+
+  it('flag on: the model sees the outside tools and persona', async () => {
+    const db = await createTestDb()
+    const { sessionRef } = await seedOutsideWorld(db, 3, 0)
+    const { llm, requests } = greedyOutsideLlm([{ text: 'hi.' }])
+
+    await runDjTurn(db, { embed: fakeEmbed, llm, outsidePicks: true }, sessionRef, 'hello')
+
+    expect(conversationRequests(requests)[0].tools).toBe(DJ_TOOLS_WITH_OUTSIDE)
+    expect(conversationRequests(requests)[0].system).toBe(PERSONA_PROMPT_WITH_OUTSIDE)
+    expect(PERSONA_PROMPT_WITH_OUTSIDE).toContain(OUTSIDE_PERSONA_LINE)
+  })
+
+  it.each([
+    ['comfort', 10, 0],
+    ['mix', 10, 2],
+    ['adventurous', 10, 4],
+    ['adventurous', 15, 6],
+  ] as const)('generate holds the cap for %s at %i tracks: at most %i new, backfilled from their own music', async (familiarity, targetCount, cap) => {
+    const db = await createTestDb()
+    const { sessionRef, catalogue } = await seedOutsideWorld(db, 20, 10)
+    const { llm, requests } = greedyOutsideLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'drive', targetCount, familiarity })] },
+      { text: 'done.' },
+    ])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm, outsidePicks: true }, sessionRef, 'go')
+
+    const outsideIds = new Set(catalogue.map((t) => t.id))
+    expect(result.queue).toHaveLength(targetCount)
+    expect(result.queue.filter((t) => t.newToYou)).toHaveLength(cap)
+    expect(result.queue.filter((t) => t.newToYou).every((t) => outsideIds.has(t.trackId))).toBe(true)
+    expect(result.queue.filter((t) => !t.newToYou).every((t) => !outsideIds.has(t.trackId))).toBe(true)
+    const text = toolResultTextFrom(conversationRequests(requests)[1])
+    const positions = result.queue.filter((t) => t.newToYou).map((t) => t.position)
+    if (cap === 0) {
+      expect(poolBlocks(requests)[0]).not.toContain('| new')
+      expect(text).not.toMatch(/do not have yet/)
+    } else {
+      expect(text.split('\n')[0]).toBe(outsidePicksNotice(positions))
+    }
+  })
+
+  it('allowOutside false yields none: no outside query rows, no new line', async () => {
+    const db = await createTestDb()
+    const { sessionRef } = await seedOutsideWorld(db, 12, 8)
+    const { llm, requests } = greedyOutsideLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'drive', targetCount: 10, familiarity: 'adventurous', allowOutside: false })] },
+      { text: 'done.' },
+    ])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm, outsidePicks: true }, sessionRef, 'only my music')
+
+    expect(poolBlocks(requests)[0]).not.toContain('| new')
+    expect(result.queue.some((t) => t.newToYou)).toBe(false)
+    expect(toolResultTextFrom(conversationRequests(requests)[1])).not.toMatch(/do not have yet/)
+  })
+
+  it('flag on with no outside candidates sends the plain curation request and no new line', async () => {
+    const db = await createTestDb()
+    const { sessionRef } = await seedOutsideWorld(db, 12, 0)
+    const { llm, requests } = greedyOutsideLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'drive', targetCount: 10 })] },
+      { text: 'done.' },
+    ])
+
+    await runDjTurn(db, { embed: fakeEmbed, llm, outsidePicks: true }, sessionRef, 'go')
+
+    expect(poolBlocks(requests)[0]).not.toContain('| new')
+    expect(toolResultTextFrom(conversationRequests(requests)[1])).not.toMatch(/do not have yet/)
+  })
+
+  it('an extend is capped against the whole queue after the edit, minus the new songs already in it', async () => {
+    const db = await createTestDb()
+    const { session, sessionRef, library, catalogue } = await seedOutsideWorld(db, 20, 10)
+    // 10 tracks, 2 of them new: the mix cap for 10 is already used up.
+    await replaceQueue(db, session.id, [...catalogue.slice(0, 2), ...library.slice(0, 8)].map((t) => ({ trackId: t.id, reason: '' })), 'dj')
+    const { llm, requests } = greedyOutsideLlm([
+      { toolCalls: [toolCall('c1', 'edit_queue', { ops: [{ op: 'extend', count: 5, intent: { themes: 'more like this' } }] })] },
+      { text: 'added five.' },
+    ])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm, outsidePicks: true }, sessionRef, 'five more like this')
+
+    // 15 after the edit: cap 3, 2 already in, so at most 1 more.
+    expect(result.queue).toHaveLength(15)
+    expect(result.queue.filter((t) => t.newToYou)).toHaveLength(3)
+    expect(curateIntentBlocks(requests)[0].split('\n')).toContain('Pick at most 1 song marked new.')
+    const text = toolResultTextFrom(conversationRequests(requests)[1])
+    const added = result.queue.slice(10).filter((t) => t.newToYou).map((t) => t.position)
+    expect(added).toHaveLength(1)
+    expect(text.split('\n')[0]).toBe(outsidePicksNotice(added))
+  })
+
+  it('a swap with the cap already spent asks for no outside rows at all', async () => {
+    const db = await createTestDb()
+    const { session, sessionRef, library, catalogue } = await seedOutsideWorld(db, 20, 10)
+    await replaceQueue(db, session.id, [...catalogue.slice(0, 2), ...library.slice(0, 8)].map((t) => ({ trackId: t.id, reason: '' })), 'dj')
+    const { llm, requests } = greedyOutsideLlm([
+      { toolCalls: [toolCall('c1', 'edit_queue', { ops: [{ op: 'swap', position: 5, intent: { themes: 'something else' } }] })] },
+      { text: 'swapped.' },
+    ])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm, outsidePicks: true }, sessionRef, 'not that one')
+
+    expect(poolBlocks(requests)[0]).not.toContain('| new')
+    expect(result.queue.filter((t) => t.newToYou)).toHaveLength(2)
+    expect(toolResultTextFrom(conversationRequests(requests)[1])).not.toMatch(/do not have yet/)
+  })
+
+  it('swapping out a new song frees its place under the cap', async () => {
+    const db = await createTestDb()
+    const { session, sessionRef, library, catalogue } = await seedOutsideWorld(db, 20, 10)
+    await replaceQueue(db, session.id, [...catalogue.slice(0, 2), ...library.slice(0, 8)].map((t) => ({ trackId: t.id, reason: '' })), 'dj')
+    const { llm, requests } = greedyOutsideLlm([
+      { toolCalls: [toolCall('c1', 'edit_queue', { ops: [{ op: 'swap', position: 0, intent: { themes: 'something else' } }] })] },
+      { text: 'swapped.' },
+    ])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm, outsidePicks: true }, sessionRef, 'not that one')
+
+    expect(curateIntentBlocks(requests)[0].split('\n')).toContain('Pick at most 1 song marked new.')
+    expect(result.queue.filter((t) => t.newToYou)).toHaveLength(2)
+    expect(result.queue[0].trackId).not.toBe(catalogue[0].id)
+  })
+})
+
+describe('outsidePicksNotice', () => {
+  it('says how many and where, and asks the DJ to say so plainly', () => {
+    expect(outsidePicksNotice([3])).toBe(
+      'note: 1 of these picks is a song this listener does not have yet, at position 3 (0-based). Tell them plainly which one is new to them.',
+    )
+    expect(outsidePicksNotice([0, 4])).toBe(
+      'note: 2 of these picks are songs this listener does not have yet, at positions 0, 4 (0-based). Tell them plainly which ones are new to them.',
+    )
+  })
+})
+
+describe('outside picks: review fixes', () => {
+  function contextOf(requests: LlmRequest[]): string {
+    return conversationRequests(requests)[0].messages[0].content as string
+  }
+
+  it('a later turn with no intent of its own does not unlock outside picks the listener ruled out', async () => {
+    const db = await createTestDb()
+    const { sessionRef } = await seedOutsideWorld(db, 20, 10)
+    const deps = (llm: LlmClient): DjDeps => ({ embed: fakeEmbed, llm, outsidePicks: true })
+
+    const first = greedyOutsideLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'drive', targetCount: 10, allowOutside: false })] },
+      { text: 'only yours.' },
+    ])
+    const turn1 = await runDjTurn(db, deps(first.llm), sessionRef, 'only my own music please')
+    expect(turn1.queue.some((t) => t.newToYou)).toBe(false)
+
+    const second = greedyOutsideLlm([
+      { toolCalls: [toolCall('c1', 'edit_queue', { ops: [{ op: 'extend', count: 5 }] })] },
+      { text: 'five more.' },
+    ])
+    const turn2 = await runDjTurn(db, deps(second.llm), sessionRef, 'add 5 more')
+
+    expect(turn2.queue).toHaveLength(15)
+    expect(turn2.queue.some((t) => t.newToYou)).toBe(false)
+    expect(poolBlocks(second.requests)[0]).not.toContain('| new')
+  })
+
+  it('a swap that finds no replacement keeps its new song counted, so a later extend cannot exceed the cap', async () => {
+    const db = await createTestDb()
+    const { session, sessionRef, library, catalogue } = await seedOutsideWorld(db, 20, 10)
+    for (const t of library) await db.insert(trackFeatures).values({ trackId: t.id, tempo: 120, source: 'reccobeats' })
+    // 15 tracks, 3 new: the mix cap for 15 is spent.
+    await replaceQueue(db, session.id, [...catalogue.slice(0, 3), ...library.slice(0, 12)].map((t) => ({ trackId: t.id, reason: '' })), 'dj')
+    const { llm } = greedyOutsideLlm([
+      { toolCalls: [toolCall('c1', 'edit_queue', { ops: [
+        // Nothing sits at 200 bpm, so this swap comes back empty and the new song stays.
+        { op: 'swap', position: 0, intent: { themes: 'faster', tempoMin: 200, tempoMax: 210 } },
+        { op: 'extend', count: 1, intent: { themes: 'more of this' } },
+      ] })] },
+      { text: 'done.' },
+    ])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm, outsidePicks: true }, sessionRef, 'faster opener and one more')
+
+    expect(result.queue).toHaveLength(16)
+    expect(result.queue[0].trackId).toBe(catalogue[0].id)
+    // 16 tracks allow 3.
+    expect(result.queue.filter((t) => t.newToYou)).toHaveLength(3)
+  })
+
+  it.each([false, true])('a not-personal (corpus) session marks no row new, flag on: %s', async (outsidePicks) => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedCorpusListener(db, 'u1')
+    const session = await seedSession(db, 'u1')
+    const { llm } = makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'late night', targetCount: 5 })] },
+      { text: 'a first guess.' },
+    ])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm, outsidePicks }, { id: session.id, userId: 'u1' }, 'play me something')
+
+    expect(result.queue).toHaveLength(5)
+    expect(result.queue.every((t) => t.newToYou === false)).toBe(true)
+  })
+
+  it('flag on: the queue listing in context and in tool results marks new songs, with one legend sentence', async () => {
+    const db = await createTestDb()
+    const { session, sessionRef, library, catalogue } = await seedOutsideWorld(db, 20, 10)
+    await replaceQueue(db, session.id, [library[0], catalogue[0], library[1]].map((t) => ({ trackId: t.id, reason: '' })), 'dj')
+    const { llm, requests } = greedyOutsideLlm([
+      { toolCalls: [toolCall('c1', 'edit_queue', { ops: [{ op: 'remove', position: 2 }] })] },
+      { text: 'which ones are new? the second.' },
+    ])
+
+    await runDjTurn(db, { embed: fakeEmbed, llm, outsidePicks: true }, sessionRef, 'drop the last one')
+
+    const context = contextOf(requests).split('\n')
+    expect(context.filter((l) => l.endsWith(' | new'))).toEqual([`[1] ${catalogue[0].title} — CorpusArtist | new`])
+    expect(context.filter((l) => l === NEW_MARKER_LEGEND)).toHaveLength(1)
+    const result = toolResultTextFrom(conversationRequests(requests)[1]).split('\n')
+    expect(result.filter((l) => l.endsWith(' | new'))).toEqual([`[1] ${catalogue[0].title} — CorpusArtist | new`])
+    expect(result).toContain(NEW_MARKER_LEGEND)
+  })
+
+  it('flag on, a not-personal session: no markers and no legend', async () => {
+    const db = await createTestDb()
+    const { session, sessionRef, library, catalogue } = await seedOutsideWorld(db, 5, 2)
+    await replaceQueue(db, session.id, [library[0], catalogue[0]].map((t) => ({ trackId: t.id, reason: '' })), 'dj')
+    await db.update(djSessions).set({ notPersonal: true }).where(eq(djSessions.id, session.id))
+    const { llm, requests } = greedyOutsideLlm([{ text: 'hi.' }])
+
+    await runDjTurn(db, { embed: fakeEmbed, llm, outsidePicks: true }, sessionRef, 'hello')
+
+    expect(contextOf(requests)).not.toContain('| new')
+    expect(contextOf(requests)).not.toContain(NEW_MARKER_LEGEND)
+  })
+
+  it('flag off: the listing is byte-for-byte today, unowned songs included', async () => {
+    const db = await createTestDb()
+    const { session, sessionRef, library, catalogue } = await seedOutsideWorld(db, 5, 2)
+    await replaceQueue(db, session.id, [library[0], catalogue[0]].map((t) => ({ trackId: t.id, reason: '' })), 'dj')
+    const { llm, requests } = greedyOutsideLlm([
+      { toolCalls: [toolCall('c1', 'edit_queue', { ops: [{ op: 'move', from: 1, to: 0 }] })] },
+      { text: 'moved.' },
+    ])
+
+    await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'swap the order')
+
+    const context = contextOf(requests)
+    expect(context.startsWith([
+      'Current queue (positions are 0-based; the listener may say "track 1" meaning position 0):',
+      `[0] ${library[0].title} — Artist`,
+      `[1] ${catalogue[0].title} — CorpusArtist`,
+      'Measured energy',
+    ].join('\n'))).toBe(true)
+    expect(toolResultTextFrom(conversationRequests(requests)[1]).split('\n').slice(1)).toEqual([
+      'Updated queue (positions are 0-based):',
+      `[0] ${catalogue[0].title} — CorpusArtist`,
+      `[1] ${library[0].title} — Artist`,
+    ])
   })
 })

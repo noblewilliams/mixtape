@@ -7,12 +7,13 @@ import {
   applyOps,
   planOps,
   MAX_ACTIVE_QUEUE_LENGTH,
+  newToListenerTrackIds,
   QueueOpError,
   QueueVersionConflict,
   type ReplacementPick,
   type ReplacementsProvider,
 } from '../../src/dj/queue-store'
-import { djSessions, mixVersions, queueTracks, tracks, user } from '../../src/db/schema'
+import { djSessions, mixVersions, playlistEntries, queueTracks, tracks, user, userPlaylists, userTracks } from '../../src/db/schema'
 import { opIntentSchema, type OpIntent } from '../../src/dj/contracts'
 
 function opIntent(partial: Partial<OpIntent> & { themes: string }): OpIntent {
@@ -992,5 +993,70 @@ describe('queue-store', () => {
       const built = db.select().from(djSessions).where(eq(djSessions.id, 'x')).for('update').toSQL()
       expect(built.sql.toLowerCase()).toContain('for update')
     })
+  })
+})
+
+describe('getActiveQueue newToYou', () => {
+  it("is true only for a track no row of this listener shares a recording with, read at query time", async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedUser(db, 'u2')
+    const session = await seedSession(db, 'u1')
+    const owned = await seedTrack(db)
+    const ownedViaTwin = await seedTrack(db)
+    const twinTheyHold = await seedTrack(db, { appleId: null, spotifyId: '0'.repeat(21) + 'A' })
+    const heldByOtherListenerOnly = await seedTrack(db)
+    const nobodys = await seedTrack(db)
+    await db.update(tracks).set({ isrc: 'USTWN2600001' }).where(eq(tracks.id, ownedViaTwin.id))
+    await db.update(tracks).set({ isrc: 'USTWN2600001' }).where(eq(tracks.id, twinTheyHold.id))
+    await db.insert(userTracks).values([
+      { userId: 'u1', trackId: owned.id, inLibrary: false },
+      { userId: 'u1', trackId: twinTheyHold.id, inLibrary: true },
+      { userId: 'u2', trackId: heldByOtherListenerOnly.id, inLibrary: true },
+    ])
+    await replaceQueue(db, session.id, [owned, ownedViaTwin, heldByOtherListenerOnly, nobodys].map((t) => ({ trackId: t.id, reason: '' })), 'dj')
+
+    const view = await getActiveQueue(db, session.id)
+    expect(view.map((v) => v.newToYou)).toEqual([false, false, true, true])
+
+    // Adding the song clears the mark by itself; nothing is stored.
+    await db.insert(userTracks).values({ userId: 'u1', trackId: nobodys.id, inLibrary: true })
+    expect((await getActiveQueue(db, session.id)).map((v) => v.newToYou)).toEqual([false, false, true, false])
+  })
+})
+
+describe('getActiveQueue newToYou: playlists and not-personal sessions', () => {
+  async function playlistOf(db: TestDb, userId: string, trackId: string, inLibrary = true) {
+    trackCounter += 1
+    const [p] = await db.insert(userPlaylists).values({ userId, appleLibraryId: `pl-${trackCounter}`, name: 'P', kind: 'editorial',
+      inLibrary, isMixtapeOwned: false, sourceFingerprint: 'a'.repeat(64) }).returning()
+    await db.insert(playlistEntries).values({ playlistId: p.id, position: 0, appleLibraryEntryId: 'e', trackId, titleSnapshot: 'T', artistSnapshot: 'A' })
+  }
+
+  it('a song in a playlist the listener keeps reads false; one in a removed playlist still reads true', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const session = await seedSession(db, 'u1')
+    const kept = await seedTrack(db)
+    const removed = await seedTrack(db)
+    await playlistOf(db, 'u1', kept.id)
+    await playlistOf(db, 'u1', removed.id, false)
+    await replaceQueue(db, session.id, [kept, removed].map((t) => ({ trackId: t.id, reason: '' })), 'dj')
+
+    expect((await getActiveQueue(db, session.id)).map((v) => v.newToYou)).toEqual([false, true])
+    expect([...(await newToListenerTrackIds(db, session.id))]).toEqual([removed.id])
+  })
+
+  it('a not-personal session marks nothing, while the raw ownership set still sees the unowned songs', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const session = await seedSession(db, 'u1')
+    const a = await seedTrack(db)
+    const b = await seedTrack(db)
+    await replaceQueue(db, session.id, [a, b].map((t) => ({ trackId: t.id, reason: '' })), 'dj')
+    await db.update(djSessions).set({ notPersonal: true }).where(eq(djSessions.id, session.id))
+
+    expect((await getActiveQueue(db, session.id)).map((v) => v.newToYou)).toEqual([false, false])
+    expect(new Set(await newToListenerTrackIds(db, session.id))).toEqual(new Set([a.id, b.id]))
   })
 })

@@ -14,10 +14,11 @@ import {
   findPlaylistInputSchema,
   setPlaylistSeedInputSchema,
   DJ_TOOLS,
+  DJ_TOOLS_WITH_OUTSIDE,
   type Intent,
   type OpIntent,
 } from './contracts'
-import { buildPool, hasPersonalCandidates, resolvePoolMode, type PoolMode } from './pool'
+import { buildPool, hasPersonalCandidates, outsideCap, resolvePoolMode, type PoolMode, type PoolTrack } from './pool'
 import { curate, CurationTruncated, CurationUnparseable } from './curate'
 import { sanitizeForPrompt, sanitizeTitleText, stripEmDashes } from './sanitize'
 import { insertMemoryNote, MAX_MEMORY_NOTES } from './memory-notes'
@@ -25,6 +26,8 @@ import { findPlaylistSeeds, PlaylistSeedError, playlistSeedContext, readPlaylist
 import {
   applyOps,
   getActiveQueue,
+  newToListenerTrackIds,
+  planOps,
   replaceQueue,
   QueueOpError,
   QueueVersionConflict,
@@ -36,7 +39,10 @@ import {
 // its truncated-prompt fallback with no titleComplete wired, same as any
 // other title-generation failure — callers that only need the tool-use loop
 // (most tests) can omit it.
-export type DjDeps = { llm: LlmClient; embed: Embedder; titleComplete?: LlmComplete }
+// outsidePicks is the OUTSIDE_PICKS flag (index.ts), read once per request.
+// Absent or false is today's behaviour exactly: the same tools and persona,
+// no outside query, the same tool results.
+export type DjDeps = { llm: LlmClient; embed: Embedder; titleComplete?: LlmComplete; outsidePicks?: boolean }
 
 // The only session fields the loop actually needs — callers (the session
 // routes, Task 8) already have the full dj_sessions row and can pass it
@@ -90,6 +96,16 @@ export const INSUFFICIENT_SEEDS_TEXT =
 // so the client's banner agrees with what the DJ said.
 export const CORPUS_NOTICE =
   "note: these picks come from the shared catalog and this listener's seeds, not their own listening history. Say so plainly."
+
+// Prepended to a generate/edit tool result when any pick THIS CALL landed
+// is a song the listener does not own (an outside pick, dj/pool.ts
+// buildOutsidePool), with its 0-based positions in the updated listing.
+// Absent otherwise, so a mix with none reads exactly as before.
+export function outsidePicksNotice(positions: number[]): string {
+  const one = positions.length === 1
+  return `note: ${positions.length} of these picks ${one ? 'is a song' : 'are songs'} this listener does not have yet, ` +
+    `at position${one ? '' : 's'} ${positions.join(', ')} (0-based). Tell them plainly which ${one ? 'one is' : 'ones are'} new to them.`
+}
 
 export const CURATION_APOLOGY = 'lost my train of thought on that one. try again?'
 export const CONFLICT_APOLOGY = 'the queue shifted while I was working on it. try that again?'
@@ -209,7 +225,7 @@ class CurationBudget {
 // from the listener's own library — and user-controlled text must never sit
 // at system-prompt altitude, where a crafted title could carry more
 // authority than the model gives ordinary conversation.
-export const PERSONA_PROMPT = [
+const PERSONA_LINES = [
   'You are the DJ: warm, brief, music-literate. You talk WITH the listener about their queue, not at them.',
   'Queues come ONLY from your tools (generate_queue, edit_queue). Never claim a track is queued, or describe ' +
     "one, unless a tool call actually put it there. Don't invent tracks or artists.",
@@ -236,7 +252,17 @@ export const PERSONA_PROMPT = [
     'reaction to anything else.',
   'Keep spoken replies SHORT, a sentence or two, like a text from a friend who runs the board.',
   'Never use em dashes in your replies. Use a comma or a full stop instead.',
-].join('\n')
+]
+
+export const PERSONA_PROMPT = PERSONA_LINES.join('\n')
+
+// OUTSIDE_PICKS on: one more line, ahead of the reply-style lines. A
+// separate static string so each variant caches on its own.
+export const OUTSIDE_PERSONA_LINE =
+  'Mixes may include a few songs the listener does not own yet, up to a cap the system enforces. Pass ' +
+  'allowOutside: false when the listener, or a saved preference, asks for only their own music. Choose ' +
+  'familiarity "adventurous" when they ask for new things. Always say which picks are new to them.'
+export const PERSONA_PROMPT_WITH_OUTSIDE = [...PERSONA_LINES.slice(0, -2), OUTSIDE_PERSONA_LINE, ...PERSONA_LINES.slice(-2)].join('\n')
 
 // Formats the failure of a zod safeParse into tool_result text: issue paths
 // and CODES only, never `issue.message` and never the offending input value
@@ -300,14 +326,34 @@ const MAX_LISTING_LINES = 60
 // model can verify what actually happened before describing it to the
 // listener, rather than assuming). Capped at MAX_LISTING_LINES with a
 // truncation note — see that constant's comment.
-function formatQueueListing(queue: QueueTrackView[]): string {
-  const lines = queue
-    .slice(0, MAX_LISTING_LINES)
-    .map((t, i) => `[${i}] ${sanitizeForPrompt(t.title)} — ${sanitizeForPrompt(t.artist)}`)
+//
+// `markNew` is OUTSIDE_PICKS: with it on, a row the listener does not own
+// (newToYou, which a not-personal session suppresses) ends in NEW_MARKER and
+// one NEW_MARKER_LEGEND line follows, so a later turn can answer "which ones
+// are new?". Off, or with no such row listed, the listing is unchanged.
+const NEW_MARKER = ' | new'
+export const NEW_MARKER_LEGEND = 'Rows ending in "| new" are songs the listener does not own yet.'
+
+function formatQueueListing(queue: QueueTrackView[], markNew = false): string {
+  const listed = queue.slice(0, MAX_LISTING_LINES)
+  const marking = markNew && listed.some((t) => t.newToYou)
+  const lines = listed.map((t, i) =>
+    `[${i}] ${sanitizeForPrompt(t.title)} — ${sanitizeForPrompt(t.artist)}${marking && t.newToYou ? NEW_MARKER : ''}`)
   if (queue.length > MAX_LISTING_LINES) {
     lines.push(`(+ ${queue.length - MAX_LISTING_LINES} more tracks not shown)`)
   }
+  if (marking) lines.push(NEW_MARKER_LEGEND)
   return lines.join('\n')
+}
+
+// 0-based positions, in the updated queue, of the given outside picks.
+function outsidePositions(queue: QueueTrackView[], outsideIds: Set<string>): number[] {
+  return queue.flatMap((t, i) => (outsideIds.has(t.trackId) ? [i] : []))
+}
+
+function outsideIdsIn(pool: PoolTrack[], picks: Array<{ trackId: string }>): string[] {
+  const outside = new Set(pool.filter((t) => t.outside).map((t) => t.trackId))
+  return picks.filter((p) => outside.has(p.trackId)).map((p) => p.trackId)
 }
 
 // Hard cap on active notes per user — enforced here (context load) and at
@@ -365,7 +411,7 @@ function formatMemoryBlock(notes: string[]): string | null {
 // — there's no earlier dj turn to bound it against. Sent as a leading USER
 // message by attemptTurn, never folded into `system` — see the PERSONA_PROMPT
 // comment above for why.
-async function buildSessionContext(db: Db, sessionId: string, userId: string): Promise<string> {
+async function buildSessionContext(db: Db, sessionId: string, userId: string, markNew = false): Promise<string> {
   const queue = await getActiveQueue(db, sessionId)
   const featureRows = queue.length ? await db.select({ id: trackFeatures.trackId, energy: trackFeatures.energy })
     .from(trackFeatures).where(inArray(trackFeatures.trackId, queue.slice(0, MAX_LISTING_LINES).map(t => t.trackId))) : []
@@ -381,7 +427,7 @@ async function buildSessionContext(db: Db, sessionId: string, userId: string): P
       ? 'Current queue: empty.'
       : [
           'Current queue (positions are 0-based; the listener may say "track 1" meaning position 0):',
-          formatQueueListing(queue),
+          formatQueueListing(queue, markNew),
         ].join('\n')
 
   const [lastDj] = await db
@@ -486,7 +532,9 @@ async function executeGenerateQueue(
   const seed = await readPlaylistSeed(db, session.id, session.userId)
   if (seed.status !== 'none' && seed.status !== 'ready') return { resultText: `playlist inspiration is ${seed.status.replace('_', ' ')}; ask the listener to choose another playlist or clear it. The queue is unchanged.`, queueChanged: false, intent }
   const selected = seed.status === 'ready' ? { playlistId: seed.playlistId!, excludeSourceTracks: seed.excludeSourceTracks } : undefined
-  const pool = await buildPool(db, deps.embed, session.userId, intent, undefined, { mode: poolMode.mode, playlistSeed: selected })
+  // Outside picks: 0 with the flag off, which skips the outside query.
+  const cap = deps.outsidePicks ? outsideCap(intent) : 0
+  const pool = await buildPool(db, deps.embed, session.userId, intent, undefined, { mode: poolMode.mode, playlistSeed: selected, outsideCap: cap })
   if (pool.length === 0) {
     // Not an error — the model still gets to tell the listener, in its own
     // voice, that nothing matched. A personal listener with no candidates at
@@ -498,7 +546,7 @@ async function executeGenerateQueue(
     return { resultText: 'no tracks in the library match those constraints', queueChanged: false, intent }
   }
   budget.consume()
-  const picks = await curate(deps.llm, pool, intent, withPlaylistSeedContext(sessionContext, seed))
+  const picks = await curate(deps.llm, pool, intent, withPlaylistSeedContext(sessionContext, seed), { outsideCap: cap })
   const version = await replaceQueue(
     db,
     session.id,
@@ -516,12 +564,14 @@ async function executeGenerateQueue(
   // assumption — accounting numbers alone ("3 added") don't tell it what
   // actually landed where, or in what order.
   const updatedQueue = await getActiveQueue(db, session.id)
+  const outsideAt = outsidePositions(updatedQueue, new Set(outsideIdsIn(pool, picks)))
   return {
     resultText: [
       ...(poolMode.mode === 'corpus' ? [CORPUS_NOTICE] : []),
+      ...(outsideAt.length > 0 ? [outsidePicksNotice(outsideAt)] : []),
       `queue generated: ${picks.length} tracks (now version ${version})`,
       'Updated queue (positions are 0-based):',
-      formatQueueListing(updatedQueue),
+      formatQueueListing(updatedQueue, deps.outsidePicks === true),
     ].join('\n'),
     queueChanged: true,
     newVersion: version,
@@ -584,6 +634,27 @@ async function executeEditQueue(
   // track in place — that queue holds no corpus pick, so no flag).
   let corpusPicksLanded = false
 
+  // Outside picks for this batch (flag on, personal mode): the cap is taken
+  // against the whole queue after the edit, using the intent in force for
+  // each request, minus the songs new to the listener already in the queue
+  // (raw ownership, never the display value a not-personal session
+  // suppresses) and those this batch added. A swapped-out new song frees its
+  // place only once its replacement has arrived, so a swap that comes back
+  // empty (the song stays) never lets a later request exceed the cap.
+  // Planned once, on the first request: applyOps has validated the ops by
+  // then. applyOps calls the provider once per plan request, in the plan's
+  // order, so the n-th call serves requests[n].
+  let outsideBudget: {
+    finalLength: number
+    keptNew: number
+    requests: ReturnType<typeof planOps>['requests']
+    swapsOfNew: Set<number>
+  } | undefined
+  let providerCalls = 0
+  let freedBySwaps = 0
+  const outsideLanded: string[] = []
+  const returnedThisBatch = new Set<string>()
+
   // Resolves a swap/extend's replacement picks. `opIntent` is whatever the
   // model put on that specific op (may be absent). With no op intent, this
   // falls back to the last generate_queue intent seen EARLIER IN THIS SAME
@@ -597,6 +668,12 @@ async function executeEditQueue(
   // empty message down to '' would otherwise throw INSIDE the provider,
   // turning a harmless "edit with no real prompt" into an internal error.
   const provider: ReplacementsProvider = async (count, opIntent) => {
+    const callIndex = providerCalls
+    providerCalls += 1
+    // The weak fallback below is the listener's raw words, not an intent the
+    // model chose, so it never carries outside picks: a later turn's "add 5
+    // more" must not undo an earlier allowOutside false or comfort brief.
+    const weakIntent = !opIntent && !lastGenerateIntent
     const base: OpIntent =
       opIntent ??
       (lastGenerateIntent ? toOpIntent(lastGenerateIntent) : opIntentSchema.parse({ themes: userText.trim() || 'more of the same' }))
@@ -616,12 +693,43 @@ async function executeEditQueue(
     // which this provider has no access to) — an acceptable, unlocked phase-1
     // read, same as everything else this provider touches before phase 2.
     const activeQueue = await getActiveQueue(db, session.id)
+    let cap = 0
+    let request: ReturnType<typeof planOps>['requests'][number] | undefined
+    if (deps.outsidePicks && poolMode === 'personal') {
+      if (!outsideBudget) {
+        const { working, requests } = planOps(activeQueue.map((t) => ({ id: t.trackId, trackId: t.trackId, reason: t.reason })), ops)
+        const isNew = await newToListenerTrackIds(db, session.id)
+        const newSlots = working.filter((slot) => slot.kind === 'keep' && isNew.has(slot.trackId))
+        outsideBudget = {
+          finalLength: working.length,
+          keptNew: newSlots.length,
+          requests,
+          swapsOfNew: new Set(newSlots.flatMap((slot) => (slot.kind === 'keep' && slot.pendingSwap ? [slot.pendingSwap.opIndex] : []))),
+        }
+      }
+      request = outsideBudget.requests[callIndex]
+      if (!weakIntent) {
+        const total = outsideCap({ ...fullIntent, targetCount: outsideBudget.finalLength })
+        // A swap of a new song may itself bring a new one: it lands only by
+        // replacing that song, so the count cannot rise.
+        const ownSlot = request?.kind === 'swap' && outsideBudget.swapsOfNew.has(request.opIndex) ? 1 : 0
+        cap = Math.max(0, total - outsideBudget.keptNew + freedBySwaps + ownSlot - outsideLanded.length)
+      }
+    }
     const pool = await buildPool(db, deps.embed, session.userId, fullIntent, activeQueue.map((t) => t.trackId),
-      { mode: poolMode, playlistSeed: selectedSeed })
+      { mode: poolMode, playlistSeed: selectedSeed, outsideCap: cap })
     if (pool.length === 0) return [] // shortfall — queue-store leaves the original track(s) in place
     budget.consume()
-    const picks = await curate(deps.llm, pool, fullIntent, withPlaylistSeedContext(sessionContext, seed))
+    const picks = await curate(deps.llm, pool, fullIntent, withPlaylistSeedContext(sessionContext, seed), { outsideCap: cap })
     if (poolMode === 'corpus' && picks.length > 0) corpusPicksLanded = true
+    // A repeat of an earlier pick in this batch is dropped by the store, so
+    // it neither lands as an outside pick nor replaces a swapped song.
+    const fresh = picks.filter((p) => !returnedThisBatch.has(p.trackId))
+    outsideLanded.push(...outsideIdsIn(pool, fresh))
+    if (request?.kind === 'swap' && outsideBudget?.swapsOfNew.has(request.opIndex) && picks[0] && fresh[0] === picks[0]) {
+      freedBySwaps += 1
+    }
+    for (const p of picks) returnedThisBatch.add(p.trackId)
     return picks.map((p) => ({ trackId: p.trackId, reason: p.reason }))
   }
 
@@ -637,12 +745,15 @@ async function executeEditQueue(
     // can't tell the model which position actually moved/dropped/swapped —
     // the model must describe results from this listing, never assumption.
     const updatedQueue = await getActiveQueue(db, session.id)
+    // Only picks that actually landed count (materialize may drop one).
+    const outsideAt = outsidePositions(updatedQueue, new Set(outsideLanded))
     return {
       resultText: [
         ...(corpusPicksLanded ? [CORPUS_NOTICE] : []),
+        ...(outsideAt.length > 0 ? [outsidePicksNotice(outsideAt)] : []),
         `queue edited — requested ${result.requested}, added ${result.added}, removed ${result.removed} (now version ${result.version})`,
         'Updated queue (positions are 0-based):',
-        formatQueueListing(updatedQueue),
+        formatQueueListing(updatedQueue, deps.outsidePicks === true),
       ].join('\n'),
       queueChanged: true,
       newVersion: result.version,
@@ -808,7 +919,7 @@ async function attemptTurn(
   try {
     const [history, sessionContext, startVersion] = await Promise.all([
       loadHistory(db, session.id, userRowSeq),
-      buildSessionContext(db, session.id, session.userId),
+      buildSessionContext(db, session.id, session.userId, deps.outsidePicks === true),
       getSessionQueueVersion(db, session.id),
     ])
 
@@ -849,7 +960,11 @@ async function attemptTurn(
     let finalText: string | null = null
 
     for (let round = 0; round < MAX_TURNS && finalText === null; round++) {
-      const turn = await counted({ system: PERSONA_PROMPT, messages: [...baseMessages, ...liveMessages], tools: DJ_TOOLS })
+      const turn = await counted({
+        system: deps.outsidePicks ? PERSONA_PROMPT_WITH_OUTSIDE : PERSONA_PROMPT,
+        messages: [...baseMessages, ...liveMessages],
+        tools: deps.outsidePicks ? DJ_TOOLS_WITH_OUTSIDE : DJ_TOOLS,
+      })
       stats.llmCalls += 1
       liveMessages.push({ role: 'assistant', content: turn.raw })
 

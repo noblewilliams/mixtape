@@ -22,7 +22,10 @@
     // as the ID token's `aud`, so Better Auth must accept it alongside the web
     // GOOGLE_CLIENT_ID secret. Keep it equal to GOOGLE_IOS_CLIENT_ID in
     // client/config/google-ios.json.
-    "GOOGLE_IOS_CLIENT_ID": "403264926110-000q34va63qouvvtvb11co0je53867gb.apps.googleusercontent.com"
+    "GOOGLE_IOS_CLIENT_ID": "403264926110-000q34va63qouvvtvb11co0je53867gb.apps.googleusercontent.com",
+    // Outside picks (plan 2026-10-03, Phase C): "on" lets mixes include a few
+    // songs the listener does not own. Anything else is off.
+    "OUTSIDE_PICKS": "off"
   }
   // Secrets required at runtime (set via `wrangler secret put` / .dev.vars locally) —
   // createAuth fails fast if any is missing:
@@ -46,5 +49,6 @@
   //   ITUNES_STOREFRONT       — iTunes storefront code for enrichment lookups (default "ng")
   //   GOOGLE_IOS_CLIENT_ID    — iOS OAuth client id, declared under "vars" above; accepted as an
   //                             additional Google ID token audience for native sign-in
+  //   OUTSIDE_PICKS           declared under "vars" above; read once per request in src/index.ts
   // MusicKit keys also enable the server-only Apple catalog client used by artwork enrichment.
 }

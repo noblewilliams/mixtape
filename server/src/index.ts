@@ -54,6 +54,7 @@ type Bindings = {
   AI?: { run(model: string, input: { text: string[] }): Promise<unknown> }
   ANTHROPIC_API_KEY?: string
   GROQ_API_KEY?: string
+  OUTSIDE_PICKS?: string
 }
 
 // This cache holds signed server tokens only. The key is the non-secret Apple
@@ -95,6 +96,13 @@ function buildDeps(env: Bindings): EnrichDeps | undefined {
   }
 }
 
+// Outside picks (plan 2026-10-03, Phase C): mixes may include songs the
+// listener does not own. Only the exact string "on" enables it, so a typo or
+// a missing var is the safe default, today's behaviour.
+export function outsidePicksEnabled(env: { OUTSIDE_PICKS?: string }): boolean {
+  return env.OUTSIDE_PICKS === 'on'
+}
+
 // No ANTHROPIC_API_KEY (or no AI binding, for the intent embedder) → no dj
 // deps. Same fail-loud-by-absence convention as buildDeps/enrich above:
 // createApp only mounts /sessions/* when `dj` is present, so an unconfigured
@@ -110,6 +118,7 @@ function buildDjDeps(env: Bindings): DjDeps | undefined {
     // the same ANTHROPIC_API_KEY the DJ loop already requires, no separate
     // config to fail-fast on.
     titleComplete: anthropicComplete(anthropic),
+    outsidePicks: outsidePicksEnabled(env),
   }
 }
 
