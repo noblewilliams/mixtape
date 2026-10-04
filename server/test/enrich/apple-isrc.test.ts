@@ -76,7 +76,7 @@ describe('Apple ISRC linking', () => {
 
   it.each([
     ['missing', [], 'no_match', { missing: 1 }],
-    ['ambiguous', [catalogSong(), catalogSong({ appleId: '999' })], 'ambiguous', { ambiguous: 1 }],
+    ['all unusable', [catalogSong({ isrc: null }), catalogSong({ appleId: '999', title: ' ' })], 'malformed', { failed: 1 }],
     ['wrong ISRC', [catalogSong({ isrc: 'GBUM71029604' })], 'malformed', { failed: 1 }],
     ['invalid Apple ID', [catalogSong({ appleId: 'bad/id' })], 'malformed', { failed: 1 }],
   ] as const)('leaves %s results unlinked and backs off instead of retrying immediately', async (_label, matches, category, counts) => {
@@ -123,7 +123,7 @@ describe('Apple ISRC linking', () => {
     }).returning()
     const lookup = vi.fn(async () => new Map([[ISRC, [catalogSong()]]]))
     expect(await runAppleIsrcBatch(db, { now: () => now, catalog: { getSongsByIsrc: lookup } }))
-      .toEqual({ processed: 1, linked: 0, missing: 0, ambiguous: 0, conflicts: 0, twins: 1, failed: 0, skipped: 0 })
+      .toEqual({ processed: 1, linked: 0, picked: 0, missing: 0, ambiguous: 0, conflicts: 0, twins: 1, failed: 0, skipped: 0 })
     expect((await db.select().from(tracks).where(eq(tracks.id, target.id)))[0].appleId).toBeNull()
     expect((await db.select().from(tracks).where(eq(tracks.id, owner.id)))[0]).toEqual(owner)
     const [record] = await db.select().from(appleIsrcLookups)
@@ -340,5 +340,139 @@ describe('Apple ISRC linking', () => {
     const lookup = vi.fn(async () => new Map())
     expect((await runAppleIsrcBatch(db, { catalog: { getSongsByIsrc: lookup } })).processed).toBe(0)
     expect(lookup).not.toHaveBeenCalled()
+  })
+
+  describe('several catalogue songs for one ISRC', () => {
+    // The Spotify row is 'Export title' by 'Credited artist'.
+    async function pick(songs: CatalogSong[], setup?: (db: TestDb) => Promise<void>) {
+      const db = await createTestDb()
+      await listener(db)
+      const row = await spotifyTrack(db)
+      await setup?.(db)
+      const lookup = vi.fn(async () => new Map([[ISRC, songs]]))
+      const result = await runAppleIsrcBatch(db, { now: () => now, catalog: { getSongsByIsrc: lookup } })
+      expect(lookup).toHaveBeenCalledOnce()
+      const [saved] = await db.select().from(tracks).where(eq(tracks.id, row.id))
+      return { db, row, result, appleId: saved.appleId, lookups: await db.select().from(appleIsrcLookups) }
+    }
+
+    it('links the song whose title matches the Spotify row', async () => {
+      const { result, appleId, lookups } = await pick([
+        catalogSong({ appleId: '100', title: 'Other', artist: 'Credited artist', releaseYear: 1990 }),
+        catalogSong({ appleId: '200', title: 'EXPORT TITLE!', artist: 'Someone', releaseYear: 2020 }),
+      ])
+      expect(appleId).toBe('200')
+      expect(result).toMatchObject({ processed: 1, linked: 1, picked: 1, ambiguous: 0, failed: 0 })
+      expect(lookups).toEqual([])
+    })
+
+    it('falls back to an artist match when no title matches', async () => {
+      const { appleId } = await pick([
+        catalogSong({ appleId: '100', title: 'Other', artist: 'Someone', releaseYear: 1990 }),
+        catalogSong({ appleId: '200', title: 'Other', artist: 'CREDITED ARTIST', releaseYear: 2020 }),
+      ])
+      expect(appleId).toBe('200')
+    })
+
+    it('takes the earliest release year when neither title nor artist matches, missing years last', async () => {
+      const { appleId } = await pick([
+        catalogSong({ appleId: '050', title: 'Other', artist: 'Someone', releaseYear: null }),
+        catalogSong({ appleId: '100', title: 'Other', artist: 'Someone', releaseYear: 2021 }),
+        catalogSong({ appleId: '200', title: 'Other', artist: 'Someone', releaseYear: 2019 }),
+      ])
+      expect(appleId).toBe('200')
+    })
+
+    it('breaks equal years by the lowest Apple ID', async () => {
+      expect((await pick([
+        catalogSong({ appleId: '300', releaseYear: 2019 }),
+        catalogSong({ appleId: '200', releaseYear: 2019 }),
+      ])).appleId).toBe('200')
+      expect((await pick([
+        catalogSong({ appleId: '100', releaseYear: 2019 }),
+        catalogSong({ appleId: '99', releaseYear: 2019 }),
+      ])).appleId).toBe('99')
+    })
+
+    it('ignores unusable songs among usable ones', async () => {
+      const { appleId, result } = await pick([
+        catalogSong({ appleId: '100', title: 'Export title', isrc: 'GBUM71029604' }),
+        catalogSong({ appleId: 'bad/id', title: 'Export title' }),
+        catalogSong({ appleId: '150', title: 'Export title', artist: '' }),
+        catalogSong({ appleId: '300', title: 'Other', releaseYear: 2020 }),
+        catalogSong({ appleId: '200', title: 'Other', releaseYear: 2021 }),
+      ])
+      expect(appleId).toBe('300')
+      expect(result).toMatchObject({ linked: 1, picked: 1, failed: 0 })
+    })
+
+    it('links a single usable song among unusable ones exactly as a single answer', async () => {
+      const { appleId, result } = await pick([
+        catalogSong({ appleId: '100', isrc: null }),
+        catalogSong({ appleId: '200' }),
+      ])
+      expect(appleId).toBe('200')
+      expect(result).toMatchObject({ linked: 1, picked: 0, failed: 0 })
+    })
+
+    it('records a twin and links nothing when any usable song is held by a row with the same ISRC', async () => {
+      const { db, result, appleId, lookups } = await pick([
+        catalogSong({ appleId: '100', title: 'Export title' }),
+        catalogSong({ appleId: '200', title: 'Other' }),
+      ], async (db) => {
+        await db.insert(tracks).values({ appleId: '200', isrc: ISRC.toLowerCase(), title: 'Existing', artist: 'Owner' })
+      })
+      expect(appleId).toBeNull()
+      expect(result).toMatchObject({ linked: 0, picked: 0, twins: 1, conflicts: 0 })
+      expect(lookups).toMatchObject([{ lastCategory: 'twin' }])
+      expect(lookups[0].nextAttemptAt.getTime()).toBe(APPLE_ISRC_NEVER.getTime())
+      expect(await db.select().from(tracks).where(eq(tracks.appleId, '100'))).toEqual([])
+    })
+
+    it('skips the best-ranked song when an unrelated row holds it and links the next free one', async () => {
+      const { db, result, appleId } = await pick([
+        catalogSong({ appleId: '100', title: 'Export title' }),
+        catalogSong({ appleId: '200', title: 'Other', releaseYear: 2021 }),
+        catalogSong({ appleId: '300', title: 'Other', releaseYear: 2020 }),
+      ], async (db) => {
+        await db.insert(tracks).values({ appleId: '100', isrc: 'GBUM71029604', title: 'Existing', artist: 'Owner' })
+      })
+      expect(appleId).toBe('300')
+      expect(result).toMatchObject({ linked: 1, picked: 1, conflicts: 0 })
+      expect((await db.select().from(tracks).where(eq(tracks.appleId, '100')))[0].isrc).toBe('GBUM71029604')
+    })
+
+    it('records a conflict when unrelated rows hold every usable song', async () => {
+      const { result, appleId, lookups } = await pick([
+        catalogSong({ appleId: '100' }),
+        catalogSong({ appleId: '200' }),
+      ], async (db) => {
+        await db.insert(tracks).values({ appleId: '100', isrc: 'GBUM71029604', title: 'Existing', artist: 'Owner' })
+        await db.insert(tracks).values({ appleId: '200', isrc: null, title: 'Existing', artist: 'Owner' })
+      })
+      expect(appleId).toBeNull()
+      expect(result).toMatchObject({ linked: 0, picked: 0, conflicts: 1, twins: 0 })
+      expect(lookups).toMatchObject([{ lastCategory: 'conflict', nextAttemptAt: new Date(now.getTime() + 30 * 86400_000) }])
+    })
+
+    it('counts picked links alongside single links with one catalogue request for the batch', async () => {
+      const db = await createTestDb()
+      await listener(db)
+      const otherIsrc = 'GBUM71029604'
+      await spotifyTrack(db)
+      await spotifyTrack(db, { spotifyId: '7ouMYWpwJ422jRcDASZB7P', isrc: otherIsrc })
+      // A second Spotify row with the same ISRC: once the first links, its
+      // pick is held by a same-ISRC row, so it settles as a twin.
+      await spotifyTrack(db, { spotifyId: '1301WleyT98MSxVHPZCA6M' })
+      const lookup = vi.fn(async () => new Map([
+        [ISRC, [catalogSong({ appleId: '100' }), catalogSong({ appleId: '200' })]],
+        [otherIsrc, [catalogSong({ appleId: '999', isrc: otherIsrc })]],
+      ]))
+      const result = await runAppleIsrcBatch(db, { now: () => now, catalog: { getSongsByIsrc: lookup } })
+      expect(result).toMatchObject({ processed: 3, linked: 2, picked: 1, twins: 1, conflicts: 0, failed: 0 })
+      expect(lookup).toHaveBeenCalledOnce()
+      expect((await db.select().from(tracks).where(eq(tracks.isrc, ISRC))).map(t => t.appleId).sort())
+        .toEqual(['100', null])
+    })
   })
 })

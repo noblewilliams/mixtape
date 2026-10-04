@@ -17,7 +17,7 @@ import type { PlaylistCatalogResult } from '../../src/playlists/catalog-resoluti
 const emptyCatalog: PlaylistCatalogResult = { processed: 0, matched: 0, missing: 0, failed: 0, linkedEntries: 0 }
 const emptyEnrichment = { processed: 0, features: 0, meaning: 0, remaining: 0, cooling: 0 }
 const emptyArtwork = { processed: 0, matched: 0, missing: 0, failed: 0, remaining: 0 }
-const emptyIsrc = { processed: 0, linked: 0, missing: 0, ambiguous: 0, conflicts: 0, twins: 0, failed: 0, skipped: 0 }
+const emptyIsrc = { processed: 0, linked: 0, picked: 0, missing: 0, ambiguous: 0, conflicts: 0, twins: 0, failed: 0, skipped: 0 }
 const emptySpotifyArtwork = { processed: 0, matched: 0, spotify: 0, deezer: 0, missing: 0, failed: 0, skipped: 0, remaining: 0 }
 const emptyTwins = { features: 0, meanings: 0 }
 const emptyIsrcBackfill = { processed: 0, filled: 0, failed: 0, remaining: 0 }

@@ -1,5 +1,30 @@
 # Decision Log
 
+## 2026-10-04 — Apple linking picks a song when several share the ISRC
+
+The first production linking pass (25 songs, storefront `ng`) linked 7,
+called 14 ambiguous and 4 conflicts. Ambiguous meant Apple returned more than
+one song for the ISRC, usually the same recording on a single, an album and a
+deluxe edition; the job refused to choose and waited 30 days. Founder
+decision: choose, because they are one recording.
+
+- Each catalogue song is judged by itself (ISRC equal, a valid Apple ID, a
+  title and an artist). Unusable songs are ignored; if none is usable the
+  outcome is `malformed`.
+- If any usable song's Apple ID already sits on a row with the same ISRC, the
+  recording is in the catalogue: record `twin`, link nothing.
+- Otherwise, among songs whose Apple ID is free: title equal to the Spotify
+  row's, then artist equal, then earliest release year, then the lowest Apple
+  ID. The winner is linked through the same guarded update as before.
+- If every candidate's Apple ID is held by an unrelated row: `conflict`.
+- `ambiguous` is no longer produced. The category stays for rows already
+  stored, which are retried under the new rule when their wait ends.
+- The run still makes one catalogue request. `picked` counts links chosen
+  from several.
+
+**Reopens if:** picked links turn out to be the wrong release for playback
+(clean versus explicit, or a regional variant) often enough to notice.
+
 ## 2026-10-04 — Apple linking falls back to the default storefront
 
 Apple ISRC linking looks a Spotify-import song up in the listener's own

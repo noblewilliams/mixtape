@@ -1,9 +1,10 @@
-import { and, eq, gt, sql } from 'drizzle-orm'
+import { and, eq, gt, inArray, ne, sql } from 'drizzle-orm'
 import type { Db } from '../db/types'
-import { appleIsrcLookups, trackArtworkStatus } from '../db/schema'
+import { appleIsrcLookups, trackArtworkStatus, tracks } from '../db/schema'
 import { AppleCatalogError, type AppleIsrcCatalogClient, type CatalogSong } from '../musickit/catalog'
 import { isAppleSongId } from '../musickit/apple-id'
 import { parseArtworkMetadata } from '../artwork/normalize'
+import { norm } from './types'
 
 export const APPLE_ISRC_BATCH = 25
 export const APPLE_ISRC_LEASE_MS = 5 * 60_000
@@ -23,9 +24,12 @@ type Candidate = { track_id: string; storefront: string; isrc: string }
 // profile always wins; with no default such a listener is never eligible.
 export type AppleIsrcDeps = { catalog: AppleIsrcCatalogClient; now?: () => Date; defaultStorefront?: string }
 export type AppleIsrcResult = {
-  processed: number; linked: number; missing: number; ambiguous: number
+  processed: number; linked: number; picked: number; missing: number; ambiguous: number
   conflicts: number; twins: number; failed: number; skipped: number
 }
+// `picked` counts the links (also in `linked`) chosen from several catalogue
+// songs. Nothing produces `ambiguous` any more; it stays because older lookup
+// rows carry it and the result shape is logged as is.
 
 function rows<T>(value: unknown): T[] {
   return (Array.isArray(value) ? value : (value as { rows: T[] }).rows) as T[]
@@ -97,21 +101,45 @@ function cleanText(value: unknown, limit = 1000): string | null {
     ? value : null
 }
 
+// Judged per song: one bad entry in Apple's answer does not spoil the rest.
+function usable(song: CatalogSong, isrc: string): boolean {
+  return song.isrc?.toUpperCase() === isrc && isAppleSongId(song.appleId)
+    && !!cleanText(song.title) && !!cleanText(song.artist)
+}
+
+function releaseYear(song: CatalogSong): number | null {
+  return typeof song.releaseYear === 'number' && Number.isInteger(song.releaseYear)
+    && song.releaseYear >= 1000 && song.releaseYear <= 9999 ? song.releaseYear : null
+}
+
+// Songs sharing an ISRC are the same recording (single, album, deluxe), so any
+// of them will do. Prefer the one that reads like the Spotify row, then the
+// original release, then a stable order. IDs are opaque, so shorter sorts
+// first to keep numeric IDs in numeric order.
+function bestPick(songs: CatalogSong[], row: { title: string; artist: string } | undefined): CatalogSong {
+  const title = row ? norm(row.title) : '', artist = row ? norm(row.artist) : ''
+  const miss = (want: string, got: string) => want && norm(got) === want ? 0 : 1
+  return [...songs].sort((a, b) =>
+    miss(title, a.title) - miss(title, b.title)
+    || miss(artist, a.artist) - miss(artist, b.artist)
+    || (releaseYear(a) ?? Infinity) - (releaseYear(b) ?? Infinity)
+    || a.appleId.length - b.appleId.length
+    || (a.appleId < b.appleId ? -1 : a.appleId > b.appleId ? 1 : 0))[0]
+}
+
 // The Apple id is already held by another row with this ISRC: the same
 // recording reached us twice, which is a state, not a conflict to retry.
-async function heldByTwin(db: Db, item: Candidate, appleId: string): Promise<boolean> {
-  return rows(await db.execute(sql`
-    SELECT 1 FROM tracks other
-    WHERE other.apple_id = ${appleId} AND other.id <> ${item.track_id} AND upper(other.isrc) = ${item.isrc}
-  `)).length > 0
+async function heldByTwin(db: Db, item: Candidate, appleIds: string[]): Promise<boolean> {
+  return (await db.select({ id: tracks.id }).from(tracks).where(and(
+    inArray(tracks.appleId, appleIds), ne(tracks.id, item.track_id), sql`upper(${tracks.isrc}) = ${item.isrc}`,
+  )).limit(1)).length > 0
 }
 
 async function link(db: Db, item: Candidate, song: CatalogSong, now: Date, fallback: string | null): Promise<boolean> {
   const artwork = parseArtworkMetadata(song.artwork)
   const duration = typeof song.durationMs === 'number' && Number.isInteger(song.durationMs)
     && song.durationMs > 0 && song.durationMs <= 2147483647 ? song.durationMs : null
-  const year = typeof song.releaseYear === 'number' && Number.isInteger(song.releaseYear)
-    && song.releaseYear >= 1000 && song.releaseYear <= 9999 ? song.releaseYear : null
+  const year = releaseYear(song)
   const result = await db.execute(sql`
     UPDATE tracks target SET
       apple_id = ${song.appleId}, apple_catalog_storefront = ${item.storefront},
@@ -150,7 +178,7 @@ export async function runAppleIsrcBatch(db: Db, deps: AppleIsrcDeps): Promise<Ap
   const fallback = /^[a-z]{2}$/.test(market) ? market : null
   const batch = await claim(db, currentTime(), token, fallback)
   const result: AppleIsrcResult = {
-    processed: 0, linked: 0, missing: 0, ambiguous: 0, conflicts: 0, twins: 0, failed: 0, skipped: 0,
+    processed: 0, linked: 0, picked: 0, missing: 0, ambiguous: 0, conflicts: 0, twins: 0, failed: 0, skipped: 0,
   }
   if (!batch.length) return result
   const storefront = batch[0].storefront
@@ -168,6 +196,23 @@ export async function runAppleIsrcBatch(db: Db, deps: AppleIsrcDeps): Promise<Ap
       eq(appleIsrcLookups.leaseToken, token), eq(appleIsrcLookups.lastCategory, 'pending'),
       gt(appleIsrcLookups.nextAttemptAt, now),
     )).orderBy(appleIsrcLookups.trackId).for('update')
+    // Choosing among several songs needs the Spotify rows' names and who holds
+    // each candidate id: one statement each for the whole batch, kept current
+    // below as this batch links.
+    const usableFor = (isrc: string) => (songs.get(isrc) ?? []).filter(song => usable(song, isrc))
+    const several = owned.filter(record => usableFor(record.isrc).length > 1)
+    const names = new Map<string, { title: string; artist: string }>()
+    const holders = new Map<string, { id: string; isrc: string | null }>()
+    if (!failure && several.length) {
+      const ids = several.map(record => record.trackId)
+      for (const row of await tx.select({ id: tracks.id, title: tracks.title, artist: tracks.artist })
+        .from(tracks).where(inArray(tracks.id, ids))) names.set(row.id, row)
+      const appleIds = [...new Set(several.flatMap(record => usableFor(record.isrc).map(song => song.appleId)))]
+      for (const row of await tx.select({ id: tracks.id, appleId: tracks.appleId, isrc: tracks.isrc })
+        .from(tracks).where(inArray(tracks.appleId, appleIds))) {
+        holders.set(row.appleId!, { id: row.id, isrc: row.isrc?.toUpperCase() ?? null })
+      }
+    }
     for (const record of owned) {
       const item = { track_id: record.trackId, storefront: record.storefront, isrc: record.isrc }
       const key = and(eq(appleIsrcLookups.trackId, item.track_id),
@@ -184,23 +229,35 @@ export async function runAppleIsrcBatch(db: Db, deps: AppleIsrcDeps): Promise<Ap
         continue
       }
       const matches = songs.get(item.isrc) ?? []
+      const candidates = usableFor(item.isrc)
       let category: Category | undefined = failure
+      // A twin among the candidates settles the row whichever song would win.
+      const twin = candidates.length > 1 && candidates.some(song => {
+        const holder = holders.get(song.appleId)
+        return holder && holder.id !== item.track_id && holder.isrc === item.isrc
+      })
+      const free = candidates.length > 1 ? candidates.filter(song => !holders.has(song.appleId)) : candidates
       if (!category) {
         if (!matches.length) category = 'no_match'
-        else if (matches.some(song => song.isrc?.toUpperCase() !== item.isrc
-          || !isAppleSongId(song.appleId) || !cleanText(song.title) || !cleanText(song.artist))) category = 'malformed'
-        else if (matches.length !== 1) category = 'ambiguous'
+        else if (!candidates.length) category = 'malformed'
+        else if (twin) category = 'twin'
+        else if (!free.length) category = 'conflict'
         else {
+          const song = candidates.length > 1 ? bestPick(free, names.get(item.track_id)) : candidates[0]
           try {
             // Isolate an Apple-ID uniqueness race with other catalog writers.
-            const linked = await tx.transaction(inner => link(inner as unknown as Db, item, matches[0], now, fallback))
-            if (linked) result.linked++
-            else category = 'conflict'
+            const linked = await tx.transaction(inner => link(inner as unknown as Db, item, song, now, fallback))
+            if (linked) {
+              result.linked++
+              if (candidates.length > 1) result.picked++
+              holders.set(song.appleId, { id: item.track_id, isrc: item.isrc })
+            } else category = 'conflict'
           } catch (error) {
             if (!appleIdConflict(error)) throw error
             category = 'conflict'
           }
-          if (category === 'conflict' && await heldByTwin(tx as unknown as Db, item, matches[0].appleId)) {
+          if (category === 'conflict'
+            && await heldByTwin(tx as unknown as Db, item, candidates.map(candidate => candidate.appleId))) {
             category = 'twin'
           }
         }
