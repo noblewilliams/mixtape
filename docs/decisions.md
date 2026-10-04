@@ -147,6 +147,39 @@ Apple playlist-only songs should be admitted (needs `user_tracks` rows or a
 wider candidate source), or a personal listener with no candidates should fall
 back to a corpus mix rather than be told to import more.
 
+## 2026-09-25 — Approved UI polish and persistent tape colours
+
+Mobile and web follow the revision-5 UI polish board, approved together by the
+founder. Mixes use small unboxed cassettes with handwritten labels, persisted
+colours and a compact 48-colour Tape settings modal. The app icon crops the right
+reel; the favicon retains the whole cassette. Web headings use the native system
+title style, and navigation says Mixes and Library. Empty illustrations reflect
+their context; source badges retain service logos. Feedback is compact with a
+bottom prism and custom success/error/info marks. Confirmation and playlist-name
+dialogs are small and text-only. See
+`mockups/approved/2026-09-25-ui-polish.md` for exact sizes, superseded choices and
+accessibility behavior. Colour is assigned once, not recomputed on each render.
+The schema migration precedes the matching API and client release; design
+approval alone does not mean deployed or device-verified.
+
+## 2026-09-25 — Landing direction and app entry
+
+Implemented September 27 as an independent React/Vite package in `landing/`.
+It links to the existing browser app, avoiding auth-route and style changes in
+`web/`. GSAP owns page-scroll animation and Motion owns interactive transitions.
+The sample mixes are illustrative and make no API calls. The native download
+destination remains configurable; no mobile store availability is invented.
+Local verification and remaining publication work: `../landing/README.md`.
+
+The marketing landing uses the supplied reference's light editorial layout and
+vivid rainbow imagery, adapted to Mixtape's cassette and prism identity. The
+primary action is **Open in browser**. A separate **Download the app** button
+carries the visible recommendation **Recommended for Apple Music library sync**.
+The recommendation does not imply that browser library sync is unavailable.
+Repeat both actions in the closing invitation and explain the native recommendation
+in the Apple Music section. Exact destination URLs must be verified when wired.
+Section and motion proposal: `product/2026-09-25-landing-direction.md`.
+
 Short ADR-style log. Newest first. Each entry: decision, why, and what would reopen it.
 
 ## 2026-09-08 — Spotify quick start uses Exportify files
@@ -886,3 +919,46 @@ Reviewing an Exportify ZIP file by file is the slow part of the import: the foun
 ## 2026-09-28 — Landing and browser app share one domain
 
 The public landing owns `/` on the existing Netlify site; the browser app moves to `/app/`. Build both packages into one artifact using `scripts/build-site.mjs`, with Vite app assets and authentication return URLs under `/app/`. Keep `/api/auth/*` on the existing same-origin proxy, before SPA fallbacks. This supersedes separate landing publication. Native download remains unavailable until a genuine App Store or TestFlight URL is configured.
+
+## 2026-10-02 — Web Home and Mixes have separate jobs
+
+Founder-approved board: `docs/mockups/approved/2026-10-02-web-navigation-cleanup.md`. Sign-in opens Home instead of automatically entering the latest mix. Home offers behavior-based recommendations, recent mixes and a compact bottom composer with editable voice transcription. Mixes owns browsing/archiving and the list/closet switch. Library uses compact artwork across the available width; Settings owns listening/account controls. Sidebar destinations share alignment and selected states. An animated SVG theme switch stores an explicit light/dark choice, overriding the system theme; reduced motion stays static. Session `updatedAt` supports “Recent mixes”, not a claim of last-played order.
+
+## 2026-10-03 — Refresh retains the workspace
+
+Founder requested keeping the last-loaded content visible, with a floating loader instead of a replacement screen. Per-tab, per-account presentation snapshots restore the current destination, selected mix or playlist, loaded content, filters and drafts. A saved identity is display-only: the API request gate waits for a verified session, and restored content is inert until then. A floating “Refreshing…” badge covers session checking and subsequent reads without changing the layout. Fresh responses replace cached content; revision guards protect intervening edits. Confirmed sign-out clears saved presentation data; account switches remount with an isolated cache. Errors, active recordings, uploads, playback commands, and destructive confirmations are not resumed from the cache. No credentials or session tokens are persisted by this feature.
+
+## 2026-10-03 — Shared web chat input
+
+Home and mix conversations use `PromptComposer` for text, microphone capture,
+editable transcription, cancellation and send controls. Chat places compact
+Playlist and Shape controls below the text inside the input. Shape shows the
+saved mix version's curve, overridden by a shape in the unsent draft. No curve
+is invented when none is known. Textareas have no manual resize handle; small
+visible controls retain 44px touch targets. Chat drafts clear when dispatched,
+so leaving while the DJ thinks does not restore an already-sent message.
+
+This follows the approved Home input and the founder's chat reference and
+explicit Shape refinement. Native inputs are unchanged. Real browser microphone
+and backend transcription acceptance remains open.
+
+## 2026-10-03 — Shape is a setting, and the chat input gets quieter
+
+Founder review of the web chat input. Choosing a shape no longer writes an
+"Energy journey: …" line into the draft or the new-mix brief. The choice
+travels beside the text as `energyArc` on `POST /sessions` and
+`POST /sessions/:id/messages`; the DJ sees it as a line in the turn's context
+block and `generate_queue` falls back to it when the model omits the argument.
+The transcript stores only what the listener typed. In chat the pending choice
+is held per mix until a new version lands, after which that version's saved
+shape is the truth again. This supersedes "overridden by a shape in the unsent
+draft" above; a curve is still never invented when none is known.
+
+The input itself: the curve sits before the "Shape" label with no caret, tool
+buttons and the voice/send controls are 28px tall with 16px icons, text stays
+at 14px, and the "Nothing is added to Apple Music until you ask." line is
+gone. The 44px touch target now applies to coarse pointers only (an invisible
+hit area), which supersedes the always-on 44px rule above. The playlist picker
+is a 256px search-and-list popover with single-line rows, no header, and no
+focus ring on its search field. The mix panel has a hairline left edge so chat
+and queue read as separate surfaces.

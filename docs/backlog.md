@@ -158,6 +158,12 @@ features remain pending.
 
 ## Native design program follow-ups (2026-09-17)
 
+- **Approved UI polish (2026-09-27):** web/native implementation and local checks
+  complete; migration 0033, API/client release and physical-device/account smoke
+  remain pending. Includes stored tape colours, compact states/dialogs, custom
+  feedback and right-reel app icon. Evidence:
+  `testing/2026-09-27-ui-polish.md`.
+
 - **Conversation Shape chip parity (2026-09-18, smoke round three).** Home's Shape chip is now state (label + wave on the chip, sentence composed into the outgoing prompt at send). The conversation's Shape chip still writes the sentence into the draft and toasts, because a mid-conversation turn has no session-start message to fold it into. Bring it to the same model once the turn path can carry a shape, ideally with the `POST /sessions` / turn `energyArc` field noted in `decisions.md`.
 - **Transport-glyph audit (founder, 2026-09-18).** Every `Icon(` in `client/lib` that is not a navigation chevron or a genuine playback control gets a playback-transport equivalent where one reads naturally: eject for detach/remove, record for start/voice, pause for hold states, previous/next for back/forward steps, stop for sign-out and cancel. Decision entry the same day. Do it screen by screen with a board note, not as a blind find-and-replace.
 
@@ -172,10 +178,20 @@ features remain pending.
   whether the system already insets a bare `UITabBar` and drop the inset if so.
 - Now Playing has no volume row: the app player bridge exposes no volume
   control. Add one if a volume slider is wanted on the sheet.
-- Shared mix handoff (Phase 5.3): the conversation now uses the arrangement's
-  save alert (adaptive dialog, "Shown under the playlist in Apple Music" helper,
-  saving spinner) and the arrangement swallows author-store failures like the
-  conversation did. The two alerts still carry different titles ("Save as
-  playlist" vs "Create playlist"); pick one at the smoke.
+- Shared mix handoff (Phase 5.3): updated by the approved September 25 polish
+  with a compact create-playlist dialog, blank-name validation and retained
+  drafts on failure. Physical-device smoke remains part of the release gate above.
 
 - **Landing release (2026-09-28):** same-domain build and routing implemented (`/` landing, `/app/` browser app). Configure the real native download destination when available; retain the unavailable-link dialog until then. Authenticated OAuth and account-link round trips need a signed-in deployment smoke check.
+
+### Landing revision QA — 2026-09-28
+
+Founder feedback implemented in the local landing: flush hero, corrected cassette label, raw tape assets, sticky scroll demo with short-screen fallback, import/memory cards, reduced copy, marquee, consistent CTA arrows and expanded prism footer. Build and three interaction tests pass. Publication and the real native download URL remain open.
+
+### Web navigation cleanup — 2026-10-02
+
+Approved board implemented locally: separate Home/Mixes, bottom 14px composer with voice, Settings, animated theme switch, full-width compact Library and consistent sources. Remaining acceptance: real microphone recording through Workers transcription; live generation once local remote AI is available. Session reads were restored on 2026-10-03 by applying migration `0033_tape_case_color` to the configured Neon database. True last-played history needs a supported backend timestamp before claiming that ordering. This UI change does not apply migrations or deploy services.
+
+### Mixes views and theme switch — 2026-10-03
+
+[Approved board](mockups/approved/2026-10-03-mixes-view-controls.md) implemented locally on web: shared Tabs on Library and Mixes, icon List / Grid / Closet switch, flush list, new unboxed grid, centred empty states, closet shelves on the page without the wall, and the reel-sun theme switch with a circular page reveal. Remaining acceptance: founder check of the reveal and icon morph in Chrome and Safari. Open: no way back to "match my system" once a theme is chosen; older unused styles (`.collection-toolbar`, `.tape-card`, `.closet*`, `.tape-spine`, `.wc-closet-mix`) are still in `web/src/styles.css` and `web-controls.css`.
