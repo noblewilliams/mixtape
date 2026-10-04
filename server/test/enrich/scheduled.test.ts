@@ -5,6 +5,7 @@ import { okDeps, OK_FEATURES } from '../helpers/enrich-fixtures'
 import {
   handleScheduled,
   jobsForCron,
+  ARTWORK_CRON_BATCH,
   CRON_BATCH,
   ENRICHMENT_CRON,
   MAINTENANCE_CRON,
@@ -16,9 +17,10 @@ import type { PlaylistCatalogResult } from '../../src/playlists/catalog-resoluti
 const emptyCatalog: PlaylistCatalogResult = { processed: 0, matched: 0, missing: 0, failed: 0, linkedEntries: 0 }
 const emptyEnrichment = { processed: 0, features: 0, meaning: 0, remaining: 0, cooling: 0 }
 const emptyArtwork = { processed: 0, matched: 0, missing: 0, failed: 0, remaining: 0 }
-const emptyIsrc = { processed: 0, linked: 0, missing: 0, ambiguous: 0, conflicts: 0, failed: 0, skipped: 0 }
+const emptyIsrc = { processed: 0, linked: 0, missing: 0, ambiguous: 0, conflicts: 0, twins: 0, failed: 0, skipped: 0 }
 const emptySpotifyArtwork = { processed: 0, matched: 0, spotify: 0, deezer: 0, missing: 0, failed: 0, skipped: 0, remaining: 0 }
 const emptyTwins = { features: 0, meanings: 0 }
+const emptyIsrcBackfill = { processed: 0, filled: 0, failed: 0, remaining: 0 }
 const catalog = { getSongs: async () => new Map(), getSongsByIsrc: async () => new Map() }
 const allDeps = {
   enrichment: okDeps,
@@ -42,6 +44,7 @@ function recordingRunners(order: string[]) {
     appleIsrc: vi.fn(async () => { order.push('appleIsrc'); return emptyIsrc }),
     spotifyArtwork: vi.fn(async () => { order.push('spotifyArtwork'); return emptySpotifyArtwork }),
     artwork: vi.fn(async () => { order.push('artwork'); return emptyArtwork }),
+    isrcBackfill: vi.fn(async () => { order.push('isrcBackfill'); return emptyIsrcBackfill }),
   }
 }
 
@@ -72,16 +75,56 @@ describe('cron dispatch', () => {
 })
 
 describe('handleScheduled', () => {
-  it('the maintenance set runs cleanup, catalogue resolution and Apple artwork, in order, and nothing else', async () => {
+  it('the maintenance set runs cleanup, catalogue resolution, Apple artwork and the ISRC backfill, in order, and nothing else', async () => {
     const db = await createTestDb()
     const order: string[] = []
-    const result = await handleScheduled(db, 'maintenance', allDeps, recordingRunners(order))
+    const runners = recordingRunners(order)
+    const result = await handleScheduled(db, 'maintenance', allDeps, runners)
     expect(order).toEqual([
-      'libraryCleanup', 'listeningCleanup', 'playlistCleanup', 'playlistCatalog', 'artwork',
+      'libraryCleanup', 'listeningCleanup', 'playlistCleanup', 'playlistCatalog', 'artwork', 'isrcBackfill',
     ])
     expect(Object.keys(result).sort()).toEqual([
-      'artwork', 'libraryCleanup', 'listeningCleanup', 'playlistCatalog', 'playlistCleanup',
+      'artwork', 'isrcBackfill', 'libraryCleanup', 'listeningCleanup', 'playlistCatalog', 'playlistCleanup',
     ])
+    expect(runners.isrcBackfill).toHaveBeenCalledWith(db, allDeps.artwork)
+  })
+
+  it('skips the ISRC backfill with a fixed marker when Apple artwork processed a full batch', async () => {
+    const db = await createTestDb()
+    const isrcBackfill = vi.fn(async () => emptyIsrcBackfill)
+    const result = await handleScheduled(db, 'maintenance', allDeps, {
+      playlistCatalog: vi.fn(async () => emptyCatalog),
+      artwork: vi.fn(async () => ({ ...emptyArtwork, processed: ARTWORK_CRON_BATCH, matched: ARTWORK_CRON_BATCH })),
+      isrcBackfill,
+    })
+    expect(result.isrcBackfill).toEqual({ skipped: 'artwork_busy' })
+    // Count rather than print the calls: their arguments include the database.
+    expect(isrcBackfill.mock.calls.length).toBe(0)
+  })
+
+  it('runs the ISRC backfill when Apple artwork processed less than a full batch', async () => {
+    const db = await createTestDb()
+    const isrcBackfill = vi.fn(async () => emptyIsrcBackfill)
+    const result = await handleScheduled(db, 'maintenance', allDeps, {
+      playlistCatalog: vi.fn(async () => emptyCatalog),
+      artwork: vi.fn(async () => ({ ...emptyArtwork, processed: ARTWORK_CRON_BATCH - 1 })),
+      isrcBackfill,
+    })
+    expect(isrcBackfill).toHaveBeenCalledOnce()
+    expect(result.isrcBackfill).toEqual(emptyIsrcBackfill)
+  })
+
+  it('runs the ISRC backfill after Apple artwork fails, and reports its failure without error text', async () => {
+    const db = await createTestDb()
+    const isrcBackfill = vi.fn(async () => { throw new Error('secret backfill failure') })
+    const result = await handleScheduled(db, 'maintenance', allDeps, {
+      playlistCatalog: vi.fn(async () => emptyCatalog),
+      artwork: vi.fn(async () => { throw new Error('secret artwork failure') }),
+      isrcBackfill,
+    })
+    expect(isrcBackfill).toHaveBeenCalledOnce()
+    expect(result).toMatchObject({ artwork: { error: 'failed' }, isrcBackfill: { error: 'failed' } })
+    expect(JSON.stringify(result)).not.toContain('secret')
   })
 
   it('the enrichment set runs twin copy, enrichment, Apple ISRC linking and the Spotify fallback, in order, and nothing else', async () => {
@@ -188,10 +231,12 @@ describe('handleScheduled', () => {
     const artwork = vi.fn(async () => { throw new Error('secret artwork failure') })
     const result = await handleScheduled(db, 'maintenance', allDeps, {
       playlistCatalog: vi.fn(async () => { throw new Error('secret catalog failure') }), artwork,
+      isrcBackfill: vi.fn(async () => emptyIsrcBackfill),
     })
     expect(artwork).toHaveBeenCalledOnce()
     expect(result).toEqual({
       artwork: { error: 'failed' },
+      isrcBackfill: emptyIsrcBackfill,
       playlistCatalog: { error: 'failed' },
       libraryCleanup: expect.objectContaining({ touchedRuns: 0 }),
       listeningCleanup: expect.objectContaining({ touchedRuns: 0 }),
@@ -301,10 +346,12 @@ describe('handleScheduled', () => {
       playlistCatalog: vi.fn(async () => emptyCatalog),
       artwork,
       playlistCleanup,
+      isrcBackfill: vi.fn(async () => emptyIsrcBackfill),
     })
 
     expect(result).toEqual({
       artwork: emptyArtwork,
+      isrcBackfill: emptyIsrcBackfill,
       playlistCatalog: emptyCatalog,
       libraryCleanup: expect.objectContaining({ touchedRuns: 0 }),
       listeningCleanup: expect.objectContaining({ touchedRuns: 0 }),

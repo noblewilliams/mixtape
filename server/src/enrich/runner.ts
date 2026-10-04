@@ -61,6 +61,7 @@ type CandidateRow = {
   artwork_height: number | null
   artwork_bg_color: string | null
   artwork_fetched_at: string | null
+  isrc_checked_at: string | null
   artist_source: TrackRow['artistSource']
   enrich_priority: number
   created_at: string
@@ -88,6 +89,7 @@ function toTrackRow(r: CandidateRow): TrackRow {
     artworkBgColor: r.artwork_bg_color,
     artworkFetchedAt:
       r.artwork_fetched_at === null ? null : new Date(r.artwork_fetched_at),
+    isrcCheckedAt: r.isrc_checked_at === null ? null : new Date(r.isrc_checked_at),
     artistSource: r.artist_source,
     enrichPriority: r.enrich_priority,
     // Raw SQL hands back created_at as a string, not a Date, despite the

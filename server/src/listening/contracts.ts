@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { normalizeIsrc } from '../contracts/isrc'
 import { safeString } from '../contracts/safe-string'
 
 export const LISTENING_IMPORT_MAX_TRACKS = 100_000
@@ -33,6 +34,13 @@ const nullableTimestamp = z
 // Spotify track id or Apple song id; the store validates it against the run's
 // source, so the contract only bounds it.
 const platformId = safeString(z.string().min(1).max(64))
+
+// Optional and forgiving: one bad export cell must never fail a chunk, so
+// anything normalizeIsrc does not accept is dropped to absent.
+const optionalIsrc = z
+  .unknown()
+  .transform((value) => normalizeIsrc(value) ?? undefined)
+  .optional()
 
 const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/
 
@@ -173,6 +181,7 @@ export const listeningTrackSnapshotSchema = z
     artist: textSnapshot(1_000),
     album: nullableTextSnapshot(1_000),
     durationMs: postgresInteger.nonnegative().nullable(),
+    isrc: optionalIsrc,
   })
   .strict()
 

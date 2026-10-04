@@ -385,6 +385,32 @@ describe('runArtworkBatch', () => {
     expect(await db.select().from(trackArtworkStatus).where(eq(trackArtworkStatus.trackId, later.id))).toHaveLength(1)
   })
 
+  it('stores a well-formed catalogue ISRC, uppercased, and never overwrites one already set', async () => {
+    const db = await createTestDb()
+    const fresh = await seed(db, 'fresh-isrc', { createdAt: new Date('2026-01-01T00:00:00Z') })
+    const known = await seed(db, 'known-isrc', { createdAt: new Date('2026-01-02T00:00:00Z') })
+    await db.update(tracks).set({ isrc: 'GBUM71029604' }).where(eq(tracks.id, known.id))
+    const bad = await seed(db, 'bad-isrc', { createdAt: new Date('2026-01-03T00:00:00Z') })
+    const none = await seed(db, 'no-isrc', { createdAt: new Date('2026-01-04T00:00:00Z') })
+    const lookalike = await seed(db, 'lookalike-isrc', { createdAt: new Date('2026-01-05T00:00:00Z') })
+    const isrcs: Record<string, string | null> = {
+      'fresh-isrc': 'usug11904206', 'known-isrc': 'USUG11904207', 'bad-isrc': 'not-an-isrc', 'no-isrc': null,
+      'lookalike-isrc': 'ſSUG11904206',
+    }
+    const getSongs = vi.fn(async (_storefront: string, ids: readonly string[]) =>
+      new Map(ids.map((id) => [id, { ...song(id), isrc: isrcs[id] }])))
+
+    expect(await runArtworkBatch(db, deps(getSongs), 10)).toMatchObject({ matched: 5 })
+
+    const isrcOf = async (id: string) =>
+      (await db.select().from(tracks).where(eq(tracks.id, id)))[0]
+    expect(await isrcOf(fresh.id)).toMatchObject({ isrc: 'USUG11904206', isrcCheckedAt: NOW })
+    expect(await isrcOf(known.id)).toMatchObject({ isrc: 'GBUM71029604' })
+    expect(await isrcOf(bad.id)).toMatchObject({ isrc: null, isrcCheckedAt: NOW })
+    expect(await isrcOf(none.id)).toMatchObject({ isrc: null, isrcCheckedAt: NOW })
+    expect(await isrcOf(lookalike.id)).toMatchObject({ isrc: null, isrcCheckedAt: NOW })
+  })
+
   it('reports total, covered, missing, and currently retryable counts', async () => {
     const db = await createTestDb()
     await seed(db, 'covered', { artwork: true, fresh: true })

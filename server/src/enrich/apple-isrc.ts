@@ -12,7 +12,11 @@ const RETRY_MS = {
   malformed: 7 * 86400_000, rate_limit: 3600_000, authorization: 6 * 3600_000,
   upstream: 15 * 60_000, timeout: 15 * 60_000, network: 15 * 60_000, internal: 3600_000,
 } as const
+// A twin is settled: the claim only takes rows whose next attempt is due, and
+// this one never is. The column is NOT NULL, so a sentinel stands in for none.
+export const APPLE_ISRC_NEVER = new Date('9999-12-31T00:00:00.000Z')
 type Failure = keyof typeof RETRY_MS
+type Category = Failure | 'twin'
 type Candidate = { track_id: string; storefront: string; isrc: string }
 // defaultStorefront: the market to look in for a listener whose profile names
 // none (a Spotify import records neither a storefront nor a country). The
@@ -20,7 +24,7 @@ type Candidate = { track_id: string; storefront: string; isrc: string }
 export type AppleIsrcDeps = { catalog: AppleIsrcCatalogClient; now?: () => Date; defaultStorefront?: string }
 export type AppleIsrcResult = {
   processed: number; linked: number; missing: number; ambiguous: number
-  conflicts: number; failed: number; skipped: number
+  conflicts: number; twins: number; failed: number; skipped: number
 }
 
 function rows<T>(value: unknown): T[] {
@@ -93,6 +97,15 @@ function cleanText(value: unknown, limit = 1000): string | null {
     ? value : null
 }
 
+// The Apple id is already held by another row with this ISRC: the same
+// recording reached us twice, which is a state, not a conflict to retry.
+async function heldByTwin(db: Db, item: Candidate, appleId: string): Promise<boolean> {
+  return rows(await db.execute(sql`
+    SELECT 1 FROM tracks other
+    WHERE other.apple_id = ${appleId} AND other.id <> ${item.track_id} AND upper(other.isrc) = ${item.isrc}
+  `)).length > 0
+}
+
 async function link(db: Db, item: Candidate, song: CatalogSong, now: Date, fallback: string | null): Promise<boolean> {
   const artwork = parseArtworkMetadata(song.artwork)
   const duration = typeof song.durationMs === 'number' && Number.isInteger(song.durationMs)
@@ -136,7 +149,9 @@ export async function runAppleIsrcBatch(db: Db, deps: AppleIsrcDeps): Promise<Ap
   const market = deps.defaultStorefront?.trim().toLowerCase() ?? ''
   const fallback = /^[a-z]{2}$/.test(market) ? market : null
   const batch = await claim(db, currentTime(), token, fallback)
-  const result: AppleIsrcResult = { processed: 0, linked: 0, missing: 0, ambiguous: 0, conflicts: 0, failed: 0, skipped: 0 }
+  const result: AppleIsrcResult = {
+    processed: 0, linked: 0, missing: 0, ambiguous: 0, conflicts: 0, twins: 0, failed: 0, skipped: 0,
+  }
   if (!batch.length) return result
   const storefront = batch[0].storefront
   let songs = new Map<string, CatalogSong[]>()
@@ -169,7 +184,7 @@ export async function runAppleIsrcBatch(db: Db, deps: AppleIsrcDeps): Promise<Ap
         continue
       }
       const matches = songs.get(item.isrc) ?? []
-      let category = failure
+      let category: Category | undefined = failure
       if (!category) {
         if (!matches.length) category = 'no_match'
         else if (matches.some(song => song.isrc?.toUpperCase() !== item.isrc
@@ -185,16 +200,19 @@ export async function runAppleIsrcBatch(db: Db, deps: AppleIsrcDeps): Promise<Ap
             if (!appleIdConflict(error)) throw error
             category = 'conflict'
           }
+          if (category === 'conflict' && await heldByTwin(tx as unknown as Db, item, matches[0].appleId)) {
+            category = 'twin'
+          }
         }
       }
       if (category) {
         if (category === 'no_match') result.missing++
         else if (category === 'ambiguous') result.ambiguous++
         else if (category === 'conflict') result.conflicts++
+        else if (category === 'twin') result.twins++
         else result.failed++
-        await tx.update(appleIsrcLookups).set({
-          lastCategory: category, nextAttemptAt: new Date(now.getTime() + RETRY_MS[category]), updatedAt: now,
-        }).where(key)
+        const nextAttemptAt = category === 'twin' ? APPLE_ISRC_NEVER : new Date(now.getTime() + RETRY_MS[category])
+        await tx.update(appleIsrcLookups).set({ lastCategory: category, nextAttemptAt, updatedAt: now }).where(key)
       } else await tx.delete(appleIsrcLookups).where(key)
     }
   })

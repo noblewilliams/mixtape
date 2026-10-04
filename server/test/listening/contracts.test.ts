@@ -154,6 +154,36 @@ describe('listening import contracts', () => {
       }).tracks[0]).toMatchObject({ album: null, durationMs: null })
     })
 
+    it('carries an ISRC uppercased, and keeps accepting snapshots without one', () => {
+      expect(listeningTrackChunkSchema.parse({
+        tracks: [track({ isrc: 'usug11904206' })],
+      }).tracks[0].isrc).toBe('USUG11904206')
+      expect(listeningTrackChunkSchema.parse({
+        tracks: [track({ isrc: 'USUG11904206' })],
+      }).tracks[0].isrc).toBe('USUG11904206')
+      expect(listeningTrackChunkSchema.parse({ tracks: [track()] }).tracks[0].isrc).toBeUndefined()
+      expect(listeningTrackChunkSchema.parse({
+        tracks: [track({ isrc: ' usug11904206 ' })],
+      }).tracks[0].isrc).toBe('USUG11904206')
+    })
+
+    it.each([
+      ['a long s that uppercases into ASCII', 'ſSUG11904206'],
+      ['an over-long string', 'U'.repeat(100_000)],
+      ['too short', 'USUG1190420'],
+      ['too long', 'USUG119042060'],
+      ['letters in the designation', 'USUG1190420X'],
+      ['punctuation', 'US-UG1-19-04206'],
+      ['empty', ''],
+      ['null', null],
+      ['a number', 123456789012],
+      ['an object', { isrc: 'USUG11904206' }],
+    ])('drops a malformed ISRC (%s) instead of rejecting the chunk', (_case, isrc) => {
+      const parsed = listeningTrackChunkSchema.safeParse({ tracks: [track({ isrc })] })
+      expect(parsed.success).toBe(true)
+      expect(parsed.data?.tracks[0].isrc).toBeUndefined()
+    })
+
     it.each([
       ['a null byte in the title', track({ title: 'Bad\0Song' })],
       ['a lone surrogate', track({ title: '\ud800' })],

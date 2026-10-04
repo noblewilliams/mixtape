@@ -8,7 +8,7 @@ import {
   appleIsrcLookups,
   trackArtworkStatus,
 } from '../../src/db/schema'
-import { runAppleIsrcBatch, APPLE_ISRC_BATCH, APPLE_ISRC_LEASE_MS } from '../../src/enrich/apple-isrc'
+import { runAppleIsrcBatch, APPLE_ISRC_BATCH, APPLE_ISRC_LEASE_MS, APPLE_ISRC_NEVER } from '../../src/enrich/apple-isrc'
 import { AppleCatalogError, type CatalogSong } from '../../src/musickit/catalog'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { seedUser, now, SPOTIFY_A, APPLE_A, tenantRows } from '../helpers/listening-fixtures'
@@ -92,22 +92,59 @@ describe('Apple ISRC linking', () => {
     expect(lookup).toHaveBeenCalledOnce()
   })
 
-  it('preserves an existing Apple owner and unrelated matches in the same batch', async () => {
+  it.each([
+    ['a different ISRC', 'USUG11904299'], ['no ISRC', null],
+  ] as const)('preserves an existing Apple owner with %s as a conflict, and unrelated matches in the same batch', async (_label, ownerIsrc) => {
     const db = await createTestDb()
     await listener(db)
     const target = await spotifyTrack(db)
     const otherIsrc = 'GBUM71029604'
     const other = await spotifyTrack(db, { spotifyId: '7ouMYWpwJ422jRcDASZB7P', isrc: otherIsrc })
-    const [owner] = await db.insert(tracks).values({ appleId: APPLE_A, isrc: ISRC, title: 'Existing', artist: 'Owner' }).returning()
+    const [owner] = await db.insert(tracks).values({ appleId: APPLE_A, isrc: ownerIsrc, title: 'Existing', artist: 'Owner' }).returning()
     const result = await runAppleIsrcBatch(db, { now: () => now, catalog: {
       getSongsByIsrc: async () => new Map([
         [ISRC, [catalogSong()]], [otherIsrc, [catalogSong({ appleId: '999', isrc: otherIsrc })]],
       ]),
     } })
-    expect(result).toMatchObject({ linked: 1, conflicts: 1, failed: 0 })
+    expect(result).toMatchObject({ linked: 1, conflicts: 1, twins: 0, failed: 0 })
     expect((await db.select().from(tracks).where(eq(tracks.id, target.id)))[0].appleId).toBeNull()
     expect((await db.select().from(tracks).where(eq(tracks.id, other.id)))[0].appleId).toBe('999')
     expect((await db.select().from(tracks).where(eq(tracks.id, owner.id)))[0]).toEqual(owner)
+    expect(await db.select().from(appleIsrcLookups).where(eq(appleIsrcLookups.trackId, target.id)))
+      .toMatchObject([{ lastCategory: 'conflict', nextAttemptAt: new Date(now.getTime() + 30 * 86400_000) }])
+  })
+
+  it('records a twin, not a conflict, when the Apple owner carries the same ISRC, and never retries it', async () => {
+    const db = await createTestDb()
+    await listener(db)
+    const target = await spotifyTrack(db)
+    const [owner] = await db.insert(tracks).values({
+      appleId: APPLE_A, isrc: ISRC.toLowerCase(), title: 'Existing', artist: 'Owner',
+    }).returning()
+    const lookup = vi.fn(async () => new Map([[ISRC, [catalogSong()]]]))
+    expect(await runAppleIsrcBatch(db, { now: () => now, catalog: { getSongsByIsrc: lookup } }))
+      .toEqual({ processed: 1, linked: 0, missing: 0, ambiguous: 0, conflicts: 0, twins: 1, failed: 0, skipped: 0 })
+    expect((await db.select().from(tracks).where(eq(tracks.id, target.id)))[0].appleId).toBeNull()
+    expect((await db.select().from(tracks).where(eq(tracks.id, owner.id)))[0]).toEqual(owner)
+    const [record] = await db.select().from(appleIsrcLookups)
+    expect(record).toMatchObject({ trackId: target.id, lastCategory: 'twin', attempts: 1 })
+    expect(record.nextAttemptAt.getTime()).toBe(APPLE_ISRC_NEVER.getTime())
+
+    const muchLater = new Date(now.getTime() + 50 * 365 * 86400_000)
+    expect((await runAppleIsrcBatch(db, { now: () => muchLater, catalog: { getSongsByIsrc: lookup } })).processed).toBe(0)
+    expect(lookup).toHaveBeenCalledOnce()
+  })
+
+  it('records a twin when an owner with the same ISRC appears while the request is in flight', async () => {
+    const db = await createTestDb()
+    await listener(db)
+    const target = await spotifyTrack(db)
+    const result = await runAppleIsrcBatch(db, { now: () => now, catalog: { getSongsByIsrc: async () => {
+      await db.insert(tracks).values({ appleId: APPLE_A, isrc: ISRC, title: 'Raced', artist: 'Owner' })
+      return new Map([[ISRC, [catalogSong()]]])
+    } } })
+    expect(result).toMatchObject({ linked: 0, conflicts: 0, twins: 1 })
+    expect(await db.select().from(appleIsrcLookups)).toMatchObject([{ trackId: target.id, lastCategory: 'twin' }])
   })
 
   it('does not overwrite existing metadata or mix artwork fields from different covers', async () => {
@@ -157,7 +194,7 @@ describe('Apple ISRC linking', () => {
     await spotifyTrack(db, { spotifyId: '7ouMYWpwJ422jRcDASZB7P' })
     const lookup = vi.fn(async () => new Map([[ISRC, [catalogSong()]]]))
     expect(await runAppleIsrcBatch(db, { now: () => now, catalog: { getSongsByIsrc: lookup } }))
-      .toMatchObject({ processed: 2, linked: 1, conflicts: 1 })
+      .toMatchObject({ processed: 2, linked: 1, conflicts: 0, twins: 1 })
     expect(lookup).toHaveBeenCalledWith('ng', [ISRC])
     expect(await db.select().from(tracks)).toHaveLength(2)
     expect(await db.select().from(userTracks)).toHaveLength(2)

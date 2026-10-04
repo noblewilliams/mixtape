@@ -212,7 +212,8 @@ const trackSpec: ChunkSpec<
     row.title === value.title &&
     row.artist === value.artist &&
     row.album === value.album &&
-    row.durationMs === value.durationMs,
+    row.durationMs === value.durationMs &&
+    row.isrc === (value.isrc ?? null),
   existing: (tx, importId, values) =>
     tx
       .select()
@@ -235,7 +236,7 @@ const trackSpec: ChunkSpec<
   insert: async (tx, importId, values) => {
     await tx
       .insert(listeningImportTracks)
-      .values(values.map((value) => ({ importId, ...value })))
+      .values(values.map((value) => ({ importId, ...value, isrc: value.isrc ?? null })))
   },
 }
 
@@ -730,11 +731,13 @@ export function createListeningImportStore(
 
         // 1. Canonical tracks. Spotify's export names the album artist, so its
         // title and artist win unless enrichment already corrected the artist;
-        // an Apple export only fills gaps the live sync left.
+        // an Apple export only fills gaps the live sync left. A staged ISRC
+        // (Exportify carries one) only fills a gap, never replacing one
+        // enrichment already set.
         if (run.source === 'spotify_export') {
           await tx.execute(sql`
-            INSERT INTO tracks (spotify_id, title, artist, album, duration_ms, artist_source, created_at)
-            SELECT platform_id, title, artist, album, duration_ms, 'export', ${now}
+            INSERT INTO tracks (spotify_id, title, artist, album, duration_ms, isrc, artist_source, created_at)
+            SELECT platform_id, title, artist, album, duration_ms, isrc, 'export', ${now}
             FROM listening_import_tracks
             WHERE import_id = ${importId}
             ORDER BY platform_id
@@ -749,7 +752,8 @@ export function createListeningImportStore(
                 ELSE 'export'
               END,
               album = coalesce(tracks.album, excluded.album),
-              duration_ms = coalesce(tracks.duration_ms, excluded.duration_ms)
+              duration_ms = coalesce(tracks.duration_ms, excluded.duration_ms),
+              isrc = coalesce(tracks.isrc, excluded.isrc)
           `)
         } else {
           await tx.execute(sql`

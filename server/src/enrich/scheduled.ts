@@ -2,9 +2,11 @@ import type { Db } from '../db/types'
 import type { EnrichDeps } from './pipeline'
 import { runEnrichmentBatch, type RunResult } from './runner'
 import {
+  runAppleIsrcBackfill,
   runArtworkBatch,
   type ArtworkDeps,
   type ArtworkRunResult,
+  type IsrcBackfillResult,
 } from '../artwork/runner'
 import {
   cleanupPlaylistSyncStaging,
@@ -81,8 +83,9 @@ export type ScheduledDeps = {
 // Two hourly triggers, two minutes apart, so Postgres wakes once per hour and
 // stays warm for the second. Each invocation gets its own 50-subrequest and
 // 10 ms CPU budget: maintenance (cleanup, playlist catalogue resolution, Apple
-// artwork) on the hour, then twin copy, enrichment, Apple ISRC linking and the
-// Spotify artwork fallback. Linking follows enrichment because enrichment
+// artwork, then the Apple ISRC backfill's single catalogue request) on the
+// hour, then twin copy, enrichment, Apple ISRC linking and the Spotify artwork
+// fallback. Linking follows enrichment because enrichment
 // produces ISRCs; the fallback follows linking so Apple gets its chance before
 // a Spotify or Deezer thumbnail is written.
 // Keep these equal to `triggers.crons` in wrangler.jsonc.
@@ -106,6 +109,7 @@ export type ScheduledResult = {
   twinCopy?: TwinCopyResult | FailedRun
   enrichment?: RunResult | FailedRun
   artwork?: ArtworkRunResult | FailedRun
+  isrcBackfill?: IsrcBackfillResult | FailedRun | { skipped: 'artwork_busy' }
   playlistCleanup?: PlaylistSyncCleanupResult | FailedRun
   libraryCleanup?: LibrarySyncCleanupResult | FailedRun
   listeningCleanup?: ListeningImportCleanupResult | FailedRun
@@ -118,6 +122,7 @@ type ScheduledRunners = {
   twinCopy: typeof runTwinCopy
   enrichment: typeof runEnrichmentBatch
   artwork: typeof runArtworkBatch
+  isrcBackfill: typeof runAppleIsrcBackfill
   playlistCleanup: typeof cleanupPlaylistSyncStaging
   libraryCleanup: typeof cleanupLibrarySyncStaging
   listeningCleanup: typeof cleanupListeningImportStaging
@@ -142,6 +147,7 @@ async function runMaintenance(
   const result: ScheduledResult = {}
   const runPlaylistCatalog = runners.playlistCatalog ?? runPlaylistCatalogBatch
   const runArtwork = runners.artwork ?? runArtworkBatch
+  const runIsrcBackfill = runners.isrcBackfill ?? runAppleIsrcBackfill
   const runPlaylistCleanup = runners.playlistCleanup ?? cleanupPlaylistSyncStaging
   const runLibraryCleanup = runners.libraryCleanup ?? cleanupLibrarySyncStaging
   const runListeningCleanup = runners.listeningCleanup ?? cleanupListeningImportStaging
@@ -181,6 +187,22 @@ async function runMaintenance(
       result.artwork = await runArtwork(db, deps.artwork, ARTWORK_CRON_BATCH)
     } catch {
       result.artwork = { error: 'failed' }
+    }
+  }
+
+  // After artwork, which already stores the ISRC of every song it fetches, so
+  // this only reaches rows whose artwork predates that. Parsing two full
+  // 300-song responses would risk the free plan's 10 ms CPU, so a run where
+  // artwork took a full batch leaves the backfill to a quieter hour.
+  const artworkBusy = result.artwork != null && 'processed' in result.artwork
+    && result.artwork.processed >= ARTWORK_CRON_BATCH
+  if (deps.artwork && artworkBusy) {
+    result.isrcBackfill = { skipped: 'artwork_busy' }
+  } else if (deps.artwork) {
+    try {
+      result.isrcBackfill = await runIsrcBackfill(db, deps.artwork)
+    } catch {
+      result.isrcBackfill = { error: 'failed' }
     }
   }
 

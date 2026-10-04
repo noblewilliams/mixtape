@@ -1,10 +1,12 @@
-import { eq, inArray, sql, type SQL } from 'drizzle-orm'
+import { and, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm'
 import { artworkRunLocks, trackArtworkStatus, tracks } from '../db/schema'
 import type { Db } from '../db/types'
+import { normalizeIsrc } from '../contracts/isrc'
 import {
   AppleCatalogError,
   type AppleCatalogClient,
   type ArtworkMetadata,
+  type CatalogSong,
 } from '../musickit/catalog'
 
 export const MAX_ARTWORK_BATCH = 300
@@ -15,6 +17,10 @@ export const ARTWORK_RATE_LIMIT_RETRY_MS = 60 * 60 * 1000
 export const ARTWORK_UPSTREAM_RETRY_MS = 15 * 60 * 1000
 export const ARTWORK_AUTH_RETRY_MS = 6 * 60 * 60 * 1000
 export const ARTWORK_INTERNAL_RETRY_MS = 60 * 60 * 1000
+// The ISRC backfill asks for at most this many songs, one catalogue request.
+export const ISRC_BACKFILL_BATCH = 300
+// A song Apple returned no ISRC for is asked again after this long, not hourly.
+export const ISRC_RECHECK_MS = 30 * 24 * 60 * 60 * 1000
 
 export type ArtworkFailureCategory =
   | 'no_match'
@@ -95,32 +101,38 @@ export function artworkRetryMs(category: ArtworkFailureCategory): number {
 }
 
 type Failure = { trackId: string; category: ArtworkFailureCategory }
-type Match = { trackId: string; artwork: ArtworkMetadata }
+type Match = { trackId: string; artwork: ArtworkMetadata; isrc: string | null }
 
 async function persistResults(db: Db, matches: Match[], failures: Failure[], now: Date) {
   if (matches.length > 0) {
     const payload = JSON.stringify(
-      matches.map(({ trackId, artwork }) => ({
+      matches.map(({ trackId, artwork, isrc }) => ({
         track_id: trackId,
         url: artwork.url,
         width: artwork.width,
         height: artwork.height,
         bg_color: artwork.bgColor,
+        isrc,
       })),
     )
+    // The catalogue song carries its ISRC; keep it when the row has none, and
+    // mark the row checked so the ISRC backfill does not ask again.
     await db.execute(sql`
       UPDATE tracks AS t
       SET artwork_url_template = a.url,
           artwork_width = COALESCE(a.width, t.artwork_width),
           artwork_height = COALESCE(a.height, t.artwork_height),
           artwork_bg_color = COALESCE(a.bg_color, t.artwork_bg_color),
-          artwork_fetched_at = ${now}
+          artwork_fetched_at = ${now},
+          isrc = COALESCE(t.isrc, a.isrc),
+          isrc_checked_at = ${now}
       FROM jsonb_to_recordset(${payload}::jsonb) AS a(
         track_id uuid,
         url text,
         width integer,
         height integer,
-        bg_color text
+        bg_color text,
+        isrc text
       )
       WHERE t.id = a.track_id
     `)
@@ -195,7 +207,7 @@ async function runLockedArtworkBatch(
       } else if (!returned.artwork) {
         failures.push({ trackId: candidate.id, category: 'malformed' })
       } else {
-        matches.push({ trackId: candidate.id, artwork: returned.artwork })
+        matches.push({ trackId: candidate.id, artwork: returned.artwork, isrc: normalizeIsrc(returned.isrc) })
       }
     }
   } catch (error) {
@@ -241,6 +253,114 @@ export async function runArtworkBatch(
       .where(eq(artworkRunLocks.name, 'catalog'))
     return result
   })
+}
+
+export type IsrcBackfillResult = {
+  processed: number
+  filled: number
+  failed: number
+  remaining: number
+}
+
+type BackfillCandidate = { id: string; apple_id: string; storefront: string }
+
+function isrcBackfillWhere(now: Date): SQL {
+  const recheckBefore = new Date(now.getTime() - ISRC_RECHECK_MS)
+  return sql`
+    FROM tracks t
+    WHERE t.apple_id IS NOT NULL
+      AND t.artwork_url_template IS NOT NULL
+      AND t.isrc IS NULL
+      AND (t.isrc_checked_at IS NULL OR t.isrc_checked_at <= ${recheckBefore})
+  `
+}
+
+// Apple rows that got artwork before the artwork job kept ISRCs. One
+// catalogue request per run, one market per run. A transient provider
+// failure leaves the rows unmarked, so the next hourly run asks again; any
+// other failure defers them. A success marks every asked row, found or not,
+// and only fills an ISRC the row still lacks.
+export async function runAppleIsrcBackfill(db: Db, deps: ArtworkDeps): Promise<IsrcBackfillResult> {
+  const now = deps.now?.() ?? new Date()
+  const fromWhere = isrcBackfillWhere(now)
+  const candidates = normalizeRows(await db.execute(sql`
+    WITH market AS (
+      SELECT coalesce(t.apple_catalog_storefront, ${deps.storefront}) AS storefront
+      ${fromWhere}
+      ORDER BY t.id LIMIT 1
+    )
+    SELECT t.id, t.apple_id, coalesce(t.apple_catalog_storefront, ${deps.storefront}) AS storefront
+    ${fromWhere}
+      AND coalesce(t.apple_catalog_storefront, ${deps.storefront}) = (SELECT storefront FROM market)
+    ORDER BY t.id
+    LIMIT ${ISRC_BACKFILL_BATCH}
+  `)) as BackfillCandidate[]
+  if (candidates.length === 0) return { processed: 0, filled: 0, failed: 0, remaining: 0 }
+
+  let songs: Map<string, CatalogSong>
+  try {
+    songs = await deps.catalog.getSongs(
+      candidates[0].storefront,
+      candidates.map((candidate) => candidate.apple_id),
+    )
+  } catch (error) {
+    if (!isTransientBackfillError(error)) {
+      // isrc_checked_at is one timestamp read against ISRC_RECHECK_MS. Writing
+      // it that far back, less the artwork job's malformed retry window, makes
+      // the rows due again after that shorter window instead of 30 days, and
+      // lets the next run move on to later rows.
+      const deferredTo = new Date(now.getTime() - ISRC_RECHECK_MS + ARTWORK_MALFORMED_RETRY_MS)
+      await db
+        .update(tracks)
+        .set({ isrcCheckedAt: deferredTo })
+        .where(and(inArray(tracks.id, candidates.map((candidate) => candidate.id)), isNull(tracks.isrc)))
+    }
+    return {
+      processed: candidates.length,
+      filled: 0,
+      failed: candidates.length,
+      remaining: await backfillRemaining(db, now),
+    }
+  }
+
+  const payload = JSON.stringify(candidates.map((candidate) => {
+    const song = songs.get(candidate.apple_id)
+    return {
+      track_id: candidate.id,
+      apple_id: candidate.apple_id,
+      isrc: song?.appleId === candidate.apple_id ? normalizeIsrc(song.isrc) : null,
+    }
+  }))
+  const updated = normalizeRows(await db.execute(sql`
+    UPDATE tracks AS t
+    SET isrc = COALESCE(t.isrc, a.isrc),
+        isrc_checked_at = ${now}
+    FROM jsonb_to_recordset(${payload}::jsonb) AS a(track_id uuid, apple_id text, isrc text)
+    WHERE t.id = a.track_id AND t.apple_id = a.apple_id
+    RETURNING a.isrc IS NOT NULL AND t.isrc = a.isrc AS filled
+  `))
+  return {
+    processed: candidates.length,
+    filled: updated.filter((row) => row.filled === true).length,
+    failed: 0,
+    remaining: await backfillRemaining(db, now),
+  }
+}
+
+async function backfillRemaining(db: Db, now: Date): Promise<number> {
+  const result = await db.execute(sql`SELECT COUNT(*) AS count ${isrcBackfillWhere(now)}`)
+  return Number(normalizeRows(result)[0]?.count ?? 0)
+}
+
+// Worth asking again next hour: rate limits, timeouts, network faults and
+// server-side 5xx errors. Anything else (a malformed response, authorization,
+// a 4xx, an unexpected error) would fail the same id-ordered batch every hour.
+function isTransientBackfillError(error: unknown): boolean {
+  const category = categoryForError(error)
+  if (category === 'rate_limit' || category === 'timeout' || category === 'network') return true
+  if (category !== 'upstream') return false
+  const status = (error as AppleCatalogError).status
+  return status === undefined || status >= 500
 }
 
 export type ArtworkStatus = {

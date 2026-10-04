@@ -606,6 +606,54 @@ describe('ListeningImportStore.complete', () => {
       .toMatchObject({ title: 'New', artist: 'Catalog Artist', artistSource: 'apple_catalog' })
   })
 
+  it('writes a staged ISRC on Spotify publish and never overwrites one already set', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const store = createListeningImportStore(db, { now: () => now })
+    await db.insert(tracks).values([
+      { spotifyId: SPOTIFY_B, title: 'Old', artist: 'Artist', isrc: 'GBUM71029604' },
+      { spotifyId: SPOTIFY_C, title: 'Old', artist: 'Artist' },
+    ])
+
+    await publish(store, 'u1', begin(), {
+      tracks: [
+        track({ isrc: 'USUG11904206' }),
+        track({ ordinal: 1, platformId: SPOTIFY_B, isrc: 'USUG11904207' }),
+        track({ ordinal: 2, platformId: SPOTIFY_C, isrc: 'USUG11904208' }),
+      ],
+    })
+
+    const rows = await db.select().from(tracks)
+    const byId = new Map(rows.map((row) => [row.spotifyId, row.isrc]))
+    expect(byId).toEqual(new Map([
+      [SPOTIFY_A, 'USUG11904206'],
+      [SPOTIFY_B, 'GBUM71029604'],
+      [SPOTIFY_C, 'USUG11904208'],
+    ]))
+  })
+
+  it('leaves the ISRC alone when an old client sends none, and on Apple publish', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const store = createListeningImportStore(db, { now: () => now })
+    await db.insert(tracks).values({ spotifyId: SPOTIFY_B, title: 'Old', artist: 'Artist', isrc: 'GBUM71029604' })
+
+    await publish(store, 'u1', begin(), {
+      tracks: [track(), track({ ordinal: 1, platformId: SPOTIFY_B })],
+    })
+    await publish(store, 'u1', appleBegin(), {
+      tracks: [track({ platformId: APPLE_A, isrc: 'USUG11904209' })],
+    })
+
+    const rows = await db.select().from(tracks)
+    const byId = new Map(rows.map((row) => [row.spotifyId ?? row.appleId, row.isrc]))
+    expect(byId).toEqual(new Map([
+      [SPOTIFY_A, null],
+      [SPOTIFY_B, 'GBUM71029604'],
+      [APPLE_A, null],
+    ]))
+  })
+
   it('prunes days and un-likes rows for the importing user only', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')

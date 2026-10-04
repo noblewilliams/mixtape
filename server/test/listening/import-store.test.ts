@@ -238,6 +238,20 @@ describe('ListeningImportStore', () => {
       expect((await runRow(db, importId)).receivedTracks).toBe(2)
     })
 
+    it('stages an ISRC when sent and null when absent, and accepts exact re-sends of either', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const store = createListeningImportStore(db, { now: () => now })
+      const { importId } = await store.begin('u1', begin())
+      const rows = [track({ isrc: 'USUG11904206' }), track({ ordinal: 1, platformId: SPOTIFY_B })]
+
+      await store.putTracks('u1', importId, rows)
+      await store.putTracks('u1', importId, rows)
+      expect((await runRow(db, importId)).receivedTracks).toBe(2)
+      expect(await db.select().from(listeningImportTracks).orderBy(listeningImportTracks.ordinal))
+        .toMatchObject([{ isrc: 'USUG11904206' }, { isrc: null }])
+    })
+
     it('hides runs from other users and unknown ids', async () => {
       const db = await createTestDb()
       await seedUser(db, 'u1')
@@ -530,6 +544,9 @@ describe('ListeningImportStore', () => {
       { change: 'durationMs', after: { durationMs: 200_001 } },
       { change: 'durationMs to null', after: { durationMs: null } },
       { change: 'durationMs from null', before: { durationMs: null }, after: { durationMs: 200_000 } },
+      { change: 'isrc', before: { isrc: 'USUG11904206' }, after: { isrc: 'GBUM71029604' } },
+      { change: 'isrc to absent', before: { isrc: 'USUG11904206' }, after: { isrc: undefined } },
+      { change: 'isrc from absent', after: { isrc: 'USUG11904206' } },
     ]
 
     it.each(trackChanges)('rejects a track re-send that changes $change', async ({ before, after }) => {

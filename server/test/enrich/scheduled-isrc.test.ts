@@ -9,7 +9,7 @@ import { createAppleCatalogClient } from '../../src/musickit/catalog'
 import { createSpotifyOEmbedArtworkClient } from '../../src/artwork/spotify-oembed'
 import { createDeezerArtworkClient } from '../../src/artwork/deezer'
 
-const empty = { processed: 0, linked: 0, missing: 0, ambiguous: 0, conflicts: 0, failed: 0, skipped: 0 }
+const empty = { processed: 0, linked: 0, missing: 0, ambiguous: 0, conflicts: 0, twins: 0, failed: 0, skipped: 0 }
 
 describe('scheduled Apple ISRC linking', () => {
   it('carries a freshly observed Spotify ISRC through the real adapters in one enrichment pass', async () => {

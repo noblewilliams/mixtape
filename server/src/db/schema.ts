@@ -70,6 +70,9 @@ export const tracks = pgTable(
     artworkHeight: integer('artwork_height'),
     artworkBgColor: text('artwork_bg_color'),
     artworkFetchedAt: timestamp('artwork_fetched_at', { withTimezone: true }),
+    // When the Apple catalogue was last asked for this row's ISRC, whether or
+    // not it had one, so the backfill does not refetch a song every hour.
+    isrcCheckedAt: timestamp('isrc_checked_at', { withTimezone: true }),
     // Who last wrote `artist`. An export never overwrites a correction that
     // came from ReccoBeats or the Apple catalog.
     artistSource: text('artist_source', {
@@ -775,10 +778,16 @@ export const listeningImportTracks = pgTable(
     artist: text('artist').notNull(),
     album: text('album'),
     durationMs: integer('duration_ms'),
+    // Uppercase and well formed, or null; the contract drops anything else.
+    isrc: text('isrc'),
   },
   (t) => [
     primaryKey({ columns: [t.importId, t.ordinal] }),
     uniqueIndex('listening_import_tracks_import_platform_idx').on(t.importId, t.platformId),
+    check(
+      'listening_import_tracks_isrc_check',
+      sql`${t.isrc} IS NULL OR ${t.isrc} ~ '^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$'`,
+    ),
     check('listening_import_tracks_ordinal_check', sql`${t.ordinal} >= 0`),
     check('listening_import_tracks_platform_id_check', platformIdSql(t.platformId)),
     check('listening_import_tracks_duration_check', nonnegativeOrNullSql(t.durationMs)),
@@ -1225,8 +1234,10 @@ export const appleIsrcLookups = pgTable(
     storefront: text('storefront').notNull(),
     isrc: text('isrc').notNull(),
     attempts: integer('attempts').notNull().default(0),
+    // `twin`: the Apple id belongs to another row with the same ISRC. That is
+    // the same recording, so the lookup is settled rather than retried.
     lastCategory: text('last_category', { enum: [
-      'pending', 'no_match', 'ambiguous', 'conflict', 'malformed', 'rate_limit',
+      'pending', 'no_match', 'ambiguous', 'conflict', 'twin', 'malformed', 'rate_limit',
       'authorization', 'upstream', 'timeout', 'network', 'internal',
     ] }).notNull().default('pending'),
     nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
@@ -1239,7 +1250,7 @@ export const appleIsrcLookups = pgTable(
     check('apple_isrc_lookups_isrc_check', sql`${t.isrc} ~ '^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$'`),
     check('apple_isrc_lookups_attempts_check', sql`${t.attempts} >= 0`),
     check('apple_isrc_lookups_category_check', sql`${t.lastCategory} IN (
-      'pending', 'no_match', 'ambiguous', 'conflict', 'malformed', 'rate_limit',
+      'pending', 'no_match', 'ambiguous', 'conflict', 'twin', 'malformed', 'rate_limit',
       'authorization', 'upstream', 'timeout', 'network', 'internal'
     )`),
   ],
