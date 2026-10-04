@@ -1,3 +1,4 @@
+import { TAPE_CASE_COLORS } from '../dj/tape-colors'
 import { Hono } from 'hono'
 import { mixHistoryRoutes } from './mix-history'
 import { z } from 'zod'
@@ -84,16 +85,17 @@ const queueOpsBodySchema = z.object({
 // `title` is bounded 1..120 raw (mirrors rename_session's own tool-input
 // bound in dj/contracts.ts) — the actual DISPLAY cap (60, sanitized) is
 // applied in the handler via sanitizeTitleText, same discipline as
-// titleFromPrompt. Either field, or both, may be sent; the refine below
-// rejects a body carrying neither (an empty PATCH is a client bug, not a
+// titleFromPrompt. Fields may be sent independently or together; the refine below
+// rejects a body carrying none (an empty PATCH is a client bug, not a
 // silent no-op).
 const patchSessionSchema = z
   .object({
     status: z.union([z.literal('active'), z.literal('archived')]).optional(),
     title: z.string().min(1).max(120).optional(),
+    caseColor: z.enum(TAPE_CASE_COLORS).optional(),
   })
-  .refine((data) => data.status !== undefined || data.title !== undefined, {
-    message: 'at least one of status or title is required',
+  .refine((data) => data.status !== undefined || data.title !== undefined || data.caseColor !== undefined, {
+    message: 'at least one of status, title or caseColor is required',
   })
 const sessionEventSchema = z.object({ type: z.union([z.literal('played'), z.literal('saved_playlist')]) })
 
@@ -107,6 +109,7 @@ const MANUAL_OPS_HINT = 'swap/extend require the DJ — send a message instead'
 const sessionListColumns = {
   id: djSessions.id,
   title: djSessions.title,
+  caseColor: djSessions.caseColor,
   status: djSessions.status,
   queueVersion: djSessions.queueVersion,
   // True once a corpus-mode generate/swap has put shared-catalog picks in
@@ -307,8 +310,9 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
     const session = await loadOwnedSession(db, c.req.param('id'), userId)
     if (!session) return c.json({ error: 'not_found' }, 404)
 
-    const { status, title } = c.req.valid('json')
-    const updates: { status?: 'active' | 'archived'; title?: string } = {}
+    const { status, title, caseColor } = c.req.valid('json')
+    const updates: { status?: 'active' | 'archived'; title?: string; caseColor?: string } = {}
+    if (caseColor !== undefined) updates.caseColor = caseColor
     if (status !== undefined) updates.status = status
     if (title !== undefined) {
       // min(1) above only rejects a literally-empty string — a
@@ -319,7 +323,7 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
       updates.title = sanitized
     }
     // Also bumps updatedAt via djSessions' own $onUpdate (db/schema.ts) even
-    // for a title-only PATCH — a documented side effect: a manual rename
+    // for a title-only or colour-only PATCH — editing mix settings
     // reorders the session to the top of GET /sessions' newest-first list.
     const [updated] = await db
       .update(djSessions)

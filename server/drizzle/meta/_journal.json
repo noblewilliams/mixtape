@@ -232,6 +232,13 @@
       "when": 1788991854345,
       "tag": "0032_soft_supreme_intelligence",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1790340520623,
+      "tag": "0033_tape_case_color",
+      "breakpoints": true
     }
   ]
 }

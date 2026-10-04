@@ -1,3 +1,4 @@
+import { TAPE_CASE_COLOR_DEFAULT_SQL } from '../dj/tape-colors'
 import type { EnergyArc, EnergyJourney } from '../dj/energy-journey'
 import { sql } from 'drizzle-orm'
 import {
@@ -312,6 +313,7 @@ export const djSessions = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
     title: text('title').notNull(),
+    caseColor: text('case_color').notNull().default(sql.raw(TAPE_CASE_COLOR_DEFAULT_SQL)),
     status: text('status', { enum: ['active', 'archived'] }).notNull().default('active'),
     queueVersion: integer('queue_version').notNull().default(0),
     // Set when a mix came from the shared corpus and seeds rather than the

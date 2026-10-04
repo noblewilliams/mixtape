@@ -1,3 +1,4 @@
+import { TAPE_CASE_COLORS } from '../../src/dj/tape-colors'
 import { describe, it, expect } from 'vitest'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { createApp, type AuthLike } from '../../src/app'
@@ -1327,6 +1328,41 @@ describe('session routes', () => {
       const body = (await res.json()) as { session: { id: string } }
       return body.session.id
     }
+
+    it('assigns a tape colour once at creation and retains it on every read', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const { llm } = makeFakeLlm([{ text: 'hi' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+      const created = await (await postJson(app, '/sessions', { prompt: 'a colourful mix' })).json() as any
+      expect(TAPE_CASE_COLORS).toContain(created.session.caseColor)
+      const detail = await (await getJson(app, `/sessions/${created.session.id}`)).json() as any
+      const list = await (await getJson(app, '/sessions')).json() as any
+      expect(detail.session.caseColor).toBe(created.session.caseColor)
+      expect(list.sessions[0].caseColor).toBe(created.session.caseColor)
+    })
+
+    it('persists an owner colour choice across detail/list and rejects unsupported colours', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      await seedUser(db, 'u2')
+      const id = await createPlainSession(db, 'u1')
+      const { llm } = makeFakeLlm([{ text: 'hi' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+      const other = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u2'))
+      const patched = await patchJson(app, `/sessions/${id}`, { caseColor: '#3257ae', title: 'Blue nights' })
+      expect(patched.status).toBe(200)
+      expect((await patched.json() as any).session).toMatchObject({ caseColor: '#3257ae', title: 'Blue nights' })
+      for (const caseColor of ['#ffffff', '#3257AE', 'blue', '', null, 1]) {
+        expect((await patchJson(app, `/sessions/${id}`, { caseColor })).status).toBe(400)
+      }
+      expect((await patchJson(other, `/sessions/${id}`, { caseColor: '#d88c9a' })).status).toBe(404)
+      expect((await (await getJson(app, `/sessions/${id}`)).json() as any).session.caseColor).toBe('#3257ae')
+      expect((await (await getJson(app, '/sessions')).json() as any).sessions[0].caseColor).toBe('#3257ae')
+      const colourOnly = await patchJson(app, `/sessions/${id}`, { caseColor: '#d88c9a' })
+      expect(colourOnly.status).toBe(200)
+      expect((await colourOnly.json() as any).session.caseColor).toBe('#d88c9a')
+    })
 
     it('archives then reactivates a session — round trip, returning the list-row shape', async () => {
       const db = await createTestDb()

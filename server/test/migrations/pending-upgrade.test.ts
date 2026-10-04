@@ -128,7 +128,8 @@ describe('pending production migration chain', () => {
         SELECT count(*)::int AS "count"
         FROM "drizzle"."__drizzle_migrations"
       `)
-      expect(migrationCount.rows).toEqual([{ count: 33 }])
+      const journal = JSON.parse(await readFile(join(migrationsDir, 'meta', '_journal.json'), 'utf8'))
+      expect(migrationCount.rows).toEqual([{ count: journal.entries.length }])
     } finally {
       await client.close()
     }
