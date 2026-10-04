@@ -19,6 +19,8 @@
   --surface-warm: #eee9e3;
   --surface-cool: #e7e9e6;
   --hairline: rgba(66, 58, 65, 0.12);
+  --session-header-height: 126px;
+  --session-rule: rgba(72, 64, 71, 0.08);
   --pink: #c9687f;
   --orange: #d18a65;
   --yellow: #d2c76f;
@@ -409,13 +411,13 @@ input:focus-visible {
 }
 
 .conversation-header {
-  min-height: 97px;
+  min-height: var(--session-header-height);
   padding: 24px 34px 17px;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 20px;
-  border-bottom: 1px solid rgba(72, 64, 71, 0.08);
+  border-bottom: 1px solid var(--session-rule);
 }
 
 .conversation-header h1,
@@ -731,13 +733,6 @@ input:focus-visible {
   height: 15px;
 }
 
-.composer-area > p {
-  margin: 8px auto 0;
-  color: var(--muted);
-  font-size: var(--type-meta-size);
-  text-align: center;
-}
-
 .queue-panel {
   min-width: 0;
   min-height: 0;
@@ -747,13 +742,15 @@ input:focus-visible {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   background: rgba(248, 247, 246, 0.62);
+  border-left: 1px solid var(--hairline);
   backdrop-filter: blur(30px) saturate(106%);
   overflow: hidden;
   animation: none;
 }
 
 .queue-header {
-  min-height: 48px;
+  /* Panel inset (20px) + header + summary (35px) end on the conversation header's rule. */
+  min-height: calc(var(--session-header-height) - 20px - 35px);
   padding: 0 4px 12px;
   display: flex;
   align-items: flex-start;
@@ -786,11 +783,13 @@ input:focus-visible {
 }
 
 .queue-summary {
-  padding: 8px 4px 12px;
+  height: 35px;
+  margin-inline: -15px;
+  padding: 8px 19px 12px;
   display: flex;
   justify-content: space-between;
   gap: 10px;
-  border-bottom: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--session-rule);
 }
 
 .queue-summary strong {
@@ -912,6 +911,28 @@ input:focus-visible {
   margin-top: 2px;
   color: var(--muted);
   font-size: var(--type-meta-size);
+}
+
+/* New to you: the artist text gives way first; the mark is never shortened. */
+.track-copy small.has-mark {
+  display: flex;
+}
+
+.track-who {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.track-mark {
+  flex: none;
+  white-space: nowrap;
+}
+
+.track-mark b {
+  color: var(--plum);
+  font-weight: 700;
 }
 
 .track-copy em {
@@ -1406,32 +1427,6 @@ input:focus-visible {
   margin: 0;
   color: var(--muted);
   font-size: var(--type-secondary-size);
-}
-
-.view-switch {
-  padding: 3px;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  background: rgba(255, 255, 255, 0.42);
-  border: 1px solid rgba(75, 67, 74, 0.16);
-  border-radius: 10px;
-}
-
-.view-switch button {
-  min-width: 91px;
-  min-height: 34px;
-  padding: 0 11px;
-  color: var(--muted);
-  background: transparent;
-  border: 0;
-  border-radius: 7px;
-  font-size: var(--type-control-size);
-  font-weight: 740;
-}
-
-.view-switch button.is-active {
-  color: white;
-  background: var(--plum);
 }
 
 .tape-grid {
@@ -1955,6 +1950,10 @@ input:focus-visible {
     transform: translateX(0);
   }
 
+  .queue-header {
+    min-height: 48px;
+  }
+
   .queue-close {
     display: grid;
   }
@@ -2076,10 +2075,6 @@ input:focus-visible {
     font-size: 16px;
   }
 
-  .composer-area > p {
-    display: none;
-  }
-
   .queue-panel {
     width: calc(100vw - 20px);
     top: 10px;
@@ -2113,14 +2108,6 @@ input:focus-visible {
 
   .collection-toolbar > p {
     display: none;
-  }
-
-  .view-switch {
-    width: 100%;
-  }
-
-  .view-switch button {
-    min-width: 0;
   }
 
   .tape-grid {
@@ -2724,8 +2711,7 @@ input:focus-visible {
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
+:root:where([data-theme="dark"]) {
     color: #e7e3e7;
     background: #08080b;
     --graphite: #e7e3e7;
@@ -2739,24 +2725,24 @@ input:focus-visible {
     --hairline: rgba(255, 255, 255, 0.09);
   }
 
-  html,
-  body {
+html:where([data-theme="dark"]),
+  :where(:root[data-theme="dark"]) body {
     background: #08080b;
   }
 
-  body {
+:where(:root[data-theme="dark"]) body {
     background:
       radial-gradient(circle at 13% 8%, rgba(104, 143, 168, 0.08), transparent 29%),
       radial-gradient(circle at 84% 92%, rgba(201, 104, 127, 0.055), transparent 31%),
       #08080b;
   }
 
-  button:focus-visible,
-  input:focus-visible {
+:where(:root[data-theme="dark"]) button:focus-visible,
+  :where(:root[data-theme="dark"]) input:focus-visible {
     outline-color: rgba(142, 184, 211, 0.78);
   }
 
-  .app-shell {
+:where(:root[data-theme="dark"]) .app-shell {
     color-scheme: dark;
     color: #e7e3e7;
     background-color: #151518;
@@ -2786,261 +2772,253 @@ input:focus-visible {
     box-shadow: 0 28px 84px rgba(0, 0, 0, 0.54), inset 0 1px 0 rgba(255, 255, 255, 0.045);
   }
 
-  .conversation-panel,
-  .home-panel {
+:where(:root[data-theme="dark"]) .conversation-panel,
+  :where(:root[data-theme="dark"]) .home-panel {
     background: rgba(21, 21, 24, 0.34);
   }
 
-  .sidebar,
-  .queue-panel {
+:where(:root[data-theme="dark"]) .sidebar,
+  :where(:root[data-theme="dark"]) .queue-panel {
     background: rgba(24, 23, 27, 0.62);
     border-color: rgba(255, 255, 255, 0.075);
     backdrop-filter: blur(32px) saturate(104%);
   }
 
-  .home-header {
+:where(:root[data-theme="dark"]) .home-header {
     background: rgba(21, 21, 24, 0.22);
   }
 
-  .conversation-header,
-  .home-header,
-  .queue-summary,
-  .sidebar-footer {
+:where(:root[data-theme="dark"]) .conversation-header,
+  :where(:root[data-theme="dark"]) .home-header,
+  :where(:root[data-theme="dark"]) .queue-summary,
+  :where(:root[data-theme="dark"]) .sidebar-footer {
     border-color: rgba(255, 255, 255, 0.075);
   }
 
-  .nav-icon-button.is-active,
-  .session-link:hover,
-  .session-link.is-active,
-  .sync-button:hover,
-  .bare-icon-button:hover,
-  .queue-toggle:hover,
-  .queue-close:hover,
-  .dialog-close:hover,
-  .reorder-handle:hover,
-  .reorder-handle:focus-visible {
+:where(:root[data-theme="dark"]) .nav-icon-button.is-active,
+  :where(:root[data-theme="dark"]) .session-link:hover,
+  :where(:root[data-theme="dark"]) .session-link.is-active,
+  :where(:root[data-theme="dark"]) .sync-button:hover,
+  :where(:root[data-theme="dark"]) .bare-icon-button:hover,
+  :where(:root[data-theme="dark"]) .queue-toggle:hover,
+  :where(:root[data-theme="dark"]) .queue-close:hover,
+  :where(:root[data-theme="dark"]) .dialog-close:hover,
+  :where(:root[data-theme="dark"]) .reorder-handle:hover,
+  :where(:root[data-theme="dark"]) .reorder-handle:focus-visible {
     background: rgba(255, 255, 255, 0.065);
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
   }
 
-  .avatar,
-  .queue-toggle span,
-  .view-switch button.is-active,
-  .dialog-confirm,
-  .account-provider-action {
+:where(:root[data-theme="dark"]) .avatar,
+  :where(:root[data-theme="dark"]) .queue-toggle span,
+  :where(:root[data-theme="dark"]) .dialog-confirm,
+  :where(:root[data-theme="dark"]) .account-provider-action {
     color: #fff;
     background: #594756;
   }
 
-  .conversation-turn--dj {
+:where(:root[data-theme="dark"]) .conversation-turn--dj {
     background: linear-gradient(105deg, #b9cbd6, #d0acbf 74%);
     background-clip: text;
     -webkit-background-clip: text;
     color: transparent;
   }
 
-  .conversation-turn--user {
+:where(:root[data-theme="dark"]) .conversation-turn--user {
     color: #b7b0b8;
   }
 
-  .composer {
+:where(:root[data-theme="dark"]) .composer {
     color: #eee9ed;
     background: rgba(28, 28, 31, 0.86);
     border-color: rgba(255, 255, 255, 0.1);
     box-shadow: 0 12px 30px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.06);
   }
 
-  .composer:focus-within {
+:where(:root[data-theme="dark"]) .composer:focus-within {
     background: rgba(29, 29, 33, 0.94);
     border-color: transparent;
   }
 
-  .composer input {
+:where(:root[data-theme="dark"]) .composer input {
     color: #eee9ed;
   }
 
-  .composer input::placeholder {
+:where(:root[data-theme="dark"]) .composer input::placeholder {
     color: #928c94;
   }
 
-  .send-button:not(:disabled):hover .send-button-surface,
-  .send-button:focus-visible .send-button-surface {
+:where(:root[data-theme="dark"]) .send-button:not(:disabled):hover .send-button-surface,
+  :where(:root[data-theme="dark"]) .send-button:focus-visible .send-button-surface {
     background: rgba(255, 255, 255, 0.075);
   }
 
-  .track-row + .track-row::before {
+:where(:root[data-theme="dark"]) .track-row + .track-row::before {
     background: rgba(255, 255, 255, 0.075);
   }
 
-  .track-row.is-dragging {
+:where(:root[data-theme="dark"]) .track-row.is-dragging {
     background: rgba(255, 255, 255, 0.055);
   }
 
-  .compact-new-tape,
-  .view-switch,
-  .label-button {
+:where(:root[data-theme="dark"]) .compact-new-tape,
+  :where(:root[data-theme="dark"]) .label-button {
     color: #eee9ed;
     background: rgba(34, 33, 37, 0.82);
     border-color: rgba(255, 255, 255, 0.09);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   }
 
-  .compact-new-tape:hover,
-  .label-button:hover {
+:where(:root[data-theme="dark"]) .compact-new-tape:hover,
+  :where(:root[data-theme="dark"]) .label-button:hover {
     background: rgba(255, 255, 255, 0.1);
     border-color: rgba(255, 255, 255, 0.13);
   }
 
-  .view-switch button {
-    color: #aaa4ac;
-  }
-
-  .closet {
+:where(:root[data-theme="dark"]) .closet {
     background: #1d1c21;
   }
 
-  .closet-shelf {
+:where(:root[data-theme="dark"]) .closet-shelf {
     background: #25242a;
     border-color: rgba(255, 255, 255, 0.09);
     box-shadow: inset 0 -9px 0 #151519;
   }
 
-  .closet-shelf::after {
+:where(:root[data-theme="dark"]) .closet-shelf::after {
     background: #5f5b62;
   }
 
-  .queue-undo-toast,
-  .connection-note--success,
-  .toast--success {
+:where(:root[data-theme="dark"]) .queue-undo-toast,
+  :where(:root[data-theme="dark"]) .connection-note--success,
+  :where(:root[data-theme="dark"]) .toast--success {
     color: #b9d3c1;
     background: #1d2c23;
     border-color: rgba(141, 190, 155, 0.13);
   }
 
-  .queue-undo-action,
-  .queue-undo-action:hover,
-  .connection-note--success svg,
-  .toast--success svg {
+:where(:root[data-theme="dark"]) .queue-undo-action,
+  :where(:root[data-theme="dark"]) .queue-undo-action:hover,
+  :where(:root[data-theme="dark"]) .connection-note--success svg,
+  :where(:root[data-theme="dark"]) .toast--success svg {
     color: #b9d3c1;
   }
 
-  .connection-note--error,
-  .toast--error,
-  .app-error {
+:where(:root[data-theme="dark"]) .connection-note--error,
+  :where(:root[data-theme="dark"]) .toast--error,
+  :where(:root[data-theme="dark"]) .app-error {
     color: #efb9c7;
     background: #382329;
     border-color: rgba(239, 185, 199, 0.14);
   }
 
-  .connection-note--error svg,
-  .toast--error svg {
+:where(:root[data-theme="dark"]) .connection-note--error svg,
+  :where(:root[data-theme="dark"]) .toast--error svg {
     color: #ef9caf;
   }
 
-  .overlay,
-  .account-overlay {
+:where(:root[data-theme="dark"]) .overlay,
+  :where(:root[data-theme="dark"]) .account-overlay {
     background: rgba(0, 0, 0, 0.42);
   }
 
-  .dialog,
-  .sync-card,
-  .account-dialog {
+:where(:root[data-theme="dark"]) .dialog,
+  :where(:root[data-theme="dark"]) .sync-card,
+  :where(:root[data-theme="dark"]) .account-dialog {
     color: #e7e3e7;
     background: rgba(36, 35, 39, 0.9);
     border-color: rgba(255, 255, 255, 0.1);
     box-shadow: 0 32px 80px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.06);
   }
 
-  .dialog input {
+:where(:root[data-theme="dark"]) .dialog input {
     color: #eee9ed;
     background: rgba(255, 255, 255, 0.07);
     border-color: rgba(255, 255, 255, 0.1);
   }
 
-  .dialog-cancel {
+:where(:root[data-theme="dark"]) .dialog-cancel {
     color: #aaa4ac;
     border-color: rgba(255, 255, 255, 0.1);
   }
 
-  .auth-page {
+:where(:root[data-theme="dark"]) .auth-page {
     color: #e7e3e7;
     background: #08080b;
   }
 
-  .auth-surface {
+:where(:root[data-theme="dark"]) .auth-surface {
     background: linear-gradient(112deg, #1c1f23, #24242a 52%, #2b252b);
     border: 1px solid rgba(255, 255, 255, 0.09);
     box-shadow: 0 34px 92px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.045);
   }
 
-  .auth-wordmark,
-  .auth-copy h1 {
+:where(:root[data-theme="dark"]) .auth-wordmark,
+  :where(:root[data-theme="dark"]) .auth-copy h1 {
     color: #f0ebef;
   }
 
-  .auth-copy > p:last-child,
-  .auth-status,
-  .auth-last-used {
+:where(:root[data-theme="dark"]) .auth-copy > p:last-child,
+  :where(:root[data-theme="dark"]) .auth-status,
+  :where(:root[data-theme="dark"]) .auth-last-used {
     color: #aaa4ac;
   }
 
-  .provider-sign-in--google {
+:where(:root[data-theme="dark"]) .provider-sign-in--google {
     color: #eee9ed;
     background: rgba(255, 255, 255, 0.075);
     border-color: rgba(255, 255, 255, 0.09);
   }
 
-  .provider-sign-in--google:hover:not(:disabled) {
+:where(:root[data-theme="dark"]) .provider-sign-in--google:hover:not(:disabled) {
     background: rgba(255, 255, 255, 0.11);
   }
 
-  .account-kicker,
-  .account-intro,
-  .account-provider-copy small,
-  .account-provider-copy em,
-  .account-note,
-  .account-dialog-close {
+:where(:root[data-theme="dark"]) .account-kicker,
+  :where(:root[data-theme="dark"]) .account-intro,
+  :where(:root[data-theme="dark"]) .account-provider-copy small,
+  :where(:root[data-theme="dark"]) .account-provider-copy em,
+  :where(:root[data-theme="dark"]) .account-note,
+  :where(:root[data-theme="dark"]) .account-dialog-close {
     color: #aaa4ac;
   }
 
-  .account-provider-list,
-  .account-provider-row + .account-provider-row {
+:where(:root[data-theme="dark"]) .account-provider-list,
+  :where(:root[data-theme="dark"]) .account-provider-row + .account-provider-row {
     border-color: rgba(255, 255, 255, 0.075);
   }
 
-  .account-provider-icon--google {
+:where(:root[data-theme="dark"]) .account-provider-icon--google {
     background: rgba(255, 255, 255, 0.9);
   }
 
-  .account-provider-action--quiet,
-  .account-provider-status {
+:where(:root[data-theme="dark"]) .account-provider-action--quiet,
+  :where(:root[data-theme="dark"]) .account-provider-status {
     color: #eee9ed;
     background: rgba(255, 255, 255, 0.075);
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
   }
 
-  .account-notice {
+:where(:root[data-theme="dark"]) .account-notice {
     color: #b9d3c1;
     background: rgba(107, 166, 127, 0.13);
   }
 
-  .account-notice--error,
-  .account-error,
-  .auth-error {
+:where(:root[data-theme="dark"]) .account-notice--error,
+  :where(:root[data-theme="dark"]) .account-error,
+  :where(:root[data-theme="dark"]) .auth-error {
     color: #efb9c7;
   }
 
-}
-
-@media (prefers-color-scheme: dark) and (max-width: 1020px) {
-  .queue-panel {
+@media (max-width: 1020px) {
+  :where(:root[data-theme="dark"]) .queue-panel {
     border-color: rgba(255, 255, 255, 0.09);
     box-shadow: 0 26px 76px rgba(0, 0, 0, 0.52);
   }
 }
 
-@media (prefers-color-scheme: dark) and (max-width: 760px) {
-  .sidebar {
+@media (max-width: 760px) {
+  :where(:root[data-theme="dark"]) .sidebar {
     border-bottom-color: rgba(255, 255, 255, 0.075);
   }
 }
@@ -3058,14 +3036,14 @@ input:focus-visible {
   }
 }
 
-@media (prefers-color-scheme: dark) and (prefers-reduced-transparency: reduce) {
-  .sidebar,
-  .queue-panel,
-  .composer,
-  .home-header,
-  .dialog,
-  .sync-card,
-  .account-dialog {
+@media (prefers-reduced-transparency: reduce) {
+  :where(:root[data-theme="dark"]) .sidebar,
+  :where(:root[data-theme="dark"]) .queue-panel,
+  :where(:root[data-theme="dark"]) .composer,
+  :where(:root[data-theme="dark"]) .home-header,
+  :where(:root[data-theme="dark"]) .dialog,
+  :where(:root[data-theme="dark"]) .sync-card,
+  :where(:root[data-theme="dark"]) .account-dialog {
     color: #eee9ed !important;
     background: #242328 !important;
   }
@@ -4073,178 +4051,176 @@ button.mini:disabled {
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  .banner {
+:where(:root[data-theme="dark"]) .banner {
     color: #e6c98f;
     background: rgba(209, 138, 101, 0.14);
     border-color: rgba(209, 138, 101, 0.35);
   }
 
-  .banner span:last-child {
+:where(:root[data-theme="dark"]) .banner span:last-child {
     color: #c9ad7a;
   }
 
-  .track-row .open:hover {
+:where(:root[data-theme="dark"]) .track-row .open:hover {
     background: rgba(255, 255, 255, 0.08);
   }
 
-  .music-link {
+:where(:root[data-theme="dark"]) .music-link {
     background: rgba(255, 255, 255, 0.06);
     border-color: rgba(255, 255, 255, 0.08);
   }
 
-  .music-link:hover,
-  .music-link.is-active {
+:where(:root[data-theme="dark"]) .music-link:hover,
+  :where(:root[data-theme="dark"]) .music-link.is-active {
     background: rgba(255, 255, 255, 0.12);
   }
 
-  .music-link-mark,
-  .source-mark,
-  .chip,
-  .status-chip {
+:where(:root[data-theme="dark"]) .music-link-mark,
+  :where(:root[data-theme="dark"]) .source-mark,
+  :where(:root[data-theme="dark"]) .chip,
+  :where(:root[data-theme="dark"]) .status-chip {
     background: rgba(255, 255, 255, 0.08);
   }
 
-  .music-link-state--ok {
+:where(:root[data-theme="dark"]) .music-link-state--ok {
     color: #a7c7ae;
   }
 
-  .music-link-state--waiting {
+:where(:root[data-theme="dark"]) .music-link-state--waiting {
     color: #e6c98f;
   }
 
-  .music-view {
+:where(:root[data-theme="dark"]) .music-view {
     background: rgba(21, 21, 24, 0.34);
   }
 
-  .music-view-head {
+:where(:root[data-theme="dark"]) .music-view-head {
     border-color: rgba(255, 255, 255, 0.07);
   }
 
-  .view-status {
+:where(:root[data-theme="dark"]) .view-status {
     color: #1b181c;
     background: #e3dbe0;
   }
 
-  .card,
-  .mini,
-  .dialog.confirm-inline {
+:where(:root[data-theme="dark"]) .card,
+  :where(:root[data-theme="dark"]) .mini,
+  :where(:root[data-theme="dark"]) .dialog.confirm-inline {
     background: rgba(255, 255, 255, 0.05);
     border-color: rgba(255, 255, 255, 0.08);
     box-shadow: none;
   }
 
-  .card.attention {
+:where(:root[data-theme="dark"]) .card.attention {
     border-color: rgba(209, 138, 101, 0.35);
   }
 
-  .mini.done {
+:where(:root[data-theme="dark"]) .mini.done {
     border-color: rgba(112, 151, 120, 0.45);
   }
 
-  .mini.done strong::before {
+:where(:root[data-theme="dark"]) .mini.done strong::before {
     color: #a7c7ae;
   }
 
-  .mini.err {
+:where(:root[data-theme="dark"]) .mini.err {
     border-color: rgba(201, 104, 127, 0.4);
   }
 
-  button.mini:hover:not(:disabled) {
+:where(:root[data-theme="dark"]) button.mini:hover:not(:disabled) {
     background: rgba(255, 255, 255, 0.1);
     border-color: rgba(255, 255, 255, 0.16);
   }
 
-  .btn {
+:where(:root[data-theme="dark"]) .btn {
     color: #e8e4e6;
     background: rgba(255, 255, 255, 0.08);
     border-color: rgba(255, 255, 255, 0.16);
   }
 
-  .btn:hover:not(:disabled) {
+:where(:root[data-theme="dark"]) .btn:hover:not(:disabled) {
     background: rgba(255, 255, 255, 0.14);
   }
 
-  .btn.primary {
+:where(:root[data-theme="dark"]) .btn.primary {
     color: #1b181c;
     background: #e3dbe0;
     border-color: #cfc5cb;
     box-shadow: 0 3px 0 #a99ea6;
   }
 
-  .btn.primary:hover:not(:disabled) {
+:where(:root[data-theme="dark"]) .btn.primary:hover:not(:disabled) {
     background: #f0e9ee;
   }
 
-  .btn.danger {
+:where(:root[data-theme="dark"]) .btn.danger {
     color: #e9a3b3;
     border-color: rgba(201, 104, 127, 0.45);
   }
 
-  .status-chip {
+:where(:root[data-theme="dark"]) .status-chip {
     color: #e8e4e6;
   }
 
-  .status-chip.ok {
+:where(:root[data-theme="dark"]) .status-chip.ok {
     color: #a7c7ae;
     background: rgba(112, 151, 120, 0.16);
   }
 
-  .status-chip.wait {
+:where(:root[data-theme="dark"]) .status-chip.wait {
     color: #e6c98f;
     background: rgba(209, 138, 101, 0.14);
   }
 
-  .status-chip.err {
+:where(:root[data-theme="dark"]) .status-chip.err {
     color: #e9a3b3;
     background: rgba(201, 104, 127, 0.16);
   }
 
-  .dialog-error,
-  .dialog > p.dialog-error {
+:where(:root[data-theme="dark"]) .dialog-error,
+  :where(:root[data-theme="dark"]) .dialog > p.dialog-error {
     color: #e9a3b3;
   }
 
-  .field input,
-  .field textarea {
+:where(:root[data-theme="dark"]) .field input,
+  :where(:root[data-theme="dark"]) .field textarea {
     color: #eee9ed;
     background: rgba(255, 255, 255, 0.06);
     border-color: rgba(255, 255, 255, 0.14);
   }
 
-  .field input:focus-visible,
-  .field textarea:focus-visible {
+:where(:root[data-theme="dark"]) .field input:focus-visible,
+  :where(:root[data-theme="dark"]) .field textarea:focus-visible {
     border-color: transparent;
     background:
       linear-gradient(#1f1e23, #1f1e23) padding-box,
       var(--stripe-horizontal) border-box;
   }
 
-  .stepper span {
+:where(:root[data-theme="dark"]) .stepper span {
     background: rgba(255, 255, 255, 0.16);
   }
 
-  .stepper span.on {
+:where(:root[data-theme="dark"]) .stepper span.on {
     background: var(--plum);
   }
 
-  .drop {
+:where(:root[data-theme="dark"]) .drop {
     background: rgba(255, 255, 255, 0.04);
     border-color: rgba(255, 255, 255, 0.2);
   }
 
-  .diag {
+:where(:root[data-theme="dark"]) .diag {
     background: rgba(255, 255, 255, 0.06);
   }
 
-  .progress {
+:where(:root[data-theme="dark"]) .progress {
     background: rgba(255, 255, 255, 0.12);
   }
 
-  .switch {
+:where(:root[data-theme="dark"]) .switch {
     background: rgba(255, 255, 255, 0.2);
   }
-}
 
 @media (prefers-reduced-transparency: reduce) {
   .card,
@@ -4253,9 +4229,9 @@ button.mini:disabled {
   }
 }
 
-@media (prefers-color-scheme: dark) and (prefers-reduced-transparency: reduce) {
-  .card,
-  .mini {
+@media (prefers-reduced-transparency: reduce) {
+  :where(:root[data-theme="dark"]) .card,
+  :where(:root[data-theme="dark"]) .mini {
     background: #242328 !important;
   }
 }
@@ -4265,3 +4241,41 @@ button.mini:disabled {
   margin: 9px 0 0;
   color: #7e2f46;
 }
+
+/* Session restoration is not a signed-out welcome screen. */
+.session-check {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+  background: var(--surface);
+  color: var(--graphite);
+  text-align: center;
+}
+.session-check p { margin: 0; color: var(--smoke); font-size: 14px; }
+
+.session-refresh-badge {
+  position: fixed;
+  z-index: 200;
+  top: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100vw - 32px);
+  padding: 9px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  color: var(--graphite);
+  background: var(--surface);
+  box-shadow: 0 3px 12px #0002;
+  font-size: 13px;
+}
+.session-refresh-badge button { border: 0; background: transparent; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; min-height: 32px; }
+.session-refresh-spinner { width: 12px; height: 12px; flex: none; border: 1.5px solid var(--hairline); border-top-color: currentColor; border-radius: 50%; animation: session-refresh-spin .8s linear infinite; }
+@keyframes session-refresh-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .session-refresh-spinner { animation: none; } }

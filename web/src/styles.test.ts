@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import stylesheet from './styles.css?raw'
+import polish from './ui-polish.css?raw'
 
 describe('marker typography', () => {
   it('uses the shared descender-safe line height', () => {
@@ -77,7 +78,7 @@ describe('approved shared content-plane glass', () => {
   })
 
   it('ships purpose-built dark and static accessibility readings', () => {
-    expect(stylesheet).toMatch(/@media \(prefers-color-scheme:\s*dark\)[\s\S]*?\.app-shell\s*{[^}]*#151518;/)
+    expect(stylesheet).toMatch(/:where\(:root\[data-theme="dark"\]\)\s*\.app-shell\s*{[^}]*#151518;/)
     expect(stylesheet).toMatch(/rgba\(var\(--content-paint-rgb\), 0\.34\)/)
     expect(stylesheet).not.toMatch(/color-mix\(in srgb, color-mix\(/)
     expect(stylesheet).toMatch(/@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.app-shell\s*{[^}]*animation:\s*none !important;/)
@@ -154,13 +155,13 @@ describe('approved Spotify import surfaces', () => {
   })
 
   it('ships the deep-graphite dark reading for cards, chips, and the raised primary', () => {
-    expect(stylesheet).toMatch(/@media \(prefers-color-scheme:\s*dark\)[\s\S]*?\.status-chip\.wait\s*{[^}]*color:\s*#e6c98f;[^}]*background:\s*rgba\(209, 138, 101, 0\.14\);/)
-    expect(stylesheet).toMatch(/@media \(prefers-color-scheme:\s*dark\)[\s\S]*?\.btn\.primary\s*{[^}]*color:\s*#1b181c;[^}]*background:\s*#e3dbe0;/)
-    expect(stylesheet).toMatch(/@media \(prefers-color-scheme:\s*dark\)[\s\S]*?\.music-view\s*{[^}]*background:\s*rgba\(21, 21, 24, 0\.34\);/)
+    expect(stylesheet).toMatch(/:where\(:root\[data-theme="dark"\]\)\s*\.status-chip\.wait\s*{[^}]*color:\s*#e6c98f;[^}]*background:\s*rgba\(209, 138, 101, 0\.14\);/)
+    expect(stylesheet).toMatch(/:where\(:root\[data-theme="dark"\]\)\s*\.btn\.primary\s*{[^}]*color:\s*#1b181c;[^}]*background:\s*#e3dbe0;/)
+    expect(stylesheet).toMatch(/:where\(:root\[data-theme="dark"\]\)\s*\.music-view\s*{[^}]*background:\s*rgba\(21, 21, 24, 0\.34\);/)
   })
 
   it('keeps the dialog error line readable on the deep-graphite canvas', () => {
-    expect(stylesheet).toMatch(/@media \(prefers-color-scheme:\s*dark\)[\s\S]*?\.dialog-error[^{]*{[^}]*color:\s*#e9a3b3;/)
+    expect(stylesheet).toMatch(/:where\(:root\[data-theme="dark"\]\)\s*\.dialog-error[^{]*{[^}]*color:\s*#e9a3b3;/)
   })
 })
 
@@ -186,11 +187,38 @@ describe('approved Spotify mix rail outputs', () => {
     expect(stylesheet).toMatch(/\.banner\s*{[^}]*color:\s*#6b5220;[^}]*background:\s*#f4ecdc;[^}]*border:\s*1px solid rgba\(209, 138, 101, 0\.5\);/s)
     expect(stylesheet).toMatch(/\.banner b\s*{[^}]*display:\s*block;/s)
     expect(stylesheet).toMatch(/\.queue-panel:has\(\.banner\)\s*{[^}]*grid-template-rows:\s*auto auto auto minmax\(0, 1fr\) auto;/s)
-    expect(stylesheet).toMatch(/@media \(prefers-color-scheme:\s*dark\)[\s\S]*?\.banner\s*{[^}]*color:\s*#e6c98f;[^}]*background:\s*rgba\(209, 138, 101, 0\.14\);[^}]*border-color:\s*rgba\(209, 138, 101, 0\.35\);/)
+    expect(stylesheet).toMatch(/:where\(:root\[data-theme="dark"\]\)\s*\.banner\s*{[^}]*color:\s*#e6c98f;[^}]*background:\s*rgba\(209, 138, 101, 0\.14\);[^}]*border-color:\s*rgba\(209, 138, 101, 0\.35\);/)
   })
 
   it('holds the copy toast and banner still under reduced motion', () => {
     expect(stylesheet).toMatch(/@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.queue-undo-toast,\s*\.banner\s*{[^}]*animation:\s*none !important;/)
     expect(stylesheet).toMatch(/\.queue-toast-hint\s*{[^}]*display:\s*block;/s)
+  })
+})
+
+describe('session header rule', () => {
+  it('ends the conversation header and the mix rail summary on one continuous line', () => {
+    expect(stylesheet).toMatch(/--session-header-height:\s*126px;/)
+    expect(stylesheet).toMatch(/--session-rule:\s*rgba\(72, 64, 71, 0\.08\);/)
+    expect(stylesheet).toMatch(/\.conversation-header\s*{[^}]*min-height:\s*var\(--session-header-height\);[^}]*border-bottom:\s*1px solid var\(--session-rule\);/s)
+    expect(stylesheet).toMatch(/\.queue-header\s*{[^}]*min-height:\s*calc\(var\(--session-header-height\) - 20px - 35px\);/s)
+    expect(stylesheet).toMatch(/\.queue-summary\s*{[^}]*height:\s*35px;[^}]*margin-inline:\s*-15px;[^}]*border-bottom:\s*1px solid var\(--session-rule\);/s)
+  })
+})
+
+describe('approved new to you mark', () => {
+  it('lets the artist text give way while the plum mark never shrinks or wraps', () => {
+    expect(stylesheet).toMatch(/\.track-copy small\.has-mark\s*{[^}]*display:\s*flex;/s)
+    expect(stylesheet).toMatch(/\.track-who\s*{[^}]*min-width:\s*0;[^}]*overflow:\s*hidden;[^}]*white-space:\s*nowrap;[^}]*text-overflow:\s*ellipsis;/s)
+    expect(stylesheet).toMatch(/\.track-mark\s*{[^}]*flex:\s*none;[^}]*white-space:\s*nowrap;/s)
+    expect(stylesheet).toMatch(/\.track-mark b\s*{[^}]*color:\s*var\(--plum\);[^}]*font-weight:\s*700;/s)
+    expect(stylesheet).not.toMatch(/\.track-mark[^{]*{[^}]*(border|background|animation|border-radius)\s*:/s)
+  })
+})
+
+describe('create playlist new to you sentence', () => {
+  it('sits 10px under the name field in the dialog text, in smoke', () => {
+    expect(polish).toMatch(/\.playlist-dialog \.playlist-dialog-note\s*{[^}]*color:\s*var\(--smoke\)/)
+    expect(polish).toMatch(/\.playlist-dialog \.playlist-dialog-note\s*{[^}]*margin:\s*10px 0 0/)
   })
 })

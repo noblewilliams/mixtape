@@ -1,14 +1,20 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useId, useRef, useState, type CSSProperties } from 'react'
+import { Cassette } from './Cassette'
+import { TapeSettings } from './TapeSettings'
 import type { DjSession } from '../domain'
 
 export function InlineMixName({
   title,
   onRename,
+  initiallyEditing = false,
+  onDone,
 }: {
+  initiallyEditing?: boolean
+  onDone?: () => void
   title: string
   onRename: (title: string) => Promise<void>
 }) {
-  const [editing, setEditing] = useState(false)
+  const [editing, setEditing] = useState(initiallyEditing)
   const [draft, setDraft] = useState(title)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -16,6 +22,7 @@ export function InlineMixName({
   const cancelling = useRef(false)
   const mounted = useRef(true)
   const input = useRef<HTMLInputElement>(null)
+  const hintId = useId()
   useEffect(() => {
     mounted.current = true
     return () => {
@@ -24,8 +31,8 @@ export function InlineMixName({
   }, [])
   useEffect(() => {
     if (editing) {
-      input.current?.focus()
-      input.current?.select()
+      input.current?.focus({ preventScroll: true })
+      input.current?.setSelectionRange(0, input.current.value.length)
     }
   }, [editing])
   async function save() {
@@ -36,6 +43,7 @@ export function InlineMixName({
     }
     if (draft.trim() === title) {
       setEditing(false)
+      onDone?.()
       return
     }
     saving.current = true
@@ -43,7 +51,7 @@ export function InlineMixName({
     setError('')
     try {
       await onRename(draft.trim())
-      if (mounted.current) setEditing(false)
+      if (mounted.current) { setEditing(false); onDone?.() }
     } catch {
       if (mounted.current) setError('Couldn’t save the name. Try again.')
     } finally {
@@ -51,54 +59,64 @@ export function InlineMixName({
       if (mounted.current) setBusy(false)
     }
   }
-  return editing ? (
-    <div className="wc-inline-edit">
-      <input
-        ref={input}
-        aria-label="Mix name"
-        aria-invalid={Boolean(error)}
-        value={draft}
-        maxLength={60}
-        disabled={busy}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => void save()}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault()
-            void save()
-          }
-          if (e.key === 'Escape') {
-            cancelling.current = true
-            setEditing(false)
-          }
-        }}
-      />
-      {busy ? (
-        <small role="status">Saving…</small>
-      ) : error ? (
+  return (
+    <span className={`wc-inline-name ${editing ? 'wc-inline-edit' : ''}`}>
+      {editing && (
         <>
-          <small role="alert">{error}</small>
-          <button className="wc-text" onMouseDown={(e) => e.preventDefault()} onClick={() => void save()}>
-            Retry
-          </button>
+          <input
+            ref={input}
+            className="wc-name"
+            aria-describedby={hintId}
+            aria-label="Mix name"
+            aria-invalid={Boolean(error)}
+            value={draft}
+            maxLength={60}
+            disabled={busy}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={() => void save()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                void save()
+              }
+              if (e.key === 'Escape') {
+                cancelling.current = true
+                setEditing(false)
+                onDone?.()
+              }
+            }}
+          />
+          <span id={hintId} className={busy || error ? 'wc-name-feedback' : 'sr-only'}>
+            {busy ? (
+              <small role="status">Saving…</small>
+            ) : error ? (
+              <>
+                <small role="alert">{error}</small>
+                <button className="wc-text" onMouseDown={(e) => e.preventDefault()} onClick={() => void save()}>
+                  Retry
+                </button>
+              </>
+            ) : (
+              <small>Enter to save · Escape to cancel</small>
+            )}
+          </span>
         </>
-      ) : (
-        <small>Enter to save · Escape to cancel</small>
       )}
-    </div>
-  ) : (
-    <button
-      className="wc-name"
-      aria-label={`Rename ${title}`}
-      onClick={() => {
-        cancelling.current = false
-        setDraft(title)
-        setError('')
-        setEditing(true)
-      }}
-    >
-      {title}
-    </button>
+      <button
+        className="wc-name"
+        aria-hidden={editing || undefined}
+        tabIndex={editing ? -1 : undefined}
+        aria-label={`Rename ${title}`}
+        onClick={() => {
+          cancelling.current = false
+          setDraft(title)
+          setError('')
+          setEditing(true)
+        }}
+      >
+        {title}
+      </button>
+    </span>
   )
 }
 
@@ -108,14 +126,22 @@ export function SessionRow({
   onRename,
   onArchive,
   onRestore,
+  onColor,
+  showTape = false,
+  layout = 'row',
 }: {
   session: DjSession
+  showTape?: boolean
+  layout?: 'row' | 'tile'
   onOpen: () => void
   onRename: (title: string) => Promise<void>
   onArchive: () => Promise<void>
   onRestore?: () => Promise<void>
+  onColor?: (color: string) => Promise<void>
 }) {
+  const [settings, setSettings] = useState(false)
   const [menu, setMenu] = useState(false)
+  const [renaming, setRenaming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [reveal, setReveal] = useState(0)
@@ -173,6 +199,48 @@ export function SessionRow({
     if (amount >= width * 0.65) void act(onArchive)
     else setReveal(amount >= 18 ? 44 : 0)
   }
+  const cassette = <Cassette title={session.title} caseColor={session.caseColor} stockColor={session.stockColor} />
+  const menuButtonElement = (
+    <button
+      ref={menuButton}
+      className="wc-text wc-more"
+      disabled={busy}
+      aria-label={layout === 'tile' ? `Mix actions for ${session.title}` : 'Mix actions'}
+      aria-expanded={menu}
+      onClick={() => setMenu((value) => !value)}
+    >
+      •••
+    </button>
+  )
+  const extras = (
+    <>
+      {menu && (
+        <div ref={menuElement} className="wc-popover wc-session-menu" role="group" aria-label="Mix actions">
+          <button className="wc-text" aria-label={`Rename ${session.title}`} onClick={() => { setMenu(false); setRenaming(true) }}>Rename</button>
+          {onColor && <button className="wc-text" onClick={() => { setMenu(false); setSettings(true) }}>Tape settings</button>}
+          {session.status === 'active' && <button className="wc-text" onClick={() => void act(onArchive)}>
+            Archive
+          </button>}
+          {layout === 'tile' && session.status === 'archived' && onRestore && <button className="wc-text" onClick={() => void act(onRestore)}>Restore</button>}
+        </div>
+      )}
+      {settings && onColor && <TapeSettings session={session} onColor={onColor} onClose={() => { setSettings(false); menuButton.current?.focus() }} />}
+      {error && <p role="alert">{error}</p>}
+    </>
+  )
+  if (layout === 'tile') return (
+    <div className={`wc-session-tile ${menu ? 'has-menu' : ''}`}>
+      {renaming ? <span className="mix-tape-open">{cassette}</span> : <button className="mix-tape-open" onClick={onOpen} aria-label={`Open ${session.title}`}>{cassette}</button>}
+      <div className="wc-tile-foot">
+        <span className="wc-session-copy">
+          <strong>{renaming ? <InlineMixName title={session.title} onRename={onRename} initiallyEditing onDone={() => setRenaming(false)} /> : session.title}</strong>
+          <small>{session.trackCount} songs · {session.ageLabel}</small>
+        </span>
+        {menuButtonElement}
+      </div>
+      {extras}
+    </div>
+  )
   return (
     <div ref={row} className={`wc-session-row ${menu ? 'has-menu' : ''}`}>
       {session.status === 'active' && reveal > 0 && (
@@ -266,40 +334,33 @@ export function SessionRow({
           wheel.current = setTimeout(() => finish(amount, width), 120)
         }}
       >
-        <div className="wc-session-copy">
-          <InlineMixName title={session.title} onRename={onRename} />
-          <small>
-            {session.trackCount} songs · {session.ageLabel}
-          </small>
-        </div>
-        <button className="wc-text" onClick={onOpen} aria-label={`Open ${session.title}`}>
-          Open
-        </button>
-        {session.status === 'archived' ? (
+        {renaming ? (
+          <div className="wc-session-open wc-session-renaming">
+            {showTape && <span className="mix-tape-open">{cassette}</span>}
+            <div className="wc-session-copy">
+              <strong><InlineMixName title={session.title} onRename={onRename} initiallyEditing onDone={() => setRenaming(false)} /></strong>
+              <small>{session.trackCount} songs · {session.ageLabel}</small>
+            </div>
+          </div>
+        ) : (
+          <div className="wc-session-open">
+            {showTape && <button className="mix-tape-open" onClick={onOpen} aria-label={`Open ${session.title}`}>{cassette}</button>}
+            <span className="wc-session-copy">
+              <button className="wc-name wc-row-name" onClick={() => setRenaming(true)} aria-label={`Edit mix name: ${session.title}`}>
+                <strong>{session.title}</strong>
+              </button>
+              <small>{showTape ? <>{session.trackCount} songs · {session.ageLabel}</> : <button className="wc-row-open" onClick={onOpen} aria-label={`Open ${session.title}`}>{session.trackCount} songs · {session.ageLabel}</button>}</small>
+            </span>
+          </div>
+        )}
+        {session.status === 'archived' && (
           <button className="wc-text" disabled={busy} onClick={() => onRestore && void act(onRestore)}>
             Restore
           </button>
-        ) : (
-          <button
-            ref={menuButton}
-            className="wc-text"
-            disabled={busy}
-            aria-label="Mix actions"
-            aria-expanded={menu}
-            onClick={() => setMenu((value) => !value)}
-          >
-            •••
-          </button>
         )}
+        {menuButtonElement}
       </div>
-      {menu && (
-        <div ref={menuElement} className="wc-popover wc-session-menu" role="group" aria-label="Mix actions">
-          <button className="wc-text" onClick={() => void act(onArchive)}>
-            Archive
-          </button>
-        </div>
-      )}
-      {error && <p role="alert">{error}</p>}
+      {extras}
     </div>
   )
 }

@@ -133,16 +133,43 @@
   max-width: 100%;
   overflow-wrap: anywhere;
 }
-.wc-inline-edit input {
+.wc-inline-name {
+  display: block;
+  position: relative;
+  min-width: 0;
+}
+.wc-inline-edit > button {
+  visibility: hidden;
+}
+.wc-inline-edit::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0;
+  border-bottom: 1px solid var(--smoke);
+  pointer-events: none;
+}
+.wc-inline-edit input.wc-name {
+  position: absolute;
+  inset: 0;
   width: 100%;
-  min-height: 44px;
-  font: inherit;
-  font-weight: 600;
+  height: 100%;
+  min-width: 0;
   color: inherit;
   background: transparent;
-  border: 1px solid var(--slate);
-  border-radius: 5px;
-  padding: 5px;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  box-shadow: none;
+  cursor: text;
+}
+.wc-name-feedback {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 1;
+  padding: 4px 8px;
+  background: var(--surface);
+  color: var(--graphite);
 }
 .wc-inline-edit small {
   display: block;
@@ -177,15 +204,38 @@
 }
 .wc-session-menu button {
   width: 100%;
+  min-height: 34px;
+  padding-block: 6px;
+  font-size: 12px;
   text-align: left;
 }
-.wc-tabs {
-  display: flex;
-  gap: 8px;
+@media (pointer: coarse) {
+  .wc-session-menu button {
+    min-height: 44px;
+  }
 }
-.wc-tabs [aria-pressed='true'] {
-  box-shadow: inset 0 -2px var(--plum);
-  border-radius: 0;
+/* The hit area stays 44px; only the hover wash shrinks to hug the dots. */
+.wc-more {
+  position: relative;
+  isolation: isolate;
+}
+.wc-more:hover {
+  background: transparent;
+}
+.wc-more::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 30px;
+  height: 22px;
+  border-radius: 6px;
+  transform: translate(-50%, -50%);
+  z-index: -1;
+}
+.wc-more:hover:not(:disabled)::before,
+.wc-more[aria-expanded='true']::before {
+  background: rgba(116, 109, 117, 0.12);
 }
 .wc-undo {
   position: fixed;
@@ -229,47 +279,70 @@
   padding: 4px 10px;
 }
 .wc-playlist-picker {
-  bottom: calc(100% + 10px);
+  bottom: calc(100% + 6px);
   left: 0;
-  width: min(330px, 100%);
-  max-height: min(320px, calc(100dvh - 250px));
+  width: min(256px, 100%);
+  max-height: min(264px, calc(100dvh - 250px));
   overflow: auto;
-  padding: 10px;
-}
-.wc-playlist-picker header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  padding: 4px;
+  border-radius: 10px;
+  box-shadow: 0 6px 18px #0000001f;
 }
 .wc-playlist-picker input[type='search'] {
-  min-height: 44px;
-  width: 100%;
-  font: inherit;
-  color: inherit;
-  padding: 10px 4px;
-  border: 0;
-  border-bottom: 1px solid #746d7526;
-  background: transparent;
-}
-.wc-pick-row {
   display: block;
   width: 100%;
+  height: 32px;
+  margin-bottom: 4px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 13px;
+  color: inherit;
+  border: 0;
+  border-bottom: 1px solid var(--hairline);
+  border-radius: 0;
+  background: transparent;
+}
+.wc-playlist-picker input[type='search']:focus,
+.wc-playlist-picker input[type='search']:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+.wc-playlist-picker input[type='search']::placeholder {
+  color: var(--muted);
+}
+.wc-playlist-picker > p {
+  margin: 0;
+  padding: 8px;
+  color: var(--muted);
+}
+.wc-pick-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 8px;
   font: inherit;
   text-align: left;
-  padding: 10px 6px;
-  min-height: 44px;
   border: 0;
+  border-radius: 6px;
   background: transparent;
   color: inherit;
   cursor: pointer;
 }
-.wc-pick-row strong,
-.wc-pick-row small {
-  display: block;
+.wc-pick-row:hover {
+  background: rgba(116, 109, 117, 0.08);
+}
+.wc-pick-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .wc-pick-row small {
-  margin-top: 4px;
-  color: var(--smoke);
+  flex: none;
+  color: var(--muted);
   font-size: 11px;
 }
 .wc-check {
@@ -315,15 +388,24 @@
   margin-top: 18px;
 }
 .wc-taste {
-  margin: 22px 0;
-  padding: 14px 0;
-  border-block: 1px solid var(--hairline);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 10px;
+  min-height: 44px;
 }
-.wc-taste p {
-  max-width: 600px;
+.wc-taste .wc-text {
+  margin-left: -6px;
+  padding-inline: 6px;
+  color: var(--plum);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: var(--hairline);
+  text-underline-offset: 3px;
 }
 .wc-taste small {
-  display: block;
+  flex-basis: 100%;
 }
 .conversation-header h1 .wc-name {
   font: inherit;
@@ -372,26 +454,24 @@
     max-width: calc(100vw - 40px);
   }
 }
-@media (prefers-color-scheme: dark) {
-  .wc-overlay,
-  .wc-undo {
+:where(:root[data-theme="dark"]) .wc-overlay,
+  :where(:root[data-theme="dark"]) .wc-undo {
     color: #eee9ed;
   }
-  .wc-modal,
-  .wc-popover,
-  .wc-undo {
+:where(:root[data-theme="dark"]) .wc-modal,
+  :where(:root[data-theme="dark"]) .wc-popover,
+  :where(:root[data-theme="dark"]) .wc-undo {
     background: #28262e;
   }
-  .wc-session-surface {
+:where(:root[data-theme="dark"]) .wc-session-surface {
     background: #25242bcc;
   }
-  .wc-danger {
+:where(:root[data-theme="dark"]) .wc-danger {
     color: #eda4b7;
   }
-  .wc-attached-label {
+:where(:root[data-theme="dark"]) .wc-attached-label {
     color: #adc6d8;
   }
-}
 @media (prefers-reduced-motion: reduce) {
   .wc-session-surface {
     transition: none;
@@ -405,8 +485,8 @@
     background: #eeefed;
   }
 }
-@media (prefers-color-scheme: dark) and (prefers-reduced-transparency: reduce) {
-  .wc-session-surface {
+@media (prefers-reduced-transparency: reduce) {
+  :where(:root[data-theme="dark"]) .wc-session-surface {
     background: #25242b;
   }
 }
@@ -417,15 +497,24 @@
 .wc-playlist-picker {
   z-index: 110;
   color: #38333a;
-}
-.wc-playlist-picker .wc-text {
-  font-size: 12px;
-}
-.wc-playlist-picker .wc-pick-row {
   font-size: 13px;
 }
-.wc-playlist-picker .wc-check {
+.wc-playlist-picker .wc-text {
+  min-height: 32px;
+  padding: 4px 8px;
   font-size: 12px;
+}
+.wc-playlist-picker .wc-pick-row:focus-visible {
+  outline-offset: -2px;
+}
+.wc-playlist-picker .wc-check {
+  min-height: 32px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+.wc-playlist-picker .wc-check input {
+  width: 14px;
+  height: 14px;
 }
 @media (max-width: 760px) {
   .wc-mobile-account {
@@ -443,29 +532,10 @@
     white-space: normal;
   }
 }
-@media (prefers-color-scheme: dark) {
-  .wc-playlist-picker {
+:where(:root[data-theme="dark"]) .wc-playlist-picker {
     color: #eee9ed;
   }
-}
 
-.home-panel:has(.wc-tabs) {
-  display: flex;
-  flex-direction: column;
-  overflow: auto;
-}
-.home-panel:has(.wc-tabs) > .home-header,
-.home-panel:has(.wc-tabs) > .collection-toolbar,
-.home-panel:has(.wc-tabs) > .wc-tabs {
-  flex: none;
-}
-.home-panel:has(.wc-tabs) > .tape-grid {
-  flex: 1;
-  overflow: visible;
-}
-.home-panel > .wc-tabs {
-  padding: 8px 18px;
-}
 .wc-closet-mix {
   width: 64px;
   flex: none !important;
@@ -541,3 +611,30 @@
   height: auto;
   padding-top: 30px;
 }
+
+.wc-session-open {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+  align-self: stretch;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+}
+.wc-session-open .wc-session-copy strong { display: block; font-size: 15px; font-weight: 500; }
+.wc-session-open .wc-session-copy small { padding-left: 0; }
+.wc-session-open .mix-tape-open:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; border-radius: 4px; }
+.wc-session-open .wc-row-name:hover { background: transparent; text-decoration: underline; text-underline-offset: 3px; }
+.wc-session-open .wc-session-copy .wc-row-name { padding: 0; font: inherit; min-height: 0; }
+.wc-row-open { padding: 0; border: 0; background: transparent; font: inherit; color: inherit; }
+
+.wc-session-surface:has(.wc-session-open) { padding-top: 0; padding-bottom: 0; }
+.wc-session-open { padding: 14px 0; cursor: default; }
+.wc-session-renaming { cursor: default; }
+.wc-session-renaming .wc-inline-name .wc-name { font: inherit; padding: 0; min-height: 0; }

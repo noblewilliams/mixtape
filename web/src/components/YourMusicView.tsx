@@ -1,3 +1,5 @@
+import { useRestorableState, useWorkspaceRestoring } from '../lib/workspace-restore'
+import { AppleMark, SpotifyMark } from './ProviderMarks'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
   ApiError,
@@ -14,6 +16,7 @@ import { spotifyStatus, spotifySource, recentDayLabel } from '../lib/onboarding'
 import { AppleMusicSyncPanel } from './AppleMusicSyncPanel'
 import { MusicEmpty, PlaylistBrowser, musicDate } from './PlaylistBrowser'
 import { SpotifyMusicView } from './SpotifyMusicView'
+import { Tabs } from './Tabs'
 import './your-music.css'
 
 export type MusicSection = 'auto' | 'playlists' | 'sources' | 'apple' | 'spotify'
@@ -36,10 +39,11 @@ type Props = {
 }
 export function YourMusicView(props: Props) {
   const { api, section, onSection, uploadGate, syncRun, revision, onSessionExpired } = props
-  const [data, setData] = useState<{
+  const restoring = useWorkspaceRestoring()
+  const [data, setData] = useRestorableState<{
     summary: MusicCollectionSummary
     onboarding: OnboardingResponse
-  } | null>(null)
+  } | null>('library.summary', null)
   const [failed, setFailed] = useState(false)
   const [reload, setReload] = useState(0)
   const viewRef = useRef<HTMLElement>(null)
@@ -49,6 +53,7 @@ export function YourMusicView(props: Props) {
   const callbacks = useRef({ onSessionExpired, onSection })
   callbacks.current = { onSessionExpired, onSection }
   useEffect(() => {
+    if (restoring) return
     const controller = new AbortController()
     setFailed(false)
     void Promise.all([api.getMusicCollectionSummary(controller.signal), api.getOnboarding(controller.signal)])
@@ -62,17 +67,8 @@ export function YourMusicView(props: Props) {
         }
       })
     return () => controller.abort()
-  }, [api, revision, reload])
-  const current =
-    section === 'auto'
-      ? data &&
-        (data.summary.apple.librarySyncedAt ||
-          data.summary.apple.playlists ||
-          data.summary.spotify.playlists ||
-          data.onboarding.importCompletedAt)
-        ? 'playlists'
-        : 'sources'
-      : section
+  }, [api, revision, reload, restoring])
+  const current = section === 'auto' ? 'playlists' : section
   useEffect(() => {
     if (viewRef.current) viewRef.current.scrollTop = 0
     headingRef.current?.focus({ preventScroll: true })
@@ -82,28 +78,35 @@ export function YourMusicView(props: Props) {
   const appleSaved = Boolean(data?.summary.apple.librarySyncedAt || data?.summary.apple.playlists)
   const hasResult = runState.kind === 'result'
   return (
-    <main ref={viewRef} className="ym-view" aria-label="Your music">
+    <main ref={viewRef} className="ym-view" aria-label="Library">
       <header className="ym-header">
         <h1 ref={headingRef} tabIndex={-1}>
-          Your music
+          Library
         </h1>
-        <p>The music you bring. The mixes you make.</p>
+        {(appleSaved || props.connected || spotify) && (
+          <div className="library-source-badges" aria-label="Connected music sources">
+            {(appleSaved || props.connected) && (
+              <button className="library-source-badge" onClick={() => onSection('apple')}>
+                <AppleMark /><span>Apple Music</span>{' '}
+                <small>{props.connected ? 'Connected' : 'Library saved'}</small>
+              </button>
+            )}
+            {spotify && (
+              <button className="library-source-badge" onClick={() => onSection('spotify')}>
+                <SpotifyMark /><span>Spotify</span>{' '}<small>Imported</small>
+              </button>
+            )}
+          </div>
+        )}
       </header>
-      <nav className="ym-tabs" aria-label="Your music sections">
-        <button
-          onClick={() => onSection('playlists')}
-          aria-current={current === 'playlists' ? 'page' : undefined}
-        >
-          Playlists
-        </button>
-        <button
-          onClick={() => onSection('sources')}
-          aria-current={current !== 'playlists' ? 'page' : undefined}
-        >
-          Sources
-        </button>
-      </nav>
+      <Tabs
+        label="Library sections"
+        current={current === 'playlists' ? 'playlists' : 'sources'}
+        onSelect={onSection}
+        items={[{ id: 'playlists', label: 'Playlists' }, { id: 'sources', label: 'Sources' }]}
+      />
       <div className="ym-content">
+        {failed && data && <p role="status">Couldn’t refresh your sources. Your saved information is still here. <button className="minimal-retry" onClick={() => setReload(n => n + 1)}>Retry</button></p>}
         {current === 'playlists' ? (
           <>
             {owner || hasResult ? (
@@ -141,7 +144,7 @@ export function YourMusicView(props: Props) {
             onSpotify={() => onSection('spotify')}
             onSignIn={onSessionExpired}
           />
-        ) : failed ? (
+        ) : failed && !data ? (
           <MusicEmpty
             title="Couldn’t load your sources"
             action="Try again"
@@ -150,13 +153,26 @@ export function YourMusicView(props: Props) {
             We couldn’t check what is connected to your account. Try again before adding or removing a source.
           </MusicEmpty>
         ) : !data ? (
-          <div aria-busy="true" aria-label="Loading sources">
-            <div className="card ym-skeleton" />
-            <div className="card ym-skeleton" />
+          <div className="ym-source-stack" aria-busy="true" aria-label="Loading sources">
+            {(['apple', 'spotify'] as const).map((provider) => (
+              <article className="ym-source-item" key={provider}>
+                <div className="ym-source-row">
+                  <span className="ym-source-mark">{provider === 'apple' ? <AppleMark /> : <SpotifyMark />}</span>
+                  <div className="ym-source-body">
+                    <h3>{provider === 'apple' ? 'Apple Music' : 'Spotify'}</h3>
+                    <div className="ym-source-placeholder" aria-hidden="true" />
+                  </div>
+                  <span className="status-chip">Checking…</span>
+                  <button className="btn ym-source-action" disabled aria-label={provider === 'apple' ? 'Connect Apple Music' : 'Import Spotify'}>
+                    {provider === 'apple' ? 'Connect' : 'Import'}
+                  </button>
+                </div>
+              </article>
+            ))}
           </div>
         ) : current === 'spotify' ? (
           <>
-            <button className="btn ym-back" onClick={() => onSection('sources')}>
+            <button className="ym-back" onClick={() => onSection('sources')}>
               ← Sources
             </button>
             {owner === 'apple' ? (
@@ -186,17 +202,12 @@ export function YourMusicView(props: Props) {
         ) : (
           <>
             <div className="ym-source-intro">
-              <p className="quiet-kicker">Bring your music</p>
-              <h2>A little more of you.</h2>
-              <p>
-                Connect Apple Music, import Spotify, or bring both. Your music helps shape the mixes you make
-                here.
-              </p>
+              <p>Connect Apple Music or import your Spotify playlists. Both help shape your mixes.</p>
             </div>
             <div className="ym-source-stack">
-              <article className="card ym-source-card">
+              <article className="ym-source-item">
                 <div className="ym-source-row">
-                  <span className="ym-source-mark">AM</span>
+                  <span className="ym-source-mark"><AppleMark /></span>
                   <div className="ym-source-body">
                     <h3>Apple Music</h3>
                     <p>
@@ -219,18 +230,16 @@ export function YourMusicView(props: Props) {
                     </p>
                   </div>
                   <span className={`status-chip ${appleSaved ? 'ok' : 'wait'}`}>
-                    {owner === 'apple' ? 'Sync in progress' : appleSaved ? 'Synced' : 'Not connected'}
+                    {owner === 'apple' ? 'Sync in progress' : appleSaved ? 'Synced' : props.connected ? 'Connected' : 'Not connected'}
                   </span>
-                </div>
-                <div className="btn-row">
-                  <button className={`btn ${appleSaved ? '' : 'primary'}`} onClick={() => onSection('apple')}>
-                    {appleSaved ? 'Manage Apple Music' : 'Connect Apple Music'}
+                  <button className="btn ym-source-action" aria-label={appleSaved ? 'Manage Apple Music' : 'Connect Apple Music'} onClick={() => onSection('apple')}>
+                    {appleSaved ? 'Manage' : 'Connect'}
                   </button>
                 </div>
               </article>
-              <article className="card ym-source-card">
+              <article className="ym-source-item">
                 <div className="ym-source-row">
-                  <span className="ym-source-mark">SP</span>
+                  <span className="ym-source-mark"><SpotifyMark /></span>
                   <div className="ym-source-body">
                     <h3>Spotify</h3>
                     <p>
@@ -238,8 +247,7 @@ export function YourMusicView(props: Props) {
                         <>
                           Imported {recentDayLabel(spotify.lastImportedAt ?? spotify.connectedAt)} ·{' '}
                           {data.summary.spotify.playlists} playlists
-                          <br />
-                          Re-import any time.
+
                         </>
                       ) : (
                         'Bring listening history and playlists from your Spotify data.'
@@ -249,17 +257,15 @@ export function YourMusicView(props: Props) {
                   <span className={`status-chip ${status?.tone ?? 'wait'}`}>
                     {status?.label ?? 'Not imported'}
                   </span>
-                </div>
-                <div className="btn-row">
-                  <button className="btn" onClick={() => onSection('spotify')}>
-                    {spotify || data.onboarding.markedRequestedAt ? 'Continue Spotify import' : 'Get started'}
+                  <button className="btn ym-source-action" aria-label={spotify || data.onboarding.markedRequestedAt ? 'Continue Spotify import' : 'Import Spotify'} onClick={() => onSection('spotify')}>
+                    {spotify || data.onboarding.markedRequestedAt ? 'Manage import' : 'Import'}
                   </button>
                 </div>
               </article>
             </div>
             <p className="ym-notice">
-              Adding a source does not remove the other. Apple access is authorized in each browser; music
-              already synced to your Mixtape account stays available.
+              Spotify imports are snapshots, not a live connection. Adding a source keeps your existing music.
+              Apple Music access is authorized in each browser.
             </p>
           </>
         )}

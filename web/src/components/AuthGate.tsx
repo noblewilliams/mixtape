@@ -5,6 +5,7 @@ import {
   type AuthPreferenceStore,
   type AuthProvider,
 } from '../lib/auth-provider'
+import { restoredIdentity, rememberIdentity, clearWorkspaceRestore } from '../lib/workspace-restore'
 import { Cassette } from './Cassette'
 import { AppleMark, GoogleMark } from './ProviderMarks'
 
@@ -31,7 +32,7 @@ export type AuthBridge = {
 type AuthGateProps = {
   auth: AuthBridge
   preferences?: AuthPreferenceStore
-  children: (user: AuthUser, lastUsed: AuthProvider | null) => ReactNode
+  children: (user: AuthUser, lastUsed: AuthProvider | null, restoring: boolean) => ReactNode
 }
 
 function label(provider: AuthProvider): string {
@@ -40,6 +41,7 @@ function label(provider: AuthProvider): string {
 
 export function AuthGate({ auth, preferences = browserAuthPreferences, children }: AuthGateProps) {
   const session = auth.useSession()
+  const [cachedUser, setCachedUser] = useState(restoredIdentity)
   const [redirecting, setRedirecting] = useState<AuthProvider | null>(null)
   const [lastUsed, setLastUsed] = useState<AuthProvider | null>(() => preferences.lastUsed())
   const [signInError, setSignInError] = useState(() => authErrorFromSearch(window.location.search))
@@ -59,9 +61,56 @@ export function AuthGate({ auth, preferences = browserAuthPreferences, children 
     if (promoted) setLastUsed(promoted)
   }, [preferences, session.data?.user?.id])
 
-  if (session.data?.user) return children(session.data.user, lastUsed)
+  useEffect(() => {
+    const user = session.data?.user
+    if (user) {
+      if (cachedUser && cachedUser.id !== user.id) clearWorkspaceRestore(cachedUser.id)
+      rememberIdentity(user)
+      setCachedUser(user)
+    } else if (!session.isPending && !session.error) {
+      clearWorkspaceRestore()
+      setCachedUser(null)
+    }
+  }, [session.data?.user.id, session.data?.user.name, session.data?.user.email, session.data?.user.image, session.isPending, session.error])
 
-  const waiting = session.isPending || redirecting !== null
+  const restoring = session.isPending || Boolean(session.error)
+  const visibleUser = session.data?.user ?? (restoring ? cachedUser : null)
+  if (visibleUser) {
+    return (
+      <>
+        <div className="workspace-session" inert={restoring} aria-busy={restoring}>
+          {children(visibleUser, lastUsed, restoring)}
+        </div>
+        {restoring && (
+          <div className="session-refresh-badge" role={session.error && !session.isPending ? 'alert' : 'status'}>
+            {session.error && !session.isPending ? (
+              <>Couldn’t refresh your session.<button onClick={() => { void session.refetch() }}>Retry</button></>
+            ) : (
+              <><span className="session-refresh-spinner" aria-hidden="true" />Refreshing…</>
+            )}
+          </div>
+        )}
+      </>
+    )
+  }
+
+  if (session.isPending || (session.error && !signInError)) {
+    return (
+      <main className="session-check" aria-label="Mixtape">
+        <span className="auth-wordmark">mixtape</span>
+        {session.isPending ? (
+          <p role="status">Checking your session…</p>
+        ) : (
+          <>
+            <p role="alert">We couldn’t check your session. Try again.</p>
+            <button className="minimal-retry" onClick={() => { void session.refetch() }}>Retry</button>
+          </>
+        )}
+      </main>
+    )
+  }
+
+  const waiting = redirecting !== null
   const errorMessage = signInError || (session.error ? 'We couldn’t check your session. Try again.' : '')
 
   async function startSignIn(provider: AuthProvider) {
@@ -99,10 +148,6 @@ export function AuthGate({ auth, preferences = browserAuthPreferences, children 
             {redirecting ? (
               <p className="auth-status" role="status">
                 Opening {label(redirecting)} sign-in
-              </p>
-            ) : session.isPending ? (
-              <p className="auth-status" role="status">
-                Checking your session
               </p>
             ) : (
               <p className="auth-status">Sign in to start a mix and keep your taste in sync.</p>

@@ -35,17 +35,17 @@ export function PlaylistAttachment({
   const [retry, setRetry] = useState(0)
   const anchor = useRef<HTMLDivElement>(null)
   const picker = useRef<HTMLDivElement>(null)
-  const [position, setPosition] = useState({ left: 16, top: 16, width: 300, maxHeight: 300 })
+  const [position, setPosition] = useState({ left: 16, top: 16, width: 256, maxHeight: 264 })
   useLayoutEffect(() => {
     if (!open) return
     const place = () => {
       const box = anchor.current!.getBoundingClientRect()
-      const width = Math.min(330, window.innerWidth - 32)
-      const height = Math.min(320, window.innerHeight - 32)
+      const width = Math.min(256, window.innerWidth - 32)
+      const height = Math.min(264, window.innerHeight - 32)
       const measured = Math.min(picker.current?.scrollHeight ?? height, height)
       setPosition({
         left: Math.max(16, Math.min(box.left, window.innerWidth - width - 16)),
-        top: Math.max(16, box.top - measured - 10),
+        top: Math.max(16, box.top - measured - 6),
         width,
         maxHeight: height,
       })
@@ -236,17 +236,6 @@ export function PlaylistAttachment({
             role="region"
             aria-label="Playlist inspiration"
           >
-            <header>
-              <strong>Playlist inspiration</strong>
-              <button
-                type="button"
-                className="wc-text"
-                onClick={() => setOpen(false)}
-                aria-label="Close playlist picker"
-              >
-                ×
-              </button>
-            </header>
             <input
               type="search"
               aria-label="Find a playlist"
@@ -279,9 +268,9 @@ export function PlaylistAttachment({
                       })
                     }
                   >
-                    <strong>{playlist.name}</strong>
+                    <span>{playlist.name}</span>
                     <small>
-                      {playlist.source === 'apple' ? 'Apple Music' : 'Spotify'} · {playlist.entryCount} songs
+                      {playlist.source === 'apple' ? 'Apple Music' : 'Spotify'} · {playlist.entryCount}
                     </small>
                   </button>
                 ))}

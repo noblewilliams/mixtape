@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { AuthGate, type AuthBridge } from './AuthGate'
+import { AuthGate, type AuthBridge, type AuthSessionState } from './AuthGate'
+import { rememberIdentity, clearWorkspaceRestore } from '../lib/workspace-restore'
 import type { AuthPreferenceStore } from '../lib/auth-provider'
 
 function preferences(lastUsed: 'apple' | 'google' | null = null): AuthPreferenceStore {
@@ -24,6 +25,7 @@ function bridge(overrides: Partial<AuthBridge> = {}): AuthBridge {
 describe('authentication gate', () => {
   afterEach(() => {
     cleanup()
+    clearWorkspaceRestore()
     window.history.replaceState({}, '', '/')
   })
 
@@ -115,4 +117,57 @@ describe('authentication gate', () => {
 
     expect(screen.getByText('Welcome Noble')).toBeInTheDocument()
   })
+})
+
+
+describe('session restoration', () => {
+  afterEach(() => { cleanup(); clearWorkspaceRestore() })
+  it('shows neither welcome nor protected content until the session check completes', () => {
+    let state: AuthSessionState = { data: null, isPending: true, error: null, refetch: vi.fn() }
+    const auth = bridge({ useSession: () => state })
+    const view = render(<AuthGate auth={auth}>{() => <p>My mixes</p>}</AuthGate>)
+    expect(screen.getByRole('status')).toHaveTextContent('Checking your session')
+    expect(screen.queryByRole('heading', { name: 'Your music, mixed for right now.' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Continue with/ })).not.toBeInTheDocument()
+    expect(screen.queryByText('My mixes')).not.toBeInTheDocument()
+    state = { ...state, isPending: false, data: { user: { id: 'u', name: 'Listener', email: 'test@example.test' } } }
+    view.rerender(<AuthGate auth={auth}>{() => <p>My mixes</p>}</AuthGate>)
+    expect(screen.getByText('My mixes')).toBeInTheDocument()
+    state = { ...state, data: null }
+    view.rerender(<AuthGate auth={auth}>{() => <p>My mixes</p>}</AuthGate>)
+    expect(screen.getByRole('button', { name: 'Continue with Google' })).toBeInTheDocument()
+  })
+  it('offers session retry instead of treating a network failure as signed out', () => {
+    const refetch = vi.fn()
+    render(<AuthGate auth={bridge({ useSession: () => ({ data: null, isPending: false, error: new Error('offline'), refetch }) })}>{() => <p>My mixes</p>}</AuthGate>)
+    expect(screen.getByRole('alert')).toHaveTextContent('couldn’t check your session')
+    expect(screen.queryByRole('button', { name: /Continue with/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(refetch).toHaveBeenCalledOnce()
+  })
+})
+
+
+it('retains cached content with a floating status until the session is verified', () => {
+  clearWorkspaceRestore()
+  rememberIdentity({ id: 'u', name: 'Listener', email: 'test@example.test' })
+  let state: AuthSessionState = { data: null, isPending: true, error: null, refetch: vi.fn() }
+  const auth = bridge({ useSession: () => state })
+  const view = render(<AuthGate auth={auth}>{(_user, _provider, restoring) => <p>{restoring ? 'Saved Library' : 'Live Library'}</p>}</AuthGate>)
+  expect(screen.getByText('Saved Library')).toBeInTheDocument()
+  expect(screen.getByRole('status')).toHaveTextContent('Refreshing')
+  expect(screen.getByText('Saved Library').closest('[inert]')).not.toBeNull()
+  state = { ...state, isPending: false, data: { user: { id: 'u', name: 'Listener', email: 'test@example.test' } } }
+  view.rerender(<AuthGate auth={auth}>{(_user, _provider, restoring) => <p>{restoring ? 'Saved Library' : 'Live Library'}</p>}</AuthGate>)
+  expect(screen.getByText('Live Library')).toBeInTheDocument()
+  expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  cleanup(); clearWorkspaceRestore()
+})
+it('clears the saved page after a confirmed signed-out response', () => {
+  clearWorkspaceRestore()
+  rememberIdentity({ id: 'u', name: 'Listener', email: 'test@example.test' })
+  render(<AuthGate auth={bridge()}>{() => <p>Saved Library</p>}</AuthGate>)
+  expect(screen.queryByText('Saved Library')).not.toBeInTheDocument()
+  expect(sessionStorage.getItem('mixtape.workspace.v1:identity')).toBeNull()
+  cleanup()
 })

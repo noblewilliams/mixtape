@@ -1,3 +1,4 @@
+import { AppleMusicMark, SpotifyMark } from './ProviderMarks'
 import { useState } from 'react'
 import type { ApiMusicSource, ListeningImportSource } from '../api/client'
 import { ledgerRangeLabel, shortDate, sourceName } from '../lib/onboarding'
@@ -41,14 +42,14 @@ export function MusicSourcesList({ sources, onImportAgain, onRemove }: MusicSour
 
   return (
     <section className="card sources-card" aria-labelledby="sources-title">
-      <p className="quiet-kicker" id="sources-title">Your music · connected</p>
+      <p className="quiet-kicker" id="sources-title">Connected sources</p>
       <ul className="source-list">
         {sources.map((source) => {
           const name = sourceName(source)
           return (
             <li className="source-row" key={source.source}>
               <span className="source-mark" aria-hidden="true">
-                {source.source === 'spotify_export' ? 'SP' : 'AM'}
+                {source.source === 'spotify_export' ? <SpotifyMark /> : <AppleMusicMark />}
               </span>
               <span className="source-copy">
                 <strong>{name}</strong>

@@ -1,9 +1,17 @@
+import { EmptyState, MixSkeletons } from './UiStates'
 import { SessionRow } from './SessionControls'
+import { TapeRack } from './TapeRack'
+import { Tabs } from './Tabs'
+import { ViewSwitch } from './ViewSwitch'
 import type { CollectionView, DjSession } from '../domain'
-import type { CSSProperties, ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { NewTapeCompactButton } from './TapeActions'
 
 type HomeProps = {
+  loading?: boolean
+  error?: string
+  onRetry?: () => void
+  onColor?: (id: string, color: string) => Promise<void>
   player?: ReactNode
   suggestions?: ReactNode
   archived?: boolean
@@ -18,79 +26,51 @@ type HomeProps = {
   onNewTape: () => void
 }
 
-const darkSpines = new Set(['#3e4850', '#51434f', '#596454', '#76584f'])
+function countLine(count: number, archived: boolean) {
+  return `${count} ${archived ? 'archived ' : ''}${count === 1 ? 'mix' : 'mixes'}${count ? ' · recently updated' : ''}`
+}
 
 export function Home({
-  player, suggestions, sessions, archived = false, onArchived, onRename, onArchive, onRestore,
+  loading = false, error, onRetry, onColor, player, suggestions, sessions, archived = false, onArchived, onRename, onArchive, onRestore,
   collectionView,
   onChangeCollectionView,
   onOpenSession,
   onNewTape,
 }: HomeProps) {
+  // A stored view from another version must not break the page.
+  const view: CollectionView = collectionView === 'grid' || collectionView === 'closet' ? collectionView : 'list'
+  const row = (session: DjSession, layout: 'row' | 'tile') => (
+    <SessionRow showTape layout={layout} key={session.id} session={session} onOpen={() => onOpenSession(session.id)}
+      onColor={onColor ? (color) => onColor(session.id, color) : undefined}
+      onRename={(title) => onRename?.(session.id, title) ?? Promise.resolve()}
+      onArchive={() => onArchive?.(session.id) ?? Promise.resolve()}
+      onRestore={() => onRestore?.(session.id) ?? Promise.resolve()} />
+  )
   return (
-    <main className="home-panel">
+    <main className="home-panel mixes-panel">
       {player}
       <header className="home-header">
         <div>
-          <p className="quiet-kicker">Your collection</p>
-          <h1>{archived ? 'Archived mixes' : 'Your tapes'}</h1>
-          <p>{sessions.length} sessions · sorted by last played</p>
+          <h1>Mixes</h1>
+          <p>{loading && sessions.length === 0 ? 'Loading mixes…' : countLine(sessions.length, archived)}</p>
         </div>
         <NewTapeCompactButton onClick={onNewTape} />
       </header>
 
       {!archived && suggestions}
-      <nav className="wc-tabs"><button className="wc-text" aria-pressed={!archived} onClick={() => onArchived?.(false)}>Active mixes</button><button className="wc-text" aria-pressed={archived} onClick={() => onArchived?.(true)}>Archived mixes</button></nav>
-      {sessions.length === 0 && <p>{archived ? 'No archived mixes.' : 'No mixes yet.'}</p>}
-      <div className="collection-toolbar">
-        <p>Return to a moment, or start from a blank tape.</p>
-        <div className="view-switch" aria-label="Collection view">
-          <button
-            className={collectionView === 'list' ? 'is-active' : ''}
-            type="button"
-            onClick={() => onChangeCollectionView('list')}
-            aria-pressed={collectionView === 'list'}
-          >
-            List view
-          </button>
-          <button
-            className={collectionView === 'closet' ? 'is-active' : ''}
-            type="button"
-            onClick={() => onChangeCollectionView('closet')}
-            aria-pressed={collectionView === 'closet'}
-          >
-            Closet view
-          </button>
-        </div>
+      <div className="mixes-toolbar">
+        <Tabs label="Mix sections" current={archived ? 'archived' : 'active'} onSelect={(tab) => onArchived?.(tab === 'archived')}
+          items={[{ id: 'active', label: 'Active' }, { id: 'archived', label: 'Archived' }]} />
+        <ViewSwitch value={view} onChange={onChangeCollectionView} />
       </div>
 
-      {collectionView === 'list' ? (
-        <section className="tape-grid" aria-label="Tape list">
-          {sessions.map((session) => (
-            <SessionRow key={session.id} session={session} onOpen={() => onOpenSession(session.id)}
-              onRename={(title) => onRename?.(session.id, title) ?? Promise.resolve()}
-              onArchive={() => onArchive?.(session.id) ?? Promise.resolve()}
-              onRestore={() => onRestore?.(session.id) ?? Promise.resolve()} />
-          ))}
-        </section>
-      ) : (
-        <section className="closet" aria-label="Tape closet">
-          <ol className="closet-shelf">
-            {sessions.map((session) => (
-              <li key={session.id} className="wc-closet-mix" style={{
-                '--spine-color': session.caseColor,
-                '--spine-ink': darkSpines.has(session.caseColor) ? '#f0ece5' : '#3d3740',
-              } as CSSProperties}>
-                <SessionRow session={session} onOpen={() => onOpenSession(session.id)}
-                  onRename={(title) => onRename?.(session.id, title) ?? Promise.resolve()}
-                  onArchive={() => onArchive?.(session.id) ?? Promise.resolve()}
-                  onRestore={() => onRestore?.(session.id) ?? Promise.resolve()} />
-              </li>
-            ))}
-          </ol>
-          <p className="closet-hint">Tap a name to edit it. Open returns to its conversation and queue.</p>
-        </section>
-      )}
+      <div className="mixes-content">
+        {error && sessions.length > 0 && <div className="mix-refresh" role="alert"><span>Couldn’t refresh your mixes. Your mixes are still here.</span><button className="minimal-retry" onClick={onRetry}>Retry</button></div>}
+        {loading && sessions.length === 0 ? <MixSkeletons view={view} /> : sessions.length === 0 ? <EmptyState kind={error ? 'error' : 'tape'} title={error ? 'Couldn’t load your mixes' : archived ? 'No archived mixes' : 'Your next moment starts here'} description={error ? 'Try again in a moment.' : archived ? 'Mixes you archive will appear here.' : 'Tell the DJ what you’re in the mood for.'} action={error ? { label: 'Try again', onClick: onRetry! } : archived ? undefined : { label: 'Make a mix', onClick: onNewTape }} />
+          : view === 'list' ? <section className="tape-grid" aria-label="Tape list">{sessions.map((session) => row(session, 'row'))}</section>
+          : view === 'grid' ? <section className="mix-grid" aria-label="Mix grid">{sessions.map((session) => row(session, 'tile'))}</section>
+          : <TapeRack sessions={sessions} onOpenSession={onOpenSession} />}
+      </div>
     </main>
   )
 }

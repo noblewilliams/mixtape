@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { MixtapeApi, SuggestionsResponse } from '../api/client'
-import { ControlModal } from './ControlModal'
+import { useRestorableState, useWorkspaceRestoring } from '../lib/workspace-restore'
+import { MixSkeletons } from './UiStates'
 import './routine-suggestions.css'
 const zone = () => Intl.DateTimeFormat().resolvedOptions().timeZone
 export function RoutineSuggestions({
@@ -12,11 +13,10 @@ export function RoutineSuggestions({
   onCreate: (prompt: string) => Promise<void>
   busy?: boolean
 }) {
-  const [data, setData] = useState<SuggestionsResponse | null>(null)
+  const [data, setData] = useRestorableState<SuggestionsResponse | null>('home.suggestions', null)
+  const restoring = useWorkspaceRestoring()
   const [error, setError] = useState('')
   const [working, setWorking] = useState(false)
-  const [settings, setSettings] = useState(false)
-  const [enabled, setEnabled] = useState(true)
   const latest = useRef({ onCreate, busy })
   latest.current = { onCreate, busy }
   const life = useRef(0),
@@ -37,6 +37,7 @@ export function RoutineSuggestions({
     }
   }
   useEffect(() => {
+    if (restoring) return
     life.current++
     void refresh()
     const update = () => {
@@ -50,7 +51,7 @@ export function RoutineSuggestions({
       clearInterval(timer)
       window.removeEventListener('focus', update)
     }
-  }, [api])
+  }, [api, restoring])
   async function act(action: () => Promise<void>) {
     if (locked.current || busy) return
     locked.current = true
@@ -69,6 +70,7 @@ export function RoutineSuggestions({
     }
   }
   const suggestion = data?.suggestion
+  if (data && !suggestion && !error) return null
   return (
     <section
       className="routine-suggestions"
@@ -76,10 +78,7 @@ export function RoutineSuggestions({
       aria-busy={working}
     >
       {suggestion && (
-        <div className="routine-card">
-          <p className="quiet-kicker">A familiar moment</p>
-          <h2>{suggestion.title}</h2>
-          <p>{suggestion.reason}</p>
+        <><h2>For this moment</h2><div className="routine-card"><img className="routine-tape" src="/tape.svg" alt=""/><div className="routine-copy"><h3>{suggestion.title}</h3><p>{suggestion.reason}</p></div>
           <div className="routine-actions">
             <button
               className="routine-primary"
@@ -113,16 +112,9 @@ export function RoutineSuggestions({
               Not today
             </button>
           </div>
-        </div>
+        </div></>
       )}
-      {!suggestion && data?.enabled && (
-        <p role="status">
-          {data.dismissed
-            ? 'That suggestion is hidden for today.'
-            : 'Your usual moments will appear here as Mixtape gets to know your routines.'}
-        </p>
-      )}
-      {!data && !error && <p role="status">Checking your usual moments…</p>}
+      {!data && !error && <div aria-busy="true" aria-label="Loading recommendations"><h2>For this moment</h2><MixSkeletons count={1} /></div>}
       {error && (
         <p role="alert">
           {error}{' '}
@@ -134,64 +126,6 @@ export function RoutineSuggestions({
             Refresh suggestions
           </button>
         </p>
-      )}
-      <button
-        className="wc-text"
-        disabled={!data || working || busy}
-        onClick={() => {
-          setEnabled(data!.enabled)
-          setSettings(true)
-        }}
-      >
-        Suggestion settings
-      </button>
-      {settings && (
-        <ControlModal
-          title="Suggestions, on your terms."
-          onClose={() => {
-            if (!working) setSettings(false)
-          }}
-        >
-          <label className="routine-check">
-            <input
-              type="checkbox"
-              checked={enabled}
-              disabled={working}
-              onChange={(e) => setEnabled(e.target.checked)}
-            />
-            Suggest mixes from my routines
-          </label>
-          <p>
-            Suggestions appear in Mixtape. They never start playing by
-            themselves.
-          </p>
-          {error && <p role="alert">{error}</p>}
-          <div className="routine-actions">
-            <button
-              className="routine-primary"
-              disabled={working}
-              onClick={() =>
-                void act(async () => {
-                  const generation = life.current
-                  await api.saveSuggestionPreference(enabled)
-                  if (generation !== life.current) return
-                  setData({ enabled, suggestion: null, dismissed: false })
-                  setSettings(false)
-                  await refresh()
-                })
-              }
-            >
-              Save
-            </button>
-            <button
-              className="wc-text"
-              disabled={working}
-              onClick={() => setSettings(false)}
-            >
-              Cancel
-            </button>
-          </div>
-        </ControlModal>
       )}
     </section>
   )

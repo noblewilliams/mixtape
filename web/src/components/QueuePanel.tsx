@@ -536,7 +536,7 @@ export function QueuePanel({
                   className={`track-swipe-surface ${track.spotifyId ? 'has-open' : ''}`}
                   data-testid="track-swipe-surface"
                   tabIndex={0}
-                  aria-label={`${track.title} by ${track.artist}, track ${index + 1}`}
+                  aria-label={`${track.title} by ${track.artist}, track ${index + 1}${track.newToYou ? ', new to you' : ''}`}
                   aria-describedby={reasonId}
                   onKeyDown={(event) => handleRowKeyDown(event, track.trackId)}
                   onPointerDown={(event) => beginPointerSwipe(event, track.trackId)}
@@ -546,7 +546,14 @@ export function QueuePanel({
                   </span>
                   <span className="track-copy">
                     <strong>{track.title}</strong>
-                    <small>{track.artist} · {track.durationMs ? formatDuration(track.durationMs) : '—'}</small>
+                    {track.newToYou ? (
+                      <small className="has-mark">
+                        <span className="track-who">{track.artist} · {track.durationMs ? formatDuration(track.durationMs) : '—'}</span>
+                        <span className="track-mark">&nbsp;· <b>New to you</b></span>
+                      </small>
+                    ) : (
+                      <small>{track.artist} · {track.durationMs ? formatDuration(track.durationMs) : '—'}</small>
+                    )}
                     <em id={reasonId}>{track.reason || 'Chosen to hold the shape of this mix.'}</em>
                   </span>
                   {track.spotifyId ? (

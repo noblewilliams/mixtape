@@ -96,6 +96,7 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
     return initial.map((track) => ({ ...track }))
   }
   const api: MixtapeApi = {
+    transcribe: async () => ({ text: 'An evening mix', language: 'en' }),
     listSessions: async () => ({ sessions: summaries.map((session) => ({ ...session })) }),
     getSuggestions: async()=>({enabled:true,suggestion:null,dismissed:false}),
     selectSuggestion: async()=>{throw new Error('No suggestion')},

@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
-import type { QueueOpsResponse } from './api/client'
+import type { ApiSessionSummary, QueueOpsResponse } from './api/client'
 import type { AccountBridge } from './components/AccountDialog'
 import type { MusicKitClient } from './musickit/client'
 import { createFakeApi } from './test/fake-api'
@@ -55,13 +55,49 @@ function renderApp(options: {
   return { api, accountAuth, musicKit }
 }
 
+async function openExistingMix() {
+  fireEvent.click(await screen.findByRole('button', { name: 'Mixes' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Open Blue hour, windows down' }))
+  await screen.findByRole('heading', { name: 'Blue hour, windows down' })
+}
+
 describe('Mixtape web shell', () => {
   afterEach(cleanup)
+
+  it('starts on Home with clear navigation and no automatically opened conversation', async () => {
+    const { api } = renderApp()
+    expect(await screen.findByRole('heading', { name: 'Home' })).toBeVisible()
+    await screen.findByRole('button', { name: 'Open Blue hour, windows down' })
+    expect(screen.getByRole('button', { name: 'Home' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('textbox', { name: 'Describe your mix' })).toBeVisible()
+    expect(screen.queryByLabelText('Message your DJ')).not.toBeInTheDocument()
+    expect(api.calls.filter(call => call.method === 'getSession')).toHaveLength(0)
+  })
+
+  it.each(['initial', 'retry'] as const)('retains a new mix when a pending %s collection read finishes', async mode => {
+    let finish!: (value: { sessions: ApiSessionSummary[] }) => void
+    const listSessions = vi.fn(() => new Promise<{ sessions: ApiSessionSummary[] }>(resolve => { finish = resolve }))
+    if (mode === 'retry') listSessions.mockRejectedValueOnce(new Error('offline'))
+    renderApp({ api: createFakeApi({ listSessions }) })
+    if (mode === 'retry') {
+      fireEvent.click(await screen.findByRole('button', { name: 'Retry' }))
+      await waitFor(() => expect(listSessions).toHaveBeenCalledTimes(2))
+    } else await waitFor(() => expect(listSessions).toHaveBeenCalledOnce())
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Describe your mix' }), { target: { value: 'Late night drive' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Make a mix' }))
+    expect(await screen.findByRole('heading', { name: 'Late night drive' })).toBeVisible()
+    await act(async () => finish({ sessions: [] }))
+    expect(screen.getByRole('heading', { name: 'Late night drive' })).toBeVisible()
+    expect(screen.getByRole('textbox', { name: 'Message your DJ' })).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Home' }))
+    expect(screen.getByRole('button', { name: 'Open Late night drive' })).toBeVisible()
+  })
 
   it('shows durable source counts without pretending this browser is authorized', async () => {
     const api = createFakeApi({ getMusicCollectionSummary: async () => ({ apple: { songs: 42, playlists: 10, librarySyncedAt: '2026-09-01T12:00:00Z' }, spotify: { playlists: 0 } }) })
     const { musicKit } = renderApp({ api })
-    fireEvent.click(await screen.findByRole('button', { name: /^Your music/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /^Library/ }))
     fireEvent.click(await screen.findByRole('button', { name: 'Sources' }))
     expect(await screen.findByText(/42 songs · 10 playlists/)).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: 'Manage Apple Music' }))
@@ -73,20 +109,25 @@ describe('Mixtape web shell', () => {
     let finish!: (value: Awaited<ReturnType<MusicKitClient['snapshot']>>) => void
     const snapshot = vi.fn(() => new Promise<Awaited<ReturnType<MusicKitClient['snapshot']>>>((resolve) => { finish = resolve }))
     const { api, musicKit } = renderApp({ musicKit: createFakeMusicKit({ snapshot }) })
-    fireEvent.click(await screen.findByRole('button', { name: /^Your music/ }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Connect Apple Music' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Connect Apple Music' }))
+    fireEvent.click(await screen.findByRole('button', { name: /^Library/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sources' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Connect Apple Music' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Apple Music' }))
+    await screen.findByRole('heading', { name: 'Connect when you’re ready' })
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Apple Music' }))
     await waitFor(() => expect(snapshot).toHaveBeenCalledOnce())
     fireEvent.click(screen.getByRole('button', { name: 'Home' }))
     await act(async () => finish({ storefront: 'ng', songs: [], playlists: [], playlistEntries: [], recentCatalogIds: [], excludedLibrarySongs: 0 }))
-    fireEvent.click(screen.getByRole('button', { name: /^Your music/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Library/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'View progress' }))
     expect(await screen.findByText('Your music is in')).toBeVisible()
     expect(musicKit.connect).toHaveBeenCalledOnce()
     expect(api.calls.filter((call) => call.method === 'completeLibrarySync')).toHaveLength(1)
   })
 
-  it('opens on the server-backed conversation with an unlabeled DJ voice and current tape', async () => {
+  it('opens an existing server-backed conversation with an unlabeled DJ voice and current tape', async () => {
     renderApp()
+    await openExistingMix()
 
     expect(await screen.findByRole('heading', { name: 'Blue hour, windows down' })).toBeInTheDocument()
     expect(await screen.findByText(/I kept the opening close/)).toBeInTheDocument()
@@ -97,6 +138,7 @@ describe('Mixtape web shell', () => {
 
   it('uses a stable session paint and the house slate on Home', async () => {
     renderApp()
+    await openExistingMix()
 
     await screen.findByRole('heading', { name: 'Blue hour, windows down' })
     const shell = document.querySelector('.app-shell') as HTMLElement
@@ -113,40 +155,41 @@ describe('Mixtape web shell', () => {
   it('does not label mixes or new-mix dialogs as Side A', async () => {
     renderApp()
 
-    expect(await screen.findByRole('complementary', { name: 'Your mix' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Make a new tape' }))
+    await openExistingMix()
+    expect(screen.getByRole('complementary', { name: 'Your mix' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Home' }))
 
     expect(screen.queryByText(/side a/i)).not.toBeInTheDocument()
   })
 
-  it('opens account settings from the signed-in identity area', async () => {
+  it('opens account settings from Settings', async () => {
     renderApp()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Open account settings' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Manage account' }))
 
     expect(await screen.findByRole('dialog', { name: 'Ways to sign in' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Close account settings' })).toHaveClass('account-dialog-close')
   })
 
-  it('renders the Closet as one tightly packed shelf of text-only spines', async () => {
+  it('renders every closet tape as a single navigation target', async () => {
     renderApp()
-    fireEvent.click(await screen.findByRole('button', { name: 'Home' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Mixes' }))
+    await screen.findByRole('button', { name: 'Open Blue hour, windows down' })
     fireEvent.click(screen.getByRole('button', { name: 'Closet view' }))
 
     const closet = screen.getByRole('region', { name: 'Tape closet' })
-    expect(within(closet).getAllByRole('list')).toHaveLength(1)
-    expect(within(closet).getAllByRole('button', { name: /^Rename / })).toHaveLength(19)
-    expect(within(closet).getAllByRole('button', { name: /^Open / })).toHaveLength(19)
-    expect(closet.querySelectorAll('.tape-spine svg')).toHaveLength(0)
+    expect(within(closet).getAllByRole('button', { name: /^Open mix: / })).toHaveLength(19)
+    expect(within(closet).queryByRole('button', { name: /^Rename / })).toBeNull()
+    expect(within(closet).queryByRole('button', { name: 'Mix actions' })).toBeNull()
   })
 
   it('creates a tape through the server and opens its conversation', async () => {
     renderApp()
-    fireEvent.click(await screen.findByRole('button', { name: 'Make a new tape' }))
-    fireEvent.change(screen.getByLabelText('What should this tape feel like?'), {
+    fireEvent.change(await screen.findByLabelText('Describe your mix'), {
       target: { value: 'Dinner after the rain' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Start tape' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Make a mix' }))
 
     expect(await screen.findByRole('heading', { name: 'Dinner after the rain' })).toBeInTheDocument()
     expect(screen.getByText('I made a first pass for this moment.')).toBeInTheDocument()
@@ -154,6 +197,7 @@ describe('Mixtape web shell', () => {
 
   it('posts a listener message and follows it with the DJ response', async () => {
     renderApp()
+    await openExistingMix()
     fireEvent.change(await screen.findByLabelText('Message your DJ'), {
       target: { value: 'Make the middle brighter.' },
     })
@@ -165,6 +209,7 @@ describe('Mixtape web shell', () => {
 
   it('keeps the mix visible and asks for Apple Music only at the action boundary', async () => {
     renderApp()
+    await openExistingMix()
 
     expect(await screen.findByText('Sweetest Taboo')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Connect Apple Music' })).toBeInTheDocument()
@@ -176,6 +221,7 @@ describe('Mixtape web shell', () => {
     const applyQueueOps = vi.fn(() => new Promise<QueueOpsResponse>(() => undefined))
     const api = createFakeApi({ applyQueueOps })
     renderApp({ api })
+    await openExistingMix()
 
     fireEvent.keyDown(await screen.findByRole('button', { name: 'Move Sweetest Taboo, track 1' }), {
       key: 'ArrowDown',
@@ -200,6 +246,7 @@ describe('Mixtape web shell', () => {
       }),
     )
     renderApp({ musicKit: createFakeMusicKit({ connect }) })
+    await openExistingMix()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Connect Apple Music' }))
     expect(screen.getByRole('button', { name: 'Connecting Apple Music…' })).toBeDisabled()
@@ -217,6 +264,7 @@ describe('Mixtape web shell', () => {
       throw new Error('cancelled')
     })
     renderApp({ musicKit: createFakeMusicKit({ connect }) })
+    await openExistingMix()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Connect Apple Music' }))
 
@@ -234,6 +282,7 @@ describe('Mixtape web shell', () => {
     const recordSessionEvent = vi.fn(async () => ({ ok: true as const }))
     const api = createFakeApi({ recordSessionEvent })
     renderApp({ api, musicKit: createFakeMusicKit({ play }) })
+    await openExistingMix()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Connect Apple Music' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Play now' }))
@@ -259,6 +308,7 @@ describe('Mixtape web shell', () => {
     const recordPlaylistCreation = vi.fn(async () => { throw new Error('offline') })
     const api = createFakeApi({ recordSessionEvent, recordPlaylistCreation })
     renderApp({ api, musicKit: createFakeMusicKit({ createPlaylist }) })
+    await openExistingMix()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Connect Apple Music' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Create playlist' }))
@@ -279,4 +329,43 @@ describe('Mixtape web shell', () => {
     })
     expect(screen.getByText('“Blue hour, windows down” is now in Apple Music.')).toBeInTheDocument()
   })
+  it('tells the Create playlist dialog how many songs in the mix are new to you', async () => {
+    const base = createFakeApi()
+    const api = createFakeApi({
+      getSession: async (...args: Parameters<typeof base.getSession>) => {
+        const detail = await base.getSession(...args)
+        return { ...detail, queue: detail.queue.map((track, index) => ({ ...track, newToYou: index === 2 || index === 7 })) }
+      },
+    })
+    renderApp({ api })
+    await openExistingMix()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect Apple Music' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Create playlist' }))
+    expect(screen.getByRole('dialog', { name: 'Create playlist' })).toHaveAccessibleDescription(
+      '2 songs here are new to you. Creating the playlist adds them to your Apple Music library.',
+    )
+  })
+
+  it('leaves the Create playlist dialog unchanged when nothing in the mix is new', async () => {
+    renderApp()
+    await openExistingMix()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect Apple Music' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Create playlist' }))
+    const dialog = screen.getByRole('dialog', { name: 'Create playlist' })
+    expect(dialog).not.toHaveAttribute('aria-describedby')
+    expect(dialog).not.toHaveTextContent(/new to you/i)
+  })
+})
+
+it('always opens Library on Playlists after leaving Sources', async () => {
+  renderApp()
+  fireEvent.click(await screen.findByRole('button', { name: /^Library/ }))
+  expect(screen.getByRole('button', { name: 'Playlists' })).toHaveAttribute('aria-current', 'page')
+  fireEvent.click(screen.getByRole('button', { name: 'Sources' }))
+  expect(screen.getByRole('button', { name: 'Sources' })).toHaveAttribute('aria-current', 'page')
+  fireEvent.click(screen.getByRole('button', { name: 'Home' }))
+  fireEvent.click(screen.getByRole('button', { name: /^Library/ }))
+  expect(screen.getByRole('button', { name: 'Playlists' })).toHaveAttribute('aria-current', 'page')
 })

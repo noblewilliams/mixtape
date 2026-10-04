@@ -37,6 +37,7 @@ export type ApiPlaylistSeed = {
 export type ApiSessionStatus = 'active' | 'archived'
 
 export type ApiSession = {
+  caseColor?: string | null
   id: string
   title: string
   status: ApiSessionStatus
@@ -72,6 +73,8 @@ export type ApiQueueTrack = {
   artworkWidth: number | null
   artworkHeight: number | null
   artworkBgColor: string | null
+  /** Absent on older servers; absence means the listener's own song. */
+  newToYou?: boolean
 }
 
 export type SessionDetailResponse = {
@@ -318,7 +321,8 @@ export type BeginPlaylistSyncInput =
   }
 
 export type MixVersionList = { currentVersion: number; versions: Array<{ version: number; trackCount: number; restoredFrom: number | null; createdAt: string }>; nextBefore: number | null }
-export type MixVersionDetail = { energyArc?: 'steady' | 'rise' | 'fall' | 'arc' | null; energyJourney?: {status:'limited'|'follows'|'mixed';known:number;total:number;bands:[number,number,number]|null} | null; version: number; currentVersion: number; restoredFrom: number | null; entries: Array<{ position: number; trackId: string; title: string; artist: string; reason: string | null; available: boolean }> }
+export type EnergyArc = 'steady' | 'rise' | 'fall' | 'arc'
+export type MixVersionDetail = { energyArc?: EnergyArc | null; energyJourney?: {status:'limited'|'follows'|'mixed';known:number;total:number;bands:[number,number,number]|null} | null; version: number; currentVersion: number; restoredFrom: number | null; entries: Array<{ position: number; trackId: string; title: string; artist: string; reason: string | null; available: boolean }> }
 export type MixRestoreInput = { version: number; expectedVersion: number; requestId: string }
 
 export type RoutineSuggestion = { id: string; title: string; prompt: string; reason: string }
@@ -326,6 +330,7 @@ export type SuggestionsResponse = { enabled: boolean; suggestion: RoutineSuggest
 export type PlaybackPreferences = {enabled:boolean;revision:number;userId?:string}
 export type PlaybackObservation = {playbackId:string;sequence:number;sessionId:string;version:number;position:number;trackId:string;source:'apple_web'|'apple_native';kind:'listen'|'skip'|'repeat';observedMs:number;occurredAt:string}
 export type MixtapeApi = {
+  transcribe: (audio: File, signal?: AbortSignal) => Promise<{text:string;language:string}>
   getSuggestions: (timeZone: string) => Promise<SuggestionsResponse>
   selectSuggestion: (id: string, timeZone: string) => Promise<{prompt: string}>
   dismissSuggestion: (id: string, timeZone: string) => Promise<{ok: boolean}>
@@ -341,15 +346,15 @@ export type MixtapeApi = {
 
   listSessions: () => Promise<{ sessions: ApiSessionSummary[] }>
   getSession: (sessionId: string) => Promise<SessionDetailResponse>
-  createSession: (prompt: string, playlistSeed?: InitialPlaylistSeed) => Promise<CreateSessionResponse>
-  sendMessage: (sessionId: string, text: string) => Promise<SendMessageResponse>
+  createSession: (prompt: string, playlistSeed?: InitialPlaylistSeed, energyArc?: EnergyArc) => Promise<CreateSessionResponse>
+  sendMessage: (sessionId: string, text: string, energyArc?: EnergyArc) => Promise<SendMessageResponse>
   applyQueueOps: (sessionId: string, ops: QueueOp[], expectedVersion?: number) => Promise<QueueOpsResponse>
   getMusicKitToken: () => Promise<MusicKitTokenResponse>
   recordSessionEvent: (sessionId: string, type: 'played' | 'saved_playlist') => Promise<{ ok: true }>
   recordPlaylistCreation: (sessionId: string, appleLibraryId: string) => Promise<{ ok: true }>
   updateSession: (
     sessionId: string,
-    updates: { title?: string; status?: ApiSessionStatus },
+    updates: { title?: string; status?: ApiSessionStatus; caseColor?: string },
     signal?: AbortSignal,
   ) => Promise<{ session: ApiSession }>
   selectPlaylistSeed: (
@@ -470,7 +475,7 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const headers = new Headers(init.headers)
     headers.set('accept', 'application/json')
-    if (init.body !== undefined) headers.set('content-type', 'application/json')
+    if (init.body !== undefined && !(init.body instanceof FormData)) headers.set('content-type', 'application/json')
     const accessToken = getAccessToken()
     if (accessToken) headers.set('authorization', `Bearer ${accessToken}`)
 
@@ -485,6 +490,10 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
   }
 
   return {
+    transcribe: (audio, signal) => {
+      const body = new FormData(); body.append('audio', audio)
+      return request('/transcribe', {method:'POST', body, signal})
+    },
     getSuggestions: timeZone => request(`/suggestions?timeZone=${encodeURIComponent(timeZone)}`),
     selectSuggestion: (id,timeZone) => request('/suggestions/select',{method:'POST',body:JSON.stringify({id,timeZone})}),
     dismissSuggestion: (id,timeZone) => request('/suggestions/dismiss',{method:'POST',body:JSON.stringify({id,timeZone})}),
@@ -498,15 +507,15 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
     restoreMixVersion: (id, input) => request(`/sessions/${encodeURIComponent(id)}/versions/restore`, { method: 'POST', body: JSON.stringify(input) }),
     listSessions: () => request('/sessions'),
     getSession: (sessionId) => request(`/sessions/${encodeURIComponent(sessionId)}`),
-    createSession: (prompt, playlistSeed) =>
+    createSession: (prompt, playlistSeed, energyArc) =>
       request('/sessions', {
         method: 'POST',
-        body: JSON.stringify({ prompt, ...(playlistSeed ? { playlistSeed } : {}) }),
+        body: JSON.stringify({ prompt, ...(playlistSeed ? { playlistSeed } : {}), ...(energyArc ? { energyArc } : {}) }),
       }),
-    sendMessage: (sessionId, text) =>
+    sendMessage: (sessionId, text, energyArc) =>
       request(`/sessions/${encodeURIComponent(sessionId)}/messages`, {
         method: 'POST',
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, ...(energyArc ? { energyArc } : {}) }),
       }),
     applyQueueOps: (sessionId, ops, expectedVersion) =>
       request(`/sessions/${encodeURIComponent(sessionId)}/queue-ops`, {

@@ -403,3 +403,49 @@ describe('Spotify mix outputs', () => {
     expect(screen.queryByText('Not personal yet')).not.toBeInTheDocument()
   })
 })
+
+describe('new to you mark', () => {
+  afterEach(cleanup)
+
+  const marked: QueueTrack[] = [
+    { ...tracks[0] },
+    { ...tracks[1], newToYou: true },
+    { ...tracks[2], newToYou: false },
+  ]
+
+  it('ends the artist line with the words New to you, only on new tracks', () => {
+    renderQueue({ tracks: marked })
+
+    const newLine = row('track-2').querySelector('.track-copy small')!
+    expect(newLine).toHaveClass('has-mark')
+    expect(newLine.querySelector('.track-who')).toHaveTextContent('Wizkid feat. Tems · 4:09')
+    expect(newLine.querySelector('.track-mark')).toHaveTextContent(/^\s*· New to you$/)
+    expect(newLine.querySelector('.track-mark b')).toHaveTextContent('New to you')
+    expect(newLine.lastElementChild).toBe(newLine.querySelector('.track-mark'))
+
+    for (const id of ['track-1', 'track-3']) {
+      const line = row(id).querySelector('.track-copy small')!
+      expect(line).not.toHaveClass('has-mark')
+      expect(line.querySelector('.track-mark')).toBeNull()
+      expect(line).not.toHaveTextContent('New to you')
+    }
+    expect(screen.getAllByText('New to you')).toHaveLength(1)
+  })
+
+  it('ends the row label with new to you and keeps the reason as its description', () => {
+    renderQueue({ tracks: marked })
+
+    const surfaces = screen.getAllByTestId('track-swipe-surface')
+    expect(surfaces[1]).toHaveAttribute('aria-label', 'Essence by Wizkid feat. Tems, track 2, new to you')
+    expect(surfaces[1]).toHaveAccessibleDescription('A familiar lift without breaking the warmth.')
+    expect(surfaces[0]).toHaveAttribute('aria-label', 'Sweetest Taboo by Sade, track 1')
+    expect(surfaces[2]).toHaveAttribute('aria-label', 'Anybody by Burna Boy, track 3')
+  })
+
+  it('keeps the mark beside the Open in Spotify link', () => {
+    renderQueue({ tracks: [{ ...spotifyTracks[0], newToYou: true }] })
+
+    expect(screen.getByRole('link', { name: 'Open in Spotify: Window Seat' })).toBeInTheDocument()
+    expect(row('s-1').querySelector('.track-mark')).toHaveTextContent('New to you')
+  })
+})

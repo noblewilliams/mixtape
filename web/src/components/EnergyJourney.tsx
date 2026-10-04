@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import type { MixtapeApi, MixVersionDetail } from '../api/client'
+import type { EnergyArc, MixtapeApi, MixVersionDetail } from '../api/client'
 import { ControlModal } from './ControlModal'
 import './energy-journey.css'
-export type EnergyArc = 'steady' | 'rise' | 'fall' | 'arc'
+export type { EnergyArc }
 const shapes: Record<
   EnergyArc,
   { label: string; description: string; path: string }
@@ -28,16 +28,6 @@ const shapes: Record<
     path: 'M10 90 C70 90 100 20 150 20 S230 90 290 90',
   },
 }
-export function energyBrief(text: string, arc: EnergyArc): string | null {
-  const clean = text
-    .replace(
-      /(?:^|\n)Energy journey: (?:Steady|Build gradually|Wind down|Build, then settle)\.(?=\n|$)/g,
-      '',
-    )
-    .trim()
-  const next = `${clean ? `${clean}\n` : ''}Energy journey: ${shapes[arc].label}.`
-  return next.length <= 2000 ? next : null
-}
 export function journeyMessage(status: string) {
   if (status === 'follows')
     return 'The opening, middle and ending broadly follow your shape.'
@@ -45,34 +35,37 @@ export function journeyMessage(status: string) {
     return 'A gentler journey this time. This mix does not follow every part of the shape. Your song choices and exclusions still come first.'
   return 'There is not enough energy information to judge every transition. Your song choices and exclusions still come first.'
 }
+// The shape is a setting sent beside the message, never written into the brief.
 export function EnergyControl({
-  text,
-  onChange,
+  value,
+  compact = false,
+  onSelect,
   disabled = false,
 }: {
-  text: string
-  onChange: (text: string) => void
+  value?: EnergyArc | null
+  compact?: boolean
+  onSelect: (shape: EnergyArc) => void
   disabled?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [arc, setArc] = useState<EnergyArc>('arc')
-  const [applied, setApplied] = useState(false)
-  const next = energyBrief(text, arc)
   return (
     <div className="energy-control">
       <button
         type="button"
         className="wc-text"
         disabled={disabled}
+        aria-label={compact ? `Energy journey${value ? `: ${shapes[value].label}` : ''}` : undefined}
+        title={compact ? value ? shapes[value].label : 'Choose a shape' : undefined}
         onClick={() => {
+          setArc(value ?? 'arc')
           setOpen(true)
-          setApplied(false)
         }}
       >
-        Energy journey
+        {compact ? <>{value && <svg className="composer-shape" viewBox="0 0 300 110" aria-hidden="true"><path d={shapes[value].path} /></svg>}<span>Shape</span></> : 'Energy journey'}
       </button>
-      {applied && text.includes(`Energy journey: ${shapes[arc].label}.`) && (
-        <span role="status">Shape added to your brief. Send when ready.</span>
+      {value && (
+        <span className={compact ? 'sr-only' : undefined} role="status">{shapes[value].label}</span>
       )}
       {open && (
         <ControlModal
@@ -108,26 +101,22 @@ export function EnergyControl({
               </button>
             ))}
           </div>
-          {next === null && (
-            <p role="alert">Shorten your brief to make room for the shape.</p>
-          )}
           <div className="energy-actions">
             <button
               type="button"
-              className="energy-button"
+              className="btn"
               onClick={() => setOpen(false)}
             >
               Cancel
             </button>
             <button
               type="button"
-              className="energy-button energy-primary"
-              disabled={disabled || next === null}
+              className="btn primary"
+              disabled={disabled}
               onClick={() => {
-                if (next !== null && !disabled) {
-                  onChange(next)
+                if (!disabled) {
+                  onSelect(arc)
                   setOpen(false)
-                  setApplied(true)
                 }
               }}
             >
@@ -156,10 +145,12 @@ export function MixEnergySummary({
   api,
   sessionId,
   version,
+  onShape,
 }: {
   api: MixtapeApi
   sessionId: string
   version: number
+  onShape?: (shape: EnergyArc | null) => void
 }) {
   const [detail, setDetail] = useState<MixVersionDetail | null>(null)
   useEffect(() => {
@@ -168,7 +159,7 @@ export function MixEnergySummary({
     if (version > 0)
       void api.readMixVersion(sessionId, version).then(
         (result) => {
-          if (current) setDetail(result)
+          if (current) { setDetail(result); onShape?.(result.energyArc ?? null) }
         },
         () => {},
       )

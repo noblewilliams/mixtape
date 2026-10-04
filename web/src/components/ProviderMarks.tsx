@@ -1,3 +1,5 @@
+import { useId } from 'react'
+
 export function AppleMark() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -18,4 +20,29 @@ export function GoogleMark() {
       <path fill="#EA4335" d="M12 5.96c1.47 0 2.79.51 3.83 1.5l2.87-2.88A9.64 9.64 0 0 0 12 2a10 10 0 0 0-8.96 5.49l3.35 2.6C7.18 7.72 9.39 5.96 12 5.96Z" />
     </svg>
   )
+}
+
+export function AppleMusicMark() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true">
+    <g fill="currentColor" transform="translate(2.16 2.16) scale(.82)">
+      <path d="M8.6 4.3h2v13.7h-2zM19.4 6.4h2v9.8h-2zM8.6 2.7 21.4 5.1v3.6L8.6 6.3z" />
+      <ellipse cx="6.6" cy="17.6" rx="4" ry="3.15" transform="rotate(-18.91 6.6 17.6)" />
+      <ellipse cx="17.6" cy="15.8" rx="3.8" ry="3" transform="rotate(-18.91 17.6 15.8)" />
+    </g>
+  </svg>
+}
+
+export function SpotifyMark() {
+  const maskId = useId()
+  return <svg viewBox="0 0 24 24" aria-hidden="true">
+    <defs><mask id={maskId}>
+      <rect width="24" height="24" fill="white" />
+      {[[6.6, 7.92, 2.16], [10.3, 6.72, 1.92], [14, 5.52, 1.68]].map(([apex, chord, stroke]) => {
+        const sag = chord * .3
+        const radius = (chord * chord + sag * sag) / (2 * sag)
+        return <path key={apex} d={`M${12 - chord} ${apex + sag} A${radius} ${radius} 0 0 1 ${12 + chord} ${apex + sag}`} fill="none" stroke="black" strokeWidth={stroke} strokeLinecap="round" />
+      })}
+    </mask></defs>
+    <circle cx="12" cy="12" r="12" fill="currentColor" mask={`url(#${maskId})`} />
+  </svg>
 }

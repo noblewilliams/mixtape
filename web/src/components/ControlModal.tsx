@@ -6,11 +6,15 @@ export function ControlModal({
   children,
   onClose,
   alert = false,
+  className = '',
+  describedBy,
 }: {
   title: string
   children: ReactNode
   onClose: () => void
   alert?: boolean
+  className?: string
+  describedBy?: string
 }) {
   const id = useId()
   const ref = useRef<HTMLElement>(null)
@@ -69,10 +73,11 @@ export function ControlModal({
       <section
         ref={ref}
         tabIndex={-1}
-        className="wc-modal"
+        className={`wc-modal ${className}`}
         role={alert ? 'alertdialog' : 'dialog'}
         aria-modal="true"
         aria-labelledby={id}
+        aria-describedby={describedBy}
       >
         <h2 id={id}>{title}</h2>
         {children}

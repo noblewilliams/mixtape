@@ -1,0 +1,14 @@
+.tabs{display:flex;gap:25px;border-bottom:1px solid var(--hairline)}
+.tabs button{border:0;background:transparent;color:var(--smoke);min-height:48px;padding:10px 2px;font-size:13px;border-bottom:2px solid transparent;cursor:pointer}
+.tabs button[aria-current]{color:var(--slate);border-bottom-color:var(--slate);font-weight:600}
+:where(:root[data-theme="dark"]) .tabs button[aria-current]{color:#a6bfd2}
+.view-toggle{display:flex;flex:none;gap:2px;padding:3px;border:1px solid var(--hairline);border-radius:10px}
+.view-toggle button{position:relative;display:grid;place-items:center;width:32px;height:30px;padding:0;border:0;border-radius:7px;background:transparent;color:var(--smoke);cursor:pointer}
+.view-toggle button::before{content:"";position:absolute;inset:-8px -1px}
+.view-toggle button:first-child::before{left:-6px}.view-toggle button:last-child::before{right:-6px}
+.view-toggle svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.view-toggle button:hover{color:var(--graphite)}
+.view-toggle button[aria-pressed=true]{background:color-mix(in srgb,var(--graphite) 11%,transparent);color:var(--graphite)}
+.view-toggle button[aria-pressed=true] svg{stroke-width:2}
+.view-toggle button:focus-visible{outline:3px solid #5b92b8;outline-offset:3px}
+@media(max-width:760px){.view-toggle button{width:38px;height:36px}.view-toggle button::before{inset:-4px -1px}}

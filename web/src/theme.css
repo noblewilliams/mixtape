@@ -1,0 +1,27 @@
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+
+.theme-toggle{position:relative;display:grid;place-items:center;flex:none;width:44px;height:44px;padding:0;border:0;border-radius:10px;background:transparent;color:#67513a;cursor:pointer;transition:color .4s ease}
+.theme-toggle:hover{background:color-mix(in srgb,var(--graphite) 9%,transparent)}
+.theme-toggle:focus-visible{outline:3px solid var(--blue);outline-offset:3px}
+:where(:root[data-theme="dark"]) .theme-toggle{color:#cdd9e3}
+.theme-toggle svg{width:26px;height:26px;overflow:visible}
+.theme-toggle svg *{transform-box:view-box;transform-origin:16px 16px}
+.theme-rays{fill:currentColor;transition:transform .52s cubic-bezier(.34,1.56,.64,1) .12s,opacity .2s ease .12s}
+.theme-body{fill:currentColor;transform:scale(.74);transition:transform .42s cubic-bezier(.34,1.56,.64,1)}
+.theme-hole{transition:transform .26s ease .14s}
+.theme-cut{transform:translate(17px,-17px);transition:transform .3s cubic-bezier(.5,0,.8,.4)}
+.theme-star{fill:currentColor;transform-box:fill-box!important;transform-origin:center!important;transform:scale(0);transition:transform .16s ease}
+.theme-toggle[aria-checked="true"] .theme-rays{transform:rotate(135deg) scale(.25);opacity:0;transition:transform .34s cubic-bezier(.6,0,.9,.5),opacity .22s ease .1s}
+.theme-toggle[aria-checked="true"] .theme-body{transform:scale(1);transition-delay:.1s}
+.theme-toggle[aria-checked="true"] .theme-hole{transform:scale(0);transition-delay:0s}
+.theme-toggle[aria-checked="true"] .theme-cut{transform:translate(5.4px,-4.6px);transition:transform .5s cubic-bezier(.3,1.35,.5,1) .16s}
+.theme-toggle[aria-checked="true"] .theme-star{transform:scale(1);transition:transform .34s cubic-bezier(.34,1.8,.64,1) .4s}
+.theme-toggle[aria-checked="true"] .theme-star + .theme-star{transition-delay:.5s}
+
+::view-transition-old(root),::view-transition-new(root){animation:none;mix-blend-mode:normal}
+::view-transition-old(root){z-index:1}::view-transition-new(root){z-index:2}
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-toggle,.theme-toggle *{transition:none!important}
+}

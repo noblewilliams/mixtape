@@ -5,9 +5,10 @@ import './playback.css'
 const time = (ms: number) =>
   `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`
 export function PlaybackPanel({
-  controller,
+  controller, settingsOnly = false,
 }: {
   controller: PlaybackController
+  settingsOnly?: boolean
 }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getState)
   const [seek, setSeek] = useState<number | null>(null)
@@ -49,8 +50,8 @@ export function PlaybackPanel({
   }
   return (
     <>
-      <div className="playback-mini">
-        {state.sessionId && (
+      {(state.sessionId || settingsOnly) && <div className={settingsOnly ? "settings-listening-details" : "playback-mini"}>
+        {state.sessionId && !settingsOnly && (
           <>
             <div>
               <strong>{track?.title ?? state.title}</strong>
@@ -72,12 +73,12 @@ export function PlaybackPanel({
             </button>
           </>
         )}
-        {!state.sessionId && (
-          <button type="button" onClick={() => setPreferences(true)}>
-            Listening preferences
+        {settingsOnly && (
+          <button className="wc-text" aria-label="Listening preferences" type="button" onClick={() => setPreferences(true)}>
+            Manage
           </button>
         )}
-      </div>
+      </div>}
       {open && (
         <ControlModal
           title={track?.title ?? 'Your player'}

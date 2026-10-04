@@ -67,6 +67,14 @@ describe('toQueueTrack Spotify id', () => {
   })
 })
 
+describe('toQueueTrack new to you', () => {
+  it('carries newToYou and treats an older server without the field as false', () => {
+    expect(toQueueTrack({ ...track(nullArtwork), newToYou: true }).newToYou).toBe(true)
+    expect(toQueueTrack({ ...track(nullArtwork), newToYou: false }).newToYou).toBe(false)
+    expect(toQueueTrack(track(nullArtwork)).newToYou).toBe(false)
+  })
+})
+
 describe('toDjSession corpus flag', () => {
   const session: ApiSession = {
     id: 'session-1',
@@ -81,4 +89,10 @@ describe('toDjSession corpus flag', () => {
     expect(toDjSession(session, []).notPersonal).toBe(true)
     expect(toDjSession({ ...session, notPersonal: false, trackCount: 1, durationMs: 1 }).notPersonal).toBe(false)
   })
+})
+
+it('uses the saved tape colour and retains deterministic legacy fallback', () => {
+  const session: ApiSession = { id: 'tape', title: 'Dinner', status: 'active', queueVersion: 0, notPersonal: false, updatedAt: '2026-09-25T00:00:00Z' }
+  expect(toDjSession({ ...session, caseColor: '#3257ae' }).caseColor).toBe('#3257ae')
+  expect(toDjSession(session).caseColor).toBe(toDjSession({ ...session }).caseColor)
 })

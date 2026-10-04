@@ -1,3 +1,4 @@
+import { useRestorableState, useWorkspaceRestoring } from '../lib/workspace-restore'
 import { PlaylistTasteControls } from './PlaylistTasteControls'
 import { useEffect, useRef, useState } from 'react'
 import { ApiError, type ApiPlaylistSummary, type MixtapeApi } from '../api/client'
@@ -49,22 +50,44 @@ export function MusicEmpty({
 }) {
   return (
     <section className="ym-empty">
-      <MusicIcon />
+      <img className="music-empty-art" src={title.startsWith('Couldn’t') ? '/ui/connection-object.svg' : '/tape.svg'} alt="" />
       <h2>{title}</h2>
       <p>{children}</p>
-      <button className="btn primary" onClick={onAction}>
+      <button className={title.startsWith('Couldn’t') ? 'minimal-retry' : 'btn primary'} onClick={onAction}>
         {action}
       </button>
     </section>
   )
 }
 
+// Mirrors the loaded track rows so nothing jumps when data lands.
+function DetailSkeleton({ playlist }: { playlist: ApiPlaylistSummary }) {
+  const spotify = playlist.source === 'spotify_export'
+  return (
+    <div role="status" aria-label="Loading tracks" aria-busy="true">
+      <ol className="ym-tracklist" aria-hidden="true">
+        {Array.from({ length: Math.min(playlist.entryCount, 12) }, (_, i) => (
+          <li className="ym-track" key={i}>
+            <span className="ym-position">{i + 1}</span>
+            <div>
+              <span className="ym-bone" style={{ width: `${[38, 52, 30, 44][i % 4]}%` }} />
+              <span className="ym-bone" style={{ width: `${[18, 14, 22, 16][i % 4]}%` }} />
+            </div>
+            <span className={spotify ? 'ym-bone ym-bone--action' : 'ym-bone ym-duration'} />
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+}
+
 type Props = { onInspire?: (playlist: ApiPlaylistSummary) => void; api: MixtapeApi; onSources: () => void; onSessionExpired: () => void }
 export function PlaylistBrowser({ onInspire, api, onSources, onSessionExpired }: Props) {
-  const [q, setQ] = useState('')
-  const [source, setSource] = useState<'' | ApiPlaylistSummary['source']>('')
-  const [data, setData] = useState<Awaited<ReturnType<MixtapeApi['listPlaylists']>> | null>(null)
-  const [selected, setSelected] = useState<ApiPlaylistSummary | null>(null)
+  const restoring = useWorkspaceRestoring()
+  const [q, setQ] = useRestorableState('library.query', '')
+  const [source, setSource] = useRestorableState<'' | ApiPlaylistSummary['source']>('library.source', '')
+  const [data, setData] = useRestorableState<Awaited<ReturnType<MixtapeApi['listPlaylists']>> | null>('library.playlists', null)
+  const [selected, setSelected] = useRestorableState<ApiPlaylistSummary | null>('library.selected', null)
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
   const [reload, setReload] = useState(0)
@@ -73,9 +96,9 @@ export function PlaylistBrowser({ onInspire, api, onSources, onSessionExpired }:
   expired.current = onSessionExpired
 
   useEffect(() => {
+    if (restoring) return
     const controller = new AbortController()
     pending.current = controller
-    setData(null)
     setBusy(true)
     setFailed(false)
     // Debounce names, but always query the complete server-side collection.
@@ -103,7 +126,7 @@ export function PlaylistBrowser({ onInspire, api, onSources, onSessionExpired }:
       controller.abort()
       pending.current?.abort()
     }
-  }, [api, q, source, reload])
+  }, [api, q, source, reload, restoring])
 
   async function more() {
     if (busy || !data?.nextCursor) return
@@ -144,15 +167,6 @@ export function PlaylistBrowser({ onInspire, api, onSources, onSessionExpired }:
     )
   return (
     <>
-      <div className="ym-status-banner">
-        <div>
-          <strong>Your music, ready.</strong>
-          <p>Playlists from your connected sources.</p>
-        </div>
-        <button className="btn" onClick={onSources}>
-          Manage sources
-        </button>
-      </div>
       <div className="ym-toolbar">
         <input
           aria-label="Search playlists"
@@ -161,16 +175,22 @@ export function PlaylistBrowser({ onInspire, api, onSources, onSessionExpired }:
           value={q}
           onChange={(event) => setQ(event.target.value)}
         />
-        <select
-          aria-label="Filter source"
-          value={source}
-          onChange={(event) => setSource(event.target.value as typeof source)}
-        >
-          <option value="">All sources</option>
-          <option value="apple">Apple Music</option>
-          <option value="spotify_export">Spotify</option>
-        </select>
+        <span className="ym-source-select">
+          <select
+            aria-label="Filter source"
+            value={source}
+            onChange={(event) => setSource(event.target.value as typeof source)}
+          >
+            <option value="">All sources</option>
+            <option value="apple">Apple Music</option>
+            <option value="spotify_export">Spotify</option>
+          </select>
+        </span>
+        <span className="ym-collection-meta" aria-live="polite">
+          {data ? `${data.playlists.length} of ${data.total} playlists` : failed ? '' : 'Loading playlists…'}
+        </span>
       </div>
+      {data && failed && <p role="status">Couldn’t refresh your playlists. Your last loaded collection is still here. <button className="minimal-retry" onClick={() => setReload(n => n + 1)}>Retry</button></p>}
       {!data && failed ? (
         <MusicEmpty
           title="Couldn’t load your playlists"
@@ -197,9 +217,6 @@ export function PlaylistBrowser({ onInspire, api, onSources, onSessionExpired }:
         </MusicEmpty>
       ) : (
         <>
-          <p className="ym-collection-meta">
-            {data.playlists.length} of {data.total} playlists
-          </p>
           <div className="ym-playlist-grid">
             {data.playlists.map((playlist) => (
               <button
@@ -211,14 +228,11 @@ export function PlaylistBrowser({ onInspire, api, onSources, onSessionExpired }:
                 <PlaylistCover playlist={playlist} />
                 <span className="ym-playlist-name">{playlist.name}</span>
                 <span className="ym-playlist-meta">
-                  {sourceLabel(playlist.source)}
-                  <br />
-                  {playlistMeta(playlist)}
+                  {sourceLabel(playlist.source)} · {playlistMeta(playlist)}
                 </span>
               </button>
             ))}
           </div>
-          {failed ? <p role="status">Couldn’t load more. Your loaded playlists are still here.</p> : null}
           {data.nextCursor ? (
             <div className="ym-end-note">
               <button className="btn" disabled={busy} onClick={() => void more()}>
@@ -246,7 +260,8 @@ function PlaylistDetail({
   onSessionExpired: () => void
 }) {
   const headingRef = useRef<HTMLHeadingElement>(null)
-  const [data, setData] = useState<Awaited<ReturnType<MixtapeApi['getPlaylist']>> | null>(null)
+  const restoring = useWorkspaceRestoring()
+  const [data, setData] = useRestorableState<Awaited<ReturnType<MixtapeApi['getPlaylist']>> | null>(`library.playlist.${initial.id}.data`, null)
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
   const [reload, setReload] = useState(0)
@@ -259,6 +274,7 @@ function PlaylistDetail({
     headingRef.current?.focus({ preventScroll: true })
   }, [])
   useEffect(() => {
+    if (restoring) return
     const controller = new AbortController()
     pending.current = controller
     setBusy(true)
@@ -281,7 +297,7 @@ function PlaylistDetail({
       controller.abort()
       pending.current?.abort()
     }
-  }, [api, initial.id, reload])
+  }, [api, initial.id, reload, restoring])
   async function more() {
     if (busy || !data?.nextEntryCursor) return
     const controller = new AbortController()
@@ -311,7 +327,7 @@ function PlaylistDetail({
   const playlist = data?.playlist ?? initial
   return (
     <>
-      <button className="btn ym-back" onClick={onBack}>
+      <button className="ym-back" onClick={onBack}>
         ← All playlists
       </button>
       <div className="ym-detail-head">
@@ -321,12 +337,28 @@ function PlaylistDetail({
           <h2 ref={headingRef} tabIndex={-1}>
             {playlist.name}
           </h2>
-          <p>{playlistMeta(playlist)}</p>
-          {playlist.syncedAt ? <p>Last synced · {musicDate(playlist.syncedAt)}</p> : null}
+          <p>
+            {playlistMeta(playlist)}
+            {playlist.syncedAt ? ` · Synced ${musicDate(playlist.syncedAt)}` : ''}
+          </p>
+          {onInspire && (
+            <button
+              className="btn primary ym-detail-action"
+              disabled={!data || !playlist.inLibrary}
+              onClick={() => onInspire(playlist)}
+            >
+              Make a mix inspired by this
+            </button>
+          )}
         </div>
+        {data ? (
+          <PlaylistTasteControls playlist={playlist} api={api} onChanged={(next) => setData(current => current ? { ...current, playlist: next } : current)} onSessionExpired={onSessionExpired} />
+        ) : !failed ? (
+          <div className="wc-taste" aria-hidden="true">
+            <span className="ym-bone" style={{ width: 'min(440px, 100%)' }} />
+          </div>
+        ) : null}
       </div>
-      {data && <PlaylistTasteControls playlist={playlist} api={api} onChanged={(next) => setData(current => current ? { ...current, playlist: next } : current)} onSessionExpired={onSessionExpired} />}
-      {onInspire && <button className="wc-text" disabled={!data || !playlist.inLibrary} onClick={() => onInspire(playlist)}>Make a mix inspired by this</button>}
       {!data && failed ? (
         <MusicEmpty
           title="Couldn’t load the tracks"
@@ -336,7 +368,7 @@ function PlaylistDetail({
           The playlist is still saved. Try loading its tracks again.
         </MusicEmpty>
       ) : !data ? (
-        <p role="status">Loading tracks…</p>
+        <DetailSkeleton playlist={playlist} />
       ) : (
         <>
           <ol className="ym-tracklist">
@@ -375,7 +407,7 @@ function PlaylistDetail({
             Showing {data.entries.length} of {playlist.entryCount} tracks. Original order and repeated songs
             are preserved. Local or unresolved entries stay visible.
           </p>
-          {failed ? <p role="status">Couldn’t load more tracks. Your loaded tracks are still here.</p> : null}
+          {failed ? <p role="status">Couldn’t refresh the tracks. Your loaded tracks are still here. <button className="minimal-retry" onClick={() => setReload(n => n + 1)}>Retry</button></p> : null}
           {data.nextEntryCursor ? (
             <button className="btn" disabled={busy} onClick={() => void more()}>
               {busy ? 'Loading tracks…' : failed ? 'Retry loading more tracks' : 'Load more tracks'}

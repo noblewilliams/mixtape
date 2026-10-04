@@ -85,8 +85,7 @@ export function PlaylistTasteControls({
     }
   }
   return (
-    <section className="wc-taste">
-      <h3>Your taste</h3>
+    <section className="wc-taste" aria-label="Your taste">
       <p>
         {confirmed
           ? 'You confirmed that you personally curated this playlist. It can inform future mixes.'

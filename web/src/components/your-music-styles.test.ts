@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import stylesheet from './your-music.css?raw'
+import tabStyles from './tabs.css?raw'
 
 describe('Your music accessibility styles', () => {
-  it('keeps interactive controls at least 44px tall', () => {
-    expect(stylesheet).toMatch(/\.ym-tabs button\s*{[^}]*min-height:\s*48px;/s)
+  it('keeps primary controls roomy and playlist filters compact', () => {
+    expect(stylesheet).not.toMatch(/\.ym-tabs/)
+    expect(tabStyles).toMatch(/\.tabs button\s*{[^}]*min-height:\s*48px;/s)
     expect(stylesheet).toMatch(/\.ym-view \.btn\s*{[^}]*min-height:\s*44px;/s)
-    expect(stylesheet).toMatch(/\.ym-toolbar input,\s*\.ym-toolbar select\s*{[^}]*min-height:\s*44px;/s)
+    expect(stylesheet).toMatch(/\.ym-toolbar input,\s*\.ym-toolbar select\s*{[^}]*min-height:\s*34px;/s)
   })
 
   it('provides visible keyboard focus without relying on color alone', () => {
@@ -16,13 +18,13 @@ describe('Your music accessibility styles', () => {
 
   it('ships dark and reduced-transparency field treatments', () => {
     expect(stylesheet).toMatch(
-      /@media \(prefers-color-scheme:\s*dark\)[\s\S]*?\.ym-view\s*{[^}]*--ym-field:\s*rgba\(255, 255, 255, 0\.045\);/,
+      /:where\(:root\[data-theme="dark"\]\) \.ym-view\s*{[^}]*--ym-field:\s*rgba\(255, 255, 255, 0\.045\);/,
     )
     expect(stylesheet).toMatch(
       /@media \(prefers-reduced-transparency:\s*reduce\)[\s\S]*?\.ym-view\s*{[^}]*--ym-field:\s*#f4f4f1;/,
     )
     expect(stylesheet).toMatch(
-      /@media \(prefers-color-scheme:\s*dark\) and \(prefers-reduced-transparency:\s*reduce\)[\s\S]*?\.ym-view\s*{[^}]*--ym-field:\s*#302f34;/,
+      /@media \(prefers-reduced-transparency:\s*reduce\)[\s\S]*?:where\(:root\[data-theme="dark"\]\) \.ym-view\s*{[^}]*--ym-field:\s*#302f34;/,
     )
   })
 
@@ -33,5 +35,14 @@ describe('Your music accessibility styles', () => {
 
     const sizes = [...stylesheet.matchAll(/font-size:\s*([0-9.]+)px/g)].map((match) => Number(match[1]))
     expect(sizes.filter((size) => size < 10)).toEqual([])
+  })
+
+  it('keeps the back link quiet and lets the track note use the full row', () => {
+    expect(stylesheet).toMatch(/\.ym-back\s*{[^}]*border:\s*0;[^}]*background:\s*none;/s)
+    expect(stylesheet).toMatch(/\.ym-view \.ym-provider-note\s*{[^}]*max-width:\s*none;/s)
+  })
+
+  it('stills the loading skeleton for reduced motion', () => {
+    expect(stylesheet).toMatch(/@media \(prefers-reduced-motion:\s*reduce\)\s*{\s*\.ym-bone\s*{[^}]*animation:\s*none;/)
   })
 })

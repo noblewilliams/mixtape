@@ -35,6 +35,7 @@ export type QueueTrack = {
   artworkWidth?: number
   artworkHeight?: number
   artworkBgColor?: string
+  newToYou?: boolean
 }
 
 export type SessionDetail = {
@@ -43,5 +44,5 @@ export type SessionDetail = {
   queue: QueueTrack[]
 }
 
-export type CollectionView = 'list' | 'closet'
-export type AppView = 'session' | 'home' | 'music' | 'memories'
+export type CollectionView = 'list' | 'grid' | 'closet'
+export type AppView = 'session' | 'home' | 'music' | 'memories' | 'mixes' | 'settings'

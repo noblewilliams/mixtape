@@ -9,6 +9,33 @@ describe('Mixtape API client', () => {
     vi.unstubAllGlobals()
   })
 
+  it('uploads voice audio with auth and cancellation without overriding the multipart boundary', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ text: 'A quiet evening', language: 'en' }), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const api = createMixtapeApi('https://api.mixtape.test/', () => 'voice-session-token')
+    const audio = new File(['recording'], 'voice-prompt.webm', { type: 'audio/webm' })
+    const controller = new AbortController()
+
+    const result = await api.transcribe(audio, controller.signal)
+
+    expect(result).toEqual({ text: 'A quiet evening', language: 'en' })
+    expect(fetchMock).toHaveBeenCalledWith('https://api.mixtape.test/transcribe', expect.objectContaining({
+      method: 'POST', credentials: 'include', signal: controller.signal,
+    }))
+    const request = fetchMock.mock.calls[0][1]!
+    const headers = new Headers(request.headers)
+    expect(headers.get('authorization')).toBe('Bearer voice-session-token')
+    expect(headers.get('accept')).toBe('application/json')
+    expect(headers.has('content-type')).toBe(false)
+    expect(request.body).toBeInstanceOf(FormData)
+    const uploaded = (request.body as FormData).get('audio') as File
+    expect(uploaded.name).toBe(audio.name)
+    expect(uploaded.type).toBe(audio.type)
+    expect(uploaded.size).toBe(audio.size)
+  })
+
   it('loads sessions with credentialed requests', async () => {
     fetchMock.mockResolvedValue(
       new Response(
@@ -102,6 +129,20 @@ describe('Mixtape API client', () => {
         method: 'POST',
         body: JSON.stringify({ text: 'Move the brighter songs forward.' }),
       }),
+    )
+  })
+
+  it('sends a chosen shape beside the message text, not inside it', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ djMessage: { id: 'm', role: 'dj', content: 'ok', queueVersion: null, createdAt: '2026-08-30T18:00:04.000Z' }, queue: [], queueVersion: 3 }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await createMixtapeApi('https://api.mixtape.test/').sendMessage('session-1', 'Slower in the middle', 'fall')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.mixtape.test/sessions/session-1/messages',
+      expect.objectContaining({ body: JSON.stringify({ text: 'Slower in the middle', energyArc: 'fall' }) }),
     )
   })
 

@@ -1,11 +1,21 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { SessionRow } from './SessionControls'
 import { demoSessions } from '../data/demo'
 afterEach(cleanup)
+it('keeps the tape and song details in place while renaming', () => {
+  const { container } = render(<SessionRow showTape session={demoSessions[0]} onOpen={vi.fn()} onRename={vi.fn()} onArchive={vi.fn()} />)
+  const details = screen.getByText(/songs ·/).textContent
+  fireEvent.click(screen.getByRole('button', { name: 'Mix actions' }))
+  fireEvent.click(screen.getByRole('button', { name: `Rename ${demoSessions[0].title}` }))
+  expect(screen.getByText(details!)).toBeVisible()
+  expect(container.querySelector('.mix-tape-open')).toBeInTheDocument()
+  expect(screen.getByRole('textbox', { name: 'Mix name' })).toHaveFocus()
+})
 it('edits a name inline and retains input on a failed save', async () => {
   const rename = vi.fn().mockRejectedValue(new Error('offline'))
   render(<SessionRow session={demoSessions[0]} onOpen={vi.fn()} onRename={rename} onArchive={vi.fn()} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Mix actions' }))
   fireEvent.click(screen.getByRole('button', { name: `Rename ${demoSessions[0].title}` }))
   fireEvent.change(screen.getByRole('textbox', { name: 'Mix name' }), { target: { value: 'New name' } })
   fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' })
@@ -34,9 +44,40 @@ it('dismisses actions when pressing another control in the same row', () => {
 it('cancels an inline rename without saving', () => {
   const rename = vi.fn()
   render(<SessionRow session={demoSessions[0]} onOpen={vi.fn()} onRename={rename} onArchive={vi.fn()} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Mix actions' }))
   fireEvent.click(screen.getByRole('button', { name: `Rename ${demoSessions[0].title}` }))
   fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Discard me' } })
   fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' })
   expect(rename).not.toHaveBeenCalled()
   expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+})
+it('renames from the title and opens only from the cassette', () => {
+  const open = vi.fn()
+  render(<SessionRow showTape session={demoSessions[0]} onOpen={open} onRename={vi.fn()} onArchive={vi.fn()} />)
+  expect(screen.queryByText('Open', { exact: true })).not.toBeInTheDocument()
+  fireEvent.click(screen.getByText(demoSessions[0].title, { selector: '.wc-session-copy strong' }))
+  expect(open).not.toHaveBeenCalled()
+  expect(screen.getByRole('textbox', { name: 'Mix name' })).toHaveFocus()
+  fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' })
+  fireEvent.click(screen.getByRole('button', { name: `Open ${demoSessions[0].title}` }))
+  expect(open).toHaveBeenCalledTimes(1)
+})
+it('lays a grid tile out with its name underneath and restore in the menu', async () => {
+  const restore = vi.fn().mockRejectedValue(new Error('offline'))
+  const session = { ...demoSessions[0], status: 'archived' as const }
+  const { container } = render(<SessionRow layout="tile" session={session} onOpen={vi.fn()} onRename={vi.fn()} onArchive={vi.fn()} onRestore={restore} />)
+  expect(container.querySelector('.wc-session-tile .mix-tape-open .cassette')).toBeInTheDocument()
+  expect(container.querySelector('.wc-session-surface')).toBeNull()
+  expect(screen.getByText(`${session.trackCount} songs · ${session.ageLabel}`)).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: `Mix actions for ${session.title}` }))
+  const menu = screen.getByRole('group', { name: 'Mix actions' })
+  expect(within(menu).getAllByRole('button').map(b => b.textContent)).toEqual(['Rename', 'Restore'])
+  fireEvent.click(within(menu).getByRole('button', { name: 'Restore' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t update this mix. Try again.')
+})
+it('renames a grid tile inline from its menu', () => {
+  render(<SessionRow layout="tile" session={demoSessions[0]} onOpen={vi.fn()} onRename={vi.fn()} onArchive={vi.fn()} />)
+  fireEvent.click(screen.getByRole('button', { name: `Mix actions for ${demoSessions[0].title}` }))
+  fireEvent.click(screen.getByRole('button', { name: `Rename ${demoSessions[0].title}` }))
+  expect(screen.getByRole('textbox', { name: 'Mix name' })).toHaveFocus()
 })

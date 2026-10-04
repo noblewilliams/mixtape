@@ -34,13 +34,12 @@ describe('MusicSourcesList', () => {
   it('lists each source with its mark, import date, and ledger range', () => {
     renderList([extended, appleLive])
 
-    expect(screen.getByText('Your music · connected')).toBeInTheDocument()
+    expect(screen.getByText('Connected sources')).toBeInTheDocument()
     expect(screen.getByText('Spotify · extended history')).toBeInTheDocument()
     expect(screen.getByText('Imported 4 Sep · Mar 2018 → Aug 2026 · re-import any time')).toBeInTheDocument()
     expect(screen.getByText('Apple Music')).toBeInTheDocument()
     expect(screen.getByText('Connected 20 Aug · saved to your Mixtape account')).toBeInTheDocument()
-    expect(screen.getAllByText('SP')).toHaveLength(1)
-    expect(screen.getAllByText('AM')).toHaveLength(1)
+    expect(document.querySelectorAll('.source-mark svg')).toHaveLength(2)
   })
 
   it('offers Import again only where an import page exists, and no Remove for a live library', () => {

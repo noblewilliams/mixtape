@@ -141,7 +141,7 @@ export function AppleMusicSyncPanel({
   const songs = result?.kind === 'complete' ? result.songs : result?.library?.songs
   return (
     <div className="ym-work">
-      <button className="btn ym-back" onClick={onSources}>
+      <button className="ym-back" onClick={onSources}>
         ← Sources
       </button>
       <header className="ym-work-head">

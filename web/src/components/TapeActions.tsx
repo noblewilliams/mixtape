@@ -83,9 +83,9 @@ export function LabelButton({ children, onClick, disabled = false, className = '
 
 export function NewTapeCompactButton({ onClick }: { onClick: () => void }) {
   return (
-    <button className="compact-new-tape" type="button" onClick={onClick} aria-label="Make a new tape">
+    <button className="compact-new-tape" type="button" onClick={onClick} aria-label="Make a mix">
       <PlusIcon />
-      <span>New tape</span>
+      <span>Make a mix</span>
     </button>
   )
 }

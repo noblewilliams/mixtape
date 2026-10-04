@@ -1,31 +1,44 @@
-import { EnergyControl } from './EnergyJourney'
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useRestorableState } from '../lib/workspace-restore'
+import { TapeSettings } from './TapeSettings'
+import { PromptComposer, type PromptComposerProps } from './PromptComposer'
+import { EnergyControl, type EnergyArc } from './EnergyJourney'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { DjMessage, DjSession } from '../domain'
 import { InlineMixName } from './SessionControls'
 import { Cassette } from './Cassette'
-import { MoreIcon, QueueIcon, SendIcon } from './Icons'
+import { MoreIcon, QueueIcon } from './Icons'
 
 type ConversationProps = {
+  currentShape?: EnergyArc | null
+  transcribe?: PromptComposerProps['transcribe']
   selectionBusy?: boolean
   attachment?: ReactNode
   energySummary?: ReactNode
   player?: ReactNode
+  onColor?: (color: string) => Promise<void>
   onRename?: (title: string) => Promise<void>
   onArchive?: () => Promise<void>
   session: DjSession
   messages: DjMessage[]
   loading?: boolean
   thinking: boolean
-  onSend: (text: string) => void
+  onSend: (text: string, shape?: EnergyArc) => void | Promise<void>
   onOpenHistory?: (version?: number) => void
   onOpenQueue: () => void
 }
 
-export function Conversation({ selectionBusy = false, attachment, energySummary, player, onRename, onArchive, session, messages, loading = false, thinking, onSend, onOpenQueue, onOpenHistory }: ConversationProps) {
+const unavailableTranscription = async () => { throw new Error('Transcription unavailable') }
+
+export function Conversation({ currentShape, transcribe = unavailableTranscription, selectionBusy = false, attachment, energySummary, player, onColor, onRename, onArchive, session, messages, loading = false, thinking, onSend, onOpenQueue, onOpenHistory }: ConversationProps) {
+  const [settings, setSettings] = useState(false)
   const [options, setOptions] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   useEffect(() => { if (!options) return; const close = (event: PointerEvent) => { if (!menuRef.current?.contains(event.target as Node)) setOptions(false) }; const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOptions(false) }; document.addEventListener('pointerdown', close); document.addEventListener('keydown', escape); return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', escape) } }, [options])
-  const [draft, setDraft] = useState('')
+  const [draft, setDraft] = useRestorableState(`conversation.${session.id}.draft`, '')
+  // A shape picked here waits as a setting for the next message; once a new
+  // mix version lands, that version's own shape is the truth again.
+  const [pendingShape, setPendingShape] = useRestorableState<{ shape: EnergyArc; version: number } | null>(`conversation.${session.id}.shape`, null)
+  const shape = pendingShape?.version === session.queueVersion ? pendingShape.shape : undefined
   const conversationRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -33,14 +46,6 @@ export function Conversation({ selectionBusy = false, attachment, energySummary,
       conversationRef.current.scrollTop = conversationRef.current.scrollHeight
     }
   }, [messages, thinking])
-
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const text = draft.trim()
-    if (!text || thinking || selectionBusy) return
-    onSend(text)
-    setDraft('')
-  }
 
   return (
     <main className="conversation-panel">
@@ -60,7 +65,8 @@ export function Conversation({ selectionBusy = false, attachment, energySummary,
           <button className="bare-icon-button" type="button" aria-label="Tape options" aria-expanded={options} onClick={() => setOptions((value) => !value)}>
             <MoreIcon />
           </button>
-          {options && <div className="wc-popover wc-session-menu"><button className="wc-text" onClick={() => { setOptions(false); onOpenHistory?.() }}>Version history</button><button className="wc-text" onClick={() => { setOptions(false); void onArchive?.().catch(() => undefined) }}>Archive</button></div>}
+          {settings && onColor && <TapeSettings session={session} onColor={onColor} onClose={() => { setSettings(false); menuRef.current?.querySelector<HTMLButtonElement>('[aria-label="Tape options"]')?.focus() }} />}
+          {options && <div className="wc-popover wc-session-menu">{onColor && <button className="wc-text" onClick={() => { setOptions(false); setSettings(true) }}>Tape settings</button>}<button className="wc-text" onClick={() => { setOptions(false); onOpenHistory?.() }}>Version history</button><button className="wc-text" onClick={() => { setOptions(false); void onArchive?.().catch(() => undefined) }}>Archive</button></div>}
         </div>
       </header>
 
@@ -103,24 +109,14 @@ export function Conversation({ selectionBusy = false, attachment, energySummary,
 
       <div className="composer-area">
         {player}
-        <form className="composer" onSubmit={submit}>
-          <span className="composer-stripe" aria-hidden="true" />
-          {attachment}
-          <EnergyControl text={draft} onChange={setDraft} disabled={thinking || loading || selectionBusy} />
-          <textarea rows={2}
-            aria-label="Message your DJ"
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder="Tell the DJ what to change…"
-            maxLength={2000}
-          />
-          <button className="send-button" type="submit" disabled={!draft.trim() || thinking || loading || selectionBusy} aria-label="Send message">
-            <span className="send-button-surface" aria-hidden="true">
-              <SendIcon />
-            </span>
-          </button>
-        </form>
-        <p>Nothing is added to Apple Music until you ask.</p>
+        <PromptComposer draft={draft} setDraft={setDraft}
+          onSubmit={text => { const request = shape ? onSend(text, shape) : onSend(text); setDraft(''); return request }} transcribe={transcribe}
+          busy={thinking || loading || selectionBusy}
+          inputLabel="Message your DJ" sendLabel="Send message"
+          inputPlaceholder="Tell the DJ what to change…"
+          submitError="Couldn’t send your message. Your text is still here—try again."
+          tools={<>{attachment}<EnergyControl compact value={shape ?? currentShape} onSelect={next => setPendingShape({ shape: next, version: session.queueVersion })} disabled={thinking || loading || selectionBusy} /></>}
+        />
       </div>
     </main>
   )

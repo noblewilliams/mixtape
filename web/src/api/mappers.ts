@@ -55,7 +55,7 @@ export function toDjSession(
     ageLabel: ageLabel(session.updatedAt),
     trackCount,
     durationLabel: durationLabel(totalDuration),
-    caseColor,
+    caseColor: session.caseColor ?? caseColor,
     stockColor,
   }
 }
@@ -76,5 +76,6 @@ export function toQueueTrack(track: ApiQueueTrack): QueueTrack {
     artworkWidth: track.artworkWidth ?? undefined,
     artworkHeight: track.artworkHeight ?? undefined,
     artworkBgColor: track.artworkBgColor ?? undefined,
+    newToYou: track.newToYou ?? false,
   }
 }

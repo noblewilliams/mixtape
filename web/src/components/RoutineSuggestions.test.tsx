@@ -15,11 +15,10 @@ const suggestion = {
   prompt: 'Make a mix that gradually winds down.',
   reason: 'You have made winding-down mixes on 3 Friday evenings.',
 }
-it('generates only after a tap and a fresh server check; dismisses and saves off', async () => {
+it('generates only after a tap and a fresh server check, then dismisses the suggestion', async () => {
   const onCreate = vi.fn().mockResolvedValue(undefined)
   const select = vi.fn().mockResolvedValue({ prompt: suggestion.prompt })
   const dismiss = vi.fn().mockResolvedValue({ ok: true })
-  const save = vi.fn().mockResolvedValue({ enabled: false })
   const api = createFakeApi({
     getSuggestions: async () => ({
       enabled: true,
@@ -28,7 +27,6 @@ it('generates only after a tap and a fresh server check; dismisses and saves off
     }),
     selectSuggestion: select,
     dismissSuggestion: dismiss,
-    saveSuggestionPreference: save,
   })
   render(<RoutineSuggestions api={api} onCreate={onCreate} />)
   await screen.findByText(suggestion.title)
@@ -36,12 +34,9 @@ it('generates only after a tap and a fresh server check; dismisses and saves off
   fireEvent.click(screen.getByRole('button', { name: 'Make this mix' }))
   await waitFor(() => expect(onCreate).toHaveBeenCalledWith(suggestion.prompt))
   fireEvent.click(screen.getByRole('button', { name: 'Not today' }))
-  await screen.findByText('That suggestion is hidden for today.')
+  await waitFor(() => expect(screen.queryByText(suggestion.title)).not.toBeInTheDocument())
   expect(dismiss).toHaveBeenCalledTimes(1)
-  fireEvent.click(screen.getByRole('button', { name: 'Suggestion settings' }))
-  fireEvent.click(screen.getByRole('checkbox'))
-  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-  await waitFor(() => expect(save).toHaveBeenCalledWith(false))
+  expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
 })
 it('does not generate an expired suggestion and exposes retry on network failure', async () => {
   const onCreate = vi.fn()
@@ -81,29 +76,6 @@ it('ignores a selection completed after leaving the account surface', async () =
   await Promise.resolve()
   expect(onCreate).not.toHaveBeenCalled()
 })
-it('keeps settings open on save failure and keeps the previous preference', async () => {
-  const api = createFakeApi({
-    getSuggestions: async () => ({
-      enabled: true,
-      suggestion,
-      dismissed: false,
-    }),
-    saveSuggestionPreference: async () => {
-      throw new Error('offline')
-    },
-  })
-  render(<RoutineSuggestions api={api} onCreate={vi.fn()} />)
-  await screen.findByText(suggestion.title)
-  fireEvent.click(screen.getByRole('button', { name: 'Suggestion settings' }))
-  fireEvent.click(screen.getByRole('checkbox'))
-  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-  await waitFor(() =>
-    expect(screen.getAllByRole('alert').length).toBeGreaterThan(0),
-  )
-  expect(screen.getByRole('dialog')).toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-  expect(screen.getByText(suggestion.title)).toBeInTheDocument()
-})
 it('does not start another mix when manual creation begins during validation', async () => {
   let resolve!: (value: { prompt: string }) => void
   const onCreate = vi.fn()
@@ -127,5 +99,24 @@ it('does not start another mix when manual creation begins during validation', a
       screen.getByRole('button', { name: 'Making your mix…' }),
     ).toBeDisabled(),
   )
+  expect(onCreate).not.toHaveBeenCalled()
+})
+
+it('leaves no empty recommendation section when no routine is available', async () => {
+  render(<RoutineSuggestions api={createFakeApi()} onCreate={vi.fn()} />)
+  await waitFor(() => expect(screen.queryByRole('region', { name: 'Routine suggestions' })).not.toBeInTheDocument())
+  expect(screen.queryByText('Checking your usual moments…')).not.toBeInTheDocument()
+})
+
+it('recovers a failed read without starting a mix', async () => {
+  const onCreate = vi.fn()
+  const getSuggestions = vi.fn()
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockResolvedValueOnce({ enabled: true, suggestion, dismissed: false })
+  render(<RoutineSuggestions api={createFakeApi({ getSuggestions })} onCreate={onCreate} />)
+  await screen.findByRole('alert')
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh suggestions' }))
+  await screen.findByText(suggestion.title)
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   expect(onCreate).not.toHaveBeenCalled()
 })

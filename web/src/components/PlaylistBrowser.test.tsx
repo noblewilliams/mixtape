@@ -1,3 +1,4 @@
+import { WorkspaceRestoreProvider } from '../lib/workspace-restore'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { PlaylistBrowser } from './PlaylistBrowser'
@@ -126,4 +127,73 @@ it('keeps repeated and unavailable entries in order and uses exact Spotify links
     'https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC',
   )
   expect(screen.getByText('Unavailable on the web')).toBeVisible()
+})
+
+it('keeps collection controls available without claiming failed music is ready', async () => {
+  render(<PlaylistBrowser api={createFakeApi({ listPlaylists: vi.fn().mockRejectedValue(new Error('offline')) })} onSources={vi.fn()} onSessionExpired={vi.fn()} />)
+  await screen.findByText('Couldn’t load your playlists')
+  expect(screen.queryByText('Your music, ready.')).not.toBeInTheDocument()
+  expect(screen.getByRole('textbox', { name: 'Search playlists' })).toBeVisible()
+  expect(screen.getByRole('combobox', { name: 'Filter source' })).toBeVisible()
+})
+
+it('restores filtered playlists immediately after remount while authentication is pending', async () => {
+  sessionStorage.clear()
+  const list = vi.fn().mockResolvedValue({ playlists: [playlist], nextCursor: null, total: 1 })
+  const api = createFakeApi({ listPlaylists: list })
+  const view = (restoring: boolean) => <WorkspaceRestoreProvider userId="library-reader" restoring={restoring}><PlaylistBrowser api={api} onSources={vi.fn()} onSessionExpired={vi.fn()} /></WorkspaceRestoreProvider>
+  const first = render(view(false))
+  await screen.findByRole('button', { name: 'Open Night bus' })
+  fireEvent.change(screen.getByLabelText('Search playlists'), { target: { value: 'Night' } })
+  fireEvent.change(screen.getByLabelText('Filter source'), { target: { value: 'spotify_export' } })
+  await waitFor(() => expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ q: 'Night', source: 'spotify_export' }), expect.any(AbortSignal)))
+  first.unmount()
+  list.mockClear()
+  const restored = render(view(true))
+  expect(screen.getByRole('button', { name: 'Open Night bus' })).toBeVisible()
+  expect(screen.getByLabelText('Search playlists')).toHaveValue('Night')
+  expect(screen.getByLabelText('Filter source')).toHaveValue('spotify_export')
+  expect(list).not.toHaveBeenCalled()
+  list.mockImplementation(() => new Promise(() => {}))
+  restored.rerender(view(false))
+  await waitFor(() => expect(list).toHaveBeenCalled())
+  expect(screen.getByRole('button', { name: 'Open Night bus' })).toBeVisible()
+  expect(screen.queryByLabelText('Loading playlists')).not.toBeInTheDocument()
+})
+
+it('restores an opened playlist and its loaded details', async () => {
+  sessionStorage.clear()
+  const detail = vi.fn().mockResolvedValue({ playlist: { ...playlist, name: 'Night bus — saved' }, entries: [], nextEntryCursor: null })
+  const list = vi.fn().mockResolvedValue({ playlists: [playlist], nextCursor: null, total: 1 })
+  const api = createFakeApi({ listPlaylists: list, getPlaylist: detail })
+  const view = (restoring: boolean) => <WorkspaceRestoreProvider userId="library-detail-reader" restoring={restoring}><PlaylistBrowser api={api} onSources={vi.fn()} onSessionExpired={vi.fn()} /></WorkspaceRestoreProvider>
+  const first = render(view(false))
+  fireEvent.click(await screen.findByRole('button', { name: 'Open Night bus' }))
+  await screen.findByRole('heading', { name: 'Night bus — saved' })
+  first.unmount()
+  detail.mockClear()
+  render(view(true))
+  expect(screen.getByRole('heading', { name: 'Night bus — saved' })).toBeVisible()
+  expect(screen.queryByRole('status', { name: 'Loading tracks' })).not.toBeInTheDocument()
+  expect(detail).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: '← All playlists' }))
+  expect(screen.getByRole('button', { name: 'Open Night bus' })).toBeVisible()
+})
+
+it('holds the playlist layout with a skeleton until its tracks arrive', async () => {
+  let finish!: (value: Awaited<ReturnType<ReturnType<typeof createFakeApi>['getPlaylist']>>) => void
+  const api = createFakeApi({
+    listPlaylists: async () => ({ playlists: [playlist], nextCursor: null, total: 1 }),
+    getPlaylist: () => new Promise((resolve) => { finish = resolve }),
+  })
+  render(<PlaylistBrowser api={api} onInspire={vi.fn()} onSources={vi.fn()} onSessionExpired={vi.fn()} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Open Night bus' }))
+  const skeleton = screen.getByRole('status', { name: 'Loading tracks' })
+  expect(skeleton.querySelectorAll('.ym-track')).toHaveLength(playlist.entryCount)
+  expect(screen.getByRole('heading', { name: 'Night bus' })).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Make a mix inspired by this' })).toBeDisabled()
+  finish({ playlist: { ...playlist, origin: 'unknown' }, entries: [], nextEntryCursor: null })
+  await waitFor(() => expect(screen.queryByRole('status', { name: 'Loading tracks' })).not.toBeInTheDocument())
+  expect(screen.getByRole('button', { name: 'Make a mix inspired by this' })).toBeEnabled()
+  expect(screen.getByRole('button', { name: 'I curated this' })).toBeVisible()
 })

@@ -28,6 +28,10 @@ token so long DJ operations are not constrained by Netlify's external proxy time
 
 Apple's real browser callback must be tested on the deployed HTTPS origin; Apple does not accept localhost return URLs. Google may use the local Worker callback during development, while production uses the same first-party auth proxy as Apple.
 
+For local Google sign-in, register the exact callback `${BETTER_AUTH_URL}/api/auth/callback/google` under the web OAuth client’s **Authorized redirect URIs**. The current local setup uses `http://localhost:8799/api/auth/callback/google`, with the frontend at `http://localhost:4176`. The frontend origin must also appear in the local Worker’s `WEB_ORIGINS`. A `redirect_uri_mismatch` error means the callback sent to Google is not registered for that client; changing the frontend port alone does not fix it.
+
+Browser favicons use the original cassette with a transparent outer canvas. The icon export script preserves alpha for the 16px/32px browser PNGs; native and touch icons retain their opaque canvas.
+
 ## Current boundary
 
 - Implemented foundations: Better Auth browser session gate with Apple + Google, remembered last-used provider, explicit account linking, credentialed session/memory/playlist APIs, MusicKit playback and playlist creation, paged MusicKit library/playlist/recent reads, deletion-safe staged upload, responsive conversation shell, server-backed session creation/chat, and the artwork-led mix rail.

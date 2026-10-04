@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ApiError, type ApiMemory, type MixtapeApi } from '../api/client'
+import { useRestorableState, useWorkspaceRestoring } from '../lib/workspace-restore'
+import { EmptyState } from './UiStates'
 import { ControlModal } from './ControlModal'
 
 export function MemoryControls({
@@ -11,7 +13,8 @@ export function MemoryControls({
   onClose: () => void
   onSessionExpired: () => void
 }) {
-  const [notes, setNotes] = useState<ApiMemory[] | null>(null)
+  const [notes, setNotes] = useRestorableState<ApiMemory[] | null>('settings.memories', null)
+  const restoring = useWorkspaceRestoring()
   const [selected, setSelected] = useState<ApiMemory | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -21,9 +24,9 @@ export function MemoryControls({
   const expired = useRef(onSessionExpired)
   expired.current = onSessionExpired
   useEffect(() => {
+    if (restoring) return
     const controller = new AbortController()
     life.current = controller
-    setNotes(null)
     setError('')
     void api
       .listMemories(controller.signal)
@@ -36,7 +39,7 @@ export function MemoryControls({
         if (e instanceof ApiError && e.status === 401) expired.current()
       })
     return () => controller.abort()
-  }, [api, revision])
+  }, [api, revision, restoring])
   async function forget() {
     if (!selected || busy) return
     const controller = life.current!
@@ -82,15 +85,13 @@ export function MemoryControls({
       </header>
       <p>Preferences you asked the DJ to remember.</p>
       {notice && <p role="status">{notice}</p>}
-      {error && <p role="alert">{error}</p>}
+      {error && notes && <p role="alert">{error} <button className="wc-text" disabled={busy} onClick={() => setRevision(n => n + 1)}>Reload notes</button></p>}
       {error && !notes ? (
-        <button className="wc-text" onClick={() => setRevision((n) => n + 1)}>
-          Reload notes
-        </button>
+        <EmptyState kind="error" title="Couldn’t load your preferences" description={error} action={{ label: 'Reload notes', onClick: () => setRevision(n => n + 1) }} />
       ) : !notes ? (
         <p role="status">Loading notes…</p>
       ) : notes.length === 0 ? (
-        <p>Nothing remembered yet. Tell the DJ “remember…” when a preference should stay with you.</p>
+        <EmptyState kind="memory" title="No saved preferences yet" description="Tell the DJ “remember…” when a preference should stay with you." />
       ) : (
         notes.map((note) => (
           <div className="wc-memory" key={note.id}>
