@@ -194,6 +194,8 @@ export type ListeningTrackRow = {
   artist: string
   album: string | null
   durationMs: number | null
+  /** Uppercase, well-formed ISRC; omitted when unknown, never null. */
+  isrc?: string
 }
 export type ListeningDayRow = {
   ordinal: number

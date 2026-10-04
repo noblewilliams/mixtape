@@ -11,6 +11,8 @@ export type SnapshotTrack = {
   artist: string
   album: string | null
   durationMs: number | null
+  /** Exportify only: uppercase ISRC, present only when well formed; never null or empty. */
+  isrc?: string
 }
 
 export type SnapshotDay = {

@@ -171,6 +171,7 @@ function toTrackRow(
     artist: track.artist,
     album: track.album,
     durationMs: track.durationMs,
+    ...(track.isrc === undefined ? {} : { isrc: track.isrc }),
   }
 }
 

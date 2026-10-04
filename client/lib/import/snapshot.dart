@@ -37,6 +37,7 @@ class SnapshotTrack {
     required this.artist,
     required this.album,
     required this.durationMs,
+    this.isrc,
   });
 
   final String platformId;
@@ -45,12 +46,17 @@ class SnapshotTrack {
   final String? album;
   final int? durationMs;
 
+  /// Exportify only: uppercase ISRC, set only when well formed. The key is
+  /// left out of the JSON when null, never sent as null or empty.
+  final String? isrc;
+
   Map<String, Object?> toCanonicalJson() => {
     'platformId': platformId,
     'title': title,
     'artist': artist,
     'album': album,
     'durationMs': durationMs,
+    if (isrc != null) 'isrc': isrc,
   };
 }
 

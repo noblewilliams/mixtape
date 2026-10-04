@@ -63,6 +63,16 @@ Future<List<List<String>>> _csv(String text, CancelToken? token) async {
   return rows;
 }
 
+/// The ISRC as the import contract carries it: trimmed, hyphens and spaces
+/// removed, uppercase, and only when it is the 12-character ISRC shape.
+/// Anything else is null, so the field is omitted.
+String? normalizeIsrc(String cell) {
+  final compact = cell.trim().replaceAll(RegExp('[- ]'), '');
+  return RegExp(r'^[A-Za-z]{2}[A-Za-z0-9]{3}[0-9]{7}$').hasMatch(compact)
+      ? compact.toUpperCase()
+      : null;
+}
+
 Future<ParsedExport> parseExportify(
   ExportArchive archive,
   ParseOptions options,
@@ -102,16 +112,23 @@ Future<ParsedExport> parseExportify(
       final rows = await _csv(text, options.cancelToken);
       if (rows.isEmpty) fail(file.path);
       final header = rows.removeAt(0), columns = <String, int>{};
+      var ambiguousIsrc = false;
       for (var i = 0; i < header.length; i++) {
         for (final e in exportifyHeaders.entries) {
           if (e.value.any(
             (s) => s.trim().toLowerCase() == header[i].trim().toLowerCase(),
           )) {
-            if (columns.containsKey(e.key)) fail(file.path);
+            // A repeated ISRC column is ignored, not fatal: it is optional.
+            if (e.key == 'isrc' && columns.containsKey(e.key)) {
+              ambiguousIsrc = true;
+            } else if (columns.containsKey(e.key)) {
+              fail(file.path);
+            }
             columns[e.key] = i;
           }
         }
       }
+      if (ambiguousIsrc) columns.remove('isrc');
       if ([
         'track_uri',
         'track_name',
@@ -142,18 +159,29 @@ Future<ParsedExport> parseExportify(
         final n = RegExp(r'^\d+$').hasMatch(duration)
             ? int.tryParse(duration)
             : null;
-        if (id != null) {
-          tracks.putIfAbsent(
-            id,
-            () => SnapshotTrack(
-              platformId: id,
-              title: title,
-              artist: artist,
-              album: album,
-              durationMs: n != null && n <= 86400000 ? n : null,
-            ),
+        final isrc = normalizeIsrc(value(r, 'isrc'));
+        // One track per recording; files are read in path order, rows in
+        // file order, so the first well-formed ISRC seen wins.
+        final known = id == null ? null : tracks[id];
+        if (id != null && known == null) {
+          tracks[id] = SnapshotTrack(
+            platformId: id,
+            title: title,
+            artist: artist,
+            album: album,
+            durationMs: n != null && n <= 86400000 ? n : null,
+            isrc: isrc,
           );
-        } else {
+        } else if (known != null && isrc != null && known.isrc == null) {
+          tracks[id!] = SnapshotTrack(
+            platformId: known.platformId,
+            title: known.title,
+            artist: known.artist,
+            album: known.album,
+            durationMs: known.durationMs,
+            isrc: isrc,
+          );
+        } else if (id == null) {
           unresolved++;
         }
         final timestamp = value(r, 'added_at');

@@ -452,6 +452,36 @@ void main() {
       expect(server.beginBody!['unresolvedPlays'], 1);
     });
 
+    test('sends a track ISRC only when the snapshot carries one, never as null', () async {
+      final server = _Server();
+      final base = _synthetic(days: 1);
+      final snapshot = ListeningExportSnapshot(
+        package: base.package,
+        timeZone: base.timeZone,
+        country: base.country,
+        tracks: const [
+          SnapshotTrack(platformId: 'track000000000000000000', title: 'T0', artist: 'A', album: null, durationMs: null, isrc: 'USRC17607839'),
+          SnapshotTrack(platformId: 'track000000000000000001', title: 'T1', artist: 'A', album: null, durationMs: null),
+        ],
+        days: base.days,
+        library: base.library,
+        artists: base.artists,
+        playlists: base.playlists,
+        unresolved: base.unresolved,
+        ledgerFrom: base.ledgerFrom,
+        ledgerTo: base.ledgerTo,
+      );
+      final service = await _service(server, parser: _parserFor(snapshot));
+      await service.import('any.zip', _lagos);
+
+      final rows = server.chunks('/tracks', 'tracks').single;
+      expect(rows[0], {
+        'ordinal': 0, 'platformId': 'track000000000000000000', 'title': 'T0', 'artist': 'A',
+        'album': null, 'durationMs': null, 'isrc': 'USRC17607839',
+      });
+      expect((rows[1] as Map).containsKey('isrc'), isFalse);
+    });
+
     test('501 liked, 501 artists, 51 playlists, and 201 entries split at 500, 500, 50, 200', () async {
       final server = _Server();
       final snapshot = _synthetic(

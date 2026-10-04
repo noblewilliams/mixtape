@@ -20,6 +20,7 @@ const trackRow = (track: SnapshotTrack): SnapshotTrack => ({
   artist: track.artist,
   album: track.album,
   durationMs: track.durationMs,
+  ...(track.isrc === undefined ? {} : { isrc: track.isrc }),
 })
 
 const dayRow = (day: SnapshotDay): SnapshotDay => ({

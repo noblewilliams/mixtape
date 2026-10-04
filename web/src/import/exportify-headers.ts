@@ -84,4 +84,7 @@ export const exportifyHeaders: Record<string, readonly string[]> = {
     'Tillagd vid',
     'Eklenme Tarihi',
   ],
+  // Only the untranslated label is mapped: no translated ISRC label is
+  // recorded in the shared fixture. Optional; see exportify-parser.ts.
+  isrc: ['ISRC'],
 }

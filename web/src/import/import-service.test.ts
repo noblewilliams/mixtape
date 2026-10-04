@@ -437,6 +437,21 @@ describe('ListeningImportService', () => {
     expect(stages).toContainEqual({ stage: 'uploading_days', completed: 2001, total: 2001 })
   })
 
+  it('sends a track ISRC only when the snapshot carries one, never as null', async () => {
+    const snapshot = extendedSnapshot(2, 1)
+    snapshot.tracks[0].isrc = 'USRC17607839'
+    const { service, mocks } = setup(fakeParser(snapshot))
+
+    await service.upload(new Blob([]), uploadOptions())
+
+    const [first, second] = mocks.putListeningTracks.mock.calls[0][1]
+    expect(first).toEqual({
+      ordinal: 0, platformId: snapshot.tracks[0].platformId, title: 'Track 0', artist: 'Artist',
+      album: null, durationMs: null, isrc: 'USRC17607839',
+    })
+    expect('isrc' in second).toBe(false)
+  })
+
   it('chunks library and artists by 500, playlists by 50, and entries by 200', async () => {
     const { service, mocks } = setup(fakeParser(accountSnapshot(501, 51, 201)))
     const options = uploadOptions()

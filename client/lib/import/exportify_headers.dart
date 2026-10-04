@@ -84,4 +84,7 @@ const exportifyHeaders = {
     "Tillagd vid",
     "Eklenme Tarihi",
   ],
+  // Only the untranslated label is mapped: no translated ISRC label is
+  // recorded in the shared fixture. Optional; see exportify_parser.dart.
+  "isrc": ["ISRC"],
 };

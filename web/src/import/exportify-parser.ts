@@ -67,6 +67,18 @@ async function csv(text: string, signal?: AbortSignal): Promise<string[][]> {
 }
 const normalize = (s: string) => s.trim().normalize('NFC').toLowerCase()
 
+/**
+ * The ISRC as the import contract carries it: trimmed, hyphens and spaces
+ * removed, uppercase, and only when it is the 12-character ISRC shape.
+ * Anything else is null, so the field is omitted.
+ */
+export function normalizeIsrc(cell: string): string | null {
+  const compact = cell.trim().replace(/[- ]/g, '')
+  return /^[A-Za-z]{2}[A-Za-z0-9]{3}[0-9]{7}$/.test(compact)
+    ? compact.toUpperCase()
+    : null
+}
+
 export async function parseExportify(
   archive: ExportArchive,
   options: ParseOptions,
@@ -113,14 +125,18 @@ export async function parseExportify(
       const [header, ...rows] = await csv(text, options.signal)
       if (!header) fail(file.path)
       const columns = new Map<string, number>()
+      let ambiguousIsrc = false
       header.forEach((h, i) => {
         for (const [key, labels] of Object.entries(exportifyHeaders)) {
           if (labels.some((label) => normalize(label) === normalize(h))) {
-            if (columns.has(key)) fail(file.path)
+            // A repeated ISRC column is ignored, not fatal: it is optional.
+            if (key === 'isrc' && columns.has(key)) ambiguousIsrc = true
+            else if (columns.has(key)) fail(file.path)
             columns.set(key, i)
           }
         }
       })
+      if (ambiguousIsrc) columns.delete('isrc')
       if (
         ['track_uri', 'track_name', 'artist_names'].some((k) => !columns.has(k))
       )
@@ -145,14 +161,20 @@ export async function parseExportify(
           /^\d+$/.test(duration) && Number(duration) <= 86_400_000
             ? Number(duration)
             : null
-        if (platformId && !tracks.has(platformId))
+        const isrc = normalizeIsrc(value(r, 'isrc'))
+        // One track per recording; files are read in path order, rows in
+        // file order, so the first well-formed ISRC seen wins.
+        const known = platformId ? tracks.get(platformId) : undefined
+        if (platformId && !known)
           tracks.set(platformId, {
             platformId,
             title,
             artist,
             album,
             durationMs,
+            ...(isrc ? { isrc } : {}),
           })
+        else if (known && isrc && known.isrc === undefined) known.isrc = isrc
         if (!platformId) unresolved++
         const timestamp = value(r, 'added_at')
         const parsed = /^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(
