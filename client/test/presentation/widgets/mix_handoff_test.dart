@@ -31,6 +31,7 @@ QueueTrack _track(
   int position, {
   String? appleId = 'apple',
   String? spotifyId,
+  bool newToYou = false,
 }) => QueueTrack(
   position: position,
   trackId: 't$position',
@@ -39,6 +40,7 @@ QueueTrack _track(
   title: 'Title $position',
   artist: 'Artist $position',
   durationMs: 180000,
+  newToYou: newToYou,
 );
 
 /// A screen stand-in: the mixin's host, with the toasts captured instead of
@@ -653,6 +655,71 @@ void main() {
 
       expect(find.byKey(MixHandoffKeys.conversation.playNow), findsOneWidget);
       expect(find.byKey(MixHandoffKeys.arrangement.playNow), findsNothing);
+    });
+  });
+
+  group('save alert, new to you', () {
+    const helper = 'Shown under the playlist in Apple Music';
+    const one =
+        '1 song here is new to you. Saving adds it to your Apple Music library.';
+    const three =
+        '3 songs here are new to you. Saving adds them to your Apple Music library.';
+
+    Future<void> pumpDialog(WidgetTester tester, int count) => tester.pumpWidget(
+      MaterialApp(
+        home: MixSaveDialog(
+          keys: MixHandoffKeys.arrangement,
+          defaultName: 'Late drive',
+          defaultAuthor: '',
+          newToYouCount: count,
+          onConfirm: (_, _) async {},
+        ),
+      ),
+    );
+
+    testWidgets('a mix of only owned songs keeps the alert unchanged', (
+      tester,
+    ) async {
+      await pumpDialog(tester, 0);
+      expect(find.text(helper), findsOneWidget);
+      expect(find.textContaining('new to you'), findsNothing);
+    });
+
+    testWidgets('one new song reads in the singular, after the helper line', (
+      tester,
+    ) async {
+      await pumpDialog(tester, 1);
+      expect(find.text(one), findsOneWidget);
+      expect(
+        tester.getRect(find.text(one)).top,
+        greaterThanOrEqualTo(tester.getRect(find.text(helper)).bottom),
+      );
+      final style = tester.widget<Text>(find.text(one)).style!;
+      expect(style.fontSize, 12);
+      expect(style, tester.widget<Text>(find.text(helper)).style);
+    });
+
+    testWidgets('several new songs read in the plural', (tester) async {
+      await pumpDialog(tester, 3);
+      expect(find.text(three), findsOneWidget);
+    });
+
+    testWidgets('the shared save flow, used by both screens, counts the queue\'s new songs', (tester) async {
+      await _pumpHost(
+        tester,
+        _container(),
+        queue: [
+          _track(0, newToYou: true),
+          _track(1),
+          _track(2, newToYou: true),
+          _track(3, newToYou: true),
+        ],
+      );
+
+      await tester.tap(find.byKey(const Key('open-save')));
+      await tester.pumpAndSettle();
+
+      expect(find.text(three), findsOneWidget);
     });
   });
 }

@@ -316,6 +316,7 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
         builder: (dialogContext) => MixSaveDialog(
           keys: keys,
           defaultName: defaultName,
+          newToYouCount: queue.where((track) => track.newToYou).length,
           defaultAuthor:
               (storedAuthor != null && storedAuthor.isNotEmpty
                   ? storedAuthor
@@ -557,6 +558,11 @@ class MixActionsRow extends ConsumerWidget {
   }
 }
 
+/// The save alert's second helper line, when the mix holds new songs.
+String mixSaveNewToYouLine(int count) => count == 1
+    ? '1 song here is new to you. Saving adds it to your Apple Music library.'
+    : '$count songs here are new to you. Saving adds them to your Apple Music library.';
+
 /// P3's native alert: the mix title as the default name, and "Your name"
 /// remembered for next time.
 class MixSaveDialog extends StatefulWidget {
@@ -566,11 +572,16 @@ class MixSaveDialog extends StatefulWidget {
     required this.defaultName,
     required this.defaultAuthor,
     required this.onConfirm,
+    this.newToYouCount = 0,
   });
 
   final MixHandoffKeys keys;
   final String defaultName;
   final String defaultAuthor;
+
+  /// Songs in the mix from outside the listener's library; saving adds them
+  /// to it, so the alert says so when there are any.
+  final int newToYouCount;
   final Future<void> Function(String name, String author) onConfirm;
 
   @override
@@ -658,6 +669,14 @@ class _MixSaveDialogState extends State<MixSaveDialog> {
             textAlign: TextAlign.start,
             style: helper,
           ),
+          if (widget.newToYouCount > 0) ...[
+            const SizedBox(height: 6),
+            Text(
+              mixSaveNewToYouLine(widget.newToYouCount),
+              textAlign: TextAlign.start,
+              style: helper,
+            ),
+          ],
         ],
       ),
       actions: [

@@ -1,13 +1,14 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
 
-Map<String, dynamic> _track({Object? spotifyId = 'x'}) => {
+Map<String, dynamic> _track({Object? spotifyId = 'x', Object? newToYou = 'x'}) => {
       'position': 0,
       'trackId': 't1',
       'appleId': null,
       'title': 'T',
       'artist': 'A',
       if (spotifyId != 'x') 'spotifyId': spotifyId,
+      if (newToYou != 'x') 'newToYou': newToYou,
     };
 
 Map<String, dynamic> _session({Object? notPersonal = 'x'}) => {
@@ -37,6 +38,20 @@ void main() {
     test('is null when absent or null on the wire', () {
       expect(QueueTrack.fromJson(_track()).spotifyId, isNull);
       expect(QueueTrack.fromJson(_track(spotifyId: null)).spotifyId, isNull);
+    });
+  });
+
+  group('QueueTrack.newToYou', () {
+    test('parses true from the wire', () {
+      expect(QueueTrack.fromJson(_track(newToYou: true)).newToYou, isTrue);
+    });
+
+    test('defaults to false when absent or null, on the wire and in the constructor', () {
+      expect(QueueTrack.fromJson(_track()).newToYou, isFalse);
+      expect(QueueTrack.fromJson(_track(newToYou: null)).newToYou, isFalse);
+      expect(QueueTrack.fromJson(_track(newToYou: false)).newToYou, isFalse);
+      const track = QueueTrack(position: 0, trackId: 't', appleId: null, title: 'T', artist: 'A');
+      expect(track.newToYou, isFalse);
     });
   });
 

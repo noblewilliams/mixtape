@@ -446,6 +446,27 @@ void main() {
     );
   });
 
+  testWidgets('the accent word is plum, unmarked, in both themes', (
+    tester,
+  ) async {
+    const word = StatusWord(label: 'New to you', kind: StatusKind.accent);
+    for (final dark in [false, true]) {
+      await _pump(tester, word, dark: dark);
+      await tester.pumpAndSettle();
+      final style = tester.widget<Text>(find.text('New to you')).style!;
+      expect(
+        style.color,
+        dark ? MixtapeTokens.dark.plum : MixtapeTokens.light.plum,
+      );
+      expect(style.fontSize, 12.5);
+      expect(style.fontWeight, FontWeight.w600);
+      expect(
+        find.descendant(of: find.byType(StatusWord), matching: find.byType(Icon)),
+        findsNothing,
+      );
+    }
+  });
+
   testWidgets('the prism stripe paints the five-stop vertical prism', (
     tester,
   ) async {

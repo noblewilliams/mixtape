@@ -75,6 +75,7 @@ class QueueTrack {
     this.artworkWidth,
     this.artworkHeight,
     this.artworkBgColor,
+    this.newToYou = false,
   });
 
   final int position;
@@ -95,21 +96,26 @@ class QueueTrack {
   final int? artworkWidth;
   final int? artworkHeight;
   final String? artworkBgColor;
+  // A pick from outside the listener's library. The server already sends
+  // false for not-personal sessions, so the clients render it as given; an
+  // older server omits it.
+  final bool newToYou;
 
   factory QueueTrack.fromJson(Map<String, dynamic> json) => QueueTrack(
-        position: json['position'] as int,
-        trackId: json['trackId'] as String,
-        appleId: json['appleId'] as String?,
-        title: json['title'] as String,
-        artist: json['artist'] as String,
-        spotifyId: json['spotifyId'] as String?,
-        reason: json['reason'] as String?,
-        durationMs: json['durationMs'] as int?,
-        artworkUrl: json['artworkUrl'] as String?,
-        artworkWidth: json['artworkWidth'] as int?,
-        artworkHeight: json['artworkHeight'] as int?,
-        artworkBgColor: json['artworkBgColor'] as String?,
-      );
+    position: json['position'] as int,
+    trackId: json['trackId'] as String,
+    appleId: json['appleId'] as String?,
+    title: json['title'] as String,
+    artist: json['artist'] as String,
+    spotifyId: json['spotifyId'] as String?,
+    reason: json['reason'] as String?,
+    durationMs: json['durationMs'] as int?,
+    artworkUrl: json['artworkUrl'] as String?,
+    artworkWidth: json['artworkWidth'] as int?,
+    artworkHeight: json['artworkHeight'] as int?,
+    artworkBgColor: json['artworkBgColor'] as String?,
+    newToYou: json['newToYou'] as bool? ?? false,
+  );
 }
 
 /// Shared by every response shape that embeds a queue snapshot (session

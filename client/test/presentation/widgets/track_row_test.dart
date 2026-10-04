@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/reason_band.dart';
+import 'package:mixtape/presentation/widgets/foundation/status_word.dart';
 import 'package:mixtape/presentation/widgets/track_row.dart';
 
 QueueTrack _track({
@@ -14,6 +16,7 @@ QueueTrack _track({
   String? reason,
   String title = 'Low Tide, Late',
   String artist = 'Harbour Lights',
+  bool newToYou = false,
 }) => QueueTrack(
   position: position,
   trackId: trackId,
@@ -23,6 +26,7 @@ QueueTrack _track({
   artist: artist,
   reason: reason,
   durationMs: 180000,
+  newToYou: newToYou,
 );
 
 Future<void> _pump(
@@ -374,4 +378,174 @@ void main() {
       expect(title.maxLines, isNull);
     },
   );
+
+  group('new to you mark', () {
+    testWidgets('a new track ends the artist line with the plum status word', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        TrackRow(number: 2, track: _track(newToYou: true), expanded: false),
+      );
+
+      final word = tester.widget<StatusWord>(find.byType(StatusWord));
+      expect(word.label, 'New to you');
+      expect(word.kind, StatusKind.accent);
+      expect(word.icon, isFalse);
+      final style = tester.widget<Text>(find.text('New to you')).style!;
+      expect(style.fontSize, 12.5);
+      expect(style.fontWeight, FontWeight.w600);
+      expect(style.color, MixtapeTokens.light.plum);
+      expect(find.text(' · '), findsOneWidget);
+      expect(find.text('Harbour Lights'), findsOneWidget);
+      // On the artist's line, after it.
+      final artist = tester.getRect(find.text('Harbour Lights'));
+      final mark = tester.getRect(find.text('New to you'));
+      expect(mark.left, greaterThan(artist.right));
+      expect((mark.center.dy - artist.center.dy).abs(), lessThan(4));
+    });
+
+    testWidgets('an owned track carries no mark', (tester) async {
+      await _pump(tester, TrackRow(number: 1, track: _track(), expanded: false));
+
+      expect(find.byType(StatusWord), findsNothing);
+      expect(find.text('New to you'), findsNothing);
+      expect(find.text(' · '), findsNothing);
+    });
+
+    testWidgets('a long artist ellipsises first and the mark is never cut', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        TrackRow(
+          number: 4,
+          track: _track(
+            artist: 'Ilse Varga and the Night Shift Choir Orchestra',
+            newToYou: true,
+          ),
+          expanded: false,
+          onOpenInSpotify: () {},
+        ),
+        // The test font draws every glyph a full em wide, so this is far
+        // tighter than a real 320 pt phone.
+        width: 340,
+      );
+
+      expect(tester.takeException(), isNull);
+      final artist = tester.renderObject<RenderParagraph>(
+        find.text('Ilse Varga and the Night Shift Choir Orchestra'),
+      );
+      expect(artist.didExceedMaxLines, isTrue);
+      final mark = tester.renderObject<RenderParagraph>(find.text('New to you'));
+      expect(mark.didExceedMaxLines, isFalse);
+      expect(
+        mark.size.width,
+        moreOrLessEquals(mark.getMaxIntrinsicWidth(double.infinity), epsilon: 0.5),
+      );
+      // The Spotify control keeps its full target beside it.
+      expect(
+        tester.getSize(find.byKey(TrackRow.spotifyKey('t1'))),
+        const Size(MixtapeMetrics.minTarget, MixtapeMetrics.minTarget),
+      );
+      expect(
+        tester.getRect(find.text('New to you')).right,
+        lessThanOrEqualTo(tester.getRect(find.byKey(TrackRow.spotifyKey('t1'))).left),
+      );
+    });
+
+    testWidgets('an unavailable new track keeps the skipped line', (tester) async {
+      await _pump(
+        tester,
+        TrackRow(
+          number: 1,
+          track: _track(appleId: null, newToYou: true),
+          expanded: false,
+        ),
+      );
+
+      expect(find.text('New to you'), findsOneWidget);
+      expect(find.text(TrackRow.unavailableText), findsOneWidget);
+    });
+
+    testWidgets('just under the wrap scale the mark stays on the artist line', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        TrackRow(number: 2, track: _track(newToYou: true), expanded: false),
+        width: 420,
+        textScaler: const TextScaler.linear(1.49),
+      );
+
+      expect(tester.takeException(), isNull);
+      expect(find.text(' · '), findsOneWidget);
+      final artist = tester.getRect(find.text('Harbour Lights'));
+      final dot = tester.getRect(find.text(' · '));
+      final mark = tester.getRect(find.text('New to you'));
+      expect(dot.left, greaterThanOrEqualTo(artist.right));
+      expect(mark.left, greaterThanOrEqualTo(dot.right));
+      expect((mark.center.dy - artist.center.dy).abs(), lessThan(6));
+      expect(
+        tester.renderObject<RenderParagraph>(find.text('New to you')).didExceedMaxLines,
+        isFalse,
+      );
+    });
+
+    testWidgets('at 150% text the mark takes its own line, without the dot', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        TrackRow(
+          number: 2,
+          track: _track(
+            artist: 'Ilse Varga and the Night Shift Choir Orchestra',
+            newToYou: true,
+          ),
+          expanded: false,
+        ),
+        width: 320,
+        textScaler: const TextScaler.linear(1.5),
+      );
+
+      expect(tester.takeException(), isNull);
+      expect(find.text(' · '), findsNothing);
+      final artist = tester.getRect(
+        find.text('Ilse Varga and the Night Shift Choir Orchestra'),
+      );
+      final mark = tester.getRect(find.text('New to you'));
+      expect(mark.top, greaterThanOrEqualTo(artist.bottom));
+      expect(mark.left, moreOrLessEquals(artist.left, epsilon: 0.5));
+      expect(
+        tester.renderObject<RenderParagraph>(find.text('New to you')).didExceedMaxLines,
+        isFalse,
+      );
+    });
+
+    testWidgets('VoiceOver reads one row ending in new to you, no extra stop', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await _pump(
+        tester,
+        TrackRow(
+          number: 2,
+          track: _track(newToYou: true),
+          expanded: false,
+          onTap: () {},
+        ),
+      );
+
+      final row = tester.getSemantics(find.text('Low Tide, Late')).getSemanticsData();
+      expect(row.label, contains('Harbour Lights'));
+      expect(row.label.toLowerCase(), endsWith('new to you'));
+      expect(row.label, isNot(contains('·')));
+      expect(
+        tester.getSemantics(find.text('New to you')),
+        same(tester.getSemantics(find.text('Low Tide, Late'))),
+      );
+      handle.dispose();
+    });
+  });
 }

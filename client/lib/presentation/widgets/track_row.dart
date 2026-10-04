@@ -10,6 +10,7 @@ import '../../data/dj/dj_models.dart';
 import '../theme/mixtape_theme.dart';
 import 'foundation/reason_band.dart';
 import 'foundation/square_art.dart';
+import 'foundation/status_word.dart';
 import 'playlist_artwork.dart' show playlistArtworkColor, playlistArtworkUrl;
 
 /// Number, 48 pt square art, title, artist and a drag grip; tapping reveals
@@ -73,6 +74,7 @@ class TrackRow extends StatelessWidget {
 
   static const String noReasonText = 'no notes from the DJ';
   static const String unavailableText = 'Not in Apple Music · skipped on play';
+  static const String newToYouText = 'New to you';
 
   static const Key numberKey = Key('track-row-number');
   static const Key artKey = Key('track-row-art');
@@ -103,6 +105,43 @@ class TrackRow extends StatelessWidget {
   static const double wrapScale = 1.5;
 
   bool get _unavailable => track.appleId == null;
+
+  /// `{artist} · New to you` for a pick from outside the library
+  /// (`docs/mockups/approved/2026-10-03-new-to-you-mark.md`): the artist
+  /// ellipsises first and the mark is never cut. From [wrapScale] the mark
+  /// takes its own line, without the dot.
+  Widget _artistLine(MixtapeTokens tokens, bool wraps) {
+    final style = tokens.meta.copyWith(color: tokens.muted);
+    final artist = Text(
+      track.artist,
+      style: style,
+      maxLines: wraps ? null : 1,
+      overflow: wraps ? null : TextOverflow.ellipsis,
+    );
+    if (!track.newToYou) return artist;
+    const mark = StatusWord(
+      label: newToYouText,
+      kind: StatusKind.accent,
+      icon: false,
+    );
+    if (wraps) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [artist, mark],
+      );
+    }
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
+      children: [
+        Flexible(child: artist),
+        ExcludeSemantics(child: Text(' · ', style: style)),
+        // Sized to its own words, so only the artist ever gives way.
+        const IntrinsicWidth(child: mark),
+      ],
+    );
+  }
 
   Widget _grip(MixtapeTokens tokens) {
     final bar = Container(
@@ -188,12 +227,7 @@ class TrackRow extends StatelessWidget {
           maxLines: wraps ? null : 1,
           overflow: wraps ? null : TextOverflow.ellipsis,
         ),
-        Text(
-          track.artist,
-          style: tokens.meta.copyWith(color: tokens.muted),
-          maxLines: wraps ? null : 1,
-          overflow: wraps ? null : TextOverflow.ellipsis,
-        ),
+        _artistLine(tokens, wraps),
         if (_unavailable)
           Padding(
             padding: const EdgeInsets.only(top: 2),
