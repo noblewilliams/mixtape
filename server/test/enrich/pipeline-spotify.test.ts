@@ -97,7 +97,7 @@ describe('Spotify ID enrichment', () => {
       artistSource: 'reccobeats', isrc: METADATA.isrc, durationMs: 201_000,
     })])
     expect(await db.select().from(enrichmentFailures)).toEqual([expect.objectContaining({
-      stage: 'features', attempts: 1, error: 'EnrichSourceError: reccobeats: features HTTP 429',
+      stage: 'features', attempts: 1, error: 'transient: EnrichSourceError: reccobeats: features HTTP 429',
     })])
   })
 

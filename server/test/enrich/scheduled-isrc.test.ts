@@ -62,7 +62,7 @@ describe('scheduled Apple ISRC linking', () => {
     const db = await createTestDb()
     const order: string[] = []
     const appleIsrc = vi.fn(async () => { order.push('isrc'); return empty })
-    const enrichment = vi.fn(async () => { order.push('metadata'); return { processed: 0, features: 0, meaning: 0, remaining: 0 } })
+    const enrichment = vi.fn(async () => { order.push('metadata'); return { processed: 0, features: 0, meaning: 0, remaining: 0, cooling: 0 } })
     const spotifyArtwork = vi.fn(async () => { order.push('spotify-artwork'); return {
       processed: 0, matched: 0, spotify: 0, deezer: 0, missing: 0, failed: 0, skipped: 0, remaining: 0,
     } })

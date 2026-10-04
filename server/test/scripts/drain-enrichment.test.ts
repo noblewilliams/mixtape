@@ -1,11 +1,11 @@
 import { describe, it, expect, vi } from 'vitest'
-import { drain, prepareDrain, parseDrainArgs, resolveBase, DEFAULT_DELAY_MS, MIN_DELAY_MS, PROVIDER_DOWN_MESSAGE } from '../../scripts/drain-enrichment'
+import { drain, prepareDrain, parseDrainArgs, resolveBase, DEFAULT_DELAY_MS, MIN_DELAY_MS, PROVIDER_DOWN_MESSAGE, COOLING_MESSAGE } from '../../scripts/drain-enrichment'
 import { MAX_BATCH } from '../../src/routes/enrich'
 
 const TOKEN = 'admin-token-value'
 const BASE = 'https://api.example.test'
 
-type Batch = { processed: number; features: number; meaning: number; remaining: number }
+type Batch = { processed: number; features: number; meaning: number; remaining: number; cooling?: number }
 
 function fakeApi(responses: Array<Batch | Response | Error>) {
   const requests: Array<{ url: string; method?: string; token?: string | null }> = []
@@ -142,6 +142,51 @@ describe('drain', () => {
     const { requests, result } = run([batch(3, 0), batch(5, 0)], 100)
     expect(await result).toMatchObject({ processed: 3, calls: 1, stopped: 'drained' })
     expect(requests).toHaveLength(1)
+  })
+
+  it('ends cleanly when every pending track is cooling down after provider errors', async () => {
+    const { requests, lines, result } = run([{ processed: 0, features: 0, meaning: 0, remaining: 0, cooling: 12 }, batch(5, 0)], 100)
+    expect(await result).toEqual({ processed: 0, features: 0, meaning: 0, calls: 1, stopped: 'cooling' })
+    expect(requests).toHaveLength(1)
+    expect(lines.at(-2)).toContain('cooling=12')
+    expect(lines.at(-1)).toBe(COOLING_MESSAGE)
+    expect(COOLING_MESSAGE).toMatch(/nothing eligible right now/)
+    expect(COOLING_MESSAGE).not.toMatch(/\u2014/)
+  })
+
+  it('reports the cooling stop once the due queue empties but some tracks still wait on backoff', async () => {
+    const { requests, lines, result } = run([{ processed: 3, features: 3, meaning: 3, remaining: 0, cooling: 4 }], 100)
+    expect(await result).toMatchObject({ processed: 3, calls: 1, stopped: 'cooling' })
+    expect(requests).toHaveLength(1)
+    expect(lines.at(-1)).toBe(COOLING_MESSAGE)
+  })
+
+  it('reports provider-down, not cooling, when the call that empties the due queue enriched nothing', async () => {
+    const { requests, lines, result } = run([{ processed: 3, features: 0, meaning: 0, remaining: 0, cooling: 3 }, batch(5, 0)], 100)
+    expect(await result).toMatchObject({ processed: 3, calls: 1, stopped: 'provider-down' })
+    expect(requests).toHaveLength(1)
+    expect(lines.at(-1)).toBe(PROVIDER_DOWN_MESSAGE)
+  })
+
+  it('reports cooling when the call that empties the due queue enriched something', async () => {
+    const { result } = run([{ processed: 3, features: 0, meaning: 1, remaining: 0, cooling: 2 }], 100)
+    expect(await result).toMatchObject({ processed: 3, calls: 1, stopped: 'cooling' })
+  })
+
+  it('words the provider-down message so it holds for permanent failures too', () => {
+    expect(PROVIDER_DOWN_MESSAGE).toMatch(/only tracks that hit a temporary provider error retry after their backoff/i)
+    expect(PROVIDER_DOWN_MESSAGE).not.toMatch(/\u2014/)
+  })
+
+  it('still reports empty and drained when nothing is cooling, including from a Worker that sends no cooling count', async () => {
+    expect(await run([{ processed: 0, features: 0, meaning: 0, remaining: 0, cooling: 0 }], 10).result).toMatchObject({ stopped: 'empty' })
+    expect(await run([{ processed: 2, features: 2, meaning: 2, remaining: 0, cooling: 0 }], 10).result).toMatchObject({ stopped: 'drained' })
+    expect(await run([batch(2, 0)], 10).result).toMatchObject({ stopped: 'drained' })
+  })
+
+  it('rejects a malformed cooling count', async () => {
+    const { result } = run([{ processed: 1, features: 1, meaning: 1, remaining: 3, cooling: -1 }], 10)
+    expect(await result).toMatchObject({ stopped: 'error' })
   })
 
   it('stops on an HTTP error, a malformed body or a failed request, printing fixed text only', async () => {

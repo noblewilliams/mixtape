@@ -1,5 +1,35 @@
 # Decision Log
 
+## 2026-10-04 — Provider outages do not use up a song's enrichment attempts
+
+The first founder-run drain (2026-10-03) hit an LRCLIB 503 spell and
+ReccoBeats 429s. Selection had no backoff and every failure counted toward
+the three attempts, so 78 songs were retried on consecutive calls and given
+up on within minutes. Their failure rows were cleared by hand (founder
+approved) and the rule changed, with no migration:
+
+- A failure is **transient** when it is an HTTP 429 or 5xx, a timeout or
+  abort, a rejected fetch, or the embedding binding failing. It is stored
+  with the error text prefixed `transient: `.
+- A stage whose latest failure is transient may be tried 8 times, and waits
+  `1 hour x min(24, 2^(attempts - 1))` after each: 1, 2, 4, 8, 16, 24, 24
+  hours, about three days in all.
+- A real miss ("no acceptable match", "no lyrics found", a 4xx, a malformed
+  response) is unchanged: three attempts, then left alone.
+- A cooling song is skipped, not counted as due. `/enrich/run` reports
+  `cooling` beside `remaining`, and the drain stops cleanly when only
+  cooling songs are left.
+- Rows written before this change have no prefix and keep the old rule.
+  38 such rows from earlier provider errors are still given up on.
+
+Free-plan effect: no new call per run. A song stuck behind a failing
+provider costs at most 8 attempts over three days where it used to cost 3 in
+three hours.
+
+**Reopens if:** a provider returns a lasting 5xx for particular songs often
+enough that the 8 attempts are routinely wasted, or outages regularly last
+longer than three days.
+
 ## 2026-10-03 — Mixes may include songs the listener does not own
 
 Founder-approved; pulls forward vision.md's "Catalog discovery". Supersedes

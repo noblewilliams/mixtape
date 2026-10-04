@@ -171,7 +171,7 @@ describe('runTwinCopy', () => {
 
     await runTwinCopy(db)
     expect(await runEnrichmentBatch(db, { ...okDeps, features, lyrics }, 5))
-      .toEqual({ processed: 0, features: 0, meaning: 0, remaining: 0 })
+      .toEqual({ processed: 0, features: 0, meaning: 0, remaining: 0, cooling: 0 })
     expect(features).not.toHaveBeenCalled()
     expect(lyrics).not.toHaveBeenCalled()
   })

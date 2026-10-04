@@ -1,5 +1,5 @@
 import { isSpotifyId } from '../listening/contracts'
-import { EnrichSourceError, SOURCE_TIMEOUT_MS, type FetchLike } from './types'
+import { bodyReadError, EnrichSourceError, SOURCE_TIMEOUT_MS, type FetchLike } from './types'
 import type { AudioFeatures } from './reccobeats'
 
 const BASE = 'https://api.reccobeats.com/v1'
@@ -133,15 +133,15 @@ async function fetchByIds<T extends { spotifyId: string }>(
     const response = await fetchLike(`${BASE}/${endpoint}?ids=${batch.join(',')}`, {
       signal: AbortSignal.timeout(SOURCE_TIMEOUT_MS),
     }).catch(() => {
-      throw new EnrichSourceError('reccobeats', `${label} fetch failed`)
+      throw new EnrichSourceError('reccobeats', `${label} fetch failed`, undefined, { transient: true })
     })
     if (!response.ok) {
       await response.body?.cancel().catch(() => undefined)
       if (response.status === 404) continue
       throw new EnrichSourceError('reccobeats', `${label} HTTP ${response.status}`, response.status)
     }
-    const body = (await response.json().catch(() => {
-      throw new EnrichSourceError('reccobeats', `malformed ${label} JSON`)
+    const body = (await response.json().catch((e: unknown) => {
+      throw bodyReadError('reccobeats', `malformed ${label} JSON`, `${label} body read failed`, e)
     })) as unknown
     const content = Array.isArray(body)
       ? body

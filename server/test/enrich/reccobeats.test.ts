@@ -102,6 +102,47 @@ describe('resolveAndFetchFeatures', () => {
     ).rejects.toMatchObject({ status: 500 })
   })
 
+  it('marks 429 and server errors transient and other 4xx permanent', async () => {
+    const key = { title: 'Nude', artist: 'Radiohead', durationMs: null }
+    for (const [status, transient] of [[429, true], [502, true], [400, false]] as const) {
+      const bad: FetchLike = async () => new Response('x', { status })
+      await expect(resolveAndFetchFeatures(key, bad)).rejects.toMatchObject({ status, transient })
+    }
+  })
+
+  it('makes a search or features body read that rejects transient, and keeps unparseable bodies permanent', async () => {
+    const key = { title: 'Nude', artist: 'Radiohead', durationMs: null }
+    const searchTimesOut: FetchLike = async () => ({ ok: true, status: 200, json: async () => { throw new DOMException('timed out', 'TimeoutError') } } as unknown as Response)
+    await expect(resolveAndFetchFeatures(key, searchTimesOut))
+      .rejects.toMatchObject({ detail: 'search body read failed (TimeoutError)', transient: true })
+    const featuresAborted: FetchLike = async (url) => String(url).includes('/track/search')
+      ? new Response(JSON.stringify({ content: [candidate()] }), { status: 200 })
+      : ({ ok: true, status: 200, json: async () => { throw new DOMException('aborted', 'AbortError') } } as unknown as Response)
+    await expect(resolveAndFetchFeatures(key, featuresAborted))
+      .rejects.toMatchObject({ detail: 'features body read failed (AbortError)', transient: true })
+    await expect(resolveAndFetchFeatures(key, async () => new Response('nope', { status: 200 })))
+      .rejects.toMatchObject({ detail: 'malformed search JSON', transient: false })
+    const featuresGarbled: FetchLike = async (url) => String(url).includes('/track/search')
+      ? new Response(JSON.stringify({ content: [candidate()] }), { status: 200 })
+      : new Response('nope', { status: 200 })
+    await expect(resolveAndFetchFeatures(key, featuresGarbled))
+      .rejects.toMatchObject({ detail: 'malformed features JSON', transient: false })
+  })
+
+  it('turns a rejected search or features fetch into a transient EnrichSourceError', async () => {
+    const key = { title: 'Nude', artist: 'Radiohead', durationMs: null }
+    const searchDown: FetchLike = async () => { throw new TypeError('fetch failed: https://api.reccobeats.com/secret') }
+    const searchError = await resolveAndFetchFeatures(key, searchDown).catch((e: unknown) => e)
+    expect(searchError).toMatchObject({ source: 'reccobeats', detail: 'search fetch failed (TypeError)', transient: true })
+    expect((searchError as Error).message).not.toContain('secret')
+    const featuresTimeout: FetchLike = async (url) => {
+      if (String(url).includes('/track/search')) return new Response(JSON.stringify({ content: [candidate()] }), { status: 200 })
+      throw new DOMException('timed out', 'TimeoutError')
+    }
+    await expect(resolveAndFetchFeatures(key, featuresTimeout))
+      .rejects.toMatchObject({ source: 'reccobeats', detail: 'features fetch failed (TimeoutError)', transient: true })
+  })
+
   it('falls back to the candidate isrc when features omit it', async () => {
     const { isrc, ...featuresNoIsrc } = features
     const result = await resolveAndFetchFeatures(

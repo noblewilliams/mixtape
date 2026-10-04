@@ -119,6 +119,34 @@ describe('fetchLyrics', () => {
     ).rejects.toMatchObject({ status: 503 })
   })
 
+  it('marks server errors and 429 transient, other 4xx and malformed bodies permanent', async () => {
+    const key = { title: 'X', artist: 'Y', album: null, durationMs: null }
+    for (const [status, transient] of [[503, true], [500, true], [429, true], [400, false], [403, false]] as const) {
+      const bad: FetchLike = async () => new Response('x', { status })
+      await expect(fetchLyrics(key, bad)).rejects.toMatchObject({ status, transient })
+    }
+    await expect(fetchLyrics(key, async () => new Response('<html>', { status: 200 }))).rejects.toMatchObject({ transient: false })
+  })
+
+  it('makes a body read that rejects transient, and keeps an unparseable body permanent', async () => {
+    const key = { title: 'X', artist: 'Y', album: null, durationMs: null }
+    const timedOut: FetchLike = async () => ({ ok: true, status: 200, json: async () => { throw new DOMException('timed out', 'TimeoutError') } } as unknown as Response)
+    await expect(fetchLyrics(key, timedOut))
+      .rejects.toMatchObject({ source: 'lrclib', detail: 'body read failed (TimeoutError)', transient: true })
+    await expect(fetchLyrics(key, async () => new Response('<html>', { status: 200 })))
+      .rejects.toMatchObject({ detail: 'malformed JSON', transient: false })
+  })
+
+  it('turns a rejected fetch into a transient EnrichSourceError naming only the error kind', async () => {
+    const key = { title: 'X', artist: 'Y', album: null, durationMs: null }
+    for (const thrown of [new TypeError('fetch failed: https://lrclib.net/secret'), new DOMException('https://lrclib.net/secret', 'TimeoutError')]) {
+      const error = await fetchLyrics(key, async () => { throw thrown }).catch((e: unknown) => e)
+      expect(error).toBeInstanceOf(EnrichSourceError)
+      expect(error).toMatchObject({ source: 'lrclib', detail: `fetch failed (${thrown.name})`, transient: true })
+      expect((error as Error).message).not.toContain('secret')
+    }
+  })
+
   it('throws EnrichSourceError on malformed JSON', async () => {
     const bad: FetchLike = async () => new Response('<html>', { status: 200 })
     await expect(

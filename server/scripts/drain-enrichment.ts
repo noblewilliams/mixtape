@@ -10,8 +10,12 @@
  * scripts/dj-chat.ts does. Founder-run only; nothing runs it automatically.
  *
  * Stops at --max tracks, when a call processes nothing, when nothing remains,
- * when two calls in a row process tracks with no stage succeeding (a provider
- * looks down; carrying on would only burn those tracks' attempts), or on any
+ * when what remains is only tracks cooling down after provider errors (a
+ * clean stop: nothing is eligible right now, the hourly cron picks them up
+ * once their backoff passes), when two calls in a row process tracks with no
+ * stage succeeding, or one such call that leaves nothing due (a provider
+ * looks down; carrying on would only spend attempts on the next tracks while
+ * the failed ones cool down), or on any
  * error. --delay-ms is at least 1000. Prints running counts only: never the token, the base URL,
  * or a response or exception text.
  */
@@ -24,7 +28,10 @@ const DEFAULT_BASE = 'https://mixtape-api.goalympics.workers.dev'
 export const DEFAULT_DELAY_MS = 4000
 export const MIN_DELAY_MS = 1000
 export const PROVIDER_DOWN_MESSAGE =
-  'stopped: two calls in a row enriched nothing, so a provider looks down. Nothing more was attempted.'
+  'stopped: calls enriched nothing, so a provider looks down. Nothing more was attempted. '
+  + 'Only tracks that hit a temporary provider error retry after their backoff; other failures used up an attempt.'
+export const COOLING_MESSAGE =
+  'stopped: nothing eligible right now. The tracks left are cooling down after provider errors and retry after their backoff.'
 
 type FetchLike = (url: string | URL, init?: RequestInit) => Promise<Response>
 
@@ -76,17 +83,24 @@ export type DrainResult = {
   features: number
   meaning: number
   calls: number
-  stopped: 'max' | 'empty' | 'drained' | 'provider-down' | 'error'
+  stopped: 'max' | 'empty' | 'drained' | 'cooling' | 'provider-down' | 'error'
 }
 
-type Batch = { processed: number; features: number; meaning: number; remaining: number }
+type Batch = { processed: number; features: number; meaning: number; remaining: number; cooling: number }
 
+const count = (v: unknown) => Number.isInteger(v) && (v as number) >= 0
+
+// cooling is optional so a Worker deployed before it existed still drains.
 function parseBatch(body: unknown): Batch | null {
   if (!body || typeof body !== 'object') return null
   const b = body as Record<string, unknown>
   const fields = ['processed', 'features', 'meaning', 'remaining'] as const
-  if (!fields.every((key) => Number.isInteger(b[key]) && (b[key] as number) >= 0)) return null
-  return { processed: b.processed as number, features: b.features as number, meaning: b.meaning as number, remaining: b.remaining as number }
+  if (!fields.every((key) => count(b[key]))) return null
+  if (b.cooling !== undefined && !count(b.cooling)) return null
+  return {
+    processed: b.processed as number, features: b.features as number, meaning: b.meaning as number,
+    remaining: b.remaining as number, cooling: (b.cooling as number | undefined) ?? 0,
+  }
 }
 
 export async function drain(opts: DrainArgs & {
@@ -132,11 +146,26 @@ export async function drain(opts: DrainArgs & {
     result.features += batch.features
     result.meaning += batch.meaning
     log(`call=${result.calls} processed=${batch.processed} total=${result.processed}/${opts.max} `
-      + `features=${result.features} meaning=${result.meaning} remaining=${batch.remaining}`)
+      + `features=${result.features} meaning=${result.meaning} remaining=${batch.remaining} cooling=${batch.cooling}`)
+    const enrichedNothing = batch.processed > 0 && batch.features === 0 && batch.meaning === 0
+    // remaining counts only tracks due now; cooling ones are not, so once
+    // nothing is due the drain is done for now rather than failed. Unless
+    // this very call processed tracks and enriched none: that is the
+    // provider-down case, and it must not exit 0.
+    const nothingDue = batch.processed === 0 || batch.remaining === 0
+    if (nothingDue && batch.cooling > 0) {
+      if (enrichedNothing) {
+        log(PROVIDER_DOWN_MESSAGE)
+        return { ...result, stopped: 'provider-down' }
+      }
+      log(COOLING_MESSAGE)
+      return { ...result, stopped: 'cooling' }
+    }
     if (batch.processed === 0) return { ...result, stopped: 'empty' }
     // features and meaning are the route's per-stage ok counts. Tracks taken
-    // with neither stage succeeding spend one of their MAX_ATTEMPTS each.
-    fruitless = batch.features === 0 && batch.meaning === 0 ? fruitless + 1 : 0
+    // with neither stage succeeding spend an attempt each; a provider error
+    // also puts them on backoff, so the next call takes different tracks.
+    fruitless = enrichedNothing ? fruitless + 1 : 0
     if (fruitless >= 2) {
       log(PROVIDER_DOWN_MESSAGE)
       return { ...result, stopped: 'provider-down' }

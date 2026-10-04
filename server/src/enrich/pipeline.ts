@@ -7,6 +7,7 @@ import type { AudioFeatures, TrackKey } from './reccobeats'
 import type { LyricsResult, LyricsKey } from './lrclib'
 import type { Embedder } from './embedder'
 import type { SpotifyEnrichSource } from './reccobeats-by-id'
+import { isTransientFailure, TRANSIENT_PREFIX } from './failures'
 
 export type EnrichDeps = {
   storefront: string
@@ -31,6 +32,13 @@ type Stage = 'itunes' | 'features' | 'meaning'
 // its name/kind.
 function classifyError(e: unknown): string {
   return e instanceof EnrichSourceError ? String(e) : `internal: ${e instanceof Error ? e.name : typeof e}`
+}
+
+// A transient failure keeps the same text behind TRANSIENT_PREFIX, which is
+// what the runner's backoff reads (failures.ts).
+function failureText(e: unknown): string {
+  const text = classifyError(e)
+  return isTransientFailure(e) ? `${TRANSIENT_PREFIX}${text}` : text
 }
 
 async function recordFailure(db: Db, trackId: string, stage: Stage, error: string) {
@@ -79,7 +87,7 @@ export async function enrichTrack(
         await clearFailure(db, track.id, 'itunes')
       }
     } catch (e) {
-      await recordFailure(db, track.id, 'itunes', classifyError(e))
+      await recordFailure(db, track.id, 'itunes', failureText(e))
     }
   }
 
@@ -144,7 +152,7 @@ export async function enrichTrack(
         featuresOutcome = 'miss'
       }
     } catch (e) {
-      await recordFailure(db, track.id, 'features', classifyError(e))
+      await recordFailure(db, track.id, 'features', failureText(e))
       featuresOutcome = 'error'
     }
   }
@@ -183,7 +191,7 @@ export async function enrichTrack(
         meaningOutcome = 'ok'
       }
     } catch (e) {
-      await recordFailure(db, track.id, 'meaning', classifyError(e))
+      await recordFailure(db, track.id, 'meaning', failureText(e))
       meaningOutcome = 'error'
     }
   }

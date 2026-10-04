@@ -30,11 +30,11 @@ describe('runEnrichmentBatch', () => {
     }))
     const search = vi.fn(okDeps.features)
     const deps: EnrichDeps = { ...okDeps, features: search, spotify: { tracks: metadata, features } }
-    expect(await runEnrichmentBatch(db, deps, 3)).toEqual({ processed: 2, features: 2, meaning: 2, remaining: 0 })
+    expect(await runEnrichmentBatch(db, deps, 3)).toEqual({ processed: 2, features: 2, meaning: 2, remaining: 0, cooling: 0 })
     expect(metadata).toHaveBeenCalledExactlyOnceWith(ids)
     expect(features).toHaveBeenCalledExactlyOnceWith(ids)
     expect(search).not.toHaveBeenCalled()
-    expect(await runEnrichmentBatch(db, deps, 3)).toEqual({ processed: 0, features: 0, meaning: 0, remaining: 0 })
+    expect(await runEnrichmentBatch(db, deps, 3)).toEqual({ processed: 0, features: 0, meaning: 0, remaining: 0, cooling: 0 })
     expect(metadata).toHaveBeenCalledTimes(1)
     expect(features).toHaveBeenCalledTimes(1)
   })
@@ -55,7 +55,7 @@ describe('runEnrichmentBatch', () => {
     const features = vi.fn(async () => ({ hits: [{ spotifyId: ids[0], features: OK_FEATURES }], missing: [] }))
     const search = vi.fn(okDeps.features)
     const deps: EnrichDeps = { ...okDeps, features: search, spotify: { tracks: metadata, features } }
-    expect(await runEnrichmentBatch(db, deps, 5)).toEqual({ processed: 4, features: 2, meaning: 4, remaining: 0 })
+    expect(await runEnrichmentBatch(db, deps, 5)).toEqual({ processed: 4, features: 2, meaning: 4, remaining: 0, cooling: 0 })
     expect(metadata).toHaveBeenCalledExactlyOnceWith([ids[0]])
     expect(features).toHaveBeenCalledExactlyOnceWith([ids[0]])
     expect(search).toHaveBeenCalledExactlyOnceWith({ title: 'Apple song', artist: 'Apple artist', durationMs: null })
@@ -82,10 +82,15 @@ describe('runEnrichmentBatch', () => {
     })
     const search = vi.fn(okDeps.features)
     const deps: EnrichDeps = { ...okDeps, features: search, spotify: { tracks: metadata, features } }
-    expect(await runEnrichmentBatch(db, deps, 3)).toEqual({ processed: 2, features: 0, meaning: 2, remaining: 2 })
+    // A 429 is transient: both features stages cool down instead of being
+    // picked again by the very next call.
+    expect(await runEnrichmentBatch(db, deps, 3)).toEqual({ processed: 2, features: 0, meaning: 2, remaining: 0, cooling: 2 })
     expect(features).toHaveBeenCalledTimes(1)
     expect(await db.select().from(enrichmentFailures)).toHaveLength(2)
-    expect(await runEnrichmentBatch(db, deps, 3)).toEqual({ processed: 2, features: 2, meaning: 0, remaining: 0 })
+    expect(await runEnrichmentBatch(db, deps, 3)).toEqual({ processed: 0, features: 0, meaning: 0, remaining: 0, cooling: 2 })
+    expect(features).toHaveBeenCalledTimes(1)
+    await db.update(enrichmentFailures).set({ lastAt: new Date(Date.now() - 2 * 3_600_000) })
+    expect(await runEnrichmentBatch(db, deps, 3)).toEqual({ processed: 2, features: 2, meaning: 0, remaining: 0, cooling: 0 })
     expect(features).toHaveBeenCalledTimes(2)
     expect(metadata).toHaveBeenCalledTimes(2)
     expect(search).not.toHaveBeenCalled()

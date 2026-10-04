@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { workersAiEmbedder } from '../../src/enrich/embedder'
+import { EnrichSourceError } from '../../src/enrich/types'
 
 const INPUT = 'some very secret lyric text that must never leak'
 
@@ -49,5 +50,13 @@ describe('workersAiEmbedder', () => {
     }
     expect(error).toBeInstanceOf(Error)
     expect((error as Error).message).not.toContain(INPUT)
+  })
+
+  it('reports a binding failure as a transient source error and an unexpected shape as a plain error', async () => {
+    const down = workersAiEmbedder({ run: async () => { throw new Error('binding down') } })
+    await expect(down(INPUT)).rejects.toMatchObject({ source: 'embedder', detail: 'AI binding failed (Error)', transient: true })
+    const odd = workersAiEmbedder({ run: async () => ({}) })
+    const error = await odd(INPUT).catch((e: unknown) => e)
+    expect(error).not.toBeInstanceOf(EnrichSourceError)
   })
 })

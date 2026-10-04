@@ -38,7 +38,7 @@ describe('Spotify enrichment through the admin route', () => {
       method: 'POST', headers: { 'X-Admin-Token': 'test-secret' },
     })
     expect(result.status).toBe(200)
-    expect(await result.json()).toEqual({ processed: 1, features: 1, meaning: 1, remaining: 0 })
+    expect(await result.json()).toEqual({ processed: 1, features: 1, meaning: 1, remaining: 0, cooling: 0 })
     expect(calls).toEqual(['/v1/track', '/v1/audio-features'])
     expect(await db.select().from(tracks)).toEqual([expect.objectContaining({
       artist: 'Credited artist', artistSource: 'reccobeats', isrc: 'NGA0A2000001', durationMs: 180000,

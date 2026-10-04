@@ -40,6 +40,20 @@ describe('lookupItunes', () => {
     await expect(lookupItunes('1', 'ng', bad)).rejects.toMatchObject({ status: 503 })
   })
 
+  it('marks a 503 transient and a 403 permanent, and a rejected fetch transient', async () => {
+    await expect(lookupItunes('1', 'ng', async () => new Response('', { status: 503 }))).rejects.toMatchObject({ transient: true })
+    await expect(lookupItunes('1', 'ng', async () => new Response('', { status: 403 }))).rejects.toMatchObject({ transient: false })
+    await expect(lookupItunes('1', 'ng', async () => { throw new TypeError('fetch failed') }))
+      .rejects.toMatchObject({ source: 'itunes', detail: 'fetch failed (TypeError)', transient: true })
+  })
+
+  it('makes a body read that rejects transient, and keeps an unparseable body permanent', async () => {
+    await expect(lookupItunes('1', 'ng', async () => ({ ok: true, status: 200, json: async () => { throw new DOMException('timed out', 'TimeoutError') } } as unknown as Response)))
+      .rejects.toMatchObject({ source: 'itunes', detail: 'body read failed (TimeoutError)', transient: true })
+    await expect(lookupItunes('1', 'ng', async () => new Response('not json', { status: 200 })))
+      .rejects.toMatchObject({ detail: 'malformed JSON', transient: false })
+  })
+
   it('sends the injected storefront and the encoded apple id', async () => {
     let seen = ''
     const spy: FetchLike = async (url) => {

@@ -219,6 +219,13 @@ describe('fetchTracksBySpotifyIds', () => {
     await expect(fetchTracksBySpotifyIds([A], bad)).rejects.toThrow(EnrichSourceError)
   })
 
+  it('makes a body read that rejects transient, and keeps an unparseable body permanent', async () => {
+    await expect(fetchTracksBySpotifyIds([A], async () => ({ ok: true, status: 200, json: async () => { throw new DOMException('timed out', 'TimeoutError') } } as unknown as Response)))
+      .rejects.toMatchObject({ source: 'reccobeats', detail: 'track body read failed (TimeoutError)', transient: true })
+    await expect(fetchTracksBySpotifyIds([A], async () => new Response('nope', { status: 200 })))
+      .rejects.toMatchObject({ detail: 'malformed track JSON', transient: false })
+  })
+
   // A rejected fetch's own message carries the request URL, ids included,
   // so it must never become the error detail.
   it('throws EnrichSourceError with a fixed detail when the fetch times out', async () => {
@@ -227,7 +234,7 @@ describe('fetchTracksBySpotifyIds', () => {
     }
     const error = await fetchTracksBySpotifyIds([A], timedOut).catch((e: unknown) => e)
     expect(error).toBeInstanceOf(EnrichSourceError)
-    expect(error).toMatchObject({ source: 'reccobeats', detail: 'track fetch failed', status: undefined })
+    expect(error).toMatchObject({ source: 'reccobeats', detail: 'track fetch failed', status: undefined, transient: true })
     expect((error as Error).message).not.toContain(A)
   })
 
@@ -237,7 +244,7 @@ describe('fetchTracksBySpotifyIds', () => {
     }
     const error = await fetchTracksBySpotifyIds([A], unreachable).catch((e: unknown) => e)
     expect(error).toBeInstanceOf(EnrichSourceError)
-    expect(error).toMatchObject({ source: 'reccobeats', detail: 'track fetch failed', status: undefined })
+    expect(error).toMatchObject({ source: 'reccobeats', detail: 'track fetch failed', status: undefined, transient: true })
     expect((error as Error).message).not.toContain(A)
   })
 })

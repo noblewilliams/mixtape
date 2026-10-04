@@ -4,8 +4,9 @@
  * docs/superpowers/plans/2026-08-30-p2.5-local-preview-analysis.md).
  *
  * For every track with an apple_id, no track_features row, and an EXHAUSTED
- * ReccoBeats features attempt (enrichment_failures.stage = 'features' with
- * attempts >= MAX_ATTEMPTS — i.e. a track the nightly enrich runner
+ * ReccoBeats features attempt (enrichment_failures.stage = 'features' at
+ * MAX_ATTEMPTS, or MAX_TRANSIENT_ATTEMPTS when the latest failure was a
+ * provider error; see src/enrich/failures.ts), i.e. a track the nightly enrich runner
  * (src/enrich/runner.ts) has already given up on): look up its iTunes 30s
  * preview (scripts/lib/preview-fetcher.ts), decode + analyze it locally
  * (scripts/lib/preview-analyzer.ts), and insert a partial track_features row
@@ -39,14 +40,14 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { and, eq, gte, isNotNull, isNull, sql } from 'drizzle-orm'
+import { and, eq, isNotNull, isNull, sql } from 'drizzle-orm'
 import { neon } from '@neondatabase/serverless'
 import { drizzle } from 'drizzle-orm/neon-http'
 import * as schema from '../src/db/schema'
 import { tracks, trackFeatures, enrichmentFailures } from '../src/db/schema'
 import type { Db } from '../src/db/types'
 import type { FetchLike } from '../src/enrich/types'
-import { MAX_ATTEMPTS } from '../src/enrich/runner'
+import { failureExhausted } from '../src/enrich/failures'
 import { fetchPreviews as realFetchPreviews, type FetchPreviewsResult } from './lib/preview-fetcher'
 import { decodeToWav as realDecodeToWav, analyzePreview as realAnalyzePreview, type PreviewFeatures } from './lib/preview-analyzer'
 
@@ -106,7 +107,7 @@ export async function selectCandidates(db: Db, limit?: number): Promise<Candidat
       and(
         isNotNull(tracks.appleId),
         isNull(trackFeatures.trackId),
-        gte(enrichmentFailures.attempts, MAX_ATTEMPTS),
+        failureExhausted('enrichment_failures'),
       ),
     )
     .orderBy(tracks.createdAt, tracks.id)

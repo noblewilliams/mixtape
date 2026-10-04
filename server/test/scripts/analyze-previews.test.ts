@@ -6,6 +6,7 @@ import { createTestDb, type TestDb } from '../helpers/db'
 import { runAnalyzePreviews, selectCandidates, type AnalyzePreviewsDeps } from '../../scripts/analyze-previews'
 import { tracks, trackFeatures, enrichmentFailures } from '../../src/db/schema'
 import { MAX_ATTEMPTS } from '../../src/enrich/runner'
+import { MAX_TRANSIENT_ATTEMPTS, TRANSIENT_PREFIX } from '../../src/enrich/failures'
 import type { FetchPreviewsResult } from '../../scripts/lib/preview-fetcher'
 import type { PreviewFeatures } from '../../scripts/lib/preview-analyzer'
 
@@ -85,6 +86,17 @@ describe('selectCandidates', () => {
     const candidates = await selectCandidates(db)
 
     expect(candidates.map((c) => c.id)).toEqual([track.id])
+  })
+
+  it('excludes a track whose latest features failure was transient until it reaches MAX_TRANSIENT_ATTEMPTS', async () => {
+    const db = await createTestDb()
+    const cooling = await seedTrack(db, { title: 'cooling' })
+    const done = await seedTrack(db, { title: 'done' })
+    await db.insert(enrichmentFailures).values([
+      { trackId: cooling.id, stage: 'features', error: `${TRANSIENT_PREFIX}x`, attempts: MAX_ATTEMPTS },
+      { trackId: done.id, stage: 'features', error: `${TRANSIENT_PREFIX}x`, attempts: MAX_TRANSIENT_ATTEMPTS },
+    ])
+    expect((await selectCandidates(db)).map((c) => c.title)).toEqual(['done'])
   })
 
   it('includes a track whose features attempts exceed MAX_ATTEMPTS', async () => {

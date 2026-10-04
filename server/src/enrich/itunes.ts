@@ -1,7 +1,7 @@
 export { EnrichSourceError } from './types'
 export type { FetchLike } from './types'
 
-import { EnrichSourceError, SOURCE_TIMEOUT_MS, type FetchLike } from './types'
+import { bodyReadError, EnrichSourceError, fetchFailedDetail, SOURCE_TIMEOUT_MS, type FetchLike } from './types'
 
 export type ItunesHit = {
   trackName: string | null
@@ -23,10 +23,12 @@ export async function lookupItunes(
     // Sent for politeness; note Apple 403s Cloudflare-IP requests regardless (see index.ts buildDeps).
     headers: { 'User-Agent': 'mixtape/0.1 (personal project; enrichment)' },
     signal: AbortSignal.timeout(SOURCE_TIMEOUT_MS),
+  }).catch((e: unknown) => {
+    throw new EnrichSourceError('itunes', fetchFailedDetail('fetch failed', e), undefined, { transient: true })
   })
   if (!res.ok) throw new EnrichSourceError('itunes', `HTTP ${res.status}`, res.status)
-  const body = (await res.json().catch(() => {
-    throw new EnrichSourceError('itunes', 'malformed JSON')
+  const body = (await res.json().catch((e: unknown) => {
+    throw bodyReadError('itunes', 'malformed JSON', 'body read failed', e)
   })) as {
     resultCount: number
     results: Array<{

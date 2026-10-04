@@ -1,3 +1,5 @@
+import { EnrichSourceError } from './types'
+
 // bge-m3's output width — shared by the pool's embedding-shape guard (dj/pool.ts)
 // and track_meanings.embedding's vector(1024) column (db/schema.ts).
 export const EMBEDDING_DIMENSIONS = 1024
@@ -14,7 +16,9 @@ export function workersAiEmbedder(ai: AiBinding): Embedder {
       out = (await ai.run('@cf/baai/bge-m3', { text: [text.slice(0, 6000)] })) as { data?: number[][] }
     } catch (e) {
       // Never rethrow the binding's error verbatim — it may echo the input payload.
-      throw new Error(`embedder: AI binding failed (${e instanceof Error ? e.name : typeof e})`)
+      // A binding failure is transient (the runner backs off and retries);
+      // an unexpected response shape below is not.
+      throw new EnrichSourceError('embedder', `AI binding failed (${e instanceof Error ? e.name : typeof e})`, undefined, { transient: true })
     }
     const vec = out?.data?.[0]
     // Error text deliberately excludes the input — never leak lyrics into logs.

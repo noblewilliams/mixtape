@@ -1,4 +1,4 @@
-import { EnrichSourceError, norm, SOURCE_TIMEOUT_MS, type FetchLike } from './types'
+import { bodyReadError, EnrichSourceError, fetchFailedDetail, norm, SOURCE_TIMEOUT_MS, type FetchLike } from './types'
 
 const BASE = 'https://api.reccobeats.com/v1'
 const DURATION_TOLERANCE_MS = 5000
@@ -42,10 +42,12 @@ export async function resolveAndFetchFeatures(
   // Title only: artist terms in searchText break ReccoBeats matching (probed live).
   const searchUrl = new URL(`${BASE}/track/search`)
   searchUrl.searchParams.set('searchText', track.title)
-  const searchRes = await fetchLike(searchUrl, { signal: AbortSignal.timeout(SOURCE_TIMEOUT_MS) })
+  const searchRes = await fetchLike(searchUrl, { signal: AbortSignal.timeout(SOURCE_TIMEOUT_MS) }).catch((e: unknown) => {
+    throw new EnrichSourceError('reccobeats', fetchFailedDetail('search fetch failed', e), undefined, { transient: true })
+  })
   if (!searchRes.ok) throw new EnrichSourceError('reccobeats', `search HTTP ${searchRes.status}`, searchRes.status)
-  const searchBody = (await searchRes.json().catch(() => {
-    throw new EnrichSourceError('reccobeats', 'malformed search JSON')
+  const searchBody = (await searchRes.json().catch((e: unknown) => {
+    throw bodyReadError('reccobeats', 'malformed search JSON', 'search body read failed', e)
   })) as { content?: Candidate[] }
   const content = Array.isArray(searchBody?.content) ? searchBody.content : []
 
@@ -81,13 +83,15 @@ export async function resolveAndFetchFeatures(
 
   const featRes = await fetchLike(`${BASE}/track/${match.id}/audio-features`, {
     signal: AbortSignal.timeout(SOURCE_TIMEOUT_MS),
+  }).catch((e: unknown) => {
+    throw new EnrichSourceError('reccobeats', fetchFailedDetail('features fetch failed', e), undefined, { transient: true })
   })
   if (!featRes.ok) {
     if (featRes.status === 404) return null
     throw new EnrichSourceError('reccobeats', `features HTTP ${featRes.status}`, featRes.status)
   }
-  const f = (await featRes.json().catch(() => {
-    throw new EnrichSourceError('reccobeats', 'malformed features JSON')
+  const f = (await featRes.json().catch((e: unknown) => {
+    throw bodyReadError('reccobeats', 'malformed features JSON', 'features body read failed', e)
   })) as Record<string, unknown> & { isrc?: unknown }
   return {
     tempo: num(f.tempo),

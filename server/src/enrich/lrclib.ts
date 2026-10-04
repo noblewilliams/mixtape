@@ -1,4 +1,4 @@
-import { EnrichSourceError, norm, SOURCE_TIMEOUT_MS, type FetchLike } from './types'
+import { bodyReadError, EnrichSourceError, fetchFailedDetail, norm, SOURCE_TIMEOUT_MS, type FetchLike } from './types'
 
 const UA = { 'User-Agent': 'mixtape/0.1 (personal project; enrichment)' }
 
@@ -18,11 +18,13 @@ const toResult = (r: LrclibRecord): LyricsResult => ({ lyrics: r.plainLyrics ?? 
 type Fetched = { ok: true; body: unknown } | { ok: false }
 
 async function getJson(url: URL, fetchLike: FetchLike): Promise<Fetched> {
-  const res = await fetchLike(url, { headers: UA, signal: AbortSignal.timeout(SOURCE_TIMEOUT_MS) })
+  const res = await fetchLike(url, { headers: UA, signal: AbortSignal.timeout(SOURCE_TIMEOUT_MS) }).catch((e: unknown) => {
+    throw new EnrichSourceError('lrclib', fetchFailedDetail('fetch failed', e), undefined, { transient: true })
+  })
   if (res.status === 404) return { ok: false }
   if (!res.ok) throw new EnrichSourceError('lrclib', `HTTP ${res.status}`, res.status)
-  const body = await res.json().catch(() => {
-    throw new EnrichSourceError('lrclib', 'malformed JSON')
+  const body = await res.json().catch((e: unknown) => {
+    throw bodyReadError('lrclib', 'malformed JSON', 'body read failed', e)
   })
   return { ok: true, body }
 }

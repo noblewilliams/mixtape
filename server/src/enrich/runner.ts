@@ -1,22 +1,32 @@
 import { sql, type SQL } from 'drizzle-orm'
 import type { Db } from '../db/types'
 import { enrichTrack, type EnrichDeps, type TrackRow } from './pipeline'
+import { failureBlocked, failureCooling, failureExhausted } from './failures'
 
-export const MAX_ATTEMPTS = 3
+export { MAX_ATTEMPTS, MAX_TRANSIENT_ATTEMPTS } from './failures'
 
-// A track is a candidate for this batch when at least one of its two
-// derived-data stages (features/meaning) is still missing AND hasn't already
-// burned through MAX_ATTEMPTS. Shared between the row-select and the
-// remaining-count query so the two can never drift apart.
-const CANDIDATE_FROM_WHERE: SQL = sql`
+const CANDIDATE_FROM: SQL = sql`
   FROM tracks t
   LEFT JOIN track_features f ON f.track_id = t.id
   LEFT JOIN track_meanings m ON m.track_id = t.id
   LEFT JOIN enrichment_failures ff ON ff.track_id = t.id AND ff.stage = 'features'
   LEFT JOIN enrichment_failures fm ON fm.track_id = t.id AND fm.stage = 'meaning'
-  WHERE (f.track_id IS NULL AND COALESCE(ff.attempts, 0) < ${MAX_ATTEMPTS})
-     OR (m.track_id IS NULL AND COALESCE(fm.attempts, 0) < ${MAX_ATTEMPTS})
 `
+
+// A stage is skipped this run when its row exists, or when its failure row is
+// exhausted or still cooling down after a transient failure (failures.ts).
+const SKIP_FEATURES: SQL = sql`(f.track_id IS NOT NULL OR ${failureBlocked('ff')})`
+const SKIP_MEANING: SQL = sql`(m.track_id IS NOT NULL OR ${failureBlocked('fm')})`
+
+// A track is a candidate for this batch when at least one of its two
+// derived-data stages (features/meaning) is due now. Shared between the
+// row-select and the remaining/cooling counts so they can never drift apart.
+const DUE: SQL = sql`(NOT ${SKIP_FEATURES} OR NOT ${SKIP_MEANING})`
+
+// Not due now, but a missing stage will be once its backoff passes. Disjoint
+// from DUE, so no track is counted in both remaining and cooling.
+const COOLING: SQL = sql`(NOT ${DUE} AND (
+  (f.track_id IS NULL AND ${failureCooling('ff')}) OR (m.track_id IS NULL AND ${failureCooling('fm')})))`
 
 // Raw `db.execute(sql...)` result shape differs by driver: neon-http (prod)
 // and pglite (test, this version) both hand back `{ rows: [...] }`, but
@@ -87,7 +97,9 @@ function toTrackRow(r: CandidateRow): TrackRow {
   }
 }
 
-export type RunResult = { processed: number; features: number; meaning: number; remaining: number }
+// remaining: tracks due now. cooling: tracks with nothing due now but a stage
+// waiting out a transient-failure backoff.
+export type RunResult = { processed: number; features: number; meaning: number; remaining: number; cooling: number }
 
 // Cache only this invocation's pending batch. Each track still receives only
 // its own requested records; a rejected batch is shared too, so an outage
@@ -109,8 +121,8 @@ function batchLookup<T extends { spotifyId: string }>(
 
 export async function runEnrichmentBatch(db: Db, deps: EnrichDeps, limit: number): Promise<RunResult> {
   // skip_* is computed in SQL, not just from row-existence, so a stage that's
-  // already burned through MAX_ATTEMPTS is never retried just because the
-  // *other* stage is what made this track a candidate.
+  // exhausted or cooling down is never retried just because the *other*
+  // stage is what made this track a candidate.
   //
   // Highest enrich_priority first: an import raises it for the listener's pool
   // candidates, so a new listener's heavy-rotation tracks are enriched ahead
@@ -118,9 +130,10 @@ export async function runEnrichmentBatch(db: Db, deps: EnrichDeps, limit: number
   // back to creation order so the walk stays stable batch to batch.
   const selectRes = await db.execute(sql`
     SELECT t.*,
-      (f.track_id IS NOT NULL OR COALESCE(ff.attempts, 0) >= ${MAX_ATTEMPTS}) AS skip_features,
-      (m.track_id IS NOT NULL OR COALESCE(fm.attempts, 0) >= ${MAX_ATTEMPTS}) AS skip_meaning
-    ${CANDIDATE_FROM_WHERE}
+      ${SKIP_FEATURES} AS skip_features,
+      ${SKIP_MEANING} AS skip_meaning
+    ${CANDIDATE_FROM}
+    WHERE ${DUE}
     ORDER BY t.enrich_priority DESC, t.created_at, t.id
     LIMIT ${limit}
   `)
@@ -147,11 +160,15 @@ export async function runEnrichmentBatch(db: Db, deps: EnrichDeps, limit: number
     if (outcome.meaning === 'ok') meaning++
   }
 
-  const remainingRes = await db.execute(sql`SELECT COUNT(*) AS count ${CANDIDATE_FROM_WHERE}`)
-  const remainingRows = normalizeRows(remainingRes)
-  const remaining = Number(remainingRows[0]?.count ?? 0)
+  const countRes = await db.execute(sql`
+    SELECT COUNT(*) FILTER (WHERE ${DUE}) AS remaining, COUNT(*) FILTER (WHERE ${COOLING}) AS cooling
+    ${CANDIDATE_FROM}
+  `)
+  const [counts] = normalizeRows(countRes)
+  const remaining = Number(counts?.remaining ?? 0)
+  const cooling = Number(counts?.cooling ?? 0)
 
-  return { processed: rows.length, features, meaning, remaining }
+  return { processed: rows.length, features, meaning, remaining, cooling }
 }
 
 export type EnrichmentStatus = {
@@ -169,7 +186,7 @@ export async function enrichmentStatus(db: Db): Promise<EnrichmentStatus> {
       (SELECT COUNT(*) FROM track_features) AS with_features,
       (SELECT COUNT(*) FROM track_meanings) AS with_meaning,
       (SELECT COUNT(*) FROM track_meanings WHERE embedding IS NOT NULL) AS with_embedding,
-      (SELECT COUNT(DISTINCT track_id) FROM enrichment_failures WHERE attempts >= ${MAX_ATTEMPTS} AND stage <> 'itunes') AS exhausted
+      (SELECT COUNT(DISTINCT ef.track_id) FROM enrichment_failures ef WHERE ${failureExhausted('ef')} AND ef.stage <> 'itunes') AS exhausted
   `)
   const [row] = normalizeRows(res)
   return {
