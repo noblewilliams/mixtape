@@ -1,5 +1,18 @@
 # Decision Log
 
+## 2026-10-04 — Apple linking falls back to the default storefront
+
+Apple ISRC linking looks a Spotify-import song up in the listener's own
+market, read from their profile (`apple_storefront`, else `country`). The
+Exportify import records neither, so linking never ran for such a listener:
+720 songs with ISRCs, none linked. Founder decision: when the profile names
+no market, use the default storefront (`ITUNES_STOREFRONT`, else `ng`). A
+profile value always wins. The cost is that a listener in another country is
+matched against the default market, where a song may be missing or be a
+different release, until the import records their country. The row keeps the
+storefront it was linked in. **Reopens if:** listeners outside the default
+market import in numbers; then the import records a country from the device.
+
 ## 2026-10-04 — Provider outages do not use up a song's enrichment attempts
 
 The first founder-run drain (2026-10-03) hit an LRCLIB 503 spell and

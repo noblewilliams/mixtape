@@ -238,7 +238,9 @@ export default {
       console.log('maintenance cron', JSON.stringify({ jobs, ...await handleScheduled(db, jobs, {
         enrichment: deps,
         artwork,
-        appleIsrc: musicKit ? { catalog: musicKit.catalog } : undefined,
+        appleIsrc: musicKit
+          ? { catalog: musicKit.catalog, defaultStorefront: env.ITUNES_STOREFRONT ?? 'ng' }
+          : undefined,
         spotifyArtwork,
       }) }))
     } finally {

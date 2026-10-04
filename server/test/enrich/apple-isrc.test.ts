@@ -258,6 +258,37 @@ describe('Apple ISRC linking', () => {
     expect(requested).toContain('USUG10000025')
   })
 
+  it('falls back to the default storefront for a listener whose profile names no market', async () => {
+    const db = await createTestDb()
+    await listener(db, null, null)
+    const row = await spotifyTrack(db)
+    const lookup = vi.fn(async () => new Map([[ISRC, [catalogSong()]]]))
+    expect(await runAppleIsrcBatch(db, { catalog: { getSongsByIsrc: lookup }, now: () => now, defaultStorefront: 'NG' }))
+      .toMatchObject({ processed: 1, linked: 1 })
+    expect(lookup).toHaveBeenCalledWith('ng', [ISRC])
+    expect(await db.select().from(tracks).where(eq(tracks.id, row.id)))
+      .toMatchObject([{ appleId: APPLE_A, appleCatalogStorefront: 'ng' }])
+  })
+
+  it('prefers the profile storefront, then its country, over the default', async () => {
+    const db = await createTestDb()
+    await listener(db, 'GB', null)
+    await spotifyTrack(db)
+    const lookup = vi.fn(async () => new Map([[ISRC, [catalogSong()]]]))
+    await runAppleIsrcBatch(db, { catalog: { getSongsByIsrc: lookup }, now: () => now, defaultStorefront: 'ng' })
+    expect(lookup).toHaveBeenCalledWith('gb', [ISRC])
+  })
+
+  it('stays idle for a marketless listener when no default, or a malformed one, is configured', async () => {
+    const db = await createTestDb()
+    await listener(db, null, null)
+    await spotifyTrack(db)
+    const lookup = vi.fn(async () => new Map())
+    expect((await runAppleIsrcBatch(db, { catalog: { getSongsByIsrc: lookup } })).processed).toBe(0)
+    expect((await runAppleIsrcBatch(db, { catalog: { getSongsByIsrc: lookup }, defaultStorefront: 'nigeria' })).processed).toBe(0)
+    expect(lookup).not.toHaveBeenCalled()
+  })
+
   it('skips invalid identities, already linked tracks, abandoned imports, and unowned catalog rows', async () => {
     const db = await createTestDb()
     await listener(db)

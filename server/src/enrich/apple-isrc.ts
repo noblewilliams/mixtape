@@ -14,7 +14,10 @@ const RETRY_MS = {
 } as const
 type Failure = keyof typeof RETRY_MS
 type Candidate = { track_id: string; storefront: string; isrc: string }
-export type AppleIsrcDeps = { catalog: AppleIsrcCatalogClient; now?: () => Date }
+// defaultStorefront: the market to look in for a listener whose profile names
+// none (a Spotify import records neither a storefront nor a country). The
+// profile always wins; with no default such a listener is never eligible.
+export type AppleIsrcDeps = { catalog: AppleIsrcCatalogClient; now?: () => Date; defaultStorefront?: string }
 export type AppleIsrcResult = {
   processed: number; linked: number; missing: number; ambiguous: number
   conflicts: number; failed: number; skipped: number
@@ -26,9 +29,9 @@ function rows<T>(value: unknown): T[] {
 
 // This is public-catalog work for a current, successfully imported source.
 // Connection begins and deleted sources do not qualify on their own.
-const eligibleTracks = () => sql`
+const eligibleTracks = (fallback: string | null) => sql`
   SELECT DISTINCT t.id AS track_id, upper(t.isrc) AS isrc,
-    coalesce(p.apple_storefront, lower(p.country)) AS storefront,
+    coalesce(p.apple_storefront, lower(p.country), ${fallback}::text) AS storefront,
     t.enrich_priority AS priority, t.created_at
   FROM tracks t
   JOIN user_tracks ut ON ut.track_id = t.id
@@ -37,12 +40,12 @@ const eligibleTracks = () => sql`
     AND src.source = 'spotify_export' AND src.last_imported_at IS NOT NULL
   WHERE t.spotify_id IS NOT NULL AND t.apple_id IS NULL
     AND upper(t.isrc) ~ '^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$'
-    AND coalesce(p.apple_storefront, lower(p.country)) ~ '^[a-z]{2}$'
+    AND coalesce(p.apple_storefront, lower(p.country), ${fallback}::text) ~ '^[a-z]{2}$'
 `
 
-async function claim(db: Db, now: Date, token: string): Promise<Candidate[]> {
+async function claim(db: Db, now: Date, token: string, fallback: string | null): Promise<Candidate[]> {
   return rows(await db.execute(sql`
-    WITH eligible AS (${eligibleTracks()}), ready AS (
+    WITH eligible AS (${eligibleTracks(fallback)}), ready AS (
       SELECT e.*, s.updated_at AS last_attempt
       FROM eligible e LEFT JOIN apple_isrc_lookups s
         ON s.track_id = e.track_id AND s.storefront = e.storefront AND s.isrc = e.isrc
@@ -90,7 +93,7 @@ function cleanText(value: unknown, limit = 1000): string | null {
     ? value : null
 }
 
-async function link(db: Db, item: Candidate, song: CatalogSong, now: Date): Promise<boolean> {
+async function link(db: Db, item: Candidate, song: CatalogSong, now: Date, fallback: string | null): Promise<boolean> {
   const artwork = parseArtworkMetadata(song.artwork)
   const duration = typeof song.durationMs === 'number' && Number.isInteger(song.durationMs)
     && song.durationMs > 0 && song.durationMs <= 2147483647 ? song.durationMs : null
@@ -112,7 +115,7 @@ async function link(db: Db, item: Candidate, song: CatalogSong, now: Date): Prom
     WHERE target.id = ${item.track_id} AND target.apple_id IS NULL AND upper(target.isrc) = ${item.isrc}
       AND NOT EXISTS (SELECT 1 FROM tracks other WHERE other.apple_id = ${song.appleId})
       AND EXISTS (
-        SELECT 1 FROM (${eligibleTracks()}) active
+        SELECT 1 FROM (${eligibleTracks(fallback)}) active
         WHERE active.track_id = target.id AND active.storefront = ${item.storefront} AND active.isrc = ${item.isrc}
       )
     RETURNING target.id
@@ -130,7 +133,9 @@ async function link(db: Db, item: Candidate, song: CatalogSong, now: Date): Prom
 export async function runAppleIsrcBatch(db: Db, deps: AppleIsrcDeps): Promise<AppleIsrcResult> {
   const currentTime = () => deps.now?.() ?? new Date()
   const token = crypto.randomUUID()
-  const batch = await claim(db, currentTime(), token)
+  const market = deps.defaultStorefront?.trim().toLowerCase() ?? ''
+  const fallback = /^[a-z]{2}$/.test(market) ? market : null
+  const batch = await claim(db, currentTime(), token, fallback)
   const result: AppleIsrcResult = { processed: 0, linked: 0, missing: 0, ambiguous: 0, conflicts: 0, failed: 0, skipped: 0 }
   if (!batch.length) return result
   const storefront = batch[0].storefront
@@ -155,7 +160,7 @@ export async function runAppleIsrcBatch(db: Db, deps: AppleIsrcDeps): Promise<Ap
         eq(appleIsrcLookups.leaseToken, token))
       result.processed++
       const active = rows(await tx.execute(sql`
-        SELECT 1 FROM (${eligibleTracks()}) e
+        SELECT 1 FROM (${eligibleTracks(fallback)}) e
         WHERE e.track_id = ${item.track_id} AND e.storefront = ${item.storefront} AND e.isrc = ${item.isrc}
       `)).length > 0
       if (!active) {
@@ -173,7 +178,7 @@ export async function runAppleIsrcBatch(db: Db, deps: AppleIsrcDeps): Promise<Ap
         else {
           try {
             // Isolate an Apple-ID uniqueness race with other catalog writers.
-            const linked = await tx.transaction(inner => link(inner as unknown as Db, item, matches[0], now))
+            const linked = await tx.transaction(inner => link(inner as unknown as Db, item, matches[0], now, fallback))
             if (linked) result.linked++
             else category = 'conflict'
           } catch (error) {
