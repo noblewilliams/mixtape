@@ -20,7 +20,8 @@ import '../widgets/foundation/empty_state.dart';
 import '../widgets/foundation/flush_row.dart';
 import '../widgets/foundation/frosted_dock.dart' show kFrostedDockHeight;
 import '../widgets/foundation/gradient_background.dart';
-import '../widgets/foundation/square_art.dart';
+import '../widgets/foundation/cassette_tile.dart';
+import '../widgets/foundation/mixtape_feedback.dart';
 import '../widgets/foundation/large_title_scaffold.dart';
 import '../widgets/foundation/segmented_toggle.dart';
 import '../widgets/foundation/tape_button.dart';
@@ -30,7 +31,6 @@ import 'chat_screen.dart';
 // TODO(2.2): remove Home's copies of these once its list is gone.
 const _archiveFailedMessage = "couldn't archive — try again";
 const _unarchiveFailedMessage = "couldn't unarchive — try again";
-const _refreshFailedMessage = "couldn't refresh — showing what we had";
 
 /// The Mixes tab.
 class MixesScreen extends ConsumerStatefulWidget {
@@ -69,14 +69,11 @@ class MixesScreen extends ConsumerStatefulWidget {
 
 class _MixesScreenState extends ConsumerState<MixesScreen> {
   bool _showArchived = false;
+  bool _refreshFailed = false;
 
   Future<void> _refresh() async {
     final ok = await ref.read(sessionsProvider.notifier).refresh();
-    if (!ok && mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text(_refreshFailedMessage)));
-    }
+    if (mounted) setState(() => _refreshFailed = !ok);
   }
 
   /// Home's `_navigateToChat`, unchanged: sessions can move while ChatScreen
@@ -103,30 +100,34 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
     messenger.hideCurrentSnackBar();
     if (!ok) {
       messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            archived ? _archiveFailedMessage : _unarchiveFailedMessage,
-          ),
+        mixtapeSnackBar(
+          message: archived ? _archiveFailedMessage : _unarchiveFailedMessage,
+          kind: FeedbackKind.error,
         ),
       );
     } else if (archived) {
       messenger.showSnackBar(
-        SnackBar(
-          content: const Text('Mix archived'),
-          duration: const Duration(seconds: 3),
-          action: SnackBarAction(
-            label: 'Undo',
-            onPressed: () async {
-              final restored = await ref
-                  .read(sessionsProvider.notifier)
-                  .unarchive(id);
-              if (!restored && mounted && messenger.mounted) {
-                messenger.showSnackBar(
-                  const SnackBar(content: Text(_unarchiveFailedMessage)),
-                );
-              }
-            },
-          ),
+        mixtapeSnackBar(
+          message: 'Mix archived',
+          kind: FeedbackKind.success,
+          duration: MediaQuery.accessibleNavigationOf(context)
+              ? const Duration(days: 1)
+              : const Duration(seconds: 3),
+          actionLabel: 'Undo',
+          onAction: () async {
+            messenger.hideCurrentSnackBar();
+            final restored = await ref
+                .read(sessionsProvider.notifier)
+                .unarchive(id);
+            if (!restored && mounted && messenger.mounted) {
+              messenger.showSnackBar(
+                mixtapeSnackBar(
+                  message: _unarchiveFailedMessage,
+                  kind: FeedbackKind.error,
+                ),
+              );
+            }
+          },
         ),
       );
     }
@@ -162,7 +163,52 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
               onChanged: (value) => setState(() => _showArchived = value),
             ),
             onRefresh: _refresh,
-            slivers: [_body(sessionsAsync)],
+            slivers: [
+              if (_refreshFailed)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Couldn’t refresh your mixes.',
+                                style: context.tokens.rowTitle.copyWith(
+                                  fontSize: 13,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'Showing your last loaded mixes.',
+                                style: context.tokens.meta.copyWith(
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton(
+                          onPressed: _refresh,
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size(48, 44),
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                            side: BorderSide(color: context.tokens.hairline),
+                          ),
+                          child: const Text(
+                            'Retry',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              _body(sessionsAsync),
+            ],
           ),
         ),
       ),
@@ -224,6 +270,9 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
             onOpen: () => _openConversation(session.id),
             onRename: (title) =>
                 ref.read(sessionsProvider.notifier).rename(session.id, title),
+            onCaseColor: (color) => ref
+                .read(sessionsProvider.notifier)
+                .setCaseColor(session.id, color),
             onArchive: () => _setArchived(session.id, archived: true),
             onRestore: () => _setArchived(session.id, archived: false),
           );
@@ -311,7 +360,13 @@ class _SessionsSkeleton extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(vertical: 10),
                   child: Row(
                     children: [
-                      SquareArt(size: MixHomeRow.artSize),
+                      Opacity(
+                        opacity: .16,
+                        child: CassetteTile(
+                          width: MixHomeRow.artSize,
+                          caseColor: tokens.muted,
+                        ),
+                      ),
                       const SizedBox(width: FlushRow.gap),
                       Expanded(
                         child: Column(
@@ -369,28 +424,16 @@ class _SessionsErrorState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    return SliverFillRemaining(
-      hasScrollBody: false,
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.cloud_off, size: 48, color: tokens.errInk),
-              const SizedBox(height: 16),
-              Text(
-                "couldn't load your sessions",
-                textAlign: TextAlign.center,
-                style: tokens.body,
-              ),
-              const SizedBox(height: 16),
-              KeyedSubtree(
-                key: const Key('sessions-retry'),
-                child: TapeButton(label: 'Try again', onPressed: onRetry),
-              ),
-            ],
+    return EmptyStateSliver(
+      child: EmptyState(
+        title: 'Couldn’t load your mixes',
+        body: 'Try again in a moment.',
+        artwork: EmptyStateArtwork.connection,
+        action: KeyedSubtree(
+          key: const Key('sessions-retry'),
+          child: OutlinedButton(
+            onPressed: onRetry,
+            child: const Text('Try again'),
           ),
         ),
       ),

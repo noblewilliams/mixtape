@@ -22,6 +22,7 @@ import 'package:mixtape/presentation/widgets/foundation/label_chip.dart';
 import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
 import 'package:mixtape/presentation/widgets/foundation/text_action.dart';
 import 'package:mixtape/presentation/widgets/mix_handoff.dart';
+import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 
 import '../../data/playback/playback_controller_test.dart' as playback
     show FakeApi, FakeBridge;
@@ -62,7 +63,7 @@ class _HostState extends ConsumerState<_Host> with MixHandoff<_Host> {
   String get mixSessionId => 's1';
 
   @override
-  void showMixSnack(String message) => snacks.add(message);
+  void showMixSnack(String message, {FeedbackKind kind = FeedbackKind.info}) => snacks.add(message);
 
   @override
   Widget build(BuildContext context) {
@@ -403,7 +404,7 @@ void main() {
       expect(await store.read(), isNull);
     });
 
-    testWidgets('a whitespace-only name falls back to the mix title', (tester) async {
+    testWidgets('a whitespace-only name cannot create a playlist', (tester) async {
       final bridge = FakeBridge();
       await _pumpHost(
         tester,
@@ -421,7 +422,7 @@ void main() {
       await tester.tap(find.byKey(MixHandoffKeys.arrangement.saveConfirm));
       await tester.pumpAndSettle();
 
-      expect(bridge.createCalls.single.name, 'Late drive');
+      expect(bridge.createCalls, isEmpty);
     });
 
     testWidgets('a second Save tap while the first is in flight creates nothing new', (
@@ -443,7 +444,7 @@ void main() {
       await tester.pumpAndSettle();
     });
 
-    testWidgets('a refused save closes the alert and reports the reason', (
+    testWidgets('a refused save retains the draft and reports the reason inline', (
       tester,
     ) async {
       final bridge = FakeBridge()
@@ -459,8 +460,9 @@ void main() {
       await tester.tap(find.byKey(MixHandoffKeys.arrangement.saveConfirm));
       await tester.pumpAndSettle();
 
-      expect(find.byKey(MixHandoffKeys.arrangement.nameField), findsNothing);
-      expect(host.snacks, ["Couldn't save the playlist — not authorized"]);
+      expect(find.byKey(MixHandoffKeys.arrangement.nameField), findsOneWidget);
+      expect(host.snacks, isEmpty);
+      expect(find.text("Couldn't save the playlist — not authorized"), findsOneWidget);
     });
 
     testWidgets('a save that added nothing posts no taste signal', (tester) async {

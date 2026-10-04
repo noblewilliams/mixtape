@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../theme/mixtape_theme.dart';
+import '../tape_palette.dart';
 
 /// The cassette, painted from `web/public/tape.svg` (viewBox 200 × 128).
 ///
@@ -17,10 +18,14 @@ class CassetteTile extends StatefulWidget {
     this.caseColor,
     this.seedId,
     this.spinning = false,
+    this.title,
+    this.shadow = false,
   });
 
   /// The painted width; height follows the 200 × 128 viewBox.
   final double width;
+  final String? title;
+  final bool shadow;
 
   /// Overrides the colour [seedId] would pick.
   final Color? caseColor;
@@ -37,7 +42,7 @@ class CassetteTile extends StatefulWidget {
   /// The painted [CustomPaint], for tests.
   static const Key paintKey = Key('cassette-paint');
 
-  /// The five case colours from the board.
+  /// Neutral brand colours retained for unassigned decorative tapes.
   static const List<Color> caseColors = [
     Color(0xFF3F4851),
     Color(0xFF544451),
@@ -46,7 +51,7 @@ class CassetteTile extends StatefulWidget {
     Color(0xFF2C2B33),
   ];
 
-  /// Picks a case from [caseColors] by a stable hash of [seedId].
+  /// Picks a case from the mix palette by a stable hash of [seedId].
   ///
   /// FNV-1a rather than [String.hashCode], which is not stable across runs.
   static Color caseColorFor(String? seedId) {
@@ -56,7 +61,7 @@ class CassetteTile extends StatefulWidget {
       hash = (hash ^ unit) & 0xFFFFFFFF;
       hash = (hash * 0x01000193) & 0xFFFFFFFF;
     }
-    return caseColors[hash % caseColors.length];
+    return tapeColor(tapePalette[hash % tapePalette.length].$2)!;
   }
 
   @override
@@ -123,6 +128,8 @@ class CassetteTileState extends State<CassetteTile>
             caseColor: caseColor,
             stripes: stripes,
             turn: _hubs.value,
+            title: widget.title,
+            shadow: widget.shadow,
           ),
         ),
       ),
@@ -136,9 +143,13 @@ class CassettePainter extends CustomPainter {
     required this.caseColor,
     required this.stripes,
     this.turn = 0,
+    this.title,
+    this.shadow = false,
   });
 
   final Color caseColor;
+  final String? title;
+  final bool shadow;
 
   /// Prism stops 1–5, top to bottom.
   final List<Color> stripes;
@@ -177,6 +188,14 @@ class CassettePainter extends CustomPainter {
 
     // Case and its inner edge.
     final shell = RRect.fromLTRBR(1, 1, 199, 127, const Radius.circular(9));
+    if (shadow) {
+      canvas.drawShadow(
+        Path()..addRRect(shell),
+        const Color(0x5517161A),
+        5,
+        false,
+      );
+    }
     canvas
       ..drawRRect(shell, _fill(caseColor))
       ..drawRRect(shell, _stroke(_caseEdge, 2))
@@ -194,6 +213,27 @@ class CassettePainter extends CustomPainter {
         const Offset(178, 31),
         _stroke(_rule, 1),
       );
+
+    if (title != null) {
+      final label = TextPainter(
+        text: TextSpan(
+          text: title,
+          style: const TextStyle(
+            fontFamily: 'Noteworthy',
+            fontFamilyFallback: ['Bradley Hand', 'cursive'],
+            fontSize: 15,
+            color: _dark,
+          ),
+        ),
+        maxLines: 1,
+        ellipsis: '…',
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: 156);
+      canvas.save();
+      canvas.clipRect(const Rect.fromLTWH(22, 12, 156, 19));
+      label.paint(canvas, const Offset(22, 12));
+      canvas.restore();
+    }
 
     // The prism stripes, y 39 → 64 in 5 pt bands.
     for (var i = 0; i < stripes.length && i < 5; i++) {
@@ -290,6 +330,8 @@ class CassettePainter extends CustomPainter {
   @override
   bool shouldRepaint(CassettePainter oldDelegate) =>
       oldDelegate.caseColor != caseColor ||
+      oldDelegate.title != title ||
+      oldDelegate.shadow != shadow ||
       oldDelegate.turn != turn ||
       !_sameStripes(oldDelegate.stripes, stripes);
 

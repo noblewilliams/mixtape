@@ -22,7 +22,6 @@ import 'package:mixtape/presentation/screens/mixes_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
 import 'package:mixtape/presentation/widgets/foundation/segmented_toggle.dart';
-import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
 import 'package:mixtape/presentation/widgets/mix_home_row.dart';
 
 /// Implements DjApi's public surface (not `extends`, since DjApi's constructor
@@ -49,6 +48,9 @@ class FakeDjApi implements DjApi {
     if (impl == null) throw UnimplementedError('onSetStatus not wired');
     return impl(id, status);
   }
+
+  @override
+  Future<DjSession> setCaseColor(String id, String caseColor) => throw UnimplementedError();
 
   @override
   Future<DjSession> renameSession(String id, String title) {
@@ -431,12 +433,12 @@ void main() {
         };
       await _pump(tester, _makeContainer(api));
 
-      expect(find.text("couldn't load your sessions"), findsOneWidget);
+      expect(find.text("Couldn’t load your mixes"), findsOneWidget);
       expect(find.byKey(const Key('sessions-retry')), findsOneWidget);
       expect(
         find.descendant(
           of: find.byKey(const Key('sessions-retry')),
-          matching: find.byType(TapeButton),
+          matching: find.byType(OutlinedButton),
         ),
         findsOneWidget,
       );
@@ -471,7 +473,7 @@ void main() {
       expect(calls, 2, reason: 'the pull must actually refetch');
       expect(find.text('Test Session'), findsOneWidget);
       expect(
-        find.text("couldn't refresh — showing what we had"),
+        find.text("Couldn’t refresh your mixes."),
         findsOneWidget,
       );
       expect(find.byKey(const Key('sessions-retry')), findsNothing);

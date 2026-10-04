@@ -126,6 +126,9 @@ class ShellDjApi implements DjApi {
       throw UnimplementedError();
 
   @override
+  Future<DjSession> setCaseColor(String id, String caseColor) => throw UnimplementedError();
+
+  @override
   Future<DjSession> renameSession(String id, String title) =>
       throw UnimplementedError();
 

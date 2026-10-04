@@ -33,6 +33,7 @@ final djApiProvider = Provider<DjApi>((ref) {
 const _genericApiErrorMessage = 'something went wrong on our end — try again';
 const _offlineErrorMessage =
     "couldn't reach the DJ — check your connection and try again";
+
 /// Shown when an edit loses a version race. Public so a screen with its own
 /// approved conflict copy (the arrangement's "This mix changed elsewhere.")
 /// can recognise it rather than string-matching a private constant.
@@ -153,6 +154,9 @@ class SessionsNotifier extends AsyncNotifier<List<DjSession>> {
 
   Future<bool> rename(String id, String title) =>
       _update(id, (api) => api.renameSession(id, title));
+
+  Future<bool> setCaseColor(String id, String color) =>
+      _update(id, (api) => api.setCaseColor(id, color));
 
   /// Adopt the complete PATCH response before any secondary read. A failed
   /// list refresh does not turn a successful archive/rename into a failure.
@@ -289,6 +293,7 @@ DjSession _withQueueVersion(DjSession session, int queueVersion) => DjSession(
   queueVersion: queueVersion,
   updatedAt: session.updatedAt,
   notPersonal: session.notPersonal,
+  caseColor: session.caseColor,
 );
 
 /// Bumps only the title, carrying every other field over verbatim — the
@@ -305,6 +310,7 @@ DjSession _withTitle(DjSession session, String title) => DjSession(
   queueVersion: session.queueVersion,
   updatedAt: session.updatedAt,
   notPersonal: session.notPersonal,
+  caseColor: session.caseColor,
 );
 
 /// Bumps only the corpus-mode flag, carrying every other field over verbatim
@@ -318,6 +324,7 @@ DjSession _withNotPersonal(DjSession session, bool notPersonal) => DjSession(
   queueVersion: session.queueVersion,
   updatedAt: session.updatedAt,
   notPersonal: notPersonal,
+  caseColor: session.caseColor,
 );
 
 class ChatNotifier extends AsyncNotifier<ChatState> {
@@ -377,6 +384,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           queueVersion: current.queueVersion,
           updatedAt: current.session.updatedAt,
           notPersonal: current.session.notPersonal,
+          caseColor: current.session.caseColor,
         ),
       ),
     );
@@ -642,6 +650,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
             queueVersion: session.queueVersion,
             updatedAt: session.updatedAt,
             notPersonal: session.notPersonal,
+            caseColor: session.caseColor,
           ),
         );
       }

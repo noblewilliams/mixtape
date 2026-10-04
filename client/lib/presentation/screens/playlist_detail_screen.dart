@@ -13,6 +13,7 @@
 /// assumes it is the app root.
 library;
 
+import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 import 'package:flutter/cupertino.dart'
     show CupertinoAlertDialog, CupertinoDialogAction, showCupertinoDialog;
 import 'package:flutter/material.dart';
@@ -123,7 +124,10 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Couldn't start a private draft.")),
+          mixtapeSnackBar(
+            message: "Couldn't start a private draft.",
+            kind: FeedbackKind.error,
+          ),
         );
       }
     } finally {
@@ -288,7 +292,10 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Couldn't load more songs.")),
+          mixtapeSnackBar(
+            message: "Couldn't load more songs.",
+            kind: FeedbackKind.error,
+          ),
         );
       }
     }

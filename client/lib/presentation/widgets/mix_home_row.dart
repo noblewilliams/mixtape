@@ -8,7 +8,8 @@ import '../theme/mixtape_theme.dart';
 import 'foundation/cassette_tile.dart';
 import 'foundation/flush_row.dart';
 import 'foundation/mixtape_menu.dart';
-import 'foundation/square_art.dart';
+import 'tape_palette.dart';
+import 'tape_settings_dialog.dart';
 
 /// Home owns canonical session state; this row only owns an unsaved name.
 class MixHomeRow extends StatefulWidget {
@@ -22,9 +23,11 @@ class MixHomeRow extends StatefulWidget {
     this.isFirst,
     this.showActionsButton = false,
     this.onVersionHistory,
+    this.onCaseColor,
   });
 
   final DjSession session;
+  final Future<bool> Function(String)? onCaseColor;
   final VoidCallback onOpen;
   final Future<bool> Function(String) onRename;
   final Future<bool> Function() onArchive;
@@ -47,7 +50,7 @@ class MixHomeRow extends StatefulWidget {
   final VoidCallback? onVersionHistory;
 
   /// The board's art box; the cassette sits inside it (`.row .art .cs`).
-  static const double artSize = 60;
+  static const double artSize = 80;
 
   /// The row's actions, in menu order.
   static const String renameAction = 'rename';
@@ -79,6 +82,17 @@ class _MixHomeRowState extends State<MixHomeRow> {
 
   void _handleAction(String action) {
     switch (action) {
+      case 'tape-settings':
+        showDialog<void>(
+          context: context,
+          builder: (_) => TapeSettingsDialog(
+            title: widget.session.title,
+            initialColor:
+                widget.session.caseColor ??
+                '#${CassetteTile.caseColorFor(widget.session.id).toARGB32().toRadixString(16).substring(2)}',
+            onSave: widget.onCaseColor!,
+          ),
+        );
       case MixHomeRow.renameAction:
         _rename();
       case MixHomeRow.versionHistoryAction:
@@ -91,6 +105,8 @@ class _MixHomeRowState extends State<MixHomeRow> {
   /// Rename, Version history and Archive/Restore — the approved row menu,
   /// shared by the long-press and the legacy trailing button.
   List<MixtapeMenuAction<String>> _menuItems(bool archived) => [
+    if (widget.onCaseColor != null)
+      const MixtapeMenuAction(value: 'tape-settings', label: 'Tape settings'),
     const MixtapeMenuAction(value: MixHomeRow.renameAction, label: 'Rename'),
     const MixtapeMenuAction(
       value: MixHomeRow.versionHistoryAction,
@@ -127,12 +143,12 @@ class _MixHomeRowState extends State<MixHomeRow> {
     }
   }
 
-  Widget get _tile => SquareArt(
-    size: MixHomeRow.artSize,
-    child: CassetteTile(
-      width: MixHomeRow.artSize - 6,
-      seedId: widget.session.id,
-    ),
+  Widget get _tile => CassetteTile(
+    width: MixHomeRow.artSize,
+    seedId: widget.session.id,
+    title: widget.session.title,
+    caseColor: tapeColor(widget.session.caseColor),
+    shadow: true,
   );
 
   @override
@@ -201,10 +217,7 @@ class _MixHomeRowState extends State<MixHomeRow> {
                 key: ValueKey('mix-actions-${widget.session.id}'),
                 tooltip: 'Mix actions',
                 padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(
-                  minWidth: 48,
-                  minHeight: 48,
-                ),
+                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
                 onPressed: _busy
                     ? null
                     : () => _openActionsMenu(context, archived),

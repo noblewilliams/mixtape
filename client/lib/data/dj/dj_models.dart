@@ -13,8 +13,10 @@ class DjSession {
     required this.queueVersion,
     required this.updatedAt,
     this.notPersonal = false,
+    this.caseColor,
   });
 
+  final String? caseColor;
   final String id;
   final String title;
   final String status; // 'active' | 'archived'
@@ -28,13 +30,14 @@ class DjSession {
   final bool notPersonal;
 
   factory DjSession.fromJson(Map<String, dynamic> json) => DjSession(
-        id: json['id'] as String,
-        title: json['title'] as String,
-        status: json['status'] as String,
-        queueVersion: json['queueVersion'] as int,
-        updatedAt: DateTime.parse(json['updatedAt'] as String),
-        notPersonal: json['notPersonal'] as bool? ?? false,
-      );
+    caseColor: json['caseColor'] as String?,
+    id: json['id'] as String,
+    title: json['title'] as String,
+    status: json['status'] as String,
+    queueVersion: json['queueVersion'] as int,
+    updatedAt: DateTime.parse(json['updatedAt'] as String),
+    notPersonal: json['notPersonal'] as bool? ?? false,
+  );
 }
 
 class DjMessage {
@@ -53,12 +56,12 @@ class DjMessage {
   final DateTime createdAt;
 
   factory DjMessage.fromJson(Map<String, dynamic> json) => DjMessage(
-        id: json['id'] as String,
-        role: json['role'] as String,
-        content: json['content'] as String,
-        queueVersion: json['queueVersion'] as int?,
-        createdAt: DateTime.parse(json['createdAt'] as String),
-      );
+    id: json['id'] as String,
+    role: json['role'] as String,
+    content: json['content'] as String,
+    queueVersion: json['queueVersion'] as int?,
+    createdAt: DateTime.parse(json['createdAt'] as String),
+  );
 }
 
 class QueueTrack {
@@ -120,8 +123,9 @@ class QueueTrack {
 
 /// Shared by every response shape that embeds a queue snapshot (session
 /// detail, turn results, queue-ops results, and DJ error bodies).
-List<QueueTrack> queueTracksFromJson(Object? json) =>
-    (json as List).map((q) => QueueTrack.fromJson(q as Map<String, dynamic>)).toList();
+List<QueueTrack> queueTracksFromJson(Object? json) => (json as List)
+    .map((q) => QueueTrack.fromJson(q as Map<String, dynamic>))
+    .toList();
 
 class SessionDetail {
   const SessionDetail({
@@ -153,17 +157,19 @@ class SessionDetail {
   final bool supportsInsert;
 
   factory SessionDetail.fromJson(Map<String, dynamic> json) => SessionDetail(
-        session: DjSession.fromJson(json['session'] as Map<String, dynamic>),
-        messages: (json['messages'] as List)
-            .map((m) => DjMessage.fromJson(m as Map<String, dynamic>))
-            .toList(),
-        queue: queueTracksFromJson(json['queue']),
-        sessionTitle: json['sessionTitle'] as String?,
-        supportsInsert: json['supportsInsert'] as bool? ?? false,
-        playlistSeed: json.containsKey('playlistSeed')
-            ? PlaylistSeedState.fromJson(playlistContextObject(json['playlistSeed']))
-            : null,
-      );
+    session: DjSession.fromJson(json['session'] as Map<String, dynamic>),
+    messages: (json['messages'] as List)
+        .map((m) => DjMessage.fromJson(m as Map<String, dynamic>))
+        .toList(),
+    queue: queueTracksFromJson(json['queue']),
+    sessionTitle: json['sessionTitle'] as String?,
+    supportsInsert: json['supportsInsert'] as bool? ?? false,
+    playlistSeed: json.containsKey('playlistSeed')
+        ? PlaylistSeedState.fromJson(
+            playlistContextObject(json['playlistSeed']),
+          )
+        : null,
+  );
 }
 
 class TurnResult {
@@ -184,11 +190,11 @@ class TurnResult {
   final String? sessionTitle;
 
   factory TurnResult.fromJson(Map<String, dynamic> json) => TurnResult(
-        djMessage: DjMessage.fromJson(json['djMessage'] as Map<String, dynamic>),
-        queue: queueTracksFromJson(json['queue']),
-        queueVersion: json['queueVersion'] as int,
-        sessionTitle: json['sessionTitle'] as String?,
-      );
+    djMessage: DjMessage.fromJson(json['djMessage'] as Map<String, dynamic>),
+    queue: queueTracksFromJson(json['queue']),
+    queueVersion: json['queueVersion'] as int,
+    sessionTitle: json['sessionTitle'] as String?,
+  );
 }
 
 class QueueOpsResult {
@@ -207,12 +213,12 @@ class QueueOpsResult {
   final List<QueueTrack> queue;
 
   factory QueueOpsResult.fromJson(Map<String, dynamic> json) => QueueOpsResult(
-        queueVersion: json['queueVersion'] as int,
-        requested: json['requested'] as int,
-        added: json['added'] as int,
-        removed: json['removed'] as int,
-        queue: queueTracksFromJson(json['queue']),
-      );
+    queueVersion: json['queueVersion'] as int,
+    requested: json['requested'] as int,
+    added: json['added'] as int,
+    removed: json['removed'] as int,
+    queue: queueTracksFromJson(json['queue']),
+  );
 }
 
 /// A durable per-user taste note the DJ saved via `remember_preference` (see
@@ -220,17 +226,21 @@ class QueueOpsResult {
 /// `GET /me/memories` returns these newest-first; DELETE is hard — a
 /// forgotten note is gone for good, there's no restore server-side.
 class DjMemory {
-  const DjMemory({required this.id, required this.note, required this.createdAt});
+  const DjMemory({
+    required this.id,
+    required this.note,
+    required this.createdAt,
+  });
 
   final String id;
   final String note;
   final DateTime createdAt;
 
   factory DjMemory.fromJson(Map<String, dynamic> json) => DjMemory(
-        id: json['id'] as String,
-        note: json['note'] as String,
-        createdAt: DateTime.parse(json['createdAt'] as String),
-      );
+    id: json['id'] as String,
+    note: json['note'] as String,
+    createdAt: DateTime.parse(json['createdAt'] as String),
+  );
 }
 
 /// Manual queue-ops are remove/move/insert (0-based positions) — swap/extend
@@ -266,10 +276,10 @@ class _InsertOp extends QueueOp {
 
   @override
   Map<String, dynamic> toJson() => {
-        'op': 'insert',
-        'position': position,
-        'trackId': trackId,
-      };
+    'op': 'insert',
+    'position': position,
+    'trackId': trackId,
+  };
 }
 
 class _MoveOp extends QueueOp {

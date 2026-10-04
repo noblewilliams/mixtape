@@ -51,6 +51,7 @@ import '../providers/playback_provider.dart';
 import '../screens/playback_screen.dart';
 import '../theme/mixtape_theme.dart';
 import 'foundation/label_chip.dart';
+import 'foundation/mixtape_feedback.dart';
 import 'foundation/tape_button.dart';
 import 'foundation/text_action.dart';
 
@@ -200,7 +201,7 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
 
   /// The host's toast. Deliberately the host's own: the arrangement and the
   /// conversation each place the floating bar differently.
-  void showMixSnack(String message);
+  void showMixSnack(String message, {FeedbackKind kind = FeedbackKind.info});
 
   bool _sendingToMusic = false;
   bool _savingPlaylist = false;
@@ -239,15 +240,17 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
   /// listener carried through. Play and Save are Apple outputs and post
   /// nothing here; they have their own session events. Same fire-and-forget
   /// contract as [postMixEvent]; the once-ness lives in [FunnelMilestones].
-  void noteSpotifyOutput() =>
-      ref.read(funnelMilestonesProvider).recordOnce(FunnelEventType.firstOutput);
+  void noteSpotifyOutput() => ref
+      .read(funnelMilestonesProvider)
+      .recordOnce(FunnelEventType.firstOutput);
 
   /// Whether the app's own player is on THIS mix — the Play now button then
   /// reads Playing and carries its meter.
   bool isPlayingThisMix() {
     final player = ref.read(playbackProvider);
     return player.sessionId == mixSessionId &&
-        (player.sample.status == 'playing' || player.sample.status == 'waiting');
+        (player.sample.status == 'playing' ||
+            player.sample.status == 'waiting');
   }
 
   /// Play now: the app-owned Apple player takes the arrangement and the Now
@@ -255,7 +258,12 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
   void playHere(ChatState state, List<QueueTrack> queue) {
     final player = ref.read(playbackProvider);
     unawaited(
-      player.start(mixSessionId, state.queueVersion, state.session.title, queue),
+      player.start(
+        mixSessionId,
+        state.queueVersion,
+        state.session.title,
+        queue,
+      ),
     );
     Navigator.push(
       context,
@@ -277,10 +285,10 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
       await ref.read(musicKitBridgeProvider).playQueue(ids);
       postMixEvent('played');
       if (!mounted) return;
-      showMixSnack(mixPlaySuccessMessage(skipped));
+      showMixSnack(mixPlaySuccessMessage(skipped), kind: FeedbackKind.success);
     } on MusicKitException catch (e) {
       if (!mounted) return;
-      showMixSnack(mixPlayFailureMessage(e.message));
+      showMixSnack(mixPlayFailureMessage(e.message), kind: FeedbackKind.error);
     } finally {
       if (mounted) setState(() => _sendingToMusic = false);
     }
@@ -393,11 +401,13 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
       if (result.added > 0) postMixEvent('saved_playlist');
       if (dialogContext.mounted) Navigator.of(dialogContext).pop();
       if (!mounted) return;
-      showMixSnack(mixSaveSuccessMessage(result.added, result.failed));
-    } on MusicKitException catch (e) {
-      if (dialogContext.mounted) Navigator.of(dialogContext).pop();
-      if (!mounted) return;
-      showMixSnack(mixSaveFailureMessage(e.message));
+      showMixSnack(
+        mixSaveSuccessMessage(result.added, result.failed),
+        kind: result.added > 0 ? FeedbackKind.success : FeedbackKind.error,
+      );
+    } on MusicKitException {
+      // Keep the entered name and author next to the recovery message.
+      rethrow;
     }
   }
 
@@ -433,10 +443,13 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
         // open isn't worth a second message on top of the confirmation.
       }
       if (!mounted) return;
-      showMixSnack(mixShareSuccessMessage(queue.length));
+      showMixSnack(
+        mixShareSuccessMessage(queue.length),
+        kind: FeedbackKind.success,
+      );
     } catch (_) {
       if (!mounted) return;
-      showMixSnack(mixShareFailureMessage);
+      showMixSnack(mixShareFailureMessage, kind: FeedbackKind.error);
     } finally {
       if (mounted) setState(() => _sharingMix = false);
     }
@@ -596,6 +609,7 @@ class _MixSaveDialogState extends State<MixSaveDialog> {
     text: widget.defaultAuthor,
   );
   bool _submitting = false;
+  String? _error;
 
   @override
   void dispose() {
@@ -606,10 +620,17 @@ class _MixSaveDialogState extends State<MixSaveDialog> {
 
   Future<void> _submit() async {
     // Guards a double-tap: each tap would otherwise create a NEW playlist.
-    if (_submitting) return;
-    setState(() => _submitting = true);
+    if (_submitting || _name.text.trim().isEmpty) return;
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
     try {
       await widget.onConfirm(_name.text, _author.text);
+    } on MusicKitException catch (error) {
+      if (mounted) {
+        setState(() => _error = mixSaveFailureMessage(error.message));
+      }
     } catch (error, stack) {
       // onConfirm resolves both outcomes it knows about — a save and Apple's
       // refusal — by popping this alert itself. Anything else reaching here
@@ -648,10 +669,11 @@ class _MixSaveDialogState extends State<MixSaveDialog> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          const SizedBox(height: 14),
+          const SizedBox(height: 10),
           CupertinoTextField(
             key: widget.keys.nameField,
             controller: _name,
+            onChanged: (_) => setState(() {}),
             autofocus: true,
             enabled: !_submitting,
             placeholder: 'Playlist name',
@@ -664,6 +686,19 @@ class _MixSaveDialogState extends State<MixSaveDialog> {
             placeholder: 'Your name',
           ),
           const SizedBox(height: 6),
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Semantics(
+                liveRegion: true,
+                child: Text(
+                  _error!,
+                  style: helper.copyWith(
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                ),
+              ),
+            ),
           Text(
             'Shown under the playlist in Apple Music',
             textAlign: TextAlign.start,
@@ -687,7 +722,7 @@ class _MixSaveDialogState extends State<MixSaveDialog> {
         CupertinoDialogAction(
           key: widget.keys.saveConfirm,
           isDefaultAction: true,
-          onPressed: _submitting ? null : _submit,
+          onPressed: _submitting || _name.text.trim().isEmpty ? null : _submit,
           child: _submitting
               ? const SizedBox(
                   width: 16,

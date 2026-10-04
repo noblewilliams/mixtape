@@ -14,6 +14,7 @@
 /// It lives inside a tab `Navigator`, so it never assumes it is the app root.
 library;
 
+import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -465,7 +466,10 @@ class _SignOutRowState extends ConsumerState<_SignOutRow> {
     } catch (_) {
       if (messenger.mounted) {
         messenger.showSnackBar(
-          const SnackBar(content: Text(YouTab.signOutFailed)),
+          mixtapeSnackBar(
+            message: YouTab.signOutFailed,
+            kind: FeedbackKind.error,
+          ),
         );
       }
     } finally {

@@ -17,7 +17,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../data/listening/listening_models.dart';
-import '../../format/source_labels.dart';
 import '../../providers/onboarding_provider.dart';
 import '../../providers/playlist_providers.dart';
 import '../../theme/mixtape_theme.dart';
@@ -323,40 +322,56 @@ class _LibraryTabState extends ConsumerState<LibraryTab> {
       );
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const SectionWord('Sources'),
-        FlushList(
-          children: [
-            for (final source in state.sources)
-              FlushRow(
-                key: LibraryTab.sourceRowKey(source.source),
-                leading: SourceMark(source: source.source),
-                leadingSize: kSourceMarkSize,
-                title: sourceName(source),
-                subtitleWidget: SourceSubtitle(source: source, state: state),
-                onTap: () => _openSource(source),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          for (final source in state.sources)
+            OutlinedButton(
+              key: LibraryTab.sourceRowKey(source.source),
+              onPressed: () => _openSource(source),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                minimumSize: const Size(44, 44),
+                side: BorderSide(color: tokens.hairline),
               ),
-            FlushRow(
-              key: LibraryTab.addSpotifyKey,
-              leading: const SizedBox.square(
-                dimension: kSourceMarkSize,
-                child: Center(child: Icon(Icons.add, size: 22)),
-              ),
-              leadingSize: kSourceMarkSize,
-              title: 'Add Spotify music',
-              subtitle: 'Bring a Spotify export across',
-              // The row names the service, so it opens on that pane.
-              onTap: () => _push(
-                const SpotifyRequestScreen(
-                  initialSegment: SpotifyRequestScreen.spotifySegment,
-                ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: FittedBox(child: SourceMark(source: source.source)),
+                  ),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      source.source.startsWith('spotify')
+                          ? 'Spotify'
+                          : 'Apple Music',
+                      style: tokens.meta.copyWith(fontSize: 12),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
-      ],
+          TextButton(
+            key: LibraryTab.addSpotifyKey,
+            onPressed: () => _push(
+              const SpotifyRequestScreen(
+                initialSegment: SpotifyRequestScreen.spotifySegment,
+              ),
+            ),
+            child: const Text(
+              'Add Spotify music',
+              style: TextStyle(fontSize: 12),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

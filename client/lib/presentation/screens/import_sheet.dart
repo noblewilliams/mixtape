@@ -11,6 +11,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -1150,7 +1151,7 @@ class _Failed extends StatelessWidget {
                 if (!context.mounted) return;
                 ScaffoldMessenger.of(
                   context,
-                ).showSnackBar(const SnackBar(content: Text('Report copied')));
+                ).showSnackBar(mixtapeSnackBar(message: 'Report copied', kind: FeedbackKind.success));
               },
             ),
           ),

@@ -11,6 +11,7 @@
 /// Pushed inside a tab `Navigator`: glass back and action clusters, no app bar.
 library;
 
+import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -103,7 +104,10 @@ class _PlaylistEditScreenState extends ConsumerState<PlaylistEditScreen> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text(PlaylistEditScreen.refreshFailed)),
+          mixtapeSnackBar(
+            message: PlaylistEditScreen.refreshFailed,
+            kind: FeedbackKind.error,
+          ),
         );
       }
     }
@@ -115,9 +119,12 @@ class _PlaylistEditScreenState extends ConsumerState<PlaylistEditScreen> {
     ref.listen(playlistEditThreadProvider(widget.draftId), (previous, next) {
       final state = next.value;
       if (state?.transientError != null) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(state!.transientError!)));
+        ScaffoldMessenger.of(context).showSnackBar(
+          mixtapeSnackBar(
+            message: state!.transientError!,
+            kind: FeedbackKind.error,
+          ),
+        );
         ref
             .read(playlistEditThreadProvider(widget.draftId).notifier)
             .clearTransientError();

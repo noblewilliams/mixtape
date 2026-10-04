@@ -9,6 +9,7 @@
 /// until they do.
 library;
 
+import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/mixtape_theme.dart';
@@ -81,6 +82,7 @@ String? energyLine(Map<String, dynamic> detail) {
 
 /// The sheet's own copy.
 const String energySheetTitle = 'Give the mix a shape.';
+
 /// The shape no longer lands in the field, so the blurb no longer promises it
 /// will (smoke round three, note 5).
 const String energySheetBlurb =
@@ -244,8 +246,7 @@ Future<EnergyShapeChoice?> pickEnergyShape(
 }) => showMixtapeSheet<EnergyShapeChoice>(
   context,
   isScrollControlled: true,
-  builder: (_) =>
-      _EnergyShapeSheet(controller: controller, selected: selected),
+  builder: (_) => _EnergyShapeSheet(controller: controller, selected: selected),
 );
 
 /// The conversation's chip: there is no session-start message to fold the
@@ -265,11 +266,7 @@ Future<void> showEnergyShapeSheet(
     selection: TextSelection.collapsed(offset: next.length),
   );
   ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(
-      content: Text(energyShapeToast),
-      behavior: SnackBarBehavior.floating,
-      margin: EdgeInsets.all(16),
-    ),
+    mixtapeSnackBar(message: energyShapeToast, kind: FeedbackKind.info),
   );
 }
 

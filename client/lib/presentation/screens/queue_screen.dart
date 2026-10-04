@@ -22,6 +22,7 @@
 /// when their own op settles rather than on a version change).
 library;
 
+import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 import 'dart:async';
 
 import 'package:flutter/cupertino.dart'
@@ -31,6 +32,7 @@ import 'package:flutter/cupertino.dart'
         CupertinoTextField,
         showCupertinoDialog;
 import 'package:flutter/material.dart';
+import '../widgets/open_tape_settings.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/dj/dj_models.dart';
@@ -102,7 +104,8 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
   String get mixSessionId => widget.sessionId;
 
   @override
-  void showMixSnack(String message) => _showSnack(context, message);
+  void showMixSnack(String message, {FeedbackKind kind = FeedbackKind.info}) =>
+      _showSnack(context, message, kind: kind);
 
   void _toggleReason(String trackId) {
     setState(() {
@@ -142,7 +145,13 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
         try {
           await _run(_intents.removeAt(0));
         } catch (_) {
-          if (mounted) _showSnack(context, 'something unexpected happened');
+          if (mounted) {
+            _showSnack(
+              context,
+              'something unexpected happened',
+              kind: FeedbackKind.error,
+            );
+          }
         }
       }
     } finally {
@@ -174,7 +183,8 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
   /// older deploy the toast simply names the song.
   void _handleDismiss(QueueTrack track, {required bool supportsInsert}) {
     final canonical =
-        ref.read(chatProvider(widget.sessionId)).value?.queue ?? const <QueueTrack>[];
+        ref.read(chatProvider(widget.sessionId)).value?.queue ??
+        const <QueueTrack>[];
     final oldPosition = canonical.indexWhere((t) => t.trackId == track.trackId);
     // An ANCHOR, not a number: the song that followed this one (null when it
     // was last). An earlier removal still in flight would shift a bare
@@ -190,15 +200,14 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
-        SnackBar(
-          content: Text('Removed "${track.title}"'),
+        mixtapeSnackBar(
+          message: 'Removed "${track.title}"',
+          kind: FeedbackKind.info,
           duration: QueueScreen.undoDuration,
-          action: canUndo
-              ? SnackBarAction(
-                  label: 'Undo',
-                  onPressed: () => _enqueue(
-                    _InsertIntent(track.trackId, beforeTrackId: followerId),
-                  ),
+          actionLabel: canUndo ? 'Undo' : null,
+          onAction: canUndo
+              ? () => _enqueue(
+                  _InsertIntent(track.trackId, beforeTrackId: followerId),
                 )
               : null,
         ),
@@ -239,7 +248,10 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
   /// is declared under LSApplicationQueriesSchemes in Info.plist, or iOS
   /// says no regardless), else the https link, which Safari or the App Store
   /// banner handles. A probe that throws counts as "cannot".
-  Future<void> _openInSpotify(BuildContext screenContext, QueueTrack track) async {
+  Future<void> _openInSpotify(
+    BuildContext screenContext,
+    QueueTrack track,
+  ) async {
     final id = track.spotifyId!;
     final app = Uri.parse('spotify:track:$id');
     var canOpenApp = false;
@@ -249,7 +261,9 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
       canOpenApp = false;
     }
     if (!mounted) return;
-    final target = canOpenApp ? app : Uri.https('open.spotify.com', '/track/$id');
+    final target = canOpenApp
+        ? app
+        : Uri.https('open.spotify.com', '/track/$id');
     var opened = false;
     try {
       opened = await ref.read(linkOpenerProvider)(target);
@@ -258,14 +272,26 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
     }
     if (!mounted) return;
     if (!opened) {
-      if (screenContext.mounted) _showSnack(screenContext, "couldn't open Spotify");
+      if (screenContext.mounted) {
+        _showSnack(
+          screenContext,
+          "couldn't open Spotify",
+          kind: FeedbackKind.error,
+        );
+      }
       return;
     }
     noteSpotifyOutput();
   }
 
-  void _showSnack(BuildContext context, String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  void _showSnack(
+    BuildContext context,
+    String message, {
+    FeedbackKind kind = FeedbackKind.info,
+  }) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(mixtapeSnackBar(message: message, kind: kind));
   }
 
   void _openHistory() {
@@ -280,11 +306,13 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
   /// which has its own button in the cluster here.
   Future<void> _openMore(BuildContext anchor) async {
     final archived =
-        ref.read(chatProvider(widget.sessionId)).value?.session.status == 'archived';
+        ref.read(chatProvider(widget.sessionId)).value?.session.status ==
+        'archived';
     final action = await showMixtapeMenu<String>(
       context,
       actions: [
         const MixtapeMenuAction(value: 'rename', label: 'Rename'),
+        const MixtapeMenuAction(value: 'tape-settings', label: 'Tape settings'),
         MixtapeMenuAction(
           value: 'status',
           label: archived ? 'Restore' : 'Archive',
@@ -294,6 +322,9 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
     );
     if (!mounted || action == null) return;
     if (action == 'rename') return _openRenameDialog();
+    if (action == 'tape-settings') {
+      return openTapeSettings(context, ref, widget.sessionId);
+    }
     final notifier = ref.read(chatProvider(widget.sessionId).notifier);
     final ok = await notifier.setArchived(!archived);
     if (!mounted) return;
@@ -302,11 +333,13 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
       ok
           ? (archived ? 'Mix restored' : 'Mix archived')
           : "Couldn't update this mix. Try again.",
+      kind: ok ? FeedbackKind.success : FeedbackKind.error,
     );
   }
 
   Future<void> _openRenameDialog() async {
-    final current = ref.read(chatProvider(widget.sessionId)).value?.session.title ?? '';
+    final current =
+        ref.read(chatProvider(widget.sessionId)).value?.session.title ?? '';
     final controller = TextEditingController(text: current);
     final name = await showCupertinoDialog<String>(
       context: context,
@@ -384,7 +417,9 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
               : state.transientError!;
           ScaffoldMessenger.of(context)
             ..hideCurrentSnackBar()
-            ..showSnackBar(SnackBar(content: Text(message)));
+            ..showSnackBar(
+              mixtapeSnackBar(message: message, kind: FeedbackKind.error),
+            );
         }
         ref.read(chatProvider(widget.sessionId).notifier).clearTransientError();
       }
@@ -404,7 +439,10 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
     }
 
     if (!chatAsync.hasValue) {
-      return _shell(title: '', body: const Center(child: CircularProgressIndicator()));
+      return _shell(
+        title: '',
+        body: const Center(child: CircularProgressIndicator()),
+      );
     }
 
     final state = chatAsync.value!;
@@ -414,7 +452,9 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
     // and the ids handed to Apple Music. A row the user has just swiped
     // away shouldn't play or be saved into a playlist just because its
     // removal hasn't round-tripped yet.
-    final visibleQueue = state.queue.where((t) => !_hiddenTrackIds.contains(t.trackId)).toList();
+    final visibleQueue = state.queue
+        .where((t) => !_hiddenTrackIds.contains(t.trackId))
+        .toList();
 
     final reducedMotion = MediaQuery.disableAnimationsOf(context);
 
@@ -455,7 +495,10 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
               ),
             ),
           if (visibleQueue.isEmpty)
-            const SliverFillRemaining(hasScrollBody: false, child: _EmptyState())
+            const SliverFillRemaining(
+              hasScrollBody: false,
+              child: _EmptyState(),
+            )
           else
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(
@@ -484,8 +527,12 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
                         lifted: true,
                         reducedMotion: reducedMotion,
                       ),
-                itemBuilder: (context, index) =>
-                    _row(state, visibleQueue, index, reducedMotion: reducedMotion),
+                itemBuilder: (context, index) => _row(
+                  state,
+                  visibleQueue,
+                  index,
+                  reducedMotion: reducedMotion,
+                ),
               ),
             ),
         ],
@@ -547,11 +594,8 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
         keys: MixHandoffKeys.arrangement,
       ),
       onSendToMusic: () => sendToMusic(visibleQueue),
-      onShare: (buttonContext) => shareToTransferTool(
-        buttonContext,
-        visibleQueue,
-        state.session.title,
-      ),
+      onShare: (buttonContext) =>
+          shareToTransferTool(buttonContext, visibleQueue, state.session.title),
       saving: savingPlaylist,
       sendingToMusic: sendingToMusic,
       sharing: sharingMix,
@@ -574,19 +618,25 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
       isFirst: index == 0,
       lifted: lifted,
       dragIndex: (lifted || track.spotifyId != null) ? null : index,
-      onOpenInSpotify:
-          track.spotifyId == null ? null : () => _openInSpotify(context, track),
-      onMoveUp: index == 0 ? null : () => _moveTo(visibleQueue, index, index - 1),
+      onOpenInSpotify: track.spotifyId == null
+          ? null
+          : () => _openInSpotify(context, track),
+      onMoveUp: index == 0
+          ? null
+          : () => _moveTo(visibleQueue, index, index - 1),
       onMoveDown: index == visibleQueue.length - 1
           ? null
           : () => _moveTo(visibleQueue, index, index + 1),
     );
-    if (lifted) return KeyedSubtree(key: ValueKey('lifted-${track.trackId}'), child: row);
+    if (lifted) {
+      return KeyedSubtree(key: ValueKey('lifted-${track.trackId}'), child: row);
+    }
     return Dismissible(
       key: ValueKey('dismissible-${track.trackId}'),
       direction: DismissDirection.endToStart,
-      movementDuration:
-          reducedMotion ? Duration.zero : const Duration(milliseconds: 200),
+      movementDuration: reducedMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 200),
       background: const _RemoveBand(),
       onDismissed: (_) =>
           _handleDismiss(track, supportsInsert: state.supportsInsert),
@@ -647,8 +697,9 @@ class _InsertIntent extends _QueueIntent {
   @override
   QueueOp? resolve(List<QueueTrack> queue) {
     if (queue.any((t) => t.trackId == trackId)) return null;
-    final anchor =
-        beforeTrackId == null ? -1 : queue.indexWhere((t) => t.trackId == beforeTrackId);
+    final anchor = beforeTrackId == null
+        ? -1
+        : queue.indexWhere((t) => t.trackId == beforeTrackId);
     return QueueOp.insert(anchor < 0 ? queue.length : anchor, trackId);
   }
 }
@@ -792,7 +843,12 @@ class _MetaLine extends StatelessWidget {
           ),
           if (!crowded) ...[
             const SizedBox(width: 8),
-            Text(hint, style: style, maxLines: 1, overflow: TextOverflow.ellipsis),
+            Text(
+              hint,
+              style: style,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
           ],
         ],
       ),

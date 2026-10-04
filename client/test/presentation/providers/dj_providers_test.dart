@@ -110,6 +110,9 @@ class FakeDjApi implements DjApi {
   }
 
   @override
+  Future<DjSession> setCaseColor(String id, String caseColor) => throw UnimplementedError();
+
+  @override
   Future<DjSession> renameSession(String id, String title) {
     lastRenameCall = (id: id, title: title);
     final impl = onRenameSession;

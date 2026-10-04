@@ -6,6 +6,7 @@
 /// through [playlistCollectionSliver].
 library;
 
+import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -269,7 +270,10 @@ class PlaylistBrowserScreen extends ConsumerWidget {
             .refresh();
         if (!ok && context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text(kPlaylistsRefreshFailed)),
+            mixtapeSnackBar(
+              message: kPlaylistsRefreshFailed,
+              kind: FeedbackKind.error,
+            ),
           );
         }
       },

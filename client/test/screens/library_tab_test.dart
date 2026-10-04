@@ -250,7 +250,7 @@ void main() {
         await _pump(tester, _container(), brightness: brightness);
 
         expect(find.text('Library'), findsOneWidget);
-        expect(find.text('Sources'), findsOneWidget);
+        expect(find.text('Sources'), findsNothing);
         expect(find.text('Playlists'), findsOneWidget);
         expect(find.byType(GlassCluster), findsOneWidget);
         expect(find.byKey(LibraryTab.syncButtonKey), findsOneWidget);
@@ -313,7 +313,7 @@ void main() {
   });
 
   group('sources', () {
-    testWidgets('each source is a row with a status word and its detail', (
+    testWidgets('each source is a compact badge with its service logo', (
       tester,
     ) async {
       await _pump(tester, _container());
@@ -324,11 +324,9 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Apple Music'), findsOneWidget);
-      expect(find.text('Spotify · account data'), findsOneWidget);
-      expect(find.byType(StatusWord), findsNWidgets(2));
-      expect(find.text('Connected'), findsOneWidget);
-      expect(find.text('1 of 2 in'), findsOneWidget);
-      expect(find.text('Imported 4 Sep'), findsOneWidget);
+      expect(find.text('Spotify'), findsOneWidget);
+      expect(find.byType(StatusWord), findsNothing);
+      expect(find.byType(SourceMark), findsNWidgets(2));
     });
 
     testWidgets('the Apple row opens Your music', (tester) async {

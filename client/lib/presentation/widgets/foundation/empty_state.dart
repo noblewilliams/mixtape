@@ -17,15 +17,19 @@ import '../../theme/mixtape_theme.dart';
 import 'cassette_tile.dart';
 import 'large_title_scaffold.dart';
 
-/// A cassette, a title, one line under it, and at most one action.
+enum EmptyStateArtwork { cassette, memory, connection }
+
+/// A contextual object, a title, one line under it, and at most one action.
 class EmptyState extends StatelessWidget {
   const EmptyState({
     super.key,
     required this.title,
     required this.body,
     this.action,
+    this.artwork = EmptyStateArtwork.cassette,
   });
 
+  final EmptyStateArtwork artwork;
   final String title;
   final String body;
 
@@ -52,7 +56,15 @@ class EmptyState extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const CassetteTile(key: cassetteKey, width: cassetteWidth),
+        if (artwork == EmptyStateArtwork.cassette)
+          const CassetteTile(key: cassetteKey, width: cassetteWidth)
+        else
+          Image.asset(
+            'assets/illustrations/${artwork == EmptyStateArtwork.memory ? 'memory' : 'connection'}-object.png',
+            width: cassetteWidth,
+            height: cassetteHeight,
+            excludeFromSemantics: true,
+          ),
         const SizedBox(height: titleGap),
         Text(title, textAlign: TextAlign.center, style: tokens.smallTitle),
         const SizedBox(height: bodyGap),

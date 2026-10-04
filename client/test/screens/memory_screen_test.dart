@@ -27,7 +27,7 @@ import 'package:mixtape/presentation/providers/playback_provider.dart';
 import 'package:mixtape/presentation/screens/interview_screen.dart';
 import 'package:mixtape/presentation/screens/memory_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
-import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
+import 'package:mixtape/presentation/widgets/foundation/empty_state.dart';
 import 'package:mixtape/presentation/widgets/foundation/mixtape_menu.dart';
 
 import '../data/playback/playback_controller_test.dart'
@@ -79,6 +79,9 @@ class FakeDjApi implements DjApi {
   @override
   Future<DjSession> setStatus(String id, String status) =>
       throw UnimplementedError();
+
+  @override
+  Future<DjSession> setCaseColor(String id, String caseColor) => throw UnimplementedError();
 
   @override
   Future<DjSession> renameSession(String id, String title) =>
@@ -175,7 +178,7 @@ void main() {
       await tester.tap(find.byKey(const Key('forget-memory-m1')));
       await tester.pumpAndSettle();
       expect(find.text('Forget this preference?'), findsOneWidget);
-      expect(find.text('You can’t undo this.'), findsOneWidget);
+      expect(find.text('The DJ will stop using this note. You can’t undo this.'), findsOneWidget);
       await tester.tapAt(const Offset(8, 8));
       await tester.pumpAndSettle();
       expect(_dialog, findsNothing);
@@ -225,9 +228,9 @@ void main() {
     expect(find.text('Undo'), findsNothing);
     expect(find.text(MemoryScreen.emptyTitle), findsOneWidget);
     expect(find.text(MemoryScreen.emptyBody), findsOneWidget);
-    expect(find.byType(CassetteTile), findsOneWidget);
+    expect(tester.widget<EmptyState>(find.byType(EmptyState)).artwork, EmptyStateArtwork.memory);
     expect(
-      tester.widget<CassetteTile>(find.byType(CassetteTile)).width,
+      tester.widget<Image>(find.byType(Image)).width,
       MemoryScreen.emptyCassetteWidth,
     );
   });

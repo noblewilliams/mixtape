@@ -1,3 +1,4 @@
+import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 import 'dart:async';
 
 import 'package:flutter/cupertino.dart' show CupertinoIcons;
@@ -93,7 +94,8 @@ class _InterviewScreenState extends ConsumerState<InterviewScreen> {
     if (_submitting || _artists.isEmpty) return;
     if ([_playsMost, _listensWhen, _neverWants, _era].any(_tooLong)) {
       setState(
-        () => _error = 'Keep each answer to ${InterviewScreen.maxAnswerLength} characters',
+        () => _error =
+            'Keep each answer to ${InterviewScreen.maxAnswerLength} characters',
       );
       return;
     }
@@ -117,9 +119,12 @@ class _InterviewScreenState extends ConsumerState<InterviewScreen> {
       // state, and a slow refetch must not hold the listener on this screen.
       unawaited(ref.read(onboardingProvider.notifier).refresh());
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(interviewSavedMessage(result))));
+      ScaffoldMessenger.of(context).showSnackBar(
+        mixtapeSnackBar(
+          message: interviewSavedMessage(result),
+          kind: FeedbackKind.success,
+        ),
+      );
       Navigator.of(context).pop();
     } on NetworkException {
       if (!mounted) return;

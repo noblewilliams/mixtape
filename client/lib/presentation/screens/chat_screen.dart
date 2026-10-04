@@ -10,6 +10,7 @@
 /// it — so it draws its own chrome and never assumes it is the root route.
 library;
 
+import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 import 'dart:async';
 
 import 'package:flutter/cupertino.dart'
@@ -19,6 +20,7 @@ import 'package:flutter/cupertino.dart'
         CupertinoTextField,
         showCupertinoDialog;
 import 'package:flutter/material.dart';
+import '../widgets/open_tape_settings.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/api/api_client.dart';
@@ -90,7 +92,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   String get mixSessionId => widget.sessionId;
 
   @override
-  void showMixSnack(String message) => _snack(message);
+  void showMixSnack(String message, {FeedbackKind kind = FeedbackKind.info}) =>
+      _snack(message, kind: kind);
 
   /// The panel's measured height, which the transcript pads for. The panel
   /// floats over the transcript (and rides the keyboard), so the list cannot
@@ -168,20 +171,24 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       await ref.read(chatProvider(widget.sessionId).notifier).send(trimmed);
     } catch (_) {
       if (!mounted) return;
-      _snack('something unexpected happened');
+      _snack('something unexpected happened', kind: FeedbackKind.error);
     }
   }
 
   /// Floating, 16 pt in: there is no dock on this route for a toast to clear,
   /// and the app-level [ScaffoldMessenger] builds the bar against the app's
   /// own theme, so the geometry is set here rather than in a local theme.
-  void _snack(String message, {SnackBarAction? action}) {
+  void _snack(
+    String message, {
+    SnackBarAction? action,
+    FeedbackKind kind = FeedbackKind.info,
+  }) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        action: action,
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.all(16),
+      mixtapeSnackBar(
+        message: message,
+        kind: kind,
+        actionLabel: action?.label,
+        onAction: action?.onPressed,
       ),
     );
   }
@@ -255,6 +262,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       actions: [
         const MixtapeMenuAction(value: 'history', label: 'Version history'),
         const MixtapeMenuAction(value: 'rename', label: 'Rename'),
+        const MixtapeMenuAction(value: 'tape-settings', label: 'Tape settings'),
         MixtapeMenuAction(
           value: 'status',
           label: archived ? 'Restore' : 'Archive',
@@ -265,6 +273,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     if (!mounted || action == null) return;
     if (action == 'history') return _openHistory();
     if (action == 'rename') return _rename();
+    if (action == 'tape-settings') return openTapeSettings(context, ref, widget.sessionId);
     await _setArchived(archived);
   }
 
@@ -282,6 +291,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       ok
           ? (archived ? 'Mix restored' : 'Mix archived')
           : 'Couldn’t update this mix. Try again.',
+      kind: ok ? FeedbackKind.success : FeedbackKind.error,
       action: ok && !archived
           ? SnackBarAction(
               label: 'Undo',
@@ -311,7 +321,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         .read(chatProvider(widget.sessionId).notifier)
         .rename(name);
     if (!mounted || ok) return;
-    _snack('Couldn’t rename this mix. Try again.');
+    _snack('Couldn’t rename this mix. Try again.', kind: FeedbackKind.error);
   }
 
   Future<void> _expireSession(SessionPlaylistContextState expected) async {
@@ -332,7 +342,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           )) {
         return;
       }
-      _snack('Couldn’t sign out. Try again.');
+      _snack('Couldn’t sign out. Try again.', kind: FeedbackKind.error);
     }
   }
 
@@ -427,7 +437,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       // other.
       if (state.transientError != null) {
         if (ModalRoute.of(context)?.isCurrent == true) {
-          _snack(state.transientError!);
+          _snack(state.transientError!, kind: FeedbackKind.error);
         }
         ref.read(chatProvider(widget.sessionId).notifier).clearTransientError();
       }

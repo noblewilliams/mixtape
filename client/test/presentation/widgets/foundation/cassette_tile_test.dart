@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
+import 'package:mixtape/presentation/widgets/tape_palette.dart';
 
 Future<void> _pump(
   WidgetTester tester,
@@ -64,7 +65,7 @@ void main() {
       expect(
         CassetteTile.caseColors.first,
         const Color(0xFF3F4851),
-        reason: 'the board fixes the five case colours',
+        reason: 'decorative brand tapes retain their neutral colours',
       );
     });
 
@@ -73,8 +74,8 @@ void main() {
         for (var i = 0; i < 300; i++) CassetteTile.caseColorFor('mix-$i'),
       };
 
-      expect(seen, hasLength(CassetteTile.caseColors.length));
-      expect(seen, containsAll(CassetteTile.caseColors));
+      expect(seen, hasLength(48));
+      expect(seen, containsAll(tapePalette.map((entry) => tapeColor(entry.$2))));
     });
 
     testWidgets('caseColor overrides the seed', (tester) async {

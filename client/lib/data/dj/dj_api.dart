@@ -49,7 +49,8 @@ class StaleQueueException implements Exception {
 const _genericDjErrorMessage = 'The DJ ran into a problem — please try again.';
 const _genericInvalidMessage = 'That request was invalid.';
 const _genericStaleMessage = 'The queue changed — showing the latest.';
-const _genericMalformedResponseMessage = 'Got an unexpected response — please try again.';
+const _genericMalformedResponseMessage =
+    'Got an unexpected response — please try again.';
 
 /// Typed client for the P3a DJ session API (sessions, transcript, queue).
 ///
@@ -72,7 +73,12 @@ class DjApi {
     required TokenStore tokenStore,
     http.Client? inner,
     Duration timeout = const Duration(seconds: 120),
-  }) : _client = ApiClient(baseUrl: baseUrl, tokenStore: tokenStore, inner: inner, timeout: timeout);
+  }) : _client = ApiClient(
+         baseUrl: baseUrl,
+         tokenStore: tokenStore,
+         inner: inner,
+         timeout: timeout,
+       );
 
   /// Builds a [DjApi] over the SAME baseUrl/tokenStore as an existing
   /// [ApiClient] (typically the app's shared one) — structural sharing so
@@ -80,44 +86,66 @@ class DjApi {
   /// [ApiClient] underneath, per this class's doc comment. [inner] is an
   /// optional override (e.g. a test's MockClient); it is NOT taken from
   /// [base] (which doesn't expose its own).
-  factory DjApi.from(ApiClient base, {http.Client? inner, Duration timeout = const Duration(seconds: 120)}) =>
-      DjApi(baseUrl: base.baseUrl, tokenStore: base.tokenStore, inner: inner, timeout: timeout);
+  factory DjApi.from(
+    ApiClient base, {
+    http.Client? inner,
+    Duration timeout = const Duration(seconds: 120),
+  }) => DjApi(
+    baseUrl: base.baseUrl,
+    tokenStore: base.tokenStore,
+    inner: inner,
+    timeout: timeout,
+  );
 
   final ApiClient _client;
 
   Duration get timeout => _client.timeout;
 
-  Future<SessionDetail> createSession(String prompt, {InitialPlaylistSeed? playlistSeed}) =>
-      _call(() => _client.postJson('/sessions', {'prompt': prompt, if (playlistSeed != null) 'playlistSeed': playlistSeed.toJson()}), SessionDetail.fromJson);
+  Future<SessionDetail> createSession(
+    String prompt, {
+    InitialPlaylistSeed? playlistSeed,
+  }) => _call(
+    () => _client.postJson('/sessions', {
+      'prompt': prompt,
+      if (playlistSeed != null) 'playlistSeed': playlistSeed.toJson(),
+    }),
+    SessionDetail.fromJson,
+  );
 
   Future<List<DjSession>> listSessions() => _call(
-        () => _client.getJson('/sessions'),
-        (json) => (json['sessions'] as List)
-            .map((s) => DjSession.fromJson(s as Map<String, dynamic>))
-            .toList(),
-      );
+    () => _client.getJson('/sessions'),
+    (json) => (json['sessions'] as List)
+        .map((s) => DjSession.fromJson(s as Map<String, dynamic>))
+        .toList(),
+  );
 
   Future<SessionDetail> getSession(String id) =>
       _call(() => _client.getJson('/sessions/$id'), SessionDetail.fromJson);
 
-  Future<TurnResult> sendMessage(String id, String text) =>
-      _call(() => _client.postJson('/sessions/$id/messages', {'text': text}), TurnResult.fromJson);
+  Future<TurnResult> sendMessage(String id, String text) => _call(
+    () => _client.postJson('/sessions/$id/messages', {'text': text}),
+    TurnResult.fromJson,
+  );
 
   /// [ops] are remove/move only (0-based positions) — swap/extend need the
   /// DJ and come back as a 400 `dj_required`. [expectedVersion] is the
   /// caller's last-known queueVersion; omit it only when there is none yet.
-  Future<QueueOpsResult> applyQueueOps(String id, List<QueueOp> ops, int? expectedVersion) => _call(
-        () => _client.postJson('/sessions/$id/queue-ops', {
-          'ops': ops.map((o) => o.toJson()).toList(),
-          if (expectedVersion != null) 'expectedVersion': expectedVersion,
-        }),
-        QueueOpsResult.fromJson,
-      );
+  Future<QueueOpsResult> applyQueueOps(
+    String id,
+    List<QueueOp> ops,
+    int? expectedVersion,
+  ) => _call(
+    () => _client.postJson('/sessions/$id/queue-ops', {
+      'ops': ops.map((o) => o.toJson()).toList(),
+      if (expectedVersion != null) 'expectedVersion': expectedVersion,
+    }),
+    QueueOpsResult.fromJson,
+  );
 
   Future<DjSession> setStatus(String id, String status) => _call(
-        () => _client.patchJson('/sessions/$id', {'status': status}),
-        (json) => DjSession.fromJson(json['session'] as Map<String, dynamic>),
-      );
+    () => _client.patchJson('/sessions/$id', {'status': status}),
+    (json) => DjSession.fromJson(json['session'] as Map<String, dynamic>),
+  );
 
   /// PATCH `/sessions/:id` with `{title}` — the server trims/sanitizes and
   /// caps it at 60 characters for display (same discipline as a
@@ -125,31 +153,42 @@ class DjApi {
   /// whitespace-only after that sanitize step comes back as a 400
   /// `invalid_title` [DjApiException]. Mirrors [setStatus]'s shape, echoing
   /// the updated session row.
+  Future<DjSession> setCaseColor(String id, String caseColor) => _call(
+    () => _client.patchJson('/sessions/$id', {'caseColor': caseColor}),
+    (json) => DjSession.fromJson(json['session'] as Map<String, dynamic>),
+  );
+
   Future<DjSession> renameSession(String id, String title) => _call(
-        () => _client.patchJson('/sessions/$id', {'title': title}),
-        (json) => DjSession.fromJson(json['session'] as Map<String, dynamic>),
-      );
+    () => _client.patchJson('/sessions/$id', {'title': title}),
+    (json) => DjSession.fromJson(json['session'] as Map<String, dynamic>),
+  );
 
   /// Fire-and-forget from the caller's perspective (see queue_screen.dart's
   /// post-play/post-save wiring) — but NOT from this method's: it throws the
   /// normal exit taxonomy like every other call here ([DjApiException],
   /// [ApiException], [NetworkException]). Swallowing failures is the
   /// caller's job, deliberately, so this class stays uniform.
-  Future<void> postSessionEvent(String sessionId, String type) =>
-      _callVoid(() => _client.postJson('/sessions/$sessionId/events', {'type': type}));
+  Future<void> postSessionEvent(String sessionId, String type) => _callVoid(
+    () => _client.postJson('/sessions/$sessionId/events', {'type': type}),
+  );
 
-  Future<void> recordPlaylistCreation(String sessionId, String appleLibraryId) =>
-      _callVoid(() => _client.postJson('/playlists/creation-receipts', {
-        'sessionId': sessionId, 'appleLibraryId': appleLibraryId,
-      }));
+  Future<void> recordPlaylistCreation(
+    String sessionId,
+    String appleLibraryId,
+  ) => _callVoid(
+    () => _client.postJson('/playlists/creation-receipts', {
+      'sessionId': sessionId,
+      'appleLibraryId': appleLibraryId,
+    }),
+  );
 
   /// `GET /me/memories` — newest-first, capped at 50 server-side.
   Future<List<DjMemory>> listMemories() => _call(
-        () => _client.getJson('/me/memories'),
-        (json) => (json['memories'] as List)
-            .map((m) => DjMemory.fromJson(m as Map<String, dynamic>))
-            .toList(),
-      );
+    () => _client.getJson('/me/memories'),
+    (json) => (json['memories'] as List)
+        .map((m) => DjMemory.fromJson(m as Map<String, dynamic>))
+        .toList(),
+  );
 
   /// `DELETE /me/memories/:id` — hard delete, owner-scoped server-side (a
   /// 404 on someone else's id surfaces as a plain [ApiException], not part
@@ -179,7 +218,10 @@ class DjApi {
     } catch (_) {
       // fall through to the typed exit below
     }
-    throw DjApiException(kind: 'malformed_response', message: _genericMalformedResponseMessage);
+    throw DjApiException(
+      kind: 'malformed_response',
+      message: _genericMalformedResponseMessage,
+    );
   }
 
   /// Same success/error-status handling as [_call], but for endpoints whose
@@ -230,7 +272,11 @@ class DjApi {
         return DjApiException(kind: 'stale', message: _genericStaleMessage);
       }
     }
-    return _translateMessageBody(body, fallback: _genericDjErrorMessage, decoded: decoded);
+    return _translateMessageBody(
+      body,
+      fallback: _genericDjErrorMessage,
+      decoded: decoded,
+    );
   }
 
   /// 502s, and 409 turn-conflicts, both use the same
@@ -243,10 +289,16 @@ class DjApi {
     Map<String, dynamic>? decoded,
   }) {
     decoded ??= _tryDecode(body);
-    if (decoded == null) return DjApiException(kind: 'unknown', message: fallback);
+    if (decoded == null) {
+      return DjApiException(kind: 'unknown', message: fallback);
+    }
 
-    final kind = decoded['error'] is String ? decoded['error'] as String : 'unknown';
-    final message = decoded['message'] is String ? decoded['message'] as String : fallback;
+    final kind = decoded['error'] is String
+        ? decoded['error'] as String
+        : 'unknown';
+    final message = decoded['message'] is String
+        ? decoded['message'] as String
+        : fallback;
     List<QueueTrack>? queue;
     // Independent of the try/catch below: the body can legitimately carry
     // `queue` without `queueVersion` (or vice versa) — e.g. a create-session
@@ -258,7 +310,9 @@ class DjApi {
     // dj_providers.dart's _atomicQueueSnapshot requires both together before
     // adopting either. Today the server always sends both together, so this
     // asymmetry is currently theoretical, not observed.
-    var queueVersion = decoded['queueVersion'] is int ? decoded['queueVersion'] as int : null;
+    var queueVersion = decoded['queueVersion'] is int
+        ? decoded['queueVersion'] as int
+        : null;
     try {
       final rawQueue = decoded['queue'];
       if (rawQueue != null) queue = queueTracksFromJson(rawQueue);
@@ -270,7 +324,9 @@ class DjApi {
       queue = null;
       queueVersion = null;
     }
-    final sessionId = decoded['sessionId'] is String ? decoded['sessionId'] as String : null;
+    final sessionId = decoded['sessionId'] is String
+        ? decoded['sessionId'] as String
+        : null;
     return DjApiException(
       kind: kind,
       message: message,
@@ -295,11 +351,15 @@ class DjApi {
   /// parse error — it falls back to `kind: 'invalid'` + a generic message.
   DjApiException _translate400(String body) {
     final decoded = _tryDecode(body);
-    if (decoded == null) return DjApiException(kind: 'invalid', message: _genericInvalidMessage);
+    if (decoded == null) {
+      return DjApiException(kind: 'invalid', message: _genericInvalidMessage);
+    }
 
     final errorField = decoded['error'];
     if (errorField is String) {
-      final message = decoded['message'] is String ? decoded['message'] as String : _genericInvalidMessage;
+      final message = decoded['message'] is String
+          ? decoded['message'] as String
+          : _genericInvalidMessage;
       return DjApiException(kind: errorField, message: message);
     }
     return DjApiException(kind: 'invalid', message: _genericInvalidMessage);

@@ -10,6 +10,7 @@
 /// Apple source row.
 library;
 
+import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 import 'package:flutter/cupertino.dart'
     show
         CupertinoAlertDialog,
@@ -28,7 +29,7 @@ import '../widgets/foundation/glass_cluster.dart';
 import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/large_title_scaffold.dart';
 import '../widgets/foundation/section_word.dart';
-import '../widgets/foundation/square_art.dart';
+import '../widgets/foundation/service_marks.dart';
 import '../widgets/foundation/status_word.dart';
 import '../widgets/foundation/tape_button.dart';
 import '../widgets/foundation/text_action.dart';
@@ -138,13 +139,9 @@ class SourceMark extends StatelessWidget {
   final String source;
 
   @override
-  Widget build(BuildContext context) => SquareArt(
-    size: kSourceMarkSize,
-    child: Icon(
-      source.startsWith('apple') ? Icons.apple : Icons.music_note_outlined,
-      size: 22,
-      color: context.tokens.text,
-    ),
+  Widget build(BuildContext context) => SizedBox.square(
+    dimension: kSourceMarkSize,
+    child: Center(child: source.startsWith('apple') ? const AppleMusicMark(size: 24) : const SpotifyMark(size: 24)),
   );
 }
 
@@ -355,9 +352,12 @@ Future<void> removeSourceFlow(
     await ref.read(listeningApiProvider).deleteSource(source.source);
   } catch (_) {
     if (context.mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text(_removeFailedMessage)));
+      ScaffoldMessenger.of(context).showSnackBar(
+        mixtapeSnackBar(
+          message: _removeFailedMessage,
+          kind: FeedbackKind.error,
+        ),
+      );
     }
     return;
   }

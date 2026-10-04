@@ -17,10 +17,7 @@ library;
 import 'dart:async';
 
 import 'package:flutter/cupertino.dart'
-    show
-        CupertinoAlertDialog,
-        CupertinoDialogAction,
-        showCupertinoDialog;
+    show CupertinoAlertDialog, CupertinoDialogAction, showCupertinoDialog;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -33,6 +30,7 @@ import '../providers/dj_providers.dart';
 import '../providers/playback_provider.dart';
 import '../theme/mixtape_theme.dart';
 import '../widgets/foundation/empty_state.dart';
+import '../widgets/foundation/mixtape_feedback.dart';
 import '../widgets/foundation/glass_cluster.dart';
 import '../widgets/foundation/mixtape_menu.dart';
 import '../widgets/foundation/gradient_background.dart';
@@ -217,9 +215,9 @@ class _MemoryScreenState extends ConsumerState<MemoryScreen> {
       case _MoreAction.clearLearned:
         await _clearLearnedListening();
       case _MoreAction.interview:
-        await Navigator.of(
-          context,
-        ).push(MaterialPageRoute<void>(builder: (_) => const InterviewScreen()));
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(builder: (_) => const InterviewScreen()),
+        );
     }
   }
 
@@ -255,13 +253,19 @@ class _MemoryScreenState extends ConsumerState<MemoryScreen> {
       _clearId = null;
       if (messenger.mounted) {
         messenger.showSnackBar(
-          const SnackBar(content: Text(MemoryScreen.cleared)),
+          mixtapeSnackBar(
+            message: MemoryScreen.cleared,
+            kind: FeedbackKind.success,
+          ),
         );
       }
     } catch (_) {
       if (messenger.mounted) {
         messenger.showSnackBar(
-          const SnackBar(content: Text(MemoryScreen.clearUnconfirmed)),
+          mixtapeSnackBar(
+            message: MemoryScreen.clearUnconfirmed,
+            kind: FeedbackKind.error,
+          ),
         );
       }
     } finally {
@@ -421,6 +425,7 @@ class _MemoryEmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) => const EmptyStateSliver(
     child: EmptyState(
+      artwork: EmptyStateArtwork.memory,
       title: MemoryScreen.emptyTitle,
       body: MemoryScreen.emptyBody,
     ),
@@ -510,9 +515,7 @@ class _MemoryRowState extends State<_MemoryRow> {
                 child: TextAction(
                   key: ValueKey('forget-memory-${widget.memory.id}'),
                   label: 'Forget',
-                  onPressed: widget.busy
-                      ? null
-                      : () => widget.onForget(_focus),
+                  onPressed: widget.busy ? null : () => widget.onForget(_focus),
                 ),
               ),
             ],
@@ -559,10 +562,11 @@ class _ForgetDialogState extends State<_ForgetDialog> {
       children: [
         const SizedBox(height: 8),
         Text(widget.memory.note),
-        const SizedBox(height: 16),
-        const Text('The DJ will stop using this note.'),
-        const SizedBox(height: 4),
-        const Text('You can’t undo this.'),
+        const SizedBox(height: 8),
+        const Text(
+          'The DJ will stop using this note. You can’t undo this.',
+          style: TextStyle(fontSize: 12),
+        ),
         if (_failed) ...[
           const SizedBox(height: 12),
           const Text('Couldn’t forget this note. Try again.'),

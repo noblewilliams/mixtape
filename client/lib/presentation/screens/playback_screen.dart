@@ -14,6 +14,7 @@
 /// than the ambient theme.
 library;
 
+import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 import 'dart:async';
 
 import 'package:flutter/cupertino.dart'
@@ -82,6 +83,7 @@ class PlaybackScreen extends ConsumerWidget {
 
   static const Key dragHandleKey = Key('now-playing-handle');
   static const Key closeKey = Key('now-playing-close');
+
   /// The More menu's Stop entry, which reads Cancel while a command is in
   /// flight — and so needs finding by something other than its word.
   static const Key stopActionKey = Key('now-playing-stop');
@@ -690,11 +692,17 @@ class _NowPlaying extends StatelessWidget {
     try {
       await ref.read(musicKitBridgeProvider).playQueue(ids);
       messenger.showSnackBar(
-        const SnackBar(content: Text(PlaybackScreen.sentToMusicMessage)),
+        mixtapeSnackBar(
+          message: PlaybackScreen.sentToMusicMessage,
+          kind: FeedbackKind.success,
+        ),
       );
     } catch (_) {
       messenger.showSnackBar(
-        const SnackBar(content: Text(PlaybackScreen.sendFailedMessage)),
+        mixtapeSnackBar(
+          message: PlaybackScreen.sendFailedMessage,
+          kind: FeedbackKind.error,
+        ),
       );
     }
   }
