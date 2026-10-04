@@ -1,8 +1,11 @@
 # Outside-library picks, with free-plan enrichment and ISRC twins
 
 Status: approved by the founder 2026-10-03 (all four decisions as recommended;
-Neon allowance confirmed). Phase A implemented locally 2026-10-03, not
-deployed; Phases B and C not started. Plan:
+Neon allowance confirmed). Phase A is deployed. Phases B and C are built and
+reviewed and, as of 2026-10-04, committed except for the web "New to you"
+mark, which waits on the uncommitted UI-polish work it sits on. Nothing from B
+or C is deployed, and `OUTSIDE_PICKS` is off. Current state and remaining
+steps: `../../backlog.md`. Plan:
 `../plans/2026-10-03-outside-library-picks.md`. Decision: `../../decisions.md`.
 Pulls forward `product/vision.md` → "Catalog discovery". Builds on the
 2026-10-03 decision (playlist songs are pool candidates).
@@ -154,7 +157,8 @@ A catalogue row is an outside candidate for a listener when all hold:
 
 - it has a meaning embedding (it can be matched to a brief);
 - its recording (ISRC, else the row id) is not among any of the listener's
-  own rows, candidate or not, so a song they played twice is not "new";
+  own rows, candidate or not, so a song they played twice is not "new",
+  and is not in any playlist they keep, of any kind;
 - it is playable for them: a listener with an Apple source or a legacy Apple
   library needs an Apple ID on the row or on its ISRC twin; a Spotify-only
   listener needs a Spotify ID;
@@ -217,7 +221,12 @@ against the whole queue after the edit.
 
 - The queue item gains `newToYou`, computed at read time (the track has no
   row of the listener's). No migration, and it clears by itself once they add
-  the song.
+  the song. It is always false in a session flagged not-personal: the
+  banner already says those picks are not the listener's own (founder,
+  2026-10-03).
+- A follow-up edit with no brief of its own ("add five more") brings in no
+  outside songs, so it cannot undo an earlier "only my music".
+- An empty library gets no outside songs; it gets the honest empty message.
 - The generate and edit tool results tell the DJ how many picks are new and
   to say so plainly, as the corpus notice does today.
 - Web and iOS show a small "new to you" mark on those rows. This is a visible

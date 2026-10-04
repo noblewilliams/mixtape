@@ -33,7 +33,8 @@ approved) and the rule changed, with no migration:
   `cooling` beside `remaining`, and the drain stops cleanly when only
   cooling songs are left.
 - Rows written before this change have no prefix and keep the old rule.
-  38 such rows from earlier provider errors are still given up on.
+  The ones left over from earlier provider errors were cleared by hand on
+  2026-10-04 (founder approved), so those songs are retried.
 
 Free-plan effect: no new call per run. A song stuck behind a failing
 provider costs at most 8 attempts over three days where it used to cost 3 in

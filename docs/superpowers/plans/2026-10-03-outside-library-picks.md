@@ -158,6 +158,21 @@ Files: `web/src/import/*` and tests; `client/lib/import/*` and tests.
 - These directories carry other sessions' uncommitted work. Touch only the
   parser and its tests. New iOS Swift files, if any, need target membership.
 
+**Phase B as built (2026-10-03):** migration `0034_isrc_twins` adds
+`listening_import_tracks.isrc`, `tracks.isrc_checked_at` and the `twin`
+lookup category. The Apple ISRC backfill covers 300 rows an hour with one
+catalogue call, is skipped in a run where the artwork job did a full batch
+(the 10 ms CPU limit), and defers rows on a lasting catalogue error. Only
+the literal `ISRC` header is mapped; no translated label is known.
+
+**Rollout order is mandatory.** 0033 and `src/dj/tape-colors.ts` (another
+session's work) must be committed before or with Phase B: the schema imports
+that file and 0034's snapshot builds on 0033. Then: apply 0034, deploy the
+Worker, ship web, ship iOS. The old Worker rejects a track carrying `isrc`
+(strict schema), so a client shipped first fails every Exportify upload, and
+so does a Worker rollback after the clients ship. A new Worker without 0034
+fails every import upload, the artwork job and playlist editing.
+
 **Phase B exit:** typecheck and tests in `server/`, `web/` and `client/`.
 Founder applies the migration, deploys, runs `drain-enrichment --max 700`,
 then re-imports the Exportify files so existing rows get their ISRCs.
@@ -226,7 +241,11 @@ Files: `server/src/dj/curate.ts`, `server/src/dj/loop.ts`,
 
 **Phase C server exit:** typecheck, tests, founder deploys with the flag off.
 
-### Gate 1: state board
+### Gate 1: state board (approved 2026-10-03)
+
+Variant A approved, wording approved, and not-personal mixes show no mark
+(the server sends `newToYou` false for them). Record:
+`../../mockups/approved/2026-10-03-new-to-you-mark.md`.
 
 The "new to you" mark on queue rows (web and iOS, light and dark, with and
 without a reason line) and the wording on "Create as playlist" when a mix
