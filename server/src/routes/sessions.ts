@@ -9,7 +9,7 @@ import type { Db } from '../db/types'
 import { djSessions, djMessages, queueTracks, sessionEvents, tracks } from '../db/schema'
 import { runDjTurn, DjError, type DjDeps, type DjSessionRef } from '../dj/loop'
 import { applyOps, getActiveQueue, QueueOpError, QueueVersionConflict } from '../dj/queue-store'
-import { queueOpsSchema } from '../dj/contracts'
+import { intentSchema, queueOpsSchema } from '../dj/contracts'
 import { generateSessionTitle } from '../dj/title'
 import { sanitizeTitleText } from '../dj/sanitize'
 import { bodyLimit } from 'hono/body-limit'
@@ -76,8 +76,8 @@ function djErrorBody(e: DjError, extra: Record<string, unknown> = {}) {
   return { error: e.kind, message: e.message, queue: e.queue, queueVersion: e.queueVersion, sessionTitle: e.sessionTitle, ...extra }
 }
 
-const createSessionSchema = z.object({ prompt: z.string().min(1).max(2000), playlistSeed: initialSeedSchema.optional() }).strict()
-const messageSchema = z.object({ text: z.string().min(1).max(2000) })
+const createSessionSchema = z.object({ prompt: z.string().min(1).max(2000), playlistSeed: initialSeedSchema.optional(), energyArc: intentSchema.shape.energyArc }).strict()
+const messageSchema = z.object({ text: z.string().min(1).max(2000), energyArc: intentSchema.shape.energyArc })
 const queueOpsBodySchema = z.object({
   ops: queueOpsSchema,
   expectedVersion: z.number().int().min(0).optional(),
@@ -136,7 +136,7 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
   })
 
   app.post('/', zValidator('json', createSessionSchema), async (c) => {
-    const { prompt, playlistSeed } = c.req.valid('json')
+    const { prompt, playlistSeed, energyArc } = c.req.valid('json')
     const userId = c.get('user').id
     const fallbackTitle = titleFromPrompt(prompt)
 
@@ -172,7 +172,7 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
     // session and retry, and the row must not still be showing the
     // truncated fallback. titlePromise itself never rejects (see above), but
     // allSettled keeps that guarantee explicit rather than relying on it.
-    const [turnResult, titleResult] = await Promise.allSettled([runDjTurn(db, deps, sessionRef, prompt), titlePromise])
+    const [turnResult, titleResult] = await Promise.allSettled([runDjTurn(db, deps, sessionRef, prompt, { energyArc }), titlePromise])
 
     // A rename_session call within this very first turn (unusual, but the
     // listener COULD open with "call this tape Lagos Nights") wins over the
@@ -351,10 +351,10 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
     const session = await loadOwnedSession(db, c.req.param('id'), userId)
     if (!session) return c.json({ error: 'not_found' }, 404)
 
-    const { text } = c.req.valid('json')
+    const { text, energyArc } = c.req.valid('json')
     const sessionRef: DjSessionRef = { id: session.id, userId }
     try {
-      const result = await runDjTurn(db, deps, sessionRef, text)
+      const result = await runDjTurn(db, deps, sessionRef, text, { energyArc })
       // A text-only reply never touches dj_sessions itself (no queue write
       // to ride $onUpdate's automatic bump), so list ordering (newest first
       // by updatedAt) would otherwise never reflect a chat-only turn.

@@ -24,6 +24,7 @@ import {
   djMemories,
   djMessages,
   djSessions,
+  mixVersions,
   tracks,
   trackFeatures,
   trackMeanings,
@@ -471,6 +472,39 @@ describe('runDjTurn', () => {
     )
     const content = (toolResultMessage!.content as Array<{ content: string }>)[0].content
     expect(content).toBe('no tracks in the library match those constraints')
+  })
+
+  it('a shape set in the composer rides the turn context, never the transcript', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const session = await seedSession(db, 'u1')
+    const sessionRef: DjSessionRef = { id: session.id, userId: 'u1' }
+    const { llm, requests } = makeFakeLlm([{ text: 'noted.' }])
+
+    await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'something for the drive', { energyArc: 'rise' })
+
+    const convo = conversationRequests(requests)
+    expect(convo[0].messages[0].content).toContain('Listener-selected mix shape: rise')
+    expect(convo[0].messages.at(-1)!.content).toBe('something for the drive')
+    const stored = await db.select({ content: djMessages.content }).from(djMessages).where(eq(djMessages.sessionId, session.id))
+    expect(stored.map((m) => m.content).join('\n')).not.toContain('rise')
+  })
+
+  it('generate_queue falls back to the listener-selected shape when the model omits energyArc', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const session = await seedSession(db, 'u1')
+    await seedLibrary(db, 'u1', 5)
+    const sessionRef: DjSessionRef = { id: session.id, userId: 'u1' }
+    const { llm } = makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'x', targetCount: 3 })] },
+      { text: 'here you go.' },
+    ])
+
+    await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'play something', { energyArc: 'fall' })
+
+    const [saved] = await db.select({ energyArc: mixVersions.energyArc }).from(mixVersions).where(eq(mixVersions.sessionId, session.id))
+    expect(saved.energyArc).toBe('fall')
   })
 
   it("includes an acknowledgment of the listener's own manual removal (since the dj's last message) in the next turn's context", async () => {

@@ -411,7 +411,7 @@ function formatMemoryBlock(notes: string[]): string | null {
 // — there's no earlier dj turn to bound it against. Sent as a leading USER
 // message by attemptTurn, never folded into `system` — see the PERSONA_PROMPT
 // comment above for why.
-async function buildSessionContext(db: Db, sessionId: string, userId: string, markNew = false): Promise<string> {
+async function buildSessionContext(db: Db, sessionId: string, userId: string, listenerShape?: Intent['energyArc'], markNew = false): Promise<string> {
   const queue = await getActiveQueue(db, sessionId)
   const featureRows = queue.length ? await db.select({ id: trackFeatures.trackId, energy: trackFeatures.energy })
     .from(trackFeatures).where(inArray(trackFeatures.trackId, queue.slice(0, MAX_LISTING_LINES).map(t => t.trackId))) : []
@@ -422,6 +422,9 @@ async function buildSessionContext(db: Db, sessionId: string, userId: string, ma
     .from(mixVersions).innerJoin(djSessions, and(eq(djSessions.id, mixVersions.sessionId), eq(djSessions.queueVersion, mixVersions.version)))
     .where(eq(mixVersions.sessionId, sessionId))
   const journeyBlock = journey?.energyArc ? `Current energy journey: ${journey.energyArc}; assessment: ${journey.energyJourney?.status ?? 'limited'}. Later explicit listener revisions override this shape. Exclusions and pinned choices come first. Limited data cannot establish a measured shape.` : null
+  // The composer's shape control is a setting, not message text: it reaches
+  // the model here and never enters the transcript. An enum, so safe to inline.
+  const shapeLine = listenerShape ? `Listener-selected mix shape: ${listenerShape}. Chosen in the app's shape control, not typed in their message. Pass energyArc: "${listenerShape}" when you build or change the mix this turn; it replaces the current energy journey.` : null
   const queueLine =
     queue.length === 0
       ? 'Current queue: empty.'
@@ -461,7 +464,7 @@ async function buildSessionContext(db: Db, sessionId: string, userId: string, ma
   const memoryBlock = formatMemoryBlock(await loadMemoryNotes(db, userId))
 
   const seedBlock = playlistSeedContext(await readPlaylistSeed(db, sessionId, userId))
-  return [queueLine, energyBlock, journeyBlock, removalLine, memoryBlock, seedBlock].filter((l): l is string => l !== null).join('\n')
+  return [queueLine, energyBlock, journeyBlock, shapeLine, removalLine, memoryBlock, seedBlock].filter((l): l is string => l !== null).join('\n')
 }
 
 // Playlist context is deliberately the final context block. A model may select
@@ -513,12 +516,14 @@ async function executeGenerateQueue(
   sessionContext: string,
   budget: CurationBudget,
   startVersion: number,
+  listenerShape?: Intent['energyArc'],
 ): Promise<GenerateOutcome> {
   const parsed = intentSchema.safeParse(rawInput)
   if (!parsed.success) {
     return { resultText: formatZodIssues('invalid generate_queue input', parsed.error), queueChanged: false }
   }
-  const intent = parsed.data
+  // The listener's shape setting holds even when the model leaves energyArc off.
+  const intent: Intent = { ...parsed.data, energyArc: parsed.data.energyArc ?? listenerShape }
   // Resolved fresh before EVERY pool build (here and in executeEditQueue's
   // provider), never cached on the session: a listener's mode changes the
   // moment their import lands or a seed crosses the threshold, and the very
@@ -914,12 +919,13 @@ async function attemptTurn(
   userText: string,
   userRowSeq: number,
   renameState: RenameTracker,
+  options: DjTurnOptions,
 ): Promise<AttemptResult> {
   const stats: AttemptStats = { llmCalls: 0, toolCalls: 0, inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0 }
   try {
     const [history, sessionContext, startVersion] = await Promise.all([
       loadHistory(db, session.id, userRowSeq),
-      buildSessionContext(db, session.id, session.userId, deps.outsidePicks === true),
+      buildSessionContext(db, session.id, session.userId, options.energyArc, deps.outsidePicks === true),
       getSessionQueueVersion(db, session.id),
     ])
 
@@ -994,7 +1000,7 @@ async function attemptTurn(
         // since nothing else about this design is visible from either
         // function's own signature.
         if (call.name === 'generate_queue') {
-          const outcome = await executeGenerateQueue(db, countedDeps, session, call.input, sessionContext, budget, currentVersion)
+          const outcome = await executeGenerateQueue(db, countedDeps, session, call.input, sessionContext, budget, currentVersion, options.energyArc)
           resultText = outcome.resultText
           if (outcome.intent) lastGenerateIntent = outcome.intent
           if (outcome.queueChanged) currentVersion = outcome.newVersion!
@@ -1053,9 +1059,10 @@ async function attemptWithConflictRetry(
   userText: string,
   userRowSeq: number,
   renameState: RenameTracker,
+  options: DjTurnOptions,
 ): Promise<AttemptResult> {
   try {
-    return await attemptTurn(db, deps, session, userText, userRowSeq, renameState)
+    return await attemptTurn(db, deps, session, userText, userRowSeq, renameState, options)
   } catch (e) {
     if (e instanceof AttemptTurnFailure && e.originalError instanceof QueueVersionConflict) {
       // Exactly one retry, from a fresh snapshot (attemptTurn re-reads
@@ -1069,7 +1076,7 @@ async function attemptWithConflictRetry(
       // `renameState` is the SAME box passed to the first attempt — a rename
       // that landed there before the conflict surfaced survives into this
       // retry untouched, and a rename this retry itself makes overwrites it.
-      return attemptTurn(db, deps, session, userText, userRowSeq, renameState)
+      return attemptTurn(db, deps, session, userText, userRowSeq, renameState, options)
     }
     throw e
   }
@@ -1082,7 +1089,10 @@ function logTurn(sessionId: string, stats: AttemptStats | null, errorKind: DjErr
   console.log('dj turn', JSON.stringify({ sessionId, ...(stats ?? {}), error: errorKind, detail }))
 }
 
-export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, userText: string): Promise<DjTurnResult> {
+// Per-turn settings the listener chose in the composer UI rather than typed.
+export type DjTurnOptions = { energyArc?: Intent['energyArc'] }
+
+export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, userText: string, options: DjTurnOptions = {}): Promise<DjTurnResult> {
   // Read before anything else: (a) fails fast on a missing session before any
   // insert, and (b) is the "before this turn" baseline that both the success
   // path and the error path compare against to decide whether the queue
@@ -1111,7 +1121,7 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
 
   let attempt: AttemptResult
   try {
-    attempt = await attemptWithConflictRetry(db, deps, session, userText, userRow.seq, renameState)
+    attempt = await attemptWithConflictRetry(db, deps, session, userText, userRow.seq, renameState, options)
   } catch (e) {
     const failure = e instanceof AttemptTurnFailure ? e : null
     const djError = normalizeError(failure ? failure.originalError : e)

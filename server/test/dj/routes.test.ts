@@ -510,6 +510,23 @@ describe('session routes', () => {
       expect(trackList).toHaveLength(3)
     })
 
+    it('accepts a listener-selected shape alongside the text and rejects unknown shapes', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const { llm: setupLlm } = makeFakeLlm([{ text: 'ready.' }])
+      const sessionId = await createSession(db, authedAs('u1'), { embed: fakeEmbed, llm: setupLlm })
+
+      const { llm, requests } = makeFakeLlm([{ text: 'noted.' }])
+      const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+
+      const res = await postJson(app, `/sessions/${sessionId}/messages`, { text: 'keep going', energyArc: 'arc' })
+      expect(res.status).toBe(200)
+      expect(JSON.stringify(requests[0].messages[0].content)).toContain('Listener-selected mix shape: arc')
+
+      const bad = await postJson(app, `/sessions/${sessionId}/messages`, { text: 'keep going', energyArc: 'zigzag' })
+      expect(bad.status).toBe(400)
+    })
+
     it('bumps dj_sessions.updatedAt on a text-only turn (no queue write to ride $onUpdate otherwise)', async () => {
       const db = await createTestDb()
       await seedUser(db, 'u1')
