@@ -113,6 +113,46 @@ export const tracks = pgTable(
   ],
 )
 
+// Platform-agnostic like `tracks`: internal id plus UPC, with apple_id one
+// column among future peers (spec 2026-10-20 album picks → Data).
+export const albums = pgTable(
+  'albums',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    upc: text('upc'),
+    appleId: text('apple_id'),
+    appleCatalogStorefront: text('apple_catalog_storefront'),
+    title: text('title').notNull(),
+    artist: text('artist').notNull(),
+    releaseYear: integer('release_year'),
+    trackCount: integer('track_count'),
+    durationMs: integer('duration_ms'),
+    type: text('type', {
+      enum: ['album', 'ep', 'single', 'live', 'compilation', 'soundtrack', 'mixtape'],
+    }).notNull(),
+    artworkUrlTemplate: text('artwork_url_template'),
+    artworkWidth: integer('artwork_width'),
+    artworkHeight: integer('artwork_height'),
+    artworkBgColor: text('artwork_bg_color'),
+    artworkFetchedAt: timestamp('artwork_fetched_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('albums_apple_id_idx').on(t.appleId).where(sql`${t.appleId} IS NOT NULL`),
+    index('albums_upc_idx').on(t.upc),
+    check('albums_apple_catalog_storefront_check', storefrontOrNullSql(t.appleCatalogStorefront)),
+    check(
+      'albums_type_check',
+      sql`${t.type} IN ('album', 'ep', 'single', 'live', 'compilation', 'soundtrack', 'mixtape')`,
+    ),
+    check('albums_track_count_positive_check', positiveOrNullSql(t.trackCount)),
+    check('albums_duration_ms_positive_check', positiveOrNullSql(t.durationMs)),
+    check('albums_artwork_bg_color_check', artworkColorSql(t.artworkBgColor)),
+    check('albums_artwork_width_positive_check', positiveOrNullSql(t.artworkWidth)),
+    check('albums_artwork_height_positive_check', positiveOrNullSql(t.artworkHeight)),
+  ],
+)
+
 export const userTracks = pgTable(
   'user_tracks',
   {
@@ -322,13 +362,18 @@ export const djSessions = pgTable(
     // Set when a mix came from the shared corpus and seeds rather than the
     // listener's own data ("not personal yet").
     notPersonal: boolean('not_personal').notNull().default(false),
+    // An album session recommends one album instead of building a queue.
+    kind: text('kind', { enum: ['mix', 'album'] }).notNull().default('mix'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .notNull()
       .defaultNow()
       .$onUpdate(() => new Date()),
   },
-  (t) => [index('dj_sessions_user_idx').on(t.userId, t.createdAt)],
+  (t) => [
+    index('dj_sessions_user_idx').on(t.userId, t.createdAt),
+    check('dj_sessions_kind_check', sql`${t.kind} IN ('mix', 'album')`),
+  ],
 )
 
 export const djMessages = pgTable(
@@ -381,10 +426,73 @@ export const sessionEvents = pgTable(
     sessionId: uuid('session_id')
       .notNull()
       .references(() => djSessions.id, { onDelete: 'cascade' }),
-    type: text('type', { enum: ['played', 'saved_playlist'] }).notNull(),
+    type: text('type', {
+      enum: [
+        'played',
+        'saved_playlist',
+        'album_saved',
+        'album_unsaved',
+        'album_passed',
+        'album_listened',
+      ],
+    }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('session_events_session_idx').on(t.sessionId, t.createdAt)],
+  (t) => [
+    index('session_events_session_idx').on(t.sessionId, t.createdAt),
+    check(
+      'session_events_type_check',
+      sql`${t.type} IN ('played', 'saved_playlist', 'album_saved', 'album_unsaved', 'album_passed', 'album_listened')`,
+    ),
+  ],
+)
+
+// One row per album turn's ranked shortlist. The latest version's rank 0 is
+// the current pick; earlier versions are the passed-over history.
+export const albumPicks = pgTable(
+  'album_picks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => djSessions.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    rank: integer('rank').notNull(),
+    albumId: uuid('album_id')
+      .notNull()
+      .references(() => albums.id),
+    reason: text('reason').notNull(),
+    newToThem: boolean('new_to_them').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('album_picks_session_version_rank_idx').on(t.sessionId, t.version, t.rank),
+    index('album_picks_session_version_idx').on(t.sessionId, t.version.desc()),
+    check('album_picks_version_positive_check', sql`${t.version} > 0`),
+    check('album_picks_rank_nonnegative_check', sql`${t.rank} >= 0`),
+  ],
+)
+
+// The listener's saved albums. Removal and listening are soft so the shelf
+// keeps its history; the session that surfaced the album may be deleted.
+export const listenLater = pgTable(
+  'listen_later',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    albumId: uuid('album_id')
+      .notNull()
+      .references(() => albums.id),
+    sessionId: uuid('session_id').references(() => djSessions.id, { onDelete: 'set null' }),
+    savedAt: timestamp('saved_at', { withTimezone: true }).notNull().defaultNow(),
+    listenedAt: timestamp('listened_at', { withTimezone: true }),
+    removedAt: timestamp('removed_at', { withTimezone: true }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.albumId] }),
+    index('listen_later_user_idx').on(t.userId, t.removedAt, t.listenedAt, t.savedAt),
+  ],
 )
 
 // Funnel steps, counts only (spec 2026-09-01 → Funnel; first-run steps from

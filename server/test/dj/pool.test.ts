@@ -232,16 +232,14 @@ async function seedQueueTrack(
   return row
 }
 
-async function seedSessionEvent(db: TestDb, sessionId: string, type: 'played' | 'saved_playlist', createdAt?: Date) {
+async function seedSessionEvent(
+  db: TestDb,
+  sessionId: string,
+  type: (typeof sessionEvents.$inferInsert)['type'],
+  createdAt?: Date,
+) {
   const [row] = await db.insert(sessionEvents).values({ sessionId, type, createdAt }).returning()
   return row
-}
-
-// The `type` enum has no DB-level CHECK (per the plan's binding facts), so an
-// "unknown event type ignored" test needs a raw insert to get a row past
-// drizzle's own type narrowing.
-async function seedRawSessionEvent(db: TestDb, sessionId: string, type: string) {
-  await db.execute(sql`INSERT INTO session_events (session_id, type) VALUES (${sessionId}, ${type})`)
 }
 
 const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 60 * 60 * 1000)
@@ -820,13 +818,16 @@ describe('buildPool taste term', () => {
     expect(byId(track.id).score).toBeCloseTo(NEUTRAL_MIX_SCORE, 5)
   })
 
-  it('an unknown session_events type is ignored — a kept track in that session stays neutral', async () => {
+  it('session_events types other than played/saved_playlist are ignored — a kept track in that session stays neutral', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')
-    const track = await seedTrack(db, 'u1', { artist: 'UnknownEventArtist', embedding: SAME_AS_QUERY, playCount: 0 })
+    const track = await seedTrack(db, 'u1', { artist: 'AlbumEventArtist', embedding: SAME_AS_QUERY, playCount: 0 })
     const s = await seedSession(db, 'u1')
     await seedQueueTrack(db, s.id, track.id, { state: 'active' })
-    await seedRawSessionEvent(db, s.id, 'skipped') // not 'played' or 'saved_playlist'
+    // Album events are taste signals recorded now and weighted later (spec 2026-10-20); prove they are not counted like saved_playlist.
+    for (const type of ['album_saved', 'album_unsaved', 'album_passed', 'album_listened'] as const) {
+      await seedSessionEvent(db, s.id, type)
+    }
 
     const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', familiarity: 'mix' }))
     const byId = (id: string) => pool.find((p) => p.trackId === id)!
