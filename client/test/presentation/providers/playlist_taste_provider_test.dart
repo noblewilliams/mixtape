@@ -12,8 +12,8 @@ import 'package:mixtape/presentation/providers/playlist_taste_provider.dart';
 
 class TestAuth extends AuthNotifier {
   @override
-  AuthStatus build() => AuthStatus.signedIn;
-  void signOutForTest() => state = AuthStatus.signedOut;
+  AuthStatus build() => AuthStatus.session;
+  void signOutForTest() => state = AuthStatus.noSession;
 }
 
 PlaylistSummary summary({

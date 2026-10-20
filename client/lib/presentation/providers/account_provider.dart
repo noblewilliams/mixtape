@@ -60,7 +60,7 @@ class AccountNotifier extends Notifier<AccountState> {
     final generation = ++_generation;
     final operation = ++_operation;
     ref.onDispose(() => _generation++);
-    if (auth != AuthStatus.signedIn) return const AccountState();
+    if (auth != AuthStatus.session) return const AccountState();
     unawaited(
       Future.microtask(() async {
         if (_current(generation, operation)) {
@@ -75,7 +75,7 @@ class AccountNotifier extends Notifier<AccountState> {
       ref.mounted &&
       generation == _generation &&
       operation == _operation &&
-      ref.read(authProvider) == AuthStatus.signedIn;
+      ref.read(authProvider) == AuthStatus.session;
 
   Future<bool> _load(AccountApi api, int generation, int operation) async {
     try {
@@ -92,7 +92,7 @@ class AccountNotifier extends Notifier<AccountState> {
 
   Future<bool> refresh() async {
     if (!ref.mounted ||
-        ref.read(authProvider) != AuthStatus.signedIn ||
+        ref.read(authProvider) != AuthStatus.session ||
         state.writing) {
       return false;
     }
@@ -106,7 +106,7 @@ class AccountNotifier extends Notifier<AccountState> {
   Future<bool> link(AccountProvider provider) async {
     if (!ref.mounted ||
         !state.canModify ||
-        ref.read(authProvider) != AuthStatus.signedIn) {
+        ref.read(authProvider) != AuthStatus.session) {
       return false;
     }
     final accounts = state.accounts!;
@@ -148,7 +148,7 @@ class AccountNotifier extends Notifier<AccountState> {
   Future<bool> unlink(String accountRowId) async {
     if (!ref.mounted ||
         !state.canModify ||
-        ref.read(authProvider) != AuthStatus.signedIn) {
+        ref.read(authProvider) != AuthStatus.session) {
       return false;
     }
     final accounts = state.accounts!;

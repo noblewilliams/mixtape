@@ -26,6 +26,8 @@ class AuthSignInException extends ApiException {
   String toString() => 'AuthSignInException($statusCode)';
 }
 
+enum StoredSession { none, anonymous, account }
+
 class AuthRepository {
   AuthRepository({
     required this.tokenStore,
@@ -59,10 +61,39 @@ class AuthRepository {
     return _signIn('google', google.getIdentityToken);
   }
 
+  /// Creates an anonymous session and stores its token flagged anonymous.
+  Future<void> signInAnonymously() => _authenticate(
+    path: '/api/auth/sign-in/anonymous',
+    body: () async => const <String, Object>{},
+    anonymous: true,
+  );
+
+  /// Social sign-in. When an anonymous token is stored, [ApiClient] sends it
+  /// as `Authorization: Bearer` on this request, which is what lets the
+  /// server's anonymous plugin link that user into the account. The
+  /// response's token is the account's and replaces the anonymous one.
   Future<void> _signIn(
     String provider,
     Future<String> Function() identity,
-  ) async {
+  ) => _authenticate(
+    path: '/api/auth/sign-in/social',
+    body: () async {
+      final idToken = await identity();
+      if (idToken.trim().isEmpty) throw StateError('Missing identity token');
+      return {
+        'provider': provider,
+        'idToken': {'token': idToken},
+      };
+    },
+    provider: provider,
+  );
+
+  Future<void> _authenticate({
+    required String path,
+    required Future<Map<String, Object>> Function() body,
+    String? provider,
+    bool anonymous = false,
+  }) async {
     if (_disposed) throw const AuthOperationCancelled();
     if (_activeSignIn != null || _signingOut > 0) {
       throw const AuthOperationBusy();
@@ -77,13 +108,9 @@ class AuthRepository {
     }
 
     try {
-      final idToken = await identity();
+      final payload = await body();
       ensureCurrent();
-      if (idToken.trim().isEmpty) throw StateError('Missing identity token');
-      final res = await api.postJson('/api/auth/sign-in/social', {
-        'provider': provider,
-        'idToken': {'token': idToken},
-      });
+      final res = await api.postJson(path, payload);
       ensureCurrent();
       final token = res.headers['set-auth-token'];
       if (token == null || token.trim().isEmpty) {
@@ -91,8 +118,8 @@ class AuthRepository {
       }
       await _withStore(() async {
         ensureCurrent();
-        await tokenStore.write(token);
-        if (!_disposed && generation == _generation) {
+        await tokenStore.write(token, anonymous: anonymous);
+        if (provider != null && !_disposed && generation == _generation) {
           try {
             await preferenceStore?.write(
               provider == 'apple'
@@ -137,9 +164,13 @@ class AuthRepository {
     return result;
   }
 
-  Future<bool> isSignedIn() => _withStore(() async {
+  /// What the keychain holds, read without a network call.
+  Future<StoredSession> storedSession() => _withStore(() async {
     final token = await tokenStore.read();
-    return token != null && token.trim().isNotEmpty;
+    if (token == null || token.trim().isEmpty) return StoredSession.none;
+    return await tokenStore.readAnonymous()
+        ? StoredSession.anonymous
+        : StoredSession.account;
   });
 
   Future<void> signOut() async {

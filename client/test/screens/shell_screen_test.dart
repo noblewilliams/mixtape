@@ -175,7 +175,7 @@ ProviderContainer shellContainer({
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
       djApiProvider.overrideWithValue(ShellDjApi()),
       listeningApiProvider.overrideWithValue(FakeListeningApi()),
-      authProvider.overrideWith(() => auth ?? TestAuth(AuthStatus.signedIn)),
+      authProvider.overrideWith(() => auth ?? TestAuth(AuthStatus.session)),
       nativeDockAvailableProvider.overrideWith((ref) => nativeDock),
       if (player != null) playbackProvider.overrideWithValue(player),
       if (fakeMiniPlayer)
@@ -428,7 +428,7 @@ void main() {
           tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
           djApiProvider.overrideWithValue(ShellDjApi()),
           listeningApiProvider.overrideWithValue(FakeListeningApi()),
-          authProvider.overrideWith(() => TestAuth(AuthStatus.signedIn)),
+          authProvider.overrideWith(() => TestAuth(AuthStatus.session)),
           nativeDockAvailableProvider.overrideWith(
             (ref) => availability.future,
           ),
@@ -844,13 +844,13 @@ void main() {
 
   group('providers', () {
     test('signing out resets the selected tab', () {
-      final auth = TestAuth(AuthStatus.signedIn);
+      final auth = TestAuth(AuthStatus.session);
       final container = shellContainer(auth: auth);
 
       container.read(selectedTabProvider.notifier).selectTab(AppTab.you);
       expect(container.read(selectedTabProvider), AppTab.you.index);
 
-      auth.set(AuthStatus.signedOut);
+      auth.set(AuthStatus.noSession);
       expect(container.read(selectedTabProvider), AppTab.home.index);
     });
 

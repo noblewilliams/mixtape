@@ -176,6 +176,32 @@ void main() {
     expect(find.byType(HomeScreen), findsOneWidget);
   });
 
+  testWidgets('an anonymous token present at launch goes straight to the shell',
+      (tester) async {
+    final store = InMemoryTokenStore();
+    await store.write('t', anonymous: true);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          tokenStoreProvider.overrideWithValue(store),
+          djApiProvider.overrideWithValue(_FakeDjApi()),
+          listeningApiProvider.overrideWithValue(FakeListeningApi()),
+          reminderSchedulerProvider.overrideWithValue(FakeReminderScheduler()),
+          servicePreferenceStoreProvider.overrideWithValue(
+            InMemoryServicePreferenceStore(),
+          ),
+          funnelOnceStoreProvider.overrideWithValue(InMemoryFunnelOnceStore()),
+        ],
+        child: const MixtapeApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(SignInScreen), findsNothing);
+    expect(find.byType(ShellScreen), findsOneWidget);
+    expect(find.byType(HomeScreen), findsOneWidget);
+    expect(_containerOf(tester).read(isAnonymousProvider), isTrue);
+  });
+
   testWidgets('sign-out returns to sign-in', (tester) async {
     final store = InMemoryTokenStore();
     await store.write('tok');

@@ -56,7 +56,7 @@ void main() {
     inspiration = FakeContextApi();
     container = ProviderContainer(
       overrides: [
-        authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.signedIn)),
+        authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.session)),
         djApiProvider.overrideWithValue(api),
         playlistContextApiProvider.overrideWithValue(inspiration),
         playlistApiProvider.overrideWithValue(BrowseApi()),

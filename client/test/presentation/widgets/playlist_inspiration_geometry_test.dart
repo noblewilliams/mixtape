@@ -11,7 +11,7 @@ import '../../helpers/auth_ui_snapshot.dart';
 
 class _SignedIn extends AuthNotifier {
   @override
-  AuthStatus build() => AuthStatus.signedIn;
+  AuthStatus build() => AuthStatus.session;
 }
 
 class _Browse implements PlaylistApi {

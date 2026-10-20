@@ -10,7 +10,7 @@ import 'package:mixtape/presentation/providers/playlist_context_provider.dart';
 
 class TestAuth extends AuthNotifier {
   @override
-  AuthStatus build() => AuthStatus.signedIn;
+  AuthStatus build() => AuthStatus.session;
   void set(AuthStatus value) => state = value;
 }
 
@@ -195,11 +195,11 @@ void main() {
       final oldNotifier = container.read(provider.notifier);
       final result = oldNotifier.select(playlistId: 'old');
       final auth = container.read(authProvider.notifier) as TestAuth;
-      auth.set(AuthStatus.signedOut);
+      auth.set(AuthStatus.noSession);
       await settle();
       expect(container.read(provider).seed, isNull);
       api.read = () async => seed(10, id: 'new-account');
-      auth.set(AuthStatus.signedIn);
+      auth.set(AuthStatus.session);
       await settle();
       pending.complete(seed(2, id: 'old'));
       expect(await result, false);

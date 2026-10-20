@@ -173,7 +173,7 @@ class FakeBridge implements MusicKitBridge {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
-/// authProvider override settled at a stable signedIn status — no real
+/// authProvider override settled at a stable session status — no real
 /// keychain restore, no async transition mid-test (same pattern as
 /// dj_providers_test.dart's TestAuthNotifier).
 class TestAuthNotifier extends AuthNotifier {
@@ -273,7 +273,7 @@ ProviderContainer _makeContainer(
       mixEnergyProvider.overrideWith((ref, key) async => <String, dynamic>{}),
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
       djApiProvider.overrideWithValue(api),
-      authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.signedIn)),
+      authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.session)),
       if (inspiration != null)
         playlistContextApiProvider.overrideWithValue(inspiration),
       // The real controller reaches the player method channel and GET
@@ -511,7 +511,7 @@ void main() {
           ),
           tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
           djApiProvider.overrideWithValue(api),
-          authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.signedIn)),
+          authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.session)),
           playbackProvider.overrideWithValue(
             PlaybackController(playback.FakeApi(), playback.FakeBridge()),
           ),
@@ -723,7 +723,7 @@ void main() {
           mixEnergyProvider.overrideWith((ref, key) async => <String, dynamic>{}),
           tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
           djApiProvider.overrideWithValue(FakeDjApi()),
-          authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.signedIn)),
+          authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.session)),
           playbackProvider.overrideWithValue(
             PlaybackController(playback.FakeApi(), playback.FakeBridge()),
           ),

@@ -378,7 +378,7 @@ void main() {
   test('a sign-out resets the flow and cancels the service; what the cancelled run reports '
       'after that is dropped: no cancelled state over the fresh idle, no onboarding refresh '
       'while signed out', () async {
-    final auth = TestAuthNotifier(AuthStatus.signedIn);
+    final auth = TestAuthNotifier(AuthStatus.session);
     final c = container(auth: auth);
     c.listen(listeningImportProvider, (_, _) {});
     c.listen(onboardingProvider, (_, _) {}, fireImmediately: true);
@@ -388,7 +388,7 @@ void main() {
     await _settle();
     expect(c.read(listeningImportProvider), isA<ImportUploading>());
 
-    auth.set(AuthStatus.signedOut);
+    auth.set(AuthStatus.noSession);
     await _settle();
     expect(c.read(listeningImportProvider), isA<ImportIdle>());
     expect(service.cancels, greaterThanOrEqualTo(1));

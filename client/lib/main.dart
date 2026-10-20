@@ -38,10 +38,12 @@ class MixtapeApp extends ConsumerWidget {
               AuthStatus.unknown => const Scaffold(
                 body: Center(child: CircularProgressIndicator()),
               ),
-              AuthStatus.signedOut => const SignInScreen(),
-              // ServiceGate resolves to Home once the listener has a service (or
-              // onboarding cannot be read).
-              AuthStatus.signedIn => const ServiceGate(),
+              // The first-run flow replaces this (first-run plan, Task 9).
+              AuthStatus.noSession => const SignInScreen(),
+              // Anonymous and account sessions alike. ServiceGate resolves to
+              // Home once the listener has a service (or onboarding cannot be
+              // read).
+              AuthStatus.session => const ServiceGate(),
             },
     );
   }

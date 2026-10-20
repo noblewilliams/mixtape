@@ -50,14 +50,14 @@ class _Auth extends AuthNotifier {
   Completer<void>? gate;
 
   @override
-  AuthStatus build() => AuthStatus.signedIn;
+  AuthStatus build() => AuthStatus.session;
 
   @override
   Future<void> signOut() async {
     signsOut++;
     if (gate != null) await gate!.future;
     if (failSignOut) throw StateError('keychain unavailable');
-    state = AuthStatus.signedOut;
+    state = AuthStatus.noSession;
   }
 }
 

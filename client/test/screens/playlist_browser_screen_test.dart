@@ -16,7 +16,7 @@ import 'package:mixtape/presentation/widgets/foundation/flush_row.dart';
 
 class _SignedIn extends AuthNotifier {
   @override
-  AuthStatus build() => AuthStatus.signedIn;
+  AuthStatus build() => AuthStatus.session;
 }
 
 PlaylistSummary summary(

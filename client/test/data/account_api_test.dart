@@ -185,4 +185,49 @@ void main() {
       throwsA(isA<AccountModelException>()),
     );
   });
+
+  group('me', () {
+    Future<Me> meWith(Object? body) => apiWith((request) async {
+      expect(request.method, 'GET');
+      expect(request.url.path, '/me');
+      return http.Response(jsonEncode(body), 200);
+    }).me();
+
+    test('maps each merged value to MergedMode', () async {
+      for (final entry in {
+        'all': MergedMode.all,
+        'mixes_only': MergedMode.mixesOnly,
+        'library_kept': MergedMode.libraryKept,
+      }.entries) {
+        final me = await meWith({
+          'user': {'id': 'u1', 'isAnonymous': false, 'name': 'Listener'},
+          'merged': entry.key,
+        });
+        expect(me.merged, entry.value);
+        expect(me.id, 'u1');
+        expect(me.isAnonymous, isFalse);
+      }
+    });
+
+    test('null or unknown merged is null; isAnonymous is read', () async {
+      final none = await meWith({
+        'user': {'id': 'anon', 'isAnonymous': true},
+        'merged': null,
+      });
+      expect(none.merged, isNull);
+      expect(none.isAnonymous, isTrue);
+      final future = await meWith({
+        'user': {'id': 'u1', 'isAnonymous': false},
+        'merged': 'something_new',
+      });
+      expect(future.merged, isNull);
+    });
+
+    test('a body without a user is a model error', () async {
+      await expectLater(
+        meWith({'merged': null}),
+        throwsA(isA<AccountModelException>()),
+      );
+    });
+  });
 }

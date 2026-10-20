@@ -112,7 +112,7 @@ ProviderContainer onboardingContainer({
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
       djApiProvider.overrideWithValue(BareDjApi()),
       listeningApiProvider.overrideWithValue(listening),
-      authProvider.overrideWith(() => auth ?? TestAuthNotifier(AuthStatus.signedIn)),
+      authProvider.overrideWith(() => auth ?? TestAuthNotifier(AuthStatus.session)),
       reminderSchedulerProvider.overrideWithValue(reminders ?? FakeReminderScheduler()),
       servicePreferenceStoreProvider
           .overrideWithValue(prefs ?? InMemoryServicePreferenceStore()),

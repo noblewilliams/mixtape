@@ -215,7 +215,7 @@ final transcribeRecordingProvider = Provider<TranscribeRecording>((ref) {
     server: api.transcribe,
     onDevice: speech.transcribeFile,
     onSessionExpired: () async {
-      if (ref.read(authProvider) != AuthStatus.signedIn) return;
+      if (ref.read(authProvider) != AuthStatus.session) return;
       try {
         await ref.read(authProvider.notifier).signOut();
       } catch (_) {

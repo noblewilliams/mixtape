@@ -67,7 +67,7 @@ ProviderContainer containerFor(PlaybackController player, {AuthNotifier? auth}) 
   final container = ProviderContainer(
     overrides: [
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
-      authProvider.overrideWith(() => auth ?? _TestAuth(AuthStatus.signedIn)),
+      authProvider.overrideWith(() => auth ?? _TestAuth(AuthStatus.session)),
       playbackProvider.overrideWithValue(player),
     ],
   );
@@ -200,13 +200,13 @@ void main() {
       // previous account's mix (CLAUDE.md → Ground rules).
       final signedIn = newPlayer();
       final signedOut = newPlayer();
-      final auth = _TestAuth(AuthStatus.signedIn);
+      final auth = _TestAuth(AuthStatus.session);
       final container = ProviderContainer(
         overrides: [
           tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
           authProvider.overrideWith(() => auth),
           playbackProvider.overrideWith(
-            (ref) => ref.watch(authProvider) == AuthStatus.signedIn
+            (ref) => ref.watch(authProvider) == AuthStatus.session
                 ? signedIn.player
                 : signedOut.player,
           ),
@@ -219,7 +219,7 @@ void main() {
       await settle();
       expect(container.read(miniPlayerStateProvider).visible, isTrue);
 
-      auth.set(AuthStatus.signedOut);
+      auth.set(AuthStatus.noSession);
 
       expect(
         container.read(miniPlayerStateProvider),

@@ -21,7 +21,7 @@ class MixOperationGate extends Notifier<MixOperation?> {
 
   void Function()? acquire(MixOperation operation) {
     if (!ref.mounted ||
-        ref.read(authProvider) != AuthStatus.signedIn ||
+        ref.read(authProvider) != AuthStatus.session ||
         state != null) {
       return null;
     }

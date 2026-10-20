@@ -59,7 +59,7 @@ class PlaylistTasteNotifier extends Notifier<PlaylistTasteState> {
     final generation = ++_generation;
     final operation = ++_operation;
     ref.onDispose(() => _generation++);
-    if (auth != AuthStatus.signedIn) return const PlaylistTasteState();
+    if (auth != AuthStatus.session) return const PlaylistTasteState();
     unawaited(
       Future.microtask(() async {
         if (_current(generation, operation)) await _read(generation, operation);
@@ -72,7 +72,7 @@ class PlaylistTasteNotifier extends Notifier<PlaylistTasteState> {
       ref.mounted &&
       generation == _generation &&
       operation == _operation &&
-      ref.read(authProvider) == AuthStatus.signedIn;
+      ref.read(authProvider) == AuthStatus.session;
 
   Future<bool> _read(int generation, int operation, {bool? expected}) async {
     try {
@@ -105,7 +105,7 @@ class PlaylistTasteNotifier extends Notifier<PlaylistTasteState> {
 
   Future<bool> refresh() async {
     if (!ref.mounted ||
-        ref.read(authProvider) != AuthStatus.signedIn ||
+        ref.read(authProvider) != AuthStatus.session ||
         state.writing) {
       return false;
     }
@@ -117,7 +117,7 @@ class PlaylistTasteNotifier extends Notifier<PlaylistTasteState> {
 
   Future<bool> setConfirmed(bool confirmed) async {
     if (!ref.mounted ||
-        ref.read(authProvider) != AuthStatus.signedIn ||
+        ref.read(authProvider) != AuthStatus.session ||
         !(confirmed ? state.canConfirm : state.canRemove)) {
       return false;
     }

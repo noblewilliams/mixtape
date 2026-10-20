@@ -16,6 +16,8 @@ class FakeAccountApi implements AccountApi {
   @override
   Future<List<LinkedAccount>> list() => onList();
   @override
+  Future<Me> me() async => const Me(id: 'u1', isAnonymous: false);
+  @override
   Future<void> link({
     required AccountProvider provider,
     required String token,
@@ -49,7 +51,7 @@ void main() {
   late ProviderContainer container;
   setUp(() {
     api = FakeAccountApi()..onList = () async => [apple];
-    auth = TestAuthNotifier(AuthStatus.signedIn);
+    auth = TestAuthNotifier(AuthStatus.session);
     container = ProviderContainer(
       overrides: [
         accountApiProvider.overrideWithValue(api),
@@ -113,7 +115,7 @@ void main() {
       final notifier = container.read(accountProvider.notifier);
       final link = notifier.link(AccountProvider.google);
       expect(await notifier.link(AccountProvider.google), isFalse);
-      auth.set(AuthStatus.signedOut);
+      auth.set(AuthStatus.noSession);
       await flush();
       token.complete('old-account-token');
       expect(await link, isFalse);
@@ -202,7 +204,7 @@ void main() {
       final oldRead = Completer<List<LinkedAccount>>();
       api.onList = () => oldRead.future;
       final refresh = container.read(accountProvider.notifier).refresh();
-      auth.set(AuthStatus.signedOut);
+      auth.set(AuthStatus.noSession);
       await flush();
       oldRead.complete([apple, google]);
       expect(await refresh, isFalse);

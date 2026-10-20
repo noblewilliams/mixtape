@@ -53,17 +53,37 @@ final authRepositoryProvider = Provider<AuthRepository>((ref) {
   return repository;
 });
 
-enum AuthStatus { unknown, signedOut, signedIn }
+/// `session` covers anonymous and account sessions alike: gating treats them
+/// as one state, and [AuthNotifier.isAnonymous] tells them apart for the You
+/// row and the mix cap.
+enum AuthStatus { unknown, noSession, session }
 
 // Invalidating authProvider rebuilds user-scoped providers and cancels their
 // in-flight work (e.g. a running library sync) — recoverable but lossy.
 class AuthNotifier extends Notifier<AuthStatus> {
   int _operation = 0;
   bool _busy = false;
+  bool _anonymous = false;
+
+  /// Whether the current session is anonymous. Read from the flag the token
+  /// store keeps beside the token, so it is known on a cold start without a
+  /// network call. False whenever [state] is not [AuthStatus.session].
+  bool get isAnonymous => _anonymous;
+
+  /// Every write to the flag after build goes through here, so a flip without
+  /// a status change still tells watchers (see [isAnonymousProvider]).
+  set _isAnonymous(bool value) {
+    if (_anonymous == value) return;
+    _anonymous = value;
+    ref.notifyListeners();
+  }
 
   @override
   AuthStatus build() {
     _busy = false;
+    // Direct write: build's own result notifies, and notifying from inside
+    // build is not allowed.
+    _anonymous = false;
     final repository = ref.read(authRepositoryProvider);
     ref.onDispose(() {
       _operation++;
@@ -74,23 +94,66 @@ class AuthNotifier extends Notifier<AuthStatus> {
   }
 
   Future<void> _restore(int operation) async {
-    bool signedIn;
+    StoredSession stored;
     try {
-      signedIn = await ref.read(authRepositoryProvider).isSignedIn();
+      stored = await ref.read(authRepositoryProvider).storedSession();
     } catch (_) {
       if (kDebugMode) debugPrint('auth restore failed');
-      signedIn = false;
+      stored = StoredSession.none;
     }
     if (!ref.mounted || operation != _operation) return;
-    state = signedIn ? AuthStatus.signedIn : AuthStatus.signedOut;
+    _isAnonymous = stored == StoredSession.anonymous;
+    state = stored == StoredSession.none
+        ? AuthStatus.noSession
+        : AuthStatus.session;
   }
 
+  /// Starts an anonymous session (lazily, at the first action that needs the
+  /// server). Moves noSession to session without invalidating anything:
+  /// there is no user-scoped state to reset yet. Only meaningful from
+  /// noSession: with a session already stored (anonymous or account) it
+  /// returns without a request, so it can never overwrite an account token;
+  /// before restore has settled it throws, because the answer is not known.
+  Future<void> signInAnonymously() async {
+    switch (state) {
+      case AuthStatus.unknown:
+        throw StateError('signInAnonymously before auth restore settled');
+      case AuthStatus.session:
+        return;
+      case AuthStatus.noSession:
+        break;
+    }
+    if (_busy) throw const AuthOperationBusy();
+    _busy = true;
+    final operation = ++_operation;
+    try {
+      await ref.read(authRepositoryProvider).signInAnonymously();
+      if (!ref.mounted || operation != _operation) {
+        throw const AuthOperationCancelled();
+      }
+      _isAnonymous = true;
+      state = AuthStatus.session;
+    } catch (_) {
+      if (!ref.mounted || operation != _operation) {
+        throw const AuthOperationCancelled();
+      }
+      rethrow;
+    } finally {
+      if (operation == _operation) _busy = false;
+    }
+  }
+
+  /// Social sign-in. From an anonymous session the request carries the
+  /// anonymous token so the server links it; the status stays `session`, so
+  /// the provider invalidates itself to reset every user-scoped provider,
+  /// exactly as a sign-in from noSession does by changing state.
   Future<void> signIn({
     AccountProvider provider = AccountProvider.apple,
   }) async {
     if (_busy) throw const AuthOperationBusy();
     _busy = true;
     final operation = ++_operation;
+    final linking = state == AuthStatus.session && _anonymous;
     try {
       final repository = ref.read(authRepositoryProvider);
       if (provider == AccountProvider.apple) {
@@ -102,7 +165,13 @@ class AuthNotifier extends Notifier<AuthStatus> {
         throw const AuthOperationCancelled();
       }
       ref.invalidate(lastSignInProvider);
-      state = AuthStatus.signedIn;
+      _isAnonymous = false;
+      if (linking) {
+        // Rebuild re-reads the stored (now account) token.
+        ref.invalidateSelf();
+      } else {
+        state = AuthStatus.session;
+      }
     } catch (_) {
       if (!ref.mounted || operation != _operation) {
         throw const AuthOperationCancelled();
@@ -120,7 +189,8 @@ class AuthNotifier extends Notifier<AuthStatus> {
       await ref.read(authRepositoryProvider).signOut();
       if (!ref.mounted || operation != _operation) return;
       // Reset protected state before slower, best-effort device cleanup.
-      state = AuthStatus.signedOut;
+      _isAnonymous = false;
+      state = AuthStatus.noSession;
       await _forgetDeviceState();
     } finally {
       if (operation == _operation) _busy = false;
@@ -155,3 +225,10 @@ class AuthNotifier extends Notifier<AuthStatus> {
 final authProvider = NotifierProvider<AuthNotifier, AuthStatus>(
   AuthNotifier.new,
 );
+
+/// [AuthNotifier.isAnonymous] as something widgets can watch: it rebuilds on
+/// every status change and on a flag flip that leaves the status alone.
+final isAnonymousProvider = Provider<bool>((ref) {
+  ref.watch(authProvider);
+  return ref.read(authProvider.notifier).isAnonymous;
+});

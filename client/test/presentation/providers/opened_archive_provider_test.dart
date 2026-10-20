@@ -42,7 +42,7 @@ void main() {
   });
 
   test('an archive opened before the listener signs in waits for the sign-in', () async {
-    final auth = TestAuthNotifier(AuthStatus.signedOut);
+    final auth = TestAuthNotifier(AuthStatus.noSession);
     final opened = FakeOpenedArchiveSource();
     final container =
         onboardingContainer(listening: FakeListeningApi(), opened: opened, auth: auth);
@@ -54,7 +54,7 @@ void main() {
     expect(container.read(openedArchiveProvider), isNull, reason: 'nobody to open it for yet');
     expect(opened.takes, 0);
 
-    auth.set(AuthStatus.signedIn);
+    auth.set(AuthStatus.session);
     container.read(openedArchiveProvider);
     await pumpEventQueue();
 
@@ -62,7 +62,7 @@ void main() {
   });
 
   test('an archive opened for one listener never surfaces for the next', () async {
-    final auth = TestAuthNotifier(AuthStatus.signedIn);
+    final auth = TestAuthNotifier(AuthStatus.session);
     final opened = FakeOpenedArchiveSource();
     final container =
         onboardingContainer(listening: FakeListeningApi(), opened: opened, auth: auth);
@@ -73,9 +73,9 @@ void main() {
     await pumpEventQueue();
     expect(container.read(openedArchiveProvider), handed(extendedArchive));
 
-    auth.set(AuthStatus.signedOut);
+    auth.set(AuthStatus.noSession);
     container.read(openedArchiveProvider);
-    auth.set(AuthStatus.signedIn);
+    auth.set(AuthStatus.session);
     container.read(openedArchiveProvider);
     await pumpEventQueue();
 

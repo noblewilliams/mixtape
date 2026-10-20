@@ -192,6 +192,39 @@ void main() {
       }
     });
 
+    test('403 anonymous_cap -> AnonymousCapException carrying the limit', () async {
+      final inner = MockClient((req) async {
+        expect(req.method, 'POST');
+        expect(req.url.path, '/sessions');
+        return http.Response(jsonEncode({'error': 'anonymous_cap', 'limit': 3}), 403);
+      });
+      await expectLater(
+        _api(inner: inner).createSession('one more'),
+        throwsA(isA<AnonymousCapException>().having((e) => e.limit, 'limit', 3)),
+      );
+    });
+
+    test('403 anonymous_cap without an integer limit -> AnonymousCapException(3)', () async {
+      final inner = MockClient((_) async => http.Response(jsonEncode({'error': 'anonymous_cap', 'limit': 'three'}), 403));
+      await expectLater(
+        _api(inner: inner).createSession('one more'),
+        throwsA(isA<AnonymousCapException>().having((e) => e.limit, 'limit', 3)),
+      );
+      final bare = MockClient((_) async => http.Response(jsonEncode({'error': 'anonymous_cap'}), 403));
+      await expectLater(
+        _api(inner: bare).createSession('one more'),
+        throwsA(isA<AnonymousCapException>().having((e) => e.limit, 'limit', 3)),
+      );
+    });
+
+    test('any other 403 still passes through as a plain ApiException', () async {
+      final inner = MockClient((_) async => http.Response(jsonEncode({'error': 'forbidden'}), 403));
+      await expectLater(
+        _api(inner: inner).createSession('hi'),
+        throwsA(isA<ApiException>().having((e) => e.statusCode, 'statusCode', 403)),
+      );
+    });
+
     test('400 zod-default shape (error is a Map, not a string) -> kind invalid, '
         'generic message (the serialized blob is never rendered)', () async {
       final inner = MockClient((_) async => http.Response(

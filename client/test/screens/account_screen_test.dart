@@ -18,12 +18,12 @@ class _Auth extends AuthNotifier {
   int signsOut = 0;
   bool failSignOut = false;
   @override
-  AuthStatus build() => AuthStatus.signedIn;
+  AuthStatus build() => AuthStatus.session;
   @override
   Future<void> signOut() async {
     signsOut++;
     if (failSignOut) throw StateError('keychain unavailable');
-    state = AuthStatus.signedOut;
+    state = AuthStatus.noSession;
   }
 }
 

@@ -120,7 +120,7 @@ class _MemoryScreenState extends ConsumerState<MemoryScreen> {
   }
 
   Future<void> _expireSession() async {
-    if (_expiring || ref.read(authProvider) != AuthStatus.signedIn) return;
+    if (_expiring || ref.read(authProvider) != AuthStatus.session) return;
     _expiring = true;
     try {
       await ref.read(authProvider.notifier).signOut();
@@ -166,7 +166,7 @@ class _MemoryScreenState extends ConsumerState<MemoryScreen> {
       // Keep the draft confirmation retryable if a local failure occurred.
     }
     if (!mounted) return _ForgetResult.stale;
-    if (ref.read(authProvider) != AuthStatus.signedIn) {
+    if (ref.read(authProvider) != AuthStatus.session) {
       setState(() => _forgetting = false);
       return _ForgetResult.stale;
     }

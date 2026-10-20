@@ -21,7 +21,7 @@ import 'package:mixtape/presentation/widgets/mix_prompt_input.dart';
 
 class TestAuthNotifier extends AuthNotifier {
   @override
-  AuthStatus build() => AuthStatus.signedIn;
+  AuthStatus build() => AuthStatus.session;
 }
 
 class FakePlaylistApi implements PlaylistApi {

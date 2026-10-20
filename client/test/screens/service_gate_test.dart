@@ -30,12 +30,12 @@ class SlowSignOutAuth extends AuthNotifier {
   final finish = Completer<void>();
 
   @override
-  AuthStatus build() => AuthStatus.signedIn;
+  AuthStatus build() => AuthStatus.session;
 
   @override
   Future<void> signOut() async {
     await finish.future;
-    state = AuthStatus.signedOut;
+    state = AuthStatus.noSession;
     await ref.read(servicePreferenceStoreProvider).clear();
   }
 }
@@ -136,7 +136,7 @@ void main() {
 
   testWidgets("the next listener's gate decides from their own onboarding, never from the "
       "previous account's carried-over state", (tester) async {
-    final auth = TestAuthNotifier(AuthStatus.signedIn);
+    final auth = TestAuthNotifier(AuthStatus.session);
     final listening =
         FakeListeningApi(onboarding: onboardingState(chosenService: 'apple', userId: 'a'));
     final container = onboardingContainer(listening: listening, auth: auth);
@@ -144,7 +144,7 @@ void main() {
     expect(find.byType(ShellScreen), findsOneWidget);
 
     // A signs out: the signed-in tree, gate included, goes away.
-    auth.set(AuthStatus.signedOut);
+    auth.set(AuthStatus.noSession);
     await pumpScreen(tester, container, const SizedBox());
 
     // B signs in with nothing yet, and their onboarding takes a moment to
@@ -152,7 +152,7 @@ void main() {
     // must not decide from it.
     final completer = Completer<OnboardingState>();
     listening.onGetOnboarding = () => completer.future;
-    auth.set(AuthStatus.signedIn);
+    auth.set(AuthStatus.session);
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,

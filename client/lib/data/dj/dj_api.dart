@@ -46,6 +46,21 @@ class StaleQueueException implements Exception {
   String toString() => 'StaleQueueException(v$queueVersion)';
 }
 
+/// Thrown when `POST /sessions` refuses a new mix because an anonymous
+/// listener reached the cap (403 `{error:'anonymous_cap', limit}`). The
+/// composer catches this to offer sign-in; follow-up turns are never capped.
+class AnonymousCapException implements Exception {
+  const AnonymousCapException(this.limit);
+
+  final int limit;
+
+  @override
+  String toString() => 'AnonymousCapException($limit)';
+}
+
+/// The server's ANONYMOUS_MIX_CAP, used when a cap body omits `limit`.
+const _defaultAnonymousCap = 3;
+
 const _genericDjErrorMessage = 'The DJ ran into a problem — please try again.';
 const _genericInvalidMessage = 'That request was invalid.';
 const _genericStaleMessage = 'The queue changed — showing the latest.';
@@ -61,11 +76,12 @@ const _genericMalformedResponseMessage =
 /// [TokenStore], with a 120s timeout: [ApiClient]'s public surface and
 /// default stay exactly as they are for every non-DJ caller.
 ///
-/// [DjApi] has exactly four exit types: [DjApiException] (a DJ-domain error
+/// [DjApi] has exactly five exit types: [DjApiException] (a DJ-domain error
 /// body, or a 200 whose body didn't parse), [StaleQueueException] (a
-/// queue-ops version conflict), [ApiException] (any status this class
-/// doesn't specially interpret — 401/403/404/500/... — passed through
-/// unchanged), and [NetworkException] (transport-level failure, from
+/// queue-ops version conflict), [AnonymousCapException] (an anonymous
+/// listener's new-mix cap), [ApiException] (any status this class
+/// doesn't specially interpret — 401/404/500/..., and any 403 other than
+/// the cap — passed through unchanged), and [NetworkException] (transport-level failure, from
 /// [ApiClient] itself). Nothing else escapes a call.
 class DjApi {
   DjApi({
@@ -248,8 +264,18 @@ class DjApi {
         return _translateMessageBody(e.body, fallback: _genericDjErrorMessage);
       case 400:
         return _translate400(e.body);
+      case 403:
+        final decoded = _tryDecode(e.body);
+        if (decoded?['error'] == 'anonymous_cap') {
+          final limit = decoded?['limit'];
+          return AnonymousCapException(
+            limit is int ? limit : _defaultAnonymousCap,
+          );
+        }
+        // Any other 403 isn't part of the DJ error taxonomy.
+        return e;
       default:
-        // Anything else (401/403/404/500/...) isn't part of the DJ error
+        // Anything else (401/404/500/...) isn't part of the DJ error
         // taxonomy — pass the original ApiException through unchanged.
         return e;
     }

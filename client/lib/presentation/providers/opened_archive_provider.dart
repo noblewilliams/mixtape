@@ -21,7 +21,7 @@ class OpenedArchiveNotifier extends Notifier<HandedArchive?> {
     // Nothing is opened for a listener who is not there: while signed out
     // the archive stays with the source (the native buffer, or the Dart-side
     // hold), and the sign-in's rebuild takes it below.
-    if (ref.watch(authProvider) != AuthStatus.signedIn) return null;
+    if (ref.watch(authProvider) != AuthStatus.session) return null;
     final source = ref.watch(openedArchiveSourceProvider);
     final generation = _generation;
     final subscription = source.opened.listen((archive) {

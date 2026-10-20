@@ -36,7 +36,7 @@ class _PendingGateway implements AppleAuthGateway {
 /// Refuses every method the way the server does for an unknown identity.
 class _UnlinkedAuth extends AuthNotifier {
   @override
-  AuthStatus build() => AuthStatus.signedOut;
+  AuthStatus build() => AuthStatus.noSession;
   @override
   Future<void> signIn({
     AccountProvider provider = AccountProvider.apple,

@@ -117,7 +117,7 @@ class TestAuthNotifier extends AuthNotifier {
   AuthStatus build() => _initial;
 
   @override
-  Future<void> signOut() async => state = AuthStatus.signedOut;
+  Future<void> signOut() async => state = AuthStatus.noSession;
 }
 
 DjMemory _memory({
@@ -131,7 +131,7 @@ ProviderContainer _makeContainer(FakeDjApi api, {PlaybackController? player}) {
     overrides: [
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
       djApiProvider.overrideWithValue(api),
-      authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.signedIn)),
+      authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.session)),
       listeningApiProvider.overrideWithValue(FakeListeningApi()),
       playbackProvider.overrideWithValue(
         player ?? PlaybackController(FakeApi(), FakeBridge()),
@@ -433,7 +433,7 @@ void main() {
             return MaterialApp(
               key: ValueKey(auth),
               theme: MixtapeTheme.light(),
-              home: auth == AuthStatus.signedIn
+              home: auth == AuthStatus.session
                   ? const MemoryScreen()
                   : const Scaffold(body: Text('Sign in')),
             );

@@ -23,7 +23,7 @@ class NewMixInspirationNotifier extends Notifier<NewMixInspiration?> {
   }
 
   void select(PlaylistSummary playlist, {bool excludeSourceTracks = false}) {
-    if (!ref.mounted || ref.read(authProvider) != AuthStatus.signedIn) return;
+    if (!ref.mounted || ref.read(authProvider) != AuthStatus.session) return;
     state = NewMixInspiration(
       playlist,
       excludeSourceTracks: excludeSourceTracks,

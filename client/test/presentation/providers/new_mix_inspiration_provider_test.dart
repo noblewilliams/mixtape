@@ -33,7 +33,7 @@ void main() {
         true,
       );
       (container.read(authProvider.notifier) as TestAuth).set(
-        AuthStatus.signedOut,
+        AuthStatus.noSession,
       );
       await container.pump();
       expect(container.read(newMixInspirationProvider), isNull);

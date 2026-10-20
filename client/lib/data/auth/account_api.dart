@@ -41,6 +41,30 @@ class LinkedAccount {
   final String providerId;
 }
 
+/// How an anonymous listener's data landed on the account they signed in
+/// with, reported once by `GET /me` after the link (the server clears it on
+/// read). `all`: a new account took everything. `mixesOnly`: mixes moved,
+/// the account's existing library won. `libraryKept`: no mix moved, the
+/// anonymous library was dropped.
+enum MergedMode { all, mixesOnly, libraryKept }
+
+MergedMode? _mergedMode(Object? value) => switch (value) {
+  'all' => MergedMode.all,
+  'mixes_only' => MergedMode.mixesOnly,
+  'library_kept' => MergedMode.libraryKept,
+  // null, or a value a newer server added: nothing to tell the listener.
+  _ => null,
+};
+
+/// The slice of `GET /me` the client acts on.
+class Me {
+  const Me({required this.id, required this.isAnonymous, this.merged});
+
+  final String id;
+  final bool isAnonymous;
+  final MergedMode? merged;
+}
+
 class AccountApi {
   const AccountApi(this._client);
 
@@ -55,6 +79,19 @@ class AccountApi {
     if (value is! List) throw const AccountModelException();
     return List<LinkedAccount>.unmodifiable(
       value.map((entry) => LinkedAccount.fromJson(_object(entry))),
+    );
+  }
+
+  /// Reading `merged` consumes it server-side; callers show the notice once.
+  Future<Me> me() async {
+    final value = _object(
+      await _request(() async => (await _client.getJson('/me')).body),
+    );
+    final user = _object(value['user']);
+    return Me(
+      id: _identifier(user['id']),
+      isAnonymous: user['isAnonymous'] == true,
+      merged: _mergedMode(value['merged']),
     );
   }
 

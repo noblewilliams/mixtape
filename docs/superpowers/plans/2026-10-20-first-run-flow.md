@@ -213,8 +213,11 @@ Files: `client/lib/presentation/providers/auth_provider.dart`,
 - The social sign-in request carries the current anonymous bearer token so
   the plugin can link. After link the new token is stored and
   `authProvider` is invalidated exactly as a sign-in is today.
-- `main.dart`: `noSession` renders the first-run flow; `session` renders the
-  shell. `ServiceGate` is removed; `choose_service_screen.dart` goes.
+- `main.dart`: `noSession` renders the existing sign-in screen until Task 9
+  swaps in the first-run flow; `session` renders the shell. (Deviation,
+  2026-10-20: `ServiceGate` removal moved to Task 9, since removing it before
+  the first-run screens exist leaves new listeners no way to choose a
+  service.)
 - Tests: the three-way switch; the sign-in request header; the anonymous
   token survives a cold start.
 
@@ -231,6 +234,12 @@ with the pubspec entry, widget tests under `client/test/screens/`.
   Semantics label carries the step.
 - Reuse `spotify_request_screen.dart` content and `import_sheet.dart` inside
   the step chrome; Library's Add your music pushes the same screens.
+- `main.dart`: `noSession` renders the first-run flow; `session` renders the
+  shell directly. Remove `ServiceGate` and `choose_service_screen.dart` and
+  their tests in this task (moved here from Task 8).
+- Known from Task 8's review: a link from an anonymous session passes the
+  root through `unknown`, so the app remounts and lands on Home rather than
+  the mix. Task 10 decides whether to key the root on status alone.
 - 200 % text scrolls; reduced motion stops the hubs and cross-fades pushes.
 - Tests per screen, matching Task 6's list.
 

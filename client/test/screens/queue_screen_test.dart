@@ -247,7 +247,7 @@ class FakeBridge implements MusicKitBridge {
   }
 }
 
-/// authProvider override settled at a stable signedIn status — no real
+/// authProvider override settled at a stable session status — no real
 /// keychain restore, no async transition mid-test (same pattern used across
 /// dj_providers_test.dart and chat_screen_test.dart).
 class TestAuthNotifier extends AuthNotifier {
@@ -378,7 +378,7 @@ ProviderContainer _makeContainer(
     overrides: [
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
       djApiProvider.overrideWithValue(api),
-      authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.signedIn)),
+      authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.session)),
       musicKitBridgeProvider.overrideWithValue(bridge ?? FakeBridge()),
       // The real store hits the keychain platform channel, which doesn't
       // exist under testWidgets.

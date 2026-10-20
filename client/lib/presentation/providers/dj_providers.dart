@@ -794,7 +794,7 @@ class MemoriesNotifier extends AsyncNotifier<List<DjMemory>> {
   /// Unknown results must be reloaded before another destructive action.
   bool get canForget =>
       ref.mounted &&
-      ref.read(authProvider) == AuthStatus.signedIn &&
+      ref.read(authProvider) == AuthStatus.session &&
       _known &&
       !_writing;
 

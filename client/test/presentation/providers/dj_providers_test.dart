@@ -229,7 +229,7 @@ ProviderContainer _makeContainer(
     overrides: [
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
       djApiProvider.overrideWithValue(api),
-      authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.signedIn)),
+      authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.session)),
       // The personal-mix milestone reads the listener and the import state
       // from onboarding and remembers itself in the keychain.
       listeningApiProvider.overrideWithValue(listening ?? FakeListeningApi()),
@@ -340,7 +340,7 @@ void main() {
     });
 
     test('auth transition rebuilds and reloads the sessions list', () async {
-      final testAuth = TestAuthNotifier(AuthStatus.signedIn);
+      final testAuth = TestAuthNotifier(AuthStatus.session);
       final api = FakeDjApi();
       api.onListSessions = () async => [_session(id: 's1')];
       final container = ProviderContainer(
@@ -355,7 +355,7 @@ void main() {
       await container.read(sessionsProvider.future);
       expect(api.listSessionsCallCount, 1);
 
-      testAuth.set(AuthStatus.signedOut);
+      testAuth.set(AuthStatus.noSession);
       await container.read(sessionsProvider.future);
 
       expect(api.listSessionsCallCount, 2);
@@ -1204,7 +1204,7 @@ void main() {
     });
 
     test('auth transition rebuilds and reloads the memories list', () async {
-      final testAuth = TestAuthNotifier(AuthStatus.signedIn);
+      final testAuth = TestAuthNotifier(AuthStatus.session);
       final api = FakeDjApi();
       api.onListMemories = () async => [DjMemory(id: 'm1', note: 'note 1', createdAt: DateTime(2026, 1, 1))];
       final container = ProviderContainer(
@@ -1219,7 +1219,7 @@ void main() {
       await container.read(memoriesProvider.future);
       expect(api.listMemoriesCallCount, 1);
 
-      testAuth.set(AuthStatus.signedOut);
+      testAuth.set(AuthStatus.noSession);
       await container.read(memoriesProvider.future);
 
       expect(api.listMemoriesCallCount, 2);

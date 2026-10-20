@@ -28,7 +28,7 @@ ProviderContainer _container({
   final container = ProviderContainer(
     overrides: [
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
-      authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.signedIn)),
+      authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.session)),
       listeningApiProvider.overrideWithValue(listening),
       servicePreferenceStoreProvider.overrideWithValue(InMemoryServicePreferenceStore()),
       funnelOnceStoreProvider.overrideWithValue(store),

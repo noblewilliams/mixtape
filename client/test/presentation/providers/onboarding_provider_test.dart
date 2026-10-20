@@ -74,7 +74,7 @@ Future<ProviderContainer> _container(
     overrides: [
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
       listeningApiProvider.overrideWithValue(api),
-      authProvider.overrideWith(() => auth ?? TestAuthNotifier(AuthStatus.signedIn)),
+      authProvider.overrideWith(() => auth ?? TestAuthNotifier(AuthStatus.session)),
       servicePreferenceStoreProvider
           .overrideWithValue(prefs ?? InMemoryServicePreferenceStore()),
     ],
@@ -209,12 +209,12 @@ void main() {
 
   test('an auth transition rebuilds the state for the next listener', () async {
     final server = _Server([_spotify, _blank]);
-    final testAuth = TestAuthNotifier(AuthStatus.signedIn);
+    final testAuth = TestAuthNotifier(AuthStatus.session);
     final container = await _container(server, auth: testAuth);
     await container.read(onboardingProvider.future);
     expect(container.read(onboardingProvider).value?.chosenService, 'spotify');
 
-    testAuth.set(AuthStatus.signedOut);
+    testAuth.set(AuthStatus.noSession);
     await container.read(onboardingProvider.future);
 
     expect(server.onboardingGets, 2);

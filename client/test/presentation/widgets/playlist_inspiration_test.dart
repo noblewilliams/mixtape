@@ -14,7 +14,7 @@ import 'package:mixtape/presentation/widgets/foundation/mixtape_menu.dart';
 
 class SignedIn extends AuthNotifier {
   @override
-  AuthStatus build() => AuthStatus.signedIn;
+  AuthStatus build() => AuthStatus.session;
 }
 
 PlaylistSummary playlist(

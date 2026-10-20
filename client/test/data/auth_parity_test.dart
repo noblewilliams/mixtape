@@ -27,10 +27,10 @@ class SlowStore extends InMemoryTokenStore {
   final writing = Completer<void>();
   final release = Completer<void>();
   @override
-  Future<void> write(String token) async {
+  Future<void> write(String token, {bool anonymous = false}) async {
     if (!writing.isCompleted) writing.complete();
     await release.future;
-    await super.write(token);
+    await super.write(token, anonymous: anonymous);
   }
 }
 

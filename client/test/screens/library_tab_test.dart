@@ -173,7 +173,7 @@ ProviderContainer _container({
               ),
             ),
       ),
-      authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.signedIn)),
+      authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.session)),
       reminderSchedulerProvider.overrideWithValue(FakeReminderScheduler()),
       servicePreferenceStoreProvider.overrideWithValue(
         InMemoryServicePreferenceStore(),

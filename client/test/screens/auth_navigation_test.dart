@@ -8,7 +8,7 @@ import 'package:mixtape/presentation/screens/sign_in_screen.dart';
 class ControlledAuth extends AuthNotifier {
   @override
   AuthStatus build() => AuthStatus.unknown;
-  void expire() => state = AuthStatus.signedOut;
+  void expire() => state = AuthStatus.noSession;
 }
 
 void main() {

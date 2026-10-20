@@ -48,7 +48,7 @@ class SessionPlaylistContextNotifier
     ref.onDispose(() {
       _generation++;
     });
-    if (auth != AuthStatus.signedIn) {
+    if (auth != AuthStatus.session) {
       return const SessionPlaylistContextState();
     }
     // Defer mutation until build has returned its initial loading state.
@@ -66,7 +66,7 @@ class SessionPlaylistContextNotifier
       ref.mounted &&
       generation == _generation &&
       operation == _operation &&
-      ref.read(authProvider) == AuthStatus.signedIn;
+      ref.read(authProvider) == AuthStatus.session;
 
   Future<bool> _load(
     PlaylistContextApi api,
@@ -103,7 +103,7 @@ class SessionPlaylistContextNotifier
 
   Future<bool> refresh() async {
     if (!ref.mounted ||
-        ref.read(authProvider) != AuthStatus.signedIn ||
+        ref.read(authProvider) != AuthStatus.session ||
         state.writing) {
       return false;
     }
@@ -119,7 +119,7 @@ class SessionPlaylistContextNotifier
     bool excludeSourceTracks = false,
   }) async {
     if (!ref.mounted ||
-        ref.read(authProvider) != AuthStatus.signedIn ||
+        ref.read(authProvider) != AuthStatus.session ||
         !state.canSelect) {
       return false;
     }

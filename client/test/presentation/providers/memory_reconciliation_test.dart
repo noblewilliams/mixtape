@@ -18,7 +18,7 @@ void main() {
   late ProviderContainer container;
   setUp(() {
     api = FakeDjApi()..onListMemories = () async => [note];
-    auth = TestAuthNotifier(AuthStatus.signedIn);
+    auth = TestAuthNotifier(AuthStatus.session);
     container = ProviderContainer(
       overrides: [
         djApiProvider.overrideWithValue(api),
@@ -80,7 +80,7 @@ void main() {
       final pending = Completer<void>();
       api.onDeleteMemory = (_) => pending.future;
       final mutation = container.read(memoriesProvider.notifier).forget('note');
-      auth.set(AuthStatus.signedOut);
+      auth.set(AuthStatus.noSession);
       await container.read(memoriesProvider.future);
       pending.complete();
       expect(await mutation, isFalse);

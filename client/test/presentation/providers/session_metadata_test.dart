@@ -27,7 +27,7 @@ void main() {
   late ProviderContainer container;
   setUp(() {
     api = FakeDjApi()..onListSessions = () async => [session()];
-    auth = TestAuthNotifier(AuthStatus.signedIn);
+    auth = TestAuthNotifier(AuthStatus.session);
     container = ProviderContainer(
       overrides: [
         djApiProvider.overrideWithValue(api),
@@ -98,7 +98,7 @@ void main() {
       api.onSetStatus = (_, _) => patch.future;
       final archive = container.read(sessionsProvider.notifier).archive('mix');
       api.onListSessions = () async => [session(title: 'New account')];
-      auth.set(AuthStatus.signedOut);
+      auth.set(AuthStatus.noSession);
       await container.read(sessionsProvider.future);
       patch.complete(session(status: 'archived'));
       expect(await archive, isFalse);
@@ -117,7 +117,7 @@ void main() {
       api.onListSessions = () => oldList.future;
       final refresh = container.read(sessionsProvider.notifier).refresh();
       api.onListSessions = () async => [session(title: 'New account')];
-      auth.set(AuthStatus.signedOut);
+      auth.set(AuthStatus.noSession);
       await container.read(sessionsProvider.future);
       oldList.complete([session()]);
       expect(await refresh, isFalse);

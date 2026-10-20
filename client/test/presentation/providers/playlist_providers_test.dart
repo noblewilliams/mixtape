@@ -10,7 +10,7 @@ import 'package:mixtape/presentation/providers/playlist_providers.dart';
 
 class TestAuthNotifier extends AuthNotifier {
   @override
-  AuthStatus build() => AuthStatus.signedIn;
+  AuthStatus build() => AuthStatus.session;
 }
 
 class FakePlaylistEditApi implements PlaylistEditApi {

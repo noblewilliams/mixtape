@@ -151,7 +151,7 @@ class FakeDjApi implements DjApi {
   void close() {}
 }
 
-/// authProvider override settled at a stable signedIn status — no real
+/// authProvider override settled at a stable session status — no real
 /// keychain restore, no async transition mid-test (same pattern as
 /// dj_providers_test.dart's TestAuthNotifier).
 class TestAuthNotifier extends AuthNotifier {
@@ -189,7 +189,7 @@ ProviderContainer _makeContainer(
     // The panel's first idea pill. No platform time zone channel in a test.
     suggestionsApiProvider.overrideWithValue(suggestions ?? FakeSuggestions()),
     suggestionTimeZoneProvider.overrideWithValue(() async => 'UTC'),
-    authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.signedIn)),
+    authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.session)),
   ];
   final container = ProviderContainer(overrides: overrides);
   addTearDown(container.dispose);

@@ -58,7 +58,7 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
       if (!mounted ||
           identical(_expiryAttempted, observed) ||
           !identical(ref.read(accountProvider), observed) ||
-          ref.read(authProvider) != AuthStatus.signedIn) {
+          ref.read(authProvider) != AuthStatus.session) {
         return;
       }
       _expiryAttempted = observed;

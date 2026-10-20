@@ -428,7 +428,7 @@ class _PlaylistPickerState extends ConsumerState<_PlaylistPicker> {
     _load(reset: true);
   }
 
-  bool get _signedIn => ref.read(authProvider) == AuthStatus.signedIn;
+  bool get _signedIn => ref.read(authProvider) == AuthStatus.session;
 
   Future<void> _load({required bool reset}) async {
     if (!reset && _loading) return;
@@ -498,7 +498,7 @@ class _PlaylistPickerState extends ConsumerState<_PlaylistPicker> {
   @override
   Widget build(BuildContext context) {
     final auth = ref.watch(authProvider);
-    if (auth != AuthStatus.signedIn && !_closing) {
+    if (auth != AuthStatus.session && !_closing) {
       _closing = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) Navigator.of(context).pop();

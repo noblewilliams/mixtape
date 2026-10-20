@@ -101,9 +101,9 @@ void main() {
       dj.send = () => pending.future;
       final sent = container.read(chat.notifier).send('Old account');
       final auth = container.read(authProvider.notifier) as TestAuth;
-      auth.set(AuthStatus.signedOut);
+      auth.set(AuthStatus.noSession);
       await container.pump();
-      auth.set(AuthStatus.signedIn);
+      auth.set(AuthStatus.session);
       await container.pump();
       await Future<void>.delayed(Duration.zero);
       pending.completeError(ApiException(500, ''));
@@ -129,10 +129,10 @@ void main() {
       final sent = container.read(chat.notifier).send('Old account');
       await started.future;
       final auth = container.read(authProvider.notifier) as TestAuth;
-      auth.set(AuthStatus.signedOut);
+      auth.set(AuthStatus.noSession);
       dj.read = null;
       await container.pump();
-      auth.set(AuthStatus.signedIn);
+      auth.set(AuthStatus.session);
       await container.pump();
       await Future<void>.delayed(Duration.zero);
       recovery.complete(

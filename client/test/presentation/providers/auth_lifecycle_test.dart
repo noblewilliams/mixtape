@@ -51,13 +51,13 @@ void main() {
       await settle();
       final notifier = container.read(authProvider.notifier);
       final request = notifier.signIn(provider: AccountProvider.google);
-      expect(container.read(authProvider), AuthStatus.signedOut);
+      expect(container.read(authProvider), AuthStatus.noSession);
       await expectLater(notifier.signIn(), throwsA(isA<AuthOperationBusy>()));
       response.complete(
         http.Response('{}', 200, headers: {'set-auth-token': 'session'}),
       );
       await request;
-      expect(container.read(authProvider), AuthStatus.signedIn);
+      expect(container.read(authProvider), AuthStatus.session);
     },
   );
   test(
@@ -94,7 +94,7 @@ void main() {
       await notifier.signOut();
       apple.token.complete('late-identity');
       await expectLater(request, throwsA(isA<AuthOperationCancelled>()));
-      expect(container.read(authProvider), AuthStatus.signedOut);
+      expect(container.read(authProvider), AuthStatus.noSession);
       expect(await store.read(), isNull);
       expect(calls, 0);
     },
@@ -137,7 +137,7 @@ void main() {
       await container
           .read(authProvider.notifier)
           .signIn(provider: AccountProvider.google);
-      expect(container.read(authProvider), AuthStatus.signedIn);
+      expect(container.read(authProvider), AuthStatus.session);
       expect(await store.read(), 'new');
     },
   );

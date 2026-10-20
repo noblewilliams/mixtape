@@ -103,7 +103,7 @@ class FakeDjApi implements DjApi {
   void close() {}
 }
 
-/// authProvider settled at signedIn — no keychain restore, no async auth
+/// authProvider settled at session — no keychain restore, no async auth
 /// transition mid-test (home_screen_test.dart's pattern).
 class TestAuthNotifier extends AuthNotifier {
   TestAuthNotifier(this._initial);
@@ -132,7 +132,7 @@ ProviderContainer _makeContainer(FakeDjApi api) {
     overrides: [
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
       djApiProvider.overrideWithValue(api),
-      authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.signedIn)),
+      authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.session)),
     ],
   );
   addTearDown(container.dispose);
