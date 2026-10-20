@@ -16,10 +16,12 @@ import { drizzle } from 'drizzle-orm/neon-http'
 import * as schema from '../src/db/schema'
 import { funnelEvents } from '../src/db/schema'
 import type { Db } from '../src/db/types'
-import { FUNNEL_EVENT_TYPES, type FunnelEventType } from '../src/seeds/contracts'
+import { SPOTIFY_FUNNEL_EVENT_TYPES, type FunnelEventType } from '../src/seeds/contracts'
 import { loadDevVars } from './lib/dev-vars'
 
-export const FUNNEL_ORDER = FUNNEL_EVENT_TYPES
+// The Spotify-listener chain only; the first-run events (spec 2026-10-20)
+// branch and are not reported here yet.
+export const FUNNEL_ORDER = SPOTIFY_FUNNEL_EVENT_TYPES
 
 export type FunnelReport = {
   steps: Array<{ type: FunnelEventType; users: number }>

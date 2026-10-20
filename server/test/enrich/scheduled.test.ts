@@ -12,6 +12,7 @@ import {
 } from '../../src/enrich/scheduled'
 import worker from '../../src/index'
 import { tracks, trackFeatures, trackMeanings } from '../../src/db/schema'
+import { user } from '../../src/db/auth-schema'
 import type { PlaylistCatalogResult } from '../../src/playlists/catalog-resolution'
 
 const emptyCatalog: PlaylistCatalogResult = { processed: 0, matched: 0, missing: 0, failed: 0, linkedEntries: 0 }
@@ -38,6 +39,7 @@ function recordingRunners(order: string[]) {
       return { ...cleanup, deletedTracks: 0, deletedDays: 0, deletedLibraryTracks: 0, deletedArtists: 0 }
     }),
     playlistCleanup: vi.fn(async () => { order.push('playlistCleanup'); return { ...cleanup, deletedEntries: 0, deletedPlaylists: 0 } }),
+    anonymousRetention: vi.fn(async () => { order.push('anonymousRetention'); return { expired: 0 } }),
     playlistCatalog: vi.fn(async () => { order.push('playlistCatalog'); return emptyCatalog }),
     twinCopy: vi.fn(async () => { order.push('twinCopy'); return emptyTwins }),
     enrichment: vi.fn(async () => { order.push('enrichment'); return emptyEnrichment }),
@@ -75,17 +77,18 @@ describe('cron dispatch', () => {
 })
 
 describe('handleScheduled', () => {
-  it('the maintenance set runs cleanup, catalogue resolution, Apple artwork and the ISRC backfill, in order, and nothing else', async () => {
+  it('the maintenance set runs cleanup, anonymous retention, catalogue resolution, Apple artwork and the ISRC backfill, in order, and nothing else', async () => {
     const db = await createTestDb()
     const order: string[] = []
     const runners = recordingRunners(order)
     const result = await handleScheduled(db, 'maintenance', allDeps, runners)
     expect(order).toEqual([
-      'libraryCleanup', 'listeningCleanup', 'playlistCleanup', 'playlistCatalog', 'artwork', 'isrcBackfill',
+      'libraryCleanup', 'listeningCleanup', 'playlistCleanup', 'anonymousRetention', 'playlistCatalog', 'artwork', 'isrcBackfill',
     ])
     expect(Object.keys(result).sort()).toEqual([
-      'artwork', 'isrcBackfill', 'libraryCleanup', 'listeningCleanup', 'playlistCatalog', 'playlistCleanup',
+      'anonymous_expired', 'artwork', 'isrcBackfill', 'libraryCleanup', 'listeningCleanup', 'playlistCatalog', 'playlistCleanup',
     ])
+    expect(runners.anonymousRetention).toHaveBeenCalledWith(db)
     expect(runners.isrcBackfill).toHaveBeenCalledWith(db, allDeps.artwork)
   })
 
@@ -241,6 +244,7 @@ describe('handleScheduled', () => {
       libraryCleanup: expect.objectContaining({ touchedRuns: 0 }),
       listeningCleanup: expect.objectContaining({ touchedRuns: 0 }),
       playlistCleanup: expect.objectContaining({ touchedRuns: 0 }),
+      anonymous_expired: 0,
     })
     expect(JSON.stringify(result)).not.toContain('secret')
   })
@@ -313,6 +317,7 @@ describe('handleScheduled', () => {
       libraryCleanup: expect.objectContaining({ touchedRuns: 0 }),
       listeningCleanup: { error: 'failed' },
       playlistCleanup: expect.objectContaining({ touchedRuns: 0 }),
+      anonymous_expired: 0,
     })
   })
 
@@ -334,6 +339,7 @@ describe('handleScheduled', () => {
       libraryCleanup: { error: 'failed' },
       listeningCleanup: expect.objectContaining({ touchedRuns: 0 }),
       playlistCleanup: expect.objectContaining({ touchedRuns: 0 }),
+      anonymous_expired: 0,
     })
   })
 
@@ -356,6 +362,34 @@ describe('handleScheduled', () => {
       libraryCleanup: expect.objectContaining({ touchedRuns: 0 }),
       listeningCleanup: expect.objectContaining({ touchedRuns: 0 }),
       playlistCleanup: { error: 'failed' },
+      anonymous_expired: 0,
     })
+  })
+
+  it('expires idle anonymous users and carries the count in the maintenance cron line', async () => {
+    const db = await createTestDb()
+    const longAgo = new Date(Date.now() - 31 * 24 * 60 * 60 * 1_000)
+    await db.insert(user).values([
+      { id: 'anon', name: 'Listener', email: 'anon@anonymous.mixtape.invalid', isAnonymous: true, createdAt: longAgo, updatedAt: longAgo },
+      { id: 'acct', name: 'A', email: 'a@example.com', createdAt: longAgo, updatedAt: longAgo },
+    ])
+    const result = await handleScheduled(db, 'maintenance', {})
+    expect(result.anonymous_expired).toBe(1)
+    expect(JSON.stringify({ jobs: 'maintenance', ...result })).toContain('"anonymous_expired":1')
+    expect((await db.select({ id: user.id }).from(user)).map((r) => r.id)).toEqual(['acct'])
+  })
+
+  it('keeps the rest of maintenance running after anonymous retention fails, without the error text', async () => {
+    const db = await createTestDb()
+    const artwork = vi.fn(async () => emptyArtwork)
+    const result = await handleScheduled(db, 'maintenance', { artwork: { storefront: 'ng', catalog } }, {
+      anonymousRetention: vi.fn(async () => { throw new Error('secret retention failure') }),
+      playlistCatalog: vi.fn(async () => emptyCatalog),
+      artwork,
+      isrcBackfill: vi.fn(async () => emptyIsrcBackfill),
+    })
+    expect(result.anonymous_expired).toEqual({ error: 'failed' })
+    expect(artwork).toHaveBeenCalledOnce()
+    expect(JSON.stringify(result)).not.toContain('secret')
   })
 })

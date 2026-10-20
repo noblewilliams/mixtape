@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { createApp, type AuthLike } from '../../src/app'
 import { funnelEvents } from '../../src/db/schema'
-import { FUNNEL_EVENT_TYPES } from '../../src/seeds/contracts'
+import { FUNNEL_EVENT_TYPES, funnelEventSchema } from '../../src/seeds/contracts'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { seedUser } from '../helpers/listening-fixtures'
 
@@ -18,6 +18,25 @@ function post(db: TestDb, auth: AuthLike, body: unknown) {
     body: JSON.stringify(body),
   })
 }
+
+const FIRST_RUN_TYPES = [
+  'first_run_opened', 'chose_make_mix', 'chose_add_music', 'chose_service', 'chose_method',
+  'sync_done', 'first_mix_made', 'first_mix_refused', 'keep_sheet_shown', 'keep_sheet_signed_in',
+  'keep_sheet_dismissed', 'cap_reached', 'account_linked_new', 'account_linked_existing',
+]
+
+describe('funnelEventSchema', () => {
+  it('accepts the first-run funnel types (spec 2026-10-20) and keeps the earlier ones', () => {
+    for (const type of FIRST_RUN_TYPES) {
+      expect(funnelEventSchema.safeParse({ type, surface: 'web' }).success, type).toBe(true)
+    }
+    expect(FUNNEL_EVENT_TYPES).toEqual(expect.arrayContaining([
+      'chose_spotify', 'marked_requested', 'interview_completed', 'file_inspected',
+      'import_completed', 'first_personal_mix', 'first_output', ...FIRST_RUN_TYPES,
+    ]))
+    expect(FUNNEL_EVENT_TYPES).toHaveLength(7 + FIRST_RUN_TYPES.length)
+  })
+})
 
 describe('POST /me/funnel-events', () => {
   it('401s without a session', async () => {

@@ -253,6 +253,13 @@
       "when": 1792509467099,
       "tag": "0035_anonymous_users",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1792510720074,
+      "tag": "0036_first_run_funnel_events",
+      "breakpoints": true
     }
   ]
 }

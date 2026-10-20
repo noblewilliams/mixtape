@@ -20,6 +20,7 @@ import {
   cleanupListeningImportStaging,
   type ListeningImportCleanupResult,
 } from '../listening/cleanup'
+import { expireAnonymousUsers } from '../jobs/anonymous-retention'
 import { runPlaylistCatalogBatch, type PlaylistCatalogResult } from '../playlists/catalog-resolution'
 import { runTwinCopy, type TwinCopyResult } from './twin-copy'
 import { runAppleIsrcBatch, type AppleIsrcDeps, type AppleIsrcResult } from './apple-isrc'
@@ -82,12 +83,12 @@ export type ScheduledDeps = {
 
 // Two hourly triggers, two minutes apart, so Postgres wakes once per hour and
 // stays warm for the second. Each invocation gets its own 50-subrequest and
-// 10 ms CPU budget: maintenance (cleanup, playlist catalogue resolution, Apple
-// artwork, then the Apple ISRC backfill's single catalogue request) on the
-// hour, then twin copy, enrichment, Apple ISRC linking and the Spotify artwork
-// fallback. Linking follows enrichment because enrichment
-// produces ISRCs; the fallback follows linking so Apple gets its chance before
-// a Spotify or Deezer thumbnail is written.
+// 10 ms CPU budget: maintenance (cleanup, anonymous-user retention, playlist
+// catalogue resolution, Apple artwork, then the Apple ISRC backfill's single
+// catalogue request) on the hour, then twin copy, enrichment, Apple ISRC
+// linking and the Spotify artwork fallback. Linking follows enrichment because
+// enrichment produces ISRCs; the fallback follows linking so Apple gets its
+// chance before a Spotify or Deezer thumbnail is written.
 // Keep these equal to `triggers.crons` in wrangler.jsonc.
 export const MAINTENANCE_CRON = '0 * * * *'
 export const ENRICHMENT_CRON = '2 * * * *'
@@ -113,6 +114,8 @@ export type ScheduledResult = {
   playlistCleanup?: PlaylistSyncCleanupResult | FailedRun
   libraryCleanup?: LibrarySyncCleanupResult | FailedRun
   listeningCleanup?: ListeningImportCleanupResult | FailedRun
+  // A bare count so the cron line reads `anonymous_expired` (spec 2026-10-20).
+  anonymous_expired?: number | FailedRun
 }
 
 type ScheduledRunners = {
@@ -126,6 +129,7 @@ type ScheduledRunners = {
   playlistCleanup: typeof cleanupPlaylistSyncStaging
   libraryCleanup: typeof cleanupLibrarySyncStaging
   listeningCleanup: typeof cleanupListeningImportStaging
+  anonymousRetention: typeof expireAnonymousUsers
 }
 
 export async function handleScheduled(
@@ -151,6 +155,7 @@ async function runMaintenance(
   const runPlaylistCleanup = runners.playlistCleanup ?? cleanupPlaylistSyncStaging
   const runLibraryCleanup = runners.libraryCleanup ?? cleanupLibrarySyncStaging
   const runListeningCleanup = runners.listeningCleanup ?? cleanupListeningImportStaging
+  const runAnonymousRetention = runners.anonymousRetention ?? expireAnonymousUsers
 
   try {
     result.libraryCleanup = await runLibraryCleanup(db)
@@ -168,6 +173,13 @@ async function runMaintenance(
     result.playlistCleanup = await runPlaylistCleanup(db)
   } catch {
     result.playlistCleanup = { error: 'failed' }
+  }
+
+  // One DELETE, no outbound fetch: the subrequest budget is untouched.
+  try {
+    result.anonymous_expired = (await runAnonymousRetention(db)).expired
+  } catch {
+    result.anonymous_expired = { error: 'failed' }
   }
 
   // Reuse the existing server-only catalog client. The resolver selects each

@@ -387,7 +387,8 @@ export const sessionEvents = pgTable(
   (t) => [index('session_events_session_idx').on(t.sessionId, t.createdAt)],
 )
 
-// Spotify-listener funnel steps, counts only (spec 2026-09-01 → Funnel).
+// Funnel steps, counts only (spec 2026-09-01 → Funnel; first-run steps from
+// spec 2026-10-20).
 export const funnelEvents = pgTable(
   'funnel_events',
   {
@@ -404,6 +405,20 @@ export const funnelEvents = pgTable(
         'import_completed',
         'first_personal_mix',
         'first_output',
+        'first_run_opened',
+        'chose_make_mix',
+        'chose_add_music',
+        'chose_service',
+        'chose_method',
+        'sync_done',
+        'first_mix_made',
+        'first_mix_refused',
+        'keep_sheet_shown',
+        'keep_sheet_signed_in',
+        'keep_sheet_dismissed',
+        'cap_reached',
+        'account_linked_new',
+        'account_linked_existing',
       ],
     }).notNull(),
     surface: text('surface', { enum: ['ios', 'web'] }).notNull(),
@@ -414,7 +429,7 @@ export const funnelEvents = pgTable(
     index('funnel_events_user_idx').on(t.userId, t.createdAt),
     check(
       'funnel_events_type_check',
-      sql`${t.type} IN ('chose_spotify', 'marked_requested', 'interview_completed', 'file_inspected', 'import_completed', 'first_personal_mix', 'first_output')`,
+      sql`${t.type} IN ('chose_spotify', 'marked_requested', 'interview_completed', 'file_inspected', 'import_completed', 'first_personal_mix', 'first_output', 'first_run_opened', 'chose_make_mix', 'chose_add_music', 'chose_service', 'chose_method', 'sync_done', 'first_mix_made', 'first_mix_refused', 'keep_sheet_shown', 'keep_sheet_signed_in', 'keep_sheet_dismissed', 'cap_reached', 'account_linked_new', 'account_linked_existing')`,
     ),
     check('funnel_events_surface_check', sql`${t.surface} IN ('ios', 'web')`),
   ],

@@ -36,9 +36,9 @@ export const interviewSchema = z.object({
 }).strict()
 export type InterviewAnswers = z.infer<typeof interviewSchema>
 
-// Funnel order (spec 2026-09-01 → Funnel); the schema check on
-// funnel_events.type lists the same values.
-export const FUNNEL_EVENT_TYPES = [
+// Spotify-listener funnel, in order (spec 2026-09-01 → Funnel). The funnel
+// report walks this list step to step.
+export const SPOTIFY_FUNNEL_EVENT_TYPES = [
   'chose_spotify',
   'marked_requested',
   'interview_completed',
@@ -47,6 +47,27 @@ export const FUNNEL_EVENT_TYPES = [
   'first_personal_mix',
   'first_output',
 ] as const
+// First-run funnel, one-time per anonymous user (spec 2026-10-20 → Clients,
+// Funnel events). Not a strict chain: the make-mix and add-music paths branch.
+export const FIRST_RUN_FUNNEL_EVENT_TYPES = [
+  'first_run_opened',
+  'chose_make_mix',
+  'chose_add_music',
+  'chose_service',
+  'chose_method',
+  'sync_done',
+  'first_mix_made',
+  'first_mix_refused',
+  'keep_sheet_shown',
+  'keep_sheet_signed_in',
+  'keep_sheet_dismissed',
+  'cap_reached',
+  'account_linked_new',
+  'account_linked_existing',
+] as const
+// Every accepted type; the schema check on funnel_events.type lists the same
+// values in the same order.
+export const FUNNEL_EVENT_TYPES = [...SPOTIFY_FUNNEL_EVENT_TYPES, ...FIRST_RUN_FUNNEL_EVENT_TYPES] as const
 export type FunnelEventType = (typeof FUNNEL_EVENT_TYPES)[number]
 
 export const funnelEventSchema = z.object({
