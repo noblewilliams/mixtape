@@ -2,7 +2,7 @@ import {
   parseArtworkMetadata,
   type ArtworkMetadata,
 } from '../artwork/normalize'
-import { isAppleSongId } from './apple-id'
+import { isAppleCatalogId, isAppleSongId } from './apple-id'
 
 export { parseArtworkMetadata } from '../artwork/normalize'
 export type { ArtworkMetadata } from '../artwork/normalize'
@@ -32,6 +32,25 @@ export type AppleIsrcCatalogClient = {
 
 export type AppleCatalogSearchClient = {
   searchSongs(storefront: string, term: string, limit: number): Promise<CatalogSong[]>
+}
+
+export type CatalogAlbum = {
+  appleId: string
+  upc: string | null
+  title: string
+  artist: string
+  releaseYear: number | null
+  trackCount: number | null
+  durationMs: number | null
+  isSingle: boolean
+  isCompilation: boolean
+  genre: string | null
+  artwork: ArtworkMetadata | null
+}
+
+export type AppleCatalogAlbumClient = {
+  searchAlbums(storefront: string, term: string, limit: number): Promise<CatalogAlbum[]>
+  getAlbums(storefront: string, ids: readonly string[]): Promise<Map<string, CatalogAlbum>>
 }
 
 export type AppleCatalogErrorCategory =
@@ -69,6 +88,13 @@ export function createAppleCatalogTokenCache(): AppleCatalogTokenCache {
 const API_ROOT = 'https://api.music.apple.com'
 const MAX_IDS_PER_REQUEST = 300
 const MAX_ISRCS_PER_REQUEST = 25
+// The album fetch returns the full tracks relationship, so a 100-id batch can
+// be large; callers in this codebase pass a handful of ids per turn, so the
+// bounded 5 MB read is not a practical concern. Lower this if a caller ever
+// needs many albums at once.
+const MAX_ALBUM_IDS_PER_REQUEST = 100
+const MAX_ALBUM_SEARCH_LIMIT = 10
+const MAX_INT32 = 2147483647
 const DEFAULT_TIMEOUT_MS = 5000
 const DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 const TOKEN_REFRESH_MARGIN_SECONDS = 60
@@ -91,13 +117,55 @@ function parseSong(value: unknown): CatalogSong | null {
     artwork: parseArtworkMetadata(attributes.artwork),
     durationMs: typeof attributes.durationInMillis === 'number'
       && Number.isInteger(attributes.durationInMillis)
-      && attributes.durationInMillis > 0 && attributes.durationInMillis <= 2147483647
+      && attributes.durationInMillis > 0 && attributes.durationInMillis <= MAX_INT32
       ? attributes.durationInMillis : null,
     genre: Array.isArray(attributes.genreNames) && typeof attributes.genreNames[0] === 'string'
       ? attributes.genreNames[0] : null,
     releaseYear: typeof attributes.releaseDate === 'string' && /^\d{4}(?:-\d{2}-\d{2})?$/.test(attributes.releaseDate)
       ? Number(attributes.releaseDate.slice(0, 4)) : null,
     explicit: attributes.contentRating === 'explicit' ? true : attributes.contentRating === 'clean' ? false : null,
+  }
+}
+
+// Total running time from the album's tracks relationship. Null unless every
+// track on a complete (unpaginated) relationship carries a valid duration:
+// a partial sum would understate the record.
+function albumDurationMs(value: Record<string, unknown>): number | null {
+  if (!isRecord(value.relationships) || !isRecord(value.relationships.tracks)) return null
+  const relationship = value.relationships.tracks
+  if (relationship.next != null || !Array.isArray(relationship.data) || relationship.data.length === 0) return null
+  let total = 0
+  for (const track of relationship.data) {
+    if (!isRecord(track) || !isRecord(track.attributes)) return null
+    const duration = track.attributes.durationInMillis
+    if (typeof duration !== 'number' || !Number.isInteger(duration) || duration <= 0) return null
+    total += duration
+    if (total > MAX_INT32) return null
+  }
+  return total
+}
+
+function parseAlbum(value: unknown): CatalogAlbum | null {
+  if (!isRecord(value) || value.type !== 'albums' || typeof value.id !== 'string' || !isRecord(value.attributes)) return null
+  const attributes = value.attributes
+  if (typeof attributes.name !== 'string' || typeof attributes.artistName !== 'string') return null
+
+  return {
+    appleId: value.id,
+    upc: typeof attributes.upc === 'string' && /^\d{8,14}$/.test(attributes.upc) ? attributes.upc : null,
+    title: attributes.name,
+    artist: attributes.artistName,
+    releaseYear: typeof attributes.releaseDate === 'string' && /^\d{4}(?:-\d{2}-\d{2})?$/.test(attributes.releaseDate)
+      ? Number(attributes.releaseDate.slice(0, 4)) : null,
+    trackCount: typeof attributes.trackCount === 'number' && Number.isInteger(attributes.trackCount)
+      && attributes.trackCount > 0 && attributes.trackCount <= MAX_INT32
+      ? attributes.trackCount : null,
+    durationMs: albumDurationMs(value),
+    isSingle: attributes.isSingle === true,
+    isCompilation: attributes.isCompilation === true,
+    genre: Array.isArray(attributes.genreNames) && typeof attributes.genreNames[0] === 'string'
+      ? attributes.genreNames[0] : null,
+    artwork: parseArtworkMetadata(attributes.artwork),
   }
 }
 
@@ -161,7 +229,7 @@ export function createAppleCatalogClient({
   maxResponseBytes?: number
   tokenCache?: AppleCatalogTokenCache
   tokenCacheKey?: string
-}): AppleCatalogClient & AppleIsrcCatalogClient & AppleCatalogSearchClient {
+}): AppleCatalogClient & AppleIsrcCatalogClient & AppleCatalogSearchClient & AppleCatalogAlbumClient {
   async function token(): Promise<string> {
     let cachedToken = tokenCache.get(tokenCacheKey)
     if (!cachedToken || cachedToken.expiresAt - TOKEN_REFRESH_MARGIN_SECONDS <= nowSeconds()) {
@@ -207,9 +275,14 @@ export function createAppleCatalogClient({
     }
   }
 
-  async function requestBatch(storefront: string, ids: readonly string[], filter = 'ids'): Promise<unknown> {
+  async function requestBatch(
+    storefront: string,
+    ids: readonly string[],
+    filter = 'ids',
+    resource: 'songs' | 'albums' = 'songs',
+  ): Promise<unknown> {
     const url = new URL(API_ROOT)
-    url.pathname = `/v1/catalog/${encodeURIComponent(storefront)}/songs`
+    url.pathname = `/v1/catalog/${encodeURIComponent(storefront)}/${resource}`
     url.searchParams.set(filter, ids.join(','))
     return request(url)
   }
@@ -247,6 +320,63 @@ export function createAppleCatalogClient({
         parsed.set(song.appleId, parsed.has(song.appleId) ? null : song)
       }
       return [...parsed.values()].filter((song): song is CatalogSong => song != null)
+    },
+    async searchAlbums(storefront, term, limit) {
+      const normalizedTerm = term.trim()
+      if (
+        !/^[a-z]{2}$/.test(storefront)
+        || normalizedTerm.length < 1
+        || normalizedTerm.length > 120
+        || !Number.isInteger(limit)
+        || limit < 1
+        || limit > MAX_ALBUM_SEARCH_LIMIT
+      ) throw new AppleCatalogError('response')
+
+      const url = new URL(API_ROOT)
+      url.pathname = `/v1/catalog/${encodeURIComponent(storefront)}/search`
+      url.searchParams.set('term', normalizedTerm)
+      url.searchParams.set('types', 'albums')
+      url.searchParams.set('limit', String(limit))
+      const payload = await request(url)
+      if (!isRecord(payload) || !isRecord(payload.results) || payload.errors != null) {
+        throw new AppleCatalogError('response', 200)
+      }
+      // Apple omits the albums key entirely when nothing matches.
+      if (payload.results.albums === undefined) return []
+      if (!isRecord(payload.results.albums) || !Array.isArray(payload.results.albums.data)) {
+        throw new AppleCatalogError('response', 200)
+      }
+
+      const parsed = new Map<string, CatalogAlbum | null>()
+      for (const value of payload.results.albums.data) {
+        const album = parseAlbum(value)
+        if (!album || !isAppleCatalogId(album.appleId)) continue
+        parsed.set(album.appleId, parsed.has(album.appleId) ? null : album)
+      }
+      return [...parsed.values()].filter((album): album is CatalogAlbum => album != null)
+    },
+    async getAlbums(storefront, ids) {
+      const requestedIds = [...new Set(ids.filter(isAppleCatalogId))]
+      const albums = new Map<string, CatalogAlbum>()
+
+      for (let offset = 0; offset < requestedIds.length; offset += MAX_ALBUM_IDS_PER_REQUEST) {
+        const batch = requestedIds.slice(offset, offset + MAX_ALBUM_IDS_PER_REQUEST)
+        const requested = new Set(batch)
+        const seen = new Set<string>()
+        const payload = await requestBatch(storefront, batch, 'ids', 'albums')
+        if (!isRecord(payload) || !Array.isArray(payload.data)) {
+          throw new AppleCatalogError('response', 200)
+        }
+        for (const value of payload.data) {
+          if (!isRecord(value) || typeof value.id !== 'string' || !requested.has(value.id)) continue
+          if (seen.has(value.id)) { albums.delete(value.id); continue }
+          seen.add(value.id)
+          const parsed = parseAlbum(value)
+          if (parsed && requested.has(parsed.appleId)) albums.set(parsed.appleId, parsed)
+        }
+      }
+
+      return albums
     },
     async getSongsByIsrc(storefront, isrcs) {
       const requested = [...new Set(isrcs.map(value => value.toUpperCase())
