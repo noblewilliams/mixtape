@@ -10,6 +10,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixtape/presentation/screens/first_run/choose_service_screen.dart';
+import 'package:mixtape/presentation/screens/first_run/first_run_flow.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/listening/listening_models.dart';
 import 'package:mixtape/data/onboarding/funnel_once_store.dart';
@@ -392,7 +394,14 @@ void main() {
 
       await tester.tap(find.byKey(LibraryTab.emptySetupKey));
       await tester.pumpAndSettle();
-      expect(find.byType(SpotifyRequestScreen), findsOneWidget);
+      // Path B's Step 1, in the mode that comes back here.
+      expect(find.byType(ChooseServiceScreen), findsOneWidget);
+      expect(
+        tester
+            .widget<ChooseServiceScreen>(find.byType(ChooseServiceScreen))
+            .mode,
+        AddMusicMode.library,
+      );
     });
 
     testWidgets('the cassette sits mid-band, under the bar and over the dock', (

@@ -22,7 +22,15 @@ import '../theme/mixtape_theme.dart';
 import '../widgets/foundation/cassette_tile.dart';
 
 class SignInScreen extends ConsumerStatefulWidget {
-  const SignInScreen({super.key});
+  const SignInScreen({super.key, this.headline = defaultHeadline});
+
+  /// The line over the provider buttons. [defaultHeadline] from a cold start
+  /// and the welcome foot link; [keepMixesHeadline] when the first-run flow's
+  /// sheet, the cap or the You row sends a listener here.
+  final String headline;
+
+  static const String defaultHeadline = 'Your music, mixed for right\u00a0now.';
+  static const String keepMixesHeadline = 'Keep your mixes.';
 
   /// The reserved status line: waiting, or the safe failure sentence.
   static const Key errorKey = Key('sign-in-error');
@@ -219,7 +227,8 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
 
     var total = text('mixtape', tokens.wordmark, width);
 
-    total += text(_headline, _headlineStyle(tokens), width) + _headlineGap;
+    total +=
+        text(widget.headline, _headlineStyle(tokens), width) + _headlineGap;
 
     // The pill's floor, or its label plus the padding it sits in.
     final labelStyle = ProviderSignInButton.labelStyle(tokens);
@@ -302,7 +311,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
     mainAxisSize: MainAxisSize.min,
     children: [
       Text(
-        _headline,
+        widget.headline,
         textAlign: TextAlign.center,
         style: _headlineStyle(tokens),
       ),
@@ -438,7 +447,6 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
       );
 
   // A non-breaking space keeps "right now." on one line instead of an orphan.
-  static const String _headline = 'Your music, mixed for right\u00a0now.';
 
   /// The founder's 2026-09-18 sizing: centred, a step under the large title
   /// in size, a step over it in quietness (w600, not w800).

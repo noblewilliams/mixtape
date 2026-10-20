@@ -73,6 +73,8 @@ flutter:
 
   assets:
     - assets/illustrations/
+    # First-run backgrounds, 780 x 1688 (2x). No 3x variants yet.
+    - assets/first_run/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

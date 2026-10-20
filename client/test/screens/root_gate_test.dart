@@ -20,7 +20,7 @@ import 'package:mixtape/presentation/providers/library_sync_provider.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
 import 'package:mixtape/presentation/screens/home_screen.dart';
 import 'package:mixtape/presentation/screens/shell/shell_screen.dart';
-import 'package:mixtape/presentation/screens/sign_in_screen.dart';
+import 'package:mixtape/presentation/screens/first_run/welcome_screen.dart';
 import '../helpers/fake_bridge.dart'
     show FakeBridge, song, apiWith, emptyPlaylistSyncResponse;
 import '../helpers/fake_listening_api.dart';
@@ -42,8 +42,10 @@ class _FakeDjApi implements DjApi {
   Future<List<DjSession>> listSessions() async => [];
 
   @override
-  Future<SessionDetail> createSession(String prompt, {InitialPlaylistSeed? playlistSeed}) =>
-      throw UnimplementedError();
+  Future<SessionDetail> createSession(
+    String prompt, {
+    InitialPlaylistSeed? playlistSeed,
+  }) => throw UnimplementedError();
 
   @override
   Future<SessionDetail> getSession(String id) => throw UnimplementedError();
@@ -64,7 +66,8 @@ class _FakeDjApi implements DjApi {
       throw UnimplementedError();
 
   @override
-  Future<DjSession> setCaseColor(String id, String caseColor) => throw UnimplementedError();
+  Future<DjSession> setCaseColor(String id, String caseColor) =>
+      throw UnimplementedError();
 
   @override
   Future<DjSession> renameSession(String id, String title) =>
@@ -141,7 +144,7 @@ void main() {
         .clearAccessibilityFeaturesTestValue(),
   );
 
-  testWidgets('shows sign-in when signed out', (tester) async {
+  testWidgets('shows the first-run welcome when signed out', (tester) async {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [tokenStoreProvider.overrideWithValue(InMemoryTokenStore())],
@@ -149,7 +152,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byType(SignInScreen), findsOneWidget);
+    expect(find.byType(WelcomeScreen), findsOneWidget);
   });
 
   testWidgets('shows home when a token exists', (tester) async {
@@ -160,7 +163,6 @@ void main() {
         overrides: [
           tokenStoreProvider.overrideWithValue(store),
           djApiProvider.overrideWithValue(_FakeDjApi()),
-          // An Apple listener: the service gate resolves straight to Home.
           listeningApiProvider.overrideWithValue(FakeListeningApi()),
           reminderSchedulerProvider.overrideWithValue(FakeReminderScheduler()),
           servicePreferenceStoreProvider.overrideWithValue(
@@ -176,33 +178,39 @@ void main() {
     expect(find.byType(HomeScreen), findsOneWidget);
   });
 
-  testWidgets('an anonymous token present at launch goes straight to the shell',
-      (tester) async {
-    final store = InMemoryTokenStore();
-    await store.write('t', anonymous: true);
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          tokenStoreProvider.overrideWithValue(store),
-          djApiProvider.overrideWithValue(_FakeDjApi()),
-          listeningApiProvider.overrideWithValue(FakeListeningApi()),
-          reminderSchedulerProvider.overrideWithValue(FakeReminderScheduler()),
-          servicePreferenceStoreProvider.overrideWithValue(
-            InMemoryServicePreferenceStore(),
-          ),
-          funnelOnceStoreProvider.overrideWithValue(InMemoryFunnelOnceStore()),
-        ],
-        child: const MixtapeApp(),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(find.byType(SignInScreen), findsNothing);
-    expect(find.byType(ShellScreen), findsOneWidget);
-    expect(find.byType(HomeScreen), findsOneWidget);
-    expect(_containerOf(tester).read(isAnonymousProvider), isTrue);
-  });
+  testWidgets(
+    'an anonymous token present at launch goes straight to the shell',
+    (tester) async {
+      final store = InMemoryTokenStore();
+      await store.write('t', anonymous: true);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            tokenStoreProvider.overrideWithValue(store),
+            djApiProvider.overrideWithValue(_FakeDjApi()),
+            listeningApiProvider.overrideWithValue(FakeListeningApi()),
+            reminderSchedulerProvider.overrideWithValue(
+              FakeReminderScheduler(),
+            ),
+            servicePreferenceStoreProvider.overrideWithValue(
+              InMemoryServicePreferenceStore(),
+            ),
+            funnelOnceStoreProvider.overrideWithValue(
+              InMemoryFunnelOnceStore(),
+            ),
+          ],
+          child: const MixtapeApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(WelcomeScreen), findsNothing);
+      expect(find.byType(ShellScreen), findsOneWidget);
+      expect(find.byType(HomeScreen), findsOneWidget);
+      expect(_containerOf(tester).read(isAnonymousProvider), isTrue);
+    },
+  );
 
-  testWidgets('sign-out returns to sign-in', (tester) async {
+  testWidgets('sign-out returns to the first-run welcome', (tester) async {
     final store = InMemoryTokenStore();
     await store.write('tok');
     await tester.pumpWidget(
@@ -210,7 +218,6 @@ void main() {
         overrides: [
           tokenStoreProvider.overrideWithValue(store),
           djApiProvider.overrideWithValue(_FakeDjApi()),
-          // An Apple listener: the service gate resolves straight to Home.
           listeningApiProvider.overrideWithValue(FakeListeningApi()),
           reminderSchedulerProvider.overrideWithValue(FakeReminderScheduler()),
           servicePreferenceStoreProvider.overrideWithValue(
@@ -223,7 +230,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     await _signOut(tester);
-    expect(find.byType(SignInScreen), findsOneWidget);
+    expect(find.byType(WelcomeScreen), findsOneWidget);
     expect(await store.read(), isNull);
   });
 
@@ -243,7 +250,6 @@ void main() {
           overrides: [
             tokenStoreProvider.overrideWithValue(store),
             djApiProvider.overrideWithValue(_FakeDjApi()),
-            // An Apple listener: the service gate resolves straight to Home.
             listeningApiProvider.overrideWithValue(FakeListeningApi()),
             reminderSchedulerProvider.overrideWithValue(
               FakeReminderScheduler(),
@@ -266,7 +272,7 @@ void main() {
       _expectSyncedThreeSongs(tester);
 
       await _signOut(tester);
-      expect(find.byType(SignInScreen), findsOneWidget);
+      expect(find.byType(WelcomeScreen), findsOneWidget);
 
       // A new user signs in on the same device.
       await store.write('tok-b');
@@ -301,7 +307,6 @@ void main() {
           overrides: [
             tokenStoreProvider.overrideWithValue(store),
             djApiProvider.overrideWithValue(_FakeDjApi()),
-            // An Apple listener: the service gate resolves straight to Home.
             listeningApiProvider.overrideWithValue(FakeListeningApi()),
             reminderSchedulerProvider.overrideWithValue(
               FakeReminderScheduler(),
@@ -327,7 +332,7 @@ void main() {
       // Sign out with nothing running — this still disposes the notifier and
       // fires cancel() on the (idle) shared service.
       await _signOut(tester);
-      expect(find.byType(SignInScreen), findsOneWidget);
+      expect(find.byType(WelcomeScreen), findsOneWidget);
 
       // User B signs in on the same device.
       await store.write('tok-b');
@@ -362,7 +367,6 @@ void main() {
           overrides: [
             tokenStoreProvider.overrideWithValue(store),
             djApiProvider.overrideWithValue(_FakeDjApi()),
-            // An Apple listener: the service gate resolves straight to Home.
             listeningApiProvider.overrideWithValue(FakeListeningApi()),
             reminderSchedulerProvider.overrideWithValue(
               FakeReminderScheduler(),
@@ -390,7 +394,7 @@ void main() {
       _containerOf(tester).read(authProvider.notifier).signOut();
       await tester.pump();
       await tester.pump();
-      expect(find.byType(SignInScreen), findsOneWidget);
+      expect(find.byType(WelcomeScreen), findsOneWidget);
 
       // Let the gated POST resolve; the loop should observe the cancellation
       // immediately after and throw instead of continuing to the next chunk.
@@ -430,7 +434,6 @@ void main() {
           overrides: [
             tokenStoreProvider.overrideWithValue(store),
             djApiProvider.overrideWithValue(_FakeDjApi()),
-            // An Apple listener: the service gate resolves straight to Home.
             listeningApiProvider.overrideWithValue(FakeListeningApi()),
             reminderSchedulerProvider.overrideWithValue(
               FakeReminderScheduler(),
@@ -458,7 +461,7 @@ void main() {
       _containerOf(tester).read(authProvider.notifier).signOut();
       await tester.pump();
       await tester.pump();
-      expect(find.byType(SignInScreen), findsOneWidget);
+      expect(find.byType(WelcomeScreen), findsOneWidget);
 
       // Let the gated POST resolve; the loop should observe the cancellation
       // immediately after and throw instead of completing with SyncDone.

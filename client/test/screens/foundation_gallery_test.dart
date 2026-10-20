@@ -5,7 +5,7 @@ import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/main.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/screens/debug/foundation_gallery_screen.dart';
-import 'package:mixtape/presentation/screens/sign_in_screen.dart';
+import 'package:mixtape/presentation/screens/first_run/welcome_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/large_title_scaffold.dart';
 
@@ -171,7 +171,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byType(SignInScreen), findsOneWidget);
+    expect(find.byType(WelcomeScreen), findsOneWidget);
     expect(find.byType(FoundationGalleryScreen), findsNothing);
   });
 }

@@ -253,7 +253,18 @@ new `client/lib/presentation/widgets/keep_sheet.dart`,
 
 - Same behaviour as Task 7. `MixtapeSheet` for the sheet; `MixtapeFeedback`
   for the merge toast.
+- All fourteen first-run funnel events on iOS, including the in-flow ones
+  whose hooks live in Task 9's screens (`first_run_opened`, `chose_make_mix`,
+  `chose_add_music`, `chose_service`, `chose_method`, `sync_done`), deferred
+  until the anonymous session exists and posted once (moved here from
+  Task 9 on 2026-10-20).
 - iOS Swift files, if any (none expected): pbxproj target membership.
+
+Left open by Task 9 for the close-out (Phase 4): first-run images are 2x
+only (about 3.3 MB) and decode at full size, so 3x variants and a
+`cacheWidth` are owed; Library's "Add Spotify music" still opens the old
+request screen rather than the new steps; the link from an anonymous session
+remounts the root twice and lands on Home, not the mix.
 
 ### Gate 3: TestFlight (founder)
 

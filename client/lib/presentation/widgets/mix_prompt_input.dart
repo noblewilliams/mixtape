@@ -19,6 +19,7 @@ class MixPromptInput extends StatefulWidget {
     this.focusNode,
     this.placeholder,
     this.reservedExamples = const [],
+    this.exampleSet,
     this.showVoiceInput = voiceInputEnabled,
     this.voiceController,
   });
@@ -42,6 +43,10 @@ class MixPromptInput extends StatefulWidget {
   /// prompts its idea pills are showing, so the hint never repeats a pill
   /// sitting right below it.
   final List<String> reservedExamples;
+
+  /// Rotating placeholders that replace [examples] — the first-run welcome
+  /// rotates its own three (first-run spec, Copy).
+  final List<String>? exampleSet;
 
   /// Draws the mic between the field and send. Defaults to the build flag;
   /// Phase 7.4 removes the flag.
@@ -82,7 +87,7 @@ class MixPromptInput extends StatefulWidget {
 
 class _MixPromptInputState extends State<MixPromptInput>
     with WidgetsBindingObserver {
-  static const _examples = MixPromptInput.examples;
+  List<String> get _examples => widget.exampleSet ?? MixPromptInput.examples;
 
   /// The composer's own shape: 12 pt top corners, 16 pt bottom.
   static const BorderRadius _fieldRadius = BorderRadius.only(

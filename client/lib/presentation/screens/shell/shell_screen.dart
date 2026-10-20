@@ -22,11 +22,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../data/shell/mini_player_state.dart';
 import '../../../data/shell/shell_channel.dart';
+import '../../providers/dj_providers.dart';
+import '../../providers/first_run_provider.dart';
 import '../../providers/playback_provider.dart';
 import '../../providers/shell_providers.dart';
 import '../../widgets/foundation/frosted_dock.dart';
 import '../../widgets/foundation/frosted_surface.dart';
 import '../../widgets/foundation/gradient_background.dart';
+import '../chat_screen.dart';
 import '../home_screen.dart';
 import '../mixes_screen.dart';
 import '../playback_screen.dart';
@@ -94,7 +97,34 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _announceIfResolved();
+      _openPendingConversation();
     });
+  }
+
+  /// The first-run flow handed off with a fresh mix: open it on Home, so
+  /// back from the conversation lands on Home as any other mix does.
+  void _openPendingConversation() {
+    final pending = ref.read(pendingConversationProvider.notifier).take();
+    if (pending == null) return;
+    final home = AppTab.home.index;
+    if (_currentIndex != home) {
+      ref.read(selectedTabProvider.notifier).select(home);
+    }
+    _navigatorOf(home)
+        ?.push(
+          MaterialPageRoute<void>(
+            builder: (_) => ChatScreen(
+              sessionId: pending.sessionId,
+              initialError: pending.initialError,
+            ),
+          ),
+        )
+        // As Home does on the way back from a mix: the list may have moved
+        // while the conversation owned the screen.
+        .then((_) {
+          if (!mounted) return;
+          ref.read(sessionsProvider.notifier).refresh();
+        });
   }
 
   @override

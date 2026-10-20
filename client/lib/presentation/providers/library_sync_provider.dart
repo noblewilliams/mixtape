@@ -9,7 +9,9 @@ import '../../data/settings/author_store.dart';
 import 'auth_provider.dart';
 import 'onboarding_provider.dart';
 
-final musicKitBridgeProvider = Provider<MusicKitBridge>((ref) => MusicKitBridge());
+final musicKitBridgeProvider = Provider<MusicKitBridge>(
+  (ref) => MusicKitBridge(),
+);
 
 /// Device-local "by &lt;author&gt;" name stamped on saved playlists (see
 /// QueueScreen's save dialog). Not user-scoped on purpose: it's a device
@@ -29,7 +31,9 @@ final accountNameProvider = FutureProvider<String?>((ref) async {
     final res = await api.getJson('/me');
     if (res.statusCode != 200) return null;
     final user = (jsonDecode(res.body) as Map<String, dynamic>)['user'];
-    final name = user is Map<String, dynamic> ? (user['name'] as String?)?.trim() : null;
+    final name = user is Map<String, dynamic>
+        ? (user['name'] as String?)?.trim()
+        : null;
     return (name == null || name.isEmpty) ? null : name;
   } catch (_) {
     return null;
@@ -52,8 +56,11 @@ class SyncIdle extends SyncState {
 }
 
 class SyncRunning extends SyncState {
-  const SyncRunning(this.progress);
+  const SyncRunning(this.progress, {this.songs = 0});
   final double progress;
+
+  /// Songs uploaded so far in this run.
+  final int songs;
 }
 
 class SyncDone extends SyncState {
@@ -62,8 +69,12 @@ class SyncDone extends SyncState {
 }
 
 class SyncFailed extends SyncState {
-  const SyncFailed(this.message);
+  const SyncFailed(this.message, {this.accessDenied = false});
   final String message;
+
+  /// The listener refused library access: only Settings can help, so a
+  /// retry is not the way out.
+  final bool accessDenied;
 }
 
 class LibrarySyncNotifier extends Notifier<SyncState> {
@@ -71,7 +82,9 @@ class LibrarySyncNotifier extends Notifier<SyncState> {
 
   @override
   SyncState build() {
-    ref.watch(authProvider); // user-scoped: reset to idle on every auth transition
+    ref.watch(
+      authProvider,
+    ); // user-scoped: reset to idle on every auth transition
     final service = ref.watch(librarySyncServiceProvider);
     ref.onDispose(service.cancel);
     _service = service;
@@ -82,23 +95,37 @@ class LibrarySyncNotifier extends Notifier<SyncState> {
     if (state is SyncRunning) return;
     state = const SyncRunning(0);
     try {
-      final summary = await _service.sync(onProgress: (p) {
-        if (ref.mounted) state = SyncRunning(p);
-      });
+      var songs = 0;
+      var progress = 0.0;
+      final summary = await _service.sync(
+        onProgress: (p) {
+          progress = p;
+          if (ref.mounted) state = SyncRunning(p, songs: songs);
+        },
+        onSongs: (n) {
+          songs = n;
+          if (ref.mounted) state = SyncRunning(progress, songs: n);
+        },
+      );
       if (ref.mounted) {
         ref.invalidate(onboardingProvider);
         state = SyncDone(summary);
       }
     } on LibraryAccessDenied {
       if (ref.mounted) {
-        state = const SyncFailed('Music library access was denied. Enable it in Settings.');
+        state = const SyncFailed(
+          'Music library access was denied. Enable it in Settings.',
+          accessDenied: true,
+        );
       }
     } on SyncCancelled {
       // auth changed mid-run: fall back to idle so the screen stays actionable
       if (ref.mounted) state = const SyncIdle();
     } on NetworkException {
       if (ref.mounted) {
-        state = const SyncFailed("Couldn't reach mixtape. Check your connection.");
+        state = const SyncFailed(
+          "Couldn't reach mixtape. Check your connection.",
+        );
       }
     } on ApiException {
       if (ref.mounted) {
@@ -111,5 +138,6 @@ class LibrarySyncNotifier extends Notifier<SyncState> {
   }
 }
 
-final librarySyncProvider =
-    NotifierProvider<LibrarySyncNotifier, SyncState>(LibrarySyncNotifier.new);
+final librarySyncProvider = NotifierProvider<LibrarySyncNotifier, SyncState>(
+  LibrarySyncNotifier.new,
+);

@@ -27,7 +27,8 @@ class FunnelMilestones {
 
   /// Posts [type] once for the signed-in listener: `first_output` from any
   /// of the queue screen's output actions.
-  void recordOnce(FunnelEventType type) => unawaited(_recordOnce(type, gate: null));
+  void recordOnce(FunnelEventType type) =>
+      unawaited(_recordOnce(type, gate: null));
 
   /// `first_personal_mix`: [session] came back with a queue built from the
   /// listener's own plays. Nothing before an EXPORT import counts — an Apple
@@ -38,7 +39,10 @@ class FunnelMilestones {
   void notePersonalMix(DjSession session, List<QueueTrack> queue) {
     if (session.notPersonal || queue.isEmpty) return;
     unawaited(
-      _recordOnce(FunnelEventType.firstPersonalMix, gate: (o) => o.hasCompletedImport),
+      _recordOnce(
+        FunnelEventType.firstPersonalMix,
+        gate: (o) => o.hasCompletedImport,
+      ),
     );
   }
 
@@ -49,8 +53,8 @@ class FunnelMilestones {
     String? key;
     try {
       // The onboarding read is the client's only source of the listener's
-      // id, and it is loaded by the service gate before any signed-in screen
-      // shows — so it is read SYNCHRONOUSLY, from the current build only
+      // id, and Home watches it from its first build (the service gate
+      // that used to load it is gone) — so it is read SYNCHRONOUSLY, from the current build only
       // (`unwrapPrevious`, so a previous account's state carried into a
       // reload never counts). Never `await ...future`: a user-scoped
       // provider awaited across an auth transition would resolve for
@@ -76,6 +80,8 @@ class FunnelMilestones {
 }
 
 final funnelMilestonesProvider = Provider<FunnelMilestones>((ref) {
-  ref.watch(authProvider); // user-scoped: the in-flight set resets with the listener
+  ref.watch(
+    authProvider,
+  ); // user-scoped: the in-flight set resets with the listener
   return FunnelMilestones(ref);
 });

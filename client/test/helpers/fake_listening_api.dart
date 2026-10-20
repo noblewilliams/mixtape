@@ -116,8 +116,15 @@ class FakeListeningApi implements ListeningApi {
   Future<List<ArtistSeed>> getArtistSeeds() => throw UnimplementedError();
 
   @override
-  Future<List<ArtistSeed>> putArtistSeeds(List<String> names) =>
-      throw UnimplementedError();
+  Future<List<ArtistSeed>> putArtistSeeds(List<String> names) {
+    putSeeds.add(names);
+    final impl = onPutArtistSeeds;
+    return impl == null ? Future.value(const <ArtistSeed>[]) : impl(names);
+  }
+
+  /// Every `PUT /me/artist-seeds`, in order.
+  final List<List<String>> putSeeds = [];
+  Future<List<ArtistSeed>> Function(List<String> names)? onPutArtistSeeds;
 
   @override
   Future<List<SeedTrack>> getSeedTracks() => throw UnimplementedError();

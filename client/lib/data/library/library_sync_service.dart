@@ -68,10 +68,12 @@ class LibrarySyncService {
   /// Full library sync. Songs are uploaded first so playlist entries can link
   /// to known catalog tracks when the staged playlist snapshot is published.
   /// Concurrent callers join the same in-flight run; the joiner's progress
-  /// callback is intentionally ignored.
+  /// callback is intentionally ignored. [onSongs] reports the songs uploaded
+  /// so far, for the first-run page's live count.
   Future<LibrarySyncSummary> sync({
     void Function(double progress)? onProgress,
-  }) => _inFlight ??= _run(onProgress).whenComplete(() {
+    void Function(int songs)? onSongs,
+  }) => _inFlight ??= _run(onProgress, onSongs).whenComplete(() {
     _inFlight = null;
     _cancelRequested = false;
     _materializingPlaylists = false;
@@ -83,12 +85,13 @@ class LibrarySyncService {
 
   Future<LibrarySyncSummary> _run(
     void Function(double progress)? onProgress,
+    void Function(int songs)? onSongs,
   ) async {
     final authorized = await bridge.requestAuthorization();
     _checkCancelled();
     if (!authorized) throw LibraryAccessDenied();
 
-    final songs = await _syncSongs(onProgress);
+    final songs = await _syncSongs(onProgress, onSongs);
     _checkCancelled();
 
     PlaylistSnapshotHeader? snapshot;
@@ -126,7 +129,10 @@ class LibrarySyncService {
     return result!;
   }
 
-  Future<int> _syncSongs(void Function(double progress)? onProgress) async {
+  Future<int> _syncSongs(
+    void Function(double progress)? onProgress,
+    void Function(int songs)? onSongs,
+  ) async {
     var offset = 0;
     var total = 0;
     while (true) {
@@ -143,6 +149,7 @@ class LibrarySyncService {
       });
       _checkCancelled();
       offset += page.songs.length;
+      onSongs?.call(offset);
       final ratio = total == 0 ? 1.0 : (offset / total).clamp(0.0, 1.0);
       onProgress?.call(_songStageEnd * ratio);
       if (offset >= total) break;

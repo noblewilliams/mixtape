@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/main.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
-import 'package:mixtape/presentation/screens/sign_in_screen.dart';
+import 'package:mixtape/presentation/screens/first_run/welcome_screen.dart';
 
 class ControlledAuth extends AuthNotifier {
   @override
@@ -41,7 +41,7 @@ void main() {
     await tester.pumpAndSettle();
     auth.expire();
     await tester.pumpAndSettle();
-    expect(find.byType(SignInScreen), findsOneWidget);
+    expect(find.byType(WelcomeScreen), findsOneWidget);
     expect(find.text('Protected account'), findsNothing);
     expect(find.text('Protected dialog'), findsNothing);
     expect(tester.state<NavigatorState>(find.byType(Navigator)).canPop(), isFalse);

@@ -29,6 +29,7 @@ import '../../widgets/foundation/section_word.dart';
 import '../../widgets/foundation/service_marks.dart';
 import '../../widgets/foundation/tape_button.dart';
 import '../../widgets/library_sync_sheet.dart';
+import '../first_run/first_run_flow.dart';
 import '../import_sheet.dart';
 import '../music_sources_screen.dart';
 import '../playlist_browser_screen.dart';
@@ -135,6 +136,13 @@ class _LibraryTabState extends ConsumerState<LibraryTab> {
       context,
     ).push(MaterialPageRoute<void>(builder: (_) => screen));
     // An import or a removal over there changes what the sources say.
+    if (mounted) await ref.read(onboardingProvider.notifier).refresh();
+  }
+
+  /// Path B's three steps from the first-run flow, popping back here once
+  /// the music is in (first-run spec, Clients).
+  Future<void> _addMusic() async {
+    await openAddMusic(context);
     if (mounted) await ref.read(onboardingProvider.notifier).refresh();
   }
 
@@ -317,7 +325,7 @@ class _LibraryTabState extends ConsumerState<LibraryTab> {
         action: TapeButton(
           key: LibraryTab.emptySetupKey,
           label: 'Add your music',
-          onPressed: () => _push(const SpotifyRequestScreen()),
+          onPressed: _addMusic,
         ),
       );
     }
