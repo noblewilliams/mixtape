@@ -36,6 +36,10 @@ export const session = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
+    // Set by the anonymous-link hook ('all' | 'mixes_only') on the session a
+    // link signed in with; GET /me reads it once and clears it. Declared to
+    // Better Auth as session.additionalFields.mergedMode.
+    mergedMode: text("merged_mode"),
   },
   (table) => [index("session_userId_idx").on(table.userId)],
 );

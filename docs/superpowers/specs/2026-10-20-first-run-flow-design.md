@@ -195,11 +195,25 @@ signed-in user.
   result tells the client `merged: 'all' | 'mixes_only'` and the client says
   "Your mixes are in. This account already had a library, so we kept that
   one." once.
-- `dj_memories` has no per-user unique key; move all. `funnel_events` move
-  so the funnel reads as one person.
+- Every move skips a row whose per-user unique key N already holds
+  (`dj_memories` is unique on user and note; the one-row-per-user settings
+  tables, the open-run partial indexes, and the primary keys on the library
+  tables). A skipped row stays on A and goes with the cascade: the account's
+  own row wins. `funnel_events` move so the funnel reads as one person.
+- `merged` reaches the client once on `GET /me`, not in the sign-in
+  response, which the plugin owns: the hook stamps `session.merged_mode` on
+  the new session inside the merge transaction, and `/me` returns and clears
+  it in one statement. Values: `all` (new account took everything),
+  `mixes_only` (at least one mix moved, the account's library won),
+  `library_kept` (no mix moved, A's library was dropped), or null.
+- The link's surface is inferred from the request: an id-token exchange is
+  `ios`, the redirect callback is `web`.
 
-The hook must be idempotent against a retried callback: repointing rows that
-already belong to N is a no-op, and a deleted A makes the hook return early.
+The hook must be idempotent against a retried callback: when nothing is left
+to move it returns `none` and writes nothing, and a deleted A makes it return
+early. A failure inside the hook is logged (error name and Postgres code
+only) and rethrown, so the sign-in fails and the anonymous user is not
+deleted unmerged.
 
 ### Limits
 
@@ -214,8 +228,12 @@ already belong to N is a no-op, and a deleted A makes the hook return early.
   depends on it.
 - Retention: the maintenance cron deletes anonymous users with no session
   activity for 30 days (`user.is_anonymous and max(session.updated_at) <
-  now() - 30 days`). Cascade removes their rows. Logged in the cron line as
-  `anonymous_expired`.
+  now() - 30 days`). Cascade removes their rows, except `funnel_events`,
+  whose `user_id` is set to null so the funnel keeps its non-converters.
+  Logged in the cron line as `anonymous_expired`.
+- Session life: Better Auth's default 7-day session would strand an
+  anonymous listener, who has no way to sign back in. Sessions last 30 days
+  and refresh daily on use, for anonymous and account sessions alike.
 
 ### What the device loses
 
@@ -279,8 +297,9 @@ rows after the first mix.
   this device. Sign in to keep going, and to keep these."
 - Refusal (DJ voice, existing text, shown in the transcript): the model's own
   sentence from `INSUFFICIENT_SEEDS_TEXT`.
-- Merge notice (existing account): "Your mixes are in. This account already
-  had a library, so we kept that one."
+- Merge notice, `mixes_only`: "Your mixes are in. This account already had
+  a library, so we kept that one." `library_kept`: "This account already had
+  a library, so we kept that one."
 - Sign-in headline from the sheet or You: "Keep your mixes."
 - You row (anonymous): "Sign in to keep your mixes".
 

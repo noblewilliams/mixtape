@@ -111,9 +111,21 @@ Files: `server/src/enrich/scheduled.ts`, new `server/src/jobs/anonymous-retentio
 - Tests: expires only idle anonymous users; never an account; respects the
   limit; the cron line carries the count.
 
-### Gate 1: migration 0035 and deploy (founder)
+### Task 4b: funnel rows outlive their anonymous user
 
-From a clean worktree of committed HEAD: apply 0035, deploy the Worker,
+Files: `server/src/db/schema.ts`, new migration 0038, `server/test/jobs/anonymous-retention.test.ts`.
+
+Found in the Task 4 review: `funnel_events.user_id` cascades, so the
+retention job would erase exactly the non-converters the first-run funnel
+(and the `first_mix_refused` reopen clause) needs. Make `user_id` nullable
+with `ON DELETE SET NULL`; the merge in Task 3 still repoints rows to the
+account. Test: expiring an anonymous user leaves its funnel rows with a null
+user id. Runs after Task 3 so the migration chain stays linear (0036 funnel
+types, 0037 merged mode, 0038 this).
+
+### Gate 1: migrations 0035 to 0038 and deploy (founder)
+
+From a clean worktree of committed HEAD: apply 0035 to 0038, deploy the Worker,
 confirm `POST /api/auth/sign-in/anonymous` on production returns a token and
 `GET /me` on it works. Existing clients are unaffected: nothing calls the
 new endpoint yet.
@@ -249,7 +261,7 @@ existing account.
 
 ## What the founder does, in order
 
-1. Gate 1: apply migration 0035 and deploy the Worker from a clean worktree.
+1. Gate 1: apply migrations 0035 to 0038 and deploy the Worker from a clean worktree.
 2. Gate 2: deploy the web, run the two private-window checks.
 3. Gate 3: TestFlight build and the device checks.
 4. Read the refusal ratio after a week.

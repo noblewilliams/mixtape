@@ -7,6 +7,7 @@ export function requireSession(auth: AuthLike) {
     if (!session) return c.json({ error: 'unauthorized' }, 401)
     // Normalize once so every route reads a real boolean.
     c.set('user', { ...session.user, isAnonymous: session.user.isAnonymous === true })
+    if (session.session?.id) c.set('sessionId', session.session.id)
     await next()
   })
 }

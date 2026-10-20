@@ -4,6 +4,7 @@ import { anonymous, bearer } from 'better-auth/plugins'
 import { importPKCS8, SignJWT } from 'jose'
 import * as schema from '../db/schema'
 import type { AuthLike } from '../app'
+import type { Db } from '../db/types'
 import { linkAnonymousAccount } from './link-anonymous'
 
 export type AuthEnv = {
@@ -80,6 +81,13 @@ export async function generateAppleClientSecret({
     .sign(signingKey)
 }
 
+// The native apps exchange a provider id token on /sign-in/social; the web
+// uses the redirect flow and lands on /callback/*.
+function linkSurface(ctx: { path?: string; body?: unknown }): 'ios' | 'web' {
+  const body = ctx.body as { idToken?: unknown } | undefined
+  return ctx.path === '/sign-in/social' && body?.idToken ? 'ios' : 'web'
+}
+
 // db is any drizzle pg database (neon-http in prod, pglite in tests)
 export function createAuth(db: object, env: AuthEnv) {
   if (!env.BETTER_AUTH_SECRET || env.BETTER_AUTH_SECRET.length < 32) {
@@ -108,6 +116,16 @@ export function createAuth(db: object, env: AuthEnv) {
     baseURL: env.BETTER_AUTH_URL,
     secret: env.BETTER_AUTH_SECRET,
     database: drizzleAdapter(db as never, { provider: 'pg', schema }),
+    // 30 days, matching the anonymous retention job: an anonymous listener has
+    // no way to sign back in, so the default 7-day expiry would orphan them.
+    session: {
+      expiresIn: 60 * 60 * 24 * 30,
+      updateAge: 60 * 60 * 24,
+      // Written by the anonymous-link hook, read once by GET /me.
+      additionalFields: {
+        mergedMode: { type: 'string', required: false, input: false },
+      },
+    },
     socialProviders: {
       apple: async () => ({
         clientId: env.APPLE_WEB_CLIENT_ID,
@@ -156,7 +174,11 @@ export function createAuth(db: object, env: AuthEnv) {
       anonymous({
         emailDomainName: ANONYMOUS_EMAIL_DOMAIN,
         generateName: () => 'Listener',
-        onLinkAccount: ({ anonymousUser, newUser }) => linkAnonymousAccount({ anonymousUser, newUser }),
+        // Errors propagate (logged inside): the sign-in fails and the
+        // anonymous user survives for a retry rather than losing its rows.
+        onLinkAccount: async ({ anonymousUser, newUser, ctx }) => {
+          await linkAnonymousAccount(db as Db, { anonymousUser, newUser, surface: linkSurface(ctx) })
+        },
       }),
     ],
   })

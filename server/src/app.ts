@@ -5,6 +5,7 @@ import { cors } from 'hono/cors'
 import { HTTPException } from 'hono/http-exception'
 import { requireSession } from './middleware/require-session'
 import { requireAdmin } from './middleware/require-admin'
+import { takeMergedMode } from './auth/link-anonymous'
 import { ingestRoutes } from './routes/ingest'
 import { libraryIngestRoutes } from './routes/library-ingest'
 import { listeningIngestRoutes } from './routes/listening-ingest'
@@ -33,7 +34,7 @@ import type { PlaylistEditDjDeps } from './playlist-editing/loop'
 export type AuthLike = {
   handler: (req: Request) => Response | Promise<Response>
   api: {
-    getSession: (input: { headers: Headers }) => Promise<{ user: SessionUser } | null>
+    getSession: (input: { headers: Headers }) => Promise<{ user: SessionUser; session?: { id: string } } | null>
   }
 }
 
@@ -42,7 +43,7 @@ export type AuthLike = {
 // normalizes it, so routes always read a real boolean.
 export type SessionUser = { id: string; isAnonymous?: boolean | null }
 
-export type AppVars = { user: { id: string; isAnonymous: boolean } }
+export type AppVars = { user: { id: string; isAnonymous: boolean }; sessionId?: string }
 
 export type EnrichWiring = { deps?: EnrichDeps; artwork?: ArtworkDeps; adminToken: string }
 export type { SeedsWiring }
@@ -115,7 +116,13 @@ export function createApp({
   //   /me/artist-seeds  /me/seed-tracks/*  /me/interview  /me/funnel-events [taste seeds]
   //   /transcribe [voice capture]
   app.all('/api/auth/*', (c) => auth.handler(c.req.raw))
-  app.get('/me', requireSession(auth), (c) => c.json({ user: c.get('user') }))
+  // merged: set once after an anonymous listener signs in (the link hook
+  // stamps it on the new session); reading it clears it.
+  app.get('/me', requireSession(auth), async (c) => {
+    const sessionId = c.get('sessionId')
+    const merged = db && sessionId ? await takeMergedMode(db, sessionId) : null
+    return c.json({ user: c.get('user'), merged })
+  })
 
   if (musicKit) {
     app.use('/musickit/*', requireSession(auth))
