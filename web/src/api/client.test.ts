@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, createMixtapeApi } from './client'
+import { AnonymousCapError, ApiError, createMixtapeApi } from './client'
 
 const fetchMock = vi.fn<typeof fetch>()
 
@@ -580,5 +580,57 @@ describe('Mixtape API client: listening import and onboarding', () => {
       ['https://api.mixtape.test/me/seed-tracks', 'POST', JSON.stringify({ spotifyIds: ['LowTideRadio0000000001', 'Missing000000000000001'] })],
       ['https://api.mixtape.test/me/seed-tracks/track%2F1', 'DELETE', undefined],
     ])
+  })
+
+  it('reads the signed-in user and the one-time merge result from /me', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      user: { id: 'user-1', name: 'Noble', email: 'noble@example.com', isAnonymous: false },
+      merged: 'mixes_only',
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const api = createMixtapeApi('https://api.mixtape.test', () => 'me-token')
+
+    const result = await api.getMe()
+
+    expect(fetchMock).toHaveBeenCalledWith('https://api.mixtape.test/me', expect.objectContaining({ credentials: 'include' }))
+    expect(new Headers(fetchMock.mock.calls[0][1]!.headers).get('authorization')).toBe('Bearer me-token')
+    expect(result).toEqual({ user: { id: 'user-1', isAnonymous: false }, merged: 'mixes_only' })
+  })
+
+  it('reports an anonymous user with no merge as merged null', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      user: { id: 'anon-1', name: 'Listener', email: 'x@anonymous.mixtape.invalid', isAnonymous: true },
+      merged: null,
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await createMixtapeApi('https://api.mixtape.test').getMe()
+
+    expect(result).toEqual({ user: { id: 'anon-1', isAnonymous: true }, merged: null })
+  })
+
+  it('maps the anonymous mix cap on a new mix to AnonymousCapError', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: 'anonymous_cap', limit: 3 }), {
+      status: 403, headers: { 'content-type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const error = await createMixtapeApi('https://api.mixtape.test').createSession('late night drive').catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(AnonymousCapError)
+    expect(error).toBeInstanceOf(ApiError)
+    expect(error).toMatchObject({ name: 'AnonymousCapError', status: 403, code: 'anonymous_cap', limit: 3 })
+  })
+
+  it('keeps other 403s from POST /sessions as a plain ApiError', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: 'forbidden' }), {
+      status: 403, headers: { 'content-type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const error = await createMixtapeApi('https://api.mixtape.test').createSession('late night drive').catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(ApiError)
+    expect(error).not.toBeInstanceOf(AnonymousCapError)
   })
 })

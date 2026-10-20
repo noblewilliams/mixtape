@@ -171,3 +171,132 @@ it('clears the saved page after a confirmed signed-out response', () => {
   expect(sessionStorage.getItem('mixtape.workspace.v1:identity')).toBeNull()
   cleanup()
 })
+
+
+describe('anonymous sessions', () => {
+  afterEach(() => { cleanup(); clearWorkspaceRestore() })
+
+  it('passes isAnonymous through to the signed-in content', () => {
+    const auth = bridge({
+      useSession: () => ({
+        data: { user: { id: 'anon-1', name: 'Listener', email: 'a@anonymous.mixtape.invalid', isAnonymous: true } },
+        isPending: false, error: null, refetch: vi.fn(),
+      }),
+    })
+    render(<AuthGate auth={auth}>{(user) => <p>anonymous {String(user.isAnonymous)}</p>}</AuthGate>)
+    expect(screen.getByText('anonymous true')).toBeInTheDocument()
+  })
+
+  it('remembers the anonymous flag with the cached identity', () => {
+    const auth = bridge({
+      useSession: () => ({
+        data: { user: { id: 'anon-1', name: 'Listener', email: 'a@anonymous.mixtape.invalid', isAnonymous: true } },
+        isPending: false, error: null, refetch: vi.fn(),
+      }),
+    })
+    render(<AuthGate auth={auth}>{() => <p>Mixes</p>}</AuthGate>)
+    expect(JSON.parse(sessionStorage.getItem('mixtape.workspace.v1:identity') ?? 'null')).toMatchObject({
+      user: { id: 'anon-1', isAnonymous: true },
+    })
+  })
+
+  it('shows the first run with no session', () => {
+    render(<AuthGate auth={bridge()}>{() => <p>Mixes</p>}</AuthGate>)
+    expect(screen.getByTestId('first-run')).toBeInTheDocument()
+    expect(screen.queryByText('Mixes')).not.toBeInTheDocument()
+  })
+})
+
+
+describe('first-run flow', () => {
+  afterEach(() => { cleanup(); clearWorkspaceRestore(); window.history.replaceState({}, '', '/') })
+  const anonymous: AuthSessionState = {
+    data: { user: { id: 'anon-1', name: 'Listener', email: 'a@anonymous.mixtape.invalid', isAnonymous: true } },
+    isPending: false, error: null, refetch: vi.fn(),
+  }
+
+  it('keeps the first run mounted when an anonymous session arrives mid-flow', () => {
+    let state: AuthSessionState = { data: null, isPending: false, error: null, refetch: vi.fn() }
+    const auth = bridge({ useSession: () => state })
+    const view = render(<AuthGate auth={auth}>{() => <p>Shell</p>}</AuthGate>)
+    expect(screen.getByTestId('first-run')).toBeInTheDocument()
+
+    state = anonymous
+    view.rerender(<AuthGate auth={auth}>{() => <p>Shell</p>}</AuthGate>)
+    expect(screen.getByTestId('first-run')).toBeInTheDocument()
+    expect(screen.queryByText('Shell')).not.toBeInTheDocument()
+  })
+
+  it('keeps the first run mounted when the first check was pending and found no session', () => {
+    let state: AuthSessionState = { data: null, isPending: true, error: null, refetch: vi.fn() }
+    const auth = bridge({ useSession: () => state })
+    const view = render(<AuthGate auth={auth}>{() => <p>Shell</p>}</AuthGate>)
+    state = { ...state, isPending: false }
+    view.rerender(<AuthGate auth={auth}>{() => <p>Shell</p>}</AuthGate>)
+    state = anonymous
+    view.rerender(<AuthGate auth={auth}>{() => <p>Shell</p>}</AuthGate>)
+    expect(screen.getByTestId('first-run')).toBeInTheDocument()
+    expect(screen.queryByText('Shell')).not.toBeInTheDocument()
+  })
+
+  it('switches to the shell when the first run finishes', () => {
+    let state: AuthSessionState = { data: null, isPending: false, error: null, refetch: vi.fn() }
+    const auth = bridge({ useSession: () => state })
+    const view = render(<AuthGate auth={auth}>{() => <p>Shell</p>}</AuthGate>)
+    state = anonymous
+    view.rerender(<AuthGate auth={auth}>{() => <p>Shell</p>}</AuthGate>)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to your mixes' }))
+
+    expect(screen.getByText('Shell')).toBeInTheDocument()
+    expect(screen.queryByTestId('first-run')).not.toBeInTheDocument()
+  })
+
+  it('renders the shell directly for an anonymous session present at load', () => {
+    render(<AuthGate auth={bridge({ useSession: () => anonymous })}>{() => <p>Shell</p>}</AuthGate>)
+    expect(screen.getByText('Shell')).toBeInTheDocument()
+    expect(screen.queryByTestId('first-run')).not.toBeInTheDocument()
+  })
+
+  it('renders the shell for an anonymous session found by a pending check at load', () => {
+    let state: AuthSessionState = { data: null, isPending: true, error: null, refetch: vi.fn() }
+    const auth = bridge({ useSession: () => state })
+    const view = render(<AuthGate auth={auth}>{() => <p>Shell</p>}</AuthGate>)
+    state = anonymous
+    view.rerender(<AuthGate auth={auth}>{() => <p>Shell</p>}</AuthGate>)
+    expect(screen.getByText('Shell')).toBeInTheDocument()
+  })
+})
+
+describe('sign-in error from the URL', () => {
+  afterEach(() => { cleanup(); clearWorkspaceRestore(); window.history.replaceState({}, '', '/') })
+
+  it('clears the error once a session appears so it does not come back after sign-out', () => {
+    window.history.replaceState({}, '', '/?auth_error=apple')
+    let state: AuthSessionState = { data: null, isPending: false, error: null, refetch: vi.fn() }
+    const auth = bridge({ useSession: () => state })
+    const view = render(<AuthGate auth={auth} preferences={preferences()}>{() => <p>Shell</p>}</AuthGate>)
+    expect(screen.getByRole('alert')).toHaveTextContent('Apple sign-in did not finish.')
+
+    state = { ...state, data: { user: { id: 'u', name: 'Listener', email: 'l@example.test' } } }
+    view.rerender(<AuthGate auth={auth} preferences={preferences()}>{() => <p>Shell</p>}</AuthGate>)
+    state = { ...state, data: null }
+    view.rerender(<AuthGate auth={auth} preferences={preferences()}>{() => <p>Shell</p>}</AuthGate>)
+
+    expect(screen.getByRole('button', { name: 'Continue with Apple' })).toBeInTheDocument()
+    expect(screen.queryByText('Apple sign-in did not finish.')).not.toBeInTheDocument()
+  })
+
+  it('clears the error when a sign-in starts so a failed session check shows Retry again', () => {
+    window.history.replaceState({}, '', '/?auth_error=google')
+    const signIn = vi.fn(() => new Promise<{ error?: string }>(() => undefined))
+    const auth = bridge({ signIn, useSession: () => ({ data: null, isPending: false, error: new Error('offline'), refetch: vi.fn() }) })
+    render(<AuthGate auth={auth} preferences={preferences()}>{() => <p>Shell</p>}</AuthGate>)
+    expect(screen.getByRole('alert')).toHaveTextContent('Google sign-in did not finish.')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with Google' }))
+
+    expect(screen.getByRole('alert')).toHaveTextContent('couldn’t check your session')
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+  })
+})

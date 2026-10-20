@@ -317,6 +317,7 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
       interview = { artists: answers.neverSkip.length, notes: saved }
       return { seeds: answers.neverSkip.length, notes: { saved, duplicate: 0, capped: 0 } }
     },
+    getMe: async () => ({ user: { id: 'listener-1', isAnonymous: false }, merged: null }),
     getArtistSeeds: async () => ({ seeds: artistSeeds.map((seed) => ({ ...seed })) }),
     putArtistSeeds: async (names) => {
       artistSeeds = [

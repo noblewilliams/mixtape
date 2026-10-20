@@ -329,7 +329,11 @@ export type RoutineSuggestion = { id: string; title: string; prompt: string; rea
 export type SuggestionsResponse = { enabled: boolean; suggestion: RoutineSuggestion | null; dismissed: boolean }
 export type PlaybackPreferences = {enabled:boolean;revision:number;userId?:string}
 export type PlaybackObservation = {playbackId:string;sequence:number;sessionId:string;version:number;position:number;trackId:string;source:'apple_web'|'apple_native';kind:'listen'|'skip'|'repeat';observedMs:number;occurredAt:string}
+export type MergedMode = 'all' | 'mixes_only' | 'library_kept'
+export type MeResponse = { user: { id: string; isAnonymous: boolean }; merged: MergedMode | null }
 export type MixtapeApi = {
+  /** `merged` is reported once after an anonymous session joins an account; the server clears it on read. */
+  getMe: (signal?: AbortSignal) => Promise<MeResponse>
   transcribe: (audio: File, signal?: AbortSignal) => Promise<{text:string;language:string}>
   getSuggestions: (timeZone: string) => Promise<SuggestionsResponse>
   selectSuggestion: (id: string, timeZone: string) => Promise<{prompt: string}>
@@ -452,6 +456,18 @@ export class ApiError extends Error {
   }
 }
 
+/** POST /sessions refused a new mix: an anonymous listener reached the cap. */
+export class AnonymousCapError extends ApiError {
+  readonly limit: number
+
+  constructor(payload: unknown) {
+    super(403, payload)
+    this.name = 'AnonymousCapError'
+    const limit = isRecord(payload) ? payload.limit : undefined
+    this.limit = typeof limit === 'number' ? limit : 3
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
@@ -507,10 +523,17 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
     restoreMixVersion: (id, input) => request(`/sessions/${encodeURIComponent(id)}/versions/restore`, { method: 'POST', body: JSON.stringify(input) }),
     listSessions: () => request('/sessions'),
     getSession: (sessionId) => request(`/sessions/${encodeURIComponent(sessionId)}`),
+    getMe: async (signal) => {
+      const body = await request<{ user: { id: string; isAnonymous?: boolean | null }; merged?: MergedMode | null }>('/me', { signal })
+      return { user: { id: body.user.id, isAnonymous: body.user.isAnonymous === true }, merged: body.merged ?? null }
+    },
     createSession: (prompt, playlistSeed, energyArc) =>
-      request('/sessions', {
+      request<CreateSessionResponse>('/sessions', {
         method: 'POST',
         body: JSON.stringify({ prompt, ...(playlistSeed ? { playlistSeed } : {}), ...(energyArc ? { energyArc } : {}) }),
+      }).catch((error: unknown) => {
+        if (error instanceof ApiError && error.status === 403 && error.code === 'anonymous_cap') throw new AnonymousCapError(error.payload)
+        throw error
       }),
     sendMessage: (sessionId, text, energyArc) =>
       request(`/sessions/${encodeURIComponent(sessionId)}/messages`, {

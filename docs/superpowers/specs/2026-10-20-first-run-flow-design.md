@@ -171,9 +171,12 @@ null default false`.
 
 When the anonymous user is created: lazily, at the first action that needs
 the server (sending the first prompt, saving artist seeds, starting a sync),
-not at launch. Opening the app and leaving creates no row. The client treats
-"no session" and "anonymous session" as one state for gating and only
-distinguishes them for the You row and the cap.
+not at launch. Opening the app and leaving creates no row. Gating: the first-run flow is
+shown when there is no session, and stays mounted once the anonymous
+session appears mid-flow until the flow hands off to the shell (the prompt
+is sent). An anonymous session already present at launch goes straight to
+the shell. Beyond that the client distinguishes anonymous from account only
+for the You row and the cap.
 
 ### The merge
 

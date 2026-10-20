@@ -1,5 +1,6 @@
 import { appReturnUrl } from './app-url'
 import { createAuthClient } from 'better-auth/react'
+import { anonymousClient } from 'better-auth/client/plugins'
 import { AUTH_URL } from '../config'
 import type { AuthBridge } from '../components/AuthGate'
 import type { AccountBridge } from '../components/AccountDialog'
@@ -8,8 +9,16 @@ import { sessionTokenStore } from './session-token'
 
 export const authClient = createAuthClient({
   baseURL: AUTH_URL,
+  // credentials: 'include' also carries an anonymous session's cookie into a
+  // social sign-in, which is how the server links it to the account.
   fetchOptions: { credentials: 'include' },
+  plugins: [anonymousClient()],
 })
+
+// The token useSession last saw. A token ensureSession() stored before the
+// session refetch lands must survive the renders in between, so the hook only
+// clears a token it observed itself (sign-out clears explicitly).
+let observedToken: string | null = null
 
 function providerLabel(provider: AuthProvider): string {
   return provider === 'apple' ? 'Apple' : 'Google'
@@ -19,8 +28,13 @@ export const browserAuth: AuthBridge & AccountBridge = {
   useSession: () => {
     const session = authClient.useSession()
     const token = session.data?.session.token
-    if (token) sessionTokenStore.write(token)
-    else sessionTokenStore.clear()
+    if (token) {
+      observedToken = token
+      sessionTokenStore.write(token)
+    } else if (observedToken && !session.isPending) {
+      observedToken = null
+      sessionTokenStore.clear()
+    }
 
     return {
       data: session.data
@@ -30,6 +44,7 @@ export const browserAuth: AuthBridge & AccountBridge = {
               name: session.data.user.name,
               email: session.data.user.email,
               image: session.data.user.image,
+              isAnonymous: session.data.user.isAnonymous === true,
             },
           }
         : null,
@@ -76,6 +91,7 @@ export const browserAuth: AuthBridge & AccountBridge = {
     }
   },
   signOut: () => {
+    observedToken = null
     sessionTokenStore.clear()
     return authClient.signOut()
   },

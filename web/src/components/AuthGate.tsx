@@ -8,12 +8,15 @@ import {
 import { restoredIdentity, rememberIdentity, clearWorkspaceRestore } from '../lib/workspace-restore'
 import { Cassette } from './Cassette'
 import { AppleMark, GoogleMark } from './ProviderMarks'
+import { FirstRun } from './first-run/FirstRun'
 
 export type AuthUser = {
   id: string
   name: string
   email: string
   image?: string | null
+  /** True for a Better Auth anonymous session created by the first run. */
+  isAnonymous?: boolean
 }
 
 export type AuthSessionState = {
@@ -42,9 +45,24 @@ function label(provider: AuthProvider): string {
 export function AuthGate({ auth, preferences = browserAuthPreferences, children }: AuthGateProps) {
   const session = auth.useSession()
   const [cachedUser, setCachedUser] = useState(restoredIdentity)
-  const [redirecting, setRedirecting] = useState<AuthProvider | null>(null)
   const [lastUsed, setLastUsed] = useState<AuthProvider | null>(() => preferences.lastUsed())
   const [signInError, setSignInError] = useState(() => authErrorFromSearch(window.location.search))
+  // The first run stays mounted while its own ensureSession() creates an
+  // anonymous session, until it calls onDone. A returning anonymous listener
+  // (session found by the first resolved check) goes straight to the shell.
+  // Any resolved no-session state arms it, so sign-out followed by a new
+  // anonymous session also stays in the flow.
+  const resolved = !session.isPending && !session.error
+  const [firstRunActive, setFirstRunActive] = useState(() => resolved && !session.data?.user)
+
+  useEffect(() => {
+    if (!resolved) return
+    if (!session.data?.user) setFirstRunActive(true)
+  }, [resolved, session.data?.user?.id])
+
+  useEffect(() => {
+    if (session.data?.user) setSignInError('')
+  }, [session.data?.user?.id])
 
   useEffect(() => {
     if (!signInError) return
@@ -71,10 +89,23 @@ export function AuthGate({ auth, preferences = browserAuthPreferences, children 
       clearWorkspaceRestore()
       setCachedUser(null)
     }
-  }, [session.data?.user.id, session.data?.user.name, session.data?.user.email, session.data?.user.image, session.isPending, session.error])
+  }, [session.data?.user.id, session.data?.user.name, session.data?.user.email, session.data?.user.image, session.data?.user.isAnonymous, session.isPending, session.error])
 
   const restoring = session.isPending || Boolean(session.error)
   const visibleUser = session.data?.user ?? (restoring ? cachedUser : null)
+  const errorMessage = signInError || (session.error ? 'We couldn’t check your session. Try again.' : '')
+  const firstRun = (
+    <FirstRun
+      auth={auth}
+      preferences={preferences}
+      lastUsed={lastUsed}
+      error={errorMessage}
+      anonymous={visibleUser?.isAnonymous === true}
+      onStart={() => setSignInError('')}
+      onDone={() => setFirstRunActive(false)}
+    />
+  )
+  if (visibleUser?.isAnonymous && firstRunActive) return firstRun
   if (visibleUser) {
     return (
       <>
@@ -110,22 +141,39 @@ export function AuthGate({ auth, preferences = browserAuthPreferences, children 
     )
   }
 
+  return firstRun
+}
+
+type SignInPageProps = {
+  auth: Pick<AuthBridge, 'signIn'>
+  preferences: AuthPreferenceStore
+  lastUsed: AuthProvider | null
+  error: string
+  /** Called as a provider sign-in starts, so the gate can drop a stale URL error. */
+  onStart?: () => void
+}
+
+/** The provider sign-in page; the first run renders it until its own pages land. */
+export function SignInPage({ auth, preferences, lastUsed, error, onStart }: SignInPageProps) {
+  const [redirecting, setRedirecting] = useState<AuthProvider | null>(null)
+  const [localError, setLocalError] = useState<string | null>(null)
   const waiting = redirecting !== null
-  const errorMessage = signInError || (session.error ? 'We couldn’t check your session. Try again.' : '')
+  const errorMessage = localError ?? error
 
   async function startSignIn(provider: AuthProvider) {
-    setSignInError('')
+    setLocalError(null)
+    onStart?.()
     setRedirecting(provider)
     preferences.begin(provider)
     try {
       const result = await auth.signIn(provider)
       if (result.error) {
-        setSignInError(result.error)
+        setLocalError(result.error)
         setRedirecting(null)
         preferences.clearPending()
       }
     } catch {
-      setSignInError(`${label(provider)} sign-in did not finish.`)
+      setLocalError(`${label(provider)} sign-in did not finish.`)
       setRedirecting(null)
       preferences.clearPending()
     }
