@@ -183,6 +183,17 @@ export async function selectPlaylistSeed(db: Db, sessionId: string, userId: stri
   })
 }
 
+// First-run limit (docs/superpowers/specs/2026-10-20-first-run-flow-design.md,
+// "Limits"): an anonymous listener may start this many mixes before signing
+// in. Every dj_sessions row counts, archived included, so archiving never
+// frees a slot. Accounts are never capped.
+export const ANONYMOUS_MIX_CAP = 3
+
+export async function countUserSessions(db: Db, userId: string): Promise<number> {
+  const [row] = await db.select({ n: sql<number>`count(*)::int` }).from(djSessions).where(eq(djSessions.userId, userId))
+  return row?.n ?? 0
+}
+
 export async function createSessionWithPlaylistSeed(db: Db, userId: string, title: string,
   input?: z.infer<typeof initialSeedSchema>) {
   return db.transaction(async tx => {

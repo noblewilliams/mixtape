@@ -13,7 +13,7 @@ import { intentSchema, queueOpsSchema } from '../dj/contracts'
 import { generateSessionTitle } from '../dj/title'
 import { sanitizeTitleText } from '../dj/sanitize'
 import { bodyLimit } from 'hono/body-limit'
-import { createSessionWithPlaylistSeed, initialSeedSchema, PlaylistSeedError, readPlaylistSeed, selectPlaylistSeed, seedSelectionSchema } from '../playlists/seed'
+import { ANONYMOUS_MIX_CAP, countUserSessions, createSessionWithPlaylistSeed, initialSeedSchema, PlaylistSeedError, readPlaylistSeed, selectPlaylistSeed, seedSelectionSchema } from '../playlists/seed'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -137,7 +137,13 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
 
   app.post('/', zValidator('json', createSessionSchema), async (c) => {
     const { prompt, playlistSeed, energyArc } = c.req.valid('json')
-    const userId = c.get('user').id
+    const { id: userId, isAnonymous } = c.get('user')
+    // Checked before any insert or model call: a capped request costs one
+    // count and nothing else. Only new mixes are capped; follow-ups, queue
+    // ops and edits on an existing session are not.
+    if (isAnonymous && (await countUserSessions(db, userId)) >= ANONYMOUS_MIX_CAP) {
+      return c.json({ error: 'anonymous_cap', limit: ANONYMOUS_MIX_CAP }, 403)
+    }
     const fallbackTitle = titleFromPrompt(prompt)
 
     // Persist-first: the session row (and, inside runDjTurn, the user's own
