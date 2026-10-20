@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
-import { ApiError, type ApiMusicSource, type MixtapeApi, type OnboardingResponse, type QueueOpsResponse } from './api/client'
+import { ApiError, type ApiMusicSource, type CreateSessionResponse, type MixtapeApi, type OnboardingResponse, type QueueOpsResponse } from './api/client'
 import type { AccountBridge } from './components/AccountDialog'
 import type { MusicKitClient } from './musickit/client'
 import { writeServiceChoice } from './lib/service-preference'
@@ -63,7 +63,7 @@ const accountAuth: AccountBridge = {
 }
 
 function renderApp(
-  options: { api?: ReturnType<typeof createFakeApi>; musicKit?: MusicKitClient; onSignOut?: () => void } = {},
+  options: { api?: ReturnType<typeof createFakeApi>; musicKit?: MusicKitClient; onSignOut?: () => void; initialSession?: CreateSessionResponse } = {},
 ) {
   const api = options.api ?? createFakeApi()
   const musicKit = options.musicKit ?? createFakeMusicKit()
@@ -77,6 +77,7 @@ function renderApp(
       user={user}
       onSignOut={onSignOut}
       importParser={createDirectParser()}
+      initialSession={options.initialSession}
     />,
   )
   return { api, musicKit, onSignOut }
@@ -92,8 +93,6 @@ async function settled(api: ReturnType<typeof createFakeApi>) {
   await screen.findByRole('heading', { name: 'Home' })
   await waitFor(() => expect(api.calls.some((call) => call.method === 'getOnboarding')).toBe(true))
 }
-
-const gate = () => screen.queryByRole('dialog', { name: 'Which do you use?' })
 
 async function openSpotify() {
   fireEvent.click(screen.getByRole('button', { name: /^Library/ }))
@@ -112,90 +111,98 @@ async function openAppleSync() {
   await screen.findByText('Sync songs and playlists into Mixtape.')
 }
 
-describe('service gate', () => {
+async function openAddMusic() {
+  fireEvent.click(screen.getByRole('button', { name: 'Library' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Sources' }))
+  const opener = await screen.findByRole('button', { name: 'Add your music' })
+  opener.focus()
+  fireEvent.click(opener)
+  await screen.findByRole('heading', { level: 1, name: 'Step 1 of 3, Which do you use?' })
+}
+
+describe('no service gate', () => {
   afterEach(cleanup)
 
-  it('asks a blank listener which service they use, with the approved copy', async () => {
-    renderApp()
-
-    const dialog = await screen.findByRole('dialog', { name: 'Which do you use?' })
-    expect(within(dialog).getByText('Before your first tape')).toBeInTheDocument()
-    expect(within(dialog).getByText('Mixtape builds mixes from what you actually listen to. Tell it where that lives.')).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: /^Apple Music/ })).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: /^Apple Music/ })).toHaveFocus()
-    expect(within(dialog).getByRole('button', { name: /^Spotify/ })).toBeInTheDocument()
-    expect(within(dialog).getByText('You can add the other later from Your music.')).toBeInTheDocument()
-  })
-
-  it('never shows for an Apple listener', async () => {
-    const api = apiWithOnboarding({ chosenService: 'apple', hasLibrary: true })
+  it('never interrupts a blank listener with a service dialog', async () => {
+    const api = createFakeApi()
     renderApp({ api })
 
     await settled(api)
-    expect(gate()).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Library' })).toBeInTheDocument()
-  })
-
-  it('never shows for a Spotify listener', async () => {
-    const api = apiWithOnboarding({ chosenService: 'spotify' })
-    renderApp({ api })
-
-    await settled(api)
-    expect(gate()).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Library' })).toBeInTheDocument()
-  })
-
-  it('never shows while onboarding is still loading', async () => {
-    const api = createFakeApi({ getOnboarding: () => new Promise<OnboardingResponse>(() => undefined) })
-    renderApp({ api })
-
-    await settled(api)
-    expect(gate()).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Which do you use?' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /Which do you use\?/ })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Home' })).toHaveAttribute('aria-current', 'page')
-  })
-
-  it('records the Spotify choice and opens the request page', async () => {
-    const { api } = renderApp()
-
-    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Which do you use?' })).getByRole('button', { name: /^Spotify/ }))
-
-    expect(await screen.findByRole('heading', { name: 'Bring your Spotify music' })).toBeInTheDocument()
-    expect(gate()).not.toBeInTheDocument()
-    expect(api.calls.filter((call) => call.method === 'postFunnelEvent').map((call) => call.args[0])).toEqual([
-      { type: 'chose_spotify', surface: 'web' },
-    ])
-    expect(screen.getByRole('button', { name: 'Library' })).toHaveAttribute('aria-current', 'page')
-  })
-
-  it('sends the Apple choice into the existing connect flow', async () => {
-    const { musicKit } = renderApp()
-
-    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Which do you use?' })).getByRole('button', { name: /^Apple Music/ }))
-
-    expect(gate()).not.toBeInTheDocument()
-    expect(musicKit.connect).not.toHaveBeenCalled()
-    fireEvent.click(await screen.findByRole('button', { name: 'Connect Apple Music' }))
-    await waitFor(() => expect(musicKit.connect).toHaveBeenCalledTimes(1))
   })
 })
 
-describe('service gate persistence', () => {
+describe('Library add flow', () => {
   afterEach(cleanup)
   afterEach(() => vi.restoreAllMocks())
 
-  it('remembers an Apple choice on this device so the gate does not come back', async () => {
-    renderApp()
-    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Which do you use?' })).getByRole('button', { name: /^Apple Music/ }))
-    expect(localStorage.getItem('mixtape:service-choice:user-1')).toBe('apple')
-    expect(screen.getByRole('button', { name: 'Library' })).toBeInTheDocument()
-    cleanup()
-
+  it('opens the first run Step 1 page from Library and returns to Library when it ends', async () => {
     const api = createFakeApi()
     renderApp({ api })
     await settled(api)
-    expect(gate()).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Library' })).toBeInTheDocument()
+    await openAddMusic()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Spotify' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Spotify data export, a few days' }))
+    expect(await screen.findByRole('heading', { level: 1, name: 'Step 3 of 3, Request your data' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: "I’ve requested it" }))
+
+    await waitFor(() => expect(screen.queryByTestId('first-run')).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'Library' })).toHaveAttribute('aria-current', 'page')
+    expect(api.calls.filter((call) => call.method === 'postFunnelEvent').map((call) => call.args[0])).toEqual([
+      { type: 'chose_spotify', surface: 'web' },
+      { type: 'marked_requested', surface: 'web' },
+    ])
   })
+
+  it('remembers the Apple choice and syncs on the workspace run', async () => {
+    const { musicKit } = renderApp()
+    await openAddMusic()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apple Music' }))
+    expect(localStorage.getItem('mixtape:service-choice:user-1')).toBe('apple')
+    fireEvent.click(await screen.findByRole('button', { name: 'Sync my library' }))
+
+    await waitFor(() => expect(musicKit.connect).toHaveBeenCalledTimes(1))
+    expect(await screen.findByRole('heading', { level: 1, name: 'Step 3 of 3, Syncing your library' })).toBeInTheDocument()
+  })
+
+  it('leaves back to Library with Skip for now', async () => {
+    renderApp()
+    await openAddMusic()
+    fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }))
+    await waitFor(() => expect(screen.queryByTestId('first-run')).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'Library' })).toHaveAttribute('aria-current', 'page')
+  })
+
+  it('focuses its Step 1 heading, and gives focus back to Add your music when it ends', async () => {
+    renderApp()
+    await openAddMusic()
+    expect(screen.getByRole('heading', { level: 1, name: 'Step 1 of 3, Which do you use?' })).toHaveFocus()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Add your music' })).toHaveFocus())
+  })
+
+  it('still takes the choice when storage throws', async () => {
+    const blocked = () => {
+      throw new Error('blocked')
+    }
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(blocked)
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(blocked)
+    renderApp()
+    await openAddMusic()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apple Music' }))
+    expect(await screen.findByRole('heading', { level: 1, name: 'Step 2 of 3, How do you want to add it?' })).toBeInTheDocument()
+  })
+})
+
+describe('service choice persistence', () => {
+  afterEach(cleanup)
 
   it('honours a remembered Spotify choice before the server has it', async () => {
     writeServiceChoice('user-1', 'spotify')
@@ -203,7 +210,6 @@ describe('service gate persistence', () => {
     renderApp({ api })
     await settled(api)
 
-    expect(gate()).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Library' })).toBeInTheDocument()
     await openSpotify()
     expect(await screen.findByRole('heading', { name: 'Bring your Spotify music' })).toBeInTheDocument()
@@ -222,23 +228,6 @@ describe('service gate persistence', () => {
     expect(localStorage.getItem('mixtape:service-choice:user-1')).toBeNull()
   })
 
-  it('still gates and still takes the choice when storage throws', async () => {
-    const blocked = () => {
-      throw new Error('blocked')
-    }
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(blocked)
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(blocked)
-    const { musicKit } = renderApp()
-
-    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Which do you use?' })).getByRole('button', { name: /^Apple Music/ }))
-
-    expect(gate()).not.toBeInTheDocument()
-    expect(musicKit.connect).not.toHaveBeenCalled()
-    fireEvent.click(await screen.findByRole('button', { name: 'Connect Apple Music' }))
-    await waitFor(() => expect(musicKit.connect).toHaveBeenCalledTimes(1))
-    expect(screen.getByRole('button', { name: 'Library' })).toBeInTheDocument()
-  })
-
   it('signs out when the onboarding read says the session has ended', async () => {
     const api = createFakeApi({
       getOnboarding: async () => {
@@ -248,7 +237,6 @@ describe('service gate persistence', () => {
     const { onSignOut } = renderApp({ api, onSignOut: vi.fn() })
 
     await waitFor(() => expect(onSignOut).toHaveBeenCalled())
-    expect(gate()).not.toBeInTheDocument()
   })
 })
 
@@ -653,6 +641,18 @@ describe('Spotify mix outputs', () => {
     await createTape('Slow start')
     await waitFor(() => expect(imported.calls.filter((call) => call.method === 'createSession')).toHaveLength(2))
     expect(funnelTypes(imported, 'first_personal_mix')).toHaveLength(1)
+  })
+
+  it('posts first_personal_mix for a personal first mix handed over by the first run', async () => {
+    const api = apiWithOnboarding({ sources: [accountPackage], importCompletedAt: '2026-09-04T09:30:00.000Z' })
+    const created = await createFakeApi().createSession('Rainy commute')
+    expect(created.session.notPersonal).toBe(false)
+    expect(created.queue.length).toBeGreaterThan(0)
+    renderApp({ api, initialSession: created })
+
+    expect(await screen.findByRole('heading', { name: 'Rainy commute' })).toBeInTheDocument()
+    await waitFor(() => expect(funnelTypes(api, 'first_personal_mix')).toHaveLength(1))
+    expect(api.calls.filter((call) => call.method === 'getSession')).toHaveLength(0)
   })
 
   it('does not post first_personal_mix for a corpus-mode tape', async () => {

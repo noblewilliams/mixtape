@@ -63,7 +63,7 @@ Path B, add my music first (three counted steps, then path A):
      and **Choose files**. The existing review step (file roles, Liked Songs
      confirmation) follows unchanged.
    - Spotify data export: the existing request instructions, then
-     **I've requested it**. The listener continues to path A page 2 and the
+     **I’ve requested it**. The listener continues to path A page 2 and the
      Home waiting row takes over when the files arrive.
    - Apple export: the existing instructions and picker.
 4. **What do you want to hear?** Path A page 1 without the add-music pill.
@@ -255,10 +255,16 @@ pages 1 to 3 as a pushed flow with the same counter. `authProvider` gains
 link, the client stores the new token and invalidates `authProvider` as a
 sign-in does today, which resets every user-scoped provider.
 
-Web (`web/src/RootApp.tsx`): `AuthGate` becomes `FirstRun`, rendering the
-same pages in a 420 px column over the session-painted plane. The Better Auth
-React client adds `anonymousClient()`. The `ChooseServiceDialog` modal is
-removed; Your music's add flow reuses path B's pages.
+Web (`web/src/RootApp.tsx`): `AuthGate` renders `FirstRun` for the no-session
+and active-anonymous states, the same pages in a 420 px column over the
+full-bleed image. The Better Auth React client adds `anonymousClient()`. The
+`ChooseServiceDialog` modal is removed; Your music gains a quiet "Add your
+music" action that opens path B's pages over the shell and returns to Your
+music. Web differences, recorded 2026-10-20: Step 2 for Apple Music offers
+only "Sync my library", because the web has no reader for Apple's export
+file; the Apple sync page drives the same sync run the Sources panel uses,
+without that panel's chrome; the Exportify and data-export instructions are
+the existing full lines.
 
 Funnel events (new, one-time per anonymous user): `first_run_opened`,
 `chose_make_mix`, `chose_add_music`, `chose_service`, `chose_method`,
@@ -287,11 +293,11 @@ rows after the first mix.
   adds what you actually played."
 - Step 3 (Apple sync): "Syncing your library" then "1,284 songs in." Pill
   "Done". Failure: "Sync stopped at 612 songs." Pills "Retry", "Continue
-  with what's in".
+  with what’s in".
 - Step 3 (Exportify): "Export from Exportify" and the three existing lines.
   Pills "Open Exportify", "Choose files".
 - Step 3 (Spotify export): "Request your data" and the existing lines. Pill
-  "I've requested it".
+  "I’ve requested it".
 - Prompt after sync: "What do you want to hear?" Line "1,284 songs in. Ask
   for anything."
 - Keep sheet: "Keep this mix." Line "Sign in and your mixes and music stay

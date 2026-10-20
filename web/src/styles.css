@@ -3537,21 +3537,12 @@ button.mini:disabled {
   background: var(--plum);
 }
 
-.dialog.interview-dialog,
-.dialog.service-dialog {
+.dialog.interview-dialog {
   width: min(520px, calc(100vw - 32px));
 }
 
 .interview-dialog h2 {
   font-size: 22px;
-}
-
-.service-dialog .mini-grid {
-  margin-top: 0;
-}
-
-.service-dialog .note {
-  margin-top: 14px;
 }
 
 .dialog.confirm-inline {

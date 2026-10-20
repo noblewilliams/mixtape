@@ -116,7 +116,7 @@ describe('approved Spotify import surfaces', () => {
   it('draws the interview stepper as five flat segments and keeps the dialog on the warm gray', () => {
     expect(stylesheet).toMatch(/\.stepper span\s*{[^}]*width:\s*22px;[^}]*height:\s*4px;/s)
     expect(stylesheet).toMatch(/\.stepper span\.on\s*{[^}]*background:\s*var\(--plum\);/s)
-    expect(stylesheet).toMatch(/\.dialog\.interview-dialog,\s*\.dialog\.service-dialog\s*{[^}]*width:\s*min\(520px, calc\(100vw - 32px\)\);/s)
+    expect(stylesheet).toMatch(/\.dialog\.interview-dialog\s*{[^}]*width:\s*min\(520px, calc\(100vw - 32px\)\);/s)
     expect(stylesheet).not.toMatch(/\.(?:interview|service)-dialog[^{]*{[^}]*content-paint/s)
   })
 

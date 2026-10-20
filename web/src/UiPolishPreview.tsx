@@ -18,6 +18,9 @@ import { PlaylistBrowser } from './components/PlaylistBrowser'
 import { Tabs } from './components/Tabs'
 import './components/web-controls.css'
 import './components/your-music.css'
+import { FirstRun } from './components/first-run/FirstRun'
+import { createFirstRunServices } from './components/first-run/services'
+import type { MusicKitClient } from './musickit/client'
 
 const previewPlaylist: ApiPlaylistSummary = { id: 'preview', name: '“just a girl”', source: 'spotify_export', kind: 'user', origin: 'unknown', curatorName: null, artworkUrlTemplate: null, artworkBgColor: null, artworkWidth: null, artworkHeight: null, entryCount: 14, knownDurationMs: null, durationComplete: false, lastModifiedAt: null, syncedAt: '2026-09-18T12:00:00Z', inLibrary: true, capability: 'copy_only' }
 const previewEntries = ['Present Tense', 'If You Say the Word', 'The Girl Is Mine', 'Let My Baby Stay', 'Do What You Gotta Do', 'Home recording'].map((title, position) => ({ id: String(position), position, trackId: null, appleCatalogId: null, spotifyId: position === 5 ? null : '4uLU6hMCjMI75M1A2tKUQC', title, artist: 'Synthetic artist', album: null, durationMs: null, artworkUrlTemplate: null, artworkWidth: null, artworkHeight: null, artworkBgColor: null, resolved: false }))
@@ -33,13 +36,20 @@ const previewQueue = demoQueue.map((track, index) =>
   : index === 3 ? { ...track, artist: 'Ilse Varga and the Night Shift Choir Orchestra', newToYou: true }
   : track)
 
+// Synthetic first-run services: seeds and the first mix resolve, a sync fails at once (no API here).
+const previewFirstRunServices = () => createFirstRunServices({
+  api: { createSession: async () => ({ session: { id: 'preview' } }), putArtistSeeds: async () => ({ seeds: [] }), postFunnelEvent: async () => ({ ok: true }) } as unknown as MixtapeApi,
+  musicKit: { connect: async () => { throw new Error('preview') } } as unknown as MusicKitClient,
+  ensureSession: async () => undefined,
+})
+
 export default function UiPolishPreview() {
   const [state, setState] = useState('populated')
   const [sessions, setSessions] = useState(demoSessions.slice(0, 4).map((session, index) => ({ ...session, caseColor: tapeColors[index * 9][1] as string })))
   const [collectionView, setCollectionView] = useState<CollectionView>('list')
   async function color(id: string, caseColor: string) { setSessions(current => current.map(s => s.id === id ? { ...s, caseColor } : s)) }
   const close = () => setState('populated')
-  const options = ['home', 'home-loading', 'home-empty', 'home-error', 'populated', 'loading', 'empty', 'archived', 'load-error', 'refresh-error', 'settings', 'success', 'error', 'info', 'playlist', 'preference', 'memory', 'sources', 'library', 'library-loading', 'conversation', 'conversation-blank']
+  const options = ['home', 'home-loading', 'home-empty', 'home-error', 'populated', 'loading', 'empty', 'archived', 'load-error', 'refresh-error', 'settings', 'success', 'error', 'info', 'playlist', 'preference', 'memory', 'sources', 'library', 'library-loading', 'conversation', 'conversation-blank', 'first-run']
   return <>
     <div style={{ position: 'fixed', right: 12, top: 8, zIndex: 200, display: 'flex', gap: 8, alignItems: 'center', background: '#f7f4f8', color: '#1c1a1e', padding: 8, borderRadius: 8, fontSize: 12 }}>
       <label htmlFor="ui-preview-state">UI preview · synthetic data</label><select id="ui-preview-state" value={state} onChange={e => setState(e.target.value)}>{options.map(option => <option key={option}>{option}</option>)}</select>
@@ -57,6 +67,7 @@ export default function UiPolishPreview() {
     </div>
     {state === 'settings' && <TapeSettings session={sessions[0]} onColor={caseColor=>color(sessions[0].id,caseColor)} onClose={close} />}
     {['success','error','info'].includes(state) && <Toast tone={state as 'success'|'error'|'info'} message={state === 'success' ? 'Playlist created' : state === 'error' ? 'Couldn’t save. Try again.' : 'Mix archived'} action={state === 'info' ? { label: 'Undo', onClick:close }:undefined} />}
+    {state === 'first-run' && <FirstRun services={previewFirstRunServices} signIn={{ auth: { signIn: async () => ({}) }, preferences: { lastUsed: () => null, begin: () => {}, promotePending: () => null, clearPending: () => {} }, lastUsed: null, error: '' }} onDone={close} />}
     {state === 'playlist' && <SaveDialog defaultName="Evening colours" newToYouCount={2} onSave={()=>setState('success')} onClose={close} />}
     {state === 'preference' && <ControlModal title="Forget this preference?" alert onClose={close}><p>Keep vocals in the background for dinner.</p><p>The DJ will stop using this note. You can’t undo this.</p><div className="wc-actions"><button className="wc-text" onClick={close}>Cancel</button><button className="wc-text wc-danger" onClick={()=>setState('success')}>Forget preference</button></div></ControlModal>}
   </>

@@ -36,6 +36,8 @@ type Props = {
   onNewTape: () => void
   onRemoveSource: (source: ListeningImportSource) => void
   onSessionExpired: () => void
+  /** Opens the first run's Step 1 to 3 pages. */
+  onAddMusic?: () => void
 }
 export function YourMusicView(props: Props) {
   const { api, section, onSection, uploadGate, syncRun, revision, onSessionExpired } = props
@@ -203,6 +205,11 @@ export function YourMusicView(props: Props) {
           <>
             <div className="ym-source-intro">
               <p>Connect Apple Music or import your Spotify playlists. Both help shape your mixes.</p>
+              {props.onAddMusic ? (
+                <button type="button" className="btn text-action" onClick={props.onAddMusic}>
+                  Add your music
+                </button>
+              ) : null}
             </div>
             <div className="ym-source-stack">
               <article className="ym-source-item">

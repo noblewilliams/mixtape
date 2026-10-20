@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
-import type { ApiSessionSummary, QueueOpsResponse } from './api/client'
+import type { ApiSessionSummary, CreateSessionResponse, QueueOpsResponse } from './api/client'
 import type { AccountBridge } from './components/AccountDialog'
 import type { MusicKitClient } from './musickit/client'
 import { createFakeApi } from './test/fake-api'
@@ -38,6 +38,8 @@ function renderApp(options: {
   api?: ReturnType<typeof createFakeApi>
   accountAuth?: AccountBridge
   musicKit?: MusicKitClient
+  initialSessionId?: string
+  initialSession?: CreateSessionResponse
 } = {}) {
   const api = options.api ?? createFakeApi()
   const accountAuth = options.accountAuth ?? createFakeAccountAuth()
@@ -50,6 +52,8 @@ function renderApp(options: {
       musicKit={musicKit}
       user={user}
       onSignOut={vi.fn()}
+      initialSessionId={options.initialSessionId}
+      initialSession={options.initialSession}
     />,
   )
   return { api, accountAuth, musicKit }
@@ -63,6 +67,21 @@ async function openExistingMix() {
 
 describe('Mixtape web shell', () => {
   afterEach(cleanup)
+
+  it('opens the mix the first run just made from its own response, with no extra read', async () => {
+    const created = await createFakeApi().createSession('Rainy commute')
+    const { api } = renderApp({ initialSession: created })
+    expect(await screen.findByRole('heading', { name: 'Rainy commute' })).toBeInTheDocument()
+    expect(await screen.findByRole('status')).toHaveTextContent('Your new tape is ready.')
+    await waitFor(() => expect(api.calls.some(call => call.method === 'listSessions')).toBe(true))
+    expect(api.calls.filter(call => call.method === 'getSession')).toHaveLength(0)
+  })
+
+  it('falls back to reading the first mix when only its id is known', async () => {
+    const { api } = renderApp({ initialSessionId: 'blue-hour' })
+    expect(await screen.findByRole('heading', { name: 'Blue hour, windows down' })).toBeInTheDocument()
+    expect(api.calls.filter(call => call.method === 'getSession').map(call => call.args[0])).toEqual(['blue-hour'])
+  })
 
   it('starts on Home with clear navigation and no automatically opened conversation', async () => {
     const { api } = renderApp()

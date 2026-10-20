@@ -10,7 +10,7 @@ import { ImportPanel, type ImportPanelHandle } from './ImportPanel'
 import { MusicSourcesList } from './MusicSourcesList'
 
 export const SPOTIFY_PRIVACY_URL = 'https://www.spotify.com/account/privacy/'
-const MARK_FAILED = 'Couldn’t save that. Check your connection and try again.'
+export const MARK_FAILED = 'Couldn’t save that. Check your connection and try again.'
 
 type SpotifyMusicViewProps = {
   embedded?: boolean
@@ -27,7 +27,8 @@ type SpotifyMusicViewProps = {
   onOpenDemo?: () => void
 }
 
-function RequestSteps() {
+/** The official request instructions, shared with the first-run Step 3 page. */
+export function SpotifyRequestSteps() {
   return (
     <ol className="steps">
       <li>
@@ -63,6 +64,26 @@ function RequestSteps() {
       <li>
         Come back to Mixtape and give it each ZIP as it arrives. You don’t have
         to wait for both.
+      </li>
+    </ol>
+  )
+}
+
+/** The three Exportify lines, shared with the first-run Step 3 page. */
+export function ExportifySteps() {
+  return (
+    <ol className="steps">
+      <li>
+        <b>Open Exportify and connect Spotify.</b> Exportify opens in
+        your browser and asks for read access.
+      </li>
+      <li>
+        <b>Choose Export All.</b> Save the ZIP as it is. You can also
+        export individual playlists.
+      </li>
+      <li>
+        <b>Come back and choose the files.</b> Mixtape will show what
+        it found before importing.
       </li>
     </ol>
   )
@@ -139,20 +160,7 @@ export function SpotifyMusicView({
           {choosing ? (
             <>
               <h2>Export your saved music</h2>
-              <ol className="steps">
-                <li>
-                  <b>Open Exportify and connect Spotify.</b> Exportify opens in
-                  your browser and asks for read access.
-                </li>
-                <li>
-                  <b>Choose Export All.</b> Save the ZIP as it is. You can also
-                  export individual playlists.
-                </li>
-                <li>
-                  <b>Come back and choose the files.</b> Mixtape will show what
-                  it found before importing.
-                </li>
-              </ol>
+              <ExportifySteps />
               <div className="btn-row">
                 <a
                   className="btn primary"
@@ -206,7 +214,7 @@ export function SpotifyMusicView({
           </button>
           {deeper ? (
             <>
-              <RequestSteps />
+              <SpotifyRequestSteps />
               {onboarding.markedRequestedAt ? (
                 <p role="status">
                   Requested {recentDayLabel(onboarding.markedRequestedAt)}. You

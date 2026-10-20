@@ -42,6 +42,8 @@ import { ledgerRangeLabel } from '../lib/onboarding'
 export type ImportPanelHandle = {
   /** Back to the drop zone (when no upload is running) and focus it. */
   focus(): void
+  /** Files dropped somewhere else on the page, read as if dropped here. */
+  takeFiles(files: File[]): void
 }
 
 type ImportPanelProps = {
@@ -50,6 +52,11 @@ type ImportPanelProps = {
   onNewTape: () => void
   mixLabel?: string
   ref?: Ref<ImportPanelHandle>
+  /**
+   * `pill`: the pick step as one "Choose files" pill (the first-run Step 3
+   * page, which takes drops on the whole page); the review is unchanged.
+   */
+  pickVariant?: 'drop' | 'pill'
 }
 
 const EXPECTED_FILES =
@@ -243,6 +250,7 @@ export function ImportPanel({
   mixLabel = 'Make your first mix',
   ref,
   uploadBlocked = false,
+  pickVariant = 'drop',
 }: ImportPanelProps) {
   const state = useSyncExternalStore(run.subscribe, run.getState)
   const [dragOver, setDragOver] = useState(false)
@@ -278,6 +286,9 @@ export function ImportPanel({
         }
         pendingFocus.current = true
         reset()
+      },
+      takeFiles(files) {
+        void takeFiles(files)
       },
     }),
     [run],
@@ -355,6 +366,28 @@ export function ImportPanel({
     event.preventDefault()
     setDragOver(false)
     void takeFiles(Array.from(event.dataTransfer?.files ?? []))
+  }
+
+  if (state.kind === 'pick' && pickVariant === 'pill') {
+    return (
+      <div className="import-pick-pill" role="region" aria-label="Import a Spotify ZIP" tabIndex={-1} ref={rootRef as Ref<HTMLDivElement>}>
+        {copyStatus ? <p role="alert">{copyStatus}</p> : null}
+        <label className="fr-pill fr-pill--go">
+          <svg className="fr-pill-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M14 3H7.5A1.5 1.5 0 0 0 6 4.5v15A1.5 1.5 0 0 0 7.5 21h9a1.5 1.5 0 0 0 1.5-1.5V7z" />
+            <path d="M14 3v4h4" />
+          </svg>
+          Choose files
+          <input
+            className="sr-only"
+            type="file"
+            accept=".zip,.csv,application/zip,text/csv"
+            multiple
+            onChange={onPick}
+          />
+        </label>
+      </div>
+    )
   }
 
   if (state.kind === 'pick') {

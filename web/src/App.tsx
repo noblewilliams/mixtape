@@ -9,6 +9,7 @@ import {
   type ApiQueueTrack,
   type ApiPlaylistSeed,
   type ApiPlaylistSummary,
+  type CreateSessionResponse,
   type InterviewResponse,
   type ListeningImportSource,
   type MixtapeApi,
@@ -20,7 +21,9 @@ import {
 import { toDjMessage, toDjSession, toQueueTrack } from './api/mappers'
 import type { AuthUser } from './components/AuthGate'
 import { AccountDialog, type AccountBridge } from './components/AccountDialog'
-import { ChooseServiceDialog } from './components/ChooseServiceDialog'
+import { FirstRun } from './components/first-run/FirstRun'
+import type { FirstRunServices } from './components/first-run/services'
+import type { MusicService } from './components/first-run/ChooseService'
 import { MixHistory } from './components/MixHistory'
 import { Conversation } from './components/Conversation'
 import { HomeDashboard } from './components/HomeDashboard'
@@ -59,6 +62,10 @@ type AppProps = {
   onSignOut: () => void
   /** The export parser the import page drives; the lazy Worker parser unless a test injects one. */
   importParser?: PageParser
+  /** The mix the first run just made, seeded the way a new tape is. */
+  initialSession?: CreateSessionResponse
+  /** Fallback when only the id is known: the mix is read and opened. */
+  initialSessionId?: string
 }
 
 function accountCallback(): { dialog: boolean; message: string; tone: 'success' | 'error' } {
@@ -126,9 +133,8 @@ function conflictSnapshot(error: unknown): { queue: ApiQueueTrack[]; queueVersio
 
 export function App(props: AppProps) { return <SignedInWorkspace key={props.user.id} {...props} /> }
 
-function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, user, onSignOut, importParser }: AppProps) {
+function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, user, onSignOut, importParser, initialSession, initialSessionId }: AppProps) {
   const restoring = useWorkspaceRestoring()
-  const [onboardingRefreshed, setOnboardingRefreshed] = useState(false)
   const refreshedSessions = useRef(new Set<string>())
   const contentRevision = useRef<Record<string, number>>({})
   const callback = useMemo(accountCallback, [])
@@ -301,7 +307,6 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
         const result = await api.getOnboarding()
         if (!cancelled) {
           setOnboarding(result)
-          setOnboardingRefreshed(true)
         }
       } catch (requestError) {
         // Any other failure falls through: onboarding never locks a listener out.
@@ -348,23 +353,39 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   }
   refreshRef.current = refreshOnboarding
 
-  function chooseApple() {
-    writeServiceChoice(user.id, 'apple')
-    setLocalChoice('apple')
-    setMusicSection('apple')
-    setActiveView('music')
+  // Library's Add your music: the first run's Step 1 to 3 pages over the
+  // shell, on the same runs, returning to Library when they finish.
+  const [addingMusic, setAddingMusic] = useState(false)
+  // The control that opened the flow gets focus back when it ends.
+  const addMusicOpener = useRef<HTMLElement | null>(null)
+  const addMusicServices = useMemo<FirstRunServices>(
+    () => ({ api, syncRun, importRun, ensureSession: () => Promise.resolve() }),
+    [api, syncRun, importRun],
+  )
+
+  function recordServiceChoice(service: MusicService) {
+    writeServiceChoice(user.id, service)
+    setLocalChoice(service)
+    if (service === 'spotify') {
+      void api
+        .postFunnelEvent({ type: 'chose_spotify', surface: 'web' })
+        .catch(() => undefined)
+        .then(() => refreshOnboarding())
+    }
   }
 
-  function chooseSpotify() {
-    writeServiceChoice(user.id, 'spotify')
-    setLocalChoice('spotify')
-    setActiveView('music')
-    setMusicSection('spotify')
+  function openAddMusic() {
+    addMusicOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     setQueueOpen(false)
-    void api
-      .postFunnelEvent({ type: 'chose_spotify', surface: 'web' })
-      .catch(() => undefined)
-      .then(() => refreshOnboarding())
+    setAddingMusic(true)
+  }
+
+  function finishAddingMusic() {
+    setAddingMusic(false)
+    setActiveView('music')
+    void refreshOnboarding()
+    // After the shell stops being inert.
+    requestAnimationFrame(() => addMusicOpener.current?.focus())
   }
 
   function openMusic() {
@@ -506,6 +527,28 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     void loadSession(id)
   }
 
+  // The first run's mix opens from its own response, as a new tape does; the
+  // personal-mix milestone waits for the onboarding read it depends on.
+  const openedInitial = useRef(false)
+  const pendingInitialMilestone = useRef<CreateSessionResponse | null>(null)
+  useEffect(() => {
+    if (restoring || openedInitial.current) return
+    if (initialSession) {
+      openedInitial.current = true
+      adoptNewSession(initialSession)
+      pendingInitialMilestone.current = initialSession
+    } else if (initialSessionId) {
+      openedInitial.current = true
+      openSession(initialSessionId)
+    }
+  }, [restoring, initialSession, initialSessionId])
+  useEffect(() => {
+    const pending = pendingInitialMilestone.current
+    if (!pending || !onboarding) return
+    pendingInitialMilestone.current = null
+    notePersonalMix(pending.session, pending.queue.length)
+  }, [onboarding, effectiveOnboarding])
+
   async function connectAppleMusic() {
     if (musicConnection === 'connecting') return
     setMusicConnection('connecting')
@@ -564,6 +607,20 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     setDialog('new-tape')
   }
 
+  /** A new mix's response becomes workspace state and the open session. */
+  function adoptNewSession(response: CreateSessionResponse) {
+    setPlaylistSeeds(current => ({ ...current, [response.session.id]: response.playlistSeed }))
+    const mapped = detailToState(response)
+    setSessions((current) => [mapped.session, ...current.filter((session) => session.id !== mapped.session.id)])
+    setMessagesBySession((current) => ({ ...current, [mapped.session.id]: mapped.messages }))
+    setQueuesBySession((current) => ({ ...current, [mapped.session.id]: mapped.queue }))
+    setActiveSessionId(mapped.session.id)
+    setActiveView('session')
+    setDialog(null)
+    setError('')
+    announce('Your new tape is ready.')
+  }
+
   async function createTape(prompt: string, useInspiration = true, propagateError = false, shape?: EnergyArc) {
     if (creatingTape) return
     const signal = controlLife.current.signal
@@ -572,16 +629,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       const response = await api.createSession(prompt, useInspiration && newSeed ? { playlistId: newSeed.playlistId, excludeSourceTracks: newSeed.excludeSourceTracks } : undefined, shape)
       if (signal.aborted) return
       setNewSeed(null)
-      setPlaylistSeeds(current => ({ ...current, [response.session.id]: response.playlistSeed }))
-      const mapped = detailToState(response)
-      setSessions((current) => [mapped.session, ...current.filter((session) => session.id !== mapped.session.id)])
-      setMessagesBySession((current) => ({ ...current, [mapped.session.id]: mapped.messages }))
-      setQueuesBySession((current) => ({ ...current, [mapped.session.id]: mapped.queue }))
-      setActiveSessionId(mapped.session.id)
-      setActiveView('session')
-      setDialog(null)
-      setError('')
-      announce('Your new tape is ready.')
+      adoptNewSession(response)
       notePersonalMix(response.session, response.queue.length)
     } catch (requestError) {
       if (signal.aborted) return
@@ -770,7 +818,8 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
 
 
   return (
-    <div className={`app-shell ${activeView !== 'session' || !activeSession ? 'app-shell--home' : ''}`} style={shellStyle}>
+    <>
+    <div className={`app-shell ${activeView !== 'session' || !activeSession ? 'app-shell--home' : ''}`} style={shellStyle} inert={addingMusic}>
       <Sidebar activeView={activeView}
         onOpenHome={() => setActiveView('home')}
         onOpenMusic={openMusic}
@@ -802,6 +851,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
           onOpenInterview={() => setDialog('interview')}
           onNewTape={() => setDialog('new-tape')}
           onRemoveSource={(source) => void removeSource(source)}
+          onAddMusic={openAddMusic}
         />
       ) : activeView !== 'session' || !activeSession ? (
         <Home
@@ -881,9 +931,6 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       {dialog === 'interview' ? (
         <InterviewDialog api={api} onClose={() => setDialog(null)} onComplete={completeInterview} />
       ) : null}
-      {!restoring && onboardingRefreshed && effectiveOnboarding && effectiveOnboarding.chosenService === null ? (
-        <ChooseServiceDialog onChooseApple={chooseApple} onChooseSpotify={chooseSpotify} />
-      ) : null}
       {dialog === 'account' ? (
         <AccountDialog
           onMemories={() => { setDialog(null); setActiveView('memories') }}
@@ -897,5 +944,9 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       {archiveUndo && !toast && <Toast message="Mix archived" tone="info" action={{ label: 'Undo', onClick: () => void updateMix(archiveUndo, { status: 'active' }).catch(() => announce('Couldn’t restore the mix. Open Archived to retry.', 'error')) }} />}
       {toast ? <Toast message={toast.message} tone={toast.tone} /> : null}
     </div>
+    {addingMusic ? (
+      <FirstRun mode="add" services={addMusicServices} onChooseService={recordServiceChoice} onDone={finishAddingMusic} />
+    ) : null}
+    </>
   )
 }

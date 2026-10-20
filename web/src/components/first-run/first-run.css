@@ -1,0 +1,247 @@
+/* First-run pages (board 2026-10-20 revision 2, frames W1 to W3). The image
+   is the theme on these pages, identical in light and dark: cream text,
+   paper pills, a scrim that keeps cream at 4.5:1. */
+.fr-root {
+  --fr-cream: #efe6da;
+  --fr-cream-muted: rgba(239, 230, 218, .8);
+  --fr-hair: rgba(239, 230, 218, .35);
+  --fr-paper: #e8dfcf;
+  --fr-paper-off: rgba(232, 223, 207, .45);
+  --fr-ink: #1c1a1e;
+  --fr-ink-muted: #5c555c;
+  --fr-chip: #d8ccb7;
+  --fr-err: #f6bfcb;
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: #140c12;
+  color-scheme: dark;
+}
+.fr-stage { min-height: 100%; display: flex; flex-direction: column; animation: fr-push .28s cubic-bezier(.2, .7, .2, 1) both; }
+.fr-stage > * { flex: 1; }
+@keyframes fr-push { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+@keyframes fr-fade { from { opacity: 0; } to { opacity: 1; } }
+/* Reduced motion: no slide, a cross-fade only (the global rule would remove it). */
+@media (prefers-reduced-motion: reduce) {
+  .fr-stage { animation: fr-fade .2s ease both !important; }
+}
+
+.fr-page {
+  position: relative;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  color: var(--fr-cream);
+  background-color: #140c12;
+  background-image: var(--fr-bg);
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+  font-size: 1rem;
+  line-height: 1.4;
+}
+.fr-page::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(10, 6, 10, .66) 0%, rgba(10, 6, 10, .52) 14%, rgba(10, 6, 10, .52) 45%, rgba(10, 6, 10, .62) 100%);
+}
+.fr-col {
+  position: relative;
+  z-index: 1;
+  width: 420px;
+  max-width: 100%;
+  min-height: 100dvh;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.fr-top { flex: none; position: relative; height: 52px; margin-top: 14px; display: flex; align-items: center; padding: 0 12px; }
+.fr-back {
+  position: relative;
+  flex: none;
+  width: 54px;
+  height: 40px;
+  margin: 2px 0;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid rgba(239, 230, 218, .7);
+  border-radius: 6px 6px 10px 10px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--fr-cream);
+  cursor: pointer;
+}
+/* 44 px target around the 40 px tape. */
+.fr-back::before { content: ""; position: absolute; inset: -3px -2px; }
+.fr-back .fr-glyph { width: 19px; height: 19px; }
+.fr-glyph { fill: currentColor; stroke: none; }
+.fr-stepc {
+  position: absolute;
+  left: 70px;
+  right: 70px;
+  text-align: center;
+  font: 600 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--fr-cream-muted);
+  pointer-events: none;
+}
+.fr-prog { flex: none; position: relative; height: 2px; background: var(--fr-hair); }
+.fr-prog--none { background: transparent; }
+/* The line jumps between steps; there is nothing to animate. */
+.fr-prog i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--fr-cream); }
+
+.fr-body { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; padding: 0 20px 40px; }
+.fr-hero { flex: 1; min-height: 120px; display: flex; align-items: center; justify-content: center; }
+.fr-cassette { width: 176px; transform: rotate(4deg); filter: drop-shadow(0 10px 18px rgba(0, 0, 0, .6)); }
+.fr-wordmark {
+  display: block;
+  align-self: flex-start;
+  margin-top: 4px;
+  color: var(--fr-cream);
+  font: italic 500 30px/1.2 var(--marker, Noteworthy, "Bradley Hand", cursive);
+  letter-spacing: -.045em;
+  transform: rotate(-2deg);
+  transform-origin: left center;
+}
+.fr-h {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: var(--fr-cream);
+  font: 800 2.25em/1.06 -apple-system, BlinkMacSystemFont, "SF Pro Display", Inter, sans-serif;
+  letter-spacing: -.025em;
+  overflow-wrap: anywhere;
+}
+.fr-h:focus { outline: none; }
+.fr-h:focus-visible { outline: 2px solid var(--fr-cream); outline-offset: 4px; border-radius: 4px; }
+.fr-line { margin: 12px 0 0; color: var(--fr-cream); }
+.fr-status { margin: 12px 0 0; min-height: 1.4em; color: var(--fr-cream); }
+.fr-status--err { display: flex; align-items: center; gap: 8px; color: var(--fr-err); }
+.fr-status-icon { width: 18px; height: 18px; flex: none; }
+.fr-pill .fr-pill-icon { width: 18px; height: 18px; flex: none; }
+
+.fr-acts { display: flex; flex-direction: column; gap: 12px; margin-top: 28px; }
+.fr-pill {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 20px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--fr-paper);
+  color: var(--fr-ink);
+  box-shadow: none;
+  font: 600 1.0625em/1.2 -apple-system, BlinkMacSystemFont, Inter, sans-serif;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+.fr-pill:focus-visible, .fr-link:focus-visible, .fr-back:focus-visible, .fr-achip-x:focus-visible { outline: 2px solid var(--fr-cream); outline-offset: 3px; }
+.fr-pill--go { font-weight: 700; }
+.fr-pill .fr-ff { width: 16px; height: 16px; flex: none; }
+.fr-pill .fr-ext { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+/* Disabled: translucent paper, regular weight, hollow glyph (never opacity alone). */
+.fr-pill--off, .fr-pill:disabled { background: var(--fr-paper-off); color: var(--fr-cream); font-weight: 500; cursor: default; }
+.fr-ff--hollow { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; }
+.fr-pill--ghost { visibility: hidden; }
+.fr-mark { display: inline-grid; width: 22px; height: 22px; flex: none; }
+.fr-mark svg { width: 100%; height: 100%; }
+.fr-mark--apple { color: #fa2d48; }
+.fr-mark--spotify { color: #1db954; }
+
+.fr-or { display: flex; align-items: center; gap: 12px; margin: 18px 0 0; font: 600 11px/1 -apple-system, BlinkMacSystemFont, sans-serif; letter-spacing: .16em; text-transform: uppercase; color: var(--fr-cream-muted); }
+.fr-or::before, .fr-or::after { content: ""; flex: 1; height: 1px; background: var(--fr-hair); }
+.fr-or + .fr-acts { margin-top: 18px; }
+.fr-foot { min-height: 44px; margin: 8px 0 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0 5px; text-align: center; font-size: .94em; line-height: 1.3; color: var(--fr-cream); }
+.fr-foot span { font-weight: 400; }
+.fr-foot--quiet { font-weight: 400; }
+.fr-link { min-height: 44px; padding: 0 4px; border: 0; background: transparent; color: var(--fr-cream); font: inherit; font-weight: 600; cursor: pointer; }
+
+/* The composer: the Home field on paper, the prism stripe, a prism ring on focus. */
+.fr-composer.home-composer {
+  position: relative;
+  min-height: 56px;
+  margin-top: 24px;
+  padding: 2px 6px 2px 22px;
+  border: 0;
+  border-radius: 12px 12px 16px 16px;
+  background: var(--fr-paper);
+  box-shadow: none;
+}
+.fr-composer textarea { color: var(--fr-ink); font-size: 1rem; }
+.fr-composer textarea::placeholder { color: var(--fr-ink-muted); }
+.fr-stripe { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); width: 4px; height: 1.6em; max-height: 60%; border-radius: 2px; background: linear-gradient(180deg, #c9687f, #d18a65, #d2c76f, #709778, #688fa8); }
+.fr-composer:focus-within .fr-stripe { opacity: 0; }
+.fr-composer:focus-within::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  padding: 2px;
+  border-radius: 14px 14px 18px 18px;
+  background: linear-gradient(135deg, #c9687f 0%, #d18a65 22%, #d2c76f 42%, #709778 62%, #688fa8 82%, #6e5c8f 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+.fr-send.home-send-button { width: 44px; height: 44px; color: var(--fr-ink); border-radius: 999px; }
+.fr-send i { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px 8px 10px 10px; background: rgba(28, 26, 30, .1); }
+.fr-send:disabled { opacity: 1; color: var(--fr-ink-muted); }
+.fr-send:disabled i { background: transparent; }
+.fr-send.home-send-button:not(:disabled):hover { background: transparent; }
+
+/* Artists: three paper fields, each a chip once entered. */
+.fr-afields { display: flex; flex-direction: column; gap: 10px; margin-top: 24px; }
+.fr-afields .fr-acts { margin-top: 18px; }
+.fr-afield { display: flex; align-items: center; min-height: 56px; padding: 0 8px 0 16px; border-radius: 16px; background: var(--fr-paper); color: var(--fr-ink-muted); }
+.fr-afield input { flex: 1; min-width: 0; height: 52px; padding: 0; border: 0; background: transparent; color: var(--fr-ink); font: inherit; font-size: 1rem; }
+.fr-afield input::placeholder { color: var(--fr-ink-muted); }
+.fr-afield input:focus { outline: none; box-shadow: none; }
+.fr-afield:focus-within { box-shadow: 0 0 0 2px var(--fr-cream); }
+.fr-achip { display: inline-flex; align-items: center; min-height: 36px; margin-left: -6px; padding-left: 14px; border-radius: 999px; background: var(--fr-chip); color: var(--fr-ink); font-weight: 600; font-size: .95em; }
+.fr-achip-x { width: 44px; height: 44px; margin: -4px 0; padding: 0; display: grid; place-items: center; border: 0; border-radius: 999px; background: transparent; color: #3f383f; cursor: pointer; }
+.fr-achip-x svg { width: 14px; height: 14px; }
+
+/* Step 3: the existing steps and components inside the chrome. */
+.fr-steps .steps { margin: 18px 0 0; padding: 0 0 0 22px; color: var(--fr-cream); font-size: .95em; line-height: 1.4; }
+.fr-steps .steps li { margin: 0 0 8px; padding-left: 2px; }
+.fr-steps .steps li::marker { color: var(--fr-cream-muted); font-weight: 600; }
+.fr-steps .steps a, .fr-steps .steps b, .fr-steps .steps i { color: var(--fr-cream); }
+.fr-steps--dense .steps { font-size: 13.5px; line-height: 1.35; }
+.fr-steps--dense .steps li { margin-bottom: 6px; }
+/* The import panel keeps its own review and progress; on paper it reads as it does in Library. */
+.fr-host { margin-top: 12px; padding: 4px; border-radius: 18px; background: var(--fr-paper); color: var(--fr-ink); color-scheme: light; }
+.fr-host .drop { border-radius: 14px; }
+
+/* The sign-in page reached from the welcome foot link keeps its own look
+   (its plum-black background lands with the Keep sheet); the outline back
+   sits on the dark plane around its card, so it stays cream. */
+.fr-sign-in { position: relative; min-height: 100%; }
+.fr-back--over { position: absolute; top: 14px; left: 12px; z-index: 2; }
+
+@media (max-width: 480px) {
+  .fr-col { width: 100%; }
+  .fr-top { margin-top: 0; }
+}
+
+/* Under 760 px the sign-in card fills the screen: the outline takes its text colour. */
+@media (max-width: 760px) {
+  .fr-back--over { color: #31353b; border-color: currentColor; }
+}
+
+/* The import panel's pick pill: the label is the pill, the input is hidden inside it. */
+.import-pick-pill { display: flex; flex-direction: column; gap: 8px; }
+.import-pick-pill:focus { outline: none; }
+.import-pick-pill [role="alert"] { margin: 0; color: var(--fr-err); }
+.import-pick-pill .fr-pill { position: relative; }
+.import-pick-pill .fr-pill:focus-within { outline: 2px solid var(--fr-cream); outline-offset: 3px; }

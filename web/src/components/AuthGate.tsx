@@ -9,6 +9,8 @@ import { restoredIdentity, rememberIdentity, clearWorkspaceRestore } from '../li
 import { Cassette } from './Cassette'
 import { AppleMark, GoogleMark } from './ProviderMarks'
 import { FirstRun } from './first-run/FirstRun'
+import type { FirstRunServices } from './first-run/services'
+import type { CreateSessionResponse } from '../api/client'
 
 export type AuthUser = {
   id: string
@@ -35,14 +37,17 @@ export type AuthBridge = {
 type AuthGateProps = {
   auth: AuthBridge
   preferences?: AuthPreferenceStore
-  children: (user: AuthUser, lastUsed: AuthProvider | null, restoring: boolean) => ReactNode
+  /** The last argument is the mix the first run just made, for the shell to open. */
+  children: (user: AuthUser, lastUsed: AuthProvider | null, restoring: boolean, initialSession: CreateSessionResponse | null) => ReactNode
+  /** Builds the first run's runs and API; called once, when the first run first renders. */
+  firstRunServices?: () => FirstRunServices
 }
 
 function label(provider: AuthProvider): string {
   return provider === 'apple' ? 'Apple' : 'Google'
 }
 
-export function AuthGate({ auth, preferences = browserAuthPreferences, children }: AuthGateProps) {
+export function AuthGate({ auth, preferences = browserAuthPreferences, children, firstRunServices }: AuthGateProps) {
   const session = auth.useSession()
   const [cachedUser, setCachedUser] = useState(restoredIdentity)
   const [lastUsed, setLastUsed] = useState<AuthProvider | null>(() => preferences.lastUsed())
@@ -54,10 +59,14 @@ export function AuthGate({ auth, preferences = browserAuthPreferences, children 
   // anonymous session also stays in the flow.
   const resolved = !session.isPending && !session.error
   const [firstRunActive, setFirstRunActive] = useState(() => resolved && !session.data?.user)
+  const [handoffSession, setHandoffSession] = useState<CreateSessionResponse | null>(null)
 
   useEffect(() => {
     if (!resolved) return
-    if (!session.data?.user) setFirstRunActive(true)
+    if (!session.data?.user) {
+      setFirstRunActive(true)
+      setHandoffSession(null)
+    }
   }, [resolved, session.data?.user?.id])
 
   useEffect(() => {
@@ -96,21 +105,22 @@ export function AuthGate({ auth, preferences = browserAuthPreferences, children 
   const errorMessage = signInError || (session.error ? 'We couldn’t check your session. Try again.' : '')
   const firstRun = (
     <FirstRun
-      auth={auth}
-      preferences={preferences}
-      lastUsed={lastUsed}
-      error={errorMessage}
-      anonymous={visibleUser?.isAnonymous === true}
-      onStart={() => setSignInError('')}
-      onDone={() => setFirstRunActive(false)}
+      services={firstRunServices}
+      signIn={{ auth, preferences, lastUsed, error: errorMessage, onStart: () => setSignInError('') }}
+      onDone={({ session: created }) => {
+        setHandoffSession(created ?? null)
+        setFirstRunActive(false)
+      }}
     />
   )
-  if (visibleUser?.isAnonymous && firstRunActive) return firstRun
+  // Once armed, the flow stays mounted through the anonymous session's
+  // arrival (and any refetch in between) until it hands off.
+  if (firstRunActive && (!visibleUser || visibleUser.isAnonymous)) return firstRun
   if (visibleUser) {
     return (
       <>
         <div className="workspace-session" inert={restoring} aria-busy={restoring}>
-          {children(visibleUser, lastUsed, restoring)}
+          {children(visibleUser, lastUsed, restoring, handoffSession)}
         </div>
         {restoring && (
           <div className="session-refresh-badge" role={session.error && !session.isPending ? 'alert' : 'status'}>
@@ -153,7 +163,7 @@ type SignInPageProps = {
   onStart?: () => void
 }
 
-/** The provider sign-in page; the first run renders it until its own pages land. */
+/** The provider sign-in page, behind the first run's "Already have an account? Sign in." */
 export function SignInPage({ auth, preferences, lastUsed, error, onStart }: SignInPageProps) {
   const [redirecting, setRedirecting] = useState<AuthProvider | null>(null)
   const [localError, setLocalError] = useState<string | null>(null)
@@ -185,7 +195,7 @@ export function SignInPage({ auth, preferences, lastUsed, error, onStart }: Sign
         <div className="auth-intro">
           <span className="auth-wordmark">mixtape</span>
           <div className="auth-copy">
-            <h1 id="auth-title">Your music, mixed for right now.</h1>
+            <h1 id="auth-title" tabIndex={-1}>Your music, mixed for right now.</h1>
             <p>Start with a mood, a memory, or one song. Mixtape builds a mix from music you already love.</p>
           </div>
         </div>

@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AuthGate, type AuthBridge, type AuthSessionState } from './AuthGate'
 import { rememberIdentity, clearWorkspaceRestore } from '../lib/workspace-restore'
 import type { AuthPreferenceStore } from '../lib/auth-provider'
+import { fakeServices } from '../test/first-run-fakes'
+import type { CreateSessionResponse } from '../api/client'
 
 function preferences(lastUsed: 'apple' | 'google' | null = null): AuthPreferenceStore {
   return {
@@ -22,6 +24,11 @@ function bridge(overrides: Partial<AuthBridge> = {}): AuthBridge {
   }
 }
 
+/** The sign-in page sits behind the welcome page's foot link. */
+function openSignIn() {
+  fireEvent.click(screen.getByRole('button', { name: 'Sign in.' }))
+}
+
 describe('authentication gate', () => {
   afterEach(() => {
     cleanup()
@@ -29,8 +36,12 @@ describe('authentication gate', () => {
     window.history.replaceState({}, '', '/')
   })
 
-  it('shows the approved compact signed-out state', () => {
+  it('opens on the first run, with the approved compact sign-in page behind its foot link', () => {
     render(<AuthGate auth={bridge()}>{() => <p>Signed in</p>}</AuthGate>)
+
+    expect(screen.getByRole('heading', { name: 'What do you want to hear?' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Continue with/ })).not.toBeInTheDocument()
+    openSignIn()
 
     expect(screen.getByRole('heading', { name: 'Your music, mixed for right now.' })).toBeInTheDocument()
     expect(
@@ -48,6 +59,7 @@ describe('authentication gate', () => {
   it('keeps an accessible redirecting state while Apple opens', async () => {
     const signIn = vi.fn(() => new Promise<{ error?: string }>(() => undefined))
     render(<AuthGate auth={bridge({ signIn })} preferences={preferences()}>{() => <p>Signed in</p>}</AuthGate>)
+    openSignIn()
 
     fireEvent.click(screen.getByRole('button', { name: 'Continue with Apple' }))
 
@@ -59,6 +71,7 @@ describe('authentication gate', () => {
 
   it('marks only the remembered provider as last used', () => {
     render(<AuthGate auth={bridge()} preferences={preferences('google')}>{() => <p>Signed in</p>}</AuthGate>)
+    openSignIn()
 
     expect(screen.getByRole('button', { name: 'Continue with Google' })).toHaveAccessibleDescription('last used')
     expect(screen.getByText('last used')).toBeInTheDocument()
@@ -86,6 +99,7 @@ describe('authentication gate', () => {
   it('keeps the control in place and explains a sign-in failure', async () => {
     const signIn = vi.fn(async () => ({ error: 'Apple sign-in did not finish.' }))
     render(<AuthGate auth={bridge({ signIn })}>{() => <p>Signed in</p>}</AuthGate>)
+    openSignIn()
 
     fireEvent.click(screen.getByRole('button', { name: 'Continue with Apple' }))
 
@@ -135,7 +149,7 @@ describe('session restoration', () => {
     expect(screen.getByText('My mixes')).toBeInTheDocument()
     state = { ...state, data: null }
     view.rerender(<AuthGate auth={auth}>{() => <p>My mixes</p>}</AuthGate>)
-    expect(screen.getByRole('button', { name: 'Continue with Google' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'What do you want to hear?' })).toBeInTheDocument()
   })
   it('offers session retry instead of treating a network failure as signed out', () => {
     const refetch = vi.fn()
@@ -239,17 +253,26 @@ describe('first-run flow', () => {
     expect(screen.queryByText('Shell')).not.toBeInTheDocument()
   })
 
-  it('switches to the shell when the first run finishes', () => {
+  it('switches to the shell with the new mix when the first run finishes', async () => {
     let state: AuthSessionState = { data: null, isPending: false, error: null, refetch: vi.fn() }
     const auth = bridge({ useSession: () => state })
-    const view = render(<AuthGate auth={auth}>{() => <p>Shell</p>}</AuthGate>)
-    state = anonymous
-    view.rerender(<AuthGate auth={auth}>{() => <p>Shell</p>}</AuthGate>)
+    const { services, ensureSession } = fakeServices()
+    // ensureSession() is what makes the anonymous session appear.
+    ensureSession.mockImplementation(async () => { state = anonymous })
+    const factory = vi.fn(() => services)
+    const shell = (_user: unknown, _provider: unknown, _restoring: unknown, created: CreateSessionResponse | null) => <p>Shell opens {created?.session.id}</p>
+    render(<AuthGate auth={auth} firstRunServices={factory}>{shell}</AuthGate>)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Continue to your mixes' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Describe your mix' }), { target: { value: 'late night drive' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Make a mix' }))
+    for (const [label, name] of [['First artist', 'Burna Boy'], ['Second artist', 'Tems'], ['Third artist', 'Sade']]) {
+      fireEvent.change(await screen.findByRole('textbox', { name: label }), { target: { value: name } })
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
 
-    expect(screen.getByText('Shell')).toBeInTheDocument()
+    expect(await screen.findByText('Shell opens session-new')).toBeInTheDocument()
     expect(screen.queryByTestId('first-run')).not.toBeInTheDocument()
+    expect(factory).toHaveBeenCalledOnce()
   })
 
   it('renders the shell directly for an anonymous session present at load', () => {
@@ -282,6 +305,7 @@ describe('sign-in error from the URL', () => {
     view.rerender(<AuthGate auth={auth} preferences={preferences()}>{() => <p>Shell</p>}</AuthGate>)
     state = { ...state, data: null }
     view.rerender(<AuthGate auth={auth} preferences={preferences()}>{() => <p>Shell</p>}</AuthGate>)
+    openSignIn()
 
     expect(screen.getByRole('button', { name: 'Continue with Apple' })).toBeInTheDocument()
     expect(screen.queryByText('Apple sign-in did not finish.')).not.toBeInTheDocument()
