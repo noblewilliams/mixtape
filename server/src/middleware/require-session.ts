@@ -5,7 +5,8 @@ export function requireSession(auth: AuthLike) {
   return createMiddleware<{ Variables: AppVars }>(async (c, next) => {
     const session = await auth.api.getSession({ headers: c.req.raw.headers })
     if (!session) return c.json({ error: 'unauthorized' }, 401)
-    c.set('user', session.user)
+    // Normalize once so every route reads a real boolean.
+    c.set('user', { ...session.user, isAnonymous: session.user.isAnonymous === true })
     await next()
   })
 }

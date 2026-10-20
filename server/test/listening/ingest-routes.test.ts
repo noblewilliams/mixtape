@@ -103,7 +103,7 @@ function failingStore(category: ListeningImportErrorCategory): ListeningImportSt
 function stubApp(db: TestDb, store: ListeningImportStore, onError: (error: unknown) => void) {
   const app = new Hono<{ Variables: AppVars }>()
   app.use('*', async (c, next) => {
-    c.set('user', { id: 'u1' })
+    c.set('user', { id: 'u1', isAnonymous: false })
     await next()
   })
   app.onError((error, c) => {

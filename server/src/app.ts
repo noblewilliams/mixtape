@@ -33,11 +33,16 @@ import type { PlaylistEditDjDeps } from './playlist-editing/loop'
 export type AuthLike = {
   handler: (req: Request) => Response | Promise<Response>
   api: {
-    getSession: (input: { headers: Headers }) => Promise<{ user: { id: string } } | null>
+    getSession: (input: { headers: Headers }) => Promise<{ user: SessionUser } | null>
   }
 }
 
-export type AppVars = { user: { id: string } }
+// isAnonymous comes from Better Auth's anonymous plugin. Loose on the auth
+// seam so test stubs that only carry an id stay valid; requireSession
+// normalizes it, so routes always read a real boolean.
+export type SessionUser = { id: string; isAnonymous?: boolean | null }
+
+export type AppVars = { user: { id: string; isAnonymous: boolean } }
 
 export type EnrichWiring = { deps?: EnrichDeps; artwork?: ArtworkDeps; adminToken: string }
 export type { SeedsWiring }

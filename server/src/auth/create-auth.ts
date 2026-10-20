@@ -1,9 +1,10 @@
 import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
-import { bearer } from 'better-auth/plugins'
+import { anonymous, bearer } from 'better-auth/plugins'
 import { importPKCS8, SignJWT } from 'jose'
 import * as schema from '../db/schema'
 import type { AuthLike } from '../app'
+import { linkAnonymousAccount } from './link-anonymous'
 
 export type AuthEnv = {
   BETTER_AUTH_SECRET: string
@@ -24,6 +25,16 @@ export type AuthEnv = {
 }
 
 const APPLE_ORIGIN = 'https://appleid.apple.com'
+// Anonymous listeners get a placeholder address on a reserved TLD so it can
+// never collide with, or be mistaken for, a deliverable email.
+const ANONYMOUS_EMAIL_DOMAIN = 'anonymous.mixtape.invalid'
+// One anonymous user per device is the norm; five an hour per IP leaves room
+// for a shared network. Best effort only: Better Auth's memory store is a
+// module-level Map, so on Workers the cap is per isolate and resets when the
+// isolate is evicted. Durable storage (rateLimit.storage 'database', or
+// customStorage on KV or a Durable Object) is the real fix.
+const ANONYMOUS_SIGN_IN_WINDOW_SECONDS = 60 * 60
+const ANONYMOUS_SIGN_IN_MAX = 5
 const APPLE_CLIENT_SECRET_TTL_SECONDS = 180 * 24 * 60 * 60
 
 export function parseWebOrigins(value: string): string[] {
@@ -129,11 +140,25 @@ export function createAuth(db: object, env: AuthEnv) {
     },
     trustedOrigins: [...webOrigins, APPLE_ORIGIN],
     // memory storage is per-isolate on Workers — real KV/DO storage is a P2 item
-    rateLimit: { enabled: true, window: 10, max: 100 },
+    rateLimit: {
+      enabled: true,
+      window: 10,
+      max: 100,
+      customRules: {
+        '/sign-in/anonymous': { window: ANONYMOUS_SIGN_IN_WINDOW_SECONDS, max: ANONYMOUS_SIGN_IN_MAX },
+      },
+    },
     // Without this, Better Auth can't resolve a client IP on Workers and rate
     // limiting collapses into one shared per-path bucket for ALL users.
     advanced: { ipAddress: { ipAddressHeaders: ['cf-connecting-ip'] } },
-    plugins: [bearer()],
+    plugins: [
+      bearer(),
+      anonymous({
+        emailDomainName: ANONYMOUS_EMAIL_DOMAIN,
+        generateName: () => 'Listener',
+        onLinkAccount: ({ anonymousUser, newUser }) => linkAnonymousAccount({ anonymousUser, newUser }),
+      }),
+    ],
   })
 }
 

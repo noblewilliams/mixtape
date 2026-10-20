@@ -23,7 +23,7 @@ describe('session middleware', () => {
     const app = createApp({ auth: stubAuth({ user: { id: 'user-1' } }) })
     const res = await app.request('http://x/me')
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ user: { id: 'user-1' } })
+    expect(await res.json()).toEqual({ user: { id: 'user-1', isAnonymous: false } })
   })
 
   it('authenticates a real bearer session end-to-end', async () => {

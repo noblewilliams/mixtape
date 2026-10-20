@@ -240,7 +240,7 @@ describe('playlist ingest routes', () => {
     // the error mapping with a body the contract itself accepts.
     const app = new Hono<{ Variables: AppVars }>()
     app.use('*', async (c, next) => {
-      c.set('user', { id: 'u1' })
+      c.set('user', { id: 'u1', isAnonymous: false })
       await next()
     })
     app.route('/ingest', playlistIngestRoutes(db, store))
