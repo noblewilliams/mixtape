@@ -1,5 +1,35 @@
 # Decision Log
 
+## 2026-10-20 — A mix before an account: anonymous listeners, merge rule, cap
+
+The first-run flow is being redesigned so a new listener reaches a mix
+without signing in (spec `superpowers/specs/2026-10-20-first-run-flow-design.md`).
+Founder decisions, taken before the board was approved:
+
+- Anonymous listeners are real `user` rows through Better Auth's `anonymous`
+  plugin (`is_anonymous` flag), created lazily at the first action that needs
+  the server, never at launch. Every route and table stays keyed by user id.
+- On sign-in the plugin's link hook moves the anonymous rows. Into a brand-new
+  account everything moves. Into an account that already has data, mixes
+  (`dj_sessions` and children), memories, funnel events and playback evidence
+  move; the existing account's library, sources, seeds, playlists and settings
+  win and the anonymous ones go with the cascade delete.
+- Anonymous listeners get 3 mixes per device, then the sign-in page. Idle
+  anonymous users are deleted after 30 days by the maintenance cron.
+- A listener with nothing synced names three artists before the first prompt;
+  the existing corpus-mode floor (`MIN_SEED_TRACKS`, `MIN_SEED_ARTISTS`) stands
+  and a miss is shown as the DJ's refusal. Catalogue-seeded corpus mixes are not
+  started now.
+- Mixes only; album recommendations are a future feature.
+- Provider buttons appear only on the sign-in page, never inside a sheet or the
+  composer panel.
+- First-run pages carry generated grainy silk-marble backgrounds, one prism hue
+  per page, identical in light and dark; the rest of the app keeps its gradient.
+
+**Reopens if:** the refusal rate on first mixes (`first_mix_refused`) is high
+enough that the artists page is not a usable floor, anonymous abuse shows up in
+the cron or model spend, or the merge rule loses a library a listener wanted.
+
 ## 2026-10-04 — Apple linking picks a song when several share the ISRC
 
 The first production linking pass (25 songs, storefront `ng`) linked 7,

@@ -1,0 +1,937 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mixtape first-run states</title>
+<style>
+/* ---------- Review page (from the 2026-09-17 Home board) ---------- */
+*{box-sizing:border-box}
+html{background:#1d1d21}
+body{margin:0;background:#1d1d21;color:#eee9ed;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1280px;margin:auto;padding:28px 24px 80px}
+h1{font-size:30px;line-height:1.15;margin:0 0 10px}
+h2{font-size:22px;margin:60px 0 6px;padding-top:18px;border-top:1px solid #3b393f}
+h3{font-size:16px;margin:26px 0 8px}
+p{max-width:840px}
+a{color:#c0daed}
+code{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;color:#e6dde6}
+.kicker{font:700 11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:#c5adbd;margin:0 0 8px}
+.note{color:#cfc5d1;font-size:14px;max-width:840px}
+.callout{background:#2b2830;border:1px solid #47434c;border-radius:10px;padding:14px 16px;max-width:840px;margin:14px 0}
+.callout strong{color:#fff}
+ul.tight,ol.tight{margin:6px 0 0;padding-left:20px}ul.tight li,ol.tight li{margin:4px 0}
+.badge{display:inline-flex;align-items:center;gap:6px;font:700 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em;text-transform:uppercase;padding:5px 8px;border-radius:5px;white-space:nowrap}
+.badge::before{content:"";width:8px;height:8px;border-radius:50%;background:currentColor}
+.b-work{color:#a7d8b4;background:rgba(112,151,120,.18);border:1px solid rgba(112,151,120,.5)}
+.b-plan{color:#bcd0de;border:1px dashed #8fa5b5}.b-plan::before{background:transparent;border:1.5px solid currentColor;width:6px;height:6px}
+.rec{display:inline-block;font:700 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em;text-transform:uppercase;padding:3px 6px;border-radius:4px;color:#a7d8b4;border:1px solid rgba(112,151,120,.6);margin-left:6px;vertical-align:1px}
+.rec.dflt{color:#ecd39a;border-color:rgba(209,138,101,.6)}
+.frames{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;margin-top:14px}
+.frame{width:390px;max-width:100%}.frame.wide{width:auto;max-width:100%}
+.frame figcaption{font-size:13px;color:#cfc5d1;margin:10px 4px 0;line-height:1.45;max-width:390px}
+.frame.wide figcaption{max-width:760px}
+.frame figcaption b{color:#fff;font-weight:600;display:block}
+figure{margin:0}
+.flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;max-width:840px;margin-top:12px}
+.flow div{background:#26242a;border:1px solid #3d3a42;border-radius:10px;padding:10px 12px;font-size:13px;color:#d8d0da}
+.flow b{display:block;color:#fff;margin-bottom:4px}
+
+/* ---------- Native language (from the 2026-09-17 Home board) ---------- */
+.phone{width:390px;height:844px;max-width:100%;border-radius:46px;padding:10px;background:#0b0b0d;border:1px solid #4b4950;box-shadow:0 22px 60px rgba(0,0,0,.5);position:relative;overflow:hidden;color-scheme:light}
+.screen{
+  --text:#1c1a1e;--plum:#544451;--smoke:#696269;--muted:#857e86;--hair:rgba(50,44,50,.14);
+  --pink:#c9687f;--orange:#d18a65;--yellow:#d2c76f;--green:#709778;--blue:#688fa8;--violet:#6e5c8f;
+  --prism:linear-gradient(135deg,var(--pink) 0%,var(--orange) 22%,var(--yellow) 42%,var(--green) 62%,var(--blue) 82%,var(--violet) 100%);
+  --prism-v:linear-gradient(180deg,var(--pink),var(--orange),var(--yellow),var(--green),var(--blue));
+  --tape:#4d404b;--tape-edge:#3b3039;--tape-shadow:#2d272e;--tape-ink:#f5f0f2;
+  --glass:rgba(255,255,255,.62);--glass-hi:rgba(255,255,255,.9);--glass-shadow:0 8px 24px rgba(30,24,30,.16);
+  --panel:rgba(255,255,255,.55);--field:rgba(255,255,255,.75);
+  --pillbg:rgba(255,255,255,.75);--sheet:rgba(250,248,246,.9);--pencil:#66505e;--wm:#42515e;
+  --ok-ink:#1f543a;--warn-ink:#7a4d12;--err-ink:#7e2f46;
+  --bgrgb:248,246,243;
+  position:relative;height:100%;border-radius:38px;overflow:hidden;
+  background:
+    radial-gradient(ellipse 90% 45% at 50% 108%,rgba(110,92,143,.55),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 0% 92%,rgba(201,104,127,.28),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 100% 80%,rgba(104,143,168,.32),transparent 70%),
+    linear-gradient(180deg,#f9f7f4 0%,#f1eeee 45%,#e6e0ea 100%);
+  color:var(--text);font:16px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;display:flex;flex-direction:column}
+.phone.dark{color-scheme:dark}
+.phone.dark .screen,.browser.dark .screen{
+  --text:#f2eef1;--plum:#f0ebef;--smoke:#b0a9b1;--muted:#98929a;--hair:rgba(255,255,255,.13);
+  --tape:#5a4957;--tape-shadow:#17131a;
+  --glass:rgba(60,56,66,.5);--glass-hi:rgba(255,255,255,.2);--glass-shadow:0 8px 24px rgba(0,0,0,.5);
+  --panel:rgba(40,36,54,.55);--field:rgba(255,255,255,.1);
+  --pillbg:rgba(255,255,255,.12);--sheet:rgba(34,30,44,.92);--pencil:rgba(240,235,239,.72);--wm:#f0ebef;
+  --ok-ink:#a7c7ae;--warn-ink:#e6c98f;--err-ink:#efb2c0;
+  --bgrgb:8,8,12;
+  background:
+    radial-gradient(ellipse 90% 45% at 50% 108%,rgba(96,78,170,.85),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 0% 88%,rgba(201,104,127,.35),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 100% 78%,rgba(80,120,170,.4),transparent 70%),
+    linear-gradient(180deg,#050507 0%,#0c0b12 45%,#1a1530 100%)}
+.phone.large .screen{font-size:30px;line-height:1.25}
+.statusbar{height:54px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 30px 8px;font:600 15px -apple-system,sans-serif;position:relative;z-index:5}
+.statusbar .right{display:flex;gap:6px;align-items:center}
+.statusbar .cell{width:18px;height:11px;background:currentColor;clip-path:polygon(0 70%,22% 70%,22% 45%,49% 45%,49% 25%,76% 25%,76% 0,100% 0,100% 100%,0 100%)}
+.statusbar .batt{width:26px;height:12px;border:1.5px solid currentColor;border-radius:4px;position:relative;opacity:.9}.statusbar .batt::after{content:"";position:absolute;inset:2px 6px 2px 2px;background:currentColor;border-radius:1.5px}
+.homebar{position:absolute;left:0;right:0;bottom:0;height:34px;display:grid;place-items:center;z-index:10}.homebar i{width:134px;height:5px;border-radius:3px;background:var(--text);opacity:.8}
+.large-title{flex:none;padding:30px 20px 8px;display:flex;align-items:flex-end;justify-content:space-between;gap:10px}
+.large-title h1{margin:0;font:800 1.75em/1.05 -apple-system,BlinkMacSystemFont,"SF Pro Display",sans-serif;letter-spacing:-.02em;color:var(--text);border:0;padding:0}
+.content{flex:1;min-height:0;overflow:hidden;padding:0 20px;display:flex;flex-direction:column;position:relative;z-index:1}
+/* Inset-grouped list (You) */
+.group{background:rgba(255,255,255,.62);border-radius:22px;overflow:hidden;margin-bottom:16px}
+.phone.dark .group{background:rgba(255,255,255,.08)}
+.grow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;align-items:center;min-height:52px;padding:8px 16px;position:relative}
+.grow+.grow::before{content:"";position:absolute;left:52px;right:0;top:0;height:1px;background:var(--hair)}
+.grow svg{width:22px;height:22px;stroke:var(--plum);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.grow strong{display:block;font-weight:500;font-size:1em}.grow small{display:block;color:var(--muted);font-size:.78em}
+.grow .chev{stroke:var(--muted);width:18px;height:18px;opacity:.6}
+.gnote{color:var(--muted);font-size:.78em;margin:-8px 16px 16px}
+.toggle{width:51px;height:31px;border-radius:16px;background:#34c759;position:relative;flex:none}.toggle::after{content:"";position:absolute;top:2px;right:2px;width:27px;height:27px;border-radius:50%;background:#fff;box-shadow:0 2px 4px rgba(0,0,0,.2)}
+.toggle.off{background:rgba(120,120,128,.32)}.toggle.off::after{right:auto;left:2px}
+/* Composer, panel and pills */
+.bpanel{position:absolute;left:0;right:0;bottom:0;z-index:5;padding:8px 14px 150px;border-radius:30px 30px 0 0;background:var(--panel);-webkit-backdrop-filter:blur(30px) saturate(150%);backdrop-filter:blur(30px) saturate(150%);box-shadow:0 -1px 0 rgba(255,255,255,.35) inset,0 -10px 40px rgba(30,24,40,.08)}
+.phone.dark .bpanel{box-shadow:0 -1px 0 rgba(255,255,255,.12) inset,0 -10px 40px rgba(0,0,0,.4)}
+.bpanel.chat{padding-bottom:36px;border-radius:26px 26px 0 0}
+.grab{width:36px;height:5px;border-radius:3px;background:rgba(127,120,130,.45);margin:2px auto 12px}
+.composer{position:relative;display:grid;grid-template-columns:minmax(0,1fr) 40px 40px;align-items:center;gap:6px;min-height:48px;padding:2px 4px 2px 14px;background:var(--field);border:1px solid var(--hair);border-radius:12px 12px 16px 16px;box-shadow:0 6px 18px rgba(61,53,60,.07),inset 0 1px 0 rgba(255,255,255,.7)}
+.phone.dark .composer,.browser.dark .composer{box-shadow:0 6px 18px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.06)}
+.composer .stripe{position:absolute;left:8px;top:50%;transform:translateY(-50%);width:4px;height:1.6em;max-height:60%;border-radius:2px;background:var(--prism-v)}
+.composer .field{min-width:0;margin-left:8px;color:var(--muted);font-size:.95em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.composer .field.typed{color:var(--text)}
+.composer.focus{border-color:transparent}
+.composer.focus::after{content:"";position:absolute;inset:-2px;padding:2px;border-radius:14px 14px 18px 18px;background:var(--prism);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none}
+.composer.focus .stripe{opacity:0}
+.mic,.send{width:40px;height:40px;display:grid;place-items:center;border:0;background:transparent;color:var(--plum);border-radius:999px}
+.mic svg,.send svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.send i{width:30px;height:30px;display:grid;place-items:center;border-radius:8px 8px 10px 10px;background:rgba(84,68,81,.1)}
+.phone.dark .send i,.browser.dark .send i{background:rgba(255,255,255,.12)}
+.send.off{color:var(--muted)}.send.off i{background:transparent}
+.pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.pill{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 13px;border-radius:999px;font:500 .82em -apple-system,sans-serif;color:var(--text);background:rgba(255,255,255,.55);border:1px solid var(--hair)}
+.phone.dark .pill{background:rgba(255,255,255,.1)}
+/* Tape button and label chip (mix actions) */
+.tape{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;min-height:40px;padding:0 14px 0 8px;border-radius:6px 6px 10px 10px;color:var(--tape-ink);background:var(--tape);border:1px solid var(--tape-edge);box-shadow:0 2px 0 var(--tape-shadow),inset 0 1px 0 rgba(255,255,255,.13);font:750 .8em -apple-system,sans-serif;position:relative;overflow:hidden}
+.tape .reel{width:20px;height:20px;flex:none;border-radius:50%;background:repeating-conic-gradient(#e4e1dd 0 24deg,transparent 24deg 45deg),#262329;border:2.5px solid #262329}
+.tape .meter{position:absolute;inset:0 0 0 auto;width:8px;background:linear-gradient(var(--blue),var(--green),var(--yellow),var(--orange),var(--pink))}
+.chip{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;min-height:36px;padding:0 11px;border-radius:6px 6px 10px 10px;font:650 .8em -apple-system,sans-serif;color:var(--plum);background:rgba(247,244,239,.6);border:1px solid rgba(73,64,72,.22);box-shadow:inset 0 0 0 2px rgba(255,255,255,.3)}
+.phone.dark .chip{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.16);box-shadow:none}
+.chip .hole{width:11px;height:11px;border-radius:50%;background:radial-gradient(circle,transparent 0 28%,var(--plum) 30% 40%,transparent 42%),repeating-conic-gradient(var(--plum) 0 18deg,transparent 18deg 45deg);border:1px solid rgba(73,64,72,.35)}
+/* Dock */
+.dock{position:absolute;left:0;right:0;bottom:32px;z-index:6;padding:0 22px;display:flex;flex-direction:column;gap:7px}
+.glass{background:var(--glass);-webkit-backdrop-filter:blur(26px) saturate(170%);backdrop-filter:blur(26px) saturate(170%);box-shadow:var(--glass-shadow),inset 0 1px 0 var(--glass-hi),inset 0 0 0 .5px rgba(255,255,255,.35)}
+.phone.dark .glass,.browser.dark .glass{box-shadow:var(--glass-shadow),inset 0 1px 0 var(--glass-hi),inset 0 0 0 .5px rgba(255,255,255,.12)}
+.tabs{display:grid;grid-template-columns:repeat(4,1fr);border-radius:999px;padding:4px}
+.tabs button{min-height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;border:0;background:transparent;color:var(--muted);font:600 .6em -apple-system,sans-serif;border-radius:999px}
+.tabs button svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.tabs button.on{color:var(--plum);background:rgba(255,255,255,.6);box-shadow:inset 0 0 0 .5px rgba(255,255,255,.6)}
+.phone.dark .tabs button.on{background:rgba(255,255,255,.14)}
+/* Conversation and arrangement */
+.turn{max-width:86%;padding:10px 14px;border-radius:18px;font-size:.95em;line-height:1.4;overflow-wrap:anywhere}
+.turn.dj{align-self:flex-start;background:rgba(255,255,255,.62);border-radius:4px 18px 18px 18px}
+.phone.dark .turn.dj{background:rgba(255,255,255,.1)}
+.turn.me{align-self:flex-end;background:var(--tape);color:var(--tape-ink);border-radius:18px 18px 4px 18px}
+.turn .dj-k{display:block;font:700 .68em/1.2 ui-monospace,Menlo,monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+.trow{display:grid;grid-template-columns:48px minmax(0,1fr) 36px;gap:12px;align-items:center;padding:8px 0;position:relative}
+.trow+.trow::before{content:"";position:absolute;left:60px;right:0;top:0;height:1px;background:var(--hair)}
+.trow .art{width:48px;height:48px;border-radius:3px;background:#e8e4e6;display:grid;place-items:center}
+.trow .art .cs{width:42px}
+.trow strong{display:block;font-weight:500;font-size:.95em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.trow small{display:block;color:var(--muted);font-size:.78em}
+.grip{width:36px;height:44px;display:grid;place-items:center;color:var(--muted)}.grip i{width:16px;height:2px;background:currentColor;border-radius:1px;box-shadow:0 -5px 0 currentColor,0 5px 0 currentColor;opacity:.6}
+.actsrow{display:flex;gap:8px;align-items:center;padding:8px 0 10px}
+.veil{position:absolute;inset:0;background:rgba(20,16,20,.28);z-index:8;border-radius:38px}
+/* Cassette */
+.cs{display:block;aspect-ratio:200/128;--case:#3f4851;--stock:#f2ede2}
+.cs svg{width:100%;height:100%;display:block;overflow:visible}
+.cs.c2{--case:#544451}.cs.c3{--case:#45596d}.cs.c4{--case:#6f5a4d}.cs.c5{--case:#2c2b33}
+.cs-case{fill:var(--case);stroke:#252328;stroke-width:2}.cs-edge{fill:none;stroke:rgba(255,255,255,.25);stroke-width:2}
+.cs-stock{fill:var(--stock)}.cs-rule{stroke:rgba(75,66,71,.34)}
+.cs-dark{fill:#17161a;stroke:#28262a;stroke-width:2}.cs-band{fill:#493638}
+.cs-ring{fill:#dedbd6;stroke:#28262a;stroke-width:4}.cs-tooth{fill:#28262a}.cs-hole{fill:#f4f1ec}
+.cs-guide{fill:#f2f0eb;stroke:#544e52;stroke-width:2}.cs-metal{fill:#9a9590;stroke:#4f4a4d;stroke-width:1.5}
+.spin .cs-hub{transform-box:fill-box;transform-origin:center;animation:hub 1.05s linear infinite}
+@keyframes hub{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.spin .cs-hub{animation:none}}
+
+/* ---------- First run (new on this board) ---------- */
+.tsvg{fill:currentColor;stroke:none}
+.ico{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.fr-top{flex:none;height:52px;display:flex;align-items:center;padding:0 12px;position:relative;z-index:5}
+.backbtn{width:54px;height:40px;flex:none;margin:2px 0;border-radius:6px 6px 10px 10px;display:grid;place-items:center;color:var(--text);background:transparent;border:1.5px solid var(--text);box-shadow:none;padding:0;position:relative;opacity:.9}.backbtn::before{content:"";position:absolute;inset:-3px -2px}
+.backbtn svg{width:19px;height:19px}
+.stepc{position:absolute;left:70px;right:70px;text-align:center;font:600 12px/1 -apple-system,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--smoke)}
+.fr-top .mid{position:absolute;left:70px;right:70px;text-align:center;font:600 1.05em/1.2 -apple-system,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fr-prog{flex:none;height:2px;background:var(--hair);position:relative;z-index:5}
+.fr-prog i{position:absolute;left:0;top:0;bottom:0;background:var(--text);opacity:.82}
+.fr-prog.none{background:transparent}
+.fr-body{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:flex-end;padding:0 20px 42px;overflow:hidden;position:relative;z-index:1}
+.fr-hero{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
+.hero-cs{width:176px;transform:rotate(4deg);filter:drop-shadow(0 10px 14px rgba(41,36,42,.25))}
+.phone.dark .hero-cs,.browser.dark .hero-cs{filter:drop-shadow(0 10px 18px rgba(0,0,0,.6))}
+.wm{display:block;align-self:flex-start;margin-top:4px;font:italic 500 30px/1.2 Noteworthy,"Bradley Hand",cursive;letter-spacing:-.045em;color:var(--wm);transform:rotate(-2deg);transform-origin:left center}
+.wm.c{align-self:center;transform-origin:center}
+.fr-h{margin:0;font:800 2.25em/1.06 -apple-system,BlinkMacSystemFont,"SF Pro Display",sans-serif;letter-spacing:-.025em;color:var(--text);border:0;padding:0}
+.fr-h.c,.fr-line.c{text-align:center}
+.fr-line{margin:12px 0 0;color:var(--smoke);font-size:1em;line-height:1.4}
+.fr-acts{display:flex;flex-direction:column;gap:12px;margin-top:28px}
+.fp{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;min-height:56px;padding:10px 20px;border-radius:999px;border:0;font:600 1.0625em/1.2 -apple-system,BlinkMacSystemFont,sans-serif;text-align:center;color:var(--text);background:var(--pillbg);-webkit-backdrop-filter:blur(20px) saturate(160%);backdrop-filter:blur(20px) saturate(160%);box-shadow:var(--glass-shadow),inset 0 1px 0 var(--glass-hi),inset 0 0 0 .5px rgba(255,255,255,.35)}
+.phone.dark .fp,.browser.dark .fp{box-shadow:var(--glass-shadow),inset 0 1px 0 rgba(255,255,255,.14)}
+.fp .mark{width:22px;height:22px;flex:none}
+.fp .ff{width:16px;height:16px;flex:none}
+.fp .ico{width:18px;height:18px;flex:none}
+.fp.go{font-weight:700}
+.fp.off{opacity:.45;font-weight:500;box-shadow:none}
+.fp.off .ff{fill:none;stroke:currentColor;stroke-width:1.5;stroke-linejoin:round}
+.fp.ghost{visibility:hidden}
+.fp.apple{background:#111114;color:#fff;box-shadow:0 6px 16px rgba(17,17,20,.18)}
+.fp.apple .mark{fill:currentColor}
+.phone.dark .fp.apple,.browser.dark .fp.apple{background:#fff;color:#000;box-shadow:none}
+.fp.google{background:#fff;color:#1f1f1f;box-shadow:inset 0 0 0 1px #747775}
+.phone.dark .fp.google,.browser.dark .fp.google{background:#131314;color:#e3e3e3;box-shadow:inset 0 0 0 1px #8e918f}
+.pencil{display:block;align-self:flex-end;margin:-6px 18px -4px 0;font:italic 500 13px/1.2 Noteworthy,"Bradley Hand",cursive;color:var(--pencil);transform:rotate(-2deg)}
+.fr-or{display:flex;align-items:center;gap:12px;margin:18px 0 0;font:600 11px/1 -apple-system,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.fr-or::before,.fr-or::after{content:"";flex:1;height:1px;background:var(--hair)}
+.fr-or+.fr-acts{margin-top:18px}
+.fr-foot{min-height:44px;margin-top:8px;display:flex;align-items:center;justify-content:center;text-align:center;font:600 .94em/1.3 -apple-system,sans-serif;color:var(--plum)}
+.fr-foot.quiet{font-weight:400;color:var(--smoke)}
+.fr-foot span{font-weight:400;color:var(--smoke);margin-right:5px}
+.composer.big{min-height:56px;grid-template-columns:minmax(0,1fr) 44px;padding-right:6px;margin-top:24px}
+.composer.big .send{width:44px;height:44px}
+.composer.big .field{font-size:1em}
+.fr-status{display:flex;align-items:center;gap:8px;margin:12px 0 0;color:var(--smoke)}
+.fr-status.err{color:var(--err-ink)}
+.fr-status svg{width:18px;height:18px;flex:none}
+.afields{display:flex;flex-direction:column;gap:10px;margin-top:24px}
+.afield{display:flex;align-items:center;min-height:56px;padding:0 8px 0 16px;border-radius:16px;background:var(--field);border:1px solid var(--hair);color:var(--muted)}
+.achip{display:inline-flex;align-items:center;min-height:36px;padding-left:14px;border-radius:999px;background:rgba(84,68,81,.1);color:var(--text);font-weight:600;font-size:.95em;margin-left:-6px}
+.phone.dark .achip,.browser.dark .achip{background:rgba(255,255,255,.14)}
+.achip .x{width:44px;height:44px;margin:-4px 0;display:grid;place-items:center;color:var(--smoke)}
+.achip .x svg{width:14px;height:14px}
+.steps{margin:18px 0 0;padding:0 0 0 22px;color:var(--text);font-size:.95em;line-height:1.4}
+.steps li{margin:0 0 8px;padding-left:2px}
+.steps li::marker{color:var(--muted);font-weight:600}
+.steps.dense{font-size:13.5px;line-height:1.35}.steps.dense li{margin-bottom:6px}
+.mixc{flex:1;min-height:0;overflow:hidden;padding:4px 20px 124px;display:flex;flex-direction:column;gap:10px;position:relative;z-index:1}
+.mixc .list{margin-top:2px}
+.phone.dark .trow .art{background:rgba(255,255,255,.08)}
+.rpills{display:flex;gap:8px;flex-wrap:wrap}
+.rpills .pill{min-height:44px;padding:0 16px;font-size:.88em;font-weight:600}
+.ksheet{position:absolute;left:0;right:0;bottom:0;z-index:9;padding:8px 20px 42px;border-radius:26px 26px 0 0;background:var(--sheet);-webkit-backdrop-filter:blur(30px) saturate(150%);backdrop-filter:blur(30px) saturate(150%);box-shadow:0 -10px 40px rgba(30,24,40,.16);display:flex;flex-direction:column}
+.ksheet .fr-h{font-size:1.75em}
+.ksheet .fr-acts{margin-top:22px}
+.capmsg{margin:12px 4px 0;font-size:.92em;line-height:1.4;color:var(--text)}
+.bp-acts{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+.yrow{display:grid;grid-template-columns:24px minmax(0,1fr) 20px;gap:14px;align-items:center;min-height:56px;padding:6px 2px;margin-bottom:16px;border-bottom:1px solid var(--hair);color:var(--plum)}
+.yrow strong{font-weight:600;color:var(--text)}
+.yrow svg{width:22px;height:22px}.yrow .chev{width:18px;height:18px;color:var(--muted);opacity:.7}
+.toast{position:absolute;left:50%;transform:translateX(-50%);bottom:296px;z-index:8;width:max-content;max-width:326px;display:flex;align-items:center;gap:9px;min-height:44px;padding:9px 14px 12px;border-radius:9px 9px 12px 12px;background:var(--sheet);box-shadow:0 8px 24px rgba(30,24,30,.16);font-size:13px;line-height:1.35;overflow:hidden}
+.toast::after{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;background:linear-gradient(90deg,#c9687f 0% 20%,#d18a65 20% 40%,#d2c76f 40% 60%,#709778 60% 80%,#688fa8 80%)}
+.toast svg{width:19px;height:19px;flex:none;color:var(--ok-ink)}
+/* Large text (200%) */
+.phone.large .fr-h{font-size:1.6em}
+.phone.large .stepc{font-size:20px}
+.phone.large .fr-top{height:60px;background:rgba(var(--bgrgb),.86);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
+.phone.large .fr-line{line-height:1.35}
+.phone.large .fp{padding:14px 24px;line-height:1.18}
+.phone.large .fr-foot{line-height:1.3;margin-top:12px}
+.scrollind{position:absolute;right:4px;bottom:120px;width:3px;height:150px;border-radius:2px;background:var(--muted);opacity:.55;z-index:6}
+/* Reduced transparency */
+.opaque .fp{background:#fbf9f7;-webkit-backdrop-filter:none;backdrop-filter:none;box-shadow:0 1px 2px rgba(0,0,0,.08),inset 0 0 0 1px rgba(50,44,50,.14)}
+.opaque .backbtn.glass{background:#fbf9f7;-webkit-backdrop-filter:none;backdrop-filter:none;box-shadow:inset 0 0 0 1px rgba(50,44,50,.14)}
+/* Browser window */
+.browser{width:1180px;max-width:100%;border-radius:12px;overflow:hidden;border:1px solid #4b4950;background:#0b0b0d;box-shadow:0 22px 60px rgba(0,0,0,.5);color-scheme:light}
+.browser.narrow{width:390px}
+.bchrome{height:40px;display:flex;align-items:center;gap:8px;padding:0 14px;background:#2a282e;border-bottom:1px solid #3d3a42}
+.bchrome i{width:12px;height:12px;border-radius:50%;background:#5a565f}
+.bchrome .addr{flex:1;max-width:420px;margin:0 auto;height:26px;border-radius:7px;background:#1d1c21;color:#bdb5bf;font:12px/26px -apple-system,sans-serif;text-align:center}
+.browser .screen{border-radius:0;height:720px}
+.fr-col{width:420px;max-width:100%;height:100%;margin:0 auto;display:flex;flex-direction:column}
+.browser .fr-top{margin-top:14px}
+.browser .fr-body{padding-bottom:40px}
+.browser.narrow .screen{height:760px}
+/* ---------- Revision 2: graphic first-run pages ---------- */
+.screen.gfx{--text:#efe6da;--plum:#efe6da;--smoke:#efe6da;--muted:rgba(239,230,218,.8);--hair:rgba(239,230,218,.35);--wm:#efe6da;--pencil:rgba(239,230,218,.8);--bgrgb:20,12,18;
+  background-color:#140c12;background-position:center;background-size:cover;background-repeat:no-repeat;color:#efe6da}
+.screen.gfx::before{content:"";position:absolute;inset:0;z-index:0;pointer-events:none;background:linear-gradient(180deg,rgba(10,6,10,.66) 0%,rgba(10,6,10,.52) 14%,rgba(10,6,10,.52) 45%,rgba(10,6,10,.62) 100%)}
+.screen.gfx .stepc{color:rgba(239,230,218,.8)}
+.screen.gfx .fr-prog{background:rgba(239,230,218,.35)}
+.screen.gfx .fr-prog i{background:#efe6da;opacity:1}
+.screen.gfx .fp{background:#e8dfcf;color:#1c1a1e;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none}
+.screen.gfx .fp.off{background:rgba(232,223,207,.45);color:#efe6da;opacity:1}
+.screen.gfx .fp.apple{background:#111114;color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.28)}
+.screen.gfx .fp.google{background:#fff;color:#1f1f1f;box-shadow:inset 0 0 0 1px #747775}
+.screen.gfx .backbtn{color:#efe6da;border-color:rgba(239,230,218,.7)}
+.opaque .screen.gfx .backbtn{background:transparent}
+.screen.gfx .composer{background:#e8dfcf;border-color:transparent;box-shadow:none}
+.screen.gfx .composer .field{color:#5c555c}.screen.gfx .composer .field.typed{color:#1c1a1e}
+.screen.gfx .send{color:#1c1a1e}.screen.gfx .send i{background:rgba(28,26,30,.1)}
+.screen.gfx .send.off{color:#5c555c}.screen.gfx .send.off i{background:transparent}
+.screen.gfx .afield{background:#e8dfcf;border-color:transparent;color:#5c555c}
+.screen.gfx .achip{background:#d8ccb7;color:#1c1a1e}
+.screen.gfx .achip .x{color:#3f383f}
+.screen.gfx .fr-status.err{color:#f6bfcb}
+.screen.gfx .steps li::marker{color:rgba(239,230,218,.8)}
+.fp.paper{background:#e8dfcf;color:#1c1a1e;box-shadow:inset 0 0 0 1px rgba(50,44,50,.14);-webkit-backdrop-filter:none;backdrop-filter:none}
+.bgstrip{display:flex;gap:16px;flex-wrap:wrap;margin-top:14px}
+.bgstrip figure{width:120px}
+.bgstrip img{display:block;width:120px;height:260px;object-fit:cover;border-radius:12px;border:1px solid #4b4950;background:#140c12}
+.bgstrip figcaption{font-size:12px;color:#cfc5d1;margin-top:6px;line-height:1.35}
+.bgstrip figcaption b{display:block;color:#fff;font-weight:600}
+</style>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="cassette" viewBox="0 0 200 128">
+    <rect class="cs-case" x="1" y="1" width="198" height="126" rx="9"/><rect class="cs-edge" x="3" y="3" width="194" height="122" rx="7"/>
+    <rect class="cs-stock" x="14" y="12" width="172" height="73" rx="5"/><path class="cs-rule" d="M22 31h156"/>
+    <path fill="#c9687f" d="M14 39h172v5H14z"/><path fill="#d18a65" d="M14 44h172v5H14z"/><path fill="#d2c76f" d="M14 49h172v5H14z"/><path fill="#709778" d="M14 54h172v5H14z"/><path fill="#688fa8" d="M14 59h172v5H14z"/>
+    <rect class="cs-dark" x="42" y="42" width="116" height="39" rx="7"/><rect class="cs-band" x="72" y="55" width="56" height="12" rx="2"/>
+    <g transform="translate(61 61)"><g class="cs-hub"><circle class="cs-ring" r="16"/><g class="cs-tooth"><rect x="-3" y="-15" width="6" height="6" rx="1"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(45)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(90)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(135)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(180)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(225)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(270)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(315)"/></g><circle class="cs-hole" r="5"/></g></g>
+    <g transform="translate(139 61)"><g class="cs-hub"><circle class="cs-ring" r="16"/><g class="cs-tooth"><rect x="-3" y="-15" width="6" height="6" rx="1"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(45)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(90)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(135)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(180)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(225)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(270)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(315)"/></g><circle class="cs-hole" r="5"/></g></g>
+    <path class="cs-dark" d="M48 89h104l12 30H36z"/><circle class="cs-guide" cx="58" cy="105" r="6"/><circle class="cs-guide" cx="142" cy="105" r="6"/>
+    <rect class="cs-metal" x="75" y="100" width="8" height="13" rx="2"/><rect class="cs-metal" x="117" y="100" width="8" height="13" rx="2"/>
+    <circle class="cs-metal" cx="100" cy="108" r="4"/><circle class="cs-metal" cx="9" cy="9" r="3"/><circle class="cs-metal" cx="191" cy="9" r="3"/><circle class="cs-metal" cx="9" cy="119" r="3"/><circle class="cs-metal" cx="191" cy="119" r="3"/>
+  </symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5M8 9l4-4 4 4"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></symbol>
+  <symbol id="i-rw" viewBox="0 0 24 24"><path d="M20 6l-8 6 8 6zM12 6l-8 6 8 6z"/></symbol>
+  <symbol id="i-ff" viewBox="0 0 24 24"><path d="m4 6 8 6-8 6zM12 6l8 6-8 6z"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9.5 5 7 7-7 7"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7.5A1.5 1.5 0 0 0 6 4.5v15A1.5 1.5 0 0 0 7.5 21h9a1.5 1.5 0 0 0 1.5-1.5V7z"/><path d="M14 3v4h4"/></symbol>
+  <symbol id="i-sync" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 8.2A7 7 0 0 1 18.4 6L20 8M4 16l1.6 2A7 7 0 0 0 18 15.8"/></symbol>
+  <symbol id="i-err" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v6M12 17h.01"/></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="m3.5 10 8.5-7 8.5 7v10.5h-6v-6h-5v6h-6z"/></symbol>
+  <symbol id="i-tape" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="1.5"/><circle cx="8.5" cy="12" r="2.2"/><circle cx="15.5" cy="12" r="2.2"/><path d="M8.5 9.8h7"/></symbol>
+  <symbol id="i-library" viewBox="0 0 24 24"><path d="M4 5v14M9 5v14M14 6l5 13"/></symbol>
+  <symbol id="i-person" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 19.5a7 7 0 0 1 14 0"/></symbol>
+  <symbol id="i-memory" viewBox="0 0 24 24"><path d="M12 3.5a5 5 0 0 1 5 5v1.2a3.5 3.5 0 0 1 .5 6.8V19a1.5 1.5 0 0 1-1.5 1.5H8A1.5 1.5 0 0 1 6.5 19v-2.5a3.5 3.5 0 0 1 .5-6.8V8.5a5 5 0 0 1 5-5z"/><path d="M9.5 20.5V17M14.5 20.5V17"/></symbol>
+  <symbol id="i-ear" viewBox="0 0 24 24"><path d="M6.5 10a5.5 5.5 0 0 1 11 0c0 3-2.5 3.5-2.5 6a2.5 2.5 0 0 1-5 0"/><path d="M9.5 10a2.5 2.5 0 0 1 5 0c0 1.5-1.5 2-1.5 3.5"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3.5 13.8 9l5.7 1.8-5.7 1.8L12 18.2l-1.8-5.6L4.5 10.8 10.2 9z"/></symbol>
+  <symbol id="i-apple" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M16.71 12.74c.02 2.15 1.89 2.87 1.91 2.88-.02.05-.3 1.02-.98 2.03-.59.87-1.21 1.73-2.18 1.75-.95.02-1.26-.57-2.35-.57s-1.43.55-2.33.59c-.94.03-1.65-.94-2.25-1.8-1.22-1.77-2.15-5-0.9-7.18a3.5 3.5 0 0 1 2.98-1.81c.93-.02 1.81.63 2.35.63.54 0 1.56-.78 2.63-.66.45.02 1.71.18 2.52 1.37-.07.04-1.5.88-1.4 2.77ZM14.89 7.47c.49-.6.83-1.43.74-2.26-.72.03-1.59.48-2.1 1.08-.46.53-.86 1.38-.75 2.19.8.06 1.62-.41 2.11-1.01Z"/></symbol>
+  <symbol id="m-google" viewBox="0 0 24 24"><path fill="#4285F4" d="M21.6 12.23c0-.71-.06-1.4-.18-2.06H12v3.89h5.38a4.6 4.6 0 0 1-2 3.02v2.52h3.24c1.9-1.74 2.98-4.31 2.98-7.37Z"/><path fill="#34A853" d="M12 22c2.7 0 4.97-.9 6.62-2.4l-3.24-2.52c-.9.6-2.05.96-3.38.96-2.61 0-4.82-1.76-5.61-4.13H3.04v2.6A10 10 0 0 0 12 22Z"/><path fill="#FBBC05" d="M6.39 13.91A6 6 0 0 1 6.08 12c0-.66.11-1.3.31-1.91v-2.6H3.04A10 10 0 0 0 2 12c0 1.61.39 3.14 1.04 4.51l3.35-2.6Z"/><path fill="#EA4335" d="M12 5.96c1.47 0 2.79.51 3.83 1.5l2.87-2.88A9.64 9.64 0 0 0 12 2a10 10 0 0 0-8.96 5.49l3.35 2.6C7.18 7.72 9.39 5.96 12 5.96Z"/></symbol>
+  <symbol id="m-am" viewBox="0 0 24 24"><rect width="24" height="24" rx="5.5" fill="#fa2d48"/><path fill="#fff" d="M16.4 5.1 10.1 6.4c-.4.1-.7.4-.7.8v7.6a2.4 2.4 0 1 0 1.3 2.1V10l5.3-1.1v4.4a2.4 2.4 0 1 0 1.3 2.1V5.7c0-.4-.4-.7-.9-.6Z"/></symbol>
+  <symbol id="m-sp" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#1ed760"/><path d="M6.4 9.3c3.8-1.1 8-.8 11.2 1M7 12.5c3.1-.9 6.4-.6 9.3.9M7.6 15.5c2.5-.7 5-.5 7.3.7" fill="none" stroke="#000" stroke-width="1.7" stroke-linecap="round"/></symbol>
+  <symbol id="g-ok" viewBox="0 0 24 24"><path d="M8 3h8l5 5v8l-5 5H8l-5-5V8Z" fill="currentColor" fill-opacity=".13"/><path d="M13 3H8L3 8v8l5 5h8l5-5v-3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="m7.5 11.5 4 4L21 5" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+</svg>
+<main>
+<p class="kicker">Native iOS and web · First run · revision 2 · synthetic data</p>
+<h1>First run: a mix before an account.</h1>
+<p class="note">A new listener reaches a mix without signing in: they ask the DJ straight away (path A) or add their music first in three counted steps (path B), and sign-in is offered after the first mix, never before it. Revision 2 applies the founder's decisions of October 20: every first-run page now sits on its own generated background with cream text and paper pills; the cap is no longer drawn in the composer but pushes the sign-in page; the Keep this mix sheet holds one pill that opens sign-in, with no provider buttons; Step 1 gains its line. Copy is verbatim from the spec: <a href="../superpowers/specs/2026-10-20-first-run-flow-design.md"><code>docs/superpowers/specs/2026-10-20-first-run-flow-design.md</code></a>. Nothing here is implemented.</p>
+<div class="legend" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:10px"><span class="badge b-plan">Planned</span><span class="note" style="margin:0">Every frame on this board is planned.</span></div>
+
+<div class="callout"><strong>Decided 2026-10-20</strong>
+<ol class="tight">
+<li>Merge into an existing account: mixes move, the existing library wins.</li>
+<li>Anonymous mix cap of 3 and 30-day retention of idle anonymous users.</li>
+<li>Anonymous user created lazily at the first server action, not at launch.</li>
+<li>The catalogue-seeded corpus program is not started now; the artists page is the floor and the refusal rate is read from <code>first_mix_refused</code>.</li>
+<li>Mixes only. Album recommendations are a future feature.</li>
+<li>Provider buttons live only on the sign-in page, never in a sheet or the composer panel.</li>
+<li>First-run pages carry generated graphic backgrounds.</li>
+</ol>
+<p style="margin:10px 0 0">What remains is visual approval of this revision.</p></div>
+
+<h3>Backgrounds</h3>
+<div class="bgstrip">
+<figure><img src="2026-10-20-first-run-assets/bg-welcome.jpg" alt="Magenta silk marble"><figcaption><b>Welcome</b>and prompt after sync</figcaption></figure>
+<figure><img src="2026-10-20-first-run-assets/bg-artists.jpg" alt="Violet silk marble"><figcaption><b>Who do you love?</b></figcaption></figure>
+<figure><img src="2026-10-20-first-run-assets/bg-step-1.jpg" alt="Blue silk marble"><figcaption><b>Step 1 of 3</b></figcaption></figure>
+<figure><img src="2026-10-20-first-run-assets/bg-step-2.jpg" alt="Green silk marble"><figcaption><b>Step 2 of 3</b></figcaption></figure>
+<figure><img src="2026-10-20-first-run-assets/bg-step-3.jpg" alt="Amber silk marble"><figcaption><b>Step 3 of 3</b>every method</figcaption></figure>
+<figure><img src="2026-10-20-first-run-assets/bg-sign-in.jpg" alt="Plum black silk marble"><figcaption><b>Sign-in</b>and cap</figcaption></figure>
+</div>
+<p class="note">Generated grainy silk marble, one prism hue per page, 780 x 1688 at 2x of the frame. Shipped as static assets and never drawn at runtime; the same in light and dark. A dark scrim over each image (darker at the top behind the counter, lightest mid-page, darker over the pills) keeps cream text at 4.5:1.</p>
+
+<div class="flow">
+<div><b>Path A · make a mix now</b>Welcome, then Who do you love?, then Mix, then the Keep this mix sheet. No counter.</div>
+<div><b>Path B · add my music first</b>Step 1 of 3 Which do you use?, Step 2 of 3 How do you want to add it?, Step 3 of 3 the doing page, then the prompt page and path A's Mix.</div>
+<div><b>Sign-in</b>From the sheet, the You row or the cap: "Keep your mixes." From the welcome foot link: the existing page, unchanged. Provider buttons appear only here.</div>
+<div><b>Returning</b>Any session, anonymous or not, skips first run and opens the shell.</div>
+</div>
+
+<h2>1 · Path A: make a mix now</h2>
+<div class="frames">
+
+<figure class="frame">
+<div class="phone"><div class="screen gfx" style="background-image:url(2026-10-20-first-run-assets/bg-welcome.jpg)">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="fr-top"></div><div class="fr-prog none"></div>
+  <div class="fr-body">
+    <span class="wm">mixtape</span>
+    <div class="fr-hero"><span class="cs hero-cs spin"><svg><use href="#cassette"/></svg></span></div>
+    <h1 class="fr-h">What do you want to hear?</h1>
+    <div class="composer big"><i class="stripe"></i><div class="field">something for a rainy commute</div><button class="send off" aria-label="Make a mix"><i><svg><use href="#i-send"/></svg></i></button></div>
+    <div class="fr-or">or</div>
+    <div class="fr-acts"><button class="fp">Add my music first</button></div>
+    <div class="fr-foot"><span>Already have an account?</span>Sign in.</div>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>A1 · Welcome, field empty</b>The first screen on a device with no session of any kind. No back, no counter: path A is not a counted errand. The placeholder rotates through the three spec examples; send stays dim until there is text. VoiceOver: "What do you want to hear?, heading", then "Text field, something for a rainy commute".</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen gfx" style="background-image:url(2026-10-20-first-run-assets/bg-welcome.jpg)">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="fr-top"></div><div class="fr-prog none"></div>
+  <div class="fr-body">
+    <span class="wm">mixtape</span>
+    <div class="fr-hero"><span class="cs hero-cs spin"><svg><use href="#cassette"/></svg></span></div>
+    <h1 class="fr-h">What do you want to hear?</h1>
+    <div class="composer big focus"><i class="stripe"></i><div class="field typed">something for a rainy commute, no talking</div><button class="send" aria-label="Make a mix"><i><svg><use href="#i-send"/></svg></i></button></div>
+    <div class="fr-or">or</div>
+    <div class="fr-acts"><button class="fp">Add my music first</button></div>
+    <div class="fr-foot"><span>Already have an account?</span>Sign in.</div>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>A2 · Welcome, text typed</b>The prism ring replaces the stripe and the send key lights. The keyboard is left out so positions can be compared with A1; in the app the column rides up on it and the cassette yields first. Send goes to Who do you love? when nothing is synced; no account or server row exists until that page saves.</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen gfx" style="background-image:url(2026-10-20-first-run-assets/bg-artists.jpg)">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="fr-top"><button class="backbtn glass" aria-label="Back"><svg class="tsvg"><use href="#i-rw"/></svg></button></div><div class="fr-prog none"></div>
+  <div class="fr-body">
+    <h1 class="fr-h">Who do you love?</h1>
+    <p class="fr-line">Three artists is enough. The DJ borrows from the shared catalogue until your music is in.</p>
+    <div class="afields"><div class="afield">First artist</div><div class="afield">Second artist</div><div class="afield">Third artist</div></div>
+    <div class="fr-acts"><button class="fp go off" aria-disabled="true">Continue<svg class="tsvg ff"><use href="#i-ff"/></svg></button></div>
+    <div class="fr-foot" aria-hidden="true"></div>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>A3 · Who do you love?, no artists</b>Back is the rewind glyph from here on. Continue is translucent, regular weight and its fast-forward glyph is drawn hollow, so the state is not carried by opacity alone. VoiceOver: "Continue, dimmed. Add three artists."</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen gfx" style="background-image:url(2026-10-20-first-run-assets/bg-artists.jpg)">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="fr-top"><button class="backbtn glass" aria-label="Back"><svg class="tsvg"><use href="#i-rw"/></svg></button></div><div class="fr-prog none"></div>
+  <div class="fr-body">
+    <h1 class="fr-h">Who do you love?</h1>
+    <p class="fr-line">Three artists is enough. The DJ borrows from the shared catalogue until your music is in.</p>
+    <div class="afields">
+      <div class="afield"><span class="achip">Burna Boy<span class="x" aria-label="Remove Burna Boy"><svg class="ico"><use href="#i-x"/></svg></span></span></div>
+      <div class="afield"><span class="achip">Tems<span class="x" aria-label="Remove Tems"><svg class="ico"><use href="#i-x"/></svg></span></span></div>
+      <div class="afield"><span class="achip">Sade<span class="x" aria-label="Remove Sade"><svg class="ico"><use href="#i-x"/></svg></span></span></div>
+    </div>
+    <div class="fr-acts"><button class="fp go">Continue<svg class="tsvg ff"><use href="#i-ff"/></svg></button></div>
+    <div class="fr-foot" aria-hidden="true"></div>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>A4 · Who do you love?, three artists</b>Each field becomes a chip in place; the remove button is a 44 pt target. Continue turns full, bold, with a solid glyph. Continue saves the seeds through <code>/me/artist-seeds</code> (creating the anonymous user lazily) and then sends the prompt from A2.</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="fr-top"><button class="backbtn glass" aria-label="Back"><svg class="tsvg"><use href="#i-rw"/></svg></button><span class="mid">Rainy commute</span></div>
+  <div class="mixc">
+    <div class="turn me">something for a rainy commute, no talking</div>
+    <div class="turn dj"><span class="dj-k">DJ</span>These picks come from the shared catalogue, not your own listening yet. Slow and warm to start, a little brighter by your stop.</div>
+    <div class="actsrow"><span class="tape"><i class="reel"></i>Play now<i class="meter"></i></span><span class="chip"><i class="hole"></i>Create playlist</span></div>
+    <div class="list">
+      <div class="trow"><span class="art"><span class="cs c2"><svg><use href="#cassette"/></svg></span></span><div><strong>Glass Harbour</strong><small>Ode Lane</small></div><span class="grip"><i></i></span></div>
+      <div class="trow"><span class="art"><span class="cs c3"><svg><use href="#cassette"/></svg></span></span><div><strong>Slow Ferry</strong><small>Mira Achebe</small></div><span class="grip"><i></i></span></div>
+      <div class="trow"><span class="art"><span class="cs c4"><svg><use href="#cassette"/></svg></span></span><div><strong>Paper Umbrella</strong><small>The Harmattan Hours</small></div><span class="grip"><i></i></span></div>
+      <div class="trow"><span class="art"><span class="cs c5"><svg><use href="#cassette"/></svg></span></span><div><strong>Northbound, Late</strong><small>Ilse Okoro</small></div><span class="grip"><i></i></span></div>
+    </div>
+  </div>
+  <section class="bpanel chat"><div class="grab"></div><div class="composer"><i class="stripe"></i><div class="field">90s R&amp;B, no ballads</div><button class="mic" aria-label="Speak your idea"><svg><use href="#i-mic"/></svg></button><button class="send off" aria-label="Send"><i><svg><use href="#i-send"/></svg></i></button></div></section>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>A5 · Mix, first reply</b>The existing conversation and arrangement screen, without the tab bar. The DJ's first reply says plainly that the picks are from the shared catalogue (<code>CORPUS_NOTICE</code>, unchanged); its wording is the model's own. Play now and Create playlist are the existing mix actions. Inside first run, back is the rewind glyph and returns to Welcome.</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="fr-top"><button class="backbtn glass" aria-label="Back"><svg class="tsvg"><use href="#i-rw"/></svg></button><span class="mid">Rainy commute</span></div>
+  <div class="mixc">
+    <div class="turn me">something for a rainy commute, no talking</div>
+    <div class="turn dj"><span class="dj-k">DJ</span>These picks come from the shared catalogue, not your own listening yet. Slow and warm to start, a little brighter by your stop.</div>
+    <div class="actsrow"><span class="tape"><i class="reel"></i>Play now<i class="meter"></i></span><span class="chip"><i class="hole"></i>Create playlist</span></div>
+    <div class="list">
+      <div class="trow"><span class="art"><span class="cs c2"><svg><use href="#cassette"/></svg></span></span><div><strong>Glass Harbour</strong><small>Ode Lane</small></div><span class="grip"><i></i></span></div>
+      <div class="trow"><span class="art"><span class="cs c3"><svg><use href="#cassette"/></svg></span></span><div><strong>Slow Ferry</strong><small>Mira Achebe</small></div><span class="grip"><i></i></span></div>
+    </div>
+  </div>
+  <div class="veil"></div>
+  <section class="ksheet" role="dialog" aria-label="Keep this mix.">
+    <div class="grab"></div>
+    <h2 class="fr-h">Keep this mix.</h2>
+    <p class="fr-line">Sign in and your mixes and music stay with you on any device.</p>
+    <div class="fr-acts"><button class="fp paper go">Keep this mix</button></div>
+    <div class="fr-foot">Not now</div>
+  </section>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>A6 · Keep this mix sheet</b>Shown once, after the first mix lands. One cream pill, Keep this mix, pushes the sign-in page (C1); provider buttons live only there, never in a sheet. Not now is final for the session; the You tab keeps a quiet Sign in row. VoiceOver: "Keep this mix., sheet"; focus starts on the heading and the handle dismisses as Not now does.</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="fr-top"><button class="backbtn glass" aria-label="Back"><svg class="tsvg"><use href="#i-rw"/></svg></button><span class="mid">Rainy commute</span></div>
+  <div class="mixc">
+    <div class="turn me">something for a rainy commute, no talking</div>
+    <div class="turn dj"><span class="dj-k">DJ</span>I don't know those artists yet. Add your music, or name a few more.</div>
+    <div class="rpills"><span class="pill">Add my music</span><span class="pill">Name a few more</span></div>
+  </div>
+  <section class="bpanel chat"><div class="grab"></div><div class="composer"><i class="stripe"></i><div class="field">warm up for a long run</div><button class="mic" aria-label="Speak your idea"><svg><use href="#i-mic"/></svg></button><button class="send off" aria-label="Send"><i><svg><use href="#i-send"/></svg></i></button></div></section>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>A7 · Refusal, artists not in the catalogue</b>The honest floor: the three artists matched too few enriched tracks, so <code>resolvePoolMode</code> returns <code>insufficient_seeds</code> and the DJ says so in its own voice. No queue, no mix actions, no sheet. Add my music opens path B step 1; Name a few more returns to Who do you love? with the chips kept. Funnel: <code>first_mix_refused</code>.</figcaption>
+</figure>
+</div>
+
+<h2>2 · Path B: add my music first</h2>
+<p class="note">Only these pages carry the step counter and the progress line, which fills a third per step. The counter is decorative; the page title carries the step.</p>
+<div class="frames">
+
+<figure class="frame">
+<div class="phone"><div class="screen gfx" style="background-image:url(2026-10-20-first-run-assets/bg-step-1.jpg)">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="fr-top"><button class="backbtn glass" aria-label="Back"><svg class="tsvg"><use href="#i-rw"/></svg></button><span class="stepc" aria-hidden="true">Step 1 of 3</span></div>
+  <div class="fr-prog" aria-hidden="true"><i style="width:33.333%"></i></div>
+  <div class="fr-body">
+    <h1 class="fr-h">Which do you use?</h1>
+    <p class="fr-line">Mixes get better when the DJ knows your music.</p>
+    <div class="fr-acts">
+      <button class="fp"><svg class="mark"><use href="#m-am"/></svg>Apple Music</button>
+      <button class="fp"><svg class="mark"><use href="#m-sp"/></svg>Spotify</button>
+    </div>
+    <div class="fr-foot">Skip for now</div>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>B1 · Step 1 of 3, Which do you use?</b>A tap on a service advances; there is no Continue. The line under the headline says why the step is worth it. Skip for now goes to Who do you love?. VoiceOver on push: "Step 1 of 3, Which do you use?"</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen gfx" style="background-image:url(2026-10-20-first-run-assets/bg-step-2.jpg)">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="fr-top"><button class="backbtn glass" aria-label="Back"><svg class="tsvg"><use href="#i-rw"/></svg></button><span class="stepc" aria-hidden="true">Step 2 of 3</span></div>
+  <div class="fr-prog" aria-hidden="true"><i style="width:66.667%"></i></div>
+  <div class="fr-body">
+    <h1 class="fr-h">How do you want to add it?</h1>
+    <div class="fr-acts">
+      <button class="fp">Sync my library</button>
+      <button class="fp">Upload an Apple export</button>
+    </div>
+    <div class="fr-foot quiet">You can add more later from Library.</div>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>B2 · Step 2 of 3, Apple Music</b>Sync my library asks for MusicKit authorisation; that sheet is Apple's. Upload an Apple export opens the existing go-deeper instructions and picker. VoiceOver: "Step 2 of 3, How do you want to add it?"</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen gfx" style="background-image:url(2026-10-20-first-run-assets/bg-step-2.jpg)">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="fr-top"><button class="backbtn glass" aria-label="Back"><svg class="tsvg"><use href="#i-rw"/></svg></button><span class="stepc" aria-hidden="true">Step 2 of 3</span></div>
+  <div class="fr-prog" aria-hidden="true"><i style="width:66.667%"></i></div>
+  <div class="fr-body">
+    <h1 class="fr-h">How do you want to add it?</h1>
+    <p class="fr-line">Exportify brings your playlists and likes. The data export adds what you actually played.</p>
+    <div class="fr-acts">
+      <button class="fp">Exportify, a few minutes</button>
+      <button class="fp">Spotify data export, a few days</button>
+    </div>
+    <div class="fr-foot quiet">You can add more later from Library.</div>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>B3 · Step 2 of 3, Spotify</b>The column is anchored at the foot, so the pills sit exactly where B2's do and the extra line lifts the headline instead. VoiceOver: "Step 2 of 3, How do you want to add it?"</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen gfx" style="background-image:url(2026-10-20-first-run-assets/bg-step-3.jpg)">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="fr-top"><button class="backbtn glass" aria-label="Back"><svg class="tsvg"><use href="#i-rw"/></svg></button><span class="stepc" aria-hidden="true">Step 3 of 3</span></div>
+  <div class="fr-prog" aria-hidden="true"><i style="width:100%"></i></div>
+  <div class="fr-body">
+    <div class="fr-hero"><span class="cs hero-cs spin"><svg><use href="#cassette"/></svg></span></div>
+    <h1 class="fr-h">Syncing your library</h1>
+    <p class="fr-status" role="status">612 songs so far</p>
+    <div class="fr-acts">
+      <button class="fp ghost" tabindex="-1" aria-hidden="true">Retry</button>
+      <button class="fp go off" aria-disabled="true">Done<svg class="tsvg ff"><use href="#i-ff"/></svg></button>
+    </div>
+    <div class="fr-foot" aria-hidden="true"></div>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>B4 · Step 3 of 3, Apple sync in progress</b>Counts arrive as the sync runs; the hubs turn while it works. The count line is a polite live region announced at most once every ten seconds ("612 songs so far"). Done waits in its final place; at the end the line reads "1,284 songs in." and Done turns full. The slot above Done is reserved for Retry so nothing moves on failure.</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen gfx" style="background-image:url(2026-10-20-first-run-assets/bg-step-3.jpg)">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="fr-top"><button class="backbtn glass" aria-label="Back"><svg class="tsvg"><use href="#i-rw"/></svg></button><span class="stepc" aria-hidden="true">Step 3 of 3</span></div>
+  <div class="fr-prog" aria-hidden="true"><i style="width:100%"></i></div>
+  <div class="fr-body">
+    <div class="fr-hero"><span class="cs hero-cs"><svg><use href="#cassette"/></svg></span></div>
+    <h1 class="fr-h">Syncing your library</h1>
+    <p class="fr-status err" role="alert"><svg class="ico"><use href="#i-err"/></svg>Sync stopped at 612 songs.</p>
+    <div class="fr-acts">
+      <button class="fp"><svg class="ico"><use href="#i-sync"/></svg>Retry</button>
+      <button class="fp go">Continue with what's in<svg class="tsvg ff"><use href="#i-ff"/></svg></button>
+    </div>
+    <div class="fr-foot" aria-hidden="true"></div>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>B5 · Step 3 of 3, Apple sync failed</b>The count is kept and the hubs stop. Retry resumes; Continue with what's in takes the 612 songs to the prompt page. The line is announced once as an alert: "Sync stopped at 612 songs." If nothing usable came in, Continue goes to Who do you love? first.</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen gfx" style="background-image:url(2026-10-20-first-run-assets/bg-step-3.jpg)">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="fr-top"><button class="backbtn glass" aria-label="Back"><svg class="tsvg"><use href="#i-rw"/></svg></button><span class="stepc" aria-hidden="true">Step 3 of 3</span></div>
+  <div class="fr-prog" aria-hidden="true"><i style="width:100%"></i></div>
+  <div class="fr-body">
+    <h1 class="fr-h">Export from Exportify</h1>
+    <ol class="steps">
+      <li>Open Exportify and connect Spotify.</li>
+      <li>Choose Export All and save the ZIP as it is.</li>
+      <li>Come back and choose the files. Mixtape will show what it found before importing.</li>
+    </ol>
+    <div class="fr-acts">
+      <button class="fp">Open Exportify<svg class="ico"><use href="#i-ext"/></svg></button>
+      <button class="fp go"><svg class="ico"><use href="#i-file"/></svg>Choose files</button>
+    </div>
+    <div class="fr-foot" aria-hidden="true"></div>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>B6 · Step 3 of 3, Exportify</b>The three existing instruction lines. Open Exportify leaves the app (the trailing arrow says so; VoiceOver adds "opens outside Mixtape"). Choose files opens the document picker directly, and the existing review step follows unchanged. VoiceOver: "Step 3 of 3, Export from Exportify".</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen gfx" style="background-image:url(2026-10-20-first-run-assets/bg-step-3.jpg)">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="fr-top"><button class="backbtn glass" aria-label="Back"><svg class="tsvg"><use href="#i-rw"/></svg></button><span class="stepc" aria-hidden="true">Step 3 of 3</span></div>
+  <div class="fr-prog" aria-hidden="true"><i style="width:100%"></i></div>
+  <div class="fr-body">
+    <h1 class="fr-h">Request your data</h1>
+    <ol class="steps dense">
+      <li>Open <b>spotify.com/account/privacy</b> and log in with the account that has your listening history. A laptop is easier than a phone for this part.</li>
+      <li>Scroll to <b>Download your data</b>.</li>
+      <li>Select <b>Account data</b> and <b>Extended streaming history</b>. Leave <i>Technical log information</i> unselected.</li>
+      <li>Press <b>Request data</b>.</li>
+      <li>Check your email. Spotify sends a <b>confirmation</b> message first. Open it and press <b>Confirm</b>. Nothing is prepared until you do, and this is the step most people miss.</li>
+      <li>Wait. The two packages arrive as separate emails, each with a <b>Download</b> button, usually within days; the extended history can take up to 30. Each link expires after about two weeks, so download it when you see it.</li>
+      <li>Save the ZIPs as they are. Don't unzip them.</li>
+    </ol>
+    <div class="fr-acts"><button class="fp go">I've requested it<svg class="tsvg ff"><use href="#i-ff"/></svg></button></div>
+    <div class="fr-foot" aria-hidden="true"></div>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>B7 · Step 3 of 3, Spotify data export</b>The existing request instructions, verbatim from <code>spotifyRequestSteps</code>. I've requested it records the request and continues to Who do you love?; the Home waiting row takes over when the files arrive. VoiceOver: "Step 3 of 3, Request your data".</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen gfx" style="background-image:url(2026-10-20-first-run-assets/bg-welcome.jpg)">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="fr-top"><button class="backbtn glass" aria-label="Back"><svg class="tsvg"><use href="#i-rw"/></svg></button></div><div class="fr-prog none"></div>
+  <div class="fr-body">
+    <span class="wm">mixtape</span>
+    <div class="fr-hero"><span class="cs hero-cs spin"><svg><use href="#cassette"/></svg></span></div>
+    <h1 class="fr-h">What do you want to hear?</h1>
+    <div class="composer big"><i class="stripe"></i><div class="field">90s R&amp;B, no ballads</div><button class="send off" aria-label="Make a mix"><i><svg><use href="#i-send"/></svg></i></button></div>
+    <p class="fr-line">1,284 songs in. Ask for anything.</p>
+    <div class="fr-foot"><span>Already have an account?</span>Sign in.</div>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>B8 · Prompt after sync</b>Path A's first page without the add-music pill, and with the library count under the field. The counter and progress line are gone: the counted errand is over. Send goes straight to Mix (A5), then the Keep this mix sheet. The DJ's reply no longer carries the shared catalogue line once the library is the pool.</figcaption>
+</figure>
+</div>
+
+<h2>3 · Sign-in, cap and returning</h2>
+<div class="frames">
+
+<figure class="frame">
+<div class="phone"><div class="screen gfx" style="background-image:url(2026-10-20-first-run-assets/bg-sign-in.jpg)">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="fr-top"><button class="backbtn glass" aria-label="Back"><svg class="tsvg"><use href="#i-rw"/></svg></button></div><div class="fr-prog none"></div>
+  <div class="fr-body">
+    <span class="wm c">mixtape</span>
+    <div class="fr-hero"><span class="cs hero-cs spin"><svg><use href="#cassette"/></svg></span></div>
+    <h1 class="fr-h c">Keep your mixes.</h1>
+    <div class="fr-acts">
+      <button class="fp apple" aria-describedby="lu1"><svg class="mark"><use href="#i-apple"/></svg>Continue with Apple</button>
+      <span class="pencil" id="lu1">last used</span>
+      <button class="fp google"><svg class="mark"><use href="#m-google"/></svg>Continue with Google</button>
+    </div>
+    <p class="fr-line c" style="font-size:.85em;margin-top:10px">&nbsp;</p>
+    <div class="fr-foot quiet" style="font-size:.8em">Music access is requested separately.</div>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>C1 · Sign-in from the sheet or the You row</b>The existing sign-in page with one change: the headline reads "Keep your mixes." The pencil note, the reserved status line (blank here) and the Apple Music foot note stay. From the welcome foot link the headline is unchanged. Signing in links the anonymous user and moves its mixes. The only place provider buttons appear.</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen gfx" style="background-image:url(2026-10-20-first-run-assets/bg-sign-in.jpg)">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="fr-top"><button class="backbtn glass" aria-label="Back"><svg class="tsvg"><use href="#i-rw"/></svg></button></div><div class="fr-prog none"></div>
+  <div class="fr-body">
+    <span class="wm c">mixtape</span>
+    <div class="fr-hero"><span class="cs hero-cs spin"><svg><use href="#cassette"/></svg></span></div>
+    <h1 class="fr-h c">Keep your mixes.</h1>
+    <p class="fr-line c">That's three mixes on this device. Sign in to keep going, and to keep these.</p>
+    <div class="fr-acts">
+      <button class="fp apple"><svg class="mark"><use href="#i-apple"/></svg>Continue with Apple</button>
+      <button class="fp google"><svg class="mark"><use href="#m-google"/></svg>Continue with Google</button>
+    </div>
+    <p class="fr-line c" style="font-size:.85em;margin-top:10px">&nbsp;</p>
+    <div class="fr-foot quiet" style="font-size:.8em">Music access is requested separately.</div>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>C2 · Cap reached, the sign-in page</b>The composer stays as it is. Sending a fourth new mix still gets 403 <code>anonymous_cap</code> from <code>POST /sessions</code>, and the client reacts by pushing this page; nothing about the cap is drawn in the composer panel. Back returns to Home with the prompt kept in the field; the prompt is sent after sign-in. No last-used note here. VoiceOver: "Keep your mixes., heading".</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="large-title"><h1>You</h1></div>
+  <div class="content">
+    <div class="yrow"><svg class="ico"><use href="#i-person"/></svg><strong>Sign in to keep your mixes</strong><svg class="ico chev"><use href="#i-chev"/></svg></div>
+    <div class="group">
+      <div class="grow"><svg><use href="#i-memory"/></svg><div><strong>What the DJ knows</strong><small>2 remembered preferences</small></div><svg class="chev"><use href="#i-chev"/></svg></div>
+      <div class="grow"><svg><use href="#i-ear"/></svg><div><strong>Learn from my listening</strong></div><span class="toggle" role="switch" aria-checked="true"></span></div>
+      <div class="grow"><svg><use href="#i-spark"/></svg><div><strong>Suggest mixes from my routines</strong></div><span class="toggle" role="switch" aria-checked="true"></span></div>
+    </div>
+    <p class="gnote">Learning stays on this device's account only. Clear learned listening from What the DJ knows.</p>
+  </div>
+  <div class="dock"><nav class="tabs glass"><button><svg><use href="#i-home"/></svg>Home</button><button><svg><use href="#i-tape"/></svg>Mixes</button><button><svg><use href="#i-library"/></svg>Library</button><button class="on"><svg><use href="#i-person"/></svg>You</button></nav></div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>C3 · You, anonymous listener</b>A returning anonymous listener opens straight into the shell. One flush row replaces the identity block and opens C1; there is no Account group and no Sign out. The rest of You is the approved shell record. VoiceOver: "Sign in to keep your mixes, button".</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="large-title"><h1>Home</h1></div>
+  <div class="content"></div>
+  <div class="toast" role="status"><svg><use href="#g-ok"/></svg><span>Your mixes are in. This account already had a library, so we kept that one.</span></div>
+  <section class="bpanel">
+    <div class="grab"></div>
+    <div class="composer"><i class="stripe"></i><div class="field">something for a rainy commute</div><button class="mic" aria-label="Speak your idea"><svg><use href="#i-mic"/></svg></button><button class="send off" aria-label="Make a mix"><i><svg><use href="#i-send"/></svg></i></button></div>
+    <div class="pills"><span class="pill">Kitchen, early, coffee on</span><span class="pill">Running, long, no lyrics</span></div>
+  </section>
+  <div class="dock"><nav class="tabs glass"><button class="on"><svg><use href="#i-home"/></svg>Home</button><button><svg><use href="#i-tape"/></svg>Mixes</button><button><svg><use href="#i-library"/></svg>Library</button><button><svg><use href="#i-person"/></svg>You</button></nav></div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>C4 · Merge notice, existing account</b>Shown once when sign-in returns <code>merged: 'mixes_only'</code>: the approved compact toast with the prism bottom edge and the success mark, two lines because the sentence is long. It sits above the panel and dock and never covers them. Polite announcement. When <code>merged: 'all'</code> nothing is shown.</figcaption>
+</figure>
+</div>
+
+<h2>4 · Web</h2>
+<p class="note">The same pages in a 420 px column over the session-painted plane. No sidebar until a session exists.</p>
+<div class="frames">
+
+<figure class="frame wide">
+<div class="browser"><div class="bchrome"><i></i><i></i><i></i><span class="addr">mixtape</span></div><div class="screen gfx" style="background-image:url(2026-10-20-first-run-assets/bg-welcome.jpg)">
+  <div class="fr-col">
+    <div class="fr-top"></div><div class="fr-prog none"></div>
+    <div class="fr-body">
+      <span class="wm">mixtape</span>
+      <div class="fr-hero"><span class="cs hero-cs spin"><svg><use href="#cassette"/></svg></span></div>
+      <h1 class="fr-h">What do you want to hear?</h1>
+      <div class="composer big"><i class="stripe"></i><div class="field">warm up for a long run</div><button class="send off" aria-label="Make a mix"><i><svg><use href="#i-send"/></svg></i></button></div>
+      <div class="fr-or">or</div>
+      <div class="fr-acts"><button class="fp">Add my music first</button></div>
+      <div class="fr-foot"><span>Already have an account?</span>Sign in.</div>
+    </div>
+  </div>
+</div></div>
+<figcaption><b>W1 · Web, Welcome</b><code>AuthGate</code> becomes <code>FirstRun</code>. The column is centred on the full gradient plane; Enter sends, as in the existing composer. The page title is "What do you want to hear?" and the anonymous session is created only when a prompt or seeds are first sent.</figcaption>
+</figure>
+
+<figure class="frame wide">
+<div class="browser"><div class="bchrome"><i></i><i></i><i></i><span class="addr">mixtape</span></div><div class="screen gfx" style="background-image:url(2026-10-20-first-run-assets/bg-step-2.jpg)">
+  <div class="fr-col">
+    <div class="fr-top"><button class="backbtn glass" aria-label="Back"><svg class="tsvg"><use href="#i-rw"/></svg></button><span class="stepc" aria-hidden="true">Step 2 of 3</span></div>
+    <div class="fr-prog" aria-hidden="true"><i style="width:66.667%"></i></div>
+    <div class="fr-body">
+      <h1 class="fr-h">How do you want to add it?</h1>
+      <p class="fr-line">Exportify brings your playlists and likes. The data export adds what you actually played.</p>
+      <div class="fr-acts">
+        <button class="fp">Exportify, a few minutes</button>
+        <button class="fp">Spotify data export, a few days</button>
+      </div>
+      <div class="fr-foot quiet">You can add more later from Library.</div>
+    </div>
+  </div>
+</div></div>
+<figcaption><b>W2 · Web, Step 2 of 3, Spotify</b>The counter and progress line span the column, not the window. Back uses the same rewind glyph and also answers the browser's back button. The document title and the focused heading read "Step 2 of 3, How do you want to add it?"</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="browser narrow"><div class="bchrome"><i></i><i></i><i></i><span class="addr">mixtape</span></div><div class="screen gfx" style="background-image:url(2026-10-20-first-run-assets/bg-step-1.jpg)">
+  <div class="fr-col">
+    <div class="fr-top"><button class="backbtn glass" aria-label="Back"><svg class="tsvg"><use href="#i-rw"/></svg></button><span class="stepc" aria-hidden="true">Step 1 of 3</span></div>
+    <div class="fr-prog" aria-hidden="true"><i style="width:33.333%"></i></div>
+    <div class="fr-body">
+      <h1 class="fr-h">Which do you use?</h1>
+    <p class="fr-line">Mixes get better when the DJ knows your music.</p>
+      <div class="fr-acts">
+        <button class="fp"><svg class="mark"><use href="#m-am"/></svg>Apple Music</button>
+        <button class="fp"><svg class="mark"><use href="#m-sp"/></svg>Spotify</button>
+      </div>
+      <div class="fr-foot">Skip for now</div>
+    </div>
+  </div>
+</div></div>
+<figcaption><b>W3 · Web narrow, Step 1 of 3</b>At 390 px the column takes the full width with 20 px gutters and the progress line runs edge to edge, as on iOS. Nothing else changes.</figcaption>
+</figure>
+</div>
+
+<h2>5 · Themes and accessibility</h2>
+<div class="frames">
+
+<figure class="frame">
+<div class="phone dark"><div class="screen gfx" style="background-image:url(2026-10-20-first-run-assets/bg-welcome.jpg)">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="fr-top"></div><div class="fr-prog none"></div>
+  <div class="fr-body">
+    <span class="wm">mixtape</span>
+    <div class="fr-hero"><span class="cs hero-cs spin"><svg><use href="#cassette"/></svg></span></div>
+    <h1 class="fr-h">What do you want to hear?</h1>
+    <div class="composer big"><i class="stripe"></i><div class="field">90s R&amp;B, no ballads</div><button class="send off" aria-label="Make a mix"><i><svg><use href="#i-send"/></svg></i></button></div>
+    <div class="fr-or">or</div>
+    <div class="fr-acts"><button class="fp">Add my music first</button></div>
+    <div class="fr-foot"><span>Already have an account?</span>Sign in.</div>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>D1 · Welcome, dark</b>Identical to A1: the graphic is the theme on first-run pages, so they do not change with the system appearance. Mix, Home and You keep the app gradient and do switch.</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone dark"><div class="screen gfx" style="background-image:url(2026-10-20-first-run-assets/bg-step-1.jpg)">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="fr-top"><button class="backbtn glass" aria-label="Back"><svg class="tsvg"><use href="#i-rw"/></svg></button><span class="stepc" aria-hidden="true">Step 1 of 3</span></div>
+  <div class="fr-prog" aria-hidden="true"><i style="width:33.333%"></i></div>
+  <div class="fr-body">
+    <h1 class="fr-h">Which do you use?</h1>
+    <p class="fr-line">Mixes get better when the DJ knows your music.</p>
+    <div class="fr-acts">
+      <button class="fp"><svg class="mark"><use href="#m-am"/></svg>Apple Music</button>
+      <button class="fp"><svg class="mark"><use href="#m-sp"/></svg>Spotify</button>
+    </div>
+    <div class="fr-foot">Skip for now</div>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>D2 · Step 1 of 3, dark</b>Identical to B1 for the same reason. The progress line is cream at 35% with the filled third at full cream; service marks keep their own colours.</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone large"><div class="screen gfx" style="background-image:url(2026-10-20-first-run-assets/bg-step-2.jpg)">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="fr-top"><button class="backbtn glass" aria-label="Back"><svg class="tsvg"><use href="#i-rw"/></svg></button><span class="stepc" aria-hidden="true">Step 2 of 3</span></div>
+  <div class="fr-prog" aria-hidden="true"><i style="width:66.667%"></i></div>
+  <div class="fr-body">
+    <h1 class="fr-h">How do you want to add it?</h1>
+    <p class="fr-line">Exportify brings your playlists and likes. The data export adds what you actually played.</p>
+    <div class="fr-acts">
+      <button class="fp">Exportify, a few minutes</button>
+      <button class="fp">Spotify data export, a few days</button>
+    </div>
+    <div class="fr-foot quiet">You can add more later from Library.</div>
+  </div>
+  <span class="scrollind" aria-hidden="true"></span>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>X1 · Step 2 of 3 at 200% text, scrolled to the end</b>The headline wraps to three lines and the pills grow in height to hold two-line labels. The page scrolls under a frosted top bar that keeps back and the counter; drawn here at the end of the scroll, with "You can add more later from Library." after the pills, never floating over them.</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone"><div class="screen gfx" style="background-image:url(2026-10-20-first-run-assets/bg-step-3.jpg)">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="fr-top"><button class="backbtn glass" aria-label="Back"><svg class="tsvg"><use href="#i-rw"/></svg></button><span class="stepc" aria-hidden="true">Step 3 of 3</span></div>
+  <div class="fr-prog" aria-hidden="true"><i style="width:100%"></i></div>
+  <div class="fr-body">
+    <div class="fr-hero"><span class="cs hero-cs"><svg><use href="#cassette"/></svg></span></div>
+    <h1 class="fr-h">Syncing your library</h1>
+    <p class="fr-status" role="status">612 songs so far</p>
+    <div class="fr-acts">
+      <button class="fp ghost" tabindex="-1" aria-hidden="true">Retry</button>
+      <button class="fp go off" aria-disabled="true">Done<svg class="tsvg ff"><use href="#i-ff"/></svg></button>
+    </div>
+    <div class="fr-foot" aria-hidden="true"></div>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>X2 · Reduced motion</b>The cassette is still; the count alone carries progress. Page pushes become a cross-fade instead of a slide, and the progress line jumps to the next third instead of animating. The welcome and sign-in cassettes are still too.</figcaption>
+</figure>
+
+<figure class="frame">
+<div class="phone opaque"><div class="screen gfx" style="background-image:url(2026-10-20-first-run-assets/bg-step-1.jpg)">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="fr-top"><button class="backbtn glass" aria-label="Back"><svg class="tsvg"><use href="#i-rw"/></svg></button><span class="stepc" aria-hidden="true">Step 1 of 3</span></div>
+  <div class="fr-prog" aria-hidden="true"><i style="width:33.333%"></i></div>
+  <div class="fr-body">
+    <h1 class="fr-h">Which do you use?</h1>
+    <p class="fr-line">Mixes get better when the DJ knows your music.</p>
+    <div class="fr-acts">
+      <button class="fp"><svg class="mark"><use href="#m-am"/></svg>Apple Music</button>
+      <button class="fp"><svg class="mark"><use href="#m-sp"/></svg>Spotify</button>
+    </div>
+    <div class="fr-foot">Skip for now</div>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>X3 · Reduced transparency</b>Pills on graphic pages are already opaque paper. The outlined back button has no material to change; the background image stays, as it is not a material. The Keep this mix sheet over Mix becomes opaque too.</figcaption>
+</figure>
+</div>
+
+<h2>6 · Alternative considered, not recommended</h2>
+<div class="frames">
+<figure class="frame">
+<div class="phone"><div class="screen gfx" style="background-image:url(2026-10-20-first-run-assets/bg-welcome.jpg)">
+  <div class="statusbar"><span>9:41</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div>
+  <div class="fr-top"></div><div class="fr-prog none"></div>
+  <div class="fr-body">
+    <span class="wm">mixtape</span>
+    <div class="fr-hero"><span class="cs hero-cs spin"><svg><use href="#cassette"/></svg></span></div>
+    <h1 class="fr-h">What do you want to hear?</h1>
+    <div class="fr-acts">
+      <button class="fp">Make a mix now</button>
+      <button class="fp">Add my music first</button>
+    </div>
+    <div class="fr-foot"><span>Already have an account?</span>Sign in.</div>
+  </div>
+  <div class="homebar"><i></i></div>
+</div></div>
+<figcaption><b>Z1 · Welcome as a two-way choice</b>Shown only for comparison. It reads more evenly, but the common path pays one more tap before the listener can type, and the headline asks a question the page does not let them answer.</figcaption>
+</figure>
+</div>
+
+<h2>7 · Coverage</h2>
+<p><strong>Approval covers:</strong></p>
+<ul class="tight">
+<li>iOS at 390 pt in light and dark, every state above: Welcome empty and typed, Who do you love? at zero and three artists, Mix, Keep this mix, Refusal, path B steps 1 to 3 for every method, sync in progress and failed, the prompt after sync.</li>
+<li>Sign-in from the sheet, the cap as the sign-in page, the anonymous You row and the merge notice.</li>
+<li>The six graphic backgrounds and their cream text, paper pills, outlined tape-shaped back button and scrim.</li>
+<li>Web wide (420 px column) and narrow (full width).</li>
+<li>Large text at 200%, reduced motion, reduced transparency.</li>
+</ul>
+<p><strong>Not covered:</strong></p>
+<ul class="tight">
+<li>The interview: it stays where it is, offered from Home rows after the first mix.</li>
+<li>Library's own add flow beyond reusing these three pages with the same counter.</li>
+<li>Album recommendations (decision 5).</li>
+<li>Apple's MusicKit authorisation sheet, the existing Apple export instructions and the existing import review step, which are unchanged and drawn elsewhere.</li>
+</ul>
+</main>
+</html>
