@@ -285,7 +285,7 @@ existing account.
 
 ## What the founder does, in order
 
-1. Gate 1: apply migrations 0035 to 0039 and deploy the Worker from a clean worktree.
+1. Gate 1: done 2026-10-20 (migrations 0035 to 0039 applied; Worker version `42bffed2` from `859700d`).
 2. Gate 2: deploy the web, run the two private-window checks.
 3. Gate 3: TestFlight build and the device checks.
 4. Read the refusal ratio after a week.
