@@ -106,7 +106,7 @@ const candidatePlaylistKindsSql = sql.join(CANDIDATE_PLAYLIST_KINDS.map((k) => s
 //    Eligibility only: confirmation is not required here (it still gates the
 //    0.10 taste term), and the candidate source stays user_tracks, so an
 //    entry with no user_tracks row for this listener stays out.
-function personalCandidateCtes(userId: string): SQL {
+export function personalCandidateCtes(userId: string): SQL {
   return sql`
     recent_plays AS (
       SELECT track_id
@@ -135,7 +135,7 @@ export function playlistCandidateTracksSql(userId: string): SQL {
 }
 
 // The rule itself, over a user_tracks row aliased `ut`.
-const PERSONAL_CANDIDATE_RULE = sql`(ut.in_library OR ut.seeded
+export const PERSONAL_CANDIDATE_RULE = sql`(ut.in_library OR ut.seeded
   OR ut.track_id IN (SELECT track_id FROM recent_plays)
   OR ut.track_id IN (SELECT track_id FROM playlist_tracks))`
 
