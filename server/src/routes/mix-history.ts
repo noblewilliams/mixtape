@@ -1,6 +1,9 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { zValidator } from '@hono/zod-validator'
+import { createMiddleware } from 'hono/factory'
+import { and, eq } from 'drizzle-orm'
+import { djSessions } from '../db/schema'
 import type { AppVars } from '../app'
 import type { Db } from '../db/types'
 import {
@@ -22,6 +25,20 @@ export function mixHistoryRoutes(db: Db) {
       return c.json({ error: 'not_found' }, 404)
     await next()
   })
+  // Mix history is mix-only: an album session's versions are pick versions,
+  // served by POST /sessions/:id/pick, so these routes refuse it before any
+  // version read. Scoped to the versions paths because this group is mounted
+  // at the sessions root and '/:id/*' would catch every session route.
+  const mixOnly = createMiddleware<{ Variables: AppVars }>(async (c, next) => {
+    const [row] = await db
+      .select({ kind: djSessions.kind })
+      .from(djSessions)
+      .where(and(eq(djSessions.id, c.req.param('id')!), eq(djSessions.userId, c.get('user').id)))
+    if (row && row.kind !== 'mix') return c.json({ error: 'wrong_session_kind' }, 409)
+    await next()
+  })
+  app.use('/:id/versions', mixOnly)
+  app.use('/:id/versions/*', mixOnly)
   app.get(
     '/:id/versions',
     zValidator('query', z.object({ before: version.optional() })),

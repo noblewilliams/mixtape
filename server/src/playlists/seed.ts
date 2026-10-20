@@ -195,7 +195,7 @@ export async function countUserSessions(db: Db, userId: string): Promise<number>
 }
 
 export async function createSessionWithPlaylistSeed(db: Db, userId: string, title: string,
-  input?: z.infer<typeof initialSeedSchema>) {
+  input?: z.infer<typeof initialSeedSchema>, kind: 'mix' | 'album' = 'mix') {
   return db.transaction(async tx => {
     if (input) {
       const [p] = await tx.select({ id: userPlaylists.id, inLibrary: userPlaylists.inLibrary }).from(userPlaylists).where(and(
@@ -208,7 +208,7 @@ export async function createSessionWithPlaylistSeed(db: Db, userId: string, titl
         .where(eq(playlistEntries.playlistId, p.id))
       if (coverage.recordings < MIN_PROFILE_RECORDINGS) throw new PlaylistSeedError('insufficient_profile')
     }
-    const [session] = await tx.insert(djSessions).values({ userId, title }).returning()
+    const [session] = await tx.insert(djSessions).values({ userId, title, kind }).returning()
     if (input) await tx.insert(sessionPlaylistSeeds).values({ sessionId: session.id,
       playlistId: input.playlistId, enabled: true, excludeSourceTracks: input.excludeSourceTracks, revision: 1 })
     return session

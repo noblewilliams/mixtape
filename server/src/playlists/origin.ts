@@ -9,14 +9,16 @@ export const playlistOriginSql = sql`CASE WHEN up.is_mixtape_owned THEN 'mixtape
     WHERE po.user_id = up.user_id AND po.source = up.source
       AND po.library_id = up.apple_library_id), 'unknown') END`
 
+// Only a mix converts to a playlist, so an album session's receipt is refused.
 export async function recordPlaylistCreation(db: Db, userId: string, sessionId: string, libraryId: string) {
-  const [session] = await db.select({ id: djSessions.id }).from(djSessions)
+  const [session] = await db.select({ kind: djSessions.kind }).from(djSessions)
     .where(and(eq(djSessions.id, sessionId), eq(djSessions.userId, userId))).limit(1)
-  if (!session) return false
+  if (!session) return 'not_found' as const
+  if (session.kind !== 'mix') return 'wrong_kind' as const
   await db.insert(playlistOrigins).values({ userId, source: 'apple', libraryId, origin: 'mixtape' })
     .onConflictDoUpdate({ target: [playlistOrigins.userId, playlistOrigins.source, playlistOrigins.libraryId],
       set: { origin: 'mixtape' } })
-  return true
+  return 'ok' as const
 }
 
 export async function confirmPlaylistTaste(db: Db, userId: string, playlistId: string, confirmed: boolean) {

@@ -17,6 +17,7 @@ import { generateMusicKitDeveloperToken } from './musickit/token'
 import {
   createAppleCatalogClient,
   createAppleCatalogTokenCache,
+  type AppleCatalogAlbumClient,
   type AppleCatalogClient,
   type AppleCatalogSearchClient,
   type AppleIsrcCatalogClient,
@@ -28,6 +29,7 @@ import { createSpotifyOEmbedArtworkClient } from './artwork/spotify-oembed'
 import { createDeezerArtworkClient } from './artwork/deezer'
 import type { SpotifyArtworkDeps } from './artwork/spotify-fallback'
 import type { PlaylistEditDjDeps } from './playlist-editing/loop'
+import type { AlbumDeps } from './albums/loop'
 
 // Minimal structural stand-in for the platform's ScheduledController — this
 // project's tsconfig doesn't pull in @cloudflare/workers-types, so the real
@@ -55,6 +57,7 @@ type Bindings = {
   ANTHROPIC_API_KEY?: string
   GROQ_API_KEY?: string
   OUTSIDE_PICKS?: string
+  ALBUM_PICKS?: string
 }
 
 // This cache holds signed server tokens only. The key is the non-secret Apple
@@ -103,6 +106,30 @@ export function outsidePicksEnabled(env: { OUTSIDE_PICKS?: string }): boolean {
   return env.OUTSIDE_PICKS === 'on'
 }
 
+// Album picks (plan 2026-10-20, Phase 1): listeners may ask the DJ for one
+// album. Same exact-"on" rule as outside picks.
+export function albumPicksEnabled(env: { ALBUM_PICKS?: string }): boolean {
+  return env.ALBUM_PICKS === 'on'
+}
+
+// The album loop rides the DJ's model clients plus the Apple catalogue, so it
+// exists only when the flag is on and both of those are configured; absent,
+// createApp mounts no Listen later routes and album sessions are refused.
+export function buildAlbumDeps(
+  dj: DjDeps | undefined,
+  musicKit: { catalog: AlbumDeps['catalog'] } | undefined,
+  env: { ALBUM_PICKS?: string; ITUNES_STOREFRONT?: string },
+): AlbumDeps | undefined {
+  if (!albumPicksEnabled(env) || !dj || !musicKit) return undefined
+  return {
+    llm: dj.llm,
+    embed: dj.embed,
+    catalog: musicKit.catalog,
+    defaultStorefront: env.ITUNES_STOREFRONT ?? 'ng',
+    titleComplete: dj.titleComplete,
+  }
+}
+
 // No ANTHROPIC_API_KEY (or no AI binding, for the intent embedder) → no dj
 // deps. Same fail-loud-by-absence convention as buildDeps/enrich above:
 // createApp only mounts /sessions/* when `dj` is present, so an unconfigured
@@ -130,7 +157,7 @@ export function buildMusicKit(
   },
   allowedOrigins: string[],
   fetchLike: FetchLike = fetch,
-): (MusicKitWiring & { catalog: AppleCatalogClient & AppleIsrcCatalogClient & AppleCatalogSearchClient }) | undefined {
+): (MusicKitWiring & { catalog: AppleCatalogClient & AppleIsrcCatalogClient & AppleCatalogSearchClient & AppleCatalogAlbumClient }) | undefined {
   const keyId = env.MUSICKIT_KEY_ID
   const privateKey = env.MUSICKIT_PRIVATE_KEY
 
@@ -215,12 +242,14 @@ export default {
       const musicKit = buildMusicKit(env, allowedOrigins)
       const playlistEditingDeps = buildPlaylistEditingDeps(djDeps, musicKit)
       const playlistEditing = playlistEditingDeps ? { deps: playlistEditingDeps } : undefined
+      const albumDeps = buildAlbumDeps(djDeps, musicKit, env)
+      const albums = albumDeps ? { deps: albumDeps } : undefined
       const artwork = buildArtworkDeps(env, musicKit)
       const enrich = env.ENRICH_ADMIN_TOKEN && (deps || artwork)
         ? { adminToken: env.ENRICH_ADMIN_TOKEN, deps, artwork }
         : undefined
       const transcribe = buildTranscribe(env)
-      const app = createApp({ auth, db, enrich, dj, playlistEditing, musicKit, transcribe, allowedOrigins })
+      const app = createApp({ auth, db, enrich, dj, albums, playlistEditing, musicKit, transcribe, allowedOrigins })
       return await app.fetch(req, env, ctx)
     } finally {
       // Closes the pool's socket(s) after the response is built rather than

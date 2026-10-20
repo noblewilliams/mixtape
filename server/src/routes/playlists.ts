@@ -37,9 +37,11 @@ export function playlistsRoutes(db: Db) {
       appleLibraryId: z.string().min(1).max(500).regex(/^[A-Za-z0-9._~-]+$/),
     }).strict().safeParse(await c.req.json().catch(() => null))
     if (!value.success) return c.json({ error: 'invalid_request' }, 400)
-    const ok = await recordPlaylistCreation(db, c.get('user').id,
+    const result = await recordPlaylistCreation(db, c.get('user').id,
       value.data.sessionId, value.data.appleLibraryId)
-    return ok ? c.json({ ok: true }) : c.json({ error: 'not_found' }, 404)
+    if (result === 'not_found') return c.json({ error: 'not_found' }, 404)
+    if (result === 'wrong_kind') return c.json({ error: 'wrong_session_kind' }, 409)
+    return c.json({ ok: true })
   })
 
   app.put('/:id/taste-confirmation', bodyLimit({ maxSize: 1024 }), async (c) => {

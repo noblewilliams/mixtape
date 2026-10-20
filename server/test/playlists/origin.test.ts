@@ -53,6 +53,10 @@ describe('playlist origin', () => {
     expect((await request(db, 'u2', '/creation-receipts', receipt)).status).toBe(404)
     expect((await request(db, 'u2', `/${row.id}/taste-confirmation`, { confirmed: true }, 'PUT')).status).toBe(404)
     expect((await request(db, 'u1', '/creation-receipts', { ...receipt, appleLibraryId: 'bad/id' })).status).toBe(400)
+    const [records] = await db.insert(djSessions).values({ userId: 'u1', title: 'Records', kind: 'album' }).returning()
+    const fromAlbum = await request(db, 'u1', '/creation-receipts', { ...receipt, sessionId: records.id })
+    expect(fromAlbum.status).toBe(409)
+    expect(await fromAlbum.json()).toEqual({ error: 'wrong_session_kind' })
     for (const kind of ['editorial', 'replay', 'personal_mix'] as const) {
       await db.update(userPlaylists).set({ kind }).where(eq(userPlaylists.id, row.id))
       expect((await request(db, 'u1', `/${row.id}/taste-confirmation`, { confirmed: true }, 'PUT')).status).toBe(409)

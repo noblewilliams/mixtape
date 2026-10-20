@@ -14,6 +14,7 @@ import { playlistsRoutes } from './routes/playlists'
 import { playlistEditDraftRoutes } from './routes/playlist-edit-drafts'
 import { enrichRoutes } from './routes/enrich'
 import { sessionRoutes } from './routes/sessions'
+import { listenLaterRoutes } from './routes/listen-later'
 import { memoriesRoutes } from './routes/memories'
 import { musicSourcesRoutes } from './routes/music-sources'
 import { onboardingRoutes } from './routes/onboarding'
@@ -28,6 +29,7 @@ import type { Db } from './db/types'
 import type { EnrichDeps } from './enrich/pipeline'
 import type { ArtworkDeps } from './artwork/runner'
 import type { DjDeps } from './dj/loop'
+import type { AlbumDeps } from './albums/loop'
 import type { PlaylistEditDjDeps } from './playlist-editing/loop'
 
 // Minimal structural type so tests can stub auth
@@ -48,6 +50,8 @@ export type AppVars = { user: { id: string; isAnonymous: boolean }; sessionId?: 
 export type EnrichWiring = { deps?: EnrichDeps; artwork?: ArtworkDeps; adminToken: string }
 export type { SeedsWiring }
 export type DjWiring = { deps: DjDeps }
+// Present only with ALBUM_PICKS on (src/index.ts buildAlbumDeps).
+export type AlbumsWiring = { deps: AlbumDeps }
 export type PlaylistEditingWiring = { deps: PlaylistEditDjDeps }
 // Injectable fetch so tests can stub Groq; production leaves it unset and the
 // route uses the platform fetch.
@@ -62,6 +66,7 @@ export function createApp({
   db,
   enrich,
   dj,
+  albums,
   playlistEditing,
   musicKit,
   seeds,
@@ -72,6 +77,7 @@ export function createApp({
   db?: Db
   enrich?: EnrichWiring
   dj?: DjWiring
+  albums?: AlbumsWiring
   playlistEditing?: PlaylistEditingWiring
   musicKit?: MusicKitWiring
   seeds?: SeedsWiring
@@ -121,7 +127,8 @@ export function createApp({
   app.get('/me', requireSession(auth), async (c) => {
     const sessionId = c.get('sessionId')
     const merged = db && sessionId ? await takeMergedMode(db, sessionId) : null
-    return c.json({ user: c.get('user'), merged })
+    // albumPicks: whether clients may offer album sessions and Listen later.
+    return c.json({ user: c.get('user'), merged, albumPicks: Boolean(albums) })
   })
 
   if (musicKit) {
@@ -183,7 +190,15 @@ export function createApp({
 
     if (dj) {
       app.use('/sessions/*', requireSession(auth))
-      app.route('/sessions', sessionRoutes(db, dj.deps))
+      app.route('/sessions', sessionRoutes(db, dj.deps, albums?.deps))
+    }
+
+    // Exists only with the flag on: off, every Listen later path is 404 by
+    // absence, as /sessions is without dj.
+    if (albums) {
+      app.use('/me/listen-later', requireSession(auth))
+      app.use('/me/listen-later/*', requireSession(auth))
+      app.route('/me/listen-later', listenLaterRoutes(db))
     }
   }
 

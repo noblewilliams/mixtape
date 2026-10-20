@@ -25,7 +25,10 @@
     "GOOGLE_IOS_CLIENT_ID": "403264926110-000q34va63qouvvtvb11co0je53867gb.apps.googleusercontent.com",
     // Outside picks (plan 2026-10-03, Phase C): "on" lets mixes include a few
     // songs the listener does not own. Anything else is off.
-    "OUTSIDE_PICKS": "off"
+    "OUTSIDE_PICKS": "off",
+    // Album picks (plan 2026-10-20, Phase 1): "on" lets listeners ask the DJ
+    // for an album. Anything else is off.
+    "ALBUM_PICKS": "off"
   }
   // Secrets required at runtime (set via `wrangler secret put` / .dev.vars locally) —
   // createAuth fails fast if any is missing:
@@ -50,5 +53,6 @@
   //   GOOGLE_IOS_CLIENT_ID    — iOS OAuth client id, declared under "vars" above; accepted as an
   //                             additional Google ID token audience for native sign-in
   //   OUTSIDE_PICKS           declared under "vars" above; read once per request in src/index.ts
+  //   ALBUM_PICKS             declared under "vars" above; read once per request in src/index.ts
   // MusicKit keys also enable the server-only Apple catalog client used by artwork enrichment.
 }

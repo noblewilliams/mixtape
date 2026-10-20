@@ -1,5 +1,5 @@
 import { TAPE_CASE_COLORS } from '../dj/tape-colors'
-import { Hono } from 'hono'
+import { Hono, type Context, type MiddlewareHandler } from 'hono'
 import { mixHistoryRoutes } from './mix-history'
 import { z } from 'zod'
 import { zValidator } from '@hono/zod-validator'
@@ -8,6 +8,8 @@ import type { AppVars } from '../app'
 import type { Db } from '../db/types'
 import { djSessions, djMessages, queueTracks, sessionEvents, tracks } from '../db/schema'
 import { runDjTurn, DjError, type DjDeps, type DjSessionRef } from '../dj/loop'
+import { runAlbumTurn, AlbumTurnError, type AlbumDeps, type AlbumTurnResult } from '../albums/loop'
+import { AlbumStoreError, choosePick, goBack, readPickState, type AlbumPickState } from '../albums/store'
 import { applyOps, getActiveQueue, QueueOpError, QueueVersionConflict } from '../dj/queue-store'
 import { intentSchema, queueOpsSchema } from '../dj/contracts'
 import { generateSessionTitle } from '../dj/title'
@@ -76,7 +78,70 @@ function djErrorBody(e: DjError, extra: Record<string, unknown> = {}) {
   return { error: e.kind, message: e.message, queue: e.queue, queueVersion: e.queueVersion, sessionTitle: e.sessionTitle, ...extra }
 }
 
-const createSessionSchema = z.object({ prompt: z.string().min(1).max(2000), playlistSeed: initialSeedSchema.optional(), energyArc: intentSchema.shape.energyArc }).strict()
+// AlbumTurnError → status, mirroring djErrorStatus: a missing session is
+// 404, a version race or a session of the other kind is 409, and everything
+// else (Apple catalogue, model, internal) is a server-side condition the
+// client can retry as-is, 502.
+function albumErrorStatus(kind: AlbumTurnError['kind']): 404 | 409 | 502 {
+  if (kind === 'not_found') return 404
+  if (kind === 'conflict' || kind === 'wrong_kind') return 409
+  return 502
+}
+
+// Same listener-ready message discipline as djErrorBody. The pick state rides
+// along only when a version landed before the failure (AlbumTurnError.state).
+function albumErrorBody(e: AlbumTurnError, extra: Record<string, unknown> = {}) {
+  return {
+    error: e.kind,
+    message: e.message,
+    step: e.step,
+    sessionTitle: e.sessionTitle,
+    ...(e.state ? pickStateBody(e.state) : {}),
+    ...extra,
+  }
+}
+
+function pickStateBody(state: AlbumPickState) {
+  return { pick: state.pick, runnersUp: state.runnersUp, passed: state.passed, version: state.version }
+}
+
+// The album turn's response fields, shared by session creation and messages.
+// suggestions and sessionTitle are present only when the turn set them.
+function albumTurnBody(result: AlbumTurnResult) {
+  return {
+    pick: result.pick,
+    runnersUp: result.runnersUp,
+    passed: result.passed,
+    version: result.version,
+    ...(result.suggestions ? { suggestions: result.suggestions } : {}),
+    ...(result.sessionTitle ? { sessionTitle: result.sessionTitle } : {}),
+  }
+}
+
+const ALBUM_PICKS_OFF = { error: 'album_picks_off' } as const
+const WRONG_SESSION_KIND = { error: 'wrong_session_kind' } as const
+
+// energyArc stays accepted for both kinds and is ignored for album sessions.
+// playlistSeed is accepted for album sessions too (the spec allows the
+// attachment), though only mixes read it today.
+const createSessionSchema = z.object({
+  prompt: z.string().min(1).max(2000),
+  playlistSeed: initialSeedSchema.optional(),
+  energyArc: intentSchema.shape.energyArc,
+  kind: z.enum(['mix', 'album']).default('mix'),
+}).strict()
+// Exactly one of albumId (choose a runner-up) or version (go back to an
+// earlier shortlist), with optional fencing on the current version.
+const pickSchema = z
+  .object({
+    albumId: z.uuid().optional(),
+    version: z.number().int().min(1).max(2147483647).optional(),
+    expectedVersion: z.number().int().min(0).max(2147483647).optional(),
+  })
+  .strict()
+  .refine((b) => (b.albumId === undefined) !== (b.version === undefined), {
+    message: 'exactly one of albumId or version is required',
+  })
 const messageSchema = z.object({ text: z.string().min(1).max(2000), energyArc: intentSchema.shape.energyArc })
 const queueOpsBodySchema = z.object({
   ops: queueOpsSchema,
@@ -117,12 +182,82 @@ const sessionListColumns = {
   // personal yet" banner reads this off every summary, so a listener sees
   // it in the collection list, not only inside the open session.
   notPersonal: djSessions.notPersonal,
+  // 'mix' | 'album': which loop, read shape and routes the session takes.
+  kind: djSessions.kind,
   updatedAt: djSessions.updatedAt,
 }
 
-export function sessionRoutes(db: Db, deps: DjDeps) {
+// albumDeps is present only with ALBUM_PICKS on (src/index.ts); absent, album
+// sessions are refused with album_picks_off and mixes are untouched.
+export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps) {
   const app = new Hono<{ Variables: AppVars }>()
   app.route('/', mixHistoryRoutes(db))
+
+  // Newest 200 by seq; callers reverse back to chronological order for the
+  // response — a long-running session must keep showing its RECENT
+  // transcript as it grows, not pin forever to whatever the first 200
+  // messages happened to be.
+  function recentMessages(sessionId: string) {
+    return db
+      .select()
+      .from(djMessages)
+      .where(eq(djMessages.sessionId, sessionId))
+      .orderBy(desc(djMessages.seq))
+      .limit(200)
+  }
+
+  // The album twin of the mix creation path below: same persist-first row,
+  // same concurrent title job (allSettled, an explicit rename wins), one
+  // closing UPDATE. Only the turn and the response shape differ.
+  async function createAlbumSession(
+    c: Context<{ Variables: AppVars }>,
+    albumDeps: AlbumDeps,
+    userId: string,
+    prompt: string,
+    playlistSeed: z.infer<typeof initialSeedSchema> | undefined,
+  ) {
+    const fallbackTitle = titleFromPrompt(prompt)
+    let session
+    try {
+      session = await createSessionWithPlaylistSeed(db, userId, fallbackTitle, playlistSeed, 'album')
+    } catch (e) {
+      if (e instanceof PlaylistSeedError) return c.json({ error: e.kind }, e.kind === 'not_found' ? 404 : 409)
+      throw e
+    }
+    const titlePromise = albumDeps.titleComplete
+      ? generateSessionTitle(albumDeps.titleComplete, prompt, fallbackTitle)
+      : Promise.resolve(fallbackTitle)
+    const [turnResult, titleResult] = await Promise.allSettled([
+      runAlbumTurn(db, albumDeps, { id: session.id, userId }, prompt),
+      titlePromise,
+    ])
+    const renamedTitle =
+      turnResult.status === 'fulfilled'
+        ? turnResult.value.sessionTitle
+        : turnResult.reason instanceof AlbumTurnError
+          ? turnResult.reason.sessionTitle
+          : undefined
+    const title = renamedTitle ?? (titleResult.status === 'fulfilled' ? titleResult.value : fallbackTitle)
+    const [sessionRow] = await db
+      .update(djSessions)
+      .set({ updatedAt: new Date(), title })
+      .where(eq(djSessions.id, session.id))
+      .returning(sessionListColumns)
+
+    if (turnResult.status === 'rejected') {
+      const e = turnResult.reason
+      if (e instanceof AlbumTurnError) {
+        return c.json(albumErrorBody(e, { sessionId: session.id }), albumErrorStatus(e.kind))
+      }
+      throw e
+    }
+    const messages = await db
+      .select()
+      .from(djMessages)
+      .where(eq(djMessages.sessionId, session.id))
+      .orderBy(asc(djMessages.seq))
+    return c.json({ session: sessionRow, messages, ...albumTurnBody(turnResult.value) })
+  }
 
   app.put('/:id/playlist-seed', bodyLimit({ maxSize: 2048 }), zValidator('json', seedSelectionSchema), async c => {
     const id = c.req.param('id')
@@ -136,8 +271,15 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
   })
 
   app.post('/', zValidator('json', createSessionSchema), async (c) => {
-    const { prompt, playlistSeed, energyArc } = c.req.valid('json')
+    const { prompt, playlistSeed, energyArc, kind } = c.req.valid('json')
     const { id: userId, isAnonymous } = c.get('user')
+    if (kind === 'album') {
+      // Both refusals land before any write, count or model call.
+      if (!albumDeps) return c.json(ALBUM_PICKS_OFF, 404)
+      // Decision 2026-10-20: album mode stays out of the anonymous flow.
+      if (isAnonymous) return c.json({ error: 'anonymous_albums' }, 403)
+      return createAlbumSession(c, albumDeps, userId, prompt, playlistSeed)
+    }
     // Checked before any insert or model call: a capped request costs one
     // count and nothing else. Only new mixes are capped; follow-ups, queue
     // ops and edits on an existing session are not.
@@ -254,6 +396,22 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
         // part of the tape a listener sees in the collection.
         trackCount: sql<number>`count(${queueTracks.id})::int`,
         durationMs: sql<number>`coalesce(sum(${tracks.durationMs}), 0)::int`,
+        // Album sessions: the current pick (the latest version's rank 0) for
+        // the Mixes list, null before the first pick. Correlated on the
+        // grouped primary key, so this stays one statement.
+        pick: sql<{ title: string; artist: string; artwork: unknown } | null>`(
+          SELECT json_build_object(
+            'title', a.title,
+            'artist', a.artist,
+            'artwork', CASE WHEN a.artwork_url_template IS NULL THEN NULL ELSE json_build_object(
+              'url', a.artwork_url_template, 'width', a.artwork_width,
+              'height', a.artwork_height, 'bgColor', a.artwork_bg_color) END)
+          FROM album_picks ap
+          JOIN albums a ON a.id = ap.album_id
+          WHERE ap.session_id = ${djSessions.id} AND ap.rank = 0
+          ORDER BY ap.version DESC
+          LIMIT 1
+        )`,
       })
       .from(djSessions)
       .leftJoin(
@@ -265,7 +423,9 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
       .groupBy(djSessions.id)
       .orderBy(desc(djSessions.updatedAt))
       .limit(50)
-    return c.json({ sessions })
+    return c.json({
+      sessions: sessions.map(({ pick, ...row }) => (row.kind === 'album' ? { ...row, pick: pick ?? null } : row)),
+    })
   })
 
   app.get('/:id', async (c) => {
@@ -273,17 +433,17 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
     const session = await loadOwnedSession(db, c.req.param('id'), userId)
     if (!session) return c.json({ error: 'not_found' }, 404)
 
+    if (session.kind === 'album') {
+      const [newestFirst, state, playlistSeed] = await Promise.all([
+        recentMessages(session.id),
+        readPickState(db, session.id, userId),
+        readPlaylistSeed(db, session.id, userId),
+      ])
+      return c.json({ session, messages: newestFirst.reverse(), ...pickStateBody(state), playlistSeed })
+    }
+
     const [newestFirst, queue] = await Promise.all([
-      // Newest 200 by seq, then reversed back to chronological order for the
-      // response — a long-running session must keep showing its RECENT
-      // transcript as it grows, not pin forever to whatever the first 200
-      // messages happened to be.
-      db
-        .select()
-        .from(djMessages)
-        .where(eq(djMessages.sessionId, session.id))
-        .orderBy(desc(djMessages.seq))
-        .limit(200),
+      recentMessages(session.id),
       getActiveQueue(db, session.id),
     ])
     const messages = newestFirst.reverse()
@@ -359,6 +519,17 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
 
     const { text, energyArc } = c.req.valid('json')
     const sessionRef: DjSessionRef = { id: session.id, userId }
+    if (session.kind === 'album') {
+      if (!albumDeps) return c.json(ALBUM_PICKS_OFF, 404)
+      try {
+        const result = await runAlbumTurn(db, albumDeps, sessionRef, text)
+        await db.update(djSessions).set({ updatedAt: new Date() }).where(eq(djSessions.id, session.id))
+        return c.json({ djMessage: result.djMessage, ...albumTurnBody(result) })
+      } catch (e) {
+        if (e instanceof AlbumTurnError) return c.json(albumErrorBody(e), albumErrorStatus(e.kind))
+        throw e
+      }
+    }
     try {
       const result = await runDjTurn(db, deps, sessionRef, text, { energyArc })
       // A text-only reply never touches dj_sessions itself (no queue write
@@ -385,6 +556,7 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
     const userId = c.get('user').id
     const session = await loadOwnedSession(db, c.req.param('id'), userId)
     if (!session) return c.json({ error: 'not_found' }, 404)
+    if (session.kind !== 'mix') return c.json(WRONG_SESSION_KIND, 409)
 
     const { ops, expectedVersion } = c.req.valid('json')
     // Manual queue-ops never carry an LLM call — swap/extend need one (to
@@ -425,6 +597,39 @@ export function sessionRoutes(db: Db, deps: DjDeps) {
         return c.json({ error: 'invalid_ops' }, 400)
       }
       throw e
+    }
+  })
+
+  // Choose a runner-up ({ albumId }) or go back to an earlier shortlist
+  // ({ version }). No model call: the store writes a new version from rows it
+  // already holds, fenced on expectedVersion like queue ops.
+  // The flag is checked ahead of the body validator, so a bad body with the
+  // flag off still answers album_picks_off.
+  const albumPicksOn: MiddlewareHandler = async (c, next) => {
+    if (!albumDeps) return c.json(ALBUM_PICKS_OFF, 404)
+    await next()
+  }
+  app.post('/:id/pick', albumPicksOn, zValidator('json', pickSchema), async (c) => {
+    const userId = c.get('user').id
+    const session = await loadOwnedSession(db, c.req.param('id'), userId)
+    if (!session) return c.json({ error: 'not_found' }, 404)
+    if (session.kind !== 'album') return c.json(WRONG_SESSION_KIND, 409)
+
+    const { albumId, version, expectedVersion } = c.req.valid('json')
+    try {
+      const state = albumId !== undefined
+        ? await choosePick(db, { sessionId: session.id, userId, albumId, expectedVersion })
+        : await goBack(db, { sessionId: session.id, userId, version: version!, expectedVersion })
+      return c.json(pickStateBody(state))
+    } catch (e) {
+      if (!(e instanceof AlbumStoreError)) throw e
+      if (e.kind === 'not_found') return c.json({ error: 'not_found' }, 404)
+      if (e.kind === 'wrong_kind') return c.json(WRONG_SESSION_KIND, 409)
+      const [current] = await db
+        .select({ version: djSessions.queueVersion })
+        .from(djSessions)
+        .where(eq(djSessions.id, session.id))
+      return c.json({ error: 'stale', version: current?.version }, 409)
     }
   })
 
