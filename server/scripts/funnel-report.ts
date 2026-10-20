@@ -10,7 +10,7 @@
  */
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { sql } from 'drizzle-orm'
+import { isNotNull, sql } from 'drizzle-orm'
 import { neon } from '@neondatabase/serverless'
 import { drizzle } from 'drizzle-orm/neon-http'
 import * as schema from '../src/db/schema'
@@ -49,11 +49,14 @@ export async function computeFunnelReport(db: Db): Promise<FunnelReport> {
       firstAt: sql<number | string>`extract(epoch from min(${funnelEvents.createdAt}))`,
     })
     .from(funnelEvents)
+    // Rows of expired anonymous users keep a null user id; they cannot be
+    // followed step to step, so the per-user funnel leaves them out.
+    .where(isNotNull(funnelEvents.userId))
     .groupBy(funnelEvents.userId, funnelEvents.type)
 
   const firstAt = new Map<FunnelEventType, Map<string, number>>()
   for (const type of FUNNEL_ORDER) firstAt.set(type, new Map())
-  for (const row of rows) firstAt.get(row.type)?.set(row.userId, Number(row.firstAt))
+  for (const row of rows) if (row.userId !== null) firstAt.get(row.type)?.set(row.userId, Number(row.firstAt))
 
   const usersAt = (type: FunnelEventType) => firstAt.get(type)!
   const steps = FUNNEL_ORDER.map((type) => ({ type, users: usersAt(type).size }))

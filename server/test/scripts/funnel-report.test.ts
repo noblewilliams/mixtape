@@ -61,6 +61,23 @@ describe('computeFunnelReport', () => {
     expect(report.requestToImport).toEqual({ users: 2, medianDays: 4 })
   })
 
+  it('ignores rows whose user was expired (null user id)', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await event(db, 'u1', 'chose_spotify', at(1))
+    await event(db, 'u1', 'marked_requested', at(1))
+    await db.insert(funnelEvents).values([
+      { userId: null, type: 'chose_spotify', surface: 'web', createdAt: at(1) },
+      { userId: null, type: 'marked_requested', surface: 'web', createdAt: at(2) },
+      { userId: null, type: 'import_completed', surface: 'web', createdAt: at(4) },
+    ])
+    const report = await computeFunnelReport(db)
+    expect(report.steps.find((s) => s.type === 'chose_spotify')?.users).toBe(1)
+    expect(report.steps.find((s) => s.type === 'import_completed')?.users).toBe(0)
+    expect(report.conversions[0]).toEqual({ from: 'chose_spotify', to: 'marked_requested', fromUsers: 1, converted: 1, rate: 1 })
+    expect(report.requestToImport).toEqual({ users: 0, medianDays: null })
+  })
+
   it('reports zeros and no median on an empty table', async () => {
     const db = await createTestDb()
     const report = await computeFunnelReport(db)

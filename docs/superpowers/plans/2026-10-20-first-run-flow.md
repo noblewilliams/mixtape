@@ -113,20 +113,22 @@ Files: `server/src/enrich/scheduled.ts`, new `server/src/jobs/anonymous-retentio
 
 ### Task 4b: funnel rows outlive their anonymous user
 
-Files: `server/src/db/schema.ts`, new migration 0038, `server/test/jobs/anonymous-retention.test.ts`.
+Files: `server/src/db/schema.ts`, migration 0039 (landed 2026-10-20 after
+the album-picks 0038), `server/test/jobs/anonymous-retention.test.ts`.
 
 Found in the Task 4 review: `funnel_events.user_id` cascades, so the
 retention job would erase exactly the non-converters the first-run funnel
 (and the `first_mix_refused` reopen clause) needs. Make `user_id` nullable
 with `ON DELETE SET NULL`; the merge in Task 3 still repoints rows to the
 account. Test: expiring an anonymous user leaves its funnel rows with a null
-user id. Deferred on 2026-10-20: another session holds an uncommitted
-migration 0038 (album picks), so this takes the next free number once that
-lands. Retention only bites after 30 idle days, so Gate 1 does not wait.
+user id. Done as 0039. The per-user funnel report skips rows with a null
+user id, since they cannot be followed step to step; the first-run reading
+in Phase 4 counts rows per type instead.
 
-### Gate 1: migrations 0035 to 0037 and deploy (founder)
+### Gate 1: migrations 0035 to 0039 and deploy (founder)
 
-From a clean worktree of committed HEAD: apply 0035 to 0037, deploy the Worker,
+From a clean worktree of committed HEAD: apply 0035 to 0039 (0038 belongs
+to album picks and is already committed), deploy the Worker,
 confirm `POST /api/auth/sign-in/anonymous` on production returns a token and
 `GET /me` on it works. Existing clients are unaffected: nothing calls the
 new endpoint yet.
@@ -278,11 +280,12 @@ existing account.
   "Implementation departures" if anything moved.
 - Watch `first_mix_refused` against `first_mix_made` for a week; that ratio
   decides whether the catalogue-seeded corpus program opens (decision
-  2026-10-20, reopen clause).
+  2026-10-20, reopen clause). Count rows per type (expired anonymous users
+  leave a null user id), not distinct users.
 
 ## What the founder does, in order
 
-1. Gate 1: apply migrations 0035 to 0037 and deploy the Worker from a clean worktree; Task 4b follows with its own migration.
+1. Gate 1: apply migrations 0035 to 0039 and deploy the Worker from a clean worktree.
 2. Gate 2: deploy the web, run the two private-window checks.
 3. Gate 3: TestFlight build and the device checks.
 4. Read the refusal ratio after a week.

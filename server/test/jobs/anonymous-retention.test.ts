@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { session, user } from '../../src/db/auth-schema'
-import { djSessions } from '../../src/db/schema'
+import { djSessions, funnelEvents } from '../../src/db/schema'
 import { expireAnonymousUsers } from '../../src/jobs/anonymous-retention'
 import { createTestDb, type TestDb } from '../helpers/db'
 
@@ -91,5 +91,21 @@ describe('expireAnonymousUsers', () => {
     expect(await db.select().from(djSessions).where(eq(djSessions.userId, 'a1'))).toHaveLength(0)
     expect(await db.select().from(session).where(eq(session.userId, 'a1'))).toHaveLength(0)
     expect(await db.select().from(djSessions)).toHaveLength(1)
+  })
+
+  it('keeps the expired user\'s funnel rows with a null user id', async () => {
+    const db = await createTestDb()
+    await seed(db, 'a1', { anonymous: true, createdAt: daysAgo(60), sessions: [daysAgo(31)] })
+    await seed(db, 'keep', { anonymous: true, createdAt: daysAgo(10), sessions: [daysAgo(1)] })
+    await db.insert(funnelEvents).values([
+      { userId: 'a1', type: 'first_run_opened', surface: 'web' },
+      { userId: 'a1', type: 'first_mix_refused', surface: 'web' },
+      { userId: 'keep', type: 'first_run_opened', surface: 'ios' },
+    ])
+    expect(await expireAnonymousUsers(db, { now })).toEqual({ expired: 1 })
+    const rows = await db.select({ userId: funnelEvents.userId, type: funnelEvents.type }).from(funnelEvents)
+    expect(rows).toHaveLength(3)
+    expect(rows.filter((r) => r.userId === null).map((r) => r.type).sort()).toEqual(['first_mix_refused', 'first_run_opened'])
+    expect(rows.filter((r) => r.userId === 'keep')).toHaveLength(1)
   })
 })

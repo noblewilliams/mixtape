@@ -4,7 +4,8 @@ import type { Db } from '../db/types'
 
 // Spec 2026-10-20 first-run flow → Limits: anonymous users with no session
 // activity for 30 days are deleted. ON DELETE CASCADE on every user-keyed
-// table removes their mixes, library and events with them.
+// table removes their mixes and library with them; funnel_events is SET NULL
+// so the funnel keeps its non-converters.
 export const ANONYMOUS_IDLE_DAYS = 30
 // Bounded so one maintenance invocation stays inside the free plan's 10 ms CPU.
 export const ANONYMOUS_EXPIRE_LIMIT = 200

@@ -501,9 +501,10 @@ export const funnelEvents = pgTable(
   'funnel_events',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    userId: text('user_id')
-      .notNull()
-      .references(() => user.id, { onDelete: 'cascade' }),
+    // Nullable, SET NULL: anonymous-user retention deletes the user but keeps
+    // its funnel rows, so the funnel keeps its non-converters (spec 2026-10-20
+    // → Limits). Every insert still writes a user id.
+    userId: text('user_id').references(() => user.id, { onDelete: 'set null' }),
     type: text('type', {
       enum: [
         'chose_spotify',
