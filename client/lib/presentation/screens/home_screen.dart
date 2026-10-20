@@ -12,6 +12,8 @@ import '../format/relative_time.dart';
 import '../theme/mixtape_theme.dart';
 import '../widgets/foundation/cassette_tile.dart';
 import '../widgets/foundation/flush_row.dart';
+import '../widgets/foundation/frosted_dock.dart' show kFrostedDockHeight;
+import '../widgets/foundation/mixtape_feedback.dart';
 import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/label_chip.dart';
 import '../widgets/foundation/large_title_scaffold.dart';
@@ -19,8 +21,12 @@ import '../widgets/foundation/square_art.dart';
 import '../widgets/foundation/status_word.dart';
 import '../widgets/energy_journey.dart';
 import '../widgets/home_panel.dart';
+import '../widgets/keep_sheet.dart';
+import '../widgets/merge_notice.dart';
 import '../format/source_labels.dart';
+import '../providers/auth_provider.dart';
 import '../providers/dj_providers.dart';
+import '../providers/keep_mixes_provider.dart';
 import '../providers/listening_import_provider.dart';
 import '../providers/onboarding_provider.dart';
 import '../providers/opened_archive_provider.dart';
@@ -116,6 +122,75 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
         }
       });
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _sendKeptPrompt();
+      unawaited(_readMergeNotice());
+    });
+  }
+
+  /// After a sign-in from the cap page the root remounts as the account and
+  /// this Home is new: the prompt the cap kept is sent once, here. A Home
+  /// that mounts still anonymous drops a stale one (the field it came from
+  /// is gone with the old shell).
+  void _sendKeptPrompt() {
+    final kept = ref.read(keptPromptProvider.notifier).take();
+    if (kept == null || ref.read(authProvider) != AuthStatus.session) return;
+    if (ref.read(isAnonymousProvider)) return;
+    // Only the draft goes back in the field; the shape stays on the chip
+    // and is folded in at send, never written into the draft.
+    _promptController.text = kept.draft;
+    _arc = kept.arc;
+    final arc = kept.arc;
+    final prompt = arc == null ? kept.draft : energyBrief(kept.draft, arc);
+    if (prompt == null) {
+      setState(() => _error = energySheetTooLong);
+      return;
+    }
+    unawaited(_start(prompt, draft: kept.draft, arc: arc, kept: true));
+  }
+
+  /// The merge notice read but not yet shown: it waits while a route sits
+  /// over Home or the kept prompt's mix is starting (C4 is drawn on Home).
+  String? _pendingNotice;
+
+  /// The merge notice (board C4), once per account Home: after the link
+  /// remounts the root, and on a cold start. The server clears `merged` on
+  /// read, so a second read says nothing.
+  Future<void> _readMergeNotice() async {
+    if (ref.read(authProvider) != AuthStatus.session ||
+        ref.read(isAnonymousProvider)) {
+      return;
+    }
+    final notice = await readMergeNotice(ref);
+    if (notice == null || !mounted) return;
+    _pendingNotice = notice;
+    _showPendingNotice();
+  }
+
+  /// Shows the pending merge notice when Home is the top route and no mix
+  /// is starting; otherwise it waits for [didPopNext] or the start to end.
+  void _showPendingNotice() {
+    final notice = _pendingNotice;
+    if (notice == null || !mounted || _starting || _obscured) return;
+    if (ModalRoute.of(context)?.isCurrent == false) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+    _pendingNotice = null;
+    messenger.showSnackBar(
+      mixtapeSnackBar(
+        message: notice,
+        kind: FeedbackKind.success,
+        duration: MergeNotice.duration,
+        // Above the panel and the dock, never over them (C4).
+        margin: EdgeInsets.fromLTRB(
+          16,
+          0,
+          16,
+          _panelHeight + kFrostedDockHeight + 8,
+        ),
+      ),
+    );
   }
 
   /// Replace (or attach): the picker is a sheet over Home, and a dismissal
@@ -194,6 +269,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
   @override
   void didPopNext() {
     if (mounted && _obscured) setState(() => _obscured = false);
+    _showPendingNotice();
   }
 
   @override
@@ -237,6 +313,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
       return;
     }
 
+    await _start(prompt, draft: draft, arc: arc);
+  }
+
+  /// Starts a mix from [prompt], composed from [draft] and [arc] (kept apart
+  /// for the cap). [kept] is the cap's prompt sent after sign-in: it carries
+  /// no attachment (the anonymous listener's playlists may not have moved
+  /// to the account).
+  Future<void> _start(
+    String prompt, {
+    required String draft,
+    EnergyArc? arc,
+    bool kept = false,
+  }) async {
+    if (_starting) return;
     setState(() {
       _starting = true;
       _error = null;
@@ -244,7 +334,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
     try {
       final sessionId = await ref.read(sessionStarterProvider)(
         prompt,
-        playlistSeed: _inspiration == null
+        playlistSeed: kept || _inspiration == null
             ? null
             : InitialPlaylistSeed(
                 playlistId: _inspiration!.id,
@@ -271,6 +361,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
       } else {
         setState(() => _error = e.message);
       }
+    } on AnonymousCapException {
+      // The fourth new mix: the composer stays exactly as it is, prompt and
+      // all, and the sign-in page says why (C2). Nothing about the cap is
+      // drawn in the panel.
+      if (!mounted) return;
+      unawaited(openCapSignIn(context, KeptPrompt(draft, arc: arc)));
     } on StaleQueueException {
       // Defensive only: DjApi's doc comment lists this among its four exit
       // types, but createSession can never actually throw it in practice
@@ -286,6 +382,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
       setState(() => _error = _genericStartErrorMessage);
     } finally {
       if (mounted) setState(() => _starting = false);
+      _showPendingNotice();
     }
   }
 

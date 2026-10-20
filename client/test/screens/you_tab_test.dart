@@ -28,6 +28,7 @@ import 'package:mixtape/presentation/providers/playback_provider.dart';
 import 'package:mixtape/presentation/providers/suggestions_provider.dart';
 import 'package:mixtape/presentation/screens/account_screen.dart';
 import 'package:mixtape/presentation/screens/memory_screen.dart';
+import 'package:mixtape/presentation/screens/sign_in_screen.dart';
 import 'package:mixtape/presentation/screens/tabs/you_tab.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/frosted_dock.dart'
@@ -43,6 +44,14 @@ import '../presentation/widgets/suggestion_settings_test.dart'
 
 /// Records sign-outs and can fail one, the way account_screen_test's does.
 class _Auth extends AuthNotifier {
+  _Auth({this.anonymous = false});
+
+  /// An anonymous listener (first-run board C3).
+  final bool anonymous;
+
+  @override
+  bool get isAnonymous => anonymous;
+
   int signsOut = 0;
   bool failSignOut = false;
 
@@ -638,6 +647,66 @@ void main() {
 
       expect(auth.signsOut, 1);
       expect(find.text(YouTab.signOutFailed), findsOneWidget);
+    });
+  });
+
+  group('anonymous listener (first-run board C3)', () {
+    testWidgets('one flush row replaces the identity block; no Account '
+        'group, no Sign out, no provider buttons', (tester) async {
+      await _pump(tester, _container(auth: _Auth(anonymous: true)));
+
+      expect(find.text(YouTab.keepMixesRow), findsOneWidget);
+      expect(
+        tester.getSize(find.byKey(YouTab.keepMixesKey)).height,
+        greaterThanOrEqualTo(44),
+      );
+      expect(find.byKey(YouTab.avatarKey), findsNothing);
+      expect(find.text('Ada'), findsNothing);
+      expect(find.byKey(const Key('you-account')), findsNothing);
+      expect(find.byKey(const Key('you-signout')), findsNothing);
+      expect(find.text('Sign out'), findsNothing);
+      expect(find.byType(ProviderSignInButton), findsNothing);
+      // The rest of You is unchanged.
+      expect(find.byKey(const Key('you-memories')), findsOneWidget);
+      expect(find.byKey(_learningSwitch), findsOneWidget);
+      expect(find.byKey(const Key('you-together')), findsOneWidget);
+      expect(find.text(YouTab.learningFootnote), findsOneWidget);
+      expect(
+        find.byType(InsetGroup),
+        findsNWidgets(2),
+        reason: 'toggles and the Together ghost only',
+      );
+    });
+
+    testWidgets('VoiceOver reads the row as a button', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await _pump(tester, _container(auth: _Auth(anonymous: true)));
+      expect(find.bySemanticsLabel(YouTab.keepMixesRow), findsOneWidget);
+      final node = tester.getSemantics(find.byKey(YouTab.keepMixesKey));
+      expect(node.flagsCollection.isButton, isTrue);
+      semantics.dispose();
+    });
+
+    testWidgets('the row opens the sign-in page with "Keep your mixes."', (
+      tester,
+    ) async {
+      await _pump(tester, _container(auth: _Auth(anonymous: true)));
+      await tester.tap(find.byKey(YouTab.keepMixesKey));
+      // The sign-in cassette turns for as long as the page is open.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 600));
+
+      expect(find.byType(KeepMixesSignInPage), findsOneWidget);
+      expect(find.text(SignInScreen.keepMixesHeadline), findsOneWidget);
+      expect(find.byKey(SignInScreen.backgroundKey), findsOneWidget);
+      expect(find.byKey(SignInScreen.lineKey), findsNothing);
+      expect(find.byType(ProviderSignInButton), findsNWidgets(2));
+    });
+
+    testWidgets('an account never sees the row', (tester) async {
+      await _pump(tester, _container());
+      expect(find.byKey(YouTab.keepMixesKey), findsNothing);
+      expect(find.text('Sign out'), findsOneWidget);
     });
   });
 }

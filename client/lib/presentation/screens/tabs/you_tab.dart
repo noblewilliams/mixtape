@@ -11,6 +11,10 @@
 ///
 /// Clear learned listening lives under What the DJ knows, as the board says.
 ///
+/// An anonymous listener (first-run board frame C3) sees one flush row, Sign
+/// in to keep your mixes, in place of the identity block, and no Account
+/// group or Sign out; the rest is unchanged.
+///
 /// It lives inside a tab `Navigator`, so it never assumes it is the app root.
 library;
 
@@ -29,12 +33,14 @@ import '../../providers/library_sync_provider.dart' show accountNameProvider;
 import '../../providers/onboarding_provider.dart' show onboardingProvider;
 import '../../providers/playback_provider.dart';
 import '../../theme/mixtape_theme.dart';
+import '../../widgets/foundation/flush_row.dart';
 import '../../widgets/foundation/gradient_background.dart';
 import '../../widgets/foundation/inset_group.dart';
 import '../../widgets/foundation/large_title_scaffold.dart';
 import '../../widgets/suggestion_settings.dart';
 import '../account_screen.dart';
 import '../memory_screen.dart';
+import '../sign_in_screen.dart';
 
 /// The You tab.
 class YouTab extends ConsumerWidget {
@@ -62,6 +68,10 @@ class YouTab extends ConsumerWidget {
   /// The Together ghost's accessibility label; the row is not tappable.
   static const String togetherLabel = 'Together, planned';
 
+  /// The anonymous listener's row (C3), in place of the identity block.
+  static const String keepMixesRow = 'Sign in to keep your mixes';
+  static const Key keepMixesKey = Key('you-keep-mixes');
+
   void _push(BuildContext context, Widget Function() screen) {
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen()));
   }
@@ -73,6 +83,7 @@ class YouTab extends ConsumerWidget {
     final accounts = ref.watch(accountProvider).accounts;
     final onboarding = ref.watch(onboardingProvider).value;
     final memories = ref.watch(memoriesProvider).value;
+    final anonymous = ref.watch(isAnonymousProvider);
     final displayName = (name == null || name.trim().isEmpty)
         ? unnamedListener
         : name.trim();
@@ -89,15 +100,18 @@ class YouTab extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    InsetGroup(
-                      children: [
-                        InsetRow(
-                          leading: _PrismAvatar(initial: _initialOf(name)),
-                          title: displayName,
-                          subtitle: identitySubtitle(accounts, onboarding),
-                        ),
-                      ],
-                    ),
+                    if (anonymous)
+                      const _KeepMixesRow()
+                    else
+                      InsetGroup(
+                        children: [
+                          InsetRow(
+                            leading: _PrismAvatar(initial: _initialOf(name)),
+                            title: displayName,
+                            subtitle: identitySubtitle(accounts, onboarding),
+                          ),
+                        ],
+                      ),
                     InsetGroup(
                       children: [
                         InsetRow(
@@ -124,18 +138,19 @@ class YouTab extends ConsumerWidget {
                         ),
                       ),
                     ),
-                    InsetGroup(
-                      children: [
-                        InsetRow(
-                          key: const Key('you-account'),
-                          leading: const Icon(Icons.person_outline),
-                          title: 'Account',
-                          subtitle: 'Login methods, linked providers',
-                          onTap: () => _push(context, AccountScreen.new),
-                        ),
-                        const _SignOutRow(),
-                      ],
-                    ),
+                    if (!anonymous)
+                      InsetGroup(
+                        children: [
+                          InsetRow(
+                            key: const Key('you-account'),
+                            leading: const Icon(Icons.person_outline),
+                            title: 'Account',
+                            subtitle: 'Login methods, linked providers',
+                            onTap: () => _push(context, AccountScreen.new),
+                          ),
+                          const _SignOutRow(),
+                        ],
+                      ),
                   ],
                 ),
               ),
@@ -201,6 +216,42 @@ class YouTab extends ConsumerWidget {
         'skipped' => 'No service connected',
         _ => null,
       };
+}
+
+/// C3's one flush row: the person glyph, the title, a chevron, a hairline
+/// under it, 44 pt or taller. Opens the sign-in page with "Keep your mixes."
+class _KeepMixesRow extends StatelessWidget {
+  const _KeepMixesRow();
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        MixtapeMetrics.screenSidePadding,
+        0,
+        MixtapeMetrics.screenSidePadding,
+        16,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Semantics(
+            button: true,
+            child: FlushRow(
+              key: YouTab.keepMixesKey,
+              isFirst: true,
+              leadingSize: 24,
+              leading: Icon(Icons.person_outline, size: 22, color: tokens.plum),
+              title: YouTab.keepMixesRow,
+              onTap: () => openKeepMixesSignIn(context),
+            ),
+          ),
+          Container(height: 1, color: tokens.hairline),
+        ],
+      ),
+    );
+  }
 }
 
 /// "Learn from my listening", bound to the same controller call the Listening

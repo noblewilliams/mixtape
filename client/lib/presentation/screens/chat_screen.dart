@@ -26,6 +26,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/api/api_client.dart';
 import '../../data/playlists/playlist_context_models.dart';
 import '../providers/dj_providers.dart';
+import '../providers/keep_mixes_provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/library_sync_provider.dart';
 import '../providers/playlist_context_provider.dart';
@@ -40,6 +41,7 @@ import '../widgets/foundation/liquid_glass_surface.dart';
 import '../widgets/foundation/tape_button.dart';
 import '../widgets/foundation/text_action.dart';
 import '../widgets/home_panel.dart' show HomePanel;
+import '../widgets/keep_sheet.dart';
 import '../widgets/mix_energy_summary.dart';
 import '../widgets/mix_handoff.dart';
 import '../widgets/mix_prompt_input.dart';
@@ -86,6 +88,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   Timer? _listeningTimer;
   bool _showListeningCaption = false;
   bool _seededInitialError = false;
+  bool _keepSheetChecked = false;
   bool _changingStatus = false;
 
   @override
@@ -474,6 +477,32 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             .seedInitialError(widget.initialError!);
       });
     }
+
+    // The Keep this mix sheet (board A6), once the new mix it was offered
+    // for is on screen: an anonymous listener's first mix with content this
+    // app session (see [KeepSheetNotifier]). Checked once per screen, from
+    // build for the same reason as the seed above.
+    if (!_keepSheetChecked && chatAsync.hasValue) {
+      _keepSheetChecked = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (ref.read(keepSheetProvider.notifier).take(widget.sessionId)) {
+          unawaited(showKeepSheet(context));
+        }
+      });
+    }
+
+    // ...and when a follow-up turn fills a refused mix while it is open.
+    ref.listen<KeepSheetState>(keepSheetProvider, (previous, next) {
+      if (!_keepSheetChecked || next.shown) return;
+      if (next.offeredFor != widget.sessionId) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (ref.read(keepSheetProvider.notifier).take(widget.sessionId)) {
+          unawaited(showKeepSheet(context));
+        }
+      });
+    });
 
     // Riverpod 3 retries a throwing build() with backoff; during that retry
     // the state is technically AsyncLoading but still carries the last error

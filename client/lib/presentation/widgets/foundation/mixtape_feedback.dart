@@ -11,6 +11,7 @@ SnackBar mixtapeSnackBar({
   String? actionLabel,
   VoidCallback? onAction,
   Duration duration = const Duration(seconds: 4),
+  EdgeInsetsGeometry? margin,
 }) {
   var used = false;
   return SnackBar(
@@ -24,6 +25,7 @@ SnackBar mixtapeSnackBar({
         ? const Duration(days: 1)
         : duration,
     behavior: SnackBarBehavior.floating,
+    margin: margin,
     backgroundColor: Colors.transparent,
     elevation: 0,
     padding: EdgeInsets.zero,

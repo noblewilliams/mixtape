@@ -6,6 +6,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../../data/listening/listening_models.dart';
 import '../../widgets/foundation/service_marks.dart';
 import 'choose_method_screen.dart';
 import 'first_run_flow.dart';
@@ -24,13 +25,16 @@ class ChooseServiceScreen extends StatelessWidget {
   static const Key spotifyKey = Key('choose-spotify');
   static const Key skipKey = Key('choose-skip');
 
-  void _choose(BuildContext context, MusicService service) => unawaited(
-    pushFirstRunPage<void>(
-      context,
-      ChooseMethodScreen(service: service, mode: mode),
-      name: '${addMusicRoutePrefix}2',
-    ),
-  );
+  void _choose(BuildContext context, MusicService service) {
+    recordFirstRun(context, mode, FunnelEventType.choseService);
+    unawaited(
+      pushFirstRunPage<void>(
+        context,
+        ChooseMethodScreen(service: service, mode: mode),
+        name: '${addMusicRoutePrefix}2',
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) => StepScaffold(

@@ -11,6 +11,8 @@ import 'package:mixtape/data/auth/account_api.dart';
 import 'package:mixtape/data/auth/google_auth_gateway.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
+import 'package:mixtape/presentation/screens/first_run/step_scaffold.dart'
+    show FirstRunColors;
 import 'package:mixtape/presentation/screens/sign_in_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
@@ -72,6 +74,7 @@ Widget _app(
   double scale = 1,
   Brightness brightness = Brightness.light,
   bool reducedMotion = true,
+  Widget screen = const SignInScreen(),
 }) => ProviderScope(
   overrides: [
     tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
@@ -91,7 +94,7 @@ Widget _app(
       ),
       child: GradientBackground(child: child!),
     ),
-    home: const RepaintBoundary(key: authSnapshotKey, child: SignInScreen()),
+    home: RepaintBoundary(key: authSnapshotKey, child: screen),
   ),
 );
 
@@ -105,6 +108,7 @@ Future<void> _pump(
   AuthNotifier Function()? auth,
   double scale = 1,
   Brightness brightness = Brightness.light,
+  Widget screen = const SignInScreen(),
 }) async {
   await tester.pumpWidget(
     _app(
@@ -114,6 +118,7 @@ Future<void> _pump(
       auth: auth,
       scale: scale,
       brightness: brightness,
+      screen: screen,
     ),
   );
   await tester.pumpAndSettle();
@@ -620,4 +625,81 @@ void main() {
       expect(foot.hitTestable(), findsOneWidget);
     });
   }
+
+  group('Keep your mixes. (first-run board C1, C2)', () {
+    testWidgets('the default page stays on the app gradient', (tester) async {
+      _phone(tester);
+      await _pump(tester, _CancellingGateway(), google: _GoogleGateway());
+      expect(find.byKey(SignInScreen.backgroundKey), findsNothing);
+      expect(find.byKey(SignInScreen.lineKey), findsNothing);
+      expect(find.text(SignInScreen.defaultHeadline), findsOneWidget);
+    });
+
+    testWidgets('from the sheet or the You row: the headline on the plum '
+        'graphic, cream, with the last-used note', (tester) async {
+      _phone(tester);
+      await _pump(
+        tester,
+        _CancellingGateway(),
+        google: _GoogleGateway(),
+        screen: const KeepMixesSignInPage(),
+      );
+      final image = tester.widget<Image>(
+        find.byKey(SignInScreen.backgroundKey),
+      );
+      expect(
+        (image.image as AssetImage).assetName,
+        'assets/first_run/bg-sign-in.jpg',
+      );
+      final headline = tester.widget<Text>(
+        find.text(SignInScreen.keepMixesHeadline),
+      );
+      expect(headline.style?.color, FirstRunColors.cream);
+      expect(find.byKey(SignInScreen.lineKey), findsNothing);
+      expect(find.text('Last used'), findsOneWidget);
+      expect(find.byKey(const Key('apple-sign-in')), findsOneWidget);
+      expect(find.byKey(const Key('google-sign-in')), findsOneWidget);
+      expect(find.byKey(const Key('first-run-back')), findsOneWidget);
+    });
+
+    testWidgets('the cap: its line, and no last-used note', (tester) async {
+      _phone(tester);
+      await _pump(
+        tester,
+        _CancellingGateway(),
+        google: _GoogleGateway(),
+        screen: const KeepMixesSignInPage(cap: true),
+      );
+      expect(
+        tester.widget<Text>(find.byKey(SignInScreen.lineKey)).data,
+        SignInScreen.capLine,
+      );
+      expect(SignInScreen.capLine, isNot(contains('\u2014')));
+      expect(find.text('Last used'), findsNothing);
+      final semantics = tester.ensureSemantics();
+      expect(
+        tester
+            .getSemantics(find.text(SignInScreen.keepMixesHeadline))
+            .flagsCollection
+            .isHeader,
+        isTrue,
+      );
+      semantics.dispose();
+    });
+
+    testWidgets('the cap page scrolls at 200 % text without overflowing', (
+      tester,
+    ) async {
+      _phone(tester);
+      await _pump(
+        tester,
+        _CancellingGateway(),
+        google: _GoogleGateway(),
+        scale: 2,
+        screen: const KeepMixesSignInPage(cap: true),
+      );
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(SignInScreen.lineKey), findsOneWidget);
+    });
+  });
 }

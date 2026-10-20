@@ -389,6 +389,18 @@ void main() {
         'import_completed',
         'first_personal_mix',
         'first_output',
+        'first_run_opened',
+        'chose_make_mix',
+        'chose_add_music',
+        'chose_service',
+        'chose_method',
+        'sync_done',
+        'first_mix_made',
+        'first_mix_refused',
+        'keep_sheet_shown',
+        'keep_sheet_signed_in',
+        'keep_sheet_dismissed',
+        'cap_reached',
       ]);
     });
 

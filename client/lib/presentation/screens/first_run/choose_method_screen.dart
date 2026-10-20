@@ -5,6 +5,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../../data/listening/listening_models.dart';
 import 'doing_screen.dart';
 import 'first_run_flow.dart';
 import 'step_scaffold.dart';
@@ -35,13 +36,16 @@ class ChooseMethodScreen extends StatelessWidget {
   static const Key exportifyKey = Key('method-exportify');
   static const Key spotifyExportKey = Key('method-spotify-export');
 
-  void _choose(BuildContext context, AddMethod method) => unawaited(
-    pushFirstRunPage<void>(
-      context,
-      DoingScreen(method: method, mode: mode),
-      name: '${addMusicRoutePrefix}3',
-    ),
-  );
+  void _choose(BuildContext context, AddMethod method) {
+    recordFirstRun(context, mode, FunnelEventType.choseMethod);
+    unawaited(
+      pushFirstRunPage<void>(
+        context,
+        DoingScreen(method: method, mode: mode),
+        name: '${addMusicRoutePrefix}3',
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {

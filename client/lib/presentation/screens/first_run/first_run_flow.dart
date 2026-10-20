@@ -18,8 +18,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../data/api/api_client.dart';
 import '../../../data/dj/dj_api.dart';
+import '../../../data/listening/listening_models.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/dj_providers.dart';
+import '../../providers/first_run_funnel_provider.dart';
 import '../../providers/first_run_provider.dart';
 import '../../providers/onboarding_provider.dart';
 import 'artists_screen.dart';
@@ -90,6 +92,20 @@ Future<void> openAddMusic(BuildContext context) => pushFirstRunPage<void>(
   name: '${addMusicRoutePrefix}1',
 );
 
+/// Records a first-run funnel event from a page in [mode]. Library's add
+/// flow is not the first run and records nothing.
+void recordFirstRun(
+  BuildContext context,
+  AddMusicMode mode,
+  FunnelEventType type,
+) {
+  if (mode != AddMusicMode.firstRun) return;
+  ProviderScope.containerOf(
+    context,
+    listen: false,
+  ).read(firstRunFunnelProvider).record(type);
+}
+
 /// The music is in ([songs] usable songs, possibly none).
 ///
 /// First run: the prompt page with the count, or Who do you love? first when
@@ -103,6 +119,7 @@ void finishAddMusic(
     case AddMusicMode.library:
       _popAddMusic(context);
     case AddMusicMode.firstRun:
+      recordFirstRun(context, mode, FunnelEventType.syncDone);
       if (songs > 0) {
         pushFirstRunPage<void>(context, WelcomeScreen.prompt(songsIn: songs));
       } else {
@@ -163,14 +180,24 @@ Future<void> saveArtistSeeds(WidgetRef ref, List<String> names) async {
 /// Returns null once handed off (the caller's page is about to unmount), or
 /// the sentence to show when the mix could not start. A session that
 /// persisted despite a failed first turn is handed off like Home does, with
-/// the failure seeded into the conversation.
-Future<String?> startFirstMix(WidgetRef ref, String prompt) async {
+/// the failure seeded into the conversation. A capped anonymous listener
+/// (possible only if this flow's session already had three mixes) gets
+/// [onCap], the sign-in page, and no sentence: nothing about the cap is
+/// drawn by the composer.
+Future<String?> startFirstMix(
+  WidgetRef ref,
+  String prompt, {
+  void Function()? onCap,
+}) async {
   try {
     await ensureAnonymousSession(ref);
     final sessionId = await ref.read(sessionStarterProvider)(prompt);
     ref
         .read(firstRunActiveProvider.notifier)
         .handOff(PendingConversation(sessionId));
+    return null;
+  } on AnonymousCapException {
+    onCap?.call();
     return null;
   } on DjApiException catch (e) {
     final sessionId = e.sessionId;

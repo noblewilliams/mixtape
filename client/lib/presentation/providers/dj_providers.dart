@@ -18,7 +18,9 @@ import '../../data/playlists/playlist_context_models.dart';
 import 'auth_provider.dart';
 import 'mix_operation_gate.dart';
 import 'playlist_context_provider.dart';
+import 'first_run_funnel_provider.dart';
 import 'funnel_provider.dart';
+import 'keep_mixes_provider.dart';
 
 /// Built over the SAME baseUrl/tokenStore as the app's shared [ApiClient]
 /// (structural sharing, per [DjApi.from]'s doc comment) but with its own
@@ -478,6 +480,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     try {
       final result = await ref.read(djApiProvider).sendMessage(sessionId, text);
       if (!_current(generation)) return;
+      // A refused mix (an empty queue) that this turn filled is the
+      // listener's mix landing, as a new mix with content is.
+      final filled = base.queue.isEmpty && result.queue.isNotEmpty;
       final newTitle = result.sessionTitle;
       _mergeCurrent((c) {
         // First bump queue+version via the `queueVersion` param (never
@@ -518,6 +523,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           ref.invalidate(sessionsProvider);
         }
       }
+      if (filled) _noteFilledMix(result.queue.length);
       await _adoptSessionFlags(generation);
       if (_current(generation)) _notePersonalMix();
     } on DjApiException catch (e) {
@@ -612,6 +618,15 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     } catch (_) {
       // Silent by design — see above.
     }
+  }
+
+  /// An anonymous listener's refused mix filled by a follow-up turn: the
+  /// first-mix funnel and the Keep this mix sheet, exactly as for a new mix
+  /// with content (see [sessionStarterProvider]). Both ignore an account.
+  void _noteFilledMix(int queueLength) {
+    if (!ref.mounted || !ref.read(isAnonymousProvider)) return;
+    ref.read(firstRunFunnelProvider).noteMixReply(queueLength);
+    ref.read(keepSheetProvider.notifier).noteMix(sessionId, queueLength);
   }
 
   /// The `first_personal_mix` milestone for what this turn generated — after
@@ -769,6 +784,15 @@ final sessionStarterProvider =
           ref
               .read(funnelMilestonesProvider)
               .notePersonalMix(detail.session, detail.queue);
+          // An anonymous listener's new mix: the first-mix funnel, and the
+          // Keep this mix sheet the conversation shows once it opens. Both
+          // ignore an account.
+          if (ref.read(isAnonymousProvider)) {
+            ref.read(firstRunFunnelProvider).noteMixReply(detail.queue.length);
+            ref
+                .read(keepSheetProvider.notifier)
+                .noteMix(detail.session.id, detail.queue.length);
+          }
           return detail.session.id;
         } on DjApiException {
           ref.invalidate(sessionsProvider);

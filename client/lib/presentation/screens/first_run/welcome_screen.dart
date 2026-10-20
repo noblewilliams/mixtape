@@ -7,9 +7,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../data/listening/listening_models.dart';
 import '../../format/import_format.dart';
+import '../../providers/first_run_funnel_provider.dart';
 import '../../theme/mixtape_theme.dart';
 import '../../widgets/foundation/cassette_tile.dart';
+import '../../providers/keep_mixes_provider.dart' show KeptPrompt;
+import '../../widgets/keep_sheet.dart';
 import '../../widgets/mix_prompt_input.dart';
 import '../sign_in_screen.dart';
 import 'artists_screen.dart';
@@ -71,6 +75,14 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
   String? _error;
 
   @override
+  void initState() {
+    super.initState();
+    if (!widget.isPrompt) {
+      ref.read(firstRunFunnelProvider).record(FunnelEventType.firstRunOpened);
+    }
+  }
+
+  @override
   void dispose() {
     _controller.dispose();
     super.dispose();
@@ -82,6 +94,9 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
     if (_starting) return;
     final prompt = _controller.text.trim();
     if (prompt.isEmpty) return;
+    if (!widget.isPrompt) {
+      ref.read(firstRunFunnelProvider).record(FunnelEventType.choseMakeMix);
+    }
     if (!_goesStraightToMix) {
       // Nothing synced in this flow: the corpus mix needs seeds first.
       unawaited(pushFirstRunPage<void>(context, ArtistsScreen(prompt: prompt)));
@@ -91,7 +106,15 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
       _starting = true;
       _error = null;
     });
-    final error = await startFirstMix(ref, prompt);
+    final error = await startFirstMix(
+      ref,
+      prompt,
+      onCap: () {
+        if (mounted) {
+          unawaited(openCapSignIn(context, KeptPrompt(prompt)));
+        }
+      },
+    );
     if (!mounted) return;
     setState(() {
       _starting = false;
@@ -99,13 +122,16 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
     });
   }
 
-  void _addMusic() => unawaited(
-    pushFirstRunPage<void>(
-      context,
-      const ChooseServiceScreen(mode: AddMusicMode.firstRun),
-      name: '${addMusicRoutePrefix}1',
-    ),
-  );
+  void _addMusic() {
+    ref.read(firstRunFunnelProvider).record(FunnelEventType.choseAddMusic);
+    unawaited(
+      pushFirstRunPage<void>(
+        context,
+        const ChooseServiceScreen(mode: AddMusicMode.firstRun),
+        name: '${addMusicRoutePrefix}1',
+      ),
+    );
+  }
 
   void _signIn() =>
       unawaited(pushFirstRunPage<void>(context, const FirstRunSignInPage()));
@@ -253,22 +279,22 @@ class _OrDivider extends StatelessWidget {
   }
 }
 
-/// The existing sign-in page, reached from the welcome foot link, with the
-/// outlined back button over it in the text colour (the page sits on the
-/// app's gradient). The headline is unchanged from this link (spec →
-/// Sign-in page); Task 10 adds the plum background and the "Keep your
-/// mixes." variant for the sheet, cap and You row.
+/// The existing sign-in page, reached from the welcome foot link, on the
+/// plum black graphic like every first-run page (approval → Locked
+/// behaviour, "Sign-in page"), with the outlined back button in cream. The
+/// headline is unchanged from this link (spec → Sign-in page); the sheet,
+/// the cap and the You row use [KeepMixesSignInPage].
 class FirstRunSignInPage extends StatelessWidget {
   const FirstRunSignInPage({super.key});
 
   @override
-  Widget build(BuildContext context) => Stack(
+  Widget build(BuildContext context) => const Stack(
     children: [
-      const SignInScreen(),
+      SignInScreen(background: FirstRunBackground.signIn),
       SafeArea(
         child: Padding(
-          padding: const EdgeInsets.only(left: 8, top: 6),
-          child: TapeBackButton(color: context.tokens.text),
+          padding: EdgeInsets.only(left: 8, top: 6),
+          child: TapeBackButton(),
         ),
       ),
     ],

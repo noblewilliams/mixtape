@@ -102,3 +102,29 @@ migration 0035. Web: `web/src/RootApp.tsx`, new `web/src/components/first-run/`,
 
 Earlier records are not rewritten. The 2026-09-17 shell and 2026-09-25 polish
 approvals stand for everything after the first mix.
+
+## Implementation departures (2026-10-20)
+
+Recorded after Tasks 5 to 10 landed; the approval above is unchanged.
+
+- Web Step 2 for Apple Music offers only "Sync my library": the web has no
+  reader for Apple's export file.
+- The web Apple sync page drives the same sync run the Sources panel uses,
+  without that panel's chrome. Exportify and data-export instructions are the
+  existing full lines (eight data-export steps, not seven).
+- The sign-in page keeps the existing web card on wide widths and becomes
+  cream-on-image under 760 px; its headline stays in the existing welcome
+  style. The welcome foot link also opens it on the plum image, with the
+  default headline.
+- The Keep sheet and `first_mix_made` also fire when a refused first mix is
+  filled by a follow-up turn, on both platforms. "Once per session" is the
+  browser tab's session on web and the app launch on iOS.
+- A prompt kept across the cap is re-sent without its playlist attachment; the
+  draft and the shape are kept apart and composed at send.
+- iOS: the sheet reuses `MixtapeSheet` (20 pt corner, not the board's 26);
+  the first-run images ship at 2x only; the link from an anonymous session
+  remounts the root and lands on Home, not the mix.
+- The composer's send key appears only with text (existing composer), and the
+  sync count starts at "0 songs so far".
+- iOS Library's "Add Spotify music" still opens the old request screen; the
+  new steps are reached from Library's "Add your music".

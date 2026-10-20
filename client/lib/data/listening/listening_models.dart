@@ -345,7 +345,23 @@ enum FunnelEventType {
   fileInspected('file_inspected'),
   importCompleted('import_completed'),
   firstPersonalMix('first_personal_mix'),
-  firstOutput('first_output');
+  firstOutput('first_output'),
+
+  // The first run (spec 2026-10-20 → Funnel events), posted once per
+  // anonymous listener. `account_linked_new` and `account_linked_existing`
+  // are written by the server's link hook and never posted from here.
+  firstRunOpened('first_run_opened'),
+  choseMakeMix('chose_make_mix'),
+  choseAddMusic('chose_add_music'),
+  choseService('chose_service'),
+  choseMethod('chose_method'),
+  syncDone('sync_done'),
+  firstMixMade('first_mix_made'),
+  firstMixRefused('first_mix_refused'),
+  keepSheetShown('keep_sheet_shown'),
+  keepSheetSignedIn('keep_sheet_signed_in'),
+  keepSheetDismissed('keep_sheet_dismissed'),
+  capReached('cap_reached');
 
   const FunnelEventType(this.wire);
 

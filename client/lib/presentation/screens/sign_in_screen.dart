@@ -20,17 +20,47 @@ import '../../data/auth/google_auth_gateway.dart';
 import '../providers/auth_provider.dart';
 import '../theme/mixtape_theme.dart';
 import '../widgets/foundation/cassette_tile.dart';
+import 'first_run/step_scaffold.dart'
+    show
+        FirstRunBackground,
+        FirstRunColors,
+        TapeBackButton,
+        firstRunTokens,
+        withTokens;
 
 class SignInScreen extends ConsumerStatefulWidget {
-  const SignInScreen({super.key, this.headline = defaultHeadline});
+  const SignInScreen({
+    super.key,
+    this.headline = defaultHeadline,
+    this.line,
+    this.background,
+    this.showLastUsed = true,
+  });
 
   /// The line over the provider buttons. [defaultHeadline] from a cold start
   /// and the welcome foot link; [keepMixesHeadline] when the first-run flow's
   /// sheet, the cap or the You row sends a listener here.
   final String headline;
 
+  /// One line under the headline: the cap's [capLine]. None otherwise.
+  final String? line;
+
+  /// A first-run graphic under the page (the sheet, cap and You row use
+  /// [FirstRunBackground.signIn], board C1 and C2), with cream text. Null
+  /// keeps the app's gradient.
+  final FirstRunBackground? background;
+
+  /// The pencil note on the last-used method. The cap page has none (C2).
+  final bool showLastUsed;
+
   static const String defaultHeadline = 'Your music, mixed for right\u00a0now.';
   static const String keepMixesHeadline = 'Keep your mixes.';
+  static const String capLine =
+      'That\u2019s three mixes on this device. Sign in to keep going, and to '
+      'keep these.';
+
+  static const Key lineKey = Key('sign-in-line');
+  static const Key backgroundKey = Key('sign-in-background');
 
   /// The reserved status line: waiting, or the safe failure sentence.
   static const Key errorKey = Key('sign-in-error');
@@ -84,73 +114,105 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final background = widget.background;
+    // The gradient is painted app-wide by MaterialApp's builder.
+    if (background == null) {
+      return Scaffold(
+        backgroundColor: Colors.transparent,
+        body: Builder(builder: _page),
+      );
+    }
+    // The graphic is the theme on this page, the same in light and dark,
+    // under the first-run scrim so cream text keeps 4.5:1.
+    return Scaffold(
+      backgroundColor: FirstRunColors.base,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(
+            background.asset,
+            key: SignInScreen.backgroundKey,
+            fit: BoxFit.cover,
+            excludeFromSemantics: true,
+            errorBuilder: (_, _, _) => const SizedBox.shrink(),
+          ),
+          const DecoratedBox(
+            decoration: BoxDecoration(gradient: FirstRunColors.scrim),
+          ),
+          withTokens(context, firstRunTokens, Builder(builder: _page)),
+        ],
+      ),
+    );
+  }
+
+  bool get _graphic => widget.background != null;
+
+  Widget _page(BuildContext context) {
     final tokens = context.tokens;
     final dark = Theme.of(context).brightness == Brightness.dark;
     final googleAvailable = ref.watch(googleAuthGatewayProvider).isAvailable;
-    final lastUsed = ref.watch(lastSignInProvider).value;
+    final lastUsed = widget.showLastUsed
+        ? ref.watch(lastSignInProvider).value
+        : null;
 
-    // The gradient is painted app-wide by MaterialApp's builder.
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: SafeArea(
-        // Centre caps the width against the bounded screen height, so the
-        // scroll view below still knows how tall a screenful is.
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final width =
-                    constraints.maxWidth - MixtapeMetrics.screenSidePadding * 2;
-                return SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: MixtapeMetrics.screenSidePadding,
-                    vertical: _scrollPadding,
-                  ),
-                  // A screenful tall, so the Apple Music note sits at the
-                  // foot; taller content (200% text) scrolls instead.
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      minHeight: math.max(
-                        0,
-                        constraints.maxHeight - _scrollPadding * 2,
-                      ),
+    return SafeArea(
+      // Centre caps the width against the bounded screen height, so the
+      // scroll view below still knows how tall a screenful is.
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final width =
+                  constraints.maxWidth - MixtapeMetrics.screenSidePadding * 2;
+              return SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: MixtapeMetrics.screenSidePadding,
+                  vertical: _scrollPadding,
+                ),
+                // A screenful tall, so the Apple Music note sits at the
+                // foot; taller content (200% text) scrolls instead.
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: math.max(
+                      0,
+                      constraints.maxHeight - _scrollPadding * 2,
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        _wordmark(tokens),
-                        // The tape sits right on the buttons: one group,
-                        // centred between the wordmark and the foot note.
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            _cassette(
-                              _tapeWidth(
-                                body: context,
-                                tokens: tokens,
-                                constraints: constraints,
-                                width: width,
-                                googleAvailable: googleAvailable,
-                                lastUsed: lastUsed,
-                              ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _wordmark(tokens),
+                      // The tape sits right on the buttons: one group,
+                      // centred between the wordmark and the foot note.
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _cassette(
+                            _tapeWidth(
+                              body: context,
+                              tokens: tokens,
+                              constraints: constraints,
+                              width: width,
+                              googleAvailable: googleAvailable,
+                              lastUsed: lastUsed,
                             ),
-                            _promise(tokens, dark, googleAvailable, lastUsed),
-                          ],
-                        ),
-                        Text(
-                          _footNote,
-                          textAlign: TextAlign.center,
-                          style: tokens.meta.copyWith(color: tokens.muted),
-                        ),
-                      ],
-                    ),
+                          ),
+                          _promise(tokens, dark, googleAvailable, lastUsed),
+                        ],
+                      ),
+                      Text(
+                        _footNote,
+                        textAlign: TextAlign.center,
+                        style: tokens.meta.copyWith(color: tokens.muted),
+                      ),
+                    ],
                   ),
-                );
-              },
-            ),
+                ),
+              );
+            },
           ),
         ),
       ),
@@ -229,6 +291,8 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
 
     total +=
         text(widget.headline, _headlineStyle(tokens), width) + _headlineGap;
+    final line = widget.line;
+    if (line != null) total += _lineGap + text(line, _lineStyle(tokens), width);
 
     // The pill's floor, or its label plus the padding it sits in.
     final labelStyle = ProviderSignInButton.labelStyle(tokens);
@@ -310,11 +374,23 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     mainAxisSize: MainAxisSize.min,
     children: [
-      Text(
-        widget.headline,
-        textAlign: TextAlign.center,
-        style: _headlineStyle(tokens),
+      Semantics(
+        header: true,
+        child: Text(
+          widget.headline,
+          textAlign: TextAlign.center,
+          style: _headlineStyle(tokens),
+        ),
       ),
+      if (widget.line != null) ...[
+        const SizedBox(height: _lineGap),
+        Text(
+          widget.line!,
+          key: SignInScreen.lineKey,
+          textAlign: TextAlign.center,
+          style: _lineStyle(tokens),
+        ),
+      ],
       const SizedBox(height: _headlineGap),
       for (final provider in AccountProvider.values) ...[
         _providerButton(provider, dark, googleAvailable),
@@ -340,7 +416,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
     bool dark,
     bool googleAvailable,
   ) {
-    final skin = _skin(provider, dark);
+    final skin = _graphic ? _graphicSkin(provider) : _skin(provider, dark);
     return ProviderSignInButton(
       key: Key('${provider.name}-sign-in'),
       label: 'Continue with ${_name(provider)}',
@@ -429,6 +505,29 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
       border: const Color(0xFF8E918F),
     ),
   };
+
+  /// The board's provider pills on a graphic page (`.screen.gfx .fp.apple`,
+  /// `.fp.google`), the same in light and dark like the image under them.
+  static ({Color background, Color foreground, Color border}) _graphicSkin(
+    AccountProvider provider,
+  ) => switch (provider) {
+    AccountProvider.apple => (
+      background: const Color(0xFF111114),
+      foreground: const Color(0xFFFFFFFF),
+      border: const Color.fromRGBO(255, 255, 255, 0.28),
+    ),
+    AccountProvider.google => (
+      background: const Color(0xFFFFFFFF),
+      foreground: const Color(0xFF1F1F1F),
+      border: const Color(0xFF747775),
+    ),
+  };
+
+  /// The line under the headline (the cap's).
+  static TextStyle _lineStyle(MixtapeTokens tokens) =>
+      tokens.body.copyWith(fontSize: 16, height: 1.4, color: tokens.text);
+
+  static const double _lineGap = 12;
 
   /// The web's `transform: rotate(-2deg)` on the wordmark and pencil note.
   static const double _wordmarkTilt = 2 * math.pi / 180;
@@ -777,3 +876,40 @@ class _GoogleMarkPainter extends CustomPainter {
   @override
   bool shouldRepaint(_GoogleMarkPainter oldDelegate) => false;
 }
+
+/// The sign-in page reached from the Keep this mix sheet, the cap and the
+/// You row (board C1 and C2): "Keep your mixes." on the plum black graphic,
+/// with the outlined back button in cream. [cap] adds the cap's line and
+/// drops the last-used note. Provider buttons appear only here, never in a
+/// sheet or the composer panel.
+class KeepMixesSignInPage extends StatelessWidget {
+  const KeepMixesSignInPage({super.key, this.cap = false});
+
+  final bool cap;
+
+  @override
+  Widget build(BuildContext context) => Stack(
+    children: [
+      SignInScreen(
+        headline: SignInScreen.keepMixesHeadline,
+        line: cap ? SignInScreen.capLine : null,
+        background: FirstRunBackground.signIn,
+        showLastUsed: !cap,
+      ),
+      const SafeArea(
+        child: Padding(
+          padding: EdgeInsets.only(left: 8, top: 6),
+          child: TapeBackButton(),
+        ),
+      ),
+    ],
+  );
+}
+
+/// Pushes [KeepMixesSignInPage] over everything (the root navigator, so the
+/// dock and any tab's page sit under it). Completes when the listener comes
+/// back from it; a sign-in that succeeds remounts the root instead.
+Future<void> openKeepMixesSignIn(BuildContext context, {bool cap = false}) =>
+    Navigator.of(context, rootNavigator: true).push<void>(
+      MaterialPageRoute<void>(builder: (_) => KeepMixesSignInPage(cap: cap)),
+    );

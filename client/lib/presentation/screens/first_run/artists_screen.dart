@@ -13,6 +13,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../theme/mixtape_theme.dart';
+import '../../providers/keep_mixes_provider.dart' show KeptPrompt;
+import '../../widgets/keep_sheet.dart';
 import 'first_run_flow.dart';
 import 'step_scaffold.dart';
 import 'welcome_screen.dart';
@@ -142,7 +144,15 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
       );
       return;
     }
-    final error = await startFirstMix(ref, prompt);
+    final error = await startFirstMix(
+      ref,
+      prompt,
+      onCap: () {
+        if (mounted) {
+          unawaited(openCapSignIn(context, KeptPrompt(prompt)));
+        }
+      },
+    );
     if (!mounted) return;
     setState(() {
       _busy = false;

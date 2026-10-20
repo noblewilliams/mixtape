@@ -41,8 +41,12 @@ class MixtapeApp extends ConsumerWidget {
       // Replacing only `home` leaves pushed account screens and dialogs above
       // sign-in. Give every root its own navigator history — keyed by the
       // root rather than the auth status, so the anonymous session the
-      // first-run flow creates mid-flow keeps the flow's pages in place.
-      key: ValueKey(root),
+      // first-run flow creates mid-flow keeps the flow's pages in place. The
+      // shell is keyed on anonymity too: a link from an anonymous session
+      // always remounts it as the account (dropping the sign-in page pushed
+      // over it, and letting Home send a capped prompt), even when the
+      // auth provider's pass through `unknown` lands within one frame.
+      key: ValueKey((root, root == _Root.shell && anonymous)),
       title: 'mixtape',
       theme: MixtapeTheme.light(),
       darkTheme: MixtapeTheme.dark(),
