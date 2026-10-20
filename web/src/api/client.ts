@@ -271,6 +271,21 @@ export type FunnelEventType =
   | 'import_completed'
   | 'first_personal_mix'
   | 'first_output'
+  // First run (spec 2026-10-20 → Clients, Funnel events), one-time per
+  // anonymous user. account_linked_new and account_linked_existing are written
+  // by the server and never posted.
+  | 'first_run_opened'
+  | 'chose_make_mix'
+  | 'chose_add_music'
+  | 'chose_service'
+  | 'chose_method'
+  | 'sync_done'
+  | 'first_mix_made'
+  | 'first_mix_refused'
+  | 'keep_sheet_shown'
+  | 'keep_sheet_signed_in'
+  | 'keep_sheet_dismissed'
+  | 'cap_reached'
 export type FunnelEventInput = { type: FunnelEventType; surface: 'web' }
 
 export type InterviewInput = {
@@ -680,6 +695,9 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
         method: 'POST',
         body: JSON.stringify(event),
         signal,
+        // cap_reached and keep_sheet_signed_in are followed by the sign-in
+        // redirect; keepalive lets the post outlive the page.
+        keepalive: true,
       }),
     postInterview: (answers, signal) =>
       request('/me/interview', {

@@ -26,6 +26,11 @@ function renderFlow(props: Partial<FirstRunProps> = {}) {
   return { ...fakes, onDone }
 }
 
+/** The flow's own server actions, without the first-run funnel posts. */
+const FIRST_RUN_EVENTS = ['first_run_opened', 'chose_make_mix', 'chose_add_music', 'chose_service', 'chose_method', 'sync_done']
+const actions = (log: string[]) => log.filter((line) => !FIRST_RUN_EVENTS.some((type) => line === `postFunnelEvent:${type}`))
+const funnelPosts = (log: string[]) => log.filter((line) => line.startsWith('postFunnelEvent:')).map((line) => line.slice('postFunnelEvent:'.length))
+
 /** onDone carries the whole createSession response. */
 const madeMix = { session: createdSession('session-new') }
 
@@ -62,7 +67,7 @@ describe('path A, make a mix now', () => {
 
     await waitFor(() => expect(onDone).toHaveBeenCalledWith(madeMix))
     expect(ensureSession).toHaveBeenCalledOnce()
-    expect(log).toEqual([
+    expect(actions(log)).toEqual([
       'ensureSession',
       'putArtistSeeds:Burna Boy|Tems|Sade',
       'createSession:something for a rainy commute, no talking',
@@ -192,7 +197,7 @@ describe('path B, add my music first', () => {
 
     typePrompt('warm up for a long run')
     await waitFor(() => expect(onDone).toHaveBeenCalledWith(madeMix))
-    expect(log).toEqual(['ensureSession', 'putArtistSeeds:Burna Boy|Tems|Sade', 'ensureSession', 'createSession:warm up for a long run'])
+    expect(actions(log)).toEqual(['ensureSession', 'putArtistSeeds:Burna Boy|Tems|Sade', 'ensureSession', 'createSession:warm up for a long run'])
   })
 
   it('syncs Apple Music after making sure of the session, then asks with the count', async () => {
@@ -252,7 +257,7 @@ describe('path B, add my music first', () => {
     fireEvent.click(await screen.findByRole('button', { name: "I’ve requested it" }))
 
     expect(await heading('Who do you love?')).toBeInTheDocument()
-    expect(log).toEqual(['ensureSession', 'postFunnelEvent:marked_requested'])
+    expect(actions(log)).toEqual(['ensureSession', 'postFunnelEvent:marked_requested'])
   })
 })
 
@@ -351,5 +356,50 @@ describe('Library add flow', () => {
     const second = renderAdd()
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
     await waitFor(() => expect(second.onDone).toHaveBeenCalledWith({}))
+  })
+})
+
+describe('first-run funnel events', () => {
+  it('posts nothing while no session exists, then the held events once after ensureSession', async () => {
+    const { log, onDone } = renderFlow()
+    await heading('What do you want to hear?')
+    typePrompt('late night drive')
+    await heading('Who do you love?')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(funnelPosts(log)).toEqual([])
+
+    nameArtists('Burna Boy', 'Tems', 'Sade')
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith(madeMix))
+    expect(log.indexOf('ensureSession')).toBeLessThan(log.indexOf('postFunnelEvent:first_run_opened'))
+    expect(funnelPosts(log)).toEqual(['first_run_opened', 'chose_make_mix'])
+  })
+
+  it('records path B choices once each, held until the sync makes the session', async () => {
+    const { log, syncRun } = renderFlow()
+    fireEvent.click(screen.getByRole('button', { name: 'Add my music first' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Apple Music' }))
+    await heading('Step 2 of 3, How do you want to add it?')
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Apple Music' }))
+    await heading('Step 2 of 3, How do you want to add it?')
+    expect(funnelPosts(log)).toEqual([])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sync my library' }))
+    await waitFor(() => expect(syncRun.start).toHaveBeenCalledOnce())
+    act(() => syncRun.set(syncResult(40)))
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+    await heading('What do you want to hear?')
+    typePrompt('90s R&B, no ballads')
+    await waitFor(() => expect(funnelPosts(log)).toEqual(['first_run_opened', 'chose_add_music', 'chose_service', 'chose_method', 'sync_done']))
+  })
+
+  it('posts no first-run events from Library\'s add flow', async () => {
+    const { log, syncRun } = renderFlow({ mode: 'add' })
+    fireEvent.click(await screen.findByRole('button', { name: 'Apple Music' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Sync my library' }))
+    await waitFor(() => expect(syncRun.start).toHaveBeenCalledOnce())
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(funnelPosts(log)).toEqual([])
   })
 })

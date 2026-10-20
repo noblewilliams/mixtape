@@ -35,3 +35,50 @@ export function postFunnelEventOnce(
   )
   return true
 }
+
+/** Whether this user's post of the event has already landed on this device. */
+export function hasPostedFunnelEvent(userId: string, type: FunnelEventType): boolean {
+  try {
+    return Boolean(window.localStorage.getItem(funnelFlagKey(type, userId)))
+  } catch {
+    return false
+  }
+}
+
+export type DeferredFunnel = {
+  /** Records the event once; held in memory until flush() has run. */
+  record: (type: FunnelEventType) => void
+  /** The session now exists: posts what was held, and posts later events at once. */
+  flush: () => void
+}
+
+/**
+ * The first run's events. They start before any session exists, and a
+ * session is never created just to post one, so they wait in memory until
+ * the listener's first server action has run ensureSession(). The flow
+ * lives only while its own anonymous user is being made, so "once" is per
+ * flow, kept in memory: a reload with that session goes straight to the
+ * shell and never shows the flow again.
+ */
+export function createDeferredFunnel(api: Pick<MixtapeApi, 'postFunnelEvent'>): DeferredFunnel {
+  const seen = new Set<FunnelEventType>()
+  const held: FunnelEventType[] = []
+  let ready = false
+  const post = (type: FunnelEventType) => {
+    void Promise.resolve()
+      .then(() => api.postFunnelEvent({ type, surface: 'web' }))
+      .catch(() => undefined)
+  }
+  return {
+    record(type) {
+      if (seen.has(type)) return
+      seen.add(type)
+      if (ready) post(type)
+      else held.push(type)
+    },
+    flush() {
+      ready = true
+      for (const type of held.splice(0)) post(type)
+    },
+  }
+}

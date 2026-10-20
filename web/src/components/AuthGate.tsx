@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   authErrorFromSearch,
   browserAuthPreferences,
@@ -9,6 +9,7 @@ import { restoredIdentity, rememberIdentity, clearWorkspaceRestore } from '../li
 import { Cassette } from './Cassette'
 import { AppleMark, GoogleMark } from './ProviderMarks'
 import { FirstRun } from './first-run/FirstRun'
+import { backgroundUrl } from './first-run/FirstRunPage'
 import type { FirstRunServices } from './first-run/services'
 import type { CreateSessionResponse } from '../api/client'
 
@@ -37,8 +38,21 @@ export type AuthBridge = {
 type AuthGateProps = {
   auth: AuthBridge
   preferences?: AuthPreferenceStore
-  /** The last argument is the mix the first run just made, for the shell to open. */
-  children: (user: AuthUser, lastUsed: AuthProvider | null, restoring: boolean, initialSession: CreateSessionResponse | null) => ReactNode
+  /**
+   * `initialSession` is the mix the first run just made, for the shell to
+   * open; `refetch` re-reads the session (the in-app sign-in page calls it
+   * as a provider sign-in starts; on the web redirect the real path is the
+   * reload after the redirect); `signInError` is a failed sign-in that came
+   * back to an anonymous listener (empty otherwise).
+   */
+  children: (
+    user: AuthUser,
+    lastUsed: AuthProvider | null,
+    restoring: boolean,
+    initialSession: CreateSessionResponse | null,
+    refetch: () => void | Promise<void>,
+    signInError: string,
+  ) => ReactNode
   /** Builds the first run's runs and API; called once, when the first run first renders. */
   firstRunServices?: () => FirstRunServices
 }
@@ -69,9 +83,12 @@ export function AuthGate({ auth, preferences = browserAuthPreferences, children,
     }
   }, [resolved, session.data?.user?.id])
 
+  // An account clears a URL sign-in error. An anonymous listener keeps it:
+  // their sign-in from the cap or the Keep pill failed, and the shell reopens
+  // the sign-in page with it.
   useEffect(() => {
-    if (session.data?.user) setSignInError('')
-  }, [session.data?.user?.id])
+    if (session.data?.user && !session.data.user.isAnonymous) setSignInError('')
+  }, [session.data?.user?.id, session.data?.user?.isAnonymous])
 
   useEffect(() => {
     if (!signInError) return
@@ -120,7 +137,7 @@ export function AuthGate({ auth, preferences = browserAuthPreferences, children,
     return (
       <>
         <div className="workspace-session" inert={restoring} aria-busy={restoring}>
-          {children(visibleUser, lastUsed, restoring, handoffSession)}
+          {children(visibleUser, lastUsed, restoring, handoffSession, session.refetch, visibleUser.isAnonymous ? signInError : '')}
         </div>
         {restoring && (
           <div className="session-refresh-badge" role={session.error && !session.isPending ? 'alert' : 'status'}>
@@ -154,17 +171,45 @@ export function AuthGate({ auth, preferences = browserAuthPreferences, children,
   return firstRun
 }
 
+/** The sign-in headline from the Keep sheet, the cap and the You row. */
+export const KEEP_HEADLINE = 'Keep your mixes.'
+/** The cap's line under that headline. */
+export const CAP_LINE = 'That’s three mixes on this device. Sign in to keep going, and to keep these.'
+const WELCOME_SIGN_IN_HEADLINE = 'Your music, mixed for right now.'
+
+/**
+ * `welcome`: behind the first run's foot link, unchanged. `keep`: from the
+ * Keep sheet or the You row. `cap`: the fourth mix, with the cap line and no
+ * last-used note (board C1, C2).
+ */
+export type SignInVariant = 'welcome' | 'keep' | 'cap'
+
+export function signInHeadline(variant: SignInVariant): string {
+  return variant === 'welcome' ? WELCOME_SIGN_IN_HEADLINE : KEEP_HEADLINE
+}
+
 type SignInPageProps = {
   auth: Pick<AuthBridge, 'signIn'>
   preferences: AuthPreferenceStore
   lastUsed: AuthProvider | null
   error: string
+  variant?: SignInVariant
   /** Called as a provider sign-in starts, so the gate can drop a stale URL error. */
   onStart?: () => void
+  /**
+   * Called when Better Auth's sign-in call resolves without an error. On the
+   * web that is as the redirect starts, not after the sign-in; the real path
+   * is the reload after the redirect. The shell refetches the session here
+   * for flows that do not leave the page.
+   */
+  onSignedIn?: () => void
 }
 
-/** The provider sign-in page, behind the first run's "Already have an account? Sign in." */
-export function SignInPage({ auth, preferences, lastUsed, error, onStart }: SignInPageProps) {
+/**
+ * The provider sign-in page: the existing screen on the plum-black sign-in
+ * image. The only place provider buttons appear.
+ */
+export function SignInPage({ auth, preferences, lastUsed, error, variant = 'welcome', onStart, onSignedIn }: SignInPageProps) {
   const [redirecting, setRedirecting] = useState<AuthProvider | null>(null)
   const [localError, setLocalError] = useState<string | null>(null)
   const waiting = redirecting !== null
@@ -181,6 +226,8 @@ export function SignInPage({ auth, preferences, lastUsed, error, onStart }: Sign
         setLocalError(result.error)
         setRedirecting(null)
         preferences.clearPending()
+      } else {
+        onSignedIn?.()
       }
     } catch {
       setLocalError(`${label(provider)} sign-in did not finish.`)
@@ -189,14 +236,22 @@ export function SignInPage({ auth, preferences, lastUsed, error, onStart }: Sign
     }
   }
 
+  const welcome = variant === 'welcome'
+  const line = welcome
+    ? 'Start with a mood, a memory, or one song. Mixtape builds a mix from music you already love.'
+    : variant === 'cap'
+      ? CAP_LINE
+      : null
+  const noted = variant === 'cap' ? null : lastUsed
+  const style = { '--auth-bg': `url("${backgroundUrl('sign-in')}")` } as CSSProperties
   return (
-    <main className="auth-page">
+    <main className="auth-page auth-page--graphic" style={style}>
       <section className="auth-surface" aria-labelledby="auth-title">
         <div className="auth-intro">
           <span className="auth-wordmark">mixtape</span>
           <div className="auth-copy">
-            <h1 id="auth-title" tabIndex={-1}>Your music, mixed for right now.</h1>
-            <p>Start with a mood, a memory, or one song. Mixtape builds a mix from music you already love.</p>
+            <h1 id="auth-title" tabIndex={-1}>{signInHeadline(variant)}</h1>
+            {line ? <p>{line}</p> : null}
           </div>
         </div>
 
@@ -208,11 +263,11 @@ export function SignInPage({ auth, preferences, lastUsed, error, onStart }: Sign
                 Opening {label(redirecting)} sign-in
               </p>
             ) : (
-              <p className="auth-status">Sign in to start a mix and keep your taste in sync.</p>
+              <p className="auth-status">{welcome ? 'Sign in to start a mix and keep your taste in sync.' : '\u00a0'}</p>
             )}
             <div className="auth-provider-row">
               {(['apple', 'google'] as const).map((provider) => {
-                const isLastUsed = lastUsed === provider
+                const isLastUsed = noted === provider
                 const lastUsedId = `last-used-${provider}`
                 return (
                   <div className="auth-provider-choice" key={provider}>

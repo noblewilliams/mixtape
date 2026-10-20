@@ -5,12 +5,15 @@ import { PlaybackPanel } from './components/PlaybackPanel'
 import { MixEnergySummary, type EnergyArc } from './components/EnergyJourney'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react'
 import {
+  AnonymousCapError,
   ApiError,
   type ApiQueueTrack,
   type ApiPlaylistSeed,
   type ApiPlaylistSummary,
   type CreateSessionResponse,
+  type InitialPlaylistSeed,
   type InterviewResponse,
+  type MergedMode,
   type ListeningImportSource,
   type MixtapeApi,
   type OnboardingResponse,
@@ -19,7 +22,10 @@ import {
   type SessionDetailResponse,
 } from './api/client'
 import { toDjMessage, toDjSession, toQueueTrack } from './api/mappers'
-import type { AuthUser } from './components/AuthGate'
+import { SignInPage, signInHeadline, type AuthBridge, type AuthUser, type SignInVariant } from './components/AuthGate'
+import { BackButton } from './components/first-run/FirstRunPage'
+import { KeepSheet, keepSheetSeen, markKeepSheetSeen } from './components/first-run/KeepSheet'
+import { PromptKept } from './components/PromptComposer'
 import { AccountDialog, type AccountBridge } from './components/AccountDialog'
 import { FirstRun } from './components/first-run/FirstRun'
 import type { FirstRunServices } from './components/first-run/services'
@@ -45,8 +51,10 @@ import { createImportRun } from './import/import-run'
 import { createListeningImportService } from './import/import-service'
 import { createLazyParser, createPageParser, type PageParser } from './import/page-parser'
 import { MusicKitClientError, type MusicKitClient } from './musickit/client'
-import type { AuthProvider } from './lib/auth-provider'
-import { postFunnelEventOnce } from './lib/funnel-once'
+import { browserAuthPreferences, type AuthPreferenceStore, type AuthProvider } from './lib/auth-provider'
+import { hasPostedFunnelEvent, postFunnelEventOnce } from './lib/funnel-once'
+import { clearKeptPrompt, keepPrompt, readKeptPrompt } from './lib/kept-prompt'
+import type { DraftSeed } from './components/HomeComposer'
 import { clearServiceChoice, readServiceChoice, writeServiceChoice, type ServiceChoice } from './lib/service-preference'
 
 type DialogState = 'new-tape' | 'save-playlist' | 'account' | 'interview' | null
@@ -66,6 +74,24 @@ type AppProps = {
   initialSession?: CreateSessionResponse
   /** Fallback when only the id is known: the mix is read and opened. */
   initialSessionId?: string
+  /** The provider sign-in behind the Keep sheet, the cap and the You row (anonymous listeners). */
+  signInAuth?: Pick<AuthBridge, 'signIn'>
+  signInPreferences?: AuthPreferenceStore
+  /** Re-reads the session after a sign-in returns, so the shell re-renders as the account. */
+  refetchSession?: () => void | Promise<void>
+  /** A sign-in from the cap or the Keep pill that came back failed (anonymous listeners only). */
+  signInError?: string
+}
+
+type SignInPageState = Exclude<SignInVariant, 'welcome'>
+
+const NO_SIGN_IN: Pick<AuthBridge, 'signIn'> = { signIn: async () => ({ error: 'Sign-in is not available here.' }) }
+
+/** The merge notice (board C4), once, after an anonymous session joined an account. */
+export function mergeNotice(merged: MergedMode | null): string | null {
+  if (merged === 'mixes_only') return 'Your mixes are in. This account already had a library, so we kept that one.'
+  if (merged === 'library_kept') return 'This account already had a library, so we kept that one.'
+  return null
 }
 
 function accountCallback(): { dialog: boolean; message: string; tone: 'success' | 'error' } {
@@ -133,7 +159,8 @@ function conflictSnapshot(error: unknown): { queue: ApiQueueTrack[]; queueVersio
 
 export function App(props: AppProps) { return <SignedInWorkspace key={props.user.id} {...props} /> }
 
-function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, user, onSignOut, importParser, initialSession, initialSessionId }: AppProps) {
+function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, user, onSignOut, importParser, initialSession, initialSessionId, signInAuth = NO_SIGN_IN, signInPreferences = browserAuthPreferences, refetchSession, signInError = '' }: AppProps) {
+  const anonymous = user.isAnonymous === true
   const restoring = useWorkspaceRestoring()
   const refreshedSessions = useRef(new Set<string>())
   const contentRevision = useRef<Record<string, number>>({})
@@ -337,11 +364,174 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
   }, [callback.dialog])
 
-  function announce(message: string, tone: ToastState['tone'] = 'success') {
+  // While the merge notice shows, a new tape's own toast does not replace it.
+  const noticeHeld = useRef(false)
+  function announce(message: string, tone: ToastState['tone'] = 'success', duration = 2800) {
     setToast({ message, tone })
     if (toastTimer.current) clearTimeout(toastTimer.current)
-    toastTimer.current = setTimeout(() => setToast(null), 2800)
+    toastTimer.current = setTimeout(() => { noticeHeld.current = false; setToast(null) }, duration)
   }
+
+  // The merge result reaches the client once, on GET /me, and the server
+  // clears it on read. Read once per account workspace: on load, and after a
+  // sign-in from the in-app page (the new account remounts the workspace).
+  const mergeRead = useRef(false)
+  useEffect(() => {
+    if (restoring || anonymous || mergeRead.current) return
+    mergeRead.current = true
+    void Promise.resolve()
+      .then(() => api.getMe())
+      .then(({ merged }) => {
+        const notice = mergeNotice(merged)
+        if (!notice) return
+        announce(notice, 'success', 6000)
+        noticeHeld.current = true
+      })
+      .catch(() => undefined)
+  }, [restoring, anonymous])
+
+  // Keep this mix, the sign-in page over the shell, and the cap.
+  const [keepSheet, setKeepSheet] = useState(false)
+  const [signInPage, setSignInPage] = useState<SignInPageState | null>(null)
+  const [signInPageError, setSignInPageError] = useState('')
+  const [draftSeed, setDraftSeed] = useState<DraftSeed | null>(null)
+  const signInOpener = useRef<HTMLElement | null>(null)
+  const sheetShown = useRef(false)
+  const mixReplySeen = useRef(false)
+  // The sheet is a history entry so the browser's back closes it as Not now.
+  // A mix handed over by the first run arrives while the first run is still
+  // folding its own entries back (an async history.go), so that entry is
+  // pushed once the fold's popstate lands, or after a short wait.
+  const awaitingFold = useRef(Boolean(initialSession))
+  const [sheetEntry, setSheetEntry] = useState(false)
+
+  /** An anonymous listener's mix reply: the first-mix funnel and, once per session, the sheet. */
+  function noteMixReply(queueLength: number) {
+    if (!anonymous) return
+    const first = !mixReplySeen.current && !hasPostedFunnelEvent(user.id, 'first_mix_made') && !hasPostedFunnelEvent(user.id, 'first_mix_refused')
+    mixReplySeen.current = true
+    if (queueLength === 0) {
+      if (first) postFunnelEventOnce(api, user.id, 'first_mix_refused')
+      return
+    }
+    postFunnelEventOnce(api, user.id, 'first_mix_made')
+    if (sheetShown.current || keepSheetSeen()) return
+    sheetShown.current = true
+    markKeepSheetSeen()
+    signInOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setKeepSheet(true)
+    postFunnelEventOnce(api, user.id, 'keep_sheet_shown')
+  }
+
+  function withState(marker: Record<string, unknown>) {
+    const current = window.history.state
+    return { ...(current && typeof current === 'object' ? current : {}), ...marker }
+  }
+
+  useEffect(() => {
+    if (!keepSheet || sheetEntry) return
+    const push = () => {
+      awaitingFold.current = false
+      window.history.pushState(withState({ mixtapeKeepSheet: true }), '')
+      setSheetEntry(true)
+    }
+    if (!awaitingFold.current) return push()
+    let done = false
+    const once = () => {
+      if (done) return
+      done = true
+      window.removeEventListener('popstate', once)
+      clearTimeout(timer)
+      push()
+    }
+    window.addEventListener('popstate', once)
+    const timer = setTimeout(once, 800)
+    return () => {
+      done = true
+      window.removeEventListener('popstate', once)
+      clearTimeout(timer)
+    }
+  }, [keepSheet, sheetEntry])
+
+  // Browser back while the sheet is open: Not now.
+  useEffect(() => {
+    if (!keepSheet || !sheetEntry) return
+    const onPop = () => dismissSheet(true)
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [keepSheet, sheetEntry])
+
+  function openSignIn(variant: SignInPageState, options: { replace?: boolean; error?: string } = {}) {
+    if (!keepSheet) signInOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setQueueOpen(false)
+    setSignInPageError(options.error ?? '')
+    setSignInPage(variant)
+    const state = withState({ mixtapeKeepSheet: undefined, mixtapeSignIn: variant })
+    if (options.replace) window.history.replaceState(state, '')
+    else window.history.pushState(state, '')
+  }
+
+  function keepFromSheet() {
+    setKeepSheet(false)
+    postFunnelEventOnce(api, user.id, 'keep_sheet_signed_in')
+    // The sheet's entry becomes the sign-in page's, so back returns to the mix.
+    const replace = sheetEntry
+    setSheetEntry(false)
+    openSignIn('keep', { replace })
+  }
+
+  function dismissSheet(fromHistory = false) {
+    setKeepSheet(false)
+    postFunnelEventOnce(api, user.id, 'keep_sheet_dismissed')
+    // Not now, Escape, the handle or the backdrop fold the sheet's entry back;
+    // its listener is gone by the time that pop lands.
+    if (sheetEntry && !fromHistory) window.history.back()
+    setSheetEntry(false)
+    requestAnimationFrame(() => signInOpener.current?.focus())
+  }
+
+  // The sign-in page is a history entry: the outlined back and the browser's
+  // back both close it. Back from the cap leaves the prompt in the field and
+  // drops the copy kept for after the redirect.
+  useEffect(() => {
+    if (!signInPage) return
+    const before = document.title
+    document.title = signInHeadline(signInPage)
+    document.getElementById('auth-title')?.focus({ preventScroll: true })
+    const onPop = () => {
+      if (signInPage === 'cap') clearKeptPrompt()
+      setSignInPage(null)
+      requestAnimationFrame(() => signInOpener.current?.focus())
+    }
+    window.addEventListener('popstate', onPop)
+    return () => {
+      window.removeEventListener('popstate', onPop)
+      document.title = before
+    }
+  }, [signInPage])
+
+  // After a sign-in from the cap page, the kept mix is sent once the
+  // account's workspace is ready. An anonymous load means the sign-in did not
+  // take: with a sign-in error the page reopens with it (the cap page with the
+  // prompt back in the field, or the Keep variant); without one a stale kept
+  // prompt is dropped.
+  const keptHandled = useRef(false)
+  useEffect(() => {
+    if (restoring || keptHandled.current) return
+    keptHandled.current = true
+    const kept = readKeptPrompt()
+    if (anonymous && signInError) {
+      if (kept) {
+        setActiveView('home')
+        setDraftSeed({ text: kept.prompt, id: Date.now() })
+        openSignIn('cap', { error: signInError })
+      } else openSignIn('keep', { error: signInError })
+      return
+    }
+    if (!kept) return
+    clearKeptPrompt()
+    if (!anonymous) void createTape(kept.prompt, false, false, kept.shape ?? undefined, kept.inspiration)
+  }, [restoring])
 
   async function refreshOnboarding() {
     try {
@@ -618,21 +808,37 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     setActiveView('session')
     setDialog(null)
     setError('')
-    announce('Your new tape is ready.')
+    if (!noticeHeld.current) announce('Your new tape is ready.')
+    noteMixReply(response.queue.length)
   }
 
-  async function createTape(prompt: string, useInspiration = true, propagateError = false, shape?: EnergyArc) {
+  /** `inspiration` overrides the dialog's seed (the kept mix re-sent after sign-in). */
+  async function createTape(prompt: string, useInspiration = true, propagateError = false, shape?: EnergyArc, inspiration?: InitialPlaylistSeed | null) {
     if (creatingTape) return
     const signal = controlLife.current.signal
     setCreatingTape(true)
+    const seed = inspiration !== undefined
+      ? inspiration ?? undefined
+      : useInspiration && newSeed ? { playlistId: newSeed.playlistId, excludeSourceTracks: newSeed.excludeSourceTracks } : undefined
     try {
-      const response = await api.createSession(prompt, useInspiration && newSeed ? { playlistId: newSeed.playlistId, excludeSourceTracks: newSeed.excludeSourceTracks } : undefined, shape)
+      const response = await api.createSession(prompt, seed, shape)
       if (signal.aborted) return
       setNewSeed(null)
       adoptNewSession(response)
       notePersonalMix(response.session, response.queue.length)
     } catch (requestError) {
       if (signal.aborted) return
+      if (requestError instanceof AnonymousCapError) {
+        // The composer stays as it is; the sign-in page answers (board C2).
+        postFunnelEventOnce(api, user.id, 'cap_reached')
+        keepPrompt({ prompt, inspiration: seed ?? null, shape: shape ?? null })
+        // From New mix: the dialog closes as the sign-in page opens; the kept
+        // record carries its seed and shape.
+        setDialog(null)
+        openSignIn('cap')
+        if (propagateError) throw new PromptKept()
+        return
+      }
       setError(errorCopy(requestError))
       if (requestError instanceof ApiError && requestError.status === 401) signOut()
       if (propagateError) throw requestError
@@ -661,10 +867,13 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     setThinkingSessionId(sessionId)
     setError('')
 
+    const hadMix = (queuesBySession[sessionId]?.length ?? 0) > 0
     try {
       const response = await api.sendMessage(sessionId, text, shape)
       if (signal.aborted) return
       const queue = response.queue.map(toQueueTrack)
+      // A refusal answered with more artists: the first mix lands on this turn.
+      if (!hadMix) noteMixReply(queue.length)
       setMessagesBySession((current) => ({
         ...current,
         [sessionId]: [...(current[sessionId] ?? []), toDjMessage(response.djMessage)],
@@ -819,7 +1028,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
 
   return (
     <>
-    <div className={`app-shell ${activeView !== 'session' || !activeSession ? 'app-shell--home' : ''}`} style={shellStyle} inert={addingMusic}>
+    <div className={`app-shell ${activeView !== 'session' || !activeSession ? 'app-shell--home' : ''}`} style={shellStyle} inert={addingMusic || keepSheet || signInPage !== null}>
       <Sidebar activeView={activeView}
         onOpenHome={() => setActiveView('home')}
         onOpenMusic={openMusic}
@@ -827,11 +1036,11 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
         onOpenSettings={() => setActiveView('settings')}
       />
 
-      {activeView === 'settings' ? <AppSettings api={api} playback={playback} userName={user.name} signInMethod={lastSignInProvider} onAccount={() => setDialog('account')} onMemories={() => setActiveView('memories')} onSignOut={signOut}/> : activeView === 'home' ? <HomeDashboard
+      {activeView === 'settings' ? <AppSettings api={api} playback={playback} userName={user.name} signInMethod={lastSignInProvider} onAccount={() => setDialog('account')} onMemories={() => setActiveView('memories')} onSignOut={signOut} anonymous={anonymous} onSignIn={() => openSignIn('keep')}/> : activeView === 'home' ? <HomeDashboard
         sessions={sessions} loading={loadingCollection} error={collectionError} busy={creatingTape}
         onRetry={() => void retryCollection()} onOpenSession={openSession} onOpenMixes={() => { setShowArchived(false); setActiveView('mixes') }}
-        onSubmit={prompt => createTape(prompt, false, true)} transcribe={(audio,signal) => api.transcribe(audio,signal)}
-        suggestions={<RoutineSuggestions key={user.id} api={api} busy={creatingTape} onCreate={prompt => createTape(prompt, false, true)}/>}
+        onSubmit={prompt => createTape(prompt, false, true)} transcribe={(audio,signal) => api.transcribe(audio,signal)} draftSeed={draftSeed}
+        suggestions={<RoutineSuggestions key={user.id} api={api} busy={creatingTape} onCreate={prompt => createTape(prompt, false, true).catch((cause) => { if (!(cause instanceof PromptKept)) throw cause })}/>}
         player={<PlaybackPanel controller={playback}/>}
         onColor={(id,color) => updateMix(id,{caseColor:color})} onRename={(id,title) => updateMix(id,{title})} onArchive={id => updateMix(id,{status:'archived'})}
       /> : activeView === 'memories' ? <MemoryControls api={api} onClose={() => setActiveView('settings')} onSessionExpired={signOut} /> : activeView === 'music' ? (
@@ -931,7 +1140,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       {dialog === 'interview' ? (
         <InterviewDialog api={api} onClose={() => setDialog(null)} onComplete={completeInterview} />
       ) : null}
-      {dialog === 'account' ? (
+      {dialog === 'account' && !anonymous ? (
         <AccountDialog
           onMemories={() => { setDialog(null); setActiveView('memories') }}
           auth={accountAuth}
@@ -946,6 +1155,23 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     </div>
     {addingMusic ? (
       <FirstRun mode="add" services={addMusicServices} onChooseService={recordServiceChoice} onDone={finishAddingMusic} />
+    ) : null}
+    {keepSheet ? <KeepSheet onKeep={keepFromSheet} onNotNow={() => dismissSheet()} /> : null}
+    {signInPage ? (
+      <div className="first-run fr-root fr-root--over" data-testid="sign-in-over-shell">
+        <div className="fr-sign-in">
+          <BackButton onBack={() => window.history.back()} className="fr-back--over" />
+          <SignInPage
+            auth={signInAuth}
+            preferences={signInPreferences}
+            lastUsed={lastSignInProvider}
+            error={signInPageError}
+            onStart={() => setSignInPageError('')}
+            variant={signInPage}
+            onSignedIn={() => { void refetchSession?.() }}
+          />
+        </div>
+      </div>
     ) : null}
     </>
   )

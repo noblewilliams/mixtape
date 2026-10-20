@@ -42,7 +42,8 @@ Path A, make a mix now (three pages):
    device." One pill, **Keep this mix**, which pushes the sign-in page, and a
    text link **Not now**. Provider buttons never appear inside a sheet or the
    composer panel (founder, 2026-10-20). Dismissing it once is final for the
-   session; the You tab keeps a quiet **Sign in** row.
+   session (on web, the browser tab's session, so a new tab after the next mix
+   shows it again); the You tab keeps a quiet **Sign in** row.
 
 Path B, add my music first (three counted steps, then path A):
 
@@ -88,7 +89,7 @@ fills a third per step. Back is the rewind glyph (transport symbols rule,
 mobile-design-preferences); on web it is the same glyph.
 
 Cap reached: the composer stays as it is. Sending a fourth mix pushes the
-sign-in page with the headline "Keep your mixes." and the line "That's three
+sign-in page with the headline "Keep your mixes." and the line "That’s three
 mixes on this device. Sign in to keep going, and to keep these." Back returns
 to Home with the prompt kept in the field; the prompt is sent after sign-in.
 Nothing about the cap is drawn inside the composer panel.
@@ -241,7 +242,10 @@ deleted unmerged.
 ### What the device loses
 
 Web: clearing site data or a private window loses the anonymous session and
-with it the mixes and library. iOS: the keychain survives reinstall (the
+with it the mixes and library. A 401 on any read signs the listener out, as
+it does for accounts; for an anonymous listener that discards their only
+identity, which is right once the session has expired and the retention job
+will clear the rows. iOS: the keychain survives reinstall (the
 stale-keychain item in the backlog stays as is). The Keep-this-mix sheet is
 the mitigation; nothing else is attempted.
 
@@ -302,7 +306,7 @@ rows after the first mix.
   for anything."
 - Keep sheet: "Keep this mix." Line "Sign in and your mixes and music stay
   with you on any device." Pill "Keep this mix". Link "Not now".
-- Cap, on the sign-in page: "Keep your mixes." Line "That's three mixes on
+- Cap, on the sign-in page: "Keep your mixes." Line "That’s three mixes on
   this device. Sign in to keep going, and to keep these."
 - Refusal (DJ voice, existing text, shown in the transcript): the model's own
   sentence from `INSUFFICIENT_SEEDS_TEXT`.

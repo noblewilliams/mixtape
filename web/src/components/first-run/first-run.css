@@ -223,9 +223,23 @@
 .fr-host { margin-top: 12px; padding: 4px; border-radius: 18px; background: var(--fr-paper); color: var(--fr-ink); color-scheme: light; }
 .fr-host .drop { border-radius: 14px; }
 
-/* The sign-in page reached from the welcome foot link keeps its own look
-   (its plum-black background lands with the Keep sheet); the outline back
-   sits on the dark plane around its card, so it stays cream. */
+/* The sign-in page keeps its own card, now on the plum-black sign-in image
+   with the first-run scrim (spec: "unchanged apart from its headline and
+   background"). The outline back sits on the dark plane around the card, so
+   it stays cream. */
+.auth-page.auth-page--graphic {
+  position: relative;
+  isolation: isolate;
+  background: #140c12 var(--auth-bg) center / cover no-repeat;
+}
+.auth-page.auth-page--graphic::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(10, 6, 10, .58) 0%, rgba(10, 6, 10, .44) 45%, rgba(10, 6, 10, .58) 100%);
+}
 .fr-sign-in { position: relative; min-height: 100%; }
 .fr-back--over { position: absolute; top: 14px; left: 12px; z-index: 2; }
 
@@ -234,9 +248,19 @@
   .fr-top { margin-top: 0; }
 }
 
-/* Under 760 px the sign-in card fills the screen: the outline takes its text colour. */
+/* Under 760 px the card would fill the screen and hide the image, so on the
+   graphic page it drops its fill: cream text straight on the plum black, as
+   board C1 and C2 draw it, with room above the wordmark for the back tape. */
 @media (max-width: 760px) {
-  .fr-back--over { color: #31353b; border-color: currentColor; }
+  .auth-page--graphic .auth-surface { background: transparent; box-shadow: none; border: 0; }
+  .auth-page--graphic .auth-intro { padding-top: 72px; }
+  .auth-page--graphic .auth-wordmark,
+  .auth-page--graphic .auth-copy h1 { color: #efe6da; }
+  .auth-page--graphic .auth-copy > p:last-child,
+  .auth-page--graphic .auth-status { color: rgba(239, 230, 218, .82); }
+  .auth-page--graphic .auth-error { color: #f6bfcb; }
+  /* Full-width pills, so the last-used note inside them clears the label. */
+  .auth-page--graphic .auth-provider-row { justify-content: stretch; }
 }
 
 /* The import panel's pick pill: the label is the pill, the input is hidden inside it. */
@@ -245,3 +269,66 @@
 .import-pick-pill [role="alert"] { margin: 0; color: var(--fr-err); }
 .import-pick-pill .fr-pill { position: relative; }
 .import-pick-pill .fr-pill:focus-within { outline: 2px solid var(--fr-cream); outline-offset: 3px; }
+
+/* Keep this mix (board A6): cream paper over the mix, one paper pill and Not
+   now. A bottom sheet on narrow widths, a centred compact modal on wide ones.
+   Opaque, so reduced transparency changes nothing. */
+.ks-root {
+  --fr-paper: #e8dfcf;
+  --fr-paper-off: rgba(232, 223, 207, .45);
+  --fr-ink: #1c1a1e;
+  --ks-cream: #efe6da;
+  --ks-pill: #ddd2bf;
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  color-scheme: light;
+}
+.ks-backdrop { position: absolute; inset: 0; background: rgba(20, 16, 20, .28); animation: fr-fade .2s ease both; }
+.ks-sheet {
+  position: relative;
+  width: 100%;
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 8px 20px calc(28px + env(safe-area-inset-bottom, 0px));
+  border-radius: 26px 26px 0 0;
+  background: var(--ks-cream);
+  color: var(--fr-ink);
+  box-shadow: 0 -10px 40px rgba(30, 24, 40, .16);
+  display: flex;
+  flex-direction: column;
+  animation: ks-rise .26s cubic-bezier(.2, .7, .2, 1) both;
+}
+@keyframes ks-rise { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+.ks-grab { align-self: stretch; height: 22px; display: grid; place-items: center; margin-bottom: 8px; cursor: pointer; }
+.ks-grab i { width: 36px; height: 5px; border-radius: 3px; background: rgba(28, 26, 30, .22); }
+.ks-h {
+  margin: 0;
+  color: var(--fr-ink);
+  font: 800 1.75em/1.08 -apple-system, BlinkMacSystemFont, "SF Pro Display", Inter, sans-serif;
+  letter-spacing: -.025em;
+  overflow-wrap: anywhere;
+}
+.ks-h:focus { outline: none; }
+.ks-h:focus-visible { outline: 2px solid var(--fr-ink); outline-offset: 4px; border-radius: 4px; }
+.ks-line { margin: 10px 0 0; color: #3f383f; font-size: 1rem; line-height: 1.4; }
+.ks-acts { display: flex; flex-direction: column; margin-top: 22px; }
+.ks-acts .fr-pill { background: var(--ks-pill); color: var(--fr-ink); }
+.ks-acts .fr-pill:focus-visible, .ks-link:focus-visible { outline: 2px solid var(--fr-ink); outline-offset: 3px; }
+.ks-foot { margin: 6px 0 0; display: flex; justify-content: center; }
+.ks-link { min-height: 44px; padding: 0 12px; border: 0; background: transparent; color: var(--fr-ink); font: inherit; font-weight: 600; cursor: pointer; }
+
+@media (min-width: 641px) {
+  .ks-root { align-items: center; padding: 24px; }
+  .ks-sheet { width: 400px; max-width: 100%; padding: 28px 28px 18px; border-radius: 22px; box-shadow: 0 24px 70px rgba(20, 16, 24, .3); }
+  .ks-grab { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ks-sheet { animation: fr-fade .2s ease both !important; }
+}
+
+/* The sign-in page over the shell (from the sheet, the cap, the You row). */
+.fr-root--over { z-index: 60; }

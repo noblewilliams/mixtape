@@ -542,6 +542,7 @@ describe('Mixtape API client: listening import and onboarding', () => {
 
     expect(await api.postFunnelEvent({ type: 'file_inspected', surface: 'web' })).toEqual({ ok: true })
     expect(await api.postInterview(interview)).toEqual({ seeds: 2, notes: { saved: 4, duplicate: 0, capped: 0 } })
+    expect(fetchMock.mock.calls[0][1]?.keepalive).toBe(true)
     expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method, init?.body])).toEqual([
       ['https://api.mixtape.test/me/funnel-events', 'POST', JSON.stringify({ type: 'file_inspected', surface: 'web' })],
       ['https://api.mixtape.test/me/interview', 'POST', JSON.stringify(interview)],

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { CreateSessionResponse } from '../../api/client'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { CreateSessionResponse, FunnelEventType } from '../../api/client'
+import { createDeferredFunnel } from '../../lib/funnel-once'
 import type { AuthPreferenceStore, AuthProvider } from '../../lib/auth-provider'
 import { SignInPage, type AuthBridge } from '../AuthGate'
 import { Artists, ARTISTS_HEADLINE } from './Artists'
@@ -116,6 +117,21 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
   const [syncStartFailed, setSyncStartFailed] = useState(false)
   const page = trail.current[depth] ?? trail.current[0]
 
+  // The first run's funnel (not Library's add flow). Events wait in memory
+  // until the first server action has made sure of the session.
+  const [funnel] = useState(() => (!adding && services ? createDeferredFunnel(services.api) : null))
+  const record = (type: FunnelEventType) => funnel?.record(type)
+  useEffect(() => {
+    funnel?.record('first_run_opened')
+  }, [funnel])
+  const ensure = useCallback(async () => {
+    if (!services) return
+    await services.ensureSession()
+    funnel?.flush()
+  }, [services, funnel])
+  // The doing page's own server actions (import, request) flush the funnel too.
+  const flowServices = useMemo(() => (services ? { ...services, ensureSession: ensure } : null), [services, ensure])
+
   const exit = useCallback(
     (result: FirstRunResult) => {
       if (finished.current) return
@@ -186,7 +202,7 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
     setBusy(true)
     setError('')
     try {
-      await services.ensureSession()
+      await ensure()
       const response = await services.api.createSession(text)
       finish({ session: response })
     } catch {
@@ -197,6 +213,7 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
 
   /** Path A: with nothing synced in this flow, the artists page comes first. */
   function send(text: string) {
+    if (page.id === 'welcome') record('chose_make_mix')
     if (seedsSaved || (songsIn ?? 0) > 0) void makeMix(text)
     else {
       setPendingPrompt(text)
@@ -210,7 +227,7 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
     setBusy(true)
     setError('')
     try {
-      await services.ensureSession()
+      await ensure()
       await services.api.putArtistSeeds(names)
       setSeedsSaved(true)
     } catch {
@@ -235,19 +252,21 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
   function startSync() {
     if (!services) return
     setSyncStartFailed(false)
-    services.ensureSession().then(
+    ensure().then(
       () => services.syncRun.start(),
       () => setSyncStartFailed(true),
     )
   }
 
   function chooseMethod(method: AddMethod) {
+    record('chose_method')
     push({ id: 'doing', method })
     if (method === 'apple-sync') startSync()
   }
 
   /** After the doing page: the prompt page, or the artists page first when nothing usable came in. */
   function added(songs: number) {
+    record('sync_done')
     if (adding) return finish({})
     setSongsIn(songs)
     push(songs > 0 || seedsSaved ? { id: 'prompt' } : { id: 'artists' })
@@ -266,7 +285,7 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
           draft={prompt}
           onDraft={setPrompt}
           onSend={send}
-          onAddMusic={page.id === 'welcome' ? () => { setPendingPrompt(null); push({ id: 'service' }) } : undefined}
+          onAddMusic={page.id === 'welcome' ? () => { record('chose_add_music'); setPendingPrompt(null); push({ id: 'service' }) } : undefined}
           line={page.id === 'prompt' && songsIn ? `${songsIn.toLocaleString()} songs in. Ask for anything.` : undefined}
           onSignIn={() => push({ id: 'sign-in' })}
           onBack={page.id === 'prompt' ? back : undefined}
@@ -286,6 +305,7 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
         <ChooseService
           key={key}
           onChoose={(service) => {
+            record('chose_service')
             onChooseService?.(service)
             push({ id: 'method', service })
           }}
@@ -299,11 +319,11 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
       content = <ChooseMethod key={key} service={page.service} onChoose={chooseMethod} onBack={back} focusHeading={focusHeading} />
       break
     case 'doing':
-      content = services ? (
+      content = flowServices ? (
         <DoingPage
           key={key}
           method={page.method}
-          services={services}
+          services={flowServices}
           onBack={back}
           focusHeading={focusHeading}
           onStartSync={startSync}

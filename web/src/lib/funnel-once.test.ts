@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { funnelFlagKey, postFunnelEventOnce } from './funnel-once'
+import { createDeferredFunnel, funnelFlagKey, hasPostedFunnelEvent, postFunnelEventOnce } from './funnel-once'
 
 const settled = () => new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -64,5 +64,47 @@ describe('once-per-user funnel events', () => {
     expect(postFunnelEventOnce({ postFunnelEvent }, 'user-1', 'first_output')).toBe(true)
     await Promise.resolve()
     expect(postFunnelEvent).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('first-run funnel events before a session exists', () => {
+  beforeEach(() => localStorage.clear())
+
+  it('holds events in memory until the session exists, then posts each once in order', async () => {
+    const postFunnelEvent = vi.fn(async (_event: { type: string; surface: 'web' }) => ({ ok: true as const }))
+    const funnel = createDeferredFunnel({ postFunnelEvent })
+    funnel.record('first_run_opened')
+    funnel.record('chose_add_music')
+    funnel.record('first_run_opened')
+    expect(postFunnelEvent).not.toHaveBeenCalled()
+
+    funnel.flush()
+    funnel.record('chose_service')
+    funnel.record('chose_add_music')
+    funnel.flush()
+    await settled()
+
+    expect(postFunnelEvent.mock.calls.map(([event]) => event)).toEqual([
+      { type: 'first_run_opened', surface: 'web' },
+      { type: 'chose_add_music', surface: 'web' },
+      { type: 'chose_service', surface: 'web' },
+    ])
+  })
+
+  it('never posts when the session never comes', async () => {
+    const postFunnelEvent = vi.fn(async () => ({ ok: true as const }))
+    const funnel = createDeferredFunnel({ postFunnelEvent })
+    funnel.record('first_run_opened')
+    await settled()
+    expect(postFunnelEvent).not.toHaveBeenCalled()
+  })
+
+  it('reports whether this user already posted an event', async () => {
+    const postFunnelEvent = vi.fn(async () => ({ ok: true as const }))
+    expect(hasPostedFunnelEvent('user-1', 'first_mix_made')).toBe(false)
+    postFunnelEventOnce({ postFunnelEvent }, 'user-1', 'first_mix_made')
+    await settled()
+    expect(hasPostedFunnelEvent('user-1', 'first_mix_made')).toBe(true)
+    expect(hasPostedFunnelEvent('user-2', 'first_mix_made')).toBe(false)
   })
 })

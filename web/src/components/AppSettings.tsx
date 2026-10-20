@@ -12,7 +12,13 @@ type Props = {
   onAccount: () => void
   onMemories: () => void
   onSignOut: () => void
+  /** An anonymous listener: one sign-in row instead of the identity block, no Sign out. */
+  anonymous?: boolean
+  /** The anonymous row: opens the sign-in page. */
+  onSignIn?: () => void
 }
+
+export const SIGN_IN_ROW = 'Sign in to keep your mixes'
 
 export function AppSettings({
   api,
@@ -22,6 +28,8 @@ export function AppSettings({
   onAccount,
   onMemories,
   onSignOut,
+  anonymous = false,
+  onSignIn,
 }: Props) {
   const player = useSyncExternalStore(playback.subscribe, playback.getState)
   const [enabled, setEnabled] = useRestorableState<boolean | null>('settings.recommendations', null)
@@ -85,6 +93,12 @@ export function AppSettings({
   return (
     <main className="app-settings">
       <h1>Settings</h1>
+      {anonymous ? (
+        <button type="button" className="settings-sign-in-row" onClick={onSignIn}>
+          <span>{SIGN_IN_ROW}</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+        </button>
+      ) : null}
       {error && (
         <div className="home-inline-error" role="alert">
           <span>{error}</span>
@@ -149,7 +163,7 @@ export function AppSettings({
           <PlaybackPanel controller={playback} settingsOnly />
         </div>
       </section>
-      <section>
+      {anonymous ? null : <section>
         <h2>Account</h2>
         <div className="setting-row">
           <span>
@@ -166,7 +180,7 @@ export function AppSettings({
           <span>Sign out of Mixtape</span>
           <button className="wc-text" onClick={onSignOut}>Sign out</button>
         </div>
-      </section>
+      </section>}
     </main>
   )
 }

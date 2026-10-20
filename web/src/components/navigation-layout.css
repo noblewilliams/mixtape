@@ -50,3 +50,6 @@
 .home-feed .mix-skeletons{padding:16px 0}
 .primary-sidebar .primary-nav button[aria-current=page]{background:color-mix(in srgb,var(--graphite) 9%,transparent)}
 .home-panel.mixes-panel{padding-bottom:0}
+/* The anonymous listener's one flush row in place of the identity block (board C3). */
+.settings-sign-in-row{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;max-width:900px;min-height:44px;margin:0 0 28px;padding:12px 0;border:0;border-bottom:1px solid var(--hairline);background:transparent;color:inherit;font:inherit;font-size:14px;font-weight:600;text-align:left;cursor:pointer}
+.settings-sign-in-row svg{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;opacity:.6}

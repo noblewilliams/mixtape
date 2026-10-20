@@ -4,6 +4,14 @@ import './home-composer.css'
 
 const placeholders = ['A slow evening, nothing too loud…', 'Something for the long way home…', 'Start with one song you love…']
 type VoiceState = 'idle' | 'requesting' | 'recording' | 'transcribing'
+/** Rejects a submit without an error line: the prompt stays in the field. */
+export class PromptKept extends Error {
+  constructor() {
+    super('Prompt kept')
+    this.name = 'PromptKept'
+  }
+}
+
 export type PromptComposerProps = {
   draft: string
   setDraft: Dispatch<SetStateAction<string>>
@@ -150,8 +158,10 @@ export function PromptComposer({ draft, setDraft, tools, inputLabel = 'Describe 
     try {
       await onSubmit(draft.trim())
       if (mounted.current) setDraft('')
-    } catch {
-      if (mounted.current) setError(submitError)
+    } catch (cause) {
+      // The prompt stays and the composer draws nothing: the caller already
+      // answered elsewhere (the cap's sign-in page).
+      if (mounted.current && !(cause instanceof PromptKept)) setError(submitError)
     } finally {
       if (mounted.current) setSending(false)
     }

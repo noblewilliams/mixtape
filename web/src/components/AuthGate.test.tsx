@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { AuthGate, type AuthBridge, type AuthSessionState } from './AuthGate'
+import { AuthGate, CAP_LINE, SignInPage, type AuthBridge, type AuthSessionState } from './AuthGate'
 import { rememberIdentity, clearWorkspaceRestore } from '../lib/workspace-restore'
 import type { AuthPreferenceStore } from '../lib/auth-provider'
 import { fakeServices } from '../test/first-run-fakes'
@@ -322,5 +322,74 @@ describe('sign-in error from the URL', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('couldn’t check your session')
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+  })
+})
+
+
+describe('sign-in page variants', () => {
+  afterEach(cleanup)
+  const store = () => preferences('apple')
+
+  it('from the welcome foot link: the existing headline on the plum-black image', () => {
+    const { container } = render(<SignInPage auth={bridge()} preferences={store()} lastUsed="apple" error="" />)
+    expect(screen.getByRole('heading', { name: 'Your music, mixed for right now.' })).toBeInTheDocument()
+    expect(container.querySelector('.auth-page--graphic')?.getAttribute('style')).toContain('first-run/bg-sign-in.jpg')
+    expect(screen.getByText('last used')).toBeInTheDocument()
+  })
+
+  it('from the sheet or the You row: "Keep your mixes." with the last-used note and a blank status line', () => {
+    render(<SignInPage auth={bridge()} preferences={store()} lastUsed="apple" error="" variant="keep" />)
+    expect(screen.getByRole('heading', { name: 'Keep your mixes.' })).toBeInTheDocument()
+    expect(screen.queryByText(CAP_LINE)).not.toBeInTheDocument()
+    expect(screen.queryByText('Sign in to start a mix and keep your taste in sync.')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Continue with Apple' })).toHaveAccessibleDescription('last used')
+  })
+
+  it('at the cap: the cap line and no last-used note', () => {
+    render(<SignInPage auth={bridge()} preferences={store()} lastUsed="apple" error="" variant="cap" />)
+    expect(screen.getByRole('heading', { name: 'Keep your mixes.' })).toBeInTheDocument()
+    expect(screen.getByText('That’s three mixes on this device. Sign in to keep going, and to keep these.')).toBeInTheDocument()
+    expect(screen.queryByText('last used')).not.toBeInTheDocument()
+  })
+
+  it('reports a sign-in call that resolved without an error (as the redirect starts), and not one that failed', async () => {
+    const onSignedIn = vi.fn()
+    const signIn = vi.fn(async () => ({}))
+    render(<SignInPage auth={{ signIn }} preferences={store()} lastUsed={null} error="" variant="keep" onSignedIn={onSignedIn} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with Apple' }))
+    await waitFor(() => expect(onSignedIn).toHaveBeenCalledOnce())
+    cleanup()
+
+    const failed = vi.fn()
+    render(<SignInPage auth={{ signIn: vi.fn(async () => ({ error: 'Apple sign-in did not finish.' })) }} preferences={store()} lastUsed={null} error="" onSignedIn={failed} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with Apple' }))
+    await screen.findByRole('alert')
+    expect(failed).not.toHaveBeenCalled()
+  })
+
+  it('keeps a URL sign-in error for an anonymous listener and hands it to the shell; an account clears it', async () => {
+    window.history.replaceState({}, '', '/?auth_error=google')
+    const anon = { id: 'anon', name: 'Listener', email: 'a@anonymous.mixtape.invalid', isAnonymous: true }
+    const seen: string[] = []
+    let user: typeof anon | { id: string; name: string; email: string } = anon
+    const auth = bridge({ useSession: () => ({ data: { user }, isPending: false, error: null, refetch: vi.fn() }) })
+    const view = render(<AuthGate auth={auth} preferences={preferences()}>{(_u, _l, _r, _i, _f, error) => { seen.push(error); return <p>Shell</p> }}</AuthGate>)
+    await waitFor(() => expect(window.location.search).toBe(''))
+    expect(seen.at(-1)).toBe('Google sign-in did not finish.')
+    user = { id: 'user-1', name: 'Noble', email: 'noble@example.com' }
+    view.rerender(<AuthGate auth={auth} preferences={preferences()}>{(_u, _l, _r, _i, _f, error) => { seen.push(error); return <p>Shell</p> }}</AuthGate>)
+    await waitFor(() => expect(seen.at(-1)).toBe(''))
+    window.history.replaceState({}, '', '/')
+  })
+
+  it('hands the shell a session refetch', () => {
+    const refetch = vi.fn()
+    const auth = bridge({
+      useSession: () => ({ data: { user: { id: 'anon', name: 'Listener', email: 'a@anonymous.mixtape.invalid', isAnonymous: true } }, isPending: false, error: null, refetch }),
+    })
+    let handed: (() => void | Promise<void>) | null = null
+    render(<AuthGate auth={auth}>{(_user, _last, _restoring, _initial, next) => { handed = next; return <p>Shell</p> }}</AuthGate>)
+    expect(screen.getByText('Shell')).toBeInTheDocument()
+    expect(handed).toBe(refetch)
   })
 })

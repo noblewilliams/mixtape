@@ -31,14 +31,14 @@ function signOut() {
 export function RootApp() {
   return (
     <AuthGate auth={browserAuth} firstRunServices={firstRunServices}>
-      {(user, lastSignInProvider, restoring, initialSession) => (
-        <WorkspaceRestoreProvider key={user.id} userId={user.id} restoring={restoring}><SignedInApp user={user} lastSignInProvider={lastSignInProvider} restoring={restoring} initialSession={initialSession} /></WorkspaceRestoreProvider>
+      {(user, lastSignInProvider, restoring, initialSession, refetch, signInError) => (
+        <WorkspaceRestoreProvider key={user.id} userId={user.id} restoring={restoring}><SignedInApp user={user} lastSignInProvider={lastSignInProvider} restoring={restoring} initialSession={initialSession} refetch={refetch} signInError={signInError} /></WorkspaceRestoreProvider>
       )}
     </AuthGate>
   )
 }
 
-function SignedInApp({ user, lastSignInProvider, restoring, initialSession }: { user: AuthUser; lastSignInProvider: AuthProvider | null; restoring: boolean; initialSession: CreateSessionResponse | null }) {
+function SignedInApp({ user, lastSignInProvider, restoring, initialSession, refetch, signInError }: { user: AuthUser; lastSignInProvider: AuthProvider | null; restoring: boolean; initialSession: CreateSessionResponse | null; refetch: () => void | Promise<void>; signInError: string }) {
   const gate = useMemo(() => createSessionRequestGate(api), [])
   const pendingReads = useSyncExternalStore(gate.subscribe, gate.getPending)
   useLayoutEffect(() => { gate.setReady(!restoring); return () => gate.setReady(false) }, [gate, restoring])
@@ -46,7 +46,7 @@ function SignedInApp({ user, lastSignInProvider, restoring, initialSession }: { 
   // Browser authorization and pending work belong to this sign-in, never a module singleton.
   const musicKit = useMemo(() => createMusicKitClient({ getDeveloperToken: gate.api.getMusicKitToken }), [])
   return <>
-    <App api={gate.api} initialSession={initialSession ?? undefined} accountAuth={browserAuth} lastSignInProvider={lastSignInProvider} musicKit={musicKit} user={user} onSignOut={signOut} />
+    <App api={gate.api} initialSession={initialSession ?? undefined} accountAuth={browserAuth} signInAuth={browserAuth} refetchSession={refetch} signInError={signInError} lastSignInProvider={lastSignInProvider} musicKit={musicKit} user={user} onSignOut={signOut} />
     {!restoring && pendingReads > 0 && <div className="session-refresh-badge" role="status"><span className="session-refresh-spinner" aria-hidden="true" />Refreshing…</div>}
   </>
 }
