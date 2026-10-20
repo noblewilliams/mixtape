@@ -1,5 +1,41 @@
 # Decision Log
 
+## 2026-10-20 — Album picks and Listen later: direction agreed
+
+Alongside a mix, the DJ can answer a prompt with one album. Spec
+`superpowers/specs/2026-10-20-album-picks-design.md`. State board approved
+the same day as drawn after one revision (`mockups/approved/
+2026-10-20-album-picks.md`); plan `superpowers/plans/2026-10-20-album-picks.md`.
+Founder decisions:
+
+- The composer's app-wide segmented control gains **Mix | Album**. It is a
+  mode, not a remembered setting. Album hides Shape; a prompt that asks for
+  an album flips the control visibly before send, never silently. Anonymous
+  listeners do not get it (the first-run decision above stands).
+- Candidates come from both the listener's shelf (albums they hold at least
+  four songs of, grouped by name and scored against the brief) and the
+  catalogue (Sonnet proposes, the Apple catalogue verifies; nothing
+  unverified is ever shown). Familiarity blends them: comfort is shelf only,
+  adventurous is catalogue first.
+- One pick with two runners-up, refined in the same conversation. Passed-over
+  picks are kept as history.
+- The record type (album, EP, live, compilation) is the model's label;
+  Apple's single and compilation flags override it.
+- Spotify-only listeners get picks with an "Open in Spotify" search link
+  only; we hold no Spotify album ids.
+- **Listen later** is an in-app, user-scoped shelf in Mixes. Nothing is
+  written to Apple Music. Phase 1 marks listened by hand; listened from
+  playback evidence waits for album playback evidence to exist.
+- Albums are keyed by internal id plus UPC with `apple_id` one column among
+  peers, as tracks are. Server lands behind `ALBUM_PICKS` off.
+- The composer row's controls are compact: the Mix | Album segmented
+  control and the Shape chip are 26 pt tall drawn with a 44 pt hit area,
+  which also compacts the existing Shape chip on Home.
+
+**Reopens if:** catalogue verification discards most proposals, picks are
+passed over far more than played or saved, Spotify-only use outgrows a
+search link, or the shelf fills faster than it empties.
+
 ## 2026-10-20 — A mix before an account: anonymous listeners, merge rule, cap
 
 The first-run flow is being redesigned so a new listener reaches a mix
