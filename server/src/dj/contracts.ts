@@ -208,7 +208,7 @@ function intentJsonSchemas(properties: Record<string, unknown>): IntentJsonSchem
 // remember_preference's longhand JSON Schema — mirrors rememberPreferenceInputSchema
 // (an agreement test in contracts.test.ts checks both against each other, same as
 // the intent schemas above).
-const rememberPreferenceJsonSchema = Object.freeze({
+export const rememberPreferenceJsonSchema = Object.freeze({
   type: 'object' as const,
   properties: {
     note: {
@@ -227,7 +227,7 @@ const rememberPreferenceJsonSchema = Object.freeze({
 // rename_session's longhand JSON Schema — mirrors renameSessionInputSchema
 // (an agreement test in contracts.test.ts checks both against each other,
 // same as the other tools above).
-const renameSessionJsonSchema = Object.freeze({
+export const renameSessionJsonSchema = Object.freeze({
   type: 'object' as const,
   properties: {
     title: {

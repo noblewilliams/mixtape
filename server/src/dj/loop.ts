@@ -371,7 +371,7 @@ export { MAX_MEMORY_NOTES }
 // not the default 80 tuned for track titles, so a legitimately long saved
 // preference doesn't get silently clipped in the very block that's supposed
 // to state it.
-async function loadMemoryNotes(db: Db, userId: string): Promise<string[]> {
+export async function loadMemoryNotes(db: Db, userId: string): Promise<string[]> {
   const rows = await db
     .select({ note: djMemories.note })
     .from(djMemories)
@@ -389,7 +389,7 @@ async function loadMemoryNotes(db: Db, userId: string): Promise<string[]> {
 // it does for queue positions, and framed unambiguously as *stated
 // preferences*, not instructions from this turn, so a note can't pose as a
 // fresh command.
-function formatMemoryBlock(notes: string[]): string | null {
+export function formatMemoryBlock(notes: string[]): string | null {
   if (notes.length === 0) return null
   const lines = notes.map((n, i) => `${i + 1}. ${sanitizeForPrompt(n, 200)}`)
   return [
