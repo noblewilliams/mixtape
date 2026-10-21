@@ -21,6 +21,18 @@ function setup(transcribe = vi.fn().mockResolvedValue({ text: 'A quiet evening' 
   return { stop, getUserMedia, onSubmit, transcribe, ...view }
 }
 describe('HomeComposer', () => {
+  it('takes a mode seed from outside without a nudge, and a fresh seed applies again', () => {
+    const props = { albumPicks: true, anonymous: false, onSubmit: vi.fn(), transcribe: vi.fn() }
+    const { rerender } = render(<HomeComposer {...props} modeSeed={{ kind: 'album', id: 1 }} />)
+    expect(screen.getByRole('radio', { name: 'Album' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('button', { name: 'Find an album' })).toBeInTheDocument()
+    expect(screen.queryByText(/Switched to Album/)).toBeNull()
+    fireEvent.click(screen.getByRole('radio', { name: 'Mix' }))
+    rerender(<HomeComposer {...props} modeSeed={{ kind: 'album', id: 1 }} />)
+    expect(screen.getByRole('radio', { name: 'Mix' })).toHaveAttribute('aria-checked', 'true')
+    rerender(<HomeComposer {...props} modeSeed={{ kind: 'album', id: 2 }} />)
+    expect(screen.getByRole('radio', { name: 'Album' })).toHaveAttribute('aria-checked', 'true')
+  })
   it('submits trimmed drafts and keeps them when creation fails', async () => {
     const onSubmit = vi.fn().mockRejectedValue(new Error('offline'))
     render(<HomeComposer albumPicks={false} anonymous={false} onSubmit={onSubmit} transcribe={vi.fn()} />)

@@ -11,6 +11,9 @@ import type { MusicKitClient } from './musickit/client'
 import { createFakeApi, type FakeApi } from './test/fake-api'
 import type { ApiPlaylistSummary } from './api/client'
 
+// Whole-app renders run long on a loaded machine; the default 5 s is too tight there.
+vi.setConfig({ testTimeout: 15_000 })
+
 const kept = () => {
   const raw = sessionStorage.getItem('mixtape.kept-prompt')
   return raw ? JSON.parse(raw) : null

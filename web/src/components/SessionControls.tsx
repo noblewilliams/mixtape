@@ -120,6 +120,12 @@ export function InlineMixName({
   )
 }
 
+/** An album session has no songs to count: its subline names the current pick instead. */
+function sessionSubline(session: DjSession): string {
+  if (session.kind === 'album') return `Album · ${session.pick ? session.pick.title : 'no pick yet'}`
+  return `${session.trackCount} songs · ${session.ageLabel}`
+}
+
 export function SessionRow({
   session,
   onOpen,
@@ -234,7 +240,7 @@ export function SessionRow({
       <div className="wc-tile-foot">
         <span className="wc-session-copy">
           <strong>{renaming ? <InlineMixName title={session.title} onRename={onRename} initiallyEditing onDone={() => setRenaming(false)} /> : session.title}</strong>
-          <small>{session.trackCount} songs · {session.ageLabel}</small>
+          <small>{sessionSubline(session)}</small>
         </span>
         {menuButtonElement}
       </div>
@@ -339,7 +345,7 @@ export function SessionRow({
             {showTape && <span className="mix-tape-open">{cassette}</span>}
             <div className="wc-session-copy">
               <strong><InlineMixName title={session.title} onRename={onRename} initiallyEditing onDone={() => setRenaming(false)} /></strong>
-              <small>{session.trackCount} songs · {session.ageLabel}</small>
+              <small>{sessionSubline(session)}</small>
             </div>
           </div>
         ) : (
@@ -349,7 +355,7 @@ export function SessionRow({
               <button className="wc-name wc-row-name" onClick={() => setRenaming(true)} aria-label={`Edit mix name: ${session.title}`}>
                 <strong>{session.title}</strong>
               </button>
-              <small>{showTape ? <>{session.trackCount} songs · {session.ageLabel}</> : <button className="wc-row-open" onClick={onOpen} aria-label={`Open ${session.title}`}>{session.trackCount} songs · {session.ageLabel}</button>}</small>
+              <small>{showTape ? sessionSubline(session) : <button className="wc-row-open" onClick={onOpen} aria-label={`Open ${session.title}`}>{sessionSubline(session)}</button>}</small>
             </span>
           </div>
         )}

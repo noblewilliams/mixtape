@@ -53,3 +53,27 @@
 /* The anonymous listener's one flush row in place of the identity block (board C3). */
 .settings-sign-in-row{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;max-width:900px;min-height:44px;margin:0 0 28px;padding:12px 0;border:0;border-bottom:1px solid var(--hairline);background:transparent;color:inherit;font:inherit;font-size:14px;font-weight:600;text-align:left;cursor:pointer}
 .settings-sign-in-row svg{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;opacity:.6}
+/* Listen later tab (board W6): flush rows on the Mixes list metrics, 56px cover, play and dots in 44px slots. */
+.mixes-content>.shelf-list{list-style:none;margin:0;padding:4px 0 32px}
+.shelf-row{position:relative;display:grid;grid-template-columns:56px minmax(0,1fr) 44px 44px;gap:10px;align-items:center;min-height:72px;padding:6px 0}
+.shelf-row+.shelf-row::before{content:"";position:absolute;top:0;left:66px;right:0;height:1px;background:var(--hairline)}
+.shelf-row.has-menu{z-index:10}
+.shelf-cover{display:block;width:56px;height:56px;border-radius:6px;object-fit:cover}
+.shelf-open{display:flex;flex-direction:column;justify-content:center;align-self:stretch;min-width:0;padding:0;border:0;background:transparent;color:inherit;font:inherit;text-align:left}
+button.shelf-open{cursor:pointer}
+button.shelf-open:hover strong{text-decoration:underline;text-underline-offset:3px}
+.shelf-open:focus-visible,.shelf-play:focus-visible{outline:2px solid var(--slate);outline-offset:2px;border-radius:4px}
+.shelf-open strong{display:block;font-size:15px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.shelf-open small{display:block;margin-top:2px;font-size:11px;color:var(--smoke);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.shelf-open small b{color:var(--plum);font-weight:600}
+.shelf-open small.shelf-sub--marked{display:flex;overflow:visible}
+.shelf-who{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.shelf-mark{flex:none;white-space:nowrap;margin-left:.3em}
+.shelf-row--listened .shelf-open strong,.shelf-row--listened .shelf-open small{color:var(--muted)}
+.shelf-row--listened .shelf-cover{opacity:.7}
+.shelf-play{display:grid;place-items:center;width:44px;height:44px;padding:0;border:0;border-radius:8px;background:transparent;color:var(--slate);cursor:pointer}
+.shelf-play:hover:not(:disabled){background:color-mix(in srgb,var(--slate) 10%,transparent)}
+.shelf-play:disabled{opacity:.5;cursor:default}
+.shelf-play svg{width:18px;height:18px}
+.shelf-section{padding:14px 0 2px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.shelf-row .wc-more{color:var(--muted);font-weight:700;letter-spacing:.05em}

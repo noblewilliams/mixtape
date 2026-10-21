@@ -7,15 +7,18 @@ import { EmptyState } from './components/UiStates'
 import { ControlModal } from './components/ControlModal'
 import { TapeSettings } from './components/TapeSettings'
 import { AppleMusicMark, SpotifyMark } from './components/ProviderMarks'
-import { demoAlbumMessages, demoAlbumPick, demoAlbumRefinedPick, demoAlbumRunnersUp, demoMessages, demoQueue, demoSessions } from './data/demo'
+import { demoAlbumMessages, demoAlbumPick, demoAlbumRefinedPick, demoAlbumRunnersUp, demoMessages, demoQueue, demoSessions, demoShelfPreviewEntries } from './data/demo'
 import { AlbumPanel } from './components/AlbumPanel'
-import { toAlbumPick } from './api/mappers'
+import { toAlbumPick, toListenLaterEntry } from './api/mappers'
+import { placeOnShelf } from './components/ListenLaterList'
+import type { MixesTab } from './components/Home'
+import type { ModeSeed } from './components/HomeComposer'
 import { useMediaQuery } from './lib/use-media-query'
 import { Conversation } from './components/Conversation'
 import { PlaylistAttachment } from './components/PlaylistAttachment'
 import { QueuePanel } from './components/QueuePanel'
 import { tapeColors } from './data/tape-colors'
-import type { AlbumPickState, CollectionView, DjSession } from './domain'
+import type { AlbumPickState, CollectionView, DjSession, ListenLaterEntry } from './domain'
 import type { ApiPlaylistSummary, MixtapeApi } from './api/client'
 import { PlaylistBrowser } from './components/PlaylistBrowser'
 import { Tabs } from './components/Tabs'
@@ -78,13 +81,27 @@ function AlbumPreview({ state, session }: { state: 'album' | 'album-refined'; se
   </>
 }
 
+// Board W6 (the shelf) and W7 (empty); Remove and Mark listened act locally so the founder can click around.
+const previewShelf: ListenLaterEntry[] = demoShelfPreviewEntries.map(toListenLaterEntry)
+function ListenLaterPreview({ empty, sessions, onTab, onFindAlbum }: { empty: boolean; sessions: DjSession[]; onTab: (tab: MixesTab) => void; onFindAlbum: () => void }) {
+  const [entries, setEntries] = useState(empty ? [] : previewShelf)
+  return <Home sessions={sessions} tab="listen-later" onTab={onTab} albumPicks collectionView="list" onChangeCollectionView={() => {}} onOpenSession={() => {}} onNewTape={() => {}}
+    shelf={{
+      entries, spotifyOnly: false, onRetry: () => {}, onFindAlbum, onOpen: () => {}, onPlay: () => {},
+      onMarkListened: (entry) => setEntries((current) => placeOnShelf(current, { ...entry, listenedAt: new Date().toISOString() })),
+      onRemove: (entry) => setEntries((current) => current.filter((item) => item.id !== entry.id)),
+    }} />
+}
+
 export default function UiPolishPreview() {
   const [state, setState] = useState('populated')
   const [sessions, setSessions] = useState(demoSessions.slice(0, 4).map((session, index) => ({ ...session, caseColor: tapeColors[index * 9][1] as string })))
   const [collectionView, setCollectionView] = useState<CollectionView>('list')
+  const [modeSeed, setModeSeed] = useState<ModeSeed | null>(null)
+  const openTab = (tab: MixesTab) => setState(tab === 'archived' ? 'archived' : tab === 'listen-later' ? 'listen-later' : 'populated')
   async function color(id: string, caseColor: string) { setSessions(current => current.map(s => s.id === id ? { ...s, caseColor } : s)) }
   const close = () => setState('populated')
-  const options = ['home', 'home-loading', 'home-empty', 'home-error', 'populated', 'loading', 'empty', 'archived', 'load-error', 'refresh-error', 'settings', 'success', 'error', 'info', 'playlist', 'preference', 'memory', 'sources', 'library', 'library-loading', 'conversation', 'conversation-blank', 'album', 'album-refined', 'first-run', 'keep-sheet', 'sign-in-keep', 'sign-in-cap', 'merge-notice']
+  const options = ['home', 'home-loading', 'home-empty', 'home-error', 'populated', 'loading', 'empty', 'archived', 'load-error', 'refresh-error', 'settings', 'success', 'error', 'info', 'playlist', 'preference', 'memory', 'sources', 'library', 'library-loading', 'conversation', 'conversation-blank', 'album', 'album-refined', 'listen-later', 'listen-later-empty', 'first-run', 'keep-sheet', 'sign-in-keep', 'sign-in-cap', 'merge-notice']
   return <>
     <div style={{ position: 'fixed', right: 12, top: 8, zIndex: 200, display: 'flex', gap: 8, alignItems: 'center', background: '#f7f4f8', color: '#1c1a1e', padding: 8, borderRadius: 8, fontSize: 12 }}>
       <label htmlFor="ui-preview-state">UI preview · synthetic data</label><select id="ui-preview-state" value={state} onChange={e => setState(e.target.value)}>{options.map(option => <option key={option}>{option}</option>)}</select>
@@ -96,10 +113,11 @@ export default function UiPolishPreview() {
         <QueuePanel key={state} session={sessions[0]} tracks={state === 'conversation' ? previewQueue : []} playing={false} playbackBusy={false} musicConnection="connected" open={false} onConnect={() => {}} onTogglePlay={() => {}} onSave={() => {}} onClose={() => {}} onPreviewTracks={() => {}} onCommitQueueOp={async () => {}} />
       </>
       : state === 'album' || state === 'album-refined' ? <AlbumPreview key={state} state={state} session={sessions[0]} />
-      : state.startsWith('home') ? <HomeDashboard sessions={state === 'home' ? sessions : []} loading={state === 'home-loading'} error={state === 'home-error' ? 'Unavailable' : ''} busy={false} player={null} suggestions={state === 'home' ? <section className="routine-suggestions"><h2>For this moment</h2><div className="routine-card"><img className="routine-tape" src="/tape.svg" alt=""/><div className="routine-copy"><h3>A softer evening</h3><p>You often slow things down around this time.</p></div><div className="routine-actions"><button className="routine-primary">Make this mix</button><button>Not today</button></div></div></section> : null} onRetry={() => setState('home')} onOpenSession={close} onOpenMixes={close} albumPicks anonymous={false} onSubmit={async()=>{setState('populated')}} transcribe={async()=>({text:'A softer evening'})} onRename={async()=>{}} onArchive={async()=>{}} onColor={color}/> : state === 'memory' ? <main className="wc-view"><h1>What the DJ knows</h1><EmptyState kind="memory" title="No saved preferences yet" description="Tell the DJ what you would like it to remember." /></main>
+      : state === 'listen-later' || state === 'listen-later-empty' ? <ListenLaterPreview key={state} empty={state === 'listen-later-empty'} sessions={sessions} onTab={openTab} onFindAlbum={() => { setModeSeed({ kind: 'album', id: Date.now() }); setState('home') }} />
+      : state.startsWith('home') ? <HomeDashboard sessions={state === 'home' ? sessions : []} loading={state === 'home-loading'} error={state === 'home-error' ? 'Unavailable' : ''} busy={false} player={null} suggestions={state === 'home' ? <section className="routine-suggestions"><h2>For this moment</h2><div className="routine-card"><img className="routine-tape" src="/tape.svg" alt=""/><div className="routine-copy"><h3>A softer evening</h3><p>You often slow things down around this time.</p></div><div className="routine-actions"><button className="routine-primary">Make this mix</button><button>Not today</button></div></div></section> : null} onRetry={() => setState('home')} onOpenSession={close} onOpenMixes={close} albumPicks anonymous={false} onSubmit={async()=>{setState('populated')}} transcribe={async()=>({text:'A softer evening'})} modeSeed={modeSeed} onRename={async()=>{}} onArchive={async()=>{}} onColor={color}/> : state === 'memory' ? <main className="wc-view"><h1>What the DJ knows</h1><EmptyState kind="memory" title="No saved preferences yet" description="Tell the DJ what you would like it to remember." /></main>
       : state === 'library' || state === 'library-loading' ? <main className="ym-view"><header className="ym-header"><h1>Library</h1></header><Tabs label="Library sections" current="playlists" onSelect={close} items={[{ id: 'playlists', label: 'Playlists' }, { id: 'sources', label: 'Sources' }]} /><div className="ym-content"><PlaylistBrowser key={state} api={previewLibraryApis[state]} onInspire={close} onSources={close} onSessionExpired={close} /></div></main>
       : state === 'sources' ? <main className="ym-view"><header className="ym-header"><h1>Library</h1></header><div className="library-source-badges"><button className="library-source-badge"><AppleMusicMark />Apple Music<small>Connected</small></button><button className="library-source-badge"><SpotifyMark />Spotify<small>Imported</small></button></div><EmptyState title="No playlists yet" description="Playlists you bring from your music services will appear here." /></main>
-      : <Home sessions={['loading','empty','archived','load-error'].includes(state) ? [] : sessions} archived={state === 'archived'} loading={state === 'loading'} error={state.endsWith('error') ? 'Couldn’t load' : undefined} onRetry={close} onArchived={value => setState(value ? 'archived' : 'populated')} onColor={color} onRename={async(id,title) => setSessions(current=>current.map(s=>s.id === id ? {...s,title}:s))} onArchive={async()=>setState('info')} onRestore={async()=>setState('success')} collectionView={collectionView} onChangeCollectionView={setCollectionView} onOpenSession={() => {}} onNewTape={()=>setState('playlist')} />}
+      : <Home sessions={['loading','empty','archived','load-error'].includes(state) ? [] : sessions} tab={state === 'archived' ? 'archived' : 'active'} albumPicks loading={state === 'loading'} error={state.endsWith('error') ? 'Couldn’t load' : undefined} onRetry={close} onTab={openTab} onColor={color} onRename={async(id,title) => setSessions(current=>current.map(s=>s.id === id ? {...s,title}:s))} onArchive={async()=>setState('info')} onRestore={async()=>setState('success')} collectionView={collectionView} onChangeCollectionView={setCollectionView} onOpenSession={() => {}} onNewTape={()=>setState('playlist')} />}
     </div>
     {state === 'settings' && <TapeSettings session={sessions[0]} onColor={caseColor=>color(sessions[0].id,caseColor)} onClose={close} />}
     {['success','error','info'].includes(state) && <Toast tone={state as 'success'|'error'|'info'} message={state === 'success' ? 'Playlist created' : state === 'error' ? 'Couldn’t save. Try again.' : 'Mix archived'} action={state === 'info' ? { label: 'Undo', onClick:close }:undefined} />}

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import type { DjSession } from '../domain'
-import { HomeComposer, type DraftSeed, type HomeSubmit } from './HomeComposer'
+import { HomeComposer, type DraftSeed, type HomeSubmit, type ModeSeed } from './HomeComposer'
 import { SessionRow } from './SessionControls'
 import { MixSkeletons } from './UiStates'
 
@@ -22,6 +22,7 @@ type Props = {
   onArchive: (id: string) => Promise<void>
   onColor: (id: string, color: string) => Promise<void>
   draftSeed?: DraftSeed | null
+  modeSeed?: ModeSeed | null
 }
 
 export function HomeDashboard(p: Props) {
@@ -74,7 +75,7 @@ export function HomeDashboard(p: Props) {
         </section>
       </div>
       {p.player}
-      <HomeComposer busy={p.busy} albumPicks={p.albumPicks} anonymous={p.anonymous} onSubmit={p.onSubmit} transcribe={p.transcribe} draftSeed={p.draftSeed} />
+      <HomeComposer busy={p.busy} albumPicks={p.albumPicks} anonymous={p.anonymous} onSubmit={p.onSubmit} transcribe={p.transcribe} draftSeed={p.draftSeed} modeSeed={p.modeSeed} />
     </main>
   )
 }

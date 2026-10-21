@@ -19,7 +19,7 @@ type AlbumPanelProps = {
 }
 
 /** A cover, or a quiet square in the artwork's own tint when the catalogue has none. */
-export function AlbumCover({ album, size, className }: { album: AlbumPick; size: number; className: string }) {
+export function AlbumCover({ album, size, className }: { album: Pick<AlbumPick, 'artworkUrl' | 'artworkBgColor'>; size: number; className: string }) {
   const source = albumArtworkSource(album.artworkUrl, size)
   if (source) return <img className={className} src={source} alt="" aria-hidden="true" width={size} height={size} />
   return <span className={`${className} album-cover--fallback`} aria-hidden="true" style={album.artworkBgColor ? { background: `#${album.artworkBgColor.replace('#', '')}` } : undefined} />

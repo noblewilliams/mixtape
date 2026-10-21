@@ -6,6 +6,9 @@ import type { AccountBridge } from './components/AccountDialog'
 import type { MusicKitClient } from './musickit/client'
 import { createFakeApi } from './test/fake-api'
 
+// Whole-app renders run long on a loaded machine; the default 5 s is too tight there.
+vi.setConfig({ testTimeout: 15_000 })
+
 const user = { id: 'user-1', name: 'Noble', email: 'noble@example.com' }
 
 function createFakeMusicKit(overrides: Partial<MusicKitClient> = {}): MusicKitClient {

@@ -195,6 +195,20 @@ export const demoListenLaterEntries: ApiListenLaterEntry[] = [
   toDemoListenLaterEntry(demoShelfAlbums[1], { savedAt: '2026-10-12T08:15:00.000Z' }),
 ]
 
+/**
+ * Board W6 for the preview harness: four unlistened rows (newest saved first),
+ * then two listened rows (newest listened first), as the server orders them.
+ * Every Room has no source session, so its row shows no Open.
+ */
+export const demoShelfPreviewEntries: ApiListenLaterEntry[] = [
+  toDemoListenLaterEntry(demoAlbumPick, { savedAt: '2026-10-20T18:05:00.000Z', sessionId: 'album-session-1', reason: demoAlbumPick.reason }),
+  toDemoListenLaterEntry(demoShelfAlbums[0], { savedAt: '2026-10-19T19:30:00.000Z', sessionId: 'album-session-2', reason: demoShelfAlbums[0].reason }),
+  toDemoListenLaterEntry(demoAlbumRunnersUp[1], { savedAt: '2026-10-16T21:00:00.000Z', sessionId: 'album-session-1', reason: demoAlbumRunnersUp[1].reason }),
+  toDemoListenLaterEntry(demoShelfAlbums[1], { savedAt: '2026-10-12T08:15:00.000Z' }),
+  toDemoListenLaterEntry(demoAlbumRunnersUp[0], { savedAt: '2026-10-05T17:00:00.000Z', listenedAt: '2026-10-12T20:00:00.000Z', sessionId: 'album-session-1', reason: demoAlbumRunnersUp[0].reason }),
+  toDemoListenLaterEntry(demoAlbumRefinedPick, { savedAt: '2026-09-28T09:00:00.000Z', listenedAt: '2026-10-02T20:00:00.000Z', sessionId: 'album-session-3', reason: demoAlbumRefinedPick.reason }),
+]
+
 export const demoAlbumPrompt = 'An album for the train home, nothing loud.'
 export const demoAlbumReply =
   'One record, start to finish. Slow and warm, and it sits exactly where a tired train does. You already have three of its songs, so it will feel half familiar.'

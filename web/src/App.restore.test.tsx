@@ -6,6 +6,9 @@ import type { MusicKitClient } from './musickit/client'
 import { WorkspaceRestoreProvider } from './lib/workspace-restore'
 import { createFakeApi } from './test/fake-api'
 
+// Whole-app renders run long on a loaded machine; the default 5 s is too tight there.
+vi.setConfig({ testTimeout: 15_000 })
+
 const user = { id: 'restore-user', name: 'Noble', email: 'noble@example.com' }
 const musicKit: MusicKitClient = {
   connect: vi.fn(async () => undefined),

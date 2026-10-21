@@ -23,7 +23,7 @@ import {
   type QueueOpsResponse,
   type SessionDetailResponse,
 } from './api/client'
-import { toAlbumPickState, toDjMessage, toDjSession, toQueueTrack } from './api/mappers'
+import { toAlbumPickState, toDjMessage, toDjSession, toListenLaterEntry, toQueueTrack } from './api/mappers'
 import { AlbumPanel } from './components/AlbumPanel'
 import { useMediaQuery } from './lib/use-media-query'
 import { SignInPage, signInHeadline, type AuthBridge, type AuthUser, type SignInVariant } from './components/AuthGate'
@@ -38,7 +38,8 @@ import { MixHistory } from './components/MixHistory'
 import { Conversation } from './components/Conversation'
 import { HomeDashboard } from './components/HomeDashboard'
 import { AppSettings } from './components/AppSettings'
-import { Home } from './components/Home'
+import { Home, type MixesTab } from './components/Home'
+import { placeOnShelf } from './components/ListenLaterList'
 import { InterviewDialog } from './components/InterviewDialog'
 import { NewTapeDialog, SaveDialog, Toast } from './components/Overlays'
 import { QueuePanel } from './components/QueuePanel'
@@ -50,7 +51,7 @@ import { YourMusicView, type MusicSection } from './components/YourMusicView'
 import { createMusicSyncService } from './sync/music-sync-service'
 import { createMusicSyncRun } from './sync/music-sync-run'
 import { createUploadGate } from './sync/upload-gate'
-import type { AlbumPick, AlbumPickState, AppView, CollectionView, DjMessage, DjSession, QueueTrack, SessionKind } from './domain'
+import type { AlbumPick, AlbumPickState, AppView, CollectionView, DjMessage, DjSession, ListenLaterEntry, QueueTrack, SessionKind } from './domain'
 import { createImportRun } from './import/import-run'
 import { createListeningImportService } from './import/import-service'
 import { createLazyParser, createPageParser, type PageParser } from './import/page-parser'
@@ -58,7 +59,7 @@ import { MusicKitClientError, type MusicKitClient } from './musickit/client'
 import { browserAuthPreferences, type AuthPreferenceStore, type AuthProvider } from './lib/auth-provider'
 import { hasPostedFunnelEvent, postFunnelEventOnce } from './lib/funnel-once'
 import { clearKeptPrompt, keepPrompt, readKeptPrompt } from './lib/kept-prompt'
-import type { DraftSeed } from './components/HomeComposer'
+import type { DraftSeed, ModeSeed } from './components/HomeComposer'
 import { clearServiceChoice, readServiceChoice, writeServiceChoice, type ServiceChoice } from './lib/service-preference'
 
 type DialogState = 'new-tape' | 'save-playlist' | 'account' | 'interview' | null
@@ -232,7 +233,9 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   navigation.current = { activeSessionId, activeView }
   const [musicSection, setMusicSection] = useRestorableState<MusicSection>('musicSection', 'playlists')
   const [musicRevision, setMusicRevision] = useState(0)
-  const [showArchived, setShowArchived] = useRestorableState('showArchived', false)
+  const [storedMixesTab, setMixesTab] = useRestorableState<MixesTab>('mixesTab', 'active')
+  // A stored tab from another version must not break the page.
+  const mixesTab: MixesTab = storedMixesTab === 'archived' || storedMixesTab === 'listen-later' ? storedMixesTab : 'active'
   const [archiveUndo, setArchiveUndo] = useState<string | null>(null)
   const metadataRevision = useRef<Record<string, number>>({})
   const sessionWrites = useRef(new Set<string>())
@@ -442,6 +445,9 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   const [signInPage, setSignInPage] = useState<SignInPageState | null>(null)
   const [signInPageError, setSignInPageError] = useState('')
   const [draftSeed, setDraftSeed] = useState<DraftSeed | null>(null)
+  // Find an album's Album mode lasts one visit to Home: leaving Home spends it.
+  const [modeSeed, setModeSeed] = useState<ModeSeed | null>(null)
+  useEffect(() => { if (activeView !== 'home') setModeSeed(null) }, [activeView])
   const signInOpener = useRef<HTMLElement | null>(null)
   const sheetShown = useRef(false)
   const mixReplySeen = useRef(false)
@@ -1170,12 +1176,126 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     else void saveAlbum(activeSession.id, album.id)
   }
 
+  // Listen later in Mixes (board W6, W7). The shelf is read each time its tab opens, so saves and
+  // unsaves made from the album panel since the last visit show up without a shared cache.
+  const [listenLater, setListenLater] = useState<ListenLaterEntry[] | null>(null)
+  const [listenLaterError, setListenLaterError] = useState('')
+  const [shelfReads, setShelfReads] = useState(0)
+  // Albums whose shelf request is in flight: their row's actions wait, so nothing is dropped unseen.
+  const [shelfPending, setShelfPending] = useState<string[]>([])
+  // GET /me's flag is server-wide; the shelf is an account's, so anonymous listeners never see it.
+  const shelfOn = albumPicks && !anonymous
+  const mixesShown = activeView === 'mixes' || (activeView === 'session' && !activeSession)
+  const shelfOpen = shelfOn && mixesTab === 'listen-later' && mixesShown
+  useEffect(() => {
+    if (!shelfOpen || restoring) return
+    const controller = new AbortController()
+    setListenLaterError('')
+    api.listListenLater(controller.signal)
+      .then(({ entries }) => { if (!controller.signal.aborted) setListenLater(entries.map(toListenLaterEntry)) })
+      .catch((requestError) => {
+        if (controller.signal.aborted) return
+        setListenLaterError(errorCopy(requestError))
+        if (requestError instanceof ApiError && requestError.status === 401) signOut()
+      })
+    return () => controller.abort()
+  }, [api, shelfOpen, restoring, shelfReads])
+
+  /** Claims an album for one shelf request; false while another is in flight (its row's actions are disabled meanwhile). */
+  function beginShelfRequest(albumId: string) {
+    if (savingAlbums.current.has(albumId)) return false
+    savingAlbums.current.add(albumId)
+    setShelfPending((current) => [...current, albumId])
+    return true
+  }
+
+  function endShelfRequest(albumId: string) {
+    savingAlbums.current.delete(albumId)
+    setShelfPending((current) => current.filter((id) => id !== albumId))
+  }
+
+  function updateShelf(update: (entries: ListenLaterEntry[]) => ListenLaterEntry[]) {
+    setListenLater((current) => current && update(current))
+  }
+
+  /** Keeps any album panel holding this album in step with the shelf. */
+  function markSavedEverywhere(albumId: string, saved: boolean) {
+    setAlbumsBySession((current) => Object.fromEntries(Object.entries(current).map(([id, state]) => [id, withSaved(state, albumId, saved)])))
+  }
+
+  /** Remove is soft on the server, so Undo is a plain save back. */
+  async function removeFromShelf(entry: ListenLaterEntry) {
+    if (!beginShelfRequest(entry.id)) return
+    const signal = controlLife.current.signal
+    updateShelf((entries) => entries.filter((item) => item.id !== entry.id))
+    markSavedEverywhere(entry.id, false)
+    try {
+      await api.unsaveForLater(entry.id, signal)
+      if (signal.aborted) return
+      announce('Removed from Listen later.', 'success', 4000, { label: 'Undo', onClick: () => { setToast(null); void restoreToShelf(entry) } })
+    } catch (requestError) {
+      if (signal.aborted) return
+      updateShelf((entries) => placeOnShelf(entries, entry))
+      markSavedEverywhere(entry.id, true)
+      announce('Couldn’t remove this album. Try again.', 'error')
+      if (requestError instanceof ApiError && requestError.status === 401) signOut()
+    } finally {
+      endShelfRequest(entry.id)
+    }
+  }
+
+  async function restoreToShelf(entry: ListenLaterEntry) {
+    if (!beginShelfRequest(entry.id)) return
+    const signal = controlLife.current.signal
+    // A save back is a new save on the server: it lands at the top, so the row does too.
+    updateShelf((entries) => placeOnShelf(entries, { ...entry, savedAt: new Date().toISOString() }))
+    markSavedEverywhere(entry.id, true)
+    try {
+      const { entry: saved } = await api.saveForLater(entry.id, entry.sessionId ?? undefined, signal)
+      if (signal.aborted) return
+      updateShelf((entries) => placeOnShelf(entries, toListenLaterEntry(saved)))
+    } catch (requestError) {
+      if (signal.aborted) return
+      updateShelf((entries) => entries.filter((item) => item.id !== entry.id))
+      markSavedEverywhere(entry.id, false)
+      announce('Couldn’t save this album. Try again.', 'error')
+      if (requestError instanceof ApiError && requestError.status === 401) signOut()
+    } finally {
+      endShelfRequest(entry.id)
+    }
+  }
+
+  async function markShelfListened(entry: ListenLaterEntry) {
+    if (entry.listenedAt || !beginShelfRequest(entry.id)) return
+    const signal = controlLife.current.signal
+    // Only rows still on the shelf move: a removal that landed meanwhile stays removed.
+    const replace = (next: ListenLaterEntry) => updateShelf((entries) => entries.some((item) => item.id === next.id) ? placeOnShelf(entries, next) : entries)
+    replace({ ...entry, listenedAt: new Date().toISOString() })
+    try {
+      const { entry: saved } = await api.markListened(entry.id, signal)
+      if (signal.aborted) return
+      replace(toListenLaterEntry(saved))
+    } catch (requestError) {
+      if (signal.aborted) return
+      replace(entry)
+      announce('Couldn’t mark this album. Try again.', 'error')
+      if (requestError instanceof ApiError && requestError.status === 401) signOut()
+    } finally {
+      endShelfRequest(entry.id)
+    }
+  }
+
+  function findAnAlbum() {
+    setModeSeed({ kind: 'album', id: Date.now() })
+    setActiveView('home')
+  }
+
   /**
    * Play now queues the whole album in Apple Music. No session event and no
    * playback evidence for albums in this phase: the evidence model is keyed
    * by mix positions, which an album does not have.
    */
-  async function playAlbum(album: AlbumPick) {
+  async function playAlbum(album: Pick<AlbumPick, 'appleId'>) {
     if (playbackBusy) return
     const failed = () => announce('Apple Music couldn’t play this album. Try again in a moment.', 'error')
     if (!album.appleId) return failed()
@@ -1239,14 +1359,14 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       <Sidebar activeView={activeView}
         onOpenHome={() => setActiveView('home')}
         onOpenMusic={openMusic}
-        onOpenMixes={() => { setShowArchived(false); setActiveView('mixes') }}
+        onOpenMixes={() => { setMixesTab('active'); setActiveView('mixes') }}
         onOpenSettings={() => setActiveView('settings')}
       />
 
       {activeView === 'settings' ? <AppSettings api={api} playback={playback} userName={user.name} signInMethod={lastSignInProvider} onAccount={() => setDialog('account')} onMemories={() => setActiveView('memories')} onSignOut={signOut} anonymous={anonymous} onSignIn={() => openSignIn('keep')}/> : activeView === 'home' ? <HomeDashboard
         sessions={sessions} loading={loadingCollection} error={collectionError} busy={creatingTape}
-        onRetry={() => void retryCollection()} onOpenSession={openSession} onOpenMixes={() => { setShowArchived(false); setActiveView('mixes') }}
-        albumPicks={albumPicks} anonymous={anonymous} onSubmit={(prompt, { kind, shape }) => createTape(prompt, false, true, shape, undefined, kind)} transcribe={(audio,signal) => api.transcribe(audio,signal)} draftSeed={draftSeed}
+        onRetry={() => void retryCollection()} onOpenSession={openSession} onOpenMixes={() => { setMixesTab('active'); setActiveView('mixes') }}
+        albumPicks={albumPicks} anonymous={anonymous} onSubmit={(prompt, { kind, shape }) => createTape(prompt, false, true, shape, undefined, kind)} transcribe={(audio,signal) => api.transcribe(audio,signal)} draftSeed={draftSeed} modeSeed={modeSeed}
         suggestions={<RoutineSuggestions key={user.id} api={api} busy={creatingTape} onCreate={prompt => createTape(prompt, false, true).catch((cause) => { if (!(cause instanceof PromptKept)) throw cause })}/>}
         player={<PlaybackPanel controller={playback}/>}
         onColor={(id,color) => updateMix(id,{caseColor:color})} onRename={(id,title) => updateMix(id,{title})} onArchive={id => updateMix(id,{status:'archived'})}
@@ -1275,9 +1395,23 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
           error={collectionError}
           onRetry={() => void retryCollection()}
           player={<PlaybackPanel controller={playback} />}
-          sessions={sessions.filter((session) => session.status === (showArchived ? 'archived' : 'active'))}
-          archived={showArchived}
-          onArchived={setShowArchived}
+          sessions={sessions.filter((session) => session.status === (mixesTab === 'archived' ? 'archived' : 'active'))}
+          tab={mixesTab}
+          onTab={setMixesTab}
+          albumPicks={shelfOn}
+          shelf={shelfOn ? {
+            entries: listenLater,
+            error: listenLaterError,
+            spotifyOnly: isSpotifyOnly(effectiveOnboarding, musicConnection),
+            busy: playbackBusy,
+            pendingIds: shelfPending,
+            onRetry: () => setShelfReads((count) => count + 1),
+            onFindAlbum: findAnAlbum,
+            onOpen: openSession,
+            onPlay: (entry) => void playAlbum(entry),
+            onMarkListened: (entry) => void markShelfListened(entry),
+            onRemove: (entry) => void removeFromShelf(entry),
+          } : undefined}
           onColor={(id, color) => updateMix(id, { caseColor: color })}
           onRename={(id, title) => updateMix(id, { title })}
           onArchive={(id) => updateMix(id, { status: 'archived' })}

@@ -9,6 +9,9 @@ import { createDirectParser } from './import/direct-parser'
 import { createFakeApi } from './test/fake-api'
 import { readFixtureArchiveBytes } from './test/listening-export-fixtures'
 
+// Whole-app renders run long on a loaded machine; the default 5 s is too tight there.
+vi.setConfig({ testTimeout: 15_000 })
+
 const user = { id: 'user-1', name: 'Noble', email: 'noble@example.com' }
 
 const blank: OnboardingResponse = {

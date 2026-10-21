@@ -81,3 +81,14 @@ it('renames a grid tile inline from its menu', () => {
   fireEvent.click(screen.getByRole('button', { name: `Rename ${demoSessions[0].title}` }))
   expect(screen.getByRole('textbox', { name: 'Mix name' })).toHaveFocus()
 })
+it.each([
+  ['row', { title: 'Low Tide Hours', artist: 'Mara Ilesanmi' }, 'Album · Low Tide Hours'],
+  ['row', null, 'Album · no pick yet'],
+  ['tile', { title: 'Low Tide Hours', artist: 'Mara Ilesanmi' }, 'Album · Low Tide Hours'],
+] as const)('sublines an album session in a %s with its pick, not a song count', (layout, pick, line) => {
+  const session = { ...demoSessions[0], kind: 'album' as const, pick, trackCount: 0 }
+  render(<SessionRow showTape layout={layout} session={session} onOpen={vi.fn()} onRename={vi.fn()} onArchive={vi.fn()} />)
+  expect(screen.getByText(line)).toBeInTheDocument()
+  expect(screen.queryByText(/songs ·/)).toBeNull()
+  expect(screen.getByRole('button', { name: layout === 'tile' ? `Mix actions for ${session.title}` : 'Mix actions' })).toBeInTheDocument()
+})

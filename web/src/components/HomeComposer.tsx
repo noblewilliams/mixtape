@@ -7,6 +7,8 @@ import { ModeControl } from './ModeControl'
 
 /** A prompt put back into the field from outside (the cap's kept prompt after a failed sign-in). */
 export type DraftSeed = { text: string; id: number }
+/** A mode chosen from outside (the empty shelf's Find an album); a fresh id applies it again. */
+export type ModeSeed = { kind: SessionKind; id: number }
 export type HomeSubmit = (prompt: string, options: { kind: SessionKind; shape?: EnergyArc }) => void | Promise<void>
 
 type Props = Pick<PromptComposerProps, 'busy' | 'transcribe'> & {
@@ -14,6 +16,7 @@ type Props = Pick<PromptComposerProps, 'busy' | 'transcribe'> & {
   anonymous: boolean
   onSubmit: HomeSubmit
   draftSeed?: DraftSeed | null
+  modeSeed?: ModeSeed | null
 }
 
 // Starters are prompts, not settings: they fill the field and never send.
@@ -23,7 +26,7 @@ const starters: Record<SessionKind, string[]> = {
 }
 const asksForAlbum = /\balbums?\b/i
 
-export function HomeComposer({ draftSeed, albumPicks, anonymous, onSubmit, busy = false, transcribe }: Props) {
+export function HomeComposer({ draftSeed, modeSeed, albumPicks, anonymous, onSubmit, busy = false, transcribe }: Props) {
   const [draft, setDraft] = useRestorableState('home.draft', '')
   // A mode, not a setting: Mix again on every mount, never stored.
   const [mode, setMode] = useState<SessionKind>('mix')
@@ -38,6 +41,11 @@ export function HomeComposer({ draftSeed, albumPicks, anonymous, onSubmit, busy 
   useEffect(() => {
     if (draftSeed) setDraft(draftSeed.text)
   }, [draftSeed?.id])
+
+  // The listener chose this mode elsewhere: no nudge, and nothing stored.
+  useEffect(() => {
+    if (modeSeed) setMode(modeSeed.kind)
+  }, [modeSeed?.id])
 
   useEffect(() => {
     const matches = asksForAlbum.test(draft)
