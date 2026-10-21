@@ -391,6 +391,14 @@ const generateQueueRows: Row[] = [
   { label: 'eraFrom one before the floor is invalid', sample: { themes: 'x', eraFrom: 1899 } },
   { label: 'eraTo one after the ceiling is invalid', sample: { themes: 'x', eraTo: 2101 } },
   { label: 'invalid familiarity enum value', sample: { themes: 'x', familiarity: 'chaotic' } },
+  { label: 'named artists and songs are valid', sample: { themes: 'x', namedArtists: ['Jay-Z'], namedSongs: [{ title: 'Reborn', artist: 'Kids See Ghosts' }, { title: 'Runaway' }] } },
+  { label: 'five named artists is valid', sample: { themes: 'x', namedArtists: ['a', 'b', 'c', 'd', 'e'] } },
+  { label: 'six named artists is invalid', sample: { themes: 'x', namedArtists: ['a', 'b', 'c', 'd', 'e', 'f'] } },
+  { label: 'an empty named artist is invalid', sample: { themes: 'x', namedArtists: [''] } },
+  { label: 'a named artist over 200 chars is invalid', sample: { themes: 'x', namedArtists: ['a'.repeat(201)] } },
+  { label: 'six named songs is invalid', sample: { themes: 'x', namedSongs: Array.from({ length: 6 }, (_, i) => ({ title: `t${i}` })) } },
+  { label: 'a named song without a title is invalid', sample: { themes: 'x', namedSongs: [{ artist: 'Kids See Ghosts' }] } },
+  { label: 'a named song with an extra field is invalid', sample: { themes: 'x', namedSongs: [{ title: 'Reborn', year: 2018 }] } },
 ]
 
 describe('generate_queue: zod and its longhand JSON schema agree', () => {
@@ -569,5 +577,39 @@ describe('DJ_TOOLS_WITH_OUTSIDE (OUTSIDE_PICKS on)', () => {
   ]
   it.each(rows)('generate_queue agrees with zod: $label', ({ sample }) => {
     expect(matchesJsonSchema(withOutside('generate_queue'), sample)).toBe(intentSchema.safeParse(sample).success)
+  })
+})
+
+describe('generate_queue named artists and songs', () => {
+  it('trims, drops blanks and dedupes case-insensitively, keeping the first spelling', () => {
+    const parsed = intentSchema.parse({
+      themes: 'x',
+      namedArtists: [' Jay-Z ', 'jay-z', '  ', 'Kid Cudi'],
+      namedSongs: [{ title: ' Reborn ', artist: ' Kids See Ghosts ' }, { title: 'REBORN', artist: 'kids see ghosts' }, { title: 'Reborn' }, { title: ' ' }],
+    })
+    expect(parsed.namedArtists).toEqual(['Jay-Z', 'Kid Cudi'])
+    expect(parsed.namedSongs).toEqual([{ title: 'Reborn', artist: 'Kids See Ghosts' }, { title: 'Reborn' }])
+  })
+
+  it('a parsed intent carries no new key when the model sent none', () => {
+    const parsed = intentSchema.parse({ themes: 'x' })
+    expect(parsed).not.toHaveProperty('namedArtists')
+    expect(parsed).not.toHaveProperty('namedSongs')
+  })
+
+  it('tells the model to leave out artists and songs the listener wants less of or to avoid', () => {
+    const props = DJ_TOOLS.find((t) => t.name === 'generate_queue')!.input_schema.properties as Record<string, { description: string }>
+    for (const field of ['namedArtists', 'namedSongs']) {
+      expect(props[field].description).toMatch(/avoid/)
+      expect(props[field].description).toMatch(/less/)
+      expect(props[field].description).toMatch(/never invent/i)
+    }
+  })
+
+  it('is advertised on generate_queue only, not on swap/extend intents', () => {
+    const ops = DJ_TOOLS.find((t) => t.name === 'edit_queue')!.input_schema.properties.ops as { items: { oneOf: Array<{ properties: { intent?: { properties: Record<string, unknown> } } }> } }
+    expect(ops.items.oneOf[2].properties.intent!.properties).not.toHaveProperty('namedArtists')
+    expect(ops.items.oneOf[3].properties.intent!.properties).not.toHaveProperty('namedSongs')
+    expect(opIntentSchema.parse({ themes: 'x', namedArtists: ['a'] })).not.toHaveProperty('namedArtists')
   })
 })

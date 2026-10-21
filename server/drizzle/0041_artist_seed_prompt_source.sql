@@ -1,0 +1,2 @@
+ALTER TABLE "user_artist_seeds" DROP CONSTRAINT "user_artist_seeds_source_check";--> statement-breakpoint
+ALTER TABLE "user_artist_seeds" ADD CONSTRAINT "user_artist_seeds_source_check" CHECK ("user_artist_seeds"."source" IN ('interview', 'pasted', 'spotify_export', 'prompt'));

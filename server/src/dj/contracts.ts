@@ -34,7 +34,51 @@ function checkWindowOrdering(
   }
 }
 
-export const intentSchema = intentBase.superRefine(checkWindowOrdering)
+// Artists and songs the listener names in the brief (spec 2026-10-21
+// everyone-gets-a-mix, step 1). The loop saves named artists as prompt seeds
+// before the pool mode resolves; named songs ride the turn result for the
+// Apple fill (step 2). generate_queue only: a swap or extend works inside a
+// queue that already exists. Optional rather than defaulted, like
+// allowOutside, so a parsed intent carries no new key unless the model sent
+// one. Trimmed, blanks dropped, deduped case-insensitively (first spelling
+// kept); more than NAMED_MAX is a schema error the model can correct.
+export const NAMED_MAX = 5
+export const NAMED_NAME_MAX = 200
+const namedName = z.string().min(1).max(NAMED_NAME_MAX)
+
+function firstOfEach<T>(items: T[], key: (item: T) => string): T[] {
+  const seen = new Set<string>()
+  return items.filter((item) => {
+    const k = key(item)
+    if (k === '' || seen.has(k)) return false
+    seen.add(k)
+    return true
+  })
+}
+
+const namedArtistsSchema = z
+  .array(namedName)
+  .max(NAMED_MAX)
+  .transform((names) => firstOfEach(names.map((n) => n.trim()), (n) => n.toLowerCase()))
+
+const namedSongsSchema = z
+  .array(z.object({ title: namedName, artist: namedName.optional() }).strict())
+  .max(NAMED_MAX)
+  .transform((songs) =>
+    firstOfEach(
+      songs.map(({ title, artist }) => {
+        const a = artist?.trim()
+        return a ? { title: title.trim(), artist: a } : { title: title.trim() }
+      }),
+      (s) => (s.title === '' ? '' : `${s.title.toLowerCase()}\u0000${s.artist?.toLowerCase() ?? ''}`),
+    ),
+  )
+
+export type NamedSong = { title: string; artist?: string }
+
+export const intentSchema = intentBase
+  .extend({ namedArtists: namedArtistsSchema.optional(), namedSongs: namedSongsSchema.optional() })
+  .superRefine(checkWindowOrdering)
 export type Intent = z.infer<typeof intentSchema>
 
 // Used only for swap/extend's replacement intent: targetCount doesn't apply
@@ -169,6 +213,36 @@ const intentPropertiesBase: Record<string, unknown> = {
   },
 }
 
+// Longhand for namedArtists / namedSongs (generate_queue only; see
+// intentSchema above). The descriptions are the model's whole instruction for
+// extracting them, so they say plainly: only what the listener names.
+const namedNameJson = { type: 'string', minLength: 1, maxLength: NAMED_NAME_MAX }
+const namedProperties = {
+  namedArtists: {
+    type: 'array',
+    maxItems: NAMED_MAX,
+    items: namedNameJson,
+    description:
+      'Artists the listener asks to hear or to build the mix around (at most 5). Leave out any artist they want ' +
+      'less of, want to avoid, or mention only as a contrast (less X, no X, nothing like X). Never invent any, ' +
+      'never add similar artists, and leave this out when they name none.',
+  },
+  namedSongs: {
+    type: 'array',
+    maxItems: NAMED_MAX,
+    items: {
+      type: 'object',
+      properties: { title: namedNameJson, artist: namedNameJson },
+      required: ['title'],
+      additionalProperties: false,
+    },
+    description:
+      'Songs the listener asks to hear or to build the mix around (at most 5), with the artist when they say it. ' +
+      'Leave out any song they want less of, want to avoid, or mention only as a contrast (less X, no X, nothing ' +
+      'like X). Never invent any, never guess an artist they did not give, and leave this out when they name none.',
+  },
+}
+
 const targetCountProperty = {
   type: 'integer' as const,
   minimum: 3,
@@ -193,7 +267,7 @@ function intentJsonSchemas(properties: Record<string, unknown>): IntentJsonSchem
     // generate_queue's full intent, including targetCount.
     full: Object.freeze({
       type: 'object' as const,
-      properties: { ...properties, targetCount: targetCountProperty },
+      properties: { ...properties, targetCount: targetCountProperty, ...namedProperties },
       required: ['themes'],
     }),
     // swap/extend's replacement intent, no targetCount, mirroring opIntentSchema.

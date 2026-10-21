@@ -70,6 +70,14 @@ CHECK or enum change if one exists), `server/test/dj/pool.test.ts`,
   threshold edges; prompt artists become seeds once; the old refusal text
   is gone.
 
+Left open by Task 2's review for later tasks: `buildOutsidePool`'s
+`own_artists` match (pool.ts ~1036) still compares exact names; a sixth
+named artist fails the whole tool call rather than being cut to five;
+`GET /me/artist-seeds` now returns `prompt` rows, which matters once the
+artists page prefills; the pinned tool hash in
+`outside-picks-flag-off.test.ts` strips the new fields rather than being
+re-pinned.
+
 ### Gate 1 (founder): migration and deploy
 
 Locale check done 2026-10-21 (read-only): production is PostgreSQL 18.6,

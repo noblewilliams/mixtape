@@ -40,8 +40,14 @@ function personalPool(n: number): PoolTrack[] {
 }
 
 describe('flag off is byte-for-byte today', () => {
-  it('sends the same tool definitions', () => {
-    expect(sha(JSON.stringify(DJ_TOOLS))).toBe(PINNED.tools)
+  // generate_queue's namedArtists/namedSongs (2026-10-21 everyone gets a mix)
+  // are a deliberate change to what the model sees, flag on or off; with
+  // them stripped, the flag-off tools are still the pre-outside ones.
+  it('sends the same tool definitions, bar the named artists and songs', () => {
+    const stripped = JSON.stringify(
+      JSON.parse(JSON.stringify(DJ_TOOLS), (k, v) => (k === 'namedArtists' || k === 'namedSongs' ? undefined : v)),
+    )
+    expect(sha(stripped)).toBe(PINNED.tools)
   })
 
   it('sends the same persona', () => {

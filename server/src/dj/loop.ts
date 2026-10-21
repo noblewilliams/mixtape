@@ -1,8 +1,8 @@
 import { z } from 'zod'
-import { and, desc, eq, gt, lt, inArray } from 'drizzle-orm'
+import { and, count, desc, eq, gt, lt, inArray } from 'drizzle-orm'
 import type { Db } from '../db/types'
 import type { Embedder } from '../enrich/embedder'
-import { djMemories, djMessages, djSessions, queueTracks, tracks, trackFeatures, mixVersions } from '../db/schema'
+import { djMemories, djMessages, djSessions, queueTracks, tracks, trackFeatures, mixVersions, userArtistSeeds } from '../db/schema'
 import type { LlmClient, LlmComplete, LlmMessage } from './llm'
 import { LlmError } from './llm'
 import {
@@ -16,12 +16,14 @@ import {
   DJ_TOOLS,
   DJ_TOOLS_WITH_OUTSIDE,
   type Intent,
+  type NamedSong,
   type OpIntent,
 } from './contracts'
 import { buildPool, hasPersonalCandidates, outsideCap, resolvePoolMode, type PoolMode, type PoolTrack } from './pool'
 import { curate, CurationTruncated, CurationUnparseable } from './curate'
 import { sanitizeForPrompt, sanitizeTitleText, stripEmDashes } from './sanitize'
 import { insertMemoryNote, MAX_MEMORY_NOTES } from './memory-notes'
+import { insertMissingArtistSeeds } from '../seeds/artist-seeds'
 import { findPlaylistSeeds, PlaylistSeedError, playlistSeedContext, readPlaylistSeed, selectPlaylistSeed } from '../playlists/seed'
 import {
   applyOps,
@@ -59,6 +61,11 @@ export type DjTurnResult = {
   // spreads this onto the turn response's own `sessionTitle` field ONLY when
   // set, so a no-rename turn omits it entirely rather than sending null.
   sessionTitle?: string
+  // Songs the listener named in this turn's brief (generate_queue's
+  // namedSongs, deduped across the turn), present only when there are any.
+  // Not stored and not sent to the client: the Apple fill (spec 2026-10-21
+  // everyone-gets-a-mix, step 2) reads them here.
+  namedSongs?: NamedSong[]
 }
 
 // Bounds the number of tool-use round trips in a single turn. A round is one
@@ -87,7 +94,7 @@ export const EMPTY_LIBRARY_TEXT =
 // voice — never straight to the client. No pool is built and no curation
 // budget is spent on the way to it.
 export const INSUFFICIENT_SEEDS_TEXT =
-  "not enough taste to draw from yet: this listener has no synced library, no listening history, and too few seed artists or pasted songs. Tell them you don't know them well enough yet and ask them to finish the DJ interview or paste a few songs they love. The queue is unchanged."
+  "not enough taste to draw from yet: this listener has no synced library, no listening history, and the artists they have named match too few songs in the shared catalog. Tell them plainly that you don't know their taste yet, and ask them to name a few more artists they love or to add their music from Library. The queue is unchanged."
 
 // Prepended, as its own first line, to a generate/edit tool result whenever
 // the picks came from the shared corpus rather than the listener's own
@@ -482,7 +489,7 @@ function withPlaylistSeedContext(sessionContext: string, state: Awaited<ReturnTy
 // back down to an OpIntent shape — dropping targetCount, which an op's own
 // `count` (extend) or the implicit 1 (swap) replaces.
 function toOpIntent(intent: Intent): OpIntent {
-  const { targetCount: _targetCount, ...rest } = intent
+  const { targetCount: _targetCount, namedArtists: _artists, namedSongs: _songs, ...rest } = intent
   return opIntentSchema.parse(rest)
 }
 
@@ -508,6 +515,23 @@ async function markNotPersonal(db: Db, sessionId: string): Promise<void> {
     .where(and(eq(djSessions.id, sessionId), eq(djSessions.notPersonal, false)))
 }
 
+// Prompt seeds a listener may hold. Prompts are cheap to send and every seed
+// shapes the corpus pool from then on, so a long chat cannot grow the list
+// without bound; the interview, pasted and export seeds are not counted.
+export const PROMPT_SEEDS_MAX = 20
+
+// One count over the (user_id, name) primary key's user_id prefix, then the
+// names that still fit, in the order named.
+async function savePromptSeeds(db: Db, userId: string, names: string[]): Promise<void> {
+  const [{ held }] = await db
+    .select({ held: count() })
+    .from(userArtistSeeds)
+    .where(and(eq(userArtistSeeds.userId, userId), eq(userArtistSeeds.source, 'prompt')))
+  const room = PROMPT_SEEDS_MAX - held
+  if (room <= 0) return
+  await insertMissingArtistSeeds(db, userId, names.slice(0, room), 'prompt')
+}
+
 async function executeGenerateQueue(
   db: Db,
   deps: DjDeps,
@@ -524,6 +548,14 @@ async function executeGenerateQueue(
   }
   // The listener's shape setting holds even when the model leaves energyArc off.
   const intent: Intent = { ...parsed.data, energyArc: parsed.data.energyArc ?? listenerShape }
+  // Artists named in the brief become seeds BEFORE the mode resolves, so the
+  // very turn that names them can already draw on them. A name the listener
+  // already holds (any source, any spelling of the same artist key) is left
+  // as it is, so a later turn naming them again adds nothing. Capped at
+  // PROMPT_SEEDS_MAX prompt rows per listener.
+  if (intent.namedArtists && intent.namedArtists.length > 0) {
+    await savePromptSeeds(db, session.userId, intent.namedArtists)
+  }
   // Resolved fresh before EVERY pool build (here and in executeEditQueue's
   // provider), never cached on the session: a listener's mode changes the
   // moment their import lands or a seed crosses the threshold, and the very
@@ -870,6 +902,19 @@ type AttemptResult = {
   text: string | null
   queueVersion: number
   stats: AttemptStats
+  namedSongs: NamedSong[]
+}
+
+// Folds one generate_queue's named songs into the turn's list: first spelling
+// of each title and artist pair kept, in the order named.
+function addNamedSongs(into: NamedSong[], songs: NamedSong[] | undefined): void {
+  const key = (s: NamedSong) => `${s.title.toLowerCase()}\u0000${s.artist?.toLowerCase() ?? ''}`
+  const seen = new Set(into.map(key))
+  for (const song of songs ?? []) {
+    if (seen.has(key(song))) continue
+    seen.add(key(song))
+    into.push(song)
+  }
 }
 
 // Shared by BOTH calls attemptWithConflictRetry can make (the original
@@ -962,6 +1007,7 @@ async function attemptTurn(
     const liveMessages: LlmMessage[] = []
 
     let lastGenerateIntent: Intent | undefined
+    const namedSongs: NamedSong[] = []
     let currentVersion = startVersion
     let finalText: string | null = null
 
@@ -1003,6 +1049,7 @@ async function attemptTurn(
           const outcome = await executeGenerateQueue(db, countedDeps, session, call.input, sessionContext, budget, currentVersion, options.energyArc)
           resultText = outcome.resultText
           if (outcome.intent) lastGenerateIntent = outcome.intent
+          addNamedSongs(namedSongs, outcome.intent?.namedSongs)
           if (outcome.queueChanged) currentVersion = outcome.newVersion!
         } else if (call.name === 'edit_queue') {
           const outcome = await executeEditQueue(db, countedDeps, session, call.input, userText, lastGenerateIntent, sessionContext, budget)
@@ -1046,7 +1093,7 @@ async function attemptTurn(
       liveMessages.push({ role: 'user', content: toolResultBlocks })
     }
 
-    return { text: finalText, queueVersion: currentVersion, stats }
+    return { text: finalText, queueVersion: currentVersion, stats, namedSongs }
   } catch (e) {
     throw new AttemptTurnFailure(e, stats)
   }
@@ -1186,5 +1233,11 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
   // called rename_session (e.g. it renamed on a first try that then hit a
   // conflict, and the retry never renames again); renameState is the one
   // value that's guaranteed to reflect every rename this WHOLE turn made.
-  return { djMessage: djMessageRow, queue, queueVersion: attempt.queueVersion, sessionTitle: renameState.title }
+  return {
+    djMessage: djMessageRow,
+    queue,
+    queueVersion: attempt.queueVersion,
+    sessionTitle: renameState.title,
+    ...(attempt.namedSongs.length > 0 ? { namedSongs: attempt.namedSongs } : {}),
+  }
 }

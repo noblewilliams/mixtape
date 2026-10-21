@@ -111,6 +111,23 @@ describe('PUT /me/artist-seeds', () => {
     expect((await rows(db, 'u1')).map((r) => r.name)).toEqual(['Tems', 'Wizkid'])
   })
 
+  it('"Jay-Z" after "jay z" is one row: names dedupe by artist key', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    expect((await put(db, authFor('u1'), { names: ['jay z', 'Jay-Z'] })).status).toBe(200)
+    expect((await rows(db, 'u1')).map((r) => r.name)).toEqual(['jay z'])
+
+    expect((await put(db, authFor('u1'), { names: ['Jay-Z'] })).status).toBe(200)
+    expect((await rows(db, 'u1')).map((r) => r.name)).toEqual(['jay z'])
+  })
+
+  it('symbol-only names with an empty key do not collide with each other', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    expect((await put(db, authFor('u1'), { names: ['!!!', '???'] })).status).toBe(200)
+    expect((await rows(db, 'u1')).map((r) => r.name)).toEqual(['!!!', '???'])
+  })
+
   it('an empty list clears the interview seeds and nothing else', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')

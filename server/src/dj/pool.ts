@@ -159,13 +159,15 @@ export async function hasPersonalCandidates(db: Db, userId: string): Promise<boo
   return row?.has_candidates === true
 }
 
-// Corpus-mode gate (spec → Before the data arrives): a "not personal yet"
-// mix unlocks only once the listener's seeds match at least MIN_SEED_TRACKS
-// enriched corpus tracks across at least MIN_SEED_ARTISTS artists. Below
-// that the DJ says it does not know enough yet (dj/loop.ts) rather than
-// guessing off two names.
+// Corpus-mode gate (spec 2026-10-21 everyone-gets-a-mix, step 1): a "not
+// personal yet" mix unlocks once the listener's seeds match at least
+// MIN_SEED_TRACKS enriched corpus tracks across at least MIN_SEED_ARTISTS
+// artists, or SOLO_SEED_TRACKS from a single artist (one name with a deep
+// catalogue is taste enough). Below that the DJ says it does not know their
+// taste yet (dj/loop.ts) rather than guessing.
 export const MIN_SEED_TRACKS = 25
-export const MIN_SEED_ARTISTS = 3
+export const MIN_SEED_ARTISTS = 2
+export const SOLO_SEED_TRACKS = 40
 
 // Corpus-mode familiarity (spec → Before the data arrives): 1.0 for a row
 // the listener seeded themselves, this for a row by an artist they named,
@@ -334,41 +336,48 @@ const num = (v: number | string | null): number | null => (v === null ? null : N
  * the source before a single row arrives, so a bare source row is an
  * abandoned import and proves nothing), or any in_library row (a library
  * synced before user_music_sources existed has no source row at all).
- * Otherwise the seed matches decide: `corpus` at or above the MIN_SEED_*
- * thresholds, `insufficient_seeds` below them.
+ * Otherwise the seed matches decide: `corpus` at MIN_SEED_TRACKS across
+ * MIN_SEED_ARTISTS, or at SOLO_SEED_TRACKS from any number of artists;
+ * `insufficient_seeds` below both.
  *
  * Seed matches = enriched corpus tracks (a track_features or track_meanings
  * row — an unenriched row has nothing to score on, so it can't stand in for
- * taste) whose normalized artist equals one of the listener's
- * user_artist_seeds names, UNIONed by track id with the listener's own
- * seeded user_tracks rows (explicit taste, counted enriched or not). Artist
- * matching is lower(btrim()) equality on both sides — the same v1 limitation
- * the taste term records above ('Wizkid' and 'Wizkid feat. Tems' are two
- * artists here), accepted for the same reason.
+ * taste) credited to one of the listener's user_artist_seeds, UNIONed by
+ * track id with the listener's own seeded user_tracks rows (explicit taste,
+ * counted enriched or not). A seed matches by artist key: `artist_key(name)`
+ * overlaps `tracks.artist_keys` (migration 0040, dj/artist-keys.ts), so
+ * "jay z" matches "Jaÿ-Z" and the "jaÿ-z & kanye west" credit. The keys are
+ * computed in SQL on both sides, never by the TypeScript helper, and the
+ * overlap uses the GIN index on artist_keys.
+ *
+ * seed_artists counts distinct seed KEYS that matched a track, not the
+ * distinct credits of the matched tracks, so a collab credit adds no artist
+ * the listener did not name. A seeded user_tracks row contributes its first
+ * credited artist's key (artist_keys[1]): a listener who pasted songs by
+ * several artists named those artists as surely as a seed list would.
  *
  * One query; the seed counts are computed even when the mode resolves
  * personal, so whoever surfaces them later (the funnel) gets honest numbers
- * rather than a placeholder zero. That costs one lower(btrim()) scan over
- * the corpus per call — single-digit ms at current scale, the same
- * acceptance as buildPool's own scored scan (see its doc comment).
+ * rather than a placeholder zero. The key match is an index probe; the
+ * enrichment EXISTS checks run only on the matched rows.
  */
 export async function resolvePoolMode(db: Db, userId: string): Promise<PoolModeResolution> {
   const res = await db.execute(sql`
-    WITH seed_names AS (
-      SELECT DISTINCT lower(btrim(name)) AS name
-      FROM user_artist_seeds
-      WHERE user_id = ${userId}
-    ),
-    seed_matches AS (
-      SELECT t.id AS track_id, lower(btrim(t.artist)) AS artist
+    WITH seed_matches AS (
+      -- Each ARRAY(...) is an initplan, computed once and a constant to the
+      -- planner, so the overlap is a GIN index scan. The lateral unnest then
+      -- names which seed key(s) each matched track answered to.
+      SELECT t.id AS track_id, k.key AS artist
       FROM tracks t
-      WHERE lower(btrim(t.artist)) IN (SELECT name FROM seed_names)
+      CROSS JOIN LATERAL unnest(t.artist_keys) AS k(key)
+      WHERE t.artist_keys && ARRAY(SELECT artist_key(name) FROM user_artist_seeds WHERE user_id = ${userId})
+        AND k.key = ANY (ARRAY(SELECT artist_key(name) FROM user_artist_seeds WHERE user_id = ${userId}))
         AND (
           EXISTS (SELECT 1 FROM track_features f WHERE f.track_id = t.id)
           OR EXISTS (SELECT 1 FROM track_meanings tm WHERE tm.track_id = t.id)
         )
       UNION
-      SELECT t.id AS track_id, lower(btrim(t.artist)) AS artist
+      SELECT t.id AS track_id, t.artist_keys[1] AS artist
       FROM user_tracks ut
       JOIN tracks t ON t.id = ut.track_id
       WHERE ut.user_id = ${userId} AND ut.seeded = true
@@ -382,15 +391,16 @@ export async function resolvePoolMode(db: Db, userId: string): Promise<PoolModeR
         SELECT 1 FROM user_tracks
         WHERE user_id = ${userId} AND in_library = true
       ) AS has_library,
-      (SELECT COUNT(*) FROM seed_matches)::int AS seed_tracks,
+      (SELECT COUNT(DISTINCT track_id) FROM seed_matches)::int AS seed_tracks,
       (SELECT COUNT(DISTINCT artist) FROM seed_matches)::int AS seed_artists
   `)
   const [row] = normalizeRows(res) as unknown as PoolModeRow[]
   const seedTracks = Number(row.seed_tracks)
   const seedArtists = Number(row.seed_artists)
   if (row.has_source || row.has_library) return { mode: 'personal', seedTracks, seedArtists }
-  const mode = seedTracks >= MIN_SEED_TRACKS && seedArtists >= MIN_SEED_ARTISTS ? 'corpus' : 'insufficient_seeds'
-  return { mode, seedTracks, seedArtists }
+  const enough =
+    (seedTracks >= MIN_SEED_TRACKS && seedArtists >= MIN_SEED_ARTISTS) || seedTracks >= SOLO_SEED_TRACKS
+  return { mode: enough ? 'corpus' : 'insufficient_seeds', seedTracks, seedArtists }
 }
 
 // The CTEs every scored query reads, whatever its candidate source: the
@@ -736,9 +746,10 @@ export async function buildPool(
   END`
   // Corpus mode has no plays worth reading — the listener owns nothing yet —
   // so familiarity is the one place their explicit taste enters the score: a
-  // row they seeded themselves is fully familiar, a row by an artist they
-  // named in the interview is SEED_ARTIST_FAMILIARITY, and the rest of the
-  // catalog is a stranger. The recent-play and playlist signals contribute
+  // row they seeded themselves is fully familiar, a row crediting an artist
+  // they named (any seed source, matched by artist key as resolvePoolMode
+  // matches, so "jay z" reaches "jaÿ-z & kanye west") is
+  // SEED_ARTIST_FAMILIARITY, and the rest of the catalog is a stranger. The recent-play and playlist signals contribute
   // NOTHING here on purpose (a web listener with a synced library is
   // personal mode anyway, so those signals have no honest corpus reading).
   // `ut.seeded` is NULL for a row the listener has no user_tracks row for
@@ -746,7 +757,7 @@ export async function buildPool(
   // as not-seeded, which is exactly right.
   const corpusFamFit = sql`CASE
     WHEN ut.seeded THEN 1.0::float8
-    WHEN lower(btrim(t.artist)) IN (SELECT name FROM seed_names) THEN ${SEED_ARTIST_FAMILIARITY}::float8
+    WHEN t.artist_keys && (SELECT keys FROM seed_keys) THEN ${SEED_ARTIST_FAMILIARITY}::float8
     ELSE 0::float8
   END`
   const famFit = mode === 'corpus' ? corpusFamFit : personalFamFit
@@ -781,7 +792,7 @@ export async function buildPool(
 
   const whereClause = sql.join(filters, sql` AND `)
 
-  // The personal candidate CTEs and seed_names are each read by only one mode
+  // The personal candidate CTEs and seed_keys are each read by only one mode
   // (the personal candidate rule and the corpus familiarity term
   // respectively); Postgres never evaluates an unreferenced CTE, so the other
   // side costs nothing.
@@ -806,8 +817,10 @@ export async function buildPool(
     ),
     -- Candidate rule, the ledger and playlist legs (personalCandidateCtes).
     ${personalCandidateCtes(userId)},
-    seed_names AS (
-      SELECT DISTINCT lower(btrim(name)) AS name
+    -- NULL when the listener has no seeds: the overlap is then NULL and the
+    -- familiarity CASE falls through to 0.
+    seed_keys AS (
+      SELECT array_agg(artist_key(name)) AS keys
       FROM user_artist_seeds
       WHERE user_id = ${userId}
     ),

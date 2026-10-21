@@ -2,6 +2,7 @@ import { and, asc, eq, inArray } from 'drizzle-orm'
 import type { Db } from '../db/types'
 import { userArtistSeeds } from '../db/schema'
 import { ARTIST_SEED_NAME_MAX } from './contracts'
+import { artistKey } from '../dj/artist-keys'
 
 export type ArtistSeedSource = (typeof userArtistSeeds.$inferInsert)['source']
 
@@ -12,9 +13,12 @@ export type ArtistSeedView = {
   createdAt: Date
 }
 
-// The pool matches seeds to artists on lower(btrim(name)) (dj/pool.ts), so
-// that is also what makes two spellings the same seed here.
-const seedKey = (name: string) => name.trim().toLowerCase()
+// The pool matches seeds to artists by artist key (dj/artist-keys.ts, the
+// SQL artist_key() in dj/pool.ts), so that is also what makes two spellings
+// the same seed here: "Jay-Z" after "jay z" is not a second seed. A name
+// whose key is empty (all symbols, "!!!") falls back to its lowercased,
+// trimmed self, so two symbol-only names do not collide on "".
+const seedKey = (name: string) => artistKey(name) || name.trim().toLowerCase()
 
 // Trims, drops blanks and over-long names, and keeps the first spelling of
 // each name; order is the caller's.
@@ -45,8 +49,8 @@ export async function listArtistSeeds(db: Db, userId: string): Promise<ArtistSee
     .orderBy(asc(userArtistSeeds.createdAt), asc(userArtistSeeds.name))
 }
 
-// Inserts the names the user does not already have (any source, matched
-// case-insensitively); existing rows are never touched. Returns how many
+// Inserts the names the user does not already have (any source, matched by
+// seedKey); existing rows are never touched. Returns how many
 // rows were added.
 export async function insertMissingArtistSeeds(
   db: Db,

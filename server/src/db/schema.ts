@@ -608,8 +608,10 @@ export const userMusicProfiles = pgTable(
   ],
 )
 
-// Artists a listener named (interview), pasted, or follows on Spotify. Seed
-// matches against the enriched corpus drive the pool before any data lands.
+// Artists a listener named (interview), pasted, follows on Spotify, or named
+// in a brief to the DJ (prompt, saved by dj/loop.ts before the pool mode
+// resolves). Seed matches against the enriched corpus drive the pool before
+// any data lands.
 export const userArtistSeeds = pgTable(
   'user_artist_seeds',
   {
@@ -618,7 +620,7 @@ export const userArtistSeeds = pgTable(
       .references(() => user.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     spotifyId: text('spotify_id'),
-    source: text('source', { enum: ['interview', 'pasted', 'spotify_export'] }).notNull(),
+    source: text('source', { enum: ['interview', 'pasted', 'spotify_export', 'prompt'] }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -627,7 +629,7 @@ export const userArtistSeeds = pgTable(
     check('user_artist_seeds_spotify_id_check', spotifyIdOrNullSql(t.spotifyId)),
     check(
       'user_artist_seeds_source_check',
-      sql`${t.source} IN ('interview', 'pasted', 'spotify_export')`,
+      sql`${t.source} IN ('interview', 'pasted', 'spotify_export', 'prompt')`,
     ),
   ],
 )

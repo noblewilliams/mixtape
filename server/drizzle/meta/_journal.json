@@ -288,6 +288,13 @@
       "when": 1792612400809,
       "tag": "0040_artist_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1792613536878,
+      "tag": "0041_artist_seed_prompt_source",
+      "breakpoints": true
     }
   ]
 }

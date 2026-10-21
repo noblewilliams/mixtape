@@ -7,6 +7,7 @@ import {
   resolvePoolMode,
   MIN_SEED_ARTISTS,
   MIN_SEED_TRACKS,
+  SOLO_SEED_TRACKS,
   RECENT_PLAY_MIN,
   RECENT_PLAY_WINDOW_DAYS,
   OUTSIDE_NEAREST,
@@ -1390,9 +1391,10 @@ describe('buildPool recording dedupe', () => {
 })
 
 describe('resolvePoolMode', () => {
-  it('exports the corpus thresholds: 25 seed tracks across 3 artists', () => {
+  it('exports the corpus thresholds: 25 seed tracks across 2 artists, or 40 from one', () => {
     expect(MIN_SEED_TRACKS).toBe(25)
-    expect(MIN_SEED_ARTISTS).toBe(3)
+    expect(MIN_SEED_ARTISTS).toBe(2)
+    expect(SOLO_SEED_TRACKS).toBe(40)
   })
 
   it('a live-synced listener (apple_live with last_imported_at) is personal', async () => {
@@ -1452,14 +1454,93 @@ describe('resolvePoolMode', () => {
     expect(await resolvePoolMode(db, 'u1')).toEqual({ mode: 'insufficient_seeds', seedTracks: 24, seedArtists: 3 })
   })
 
-  it('below the artist threshold (25 tracks, 2 artists) is insufficient_seeds', async () => {
+  it('below the artist threshold (39 tracks, 1 artist) is insufficient_seeds', async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')
-    await seedCorpusArtist(db, 'ArtistA', 13)
-    await seedCorpusArtist(db, 'ArtistB', 12)
-    for (const name of ['ArtistA', 'ArtistB']) await seedArtistSeed(db, 'u1', name)
+    await seedCorpusArtist(db, 'ArtistA', 39)
+    await seedArtistSeed(db, 'u1', 'ArtistA')
 
-    expect(await resolvePoolMode(db, 'u1')).toEqual({ mode: 'insufficient_seeds', seedTracks: 25, seedArtists: 2 })
+    expect(await resolvePoolMode(db, 'u1')).toEqual({ mode: 'insufficient_seeds', seedTracks: 39, seedArtists: 1 })
+  })
+
+  // The 2026-10-21 production case: "jay z" matched none of the rows spelled
+  // "jaÿ-z" under exact matching, two artists were under the old floor of
+  // three, and the DJ refused with 199 usable tracks in reach.
+  describe('golden case 2026-10-21: kanye west, jay z, kid cudi', () => {
+    const SEEDS = ['kanye west', 'jay z', 'kid cudi']
+
+    async function goldenListener(db: TestDb, counts: { kanye: number; cudi: number; collab: number; jay?: number }) {
+      await seedUser(db, 'u1')
+      await seedCorpusArtist(db, 'kanye west', counts.kanye)
+      await seedCorpusArtist(db, 'kid cudi', counts.cudi)
+      await seedCorpusArtist(db, 'jaÿ-z & kanye west', counts.collab)
+      await seedCorpusArtist(db, 'JAŸ-Z', counts.jay ?? 0)
+      await seedCorpusArtist(db, 'Unrelated', 30)
+      for (const name of SEEDS) await seedArtistSeed(db, 'u1', name)
+    }
+
+    it('the production catalogue shape resolves corpus with all three seeds matched', async () => {
+      const db = await createTestDb()
+      await goldenListener(db, { kanye: 30, cudi: 10, collab: 15, jay: 1 })
+
+      // A collab row counts once as a track, and its credits add no artist
+      // beyond the seeds it matched; the solo "JAŸ-Z" row matches "jay z" too.
+      expect(await resolvePoolMode(db, 'u1')).toEqual({ mode: 'corpus', seedTracks: 56, seedArtists: 3 })
+    })
+
+    it('24 tracks across 2 matched seeds is insufficient_seeds', async () => {
+      const db = await createTestDb()
+      await goldenListener(db, { kanye: 12, cudi: 12, collab: 0 })
+
+      expect(await resolvePoolMode(db, 'u1')).toEqual({ mode: 'insufficient_seeds', seedTracks: 24, seedArtists: 2 })
+    })
+
+    it('25 tracks across 2 matched seeds is corpus', async () => {
+      const db = await createTestDb()
+      await goldenListener(db, { kanye: 13, cudi: 12, collab: 0 })
+
+      expect(await resolvePoolMode(db, 'u1')).toEqual({ mode: 'corpus', seedTracks: 25, seedArtists: 2 })
+    })
+
+    it('40 tracks from one matched seed is corpus', async () => {
+      const db = await createTestDb()
+      await goldenListener(db, { kanye: 40, cudi: 0, collab: 0 })
+
+      expect(await resolvePoolMode(db, 'u1')).toEqual({ mode: 'corpus', seedTracks: 40, seedArtists: 1 })
+    })
+
+    it('39 tracks from one matched seed is insufficient_seeds', async () => {
+      const db = await createTestDb()
+      await goldenListener(db, { kanye: 39, cudi: 0, collab: 0 })
+
+      expect(await resolvePoolMode(db, 'u1')).toEqual({ mode: 'insufficient_seeds', seedTracks: 39, seedArtists: 1 })
+    })
+
+    it('unenriched collab rows do not count', async () => {
+      const db = await createTestDb()
+      await goldenListener(db, { kanye: 0, cudi: 10, collab: 0 })
+      for (let i = 0; i < 15; i++) await seedCorpusTrack(db, { artist: 'jaÿ-z & kanye west', enriched: false })
+
+      expect(await resolvePoolMode(db, 'u1')).toEqual({ mode: 'insufficient_seeds', seedTracks: 10, seedArtists: 1 })
+    })
+
+    it('a seeded user_tracks row still counts alongside the key matches', async () => {
+      const db = await createTestDb()
+      await goldenListener(db, { kanye: 12, cudi: 12, collab: 0 })
+      await seedTrack(db, 'u1', { artist: 'kid cudi', inLibrary: false, seeded: true, noFeatures: true })
+
+      expect(await resolvePoolMode(db, 'u1')).toEqual({ mode: 'corpus', seedTracks: 25, seedArtists: 2 })
+    })
+
+    it('two spellings of one seed count as one artist', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      await seedCorpusArtist(db, 'jaÿ-z & kanye west', 20)
+      await seedArtistSeed(db, 'u1', 'jay z')
+      await seedArtistSeed(db, 'u1', 'JAY-Z')
+
+      expect(await resolvePoolMode(db, 'u1')).toEqual({ mode: 'insufficient_seeds', seedTracks: 20, seedArtists: 1 })
+    })
   })
 
   it('seeded user_tracks rows count as seed matches, unioned by track id with seed-artist matches', async () => {
@@ -1530,6 +1611,20 @@ describe('buildPool corpus mode', () => {
 
     expect(byId(seeded.id).score).toBeCloseTo(NEUTRAL_MIX_SCORE + CORPUS_FAM_WEIGHT * 1.0, 5)
     expect(byId(seedArtist.id).score).toBeCloseTo(NEUTRAL_MIX_SCORE + CORPUS_FAM_WEIGHT * 0.7, 5)
+    expect(byId(stranger.id).score).toBeCloseTo(NEUTRAL_MIX_SCORE, 5)
+  })
+
+  it('a "jaÿ-z & kanye west" credit gets the seed-artist familiarity from the seed "jay z"', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedArtistSeed(db, 'u1', 'jay z')
+    const collab = await seedCorpusTrack(db, { artist: 'jaÿ-z & kanye west', embedding: SAME_AS_QUERY })
+    const stranger = await seedCorpusTrack(db, { artist: 'kanye west', embedding: SAME_AS_QUERY })
+
+    const pool = await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', familiarity: 'mix' }), undefined, { mode: 'corpus' })
+    const byId = (id: string) => pool.find((p) => p.trackId === id)!
+
+    expect(byId(collab.id).score).toBeCloseTo(NEUTRAL_MIX_SCORE + CORPUS_FAM_WEIGHT * 0.7, 5)
     expect(byId(stranger.id).score).toBeCloseTo(NEUTRAL_MIX_SCORE, 5)
   })
 

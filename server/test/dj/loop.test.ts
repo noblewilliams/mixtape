@@ -14,6 +14,7 @@ import {
   PERSONA_PROMPT,
   PERSONA_PROMPT_WITH_OUTSIDE,
   outsidePicksNotice,
+  PROMPT_SEEDS_MAX,
   type DjDeps,
   type DjSessionRef,
 } from '../../src/dj/loop'
@@ -2283,5 +2284,167 @@ describe('outside picks: review fixes', () => {
       `[0] ${catalogue[0].title} — CorpusArtist`,
       `[1] ${library[0].title} — Artist`,
     ])
+  })
+})
+
+// --- 2026-10-21 everyone gets a mix: prompt seeds and the new refusal ------
+
+describe('prompt seeds', () => {
+  async function seedRows(db: TestDb, userId: string) {
+    return db
+      .select({ name: userArtistSeeds.name, source: userArtistSeeds.source })
+      .from(userArtistSeeds)
+      .where(eq(userArtistSeeds.userId, userId))
+      .orderBy(asc(userArtistSeeds.name))
+  }
+
+  it('advertises namedArtists and namedSongs on generate_queue, and says never to invent any', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const session = await seedSession(db, 'u1')
+    const { llm, requests } = makeFakeLlm([{ text: 'hey.' }])
+
+    await runDjTurn(db, { embed: fakeEmbed, llm }, { id: session.id, userId: 'u1' }, 'hi')
+
+    const gen = conversationRequests(requests)[0].tools.find((t) => t.name === 'generate_queue')!
+    const props = gen.input_schema.properties as Record<string, { type: string; maxItems: number; description: string }>
+    expect(props.namedArtists.type).toBe('array')
+    expect(props.namedArtists.maxItems).toBe(5)
+    expect(props.namedSongs.type).toBe('array')
+    expect(props.namedSongs.maxItems).toBe(5)
+    for (const field of [props.namedArtists, props.namedSongs]) {
+      expect(field.description).toMatch(/asks to hear/)
+      expect(field.description).toMatch(/avoid/)
+      expect(field.description).toMatch(/never invent/i)
+    }
+  })
+
+  it('a brief naming two artists saves two prompt seeds once; a second turn adds none', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const session = await seedSession(db, 'u1')
+    const sessionRef: DjSessionRef = { id: session.id, userId: 'u1' }
+    const input = { themes: 'late night drive', targetCount: 5, namedArtists: [' Kanye West ', 'Jay-Z', 'kanye west'] }
+    const turn = () => makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', input)] },
+      { text: "I don't know your taste yet." },
+    ]).llm
+
+    await runDjTurn(db, { embed: fakeEmbed, llm: turn() }, sessionRef, 'kanye and jay-z for a late night drive')
+    expect(await seedRows(db, 'u1')).toEqual([
+      { name: 'Jay-Z', source: 'prompt' },
+      { name: 'Kanye West', source: 'prompt' },
+    ])
+
+    await runDjTurn(db, { embed: fakeEmbed, llm: turn() }, sessionRef, 'again, kanye and jay-z')
+    expect(await seedRows(db, 'u1')).toHaveLength(2)
+  })
+
+  it('a prompt artist already seeded by the interview is left as it was', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await db.insert(userArtistSeeds).values({ userId: 'u1', name: 'kid cudi', source: 'interview' })
+    const session = await seedSession(db, 'u1')
+    const { llm } = makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'x', namedArtists: ['Kid Cudi'] })] },
+      { text: 'ok.' },
+    ])
+
+    await runDjTurn(db, { embed: fakeEmbed, llm }, { id: session.id, userId: 'u1' }, 'kid cudi please')
+
+    expect(await seedRows(db, 'u1')).toEqual([{ name: 'kid cudi', source: 'interview' }])
+  })
+
+  it('prompt seeds land before the pool mode resolves, so the first turn already builds from them', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    for (let i = 0; i < 15; i++) await seedCorpusTrack(db, { artist: 'kanye west' })
+    for (let i = 0; i < 15; i++) await seedCorpusTrack(db, { artist: 'jaÿ-z & kanye west' })
+    const session = await seedSession(db, 'u1')
+    const { llm, requests } = makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'late night', targetCount: 5, namedArtists: ['jay z', 'kanye west'] })] },
+      { text: 'here you go.' },
+    ])
+
+    // No seeds before this turn: 30 tracks across the two named artists
+    // resolve corpus on the very turn that names them.
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, { id: session.id, userId: 'u1' }, 'jay z and kanye for a late night')
+
+    expect(result.queue).toHaveLength(5)
+    expect(toolResultTextFrom(conversationRequests(requests)[1]).split('\n')[0]).toBe(CORPUS_NOTICE)
+  })
+
+  it('a turn whose tool input carries namedArtists: [] stores nothing', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const session = await seedSession(db, 'u1')
+    const { llm } = makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'x', namedArtists: [] })] },
+      { text: 'ok.' },
+    ])
+
+    await runDjTurn(db, { embed: fakeEmbed, llm }, { id: session.id, userId: 'u1' }, 'something chill')
+
+    expect(await seedRows(db, 'u1')).toEqual([])
+  })
+
+  it(`stops saving prompt seeds once the listener holds PROMPT_SEEDS_MAX (${PROMPT_SEEDS_MAX}) of them`, async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await db.insert(userArtistSeeds).values(
+      Array.from({ length: PROMPT_SEEDS_MAX }, (_, i) => ({ userId: 'u1', name: `Prompt Artist ${i}`, source: 'prompt' as const })),
+    )
+    await db.insert(userArtistSeeds).values({ userId: 'u1', name: 'Interview Artist', source: 'interview' })
+    const session = await seedSession(db, 'u1')
+    const { llm } = makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'x', namedArtists: ['The Twenty First'] })] },
+      { text: 'ok.' },
+    ])
+
+    await runDjTurn(db, { embed: fakeEmbed, llm }, { id: session.id, userId: 'u1' }, 'the twenty first please')
+
+    const stored = await seedRows(db, 'u1')
+    expect(stored).toHaveLength(PROMPT_SEEDS_MAX + 1)
+    expect(stored.map((r) => r.name)).not.toContain('The Twenty First')
+  })
+
+  it('keeps named songs on the turn result, trimmed and deduped, and stores nothing for them', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const session = await seedSession(db, 'u1')
+    const namedSongs = [
+      { title: ' Reborn ', artist: 'Kids See Ghosts' },
+      { title: 'reborn', artist: 'kids see ghosts' },
+      { title: 'Runaway' },
+    ]
+    const { llm } = makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'mainstream', namedSongs })] },
+      { text: 'ok.' },
+    ])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, { id: session.id, userId: 'u1' }, "mostly mainstream like kids see ghost's reborn")
+
+    expect(result.namedSongs).toEqual([{ title: 'Reborn', artist: 'Kids See Ghosts' }, { title: 'Runaway' }])
+    expect(await seedRows(db, 'u1')).toEqual([])
+  })
+
+  it('a turn that names no songs carries no namedSongs key', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const session = await seedSession(db, 'u1')
+    const { llm } = makeFakeLlm([{ text: 'hey.' }])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, { id: session.id, userId: 'u1' }, 'hi')
+
+    expect(result).not.toHaveProperty('namedSongs')
+  })
+})
+
+describe('refusal copy', () => {
+  it('no longer mentions the interview, and asks for artists or music from Library', () => {
+    expect(INSUFFICIENT_SEEDS_TEXT).not.toMatch(/interview/i)
+    expect(INSUFFICIENT_SEEDS_TEXT).toMatch(/don't know (their|your) taste yet/)
+    expect(INSUFFICIENT_SEEDS_TEXT).toMatch(/name a few more artists/)
+    expect(INSUFFICIENT_SEEDS_TEXT).toMatch(/Library/)
   })
 })
