@@ -9,8 +9,13 @@ export type CuratedTrack = { trackId: string; reason: string }
 // verbose LLM turn can't blow up a queue-list UI.
 const MAX_REASON_LENGTH = 140
 
-const BASE_MAX_TOKENS = 1200
-const PER_TRACK_TOKENS = 80
+// Sonnet 5 runs adaptive thinking by default and its thinking tokens count
+// against max_tokens. A 300-line corpus pool drew 2,400 and then 4,800
+// tokens of truncated output on 2026-10-21 (both calls hit the cap), so the
+// budget leaves room for the reasoning as well as the JSON: 15 tracks get
+// 9,000 and the retry doubles to the cap.
+const BASE_MAX_TOKENS = 6000
+const PER_TRACK_TOKENS = 200
 const MAX_TOKENS_CAP = 16000
 
 // Thrown when the LLM's curation output is STILL truncated (stopReason

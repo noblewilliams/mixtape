@@ -205,7 +205,7 @@ describe('curate', () => {
     await curate(llm, pool, intent({ themes: 'x', targetCount: 20 }))
 
     expect(requests[0].effort).toBe('medium')
-    expect(requests[0].maxTokens).toBe(1200 + 80 * 20)
+    expect(requests[0].maxTokens).toBe(6000 + 200 * 20)
   })
 
   it('caps maxTokens at 16000 even for a large targetCount', async () => {
