@@ -88,6 +88,25 @@ and Hangul, all handled. Task 2 still matches seeds in SQL
 (`artist_keys && ARRAY[artist_key($seed)]`) so any later drift between the
 two helpers cannot break matching.
 
+Gate 1 run, 2026-10-21: migrations 0040 and 0041 applied (journal rows 41
+and 42, all 6,438 tracks keyed, "jay z" matches 78 rows), Worker deployed as
+`687bc091`. The founder's prompt then failed twice for reasons outside
+Step 1, both fixed the same evening:
+
+- `CurationTruncated`: the curation call's budget (1,200 + 80 per track) was
+  sized for the JSON alone, but Sonnet 5's adaptive thinking counts against
+  `max_tokens`, and a 300-line corpus pool drew more than 4,800 tokens on
+  the retry. Raised to 6,000 + 200 per track (`aa8fc98`); the prompt pin in
+  `outside-picks-flag-off.test.ts` now hashes the prompt parts apart from
+  the budget (`1184696`). Locally the same prompt then returned 15 tracks
+  with Jay-Z and Kanye in 49 s.
+- `HTTP unknown` after 126 s on production: the model client is built with
+  a 60 s timeout and one retry, and that timeout waits for response
+  headers, which a non-streaming call does not send until the model has
+  finished thinking. Two silent attempts made the 126 s. Fix: stream every
+  DJ model call (headers arrive at once) with a 100 s per-call deadline,
+  since the iOS client gives up at 120 s (llm.ts).
+
 From a clean worktree: apply the Task 1 migration (a sub-second rewrite of
 `tracks`, 6,438 rows, under a brief exclusive lock), deploy, spot-check
 `artist_key('MØ ŁONA ΣΑΒΒΑΣ')` on production, then re-run the 2026-10-21

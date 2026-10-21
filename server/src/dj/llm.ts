@@ -60,12 +60,17 @@ export class LlmError extends Error {
 }
 
 // Shared by anthropicLlm and anthropicComplete — deliberately excludes the SDK's
-// own error message (see LlmError's comment above).
+// own error message (see LlmError's comment above). A status-less APIError (an SSE `error` event mid-stream, a dropped
+// connection) carries the API's error type — e.g. overloaded_error — in
+// `type` or its body; name it so logTurn shows more than "HTTP unknown".
 function toLlmError(e: unknown): LlmError {
-  return new LlmError(
-    e instanceof Anthropic.APIError ? `HTTP ${e.status ?? 'unknown'}` : e instanceof Error ? e.name : typeof e,
-    e instanceof Anthropic.APIError ? e.status : undefined,
-  )
+  if (e instanceof Anthropic.APIError) {
+    const bodyType = (e.error as { error?: { type?: unknown } } | undefined)?.error?.type
+    const errType = e.type ?? (typeof bodyType === 'string' ? bodyType : null)
+    const detail = e.status === undefined && errType ? `HTTP unknown (${errType})` : `HTTP ${e.status ?? 'unknown'}`
+    return new LlmError(detail, e.status)
+  }
+  return new LlmError(e instanceof Error ? e.name : typeof e)
 }
 
 // A minimal, tools-less "ask the model one thing, get text back" seam —
@@ -86,34 +91,75 @@ export type LlmComplete = (opts: {
   timeoutMs?: number
 }) => Promise<string>
 
-// Structural surface of the real SDK client — a fake `{ messages: { create } }` in
-// tests satisfies this directly, no `as never` needed in either direction.
+// Final shape both SDK paths resolve to — a non-streaming create's response, or
+// a stream's finalMessage() (the SDK accumulates every content block, thinking
+// blocks included with their signatures, plus stop_reason and usage).
+type AnthropicMessage = {
+  content: Anthropic.ContentBlock[]
+  stop_reason: string | null
+  usage: { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number | null }
+}
+
+// Structural surfaces of the real SDK client — fakes `{ messages: { create } }` /
+// `{ messages: { stream } }` in tests satisfy these directly, no `as never`
+// needed in either direction.
 type AnthropicClient = {
   messages: {
-    create(
-      body: Anthropic.MessageCreateParamsNonStreaming,
-      options?: { timeout?: number },
-    ): Promise<{
-      content: Anthropic.ContentBlock[]
-      stop_reason: string | null
-      usage: { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number | null }
-    }>
+    create(body: Anthropic.MessageCreateParamsNonStreaming, options?: { timeout?: number }): Promise<AnthropicMessage>
+  }
+}
+type AnthropicStreamingClient = {
+  messages: {
+    stream(
+      body: Anthropic.MessageStreamParams,
+      options?: { signal?: AbortSignal },
+    ): { finalMessage(): Promise<AnthropicMessage> }
   }
 }
 
-export function anthropicLlm(client: AnthropicClient): LlmClient {
+// Always streams. The proven cause of the prod failure (2026-10-21, ~126s,
+// "HTTP unknown"): called non-streaming, a long adaptive-thinking turn
+// (curation runs up to 16k max_tokens) returns no headers until the model is
+// done, so the SDK's 60s time-to-headers timeout fired, retried once
+// (maxRetries 1, see buildAnthropic) and surfaced as APIConnectionTimeoutError.
+// A stream returns headers at once, so that timeout no longer applies;
+// finalMessage() resolves to the same Message shape create did, and rejects on
+// any mid-stream error.
+//
+// Total deadline per call: the iOS client gives up at 120s
+// (client/lib/data/dj/dj_api.dart), so a stalled stream must fail before that
+// rather than spend tokens on a queue nobody will see.
+export const LLM_CALL_DEADLINE_MS = 100_000
+
+export function anthropicLlm(
+  client: AnthropicStreamingClient,
+  opts: { deadlineMs?: number } = {},
+): LlmClient {
+  const deadlineMs = opts.deadlineMs ?? LLM_CALL_DEADLINE_MS
   return async (req) => {
-    let res: Awaited<ReturnType<AnthropicClient['messages']['create']>>
+    let res: AnthropicMessage
+    const signal = AbortSignal.timeout(deadlineMs)
     try {
-      res = await client.messages.create({
-        model: DJ_MODEL,
-        max_tokens: req.maxTokens ?? DEFAULT_MAX_TOKENS,
-        system: req.system,
-        messages: req.messages as Anthropic.MessageParam[],
-        tools: req.tools,
-        ...(req.effort ? { output_config: { effort: req.effort } } : {}),
-      })
+      res = await client.messages
+        .stream(
+          {
+            model: DJ_MODEL,
+            max_tokens: req.maxTokens ?? DEFAULT_MAX_TOKENS,
+            system: req.system,
+            messages: req.messages as Anthropic.MessageParam[],
+            tools: req.tools,
+            ...(req.effort ? { output_config: { effort: req.effort } } : {}),
+          },
+          { signal },
+        )
+        .finalMessage()
     } catch (e) {
+      // The SDK turns our deadline's abort into a status-less APIUserAbortError;
+      // report it by the signal's own reason (a TimeoutError) instead.
+      if (signal.aborted) {
+        const reason: unknown = signal.reason
+        throw new LlmError(reason instanceof Error ? reason.name : 'TimeoutError')
+      }
       throw toLlmError(e)
     }
     const raw = res.content as LlmAssistantBlock[]
@@ -146,7 +192,7 @@ export function anthropicLlm(client: AnthropicClient): LlmClient {
 // carries no separate credentials or client wiring.
 export function anthropicComplete(client: AnthropicClient): LlmComplete {
   return async (opts) => {
-    let res: Awaited<ReturnType<AnthropicClient['messages']['create']>>
+    let res: AnthropicMessage
     try {
       res = await client.messages.create(
         {
