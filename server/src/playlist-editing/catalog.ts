@@ -45,7 +45,9 @@ function boundedText(value: string | null, max: number): string | null {
   return clean || null
 }
 
-function insertValue(song: CatalogSong, storefront: string): typeof tracks.$inferInsert {
+// The tracks row for an Apple catalogue song (also the DJ's catalogue fill,
+// dj/catalogue-fill.ts). artist_keys is generated, never written.
+export function catalogTrackValue(song: CatalogSong, storefront: string): typeof tracks.$inferInsert {
   return {
     appleId: song.appleId,
     appleCatalogStorefront: storefront,
@@ -93,7 +95,7 @@ export async function discoverCatalogSongs(
     .map((song) => [song.appleId, song])).values()].slice(0, input.limit)
   if (!eligible.length) return []
 
-  const values = eligible.map((song) => insertValue(song, profile.storefront!))
+  const values = eligible.map((song) => catalogTrackValue(song, profile.storefront!))
   const rows = await db.insert(tracks).values(values).onConflictDoUpdate({
     target: tracks.appleId,
     targetWhere: sql`${tracks.appleId} IS NOT NULL`,

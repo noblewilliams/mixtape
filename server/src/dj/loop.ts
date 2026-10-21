@@ -2,7 +2,9 @@ import { z } from 'zod'
 import { and, count, desc, eq, gt, lt, inArray } from 'drizzle-orm'
 import type { Db } from '../db/types'
 import type { Embedder } from '../enrich/embedder'
-import { djMemories, djMessages, djSessions, queueTracks, tracks, trackFeatures, mixVersions, userArtistSeeds } from '../db/schema'
+import { djMemories, djMessages, djSessions, funnelEvents, queueTracks, tracks, trackFeatures, mixVersions, userArtistSeeds } from '../db/schema'
+import type { Surface } from '../seeds/contracts'
+import { fillForSeeds, FILL_BUDGET, type FillDeps } from './catalogue-fill'
 import type { LlmClient, LlmComplete, LlmMessage } from './llm'
 import { LlmError } from './llm'
 import {
@@ -44,7 +46,10 @@ import {
 // outsidePicks is the OUTSIDE_PICKS flag (index.ts), read once per request.
 // Absent or false is today's behaviour exactly: the same tools and persona,
 // no outside query, the same tool results.
-export type DjDeps = { llm: LlmClient; embed: Embedder; titleComplete?: LlmComplete; outsidePicks?: boolean }
+// fill is the Apple catalogue fill (dj/catalogue-fill.ts), wired only when
+// MusicKit and the AI binding are configured; absent, an insufficient_seeds
+// listener is refused as before.
+export type DjDeps = { llm: LlmClient; embed: Embedder; titleComplete?: LlmComplete; outsidePicks?: boolean; fill?: FillDeps }
 
 // The only session fields the loop actually needs — callers (the session
 // routes, Task 8) already have the full dj_sessions row and can pass it
@@ -532,6 +537,47 @@ async function savePromptSeeds(db: Db, userId: string, names: string[]): Promise
   await insertMissingArtistSeeds(db, userId, names.slice(0, room), 'prompt')
 }
 
+// The catalogue fill's part of the turn log: counts only.
+type FillLog = { inserted: number; enriched: number; subrequests: number; appleError?: string; timedOut?: true } | { error: 'internal' }
+
+// At most one catalogue fill per turn, across a conflict retry too (hoisted
+// into runDjTurn like RenameTracker): FILL_BUDGET is a per-request budget.
+type FillTracker = { ran: boolean; log?: FillLog }
+
+type TurnFill = { tracker: FillTracker; surface: Surface }
+
+// An insufficient_seeds listener's named artists may simply be missing from
+// the catalogue: fill them from Apple (spec 2026-10-21 everyone-gets-a-mix,
+// step 2), once per turn. Never throws: a failed fill leaves the turn to
+// refuse as it would have.
+async function fillCatalogue(db: Db, fill: FillDeps, session: DjSessionRef, intent: Intent, turn: TurnFill): Promise<void> {
+  turn.tracker.ran = true
+  try {
+    const result = await fillForSeeds(db, fill, { userId: session.userId, namedSongs: intent.namedSongs, budget: FILL_BUDGET })
+    // Counts first: they live in the log, and a failed funnel insert below
+    // must not replace them.
+    turn.tracker.log = {
+      inserted: result.inserted,
+      enriched: result.enriched,
+      subrequests: result.subrequests,
+      ...(result.appleError ? { appleError: result.appleError } : {}),
+      ...(result.timedOut ? { timedOut: true as const } : {}),
+    }
+  } catch {
+    turn.tracker.log = { error: 'internal' }
+    return
+  }
+  const log = turn.tracker.log
+  if ('inserted' in log && (log.inserted > 0 || log.enriched > 0)) {
+    try {
+      // User and surface only; the counts are on the turn's log line.
+      await db.insert(funnelEvents).values({ userId: session.userId, type: 'catalogue_filled', surface: turn.surface })
+    } catch {
+      // A missing funnel row never fails the turn.
+    }
+  }
+}
+
 async function executeGenerateQueue(
   db: Db,
   deps: DjDeps,
@@ -540,6 +586,7 @@ async function executeGenerateQueue(
   sessionContext: string,
   budget: CurationBudget,
   startVersion: number,
+  turn: TurnFill,
   listenerShape?: Intent['energyArc'],
 ): Promise<GenerateOutcome> {
   const parsed = intentSchema.safeParse(rawInput)
@@ -562,7 +609,13 @@ async function executeGenerateQueue(
   // next turn must see that. A listener with nothing to draw from gets the
   // insufficient text back as the tool result — no pool, no curate() call,
   // so nothing is consumed from the budget — and the model does the telling.
-  const poolMode = await resolvePoolMode(db, session.userId)
+  let poolMode = await resolvePoolMode(db, session.userId)
+  // Never for a personal listener (resolved above, and fillForSeeds checks
+  // again); then the mode is resolved afresh over the filled rows.
+  if (poolMode.mode === 'insufficient_seeds' && deps.fill && !turn.tracker.ran) {
+    await fillCatalogue(db, deps.fill, session, intent, turn)
+    poolMode = await resolvePoolMode(db, session.userId)
+  }
   if (poolMode.mode === 'insufficient_seeds') {
     return { resultText: INSUFFICIENT_SEEDS_TEXT, queueChanged: false, intent }
   }
@@ -964,6 +1017,7 @@ async function attemptTurn(
   userText: string,
   userRowSeq: number,
   renameState: RenameTracker,
+  fillTracker: FillTracker,
   options: DjTurnOptions,
 ): Promise<AttemptResult> {
   const stats: AttemptStats = { llmCalls: 0, toolCalls: 0, inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0 }
@@ -1046,7 +1100,7 @@ async function attemptTurn(
         // since nothing else about this design is visible from either
         // function's own signature.
         if (call.name === 'generate_queue') {
-          const outcome = await executeGenerateQueue(db, countedDeps, session, call.input, sessionContext, budget, currentVersion, options.energyArc)
+          const outcome = await executeGenerateQueue(db, countedDeps, session, call.input, sessionContext, budget, currentVersion, { tracker: fillTracker, surface: options.surface ?? 'web' }, options.energyArc)
           resultText = outcome.resultText
           if (outcome.intent) lastGenerateIntent = outcome.intent
           addNamedSongs(namedSongs, outcome.intent?.namedSongs)
@@ -1106,10 +1160,11 @@ async function attemptWithConflictRetry(
   userText: string,
   userRowSeq: number,
   renameState: RenameTracker,
+  fillTracker: FillTracker,
   options: DjTurnOptions,
 ): Promise<AttemptResult> {
   try {
-    return await attemptTurn(db, deps, session, userText, userRowSeq, renameState, options)
+    return await attemptTurn(db, deps, session, userText, userRowSeq, renameState, fillTracker, options)
   } catch (e) {
     if (e instanceof AttemptTurnFailure && e.originalError instanceof QueueVersionConflict) {
       // Exactly one retry, from a fresh snapshot (attemptTurn re-reads
@@ -1123,21 +1178,24 @@ async function attemptWithConflictRetry(
       // `renameState` is the SAME box passed to the first attempt — a rename
       // that landed there before the conflict surfaced survives into this
       // retry untouched, and a rename this retry itself makes overwrites it.
-      return attemptTurn(db, deps, session, userText, userRowSeq, renameState, options)
+      return attemptTurn(db, deps, session, userText, userRowSeq, renameState, fillTracker, options)
     }
     throw e
   }
 }
 
-function logTurn(sessionId: string, stats: AttemptStats | null, errorKind: DjError['kind'] | null, detail?: string): void {
+function logTurn(sessionId: string, stats: AttemptStats | null, errorKind: DjError['kind'] | null, detail?: string, fill?: FillLog): void {
   // Counts and codes only — no message content, no track/tool payloads.
   // `detail` (when present) is already content-free by construction — see
   // DjError.detail's comment — so it's safe alongside the rest of this line.
-  console.log('dj turn', JSON.stringify({ sessionId, ...(stats ?? {}), error: errorKind, detail }))
+  // `fill` is present only on a turn that ran the catalogue fill.
+  console.log('dj turn', JSON.stringify({ sessionId, ...(stats ?? {}), error: errorKind, detail, ...(fill ? { fill } : {}) }))
 }
 
 // Per-turn settings the listener chose in the composer UI rather than typed.
-export type DjTurnOptions = { energyArc?: Intent['energyArc'] }
+// surface is where the request came from (routes/sessions.ts), for the
+// catalogue fill's funnel row; absent means 'web'.
+export type DjTurnOptions = { energyArc?: Intent['energyArc']; surface?: Surface }
 
 export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, userText: string, options: DjTurnOptions = {}): Promise<DjTurnResult> {
   // Read before anything else: (a) fails fast on a missing session before any
@@ -1165,14 +1223,15 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
   // returns (or throws). See RenameTracker's own comment for the "last
   // rename wins" contract across attempts.
   const renameState: RenameTracker = {}
+  const fillTracker: FillTracker = { ran: false }
 
   let attempt: AttemptResult
   try {
-    attempt = await attemptWithConflictRetry(db, deps, session, userText, userRow.seq, renameState, options)
+    attempt = await attemptWithConflictRetry(db, deps, session, userText, userRow.seq, renameState, fillTracker, options)
   } catch (e) {
     const failure = e instanceof AttemptTurnFailure ? e : null
     const djError = normalizeError(failure ? failure.originalError : e)
-    logTurn(session.id, failure?.stats ?? null, djError.kind, djError.detail)
+    logTurn(session.id, failure?.stats ?? null, djError.kind, djError.detail, fillTracker.log)
 
     // Same rationale as the queue/queueVersion attachment below: a rename
     // that already landed in the DB this turn must ride the error out to the
@@ -1227,7 +1286,7 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
     .returning()
 
   const queue = await getActiveQueue(db, session.id)
-  logTurn(session.id, attempt.stats, null)
+  logTurn(session.id, attempt.stats, null, undefined, fillTracker.log)
   // sessionTitle comes from the hoisted renameState, NOT from `attempt`
   // itself — the attempt that finally succeeds may not be the one that
   // called rename_session (e.g. it renamed on a first try that then hit a

@@ -1,6 +1,6 @@
 import { sql, type SQL } from 'drizzle-orm'
 import type { Db } from '../db/types'
-import { enrichTrack, type EnrichDeps, type TrackRow } from './pipeline'
+import { enrichTrack, type EnrichDeps, type EnrichSkip, type TrackRow } from './pipeline'
 import { failureBlocked, failureCooling, failureExhausted } from './failures'
 
 export { MAX_ATTEMPTS, MAX_TRANSIENT_ATTEMPTS } from './failures'
@@ -123,27 +123,46 @@ function batchLookup<T extends { spotifyId: string }>(
   }
 }
 
-export async function runEnrichmentBatch(db: Db, deps: EnrichDeps, limit: number): Promise<RunResult> {
-  // skip_* is computed in SQL, not just from row-existence, so a stage that's
-  // exhausted or cooling down is never retried just because the *other*
-  // stage is what made this track a candidate.
-  //
-  // Highest enrich_priority first: an import raises it for the listener's pool
-  // candidates, so a new listener's heavy-rotation tracks are enriched ahead
-  // of the backlog instead of waiting their turn by creation date. Ties fall
-  // back to creation order so the walk stays stable batch to batch.
+// The front of the queue: a catalogue fill (dj/catalogue-fill.ts) sets this
+// on the rows it adds, so they are enriched before any import's pool
+// candidates (which reach at most 1 + a recent play count).
+export const FRONT_OF_QUEUE_PRIORITY = 1_000_000_000
+
+export type DueTrack = { track: TrackRow; skip: EnrichSkip }
+
+// Tracks with at least one stage due now, highest enrich_priority first, with
+// the skip flags enrichTrack takes. `where` narrows the candidates (the
+// catalogue fill passes its own rows); the batch runner passes none.
+//
+// skip_* is computed in SQL, not just from row-existence, so a stage that's
+// exhausted or cooling down is never retried just because the *other*
+// stage is what made this track a candidate.
+//
+// Highest enrich_priority first: an import raises it for the listener's pool
+// candidates, so a new listener's heavy-rotation tracks are enriched ahead
+// of the backlog instead of waiting their turn by creation date. Ties fall
+// back to creation order so the walk stays stable batch to batch.
+export async function dueTracks(db: Db, limit: number, where: SQL = sql`true`): Promise<DueTrack[]> {
   const selectRes = await db.execute(sql`
     SELECT t.*,
       ${SKIP_FEATURES} AS skip_features,
       ${SKIP_MEANING} AS skip_meaning
     ${CANDIDATE_FROM}
-    WHERE ${DUE}
+    WHERE ${DUE} AND (${where})
     ORDER BY t.enrich_priority DESC, t.created_at, t.id
     LIMIT ${limit}
   `)
   const rows = normalizeRows(selectRes) as unknown as CandidateRow[]
-  const spotifyIds = rows.flatMap((row) =>
-    row.spotify_id && !truthy(row.skip_features) ? [row.spotify_id] : [])
+  return rows.map((row) => ({
+    track: toTrackRow(row),
+    skip: { features: truthy(row.skip_features), meaning: truthy(row.skip_meaning) },
+  }))
+}
+
+export async function runEnrichmentBatch(db: Db, deps: EnrichDeps, limit: number): Promise<RunResult> {
+  const rows = await dueTracks(db, limit)
+  const spotifyIds = rows.flatMap(({ track, skip }) =>
+    track.spotifyId && !skip.features ? [track.spotifyId] : [])
   const batchDeps: EnrichDeps = deps.spotify && spotifyIds.length > 0 ? {
     ...deps,
     spotify: {
@@ -154,12 +173,8 @@ export async function runEnrichmentBatch(db: Db, deps: EnrichDeps, limit: number
 
   let features = 0
   let meaning = 0
-  for (const row of rows) {
-    const track = toTrackRow(row)
-    const outcome = await enrichTrack(db, batchDeps, track, {
-      features: truthy(row.skip_features),
-      meaning: truthy(row.skip_meaning),
-    })
+  for (const { track, skip } of rows) {
+    const outcome = await enrichTrack(db, batchDeps, track, skip)
     if (outcome.features === 'ok') features++
     if (outcome.meaning === 'ok') meaning++
   }

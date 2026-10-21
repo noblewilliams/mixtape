@@ -13,11 +13,13 @@ import type { Db } from './db/types'
 import { handleScheduled, jobsForCron } from './enrich/scheduled'
 import { anthropicLlm, anthropicComplete, buildAnthropic } from './dj/llm'
 import type { DjDeps } from './dj/loop'
+import type { FillDeps } from './dj/catalogue-fill'
 import { generateMusicKitDeveloperToken } from './musickit/token'
 import {
   createAppleCatalogClient,
   createAppleCatalogTokenCache,
   type AppleCatalogAlbumClient,
+  type AppleCatalogArtistClient,
   type AppleCatalogClient,
   type AppleCatalogSearchClient,
   type AppleIsrcCatalogClient,
@@ -149,6 +151,37 @@ function buildDjDeps(env: Bindings): DjDeps | undefined {
   }
 }
 
+// The DJ's catalogue fill (dj/catalogue-fill.ts) needs the Apple catalogue
+// and the enrichment sources. Its ReccoBeats and LRCLIB calls go through a
+// fetch that counts, per request, so the fill charges its subrequest budget
+// what those calls actually fetched.
+export function buildFillDeps(
+  env: Pick<Bindings, 'AI' | 'ITUNES_STOREFRONT'>,
+  musicKit: { catalog: FillDeps['catalog'] } | undefined,
+  fetchLike: FetchLike = fetch,
+): FillDeps | undefined {
+  if (!env.AI || !musicKit) return undefined
+  let fetches = 0
+  const counted: FetchLike = (url, init) => {
+    fetches += 1
+    return fetchLike(url, init)
+  }
+  const storefront = env.ITUNES_STOREFRONT ?? 'ng'
+  return {
+    catalog: musicKit.catalog,
+    defaultStorefront: storefront,
+    enrich: {
+      storefront,
+      // Same as buildDeps: Apple 403s iTunes calls from Cloudflare.
+      itunes: async () => null,
+      features: (key) => resolveAndFetchFeatures(key, counted),
+      lyrics: (key) => fetchLyrics(key, counted),
+      embed: workersAiEmbedder(env.AI),
+    },
+    enrichFetches: () => fetches,
+  }
+}
+
 export function buildMusicKit(
   env: {
     APPLE_TEAM_ID: string
@@ -157,7 +190,7 @@ export function buildMusicKit(
   },
   allowedOrigins: string[],
   fetchLike: FetchLike = fetch,
-): (MusicKitWiring & { catalog: AppleCatalogClient & AppleIsrcCatalogClient & AppleCatalogSearchClient & AppleCatalogAlbumClient }) | undefined {
+): (MusicKitWiring & { catalog: AppleCatalogClient & AppleIsrcCatalogClient & AppleCatalogSearchClient & AppleCatalogAlbumClient & AppleCatalogArtistClient }) | undefined {
   const keyId = env.MUSICKIT_KEY_ID
   const privateKey = env.MUSICKIT_PRIVATE_KEY
 
@@ -237,9 +270,11 @@ export default {
       const auth = createAuth(db, env)
       const allowedOrigins = parseWebOrigins(env.WEB_ORIGINS)
       const deps = buildDeps(env)
-      const djDeps = buildDjDeps(env)
-      const dj = djDeps ? { deps: djDeps } : undefined
       const musicKit = buildMusicKit(env, allowedOrigins)
+      const baseDjDeps = buildDjDeps(env)
+      const fill = buildFillDeps(env, musicKit)
+      const djDeps = baseDjDeps && fill ? { ...baseDjDeps, fill } : baseDjDeps
+      const dj = djDeps ? { deps: djDeps } : undefined
       const playlistEditingDeps = buildPlaylistEditingDeps(djDeps, musicKit)
       const playlistEditing = playlistEditingDeps ? { deps: playlistEditingDeps } : undefined
       const albumDeps = buildAlbumDeps(djDeps, musicKit, env)

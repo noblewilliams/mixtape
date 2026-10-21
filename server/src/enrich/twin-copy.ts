@@ -20,7 +20,11 @@ function count(res: unknown): number {
   return Number((rows?.[0] as { count?: unknown } | undefined)?.count ?? 0)
 }
 
-export async function runTwinCopy(db: Db, limit = TWIN_COPY_LIMIT): Promise<TwinCopyResult> {
+// `ids` limits the copy to those tracks (the catalogue fill's new rows);
+// absent, every track is eligible.
+export async function runTwinCopy(db: Db, limit = TWIN_COPY_LIMIT, ids?: readonly string[]): Promise<TwinCopyResult> {
+  if (ids && ids.length === 0) return { features: 0, meanings: 0 }
+  const only = ids ? sql`AND t.id IN (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})` : sql``
   // Filling a stage also clears its failure row, so a twin that had burned
   // through its own attempts reads as complete rather than exhausted.
   const features = count(await db.execute(sql`
@@ -36,7 +40,7 @@ export async function runTwinCopy(db: Db, limit = TWIN_COPY_LIMIT): Promise<Twin
         FROM tracks t
         JOIN tracks d ON upper(d.isrc) = upper(t.isrc) AND d.id <> t.id
         JOIN track_features f ON f.track_id = d.id
-        WHERE upper(t.isrc) ~ ${VALID_ISRC}
+        WHERE upper(t.isrc) ~ ${VALID_ISRC} ${only}
           AND NOT EXISTS (SELECT 1 FROM track_features own WHERE own.track_id = t.id)
         ORDER BY t.id, f.fetched_at, d.id
         LIMIT ${limit}
@@ -61,7 +65,7 @@ export async function runTwinCopy(db: Db, limit = TWIN_COPY_LIMIT): Promise<Twin
         FROM tracks t
         JOIN tracks d ON upper(d.isrc) = upper(t.isrc) AND d.id <> t.id
         JOIN track_meanings m ON m.track_id = d.id
-        WHERE upper(t.isrc) ~ ${VALID_ISRC}
+        WHERE upper(t.isrc) ~ ${VALID_ISRC} ${only}
           AND (m.embedding IS NOT NULL OR m.instrumental)
           AND NOT EXISTS (SELECT 1 FROM track_meanings own WHERE own.track_id = t.id)
         ORDER BY t.id, m.embedded_at, d.id

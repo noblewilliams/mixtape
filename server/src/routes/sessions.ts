@@ -187,6 +187,13 @@ const sessionListColumns = {
   updatedAt: djSessions.updatedAt,
 }
 
+// Where a turn's request came from, for the catalogue fill's funnel row. The
+// native app talks to the API through Dart's HTTP client, whose default
+// User-Agent is "Dart/<version> (dart:io)"; anything else is the web.
+export function requestSurface(userAgent: string | undefined): 'ios' | 'web' {
+  return userAgent?.startsWith('Dart/') ? 'ios' : 'web'
+}
+
 // albumDeps is present only with ALBUM_PICKS on (src/index.ts); absent, album
 // sessions are refused with album_picks_off and mixes are untouched.
 export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps) {
@@ -320,7 +327,7 @@ export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps) {
     // session and retry, and the row must not still be showing the
     // truncated fallback. titlePromise itself never rejects (see above), but
     // allSettled keeps that guarantee explicit rather than relying on it.
-    const [turnResult, titleResult] = await Promise.allSettled([runDjTurn(db, deps, sessionRef, prompt, { energyArc }), titlePromise])
+    const [turnResult, titleResult] = await Promise.allSettled([runDjTurn(db, deps, sessionRef, prompt, { energyArc, surface: requestSurface(c.req.header('User-Agent')) }), titlePromise])
 
     // A rename_session call within this very first turn (unusual, but the
     // listener COULD open with "call this tape Lagos Nights") wins over the
@@ -531,7 +538,7 @@ export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps) {
       }
     }
     try {
-      const result = await runDjTurn(db, deps, sessionRef, text, { energyArc })
+      const result = await runDjTurn(db, deps, sessionRef, text, { energyArc, surface: requestSurface(c.req.header('User-Agent')) })
       // A text-only reply never touches dj_sessions itself (no queue write
       // to ride $onUpdate's automatic bump), so list ordering (newest first
       // by updatedAt) would otherwise never reflect a chat-only turn.

@@ -150,12 +150,32 @@ Files: new `server/src/dj/catalogue-fill.ts`, `server/src/dj/loop.ts`,
   enrichment; second resolution sees the rows; a provider 429 leaves the
   rows queued with a failure record and the turn still proceeds.
 
+Task 4 as built (2026-10-21, after review): `FILL_BUDGET` 20,
+`FILL_DEADLINE_MS` 12 s, at most 3 artists and 3 named songs per turn; new
+rows carry a 1,000 priority boost and only rows enriched in-line take the
+front of the queue, dropping to 0 if they fail; thin seeds count only
+live rows; the funnel row is user plus surface, counts on the `dj turn`
+log line; `artist_source` is `apple_catalog` (the column has no fill
+value). Realistic yield: 3 enriched rows per turn for three new artists,
+so a first prompt naming only unknown artists is still refused while the
+other 27 rows wait for the hourly cron.
+
 ### Gate 2 (founder): deploy and three prompts
 
-Deploy; make three anonymous mixes naming artists absent from the
-catalogue (one Afrobeats, one K-pop, one classical) and confirm each comes
-back as a mix within about a minute. Watch the Worker's CPU time in the
-logs for the fill turns.
+Apply migration 0042 and deploy from a clean worktree. Then three checks:
+
+1. A half-known artist: name one the catalogue holds 15 to 24 enriched
+   rows for (find one with a read-only query) plus two known ones, and
+   confirm the mix comes back on the first turn with `fill` counts in the
+   `dj turn` log line.
+2. Unknown artists: name three the catalogue does not hold (Afrobeats,
+   K-pop, classical). Expect the honest refusal, `fill: { inserted: 30,
+   enriched: 3 }` in the log, and 30 new `tracks` rows with the 1,000
+   boost. After the next hourly cron (8 rows an hour), repeat the prompt;
+   it should turn into a mix within a few hours of prompts and crons, not
+   on the first turn. Step 4 closes this gap.
+3. Watch the Worker's CPU time and wall time on the fill turns in the
+   logs; a fill turn should add no more than about 15 s.
 
 ## Step 3: a broad catalogue
 
@@ -228,6 +248,6 @@ catalogue; if acceptable, set `NEVER_REFUSE` to `on` and deploy.
 
 1. Take the five decisions in the spec.
 2. Gate 1 after Step 1: done 2026-10-21.
-3. Gate 2 after Step 2: deploy, three prompts with unknown artists.
+3. Gate 2 after Step 2: apply 0042, deploy, the three checks above.
 4. Gate 3: the seeding sittings.
 5. Gate 4: listen, flag on.

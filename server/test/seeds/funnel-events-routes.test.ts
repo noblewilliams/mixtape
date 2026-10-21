@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { createApp, type AuthLike } from '../../src/app'
 import { funnelEvents } from '../../src/db/schema'
-import { FUNNEL_EVENT_TYPES, funnelEventSchema } from '../../src/seeds/contracts'
+import { CLIENT_FUNNEL_EVENT_TYPES, FUNNEL_EVENT_TYPES, funnelEventSchema } from '../../src/seeds/contracts'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { seedUser } from '../helpers/listening-fixtures'
 
@@ -34,7 +34,12 @@ describe('funnelEventSchema', () => {
       'chose_spotify', 'marked_requested', 'interview_completed', 'file_inspected',
       'import_completed', 'first_personal_mix', 'first_output', ...FIRST_RUN_TYPES,
     ]))
-    expect(FUNNEL_EVENT_TYPES).toHaveLength(7 + FIRST_RUN_TYPES.length)
+    expect(FUNNEL_EVENT_TYPES).toHaveLength(7 + FIRST_RUN_TYPES.length + 1)
+  })
+
+  it('refuses the server-only catalogue_filled type from a client', () => {
+    expect(FUNNEL_EVENT_TYPES).toContain('catalogue_filled')
+    expect(funnelEventSchema.safeParse({ type: 'catalogue_filled', surface: 'web' }).success).toBe(false)
   })
 })
 
@@ -60,10 +65,10 @@ describe('POST /me/funnel-events', () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')
     expect(FUNNEL_EVENT_TYPES).toEqual(funnelEvents.type.enumValues)
-    for (const type of FUNNEL_EVENT_TYPES) {
+    for (const type of CLIENT_FUNNEL_EVENT_TYPES) {
       expect((await post(db, authFor('u1'), { type, surface: 'ios' })).status, type).toBe(201)
     }
-    expect(await db.select().from(funnelEvents).where(eq(funnelEvents.userId, 'u1'))).toHaveLength(FUNNEL_EVENT_TYPES.length)
+    expect(await db.select().from(funnelEvents).where(eq(funnelEvents.userId, 'u1'))).toHaveLength(CLIENT_FUNNEL_EVENT_TYPES.length)
   })
 
   it('400s on an unknown type, an unknown surface, a missing field, or an unknown key', async () => {
@@ -71,6 +76,7 @@ describe('POST /me/funnel-events', () => {
     await seedUser(db, 'u1')
     for (const body of [
       { type: 'signed_up', surface: 'ios' },
+      { type: 'catalogue_filled', surface: 'ios' },
       { type: 'chose_spotify', surface: 'android' },
       { type: 'chose_spotify' },
       { type: 'chose_spotify', surface: 'ios', userId: 'u2' },

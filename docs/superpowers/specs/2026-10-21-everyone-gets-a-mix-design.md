@@ -4,7 +4,8 @@ Status: decisions taken 2026-10-21, all five recommendations (recorded in
 `../../decisions.md`). Step 1 implemented and committed 2026-10-21 (Tasks 1
 and 2, each reviewed) and deployed; Gate 1 passed the same evening after two
 fixes to the DJ model calls (curation token budget, streaming with a
-deadline). Steps 2 to 4 not started. Plan: `../plans/2026-10-21-everyone-gets-a-mix.md`.
+deadline). Step 2 implemented and committed 2026-10-21 (Tasks 3 and 4, each
+reviewed); Gate 2 owed. Steps 3 and 4 not started. Plan: `../plans/2026-10-21-everyone-gets-a-mix.md`.
 Follows `2026-10-20-first-run-flow-design.md` (decision 4 there deferred
 this program) and reopens the 2026-10-03 "honest empty mixes" decision on
 the evidence below.
@@ -86,23 +87,33 @@ has fewer than `FILL_FLOOR` (12) enriched tracks in the catalogue:
    when a recording already exists under another id.
 3. Enrich inside the request what the budget allows: the free plan gives
    50 subrequests and 10 ms CPU per invocation, and a mix turn already
-   spends on the model and the database. Per filled artist the fill costs
-   2 Apple calls, 1 ReccoBeats search call per track for features
-   (`resolveAndFetchFeatures`, no Spotify ids here), 1 LRCLIB call per
-   track for lyrics, and 1 Workers AI call per track for the embedding.
-   Budget: `FILL_BUDGET` = 24 subrequests per mix turn, so about 6 tracks
-   fully enriched in-request per turn; the rest wait for the hourly cron
-   (`ENRICH_BATCH_CAP` 8) and the next prompt.
-4. Then `resolvePoolMode` runs again. With 6 fresh tracks per artist across
-   two or three artists the 25-track floor is usually met together with
-   the catalogue's existing rows; when it is not, step 4 applies.
+   spends about 30 on the model, the database and the title. Per filled
+   artist the fill costs 2 Apple calls; per track it costs up to 2
+   ReccoBeats calls (search, then features), up to 2 LRCLIB calls (exact,
+   then search) and 1 Workers AI call for the embedding, charged at what
+   was actually fetched. Budget: `FILL_BUDGET` = 20 subrequests and
+   `FILL_DEADLINE_MS` = 12 s per mix turn, at most 3 artists and 3 named
+   songs, which comes to 3 or 4 tracks fully enriched in-request; the rest
+   are queued with a priority boost for the hourly cron (`ENRICH_BATCH_CAP`
+   8) and the next prompt. (Corrected 2026-10-21 from "about 6": the
+   original arithmetic counted one call per provider.)
+4. Then `resolvePoolMode` runs again. For an artist the catalogue already
+   half knows, the fresh rows plus the existing ones usually meet the
+   25-track floor on this turn. For an artist the catalogue does not hold
+   at all, one turn yields 3 or 4 enriched rows, so the floor is met on a
+   later prompt once the cron has worked through the queued rows, or not
+   at all until step 4; the DJ's refusal says to name a few more artists,
+   which also widens the fill. This is the honest shape of step 2 on the
+   free plan; step 4 is what closes it.
 
 The "Making your mix" page already covers the time. The DJ's first reply
 says the picks come from the shared catalogue, as today. Fill never runs
 for a listener in `personal` mode. A filled track is an ordinary catalogue
 row afterwards: the next listener who names that artist finds it.
 
-Funnel: `catalogue_filled` with the count, on the session.
+Funnel: `catalogue_filled` for the listener (user and surface; the counts
+go to the `dj turn` log line, since `funnel_events` has no session or
+count columns).
 
 ## Step 3: a broad catalogue (founder-run script, server admin route)
 
@@ -187,7 +198,9 @@ golden set gains a vibe-only prompt per familiarity preset.
 1. Step 1 floor: 25 tracks across 2 artists, or 40 from one (recommended).
 2. Step 2 budget: `FILL_BUDGET` 24 subrequests, `FILL_PER_ARTIST` 10,
    `FILL_FLOOR` 12 (recommended), or smaller to keep the turn under a
-   minute.
+   minute. (Taken; then lowered in review to 20 with a 12 s deadline once
+   the whole turn's subrequests were traced: a turn with two curation
+   calls was reaching 50.)
 3. Storage for step 3: `halfvec` embeddings on the free plan (recommended,
    one migration and a re-index) or Neon's paid plan at 1024-float.
 4. Step 3 scope: storefronts `ng`, `us`, `gb` and a 25,000-track first pass

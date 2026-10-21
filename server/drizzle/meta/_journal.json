@@ -295,6 +295,13 @@
       "when": 1792613536878,
       "tag": "0041_artist_seed_prompt_source",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1792619057584,
+      "tag": "0042_catalogue_filled_funnel_event",
+      "breakpoints": true
     }
   ]
 }
