@@ -60,6 +60,13 @@ export const tracks = pgTable(
     isrc: text('isrc'),
     title: text('title').notNull(),
     artist: text('artist').notNull(),
+    // One folded key per credited artist plus the whole credit, kept by the
+    // Postgres function artist_keys() (migration 0040_artist_keys, mirrored
+    // by src/dj/artist-keys.ts). Seeds match on these, not on `artist`.
+    artistKeys: text('artist_keys')
+      .array()
+      .notNull()
+      .generatedAlwaysAs(sql`artist_keys("artist")`),
     album: text('album'),
     genre: text('genre'),
     durationMs: integer('duration_ms'),
@@ -90,6 +97,7 @@ export const tracks = pgTable(
       .on(t.spotifyId)
       .where(sql`${t.spotifyId} IS NOT NULL`),
     index('tracks_isrc_idx').on(t.isrc),
+    index('tracks_artist_keys_idx').using('gin', t.artistKeys),
     check('tracks_apple_catalog_storefront_check', storefrontOrNullSql(t.appleCatalogStorefront)),
     index('tracks_enrich_priority_idx').on(t.enrichPriority.desc(), t.createdAt, t.id),
     check('tracks_spotify_id_check', spotifyIdOrNullSql(t.spotifyId)),

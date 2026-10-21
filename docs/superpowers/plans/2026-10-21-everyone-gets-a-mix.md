@@ -72,9 +72,19 @@ CHECK or enum change if one exists), `server/test/dj/pool.test.ts`,
 
 ### Gate 1 (founder): migration and deploy
 
-From a clean worktree: apply the Task 1 migration, deploy, then re-run the
-2026-10-21 prompt as an anonymous listener and confirm a mix comes back.
-Delete the test user through the plugin afterwards.
+Locale check done 2026-10-21 (read-only): production is PostgreSQL 18.6,
+`C.UTF-8` with the built-in locale provider, and `lower()` folds `MØ ŁONA
+ΣΑΒΒΑΣ Мумий` correctly, so the SQL keys agree with pglite and with the
+TypeScript helper. Catalogue artists carry only Latin diacritics, katakana
+and Hangul, all handled. Task 2 still matches seeds in SQL
+(`artist_keys && ARRAY[artist_key($seed)]`) so any later drift between the
+two helpers cannot break matching.
+
+From a clean worktree: apply the Task 1 migration (a sub-second rewrite of
+`tracks`, 6,438 rows, under a brief exclusive lock), deploy, spot-check
+`artist_key('MØ ŁONA ΣΑΒΒΑΣ')` on production, then re-run the 2026-10-21
+prompt as an anonymous listener and confirm a mix comes back. Delete the
+test user through the plugin afterwards.
 
 ## Step 2: fill from Apple at prompt time
 

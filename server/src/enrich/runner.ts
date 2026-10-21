@@ -51,6 +51,7 @@ type CandidateRow = {
   isrc: string | null
   title: string
   artist: string
+  artist_keys: string[]
   album: string | null
   genre: string | null
   duration_ms: number | null
@@ -78,6 +79,7 @@ function toTrackRow(r: CandidateRow): TrackRow {
     isrc: r.isrc,
     title: r.title,
     artist: r.artist,
+    artistKeys: r.artist_keys,
     album: r.album,
     genre: r.genre,
     durationMs: r.duration_ms,

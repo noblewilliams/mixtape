@@ -281,6 +281,13 @@
       "when": 1792518995478,
       "tag": "0039_funnel_events_keep_rows",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1792612400809,
+      "tag": "0040_artist_keys",
+      "breakpoints": true
     }
   ]
 }
