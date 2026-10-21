@@ -5,8 +5,10 @@
 /// and 3.2).
 ///
 /// Glass inset from both screen edges, rounded on all four corners, with a
-/// drag-handle glyph, holding the composer, the start-failure line and at most
-/// three idea pills of equal weight. It floats at the bottom of the screen
+/// drag-handle glyph, holding the compact Mix | Album and Shape row (album
+/// picks board H1 to H4), the composer, the start-failure line and at most
+/// three idea pills of equal weight (or, after the album nudge, the line that
+/// says so). It floats at the bottom of the screen
 /// above the dock and rides the keyboard, so it is drawn outside the scroll
 /// view Home's open space lives in.
 library;
@@ -16,6 +18,7 @@ import 'package:flutter/material.dart';
 import '../theme/mixtape_theme.dart';
 import 'foundation/idea_pill.dart';
 import 'foundation/liquid_glass_surface.dart';
+import 'foundation/text_action.dart';
 import 'mix_prompt_input.dart';
 import 'routine_suggestions.dart';
 
@@ -46,7 +49,32 @@ class HomePanel extends StatefulWidget {
     this.placeholder,
     this.refinements,
     this.obscured = false,
+    this.modeControl,
+    this.shapeControl,
+    this.sendLabel = MixPromptInput.defaultSendLabel,
+    this.routineSuggestion = true,
+    this.switched = false,
+    this.onKeepMix,
   });
+
+  /// The row above the composer (album picks board H1): the Mix | Album
+  /// control at the leading edge and the compact Shape chip trailing. Either
+  /// may be absent (no control for an anonymous listener or with albums off;
+  /// no chip under Album); with neither there is no row.
+  final Widget? modeControl;
+  final Widget? shapeControl;
+
+  /// The send key's name ("Find an album" under Album).
+  final String sendLabel;
+
+  /// Whether the routine suggestion may take the first pill. Under Album the
+  /// three album starters stand alone.
+  final bool routineSuggestion;
+
+  /// The album nudge just moved the control: the "Switched to Album" line
+  /// replaces the pills until send, with [onKeepMix] as the way back.
+  final bool switched;
+  final VoidCallback? onKeepMix;
 
   /// The composer's draft, which the pills fill.
   final TextEditingController controller;
@@ -133,6 +161,21 @@ class HomePanel extends StatefulWidget {
 
   static const Key handleKey = Key('home-panel-handle');
 
+  /// The compact row above the composer.
+  static const Key modeRowKey = Key('home-panel-mode-row');
+
+  /// Text scaling stops here on the compact row, as the Mixes toggle caps its
+  /// labels. The compact control and chip grow their drawn height with the
+  /// scale up to this cap: 26 pt at 1x, 32 pt at 1.5x and beyond (a 28 pt
+  /// segment in a 32 pt track), still 44 pt to touch.
+  static const double modeRowMaxTextScale = 1.5;
+
+  /// The nudge line and its way back (board H3).
+  static const Key switchedKey = Key('home-panel-switched');
+  static const Key keepMixKey = Key('home-panel-keep-mix');
+  static const String switchedText = 'Switched to Album for this prompt.';
+  static const String keepMixLabel = 'Keep it a mix';
+
   /// The glass itself, so a test can measure where the panel sits.
   static const Key surfaceKey = Key('home-panel-surface');
   static const Key pillsKey = Key('home-panel-pills');
@@ -207,6 +250,7 @@ class _HomePanelState extends State<HomePanel> {
     final dimmed = widget.busy || widget.controller.text.trim().isNotEmpty;
     final starters = _starters;
     final error = widget.error;
+    final hasRow = widget.modeControl != null || widget.shapeControl != null;
 
     return ConstrainedBox(
       // At 200% text with the keyboard up the panel wants more room than the
@@ -255,13 +299,19 @@ class _HomePanelState extends State<HomePanel> {
                           key: HomePanel.handleKey,
                           width: HomePanel.handleWidth,
                           height: HomePanel.handleHeight,
-                          margin: const EdgeInsets.only(top: 2, bottom: 12),
+                          // With the row below it, its invisible 9 pt hit
+                          // band supplies most of the board's 12 pt gap.
+                          margin: EdgeInsets.only(
+                            top: 2,
+                            bottom: hasRow ? 4 : 12,
+                          ),
                           decoration: const BoxDecoration(
                             color: HomePanel.handleColor,
                             borderRadius: BorderRadius.all(Radius.circular(3)),
                           ),
                         ),
                       ),
+                      if (hasRow) _modeRow(),
                       MixPromptInput(
                         key: widget.composerKey,
                         controller: widget.controller,
@@ -270,6 +320,7 @@ class _HomePanelState extends State<HomePanel> {
                         onSubmit: widget.onSubmit,
                         attachment: widget.attachment,
                         placeholder: widget.placeholder,
+                        sendLabel: widget.sendLabel,
                         // The pills hold these; the rotating hint skips them so
                         // the field never repeats a pill below it. Refinements
                         // are not prompts, so they reserve nothing.
@@ -278,43 +329,60 @@ class _HomePanelState extends State<HomePanel> {
                             : const [],
                       ),
                       if (error != null) _errorLine(tokens, error),
-                      Padding(
-                        padding: const EdgeInsets.only(
-                          top: HomePanel.pillsTopGap,
+                      if (widget.switched)
+                        _switchedLine(tokens)
+                      else
+                        Padding(
+                          padding: const EdgeInsets.only(
+                            top: HomePanel.pillsTopGap,
+                          ),
+                          // With a playlist attached the three pills are refinements
+                          // of it, and no routine suggestion competes with them.
+                          child: widget.refinements != null
+                              ? _refinementPills(dimmed: dimmed)
+                              : !widget.routineSuggestion
+                              ? Wrap(
+                                  key: HomePanel.pillsKey,
+                                  spacing: HomePanel.pillGap,
+                                  runSpacing: HomePanel.pillRunGap,
+                                  children: [
+                                    for (var i = 0; i < starters.length; i++)
+                                      _starterPill(
+                                        i,
+                                        starters[i],
+                                        dimmed: dimmed,
+                                      ),
+                                  ],
+                                )
+                              : RoutinePillSlot(
+                                  onFill: _fill,
+                                  dimmed: dimmed,
+                                  enabled: !widget.busy,
+                                  builder: (context, pill) {
+                                    final shown = pill == null
+                                        ? HomePanel.maxPills
+                                        : HomePanel.maxPills - 1;
+                                    return Wrap(
+                                      key: HomePanel.pillsKey,
+                                      spacing: HomePanel.pillGap,
+                                      runSpacing: HomePanel.pillRunGap,
+                                      children: [
+                                        if (pill != null) pill,
+                                        for (
+                                          var i = 0;
+                                          i < shown && i < starters.length;
+                                          i++
+                                        )
+                                          _starterPill(
+                                            i,
+                                            starters[i],
+                                            dimmed: dimmed,
+                                          ),
+                                      ],
+                                    );
+                                  },
+                                ),
                         ),
-                        // With a playlist attached the three pills are refinements
-                        // of it, and no routine suggestion competes with them.
-                        child: widget.refinements != null
-                            ? _refinementPills(dimmed: dimmed)
-                            : RoutinePillSlot(
-                                onFill: _fill,
-                                dimmed: dimmed,
-                                enabled: !widget.busy,
-                                builder: (context, pill) {
-                                  final shown = pill == null
-                                      ? HomePanel.maxPills
-                                      : HomePanel.maxPills - 1;
-                                  return Wrap(
-                                    key: HomePanel.pillsKey,
-                                    spacing: HomePanel.pillGap,
-                                    runSpacing: HomePanel.pillRunGap,
-                                    children: [
-                                      if (pill != null) pill,
-                                      for (
-                                        var i = 0;
-                                        i < shown && i < starters.length;
-                                        i++
-                                      )
-                                        _starterPill(
-                                          i,
-                                          starters[i],
-                                          dimmed: dimmed,
-                                        ),
-                                    ],
-                                  );
-                                },
-                              ),
-                      ),
                     ],
                   ),
                 ),
@@ -325,6 +393,57 @@ class _HomePanelState extends State<HomePanel> {
       ),
     );
   }
+
+  /// The board's `.moderow`: the control leading, the chip trailing, one row
+  /// tall enough for their 44 pt targets whichever of them is present, so
+  /// nothing jumps when the chip leaves under Album.
+  Widget _modeRow() => MediaQuery.withClampedTextScaling(
+    maxScaleFactor: HomePanel.modeRowMaxTextScale,
+    child: ConstrainedBox(
+      key: HomePanel.modeRowKey,
+      constraints: const BoxConstraints(minHeight: MixtapeMetrics.minTarget),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          if (widget.modeControl != null) Flexible(child: widget.modeControl!),
+          if (widget.modeControl != null && widget.shapeControl != null)
+            const SizedBox(width: 8),
+          if (widget.shapeControl != null)
+            Flexible(child: widget.shapeControl!),
+        ],
+      ),
+    ),
+  );
+
+  /// The board's `.switched` line (H3): what the nudge did and the one-tap
+  /// way back, announced politely once as it appears.
+  Widget _switchedLine(MixtapeTokens tokens) => Semantics(
+    key: HomePanel.switchedKey,
+    container: true,
+    liveRegion: true,
+    explicitChildNodes: true,
+    label: HomePanel.switchedText,
+    child: Padding(
+      // The board's `.switched` margin-top.
+      padding: const EdgeInsets.only(top: 8, left: 2),
+      child: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          ExcludeSemantics(
+            child: Text(
+              HomePanel.switchedText,
+              style: tokens.secondary.copyWith(color: tokens.smoke),
+            ),
+          ),
+          TextAction(
+            key: HomePanel.keepMixKey,
+            label: HomePanel.keepMixLabel,
+            onPressed: widget.busy ? null : widget.onKeepMix,
+          ),
+        ],
+      ),
+    ),
+  );
 
   /// The attached playlist's three refinements, in the board's order.
   Widget _refinementPills({required bool dimmed}) => Wrap(

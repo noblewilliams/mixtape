@@ -10,6 +10,7 @@ import 'package:mixtape/data/dj/dj_models.dart';
 import 'package:mixtape/data/playlists/playlist_context_models.dart';
 import 'package:mixtape/data/playlists/playlist_models.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
+import 'package:mixtape/presentation/providers/capabilities_provider.dart';
 import 'package:mixtape/presentation/providers/dj_providers.dart';
 import 'package:mixtape/presentation/providers/new_mix_inspiration_provider.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
@@ -43,6 +44,7 @@ class RecordingDj extends FakeDjApi {
   int creates = 0;
   String? prompt;
   InitialPlaylistSeed? seed;
+  SessionKind? kind;
   @override
   Future<SessionDetail> createSession(
     String prompt, {
@@ -52,6 +54,7 @@ class RecordingDj extends FakeDjApi {
     creates++;
     this.prompt = prompt;
     seed = playlistSeed;
+    this.kind = kind;
     throw ApiException(503, '');
   }
 }
@@ -66,7 +69,7 @@ class BrowseApi extends ReadApi {
   }) async => const PlaylistPage(playlists: [chosen]);
 }
 
-ProviderContainer makeContainer(RecordingDj dj) {
+ProviderContainer makeContainer(RecordingDj dj, {bool albumPicks = false}) {
   final playlists = BrowseApi()
     ..read = () async => const PlaylistDetail(playlist: chosen, entries: []);
   return ProviderContainer(
@@ -77,6 +80,7 @@ ProviderContainer makeContainer(RecordingDj dj) {
       listeningApiProvider.overrideWithValue(FakeListeningApi()),
       playlistApiProvider.overrideWithValue(playlists),
       playlistContextApiProvider.overrideWithValue(FakeContextApi()),
+      if (albumPicks) albumPicksEnabledProvider.overrideWithValue(true),
     ],
   );
 }
@@ -181,6 +185,34 @@ void main() {
       expect(container.read(newMixInspirationProvider), isNull);
       expect(dj.creates, 1);
       expect(find.byKey(InspirationChip.chipKey), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'the attachment keeps working under Album and rides with the album ask',
+    (tester) async {
+      final dj = RecordingDj()..onListSessions = () async => [];
+      final container = makeContainer(dj, albumPicks: true);
+      addTearDown(container.dispose);
+      await pumpHome(tester, container);
+      container.read(newMixInspirationProvider.notifier).select(chosen);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(HomeScreen.modeAlbumKey));
+      await tester.pumpAndSettle();
+      expect(find.byKey(InspirationChip.chipKey), findsOneWidget);
+      expect(find.byKey(HomePanel.refinementPillKey(0)), findsOneWidget);
+
+      await tester.enterText(
+        find.byKey(const Key('prompt-field')),
+        'warmer, start to finish',
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('start-session')));
+      await tester.pumpAndSettle();
+      expect(dj.kind, SessionKind.album);
+      expect(dj.prompt, 'warmer, start to finish');
+      expect(dj.seed!.playlistId, 'exact-playlist');
     },
   );
 

@@ -18,6 +18,7 @@ class MixPromptInput extends StatefulWidget {
     this.attachment,
     this.focusNode,
     this.placeholder,
+    this.sendLabel = defaultSendLabel,
     this.reservedExamples = const [],
     this.exampleSet,
     this.showVoiceInput = voiceInputEnabled,
@@ -38,6 +39,12 @@ class MixPromptInput extends StatefulWidget {
   /// (`docs/mockups/approved/2026-09-17-mobile-home-states.md` → Playlist
   /// attached).
   final String? placeholder;
+
+  /// The send key's tooltip and spoken name. Home names it "Find an album"
+  /// under Album (album picks board H2).
+  final String sendLabel;
+
+  static const String defaultSendLabel = 'Start new mix';
 
   /// Placeholders the rotation must leave alone — Home's panel reserves the
   /// prompts its idea pills are showing, so the hint never repeats a pill
@@ -415,7 +422,7 @@ class _MixPromptInputState extends State<MixPromptInput>
                 if (hasText || widget.busy)
                   _iconKey(
                     key: const Key('start-session'),
-                    tooltip: 'Start new mix',
+                    tooltip: widget.sendLabel,
                     onPressed: widget.busy || listening || !hasText
                         ? null
                         : _submit,

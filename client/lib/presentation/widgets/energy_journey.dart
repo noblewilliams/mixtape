@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 import '../theme/mixtape_theme.dart';
 import 'foundation/frosted_surface.dart';
 import 'foundation/mixtape_sheet.dart';
+import 'foundation/segmented_toggle.dart';
 import 'foundation/tape_button.dart';
 import 'foundation/text_action.dart';
 
@@ -109,14 +110,13 @@ class EnergyShapeChoice {
   int get hashCode => arc.hashCode;
 }
 
-/// Home's `Shape` control: a glass pill marked with the wave glyph, sitting in
-/// the large-title row's trailing slot beside the title — the same slot
-/// Library's glass cluster uses (founder, smoke round five, note 1).
+/// Home's `Shape` control: a glass pill marked with the wave glyph. Home draws
+/// it [compact] on the panel's row above the composer, trailing the Mix | Album
+/// control (album picks board H1, 2026-10-20); before that it sat in the
+/// large-title row (smoke round five, note 1).
 ///
 /// With no shape chosen it reads "Shape" over the generic wave; with one it
-/// wears that arc's own name and its own wave, and the sheet opens on it. It
-/// used to sit inside the bottom panel above the composer, which stretched the
-/// panel.
+/// wears that arc's own name and its own wave, and the sheet opens on it.
 class EnergyControl extends StatelessWidget {
   const EnergyControl({
     super.key,
@@ -124,7 +124,14 @@ class EnergyControl extends StatelessWidget {
     this.enabled = true,
     this.selectedArc,
     this.onArcChanged,
+    this.compact = false,
   });
+
+  /// The Home panel's row size (album picks board H1, `.moderow .chip`):
+  /// drawn [compactHeight] tall in [compactFontSize] type, with an invisible
+  /// band above and below that keeps the target 44 pt tall. The sheet and its
+  /// flow are the same either way.
+  final bool compact;
 
   /// The draft, which the sheet reads to judge the composed message's length.
   /// It is never written to.
@@ -153,6 +160,15 @@ class EnergyControl extends StatelessWidget {
   static const double waveHeight = 12;
   static const double waveGap = 6;
 
+  /// The compact chip's drawn height at 1x (it grows with text as the compact
+  /// segmented control does, to 32 pt at 1.5x), label size, padding and wave.
+  static const double compactHeight = SegmentedToggle.compactTrackHeight;
+  static const double compactFontSize = 11.5;
+  static const double compactSidePadding = 9;
+  static const double compactWaveWidth = 14;
+  static const double compactWaveHeight = 9;
+  static const double compactWaveGap = 5;
+
   /// The label stops growing here rather than pushing the title off its row.
   static const double maxLabelWidth = 132;
 
@@ -180,8 +196,12 @@ class EnergyControl extends StatelessWidget {
     final tokens = context.tokens;
     final arc = selectedArc;
     final label = arc?.label ?? unsetLabel;
+    final drawn = compact
+        ? SegmentedToggle.compactDrawnHeight(context)
+        : pillHeight;
+    final slop = compact ? SegmentedToggle.compactHitSlopFor(drawn) : 0.0;
 
-    return Semantics(
+    final chip = Semantics(
       button: true,
       enabled: enabled,
       label: label,
@@ -192,42 +212,46 @@ class EnergyControl extends StatelessWidget {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: enabled ? () => _open(context) : null,
-        child: Opacity(
-          opacity: enabled ? 1 : 0.4,
-          child: FrostedSurface(
-            key: chipKey,
-            borderRadius: BorderRadius.circular(MixtapeMetrics.pillRadius),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(minHeight: pillHeight),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: pillSidePadding,
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    EnergyWave(
-                      arc: arc ?? genericArc,
-                      width: waveWidth,
-                      height: waveHeight,
-                    ),
-                    const SizedBox(width: waveGap),
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(
-                        maxWidth: maxLabelWidth,
+        child: Padding(
+          // Compact: the hit band, inside the detector so it answers taps.
+          padding: EdgeInsets.symmetric(vertical: slop),
+          child: Opacity(
+            opacity: enabled ? 1 : 0.4,
+            child: FrostedSurface(
+              key: chipKey,
+              borderRadius: BorderRadius.circular(MixtapeMetrics.pillRadius),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: drawn),
+                child: Padding(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: compact ? compactSidePadding : pillSidePadding,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      EnergyWave(
+                        arc: arc ?? genericArc,
+                        width: compact ? compactWaveWidth : waveWidth,
+                        height: compact ? compactWaveHeight : waveHeight,
                       ),
-                      child: Text(
-                        label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: tokens.text,
+                      SizedBox(width: compact ? compactWaveGap : waveGap),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(
+                          maxWidth: maxLabelWidth,
+                        ),
+                        child: Text(
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: compact ? compactFontSize : 13,
+                            fontWeight: FontWeight.w600,
+                            color: tokens.text,
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -235,6 +259,13 @@ class EnergyControl extends StatelessWidget {
         ),
       ),
     );
+    // Compact, the label stops growing where the drawn height does (1.5x).
+    return compact
+        ? MediaQuery.withClampedTextScaling(
+            maxScaleFactor: SegmentedToggle.compactMaxTextScale,
+            child: chip,
+          )
+        : chip;
   }
 }
 

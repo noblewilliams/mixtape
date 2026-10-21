@@ -172,4 +172,115 @@ void main() {
       moreOrLessEquals(SegmentedToggle.trackHeight, epsilon: 0.5),
     );
   });
+
+  group('compact (the Home panel row, album picks board H1)', () {
+    Future<List<int>> pumpCompact(
+      WidgetTester tester, {
+      double textScale = 1,
+    }) async {
+      final taps = <int>[];
+      var current = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: MixtapeTheme.light(),
+          home: Builder(
+            builder: (context) => MediaQuery(
+              data: MediaQuery.of(
+                context,
+              ).copyWith(textScaler: TextScaler.linear(textScale)),
+              child: Scaffold(
+                body: Center(
+                  child: StatefulBuilder(
+                    builder: (context, setState) =>
+                        SegmentedToggle<int>.compact(
+                          semanticLabel: 'What to make',
+                          options: _options,
+                          value: current,
+                          onChanged: (next) {
+                            taps.add(next);
+                            setState(() => current = next);
+                          },
+                        ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      return taps;
+    }
+
+    testWidgets('drawn 26 pt tall with 11.5 pt labels', (tester) async {
+      await pumpCompact(tester);
+      final track = _rectOf(tester, SegmentedToggle.trackKey);
+      expect(track.height, moreOrLessEquals(26, epsilon: 0.5));
+      expect(SegmentedToggle.compactTrackHeight, 26);
+      final label = tester.widget<Text>(find.text('Spotify'));
+      expect(label.style!.fontSize, 11.5);
+      // The thumb sits inside the drawn track, not the hit area.
+      final thumb = _rectOf(tester, SegmentedToggle.thumbKey);
+      expect(thumb.top, greaterThanOrEqualTo(track.top));
+      expect(thumb.bottom, lessThanOrEqualTo(track.bottom));
+    });
+
+    testWidgets('each segment answers taps over a 44 pt tall area', (
+      tester,
+    ) async {
+      final taps = await pumpCompact(tester);
+      for (final key in const [Key('seg-apple'), Key('seg-spotify')]) {
+        expect(
+          _rectOf(tester, key).height,
+          greaterThanOrEqualTo(MixtapeMetrics.minTarget),
+        );
+      }
+      final track = _rectOf(tester, SegmentedToggle.trackKey);
+      final spotify = _rectOf(tester, const Key('seg-spotify'));
+      // Above the drawn track, still inside the invisible hit area.
+      await tester.tapAt(Offset(spotify.center.dx, track.top - 6));
+      await tester.pumpAndSettle();
+      expect(taps, [1]);
+    });
+
+    testWidgets('at 1.5x text it draws 28 to 32 pt, still 44 pt to touch', (
+      tester,
+    ) async {
+      await pumpCompact(tester, textScale: 1.5);
+      final track = _rectOf(tester, SegmentedToggle.trackKey);
+      expect(track.height, greaterThanOrEqualTo(28));
+      expect(track.height, lessThanOrEqualTo(32));
+      // The board's large-text frame: a 28 pt segment in a 32 pt track.
+      expect(
+        _rectOf(tester, SegmentedToggle.thumbKey).height,
+        greaterThanOrEqualTo(28 - SegmentedToggle.compactInset * 2),
+      );
+      expect(
+        _rectOf(tester, const Key('seg-apple')).height,
+        greaterThanOrEqualTo(MixtapeMetrics.minTarget),
+      );
+    });
+
+    testWidgets('past 1.5x the drawn height stops growing', (tester) async {
+      await pumpCompact(tester, textScale: 3);
+      expect(
+        _rectOf(tester, SegmentedToggle.trackKey).height,
+        lessThanOrEqualTo(32),
+      );
+    });
+
+    testWidgets('the control is a named group of selectable segments', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await pumpCompact(tester);
+      expect(find.bySemanticsLabel('What to make'), findsOneWidget);
+      final apple = tester
+          .getSemantics(find.byKey(const Key('seg-apple')))
+          .getSemanticsData();
+      expect(apple.flagsCollection.isSelected, isTrue);
+      expect(apple.label, 'Apple Music');
+      handle.dispose();
+    });
+  });
 }

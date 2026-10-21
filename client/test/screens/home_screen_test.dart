@@ -20,6 +20,8 @@ import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/dj/dj_api.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
+import 'package:mixtape/presentation/providers/capabilities_provider.dart';
+import 'package:mixtape/presentation/providers/home_mode_provider.dart';
 import 'package:mixtape/presentation/providers/dj_providers.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
 import 'package:mixtape/presentation/providers/suggestions_provider.dart';
@@ -29,6 +31,8 @@ import 'package:mixtape/presentation/screens/playback_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
 import 'package:mixtape/presentation/widgets/foundation/idea_pill.dart';
+import 'package:mixtape/presentation/widgets/foundation/segmented_toggle.dart';
+import 'package:mixtape/presentation/widgets/mix_prompt_input.dart';
 import 'package:mixtape/presentation/widgets/energy_journey.dart';
 import 'package:mixtape/presentation/widgets/home_panel.dart';
 import 'package:mixtape/presentation/screens/shell/shell_route_observer.dart';
@@ -64,28 +68,42 @@ class FakeDjApi implements DjApi {
   Future<List<DjMemory>> Function()? onListMemories;
   Future<void> Function(String id)? onDeleteMemory;
 
+  /// Every kind and seed `createSession` was called with, in order.
+  final List<SessionKind> kinds = [];
+  final List<InitialPlaylistSeed?> seeds = [];
+  final List<String> prompts = [];
+
   @override
   Duration get timeout => const Duration(seconds: 120);
 
   @override
-  Future<AlbumPickState> choosePick(String sessionId, {required String albumId, int? expectedVersion}) =>
+  Future<AlbumPickState> choosePick(
+    String sessionId, {
+    required String albumId,
+    int? expectedVersion,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<AlbumPickState> goBackToPick(
+    String sessionId, {
+    required int version,
+    int? expectedVersion,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<List<ListenLaterEntry>> listListenLater() =>
       throw UnimplementedError();
 
   @override
-  Future<AlbumPickState> goBackToPick(String sessionId, {required int version, int? expectedVersion}) =>
+  Future<ListenLaterEntry> saveForLater(String albumId, {String? sessionId}) =>
       throw UnimplementedError();
-
-  @override
-  Future<List<ListenLaterEntry>> listListenLater() => throw UnimplementedError();
-
-  @override
-  Future<ListenLaterEntry> saveForLater(String albumId, {String? sessionId}) => throw UnimplementedError();
 
   @override
   Future<void> unsaveForLater(String albumId) => throw UnimplementedError();
 
   @override
-  Future<ListenLaterEntry> markListened(String albumId) => throw UnimplementedError();
+  Future<ListenLaterEntry> markListened(String albumId) =>
+      throw UnimplementedError();
 
   @override
   Future<SessionDetail> createSession(
@@ -93,6 +111,8 @@ class FakeDjApi implements DjApi {
     InitialPlaylistSeed? playlistSeed,
     SessionKind kind = SessionKind.mix,
   }) {
+    kinds.add(kind);
+    seeds.add(playlistSeed);
     final impl = onCreateSession;
     if (impl == null) throw UnimplementedError('onCreateSession not wired');
     return impl(prompt);
@@ -138,7 +158,8 @@ class FakeDjApi implements DjApi {
   }
 
   @override
-  Future<DjSession> setCaseColor(String id, String caseColor) => throw UnimplementedError();
+  Future<DjSession> setCaseColor(String id, String caseColor) =>
+      throw UnimplementedError();
 
   @override
   Future<DjSession> renameSession(String id, String title) {
@@ -200,6 +221,9 @@ DjSession _session({
 ProviderContainer _makeContainer(
   FakeDjApi api, {
   FakeSuggestions? suggestions,
+  bool albumPicks = true,
+  bool anonymous = false,
+  bool Function(Ref ref)? albumPicksFrom,
 }) {
   final overrides = [
     tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
@@ -211,6 +235,12 @@ ProviderContainer _makeContainer(
     suggestionsApiProvider.overrideWithValue(suggestions ?? FakeSuggestions()),
     suggestionTimeZoneProvider.overrideWithValue(() async => 'UTC'),
     authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.session)),
+    // The Mix | Album control (album picks Task 11): on unless a test says
+    // the flag is off or the listener is anonymous.
+    albumPicksFrom != null
+        ? albumPicksEnabledProvider.overrideWith(albumPicksFrom)
+        : albumPicksEnabledProvider.overrideWithValue(albumPicks && !anonymous),
+    isAnonymousProvider.overrideWithValue(anonymous),
   ];
   final container = ProviderContainer(overrides: overrides);
   addTearDown(container.dispose);
@@ -223,6 +253,7 @@ Future<void> _pump(
   Brightness brightness = Brightness.light,
   double textScale = 1,
   bool settle = true,
+  bool reduceMotion = false,
 }) async {
   await tester.pumpWidget(
     UncontrolledProviderScope(
@@ -233,9 +264,10 @@ Future<void> _pump(
             : MixtapeTheme.light(),
         home: Builder(
           builder: (context) => MediaQuery(
-            data: MediaQuery.of(
-              context,
-            ).copyWith(textScaler: TextScaler.linear(textScale)),
+            data: MediaQuery.of(context).copyWith(
+              textScaler: TextScaler.linear(textScale),
+              disableAnimations: reduceMotion,
+            ),
             child: const HomeScreen(),
           ),
         ),
@@ -299,8 +331,11 @@ void main() {
             queue: [],
           );
         };
-        api.onGetSession = (id) async =>
-            SessionDetail(session: _session(id: id), messages: [], queue: []);
+        api.onGetSession = (id) async => SessionDetail(
+          session: _session(id: id),
+          messages: [],
+          queue: [],
+        );
         await _pump(tester, _makeContainer(api));
 
         await tester.enterText(
@@ -351,8 +386,11 @@ void main() {
           queue: [],
         );
       };
-      api.onGetSession = (id) async =>
-          SessionDetail(session: _session(id: id), messages: [], queue: []);
+      api.onGetSession = (id) async => SessionDetail(
+        session: _session(id: id),
+        messages: [],
+        queue: [],
+      );
       await _pump(tester, _makeContainer(api));
 
       await tester.enterText(
@@ -681,38 +719,60 @@ void main() {
       expect(find.byKey(const Key('sessions-empty')), findsNothing);
     });
 
-    testWidgets('the Shape control rides the title row, not the panel', (
-      tester,
-    ) async {
-      tester.view.physicalSize = const Size(390, 844);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final api = FakeDjApi()..onListSessions = () async => [];
-      await _pump(tester, _makeContainer(api));
+    testWidgets(
+      'the Shape chip rides the panel row above the composer, trailing the '
+      'Mix | Album control (album picks board H1, superseding the title row)',
+      (tester) async {
+        tester.view.physicalSize = const Size(390, 844);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final api = FakeDjApi()..onListSessions = () async => [];
+        await _pump(tester, _makeContainer(api));
 
-      final control = find.byKey(EnergyControl.chipKey);
-      expect(control, findsOneWidget);
-      // Out of the panel entirely: the panel is composer and pills.
-      expect(
-        find.descendant(of: find.byType(HomePanel), matching: control),
-        findsNothing,
-      );
+        final chip = find.byKey(EnergyControl.chipKey);
+        final mix = find.byKey(HomeScreen.modeMixKey);
+        final album = find.byKey(HomeScreen.modeAlbumKey);
+        for (final finder in [chip, mix, album]) {
+          expect(
+            find.descendant(of: find.byType(HomePanel), matching: finder),
+            findsOneWidget,
+          );
+        }
+        // The title row carries nothing beside "Home" now.
+        expect(
+          tester.getRect(chip).top,
+          greaterThan(tester.getRect(find.byType(HomePanel)).top),
+        );
 
-      final rect = tester.getRect(control);
-      expect(
-        rect.bottom,
-        lessThan(tester.getRect(find.byType(HomePanel)).top),
-        reason: 'the control is up in the title row, above the panel',
-      );
-      // Right-aligned on the screen margin, where Library's glass cluster sits.
-      expect(
-        rect.right,
-        moreOrLessEquals(390 - MixtapeMetrics.screenSidePadding, epsilon: 0.5),
-      );
-      // …and to the right of the title itself.
-      expect(rect.left, greaterThan(tester.getRect(find.text('Home')).right));
-    });
+        final composer = tester.getRect(find.byType(MixPromptInput));
+        final chipRect = tester.getRect(chip);
+        final track = tester.getRect(find.byKey(SegmentedToggle.trackKey));
+        // One row, above the composer, under the handle.
+        expect(chipRect.bottom, lessThanOrEqualTo(composer.top));
+        expect(track.bottom, lessThanOrEqualTo(composer.top));
+        expect(
+          track.top,
+          greaterThan(tester.getRect(find.byKey(HomePanel.handleKey)).bottom),
+        );
+        expect(
+          chipRect.center.dy,
+          moreOrLessEquals(track.center.dy, epsilon: 1),
+        );
+        // Control leading, chip trailing.
+        expect(track.left, moreOrLessEquals(composer.left, epsilon: 4));
+        expect(chipRect.right, moreOrLessEquals(composer.right, epsilon: 4));
+        // 26 pt drawn, 44 pt to touch.
+        expect(track.height, moreOrLessEquals(26, epsilon: 0.5));
+        expect(chipRect.height, moreOrLessEquals(26, epsilon: 0.5));
+        for (final segment in [mix, album]) {
+          expect(
+            tester.getRect(segment).height,
+            greaterThanOrEqualTo(MixtapeMetrics.minTarget),
+          );
+        }
+      },
+    );
 
     testWidgets('Home does not scroll while the panel fits', (tester) async {
       tester.view.physicalSize = const Size(390, 844);
@@ -917,6 +977,389 @@ void main() {
     }
   });
 
+  group('Mix | Album (album picks Task 11, board H1 to H4)', () {
+    FakeDjApi recordingApi() {
+      final api = FakeDjApi();
+      api.onListSessions = () async => [];
+      api.onCreateSession = (prompt) async {
+        api.prompts.add(prompt);
+        return SessionDetail(
+          session: _session(id: 'new-1'),
+          messages: [],
+          queue: [],
+        );
+      };
+      api.onGetSession = (id) async => SessionDetail(
+        session: _session(id: id),
+        messages: [],
+        queue: [],
+      );
+      return api;
+    }
+
+    bool selected(WidgetTester tester, Key key) => tester
+        .getSemantics(find.byKey(key))
+        .getSemanticsData()
+        .flagsCollection
+        .isSelected;
+
+    String sendLabel(WidgetTester tester) => tester
+        .widget<IconButton>(find.byKey(const Key('start-session')))
+        .tooltip!;
+
+    String? hint(WidgetTester tester) => tester
+        .widget<TextField>(find.byKey(const Key('prompt-field')))
+        .decoration!
+        .hintText;
+
+    Future<void> chooseShape(WidgetTester tester, EnergyArc arc) async {
+      await tester.tap(find.byKey(EnergyControl.chipKey));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(EnergyControl.presetKey(arc)));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(EnergyControl.confirmKey));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('Mix is the default, the shape folds in, and the kind is mix', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      final api = recordingApi();
+      await _pump(tester, _makeContainer(api));
+
+      expect(selected(tester, HomeScreen.modeMixKey), isTrue);
+      expect(selected(tester, HomeScreen.modeAlbumKey), isFalse);
+      expect(find.bySemanticsLabel('What to make'), findsOneWidget);
+      expect(find.byKey(EnergyControl.chipKey), findsOneWidget);
+
+      await tester.enterText(
+        find.byKey(const Key('prompt-field')),
+        'a slow walk',
+      );
+      await tester.pump();
+      expect(sendLabel(tester), 'Start new mix');
+      await chooseShape(tester, EnergyArc.fall);
+      await tester.tap(find.byKey(const Key('start-session')));
+      await tester.pumpAndSettle();
+
+      expect(api.kinds, [SessionKind.mix]);
+      expect(
+        api.prompts.single,
+        'a slow walk\nEnergy journey: ${EnergyArc.fall.label}.',
+      );
+      handle.dispose();
+    });
+
+    testWidgets(
+      'Album drops the chip, fixes the placeholder, renames Send, swaps the '
+      'pills, and sends the raw draft as an album',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+        final api = recordingApi();
+        await _pump(tester, _makeContainer(api));
+        final rowHeight = tester
+            .getRect(find.byKey(HomePanel.modeRowKey))
+            .height;
+
+        // A shape chosen under Mix must not ride out with an album ask.
+        await chooseShape(tester, EnergyArc.rise);
+        await tester.tap(find.byKey(HomeScreen.modeAlbumKey));
+        await tester.pumpAndSettle();
+
+        expect(selected(tester, HomeScreen.modeAlbumKey), isTrue);
+        expect(find.byKey(EnergyControl.chipKey), findsNothing);
+        expect(
+          tester.getRect(find.byKey(HomePanel.modeRowKey)).height,
+          moreOrLessEquals(rowHeight, epsilon: 0.5),
+          reason: 'the row keeps its height so nothing jumps',
+        );
+        expect(hint(tester), 'What kind of record are you in the mood for…');
+        for (final pill in const [
+          'Rainy evening, start to finish',
+          'Something I have never heard',
+          'One I own and forgot',
+        ]) {
+          expect(find.widgetWithText(IdeaPill, pill), findsOneWidget);
+        }
+        expect(find.byType(IdeaPill), findsNWidgets(3));
+
+        await tester.enterText(
+          find.byKey(const Key('prompt-field')),
+          'something warm for cooking',
+        );
+        await tester.pump();
+        expect(sendLabel(tester), 'Find an album');
+        expect(find.bySemanticsLabel('Find an album'), findsOneWidget);
+
+        await tester.tap(find.byKey(const Key('start-session')));
+        await tester.pumpAndSettle();
+        expect(api.kinds, [SessionKind.album]);
+        expect(api.prompts.single, 'something warm for cooking');
+        handle.dispose();
+      },
+    );
+
+    testWidgets(
+      'typing "album" under Mix switches once, says so in place of the pills, '
+      'and "Keep it a mix" undoes it for the rest of the draft',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+        final api = recordingApi();
+        await _pump(tester, _makeContainer(api));
+        final field = find.byKey(const Key('prompt-field'));
+
+        await tester.enterText(field, 'an album for the train home');
+        await tester.pumpAndSettle();
+        expect(selected(tester, HomeScreen.modeAlbumKey), isTrue);
+        expect(find.byKey(HomePanel.switchedKey), findsOneWidget);
+        expect(find.text(HomePanel.switchedText), findsOneWidget);
+        expect(find.byKey(HomePanel.keepMixKey), findsOneWidget);
+        expect(find.text('Keep it a mix'), findsOneWidget);
+        expect(find.byType(IdeaPill), findsNothing);
+        expect(
+          tester
+              .getSemantics(find.byKey(HomePanel.switchedKey))
+              .getSemanticsData()
+              .flagsCollection
+              .isLiveRegion,
+          isTrue,
+        );
+
+        await tester.tap(find.byKey(HomePanel.keepMixKey));
+        await tester.pumpAndSettle();
+        expect(selected(tester, HomeScreen.modeMixKey), isTrue);
+        expect(find.byKey(HomePanel.switchedKey), findsNothing);
+
+        await tester.enterText(field, 'an album for the train home, albums');
+        await tester.pumpAndSettle();
+        expect(
+          selected(tester, HomeScreen.modeMixKey),
+          isTrue,
+          reason: 'one nudge per draft',
+        );
+        expect(find.byKey(HomePanel.switchedKey), findsNothing);
+
+        // Clearing the field re-arms it.
+        await tester.enterText(field, '');
+        await tester.pumpAndSettle();
+        await tester.enterText(field, 'an Album please');
+        await tester.pumpAndSettle();
+        expect(selected(tester, HomeScreen.modeAlbumKey), isTrue);
+        expect(find.byKey(HomePanel.switchedKey), findsOneWidget);
+
+        // A manual tap on Mix suppresses it the same way.
+        await tester.tap(find.byKey(HomeScreen.modeMixKey));
+        await tester.pumpAndSettle();
+        expect(find.byKey(HomePanel.switchedKey), findsNothing);
+        await tester.enterText(field, 'an Album please, an album');
+        await tester.pumpAndSettle();
+        expect(selected(tester, HomeScreen.modeMixKey), isTrue);
+
+        await tester.tap(find.byKey(const Key('start-session')));
+        await tester.pumpAndSettle();
+        expect(api.kinds, [SessionKind.mix]);
+        handle.dispose();
+      },
+    );
+
+    testWidgets('a nudged prompt is sent as an album with the raw draft', (
+      tester,
+    ) async {
+      final api = recordingApi();
+      await _pump(tester, _makeContainer(api));
+      await chooseShape(tester, EnergyArc.rise);
+      await tester.enterText(
+        find.byKey(const Key('prompt-field')),
+        'an album for the train home',
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('start-session')));
+      await tester.pumpAndSettle();
+      expect(api.kinds, [SessionKind.album]);
+      expect(api.prompts.single, 'an album for the train home');
+    });
+
+    for (final (name, anonymous, albumPicks) in const [
+      ('an anonymous listener', true, true),
+      ('albums off', false, false),
+    ]) {
+      testWidgets('$name: no control, the chip keeps the row, nothing nudges', (
+        tester,
+      ) async {
+        final api = recordingApi();
+        await _pump(
+          tester,
+          _makeContainer(api, anonymous: anonymous, albumPicks: albumPicks),
+        );
+        expect(find.byKey(HomeScreen.modeMixKey), findsNothing);
+        expect(find.byKey(HomeScreen.modeAlbumKey), findsNothing);
+        expect(find.byType(SegmentedToggle<SessionKind>), findsNothing);
+        expect(
+          find.descendant(
+            of: find.byKey(HomePanel.modeRowKey),
+            matching: find.byKey(EnergyControl.chipKey),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          tester.getRect(find.byKey(EnergyControl.chipKey)).height,
+          moreOrLessEquals(26, epsilon: 0.5),
+        );
+
+        await tester.enterText(
+          find.byKey(const Key('prompt-field')),
+          'an album for the train home',
+        );
+        await tester.pumpAndSettle();
+        expect(find.byKey(HomePanel.switchedKey), findsNothing);
+        expect(find.byKey(EnergyControl.chipKey), findsOneWidget);
+        await tester.tap(find.byKey(const Key('start-session')));
+        await tester.pumpAndSettle();
+        expect(api.kinds, [SessionKind.mix]);
+      });
+    }
+
+    testWidgets('at 1.5x text both row controls draw at least 28 pt', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await _pump(tester, _makeContainer(recordingApi()), textScale: 1.5);
+
+      final row = find.byKey(HomePanel.modeRowKey);
+      final track = find.descendant(
+        of: row,
+        matching: find.byKey(SegmentedToggle.trackKey),
+      );
+      final chip = find.descendant(
+        of: row,
+        matching: find.byKey(EnergyControl.chipKey),
+      );
+      for (final control in [track, chip]) {
+        final height = tester.getRect(control).height;
+        expect(height, greaterThanOrEqualTo(28));
+        expect(height, lessThanOrEqualTo(32));
+      }
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+      'typing "album" before albums turn on changes nothing out of sight',
+      (tester) async {
+        final albumsOn = ValueNotifier(false);
+        addTearDown(albumsOn.dispose);
+        final api = recordingApi();
+        final container = _makeContainer(
+          api,
+          albumPicksFrom: (ref) {
+            void changed() => ref.invalidateSelf();
+            albumsOn.addListener(changed);
+            ref.onDispose(() => albumsOn.removeListener(changed));
+            return albumsOn.value;
+          },
+        );
+        await _pump(tester, container);
+        final field = find.byKey(const Key('prompt-field'));
+
+        await tester.enterText(field, 'an album for the train home');
+        await tester.pumpAndSettle();
+        expect(find.byKey(HomeScreen.modeMixKey), findsNothing);
+
+        albumsOn.value = true;
+        await tester.pumpAndSettle();
+        expect(selected(tester, HomeScreen.modeMixKey), isTrue);
+        expect(find.byKey(HomePanel.switchedKey), findsNothing);
+        expect(find.byKey(EnergyControl.chipKey), findsOneWidget);
+
+        // Still armed: the next "album" word now offered nudges.
+        await tester.enterText(field, 'an album for the train home, albums');
+        await tester.pumpAndSettle();
+        expect(selected(tester, HomeScreen.modeAlbumKey), isTrue);
+        expect(find.byKey(HomePanel.switchedKey), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'a nudged Album returns to Mix after a send; a hand-chosen Album stays',
+      (tester) async {
+        final api = recordingApi();
+        await _pump(tester, _makeContainer(api));
+        final field = find.byKey(const Key('prompt-field'));
+
+        Future<void> sendAndComeBack() async {
+          await tester.tap(find.byKey(const Key('start-session')));
+          await tester.pumpAndSettle();
+          expect(find.byType(ChatScreen), findsOneWidget);
+          Navigator.of(tester.element(find.byType(ChatScreen))).pop();
+          await tester.pumpAndSettle();
+        }
+
+        await tester.enterText(field, 'an album for the train home');
+        await tester.pumpAndSettle();
+        expect(selected(tester, HomeScreen.modeAlbumKey), isTrue);
+        await sendAndComeBack();
+        expect(api.kinds, [SessionKind.album]);
+        expect(selected(tester, HomeScreen.modeMixKey), isTrue);
+        expect(find.byKey(HomePanel.switchedKey), findsNothing);
+
+        await tester.tap(find.byKey(HomeScreen.modeAlbumKey));
+        await tester.pumpAndSettle();
+        await tester.enterText(field, 'something warm for cooking');
+        await tester.pump();
+        await sendAndComeBack();
+        expect(api.kinds, [SessionKind.album, SessionKind.album]);
+        expect(selected(tester, HomeScreen.modeAlbumKey), isTrue);
+      },
+    );
+
+    testWidgets('reduced motion: the thumb does not slide', (tester) async {
+      final api = recordingApi();
+      await _pump(tester, _makeContainer(api), reduceMotion: true);
+      final align = tester.widget<AnimatedAlign>(
+        find.descendant(
+          of: find.byType(SegmentedToggle<SessionKind>),
+          matching: find.byType(AnimatedAlign),
+        ),
+      );
+      expect(align.duration, Duration.zero);
+
+      await tester.tap(find.byKey(HomeScreen.modeAlbumKey));
+      await tester.pump();
+      final thumb = tester.getRect(find.byKey(SegmentedToggle.thumbKey));
+      final albumRect = tester.getRect(find.byKey(HomeScreen.modeAlbumKey));
+      expect(thumb.right, moreOrLessEquals(albumRect.right, epsilon: 0.5));
+    });
+
+    testWidgets('a pending Album request opens Home on Album and is cleared', (
+      tester,
+    ) async {
+      final api = recordingApi();
+      final container = _makeContainer(api);
+      container
+          .read(homeModeRequestProvider.notifier)
+          .request(SessionKind.album);
+      await _pump(tester, container);
+
+      expect(find.byKey(EnergyControl.chipKey), findsNothing);
+      expect(hint(tester), 'What kind of record are you in the mood for…');
+      expect(container.read(homeModeRequestProvider), isNull);
+
+      // …and one made while Home is mounted is taken too.
+      await tester.tap(find.byKey(HomeScreen.modeMixKey));
+      await tester.pumpAndSettle();
+      expect(find.byKey(EnergyControl.chipKey), findsOneWidget);
+      container
+          .read(homeModeRequestProvider.notifier)
+          .request(SessionKind.album);
+      await tester.pumpAndSettle();
+      expect(find.byKey(EnergyControl.chipKey), findsNothing);
+      expect(container.read(homeModeRequestProvider), isNull);
+    });
+  });
+
   group('the panel under a modal', () {
     /// Home inside a tab's route-observer scope, the way the shell builds it.
     Future<ShellRouteObserver> pumpInShell(
@@ -941,9 +1384,8 @@ void main() {
       return observer;
     }
 
-    double panelOpacity(WidgetTester tester) => tester
-        .widget<AnimatedOpacity>(find.byKey(HomePanel.veilKey))
-        .opacity;
+    double panelOpacity(WidgetTester tester) =>
+        tester.widget<AnimatedOpacity>(find.byKey(HomePanel.veilKey)).opacity;
 
     bool panelAllowsNative(WidgetTester tester) => tester
         .widget<LiquidGlassSurface>(find.byKey(HomePanel.surfaceKey))

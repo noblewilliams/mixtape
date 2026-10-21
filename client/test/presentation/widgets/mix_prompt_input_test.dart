@@ -42,6 +42,40 @@ void main() {
       controller.dispose();
     },
   );
+  testWidgets('the send key takes its name from the owner', (tester) async {
+    final handle = tester.ensureSemantics();
+    final controller = TextEditingController(text: 'something warm');
+    addTearDown(controller.dispose);
+    Future<void> pump(String? label) => tester.pumpWidget(
+      MaterialApp(
+        theme: MixtapeTheme.light(),
+        home: Scaffold(
+          body: label == null
+              ? MixPromptInput(
+                  controller: controller,
+                  busy: false,
+                  onSubmit: () {},
+                )
+              : MixPromptInput(
+                  controller: controller,
+                  busy: false,
+                  onSubmit: () {},
+                  sendLabel: label,
+                ),
+        ),
+      ),
+    );
+    String tooltip() => tester
+        .widget<IconButton>(find.byKey(const Key('start-session')))
+        .tooltip!;
+
+    await pump(null);
+    expect(tooltip(), 'Start new mix');
+    await pump('Find an album');
+    expect(tooltip(), 'Find an album');
+    expect(find.bySemanticsLabel('Find an album'), findsOneWidget);
+    handle.dispose();
+  });
   testWidgets('the send key appears only once the field has text', (
     tester,
   ) async {
@@ -100,7 +134,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final field = tester.widget<TextField>(find.byKey(const Key('prompt-field')));
+    final field = tester.widget<TextField>(
+      find.byKey(const Key('prompt-field')),
+    );
     final body = MixtapeTokens.light.body.fontSize!;
     expect(field.style?.fontSize, body - 1);
     expect(field.decoration?.hintStyle?.fontSize, body - 1);

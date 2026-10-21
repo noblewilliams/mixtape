@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/api/api_client.dart';
 import '../../data/dj/dj_api.dart';
+import '../../data/dj/dj_models.dart';
 import '../../data/files/opened_archive_channel.dart';
 import '../../data/listening/listening_models.dart';
 import '../format/import_format.dart';
@@ -16,15 +17,19 @@ import '../widgets/foundation/frosted_dock.dart' show kFrostedDockHeight;
 import '../widgets/foundation/mixtape_feedback.dart';
 import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/label_chip.dart';
+import '../widgets/foundation/segmented_toggle.dart';
 import '../widgets/foundation/large_title_scaffold.dart';
 import '../widgets/foundation/square_art.dart';
 import '../widgets/foundation/status_word.dart';
 import '../widgets/energy_journey.dart';
 import '../widgets/home_panel.dart';
+import '../widgets/mix_prompt_input.dart';
 import '../widgets/keep_sheet.dart';
 import '../widgets/merge_notice.dart';
 import '../format/source_labels.dart';
 import '../providers/auth_provider.dart';
+import '../providers/capabilities_provider.dart';
+import '../providers/home_mode_provider.dart';
 import '../providers/dj_providers.dart';
 import '../providers/keep_mixes_provider.dart';
 import '../providers/listening_import_provider.dart';
@@ -53,6 +58,10 @@ const _offlineStartErrorMessage =
 /// space. The mix list is the Mixes tab (task 2.3) and the old menu's
 /// destinations are the Library and You tabs (task 2.2), so Home has no
 /// chrome of its own beyond the title.
+///
+/// Album picks (Task 11, board H1 to H4): a compact row in the panel holds
+/// Mix | Album and the Shape chip. The mode is this screen's state only: Mix
+/// on every launch, never persisted.
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key, this.initialPlaylist});
 
@@ -83,6 +92,32 @@ class HomeScreen extends ConsumerStatefulWidget {
   ];
   static const String excludeRefinement = 'without its songs';
 
+  /// The Mix | Album control (album picks board H1 to H4).
+  static const String modeGroupLabel = 'What to make';
+  static const Key modeMixKey = Key('home-mode-mix');
+  static const Key modeAlbumKey = Key('home-mode-album');
+
+  /// Under Album: the fixed placeholder, the send key's name and the three
+  /// starter pills (board H2).
+  static const String albumPlaceholder =
+      'What kind of record are you in the mood for…';
+  static const String albumSendLabel = 'Find an album';
+  static const List<String> albumStarters = [
+    'Rainy evening, start to finish',
+    'Something I have never heard',
+    'One I own and forgot',
+  ];
+
+  /// The album nudge's device-side word match (board H3; the word list is
+  /// the implementer's call, "album" the floor). "album"/"albums" in any
+  /// case, plus "LP"/"EP" (and plurals) in capitals only, where they cannot
+  /// be an ordinary word. "record" is left out: "record player", "on record"
+  /// and "record-breaking" read as mixes too often.
+  static bool mentionsAlbum(String draft) =>
+      _albumWord.hasMatch(draft) || _formatWord.hasMatch(draft);
+  static final RegExp _albumWord = RegExp(r'\balbums?\b', caseSensitive: false);
+  static final RegExp _formatWord = RegExp(r'\b(?:LP|EP)s?\b');
+
   static const Key hintKey = Key('home-hint');
   static const Key startingKey = Key('home-starting');
 
@@ -105,6 +140,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
   /// The Shape chip's state. Never written into the draft — the sentence is
   /// folded into the outgoing message at send (smoke round three, note 5).
   EnergyArc? _arc;
+
+  /// Mix | Album. Screen state only: Mix on every mount, never persisted.
+  SessionKind _kind = SessionKind.mix;
+
+  /// The nudge moved the control to Album for this draft: the "Switched to
+  /// Album" line is up and the mode goes back to Mix with the draft (sent or
+  /// cleared), since the line promises "for this prompt".
+  bool _switched = false;
+
+  /// The nudge has fired (or been refused with "Keep it a mix" or a tap on
+  /// Mix) for this draft. Cleared with the draft.
+  bool _nudgeSpent = false;
+
+  /// Albums are offered: a signed-in account whose server has the flag on.
+  /// [albumPicksEnabledProvider] already says no for anonymous listeners;
+  /// the second check keeps that rule here too.
+  bool get _albumsOffered =>
+      ref.read(albumPicksEnabledProvider) && !ref.read(isAnonymousProvider);
+
+  /// The mode that is actually in force: always Mix when albums are not
+  /// offered, whatever [_kind] says.
+  SessionKind get _effectiveKind => _albumsOffered ? _kind : SessionKind.mix;
+
   PlaylistSummary? get _inspiration =>
       ref.read(newMixInspirationProvider)?.playlist;
   bool get _excludeSourceTracks =>
@@ -113,6 +171,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
   @override
   void initState() {
     super.initState();
+    _promptController.addListener(_draftChanged);
     if (widget.initialPlaylist != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
@@ -124,10 +183,67 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      _takeModeRequest();
       _sendKeptPrompt();
       unawaited(_readMergeNotice());
     });
   }
+
+  /// A one-shot "open on Album" from elsewhere (the empty Listen later
+  /// shelf, Task 13): taken on mount and whenever one arrives while Home is
+  /// mounted (it stays alive in the shell's tab stack).
+  void _takeModeRequest() {
+    final kind = ref.read(homeModeRequestProvider.notifier).take();
+    if (kind == null || !mounted) return;
+    setState(() {
+      _kind = kind;
+      _switched = false;
+    });
+  }
+
+  /// The nudge (board H3): with Mix in force, a draft that comes to mention
+  /// an album moves the control to Album, once per draft. An empty field
+  /// re-arms it and ends a nudged Album.
+  void _draftChanged() {
+    // Nothing happens out of sight: with no control on screen (anonymous, or
+    // albums off or not yet known) the mode and the nudge stay untouched, so
+    // the control never appears already switched once `/me` lands.
+    if (!_albumsOffered) return;
+    final draft = _promptController.text;
+    if (draft.trim().isEmpty) {
+      if (!_switched && !_nudgeSpent) return;
+      setState(() {
+        if (_switched) _kind = SessionKind.mix;
+        _switched = false;
+        _nudgeSpent = false;
+      });
+      return;
+    }
+    if (_nudgeSpent ||
+        _starting ||
+        _effectiveKind != SessionKind.mix ||
+        !HomeScreen.mentionsAlbum(draft)) {
+      return;
+    }
+    setState(() {
+      _kind = SessionKind.album;
+      _switched = true;
+      _nudgeSpent = true;
+    });
+  }
+
+  /// A tap on the control. Mix after a nudge is "Keep it a mix": no more
+  /// nudges for this draft.
+  void _modeChanged(SessionKind kind) {
+    if (_starting || kind == _kind) return;
+    setState(() {
+      if (kind == SessionKind.mix && _switched) _nudgeSpent = true;
+      _switched = false;
+      _kind = kind;
+    });
+  }
+
+  void _keepMix() => _modeChanged(SessionKind.mix);
 
   /// After a sign-in from the cap page the root remounts as the account and
   /// this Home is new: the prompt the cap kept is sent once, here. A Home
@@ -275,6 +391,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
   @override
   void dispose() {
     _routeObserver?.unsubscribe(this);
+    _promptController.removeListener(_draftChanged);
     _promptController.dispose();
     _promptFocus.dispose();
     super.dispose();
@@ -303,6 +420,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
     final draft = _promptController.text.trim();
     if (draft.isEmpty) return;
 
+    // An album ask goes out as typed: no shape, no energy sentence.
+    if (_effectiveKind == SessionKind.album) {
+      await _start(draft, draft: draft, kind: SessionKind.album);
+      return;
+    }
+
     // The shape rides out with the message, not in the field. The server has
     // no `energyArc` on session start, so the sentence is composed here; the
     // length guard is the sheet's own.
@@ -316,15 +439,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
     await _start(prompt, draft: draft, arc: arc);
   }
 
-  /// Starts a mix from [prompt], composed from [draft] and [arc] (kept apart
-  /// for the cap). [kept] is the cap's prompt sent after sign-in: it carries
-  /// no attachment (the anonymous listener's playlists may not have moved
-  /// to the account).
+  /// Starts a mix (or, with [kind] album, an album session) from [prompt],
+  /// composed from [draft] and [arc] (kept apart for the cap). [kept] is the
+  /// cap's prompt sent after sign-in: it carries no attachment (the anonymous
+  /// listener's playlists may not have moved to the account). The playlist
+  /// attachment rides with an album ask as with a mix.
   Future<void> _start(
     String prompt, {
     required String draft,
     EnergyArc? arc,
     bool kept = false,
+    SessionKind kind = SessionKind.mix,
   }) async {
     if (_starting) return;
     setState(() {
@@ -340,6 +465,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
                 playlistId: _inspiration!.id,
                 excludeSourceTracks: _excludeSourceTracks,
               ),
+        kind: kind,
       );
       if (!mounted) return;
       _promptController.clear();
@@ -471,6 +597,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
   @override
   Widget build(BuildContext context) {
     ref.watch(newMixInspirationProvider);
+    // The Mix | Album control is offered only to an account with albums on.
+    ref.watch(albumPicksEnabledProvider);
+    ref.watch(isAnonymousProvider);
+    ref.listen(homeModeRequestProvider, (_, next) {
+      if (next != null) _takeModeRequest();
+    });
+    final albumsOffered = _albumsOffered;
+    final album = _effectiveKind == SessionKind.album;
     // The Spotify waiting state, until the import lands. Apple listeners
     // (and anyone whose onboarding cannot be read) see Home exactly as before.
     // The card stays until both packages have landed: the first import is
@@ -519,21 +653,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
               removeBottom: true,
               child: LargeTitleScaffold(
                 title: 'Home',
-                // The Shape control lives beside the title, in the slot
-                // Library gives its glass cluster (smoke round five, note 1).
-                // Its state stays here: the sentence is folded into the first
-                // prompt at send, never into the draft.
-                trailing: EnergyControl(
-                  controller: _promptController,
-                  enabled: !_starting,
-                  selectedArc: _arc,
-                  onArcChanged: (arc) => setState(() {
-                    _arc = arc;
-                    // A shape the listener just changed clears a stale
-                    // "too long" line from an earlier attempt.
-                    if (_error == energySheetTooLong) _error = null;
-                  }),
-                ),
                 // No pull-to-refresh on Home: there is no list to refresh.
                 slivers: [
                   SliverLayoutBuilder(
@@ -577,7 +696,36 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
                   busy: _starting,
                   error: _error,
                   onSubmit: _submit,
-                  placeholder: _inspiration == null
+                  modeControl: albumsOffered ? _modeControl() : null,
+                  // Absent under Album, not hidden: no shape is sent there.
+                  shapeControl: album
+                      ? null
+                      : EnergyControl(
+                          compact: true,
+                          controller: _promptController,
+                          enabled: !_starting,
+                          selectedArc: _arc,
+                          onArcChanged: (arc) => setState(() {
+                            _arc = arc;
+                            // A shape the listener just changed clears a
+                            // stale "too long" line from an earlier attempt.
+                            if (_error == energySheetTooLong) _error = null;
+                          }),
+                        ),
+                  switched: _switched && album,
+                  onKeepMix: _keepMix,
+                  sendLabel: album
+                      ? HomeScreen.albumSendLabel
+                      : MixPromptInput.defaultSendLabel,
+                  starterPrompts: album
+                      ? HomeScreen.albumStarters
+                      : MixPromptInput.examples,
+                  routineSuggestion: !album,
+                  // Under Album the record placeholder holds even with a
+                  // playlist attached; the attachment chip says which one.
+                  placeholder: album
+                      ? HomeScreen.albumPlaceholder
+                      : _inspiration == null
                       ? null
                       : 'Something like ${_inspiration!.name}, but…',
                   refinements: _inspiration == null ? null : _refinements(),
@@ -602,6 +750,26 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
       ),
     );
   }
+
+  /// The app-wide segmented control in its compact form, as one group named
+  /// "What to make" (board H1).
+  Widget _modeControl() => SegmentedToggle<SessionKind>.compact(
+    semanticLabel: HomeScreen.modeGroupLabel,
+    value: _effectiveKind,
+    onChanged: _modeChanged,
+    options: const [
+      SegmentedOption(
+        value: SessionKind.mix,
+        label: 'Mix',
+        key: HomeScreen.modeMixKey,
+      ),
+      SegmentedOption(
+        value: SessionKind.album,
+        label: 'Album',
+        key: HomeScreen.modeAlbumKey,
+      ),
+    ],
+  );
 
   /// What the space between the title and the panel holds: the starting
   /// state, the Spotify waiting rows, or the one hint line.
