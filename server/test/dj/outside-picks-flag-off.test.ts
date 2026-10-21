@@ -18,7 +18,9 @@ const sha = (s: string) => createHash('sha256').update(s).digest('hex')
 const PINNED = {
   tools: 'e8e7182e2be15efbe3e740bc6a13d850d183125dac2a226fc08f944460f0f002',
   persona: '6afe70f49f5eb3d743b2dbd80647e6e1067ae1075318c68b6cd5a856b6dd1840',
-  curation: '83fc6e4232f504f10c54a95bcf307af6ad52498154ace9edd13602fcf7a4bc7e',
+  // Prompt parts only (system, messages, tools, effort); re-pinned 2026-10-21
+  // when the token budget left the hash, see the curation test below.
+  curation: 'a039200b58f796d7c47e943fdd456a5319e62548c715b3908d9d2259d337325c',
 }
 
 function personalPool(n: number): PoolTrack[] {
@@ -63,7 +65,12 @@ describe('flag off is byte-for-byte today', () => {
     const intent = intentSchema.parse({ themes: 'late night drive', tempoMin: 90, tempoMax: 120, energyArc: 'rise', eraFrom: 1990, eraTo: 2010, familiarity: 'mix', targetCount: 5 })
     await curate(llm, personalPool(8), intent, 'Current queue: empty.')
     const { system, messages, tools, maxTokens, effort } = requests[0]
-    expect(sha(JSON.stringify({ system, messages, tools, maxTokens, effort }))).toBe(PINNED.curation)
+    // The prompt parts are pinned byte-for-byte. The token budget is a knob
+    // asserted on its own: fix(dj) 2026-10-21 raised it so Sonnet 5's
+    // adaptive thinking fits (BASE 6000 + 200 per track).
+    const promptHash = sha(JSON.stringify({ system, messages, tools, effort }))
+    expect(promptHash).toBe(PINNED.curation)
+    expect(maxTokens).toBe(6000 + 200 * 5)
   })
 })
 
