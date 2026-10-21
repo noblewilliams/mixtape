@@ -69,6 +69,9 @@ class FirstRunDjApi extends BareDjApi {
   String nextId = 'session-new';
   Object? failWith;
 
+  /// Holds the DJ turn open when set, as a real 20 to 60 second turn does.
+  Completer<void>? gate;
+
   @override
   Future<List<DjSession>> listSessions() async => [];
 
@@ -79,6 +82,8 @@ class FirstRunDjApi extends BareDjApi {
     SessionKind kind = SessionKind.mix,
   }) async {
     prompts.add(prompt);
+    final hold = gate;
+    if (hold != null) await hold.future;
     final failure = failWith;
     if (failure != null) throw failure;
     return SessionDetail(

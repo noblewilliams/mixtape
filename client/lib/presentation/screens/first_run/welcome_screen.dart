@@ -107,6 +107,7 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
       _error = null;
     });
     final error = await startFirstMix(
+      context,
       ref,
       prompt,
       onCap: () {

@@ -19,6 +19,8 @@ import 'package:mixtape/presentation/screens/first_run/choose_method_screen.dart
 import 'package:mixtape/presentation/screens/first_run/choose_service_screen.dart';
 import 'package:mixtape/presentation/screens/first_run/doing_screen.dart';
 import 'package:mixtape/presentation/screens/first_run/first_run_flow.dart';
+import 'package:mixtape/presentation/screens/first_run/making_screen.dart';
+import 'package:mixtape/presentation/screens/first_run/step_scaffold.dart';
 import 'package:mixtape/presentation/screens/first_run/welcome_screen.dart';
 import 'package:mixtape/presentation/screens/home_screen.dart';
 import 'package:mixtape/presentation/screens/shell/shell_screen.dart';
@@ -133,6 +135,40 @@ void main() {
     await tester.tap(find.byKey(const Key('chat-back')));
     await tester.pumpAndSettle();
     expect(find.byType(HomeScreen), findsOneWidget);
+  });
+
+  testWidgets('path A in the app: Continue shows Making your mix. over Who '
+      'do you love? until the DJ turn returns, then hands off', (tester) async {
+    final h = FirstRunHarness();
+    h.dj.gate = Completer<void>();
+    final c = await _pumpApp(tester, h);
+
+    await tester.enterText(find.byKey(const Key('prompt-field')), 'rainy');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('start-session')));
+    await tester.pumpAndSettle();
+    await _enterArtists(tester);
+    await tester.tap(find.byKey(ArtistsScreen.continueKey));
+    await tester.pumpAndSettle();
+
+    expect(h.dj.prompts, ['rainy']);
+    expect(find.byType(MakingScreen), findsOneWidget);
+    expect(find.text(MakingScreen.headline), findsOneWidget);
+    expect(find.text(MakingScreen.line), findsOneWidget);
+    expect(find.byKey(TapeBackButton.defaultKey), findsNothing);
+    expect(find.byType(ShellScreen), findsNothing);
+    expect(c.read(firstRunActiveProvider), isTrue);
+
+    h.dj.gate!.complete();
+    await tester.pumpAndSettle();
+
+    expect(find.byType(MakingScreen), findsNothing);
+    expect(find.byType(FirstRunFlow), findsNothing);
+    expect(find.byType(ShellScreen), findsOneWidget);
+    expect(
+      tester.widget<ChatScreen>(find.byType(ChatScreen)).sessionId,
+      'session-new',
+    );
   });
 
   testWidgets('signed in with an account, then signed out: the flow comes '

@@ -144,7 +144,11 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
       );
       return;
     }
+    // The seeds are in: the busy state ends here and the making page,
+    // pushed by startFirstMix, covers the DJ turn.
+    setState(() => _busy = false);
     final error = await startFirstMix(
+      context,
       ref,
       prompt,
       onCap: () {
@@ -154,10 +158,7 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
       },
     );
     if (!mounted) return;
-    setState(() {
-      _busy = false;
-      _error = error;
-    });
+    setState(() => _error = error);
   }
 
   @override

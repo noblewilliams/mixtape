@@ -13,6 +13,8 @@
 /// [AddMusicMode.library], which pops back to Library when the music is in.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -26,6 +28,7 @@ import '../../providers/first_run_provider.dart';
 import '../../providers/onboarding_provider.dart';
 import 'artists_screen.dart';
 import 'choose_service_screen.dart';
+import 'making_screen.dart';
 import 'welcome_screen.dart';
 
 /// The root of the first-run flow: Welcome.
@@ -177,6 +180,11 @@ Future<void> saveArtistSeeds(WidgetRef ref, List<String> names) async {
 
 /// Sends the first prompt and hands off to the shell, which opens the mix.
 ///
+/// The DJ turn takes 20 to 60 seconds, so [MakingScreen] is pushed over the
+/// caller's page the moment the start begins and popped when it returns,
+/// whatever the outcome; a failure leaves the listener back on the caller's
+/// page with what they typed.
+///
 /// Returns null once handed off (the caller's page is about to unmount), or
 /// the sentence to show when the mix could not start. A session that
 /// persisted despite a failed first turn is handed off like Home does, with
@@ -185,21 +193,39 @@ Future<void> saveArtistSeeds(WidgetRef ref, List<String> names) async {
 /// [onCap], the sign-in page, and no sentence: nothing about the cap is
 /// drawn by the composer.
 Future<String?> startFirstMix(
+  BuildContext context,
   WidgetRef ref,
   String prompt, {
   void Function()? onCap,
 }) async {
+  final navigator = Navigator.of(context);
+  final making = FirstRunPageRoute<void>(
+    builder: (_) => const MakingScreen(),
+    settings: const RouteSettings(name: MakingScreen.routeName),
+  );
+  unawaited(navigator.push(making));
+  void leaveMaking() {
+    if (making.isCurrent) {
+      navigator.pop();
+    } else if (making.isActive) {
+      navigator.removeRoute(making);
+    }
+  }
+
   try {
     await ensureAnonymousSession(ref);
     final sessionId = await ref.read(sessionStarterProvider)(prompt);
+    leaveMaking();
     ref
         .read(firstRunActiveProvider.notifier)
         .handOff(PendingConversation(sessionId));
     return null;
   } on AnonymousCapException {
+    leaveMaking();
     onCap?.call();
     return null;
   } on DjApiException catch (e) {
+    leaveMaking();
     final sessionId = e.sessionId;
     if (sessionId == null) return e.message;
     ref
@@ -207,6 +233,7 @@ Future<String?> startFirstMix(
         .handOff(PendingConversation(sessionId, initialError: e.message));
     return null;
   } catch (e) {
+    leaveMaking();
     return firstRunErrorFor(e);
   }
 }
