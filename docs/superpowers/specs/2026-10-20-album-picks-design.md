@@ -9,8 +9,11 @@ then iOS, two founder gates). Phase 1, the server behind `ALBUM_PICKS` off,
 is committed on `main` (2026-10-20, Tasks 1 to 5); Gate 1 was covered by the
 first-run deploy of 2026-10-20. Phase 2, the web client, is committed on
 `main` (2026-10-21, Tasks 6 to 9: API types, the Mix | Album control with the
-nudge, the album panel, the Listen later tab); departures from the board are
-listed in `../../backlog.md`. Decision:
+nudge, the album panel, the Listen later tab). Phase 3, the iOS client, is
+committed on `main` (2026-10-21, Tasks 10 to 13: models and providers, the
+compact Mix | Album row with the nudge, the album card with the playback
+bridge, the Listen later segment); Gate 2 is owed. Departures from the board
+on both clients are listed in `../../backlog.md`. Decision:
 `../../decisions.md` 2026-10-20. Keeps the first-run decision of the same
 day (albums stay out of the anonymous flow). Builds on the outside-library
 picks spec (`2026-10-03-outside-library-picks-design.md`) for what "new to
