@@ -187,6 +187,10 @@ Files: `server/src/routes/sessions.ts`, new `server/src/routes/listen-later.ts`,
 
 ### Gate 1: the album picks migration and deploy (founder)
 
+Done 2026-10-20 as part of the first-run flow's Gate 1: migration 0038 applied
+and Worker `42bffed2` deployed from `859700d` with the flag off. The
+`album_picks_off` check on production is still to be run.
+
 From a clean worktree of committed HEAD: apply the album picks migration, deploy the Worker with
 `ALBUM_PICKS` off, confirm `GET /sessions` and an ordinary mix still work
 and that `POST /sessions` with `kind: 'album'` returns `album_picks_off`.
