@@ -1,4 +1,5 @@
-.home-compose { flex: none; padding-top: 12px; }
+.home-compose-area, .home-compose { flex: none; }
+.home-compose { padding-top: 12px; }
 .home-composer { display: flex; align-items: center; gap: 6px; padding: 7px 8px 7px 16px; min-height: 60px; border: 1px solid var(--hairline); border-radius: 12px; background: var(--surface); }
 .home-composer textarea { flex: 1; min-width: 0; height: 40px; min-height: 40px; max-height: 112px; resize: none; margin: 0; padding: 9px 0; border: 0; border-radius: 0; background: transparent; color: var(--graphite); font-family: inherit; font-size: 14px; line-height: 22px; overflow: auto; }
 .home-composer textarea::placeholder { color: var(--muted); }
@@ -25,9 +26,29 @@
 .composer-tools .wc-attached-label { display: block; max-width: 180px; }
 .composer-shape { width: 18px; height: 8px; flex: none; overflow: visible; }
 .composer-shape path { fill: none; stroke: currentColor; stroke-width: 24; stroke-linecap: round; }
+/* The mode pair is drawn as the Mixes view switch; the current fill slides between equal segments. */
+.mode-control { position: relative; display: inline-grid; grid-template-columns: 1fr 1fr; gap: 2px; padding: 2px; margin-right: 4px; border: 1px solid var(--hairline); border-radius: 8px; }
+.mode-control::after { content: ''; position: absolute; top: 2px; bottom: 2px; left: 2px; width: calc(50% - 3px); border-radius: 6px; background: color-mix(in srgb, var(--graphite) 11%, transparent); transition: transform 200ms ease; pointer-events: none; }
+.mode-control[data-mode=album]::after { transform: translateX(calc(100% + 2px)); }
+.mode-control button { position: relative; z-index: 1; min-height: 22px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--smoke); font: inherit; font-size: 12px; cursor: pointer; }
+.mode-control button[aria-checked=true] { color: var(--graphite); font-weight: 600; }
+.mode-control button:not([aria-checked=true]):hover { color: var(--graphite); }
+.mode-control button:disabled { cursor: default; }
+.mode-control button:focus-visible { outline: 3px solid #5b92b8; outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) { .mode-control::after { transition: none; } }
+.home-starters { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.home-starters button { min-height: 30px; padding: 0 12px; display: inline-flex; align-items: center; border: 1px solid var(--hairline); border-radius: 999px; background: transparent; color: var(--graphite); font: inherit; font-size: 12px; cursor: pointer; }
+.home-starters button:not(:disabled):hover { background: var(--hairline); }
+.home-starters button:disabled { opacity: .4; cursor: default; }
+.home-switched { display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; font-size: 12px; color: var(--smoke); }
+/* Empty while the pills show: the live region stays mounted but takes no space. */
+.home-switched:not(:empty) { margin-top: 12px; min-height: 30px; }
+.home-switched button { position: relative; padding: 0; border: 0; background: transparent; color: var(--plum); font: inherit; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; cursor: pointer; }
 /* Compact controls keep a 44px touch target without the visual height. */
 @media (pointer: coarse) {
   .home-voice-button::before, .home-send-button::before, .composer-tools .wc-text::before { content: ''; position: absolute; inset: -8px -2px; }
+  .mode-control button::before { content: ''; position: absolute; inset: -11px -1px; }
+  .home-switched button::before { content: ''; position: absolute; inset: -14px -6px; }
 }
 @media (max-width: 600px) {
   .composer-tools .wc-text { padding-inline: 5px; gap: 4px; }

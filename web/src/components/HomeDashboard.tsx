@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import type { DjSession } from '../domain'
-import { HomeComposer, type DraftSeed } from './HomeComposer'
+import { HomeComposer, type DraftSeed, type HomeSubmit } from './HomeComposer'
 import { SessionRow } from './SessionControls'
 import { MixSkeletons } from './UiStates'
 
@@ -14,7 +14,9 @@ type Props = {
   onRetry: () => void
   onOpenSession: (id: string) => void
   onOpenMixes: () => void
-  onSubmit: (prompt: string) => Promise<void>
+  onSubmit: HomeSubmit
+  albumPicks: boolean
+  anonymous: boolean
   transcribe: (audio: File, signal: AbortSignal) => Promise<{ text: string }>
   onRename: (id: string, title: string) => Promise<void>
   onArchive: (id: string) => Promise<void>
@@ -72,7 +74,7 @@ export function HomeDashboard(p: Props) {
         </section>
       </div>
       {p.player}
-      <HomeComposer busy={p.busy} onSubmit={p.onSubmit} transcribe={p.transcribe} draftSeed={p.draftSeed} />
+      <HomeComposer busy={p.busy} albumPicks={p.albumPicks} anonymous={p.anonymous} onSubmit={p.onSubmit} transcribe={p.transcribe} draftSeed={p.draftSeed} />
     </main>
   )
 }

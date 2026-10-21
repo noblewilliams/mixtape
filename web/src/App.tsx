@@ -46,7 +46,7 @@ import { YourMusicView, type MusicSection } from './components/YourMusicView'
 import { createMusicSyncService } from './sync/music-sync-service'
 import { createMusicSyncRun } from './sync/music-sync-run'
 import { createUploadGate } from './sync/upload-gate'
-import type { AppView, CollectionView, DjMessage, DjSession, QueueTrack } from './domain'
+import type { AppView, CollectionView, DjMessage, DjSession, QueueTrack, SessionKind } from './domain'
 import { createImportRun } from './import/import-run'
 import { createListeningImportService } from './import/import-service'
 import { createLazyParser, createPageParser, type PageParser } from './import/page-parser'
@@ -376,12 +376,14 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   // clears it on read. Read once per account workspace: on load, and after a
   // sign-in from the in-app page (the new account remounts the workspace).
   const mergeRead = useRef(false)
+  const [albumPicks, setAlbumPicks] = useState(false)
   useEffect(() => {
     if (restoring || anonymous || mergeRead.current) return
     mergeRead.current = true
     void Promise.resolve()
       .then(() => api.getMe())
-      .then(({ merged }) => {
+      .then(({ merged, albumPicks }) => {
+        setAlbumPicks(albumPicks)
         const notice = mergeNotice(merged)
         if (!notice) return
         announce(notice, 'success', 6000)
@@ -813,7 +815,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   }
 
   /** `inspiration` overrides the dialog's seed (the kept mix re-sent after sign-in). */
-  async function createTape(prompt: string, useInspiration = true, propagateError = false, shape?: EnergyArc, inspiration?: InitialPlaylistSeed | null) {
+  async function createTape(prompt: string, useInspiration = true, propagateError = false, shape?: EnergyArc, inspiration?: InitialPlaylistSeed | null, kind: SessionKind = 'mix') {
     if (creatingTape) return
     const signal = controlLife.current.signal
     setCreatingTape(true)
@@ -821,7 +823,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       ? inspiration ?? undefined
       : useInspiration && newSeed ? { playlistId: newSeed.playlistId, excludeSourceTracks: newSeed.excludeSourceTracks } : undefined
     try {
-      const response = await api.createSession(prompt, seed, shape)
+      const response = kind === 'album' ? await api.createSession(prompt, seed, undefined, 'album') : await api.createSession(prompt, seed, shape)
       if (signal.aborted) return
       setNewSeed(null)
       adoptNewSession(response)
@@ -1039,7 +1041,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       {activeView === 'settings' ? <AppSettings api={api} playback={playback} userName={user.name} signInMethod={lastSignInProvider} onAccount={() => setDialog('account')} onMemories={() => setActiveView('memories')} onSignOut={signOut} anonymous={anonymous} onSignIn={() => openSignIn('keep')}/> : activeView === 'home' ? <HomeDashboard
         sessions={sessions} loading={loadingCollection} error={collectionError} busy={creatingTape}
         onRetry={() => void retryCollection()} onOpenSession={openSession} onOpenMixes={() => { setShowArchived(false); setActiveView('mixes') }}
-        onSubmit={prompt => createTape(prompt, false, true)} transcribe={(audio,signal) => api.transcribe(audio,signal)} draftSeed={draftSeed}
+        albumPicks={albumPicks} anonymous={anonymous} onSubmit={(prompt, { kind, shape }) => createTape(prompt, false, true, shape, undefined, kind)} transcribe={(audio,signal) => api.transcribe(audio,signal)} draftSeed={draftSeed}
         suggestions={<RoutineSuggestions key={user.id} api={api} busy={creatingTape} onCreate={prompt => createTape(prompt, false, true).catch((cause) => { if (!(cause instanceof PromptKept)) throw cause })}/>}
         player={<PlaybackPanel controller={playback}/>}
         onColor={(id,color) => updateMix(id,{caseColor:color})} onRename={(id,title) => updateMix(id,{title})} onArchive={id => updateMix(id,{status:'archived'})}

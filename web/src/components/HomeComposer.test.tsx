@@ -17,17 +17,17 @@ function setup(transcribe = vi.fn().mockResolvedValue({ text: 'A quiet evening' 
   }
   vi.stubGlobal('MediaRecorder', Recorder)
   const onSubmit = vi.fn().mockResolvedValue(undefined)
-  const view = render(chat ? <Conversation session={demoSessions[0]} messages={[]} thinking={false} onSend={onSubmit} transcribe={transcribe} onOpenQueue={vi.fn()} /> : <HomeComposer onSubmit={onSubmit} transcribe={transcribe} />)
+  const view = render(chat ? <Conversation session={demoSessions[0]} messages={[]} thinking={false} onSend={onSubmit} transcribe={transcribe} onOpenQueue={vi.fn()} /> : <HomeComposer albumPicks={false} anonymous={false} onSubmit={onSubmit} transcribe={transcribe} />)
   return { stop, getUserMedia, onSubmit, transcribe, ...view }
 }
 describe('HomeComposer', () => {
   it('submits trimmed drafts and keeps them when creation fails', async () => {
     const onSubmit = vi.fn().mockRejectedValue(new Error('offline'))
-    render(<HomeComposer onSubmit={onSubmit} transcribe={vi.fn()} />)
+    render(<HomeComposer albumPicks={false} anonymous={false} onSubmit={onSubmit} transcribe={vi.fn()} />)
     const input = screen.getByRole('textbox', { name: 'Describe your mix' })
     fireEvent.change(input, { target: { value: '  slow songs  ' } })
     fireEvent.click(screen.getByRole('button', { name: 'Make a mix' }))
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith('slow songs'))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith('slow songs', { kind: 'mix' }))
     expect(input).toHaveValue('  slow songs  ')
     expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t make your mix')
   })
@@ -118,4 +118,142 @@ it('uses editable voice transcripts in an existing mix too', async () => {
   expect(onSubmit).not.toHaveBeenCalled()
   fireEvent.click(screen.getByRole('button', { name: 'Send message' }))
   expect(onSubmit).toHaveBeenCalledWith('More mellow')
+})
+
+describe('HomeComposer mode', () => {
+  const mixPills = ['Kitchen, early, coffee on', 'Running, long, no lyrics', 'Last bus home']
+  const albumPills = ['Rainy evening, start to finish', 'Something I have never heard', 'One I own and forgot']
+  function mount(props: { albumPicks?: boolean; anonymous?: boolean; busy?: boolean } = {}) {
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    render(<HomeComposer albumPicks={props.albumPicks ?? true} anonymous={props.anonymous ?? false} busy={props.busy} onSubmit={onSubmit} transcribe={vi.fn()} />)
+    return { onSubmit, input: screen.getByRole('textbox', { name: 'Describe your mix' }) }
+  }
+  const radio = (name: string) => screen.getByRole('radio', { name })
+  const type = (input: HTMLElement, value: string) => fireEvent.change(input, { target: { value } })
+
+  it('starts on Mix with the Shape control and the mix pills', () => {
+    mount()
+    expect(screen.getByRole('radiogroup', { name: 'What to make' })).toBeInTheDocument()
+    expect(radio('Mix')).toHaveAttribute('aria-checked', 'true')
+    expect(radio('Album')).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getByRole('button', { name: 'Energy journey' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Make a mix' })).toBeInTheDocument()
+    for (const pill of mixPills) expect(screen.getByRole('button', { name: pill })).toBeInTheDocument()
+  })
+
+  it('under Album drops Shape and swaps the send label, placeholder and pills', () => {
+    const { input } = mount()
+    fireEvent.click(radio('Album'))
+    expect(radio('Album')).toHaveAttribute('aria-checked', 'true')
+    expect(screen.queryByRole('button', { name: /Energy journey/ })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Find an album' })).toBeInTheDocument()
+    expect(input).toHaveAttribute('placeholder', 'What kind of record are you in the mood for…')
+    for (const pill of albumPills) expect(screen.getByRole('button', { name: pill })).toBeInTheDocument()
+    for (const pill of mixPills) expect(screen.queryByRole('button', { name: pill })).toBeNull()
+  })
+
+  it('moves between the options with the arrow keys', () => {
+    mount()
+    radio('Mix').focus()
+    fireEvent.keyDown(radio('Mix'), { key: 'ArrowRight' })
+    expect(radio('Album')).toHaveAttribute('aria-checked', 'true')
+    expect(radio('Album')).toHaveFocus()
+    expect(radio('Mix')).toHaveAttribute('tabindex', '-1')
+    fireEvent.keyDown(radio('Album'), { key: 'ArrowLeft' })
+    expect(radio('Mix')).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('nudges to Album once and stays a mix after Keep it a mix', () => {
+    const { input } = mount()
+    type(input, 'an album for the train home')
+    expect(radio('Album')).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('status')).toHaveTextContent('Switched to Album for this prompt.')
+    expect(screen.queryByRole('button', { name: albumPills[0] })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Keep it a mix' }))
+    expect(radio('Mix')).toHaveAttribute('aria-checked', 'true')
+    expect(screen.queryByText('Switched to Album for this prompt.')).toBeNull()
+    type(input, 'an album for the train home, nothing loud')
+    type(input, 'an')
+    type(input, 'an Albums please')
+    expect(radio('Mix')).toHaveAttribute('aria-checked', 'true')
+    type(input, '')
+    type(input, 'album')
+    expect(radio('Album')).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('keeps the live region mounted and empty until the nudge', () => {
+    const { input } = mount()
+    expect(screen.getByRole('status')).toBeEmptyDOMElement()
+    type(input, 'an album')
+    expect(screen.getByRole('status')).toHaveTextContent('Switched to Album for this prompt.')
+  })
+
+  it('names the album failure', async () => {
+    const onSubmit = vi.fn().mockRejectedValue(new Error('offline'))
+    render(<HomeComposer albumPicks anonymous={false} onSubmit={onSubmit} transcribe={vi.fn()} />)
+    fireEvent.click(radio('Album'))
+    type(screen.getByRole('textbox'), 'warm')
+    fireEvent.click(screen.getByRole('button', { name: 'Find an album' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t find an album. Your prompt is still here, try again.')
+  })
+
+  it('a Mix choice on the control after a nudge stops further nudges', () => {
+    const { input } = mount()
+    type(input, 'one album')
+    fireEvent.click(radio('Mix'))
+    expect(screen.queryByText('Switched to Album for this prompt.')).toBeNull()
+    type(input, 'one album, then')
+    type(input, 'one')
+    type(input, 'one album again')
+    expect(radio('Mix')).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('does not nudge on words that only contain album', () => {
+    const { input } = mount()
+    type(input, 'albumen and photoalbums')
+    expect(radio('Mix')).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('a pill fills the draft and never sends', () => {
+    const { input, onSubmit } = mount()
+    fireEvent.click(screen.getByRole('button', { name: 'Last bus home' }))
+    expect(input).toHaveValue('Last bus home')
+    expect(input).toHaveFocus()
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it('disables the pills while busy', () => {
+    mount({ busy: true })
+    expect(screen.getByRole('button', { name: 'Last bus home' })).toBeDisabled()
+  })
+
+  it.each([{ anonymous: true }, { albumPicks: false }])('hides the control and never nudges (%o)', async props => {
+    const { input, onSubmit } = mount(props)
+    expect(screen.queryByRole('radiogroup')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Energy journey' })).toBeInTheDocument()
+    type(input, 'an album please')
+    expect(screen.queryByText('Switched to Album for this prompt.')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Make a mix' }))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith('an album please', { kind: 'mix' }))
+  })
+
+  it('sends a chosen Shape with a mix', async () => {
+    const { input, onSubmit } = mount()
+    fireEvent.click(screen.getByRole('button', { name: 'Energy journey' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Wind down' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Use this shape' }))
+    type(input, 'slow train')
+    fireEvent.click(screen.getByRole('button', { name: 'Make a mix' }))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith('slow train', { kind: 'mix', shape: 'fall' }))
+  })
+
+  it('sends an album with no Shape even when one was chosen', async () => {
+    const { input, onSubmit } = mount()
+    fireEvent.click(screen.getByRole('button', { name: 'Energy journey' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Use this shape' }))
+    fireEvent.click(radio('Album'))
+    type(input, 'warm, for cooking')
+    fireEvent.click(screen.getByRole('button', { name: 'Find an album' }))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith('warm, for cooking', { kind: 'album' }))
+  })
 })

@@ -40,6 +40,7 @@ function renderApp(options: {
   musicKit?: MusicKitClient
   initialSessionId?: string
   initialSession?: CreateSessionResponse
+  user?: typeof user & { isAnonymous?: boolean }
 } = {}) {
   const api = options.api ?? createFakeApi()
   const accountAuth = options.accountAuth ?? createFakeAccountAuth()
@@ -50,7 +51,7 @@ function renderApp(options: {
       accountAuth={accountAuth}
       lastSignInProvider="apple"
       musicKit={musicKit}
-      user={user}
+      user={options.user ?? user}
       onSignOut={vi.fn()}
       initialSessionId={options.initialSessionId}
       initialSession={options.initialSession}
@@ -212,6 +213,47 @@ describe('Mixtape web shell', () => {
 
     expect(await screen.findByRole('heading', { name: 'Dinner after the rain' })).toBeInTheDocument()
     expect(screen.getByText('I made a first pass for this moment.')).toBeInTheDocument()
+  })
+
+  it('creates an album from Home with the kind and no shape', async () => {
+    const api = createFakeApi()
+    const createSession = vi.spyOn(api, 'createSession')
+    renderApp({ api })
+    fireEvent.click(await screen.findByRole('radio', { name: 'Album' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Describe your mix' }), { target: { value: 'Rainy evening' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Find an album' }))
+    await waitFor(() => expect(createSession).toHaveBeenCalledOnce())
+    expect(createSession.mock.calls[0]).toEqual(['Rainy evening', undefined, undefined, 'album'])
+    expect(await screen.findByRole('heading', { name: 'Rainy evening' })).toBeInTheDocument()
+  })
+
+  it('creates a mix from Home with the chosen shape and no kind', async () => {
+    const api = createFakeApi()
+    const createSession = vi.spyOn(api, 'createSession')
+    renderApp({ api })
+    await screen.findByRole('radio', { name: 'Mix' })
+    fireEvent.click(screen.getByRole('button', { name: 'Energy journey' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Wind down' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Use this shape' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Describe your mix' }), { target: { value: 'Slow train' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Make a mix' }))
+    await waitFor(() => expect(createSession).toHaveBeenCalledOnce())
+    expect(createSession.mock.calls[0]).toEqual(['Slow train', undefined, 'fall'])
+  })
+
+  it('hides the mode control when albums are off', async () => {
+    const getMe = vi.fn(async () => ({ user: { id: user.id, isAnonymous: false }, merged: null, albumPicks: false }))
+    renderApp({ api: createFakeApi({ getMe }) })
+    await waitFor(() => expect(getMe).toHaveBeenCalled())
+    expect(await screen.findByRole('button', { name: 'Energy journey' })).toBeInTheDocument()
+    expect(screen.queryByRole('radiogroup', { name: 'What to make' })).toBeNull()
+  })
+
+  it('hides the mode control for an anonymous listener', async () => {
+    renderApp({ user: { ...user, isAnonymous: true } })
+    expect(await screen.findByRole('button', { name: 'Energy journey' })).toBeInTheDocument()
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+    expect(screen.queryByRole('radiogroup', { name: 'What to make' })).toBeNull()
   })
 
   it('posts a listener message and follows it with the DJ response', async () => {

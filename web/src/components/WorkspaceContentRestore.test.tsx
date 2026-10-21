@@ -14,7 +14,7 @@ afterEach(() => { cleanup(); sessionStorage.clear() })
 const suggestion = { id: 'moment', title: 'An easy evening', prompt: 'Make a gentle mix', reason: 'From recent listening' }
 function content(api: MixtapeApi, playback: PlaybackController, restoring: boolean) {
   return <WorkspaceRestoreProvider userId="restore-listener" restoring={restoring}>
-    <HomeComposer onSubmit={vi.fn()} transcribe={vi.fn()} />
+    <HomeComposer albumPicks={false} anonymous={false} onSubmit={vi.fn()} transcribe={vi.fn()} />
     <RoutineSuggestions api={api} onCreate={vi.fn()} />
     <MemoryControls api={api} onClose={vi.fn()} onSessionExpired={vi.fn()} />
     <AppSettings api={api} playback={playback} userName="Listener" signInMethod="google" onAccount={vi.fn()} onMemories={vi.fn()} onSignOut={vi.fn()} />
