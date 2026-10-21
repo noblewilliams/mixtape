@@ -27,6 +27,7 @@ class LargeTitleScaffold extends StatefulWidget {
     this.leading,
     this.trailing,
     this.titleAccessory,
+    this.accessoriesBelowTitle = false,
     this.controller,
     this.onRefresh,
     this.contentPadding,
@@ -48,6 +49,13 @@ class LargeTitleScaffold extends StatefulWidget {
 
   /// Bottom-aligned beside the title — normally a segmented control.
   final Widget? titleAccessory;
+
+  /// Draws the accessories on their own row below the title, leading-aligned,
+  /// at every text size: the board's `.large-title` wrapping, for a host whose
+  /// accessory would not leave the title room beside it (Mixes' three
+  /// segments). Other screens keep the side-by-side row and the large-text
+  /// stack above the title.
+  final bool accessoriesBelowTitle;
 
   final ScrollController? controller;
 
@@ -287,7 +295,24 @@ class _LargeTitleScaffoldState extends State<LargeTitleScaffold>
       if (trailing != null && !pinned) trailing,
     ];
 
-    final Widget block = stacked
+    final Widget block = widget.accessoriesBelowTitle && accessories.isNotEmpty
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              title,
+              const SizedBox(height: LargeTitleScaffold.titleBottomGap),
+              Row(
+                children: [
+                  for (var i = 0; i < accessories.length; i++) ...[
+                    if (i > 0)
+                      const SizedBox(width: LargeTitleScaffold.titleGap),
+                    accessories[i],
+                  ],
+                ],
+              ),
+            ],
+          )
+        : stacked
         ? Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [

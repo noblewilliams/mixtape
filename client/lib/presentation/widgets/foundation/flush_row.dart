@@ -56,10 +56,14 @@ class FlushRow extends StatelessWidget {
     this.leadingSize = 60,
     this.inset = true,
     this.isFirst,
+    this.titleColor,
   });
 
   final Widget leading;
   final String title;
+
+  /// Overrides the title's ink (a muted, listened shelf row).
+  final Color? titleColor;
   final String? subtitle;
 
   /// Takes precedence over [subtitle] (a status word, a meta line with ink).
@@ -144,7 +148,9 @@ class FlushRow extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: tokens.rowTitle,
+                  style: titleColor == null
+                      ? tokens.rowTitle
+                      : tokens.rowTitle.copyWith(color: titleColor),
                   maxLines: wraps ? null : 1,
                   overflow: wraps ? null : TextOverflow.ellipsis,
                 ),

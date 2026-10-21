@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/presentation/screens/mix_history_screen.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
+import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
 import 'package:mixtape/presentation/widgets/foundation/flush_row.dart';
 import 'package:mixtape/presentation/widgets/mix_home_row.dart';
 
@@ -201,4 +202,75 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  group('album session', () {
+    final album = DjSession(
+      id: 'alb',
+      title: 'Something new, warm',
+      status: 'active',
+      queueVersion: 2,
+      updatedAt: DateTime(2026),
+      kind: SessionKind.album,
+      pick: const AlbumSummary(
+        title: 'Kitchen Radio Sessions',
+        artist: 'Odun & the Weather',
+      ),
+    );
+
+    Future<void> pumpRow(WidgetTester tester, DjSession s) => tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MixHomeRow(
+            session: s,
+            onOpen: () {},
+            onRename: (_) async => true,
+            onCaseColor: (_) async => true,
+            onArchive: () async => true,
+            onRestore: () async => true,
+          ),
+        ),
+      ),
+    );
+
+    testWidgets('the long-press menu offers Rename and Archive only', (
+      tester,
+    ) async {
+      await pumpRow(tester, album);
+      await tester.longPress(find.text('Something new, warm'));
+      await tester.pumpAndSettle();
+      expect(find.text('Rename'), findsOneWidget);
+      expect(find.text('Archive'), findsOneWidget);
+      expect(find.text('Version history'), findsNothing);
+      expect(find.text('Tape settings'), findsNothing);
+    });
+
+    testWidgets('the subtitle is the pick, and the tile stays a cassette', (
+      tester,
+    ) async {
+      await pumpRow(tester, album);
+      expect(
+        find.text('Kitchen Radio Sessions · Odun & the Weather'),
+        findsOneWidget,
+      );
+      expect(find.byType(CassetteTile), findsOneWidget);
+    });
+
+    testWidgets('before its first pick the subtitle is the relative time', (
+      tester,
+    ) async {
+      await pumpRow(
+        tester,
+        DjSession(
+          id: 'alb2',
+          title: 'Loud and strange',
+          status: 'active',
+          queueVersion: 0,
+          updatedAt: DateTime(2026),
+          kind: SessionKind.album,
+        ),
+      );
+      expect(find.textContaining(' · '), findsNothing);
+      expect(find.text('Loud and strange'), findsOneWidget);
+    });
+  });
 }

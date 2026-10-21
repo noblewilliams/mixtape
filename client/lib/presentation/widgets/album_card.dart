@@ -241,9 +241,9 @@ class _AlbumCardState extends ConsumerState<AlbumCard> {
       padding: const EdgeInsets.only(top: 4),
       child: _MetaLine(album: pick),
     );
-    final cover = _AlbumCover(
+    final cover = AlbumCover(
       key: AlbumCard.coverKey,
-      album: pick,
+      artwork: pick.artwork,
       size: large ? AlbumCard.compactCoverSize : AlbumCard.coverSize,
       radius: large ? 4 : 6,
       shadow: !large,
@@ -494,18 +494,18 @@ class _Mark extends StatelessWidget {
 }
 
 /// The Apple artwork template at the size drawn, over the artwork's own
-/// background colour while it loads.
-class _AlbumCover extends StatelessWidget {
-  const _AlbumCover({
+/// background colour while it loads. Shared with the Listen later shelf.
+class AlbumCover extends StatelessWidget {
+  const AlbumCover({
     super.key,
-    required this.album,
+    required this.artwork,
     required this.size,
     required this.radius,
     this.shadow = false,
     this.opacity = 1,
   });
 
-  final AlbumPick album;
+  final AlbumArtwork? artwork;
   final double size;
   final double radius;
   final bool shadow;
@@ -514,7 +514,7 @@ class _AlbumCover extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final art = album.artwork;
+    final art = artwork;
     final bg = art?.bgColor?.replaceFirst('#', '').toLowerCase();
     Widget cover = SquareArt(
       url: playlistArtworkUrl(art?.url, size: (size * 3).round()),
@@ -674,7 +674,7 @@ class _RunnerRow extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 7),
           child: Row(
             children: [
-              _AlbumCover(album: album, size: 48, radius: 4),
+              AlbumCover(artwork: album.artwork, size: 48, radius: 4),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -748,9 +748,9 @@ class PassedOverRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: Row(
           children: [
-            _AlbumCover(
+            AlbumCover(
               key: coverKey,
-              album: album,
+              artwork: album.artwork,
               size: 40,
               radius: 3,
               opacity: 0.75,

@@ -102,16 +102,21 @@ class _MixHomeRowState extends State<MixHomeRow> {
     }
   }
 
+  bool get _isAlbum => widget.session.kind == SessionKind.album;
+
   /// Rename, Version history and Archive/Restore — the approved row menu,
-  /// shared by the long-press and the legacy trailing button.
+  /// shared by the long-press and the legacy trailing button. An album
+  /// session has no versions to browse and no tape to dress (both answer 409),
+  /// so it offers Rename and Archive/Restore only.
   List<MixtapeMenuAction<String>> _menuItems(bool archived) => [
-    if (widget.onCaseColor != null)
+    if (widget.onCaseColor != null && !_isAlbum)
       const MixtapeMenuAction(value: 'tape-settings', label: 'Tape settings'),
     const MixtapeMenuAction(value: MixHomeRow.renameAction, label: 'Rename'),
-    const MixtapeMenuAction(
-      value: MixHomeRow.versionHistoryAction,
-      label: 'Version history',
-    ),
+    if (!_isAlbum)
+      const MixtapeMenuAction(
+        value: MixHomeRow.versionHistoryAction,
+        label: 'Version history',
+      ),
     MixtapeMenuAction(
       value: MixHomeRow.statusAction,
       label: archived ? 'Restore' : 'Archive',
@@ -141,6 +146,13 @@ class _MixHomeRowState extends State<MixHomeRow> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// An album session names its current pick; everything else says when.
+  String get _subtitle {
+    final pick = widget.session.pick;
+    if (_isAlbum && pick != null) return '${pick.title} · ${pick.artist}';
+    return relativeTime(widget.session.updatedAt);
   }
 
   Widget get _tile => CassetteTile(
@@ -209,7 +221,7 @@ class _MixHomeRowState extends State<MixHomeRow> {
         leading: _tile,
         leadingSize: MixHomeRow.artSize,
         title: widget.session.title,
-        subtitle: relativeTime(widget.session.updatedAt),
+        subtitle: _subtitle,
         isFirst: widget.isFirst,
         onTap: _busy ? null : widget.onOpen,
         trailing: widget.showActionsButton

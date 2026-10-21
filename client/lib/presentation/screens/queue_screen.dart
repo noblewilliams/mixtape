@@ -43,6 +43,7 @@ import '../theme/mixtape_theme.dart';
 import '../widgets/foundation/cassette_tile.dart';
 import '../widgets/foundation/glass_cluster.dart';
 import '../widgets/foundation/gradient_background.dart';
+import '../widgets/foundation/remove_band.dart';
 import '../widgets/foundation/tape_button.dart';
 import '../widgets/mix_handoff.dart';
 import '../widgets/track_row.dart';
@@ -637,7 +638,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
       movementDuration: reducedMotion
           ? Duration.zero
           : const Duration(milliseconds: 200),
-      background: const _RemoveBand(),
+      background: const RemoveBand(),
       onDismissed: (_) =>
           _handleDismiss(track, supportsInsert: state.supportsInsert),
       child: row,
@@ -850,36 +851,6 @@ class _MetaLine extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ],
-        ],
-      ),
-    );
-  }
-}
-
-/// The red band a swipe reveals under a row.
-class _RemoveBand extends StatelessWidget {
-  const _RemoveBand();
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    return Container(
-      color: tokens.errInk,
-      alignment: Alignment.centerRight,
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: const Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            'Remove',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          SizedBox(width: 6),
-          Icon(Icons.close, size: 18, color: Colors.white),
         ],
       ),
     );
