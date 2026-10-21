@@ -24,17 +24,21 @@ import '../widgets/open_tape_settings.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/api/api_client.dart';
+import '../../data/dj/dj_models.dart';
 import '../../data/playlists/playlist_context_models.dart';
 import '../providers/dj_providers.dart';
 import '../providers/keep_mixes_provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/library_sync_provider.dart';
 import '../providers/playlist_context_provider.dart';
+import '../providers/shell_providers.dart';
 import '../providers/mix_operation_gate.dart';
 import '../theme/mixtape_theme.dart';
+import '../widgets/album_card.dart';
 import '../widgets/conversation_turn.dart';
 import '../widgets/energy_journey.dart';
 import '../widgets/foundation/glass_cluster.dart';
+import '../widgets/foundation/idea_pill.dart';
 import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/label_chip.dart';
 import '../widgets/foundation/liquid_glass_surface.dart';
@@ -256,16 +260,23 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   }
 
   /// The board's More menu: Version history, Rename, Archive or Restore.
+  /// An album session keeps Rename and Archive only: it has no versions to
+  /// browse and no tape to dress.
   Future<void> _actions(BuildContext anchor) async {
-    final archived =
-        ref.read(chatProvider(widget.sessionId)).value?.session.status ==
-        'archived';
+    final session = ref.read(chatProvider(widget.sessionId)).value?.session;
+    final archived = session?.status == 'archived';
+    final album = session?.kind == SessionKind.album;
     final action = await showMixtapeMenu<String>(
       context,
       actions: [
-        const MixtapeMenuAction(value: 'history', label: 'Version history'),
+        if (!album)
+          const MixtapeMenuAction(value: 'history', label: 'Version history'),
         const MixtapeMenuAction(value: 'rename', label: 'Rename'),
-        const MixtapeMenuAction(value: 'tape-settings', label: 'Tape settings'),
+        if (!album)
+          const MixtapeMenuAction(
+            value: 'tape-settings',
+            label: 'Tape settings',
+          ),
         MixtapeMenuAction(
           value: 'status',
           label: archived ? 'Restore' : 'Archive',
@@ -312,12 +323,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   /// The native alert, with the current title preselected.
   Future<void> _rename() async {
-    final current =
-        ref.read(chatProvider(widget.sessionId)).value?.session.title ?? '';
+    final session = ref.read(chatProvider(widget.sessionId)).value?.session;
+    final current = session?.title ?? '';
     final name = await showCupertinoDialog<String>(
       context: context,
       barrierDismissible: true,
-      builder: (_) => _RenameDialog(title: current),
+      builder: (_) => _RenameDialog(
+        title: current,
+        heading: session?.kind == SessionKind.album ? 'Rename' : 'Rename mix',
+      ),
     );
     if (!mounted || name == null || name.trim().isEmpty) return;
     final ok = await ref
@@ -531,6 +545,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       final title = _knownTitle();
       return _frame(
         title: title ?? '',
+        showArrangement: _knownKind() != SessionKind.album,
         body: _SkeletonTurns(title: title),
         panel: _panel(state: null, inspiration: inspiration, busy: true),
       );
@@ -542,6 +557,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     return _frame(
       title: state.session.title,
       notPersonal: state.session.notPersonal,
+      showArrangement: state.kind != SessionKind.album,
       onArrangement: _openArrangement,
       onMore: _changingStatus ? null : _actions,
       body: _transcript(state, busy: busy),
@@ -556,6 +572,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     required String title,
     required Widget body,
     bool notPersonal = false,
+    bool showArrangement = true,
     VoidCallback? onArrangement,
     Future<void> Function(BuildContext anchor)? onMore,
     Widget? panel,
@@ -577,7 +594,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                       title: title,
                       notPersonal: notPersonal,
                       onBack: () => Navigator.of(context).maybePop(),
-                      onArrangement: onArrangement,
+                      onArrangement: showArrangement ? onArrangement : null,
+                      showArrangement: showArrangement,
                       onMore: onMore,
                     ),
                     Expanded(child: body),
@@ -600,6 +618,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   /// The turns, flush on the gradient, scrolled to the last one.
   Widget _transcript(ChatState state, {required bool busy}) {
+    if (state.kind == SessionKind.album) {
+      return _albumTranscript(state, busy: busy);
+    }
     final currentVersion = state.queueVersion;
 
     // The LATEST message whose queueVersion matches the current one carries
@@ -663,6 +684,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       items.add(WorkingIndicator(showCaption: _showListeningCaption));
     }
 
+    return _list(items);
+  }
+
+  Widget _list(List<Widget> items) {
     return ListView.builder(
       controller: _scrollController,
       padding: EdgeInsets.fromLTRB(
@@ -674,6 +699,138 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       itemCount: items.length,
       itemBuilder: (context, index) => items[index],
     );
+  }
+
+  Widget _turn(ChatState state, int i, {required bool busy}) {
+    final message = state.messages[i];
+    final precedingText = message.isError
+        ? _precedingUserText(state.messages, i)
+        : '';
+    return ConversationTurn(
+      text: message.message.content,
+      kind: message.isError
+          ? ConversationTurnKind.error
+          : (message.message.role == 'user'
+                ? ConversationTurnKind.user
+                : ConversationTurnKind.dj),
+      onResend: message.isError && precedingText.isNotEmpty
+          ? () => _send(precedingText)
+          : null,
+      resendEnabled: !busy,
+    );
+  }
+
+  /// An album session's transcript (board A2 to A8, F1 to F3): the album
+  /// card where the tape card would be, each passed-over pick as a muted
+  /// row after the reply that offered it (so above the turn that replaced
+  /// it), and the honest failure's refinement pills under the last reply.
+  Widget _albumTranscript(ChatState state, {required bool busy}) {
+    final pickState = state.pickState;
+    final pick = pickState?.pick;
+    final currentVersion = state.queueVersion;
+    final notifier = ref.read(chatProvider(widget.sessionId).notifier);
+
+    int? cardIndex;
+    int? lastDjIndex;
+    for (var i = state.messages.length - 1; i >= 0; i--) {
+      final message = state.messages[i];
+      if (cardIndex == null && message.message.queueVersion == currentVersion) {
+        cardIndex = i;
+      }
+      if (lastDjIndex == null &&
+          !message.isError &&
+          message.message.role != 'user') {
+        lastDjIndex = i;
+      }
+    }
+
+    // Passed picks by the version they were the pick in; those whose reply
+    // is not in the transcript (a "Pick this" swap writes no message) go
+    // directly above the current card instead.
+    final versions = {
+      for (final m in state.messages)
+        if (m.message.queueVersion != null) m.message.queueVersion!,
+    };
+    final passedByVersion = <int, List<AlbumPick>>{};
+    final orphans = <AlbumPick>[];
+    for (final album in pickState?.passed ?? const <AlbumPick>[]) {
+      if (versions.contains(album.version) && album.version != currentVersion) {
+        passedByVersion.putIfAbsent(album.version, () => []).add(album);
+      } else {
+        orphans.add(album);
+      }
+    }
+    final goBack = busy ? null : (int version) => notifier.goBack(version);
+    Widget passedRow(AlbumPick album) =>
+        PassedOverRow(album: album, onGoBack: goBack);
+
+    List<Widget> card() => [
+      ...orphans.map(passedRow),
+      if (pick != null)
+        AlbumCard(
+          pick: pick,
+          runnersUp: pickState!.runnersUp,
+          enabled: !busy,
+          onToggleListenLater: notifier.toggleListenLater,
+          onPick: (id) => notifier.choosePick(id),
+        ),
+    ];
+
+    final suggestions = state.suggestions;
+    Widget pills() => Padding(
+      padding: const EdgeInsets.only(top: 2, bottom: 4),
+      child: Wrap(
+        key: const Key('album-suggestions'),
+        spacing: 8,
+        children: [
+          for (final suggestion in suggestions!)
+            IdeaPill(
+              label: suggestion,
+              onPressed: busy ? null : () => _takeSuggestion(suggestion),
+            ),
+        ],
+      ),
+    );
+
+    final seenVersions = <int>{};
+    final items = <Widget>[];
+    for (var i = 0; i < state.messages.length; i++) {
+      items.add(_turn(state, i, busy: busy));
+      final version = state.messages[i].message.queueVersion;
+      if (i == cardIndex) {
+        items.addAll(card());
+      } else if (version != null && seenVersions.add(version)) {
+        items.addAll((passedByVersion[version] ?? const []).map(passedRow));
+      }
+      if (i == lastDjIndex && suggestions != null && suggestions.isNotEmpty) {
+        items.add(pills());
+      }
+    }
+    if (cardIndex == null) items.addAll(card());
+    if (lastDjIndex == null && suggestions != null && suggestions.isNotEmpty) {
+      items.add(pills());
+    }
+    if (state.sending) {
+      items.add(
+        WorkingIndicator(
+          showCaption: _showListeningCaption,
+          captionText: WorkingIndicator.albumCaption,
+          announcementText: WorkingIndicator.albumAnnouncement,
+        ),
+      );
+    }
+    return _list(items);
+  }
+
+  /// A refinement pill is the next turn in its own words; "Add my music"
+  /// is the one that leaves, for the Library tab (board F2).
+  void _takeSuggestion(String suggestion) {
+    if (suggestion == 'Add my music') {
+      ref.read(selectedTabProvider.notifier).selectTab(AppTab.library);
+      Navigator.of(context).popUntil((route) => route.isFirst);
+      return;
+    }
+    _send(suggestion);
   }
 
   /// The tape card and, under it, the energy line for the same version.
@@ -705,6 +862,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     final bottom = keyboard > 0 ? keyboard : media.padding.bottom + 8;
     final enabled = state != null && !busy;
     final status = _inspirationStatus(inspiration);
+    final album = state?.kind == SessionKind.album;
 
     return ConstrainedBox(
       // At 200% text with the keyboard up the panel wants more room than the
@@ -752,7 +910,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                     ),
                   ),
                   if (state != null) ...[
-                    _attachments(inspiration, enabled: enabled),
+                    _attachments(inspiration, enabled: enabled, album: album),
                     if (status != null)
                       Padding(
                         padding: const EdgeInsets.only(left: 2, bottom: 4),
@@ -798,6 +956,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                     controller: _textController,
                     focusNode: _promptFocus,
                     busy: !enabled,
+                    // An album session's composer suggests the refinements
+                    // once there is a pick (board A2), else asks for more.
+                    placeholder: album
+                        ? (state?.pickState?.pick != null
+                              ? 'Another? Older? Something you do not know?'
+                              : 'Tell the DJ more…')
+                        : null,
                     onSubmit: () =>
                         _send(_textController.text, fromComposer: true),
                   ),
@@ -805,36 +970,38 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                   // which the arrangement draws too: a mix Apple Music
                   // cannot touch drops Play/Create and says why; anything
                   // with a Spotify id gains the transfer handoff.
-                  MixActionsRow(
-                    keys: MixHandoffKeys.conversation,
-                    queue: state?.queue ?? const [],
-                    enabled: enabled,
-                    padding: const EdgeInsets.only(top: 8),
-                    isPlayingThisMix: isPlayingThisMix,
-                    onPlayNow: state == null
-                        ? null
-                        : () => playHere(state, state.queue),
-                    onCreatePlaylist: state == null
-                        ? null
-                        : () => createPlaylist(
-                            queue: state.queue,
-                            defaultName: state.session.title,
-                            keys: MixHandoffKeys.conversation,
-                          ),
-                    onSendToMusic: state == null
-                        ? null
-                        : () => sendToMusic(state.queue),
-                    onShare: state == null
-                        ? null
-                        : (buttonContext) => shareToTransferTool(
-                            buttonContext,
-                            state.queue,
-                            state.session.title,
-                          ),
-                    saving: savingPlaylist,
-                    sendingToMusic: sendingToMusic,
-                    sharing: sharingMix,
-                  ),
+                  // An album has its own actions on the card.
+                  if (!album)
+                    MixActionsRow(
+                      keys: MixHandoffKeys.conversation,
+                      queue: state?.queue ?? const [],
+                      enabled: enabled,
+                      padding: const EdgeInsets.only(top: 8),
+                      isPlayingThisMix: isPlayingThisMix,
+                      onPlayNow: state == null
+                          ? null
+                          : () => playHere(state, state.queue),
+                      onCreatePlaylist: state == null
+                          ? null
+                          : () => createPlaylist(
+                              queue: state.queue,
+                              defaultName: state.session.title,
+                              keys: MixHandoffKeys.conversation,
+                            ),
+                      onSendToMusic: state == null
+                          ? null
+                          : () => sendToMusic(state.queue),
+                      onShare: state == null
+                          ? null
+                          : (buttonContext) => shareToTransferTool(
+                              buttonContext,
+                              state.queue,
+                              state.session.title,
+                            ),
+                      saving: savingPlaylist,
+                      sendingToMusic: sendingToMusic,
+                      sharing: sharingMix,
+                    ),
                 ],
               ),
             ),
@@ -848,6 +1015,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   Widget _attachments(
     SessionPlaylistContextState inspiration, {
     required bool enabled,
+    bool album = false,
   }) {
     final attached = inspiration.seed?.playlistId != null;
     final canWrite = enabled && inspiration.canSelect;
@@ -874,19 +1042,21 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                       .select(playlistId: null)
                 : null,
           ),
-          LabelChip(
-            key: const Key('chat-shape-chip'),
-            label: 'Shape',
-            hole: false,
-            leading: const EnergyWave(
-              arc: EnergyArc.arc,
-              width: 18,
-              height: 12,
+          // No Shape for an album: there is no energy line to shape.
+          if (!album)
+            LabelChip(
+              key: const Key('chat-shape-chip'),
+              label: 'Shape',
+              hole: false,
+              leading: const EnergyWave(
+                arc: EnergyArc.arc,
+                width: 18,
+                height: 12,
+              ),
+              onPressed: enabled
+                  ? () => showEnergyShapeSheet(context, _textController)
+                  : null,
             ),
-            onPressed: enabled
-                ? () => showEnergyShapeSheet(context, _textController)
-                : null,
-          ),
         ],
       ),
     );
@@ -903,6 +1073,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     final title = match?.title.trim();
     return (title == null || title.isEmpty) ? null : title;
   }
+
+  /// This session's kind before its own transcript has loaded, from the
+  /// Mixes list; null when that list was never read.
+  SessionKind? _knownKind() => ref
+      .watch(sessionsProvider)
+      .value
+      ?.where((session) => session.id == widget.sessionId)
+      .firstOrNull
+      ?.kind;
 
   /// The text of the nearest USER message before [index] — that's the turn an
   /// error turn at [index] answers, and what "resend" means.
@@ -925,12 +1104,16 @@ class _TopBar extends StatelessWidget {
     required this.onBack,
     required this.onArrangement,
     required this.onMore,
+    this.showArrangement = true,
   });
 
   final String title;
   final bool notPersonal;
   final VoidCallback onBack;
   final VoidCallback? onArrangement;
+
+  /// False for an album session: an album has no arrangement (board A1).
+  final bool showArrangement;
   final Future<void> Function(BuildContext anchor)? onMore;
 
   @override
@@ -978,12 +1161,13 @@ class _TopBar extends StatelessWidget {
           ),
           GlassCluster(
             children: [
-              GlassButton(
-                key: const Key('chat-arrangement'),
-                icon: Icons.queue_music,
-                label: 'Arrangement',
-                onPressed: onArrangement,
-              ),
+              if (showArrangement)
+                GlassButton(
+                  key: const Key('chat-arrangement'),
+                  icon: Icons.queue_music,
+                  label: 'Arrangement',
+                  onPressed: onArrangement,
+                ),
               Builder(
                 builder: (anchor) => GlassButton(
                   key: const Key('chat-actions'),
@@ -1168,9 +1352,10 @@ class _CouldNotOpen extends StatelessWidget {
 /// disposed the moment `showDialog` returns is still being read by the
 /// fading-out field.
 class _RenameDialog extends StatefulWidget {
-  const _RenameDialog({required this.title});
+  const _RenameDialog({required this.title, required this.heading});
 
   final String title;
+  final String heading;
 
   @override
   State<_RenameDialog> createState() => _RenameDialogState();
@@ -1192,7 +1377,7 @@ class _RenameDialogState extends State<_RenameDialog> {
 
   @override
   Widget build(BuildContext context) => CupertinoAlertDialog(
-    title: const Text('Rename mix'),
+    title: Text(widget.heading),
     content: Padding(
       padding: const EdgeInsets.only(top: 14),
       child: CupertinoTextField(

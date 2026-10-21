@@ -25,6 +25,7 @@ mixin NoPlaylistSnapshots {
   }) async => const PlaylistEntryPage(entries: [], total: 0);
   Future<bool> cancelPlaylistSnapshot() async => true;
   Future<bool> releasePlaylistSnapshot(String snapshotId) async => true;
+  Future<bool> playAlbum(String appleAlbumId) async => true;
 }
 
 /// Mirrors the native contract enforced by MusicKitBridge.swift: offset 0 (re)builds

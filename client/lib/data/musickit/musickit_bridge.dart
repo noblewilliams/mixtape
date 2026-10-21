@@ -604,6 +604,27 @@ class MusicKitBridge {
     }
   }
 
+  /// Hands an album to the Music app (`playAlbum` on the native side): the
+  /// album id is queued on the system player, falling back to its songs in
+  /// album order. Same guard, timeout and error mapping as [playQueue].
+  Future<bool> playAlbum(String appleAlbumId) async {
+    if (appleAlbumId.isEmpty) {
+      throw MusicKitException('cannot play an album without an id');
+    }
+    try {
+      final result = await _channel
+          .invokeMethod<dynamic>('playAlbum', {'appleAlbumId': appleAlbumId})
+          .timeout(_callTimeout);
+      return result is bool ? result : false;
+    } on PlatformException catch (e) {
+      throw _fromPlatform(e);
+    } on MissingPluginException {
+      throw MusicKitException('MusicKit bridge not registered');
+    } on TimeoutException {
+      throw MusicKitException('timed out waiting for the Music app');
+    }
+  }
+
   /// Creates a new library playlist named [name] and adds [appleIds] to it.
   /// Per-track add failures are counted, not fatal — the native side keeps
   /// going and reports `added`/`failed` counts rather than aborting on the

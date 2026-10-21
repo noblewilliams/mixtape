@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/musickit/musickit_bridge.dart';
+import 'package:mixtape/data/playback/player_bridge.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -215,6 +216,82 @@ void main() {
         throwsA(isA<MusicKitException>()),
       );
     });
+  });
+
+  group('playAlbum', () {
+    test('sends the album id and decodes a true result', () async {
+      MethodCall? captured;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        captured = call;
+        return true;
+      });
+
+      expect(await MusicKitBridge().playAlbum('1440833098'), isTrue);
+      expect(captured?.method, 'playAlbum');
+      expect(captured?.arguments, {'appleAlbumId': '1440833098'});
+    });
+
+    test('a non-bool result degrades to false', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async => 'yes');
+      expect(await MusicKitBridge().playAlbum('1'), isFalse);
+    });
+
+    test('wraps a PlatformException in MusicKitException', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        throw PlatformException(code: 'play_failed', message: 'nope');
+      });
+      await expectLater(
+        MusicKitBridge().playAlbum('1'),
+        throwsA(isA<MusicKitException>()),
+      );
+    });
+
+    test('times out into a MusicKitException', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) => Completer<bool>().future);
+      await expectLater(
+        MusicKitBridge(
+          callTimeout: const Duration(milliseconds: 50),
+        ).playAlbum('1'),
+        throwsA(isA<MusicKitException>()),
+      );
+    });
+
+    test('rejects an empty id without invoking the channel', () async {
+      var invoked = false;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        invoked = true;
+        return true;
+      });
+      await expectLater(
+        MusicKitBridge().playAlbum(''),
+        throwsA(isA<MusicKitException>()),
+      );
+      expect(invoked, isFalse);
+    });
+  });
+
+  test('AppPlayerBridge.startAlbum calls startAlbum on the player channel', () async {
+    const player = MethodChannel('mixtape/player');
+    MethodCall? captured;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(player, (call) async {
+      captured = call;
+      return null;
+    });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(player, null),
+    );
+
+    await AppPlayerBridge().startAlbum('1440833098');
+
+    expect(captured?.method, 'startAlbum');
+    expect(captured?.arguments, {'appleAlbumId': '1440833098'});
   });
 
   group('createPlaylist', () {

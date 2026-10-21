@@ -168,9 +168,20 @@ class ConversationTurn extends StatelessWidget {
 /// indicator reads the same whether it animates or not; the shimmer is a
 /// refinement on top and never starts under reduced motion.
 class WorkingIndicator extends StatefulWidget {
-  const WorkingIndicator({super.key, required this.showCaption});
+  const WorkingIndicator({
+    super.key,
+    required this.showCaption,
+    this.captionText,
+    this.announcementText,
+  });
 
   final bool showCaption;
+
+  /// What the small line says once it shows; [caption] when null.
+  final String? captionText;
+
+  /// What VoiceOver hears; [announcement] when null.
+  final String? announcementText;
 
   static const Key indicatorKey = Key('typing-indicator');
   static const Key dotsKey = Key('working-dots');
@@ -184,6 +195,10 @@ class WorkingIndicator extends StatefulWidget {
 
   static const String announcement = 'The DJ is working';
   static const String caption = 'the DJ is listening…';
+
+  /// An album session's line (board A1): says the catalogue check too.
+  static const String albumCaption = 'Finding your album · checking Apple Music';
+  static const String albumAnnouncement = 'Finding your album';
 
   @override
   WorkingIndicatorState createState() => WorkingIndicatorState();
@@ -226,7 +241,7 @@ class WorkingIndicatorState extends State<WorkingIndicator>
       key: WorkingIndicator.indicatorKey,
       container: true,
       liveRegion: true,
-      label: WorkingIndicator.announcement,
+      label: widget.announcementText ?? WorkingIndicator.announcement,
       child: ExcludeSemantics(
         child: Align(
           alignment: Alignment.centerLeft,
@@ -271,7 +286,7 @@ class WorkingIndicatorState extends State<WorkingIndicator>
                 Padding(
                   padding: const EdgeInsets.only(left: 4, bottom: 2),
                   child: Text(
-                    WorkingIndicator.caption,
+                    widget.captionText ?? WorkingIndicator.caption,
                     key: WorkingIndicator.captionKey,
                     style: tokens.meta.copyWith(color: tokens.muted),
                   ),

@@ -15,6 +15,7 @@ class TextAction extends StatelessWidget {
     this.quiet = false,
     this.icon,
     this.iconAfter = false,
+    this.underline = false,
   });
 
   final String label;
@@ -25,6 +26,9 @@ class TextAction extends StatelessWidget {
   /// on the right (a forward arrow) instead of the left (a sign-out mark).
   final IconData? icon;
   final bool iconAfter;
+
+  /// The board's `.tbtn.link`: an underlined word that leaves the app.
+  final bool underline;
 
   static const double iconSize = 16;
   static const double _iconGap = 6;
@@ -65,6 +69,10 @@ class TextAction extends StatelessWidget {
                         fontSize: 14,
                         fontWeight: quiet ? FontWeight.w500 : FontWeight.w600,
                         color: ink,
+                        decoration: underline
+                            ? TextDecoration.underline
+                            : null,
+                        decorationColor: ink,
                       ),
                     );
                     if (icon == null) return word;

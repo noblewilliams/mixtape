@@ -234,4 +234,28 @@ void main() {
     final state = tester.state<WorkingIndicatorState>(find.byType(WorkingIndicator));
     expect(state.isAnimating, isFalse);
   });
+
+  testWidgets('an album session words the caption and the announcement', (
+    tester,
+  ) async {
+    await _pump(
+      tester,
+      const WorkingIndicator(
+        showCaption: true,
+        captionText: WorkingIndicator.albumCaption,
+        announcementText: WorkingIndicator.albumAnnouncement,
+      ),
+      reducedMotion: true,
+    );
+
+    expect(find.text('Finding your album · checking Apple Music'), findsOneWidget);
+    expect(
+      tester.getSemantics(find.byKey(WorkingIndicator.indicatorKey)).label,
+      'Finding your album',
+    );
+    expect(
+      tester.state<WorkingIndicatorState>(find.byType(WorkingIndicator)).isAnimating,
+      isFalse,
+    );
+  });
 }

@@ -160,4 +160,12 @@ void main() {
     expect(source, contains('Inbox'));
     expect(source, contains('removeItem(at: url)'));
   });
+
+  test('native album playback: both players take an album id', () {
+    final bridge = File('ios/Runner/MusicKitBridge.swift').readAsStringSync();
+    expect(bridge, contains('case "playAlbum"'));
+    expect(bridge, contains('case "startAlbum"'));
+    expect(bridge, contains('MusicCatalogResourceRequest<Album>'));
+    expect(bridge, contains('ApplicationMusicPlayer.Queue(for: [album])'));
+  });
 }

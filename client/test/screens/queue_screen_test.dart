@@ -237,6 +237,9 @@ class FakeBridge implements MusicKitBridge {
       throw UnimplementedError();
 
   @override
+  Future<bool> playAlbum(String appleAlbumId) => throw UnimplementedError();
+
+  @override
   Future<bool> playQueue(List<String> appleIds) {
     playCalls.add(appleIds);
     final impl = onPlayQueue;

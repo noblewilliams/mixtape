@@ -17,7 +17,7 @@ class MusicKitBridge: NSObject {
 
   /// MusicKit declares playbackStoreID as opaque. Keep a bounded set of URL-
   /// safe, comma-free characters that matches the server/catalog contract.
-  private static func isSupportedAppleSongID(_ value: String) -> Bool {
+  fileprivate static func isSupportedAppleSongID(_ value: String) -> Bool {
     value.range(
       of: #"^[A-Za-z0-9._~-]{1,128}$"#,
       options: .regularExpression
@@ -59,6 +59,10 @@ class MusicKitBridge: NSObject {
         let args = call.arguments as? [String: Any] ?? [:]
         let appleIds = args["appleIds"] as? [String] ?? []
         playQueue(appleIds: appleIds, result: result)
+      case "playAlbum":
+        let args = call.arguments as? [String: Any] ?? [:]
+        let appleAlbumId = args["appleAlbumId"] as? String ?? ""
+        playAlbum(appleAlbumId: appleAlbumId, result: result)
       case "createPlaylist":
         let args = call.arguments as? [String: Any] ?? [:]
         let name = args["name"] as? String ?? ""
@@ -102,6 +106,59 @@ class MusicKitBridge: NSObject {
           player.play()
           result(true)
         }
+      }
+    }
+  }
+
+  /// Album hand-off to the Music app. Store ids take album ids, so the album
+  /// itself is queued first; if the system player refuses it, the album's
+  /// tracks are fetched from the catalogue and queued in order exactly as
+  /// `playQueue` does. No playback evidence is recorded for albums.
+  private static func playAlbum(appleAlbumId: String, result: @escaping FlutterResult) {
+    guard isSupportedAppleSongID(appleAlbumId) else {
+      result(FlutterError(code: "invalid_album", message: "cannot play this album", details: nil))
+      return
+    }
+    DispatchQueue.main.async {
+      let player = MPMusicPlayerController.systemMusicPlayer
+      player.setQueue(with: [appleAlbumId])
+      player.prepareToPlay { error in
+        DispatchQueue.main.async {
+          if error == nil {
+            player.play()
+            result(true)
+            return
+          }
+          playAlbumTracks(appleAlbumId: appleAlbumId, result: result)
+        }
+      }
+    }
+  }
+
+  /// The fallback: the album's songs, in album order, through `playQueue`.
+  private static func playAlbumTracks(appleAlbumId: String, result: @escaping FlutterResult) {
+    Task { @MainActor in
+      do {
+        let request = MusicCatalogResourceRequest<Album>(
+          matching: \.id, equalTo: MusicItemID(appleAlbumId))
+        let response = try await request.response()
+        guard let album = response.items.first else {
+          result(FlutterError(code: "play_failed", message: "this album is not in Apple Music", details: nil))
+          return
+        }
+        let detailed = try await album.with([.tracks])
+        let ids = (detailed.tracks ?? []).map { $0.id.rawValue }.filter { isSupportedAppleSongID($0) }
+        guard !ids.isEmpty else {
+          result(FlutterError(code: "play_failed", message: "this album has no playable songs", details: nil))
+          return
+        }
+        playQueue(appleIds: ids, result: result)
+      } catch {
+        result(FlutterError(
+          code: "play_failed",
+          message: "could not start playback",
+          details: error.localizedDescription
+        ))
       }
     }
   }
@@ -699,6 +756,14 @@ private final class MixtapePlayerBridge: NSObject, FlutterStreamHandler {
         }
         return
       }
+      switch call.method {
+      case "startAlbum":
+        let args = call.arguments as? [String: Any] ?? [:]
+        self.startAlbum(albumId: args["appleAlbumId"] as? String ?? "", result: result)
+        return
+      default:
+        break
+      }
       let commandGeneration = self.generation
       Task { @MainActor in
         do {
@@ -716,6 +781,48 @@ private final class MixtapePlayerBridge: NSObject, FlutterStreamHandler {
           if commandGeneration != self.generation { self.player.stop() }
           self.emit(); result(nil)
         } catch { result(FlutterError(code:"playback_failed",message:"Playback was interrupted",details:nil)) }
+      }
+    }
+  }
+  /// The album twin of `start`: same authorization, subscription and
+  /// generation guards, with the album itself as the queue.
+  private func startAlbum(albumId: String, result: @escaping FlutterResult) {
+    guard MusicKitBridge.isSupportedAppleSongID(albumId) else {
+      result(FlutterError(code:"album_unavailable",message:"This album cannot play here",details:nil)); return
+    }
+    self.generation += 1
+    let generation = self.generation
+    let previous = self.pending
+    previous?.cancel()
+    self.pending = Task { @MainActor in
+      await previous?.value
+      do {
+        try Task.checkCancellation()
+        self.player.stop()
+        guard MusicAuthorization.currentStatus == .authorized else {
+          result(FlutterError(code:"authorization_required",message:"Connect Apple Music to play here",details:nil)); return
+        }
+        let subscription = try await MusicSubscription.current
+        guard subscription.canPlayCatalogContent else {
+          result(FlutterError(code:"subscription_required",message:"An Apple Music subscription is needed",details:nil)); return
+        }
+        let request = MusicCatalogResourceRequest<Album>(matching: \.id, equalTo: MusicItemID(albumId))
+        let response = try await request.response()
+        try Task.checkCancellation()
+        guard let album = response.items.first else {
+          result(FlutterError(code:"album_unavailable",message:"This album cannot play here",details:nil)); return
+        }
+        guard generation == self.generation else { throw CancellationError() }
+        self.player.queue = ApplicationMusicPlayer.Queue(for: [album])
+        self.player.state.repeatMode = .none
+        self.player.state.shuffleMode = .off
+        try await self.player.prepareToPlay()
+        try Task.checkCancellation()
+        try await self.player.play()
+        if Task.isCancelled || generation != self.generation { self.player.stop(); throw CancellationError() }
+        self.observe(); self.emit(); result(nil)
+      } catch {
+        result(FlutterError(code:Task.isCancelled ? "cancelled" : "playback_failed",message:"Playback did not start",details:nil))
       }
     }
   }
