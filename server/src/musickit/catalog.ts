@@ -34,6 +34,18 @@ export type AppleCatalogSearchClient = {
   searchSongs(storefront: string, term: string, limit: number): Promise<CatalogSong[]>
 }
 
+export type CatalogArtist = {
+  id: string
+  name: string
+  genres: string[]
+}
+
+export type AppleCatalogArtistClient = {
+  searchArtists(storefront: string, term: string, limit: number): Promise<CatalogArtist[]>
+  // One page of an artist's top songs; an unknown artist (404) is an empty list.
+  artistTopSongs(storefront: string, artistId: string, limit: number): Promise<CatalogSong[]>
+}
+
 export type CatalogAlbum = {
   appleId: string
   upc: string | null
@@ -94,6 +106,8 @@ const MAX_ISRCS_PER_REQUEST = 25
 // needs many albums at once.
 const MAX_ALBUM_IDS_PER_REQUEST = 100
 const MAX_ALBUM_SEARCH_LIMIT = 10
+const MAX_ARTIST_SEARCH_LIMIT = 25
+const MAX_TOP_SONGS_LIMIT = 30
 const MAX_INT32 = 2147483647
 const DEFAULT_TIMEOUT_MS = 5000
 const DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024
@@ -125,6 +139,30 @@ function parseSong(value: unknown): CatalogSong | null {
       ? Number(attributes.releaseDate.slice(0, 4)) : null,
     explicit: attributes.contentRating === 'explicit' ? true : attributes.contentRating === 'clean' ? false : null,
   }
+}
+
+function parseArtist(value: unknown): CatalogArtist | null {
+  if (!isRecord(value) || value.type !== 'artists' || typeof value.id !== 'string' || !isRecord(value.attributes)) return null
+  const attributes = value.attributes
+  if (typeof attributes.name !== 'string' || attributes.name.trim().length === 0) return null
+  return {
+    id: value.id,
+    name: attributes.name,
+    genres: Array.isArray(attributes.genreNames)
+      ? attributes.genreNames.filter((genre): genre is string => typeof genre === 'string')
+      : [],
+  }
+}
+
+// Duplicate ids are ambiguous: drop every copy rather than choose a winner.
+function uniqueById<T>(items: Iterable<T | null>, id: (item: T) => string): T[] {
+  const parsed = new Map<string, T | null>()
+  for (const item of items) {
+    if (!item) continue
+    const key = id(item)
+    parsed.set(key, parsed.has(key) ? null : item)
+  }
+  return [...parsed.values()].filter((item): item is T => item != null)
 }
 
 // Total running time from the album's tracks relationship. Null unless every
@@ -229,7 +267,8 @@ export function createAppleCatalogClient({
   maxResponseBytes?: number
   tokenCache?: AppleCatalogTokenCache
   tokenCacheKey?: string
-}): AppleCatalogClient & AppleIsrcCatalogClient & AppleCatalogSearchClient & AppleCatalogAlbumClient {
+}): AppleCatalogClient & AppleIsrcCatalogClient & AppleCatalogSearchClient & AppleCatalogAlbumClient
+  & AppleCatalogArtistClient {
   async function token(): Promise<string> {
     let cachedToken = tokenCache.get(tokenCacheKey)
     if (!cachedToken || cachedToken.expiresAt - TOKEN_REFRESH_MARGIN_SECONDS <= nowSeconds()) {
@@ -288,6 +327,66 @@ export function createAppleCatalogClient({
   }
 
   return {
+    async searchArtists(storefront, term, limit) {
+      const normalizedTerm = term.trim()
+      if (
+        !/^[a-z]{2}$/.test(storefront)
+        || normalizedTerm.length < 1
+        || normalizedTerm.length > 120
+        || !Number.isInteger(limit)
+        || limit < 1
+      ) throw new AppleCatalogError('response')
+
+      const url = new URL(API_ROOT)
+      url.pathname = `/v1/catalog/${encodeURIComponent(storefront)}/search`
+      url.searchParams.set('term', normalizedTerm)
+      url.searchParams.set('types', 'artists')
+      // Caps on purpose (searchSongs rejects): the fill calls this with small fixed limits.
+      url.searchParams.set('limit', String(Math.min(limit, MAX_ARTIST_SEARCH_LIMIT)))
+      const payload = await request(url)
+      if (!isRecord(payload) || !isRecord(payload.results) || payload.errors != null) {
+        throw new AppleCatalogError('response', 200)
+      }
+      // Apple omits the artists key entirely when nothing matches.
+      if (payload.results.artists === undefined) return []
+      if (!isRecord(payload.results.artists) || !Array.isArray(payload.results.artists.data)) {
+        throw new AppleCatalogError('response', 200)
+      }
+      return uniqueById(
+        payload.results.artists.data.map(parseArtist).filter((artist) => artist != null && isAppleCatalogId(artist.id)),
+        (artist) => artist.id,
+      )
+    },
+    async artistTopSongs(storefront, artistId, limit) {
+      if (
+        !/^[a-z]{2}$/.test(storefront)
+        || !isAppleCatalogId(artistId)
+        // '.' and '..' pass the id pattern but the pathname setter collapses them.
+        || /^\.+$/.test(artistId)
+        || !Number.isInteger(limit)
+        || limit < 1
+      ) throw new AppleCatalogError('response')
+
+      const url = new URL(API_ROOT)
+      url.pathname = `/v1/catalog/${encodeURIComponent(storefront)}/artists/${encodeURIComponent(artistId)}/view/top-songs`
+      // Caps on purpose (searchSongs rejects): the fill calls this with small fixed limits.
+      url.searchParams.set('limit', String(Math.min(limit, MAX_TOP_SONGS_LIMIT)))
+      let payload: unknown
+      try {
+        payload = await request(url)
+      } catch (error) {
+        if (error instanceof AppleCatalogError && error.status === 404) return []
+        throw error
+      }
+      // One page only; `next` is ignored because callers take the top N.
+      if (!isRecord(payload) || !Array.isArray(payload.data) || payload.errors != null) {
+        throw new AppleCatalogError('response', 200)
+      }
+      return uniqueById(
+        payload.data.map(parseSong).filter((song) => song != null && isAppleSongId(song.appleId)),
+        (song) => song.appleId,
+      )
+    },
     async searchSongs(storefront, term, limit) {
       const normalizedTerm = term.trim()
       if (
