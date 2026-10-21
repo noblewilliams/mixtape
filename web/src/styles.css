@@ -69,6 +69,40 @@ input:focus-visible {
   outline-offset: 3px;
 }
 
+/* Focus rings only for keyboard navigation (founder, 2026-10-21):
+   lib/focus-modality.ts sets data-focus on the root. After pointer use no
+   :focus-visible ring is drawn; keyboard users keep every ring below. */
+html[data-focus="pointer"] :focus-visible {
+  outline: 0;
+  box-shadow: none;
+}
+
+/* Headings and containers focused programmatically after a page change
+   never draw a ring, whatever the modality. */
+[tabindex="-1"]:focus-visible {
+  outline: 0;
+}
+
+/* The focus-within rings follow the same rule. */
+html[data-focus="pointer"] .composer:focus-within::after,
+html[data-focus="pointer"] .fr-composer:focus-within::after {
+  opacity: 0;
+}
+
+html[data-focus="pointer"] .composer:focus-within .composer-stripe,
+html[data-focus="pointer"] .fr-composer:focus-within .fr-stripe {
+  opacity: 1;
+}
+
+html[data-focus="pointer"] .fr-afield:focus-within {
+  box-shadow: none;
+}
+
+html[data-focus="pointer"] .file-pick:focus-within,
+html[data-focus="pointer"] .import-pick-pill .fr-pill:focus-within {
+  outline: 0;
+}
+
 #root {
   min-height: 100vh;
 }

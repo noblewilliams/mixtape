@@ -47,6 +47,8 @@ type Props = {
   onBack?: () => void
   /** Move focus to the heading when the page appears (every page change, not the first load). */
   focusHeading?: boolean
+  /** The page is waiting on a request (aria-busy). */
+  busy?: boolean
   /** Drawn above the headline (wordmark, cassette). */
   before?: ReactNode
   children?: ReactNode
@@ -58,14 +60,14 @@ type Props = {
  * and on counted pages "STEP n OF 3" with a 2 px line filling a third per
  * step. The counter is decorative; the heading carries the step.
  */
-export function FirstRunPage({ background, headline, step, onBack, focusHeading = false, before, children }: Props) {
+export function FirstRunPage({ background, headline, step, onBack, focusHeading = false, busy = false, before, children }: Props) {
   const heading = useRef<HTMLHeadingElement>(null)
   useEffect(() => {
     if (focusHeading) heading.current?.focus({ preventScroll: true })
   }, [focusHeading])
   const style = { '--fr-bg': `url("${backgroundUrl(background)}")` } as CSSProperties
   return (
-    <main className={`fr-page fr-page--${background}`} style={style} data-background={background}>
+    <main className={`fr-page fr-page--${background}`} style={style} data-background={background} aria-busy={busy || undefined}>
       <div className="fr-col">
         <div className="fr-top">
           {onBack ? <BackButton onBack={onBack} /> : null}

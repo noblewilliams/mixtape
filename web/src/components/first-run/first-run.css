@@ -119,8 +119,6 @@
   letter-spacing: -.025em;
   overflow-wrap: anywhere;
 }
-.fr-h:focus { outline: none; }
-.fr-h:focus-visible { outline: 2px solid var(--fr-cream); outline-offset: 4px; border-radius: 4px; }
 .fr-line { margin: 12px 0 0; color: var(--fr-cream); }
 .fr-status { margin: 12px 0 0; min-height: 1.4em; color: var(--fr-cream); }
 .fr-status--err { display: flex; align-items: center; gap: 8px; color: var(--fr-err); }
@@ -265,7 +263,6 @@
 
 /* The import panel's pick pill: the label is the pill, the input is hidden inside it. */
 .import-pick-pill { display: flex; flex-direction: column; gap: 8px; }
-.import-pick-pill:focus { outline: none; }
 .import-pick-pill [role="alert"] { margin: 0; color: var(--fr-err); }
 .import-pick-pill .fr-pill { position: relative; }
 .import-pick-pill .fr-pill:focus-within { outline: 2px solid var(--fr-cream); outline-offset: 3px; }
@@ -312,8 +309,6 @@
   letter-spacing: -.025em;
   overflow-wrap: anywhere;
 }
-.ks-h:focus { outline: none; }
-.ks-h:focus-visible { outline: 2px solid var(--fr-ink); outline-offset: 4px; border-radius: 4px; }
 .ks-line { margin: 10px 0 0; color: #3f383f; font-size: 1rem; line-height: 1.4; }
 .ks-acts { display: flex; flex-direction: column; margin-top: 22px; }
 .ks-acts .fr-pill { background: var(--ks-pill); color: var(--fr-ink); }
@@ -332,3 +327,7 @@
 
 /* The sign-in page over the shell (from the sheet, the cap, the You row). */
 .fr-root--over { z-index: 60; }
+
+/* Making your mix: the welcome page's image and cassette, nothing to press. */
+.fr-making { display: flex; flex-direction: column; }
+.fr-making > .fr-page { flex: 1; }

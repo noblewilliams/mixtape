@@ -222,3 +222,17 @@ describe('create playlist new to you sentence', () => {
     expect(polish).toMatch(/\.playlist-dialog \.playlist-dialog-note\s*{[^}]*margin:\s*10px 0 0/)
   })
 })
+
+describe('focus rings follow the input modality', () => {
+  it('hides rings after pointer use and never draws one on programmatic focus', () => {
+    expect(stylesheet).toMatch(/html\[data-focus="pointer"\] :focus-visible\s*{[^}]*outline:\s*0;[^}]*box-shadow:\s*none;/s)
+    expect(stylesheet).toMatch(/\[tabindex="-1"\]:focus-visible\s*{[^}]*outline:\s*0;/s)
+  })
+
+  it('hides the focus-within rings under pointer modality too', () => {
+    expect(stylesheet).toMatch(/html\[data-focus="pointer"\] \.composer:focus-within::after/)
+    expect(stylesheet).toMatch(/html\[data-focus="pointer"\] \.fr-composer:focus-within::after/)
+    expect(stylesheet).toMatch(/html\[data-focus="pointer"\] \.fr-afield:focus-within/)
+    expect(stylesheet).toMatch(/html\[data-focus="pointer"\] \.file-pick:focus-within/)
+  })
+})

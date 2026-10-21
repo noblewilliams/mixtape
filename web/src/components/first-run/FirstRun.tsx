@@ -8,6 +8,7 @@ import { ChooseMethod, METHOD_HEADLINE, type AddMethod } from './ChooseMethod'
 import { ChooseService, SERVICE_HEADLINE, type MusicService } from './ChooseService'
 import { DOING_HEADLINES, DoingPage } from './DoingPage'
 import { BackButton, pageName, type FirstRunStep } from './FirstRunPage'
+import { Making, MAKING_HEADLINE } from './Making'
 import type { FirstRunServices } from './services'
 import { Welcome, WELCOME_HEADLINE } from './Welcome'
 import './first-run.css'
@@ -19,6 +20,7 @@ export type FirstRunPageId =
   | { id: 'method'; service: MusicService }
   | { id: 'doing'; method: AddMethod }
   | { id: 'prompt' }
+  | { id: 'making' }
   | { id: 'sign-in' }
 
 /** first-run: the new mix's own response, for the shell to open as it opens a new tape. */
@@ -79,6 +81,8 @@ function headlineOf(page: FirstRunPageId): { headline: string; step?: FirstRunSt
       return { headline: METHOD_HEADLINE, step: 2 }
     case 'doing':
       return { headline: DOING_HEADLINES[page.method], step: 3 }
+    case 'making':
+      return { headline: MAKING_HEADLINE }
     case 'sign-in':
       return { headline: 'Your music, mixed for right now.' }
   }
@@ -104,7 +108,17 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
       : [{ id: 'welcome' }]
   // The visited trail survives a back so the browser's forward can return.
   const trail = useRef<FirstRunPageId[]>(initial)
-  const [depth, setDepth] = useState(initial.length - 1)
+  const [depth, setDepthState] = useState(initial.length - 1)
+  // The live depth, for a mix request that settles after later navigation.
+  const depthRef = useRef(initial.length - 1)
+  const setDepth = useCallback((next: number) => {
+    depthRef.current = next
+    setDepthState(next)
+  }, [])
+  // The first mix in flight (a DJ turn of up to a minute), and the error the
+  // pop off the making page should show on the page it lands on.
+  const mixing = useRef(false)
+  const popError = useRef('')
   const navigated = useRef(false)
   const finished = useRef(false)
   const [prompt, setPrompt] = useState('')
@@ -156,14 +170,22 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
       if (finished.current) return
       const mark = marker(event.state)
       navigated.current = true
-      setError('')
-      if (mark?.flow === flow) setDepth(Math.min(mark.step, trail.current.length - 1))
-      else if (adding) exit({})
+      setError(popError.current)
+      popError.current = ''
+      if (mark?.flow === flow) {
+        const step = Math.min(mark.step, trail.current.length - 1)
+        // Forward onto a making page whose request already settled: step back off it.
+        if (trail.current[step]?.id === 'making' && !mixing.current) {
+          window.history.back()
+          return
+        }
+        setDepth(step)
+      } else if (adding) exit({})
       else setDepth(0)
     }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
-  }, [adding, exit, flow])
+  }, [adding, exit, flow, setDepth])
 
   const { headline, step } = headlineOf(page)
   useEffect(() => {
@@ -180,34 +202,48 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
   }, [page.id, depth])
 
   function push(next: FirstRunPageId) {
-    trail.current = [...trail.current.slice(0, depth + 1), next]
+    const at = depthRef.current
+    trail.current = [...trail.current.slice(0, at + 1), next]
     navigated.current = true
     setError('')
-    setDepth(depth + 1)
-    window.history.pushState(withMarker(flow, depth + 1), '')
+    setDepth(at + 1)
+    window.history.pushState(withMarker(flow, at + 1), '')
   }
 
   const back = () => window.history.back()
 
   /** Leave for the shell or the Library, folding the flow's entries back first. */
   function finish(result: FirstRunResult) {
-    const entries = adding ? depth + 1 : depth
+    const at = depthRef.current
+    const entries = adding ? at + 1 : at
     exit(result)
     // The pop lands after exit, which already stopped this flow listening.
     if (entries > 0) window.history.go(-entries)
   }
 
-  async function makeMix(text: string) {
+  /**
+   * The first mix: push the making page the moment the request starts. It
+   * keeps running through a browser back; success hands off from wherever the
+   * listener is, and failure pops off the making page (or shows on the
+   * current page) with the prompt and artists kept.
+   */
+  async function makeMix(text: string, ensured = false) {
     if (!services) return setError(MIX_FAILED)
-    setBusy(true)
-    setError('')
+    // A request is already running (the listener went back and pressed again): show it.
+    if (mixing.current) return push({ id: 'making' })
+    mixing.current = true
+    push({ id: 'making' })
     try {
-      await ensure()
+      if (!ensured) await ensure()
       const response = await services.api.createSession(text)
+      mixing.current = false
       finish({ session: response })
     } catch {
-      setError(MIX_FAILED)
-      setBusy(false)
+      mixing.current = false
+      if (trail.current[depthRef.current]?.id === 'making') {
+        popError.current = MIX_FAILED
+        window.history.back()
+      } else setError(MIX_FAILED)
     }
   }
 
@@ -235,18 +271,9 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
       setBusy(false)
       return
     }
-    if (pendingPrompt) {
-      try {
-        const response = await services.api.createSession(pendingPrompt)
-        finish({ session: response })
-      } catch {
-        setError(MIX_FAILED)
-        setBusy(false)
-      }
-    } else {
-      setBusy(false)
-      push({ id: 'prompt' })
-    }
+    setBusy(false)
+    if (pendingPrompt) void makeMix(pendingPrompt, true)
+    else push({ id: 'prompt' })
   }
 
   function startSync() {
@@ -334,6 +361,9 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
           importDoneLabel={adding ? 'Done' : undefined}
         />
       ) : null
+      break
+    case 'making':
+      content = <Making key={key} focusHeading={focusHeading} />
       break
     case 'sign-in':
       content = signIn ? (

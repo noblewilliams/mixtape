@@ -39,7 +39,16 @@ Path A, make a mix now (three pages):
    music is in." Continue is enabled at three. This page exists because a
    listener with nothing synced gets a corpus mix only from seeds (see "Why
    path A asks for artists").
-3. **Mix.** The existing conversation and arrangement screen. The DJ's first
+3. **Making your mix.** Creating a mix is a DJ turn of 20 to 60 seconds
+   (59 s measured on production, 2026-10-21). From the moment the prompt is
+   sent the flow shows a waiting page on the welcome background: headline
+   "Making your mix.", line "The DJ is listening. This takes about a
+   minute.", the cassette with its hubs turning, no back button and no
+   pills. A failure returns to the page the listener came from with the
+   error line and their prompt and artists intact. A refresh during this
+   page cancels the turn and leaves an empty mix in the shell, which is why
+   the page exists.
+4. **Mix.** The existing conversation and arrangement screen. The DJ's first
    reply says plainly that the picks come from the shared catalogue
    (`CORPUS_NOTICE`, unchanged). After the first mix lands, one sheet:
    **Keep this mix.** "Sign in and your mixes and music stay with you on any
@@ -290,6 +299,8 @@ rows after the first mix.
   ballads", "warm up for a long run".
 - Add-music pill: "Add my music first". Foot link: "Already have an account?
   Sign in."
+- Making: "Making your mix." Line "The DJ is listening. This takes about a
+  minute."
 - Artists headline: "Who do you love?" Line: "Three artists is enough. The
   DJ borrows from the shared catalogue until your music is in."
 - Step 1: "Which do you use?" Line "Mixes get better when the DJ knows your
@@ -336,6 +347,9 @@ No em dashes in app copy on these pages.
 - Sync progress is announced as a live region at most once per ten seconds.
 - Nothing is colour-only: the enabled Continue pill differs by weight and
   the arrow glyph, not only by opacity.
+- Focus rings (founder, 2026-10-21): shown only for keyboard navigation.
+  Pointer use and programmatic focus (headings and containers focused after a
+  page change) draw no ring on either platform's web surface.
 
 ## Tests
 

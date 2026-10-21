@@ -131,6 +131,8 @@ describe('the first mix failing', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t make your mix. Try again.')
+    expect(await heading('Who do you love?')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Remove Sade' })).toBeInTheDocument()
     expect(onDone).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled()
 
@@ -153,6 +155,177 @@ describe('the first mix failing', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t make your mix. Try again.')
     expect(screen.getByRole('textbox', { name: 'Describe your mix' })).toHaveValue('warm up for a long run')
     expect(onDone).not.toHaveBeenCalled()
+  })
+})
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
+const MAKING = 'Making your mix.'
+const MAKING_LINE = 'The DJ is listening. This takes about a minute.'
+
+describe('making your mix', () => {
+  async function toContinue() {
+    const fakes = renderFlow()
+    const pending = deferred<ReturnType<typeof createdSession>>()
+    fakes.api.createSession.mockImplementationOnce(() => pending.promise)
+    typePrompt('late night drive')
+    await heading('Who do you love?')
+    nameArtists('Burna Boy', 'Tems', 'Sade')
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    return { ...fakes, pending }
+  }
+
+  it('shows the making page from Continue before the mix arrives, with no back button', async () => {
+    const { api, onDone } = await toContinue()
+    expect(await heading(MAKING)).toHaveFocus()
+    await waitFor(() => expect(api.createSession).toHaveBeenCalledOnce())
+    expect(screen.getByText(MAKING_LINE, { selector: 'p.fr-line' })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(MAKING_LINE)
+    expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('fr-progress')).not.toBeInTheDocument()
+    expect(screen.getByRole('main')).toHaveAttribute('aria-busy', 'true')
+    expect(screen.getByRole('main')).toHaveAttribute('data-background', 'welcome')
+    expect(document.title).toBe(MAKING)
+    expect(onDone).not.toHaveBeenCalled()
+  })
+
+  it('turns the hubs while the DJ works', async () => {
+    await toContinue()
+    await heading(MAKING)
+    expect(document.querySelectorAll('.fr-making .cassette-hub--moving')).toHaveLength(2)
+  })
+
+  it('keeps the hubs still under reduced motion', async () => {
+    vi.stubGlobal(
+      'matchMedia',
+      (query: string) =>
+        ({
+          matches: query.includes('prefers-reduced-motion'),
+          media: query,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        }) as unknown as MediaQueryList,
+    )
+    try {
+      await toContinue()
+      await heading(MAKING)
+      expect(document.querySelector('.fr-making .cassette')).toBeInTheDocument()
+      expect(document.querySelectorAll('.fr-making .cassette-hub--moving')).toHaveLength(0)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('hands off when the mix arrives', async () => {
+    const { pending, onDone } = await toContinue()
+    await heading(MAKING)
+    await act(async () => pending.resolve(createdSession('session-new')))
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith(madeMix))
+  })
+
+  it('returns to Who do you love? with the error and the chips when the mix fails', async () => {
+    const { pending, onDone } = await toContinue()
+    await heading(MAKING)
+    await act(async () => pending.reject(new TypeError('Failed to fetch')))
+
+    expect(await heading('Who do you love?')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t make your mix. Try again.')
+    expect(screen.getByRole('button', { name: 'Remove Burna Boy' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Remove Tems' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Remove Sade' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled()
+    expect(onDone).not.toHaveBeenCalled()
+  })
+
+  it('shows the making page when the prompt page sends', async () => {
+    const { api, onDone } = renderFlow()
+    fireEvent.click(screen.getByRole('button', { name: 'Add my music first' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Skip for now' }))
+    await heading('Who do you love?')
+    nameArtists('Burna Boy', 'Tems', 'Sade')
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    await heading('What do you want to hear?')
+    const pending = deferred<ReturnType<typeof createdSession>>()
+    api.createSession.mockImplementationOnce(() => pending.promise)
+    typePrompt('warm up for a long run')
+
+    expect(await heading(MAKING)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument()
+    await act(async () => pending.resolve(createdSession('session-new')))
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith(madeMix))
+  })
+
+  it('returns to the prompt page with the prompt when the mix fails there', async () => {
+    const { api } = renderFlow()
+    fireEvent.click(screen.getByRole('button', { name: 'Add my music first' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Skip for now' }))
+    await heading('Who do you love?')
+    nameArtists('Burna Boy', 'Tems', 'Sade')
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    await heading('What do you want to hear?')
+    const pending = deferred<ReturnType<typeof createdSession>>()
+    api.createSession.mockImplementationOnce(() => pending.promise)
+    typePrompt('warm up for a long run')
+    await heading(MAKING)
+    await act(async () => pending.reject(new TypeError('Failed to fetch')))
+
+    expect(await heading('What do you want to hear?')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t make your mix. Try again.')
+    expect(screen.getByRole('textbox', { name: 'Describe your mix' })).toHaveValue('warm up for a long run')
+  })
+
+  it('answers the browser back during making, keeps the request, and still hands off', async () => {
+    const go = vi.spyOn(window.history, 'go')
+    try {
+      const { pending, onDone, api } = await toContinue()
+      await heading(MAKING)
+      act(() => window.history.back())
+      expect(await heading('Who do you love?')).toBeInTheDocument()
+      expect(api.createSession).toHaveBeenCalledOnce()
+
+      await act(async () => pending.resolve(createdSession('session-new')))
+      await waitFor(() => expect(onDone).toHaveBeenCalledWith(madeMix))
+      // Welcome and Who do you love? are the flow's entries; the making entry is ahead.
+      expect(go).toHaveBeenLastCalledWith(-1)
+    } finally {
+      go.mockRestore()
+    }
+  })
+
+  it('shows a failure on whatever page is current after a browser back', async () => {
+    const { pending, onDone } = await toContinue()
+    await heading(MAKING)
+    act(() => window.history.back())
+    await heading('Who do you love?')
+    act(() => window.history.back())
+    await heading('What do you want to hear?')
+
+    await act(async () => pending.reject(new TypeError('Failed to fetch')))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t make your mix. Try again.')
+    expect(screen.getByRole('textbox', { name: 'Describe your mix' })).toHaveValue('late night drive')
+    expect(onDone).not.toHaveBeenCalled()
+  })
+
+  it('returns to the making page for the running request instead of sending again', async () => {
+    const { pending, onDone, api } = await toContinue()
+    await heading(MAKING)
+    act(() => window.history.back())
+    await heading('Who do you love?')
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+
+    expect(await heading(MAKING)).toBeInTheDocument()
+    expect(api.createSession).toHaveBeenCalledOnce()
+    await act(async () => pending.resolve(createdSession('session-new')))
+    await waitFor(() => expect(onDone).toHaveBeenCalledOnce())
   })
 })
 
@@ -271,7 +444,8 @@ describe('history', () => {
       nameArtists('Burna Boy', 'Tems', 'Sade')
       fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
       await waitFor(() => expect(onDone).toHaveBeenCalledWith(madeMix))
-      expect(go).toHaveBeenCalledWith(-1)
+      // Welcome, Who do you love? and Making your mix.
+      expect(go).toHaveBeenCalledWith(-2)
     } finally {
       go.mockRestore()
     }
