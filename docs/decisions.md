@@ -1,5 +1,38 @@
 # Decision Log
 
+## 2026-10-21 — Everyone gets a mix: fair floor, Apple fill, seeded catalogue, never refuse
+
+On the live first-run flow the DJ refused a no-library listener whose named
+artists (kanye west, jay z, kid cudi) matched 199 catalogue tracks: seed
+matching was exact-string, so "jay z" missed "jaÿ-z", and the floor wanted
+three matched artists. Spec
+`superpowers/specs/2026-10-21-everyone-gets-a-mix-design.md`. Founder
+decisions, taking every recommendation:
+
+- Seeds match catalogue artists by a normalised key (accents, punctuation and
+  spacing removed; credits split on &, comma, feat., ft., with, x). Artists
+  and songs named in the prompt count as seeds. The corpus floor is 25
+  matched tracks across 2 artists, or 40 from one.
+- When a named artist is thin in the catalogue, the DJ fills from Apple's
+  catalogue at prompt time within a 24-subrequest budget per turn (10 songs
+  per artist fetched, about 6 enriched in-request, the rest through the cron).
+- The catalogue is seeded from Apple's genre charts and editorial playlists
+  for storefronts ng, us and gb, a 25,000-track first pass, by founder-run
+  script in sittings.
+- Embeddings move to half precision (`halfvec`) so that pass fits the Neon
+  free plan; no paid plan for now.
+- Once the seeded catalogue passes 15,000 enriched tracks, the DJ never
+  refuses: a listener with no seeds gets a vibe-only mix from the catalogue,
+  behind `NEVER_REFUSE`, turned on after three founder listening checks.
+
+This reopens the 2026-10-03 "honest empty mixes" decision for listeners with
+no personal data only; a listener with a library whose pool is empty still
+gets the honest message.
+
+**Reopens if:** vibe-only mixes read as generic in the listening checks,
+Apple's chart and playlist endpoints are rate-limited below a usable pace,
+or half-precision embeddings measurably hurt nearest-neighbour picks.
+
 ## 2026-10-20 — Album picks and Listen later: direction agreed
 
 Alongside a mix, the DJ can answer a prompt with one album. Spec
