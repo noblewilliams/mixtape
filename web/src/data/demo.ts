@@ -1,3 +1,4 @@
+import type { ApiAlbum, ApiListenLaterEntry } from '../api/client'
 import type { DjMessage, DjSession, QueueTrack } from '../domain'
 
 const tapeNames = [
@@ -25,6 +26,7 @@ const tapeNames = [
 export const demoSessions: DjSession[] = tapeNames.map(
   ([id, title, ageLabel, trackCount, caseColor], index) => ({
     id,
+    kind: 'mix',
     title,
     status: 'active',
     queueVersion: 3,
@@ -122,3 +124,87 @@ export function makeConversationFor(session: DjSession): DjMessage[] {
     },
   ]
 }
+
+// Album picks (board 2026-10-20). Artwork stays null: no external URLs in fixtures.
+const albumId = (n: number) => `5a1b0000-0000-4000-8000-${String(n).padStart(12, '0')}`
+
+function demoAlbum(
+  n: number,
+  fields: Pick<ApiAlbum, 'title' | 'artist' | 'releaseYear' | 'type' | 'trackCount' | 'reason' | 'newToThem'> & { minutes: number },
+): ApiAlbum {
+  const { minutes, ...rest } = fields
+  return {
+    id: albumId(n),
+    upc: `19000000000${n}`,
+    appleId: `157000000${n}`,
+    durationMs: minutes * 60_000,
+    artwork: null,
+    savedForLater: false,
+    version: 1,
+    ...rest,
+  }
+}
+
+export const demoAlbumPick = demoAlbum(1, {
+  title: 'Low Tide Hours', artist: 'Mara Ilesanmi', releaseYear: 2019, type: 'album', trackCount: 11, minutes: 44,
+  newToThem: false, reason: 'Slow and warm, and you already know three of its songs.',
+})
+
+export const demoAlbumRunnersUp: ApiAlbum[] = [
+  demoAlbum(2, {
+    title: 'Nightshift Radio', artist: 'The Quiet Parade', releaseYear: 2016, type: 'ep', trackCount: 5, minutes: 22,
+    newToThem: true, reason: 'Shorter and a little brighter, from a band you have not played yet.',
+  }),
+  demoAlbum(3, {
+    title: 'Slow Rooms', artist: 'Mara Ilesanmi', releaseYear: 2014, type: 'album', trackCount: 10, minutes: 41,
+    newToThem: false, reason: 'Her earlier record, sparer and just as warm.',
+  }),
+]
+
+export const demoAlbumRefinedPick: ApiAlbum = {
+  ...demoAlbum(4, {
+    title: 'Harbour Lights', artist: 'Folake Adeyemi', releaseYear: 1978, type: 'album', trackCount: 8, minutes: 36,
+    newToThem: true, reason: 'Older, same hush, and an artist you have never played.',
+  }),
+  version: 2,
+}
+
+export const demoShelfAlbums: ApiAlbum[] = [
+  demoAlbum(5, {
+    title: 'Kitchen Radio Sessions', artist: 'Odun & the Weather', releaseYear: 2021, type: 'live', trackCount: 12, minutes: 58,
+    newToThem: true, reason: 'Recorded live in one room, loose and close.',
+  }),
+  demoAlbum(6, {
+    title: 'Every Room Is a Harbour, Part Two: The Long Way Round', artist: 'The Quiet Parade', releaseYear: 2023,
+    type: 'compilation', trackCount: 18, minutes: 72, newToThem: false, reason: 'A long, patient collection for when the trip runs over.',
+  }),
+]
+
+export const demoAlbums: ApiAlbum[] = [demoAlbumPick, ...demoAlbumRunnersUp, demoAlbumRefinedPick, ...demoShelfAlbums]
+
+export function toDemoListenLaterEntry(
+  { newToThem: _newToThem, reason: _reason, savedForLater: _saved, version: _version, ...album }: ApiAlbum,
+  entry: Pick<ApiListenLaterEntry, 'savedAt'> & Partial<Pick<ApiListenLaterEntry, 'sessionId' | 'listenedAt' | 'reason'>>,
+): ApiListenLaterEntry {
+  return { ...album, sessionId: null, listenedAt: null, reason: null, ...entry }
+}
+
+/** The shelf as GET /me/listen-later returns it: newest saved first, nothing listened yet. */
+export const demoListenLaterEntries: ApiListenLaterEntry[] = [
+  toDemoListenLaterEntry(demoShelfAlbums[0], { savedAt: '2026-10-19T19:30:00.000Z' }),
+  toDemoListenLaterEntry(demoShelfAlbums[1], { savedAt: '2026-10-12T08:15:00.000Z' }),
+]
+
+export const demoAlbumPrompt = 'An album for the train home, nothing loud.'
+export const demoAlbumReply =
+  'One record, start to finish. Slow and warm, and it sits exactly where a tired train does. You already have three of its songs, so it will feel half familiar.'
+export const demoAlbumRefinePrompt = 'Another, older.'
+export const demoAlbumRefineReply =
+  'Older then. Nineteen seventy-eight, and it has the same hush. You do not have any of it yet.'
+
+export const demoAlbumMessages: DjMessage[] = [
+  { id: 'album-message-1', role: 'user', content: demoAlbumPrompt, createdAt: '2026-10-20T18:00:00.000Z' },
+  { id: 'album-message-2', role: 'dj', content: demoAlbumReply, queueVersion: 1, createdAt: '2026-10-20T18:00:09.000Z' },
+  { id: 'album-message-3', role: 'user', content: demoAlbumRefinePrompt, createdAt: '2026-10-20T18:03:00.000Z' },
+  { id: 'album-message-4', role: 'dj', content: demoAlbumRefineReply, queueVersion: 2, createdAt: '2026-10-20T18:03:08.000Z' },
+]

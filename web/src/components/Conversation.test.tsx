@@ -5,6 +5,7 @@ import { Conversation } from './Conversation'
 
 const session: DjSession = {
   id: 'blue-hour',
+  kind: 'mix',
   title: 'Blue hour, windows down',
   status: 'active',
   queueVersion: 3,

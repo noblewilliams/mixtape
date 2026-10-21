@@ -6,6 +6,7 @@ import { QueuePanel, type MusicConnectionState } from './QueuePanel'
 
 const session: DjSession = {
   id: 'session-1',
+  kind: 'mix',
   title: 'Blue hour',
   status: 'active',
   queueVersion: 3,

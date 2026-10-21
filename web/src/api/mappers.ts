@@ -1,5 +1,14 @@
-import type { DjMessage, DjSession, QueueTrack } from '../domain'
-import type { ApiMessage, ApiQueueTrack, ApiSession, ApiSessionSummary } from './client'
+import type { AlbumPick, AlbumPickState, AlbumSummary, DjMessage, DjSession, ListenLaterEntry, QueueTrack } from '../domain'
+import type {
+  AlbumPickResponse,
+  ApiAlbum,
+  ApiAlbumArtwork,
+  ApiListenLaterEntry,
+  ApiMessage,
+  ApiQueueTrack,
+  ApiSession,
+  ApiSessionSummary,
+} from './client'
 
 const TAPE_PALETTES = [
   ['#3f4851', '#f2ede2'],
@@ -50,14 +59,50 @@ export function toDjSession(
       ? session.durationMs
       : queue.reduce((total, track) => total + (track.durationMs ?? 0), 0)
 
+  const { pick, ...rest } = session as ApiSessionSummary
+  const kind = session.kind ?? 'mix'
+
   return {
-    ...session,
+    ...rest,
+    kind,
+    ...(kind === 'album' && pick !== undefined ? { pick: pick && toAlbumSummary(pick) } : {}),
     ageLabel: ageLabel(session.updatedAt),
     trackCount,
     durationLabel: durationLabel(totalDuration),
     caseColor: session.caseColor ?? caseColor,
     stockColor,
   }
+}
+
+function flatArtwork(artwork: ApiAlbumArtwork | null) {
+  return {
+    artworkUrl: artwork?.url ?? undefined,
+    artworkWidth: artwork?.width ?? undefined,
+    artworkHeight: artwork?.height ?? undefined,
+    artworkBgColor: artwork?.bgColor ?? undefined,
+  }
+}
+
+function toAlbumSummary(pick: NonNullable<ApiSessionSummary['pick']>): AlbumSummary {
+  const { artworkUrl, artworkBgColor } = flatArtwork(pick.artwork)
+  return { title: pick.title, artist: pick.artist, artworkUrl, artworkBgColor }
+}
+
+export function toAlbumPick({ artwork, newToThem, ...album }: ApiAlbum): AlbumPick {
+  return { ...album, ...flatArtwork(artwork), newToYou: newToThem }
+}
+
+export function toAlbumPickState(response: AlbumPickResponse): AlbumPickState {
+  return {
+    version: response.version,
+    pick: response.pick ? toAlbumPick(response.pick) : null,
+    runnersUp: response.runnersUp.map(toAlbumPick),
+    passed: response.passed.map(toAlbumPick),
+  }
+}
+
+export function toListenLaterEntry({ artwork, ...entry }: ApiListenLaterEntry): ListenLaterEntry {
+  return { ...entry, ...flatArtwork(artwork) }
 }
 
 export function toDjMessage(message: ApiMessage): DjMessage {

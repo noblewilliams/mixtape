@@ -559,7 +559,7 @@ describe('Spotify mix outputs', () => {
     const api = apiWithPostTurnRefetch(async (detail) => ({
       ...detail,
       session: { ...detail.session, notPersonal: true },
-      queue: detail.queue.slice(0, 1),
+      queue: detail.queue?.slice(0, 1),
     }))
     renderApp({ api })
     await settled(api)
@@ -647,7 +647,7 @@ describe('Spotify mix outputs', () => {
     const api = apiWithOnboarding({ sources: [accountPackage], importCompletedAt: '2026-09-04T09:30:00.000Z' })
     const created = await createFakeApi().createSession('Rainy commute')
     expect(created.session.notPersonal).toBe(false)
-    expect(created.queue.length).toBeGreaterThan(0)
+    expect(created.queue?.length).toBeGreaterThan(0)
     renderApp({ api, initialSession: created })
 
     expect(await screen.findByRole('heading', { name: 'Rainy commute' })).toBeInTheDocument()
@@ -723,7 +723,7 @@ describe('Spotify mix outputs', () => {
           const detail = await base.getSession(sessionId)
           return {
             ...detail,
-            queue: detail.queue.map((track) => ({ ...track, appleId: null, spotifyId: `sp-${track.trackId}` })),
+            queue: detail.queue?.map((track) => ({ ...track, appleId: null, spotifyId: `sp-${track.trackId}` })),
           }
         },
       },

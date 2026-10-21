@@ -1,9 +1,14 @@
+import { ApiError } from '../api/client'
 import type {
+  AlbumPickResponse,
+  ApiAlbum,
   ApiArtistSeed,
+  ApiListenLaterEntry,
   ApiMessage,
   ApiMusicSource,
   ApiQueueTrack,
   ApiSeedTrack,
+  ApiSession,
   ApiSessionSummary,
   CreateSessionResponse,
   FunnelEventInput,
@@ -13,7 +18,18 @@ import type {
   MixtapeApi,
   SessionDetailResponse,
 } from '../api/client'
-import { demoQueue, demoSessions, makeConversationFor } from '../data/demo'
+import {
+  demoAlbumPick,
+  demoAlbumRefinedPick,
+  demoAlbumRefineReply,
+  demoAlbumReply,
+  demoAlbumRunnersUp,
+  demoAlbums,
+  demoQueue,
+  demoSessions,
+  makeConversationFor,
+  toDemoListenLaterEntry,
+} from '../data/demo'
 
 const summaries: ApiSessionSummary[] = demoSessions.map((session) => ({
   id: session.id,
@@ -22,6 +38,7 @@ const summaries: ApiSessionSummary[] = demoSessions.map((session) => ({
   queueVersion: session.queueVersion,
   notPersonal: session.notPersonal,
   updatedAt: session.updatedAt,
+  kind: 'mix',
   trackCount: session.trackCount,
   durationMs: Math.max(0, Number.parseInt(session.durationLabel, 10)) * 60_000,
 }))
@@ -66,7 +83,85 @@ type FakeListeningImport = {
   dayKeys: string[]
 }
 
-export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
+type FakeAlbumSession = {
+  session: ApiSession
+  messages: ApiMessage[]
+  /** Every shortlist by version, so a go-back can restore any of them. */
+  history: Map<number, AlbumPickResponse>
+}
+
+type FakeShelfRow = { entry: ApiListenLaterEntry; removed: boolean }
+
+export type FakeApiOptions = {
+  /** Listen later entries the fake starts with, e.g. demoListenLaterEntries for the preview harness. */
+  listenLater?: ApiListenLaterEntry[]
+}
+
+const notFound = () => new ApiError(404, { error: 'not_found' })
+const atVersion = (album: ApiAlbum, version: number): ApiAlbum => ({ ...album, version })
+
+export function createFakeApi(overrides: Partial<MixtapeApi> = {}, options: FakeApiOptions = {}): FakeApi {
+  const albumSessions = new Map<string, FakeAlbumSession>()
+  const shelf = new Map<string, FakeShelfRow>(
+    (options.listenLater ?? []).map((entry) => [entry.id, { entry: { ...entry }, removed: false }]),
+  )
+  // Strictly increasing stamps keep the shelf order deterministic within one millisecond.
+  let clock = 0
+  const tick = () => new Date((clock = Math.max(Date.now(), clock + 1))).toISOString()
+  const isSaved = (id: string) => shelf.get(id)?.removed === false
+  const savedView = (album: ApiAlbum): ApiAlbum => ({ ...album, savedForLater: isSaved(album.id) })
+  const albumState = (sessionId: string) => {
+    const state = albumSessions.get(sessionId)
+    if (!state) throw notFound()
+    return state
+  }
+  const currentPicks = (state: FakeAlbumSession) => state.history.get(state.session.queueVersion)!
+  const pickView = (state: FakeAlbumSession): AlbumPickResponse => {
+    const current = currentPicks(state)
+    return {
+      version: current.version,
+      pick: current.pick && savedView(current.pick),
+      runnersUp: current.runnersUp.map(savedView),
+      passed: current.passed.map(savedView),
+    }
+  }
+  const pushPicks = (state: FakeAlbumSession, next: Omit<AlbumPickResponse, 'version'>) => {
+    const version = state.session.queueVersion + 1
+    state.history.set(version, { ...next, version })
+    state.session = { ...state.session, queueVersion: version, updatedAt: tick() }
+    return pickView(state)
+  }
+  const offeredReason = (sessionId: string, albumId: string): string | null => {
+    const history = albumSessions.get(sessionId)?.history
+    if (!history) return null
+    const offered = [...history.values()]
+      .sort((a, b) => b.version - a.version)
+      .flatMap((picks) => [picks.pick, ...picks.runnersUp])
+      .find((item) => item?.id === albumId)
+    return offered?.reason ?? null
+  }
+  const sortedShelf = () =>
+    [...shelf.values()]
+      .filter((row) => !row.removed)
+      .map((row) => ({ ...row.entry }))
+      .sort((a, b) => {
+        if ((a.listenedAt === null) !== (b.listenedAt === null)) return a.listenedAt === null ? -1 : 1
+        return (b.listenedAt ?? b.savedAt).localeCompare(a.listenedAt ?? a.savedAt)
+      })
+  const albumTurn = (sessionId: string, text: string) => {
+    const state = albumState(sessionId)
+    const current = currentPicks(state)
+    const version = current.version + 1
+    const createdAt = tick()
+    const djMessage: ApiMessage = { id: `${sessionId}-dj-${version}`, role: 'dj', content: demoAlbumRefineReply, queueVersion: version, createdAt }
+    state.messages.push({ id: `${sessionId}-user-${version}`, role: 'user', content: text, createdAt }, djMessage)
+    const picks = pushPicks(state, {
+      pick: atVersion(demoAlbumRefinedPick, version),
+      runnersUp: current.runnersUp.map((album) => atVersion(album, version)),
+      passed: [...(current.pick ? [current.pick] : []), ...current.passed],
+    })
+    return { djMessage: { ...djMessage }, ...picks }
+  }
   const queueState = new Map<string, ApiQueueTrack[]>()
   const createdSessions = new Map<string, CreateSessionResponse>()
   const funnelEvents: FunnelEventInput[] = []
@@ -97,7 +192,20 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
   }
   const api: MixtapeApi = {
     transcribe: async () => ({ text: 'An evening mix', language: 'en' }),
-    listSessions: async () => ({ sessions: summaries.map((session) => ({ ...session })) }),
+    listSessions: async () => {
+      const albums: ApiSessionSummary[] = [...albumSessions.values()]
+        .map((state) => {
+          const pick = currentPicks(state).pick
+          return {
+            ...state.session,
+            trackCount: 0,
+            durationMs: 0,
+            pick: pick && { title: pick.title, artist: pick.artist, artwork: pick.artwork },
+          }
+        })
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      return { sessions: [...albums, ...summaries.map((session) => ({ ...session }))] }
+    },
     getSuggestions: async()=>({enabled:true,suggestion:null,dismissed:false}),
     selectSuggestion: async()=>{throw new Error('No suggestion')},
     dismissSuggestion: async()=>({ok:true}),
@@ -110,6 +218,10 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
     readMixVersion: async () => { throw new Error('No historical fixture') },
     restoreMixVersion: async () => { throw new Error('No historical fixture') },
     getSession: async (sessionId): Promise<SessionDetailResponse> => {
+      const album = albumSessions.get(sessionId)
+      if (album) {
+        return { session: { ...album.session }, messages: album.messages.map((message) => ({ ...message })), ...pickView(album) }
+      }
       const created = createdSessions.get(sessionId)
       if (created) {
         return {
@@ -121,7 +233,26 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
       const session = summaries.find((item) => item.id === sessionId) ?? summaries[0]
       return { session: { ...session }, messages: messagesFor(sessionId), queue: currentQueue(sessionId) }
     },
-    createSession: async (prompt): Promise<CreateSessionResponse> => {
+    createSession: async (prompt, _seed, _arc, kind): Promise<CreateSessionResponse> => {
+      if (kind === 'album') {
+        const createdAt = tick()
+        const id = albumSessions.size === 0 ? 'created-album-session' : `created-album-session-${albumSessions.size + 1}`
+        const state: FakeAlbumSession = {
+          session: { id, title: prompt, status: 'active', queueVersion: 0, notPersonal: false, updatedAt: createdAt, kind: 'album' },
+          messages: [
+            { id: `${id}-user-1`, role: 'user', content: prompt, createdAt },
+            { id: `${id}-dj-1`, role: 'dj', content: demoAlbumReply, queueVersion: 1, createdAt },
+          ],
+          history: new Map(),
+        }
+        albumSessions.set(id, state)
+        const picks = pushPicks(state, {
+          pick: atVersion(demoAlbumPick, 1),
+          runnersUp: demoAlbumRunnersUp.map((album) => atVersion(album, 1)),
+          passed: [],
+        })
+        return { session: { ...state.session }, messages: state.messages.map((message) => ({ ...message })), ...picks }
+      }
       const createdAt = new Date().toISOString()
       const created: CreateSessionResponse = {
         session: {
@@ -142,7 +273,7 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
       createdSessions.set(created.session.id, created)
       return created
     },
-    sendMessage: async (_sessionId, _text) => ({
+    sendMessage: async (sessionId, text) => albumSessions.has(sessionId) ? albumTurn(sessionId, text) : ({
       djMessage: {
         id: 'reply-message',
         role: 'dj',
@@ -174,6 +305,66 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
         removed: ops.filter((op) => op.op === 'remove').length,
         queue,
       }
+    },
+    choosePick: async (sessionId, input, expectedVersion) => {
+      const state = albumState(sessionId)
+      const current = currentPicks(state)
+      if (expectedVersion !== undefined && expectedVersion !== current.version) {
+        throw new ApiError(409, { error: 'stale', version: current.version })
+      }
+      const version = current.version + 1
+      const previous = current.pick ? [current.pick] : []
+      if ('albumId' in input) {
+        const chosen = current.runnersUp.find((album) => album.id === input.albumId)
+        if (!chosen) throw notFound()
+        return pushPicks(state, {
+          pick: atVersion(chosen, version),
+          runnersUp: current.runnersUp.filter((album) => album.id !== chosen.id).map((album) => atVersion(album, version)),
+          passed: [...previous, ...current.passed],
+        })
+      }
+      const restored = state.history.get(input.version)
+      if (!restored) throw notFound()
+      return pushPicks(state, {
+        pick: restored.pick && atVersion(restored.pick, version),
+        runnersUp: restored.runnersUp.map((album) => atVersion(album, version)),
+        passed: [...previous, ...current.passed].filter((album) => album.id !== restored.pick?.id),
+      })
+    },
+    listListenLater: async () => ({ entries: sortedShelf() }),
+    saveForLater: async (albumId, sessionId) => {
+      const album = demoAlbums.find((item) => item.id === albumId)
+      if (!album) throw notFound()
+      // As the server: a named source must be an album session that offered this album.
+      if (sessionId && offeredReason(sessionId, albumId) === null) throw notFound()
+      const existing = shelf.get(albumId)
+      if (!existing) {
+        const entry = toDemoListenLaterEntry(album, { savedAt: tick() })
+        shelf.set(albumId, { entry, removed: false })
+      } else if (existing.removed) {
+        existing.removed = false
+        existing.entry = { ...existing.entry, savedAt: tick(), sessionId: sessionId ?? existing.entry.sessionId }
+      } else {
+        // A repeat keeps the saved date and source, only filling a source it never had.
+        existing.entry = { ...existing.entry, sessionId: existing.entry.sessionId ?? sessionId ?? null }
+      }
+      const row = shelf.get(albumId)!
+      if (!existing && sessionId) row.entry.sessionId = sessionId
+      // The why is read off the source session, as the server's join does.
+      row.entry.reason = row.entry.sessionId ? offeredReason(row.entry.sessionId, albumId) : null
+      return { entry: { ...row.entry } }
+    },
+    unsaveForLater: async (albumId) => {
+      if (!demoAlbums.some((item) => item.id === albumId)) throw notFound()
+      const row = shelf.get(albumId)
+      if (row) row.removed = true
+      return { ok: true }
+    },
+    markListened: async (albumId) => {
+      const row = shelf.get(albumId)
+      if (!row || row.removed) throw notFound()
+      row.entry.listenedAt ??= tick()
+      return { entry: { ...row.entry } }
     },
     getMusicKitToken: async () => ({ developerToken: 'fake-developer-token', expiresAt: 1_788_138_000 }),
     recordSessionEvent: async () => ({ ok: true }),
@@ -317,7 +508,7 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}): FakeApi {
       interview = { artists: answers.neverSkip.length, notes: saved }
       return { seeds: answers.neverSkip.length, notes: { saved, duplicate: 0, capped: 0 } }
     },
-    getMe: async () => ({ user: { id: 'listener-1', isAnonymous: false }, merged: null }),
+    getMe: async () => ({ user: { id: 'listener-1', isAnonymous: false }, merged: null, albumPicks: true }),
     getArtistSeeds: async () => ({ seeds: artistSeeds.map((seed) => ({ ...seed })) }),
     putArtistSeeds: async (names) => {
       artistSeeds = [

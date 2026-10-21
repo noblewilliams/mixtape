@@ -353,7 +353,7 @@ describe('Mixtape web shell', () => {
     const api = createFakeApi({
       getSession: async (...args: Parameters<typeof base.getSession>) => {
         const detail = await base.getSession(...args)
-        return { ...detail, queue: detail.queue.map((track, index) => ({ ...track, newToYou: index === 2 || index === 7 })) }
+        return { ...detail, queue: detail.queue?.map((track, index) => ({ ...track, newToYou: index === 2 || index === 7 })) }
       },
     })
     renderApp({ api })

@@ -595,7 +595,7 @@ describe('Mixtape API client: listening import and onboarding', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('https://api.mixtape.test/me', expect.objectContaining({ credentials: 'include' }))
     expect(new Headers(fetchMock.mock.calls[0][1]!.headers).get('authorization')).toBe('Bearer me-token')
-    expect(result).toEqual({ user: { id: 'user-1', isAnonymous: false }, merged: 'mixes_only' })
+    expect(result).toEqual({ user: { id: 'user-1', isAnonymous: false }, merged: 'mixes_only', albumPicks: false })
   })
 
   it('reports an anonymous user with no merge as merged null', async () => {
@@ -607,7 +607,7 @@ describe('Mixtape API client: listening import and onboarding', () => {
 
     const result = await createMixtapeApi('https://api.mixtape.test').getMe()
 
-    expect(result).toEqual({ user: { id: 'anon-1', isAnonymous: true }, merged: null })
+    expect(result).toEqual({ user: { id: 'anon-1', isAnonymous: true }, merged: null, albumPicks: false })
   })
 
   it('maps the anonymous mix cap on a new mix to AnonymousCapError', async () => {
@@ -633,5 +633,71 @@ describe('Mixtape API client: listening import and onboarding', () => {
 
     expect(error).toBeInstanceOf(ApiError)
     expect(error).not.toBeInstanceOf(AnonymousCapError)
+  })
+
+  describe('album picks', () => {
+    const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+    const sent = () => fetchMock.mock.calls.map(([url, init]) => [url, init?.method ?? 'GET', init?.body])
+
+    it('sends kind album on a new session and never an energy arc', async () => {
+      fetchMock.mockImplementation(async () => ok({ session: {}, messages: [], pick: null, runnersUp: [], passed: [], version: 1 }))
+      vi.stubGlobal('fetch', fetchMock)
+      const api = createMixtapeApi('https://api.mixtape.test')
+
+      await api.createSession('An album for the train home', undefined, 'rise', 'album')
+      await api.createSession('A mix', undefined, 'rise', 'mix')
+      await api.createSession('A plain mix')
+
+      expect(sent()).toEqual([
+        ['https://api.mixtape.test/sessions', 'POST', JSON.stringify({ prompt: 'An album for the train home', kind: 'album' })],
+        ['https://api.mixtape.test/sessions', 'POST', JSON.stringify({ prompt: 'A mix', energyArc: 'rise' })],
+        ['https://api.mixtape.test/sessions', 'POST', JSON.stringify({ prompt: 'A plain mix' })],
+      ])
+    })
+
+    it('chooses a runner-up or goes back to a version, fenced on expectedVersion', async () => {
+      fetchMock.mockImplementation(async () => ok({ pick: null, runnersUp: [], passed: [], version: 3 }))
+      vi.stubGlobal('fetch', fetchMock)
+      const api = createMixtapeApi('https://api.mixtape.test')
+
+      await api.choosePick('session/1', { albumId: 'album-2' }, 2)
+      await api.choosePick('session/1', { version: 1 })
+
+      expect(sent()).toEqual([
+        ['https://api.mixtape.test/sessions/session%2F1/pick', 'POST', JSON.stringify({ albumId: 'album-2', expectedVersion: 2 })],
+        ['https://api.mixtape.test/sessions/session%2F1/pick', 'POST', JSON.stringify({ version: 1 })],
+      ])
+    })
+
+    it('reads and writes the Listen later shelf', async () => {
+      fetchMock.mockImplementation(async () => ok({ entries: [] }))
+      vi.stubGlobal('fetch', fetchMock)
+      const api = createMixtapeApi('https://api.mixtape.test')
+
+      await api.listListenLater()
+      await api.saveForLater('album/1', 'session-1')
+      await api.saveForLater('album/1')
+      await api.unsaveForLater('album/1')
+      await api.markListened('album/1')
+
+      expect(sent()).toEqual([
+        ['https://api.mixtape.test/me/listen-later', 'GET', undefined],
+        ['https://api.mixtape.test/me/listen-later/album%2F1', 'PUT', JSON.stringify({ sessionId: 'session-1' })],
+        ['https://api.mixtape.test/me/listen-later/album%2F1', 'PUT', JSON.stringify({})],
+        ['https://api.mixtape.test/me/listen-later/album%2F1', 'DELETE', undefined],
+        ['https://api.mixtape.test/me/listen-later/album%2F1/listened', 'POST', undefined],
+      ])
+      expect(new Headers(fetchMock.mock.calls[1][1]!.headers).get('content-type')).toBe('application/json')
+    })
+
+    it('reads the album picks capability from /me and treats an older server as off', async () => {
+      vi.stubGlobal('fetch', fetchMock)
+      fetchMock.mockResolvedValueOnce(ok({ user: { id: 'user-1', isAnonymous: false }, merged: null, albumPicks: true }))
+      fetchMock.mockResolvedValueOnce(ok({ user: { id: 'user-1', isAnonymous: false }, merged: null }))
+      const api = createMixtapeApi('https://api.mixtape.test')
+
+      expect((await api.getMe()).albumPicks).toBe(true)
+      expect((await api.getMe()).albumPicks).toBe(false)
+    })
   })
 })

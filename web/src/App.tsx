@@ -117,7 +117,7 @@ function detailToState(detail: SessionDetailResponse) {
   return {
     session: toDjSession(detail.session, detail.queue),
     messages: detail.messages.map(toDjMessage),
-    queue: detail.queue.map(toQueueTrack),
+    queue: (detail.queue ?? []).map(toQueueTrack),
   }
 }
 
@@ -626,7 +626,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
           session.id === sessionId ? { ...session, notPersonal: detail.session.notPersonal } : session,
         ),
       )
-      notePersonalMix(detail.session, detail.queue.length)
+      notePersonalMix(detail.session, detail.queue?.length ?? 0)
     } catch (requestError) {
       if (signal.aborted) return
       if (requestError instanceof ApiError && requestError.status === 401) signOut()
@@ -736,7 +736,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     const pending = pendingInitialMilestone.current
     if (!pending || !onboarding) return
     pendingInitialMilestone.current = null
-    notePersonalMix(pending.session, pending.queue.length)
+    notePersonalMix(pending.session, pending.queue?.length ?? 0)
   }, [onboarding, effectiveOnboarding])
 
   async function connectAppleMusic() {
@@ -809,7 +809,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     setDialog(null)
     setError('')
     if (!noticeHeld.current) announce('Your new tape is ready.')
-    noteMixReply(response.queue.length)
+    noteMixReply(response.queue?.length ?? 0)
   }
 
   /** `inspiration` overrides the dialog's seed (the kept mix re-sent after sign-in). */
@@ -825,7 +825,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       if (signal.aborted) return
       setNewSeed(null)
       adoptNewSession(response)
-      notePersonalMix(response.session, response.queue.length)
+      notePersonalMix(response.session, response.queue?.length ?? 0)
     } catch (requestError) {
       if (signal.aborted) return
       if (requestError instanceof AnonymousCapError) {
@@ -871,7 +871,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     try {
       const response = await api.sendMessage(sessionId, text, shape)
       if (signal.aborted) return
-      const queue = response.queue.map(toQueueTrack)
+      const queue = (response.queue ?? []).map(toQueueTrack)
       // A refusal answered with more artists: the first mix lands on this turn.
       if (!hadMix) noteMixReply(queue.length)
       setMessagesBySession((current) => ({
@@ -886,7 +886,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
                 {
                   ...session,
                   title: (metadataRevision.current[sessionId] ?? 0) === metadataAtStart ? response.sessionTitle ?? session.title : session.title,
-                  queueVersion: response.queueVersion,
+                  queueVersion: response.queueVersion ?? session.queueVersion,
                   updatedAt: new Date().toISOString(),
                 },
                 response.queue,
@@ -957,7 +957,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     }
     try {
       const detail = await api.getSession(sessionId)
-      applyQueueSnapshot(sessionId, detail.session.queueVersion, detail.queue)
+      applyQueueSnapshot(sessionId, detail.session.queueVersion, detail.queue ?? [])
     } catch (refreshError) {
       setError(errorCopy(refreshError))
       if (refreshError instanceof ApiError && refreshError.status === 401) signOut()

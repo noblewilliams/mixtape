@@ -45,12 +45,56 @@ export type ApiSession = {
   /** True once corpus-mode picks landed in the queue: the "Not personal yet" banner. */
   notPersonal: boolean
   updatedAt: string
+  /** Absent on older servers; absence means a mix. */
+  kind?: 'mix' | 'album'
 }
 
 export type ApiSessionSummary = ApiSession & {
+  /** Both 0 for album sessions. */
   trackCount: number
   durationMs: number
+  /** Album sessions only: the current pick, null before the first. */
+  pick?: { title: string; artist: string; artwork: ApiAlbumArtwork | null } | null
 }
+
+export type ApiAlbumType = 'album' | 'ep' | 'single' | 'live' | 'compilation' | 'soundtrack' | 'mixtape'
+export type ApiAlbumArtwork = { url: string; width: number | null; height: number | null; bgColor: string | null }
+
+type ApiAlbumFields = {
+  id: string
+  upc: string | null
+  appleId: string | null
+  title: string
+  artist: string
+  releaseYear: number | null
+  type: ApiAlbumType
+  trackCount: number | null
+  durationMs: number | null
+  artwork: ApiAlbumArtwork | null
+}
+
+export type ApiAlbum = ApiAlbumFields & {
+  newToThem: boolean
+  reason: string
+  savedForLater: boolean
+  version: number
+}
+
+export type AlbumPickResponse = {
+  pick: ApiAlbum | null
+  runnersUp: ApiAlbum[]
+  passed: ApiAlbum[]
+  version: number
+}
+
+export type ApiListenLaterEntry = ApiAlbumFields & {
+  sessionId: string | null
+  savedAt: string
+  listenedAt: string | null
+  reason: string | null
+}
+
+export type ChoosePickInput = { albumId: string; version?: never } | { version: number; albumId?: never }
 
 export type ApiMessage = {
   id: string
@@ -82,19 +126,23 @@ export type SessionDetailResponse = {
   /** Absent on older servers; absence is not a confirmed empty selection. */
   playlistSeed?: ApiPlaylistSeed
   messages: ApiMessage[]
-  queue: ApiQueueTrack[]
-}
+  /** Mix sessions only. */
+  queue?: ApiQueueTrack[]
+} & Partial<AlbumPickResponse>
 
 export type CreateSessionResponse = SessionDetailResponse & {
   sessionTitle?: string
+  suggestions?: string[]
 }
 
+/** A mix turn carries queue and queueVersion; an album turn the pick state instead. */
 export type SendMessageResponse = {
   djMessage: ApiMessage
-  queue: ApiQueueTrack[]
-  queueVersion: number
+  queue?: ApiQueueTrack[]
+  queueVersion?: number
   sessionTitle?: string
-}
+  suggestions?: string[]
+} & Partial<AlbumPickResponse>
 
 export type QueueOp =
   | { op: 'remove'; position: number }
@@ -345,7 +393,12 @@ export type SuggestionsResponse = { enabled: boolean; suggestion: RoutineSuggest
 export type PlaybackPreferences = {enabled:boolean;revision:number;userId?:string}
 export type PlaybackObservation = {playbackId:string;sequence:number;sessionId:string;version:number;position:number;trackId:string;source:'apple_web'|'apple_native';kind:'listen'|'skip'|'repeat';observedMs:number;occurredAt:string}
 export type MergedMode = 'all' | 'mixes_only' | 'library_kept'
-export type MeResponse = { user: { id: string; isAnonymous: boolean }; merged: MergedMode | null }
+export type MeResponse = {
+  user: { id: string; isAnonymous: boolean }
+  merged: MergedMode | null
+  /** Whether album sessions and Listen later are offered; false on older servers. */
+  albumPicks: boolean
+}
 export type MixtapeApi = {
   /** `merged` is reported once after an anonymous session joins an account; the server clears it on read. */
   getMe: (signal?: AbortSignal) => Promise<MeResponse>
@@ -365,9 +418,19 @@ export type MixtapeApi = {
 
   listSessions: () => Promise<{ sessions: ApiSessionSummary[] }>
   getSession: (sessionId: string) => Promise<SessionDetailResponse>
-  createSession: (prompt: string, playlistSeed?: InitialPlaylistSeed, energyArc?: EnergyArc) => Promise<CreateSessionResponse>
+  createSession: (
+    prompt: string,
+    playlistSeed?: InitialPlaylistSeed,
+    energyArc?: EnergyArc,
+    kind?: 'mix' | 'album',
+  ) => Promise<CreateSessionResponse>
   sendMessage: (sessionId: string, text: string, energyArc?: EnergyArc) => Promise<SendMessageResponse>
   applyQueueOps: (sessionId: string, ops: QueueOp[], expectedVersion?: number) => Promise<QueueOpsResponse>
+  choosePick: (sessionId: string, input: ChoosePickInput, expectedVersion?: number) => Promise<AlbumPickResponse>
+  listListenLater: (signal?: AbortSignal) => Promise<{ entries: ApiListenLaterEntry[] }>
+  saveForLater: (albumId: string, sessionId?: string, signal?: AbortSignal) => Promise<{ entry: ApiListenLaterEntry }>
+  unsaveForLater: (albumId: string, signal?: AbortSignal) => Promise<{ ok: true }>
+  markListened: (albumId: string, signal?: AbortSignal) => Promise<{ entry: ApiListenLaterEntry }>
   getMusicKitToken: () => Promise<MusicKitTokenResponse>
   recordSessionEvent: (sessionId: string, type: 'played' | 'saved_playlist') => Promise<{ ok: true }>
   recordPlaylistCreation: (sessionId: string, appleLibraryId: string) => Promise<{ ok: true }>
@@ -539,13 +602,26 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
     listSessions: () => request('/sessions'),
     getSession: (sessionId) => request(`/sessions/${encodeURIComponent(sessionId)}`),
     getMe: async (signal) => {
-      const body = await request<{ user: { id: string; isAnonymous?: boolean | null }; merged?: MergedMode | null }>('/me', { signal })
-      return { user: { id: body.user.id, isAnonymous: body.user.isAnonymous === true }, merged: body.merged ?? null }
+      const body = await request<{
+        user: { id: string; isAnonymous?: boolean | null }
+        merged?: MergedMode | null
+        albumPicks?: boolean
+      }>('/me', { signal })
+      return {
+        user: { id: body.user.id, isAnonymous: body.user.isAnonymous === true },
+        merged: body.merged ?? null,
+        albumPicks: body.albumPicks === true,
+      }
     },
-    createSession: (prompt, playlistSeed, energyArc) =>
+    createSession: (prompt, playlistSeed, energyArc, kind) =>
       request<CreateSessionResponse>('/sessions', {
         method: 'POST',
-        body: JSON.stringify({ prompt, ...(playlistSeed ? { playlistSeed } : {}), ...(energyArc ? { energyArc } : {}) }),
+        // The server ignores energyArc on an album, but it is never sent: albums have no shape.
+        body: JSON.stringify({
+          prompt,
+          ...(playlistSeed ? { playlistSeed } : {}),
+          ...(kind === 'album' ? { kind } : energyArc ? { energyArc } : {}),
+        }),
       }).catch((error: unknown) => {
         if (error instanceof ApiError && error.status === 403 && error.code === 'anonymous_cap') throw new AnonymousCapError(error.payload)
         throw error
@@ -560,6 +636,22 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
         method: 'POST',
         body: JSON.stringify({ ops, ...(expectedVersion === undefined ? {} : { expectedVersion }) }),
       }),
+    choosePick: (sessionId, input, expectedVersion) =>
+      request(`/sessions/${encodeURIComponent(sessionId)}/pick`, {
+        method: 'POST',
+        body: JSON.stringify({ ...input, ...(expectedVersion === undefined ? {} : { expectedVersion }) }),
+      }),
+    listListenLater: (signal) => request('/me/listen-later', { signal }),
+    saveForLater: (albumId, sessionId, signal) =>
+      request(`/me/listen-later/${encodeURIComponent(albumId)}`, {
+        method: 'PUT',
+        body: JSON.stringify(sessionId ? { sessionId } : {}),
+        signal,
+      }),
+    unsaveForLater: (albumId, signal) =>
+      request(`/me/listen-later/${encodeURIComponent(albumId)}`, { method: 'DELETE', signal }),
+    markListened: (albumId, signal) =>
+      request(`/me/listen-later/${encodeURIComponent(albumId)}/listened`, { method: 'POST', signal }),
     getMusicKitToken: () => request('/musickit/token'),
     recordPlaylistCreation: (sessionId, appleLibraryId) => request('/playlists/creation-receipts', {
       method: 'POST', body: JSON.stringify({ sessionId, appleLibraryId }),
