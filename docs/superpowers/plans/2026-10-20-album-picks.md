@@ -332,6 +332,11 @@ Files: `client/lib/presentation/screens/mixes_screen.dart`, new
 
 ### Gate 2: flag on and founder briefs
 
+Server half done 2026-10-21: `ALBUM_PICKS` on in `150a7cf`, Worker version
+`0a2bd253` deployed from a clean worktree of it, flag-off and flag-on route
+checks passed on production with a throwaway anonymous user. The briefs, the
+web deploy, the iOS build and the playback checks are still the founder's.
+
 From a clean worktree of committed HEAD, deploy with `ALBUM_PICKS` on. The
 founder makes three album briefs (comfort, default, adventurous) on the main
 account and one on the Spotify-only test account, saves two to Listen later,
