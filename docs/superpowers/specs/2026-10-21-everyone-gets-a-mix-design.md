@@ -2,7 +2,9 @@
 
 Status: decisions taken 2026-10-21, all five recommendations (recorded in
 `../../decisions.md`). Step 1 implemented and committed 2026-10-21 (Tasks 1
-and 2, each reviewed); Gate 1 owed. Steps 2 to 4 not started. Plan: `../plans/2026-10-21-everyone-gets-a-mix.md`.
+and 2, each reviewed) and deployed; Gate 1 passed the same evening after two
+fixes to the DJ model calls (curation token budget, streaming with a
+deadline). Steps 2 to 4 not started. Plan: `../plans/2026-10-21-everyone-gets-a-mix.md`.
 Follows `2026-10-20-first-run-flow-design.md` (decision 4 there deferred
 this program) and reopens the 2026-10-03 "honest empty mixes" decision on
 the evidence below.

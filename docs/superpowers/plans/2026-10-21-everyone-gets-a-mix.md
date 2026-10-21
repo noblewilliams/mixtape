@@ -107,7 +107,11 @@ Step 1, both fixed the same evening:
   DJ model call (headers arrive at once) with a 100 s per-call deadline,
   since the iOS client gives up at 120 s (llm.ts).
 
-From a clean worktree: apply the Task 1 migration (a sub-second rewrite of
+Gate 1 passed 2026-10-21 evening: Worker `27d81fb1` (commit `82ee1ee`); the
+founder's prompt with kanye west, jay z and kid cudi returned 15 tracks in
+53 s with Kanye, Kid Cudi and Kendrick in the mix; test user deleted.
+
+Originally planned as: from a clean worktree, apply the Task 1 migration (a sub-second rewrite of
 `tracks`, 6,438 rows, under a brief exclusive lock), deploy, spot-check
 `artist_key('MØ ŁONA ΣΑΒΒΑΣ')` on production, then re-run the 2026-10-21
 prompt as an anonymous listener and confirm a mix comes back. Delete the
@@ -223,7 +227,7 @@ catalogue; if acceptable, set `NEVER_REFUSE` to `on` and deploy.
 ## What the founder does, in order
 
 1. Take the five decisions in the spec.
-2. Gate 1 after Step 1: migration, deploy, the 2026-10-21 prompt.
+2. Gate 1 after Step 1: done 2026-10-21.
 3. Gate 2 after Step 2: deploy, three prompts with unknown artists.
 4. Gate 3: the seeding sittings.
 5. Gate 4: listen, flag on.
