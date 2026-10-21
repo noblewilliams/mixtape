@@ -7,12 +7,15 @@ import { EmptyState } from './components/UiStates'
 import { ControlModal } from './components/ControlModal'
 import { TapeSettings } from './components/TapeSettings'
 import { AppleMusicMark, SpotifyMark } from './components/ProviderMarks'
-import { demoMessages, demoQueue, demoSessions } from './data/demo'
+import { demoAlbumMessages, demoAlbumPick, demoAlbumRefinedPick, demoAlbumRunnersUp, demoMessages, demoQueue, demoSessions } from './data/demo'
+import { AlbumPanel } from './components/AlbumPanel'
+import { toAlbumPick } from './api/mappers'
+import { useMediaQuery } from './lib/use-media-query'
 import { Conversation } from './components/Conversation'
 import { PlaylistAttachment } from './components/PlaylistAttachment'
 import { QueuePanel } from './components/QueuePanel'
 import { tapeColors } from './data/tape-colors'
-import type { CollectionView } from './domain'
+import type { AlbumPickState, CollectionView, DjSession } from './domain'
 import type { ApiPlaylistSummary, MixtapeApi } from './api/client'
 import { PlaylistBrowser } from './components/PlaylistBrowser'
 import { Tabs } from './components/Tabs'
@@ -46,23 +49,53 @@ const previewFirstRunServices = () => createFirstRunServices({
   ensureSession: async () => undefined,
 })
 
+// Board W3 (first pick, runners-up folded) and W4 (refined, Spotify-only, saved, runners-up open).
+const previewAlbumStates: Record<'album' | 'album-refined', AlbumPickState> = {
+  album: { version: 1, pick: toAlbumPick(demoAlbumPick), runnersUp: demoAlbumRunnersUp.map(toAlbumPick), passed: [] },
+  'album-refined': {
+    version: 2,
+    pick: { ...toAlbumPick(demoAlbumRefinedPick), savedForLater: true },
+    runnersUp: demoAlbumRunnersUp.map((album) => toAlbumPick({ ...album, version: 2 })),
+    passed: [toAlbumPick(demoAlbumPick)],
+  },
+}
+
+/** The album states with local saved toggles, so the founder can click around. */
+function AlbumPreview({ state, session }: { state: 'album' | 'album-refined'; session: DjSession }) {
+  const [albums, setAlbums] = useState(previewAlbumStates[state])
+  const refined = state === 'album-refined'
+  const flip = (id: string) => setAlbums((current) => {
+    const toggle = <T extends { id: string; savedForLater: boolean }>(album: T) => (album.id === id ? { ...album, savedForLater: !album.savedForLater } : album)
+    return { ...current, pick: current.pick && toggle(current.pick), runnersUp: current.runnersUp.map(toggle), passed: current.passed.map(toggle) }
+  })
+  const albumSession = { ...session, kind: 'album' as const, title: 'Train home', queueVersion: albums.version, trackCount: 0 }
+  // As the app: below the shell's third column the panel folds into the conversation (W5).
+  const narrow = useMediaQuery('(max-width: 1020px)')
+  const panel = (inline: boolean) => <AlbumPanel key={state} state={albums} spotifyOnly={refined} defaultExpanded={refined} onPlay={() => {}} onToggleSaved={(album) => flip(album.id)} onPick={() => {}} inline={inline} />
+  return <>
+    <Conversation kind="album" session={albumSession} messages={refined ? demoAlbumMessages : demoAlbumMessages.slice(0, 2)} passed={albums.passed} onGoBack={() => {}} thinking={false} onSend={() => {}} attachment={<PlaylistAttachment api={previewLibraryApis.library} value={null} onSelect={async () => {}} onSessionExpired={() => {}} />} inlinePanel={narrow ? panel(true) : undefined} inlinePanelVersion={albums.version} />
+    {narrow ? null : panel(false)}
+  </>
+}
+
 export default function UiPolishPreview() {
   const [state, setState] = useState('populated')
   const [sessions, setSessions] = useState(demoSessions.slice(0, 4).map((session, index) => ({ ...session, caseColor: tapeColors[index * 9][1] as string })))
   const [collectionView, setCollectionView] = useState<CollectionView>('list')
   async function color(id: string, caseColor: string) { setSessions(current => current.map(s => s.id === id ? { ...s, caseColor } : s)) }
   const close = () => setState('populated')
-  const options = ['home', 'home-loading', 'home-empty', 'home-error', 'populated', 'loading', 'empty', 'archived', 'load-error', 'refresh-error', 'settings', 'success', 'error', 'info', 'playlist', 'preference', 'memory', 'sources', 'library', 'library-loading', 'conversation', 'conversation-blank', 'first-run', 'keep-sheet', 'sign-in-keep', 'sign-in-cap', 'merge-notice']
+  const options = ['home', 'home-loading', 'home-empty', 'home-error', 'populated', 'loading', 'empty', 'archived', 'load-error', 'refresh-error', 'settings', 'success', 'error', 'info', 'playlist', 'preference', 'memory', 'sources', 'library', 'library-loading', 'conversation', 'conversation-blank', 'album', 'album-refined', 'first-run', 'keep-sheet', 'sign-in-keep', 'sign-in-cap', 'merge-notice']
   return <>
     <div style={{ position: 'fixed', right: 12, top: 8, zIndex: 200, display: 'flex', gap: 8, alignItems: 'center', background: '#f7f4f8', color: '#1c1a1e', padding: 8, borderRadius: 8, fontSize: 12 }}>
       <label htmlFor="ui-preview-state">UI preview · synthetic data</label><select id="ui-preview-state" value={state} onChange={e => setState(e.target.value)}>{options.map(option => <option key={option}>{option}</option>)}</select>
     </div>
-    <div className={state.startsWith('conversation') ? 'app-shell' : 'app-shell app-shell--home'}>
+    <div className={state.startsWith('conversation') || state.startsWith('album') ? 'app-shell' : 'app-shell app-shell--home'}>
       <Sidebar activeView={state.startsWith('home') ? 'home' : state === 'sources' ? 'music' : 'mixes'} onOpenHome={() => setState('home')} onOpenMusic={() => setState('sources')} onOpenMixes={close} onOpenSettings={() => setState('preference')} />
       {state.startsWith('conversation') ? <>
         <Conversation session={sessions[0]} messages={state === 'conversation' ? demoMessages : []} thinking={false} onSend={() => {}} onOpenQueue={() => {}} attachment={<PlaylistAttachment api={previewLibraryApis.library} value={null} onSelect={async () => {}} onSessionExpired={() => {}} />} />
         <QueuePanel key={state} session={sessions[0]} tracks={state === 'conversation' ? previewQueue : []} playing={false} playbackBusy={false} musicConnection="connected" open={false} onConnect={() => {}} onTogglePlay={() => {}} onSave={() => {}} onClose={() => {}} onPreviewTracks={() => {}} onCommitQueueOp={async () => {}} />
       </>
+      : state === 'album' || state === 'album-refined' ? <AlbumPreview key={state} state={state} session={sessions[0]} />
       : state.startsWith('home') ? <HomeDashboard sessions={state === 'home' ? sessions : []} loading={state === 'home-loading'} error={state === 'home-error' ? 'Unavailable' : ''} busy={false} player={null} suggestions={state === 'home' ? <section className="routine-suggestions"><h2>For this moment</h2><div className="routine-card"><img className="routine-tape" src="/tape.svg" alt=""/><div className="routine-copy"><h3>A softer evening</h3><p>You often slow things down around this time.</p></div><div className="routine-actions"><button className="routine-primary">Make this mix</button><button>Not today</button></div></div></section> : null} onRetry={() => setState('home')} onOpenSession={close} onOpenMixes={close} albumPicks anonymous={false} onSubmit={async()=>{setState('populated')}} transcribe={async()=>({text:'A softer evening'})} onRename={async()=>{}} onArchive={async()=>{}} onColor={color}/> : state === 'memory' ? <main className="wc-view"><h1>What the DJ knows</h1><EmptyState kind="memory" title="No saved preferences yet" description="Tell the DJ what you would like it to remember." /></main>
       : state === 'library' || state === 'library-loading' ? <main className="ym-view"><header className="ym-header"><h1>Library</h1></header><Tabs label="Library sections" current="playlists" onSelect={close} items={[{ id: 'playlists', label: 'Playlists' }, { id: 'sources', label: 'Sources' }]} /><div className="ym-content"><PlaylistBrowser key={state} api={previewLibraryApis[state]} onInspire={close} onSources={close} onSessionExpired={close} /></div></main>
       : state === 'sources' ? <main className="ym-view"><header className="ym-header"><h1>Library</h1></header><div className="library-source-badges"><button className="library-source-badge"><AppleMusicMark />Apple Music<small>Connected</small></button><button className="library-source-badge"><SpotifyMark />Spotify<small>Imported</small></button></div><EmptyState title="No playlists yet" description="Playlists you bring from your music services will appear here." /></main>

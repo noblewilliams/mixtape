@@ -802,6 +802,373 @@ input:focus-visible {
   font-size: var(--type-meta-size);
 }
 
+/* Album picks (board 2026-10-20, W3 to W5). The album panel takes the queue
+   panel's column, width and hairline; its header ends on the conversation
+   header's rule as the queue's header and summary do together. The card is
+   flush, no box; Play now is the panel's one filled button. */
+.album-panel {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  padding: 20px 15px 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: rgba(248, 247, 246, 0.62);
+  border-left: 1px solid var(--hairline);
+  backdrop-filter: blur(30px) saturate(106%);
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.album-header {
+  min-height: calc(var(--session-header-height) - 20px);
+  margin-inline: -15px;
+  padding: 0 19px 12px;
+  border-bottom: 1px solid var(--session-rule);
+}
+
+.album-header p {
+  margin: 0;
+  color: var(--plum);
+  font: italic 450 21px/var(--marker-leading) var(--marker);
+}
+
+.album-header span {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: var(--type-micro-size);
+}
+
+.album-empty {
+  margin: 0;
+  padding: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.album-card {
+  padding: 4px 4px 0;
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.album-cover,
+.album-runner-cover,
+.album-passed-cover {
+  display: block;
+  object-fit: cover;
+}
+
+.album-cover {
+  width: 96px;
+  height: 96px;
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(30, 24, 30, 0.2);
+}
+
+.album-cover--fallback {
+  background: var(--hairline);
+}
+
+.album-copy {
+  min-width: 0;
+}
+
+.album-copy strong {
+  display: block;
+  color: var(--graphite);
+  font-size: 14px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.album-by {
+  display: block;
+  margin-top: 2px;
+  color: var(--smoke);
+  font-size: 12px;
+}
+
+/* The meta line may wrap between parts, never inside one ("36 min" stays whole). */
+.album-meta-part {
+  white-space: nowrap;
+}
+
+/* The approval record's mark weight on the album card and rows. */
+.album-mark b {
+  font-weight: 600;
+}
+
+/* The meta line may wrap; the mark (.track-mark: nowrap) never truncates. */
+.album-meta {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.album-why {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--graphite);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.album-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+}
+
+.album-play,
+.album-save,
+.album-runners-head button,
+.album-pick-this,
+.album-passed button {
+  position: relative;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.album-play {
+  min-height: 32px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 8px;
+  background: var(--plum);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.album-play svg,
+.album-save svg {
+  width: 14px;
+  height: 14px;
+}
+
+.album-play:disabled,
+.album-pick-this:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.album-save {
+  min-height: 32px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--plum);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.album-open {
+  position: relative;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--slate);
+  font-size: 11px;
+  font-weight: 750;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.album-runners {
+  margin-inline: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--session-rule);
+}
+
+.album-runners-head {
+  min-height: 28px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.album-runners-head button {
+  min-height: 28px;
+  padding: 0 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.album-runners-head button:hover {
+  color: var(--graphite);
+}
+
+.album-runner-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.album-runner {
+  position: relative;
+  min-height: 52px;
+  padding: 6px 0;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.album-runner + .album-runner::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50px;
+  right: 0;
+  height: 1px;
+  background: var(--session-rule);
+}
+
+.album-runner-cover {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+}
+
+.album-runner-copy {
+  min-width: 0;
+}
+
+.album-runner-copy strong {
+  display: block;
+  overflow: hidden;
+  color: var(--graphite);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.album-runner-copy small {
+  margin-top: 2px;
+  display: flex;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.album-runner-who {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.album-pick-this,
+.album-passed button {
+  min-height: 32px;
+  padding: 0 4px;
+  background: transparent;
+  color: var(--plum);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* Passed over, in the transcript above the turn that replaced it. */
+.album-passed {
+  margin: 0 0 24px;
+  padding-top: 8px;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border-top: 1px solid var(--session-rule);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.album-passed-cover {
+  width: 32px;
+  height: 32px;
+  border-radius: 5px;
+  opacity: 0.75;
+}
+
+.album-passed-copy {
+  min-width: 0;
+}
+
+.album-passed-copy strong {
+  display: block;
+  overflow: hidden;
+  color: var(--smoke);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Honest-failure pills sit under the DJ reply, drawn as Home's starter pills. */
+.conversation-pills {
+  margin: -19px 0 31px;
+}
+
+/* Below the shell's third column the panel folds under the reply (board W5),
+   with a hairline above instead of beside. */
+.album-panel--inline {
+  height: auto;
+  margin: -15px 0 31px;
+  padding: 12px 0 0;
+  overflow: visible;
+  background: transparent;
+  border-left: 0;
+  border-top: 1px solid var(--hairline);
+  backdrop-filter: none;
+}
+
+.album-panel--inline .album-header {
+  min-height: 0;
+  margin: 0;
+  padding: 0 4px;
+  border-bottom: 0;
+}
+
+.album-panel--inline .album-header p {
+  font-size: 18px;
+}
+
+@media (pointer: coarse) {
+  .album-play::before,
+  .album-save::before,
+  .album-open::before,
+  .album-pick-this::before,
+  .album-passed button::before {
+    content: '';
+    position: absolute;
+    inset: -6px -2px;
+  }
+
+  .album-runners-head button::before {
+    content: '';
+    position: absolute;
+    inset: -8px -6px;
+  }
+}
+
 .track-list {
   min-height: 0;
   margin: 0;
@@ -2778,7 +3145,8 @@ html:where([data-theme="dark"]),
   }
 
 :where(:root[data-theme="dark"]) .sidebar,
-  :where(:root[data-theme="dark"]) .queue-panel {
+  :where(:root[data-theme="dark"]) .queue-panel,
+  :where(:root[data-theme="dark"]) .album-panel:not(.album-panel--inline) {
     background: rgba(24, 23, 27, 0.62);
     border-color: rgba(255, 255, 255, 0.075);
     backdrop-filter: blur(32px) saturate(104%);
@@ -2791,6 +3159,7 @@ html:where([data-theme="dark"]),
 :where(:root[data-theme="dark"]) .conversation-header,
   :where(:root[data-theme="dark"]) .home-header,
   :where(:root[data-theme="dark"]) .queue-summary,
+  :where(:root[data-theme="dark"]) .album-header,
   :where(:root[data-theme="dark"]) .sidebar-footer {
     border-color: rgba(255, 255, 255, 0.075);
   }
@@ -3010,6 +3379,24 @@ html:where([data-theme="dark"]),
     color: #efb9c7;
   }
 
+:where(:root[data-theme="dark"]) .album-play {
+  color: #1c1a1e;
+}
+
+:where(:root[data-theme="dark"]) .album-cover {
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+:where(:root[data-theme="dark"]) .album-panel--inline,
+  :where(:root[data-theme="dark"]) .album-runners,
+  :where(:root[data-theme="dark"]) .album-passed {
+  border-top-color: rgba(255, 255, 255, 0.075);
+}
+
+:where(:root[data-theme="dark"]) .album-runner + .album-runner::before {
+  background: rgba(255, 255, 255, 0.075);
+}
+
 @media (max-width: 1020px) {
   :where(:root[data-theme="dark"]) .queue-panel {
     border-color: rgba(255, 255, 255, 0.09);
@@ -3026,6 +3413,7 @@ html:where([data-theme="dark"]),
 @media (prefers-reduced-transparency: reduce) {
   .sidebar,
   .queue-panel,
+  .album-panel:not(.album-panel--inline),
   .composer,
   .home-header,
   .dialog,
@@ -3039,6 +3427,7 @@ html:where([data-theme="dark"]),
 @media (prefers-reduced-transparency: reduce) {
   :where(:root[data-theme="dark"]) .sidebar,
   :where(:root[data-theme="dark"]) .queue-panel,
+  :where(:root[data-theme="dark"]) .album-panel:not(.album-panel--inline),
   :where(:root[data-theme="dark"]) .composer,
   :where(:root[data-theme="dark"]) .home-header,
   :where(:root[data-theme="dark"]) .dialog,

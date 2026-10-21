@@ -22,7 +22,7 @@ export type MusicKitInstance = {
   removeEventListener?: (name:string,callback:()=>void) => void
   readonly isAuthorized: boolean
   authorize: () => Promise<string | void>
-  setQueue: (options: { songs: string[] }) => Promise<unknown>
+  setQueue: (options: { songs: string[] } | { album: string }) => Promise<unknown>
   play: () => void | Promise<void>
   pause: () => void | Promise<void>
 }
@@ -49,6 +49,8 @@ export type MusicKitClient = {
     onProgress: (progress: MusicSnapshotProgress) => void
   }) => Promise<MusicSnapshot>
   play: (appleIds: string[]) => Promise<void>
+  /** Queues a whole catalogue album by its Apple id and starts it. */
+  playAlbum: (appleAlbumId: string) => Promise<void>
   pause: () => Promise<void>
   createPlaylist: (name: string, appleIds: string[], onCreated?: (libraryId: string) => void) => Promise<void>
 }
@@ -285,6 +287,23 @@ export function createMusicKitClient({
       })
       playbackTail=run
       try {await run} catch(error){throw asClientError(error,'playback_failed','Apple Music could not play this mix.')}
+    },
+    async playAlbum(appleAlbumId) {
+      if (!appleAlbumId) throw new MusicKitClientError('empty_queue','This album is not in Apple Music.')
+      // Same generation and tail as play(): a later mix or album supersedes this one.
+      const generation=++playbackGeneration
+      const run=playbackTail.catch(()=>{}).then(async()=>{
+        const {instance}=await requireConnection()
+        if(generation!==playbackGeneration)return
+        await instance.setQueue({album:appleAlbumId})
+        if(generation!==playbackGeneration)return
+        // The album's song ids are unknown here, so observed samples carry no mix index.
+        playbackIds=[]
+        await instance.play()
+        if(generation!==playbackGeneration)await instance.pause()
+      })
+      playbackTail=run
+      try {await run} catch(error){throw asClientError(error,'playback_failed','Apple Music could not play this album.')}
     },
     async resume(){const generation=playbackGeneration;const {instance}=await requireConnection();if(generation!==playbackGeneration)return;await instance.play();if(generation!==playbackGeneration)await instance.pause()},
     async next(){const {instance}=await requireConnection();if(!instance.skipToNextItem)throw new Error('transport unavailable');await instance.skipToNextItem()},

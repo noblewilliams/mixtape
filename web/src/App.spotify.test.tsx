@@ -50,6 +50,7 @@ function createFakeMusicKit(overrides: Partial<MusicKitClient> = {}): MusicKitCl
       excludedLibrarySongs: 0,
     })),
     play: vi.fn(async () => undefined),
+    playAlbum: vi.fn(async () => undefined),
     pause: vi.fn(async () => undefined),
     createPlaylist: vi.fn(async () => undefined),
     ...overrides,

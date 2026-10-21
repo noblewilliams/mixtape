@@ -75,6 +75,33 @@ describe('MusicKit browser client', () => {
     )
   })
 
+  it('queues a whole album by its Apple id before starting playback', async () => {
+    const { client, instance } = setup()
+    await client.connect()
+
+    await client.playAlbum('1570000001')
+
+    expect(instance.setQueue).toHaveBeenCalledWith({ album: '1570000001' })
+    expect(instance.play).toHaveBeenCalledOnce()
+    expect(vi.mocked(instance.setQueue).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(instance.play).mock.invocationCallOrder[0],
+    )
+  })
+
+  it('a later album or mix supersedes an album still being queued', async () => {
+    const { client, instance } = setup()
+    await client.connect()
+    let finish!: () => void
+    vi.mocked(instance.setQueue).mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve }))
+    const first = client.playAlbum('1570000001')
+    await vi.waitFor(() => expect(instance.setQueue).toHaveBeenCalledOnce())
+    const second = client.play(['song-1'])
+    finish()
+    await Promise.all([first, second])
+    expect(instance.setQueue).toHaveBeenLastCalledWith({ songs: ['song-1'] })
+    expect(instance.play).toHaveBeenCalledOnce()
+  })
+
   it('creates an Apple Music playlist with developer and in-memory user authorization', async () => {
     const { client, fetchImpl } = setup()
     fetchImpl.mockResolvedValue(new Response(JSON.stringify({ data: [{ id: 'p.123', type: 'library-playlists' }] }), { status: 201 }))

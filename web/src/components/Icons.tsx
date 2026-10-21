@@ -134,3 +134,12 @@ export function MusicIcon(props: IconProps) {
     </svg>
   )
 }
+
+/** Listen later: outlined when unsaved, filled once saved. */
+export function BookmarkIcon({ filled = false, ...props }: IconProps & { filled?: boolean }) {
+  return (
+    <svg {...iconDefaults} {...props}>
+      <path d="M7 4h10v16l-5-3.6L7 20z" fill={filled ? 'currentColor' : 'none'} />
+    </svg>
+  )
+}
