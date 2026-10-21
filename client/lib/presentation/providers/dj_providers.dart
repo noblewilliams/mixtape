@@ -21,6 +21,7 @@ import 'playlist_context_provider.dart';
 import 'first_run_funnel_provider.dart';
 import 'funnel_provider.dart';
 import 'keep_mixes_provider.dart';
+import 'listen_later_provider.dart';
 
 /// Built over the SAME baseUrl/tokenStore as the app's shared [ApiClient]
 /// (structural sharing, per [DjApi.from]'s doc comment) but with its own
@@ -220,9 +221,23 @@ class ChatState {
     this.sending = false,
     this.transientError,
     this.supportsInsert = false,
+    this.pickState,
+    this.suggestions,
   });
 
   final DjSession session;
+
+  /// Mix or album, read off the session (one source of truth, as
+  /// [queueVersion] is).
+  SessionKind get kind => session.kind;
+
+  /// Album sessions only: the current shortlist. Its version is always
+  /// [queueVersion] once adopted.
+  final AlbumPickState? pickState;
+
+  /// The latest failed album turn's refinement pills; cleared when the next
+  /// send starts.
+  final List<String>? suggestions;
   final List<ChatMessage> messages;
   final List<QueueTrack> queue;
   final bool sending;
@@ -256,6 +271,9 @@ class ChatState {
     String? transientError,
     bool clearTransientError = false,
     bool? supportsInsert,
+    AlbumPickState? pickState,
+    List<String>? suggestions,
+    bool clearSuggestions = false,
   }) {
     assert(
       session == null || queueVersion == null,
@@ -265,7 +283,7 @@ class ChatState {
     final resolvedSession =
         session ??
         (queueVersion != null
-            ? _withQueueVersion(this.session, queueVersion)
+            ? this.session.copyWith(queueVersion: queueVersion)
             : this.session);
     return ChatState(
       session: resolvedSession,
@@ -276,58 +294,15 @@ class ChatState {
           ? null
           : (transientError ?? this.transientError),
       supportsInsert: supportsInsert ?? this.supportsInsert,
+      pickState: pickState ?? this.pickState,
+      suggestions: clearSuggestions ? null : (suggestions ?? this.suggestions),
     );
   }
 }
 
-/// Bumps only the queue version, carrying every other session field —
-/// including [DjSession.title] and [DjSession.updatedAt] — over verbatim.
-/// Those two go stale the instant this runs: [updatedAt] reflects the last
-/// full getSession/create/message turn, not "the queue last moved", and
-/// title obviously doesn't change on a queue edit. That's an accepted v1
-/// tradeoff, not a bug — the version itself is always accurate, staleness
-/// is confined to display-only fields, and the next full session load
-/// (getSession) replaces them wholesale anyway.
-DjSession _withQueueVersion(DjSession session, int queueVersion) => DjSession(
-  id: session.id,
-  title: session.title,
-  status: session.status,
-  queueVersion: queueVersion,
-  updatedAt: session.updatedAt,
-  notPersonal: session.notPersonal,
-  caseColor: session.caseColor,
-);
-
-/// Bumps only the title, carrying every other field over verbatim — the
-/// counterpart to [_withQueueVersion] above, used by [ChatNotifier.send] to
-/// adopt a same-turn `rename_session` without a refetch. Called AFTER
-/// [_withQueueVersion] has already landed the turn's fresh queueVersion onto
-/// `session` (via a first `copyWith(queueVersion: ...)`), so the session this
-/// wraps already carries the right version — this step only ever changes the
-/// title on top of that.
-DjSession _withTitle(DjSession session, String title) => DjSession(
-  id: session.id,
-  title: title,
-  status: session.status,
-  queueVersion: session.queueVersion,
-  updatedAt: session.updatedAt,
-  notPersonal: session.notPersonal,
-  caseColor: session.caseColor,
-);
-
-/// Bumps only the corpus-mode flag, carrying every other field over verbatim
-/// — used by [ChatNotifier._adoptSessionFlags] after a turn, which must not
-/// touch the version the turn (or a queue edit that interleaved with it)
-/// already landed.
-DjSession _withNotPersonal(DjSession session, bool notPersonal) => DjSession(
-  id: session.id,
-  title: session.title,
-  status: session.status,
-  queueVersion: session.queueVersion,
-  updatedAt: session.updatedAt,
-  notPersonal: notPersonal,
-  caseColor: session.caseColor,
-);
+// Bumping the version leaves [DjSession.updatedAt] (and the title) as the
+// last full load had them: an accepted v1 tradeoff, since the version itself
+// is always accurate and the next getSession replaces the display fields.
 
 class ChatNotifier extends AsyncNotifier<ChatState> {
   ChatNotifier(this.sessionId);
@@ -360,7 +335,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       if (canonical == null) return false;
       _mergeCurrent(
         (current) => current.copyWith(
-          session: _withTitle(current.session, canonical.title),
+          session: current.session.copyWith(title: canonical.title),
         ),
       );
       return true;
@@ -379,14 +354,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     if (!_current(generation) || !saved) return false;
     _mergeCurrent(
       (current) => current.copyWith(
-        session: DjSession(
-          id: current.session.id,
-          title: current.session.title,
+        session: current.session.copyWith(
           status: archived ? 'archived' : 'active',
-          queueVersion: current.queueVersion,
-          updatedAt: current.session.updatedAt,
-          notPersonal: current.session.notPersonal,
-          caseColor: current.session.caseColor,
         ),
       ),
     );
@@ -401,7 +370,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       authProvider,
     ); // user-scoped: reload/reset on every auth transition
     final generation = ++_generation;
+    // In-flight flags belong to the build that set them: a rebuild mid-write
+    // (auth, or a screen's retry invalidating this provider) must not leave
+    // later writes refused, since the superseded write's finally skips them.
     _renaming = false;
+    _picking = false;
+    _savingLater = false;
     ref.onDispose(() => _generation++);
     final api = ref.watch(djApiProvider);
     final seedRead = _captureSeedRead();
@@ -433,6 +407,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     sending: sending,
     transientError: transientError,
     supportsInsert: detail.supportsInsert,
+    pickState: detail.pickState,
+    suggestions: detail.suggestions,
   );
 
   DjMessage _localMessage(String role, String content) => DjMessage(
@@ -474,7 +450,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
     final userMessage = ChatMessage(_localMessage('user', text));
     state = AsyncData(
-      base.copyWith(messages: [...base.messages, userMessage], sending: true),
+      base.copyWith(
+        messages: [...base.messages, userMessage],
+        sending: true,
+        clearSuggestions: true,
+      ),
     );
 
     try {
@@ -488,10 +468,15 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         // First bump queue+version via the `queueVersion` param (never
         // `session`, per copyWith's own session-XOR-queueVersion contract —
         // see ChatState.copyWith's doc comment).
+        // An album turn carries its shortlist and, after an honest
+        // failure, refinement pills; its queue is empty and its version
+        // is the pick version.
         final withQueue = c.copyWith(
           messages: [...c.messages, ChatMessage(result.djMessage)],
           queue: result.queue,
           queueVersion: result.queueVersion,
+          pickState: result.pickState,
+          suggestions: result.suggestions,
         );
         if (newTitle == null || nameRevision != _nameRevision) return withQueue;
         // A same-turn rename (rename_session): a SECOND copyWith call, this
@@ -500,7 +485,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         // the bump above, so the resulting DjSession carries BOTH the new
         // title and the turn's fresh queueVersion at once.
         return withQueue.copyWith(
-          session: _withTitle(withQueue.session, newTitle),
+          session: withQueue.session.copyWith(title: newTitle),
         );
       });
       // Lazily invalidate (never an eager refresh) so Home's list picks up
@@ -523,6 +508,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           ref.invalidate(sessionsProvider);
         }
       }
+      // The notPersonal flag, the funnel and the Keep sheet are mix
+      // concerns: an album turn needs no refetch.
+      if (base.kind == SessionKind.album) return;
       if (filled) _noteFilledMix(result.queue.length);
       await _adoptSessionFlags(generation);
       if (_current(generation)) _notePersonalMix();
@@ -540,6 +528,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         return;
       }
       final adopted = _atomicQueueSnapshot(e.queue, e.queueVersion);
+      // An album failure after a version landed carries that shortlist:
+      // adopt it (and its version) before the error turn.
+      final pickState = e.pickState;
       _mergeCurrent(
         (c) => c.copyWith(
           messages: [
@@ -547,7 +538,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
             ChatMessage(_localMessage('dj', e.message), isError: true),
           ],
           queue: adopted.queue,
-          queueVersion: adopted.queueVersion,
+          queueVersion: pickState?.version ?? adopted.queueVersion,
+          pickState: pickState,
         ),
       );
     } on ApiException {
@@ -612,7 +604,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       seedRead?.adopt(detail.playlistSeed);
       _mergeCurrent(
         (c) => c.copyWith(
-          session: _withNotPersonal(c.session, detail.session.notPersonal),
+          session: c.session.copyWith(notPersonal: detail.session.notPersonal),
         ),
       );
     } catch (_) {
@@ -654,18 +646,13 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       if (current != null) {
         final session = recovered.session;
         recovered = recovered.copyWith(
-          session: DjSession(
-            id: session.id,
+          session: session.copyWith(
             title: nameRevision == _nameRevision
                 ? session.title
                 : current.session.title,
             status: status == current.session.status
                 ? session.status
                 : current.session.status,
-            queueVersion: session.queueVersion,
-            updatedAt: session.updatedAt,
-            notPersonal: session.notPersonal,
-            caseColor: session.caseColor,
           ),
         );
       }
@@ -713,6 +700,109 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       _mergeCurrent((c) => c.copyWith(transientError: _offlineErrorMessage));
     }
   }
+
+  bool _picking = false;
+  bool _savingLater = false;
+
+  /// Album sessions: make runner-up [albumId] the pick. Fenced on the
+  /// current [ChatState.queueVersion]; a lost race refetches the session.
+  /// One pick write at a time, and none while a turn is sending.
+  Future<bool> choosePick(String albumId) => _writePick(
+    (api, version) =>
+        api.choosePick(sessionId, albumId: albumId, expectedVersion: version),
+  );
+
+  /// Album sessions: go back to the shortlist of an earlier [version].
+  Future<bool> goBack(int version) => _writePick(
+    (api, current) =>
+        api.goBackToPick(sessionId, version: version, expectedVersion: current),
+  );
+
+  Future<bool> _writePick(
+    Future<AlbumPickState> Function(DjApi api, int version) write,
+  ) async {
+    final base = state.value;
+    if (base == null || base.sending || _picking) return false;
+    final generation = _generation;
+    _picking = true;
+    try {
+      final result = await write(ref.read(djApiProvider), base.queueVersion);
+      if (!_current(generation)) return false;
+      _mergeCurrent(
+        (c) => c.copyWith(pickState: result, queueVersion: result.version),
+      );
+      return true;
+    } on DjApiException catch (e) {
+      if (!_current(generation)) return false;
+      if (e.kind == 'stale') {
+        await _refetchAfterFailedTurn();
+        return false;
+      }
+      _mergeCurrent((c) => c.copyWith(transientError: e.message));
+      return false;
+    } catch (e) {
+      if (_current(generation)) {
+        _mergeCurrent((c) => c.copyWith(transientError: _messageFor(e)));
+      }
+      return false;
+    } finally {
+      if (_current(generation)) _picking = false;
+    }
+  }
+
+  /// Album sessions: saves or unsaves the current pick for later. The flip
+  /// is optimistic (on every appearance of the album in the shortlist) and
+  /// reverts with a transient error if the write fails; on success the
+  /// Listen later shelf is told, so it stays in step without a refetch.
+  Future<bool> toggleListenLater() async {
+    final base = state.value;
+    final pick = base?.pickState?.pick;
+    if (base == null || pick == null || base.sending || _savingLater) {
+      return false;
+    }
+    final generation = _generation;
+    final albumId = pick.id;
+    final save = !pick.savedForLater;
+    _savingLater = true;
+    _markSaved(albumId, save);
+    try {
+      final api = ref.read(djApiProvider);
+      if (save) {
+        final entry = await api.saveForLater(albumId, sessionId: sessionId);
+        if (!_current(generation)) return false;
+        if (ref.exists(listenLaterProvider)) {
+          ref.read(listenLaterProvider.notifier).noteSaved(entry);
+        }
+      } else {
+        await api.unsaveForLater(albumId);
+        if (!_current(generation)) return false;
+        if (ref.exists(listenLaterProvider)) {
+          ref.read(listenLaterProvider.notifier).noteUnsaved(albumId);
+        }
+      }
+      return true;
+    } catch (e) {
+      if (_current(generation)) {
+        _markSaved(albumId, !save);
+        _mergeCurrent((c) => c.copyWith(transientError: _messageFor(e)));
+      }
+      return false;
+    } finally {
+      if (_current(generation)) _savingLater = false;
+    }
+  }
+
+  void _markSaved(String albumId, bool saved) => _mergeCurrent((c) {
+    final pickState = c.pickState;
+    if (pickState == null) return c;
+    return c.copyWith(pickState: pickState.withSavedForLater(albumId, saved));
+  });
+
+  String _messageFor(Object error) => switch (error) {
+    DjApiException(:final message) => message,
+    NetworkException() => _offlineErrorMessage,
+    _ => _genericApiErrorMessage,
+  };
 
   /// Seeds a synthetic error bubble into the just-loaded transcript — used
   /// when Home navigates here after a create-session failure that still
@@ -771,14 +861,21 @@ final sessionStarterProvider =
       Future<String> Function(
         String prompt, {
         InitialPlaylistSeed? playlistSeed,
+        SessionKind kind,
       })
     >((ref) {
-      return (String prompt, {InitialPlaylistSeed? playlistSeed}) async {
+      return (
+        String prompt, {
+        InitialPlaylistSeed? playlistSeed,
+        SessionKind kind = SessionKind.mix,
+      }) async {
         try {
           final detail = await ref
               .read(djApiProvider)
-              .createSession(prompt, playlistSeed: playlistSeed);
+              .createSession(prompt, playlistSeed: playlistSeed, kind: kind);
           ref.invalidate(sessionsProvider);
+          // The milestone, funnel and Keep sheet notes are mix-only.
+          if (kind == SessionKind.album) return detail.session.id;
           // The create response's session row is read after the first turn,
           // so its notPersonal already says whether this mix was personal.
           ref

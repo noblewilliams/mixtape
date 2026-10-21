@@ -47,6 +47,7 @@ class RecordingDj extends FakeDjApi {
   Future<SessionDetail> createSession(
     String prompt, {
     InitialPlaylistSeed? playlistSeed,
+    SessionKind kind = SessionKind.mix,
   }) async {
     creates++;
     this.prompt = prompt;

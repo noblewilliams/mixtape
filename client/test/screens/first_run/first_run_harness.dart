@@ -76,6 +76,7 @@ class FirstRunDjApi extends BareDjApi {
   Future<SessionDetail> createSession(
     String prompt, {
     InitialPlaylistSeed? playlistSeed,
+    SessionKind kind = SessionKind.mix,
   }) async {
     prompts.add(prompt);
     final failure = failWith;

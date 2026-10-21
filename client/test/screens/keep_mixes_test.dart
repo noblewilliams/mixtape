@@ -139,6 +139,7 @@ class _Dj extends FirstRunDjApi {
   Future<SessionDetail> createSession(
     String prompt, {
     InitialPlaylistSeed? playlistSeed,
+    SessionKind kind = SessionKind.mix,
   }) async {
     prompts.add(prompt);
     final failure = failWith;

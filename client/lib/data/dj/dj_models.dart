@@ -5,6 +5,59 @@ library;
 
 import '../playlists/playlist_context_models.dart';
 
+/// Which loop, read shape and routes a session takes (server
+/// `dj_sessions.kind`). An older server omits it; anything unknown reads as
+/// a mix, the shape every client already understands.
+enum SessionKind {
+  mix,
+  album;
+
+  static SessionKind fromWire(Object? value) =>
+      value == 'album' ? SessionKind.album : SessionKind.mix;
+}
+
+/// Album artwork as the server sends it: an Apple URL template
+/// (`{w}x{h}`) plus the optional source size and background colour.
+class AlbumArtwork {
+  const AlbumArtwork({
+    required this.url,
+    this.width,
+    this.height,
+    this.bgColor,
+  });
+
+  final String url;
+  final int? width;
+  final int? height;
+  final String? bgColor;
+
+  factory AlbumArtwork.fromJson(Map<String, dynamic> json) => AlbumArtwork(
+    url: json['url'] as String,
+    width: json['width'] as int?,
+    height: json['height'] as int?,
+    bgColor: json['bgColor'] as String?,
+  );
+
+  static AlbumArtwork? maybe(Object? json) =>
+      json == null ? null : AlbumArtwork.fromJson(json as Map<String, dynamic>);
+}
+
+/// The current pick an album row shows in the Mixes list (`GET /sessions`
+/// → `pick`, album rows only; null before the first pick).
+class AlbumSummary {
+  const AlbumSummary({required this.title, required this.artist, this.artwork});
+
+  final String title;
+  final String artist;
+  final AlbumArtwork? artwork;
+
+  factory AlbumSummary.fromJson(Map<String, dynamic> json) => AlbumSummary(
+    title: json['title'] as String,
+    artist: json['artist'] as String,
+    artwork: AlbumArtwork.maybe(json['artwork']),
+  );
+}
+
 class DjSession {
   const DjSession({
     required this.id,
@@ -14,6 +67,8 @@ class DjSession {
     required this.updatedAt,
     this.notPersonal = false,
     this.caseColor,
+    this.kind = SessionKind.mix,
+    this.pick,
   });
 
   final String? caseColor;
@@ -29,6 +84,38 @@ class DjSession {
   /// Absent on the wire (older server) reads as false.
   final bool notPersonal;
 
+  /// Mix or album. For an album session [queueVersion] is the pick version.
+  final SessionKind kind;
+
+  /// Album rows in `GET /sessions` only: the current pick, for the Mixes
+  /// list. Null for mixes, for an album before its first pick, and on every
+  /// other read (session detail, PATCH echoes).
+  final AlbumSummary? pick;
+
+  /// The one way to change a session in place, so a new field can never be
+  /// silently dropped by a hand-rolled rebuild.
+  DjSession copyWith({
+    String? id,
+    String? title,
+    String? status,
+    int? queueVersion,
+    DateTime? updatedAt,
+    bool? notPersonal,
+    String? caseColor,
+    SessionKind? kind,
+    AlbumSummary? pick,
+  }) => DjSession(
+    id: id ?? this.id,
+    title: title ?? this.title,
+    status: status ?? this.status,
+    queueVersion: queueVersion ?? this.queueVersion,
+    updatedAt: updatedAt ?? this.updatedAt,
+    notPersonal: notPersonal ?? this.notPersonal,
+    caseColor: caseColor ?? this.caseColor,
+    kind: kind ?? this.kind,
+    pick: pick ?? this.pick,
+  );
+
   factory DjSession.fromJson(Map<String, dynamic> json) => DjSession(
     caseColor: json['caseColor'] as String?,
     id: json['id'] as String,
@@ -37,7 +124,223 @@ class DjSession {
     queueVersion: json['queueVersion'] as int,
     updatedAt: DateTime.parse(json['updatedAt'] as String),
     notPersonal: json['notPersonal'] as bool? ?? false,
+    kind: SessionKind.fromWire(json['kind']),
+    pick: json['pick'] == null
+        ? null
+        : AlbumSummary.fromJson(json['pick'] as Map<String, dynamic>),
   );
+}
+
+/// The display word for an album's release type. Known types have their own
+/// casing (EP); a type a newer server added is shown as given, capitalised.
+String albumTypeLabel(String type) => switch (type) {
+  'album' => 'Album',
+  'ep' => 'EP',
+  'single' => 'Single',
+  'live' => 'Live',
+  'compilation' => 'Compilation',
+  'soundtrack' => 'Soundtrack',
+  'mixtape' => 'Mixtape',
+  '' => '',
+  _ => '${type[0].toUpperCase()}${type.substring(1)}',
+};
+
+/// One album the DJ offered (server `AlbumView`): the pick, a runner-up, or
+/// a passed-over pick from an earlier version.
+class AlbumPick {
+  const AlbumPick({
+    required this.id,
+    required this.title,
+    required this.artist,
+    required this.type,
+    required this.newToThem,
+    required this.reason,
+    required this.savedForLater,
+    required this.version,
+    this.upc,
+    this.appleId,
+    this.releaseYear,
+    this.trackCount,
+    this.durationMs,
+    this.artwork,
+  });
+
+  final String id;
+  final String? upc;
+  final String? appleId;
+  final String title;
+  final String artist;
+  final int? releaseYear;
+
+  /// The raw wire type (album, ep, single, live, compilation, soundtrack,
+  /// mixtape, or something newer); see [typeLabel].
+  final String type;
+  final int? trackCount;
+  final int? durationMs;
+  final AlbumArtwork? artwork;
+  final bool newToThem;
+
+  /// The DJ's "why".
+  final String reason;
+  final bool savedForLater;
+
+  /// The pick version this album was offered in.
+  final int version;
+
+  String get typeLabel => albumTypeLabel(type);
+
+  AlbumPick copyWith({bool? savedForLater}) => AlbumPick(
+    id: id,
+    upc: upc,
+    appleId: appleId,
+    title: title,
+    artist: artist,
+    releaseYear: releaseYear,
+    type: type,
+    trackCount: trackCount,
+    durationMs: durationMs,
+    artwork: artwork,
+    newToThem: newToThem,
+    reason: reason,
+    savedForLater: savedForLater ?? this.savedForLater,
+    version: version,
+  );
+
+  factory AlbumPick.fromJson(Map<String, dynamic> json) => AlbumPick(
+    id: json['id'] as String,
+    upc: json['upc'] as String?,
+    appleId: json['appleId'] as String?,
+    title: json['title'] as String,
+    artist: json['artist'] as String,
+    releaseYear: json['releaseYear'] as int?,
+    type: json['type'] as String? ?? '',
+    trackCount: json['trackCount'] as int?,
+    durationMs: json['durationMs'] as int?,
+    artwork: AlbumArtwork.maybe(json['artwork']),
+    newToThem: json['newToThem'] as bool? ?? false,
+    reason: json['reason'] as String? ?? '',
+    savedForLater: json['savedForLater'] as bool? ?? false,
+    version: json['version'] as int? ?? 0,
+  );
+}
+
+List<AlbumPick> _albumPicksFromJson(Object? json) => json == null
+    ? const []
+    : (json as List)
+          .map((a) => AlbumPick.fromJson(a as Map<String, dynamic>))
+          .toList();
+
+/// An album session's current shortlist (server `AlbumPickState`): every
+/// response that touches the pick carries all four together. [version] is
+/// the session's queueVersion for an album session.
+class AlbumPickState {
+  const AlbumPickState({
+    required this.version,
+    this.pick,
+    this.runnersUp = const [],
+    this.passed = const [],
+  });
+
+  final int version;
+  final AlbumPick? pick;
+  final List<AlbumPick> runnersUp;
+  final List<AlbumPick> passed;
+
+  /// Sets [AlbumPick.savedForLater] on every appearance of [albumId] (the
+  /// same album can be the pick and also sit in the passed-over history).
+  AlbumPickState withSavedForLater(String albumId, bool saved) {
+    AlbumPick mark(AlbumPick a) =>
+        a.id == albumId ? a.copyWith(savedForLater: saved) : a;
+    return AlbumPickState(
+      version: version,
+      pick: pick == null ? null : mark(pick!),
+      runnersUp: runnersUp.map(mark).toList(),
+      passed: passed.map(mark).toList(),
+    );
+  }
+
+  /// Tolerant of absent keys: no pick, empty lists, version 0.
+  factory AlbumPickState.fromJson(Map<String, dynamic> json) => AlbumPickState(
+    version: json['version'] as int? ?? 0,
+    pick: json['pick'] == null
+        ? null
+        : AlbumPick.fromJson(json['pick'] as Map<String, dynamic>),
+    runnersUp: _albumPicksFromJson(json['runnersUp']),
+    passed: _albumPicksFromJson(json['passed']),
+  );
+}
+
+/// Whether a response body carries an album pick state (album turns, album
+/// session reads, album error bodies).
+bool _hasPickState(Map<String, dynamic> json) =>
+    json.containsKey('pick') ||
+    json.containsKey('runnersUp') ||
+    json.containsKey('passed');
+
+List<String>? _suggestionsFromJson(Object? json) =>
+    json == null ? null : (json as List).cast<String>().toList();
+
+/// One album on the listener's Listen later shelf (`GET /me/listen-later`).
+class ListenLaterEntry {
+  const ListenLaterEntry({
+    required this.id,
+    required this.title,
+    required this.artist,
+    required this.type,
+    required this.savedAt,
+    this.upc,
+    this.appleId,
+    this.releaseYear,
+    this.trackCount,
+    this.durationMs,
+    this.artwork,
+    this.sessionId,
+    this.listenedAt,
+    this.reason,
+  });
+
+  /// The album id.
+  final String id;
+  final String? upc;
+  final String? appleId;
+  final String title;
+  final String artist;
+  final int? releaseYear;
+  final String type;
+  final int? trackCount;
+  final int? durationMs;
+  final AlbumArtwork? artwork;
+
+  /// The album session it was saved from, if any.
+  final String? sessionId;
+  final DateTime savedAt;
+  final DateTime? listenedAt;
+
+  /// The DJ's "why" in the session it came from; null without one.
+  final String? reason;
+
+  bool get listened => listenedAt != null;
+  String get typeLabel => albumTypeLabel(type);
+
+  factory ListenLaterEntry.fromJson(Map<String, dynamic> json) =>
+      ListenLaterEntry(
+        id: json['id'] as String,
+        upc: json['upc'] as String?,
+        appleId: json['appleId'] as String?,
+        title: json['title'] as String,
+        artist: json['artist'] as String,
+        releaseYear: json['releaseYear'] as int?,
+        type: json['type'] as String? ?? '',
+        trackCount: json['trackCount'] as int?,
+        durationMs: json['durationMs'] as int?,
+        artwork: AlbumArtwork.maybe(json['artwork']),
+        sessionId: json['sessionId'] as String?,
+        savedAt: DateTime.parse(json['savedAt'] as String),
+        listenedAt: json['listenedAt'] == null
+            ? null
+            : DateTime.parse(json['listenedAt'] as String),
+        reason: json['reason'] as String?,
+      );
 }
 
 class DjMessage {
@@ -127,6 +430,12 @@ List<QueueTrack> queueTracksFromJson(Object? json) => (json as List)
     .map((q) => QueueTrack.fromJson(q as Map<String, dynamic>))
     .toList();
 
+/// For bodies whose queue is absent for album sessions (session detail, turn
+/// results): no key reads as an empty queue. A present-but-null queue is
+/// still a drift error, as before.
+List<QueueTrack> _optionalQueue(Map<String, dynamic> json) =>
+    json.containsKey('queue') ? queueTracksFromJson(json['queue']) : const [];
+
 class SessionDetail {
   const SessionDetail({
     required this.session,
@@ -135,7 +444,17 @@ class SessionDetail {
     this.sessionTitle,
     this.playlistSeed,
     this.supportsInsert = false,
+    this.pickState,
+    this.suggestions,
   });
+
+  SessionKind get kind => session.kind;
+
+  /// Album sessions only: the current shortlist. Their reads carry no queue.
+  final AlbumPickState? pickState;
+
+  /// An album create whose first turn failed honestly: refinement pills.
+  final List<String>? suggestions;
 
   /// Missing legacy field is unknown rather than a synthetic empty seed.
   final PlaylistSeedState? playlistSeed;
@@ -156,20 +475,27 @@ class SessionDetail {
   /// shows an affordance the server would reject.
   final bool supportsInsert;
 
-  factory SessionDetail.fromJson(Map<String, dynamic> json) => SessionDetail(
-    session: DjSession.fromJson(json['session'] as Map<String, dynamic>),
-    messages: (json['messages'] as List)
-        .map((m) => DjMessage.fromJson(m as Map<String, dynamic>))
-        .toList(),
-    queue: queueTracksFromJson(json['queue']),
-    sessionTitle: json['sessionTitle'] as String?,
-    supportsInsert: json['supportsInsert'] as bool? ?? false,
-    playlistSeed: json.containsKey('playlistSeed')
-        ? PlaylistSeedState.fromJson(
-            playlistContextObject(json['playlistSeed']),
-          )
-        : null,
-  );
+  factory SessionDetail.fromJson(Map<String, dynamic> json) {
+    final session = DjSession.fromJson(json['session'] as Map<String, dynamic>);
+    return SessionDetail(
+      session: session,
+      messages: (json['messages'] as List)
+          .map((m) => DjMessage.fromJson(m as Map<String, dynamic>))
+          .toList(),
+      queue: _optionalQueue(json),
+      pickState: session.kind == SessionKind.album || _hasPickState(json)
+          ? AlbumPickState.fromJson(json)
+          : null,
+      suggestions: _suggestionsFromJson(json['suggestions']),
+      sessionTitle: json['sessionTitle'] as String?,
+      supportsInsert: json['supportsInsert'] as bool? ?? false,
+      playlistSeed: json.containsKey('playlistSeed')
+          ? PlaylistSeedState.fromJson(
+              playlistContextObject(json['playlistSeed']),
+            )
+          : null,
+    );
+  }
 }
 
 class TurnResult {
@@ -178,7 +504,16 @@ class TurnResult {
     required this.queue,
     required this.queueVersion,
     this.sessionTitle,
+    this.pickState,
+    this.suggestions,
   });
+
+  /// Album turns only: the shortlist after this turn. [queueVersion] is its
+  /// version (the server's `version`), and [queue] is empty.
+  final AlbumPickState? pickState;
+
+  /// An album turn that failed honestly: refinement pills, else null.
+  final List<String>? suggestions;
 
   final DjMessage djMessage;
   final List<QueueTrack> queue;
@@ -191,9 +526,11 @@ class TurnResult {
 
   factory TurnResult.fromJson(Map<String, dynamic> json) => TurnResult(
     djMessage: DjMessage.fromJson(json['djMessage'] as Map<String, dynamic>),
-    queue: queueTracksFromJson(json['queue']),
-    queueVersion: json['queueVersion'] as int,
+    queue: _optionalQueue(json),
+    queueVersion: (json['queueVersion'] ?? json['version']) as int,
     sessionTitle: json['sessionTitle'] as String?,
+    pickState: _hasPickState(json) ? AlbumPickState.fromJson(json) : null,
+    suggestions: _suggestionsFromJson(json['suggestions']),
   );
 }
 

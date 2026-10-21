@@ -193,6 +193,37 @@ void main() {
       return http.Response(jsonEncode(body), 200);
     }).me();
 
+    test('name is trimmed; blank or absent is null', () async {
+      Future<String?> name(Object? value) async => (await meWith({
+            'user': {'id': 'u1', 'isAnonymous': false, 'name': value},
+            'merged': null,
+          })).name;
+      expect(await name('  Noble  '), 'Noble');
+      expect(await name('   '), isNull);
+      expect(await name(null), isNull);
+      expect(await name(7), isNull);
+    });
+
+    test('albumPicks reads the capability; absent or non-true is off', () async {
+      final on = await meWith({
+        'user': {'id': 'u1', 'isAnonymous': false},
+        'merged': null,
+        'albumPicks': true,
+      });
+      expect(on.albumPicks, isTrue);
+      final off = await meWith({
+        'user': {'id': 'u1', 'isAnonymous': false},
+        'merged': null,
+        'albumPicks': false,
+      });
+      expect(off.albumPicks, isFalse);
+      final older = await meWith({
+        'user': {'id': 'u1', 'isAnonymous': false},
+        'merged': null,
+      });
+      expect(older.albumPicks, isFalse);
+    });
+
     test('maps each merged value to MergedMode', () async {
       for (final entry in {
         'all': MergedMode.all,

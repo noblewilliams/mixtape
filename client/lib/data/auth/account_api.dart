@@ -58,11 +58,24 @@ MergedMode? _mergedMode(Object? value) => switch (value) {
 
 /// The slice of `GET /me` the client acts on.
 class Me {
-  const Me({required this.id, required this.isAnonymous, this.merged});
+  const Me({
+    required this.id,
+    required this.isAnonymous,
+    this.merged,
+    this.albumPicks = false,
+    this.name,
+  });
+
+  /// Better Auth's user.name, trimmed; null when unset or blank.
+  final String? name;
 
   final String id;
   final bool isAnonymous;
   final MergedMode? merged;
+
+  /// The server's album picks capability (`ALBUM_PICKS`); absent on an
+  /// older server, which reads as off.
+  final bool albumPicks;
 }
 
 class AccountApi {
@@ -92,6 +105,8 @@ class AccountApi {
       id: _identifier(user['id']),
       isAnonymous: user['isAnonymous'] == true,
       merged: _mergedMode(value['merged']),
+      albumPicks: value['albumPicks'] == true,
+      name: _displayName(user['name']),
     );
   }
 
@@ -147,6 +162,12 @@ class AccountApi {
       throw const AccountModelException();
     }
   }
+}
+
+String? _displayName(Object? value) {
+  if (value is! String) return null;
+  final name = value.trim();
+  return name.isEmpty ? null : name;
 }
 
 Map<String, dynamic> _object(Object? value) {

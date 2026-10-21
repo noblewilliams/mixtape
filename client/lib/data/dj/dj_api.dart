@@ -21,6 +21,8 @@ class DjApiException implements Exception {
     this.queue,
     this.queueVersion,
     this.sessionId,
+    this.pickState,
+    this.step,
   });
 
   final String kind;
@@ -28,6 +30,13 @@ class DjApiException implements Exception {
   final List<QueueTrack>? queue;
   final int? queueVersion;
   final String? sessionId;
+
+  /// Album error bodies only: the shortlist when a version landed before the
+  /// failure (the server's `pick`/`runnersUp`/`passed`/`version`).
+  final AlbumPickState? pickState;
+
+  /// Album error bodies only: which step of the album loop failed.
+  final String? step;
 
   @override
   String toString() => 'DjApiException($kind): $message';
@@ -64,6 +73,8 @@ const _defaultAnonymousCap = 3;
 const _genericDjErrorMessage = 'The DJ ran into a problem — please try again.';
 const _genericInvalidMessage = 'That request was invalid.';
 const _genericStaleMessage = 'The queue changed — showing the latest.';
+const _albumPicksOffMessage = 'Album picks are not available right now.';
+const _anonymousAlbumsMessage = 'Sign in to get album picks.';
 const _genericMalformedResponseMessage =
     'Got an unexpected response — please try again.';
 
@@ -77,7 +88,8 @@ const _genericMalformedResponseMessage =
 /// default stay exactly as they are for every non-DJ caller.
 ///
 /// [DjApi] has exactly five exit types: [DjApiException] (a DJ-domain error
-/// body, or a 200 whose body didn't parse), [StaleQueueException] (a
+/// body, a 200 whose body didn't parse, or the album refusals: 404
+/// `album_picks_off` and 403 `anonymous_albums`), [StaleQueueException] (a
 /// queue-ops version conflict), [AnonymousCapException] (an anonymous
 /// listener's new-mix cap), [ApiException] (any status this class
 /// doesn't specially interpret — 401/404/500/..., and any 403 other than
@@ -117,13 +129,17 @@ class DjApi {
 
   Duration get timeout => _client.timeout;
 
+  /// [kind] rides the wire only for an album session; a mix sends exactly
+  /// what it always did, so an older server never sees an unknown key.
   Future<SessionDetail> createSession(
     String prompt, {
     InitialPlaylistSeed? playlistSeed,
+    SessionKind kind = SessionKind.mix,
   }) => _call(
     () => _client.postJson('/sessions', {
       'prompt': prompt,
       if (playlistSeed != null) 'playlistSeed': playlistSeed.toJson(),
+      if (kind == SessionKind.album) 'kind': 'album',
     }),
     SessionDetail.fromJson,
   );
@@ -212,6 +228,66 @@ class DjApi {
   Future<void> deleteMemory(String id) =>
       _callVoid(() => _client.deleteJson('/me/memories/$id'));
 
+  /// `POST /sessions/:id/pick` with `{albumId}`: make a runner-up the pick.
+  /// [expectedVersion] fences on the caller's last-known pick version; a
+  /// lost race is a [DjApiException] of kind `stale`.
+  Future<AlbumPickState> choosePick(
+    String sessionId, {
+    required String albumId,
+    int? expectedVersion,
+  }) => _call(
+    () => _client.postJson('/sessions/$sessionId/pick', {
+      'albumId': albumId,
+      if (expectedVersion != null) 'expectedVersion': expectedVersion,
+    }),
+    AlbumPickState.fromJson,
+  );
+
+  /// `POST /sessions/:id/pick` with `{version}`: go back to an earlier
+  /// shortlist (written as a new version server-side).
+  Future<AlbumPickState> goBackToPick(
+    String sessionId, {
+    required int version,
+    int? expectedVersion,
+  }) => _call(
+    () => _client.postJson('/sessions/$sessionId/pick', {
+      'version': version,
+      if (expectedVersion != null) 'expectedVersion': expectedVersion,
+    }),
+    AlbumPickState.fromJson,
+  );
+
+  /// `GET /me/listen-later` in server order: unlistened newest-saved first,
+  /// then listened newest-listened first.
+  Future<List<ListenLaterEntry>> listListenLater() => _call(
+    () => _client.getJson('/me/listen-later'),
+    (json) => (json['entries'] as List)
+        .map((e) => ListenLaterEntry.fromJson(e as Map<String, dynamic>))
+        .toList(),
+  );
+
+  /// `PUT /me/listen-later/:albumId`. [sessionId] names the album session
+  /// it was saved from; a re-save without one keeps the row's source.
+  Future<ListenLaterEntry> saveForLater(String albumId, {String? sessionId}) =>
+      _call(
+        () => _client.putJson('/me/listen-later/$albumId', {
+          if (sessionId != null) 'sessionId': sessionId,
+        }),
+        (json) =>
+            ListenLaterEntry.fromJson(json['entry'] as Map<String, dynamic>),
+      );
+
+  /// `DELETE /me/listen-later/:albumId` (a soft removal server-side).
+  Future<void> unsaveForLater(String albumId) =>
+      _callVoid(() => _client.deleteJson('/me/listen-later/$albumId'));
+
+  /// `POST /me/listen-later/:albumId/listened`; keeps the first listened
+  /// date. A 404 (not on the shelf) passes through as [ApiException].
+  Future<ListenLaterEntry> markListened(String albumId) => _call(
+    () => _client.postJson('/me/listen-later/$albumId/listened', const {}),
+    (json) => ListenLaterEntry.fromJson(json['entry'] as Map<String, dynamic>),
+  );
+
   void close() => _client.close();
 
   Future<T> _call<T>(
@@ -264,8 +340,24 @@ class DjApi {
         return _translateMessageBody(e.body, fallback: _genericDjErrorMessage);
       case 400:
         return _translate400(e.body);
+      case 404:
+        // The album flag is off server-side: a known condition the UI words,
+        // unlike a plain not_found.
+        if (_tryDecode(e.body)?['error'] == 'album_picks_off') {
+          return DjApiException(
+            kind: 'album_picks_off',
+            message: _albumPicksOffMessage,
+          );
+        }
+        return e;
       case 403:
         final decoded = _tryDecode(e.body);
+        if (decoded?['error'] == 'anonymous_albums') {
+          return DjApiException(
+            kind: 'anonymous_albums',
+            message: _anonymousAlbumsMessage,
+          );
+        }
         if (decoded?['error'] == 'anonymous_cap') {
           final limit = decoded?['limit'];
           return AnonymousCapException(
@@ -284,6 +376,11 @@ class DjApi {
   Exception _translate409(String body) {
     final decoded = _tryDecode(body);
     if (decoded != null && decoded['error'] == 'stale') {
+      // The pick route's stale shape is `{error:'stale', version}` with no
+      // queue: the caller refetches the session for the fresh shortlist.
+      if (decoded['queue'] == null) {
+        return DjApiException(kind: 'stale', message: _genericStaleMessage);
+      }
       try {
         return StaleQueueException(
           queue: queueTracksFromJson(decoded['queue']),
@@ -353,12 +450,24 @@ class DjApi {
     final sessionId = decoded['sessionId'] is String
         ? decoded['sessionId'] as String
         : null;
+    // Album error bodies carry the shortlist only when a version landed
+    // before the failure; a body that fails to parse carries none.
+    AlbumPickState? pickState;
+    if (decoded['version'] is int) {
+      try {
+        pickState = AlbumPickState.fromJson(decoded);
+      } catch (_) {
+        pickState = null;
+      }
+    }
     return DjApiException(
       kind: kind,
       message: message,
       queue: queue,
       queueVersion: queueVersion,
       sessionId: sessionId,
+      pickState: pickState,
+      step: decoded['step'] is String ? decoded['step'] as String : null,
     );
   }
 

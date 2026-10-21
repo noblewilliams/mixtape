@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/api/api_client.dart';
@@ -7,6 +5,7 @@ import '../../data/library/library_sync_service.dart';
 import '../../data/musickit/musickit_bridge.dart';
 import '../../data/settings/author_store.dart';
 import 'auth_provider.dart';
+import 'capabilities_provider.dart';
 import 'onboarding_provider.dart';
 
 final musicKitBridgeProvider = Provider<MusicKitBridge>(
@@ -24,17 +23,13 @@ final authorStoreProvider = Provider<AuthorStore>((ref) => SecureAuthorStore());
 /// default when nothing was typed on this device yet. Attribution nicety
 /// only: any failure resolves to null rather than surfacing, so a flaky
 /// network can never block saving a playlist.
+///
+/// Derived from [meProvider], the one `GET /me` reader, so it can never
+/// consume `merged` ahead of the merge notice; user-scoped through it.
 final accountNameProvider = FutureProvider<String?>((ref) async {
-  ref.watch(authProvider); // user-scoped: refetch on every auth transition
-  final api = ref.watch(apiClientProvider);
+  ref.watch(authProvider); // user-scoped: rebuilt with meProvider, not after
   try {
-    final res = await api.getJson('/me');
-    if (res.statusCode != 200) return null;
-    final user = (jsonDecode(res.body) as Map<String, dynamic>)['user'];
-    final name = user is Map<String, dynamic>
-        ? (user['name'] as String?)?.trim()
-        : null;
-    return (name == null || name.isEmpty) ? null : name;
+    return (await ref.watch(meProvider.future))?.name;
   } catch (_) {
     return null;
   }

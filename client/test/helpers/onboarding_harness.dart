@@ -43,7 +43,27 @@ class BareDjApi implements DjApi {
   Future<List<DjSession>> listSessions() async => [];
 
   @override
-  Future<SessionDetail> createSession(String prompt, {InitialPlaylistSeed? playlistSeed}) => throw UnimplementedError();
+  Future<AlbumPickState> choosePick(String sessionId, {required String albumId, int? expectedVersion}) =>
+      throw UnimplementedError();
+
+  @override
+  Future<AlbumPickState> goBackToPick(String sessionId, {required int version, int? expectedVersion}) =>
+      throw UnimplementedError();
+
+  @override
+  Future<List<ListenLaterEntry>> listListenLater() => throw UnimplementedError();
+
+  @override
+  Future<ListenLaterEntry> saveForLater(String albumId, {String? sessionId}) => throw UnimplementedError();
+
+  @override
+  Future<void> unsaveForLater(String albumId) => throw UnimplementedError();
+
+  @override
+  Future<ListenLaterEntry> markListened(String albumId) => throw UnimplementedError();
+
+  @override
+  Future<SessionDetail> createSession(String prompt, {InitialPlaylistSeed? playlistSeed, SessionKind kind = SessionKind.mix}) => throw UnimplementedError();
 
   @override
   Future<SessionDetail> getSession(String id) => throw UnimplementedError();

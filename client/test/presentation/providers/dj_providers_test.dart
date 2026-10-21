@@ -42,6 +42,12 @@ class FakeDjApi implements DjApi {
   Future<List<DjMemory>> Function()? onListMemories;
   Future<void> Function(String id)? onDeleteMemory;
 
+  Future<AlbumPickState> Function(String id, String albumId, int? expectedVersion)? onChoosePick;
+  Future<AlbumPickState> Function(String id, int version, int? expectedVersion)? onGoBackToPick;
+  Future<ListenLaterEntry> Function(String albumId, String? sessionId)? onSaveForLater;
+  Future<void> Function(String albumId)? onUnsaveForLater;
+  SessionKind? lastCreateKind;
+  int choosePickCallCount = 0;
   InitialPlaylistSeed? lastInitialSeed;
   int listSessionsCallCount = 0;
   int listMemoriesCallCount = 0;
@@ -57,8 +63,13 @@ class FakeDjApi implements DjApi {
   Duration get timeout => const Duration(seconds: 120);
 
   @override
-  Future<SessionDetail> createSession(String prompt, {InitialPlaylistSeed? playlistSeed}) {
+  Future<SessionDetail> createSession(
+    String prompt, {
+    InitialPlaylistSeed? playlistSeed,
+    SessionKind kind = SessionKind.mix,
+  }) {
     lastInitialSeed = playlistSeed;
+    lastCreateKind = kind;
     final impl = onCreateSession;
     if (impl == null) throw UnimplementedError('onCreateSession not wired');
     return impl(prompt);
@@ -142,6 +153,41 @@ class FakeDjApi implements DjApi {
     if (impl == null) throw UnimplementedError('onDeleteMemory not wired');
     return impl(id);
   }
+
+  @override
+  Future<AlbumPickState> choosePick(String sessionId, {required String albumId, int? expectedVersion}) {
+    choosePickCallCount++;
+    final impl = onChoosePick;
+    if (impl == null) throw UnimplementedError('onChoosePick not wired');
+    return impl(sessionId, albumId, expectedVersion);
+  }
+
+  @override
+  Future<AlbumPickState> goBackToPick(String sessionId, {required int version, int? expectedVersion}) {
+    final impl = onGoBackToPick;
+    if (impl == null) throw UnimplementedError('onGoBackToPick not wired');
+    return impl(sessionId, version, expectedVersion);
+  }
+
+  @override
+  Future<List<ListenLaterEntry>> listListenLater() => throw UnimplementedError('listListenLater not wired');
+
+  @override
+  Future<ListenLaterEntry> saveForLater(String albumId, {String? sessionId}) {
+    final impl = onSaveForLater;
+    if (impl == null) throw UnimplementedError('onSaveForLater not wired');
+    return impl(albumId, sessionId);
+  }
+
+  @override
+  Future<void> unsaveForLater(String albumId) {
+    final impl = onUnsaveForLater;
+    if (impl == null) throw UnimplementedError('onUnsaveForLater not wired');
+    return impl(albumId);
+  }
+
+  @override
+  Future<ListenLaterEntry> markListened(String albumId) => throw UnimplementedError('markListened not wired');
 
   @override
   void close() {}
@@ -1419,6 +1465,339 @@ void main() {
       await container.read(chatProvider('s1').notifier).send('play jazz');
       await _flush();
       expect(listening.funnelEvents, [FunnelEventType.firstPersonalMix]);
+    });
+  });
+
+  group('album sessions in the chat', () {
+    AlbumPick album(String id, {int version = 1, bool saved = false}) => AlbumPick(
+          id: id,
+          title: 'Album $id',
+          artist: 'Artist',
+          type: 'album',
+          newToThem: false,
+          reason: 'why $id',
+          savedForLater: saved,
+          version: version,
+        );
+
+    AlbumPickState pickState(int version, {String pick = 'a', List<String> runnersUp = const ['b'], bool saved = false}) =>
+        AlbumPickState(
+          version: version,
+          pick: album(pick, version: version, saved: saved),
+          runnersUp: [for (final id in runnersUp) album(id, version: version)],
+          passed: const [],
+        );
+
+    DjSession albumSession({int queueVersion = 1}) => _session(queueVersion: queueVersion).copyWith(kind: SessionKind.album);
+
+    SessionDetail albumDetail({int version = 1, bool saved = false}) => SessionDetail(
+          session: albumSession(queueVersion: version),
+          messages: [_msg('m1', 'user', 'a record for sunday')],
+          queue: const [],
+          pickState: pickState(version, saved: saved),
+        );
+
+    test('the session load carries the kind and the pick state', () async {
+      final api = FakeDjApi()..onGetSession = (_) async => albumDetail();
+      final container = _makeContainer(api);
+
+      final state = await container.read(chatProvider('s1').future);
+
+      expect(state.kind, SessionKind.album);
+      expect(state.pickState!.pick!.id, 'a');
+      expect(state.queue, isEmpty);
+      expect(state.suggestions, isNull);
+    });
+
+    test('send adopts an album turn: pick state, version, title and suggestions, with no refetch', () async {
+      final api = FakeDjApi()..onGetSession = (_) async => albumDetail();
+      api.onSendMessage = (id, text) async => TurnResult(
+            djMessage: DjMessage(id: 'd1', role: 'dj', content: 'try this', queueVersion: 2, createdAt: DateTime(2026)),
+            queue: const [],
+            queueVersion: 2,
+            sessionTitle: 'Sunday records',
+            pickState: pickState(2, pick: 'c'),
+          );
+      final container = _makeContainer(api);
+      await container.read(chatProvider('s1').future);
+
+      await container.read(chatProvider('s1').notifier).send('older');
+
+      final state = container.read(chatProvider('s1')).value!;
+      expect(state.pickState!.pick!.id, 'c');
+      expect(state.queueVersion, 2);
+      expect(state.session.title, 'Sunday records');
+      expect(state.session.kind, SessionKind.album);
+      expect(state.messages.last.message.content, 'try this');
+      expect(state.sending, isFalse);
+      // The notPersonal refetch is a mix concern.
+      expect(api.getSessionCallCount, 1);
+    });
+
+    test('a failed album turn keeps its pills until the next send starts', () async {
+      final api = FakeDjApi()..onGetSession = (_) async => albumDetail();
+      final second = Completer<TurnResult>();
+      var call = 0;
+      api.onSendMessage = (id, text) {
+        call++;
+        if (call == 1) {
+          return Future.value(TurnResult(
+            djMessage: DjMessage(id: 'd1', role: 'dj', content: 'nothing fit', createdAt: DateTime(2026)),
+            queue: const [],
+            queueVersion: 1,
+            pickState: pickState(1),
+            suggestions: const ['Something older'],
+          ));
+        }
+        return second.future;
+      };
+      final container = _makeContainer(api);
+      await container.read(chatProvider('s1').future);
+      final notifier = container.read(chatProvider('s1').notifier);
+
+      await notifier.send('obscure');
+      expect(container.read(chatProvider('s1')).value!.suggestions, ['Something older']);
+
+      final pending = notifier.send('Something older');
+      expect(container.read(chatProvider('s1')).value!.suggestions, isNull);
+      second.complete(TurnResult(
+        djMessage: DjMessage(id: 'd2', role: 'dj', content: 'ok', queueVersion: 2, createdAt: DateTime(2026)),
+        queue: const [],
+        queueVersion: 2,
+        pickState: pickState(2),
+      ));
+      await pending;
+      expect(container.read(chatProvider('s1')).value!.queueVersion, 2);
+    });
+
+    test('a DjApiException carrying a pick state adopts it before the error turn', () async {
+      final api = FakeDjApi()..onGetSession = (_) async => albumDetail();
+      api.onSendMessage = (id, text) async => throw DjApiException(
+            kind: 'upstream',
+            message: 'The DJ lost the thread.',
+            pickState: pickState(3, pick: 'z'),
+          );
+      final container = _makeContainer(api);
+      await container.read(chatProvider('s1').future);
+
+      await container.read(chatProvider('s1').notifier).send('again');
+
+      final state = container.read(chatProvider('s1')).value!;
+      expect(state.pickState!.pick!.id, 'z');
+      expect(state.queueVersion, 3);
+      expect(state.messages.last.isError, isTrue);
+      expect(state.messages.last.message.content, 'The DJ lost the thread.');
+    });
+
+    test('choosePick fences on the current version and adopts the returned state', () async {
+      final api = FakeDjApi()..onGetSession = (_) async => albumDetail(version: 2);
+      int? fence;
+      api.onChoosePick = (id, albumId, expectedVersion) async {
+        fence = expectedVersion;
+        expect(albumId, 'b');
+        return pickState(3, pick: 'b', runnersUp: const []);
+      };
+      final container = _makeContainer(api);
+      await container.read(chatProvider('s1').future);
+
+      final ok = await container.read(chatProvider('s1').notifier).choosePick('b');
+
+      expect(ok, isTrue);
+      expect(fence, 2);
+      final state = container.read(chatProvider('s1')).value!;
+      expect(state.pickState!.pick!.id, 'b');
+      expect(state.queueVersion, 3);
+    });
+
+    test('goBack fences too and adopts the returned version', () async {
+      final api = FakeDjApi()..onGetSession = (_) async => albumDetail(version: 3);
+      api.onGoBackToPick = (id, version, expectedVersion) async {
+        expect(version, 1);
+        expect(expectedVersion, 3);
+        return pickState(4, pick: 'a');
+      };
+      final container = _makeContainer(api);
+      await container.read(chatProvider('s1').future);
+
+      expect(await container.read(chatProvider('s1').notifier).goBack(1), isTrue);
+      expect(container.read(chatProvider('s1')).value!.queueVersion, 4);
+    });
+
+    test('a stale pick refetches the session', () async {
+      var reads = 0;
+      final api = FakeDjApi()
+        ..onGetSession = (_) async {
+          reads++;
+          return reads == 1 ? albumDetail(version: 2) : SessionDetail(
+                session: albumSession(queueVersion: 5),
+                messages: const [],
+                queue: const [],
+                pickState: pickState(5, pick: 'q'),
+              );
+        };
+      api.onChoosePick = (id, albumId, expectedVersion) async =>
+          throw DjApiException(kind: 'stale', message: 'moved');
+      final container = _makeContainer(api);
+      await container.read(chatProvider('s1').future);
+
+      final ok = await container.read(chatProvider('s1').notifier).choosePick('b');
+
+      expect(ok, isFalse);
+      final state = container.read(chatProvider('s1')).value!;
+      expect(state.queueVersion, 5);
+      expect(state.pickState!.pick!.id, 'q');
+      expect(state.transientError, isNull);
+    });
+
+    test('one pick at a time, and none while a turn is sending', () async {
+      final api = FakeDjApi()..onGetSession = (_) async => albumDetail();
+      final gate = Completer<AlbumPickState>();
+      api.onChoosePick = (id, albumId, expectedVersion) => gate.future;
+      final turn = Completer<TurnResult>();
+      api.onSendMessage = (id, text) => turn.future;
+      final container = _makeContainer(api);
+      await container.read(chatProvider('s1').future);
+      final notifier = container.read(chatProvider('s1').notifier);
+
+      final first = notifier.choosePick('b');
+      expect(await notifier.choosePick('b'), isFalse);
+      expect(api.choosePickCallCount, 1);
+      gate.complete(pickState(2, pick: 'b'));
+      expect(await first, isTrue);
+
+      final sending = notifier.send('older');
+      expect(await notifier.choosePick('a'), isFalse);
+      expect(api.choosePickCallCount, 1);
+      turn.complete(TurnResult(
+        djMessage: DjMessage(id: 'd', role: 'dj', content: 'ok', createdAt: DateTime(2026)),
+        queue: const [],
+        queueVersion: 2,
+        pickState: pickState(2, pick: 'b'),
+      ));
+      await sending;
+    });
+
+    test('a rebuild mid-pick does not leave picks and Listen later locked', () async {
+      final api = FakeDjApi()..onGetSession = (_) async => albumDetail();
+      final stuck = Completer<AlbumPickState>();
+      final stuckSave = Completer<ListenLaterEntry>();
+      var picks = 0;
+      api.onChoosePick = (id, albumId, expectedVersion) {
+        picks++;
+        return picks == 1 ? stuck.future : Future.value(pickState(2, pick: albumId));
+      };
+      var saves = 0;
+      api.onSaveForLater = (albumId, sessionId) {
+        saves++;
+        return saves == 1
+            ? stuckSave.future
+            : Future.value(ListenLaterEntry(id: albumId, title: 't', artist: 'a', type: 'album', savedAt: DateTime(2026)));
+      };
+      final container = _makeContainer(api);
+      container.listen(chatProvider('s1'), (_, _) {});
+      await container.read(chatProvider('s1').future);
+
+      final first = container.read(chatProvider('s1').notifier).choosePick('b');
+      final firstSave = container.read(chatProvider('s1').notifier).toggleListenLater();
+      container.invalidate(chatProvider('s1'));
+      await container.read(chatProvider('s1').future);
+
+      expect(await container.read(chatProvider('s1').notifier).choosePick('b'), isTrue);
+      expect(container.read(chatProvider('s1')).value!.pickState!.pick!.id, 'b');
+      expect(await container.read(chatProvider('s1').notifier).toggleListenLater(), isTrue);
+
+      stuck.complete(pickState(9, pick: 'z'));
+      stuckSave.completeError(ApiException(500, 'late'));
+      expect(await first, isFalse);
+      expect(await firstSave, isFalse);
+      // The superseded writes land nowhere.
+      expect(container.read(chatProvider('s1')).value!.queueVersion, 2);
+      expect(container.read(chatProvider('s1')).value!.pickState!.pick!.savedForLater, isTrue);
+    });
+
+    test('toggleListenLater flips the pick (and the same album elsewhere) optimistically, then saves', () async {
+      final api = FakeDjApi()
+        ..onGetSession = (_) async => SessionDetail(
+              session: albumSession(),
+              messages: const [],
+              queue: const [],
+              pickState: AlbumPickState(
+                version: 2,
+                pick: album('a', version: 2),
+                runnersUp: [album('b', version: 2)],
+                passed: [album('a', version: 1)],
+              ),
+            );
+      final save = Completer<ListenLaterEntry>();
+      String? savedSession;
+      api.onSaveForLater = (albumId, sessionId) {
+        expect(albumId, 'a');
+        savedSession = sessionId;
+        return save.future;
+      };
+      final container = _makeContainer(api);
+      await container.read(chatProvider('s1').future);
+
+      final pending = container.read(chatProvider('s1').notifier).toggleListenLater();
+      var state = container.read(chatProvider('s1')).value!;
+      expect(state.pickState!.pick!.savedForLater, isTrue);
+      expect(state.pickState!.passed.single.savedForLater, isTrue);
+      expect(state.pickState!.runnersUp.single.savedForLater, isFalse);
+
+      save.complete(ListenLaterEntry(
+        id: 'a',
+        title: 'Album a',
+        artist: 'Artist',
+        type: 'album',
+        savedAt: DateTime(2026, 10, 21),
+        sessionId: 's1',
+      ));
+      expect(await pending, isTrue);
+      expect(savedSession, 's1');
+      state = container.read(chatProvider('s1')).value!;
+      expect(state.pickState!.pick!.savedForLater, isTrue);
+    });
+
+    test('toggleListenLater reverts with a transient error when the write fails', () async {
+      final api = FakeDjApi()..onGetSession = (_) async => albumDetail(saved: true);
+      api.onUnsaveForLater = (albumId) async => throw ApiException(500, 'boom');
+      final container = _makeContainer(api);
+      await container.read(chatProvider('s1').future);
+
+      final ok = await container.read(chatProvider('s1').notifier).toggleListenLater();
+
+      expect(ok, isFalse);
+      final state = container.read(chatProvider('s1')).value!;
+      expect(state.pickState!.pick!.savedForLater, isTrue);
+      expect(state.transientError, isNotNull);
+    });
+  });
+
+  group('sessionStarterProvider kind', () {
+    test('passes album through and skips the anonymous mix notes', () async {
+      final api = FakeDjApi()
+        ..onCreateSession = (_) async => SessionDetail(
+              session: _session(id: 'al').copyWith(kind: SessionKind.album),
+              messages: const [],
+              queue: const [],
+              pickState: const AlbumPickState(version: 0, runnersUp: [], passed: []),
+            );
+      final container = _makeContainer(api);
+
+      final id = await container.read(sessionStarterProvider)('a record', kind: SessionKind.album);
+
+      expect(id, 'al');
+      expect(api.lastCreateKind, SessionKind.album);
+    });
+
+    test('defaults to mix', () async {
+      final api = FakeDjApi()
+        ..onCreateSession = (_) async => SessionDetail(session: _session(id: 'm'), messages: const [], queue: const []);
+      final container = _makeContainer(api);
+
+      await container.read(sessionStarterProvider)('rainy');
+
+      expect(api.lastCreateKind, SessionKind.mix);
     });
   });
 }

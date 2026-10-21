@@ -748,4 +748,313 @@ void main() {
       await _api(inner: inner).deleteMemory('m1');
     });
   });
+
+  group('album sessions', () {
+    test('createSession sends kind only for album', () async {
+      final bodies = <Map<String, dynamic>>[];
+      final inner = MockClient((req) async {
+        final body = jsonDecode(req.body) as Map<String, dynamic>;
+        bodies.add(body);
+        if (body['kind'] == 'album') {
+          return http.Response(
+            jsonEncode({
+              'session': {..._session(), 'kind': 'album'},
+              'messages': [],
+              'pick': _albumView(id: 'a'),
+              'runnersUp': [_albumView(id: 'b')],
+              'passed': [],
+              'version': 1,
+            }),
+            200,
+          );
+        }
+        return http.Response(jsonEncode({'session': _session(), 'messages': [], 'queue': []}), 200);
+      });
+      final api = _api(inner: inner);
+
+      final mix = await api.createSession('rainy');
+      final album = await api.createSession('a record for sunday', kind: SessionKind.album);
+
+      expect(bodies[0], {'prompt': 'rainy'});
+      expect(bodies[1], {'prompt': 'a record for sunday', 'kind': 'album'});
+      expect(mix.kind, SessionKind.mix);
+      expect(album.kind, SessionKind.album);
+      expect(album.pickState!.pick!.id, 'a');
+      expect(album.queue, isEmpty);
+    });
+
+    test('404 album_picks_off -> DjApiException(album_picks_off)', () async {
+      final inner = MockClient((_) async => http.Response(jsonEncode({'error': 'album_picks_off'}), 404));
+      await expectLater(
+        _api(inner: inner).createSession('x', kind: SessionKind.album),
+        throwsA(isA<DjApiException>()
+            .having((e) => e.kind, 'kind', 'album_picks_off')
+            .having((e) => e.message, 'message', 'Album picks are not available right now.')),
+      );
+    });
+
+    test('403 anonymous_albums -> DjApiException(anonymous_albums)', () async {
+      final inner = MockClient((_) async => http.Response(jsonEncode({'error': 'anonymous_albums'}), 403));
+      await expectLater(
+        _api(inner: inner).createSession('x', kind: SessionKind.album),
+        throwsA(isA<DjApiException>().having((e) => e.kind, 'kind', 'anonymous_albums')),
+      );
+    });
+
+    test('a 502 album error carries the step, the pick state and the session id', () async {
+      final inner = MockClient((_) async => http.Response(
+            jsonEncode({
+              'error': 'upstream',
+              'message': 'The DJ lost the thread.',
+              'step': 'verify',
+              'pick': _albumView(id: 'a', version: 2),
+              'runnersUp': [],
+              'passed': [],
+              'version': 2,
+              'sessionId': 's9',
+            }),
+            502,
+          ));
+      await expectLater(
+        _api(inner: inner).createSession('x', kind: SessionKind.album),
+        throwsA(isA<DjApiException>()
+            .having((e) => e.kind, 'kind', 'upstream')
+            .having((e) => e.message, 'message', 'The DJ lost the thread.')
+            .having((e) => e.step, 'step', 'verify')
+            .having((e) => e.sessionId, 'sessionId', 's9')
+            .having((e) => e.pickState?.version, 'pickState.version', 2)
+            .having((e) => e.pickState?.pick?.id, 'pickState.pick', 'a')
+            .having((e) => e.queue, 'queue', isNull)),
+      );
+    });
+
+    test('an album error without a version carries no pick state', () async {
+      final inner = MockClient((_) async => http.Response(
+            jsonEncode({'error': 'conflict', 'message': 'Busy.'}),
+            409,
+          ));
+      await expectLater(
+        _api(inner: inner).sendMessage('s1', 'older'),
+        throwsA(isA<DjApiException>()
+            .having((e) => e.kind, 'kind', 'conflict')
+            .having((e) => e.pickState, 'pickState', isNull)),
+      );
+    });
+
+    test('an album turn parses version as the queue version', () async {
+      final inner = MockClient((req) async {
+        expect(req.url.path, '/sessions/s1/messages');
+        return http.Response(
+          jsonEncode({
+            'djMessage': _djMessage(queueVersion: 4),
+            'pick': _albumView(id: 'a', version: 4),
+            'runnersUp': [],
+            'passed': [_albumView(id: 'z', version: 3)],
+            'version': 4,
+          }),
+          200,
+        );
+      });
+      final result = await _api(inner: inner).sendMessage('s1', 'older');
+      expect(result.queueVersion, 4);
+      expect(result.queue, isEmpty);
+      expect(result.pickState!.passed.single.id, 'z');
+    });
+
+    test('getSession for an album session parses with no queue', () async {
+      final inner = MockClient((_) async => http.Response(
+            jsonEncode({
+              'session': {..._session(), 'kind': 'album'},
+              'messages': [],
+              'pick': _albumView(id: 'a'),
+              'runnersUp': [],
+              'passed': [],
+              'version': 1,
+            }),
+            200,
+          ));
+      final detail = await _api(inner: inner).getSession('s1');
+      expect(detail.queue, isEmpty);
+      expect(detail.pickState!.pick!.id, 'a');
+    });
+
+    test('listSessions parses kind and pick per row, defaulting to mix', () async {
+      final inner = MockClient((_) async => http.Response(
+            jsonEncode({
+              'sessions': [
+                {..._session(id: 'm'), 'trackCount': 3, 'durationMs': 1},
+                {
+                  ..._session(id: 'a'),
+                  'kind': 'album',
+                  'trackCount': 0,
+                  'durationMs': 0,
+                  'pick': {'title': 'Blue', 'artist': 'Joni Mitchell', 'artwork': null},
+                },
+              ],
+            }),
+            200,
+          ));
+      final sessions = await _api(inner: inner).listSessions();
+      expect(sessions[0].kind, SessionKind.mix);
+      expect(sessions[0].pick, isNull);
+      expect(sessions[1].kind, SessionKind.album);
+      expect(sessions[1].pick!.title, 'Blue');
+    });
+  });
+
+  group('pick route', () {
+    test('choosePick POSTs albumId and expectedVersion to /sessions/:id/pick', () async {
+      final inner = MockClient((req) async {
+        expect(req.method, 'POST');
+        expect(req.url.path, '/sessions/s1/pick');
+        expect(jsonDecode(req.body), {'albumId': 'b', 'expectedVersion': 2});
+        return http.Response(
+          jsonEncode({'pick': _albumView(id: 'b', version: 3), 'runnersUp': [], 'passed': [_albumView(id: 'a')], 'version': 3}),
+          200,
+        );
+      });
+      final state = await _api(inner: inner).choosePick('s1', albumId: 'b', expectedVersion: 2);
+      expect(state.version, 3);
+      expect(state.pick!.id, 'b');
+      expect(state.passed.single.id, 'a');
+    });
+
+    test('goBackToPick POSTs version (and omits a null expectedVersion)', () async {
+      final inner = MockClient((req) async {
+        expect(req.url.path, '/sessions/s1/pick');
+        expect(jsonDecode(req.body), {'version': 1});
+        return http.Response(
+          jsonEncode({'pick': _albumView(id: 'a', version: 4), 'runnersUp': [], 'passed': [], 'version': 4}),
+          200,
+        );
+      });
+      final state = await _api(inner: inner).goBackToPick('s1', version: 1);
+      expect(state.version, 4);
+    });
+
+    test('409 stale with the album shape -> DjApiException(stale), never a parse error', () async {
+      final inner = MockClient((_) async => http.Response(jsonEncode({'error': 'stale', 'version': 5}), 409));
+      await expectLater(
+        _api(inner: inner).choosePick('s1', albumId: 'b', expectedVersion: 2),
+        throwsA(isA<DjApiException>().having((e) => e.kind, 'kind', 'stale')),
+      );
+    });
+
+    test('409 wrong_session_kind -> DjApiException keeping the kind', () async {
+      final inner = MockClient((_) async => http.Response(jsonEncode({'error': 'wrong_session_kind'}), 409));
+      await expectLater(
+        _api(inner: inner).goBackToPick('s1', version: 1),
+        throwsA(isA<DjApiException>().having((e) => e.kind, 'kind', 'wrong_session_kind')),
+      );
+    });
+
+    test('404 album_picks_off translates; a plain 404 stays ApiException', () async {
+      final off = MockClient((_) async => http.Response(jsonEncode({'error': 'album_picks_off'}), 404));
+      await expectLater(
+        _api(inner: off).choosePick('s1', albumId: 'b'),
+        throwsA(isA<DjApiException>().having((e) => e.kind, 'kind', 'album_picks_off')),
+      );
+      final missing = MockClient((_) async => http.Response(jsonEncode({'error': 'not_found'}), 404));
+      await expectLater(
+        _api(inner: missing).choosePick('s1', albumId: 'b'),
+        throwsA(isA<ApiException>().having((e) => e.statusCode, 'statusCode', 404)),
+      );
+    });
+  });
+
+  group('listen later', () {
+    test('listListenLater GETs /me/listen-later in server order', () async {
+      final inner = MockClient((req) async {
+        expect(req.method, 'GET');
+        expect(req.url.path, '/me/listen-later');
+        return http.Response(jsonEncode({'entries': [_entry(id: 'a'), _entry(id: 'b', listenedAt: '2026-10-21T00:00:00.000Z')]}), 200);
+      });
+      final entries = await _api(inner: inner).listListenLater();
+      expect(entries.map((e) => e.id), ['a', 'b']);
+      expect(entries[1].listened, isTrue);
+    });
+
+    test('saveForLater PUTs the session id when given, an empty body otherwise', () async {
+      final bodies = <Object?>[];
+      final inner = MockClient((req) async {
+        expect(req.method, 'PUT');
+        expect(req.url.path, '/me/listen-later/al-1');
+        bodies.add(jsonDecode(req.body));
+        return http.Response(jsonEncode({'entry': _entry(id: 'al-1')}), 200);
+      });
+      final api = _api(inner: inner);
+      final entry = await api.saveForLater('al-1', sessionId: 's1');
+      await api.saveForLater('al-1');
+      expect(entry.id, 'al-1');
+      expect(bodies, [
+        {'sessionId': 's1'},
+        <String, dynamic>{},
+      ]);
+    });
+
+    test('unsaveForLater DELETEs /me/listen-later/:albumId', () async {
+      String? method;
+      String? path;
+      final inner = MockClient((req) async {
+        method = req.method;
+        path = req.url.path;
+        return http.Response(jsonEncode({'ok': true}), 200);
+      });
+      await _api(inner: inner).unsaveForLater('al-1');
+      expect(method, 'DELETE');
+      expect(path, '/me/listen-later/al-1');
+    });
+
+    test('markListened POSTs /me/listen-later/:albumId/listened and parses the entry', () async {
+      final inner = MockClient((req) async {
+        expect(req.method, 'POST');
+        expect(req.url.path, '/me/listen-later/al-1/listened');
+        return http.Response(jsonEncode({'entry': _entry(id: 'al-1', listenedAt: '2026-10-21T00:00:00.000Z')}), 200);
+      });
+      final entry = await _api(inner: inner).markListened('al-1');
+      expect(entry.listened, isTrue);
+    });
+
+    test('album_picks_off on the shelf translates too', () async {
+      final inner = MockClient((_) async => http.Response(jsonEncode({'error': 'album_picks_off'}), 404));
+      await expectLater(
+        _api(inner: inner).listListenLater(),
+        throwsA(isA<DjApiException>().having((e) => e.kind, 'kind', 'album_picks_off')),
+      );
+    });
+  });
 }
+
+Map<String, dynamic> _albumView({String id = 'al-1', int version = 1}) => {
+      'id': id,
+      'upc': null,
+      'appleId': 'apple-$id',
+      'title': 'Album $id',
+      'artist': 'Artist',
+      'releaseYear': 2001,
+      'type': 'album',
+      'trackCount': 9,
+      'durationMs': 2000000,
+      'artwork': null,
+      'newToThem': false,
+      'reason': 'why $id',
+      'savedForLater': false,
+      'version': version,
+    };
+
+Map<String, dynamic> _entry({String id = 'al-1', String? listenedAt}) => {
+      'id': id,
+      'upc': null,
+      'appleId': 'apple-$id',
+      'title': 'Album $id',
+      'artist': 'Artist',
+      'releaseYear': 2001,
+      'type': 'album',
+      'trackCount': 9,
+      'durationMs': 2000000,
+      'artwork': null,
+      'sessionId': null,
+      'savedAt': '2026-10-20T00:00:00.000Z',
+      'listenedAt': listenedAt,
+      'reason': null,
+    };
