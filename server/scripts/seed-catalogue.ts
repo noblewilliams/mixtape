@@ -5,12 +5,12 @@
  * editorial playlist each search term resolves to), it pages the deployed
  * Worker's admin `POST /enrich/seed` until the list ends or --per-list songs
  * are fetched, then drives `POST /enrich/run` exactly as drain-enrichment.ts
- * does (same delay, cool-down and stop rules, --max tracks per sitting), and
+ * does (same delay, back-off and stop rules, --max tracks per sitting), and
  * ends with a coverage report from `GET /enrich/status`.
  *
  * Usage (from server/):
  *   npm run seed-catalogue -- --max <tracks> [--storefronts ng,us,gb]
- *     [--per-list 200] [--page-size 100] [--delay-ms 4000] [--resume]
+ *     [--per-list 200] [--page-size 100] [--delay-ms 10000] [--resume]
  * The first sitting runs without --resume; every later sitting passes
  * --resume, or it starts the lists over (harmless, but it spends Apple calls
  * on pages already seeded).

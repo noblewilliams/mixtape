@@ -8,6 +8,7 @@ import {
   ARTWORK_CRON_BATCH,
   CRON_BATCH,
   ENRICHMENT_CRON,
+  ENRICHMENT_CRONS,
   MAINTENANCE_CRON,
 } from '../../src/enrich/scheduled'
 import worker from '../../src/index'
@@ -51,11 +52,13 @@ function recordingRunners(order: string[]) {
 }
 
 describe('cron dispatch', () => {
-  it('declares exactly the two crons in wrangler.jsonc', () => {
+  it('declares maintenance plus the three enrichment crons in wrangler.jsonc, inside the 5-trigger limit', () => {
     const config = readFileSync(new URL('../../wrangler.jsonc', import.meta.url), 'utf8')
     const crons = /"crons"\s*:\s*(\[[^\]]*\])/.exec(config)?.[1]
-    expect(JSON.parse(crons ?? 'null')).toEqual([MAINTENANCE_CRON, ENRICHMENT_CRON])
-    expect([MAINTENANCE_CRON, ENRICHMENT_CRON]).toEqual(['0 * * * *', '2 * * * *'])
+    expect(JSON.parse(crons ?? 'null')).toEqual([MAINTENANCE_CRON, ...ENRICHMENT_CRONS])
+    expect([MAINTENANCE_CRON, ...ENRICHMENT_CRONS]).toEqual(['0 * * * *', '2 * * * *', '22 * * * *', '42 * * * *'])
+    expect(ENRICHMENT_CRONS[0]).toBe(ENRICHMENT_CRON)
+    expect(JSON.parse(crons ?? '[]').length).toBeLessThanOrEqual(4)
   })
 
   it('maps each cron to its job set and anything else to none', () => {
@@ -63,6 +66,19 @@ describe('cron dispatch', () => {
     expect(jobsForCron(ENRICHMENT_CRON)).toBe('enrichment')
     expect(jobsForCron('*/15 * * * *')).toBeNull()
     expect(jobsForCron('')).toBeNull()
+  })
+
+  it('runs the :22 and :42 triggers as the same enrichment-only set as :02', () => {
+    expect(jobsForCron('22 * * * *')).toBe(jobsForCron('2 * * * *'))
+    expect(jobsForCron('42 * * * *')).toBe(jobsForCron('2 * * * *'))
+    expect(jobsForCron('22 * * * *')).toBe('enrichment')
+  })
+
+  it('runs maintenance only at :00', () => {
+    const maintenance = ['0 * * * *', '2 * * * *', '22 * * * *', '42 * * * *'].filter((c) => jobsForCron(c) === 'maintenance')
+    expect(maintenance).toEqual(['0 * * * *'])
+    expect(jobsForCron('20 * * * *')).toBeNull()
+    expect(jobsForCron('40 * * * *')).toBeNull()
   })
 
   it('an unknown cron runs nothing and logs a fixed marker', async () => {

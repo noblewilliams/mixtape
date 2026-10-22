@@ -89,16 +89,21 @@ export type ScheduledDeps = {
 // linking and the Spotify artwork fallback. Linking follows enrichment because
 // enrichment produces ISRCs; the fallback follows linking so Apple gets its
 // chance before a Spotify or Deezer thumbnail is written.
+// :22 and :42 repeat the enrichment set (spec 2026-10-21 Step 3b): three
+// times the pace, each run with its own budget, 20 minutes apart so LRCLIB
+// sees a gentle rate. Maintenance stays hourly. Four of the free plan's five
+// triggers; one stays spare.
 // Keep these equal to `triggers.crons` in wrangler.jsonc.
 export const MAINTENANCE_CRON = '0 * * * *'
 export const ENRICHMENT_CRON = '2 * * * *'
+export const ENRICHMENT_CRONS: readonly string[] = [ENRICHMENT_CRON, '22 * * * *', '42 * * * *']
 
 export type ScheduledJobs = 'maintenance' | 'enrichment'
 
 // Anything else (a stale or hand-added trigger) runs nothing.
 export function jobsForCron(cron: string): ScheduledJobs | null {
   if (cron === MAINTENANCE_CRON) return 'maintenance'
-  if (cron === ENRICHMENT_CRON) return 'enrichment'
+  if (ENRICHMENT_CRONS.includes(cron)) return 'enrichment'
   return null
 }
 

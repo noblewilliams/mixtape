@@ -11,6 +11,7 @@ import {
   type SeedConfig,
   type SeedState,
 } from '../../scripts/seed-catalogue'
+import { BACKOFF_MS } from '../../scripts/drain-enrichment'
 
 const TOKEN = 'admin-token-value'
 const BASE = 'https://api.example.test'
@@ -95,7 +96,7 @@ describe('parseSeedArgs', () => {
   it('requires --max and defaults the rest', () => {
     expect(() => parseSeedArgs([])).toThrow('--max')
     expect(parseSeedArgs(['--max', '700'])).toEqual({
-      storefronts: ['ng', 'us', 'gb'], perList: 200, pageSize: 100, max: 700, delayMs: 4000, resume: false,
+      storefronts: ['ng', 'us', 'gb'], perList: 200, pageSize: 100, max: 700, delayMs: 10_000, resume: false,
     })
   })
 
@@ -315,9 +316,10 @@ describe('seedCatalogue', () => {
     expect((await run(worker).result).seed.stopped).toBe('error')
   })
 
-  it('drives the drain with --max and the delay, stopping as drain-enrichment does', async () => {
+  it('drives the drain with --max and the delay, backing off a transient streak as drain-enrichment does', async () => {
     const worker = fakeWorker({
       batches: [
+        { processed: 5, features: 5, meaning: 5, remaining: 14 },
         { processed: 5, features: 0, meaning: 0, remaining: 9 },
         { processed: 5, features: 0, meaning: 0, remaining: 4 },
         { processed: 5, features: 5, meaning: 5, remaining: 0 },
@@ -325,10 +327,18 @@ describe('seedCatalogue', () => {
     })
     const { result, sleep } = run(worker, { max: 40, delayMs: 2500 })
     const report = await result
-    expect(report.drain).toMatchObject({ stopped: 'provider-down', calls: 2, processed: 10 })
+    expect(report.drain).toMatchObject({ stopped: 'drained', calls: 4, processed: 20 })
     const runs = worker.requests.filter((r) => r.url.includes('/enrich/run'))
     expect(runs[0].url).toMatch(/\/enrich\/run\?limit=\d+$/)
     expect(sleep).toHaveBeenCalledWith(2500)
+    expect(sleep.mock.calls.filter(([ms]) => ms === BACKOFF_MS)).toHaveLength(2)
+  })
+
+  it('stops the drain as provider-down after three transient calls in a row', async () => {
+    const failing = { processed: 5, features: 0, meaning: 0, remaining: 30 }
+    const worker = fakeWorker({ batches: [failing, failing, failing, { processed: 5, features: 5, meaning: 5, remaining: 0 }] })
+    const report = await run(worker, { max: 40 }).result
+    expect(report.drain).toMatchObject({ stopped: 'provider-down', calls: 3, processed: 15 })
   })
 
   it('reports null coverage when the status route is unavailable', async () => {

@@ -4,19 +4,22 @@
  * Each call is its own invocation with its own free-plan budget, and the
  * database stays awake only while this runs.
  *
- * Usage (from server/):  npm run drain-enrichment -- --max <tracks> [--delay-ms 4000]
+ * Usage (from server/):  npm run drain-enrichment -- --max <tracks> [--delay-ms 10000]
  * Reads ENRICH_ADMIN_TOKEN from the environment, else from .dev.vars
  * (scripts/lib/dev-vars.ts). Targets DJ_BASE, else the deployed Worker, as
  * scripts/dj-chat.ts does. Founder-run only; nothing runs it automatically.
  *
+ * A call that takes tracks and enriches none (LRCLIB or ReccoBeats answering
+ * 429 or 503; the runner puts those tracks on cool-down, so the batch's
+ * cooling count rises) is transient: the drain logs it, waits BACKOFF_MS and
+ * carries on with the next due tracks. Spec 2026-10-21 Step 3b.
+ *
  * Stops at --max tracks, when a call processes nothing, when nothing remains,
  * when what remains is only tracks cooling down after provider errors (a
- * clean stop: nothing is eligible right now, the hourly cron picks them up
- * once their backoff passes), when two calls in a row process tracks with no
- * stage succeeding, or one such call that leaves nothing due (a provider
- * looks down; carrying on would only spend attempts on the next tracks while
- * the failed ones cool down), or on any
- * error. --delay-ms is at least 1000. Prints running counts only: never the token, the base URL,
+ * clean stop: nothing is eligible right now, the cron picks them up once
+ * their backoff passes), after TRANSIENT_STREAK_LIMIT backed-off calls in a
+ * row, or after one such call that leaves nothing due (a provider looks
+ * down), or on any error. --delay-ms is at least 1000. Prints running counts only: never the token, the base URL,
  * or a response or exception text.
  */
 import { pathToFileURL } from 'node:url'
@@ -25,8 +28,12 @@ import { MAX_BATCH } from '../src/routes/enrich'
 import { loadDevVars } from './lib/dev-vars'
 
 const DEFAULT_BASE = 'https://mixtape-api.goalympics.workers.dev'
-export const DEFAULT_DELAY_MS = 4000
+export const DEFAULT_DELAY_MS = 10_000
 export const MIN_DELAY_MS = 1000
+// Wait after a call that enriched nothing, before trying the next tracks.
+export const BACKOFF_MS = 60_000
+// Backed-off calls in a row that end the drain as provider-down.
+export const TRANSIENT_STREAK_LIMIT = 3
 export const PROVIDER_DOWN_MESSAGE =
   'stopped: calls enriched nothing, so a provider looks down. Nothing more was attempted. '
   + 'Only tracks that hit a temporary provider error retry after their backoff; other failures used up an attempt.'
@@ -109,15 +116,18 @@ export async function drain(opts: DrainArgs & {
   fetchLike?: FetchLike
   sleep?: (ms: number) => Promise<void>
   log?: (line: string) => void
+  backoffMs?: number
 }): Promise<DrainResult> {
   const fetchLike = opts.fetchLike ?? fetch
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)))
   const log = opts.log ?? ((line: string) => console.log(line))
   const result: DrainResult = { processed: 0, features: 0, meaning: 0, calls: 0, stopped: 'max' }
-  let fruitless = 0
+  const backoffMs = opts.backoffMs ?? BACKOFF_MS
+  let streak = 0
+  let wait = 0
 
   while (result.processed < opts.max) {
-    if (result.calls > 0) await sleep(opts.delayMs)
+    if (result.calls > 0) await sleep(wait)
     // The route clamps to its own MAX_BATCH too, so --max is never exceeded
     // even if the deployed ceiling differs from this checkout's.
     const limit = Math.min(MAX_BATCH, opts.max - result.processed)
@@ -164,13 +174,20 @@ export async function drain(opts: DrainArgs & {
     if (batch.processed === 0) return { ...result, stopped: 'empty' }
     // features and meaning are the route's per-stage ok counts. Tracks taken
     // with neither stage succeeding spend an attempt each; a provider error
-    // also puts them on backoff, so the next call takes different tracks.
-    fruitless = enrichedNothing ? fruitless + 1 : 0
-    if (fruitless >= 2) {
+    // also puts them on cool-down (cooling rises), so the next call takes
+    // different tracks. A rate limit usually passes within a minute, so back
+    // off rather than stop; any enrichment resets the streak.
+    streak = enrichedNothing ? streak + 1 : 0
+    if (streak >= TRANSIENT_STREAK_LIMIT) {
       log(PROVIDER_DOWN_MESSAGE)
       return { ...result, stopped: 'provider-down' }
     }
     if (batch.remaining === 0) return { ...result, stopped: 'drained' }
+    wait = opts.delayMs
+    if (streak > 0 && result.processed < opts.max) {
+      log(`call=${result.calls} enriched nothing (${streak}/${TRANSIENT_STREAK_LIMIT} in a row); backing off ${backoffMs} ms`)
+      wait = backoffMs
+    }
   }
   return result
 }

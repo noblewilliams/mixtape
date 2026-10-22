@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { drain, prepareDrain, parseDrainArgs, resolveBase, DEFAULT_DELAY_MS, MIN_DELAY_MS, PROVIDER_DOWN_MESSAGE, COOLING_MESSAGE } from '../../scripts/drain-enrichment'
+import { drain, prepareDrain, parseDrainArgs, resolveBase, DEFAULT_DELAY_MS, MIN_DELAY_MS, BACKOFF_MS, TRANSIENT_STREAK_LIMIT, PROVIDER_DOWN_MESSAGE, COOLING_MESSAGE } from '../../scripts/drain-enrichment'
 import { MAX_BATCH } from '../../src/routes/enrich'
 
 const TOKEN = 'admin-token-value'
@@ -19,12 +19,13 @@ function fakeApi(responses: Array<Batch | Response | Error>) {
   return { fetchLike, requests }
 }
 
-function run(responses: Array<Batch | Response | Error>, max: number, delayMs = 10) {
+function run(responses: Array<Batch | Response | Error>, max: number, delayMs = 10, backoffMs?: number) {
   const api = fakeApi(responses)
   const lines: string[] = []
-  const sleep = vi.fn(async () => {})
+  const sleep = vi.fn(async (_ms: number) => {})
   const result = drain({
     max, delayMs, base: BASE, token: TOKEN, fetchLike: api.fetchLike, sleep, log: (line) => lines.push(line),
+    ...(backoffMs === undefined ? {} : { backoffMs }),
   })
   return { ...api, lines, sleep, result }
 }
@@ -46,9 +47,9 @@ describe('parseDrainArgs', () => {
     expect(() => parseDrainArgs(['--max', '10', '--wat'])).toThrow()
   })
 
-  it('defaults the delay to 4 seconds and accepts an override', () => {
-    expect(DEFAULT_DELAY_MS).toBe(4000)
-    expect(parseDrainArgs(['--max', '700'])).toEqual({ max: 700, delayMs: 4000 })
+  it('defaults the delay to 10 seconds and accepts an override', () => {
+    expect(DEFAULT_DELAY_MS).toBe(10_000)
+    expect(parseDrainArgs(['--max', '700'])).toEqual({ max: 700, delayMs: 10_000 })
     expect(parseDrainArgs(['--delay-ms', '2500', '--max', '12'])).toEqual({ max: 12, delayMs: 2500 })
   })
 
@@ -118,13 +119,70 @@ describe('drain', () => {
     expect(requests).toHaveLength(2)
   })
 
-  it('stops after two consecutive calls that processed tracks with no stage succeeding', async () => {
-    const failing = (processed: number, remaining: number): Batch => ({ processed, features: 0, meaning: 0, remaining })
-    const { requests, lines, result } = run([failing(5, 50), failing(5, 50), batch(5, 45)], 100)
-    expect(await result).toMatchObject({ processed: 10, features: 0, meaning: 0, calls: 2, stopped: 'provider-down' })
-    expect(requests).toHaveLength(2)
+  it('backs off a 429-shaped streak of two and resumes', async () => {
+    // LRCLIB answering 429: tracks taken, nothing enriched, cooling rises.
+    const { requests, lines, sleep, result } = run([
+      batch(5, 50),
+      { processed: 5, features: 0, meaning: 0, remaining: 45, cooling: 5 },
+      { processed: 5, features: 0, meaning: 0, remaining: 40, cooling: 10 },
+      { ...batch(5, 0), cooling: 10 },
+    ], 100, 10, 777)
+    expect(await result).toMatchObject({ processed: 20, features: 10, meaning: 10, calls: 4, stopped: 'cooling' })
+    expect(requests).toHaveLength(4)
+    expect(sleep.mock.calls.map(([ms]) => ms)).toEqual([10, 777, 777])
+    expect(lines.filter((l) => l.includes('backing off'))).toEqual([
+      `call=2 enriched nothing (1/${TRANSIENT_STREAK_LIMIT} in a row); backing off 777 ms`,
+      `call=3 enriched nothing (2/${TRANSIENT_STREAK_LIMIT} in a row); backing off 777 ms`,
+    ])
+    for (const line of lines) {
+      expect(line).not.toContain(TOKEN)
+      expect(line).not.toContain('example.test')
+      expect(line).not.toMatch(/\u2014/)
+    }
+  })
+
+  it('backs off 60 seconds by default', async () => {
+    expect(BACKOFF_MS).toBe(60_000)
+    const failing = { processed: 5, features: 0, meaning: 0, remaining: 50, cooling: 5 }
+    const { sleep, result } = run([failing, batch(5, 0)], 100)
+    expect(await result).toMatchObject({ calls: 2, stopped: 'drained' })
+    expect(sleep).toHaveBeenCalledExactlyOnceWith(BACKOFF_MS)
+  })
+
+  it('stops as provider-down after three backed-off calls in a row', async () => {
+    const failing = (processed: number, remaining: number, cooling: number): Batch => ({ processed, features: 0, meaning: 0, remaining, cooling })
+    const { requests, lines, sleep, result } = run([failing(5, 50, 5), failing(5, 45, 10), failing(5, 40, 15), batch(5, 35)], 100, 10, 777)
+    expect(TRANSIENT_STREAK_LIMIT).toBe(3)
+    expect(await result).toMatchObject({ processed: 15, features: 0, meaning: 0, calls: 3, stopped: 'provider-down' })
+    expect(requests).toHaveLength(3)
+    expect(sleep.mock.calls.map(([ms]) => ms)).toEqual([777, 777])
     expect(lines.at(-1)).toBe(PROVIDER_DOWN_MESSAGE)
     expect(PROVIDER_DOWN_MESSAGE).not.toMatch(/\u2014/)
+  })
+
+  it('treats a call with no cooling count but nothing enriched as transient too', async () => {
+    const failing = (processed: number, remaining: number): Batch => ({ processed, features: 0, meaning: 0, remaining })
+    const { result } = run([failing(5, 50), failing(5, 50), failing(5, 50), batch(5, 45)], 100, 10, 777)
+    expect(await result).toMatchObject({ calls: 3, stopped: 'provider-down' })
+  })
+
+  it('a mixed call (some features) resets the streak', async () => {
+    const failing = (cooling: number): Batch => ({ processed: 5, features: 0, meaning: 0, remaining: 40, cooling })
+    const { requests, sleep, result } = run([
+      failing(5), failing(10),
+      { processed: 5, features: 2, meaning: 0, remaining: 40, cooling: 13 },
+      failing(18), failing(23),
+      batch(5, 0),
+    ], 100, 10, 777)
+    expect(await result).toMatchObject({ processed: 30, calls: 6, stopped: 'drained' })
+    expect(requests).toHaveLength(6)
+    expect(sleep.mock.calls.map(([ms]) => ms)).toEqual([777, 777, 10, 777, 777])
+  })
+
+  it('does not back off when the streak call reaches --max', async () => {
+    const { sleep, result } = run([{ processed: 5, features: 0, meaning: 0, remaining: 40, cooling: 5 }], 5, 10, 777)
+    expect(await result).toMatchObject({ processed: 5, calls: 1, stopped: 'max' })
+    expect(sleep).not.toHaveBeenCalled()
   })
 
   it('a single failing call, or a partial success, does not stop the drain', async () => {

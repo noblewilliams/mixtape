@@ -11,10 +11,11 @@
     "binding": "AI"
   },
   // Maintenance on the hour, then enrichment two minutes later while Postgres
-  // is still awake. Dispatched on event.cron (src/enrich/scheduled.ts); keep
-  // the two in step. The free plan allows 5 triggers per account.
+  // is still awake. 22 and 42 are enrichment-only runs (no maintenance).
+  // Dispatched on event.cron (src/enrich/scheduled.ts); keep the two in step.
+  // The free plan allows 5 triggers per account; one stays spare.
   "triggers": {
-    "crons": ["0 * * * *", "2 * * * *"]
+    "crons": ["0 * * * *", "2 * * * *", "22 * * * *", "42 * * * *"]
   },
   "vars": {
     // Public OAuth identifier, not a secret — it ships with `wrangler deploy`,
