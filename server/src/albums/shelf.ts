@@ -123,7 +123,7 @@ export async function buildShelf(
         -- FILTER, not a NULL passthrough: GREATEST ignores NULL arguments,
         -- so an unembedded row would otherwise average in as 0.
         COALESCE(
-          AVG(GREATEST(0, 1 - (tm.embedding <=> ${vecLiteral}::vector)))
+          AVG(GREATEST(0, 1 - (tm.embedding <=> ${vecLiteral}::halfvec(1024))))
             FILTER (WHERE tm.embedding IS NOT NULL),
           0
         )::float8 AS similarity,

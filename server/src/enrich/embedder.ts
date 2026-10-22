@@ -1,7 +1,7 @@
 import { EnrichSourceError } from './types'
 
 // bge-m3's output width — shared by the pool's embedding-shape guard (dj/pool.ts)
-// and track_meanings.embedding's vector(1024) column (db/schema.ts).
+// and track_meanings.embedding's halfvec(1024) column (db/schema.ts).
 export const EMBEDDING_DIMENSIONS = 1024
 
 // Lyric text passes through here transiently and is never stored or logged.

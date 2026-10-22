@@ -17,7 +17,7 @@ import {
   primaryKey,
   doublePrecision,
   smallint,
-  vector,
+  halfvec,
   check,
   foreignKey,
 } from 'drizzle-orm/pg-core'
@@ -303,13 +303,17 @@ export const trackMeanings = pgTable(
     trackId: uuid('track_id')
       .primaryKey()
       .references(() => tracks.id, { onDelete: 'cascade' }),
-    embedding: vector('embedding', { dimensions: 1024 }), // bge-m3 width — see EMBEDDING_DIMENSIONS in enrich/embedder.ts
+    // bge-m3 width (EMBEDDING_DIMENSIONS in enrich/embedder.ts), stored as
+    // halfvec: half the bytes of vector, same nearest-neighbour order at this
+    // size (migration 0043, spec 2026-10-21 everyone-gets-a-mix decision 3).
+    // Query vectors cast with ::halfvec(1024) so the HNSW index serves them.
+    embedding: halfvec('embedding', { dimensions: 1024 }),
     lyricsSource: text('lyrics_source'),
     instrumental: boolean('instrumental').notNull().default(false),
     embeddedAt: timestamp('embedded_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    index('track_meanings_embedding_hnsw_idx').using('hnsw', t.embedding.op('vector_cosine_ops')),
+    index('track_meanings_embedding_hnsw_idx').using('hnsw', t.embedding.op('halfvec_cosine_ops')),
   ],
 )
 

@@ -1935,6 +1935,39 @@ describe('buildPool outside picks', () => {
     expect(outside.map((p) => p.trackId)).not.toContain(far.id)
   })
 
+  // Recall sanity for halfvec storage (migration 0043): three fixed
+  // embeddings, deliberately not fp16-exact, come back from the nearest step
+  // in the order full-precision cosine gives, at distances within fp16 noise.
+  it('the nearest step keeps full-precision cosine order for halfvec embeddings', async () => {
+    const db = await createTestDb()
+    const query = vec({ 0: 1, 1: 0.2, 2: -0.3 })
+    const embeddings = [vec({ 0: 0.9, 1: 0.21, 2: -0.31 }), vec({ 0: 0.8, 1: 0.5, 2: -0.1 }), vec({ 0: 0.3, 1: 0.9, 2: 0.4 })]
+    const [near, middle, far] = [
+      await seedCorpusTrack(db, { embedding: embeddings[0] }),
+      await seedCorpusTrack(db, { embedding: embeddings[1] }),
+      await seedCorpusTrack(db, { embedding: embeddings[2] }),
+    ]
+    const cosineDistance = (a: number[], b: number[]) => {
+      let dot = 0, na = 0, nb = 0
+      for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i] }
+      return 1 - dot / Math.sqrt(na * nb)
+    }
+    const literal = '[' + query.join(',') + ']'
+
+    const res = await db.execute(outsideNearestSql(literal))
+    const order = (res as unknown as { rows: Array<{ track_id: string }> }).rows.map((r) => r.track_id)
+    expect(order).toEqual([near.id, middle.id, far.id])
+
+    const dist = await db.execute(sql`
+      SELECT track_id, embedding <=> ${literal}::halfvec(1024) AS d FROM track_meanings`)
+    const byId = new Map((dist as unknown as { rows: Array<{ track_id: string; d: number }> }).rows.map((r) => [r.track_id, Number(r.d)]))
+    // Full precision (what vector(1024) computed) is in this order...
+    const exact = embeddings.map((e) => cosineDistance(e, query))
+    expect([...exact].sort((a, b) => a - b)).toEqual(exact)
+    // ...and halfvec's distances sit within fp16 noise of it.
+    ;[near, middle, far].forEach((t, i) => expect(byId.get(t.id)!).toBeCloseTo(exact[i], 3))
+  })
+
   it('the nearest step runs on the HNSW index and still yields more than its default 40 rows', async () => {
     const db = await createTestDb()
     await appleListener(db)
@@ -1946,7 +1979,7 @@ describe('buildPool outside picks', () => {
 
     const plan = await db.execute(sql`EXPLAIN ${outsideNearestSql('[' + QUERY_DIRECTION.join(',') + ']')}`)
     const text = (plan as unknown as { rows: Array<Record<string, string>> }).rows.map((r) => Object.values(r)[0]).join('\n')
-    expect(text).toContain('track_meanings_embedding_hnsw_idx')
+    expect(text).toContain('Index Scan using track_meanings_embedding_hnsw_idx')
 
     const outside = (await buildPool(db, fakeEmbed, 'u1', mix15(), undefined, { outsideCap: 15 })).filter((p) => p.outside)
     expect(outside).toHaveLength(OUTSIDE_POOL_MAX)

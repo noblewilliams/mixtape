@@ -8,6 +8,8 @@ import { tracks, trackFeatures, trackMeanings, enrichmentFailures } from '../../
 
 const ISRC = 'USUG11904206'
 const { isrc: _isrc, matchedDurationMs: _matched, ...FEATURE_COLS } = OK_FEATURES
+// Values are fp16-exact (0.125, 0.25, 0.5, 0.75): the column is halfvec, so a
+// copied embedding reads back bit-for-bit only when the donor's did.
 const vec = (value: number) => Array.from({ length: 1024 }, () => value)
 
 async function track(db: TestDb, isrc: string | null, extra: Partial<typeof tracks.$inferInsert> = {}) {
@@ -85,14 +87,14 @@ describe('runTwinCopy', () => {
     })
     const newer = await track(db, ISRC)
     await db.insert(trackMeanings).values({
-      trackId: newer.id, embedding: vec(0.7), lyricsSource: 'lrclib', instrumental: false,
+      trackId: newer.id, embedding: vec(0.75), lyricsSource: 'lrclib', instrumental: false,
       embeddedAt: new Date('2026-06-01T00:00:00Z'),
     })
     const target = await track(db, ISRC)
 
     expect(await runTwinCopy(db)).toEqual({ features: 0, meanings: 1 })
     const [meaning] = await db.select().from(trackMeanings).where(eq(trackMeanings.trackId, target.id))
-    expect(meaning.embedding).toEqual(vec(0.7))
+    expect(meaning.embedding).toEqual(vec(0.75))
   })
 
   it('fills only what is missing and never overwrites an existing row', async () => {
@@ -110,7 +112,7 @@ describe('runTwinCopy', () => {
 
   it('picks the oldest donor deterministically', async () => {
     const db = await createTestDb()
-    const older = await enriched(db, ISRC, 90, 0.1)
+    const older = await enriched(db, ISRC, 90, 0.125)
     const newer = await enriched(db, ISRC, 150, 0.9)
     await db.update(trackFeatures).set({ fetchedAt: new Date('2026-01-01T00:00:00Z') }).where(eq(trackFeatures.trackId, older.id))
     await db.update(trackFeatures).set({ fetchedAt: new Date('2026-06-01T00:00:00Z') }).where(eq(trackFeatures.trackId, newer.id))
@@ -122,7 +124,7 @@ describe('runTwinCopy', () => {
     const [features] = await db.select().from(trackFeatures).where(eq(trackFeatures.trackId, target.id))
     expect(features.tempo).toBe(90)
     const [meaning] = await db.select().from(trackMeanings).where(eq(trackMeanings.trackId, target.id))
-    expect(meaning.embedding).toEqual(vec(0.1))
+    expect(meaning.embedding).toEqual(vec(0.125))
   })
 
   it('respects the limit per table', async () => {

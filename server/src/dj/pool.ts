@@ -606,7 +606,7 @@ function scoreTerms(intent: Intent, vecLiteral: string) {
   // GREATEST(0, ...) clamps it back into [0,1]. NULL (no track_meanings row
   // at all, via the LEFT JOIN) is COALESCEd to 0 — scores neutrally low
   // rather than excluding the track or poisoning the sum with NULL.
-  const simFit = sql`COALESCE(GREATEST(0, 1 - (tm.embedding <=> ${vecLiteral}::vector)), 0)`
+  const simFit = sql`COALESCE(GREATEST(0, 1 - (tm.embedding <=> ${vecLiteral}::halfvec(1024))), 0)`
 
   // Taste: COALESCE inside the expression (not wrapped around it) so a track
   // whose artist has no row in artist_taste at all (LEFT JOIN miss — no
@@ -711,7 +711,7 @@ export async function buildPool(
   if (embedding.length !== EMBEDDING_DIMENSIONS || !embedding.every(Number.isFinite)) {
     throw new Error(`pool: bad embedding (len ${embedding.length})`)
   }
-  // Bound as a STRING literal parameter, cast to ::vector in SQL below — the
+  // Bound as a STRING literal parameter, cast to ::halfvec(1024) in SQL below — the
   // themes text itself never reaches SQL at all (it only ever reaches the
   // embedder, above); only the resulting vector's numeric text touches the
   // query, and even that goes through drizzle's parameterization, never
@@ -989,7 +989,7 @@ export function outsideNearestSql(vecLiteral: string): SQL {
       SELECT m.track_id, m.embedding
       FROM track_meanings m
       WHERE cfg.ef IS NOT NULL AND m.embedding IS NOT NULL
-      ORDER BY m.embedding <=> ${vecLiteral}::vector
+      ORDER BY m.embedding <=> ${vecLiteral}::halfvec(1024)
       LIMIT ${OUTSIDE_NEAREST}
     ) nn`
 }

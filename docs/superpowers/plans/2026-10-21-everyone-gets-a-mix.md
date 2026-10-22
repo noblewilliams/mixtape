@@ -208,6 +208,19 @@ Files: `server/src/db/schema.ts`, migration, `server/src/enrich/embedder.ts`,
   table before and after on pglite and record it. Golden structural tests
   unchanged.
 
+Task 5 measured on pglite (200 rows): the table with its HNSW index goes
+from 2,867,200 to 1,171,456 bytes (0.41), which projects production's
+76 MB to about 31 MB and 25,000 rows to about 130 MB. Precision: fp16
+moves a cosine distance by about 5e-6 (max 3e-5 in a 6,000-vector
+simulation), far below the meaning term's weight; only candidates already
+tied can swap. Order at Gate 3: run 0043 first, then deploy, because the
+old Worker's `::vector` cast still uses the index on a `halfvec` column
+while the new Worker's `::halfvec` cast would seq-scan a `vector` column.
+Window: between :15 and :45, away from the :00 and :02 crons, at a quiet
+hour; the lock is 5 to 15 s and the migration sets `lock_timeout` 5 s so it
+fails fast and is retried rather than queueing live DJ turns. Production
+pgvector is 0.8.6, `halfvec` present (checked 2026-10-22).
+
 ### Task 6: seed route and script
 
 Files: new `server/src/routes/enrich-seed.ts` (behind `requireAdmin`),
