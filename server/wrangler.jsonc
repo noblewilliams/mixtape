@@ -33,7 +33,7 @@
     // Never refuse (plan 2026-10-21 everyone-gets-a-mix, Task 7): "on" gives a
     // listener with too few seeds songs the DJ proposes, verified on Apple,
     // instead of a refusal. Anything else is off.
-    "NEVER_REFUSE": "off"
+    "NEVER_REFUSE": "on"
   }
   // Secrets required at runtime (set via `wrangler secret put` / .dev.vars locally) —
   // createAuth fails fast if any is missing:
