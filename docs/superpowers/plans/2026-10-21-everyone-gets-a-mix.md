@@ -250,6 +250,23 @@ drain; an uncharted genre is an empty list, a broken token is a hard stop
 `server/.seed-catalogue-state.json` (git-ignored); pass `--resume` on every
 sitting after the first.
 
+Gate 3, sitting 1 (2026-10-22, 07:29 to about 08:05 UTC): migration 0043
+applied in 12 s (meanings table 76 MB to 31 MB, database 98 MB to 54 MB,
+all 5,847 embeddings intact), Worker `56d0fda0` deployed from `ecc872a`,
+one mix confirmed in 25 s. Seeding: 248 calls over 132 lists, 15,883
+fetched, 9,022 inserted, 6,861 duplicates; the catalogue went from 6,438
+to 15,488 tracks and from 1,587 to about 5,700 artists; 14 of the 84 chart
+lists came back empty (subgenres Apple does not chart in that
+storefront). Drain: stopped after 17 calls and 85 tracks with 17 features
+and 15 meanings; LRCLIB answered 429 on 25 lyric lookups at the 4 s pace,
+and ReccoBeats found no acceptable match for 26 of the 85 (chart songs
+with no Spotify id go through its title search). Coverage after: 6,000
+features, 6,021 meanings, 6,375 enriched of 15,488; 2,462 exhausted.
+Lessons for sitting 2: run the drain with `--delay-ms 10000` or add a
+per-provider cool-down for LRCLIB, and change the script's stop rule so a
+call whose failures are all transient 429s backs off instead of stopping.
+The hourly cron keeps working through the backlog at 8 an hour meanwhile.
+
 ### Gate 3 (founder): the first pass
 
 1. Migration 0043 first, then deploy, in the window above (between :15
