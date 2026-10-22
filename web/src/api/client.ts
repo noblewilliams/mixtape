@@ -398,10 +398,16 @@ export type MeResponse = {
   merged: MergedMode | null
   /** Whether album sessions and Listen later are offered; false on older servers. */
   albumPicks: boolean
+  /** Whether a listener with no music still gets a mix (NEVER_REFUSE); false on older servers. */
+  neverRefuse: boolean
 }
+/** The public flags, readable before any session exists. */
+export type PublicConfig = { neverRefuse: boolean }
 export type MixtapeApi = {
   /** `merged` is reported once after an anonymous session joins an account; the server clears it on read. */
   getMe: (signal?: AbortSignal) => Promise<MeResponse>
+  /** Reads GET /health, which needs no session; never creates one. */
+  getConfig: (signal?: AbortSignal) => Promise<PublicConfig>
   transcribe: (audio: File, signal?: AbortSignal) => Promise<{text:string;language:string}>
   getSuggestions: (timeZone: string) => Promise<SuggestionsResponse>
   selectSuggestion: (id: string, timeZone: string) => Promise<{prompt: string}>
@@ -606,12 +612,18 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
         user: { id: string; isAnonymous?: boolean | null }
         merged?: MergedMode | null
         albumPicks?: boolean
+        neverRefuse?: boolean
       }>('/me', { signal })
       return {
         user: { id: body.user.id, isAnonymous: body.user.isAnonymous === true },
         merged: body.merged ?? null,
         albumPicks: body.albumPicks === true,
+        neverRefuse: body.neverRefuse === true,
       }
+    },
+    getConfig: async (signal) => {
+      const body = await request<{ neverRefuse?: boolean }>('/health', { signal })
+      return { neverRefuse: body.neverRefuse === true }
     },
     createSession: (prompt, playlistSeed, energyArc, kind) =>
       request<CreateSessionResponse>('/sessions', {

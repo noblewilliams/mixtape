@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../data/listening/listening_models.dart';
 import '../../format/import_format.dart';
+import '../../providers/first_run_flags_provider.dart';
 import '../../providers/first_run_funnel_provider.dart';
 import '../../theme/mixtape_theme.dart';
 import '../../widgets/foundation/cassette_tile.dart';
@@ -32,17 +33,25 @@ class WelcomeScreen extends ConsumerStatefulWidget {
   const WelcomeScreen({super.key})
     : songsIn = null,
       isPrompt = false,
-      seedsSaved = false;
+      seedsSaved = false,
+      withoutMusic = false;
 
   /// The prompt page. [songsIn] is the real count from the sync or import;
   /// [seedsSaved] is set when Who do you love? has already run, so a send
-  /// goes straight to the mix.
-  const WelcomeScreen.prompt({super.key, this.songsIn, this.seedsSaved = false})
-    : isPrompt = true;
+  /// goes straight to the mix. [withoutMusic] is Step 1's "Skip for now"
+  /// under the server's never-refuse flag: no songs and no artists, and a
+  /// send still goes straight to the mix.
+  const WelcomeScreen.prompt({
+    super.key,
+    this.songsIn,
+    this.seedsSaved = false,
+    this.withoutMusic = false,
+  }) : isPrompt = true;
 
   final int? songsIn;
   final bool isPrompt;
   final bool seedsSaved;
+  final bool withoutMusic;
 
   static const String headline = 'What do you want to hear?';
   static const List<String> examples = [
@@ -88,7 +97,8 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
     super.dispose();
   }
 
-  bool get _goesStraightToMix => widget.seedsSaved || (widget.songsIn ?? 0) > 0;
+  bool get _goesStraightToMix =>
+      widget.seedsSaved || widget.withoutMusic || (widget.songsIn ?? 0) > 0;
 
   Future<void> _send() async {
     if (_starting) return;
@@ -139,6 +149,9 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Welcome opens the flow: start reading the server's flags now, before
+    // any anonymous sign-in, and hold them for Step 1's Skip.
+    if (!widget.isPrompt) ref.watch(firstRunFlagsProvider);
     final songs = widget.songsIn ?? 0;
     return StepScaffold(
       background: FirstRunBackground.welcome,

@@ -63,6 +63,7 @@ class Me {
     required this.isAnonymous,
     this.merged,
     this.albumPicks = false,
+    this.neverRefuse = false,
     this.name,
   });
 
@@ -76,6 +77,10 @@ class Me {
   /// The server's album picks capability (`ALBUM_PICKS`); absent on an
   /// older server, which reads as off.
   final bool albumPicks;
+
+  /// The server's never-refuse flag (`NEVER_REFUSE`); absent on an older
+  /// server, which reads as off.
+  final bool neverRefuse;
 }
 
 class AccountApi {
@@ -106,6 +111,7 @@ class AccountApi {
       isAnonymous: user['isAnonymous'] == true,
       merged: _mergedMode(value['merged']),
       albumPicks: value['albumPicks'] == true,
+      neverRefuse: value['neverRefuse'] == true,
       name: _displayName(user['name']),
     );
   }

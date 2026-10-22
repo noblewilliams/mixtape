@@ -267,7 +267,14 @@ not enter the catalogue; the replacement round is skipped after a 429 or
 once the turn has run 50 s; a listener with explicit off has explicit
 hits rejected; the three-per-artist rule is the model's, not code's; edits
 (swap, extend) on a proposed mix go through the same propose and verify
-with the current queue excluded.
+with the current queue excluded. Clients learn the flag from `GET /health`
+(public: `{ ok, service, neverRefuse }`, no session, no database), because
+"Skip for now" can be pressed before any session exists; `GET /me` reports
+it too. The flag reads on only when the Apple fill is wired, so a server
+without Apple keys never routes a listener to a mix it cannot propose.
+With the flag on, Step 1's "Skip for now" goes to the prompt page; the
+export pages' "I've requested it" and a sync that brings nothing in still
+go to the artists page.
 
 ## What this does not do
 

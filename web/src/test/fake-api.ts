@@ -508,7 +508,8 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}, options: Fake
       interview = { artists: answers.neverSkip.length, notes: saved }
       return { seeds: answers.neverSkip.length, notes: { saved, duplicate: 0, capped: 0 } }
     },
-    getMe: async () => ({ user: { id: 'listener-1', isAnonymous: false }, merged: null, albumPicks: true }),
+    getMe: async () => ({ user: { id: 'listener-1', isAnonymous: false }, merged: null, albumPicks: true, neverRefuse: false }),
+    getConfig: async () => ({ neverRefuse: false }),
     getArtistSeeds: async () => ({ seeds: artistSeeds.map((seed) => ({ ...seed })) }),
     putArtistSeeds: async (names) => {
       artistSeeds = [

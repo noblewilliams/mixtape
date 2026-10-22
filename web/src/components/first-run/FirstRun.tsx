@@ -54,6 +54,8 @@ export type FirstRunProps = {
 const HISTORY_KEY = 'mixtapeFirstRun'
 const MIX_FAILED = 'Couldn’t make your mix. Try again.'
 const SAVE_FAILED = 'Couldn’t save your artists. Try again.'
+/** How long Skip for now waits on a flag read still in flight; past it, off. */
+export const SKIP_CONFIG_WAIT_MS = 1000
 
 type Marker = { flow: string; step: number }
 
@@ -138,6 +140,27 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
   useEffect(() => {
     funnel?.record('first_run_opened')
   }, [funnel])
+  // NEVER_REFUSE, read once per flow from the public /health (no session is
+  // made for it). The read starts when Step 1 opens, the only page whose Skip
+  // for now it steers, so the first run still makes no request on load.
+  // Until it lands, or if it fails, it is off: Skip goes to the artists page.
+  const [neverRefuse, setNeverRefuse] = useState(false)
+  const configRead = useRef<Promise<boolean> | null>(null)
+  const onStep1 = page.id === 'service'
+  useEffect(() => {
+    if (adding || !services || !onStep1) return
+    configRead.current ??= services.api.getConfig().then(
+      (config) => config.neverRefuse,
+      () => false,
+    )
+    let live = true
+    void configRead.current.then((on) => {
+      if (live) setNeverRefuse(on)
+    })
+    return () => {
+      live = false
+    }
+  }, [adding, services, onStep1])
   const ensure = useCallback(async () => {
     if (!services) return
     await services.ensureSession()
@@ -247,10 +270,14 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
     }
   }
 
-  /** Path A: with nothing synced in this flow, the artists page comes first. */
+  /**
+   * Path A: with nothing synced in this flow, the artists page comes first,
+   * except on the prompt page Skip for now opened with never refuse on.
+   */
   function send(text: string) {
     if (page.id === 'welcome') record('chose_make_mix')
-    if (seedsSaved || (songsIn ?? 0) > 0) void makeMix(text)
+    // neverRefuse on the prompt page: only Skip for now's route lands there without seeds or songs today.
+    if (seedsSaved || (songsIn ?? 0) > 0 || (neverRefuse && page.id === 'prompt')) void makeMix(text)
     else {
       setPendingPrompt(text)
       push({ id: 'artists' })
@@ -274,6 +301,29 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
     setBusy(false)
     if (pendingPrompt) void makeMix(pendingPrompt, true)
     else push({ id: 'prompt' })
+  }
+
+  /**
+   * Step 1's Skip for now: the prompt page with never refuse on, else the
+   * artists page. Waits on the flag read if it is still in flight, at most
+   * SKIP_CONFIG_WAIT_MS (then off); a second tap while waiting is ignored,
+   * and a back during the wait wins.
+   */
+  const skipping = useRef(false)
+  async function skip() {
+    if (adding) return finish({})
+    if (skipping.current) return
+    skipping.current = true
+    const at = depthRef.current
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const capped = new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(false), SKIP_CONFIG_WAIT_MS)
+    })
+    const on = await Promise.race([configRead.current ?? Promise.resolve(false), capped])
+    clearTimeout(timer)
+    skipping.current = false
+    if (finished.current || depthRef.current !== at || trail.current[at]?.id !== 'service') return
+    push(on ? { id: 'prompt' } : { id: 'artists' })
   }
 
   function startSync() {
@@ -336,7 +386,7 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
             onChooseService?.(service)
             push({ id: 'method', service })
           }}
-          onSkip={() => (adding ? finish({}) : push({ id: 'artists' }))}
+          onSkip={() => void skip()}
           onBack={back}
           focusHeading={focusHeading}
         />

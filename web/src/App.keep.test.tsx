@@ -317,7 +317,7 @@ describe('the merge notice', () => {
     ['all', null],
     [null, null],
   ])('merged %s', async (merged, notice) => {
-    const getMe = vi.fn(async () => ({ user: { id: account.id, isAnonymous: false }, merged, albumPicks: false }))
+    const getMe = vi.fn(async () => ({ user: { id: account.id, isAnonymous: false }, merged, albumPicks: false, neverRefuse: false }))
     renderApp({ user: account, api: createFakeApi({ getMe }) })
     await waitFor(() => expect(getMe).toHaveBeenCalledOnce())
     if (notice) {
@@ -330,7 +330,7 @@ describe('the merge notice', () => {
   })
 
   it('is not read for an anonymous listener', async () => {
-    const getMe = vi.fn(async () => ({ user: { id: anonymous.id, isAnonymous: true }, merged: null, albumPicks: false }))
+    const getMe = vi.fn(async () => ({ user: { id: anonymous.id, isAnonymous: true }, merged: null, albumPicks: false, neverRefuse: false }))
     renderApp({ api: createFakeApi({ getMe }) })
     await screen.findByRole('heading', { name: 'Home' })
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -341,7 +341,7 @@ describe('the merge notice', () => {
     keepRecord('late night drive')
     const made = deferred<CreateSessionResponse>()
     const createSession = vi.fn(() => made.promise)
-    const getMe = vi.fn(async () => ({ user: { id: account.id, isAnonymous: false }, merged: 'mixes_only' as const, albumPicks: false }))
+    const getMe = vi.fn(async () => ({ user: { id: account.id, isAnonymous: false }, merged: 'mixes_only' as const, albumPicks: false, neverRefuse: false }))
     renderApp({ user: account, api: createFakeApi({ getMe, createSession }) })
     const notice = 'Your mixes are in. This account already had a library, so we kept that one.'
     expect(await screen.findByText(notice)).toBeInTheDocument()
@@ -356,7 +356,7 @@ describe('the merge notice', () => {
   it('shows for six seconds', async () => {
     vi.useFakeTimers()
     try {
-      const getMe = vi.fn(async () => ({ user: { id: account.id, isAnonymous: false }, merged: 'library_kept' as const, albumPicks: false }))
+      const getMe = vi.fn(async () => ({ user: { id: account.id, isAnonymous: false }, merged: 'library_kept' as const, albumPicks: false, neverRefuse: false }))
       renderApp({ user: account, api: createFakeApi({ getMe }) })
       const notice = 'This account already had a library, so we kept that one.'
       // Step the clock a millisecond at a time until the notice lands, so its 6 s starts here.

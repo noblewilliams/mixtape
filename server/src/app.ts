@@ -118,7 +118,12 @@ export function createApp({
     )
   }
 
-  app.get('/health', (c) => c.json({ ok: true, service: 'mixtape-api' }))
+  // neverRefuse: the NEVER_REFUSE flag as the DJ deps carry it (index.ts),
+  // on only when the DJ can act on it (the Apple fill is wired; without it
+  // the loop still refuses). Public and database-free so a first-run page
+  // with no session yet can route "Skip for now" (spec 2026-10-21, Task 8).
+  const neverRefuse = dj?.deps.neverRefuse === true && dj.deps.fill !== undefined
+  app.get('/health', (c) => c.json({ ok: true, service: 'mixtape-api', neverRefuse }))
   // Route groups land per docs/superpowers/specs/2026-08-29-mixtape-v1-design.md:
   //   /api/auth/* [P1]  /me [P1]  /ingest/* [P1]  /enrich/* [P2 live]  /sessions/* [P3 live]
   //   /me/memories/* [P4 live]  /me/music-sources  /me/onboarding [listening import]
@@ -131,7 +136,8 @@ export function createApp({
     const sessionId = c.get('sessionId')
     const merged = db && sessionId ? await takeMergedMode(db, sessionId) : null
     // albumPicks: whether clients may offer album sessions and Listen later.
-    return c.json({ user: c.get('user'), merged, albumPicks: Boolean(albums) })
+    // neverRefuse: whether a listener with no music still gets a mix.
+    return c.json({ user: c.get('user'), merged, albumPicks: Boolean(albums), neverRefuse })
   })
 
   if (musicKit) {

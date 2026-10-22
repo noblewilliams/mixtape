@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AuthPreferenceStore } from '../../lib/auth-provider'
 import { AnonymousCapError } from '../../api/client'
 import { createdSession, fakeServices, syncResult } from '../../test/first-run-fakes'
-import { FirstRun, type FirstRunProps } from './FirstRun'
+import { FirstRun, SKIP_CONFIG_WAIT_MS, type FirstRunProps } from './FirstRun'
 
 const preferences: AuthPreferenceStore = {
   lastUsed: () => null,
@@ -12,8 +12,8 @@ const preferences: AuthPreferenceStore = {
   clearPending: vi.fn(),
 }
 
-function renderFlow(props: Partial<FirstRunProps> = {}) {
-  const fakes = fakeServices()
+function renderFlow(props: Partial<FirstRunProps> = {}, options: { neverRefuse?: boolean } = {}) {
+  const fakes = fakeServices(options)
   const onDone = vi.fn()
   render(
     <FirstRun
@@ -434,6 +434,104 @@ describe('path B, add my music first', () => {
   })
 })
 
+describe('never refuse, Skip for now on Step 1', () => {
+  async function toStep1(options: { neverRefuse?: boolean }, configFails = false) {
+    const fakes = fakeServices(options)
+    if (configFails) fakes.api.getConfig.mockRejectedValueOnce(new Error('offline'))
+    const onDone = vi.fn()
+    render(<FirstRun services={fakes.services} onDone={onDone} />)
+    // Nothing is read on load; Step 1 opening starts the flag read.
+    expect(fakes.api.getConfig).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Add my music first' }))
+    await heading('Step 1 of 3, Which do you use?')
+    await waitFor(() => expect(fakes.api.getConfig).toHaveBeenCalled())
+    await act(async () => {})
+    return { ...fakes, onDone }
+  }
+
+  it('with the flag on, goes to the prompt page and makes the mix without artists', async () => {
+    const { log, onDone, api, ensureSession } = await toStep1({ neverRefuse: true })
+    fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }))
+    expect(await heading('What do you want to hear?')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Add my music first' })).not.toBeInTheDocument()
+    expect(ensureSession).not.toHaveBeenCalled()
+
+    expect(screen.queryByText(/songs in/)).not.toBeInTheDocument()
+
+    typePrompt('warm up for a long run')
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith(madeMix))
+    expect(screen.queryByRole('heading', { name: 'Who do you love?' })).not.toBeInTheDocument()
+    expect(api.putArtistSeeds).not.toHaveBeenCalled()
+    expect(actions(log)).toEqual(['ensureSession', 'createSession:warm up for a long run'])
+  })
+
+  it('with the flag on, the welcome path still asks for artists', async () => {
+    const { api } = await toStep1({ neverRefuse: true })
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    await heading('What do you want to hear?')
+    typePrompt('late night drive')
+    expect(await heading('Who do you love?')).toBeInTheDocument()
+    expect(api.createSession).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['the flag off', false],
+    ['the flag read failing', true],
+  ])('with %s, goes to Who do you love? as today', async (_name, fails) => {
+    // A failed read defaults to off even where the server would say on.
+    await toStep1({ neverRefuse: fails }, fails)
+    fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }))
+    expect(await heading('Who do you love?')).toBeInTheDocument()
+  })
+
+  /** Step 1 with the flag read held open; resolve() settles it. */
+  async function toStep1Pending() {
+    const fakes = fakeServices({ neverRefuse: true })
+    let resolve: (value: { neverRefuse: boolean }) => void = () => undefined
+    fakes.api.getConfig.mockImplementationOnce(() => new Promise((r) => { resolve = r }))
+    render(<FirstRun services={fakes.services} onDone={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add my music first' }))
+    await heading('Step 1 of 3, Which do you use?')
+    await waitFor(() => expect(fakes.api.getConfig).toHaveBeenCalled())
+    return { ...fakes, resolve: (on: boolean) => resolve({ neverRefuse: on }) }
+  }
+
+  it('waits on a read still in flight when Skip is tapped, then goes to the prompt page when it says on', async () => {
+    const { resolve, api } = await toStep1Pending()
+    fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }))
+    // A double tap while waiting pushes nothing extra.
+    fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }))
+    expect(screen.getByRole('heading', { level: 1, name: 'Step 1 of 3, Which do you use?' })).toBeInTheDocument()
+    await act(async () => resolve(true))
+    expect(await heading('What do you want to hear?')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Add my music first' })).not.toBeInTheDocument()
+    expect(api.getConfig).toHaveBeenCalledOnce()
+    // One page pushed: back returns to Step 1.
+    act(() => window.history.back())
+    expect(await heading('Step 1 of 3, Which do you use?')).toBeInTheDocument()
+  })
+
+  it(`goes to Who do you love? when the read is still pending past ${SKIP_CONFIG_WAIT_MS} ms`, async () => {
+    const { resolve } = await toStep1Pending()
+    fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }))
+    expect(await screen.findByRole('heading', { level: 1, name: 'Who do you love?' }, { timeout: SKIP_CONFIG_WAIT_MS + 1500 })).toBeInTheDocument()
+    await act(async () => resolve(true))
+    expect(screen.getByRole('heading', { level: 1, name: 'Who do you love?' })).toBeInTheDocument()
+  })
+
+  it('reads the flag once per flow and never makes a session for it', async () => {
+    const { api, ensureSession } = await toStep1({ neverRefuse: true })
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    await heading('What do you want to hear?')
+    fireEvent.click(screen.getByRole('button', { name: 'Add my music first' }))
+    await heading('Step 1 of 3, Which do you use?')
+    fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }))
+    await heading('What do you want to hear?')
+    expect(api.getConfig).toHaveBeenCalledOnce()
+    expect(ensureSession).not.toHaveBeenCalled()
+  })
+})
+
 describe('history', () => {
   it('folds the flow\'s entries back when it finishes', async () => {
     const go = vi.spyOn(window.history, 'go')
@@ -525,6 +623,7 @@ describe('Library add flow', () => {
     const first = renderAdd()
     fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }))
     expect(first.onDone).toHaveBeenCalledWith({})
+    expect(first.api.getConfig).not.toHaveBeenCalled()
     cleanup()
 
     const second = renderAdd()

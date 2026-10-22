@@ -5,14 +5,16 @@ library;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../data/listening/listening_models.dart';
+import '../../providers/first_run_flags_provider.dart';
 import '../../widgets/foundation/service_marks.dart';
 import 'choose_method_screen.dart';
 import 'first_run_flow.dart';
 import 'step_scaffold.dart';
 
-class ChooseServiceScreen extends StatelessWidget {
+class ChooseServiceScreen extends ConsumerWidget {
   const ChooseServiceScreen({super.key, this.mode = AddMusicMode.firstRun});
 
   final AddMusicMode mode;
@@ -37,7 +39,14 @@ class ChooseServiceScreen extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => StepScaffold(
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Skip's destination hangs on the server's flags; reading them here
+    // (Welcome has usually started the read already) keeps them for Skip.
+    if (mode == AddMusicMode.firstRun) ref.watch(firstRunFlagsProvider);
+    return _build(context);
+  }
+
+  Widget _build(BuildContext context) => StepScaffold(
     background: FirstRunBackground.step1,
     headline: headline,
     step: 1,
@@ -57,12 +66,13 @@ class ChooseServiceScreen extends StatelessWidget {
       ),
     ],
     // From Library the back button is the way out; "Skip" belongs to the
-    // first run, where it leads on to Who do you love?.
+    // first run, where it leads on to Who do you love?, or to the prompt
+    // page when the server never refuses ([skipAddMusic]).
     foot: mode == AddMusicMode.firstRun
         ? FootLink(
             key: skipKey,
             label: skipLabel,
-            onPressed: () => continueWithoutMusic(context, mode),
+            onPressed: () => unawaited(skipAddMusic(context, mode)),
           )
         : null,
   );

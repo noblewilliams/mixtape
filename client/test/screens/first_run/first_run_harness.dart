@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/auth/token_store.dart';
+import 'package:mixtape/data/config/config_api.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
 import 'package:mixtape/data/library/library_sync_service.dart';
 import 'package:mixtape/data/onboarding/funnel_once_store.dart';
@@ -12,6 +13,7 @@ import 'package:mixtape/data/onboarding/service_preference_store.dart';
 import 'package:mixtape/data/playlists/playlist_context_models.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/device_providers.dart';
+import 'package:mixtape/presentation/providers/first_run_flags_provider.dart';
 import 'package:mixtape/presentation/providers/dj_providers.dart';
 import 'package:mixtape/presentation/providers/library_sync_provider.dart';
 import 'package:mixtape/presentation/providers/listening_import_provider.dart';
@@ -116,6 +118,29 @@ class FirstRunDjApi extends BareDjApi {
   Future<void> postSessionEvent(String sessionId, String type) async {}
 }
 
+/// `GET /health`'s flags, answered with [answer] (or thrown [failWith]); counts reads and notes whether an
+/// anonymous listener existed when each was made.
+class FakeConfigApi implements ConfigApi {
+  FakeConfigApi(this._auth);
+
+  final FirstRunAuth _auth;
+  FirstRunFlags answer = FirstRunFlags.off;
+  Object? failWith;
+  int calls = 0;
+
+  /// The anonymous sign-ins made before each read, in order.
+  final List<int> signInsAtRead = [];
+
+  @override
+  Future<FirstRunFlags> flags() async {
+    calls++;
+    signInsAtRead.add(_auth.anonymousSignIns);
+    final failure = failWith;
+    if (failure != null) throw failure;
+    return answer;
+  }
+}
+
 /// The library sync, driven by the test.
 class ControlledSync extends LibrarySyncNotifier {
   int runs = 0;
@@ -157,9 +182,12 @@ class FirstRunHarness {
   FirstRunHarness({
     AuthStatus status = AuthStatus.noSession,
     bool anonymous = false,
-  }) : auth = FirstRunAuth(status, anonymous: anonymous);
+  }) : auth = FirstRunAuth(status, anonymous: anonymous) {
+    config = FakeConfigApi(auth);
+  }
 
   final FirstRunAuth auth;
+  late final FakeConfigApi config;
   final FirstRunDjApi dj = FirstRunDjApi();
   final FakeListeningApi listening = FakeListeningApi(
     onboarding: onboardingState(userId: 'anon-1'),
@@ -174,6 +202,7 @@ class FirstRunHarness {
     authProvider.overrideWith(() => auth),
     tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
     djApiProvider.overrideWithValue(dj),
+    configApiProvider.overrideWithValue(config),
     listeningApiProvider.overrideWithValue(listening),
     reminderSchedulerProvider.overrideWithValue(reminders),
     servicePreferenceStoreProvider.overrideWithValue(prefs),

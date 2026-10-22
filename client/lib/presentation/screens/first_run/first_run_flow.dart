@@ -23,6 +23,7 @@ import '../../../data/dj/dj_api.dart';
 import '../../../data/listening/listening_models.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/dj_providers.dart';
+import '../../providers/first_run_flags_provider.dart';
 import '../../providers/first_run_funnel_provider.dart';
 import '../../providers/first_run_provider.dart';
 import '../../providers/onboarding_provider.dart';
@@ -140,6 +141,31 @@ void continueWithoutMusic(BuildContext context, AddMusicMode mode) {
     case AddMusicMode.firstRun:
       pushFirstRunPage<void>(context, const ArtistsScreen());
   }
+}
+
+/// Step 1's "Skip for now". With the server's never-refuse flag on, a
+/// listener with no music still gets a mix, so first run goes to the prompt
+/// page and its send makes the mix without artists; otherwise as
+/// [continueWithoutMusic]. The flag was read when the flow opened
+/// ([firstRunFlagsProvider]); a failed read is off.
+Future<void> skipAddMusic(BuildContext context, AddMusicMode mode) async {
+  if (mode == AddMusicMode.firstRun) {
+    final flags = await ProviderScope.containerOf(
+      context,
+      listen: false,
+    ).read(firstRunFlagsProvider.future);
+    if (!context.mounted) return;
+    if (flags.neverRefuse) {
+      unawaited(
+        pushFirstRunPage<void>(
+          context,
+          const WelcomeScreen.prompt(withoutMusic: true),
+        ),
+      );
+      return;
+    }
+  }
+  continueWithoutMusic(context, mode);
 }
 
 void _popAddMusic(BuildContext context) {

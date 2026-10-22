@@ -224,6 +224,27 @@ void main() {
       expect(older.albumPicks, isFalse);
     });
 
+    test('neverRefuse reads the flag; absent or non-true is off', () async {
+      final on = await meWith({
+        'user': {'id': 'u1', 'isAnonymous': true},
+        'merged': null,
+        'neverRefuse': true,
+      });
+      expect(on.neverRefuse, isTrue);
+      final off = await meWith({
+        'user': {'id': 'u1', 'isAnonymous': true},
+        'merged': null,
+        'neverRefuse': 'yes',
+      });
+      expect(off.neverRefuse, isFalse);
+      final older = await meWith({
+        'user': {'id': 'u1', 'isAnonymous': true},
+        'merged': null,
+      });
+      expect(older.neverRefuse, isFalse);
+      expect(const Me(id: 'u1', isAnonymous: false).neverRefuse, isFalse);
+    });
+
     test('maps each merged value to MergedMode', () async {
       for (final entry in {
         'all': MergedMode.all,

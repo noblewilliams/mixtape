@@ -195,6 +195,35 @@ describe('never refuse: proposed songs verified on Apple', () => {
     for (const artist of ARTISTS) expect(block).toContain(artist)
   })
 
+  it('golden: Skip for now, no named artists and no seeds, still gets a proposed queue with the notice', async () => {
+    // The exact turn web's Skip for now creates with the flag on: a bare
+    // prompt from a listener who saved no artists and synced nothing.
+    const db = await createTestDb()
+    await seedUser(db)
+    const session = await seedSession(db)
+    const round = proposals('Bare', 13)
+    const { fill, searches } = fakeFill(round)
+    const { llm, requests } = scriptedLlm([{ themes: 'rainy commute, no talking', targetCount: 5 }], [round])
+    const deps: DjDeps = { llm, embed: embedFake, fill, neverRefuse: true }
+
+    const { value: result, logged } = await withLog(() =>
+      runDjTurn(db, deps, { id: session.id, userId: 'u1' }, 'something for a rainy commute, no talking', { surface: 'web' }))
+
+    expect(await db.select().from(userArtistSeeds)).toHaveLength(0)
+    expect(result.queue).toHaveLength(5)
+    expect(await queueTitles(db, session.id)).toEqual(round.slice(0, 5).map((s) => ({ title: s.title, reason: s.reason })))
+    expect(await notPersonal(db, session.id)).toBe(true)
+    const [text] = toolResults(requests)
+    expect(text.split('\n')[0]).toBe(PROPOSED_NOTICE)
+    expect(text).toContain('queue generated: 5 tracks')
+    expect(text).not.toContain(INSUFFICIENT_SEEDS_TEXT)
+    expect(proposalRequests(requests)).toHaveLength(1)
+    expect(searches.length).toBeGreaterThanOrEqual(5)
+    expect(logged.propose).toMatchObject({ verified: 5, rounds: 1 })
+    const block = proposalRequests(requests)[0].messages[0].content as string
+    expect(block).toContain('Request: something for a rainy commute, no talking')
+  })
+
   it('a short first round asks once for replacements, naming what was tried, and merges in order', async () => {
     const db = await createTestDb()
     await seedUser(db)

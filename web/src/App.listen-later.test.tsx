@@ -133,7 +133,7 @@ describe('Listen later in Mixes', () => {
   })
 
   it('has no Listen later tab when album picks are off', async () => {
-    const api = createFakeApi({ getMe: async () => ({ user: { id: 'listener-1', isAnonymous: false }, merged: null, albumPicks: false }) }, { listenLater: demoShelfPreviewEntries })
+    const api = createFakeApi({ getMe: async () => ({ user: { id: 'listener-1', isAnonymous: false }, merged: null, albumPicks: false, neverRefuse: false }) }, { listenLater: demoShelfPreviewEntries })
     renderApp(api)
     await waitFor(() => expect(callsOf(api, 'getMe')).toHaveLength(1))
     fireEvent.click(await screen.findByRole('button', { name: 'Mixes' }))

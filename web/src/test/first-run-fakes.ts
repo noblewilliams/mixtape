@@ -84,7 +84,7 @@ export function createdSession(id: string): CreateSessionResponse {
 }
 
 /** Services whose every call is recorded in one ordered log. */
-export function fakeServices() {
+export function fakeServices({ neverRefuse = false }: { neverRefuse?: boolean } = {}) {
   const log: string[] = []
   const syncRun = fakeSyncRun()
   const importRun = fakeImportRun()
@@ -97,6 +97,8 @@ export function fakeServices() {
       log.push(`putArtistSeeds:${names.join('|')}`)
       return { seeds: [] }
     }),
+    // Not logged: the flag read is not a server action and never makes a session.
+    getConfig: vi.fn(async () => ({ neverRefuse })),
     postFunnelEvent: vi.fn(async (event: { type: string }) => {
       log.push(`postFunnelEvent:${event.type}`)
       return { ok: true as const }

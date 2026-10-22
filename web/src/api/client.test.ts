@@ -595,7 +595,7 @@ describe('Mixtape API client: listening import and onboarding', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('https://api.mixtape.test/me', expect.objectContaining({ credentials: 'include' }))
     expect(new Headers(fetchMock.mock.calls[0][1]!.headers).get('authorization')).toBe('Bearer me-token')
-    expect(result).toEqual({ user: { id: 'user-1', isAnonymous: false }, merged: 'mixes_only', albumPicks: false })
+    expect(result).toEqual({ user: { id: 'user-1', isAnonymous: false }, merged: 'mixes_only', albumPicks: false, neverRefuse: false })
   })
 
   it('reports an anonymous user with no merge as merged null', async () => {
@@ -607,7 +607,7 @@ describe('Mixtape API client: listening import and onboarding', () => {
 
     const result = await createMixtapeApi('https://api.mixtape.test').getMe()
 
-    expect(result).toEqual({ user: { id: 'anon-1', isAnonymous: true }, merged: null, albumPicks: false })
+    expect(result).toEqual({ user: { id: 'anon-1', isAnonymous: true }, merged: null, albumPicks: false, neverRefuse: false })
   })
 
   it('maps the anonymous mix cap on a new mix to AnonymousCapError', async () => {
@@ -698,6 +698,30 @@ describe('Mixtape API client: listening import and onboarding', () => {
 
       expect((await api.getMe()).albumPicks).toBe(true)
       expect((await api.getMe()).albumPicks).toBe(false)
+    })
+
+    it('reads the never-refuse flag from /me and treats an older server as off', async () => {
+      vi.stubGlobal('fetch', fetchMock)
+      fetchMock.mockResolvedValueOnce(ok({ user: { id: 'user-1', isAnonymous: true }, merged: null, albumPicks: false, neverRefuse: true }))
+      fetchMock.mockResolvedValueOnce(ok({ user: { id: 'user-1', isAnonymous: true }, merged: null }))
+      const api = createMixtapeApi('https://api.mixtape.test')
+
+      expect((await api.getMe()).neverRefuse).toBe(true)
+      expect((await api.getMe()).neverRefuse).toBe(false)
+    })
+
+    it('reads the public never-refuse flag from /health and treats an older server as off', async () => {
+      vi.stubGlobal('fetch', fetchMock)
+      fetchMock.mockResolvedValueOnce(ok({ ok: true, service: 'mixtape-api', neverRefuse: true }))
+      fetchMock.mockResolvedValueOnce(ok({ ok: true, service: 'mixtape-api' }))
+      const api = createMixtapeApi('https://api.mixtape.test')
+
+      expect(await api.getConfig()).toEqual({ neverRefuse: true })
+      expect(await api.getConfig()).toEqual({ neverRefuse: false })
+      expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method ?? 'GET'])).toEqual([
+        ['https://api.mixtape.test/health', 'GET'],
+        ['https://api.mixtape.test/health', 'GET'],
+      ])
     })
   })
 })

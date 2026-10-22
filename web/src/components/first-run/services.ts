@@ -7,7 +7,7 @@ import { createMusicSyncRun, type MusicSyncRun } from '../../sync/music-sync-run
 import { createMusicSyncService } from '../../sync/music-sync-service'
 import { createUploadGate } from '../../sync/upload-gate'
 
-export type FirstRunApi = Pick<MixtapeApi, 'createSession' | 'putArtistSeeds' | 'postFunnelEvent'>
+export type FirstRunApi = Pick<MixtapeApi, 'createSession' | 'putArtistSeeds' | 'postFunnelEvent' | 'getConfig'>
 
 /**
  * What the first-run pages need from outside: the API for seeds, the first
