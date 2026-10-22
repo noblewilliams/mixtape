@@ -382,9 +382,9 @@ describe('NEVER_REFUSE off is today', () => {
     }
   })
 
-  it('ships off in wrangler.jsonc', () => {
+  it('ships on in wrangler.jsonc (Gate 4 passed 2026-10-22)', () => {
     const config = readFileSync(new URL('../../wrangler.jsonc', import.meta.url), 'utf8')
-    expect(config).toMatch(/"NEVER_REFUSE":\s*"off"/)
+    expect(config).toMatch(/"NEVER_REFUSE":\s*"on"/)
   })
 })
 

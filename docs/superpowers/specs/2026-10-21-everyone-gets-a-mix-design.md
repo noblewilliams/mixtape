@@ -7,8 +7,9 @@ fixes to the DJ model calls (curation token budget, streaming with a
 deadline). Step 2 implemented and committed 2026-10-21 (Tasks 3 and 4, each
 reviewed) and deployed; Gate 2 passed 2026-10-22. Step 3 implemented and committed
 2026-10-22 (Tasks 5 and 6, each reviewed); migration 0043 and the deploy done, sitting 1 seeded 9,022 tracks
-(Gate 3 continues in sittings). Step 3b and Step 4 (Task 7) committed 2026-10-22 behind
-`NEVER_REFUSE` off, each reviewed; Task 8 and Gate 4 owed. Plan: `../plans/2026-10-21-everyone-gets-a-mix.md`.
+(Gate 3 continues in sittings). Steps 3b and 4 committed and deployed 2026-10-22; Gate 4 passed and
+`NEVER_REFUSE` is on in production (Worker `e32b557b`). The program is live;
+Gate 3 seeding sittings continue at the founder's pace. Plan: `../plans/2026-10-21-everyone-gets-a-mix.md`.
 Follows `2026-10-20-first-run-flow-design.md` (decision 4 there deferred
 this program) and reopens the 2026-10-03 "honest empty mixes" decision on
 the evidence below.
@@ -248,9 +249,9 @@ The first-run artists page stays; "Skip for now" goes to the prompt page
 when the flag is on. Outside picks for personal listeners are a separate
 program and unchanged.
 
-Gating: behind `NEVER_REFUSE` = off in `wrangler.jsonc`. Turned on only
-after the founder listens to three proposed mixes (comfort, default,
-adventurous) and calls them acceptable. No catalogue size gate any more.
+Gating: `NEVER_REFUSE` in `wrangler.jsonc`, on since 2026-10-22 after the
+founder listened to three proposed mixes (comfort, default, adventurous)
+and called them acceptable. No catalogue size gate.
 
 Known limits, accepted: the model's knowledge thins outside mainstream
 and recent releases (a 2026 release it has not seen cannot be proposed);

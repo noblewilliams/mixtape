@@ -373,6 +373,16 @@ each, no replacement needed, every reply carried the notice, 35 verified
 songs joined the catalogue. Track lists are in the session record; the
 founder judges them. Test users deleted.
 
+Gate 4 passed 2026-10-22: the founder judged the three proposed mixes
+acceptable; Task 8 landed (`15dc384`, the flag read from `/health` and
+`/me`, Skip on Step 1 to the prompt page); `NEVER_REFUSE` set to on
+(`c17e9e0`) and Worker `e32b557b` deployed from a clean worktree. The Gate 2
+prompts re-run on production with unknown artists (Tyla, CKay, Lojay;
+NewJeans, IVE, LE SSERAFIM; Einaudi, Richter, Arnalds) each returned a
+15-track mix on the first turn in 31 to 39 s with the notice in the reply.
+Test users deleted. Open: iOS has the change in `main` but no TestFlight
+build; a swap proposes exactly one song.
+
 ### Gate 4 (founder): listen, then flag on
 
 Deploy with the flag off. Set `NEVER_REFUSE` on locally (`wrangler dev`
@@ -389,5 +399,4 @@ first turn.
 2. Gate 1 after Step 1: done 2026-10-21.
 3. Gate 2 after Step 2: done 2026-10-22.
 4. Gate 3: sittings continue at the Task 6b pace; no count gates Step 4.
-5. Gate 4: listen to three proposed mixes, then flag on and re-run the
-   Gate 2 prompts.
+5. Gate 4: done 2026-10-22.
