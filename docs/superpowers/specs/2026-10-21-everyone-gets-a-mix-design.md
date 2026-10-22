@@ -5,7 +5,7 @@ Status: decisions taken 2026-10-21, all five recommendations (recorded in
 and 2, each reviewed) and deployed; Gate 1 passed the same evening after two
 fixes to the DJ model calls (curation token budget, streaming with a
 deadline). Step 2 implemented and committed 2026-10-21 (Tasks 3 and 4, each
-reviewed); Gate 2 owed. Steps 3 and 4 not started. Plan: `../plans/2026-10-21-everyone-gets-a-mix.md`.
+reviewed) and deployed; Gate 2 passed 2026-10-22. Steps 3 and 4 not started. Plan: `../plans/2026-10-21-everyone-gets-a-mix.md`.
 Follows `2026-10-20-first-run-flow-design.md` (decision 4 there deferred
 this program) and reopens the 2026-10-03 "honest empty mixes" decision on
 the evidence below.
@@ -72,8 +72,10 @@ mode is `corpus`, the mix is built.
 
 ## Step 2: fill from Apple at prompt time (server)
 
-When, after step 1, a named artist (from the artists page or the prompt)
-has fewer than `FILL_FLOOR` (12) enriched tracks in the catalogue:
+When step 1's floor fails (mode `insufficient_seeds`; the fill never runs
+for a listener whose seeds already pass it, nor in personal mode), for each
+named artist (from the artists page or the prompt) with fewer than
+`FILL_FLOOR` (12) enriched tracks in the catalogue:
 
 1. Resolve the artist through the Apple catalogue client
    (`server/src/musickit/catalog.ts`): `searchSongs` with the artist name

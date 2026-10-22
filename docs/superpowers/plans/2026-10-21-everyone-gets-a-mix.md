@@ -160,6 +160,24 @@ value). Realistic yield: 3 enriched rows per turn for three new artists,
 so a first prompt naming only unknown artists is still refused while the
 other 27 rows wait for the hourly cron.
 
+Gate 2 passed 2026-10-22: migration 0042 applied (journal row 43), Worker
+`f262a2e3` from `a2fdad9`.
+
+- Check 1 (taylor swift at 9 enriched rows, plus kanye west and lana del
+  rey): a 15-track mix on the first turn in 48 s. No `fill` line, because
+  the loop runs the fill only when the floor fails; the two known artists
+  already passed it. The check's wording below assumed a fill on every
+  thin artist; the spec's Step 2 now says when the fill runs.
+- Check 2 (tyla, newjeans, ludovico einaudi): the honest refusal in 18 s
+  with `fill: { inserted: 28, enriched: 3, subrequests: 18 }`; 28 new rows
+  at the 1,000 boost, the 3 enriched in-line (meaning only: ReccoBeats
+  found no features for K-pop or classical), failed rows dropped to
+  priority 0, one `catalogue_filled` funnel row.
+- Check 3: the fill turn was 17 s wall and 257 ms CPU; the plain mix turn
+  347 ms CPU. Both succeeded, so the account is not held to the 10 ms CPU
+  figure in the standing rules; confirm the Workers plan on the dashboard
+  and correct the rule.
+
 ### Gate 2 (founder): deploy and three prompts
 
 Apply migration 0042 and deploy from a clean worktree. Then three checks:
@@ -248,6 +266,6 @@ catalogue; if acceptable, set `NEVER_REFUSE` to `on` and deploy.
 
 1. Take the five decisions in the spec.
 2. Gate 1 after Step 1: done 2026-10-21.
-3. Gate 2 after Step 2: apply 0042, deploy, the three checks above.
+3. Gate 2 after Step 2: done 2026-10-22.
 4. Gate 3: the seeding sittings.
 5. Gate 4: listen, flag on.
