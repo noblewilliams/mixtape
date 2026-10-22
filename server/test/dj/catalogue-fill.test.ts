@@ -402,6 +402,22 @@ describe('fillForSeeds: budget', () => {
     expect(STAGE_SUBREQUESTS).toEqual({ apple: 1, itunes: 1, features: 2, lyrics: 2, embed: 1 })
   })
 
+  it('enrich: false inserts and queues the rows but enriches none in-request (the never-refuse path)', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    await seedArtists(db, ['Burna Boy', 'Wizkid', 'Tems'])
+    const { catalog, calls } = threeArtists()
+    const { enrich, calls: enrichCalls } = fakeEnrich()
+
+    const result = await fillForSeeds(db, deps(catalog, enrich), { userId: 'u1', budget: FILL_BUDGET, enrich: false })
+
+    expect(calls).toHaveLength(6)
+    expect(enrichCalls).toEqual({ itunes: 0, features: 0, lyrics: 0, embed: 0 })
+    expect(result).toMatchObject({ inserted: 30, enriched: 0, subrequests: 6 })
+    const rows = await db.select().from(tracks)
+    expect(rows.every((r) => r.enrichPriority >= FILL_QUEUE_BOOST && r.enrichPriority < FRONT_OF_QUEUE_PRIORITY)).toBe(true)
+  })
+
   it('charges ReccoBeats and LRCLIB what they fetched when the caller counts', async () => {
     const db = await createTestDb()
     await seedUser(db)

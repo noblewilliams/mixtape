@@ -73,6 +73,10 @@ export type FillOptions = {
   storefront?: string
   namedSongs?: NamedSong[]
   budget?: number
+  // false inserts and queues the rows (twin copy included) but enriches none
+  // in this request: the never-refuse path (dj/propose.ts) spends the turn's
+  // subrequests on Apple searches instead. Absent is true.
+  enrich?: boolean
 }
 
 export type FillResult = {
@@ -349,6 +353,7 @@ export async function fillForSeeds(db: Db, deps: FillDeps, options: FillOptions)
   const twins = await runTwinCopy(db, newIds.length, newIds)
   result.twins = Math.max(twins.features, twins.meanings)
 
+  if (options.enrich === false) return result
   const keys = plan.thin.map((s) => s.key)
   if (keys.length === 0 && namedIds.size === 0) return result
   const filters: SQL[] = []

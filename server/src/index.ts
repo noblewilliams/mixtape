@@ -61,6 +61,7 @@ type Bindings = {
   GROQ_API_KEY?: string
   OUTSIDE_PICKS?: string
   ALBUM_PICKS?: string
+  NEVER_REFUSE?: string
 }
 
 // This cache holds signed server tokens only. The key is the non-secret Apple
@@ -115,6 +116,13 @@ export function albumPicksEnabled(env: { ALBUM_PICKS?: string }): boolean {
   return env.ALBUM_PICKS === 'on'
 }
 
+// Never refuse (spec 2026-10-21 everyone-gets-a-mix, step 4): a listener
+// with too few seeds gets songs the DJ proposes, verified on Apple, instead
+// of a refusal. Same exact-"on" rule as outside picks.
+export function neverRefuseEnabled(env: { NEVER_REFUSE?: string }): boolean {
+  return env.NEVER_REFUSE === 'on'
+}
+
 // The album loop rides the DJ's model clients plus the Apple catalogue, so it
 // exists only when the flag is on and both of those are configured; absent,
 // createApp mounts no Listen later routes and album sessions are refused.
@@ -149,6 +157,7 @@ function buildDjDeps(env: Bindings): DjDeps | undefined {
     // config to fail-fast on.
     titleComplete: anthropicComplete(anthropic),
     outsidePicks: outsidePicksEnabled(env),
+    neverRefuse: neverRefuseEnabled(env),
   }
 }
 

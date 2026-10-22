@@ -66,8 +66,9 @@ export const FIRST_RUN_FUNNEL_EVENT_TYPES = [
   'account_linked_existing',
 ] as const
 // Written by the server itself, never posted by a client: the DJ loop's
-// catalogue fill (spec 2026-10-21 everyone-gets-a-mix, step 2).
-export const SERVER_FUNNEL_EVENT_TYPES = ['catalogue_filled'] as const
+// catalogue fill (spec 2026-10-21 everyone-gets-a-mix, step 2) and its
+// verified proposals (step 4, NEVER_REFUSE).
+export const SERVER_FUNNEL_EVENT_TYPES = ['catalogue_filled', 'proposed_mix'] as const
 // What POST /me/funnel-events accepts.
 export const CLIENT_FUNNEL_EVENT_TYPES = [...SPOTIFY_FUNNEL_EVENT_TYPES, ...FIRST_RUN_FUNNEL_EVENT_TYPES] as const
 // Every stored type; the schema check on funnel_events.type lists the same

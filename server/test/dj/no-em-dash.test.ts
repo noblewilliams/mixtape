@@ -5,6 +5,8 @@ import {
   CORPUS_NOTICE,
   CURATION_APOLOGY,
   EMPTY_LIBRARY_TEXT,
+  SHORT_VERIFIED_TEXT,
+  partialVerifiedNotice,
   FALLBACK_TEXT,
   FALLBACK_UNCHANGED_TEXT,
   INSUFFICIENT_SEEDS_TEXT,
@@ -16,7 +18,8 @@ import {
   PERSONA_PROMPT_WITH_OUTSIDE,
   outsidePicksNotice,
 } from '../../src/dj/loop'
-import { OUTSIDE_LEGEND_LINE, OUTSIDE_SYSTEM_INTRO } from '../../src/dj/curate'
+import { OUTSIDE_LEGEND_LINE, OUTSIDE_SYSTEM_INTRO, REASON_RULE } from '../../src/dj/curate'
+import { PROPOSED_NOTICE, PROPOSE_SYSTEM_PROMPT } from '../../src/dj/propose'
 import { DJ_TOOLS_WITH_OUTSIDE } from '../../src/dj/contracts'
 import { PLAYLIST_EDIT_FALLBACK, PLAYLIST_EDIT_PERSONA } from '../../src/playlist-editing/loop'
 
@@ -69,6 +72,11 @@ describe('no em dashes in canned DJ text or persona prompts', () => {
     ['EMPTY_LIBRARY_TEXT', EMPTY_LIBRARY_TEXT],
     ['INSUFFICIENT_SEEDS_TEXT', INSUFFICIENT_SEEDS_TEXT],
     ['CORPUS_NOTICE', CORPUS_NOTICE],
+    ['PROPOSED_NOTICE', PROPOSED_NOTICE],
+    ['SHORT_VERIFIED_TEXT', SHORT_VERIFIED_TEXT],
+    ['partialVerifiedNotice', partialVerifiedNotice(9, 10)],
+    ['PROPOSE_SYSTEM_PROMPT', PROPOSE_SYSTEM_PROMPT],
+    ['REASON_RULE', REASON_RULE],
     ['CURATION_APOLOGY', CURATION_APOLOGY],
     ['CONFLICT_APOLOGY', CONFLICT_APOLOGY],
     ['LLM_APOLOGY', LLM_APOLOGY],

@@ -541,6 +541,7 @@ export const funnelEvents = pgTable(
         'account_linked_new',
         'account_linked_existing',
         'catalogue_filled',
+        'proposed_mix',
       ],
     }).notNull(),
     surface: text('surface', { enum: ['ios', 'web'] }).notNull(),
@@ -551,7 +552,7 @@ export const funnelEvents = pgTable(
     index('funnel_events_user_idx').on(t.userId, t.createdAt),
     check(
       'funnel_events_type_check',
-      sql`${t.type} IN ('chose_spotify', 'marked_requested', 'interview_completed', 'file_inspected', 'import_completed', 'first_personal_mix', 'first_output', 'first_run_opened', 'chose_make_mix', 'chose_add_music', 'chose_service', 'chose_method', 'sync_done', 'first_mix_made', 'first_mix_refused', 'keep_sheet_shown', 'keep_sheet_signed_in', 'keep_sheet_dismissed', 'cap_reached', 'account_linked_new', 'account_linked_existing', 'catalogue_filled')`,
+      sql`${t.type} IN ('chose_spotify', 'marked_requested', 'interview_completed', 'file_inspected', 'import_completed', 'first_personal_mix', 'first_output', 'first_run_opened', 'chose_make_mix', 'chose_add_music', 'chose_service', 'chose_method', 'sync_done', 'first_mix_made', 'first_mix_refused', 'keep_sheet_shown', 'keep_sheet_signed_in', 'keep_sheet_dismissed', 'cap_reached', 'account_linked_new', 'account_linked_existing', 'catalogue_filled', 'proposed_mix')`,
     ),
     check('funnel_events_surface_check', sql`${t.surface} IN ('ios', 'web')`),
   ],

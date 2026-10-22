@@ -34,12 +34,17 @@ describe('funnelEventSchema', () => {
       'chose_spotify', 'marked_requested', 'interview_completed', 'file_inspected',
       'import_completed', 'first_personal_mix', 'first_output', ...FIRST_RUN_TYPES,
     ]))
-    expect(FUNNEL_EVENT_TYPES).toHaveLength(7 + FIRST_RUN_TYPES.length + 1)
+    expect(FUNNEL_EVENT_TYPES).toHaveLength(7 + FIRST_RUN_TYPES.length + 2)
   })
 
   it('refuses the server-only catalogue_filled type from a client', () => {
     expect(FUNNEL_EVENT_TYPES).toContain('catalogue_filled')
     expect(funnelEventSchema.safeParse({ type: 'catalogue_filled', surface: 'web' }).success).toBe(false)
+  })
+
+  it('refuses the server-only proposed_mix type from a client', () => {
+    expect(FUNNEL_EVENT_TYPES).toContain('proposed_mix')
+    expect(funnelEventSchema.safeParse({ type: 'proposed_mix', surface: 'ios' }).success).toBe(false)
   })
 })
 

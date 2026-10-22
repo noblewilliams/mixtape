@@ -7,7 +7,7 @@ export type CuratedTrack = { trackId: string; reason: string }
 
 // A short display string, never a fact about the track — cap it hard so one
 // verbose LLM turn can't blow up a queue-list UI.
-const MAX_REASON_LENGTH = 140
+export const MAX_REASON_LENGTH = 140
 
 // Sonnet 5 runs adaptive thinking by default and its thinking tokens count
 // against max_tokens. A 300-line corpus pool drew 2,400 and then 4,800
@@ -16,7 +16,7 @@ const MAX_REASON_LENGTH = 140
 // 9,000 and the retry doubles to the cap.
 const BASE_MAX_TOKENS = 6000
 const PER_TRACK_TOKENS = 200
-const MAX_TOKENS_CAP = 16000
+export const MAX_TOKENS_CAP = 16000
 
 // Thrown when the LLM's curation output is STILL truncated (stopReason
 // 'max_tokens') after one retry with doubled (capped) maxTokens. This is
@@ -45,7 +45,7 @@ export class CurationUnparseable extends Error {
   }
 }
 
-function scaledMaxTokens(targetCount: number): number {
+export function scaledMaxTokens(targetCount: number): number {
   return Math.min(BASE_MAX_TOKENS + PER_TRACK_TOKENS * targetCount, MAX_TOKENS_CAP)
 }
 
@@ -90,7 +90,7 @@ function poolLine(t: PoolTrack): string {
   ].join(' | ')
 }
 
-function arcInstruction(arc: Intent['energyArc']): string {
+export function arcInstruction(arc: Intent['energyArc']): string {
   switch (arc) {
     case 'rise':
       return 'Sequence the picks on a RISING energy arc: start calmer, build energy toward the end.'
@@ -123,6 +123,18 @@ export const OUTSIDE_SYSTEM_INTRO =
   'know those. Tracks marked new are songs they do not own yet: use one only where it truly ' +
   'belongs, never more than the intent allows, and never as filler.'
 
+// The reason rules, shared with the proposal call (dj/propose.ts) so both
+// paths write reasons in one register.
+export const REASON_RULE =
+  'Reasons: each pick carries one short line shown to the listener under the track title. ' +
+    'Write it the way a DJ leans over and says why this one, now: lowercase, two to six words, ' +
+    'a fragment, no closing punctuation, no em dashes. Vary what each reason is about across the ' +
+    'queue: the sound, the mood a lyric carries, why it follows the track before it, where it ' +
+    'sits in the arc. Never repeat a reason. Never name the track or the artist; the listener ' +
+    'can already see those. Never restate the request back at them: "matches your vibe", "fits ' +
+    'the mood", "great choice" are failures. "slow burn opener", "keeps the pulse up", "the ' +
+    'comedown", "lands after that chorus" are the register.'
+
 const SYSTEM_RULES = [
   'Selection:\n' +
     '- Choose tracks ONLY by the ids listed in the pool. Never invent a track, an artist, or an id.\n' +
@@ -131,14 +143,7 @@ const SYSTEM_RULES = [
     'requested energy arc.\n' +
     '- Spread the artists — at most two tracks by any one artist, unless the request is about ' +
     'that artist.',
-  'Reasons: each pick carries one short line shown to the listener under the track title. ' +
-    'Write it the way a DJ leans over and says why this one, now: lowercase, two to six words, ' +
-    'a fragment, no closing punctuation, no em dashes. Vary what each reason is about across the ' +
-    'queue: the sound, the mood a lyric carries, why it follows the track before it, where it ' +
-    'sits in the arc. Never repeat a reason. Never name the track or the artist; the listener ' +
-    'can already see those. Never restate the request back at them: "matches your vibe", "fits ' +
-    'the mood", "great choice" are failures. "slow burn opener", "keeps the pulse up", "the ' +
-    'comedown", "lands after that chorus" are the register.',
+  REASON_RULE,
   'Output STRICT JSON ONLY: one array, [{"id":"<pool id>","reason":"<short reason>"}, ...], in ' +
     'play order. Begin your response with [ and end it with ]. No prose, no markdown, no code ' +
     'fences, nothing before or after the array.',
@@ -238,7 +243,7 @@ function looksLikePicks(arr: unknown[]): boolean {
 // JSON and contains at least one object with a string `id` — the shape a
 // real picks array must have. Returns null once candidates are exhausted
 // with nothing matching.
-function extractJsonArray(text: string): unknown[] | null {
+export function extractJsonArrayWhere(text: string, accept: (arr: unknown[]) => boolean): unknown[] | null {
   let searchFrom = 0
   for (;;) {
     const start = text.indexOf('[', searchFrom)
@@ -246,10 +251,23 @@ function extractJsonArray(text: string): unknown[] | null {
     const candidate = scanBalancedArray(text, start)
     if (candidate !== null) {
       const parsed = tryParseArray(candidate)
-      if (parsed && looksLikePicks(parsed)) return parsed
+      if (parsed && accept(parsed)) return parsed
     }
     searchFrom = start + 1
   }
+}
+
+function extractJsonArray(text: string): unknown[] | null {
+  return extractJsonArrayWhere(text, looksLikePicks)
+}
+
+// A reason as the listener sees it: trimmed, em dashes out, then capped at
+// MAX_REASON_LENGTH. Array.from(...).slice(...).join('') caps by CODE POINT,
+// not UTF-16 code unit: a plain .slice could bisect a surrogate pair (emoji,
+// rare scripts) and hand back a malformed half-character to the UI. Em
+// dashes go before the cap, so the cap measures what the listener sees.
+export function sanitizeReason(raw: unknown): string {
+  return typeof raw === 'string' ? Array.from(stripEmDashes(raw.trim())).slice(0, MAX_REASON_LENGTH).join('') : ''
 }
 
 function normalizePicks(raw: unknown[], poolIds: Set<string>): CuratedTrack[] {
@@ -260,14 +278,7 @@ function normalizePicks(raw: unknown[], poolIds: Set<string>): CuratedTrack[] {
     const id = (item as Record<string, unknown>).id
     if (typeof id !== 'string' || !poolIds.has(id) || seen.has(id)) continue
     seen.add(id)
-    const reasonRaw = (item as Record<string, unknown>).reason
-    // Array.from(...).slice(...).join('') caps by CODE POINT, not UTF-16
-    // code unit — a plain .slice could bisect a surrogate pair (emoji, rare
-    // scripts) and hand back a malformed half-character to the UI.
-    // Em dashes go before the cap, so the cap measures what the listener sees.
-    const reason = typeof reasonRaw === 'string'
-      ? Array.from(stripEmDashes(reasonRaw.trim())).slice(0, MAX_REASON_LENGTH).join('')
-      : ''
+    const reason = sanitizeReason((item as Record<string, unknown>).reason)
     picks.push({ trackId: id, reason })
   }
   return picks

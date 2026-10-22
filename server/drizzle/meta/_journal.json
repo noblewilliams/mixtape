@@ -309,6 +309,13 @@
       "when": 1792651989914,
       "tag": "0043_halfvec_embeddings",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1792661558071,
+      "tag": "0044_proposed_mix_funnel_event",
+      "breakpoints": true
     }
   ]
 }

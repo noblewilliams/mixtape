@@ -23,6 +23,22 @@ import {
 } from './contracts'
 import { buildPool, hasPersonalCandidates, outsideCap, resolvePoolMode, type PoolMode, type PoolTrack } from './pool'
 import { curate, CurationTruncated, CurationUnparseable } from './curate'
+import {
+  MIN_VERIFIED,
+  PROPOSE_EXTRA,
+  PROPOSED_NOTICE,
+  proposalCount,
+  proposeSongs,
+  ROUND_TWO_CUTOFF_MS,
+  verifyProposals,
+  VERIFY_DEADLINE_MS,
+  VERIFY_MAX,
+  type Proposal,
+  type ProposedSong,
+  type VerifiedProposal,
+  type VerifyResult,
+} from './propose'
+import { resolveMarket } from '../albums/verify'
 import { sanitizeForPrompt, sanitizeTitleText, stripEmDashes } from './sanitize'
 import { insertMemoryNote, MAX_MEMORY_NOTES } from './memory-notes'
 import { insertMissingArtistSeeds } from '../seeds/artist-seeds'
@@ -49,7 +65,11 @@ import {
 // fill is the Apple catalogue fill (dj/catalogue-fill.ts), wired only when
 // MusicKit and the AI binding are configured; absent, an insufficient_seeds
 // listener is refused as before.
-export type DjDeps = { llm: LlmClient; embed: Embedder; titleComplete?: LlmComplete; outsidePicks?: boolean; fill?: FillDeps }
+// neverRefuse is the NEVER_REFUSE flag (index.ts), read once per request:
+// with it on and fill wired, an insufficient_seeds listener gets songs the
+// DJ proposes, verified on Apple (dj/propose.ts), instead of the refusal.
+// Absent or false is today's behaviour exactly.
+export type DjDeps = { llm: LlmClient; embed: Embedder; titleComplete?: LlmComplete; outsidePicks?: boolean; fill?: FillDeps; neverRefuse?: boolean }
 
 // The only session fields the loop actually needs — callers (the session
 // routes, Task 8) already have the full dj_sessions row and can pass it
@@ -108,6 +128,13 @@ export const INSUFFICIENT_SEEDS_TEXT =
 // so the client's banner agrees with what the DJ said.
 export const CORPUS_NOTICE =
   "note: these picks come from the shared catalog and this listener's seeds, not their own listening history. Say so plainly."
+
+// Follows PROPOSED_NOTICE (dj/propose.ts) when fewer songs verified on Apple
+// than the mix needs, even after the replacement round. Goes to the MODEL.
+export const SHORT_VERIFIED_TEXT =
+  "note: only the songs listed below could be confirmed on Apple Music, so this mix is shorter than asked. Tell them " +
+  'plainly how many you could confirm, and offer to loosen the request (a broader mood, more artists, another era) ' +
+  'for a fuller mix.'
 
 // Prepended to a generate/edit tool result when any pick THIS CALL landed
 // is a song the listener does not own (an outside pick, dj/pool.ts
@@ -540,9 +567,24 @@ async function savePromptSeeds(db: Db, userId: string, names: string[]): Promise
 // The catalogue fill's part of the turn log: counts only.
 type FillLog = { inserted: number; enriched: number; subrequests: number; appleError?: string; timedOut?: true } | { error: 'internal' }
 
+// The never-refuse path's part of the turn log: counts only. `rounds` counts
+// proposal calls (a generate's two rounds and any edit's); `error` marks a
+// replacement round that failed and was let go.
+type ProposeLog = { proposed: number; verified: number; searches: number; rounds: number; error?: 'replacement' }
+
+// What one turn's proposals verified, kept so a conflict retry or a second
+// generate_queue reuses them instead of spending the searches again.
+type ProposeState = { verified: VerifiedProposal[]; funnelWritten: boolean }
+
+// The turn's Apple searches and verification time, shared by every proposal
+// call this turn makes (generate and edits alike), across a conflict retry.
+type ProposeSpend = { log: ProposeLog; verifyMs: number }
+
 // At most one catalogue fill per turn, across a conflict retry too (hoisted
 // into runDjTurn like RenameTracker): FILL_BUDGET is a per-request budget.
-type FillTracker = { ran: boolean; log?: FillLog }
+// The proposals ride the same box for the same reason. turnStartedAt is the
+// turn's start on the fill's clock, for ROUND_TWO_CUTOFF_MS.
+type FillTracker = { ran: boolean; log?: FillLog; propose?: ProposeState; spend?: ProposeSpend; turnStartedAt: number }
 
 type TurnFill = { tracker: FillTracker; surface: Surface }
 
@@ -550,10 +592,17 @@ type TurnFill = { tracker: FillTracker; surface: Surface }
 // the catalogue: fill them from Apple (spec 2026-10-21 everyone-gets-a-mix,
 // step 2), once per turn. Never throws: a failed fill leaves the turn to
 // refuse as it would have.
-async function fillCatalogue(db: Db, fill: FillDeps, session: DjSessionRef, intent: Intent, turn: TurnFill): Promise<void> {
+// `enrich` false keeps the insertion and skips the in-request enrichment
+// (the never-refuse path spends those subrequests on Apple searches).
+async function fillCatalogue(db: Db, fill: FillDeps, session: DjSessionRef, intent: Intent, turn: TurnFill, enrich: boolean): Promise<void> {
   turn.tracker.ran = true
   try {
-    const result = await fillForSeeds(db, fill, { userId: session.userId, namedSongs: intent.namedSongs, budget: FILL_BUDGET })
+    const result = await fillForSeeds(db, fill, {
+      userId: session.userId,
+      namedSongs: intent.namedSongs,
+      budget: FILL_BUDGET,
+      ...(enrich ? {} : { enrich: false }),
+    })
     // Counts first: they live in the log, and a failed funnel insert below
     // must not replace them.
     turn.tracker.log = {
@@ -578,11 +627,198 @@ async function fillCatalogue(db: Db, fill: FillDeps, session: DjSessionRef, inte
   }
 }
 
+// Songs taken out of this session's queue, newest first: an edit's
+// proposals never bring one back.
+const REMOVED_EXCLUDE = 30
+
+async function removedSongs(db: Db, sessionId: string): Promise<ProposedSong[]> {
+  return db
+    .select({ title: tracks.title, artist: tracks.artist })
+    .from(queueTracks)
+    .innerJoin(tracks, eq(tracks.id, queueTracks.trackId))
+    .where(and(eq(queueTracks.sessionId, sessionId), eq(queueTracks.state, 'removed')))
+    .orderBy(desc(queueTracks.updatedAt))
+    .limit(REMOVED_EXCLUDE)
+}
+
+// Seed names the proposal call is given, newest first.
+const PROPOSAL_SEEDS = 20
+
+async function loadSeedNames(db: Db, userId: string): Promise<string[]> {
+  const rows = await db
+    .select({ name: userArtistSeeds.name })
+    .from(userArtistSeeds)
+    .where(eq(userArtistSeeds.userId, userId))
+    .orderBy(desc(userArtistSeeds.createdAt))
+    .limit(PROPOSAL_SEEDS)
+  return rows.map((r) => r.name)
+}
+
+function proposeSpend(tracker: FillTracker): ProposeSpend {
+  tracker.spend ??= { log: { proposed: 0, verified: 0, searches: 0, rounds: 0 }, verifyMs: 0 }
+  return tracker.spend
+}
+
+// What every proposal call this turn shares: where to verify, whom for.
+type ProposeContext = { storefront: string; seeds: string[]; userText: string; sessionContext: string; now: () => number }
+
+async function proposeContext(db: Db, fill: FillDeps, session: DjSessionRef, userText: string, sessionContext: string): Promise<ProposeContext> {
+  // The listener's storefront, else the configured default, else 'ng'.
+  const storefront = (await resolveMarket(db, session.userId, fill.defaultStorefront)) ?? 'ng'
+  return { storefront, seeds: await loadSeedNames(db, session.userId), userText, sessionContext, now: fill.now ?? Date.now }
+}
+
+// One proposal call and its verification, inside what is left of the turn's
+// VERIFY_MAX searches and VERIFY_DEADLINE_MS. Null when nothing is left, so
+// no proposal is spent that could not be checked. One curation against the
+// turn's budget.
+async function proposeRound(
+  db: Db,
+  deps: DjDeps,
+  fill: FillDeps,
+  ctx: ProposeContext,
+  round: { intent: Intent; count?: number; exclude?: ProposedSong[]; want: number },
+  budget: CurationBudget,
+  spend: ProposeSpend,
+): Promise<{ proposals: Proposal[]; result: VerifyResult } | null> {
+  const searchesLeft = VERIFY_MAX - spend.log.searches
+  const timeLeft = VERIFY_DEADLINE_MS - spend.verifyMs
+  if (searchesLeft <= 0 || timeLeft <= 0) return null
+  spend.log.rounds += 1
+  budget.consume()
+  const proposals = await proposeSongs(deps.llm, {
+    brief: ctx.userText, intent: round.intent, seeds: ctx.seeds, storefront: ctx.storefront, sessionContext: ctx.sessionContext,
+    ...(round.exclude && round.exclude.length > 0 ? { exclude: round.exclude } : {}),
+    count: Math.min(round.count ?? proposalCount(round.intent), searchesLeft),
+  })
+  spend.log.proposed += proposals.length
+  const began = ctx.now()
+  const result = await verifyProposals(db, fill.catalog, {
+    proposals, storefront: ctx.storefront, budget: searchesLeft, deadlineMs: timeLeft, now: ctx.now,
+    want: round.want, allowExplicit: round.intent.allowExplicit,
+  })
+  spend.verifyMs += ctx.now() - began
+  spend.log.searches += result.searches
+  return { proposals, result }
+}
+
+// Propose and verify; when fewer than the mix's floor verify, one
+// replacement round naming what was tried, unless Apple rate-limited round
+// one or the turn has already run ROUND_TWO_CUTOFF_MS. A failed replacement
+// round keeps round one's songs.
+async function runProposals(
+  db: Db,
+  deps: DjDeps,
+  fill: FillDeps,
+  session: DjSessionRef,
+  intent: Intent,
+  userText: string,
+  sessionContext: string,
+  budget: CurationBudget,
+  tracker: FillTracker,
+): Promise<ProposeState> {
+  const spend = proposeSpend(tracker)
+  const ctx = await proposeContext(db, fill, session, userText, sessionContext)
+  const want = intent.targetCount
+  const enough = Math.min(MIN_VERIFIED, want)
+
+  const one = await proposeRound(db, deps, fill, ctx, { intent, want }, budget, spend)
+  if (!one) return { verified: [], funnelWritten: false }
+  const verified = [...one.result.verified]
+  spend.log.verified += verified.length
+
+  const rateLimited = one.result.appleError === 'rate_limit'
+  const late = ctx.now() - tracker.turnStartedAt > ROUND_TWO_CUTOFF_MS
+  if (verified.length < enough && !rateLimited && !late) {
+    try {
+      // Every proposal searched in the first round, verified or missed.
+      const exclude = one.proposals.slice(0, one.result.searches).map(({ title, artist }) => ({ title, artist }))
+      const two = await proposeRound(db, deps, fill, ctx, {
+        intent, exclude, count: want + PROPOSE_EXTRA - verified.length, want: want - verified.length,
+      }, budget, spend)
+      if (two) {
+        const held = new Set(verified.map((v) => v.trackId))
+        const added = two.result.verified.filter((v) => !held.has(v.trackId))
+        verified.push(...added)
+        spend.log.verified += added.length
+      }
+    } catch {
+      spend.log.error = 'replacement'
+    }
+  }
+  return { verified, funnelWritten: false }
+}
+
+// Said to the model when the mix verified enough to stand but fewer songs
+// than were asked for.
+export function partialVerifiedNotice(confirmed: number, asked: number): string {
+  return `note: ${confirmed} of the ${asked} songs asked for could be confirmed on Apple Music; say so.`
+}
+
+// The never-refuse path: the queue is the verified proposals in the model's
+// order, cut to targetCount, with the model's reasons, written exactly as
+// curated picks are (replaceQueue, markNotPersonal, the updated listing).
+async function executeProposedQueue(
+  db: Db,
+  deps: DjDeps,
+  fill: FillDeps,
+  session: DjSessionRef,
+  intent: Intent,
+  userText: string,
+  sessionContext: string,
+  budget: CurationBudget,
+  startVersion: number,
+  turn: TurnFill,
+): Promise<GenerateOutcome> {
+  const seed = await readPlaylistSeed(db, session.id, session.userId)
+  if (seed.status !== 'none' && seed.status !== 'ready') return { resultText: `playlist inspiration is ${seed.status.replace('_', ' ')}; ask the listener to choose another playlist or clear it. The queue is unchanged.`, queueChanged: false, intent }
+  const state = turn.tracker.propose ?? await runProposals(db, deps, fill, session, intent, userText, sessionContext, budget, turn.tracker)
+  turn.tracker.propose = state
+  if (state.verified.length === 0) return { resultText: INSUFFICIENT_SEEDS_TEXT, queueChanged: false, intent }
+
+  const picks = state.verified.slice(0, intent.targetCount)
+  const version = await replaceQueue(
+    db,
+    session.id,
+    picks.map((p) => ({ trackId: p.trackId, reason: p.reason })),
+    'dj',
+    { queueVersion: startVersion, seedRevision: seed.revision, playlistId: seed.status === 'ready' ? seed.playlistId : null,
+      fingerprint: seed.status === 'ready' ? seed.fingerprint : null },
+    intent.energyArc ?? null,
+  )
+  await markNotPersonal(db, session.id)
+  if (!state.funnelWritten) {
+    state.funnelWritten = true
+    try {
+      // User and surface only; the counts are on the turn's log line.
+      await db.insert(funnelEvents).values({ userId: session.userId, type: 'proposed_mix', surface: turn.surface })
+    } catch {
+      // A missing funnel row never fails the turn.
+    }
+  }
+  const updatedQueue = await getActiveQueue(db, session.id)
+  const short = state.verified.length < Math.min(MIN_VERIFIED, intent.targetCount)
+  return {
+    resultText: [
+      PROPOSED_NOTICE,
+      ...(short ? [SHORT_VERIFIED_TEXT] : []),
+      ...(!short && picks.length < intent.targetCount ? [partialVerifiedNotice(picks.length, intent.targetCount)] : []),
+      `queue generated: ${picks.length} tracks (now version ${version})`,
+      'Updated queue (positions are 0-based):',
+      formatQueueListing(updatedQueue, deps.outsidePicks === true),
+    ].join('\n'),
+    queueChanged: true,
+    newVersion: version,
+    intent,
+  }
+}
+
 async function executeGenerateQueue(
   db: Db,
   deps: DjDeps,
   session: DjSessionRef,
   rawInput: unknown,
+  userText: string,
   sessionContext: string,
   budget: CurationBudget,
   startVersion: number,
@@ -612,11 +848,19 @@ async function executeGenerateQueue(
   let poolMode = await resolvePoolMode(db, session.userId)
   // Never for a personal listener (resolved above, and fillForSeeds checks
   // again); then the mode is resolved afresh over the filled rows.
+  // With NEVER_REFUSE on, the fill keeps its insertion and skips its
+  // in-request enrichment: the proposal path below spends those
+  // subrequests on Apple searches.
+  const neverRefuse = deps.neverRefuse === true
   if (poolMode.mode === 'insufficient_seeds' && deps.fill && !turn.tracker.ran) {
-    await fillCatalogue(db, deps.fill, session, intent, turn)
+    await fillCatalogue(db, deps.fill, session, intent, turn, !neverRefuse)
     poolMode = await resolvePoolMode(db, session.userId)
   }
   if (poolMode.mode === 'insufficient_seeds') {
+    // insufficient_seeds is never a personal listener (resolvePoolMode).
+    if (neverRefuse && deps.fill) {
+      return executeProposedQueue(db, deps, deps.fill, session, intent, userText, sessionContext, budget, startVersion, turn)
+    }
     return { resultText: INSUFFICIENT_SEEDS_TEXT, queueChanged: false, intent }
   }
   const seed = await readPlaylistSeed(db, session.id, session.userId)
@@ -684,6 +928,7 @@ async function executeEditQueue(
   lastGenerateIntent: Intent | undefined,
   sessionContext: string,
   budget: CurationBudget,
+  turn: TurnFill,
 ): Promise<EditOutcome> {
   const parsed = editQueueInputSchema.safeParse(rawInput)
   if (!parsed.success) {
@@ -709,16 +954,24 @@ async function executeEditQueue(
   const selectedSeed = seed.status === 'ready'
     ? { playlistId: seed.playlistId!, excludeSourceTracks: seed.excludeSourceTracks }
     : undefined
+  // NEVER_REFUSE on with the Apple fill wired: an insufficient_seeds
+  // listener's swaps and extends are proposed and verified like their mix.
+  let proposedFill: FillDeps | undefined
   if (needsPool) {
     const resolved = await resolvePoolMode(db, session.userId)
-    if (resolved.mode === 'insufficient_seeds') return { resultText: INSUFFICIENT_SEEDS_TEXT, queueChanged: false }
+    if (resolved.mode === 'insufficient_seeds') {
+      if (!(deps.neverRefuse === true && deps.fill)) return { resultText: INSUFFICIENT_SEEDS_TEXT, queueChanged: false }
+      proposedFill = deps.fill
+    }
     // Same gate for a personal listener with nothing the candidate rule
     // admits: checked before applyOps, so no partial application.
     if (resolved.mode === 'personal' && !(await hasPersonalCandidates(db, session.userId))) {
       return { resultText: EMPTY_LIBRARY_TEXT, queueChanged: false }
     }
-    poolMode = resolved.mode
+    if (resolved.mode !== 'insufficient_seeds') poolMode = resolved.mode
   }
+  let proposedPicksLanded = false
+  let proposeCtx: ProposeContext | undefined
   // Set by the provider once corpus picks are actually handed to
   // queue-store (an empty pool hands back nothing and leaves the original
   // track in place — that queue holds no corpus pick, so no flag).
@@ -783,6 +1036,20 @@ async function executeEditQueue(
     // which this provider has no access to) — an acceptable, unlocked phase-1
     // read, same as everything else this provider touches before phase 2.
     const activeQueue = await getActiveQueue(db, session.id)
+    if (proposedFill) {
+      // Never the songs in the queue or those taken out of it.
+      proposeCtx ??= await proposeContext(db, proposedFill, session, userText, sessionContext)
+      const exclude = [...activeQueue.map((t) => ({ title: t.title, artist: t.artist })), ...(await removedSongs(db, session.id))]
+      const round = await proposeRound(db, deps, proposedFill, proposeCtx, { intent: fullIntent, count, exclude, want: count },
+        budget, proposeSpend(turn.tracker))
+      if (!round) return [] // nothing left to verify with: the original track(s) stay
+      const inQueue = new Set(activeQueue.map((t) => t.trackId))
+      const fresh = round.result.verified.filter((v) => !inQueue.has(v.trackId) && !returnedThisBatch.has(v.trackId)).slice(0, count)
+      turn.tracker.spend!.log.verified += fresh.length
+      for (const v of fresh) returnedThisBatch.add(v.trackId)
+      if (fresh.length > 0) proposedPicksLanded = true
+      return fresh.map((v) => ({ trackId: v.trackId, reason: v.reason }))
+    }
     let cap = 0
     let request: ReturnType<typeof planOps>['requests'][number] | undefined
     if (deps.outsidePicks && poolMode === 'personal') {
@@ -830,7 +1097,7 @@ async function executeEditQueue(
     // Same rule as executeGenerateQueue: flagged after the picks landed
     // (applyOps is atomic — a throw above means nothing landed and we never
     // get here), and the model is told in the same result.
-    if (corpusPicksLanded) await markNotPersonal(db, session.id)
+    if (corpusPicksLanded || proposedPicksLanded) await markNotPersonal(db, session.id)
     // Same rationale as executeGenerateQueue: the accounting line alone
     // can't tell the model which position actually moved/dropped/swapped —
     // the model must describe results from this listing, never assumption.
@@ -839,6 +1106,7 @@ async function executeEditQueue(
     const outsideAt = outsidePositions(updatedQueue, new Set(outsideLanded))
     return {
       resultText: [
+        ...(proposedPicksLanded ? [PROPOSED_NOTICE] : []),
         ...(corpusPicksLanded ? [CORPUS_NOTICE] : []),
         ...(outsideAt.length > 0 ? [outsidePicksNotice(outsideAt)] : []),
         `queue edited — requested ${result.requested}, added ${result.added}, removed ${result.removed} (now version ${result.version})`,
@@ -1100,13 +1368,13 @@ async function attemptTurn(
         // since nothing else about this design is visible from either
         // function's own signature.
         if (call.name === 'generate_queue') {
-          const outcome = await executeGenerateQueue(db, countedDeps, session, call.input, sessionContext, budget, currentVersion, { tracker: fillTracker, surface: options.surface ?? 'web' }, options.energyArc)
+          const outcome = await executeGenerateQueue(db, countedDeps, session, call.input, userText, sessionContext, budget, currentVersion, { tracker: fillTracker, surface: options.surface ?? 'web' }, options.energyArc)
           resultText = outcome.resultText
           if (outcome.intent) lastGenerateIntent = outcome.intent
           addNamedSongs(namedSongs, outcome.intent?.namedSongs)
           if (outcome.queueChanged) currentVersion = outcome.newVersion!
         } else if (call.name === 'edit_queue') {
-          const outcome = await executeEditQueue(db, countedDeps, session, call.input, userText, lastGenerateIntent, sessionContext, budget)
+          const outcome = await executeEditQueue(db, countedDeps, session, call.input, userText, lastGenerateIntent, sessionContext, budget, { tracker: fillTracker, surface: options.surface ?? 'web' })
           resultText = outcome.resultText
           if (outcome.queueChanged) currentVersion = outcome.newVersion!
         } else if (call.name === 'find_playlists') {
@@ -1184,12 +1452,13 @@ async function attemptWithConflictRetry(
   }
 }
 
-function logTurn(sessionId: string, stats: AttemptStats | null, errorKind: DjError['kind'] | null, detail?: string, fill?: FillLog): void {
+function logTurn(sessionId: string, stats: AttemptStats | null, errorKind: DjError['kind'] | null, detail?: string, fill?: FillLog, propose?: ProposeLog): void {
   // Counts and codes only — no message content, no track/tool payloads.
   // `detail` (when present) is already content-free by construction — see
   // DjError.detail's comment — so it's safe alongside the rest of this line.
-  // `fill` is present only on a turn that ran the catalogue fill.
-  console.log('dj turn', JSON.stringify({ sessionId, ...(stats ?? {}), error: errorKind, detail, ...(fill ? { fill } : {}) }))
+  // `fill` is present only on a turn that ran the catalogue fill, `propose`
+  // only on one that proposed songs (NEVER_REFUSE).
+  console.log('dj turn', JSON.stringify({ sessionId, ...(stats ?? {}), error: errorKind, detail, ...(fill ? { fill } : {}), ...(propose ? { propose } : {}) }))
 }
 
 // Per-turn settings the listener chose in the composer UI rather than typed.
@@ -1223,7 +1492,7 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
   // returns (or throws). See RenameTracker's own comment for the "last
   // rename wins" contract across attempts.
   const renameState: RenameTracker = {}
-  const fillTracker: FillTracker = { ran: false }
+  const fillTracker: FillTracker = { ran: false, turnStartedAt: (deps.fill?.now ?? Date.now)() }
 
   let attempt: AttemptResult
   try {
@@ -1231,7 +1500,7 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
   } catch (e) {
     const failure = e instanceof AttemptTurnFailure ? e : null
     const djError = normalizeError(failure ? failure.originalError : e)
-    logTurn(session.id, failure?.stats ?? null, djError.kind, djError.detail, fillTracker.log)
+    logTurn(session.id, failure?.stats ?? null, djError.kind, djError.detail, fillTracker.log, fillTracker.spend?.log)
 
     // Same rationale as the queue/queueVersion attachment below: a rename
     // that already landed in the DB this turn must ride the error out to the
@@ -1286,7 +1555,7 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
     .returning()
 
   const queue = await getActiveQueue(db, session.id)
-  logTurn(session.id, attempt.stats, null, undefined, fillTracker.log)
+  logTurn(session.id, attempt.stats, null, undefined, fillTracker.log, fillTracker.spend?.log)
   // sessionTitle comes from the hoisted renameState, NOT from `attempt`
   // itself — the attempt that finally succeeds may not be the one that
   // called rename_session (e.g. it renamed on a first try that then hit a

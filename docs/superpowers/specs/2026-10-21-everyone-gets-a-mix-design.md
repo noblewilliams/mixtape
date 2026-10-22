@@ -7,7 +7,8 @@ fixes to the DJ model calls (curation token budget, streaming with a
 deadline). Step 2 implemented and committed 2026-10-21 (Tasks 3 and 4, each
 reviewed) and deployed; Gate 2 passed 2026-10-22. Step 3 implemented and committed
 2026-10-22 (Tasks 5 and 6, each reviewed); migration 0043 and the deploy done, sitting 1 seeded 9,022 tracks
-(Gate 3 continues in sittings). Step 3b and the reshaped Step 4 not started. Plan: `../plans/2026-10-21-everyone-gets-a-mix.md`.
+(Gate 3 continues in sittings). Step 3b and Step 4 (Task 7) committed 2026-10-22 behind
+`NEVER_REFUSE` off, each reviewed; Task 8 and Gate 4 owed. Plan: `../plans/2026-10-21-everyone-gets-a-mix.md`.
 Follows `2026-10-20-first-run-flow-design.md` (decision 4 there deferred
 this program) and reopens the 2026-10-03 "honest empty mixes" decision on
 the evidence below.
@@ -254,8 +255,19 @@ adventurous) and calls them acceptable. No catalogue size gate any more.
 Known limits, accepted: the model's knowledge thins outside mainstream
 and recent releases (a 2026 release it has not seen cannot be proposed);
 Apple search by title can pick a cover or a live version when the credit
-matches (title key plus artist key is the guard); verified rows arrive
-unenriched and are scored only once the cron reaches them.
+matches (title key plus artist key is the guard, with an exact-title pass
+before the stripped one and a rejected-versions list); verified rows
+arrive unenriched and are scored only once the cron reaches them.
+
+As built (2026-10-22): a proposal asks for `targetCount + 8` songs capped at
+`VERIFY_MAX` (22) searches, so a proposed queue holds at most 22 and a
+60-track brief on this path gets 22, with the DJ saying how many it could
+confirm; verification stops once the mix is full, so spare proposals do
+not enter the catalogue; the replacement round is skipped after a 429 or
+once the turn has run 50 s; a listener with explicit off has explicit
+hits rejected; the three-per-artist rule is the model's, not code's; edits
+(swap, extend) on a proposed mix go through the same propose and verify
+with the current queue excluded.
 
 ## What this does not do
 
