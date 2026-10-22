@@ -362,6 +362,17 @@ Files: `web/src/components/first-run/FirstRun.tsx`,
   Step 1 of 3 goes to the prompt page; the artists page remains reachable
   from the welcome path. The "Making your mix" page is unchanged.
 
+Gate 4 preparation, 2026-10-22: migration 0044 applied (journal row 45),
+Worker `eff7d313` deployed with `NEVER_REFUSE` off from `7d83be0`. Three
+proposed mixes made against a local Worker with the flag on (launch config
+`api-never-refuse`, port 8798), each with seeds the catalogue lacks:
+comfort (Einaudi, Richter, Arnalds; 15 tracks, 22 proposed, 19 searches,
+56 s), default (NewJeans, IVE, LE SSERAFIM; 15 of 22, 16 searches, 55 s),
+adventurous (Tyla, CKay, Lojay; 15 of 22, 16 searches, 43 s). One round
+each, no replacement needed, every reply carried the notice, 35 verified
+songs joined the catalogue. Track lists are in the session record; the
+founder judges them. Test users deleted.
+
 ### Gate 4 (founder): listen, then flag on
 
 Deploy with the flag off. Set `NEVER_REFUSE` on locally (`wrangler dev`
