@@ -1,5 +1,32 @@
 # Decision Log
 
+## 2026-10-22 — Never refuse means model-proposed songs verified on Apple
+
+Gate 3's first seeding sitting tripled the catalogue to 15,488 tracks in
+twenty minutes but enriched 85 of them before the free providers pushed
+back (LRCLIB 429 at a 4 s pace; ReccoBeats no match for about 30 % of
+chart songs). Songs are cheap; scoring them is the bottleneck. Founder
+decisions:
+
+- Step 4 of `superpowers/specs/2026-10-21-everyone-gets-a-mix-design.md` is
+  reshaped: when a no-library listener's named artists fail the floor, the
+  DJ proposes the songs itself (one model call, title and artist and reason)
+  and every proposal is verified by an Apple catalogue search before it is
+  shown, the album program's hallucination guard applied to songs. Verified
+  songs join the catalogue for everyone. The vibe-only ranking of the seeded
+  catalogue is dropped, and no catalogue size gates Step 4 any more.
+- Enrichment throughput comes from two more Worker cron triggers and a
+  drain that backs off on transient errors instead of stopping; no GitHub
+  Actions (private repository, free minutes too few) and no new
+  infrastructure.
+- The seeded catalogue keeps its purpose: the scored corpus for listeners
+  whose artists it holds, and the pool outside picks draw from.
+
+**Reopens if:** verified proposals read as generic or wrong in the Gate 4
+listening checks, Apple search by title keeps picking covers or live
+versions, or the model's proposals fail verification more than a third of
+the time for mainstream briefs.
+
 ## 2026-10-21 — Everyone gets a mix: fair floor, Apple fill, seeded catalogue, never refuse
 
 On the live first-run flow the DJ refused a no-library listener whose named

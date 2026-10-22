@@ -6,8 +6,8 @@ and 2, each reviewed) and deployed; Gate 1 passed the same evening after two
 fixes to the DJ model calls (curation token budget, streaming with a
 deadline). Step 2 implemented and committed 2026-10-21 (Tasks 3 and 4, each
 reviewed) and deployed; Gate 2 passed 2026-10-22. Step 3 implemented and committed
-2026-10-22 (Tasks 5 and 6, each reviewed); Gate 3 owed (migration 0043, a
-deploy, then the seeding sittings). Step 4 not started. Plan: `../plans/2026-10-21-everyone-gets-a-mix.md`.
+2026-10-22 (Tasks 5 and 6, each reviewed); migration 0043 and the deploy done, sitting 1 seeded 9,022 tracks
+(Gate 3 continues in sittings). Step 3b and the reshaped Step 4 not started. Plan: `../plans/2026-10-21-everyone-gets-a-mix.md`.
 Follows `2026-10-20-first-run-flow-design.md` (decision 4 there deferred
 this program) and reopens the 2026-10-03 "honest empty mixes" decision on
 the evidence below.
@@ -167,26 +167,95 @@ Seed the catalogue ahead of demand so step 4 has something to draw from.
   Seeding is about 264 calls, roughly 20 minutes once; the drain is about
   13 sittings at the observed 720 rows a sitting.
 
-## Step 4: never refuse (server)
+## Step 3b: enrichment throughput (server, founder-run)
 
-Once step 3 has landed and the catalogue passes 15,000 enriched tracks:
+Added 2026-10-22 after sitting 1 of Gate 3. Songs are now cheap to get and
+slow to score: the drain stopped at 85 tracks because LRCLIB answered 429
+at a 4 s pace and ReccoBeats found no match for about 30 % of chart songs,
+and the hourly cron does 8 an hour. Three changes, no new infrastructure:
 
-- `resolvePoolMode` returns `corpus` for any listener with no personal
-  data, whatever the seeds, with `seedTracks` and `seedArtists` reported as
-  today. `insufficient_seeds` is no longer produced.
-- `buildPool` in corpus mode with no matched seeds ranks the whole
-  catalogue by the prompt's vibe (the existing meaning and feature terms,
-  familiarity 0 everywhere) and by genre when the brief names one. The DJ
-  is told, through the existing `CORPUS_NOTICE`, that these picks are from
-  the shared catalogue and that naming artists would sharpen them.
-- The first-run artists page stays (it makes the first mix better), but
-  "Skip for now" from Step 1 of 3 now goes straight to the prompt page.
+- **Two more cron triggers.** The Worker's free plan allows 5 triggers and
+  uses 2 (`0 * * * *` maintenance, `2 * * * *` enrichment). Add `22 * * *
+  *` and `42 * * * *` as enrichment-only runs: three times the pace, about
+  570 tracks a day, each run inside its own subrequest budget, 20 minutes
+  apart so LRCLIB sees a gentle rate.
+- **A kinder drain.** The founder's drain and the seed script's drain back
+  off on a call whose failures are all transient (429, 503): wait 60 s,
+  then continue; they stop only when nothing is due, when `--max` is
+  reached, or after three consecutive backed-off calls. Default
+  `--delay-ms` becomes 10,000. A provider's own cool-down is already
+  recorded per track by the runner.
+- **Sittings from the founder's machine stay the burst tool.** A sitting
+  at the new pace is about 300 tracks an hour. GitHub Actions is not used:
+  the repository is private and a scheduled drain would exceed the free
+  minutes.
 
-Gating: step 4 ships behind `NEVER_REFUSE` = off in `wrangler.jsonc` and is
-turned on only after a founder listens to three vibe-only mixes (comfort,
-default, adventurous) from the seeded catalogue and calls them acceptable.
-Before step 3, a vibe-only mix for a rap prompt over the current catalogue
-would be an off-genre mix, which is worse than the refusal.
+Expected: the 9,000-row backlog from sitting 1 clears in about two to
+three weeks of cron alone, or a few days with sittings. Step 4 no longer
+waits for it.
+
+## Step 4: never refuse (server), reshaped 2026-10-22
+
+The original Step 4 ranked the whole seeded catalogue by the prompt's vibe.
+Sitting 1 showed that is the wrong lever: scoring is the bottleneck, not
+songs, and a vibe-only pool over half-enriched rows would be thin. The
+reshaped Step 4 lets the DJ draw on what the model already knows about
+music, and makes Apple the hallucination guard, the way the album program
+does (`server/src/albums/verify.ts`: a candidate Apple cannot confirm in
+the listener's market is dropped, never shown).
+
+When step 1's floor fails for a listener with no personal data, and
+`NEVER_REFUSE` is on:
+
+1. **Propose.** One model call (Sonnet 5, the DJ's own voice) given the
+   brief, the named artists and seeds, the shape, and the listener's
+   storefront: return `targetCount + 8` songs as `{ title, artist, reason }`
+   in the order they should play, mainstream-leaning unless the brief says
+   otherwise, no two by the same artist in a row, at most three per artist,
+   and a one-line reason each in the existing reason style. This replaces
+   the curation call for this turn; there is no pool to score.
+2. **Verify.** For each proposal, one Apple `searchSongs(storefront,
+   "<title> <artist>", 5)`; keep the first hit whose credited artist key
+   matches the proposed artist (`artistMatches` from the album program,
+   adapted to credits) and whose title key matches. Cap `VERIFY_MAX` = 25
+   searches per turn and `VERIFY_DEADLINE_MS` = 10 s. Insert the hits as
+   catalogue rows through `addCatalogueSongs` (ISRC then Apple id dedupe,
+   the 1,000 priority boost, never enriched in-request), so the catalogue
+   learns every verified song for everyone.
+3. **Assemble.** The verified songs, in the model's order, cut to
+   `targetCount`, become the queue with the model's reasons. If fewer than
+   `MIN_VERIFIED` (8) verify, one more proposal call asks for replacements
+   naming the ones that failed; if still short, the DJ says what it could
+   confirm and offers to loosen (the album program's "nothing verified"
+   shape), never an empty answer.
+4. **Say so.** The DJ's reply carries a notice like `CORPUS_NOTICE`: these
+   picks are from the DJ's own knowledge, checked against Apple Music, not
+   from the listener's listening, and naming more artists or adding their
+   music sharpens them.
+
+Budget per turn: the proposal call (1 to 2 fetches), up to 25 Apple
+searches, the final reply round, the title, and the database over one
+socket: about 35 subrequests, with the prompt-time fill's in-request
+enrichment turned off on this path (its top-songs insertion stays, 6
+calls, because it compounds). Wall time: about 15 s proposal, 5 to 10 s
+verification, 15 s reply: under a minute.
+
+The corpus path (step 1's `corpus` mode over the enriched catalogue) is
+unchanged and still preferred when the floor passes, because scored rows
+carry features the model's memory does not. Personal mode is untouched.
+The first-run artists page stays; "Skip for now" goes to the prompt page
+when the flag is on. Outside picks for personal listeners are a separate
+program and unchanged.
+
+Gating: behind `NEVER_REFUSE` = off in `wrangler.jsonc`. Turned on only
+after the founder listens to three proposed mixes (comfort, default,
+adventurous) and calls them acceptable. No catalogue size gate any more.
+
+Known limits, accepted: the model's knowledge thins outside mainstream
+and recent releases (a 2026 release it has not seen cannot be proposed);
+Apple search by title can pick a cover or a live version when the credit
+matches (title key plus artist key is the guard); verified rows arrive
+unenriched and are scored only once the cron reaches them.
 
 ## What this does not do
 
@@ -225,3 +294,10 @@ golden set gains a vibe-only prompt per familiarity preset.
    (recommended), or `ng` only to start.
 5. Step 4 gate: ship behind `NEVER_REFUSE` and turn on after the three
    listening checks (recommended).
+
+Taken 2026-10-22, after Gate 3 sitting 1 (recorded in `../../decisions.md`):
+
+6. Step 4 is reshaped to model-proposed songs verified on Apple, as above;
+   the vibe-only ranking of the seeded catalogue is dropped.
+7. Enrichment throughput: two more Worker cron triggers and a kinder drain
+   (Step 3b); no GitHub Actions, no new infrastructure.

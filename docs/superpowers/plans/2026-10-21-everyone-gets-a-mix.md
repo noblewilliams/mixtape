@@ -281,39 +281,102 @@ The hourly cron keeps working through the backlog at 8 an hour meanwhile.
    least 15,000 enriched tracks. Record each sitting's counts, provider
    error rate and `pg_database_size` in `docs/backlog.md`.
 
-## Step 4: never refuse
+## Step 3b: enrichment throughput
 
-### Task 7: vibe-only corpus mode
+### Task 6b: cron triggers and a kinder drain
 
-Files: `server/src/dj/pool.ts`, `server/src/dj/loop.ts`, `server/src/index.ts`
-(`NEVER_REFUSE` var), `server/wrangler.jsonc`, `server/test/dj/pool.test.ts`,
-the golden set.
+Files: `server/wrangler.jsonc`, `server/src/enrich/scheduled.ts` (`jobsForCron`),
+`server/scripts/drain-enrichment.ts`, `server/scripts/seed-catalogue.ts`,
+`server/test/enrich/scheduled.test.ts`, `server/test/scripts/*`.
 
-- With the flag on, `resolvePoolMode` never returns `insufficient_seeds`.
-  `buildPool` in corpus mode with no matched seeds ranks by the meaning and
-  feature terms and, when the brief names a genre, by genre; familiarity 0.
-  `CORPUS_NOTICE` gains the line inviting artist names.
-- Golden set: one vibe-only prompt per familiarity preset must return a
-  full mix with at least three distinct artists and no artist above 30 %.
+- Add `22 * * * *` and `42 * * * *` to `triggers.crons`; `jobsForCron` maps
+  both to the enrichment-only job set that `2 * * * *` runs. The free plan's
+  5-trigger limit leaves one spare. Test the mapping.
+- Drain stop rule: a call whose failures are all transient (the batch
+  result's cooling count rose and nothing was enriched) backs off 60 s and
+  continues; stop after three consecutive backed-off calls, when nothing is
+  due, or at `--max`. Default `--delay-ms` 10,000; `MIN_DELAY_MS` stays.
+  The seed script inherits it through `drain()`. Tests against the fake
+  Worker: a 429 streak backs off and resumes; three in a row stops as
+  `provider-down`; a mixed call continues.
+- Record in `docs/backlog.md` the expected pace (about 570 a day from cron,
+  about 300 an hour in a sitting).
+
+### Gate 3 (founder): sittings continue
+
+Deploy Task 6b from a clean worktree. Run sittings with the new default
+pace whenever convenient; record each sitting's counts and the enriched
+total. No count gates Step 4 any more.
+
+## Step 4: never refuse, reshaped 2026-10-22
+
+### Task 7: model-proposed songs verified on Apple
+
+Files: new `server/src/dj/propose.ts`, `server/src/dj/loop.ts`,
+`server/src/dj/curate.ts` (shared reason rules), `server/src/albums/verify.ts`
+(export `artistMatches`, or move it and `fold` to a shared module),
+`server/src/index.ts` (`NEVER_REFUSE` var), `server/wrangler.jsonc`,
+`server/src/seeds/contracts.ts` (`proposed_mix` funnel type, migration for
+the CHECK), tests beside each.
+
+- `proposeSongs(llm, { brief, intent, seeds, storefront })`: one model
+  call with the DJ system prompt's voice rules, returning `{ title, artist,
+  reason }[]` of `targetCount + 8`, parsed with the same strict-JSON guard
+  as curation; reasons go through the existing reason sanitiser (140
+  characters, no em dashes, never naming the track or artist).
+- `verifyProposals(catalog, db, { proposals, storefront, budget: VERIFY_MAX
+  25, deadlineMs: VERIFY_DEADLINE_MS 10_000 })`: one `searchSongs` per
+  proposal, keep the first hit whose credited artist key and title key
+  match, insert through `addCatalogueSongs` with the boost and no
+  enrichment, return the verified rows in proposal order with their
+  reasons and the misses.
+- Loop: when `NEVER_REFUSE` is on, the mode is `insufficient_seeds` after
+  Task 2 and the fill's insertion, and the listener is not personal: run
+  propose and verify instead of the pool and curation; if fewer than
+  `MIN_VERIFIED` (8) verify, one replacement proposal naming the misses;
+  if still short, the DJ reply says what it could confirm and offers to
+  loosen. Build the queue from the verified rows in order, cut to
+  `targetCount`, mark the session `not_personal`, and prepend a
+  `PROPOSED_NOTICE` to the reply (DJ's own knowledge, checked against Apple
+  Music, not the listener's listening). The fill's in-request enrichment
+  is skipped on this path; its top-songs insertion stays.
+- Funnel: `proposed_mix` on the listener; counts (`proposed`, `verified`,
+  `searches`) on the `dj turn` log line.
 - Flag off: today's behaviour, pinned by a test.
+- Tests (golden structural, no exact tracks): a no-library listener with
+  unknown artists gets a full queue of verified rows in proposal order; a
+  proposal Apple cannot confirm is dropped; title-only matches (a cover)
+  are rejected; the replacement round runs once; short verification gives
+  the loosen reply; budget and deadline respected; verified rows are
+  inserted once with the boost; nothing changes for corpus or personal
+  listeners; no provider buttons or copy regressions; the notice has no
+  em dashes.
 
-### Task 8: first-run skip
+### Task 8: clients
 
 Files: `web/src/components/first-run/FirstRun.tsx`,
-`client/lib/presentation/screens/first_run/first_run_flow.dart`, tests.
+`client/lib/presentation/screens/first_run/first_run_flow.dart`, the
+`/me` mapping on both, tests.
 
-- With `NEVER_REFUSE` on (the client learns it from `GET /me`), "Skip for
-  now" goes to the prompt page; otherwise to the artists page as today.
+- `GET /me` reports `neverRefuse: boolean`. With it on, "Skip for now" on
+  Step 1 of 3 goes to the prompt page; the artists page remains reachable
+  from the welcome path. The "Making your mix" page is unchanged.
 
 ### Gate 4 (founder): listen, then flag on
 
-Three vibe-only mixes (comfort, default, adventurous) from the seeded
-catalogue; if acceptable, set `NEVER_REFUSE` to `on` and deploy.
+Deploy with the flag off. Set `NEVER_REFUSE` on locally (`wrangler dev`
+against production data) and make three no-library mixes naming artists the
+catalogue does not hold (comfort, default, adventurous). If the mixes read
+as yours and the reasons are honest, set the flag on in `wrangler.jsonc`,
+commit, deploy from a clean worktree, and run the Afrobeats, K-pop and
+classical prompts from Gate 2 once more: each must now return a mix on the
+first turn.
 
 ## What the founder does, in order
 
 1. Take the five decisions in the spec.
 2. Gate 1 after Step 1: done 2026-10-21.
 3. Gate 2 after Step 2: done 2026-10-22.
-4. Gate 3: the seeding sittings.
-5. Gate 4: listen, flag on.
+4. Gate 3: sittings continue at the Task 6b pace; no count gates Step 4.
+5. Gate 4: listen to three proposed mixes, then flag on and re-run the
+   Gate 2 prompts.
