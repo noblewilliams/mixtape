@@ -5,7 +5,9 @@ Status: decisions taken 2026-10-21, all five recommendations (recorded in
 and 2, each reviewed) and deployed; Gate 1 passed the same evening after two
 fixes to the DJ model calls (curation token budget, streaming with a
 deadline). Step 2 implemented and committed 2026-10-21 (Tasks 3 and 4, each
-reviewed) and deployed; Gate 2 passed 2026-10-22. Steps 3 and 4 not started. Plan: `../plans/2026-10-21-everyone-gets-a-mix.md`.
+reviewed) and deployed; Gate 2 passed 2026-10-22. Step 3 implemented and committed
+2026-10-22 (Tasks 5 and 6, each reviewed); Gate 3 owed (migration 0043, a
+deploy, then the seeding sittings). Step 4 not started. Plan: `../plans/2026-10-21-everyone-gets-a-mix.md`.
 Follows `2026-10-20-first-run-flow-design.md` (decision 4 there deferred
 this program) and reopens the 2026-10-03 "honest empty mixes" decision on
 the evidence below.
@@ -150,6 +152,20 @@ Seed the catalogue ahead of demand so step 4 has something to draw from.
 - **Quality.** Chart songs come with Apple genre and release year; the
   pool's familiarity and taste terms treat them as 0, as corpus rows are
   today. Explicit and clean twins are kept as one recording by ISRC.
+- **Provenance (built 2026-10-22).** Seeded rows and prompt-time fill rows
+  are written as `artist_source = 'apple_catalog'`, the same as
+  playlist-editing rows; `tracks` has no separate source column and
+  adding one was not worth a migration. Seeded rows therefore cannot be
+  counted or rolled back on their own; the script's own log and state
+  file are the record of what was seeded.
+- **Lists as built.** 27 Apple genre charts plus the overall chart (ids
+  from Apple's genre tree, checked live: Afrobeats 100051 under African
+  1203, Amapiano 42, K-Pop 51, Gospel 1101, Metal 1153) and 16 editorial
+  playlist search terms, one Apple Music playlist per term; 100 songs a
+  page; about 21,000 songs before dedupe, an expected 10,000 to 13,000 new
+  rows, so 15,000 enriched is reachable with the 6,000 already held.
+  Seeding is about 264 calls, roughly 20 minutes once; the drain is about
+  13 sittings at the observed 720 rows a sitting.
 
 ## Step 4: never refuse (server)
 

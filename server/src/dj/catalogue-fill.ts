@@ -165,15 +165,37 @@ async function readFillPlan(db: Db, userId: string): Promise<FillPlan> {
 
 const upperIsrc = (isrc: string | null | undefined): string | null => (isrc ? isrc.trim().toUpperCase() || null : null)
 
-// Inserts the songs the catalogue does not hold yet and puts every one of
-// them (new or already held) at the front of the enrichment queue, in the
-// order given. Dedupe is by ISRC, then Apple id: within the list, and
+// How addCatalogueSongs queues what it touches. The fill's default puts new
+// rows ahead of ordinary backlog in the order given and raises held rows to
+// the same boost; the catalogue seed (routes/enrich-seed.ts) inserts at
+// normal priority and leaves held rows alone.
+export type CatalogueQueue = {
+  // Priority for the new row at rank (0-based) among total songs.
+  priority: (rank: number, total: number) => number
+  // Floor raised onto held rows, or null to leave them as they are.
+  heldFloor: number | null
+}
+
+const FILL_QUEUE: CatalogueQueue = {
+  // Top songs first within the fill.
+  priority: (rank, total) => FILL_QUEUE_BOOST + (total - rank),
+  heldFloor: FILL_QUEUE_BOOST,
+}
+
+// Inserts the songs the catalogue does not hold yet and queues them (the
+// fill's default: every one of them, new or already held, ahead of
+// ordinary backlog in the order given). Dedupe is by ISRC, then Apple id: within the list, and
 // against rows that already carry an Apple id (the same Apple recording,
 // perhaps under another id). A row with the same ISRC and no Apple id (a
 // Spotify export's row) is a peer identity, not a duplicate (schema.ts,
 // tracks.spotify_id): the Apple row is added and twin copy fills it.
 // Returns the new rows' ids.
-async function addCatalogueSongs(db: Db, found: CatalogSong[], storefront: string): Promise<string[]> {
+export async function addCatalogueSongs(
+  db: Db,
+  found: CatalogSong[],
+  storefront: string,
+  queue: CatalogueQueue = FILL_QUEUE,
+): Promise<string[]> {
   const songs: CatalogSong[] = []
   const seenIsrc = new Set<string>()
   const seenApple = new Set<string>()
@@ -205,16 +227,15 @@ async function addCatalogueSongs(db: Db, found: CatalogSong[], storefront: strin
       .insert(tracks)
       .values(fresh.map(({ song, rank }) => ({
         ...catalogTrackValue(song, storefront),
-        // Top songs first within the fill.
-        enrichPriority: FILL_QUEUE_BOOST + (songs.length - rank),
+        enrichPriority: queue.priority(rank, songs.length),
       })))
       .onConflictDoNothing()
       .returning({ id: tracks.id })
     inserted = rows.map((r) => r.id)
   }
-  if (held.length > 0) {
+  if (held.length > 0 && queue.heldFloor !== null) {
     await db.execute(sql`
-      UPDATE tracks t SET enrich_priority = GREATEST(t.enrich_priority, ${FILL_QUEUE_BOOST})
+      UPDATE tracks t SET enrich_priority = GREATEST(t.enrich_priority, ${queue.heldFloor})
       WHERE ${matchHeld}`)
   }
   return inserted

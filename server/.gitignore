@@ -31,3 +31,6 @@ lerna-debug.log*
 
 # misc
 .DS_Store
+
+# seed-catalogue --resume state
+.seed-catalogue-state.json

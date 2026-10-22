@@ -240,11 +240,29 @@ tests beside each.
 - Tests: dedupe, queueing, counts; the script against a fake Worker
   (resume, stop on sustained 429/503, report).
 
+Task 6 as built (2026-10-22): `POST /enrich/seed` (chart or playlist page,
+100 songs a page, one Apple call, ISRC twins copied, never enriches) and
+`POST /enrich/seed/playlists` (term to Apple Music playlists), both admin;
+`npm run seed-catalogue -- --storefronts ng,us,gb [--per-list 200]
+[--max N] [--delay-ms 4000] [--resume]` seeds every list then drives the
+drain; an uncharted genre is an empty list, a broken token is a hard stop
+(502), a 429 or 503 cools down and retries three times. State lives in
+`server/.seed-catalogue-state.json` (git-ignored); pass `--resume` on every
+sitting after the first.
+
 ### Gate 3 (founder): the first pass
 
-Run the script for `ng`, `us`, `gb` in sittings until coverage reports at
-least 15,000 enriched tracks. Record the sittings, provider error rates and
-the Neon storage figure in `docs/backlog.md` after each sitting.
+1. Migration 0043 first, then deploy, in the window above (between :15
+   and :45, a quiet hour): from a clean worktree `DATABASE_URL=... npx
+   drizzle-kit migrate`, then `npx wrangler deploy`. Confirm one mix still
+   comes back and the Worker's `dj turn` log shows no error.
+2. First sitting, from `server/` with `ENRICH_ADMIN_TOKEN` in `.dev.vars`:
+   `npm run seed-catalogue -- --storefronts ng,us,gb --max 700`. Seeding
+   is about 20 minutes; the drain follows. Read the inserted counts per
+   list and the coverage report at the end.
+3. Later sittings: the same with `--resume`, until the report shows at
+   least 15,000 enriched tracks. Record each sitting's counts, provider
+   error rate and `pg_database_size` in `docs/backlog.md`.
 
 ## Step 4: never refuse
 

@@ -22,6 +22,7 @@ import {
   type AppleCatalogArtistClient,
   type AppleCatalogClient,
   type AppleCatalogSearchClient,
+  type AppleCatalogSeedClient,
   type AppleIsrcCatalogClient,
   type FetchLike,
 } from './musickit/catalog'
@@ -190,7 +191,7 @@ export function buildMusicKit(
   },
   allowedOrigins: string[],
   fetchLike: FetchLike = fetch,
-): (MusicKitWiring & { catalog: AppleCatalogClient & AppleIsrcCatalogClient & AppleCatalogSearchClient & AppleCatalogAlbumClient & AppleCatalogArtistClient }) | undefined {
+): (MusicKitWiring & { catalog: AppleCatalogClient & AppleIsrcCatalogClient & AppleCatalogSearchClient & AppleCatalogAlbumClient & AppleCatalogArtistClient & AppleCatalogSeedClient }) | undefined {
   const keyId = env.MUSICKIT_KEY_ID
   const privateKey = env.MUSICKIT_PRIVATE_KEY
 
@@ -280,8 +281,9 @@ export default {
       const albumDeps = buildAlbumDeps(djDeps, musicKit, env)
       const albums = albumDeps ? { deps: albumDeps } : undefined
       const artwork = buildArtworkDeps(env, musicKit)
-      const enrich = env.ENRICH_ADMIN_TOKEN && (deps || artwork)
-        ? { adminToken: env.ENRICH_ADMIN_TOKEN, deps, artwork }
+      const seed = musicKit ? { catalog: musicKit.catalog } : undefined
+      const enrich = env.ENRICH_ADMIN_TOKEN && (deps || artwork || seed)
+        ? { adminToken: env.ENRICH_ADMIN_TOKEN, deps, artwork, seed }
         : undefined
       const transcribe = buildTranscribe(env)
       const app = createApp({ auth, db, enrich, dj, albums, playlistEditing, musicKit, transcribe, allowedOrigins })

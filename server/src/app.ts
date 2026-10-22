@@ -13,6 +13,7 @@ import { playlistIngestRoutes } from './routes/playlist-ingest'
 import { playlistsRoutes } from './routes/playlists'
 import { playlistEditDraftRoutes } from './routes/playlist-edit-drafts'
 import { enrichRoutes } from './routes/enrich'
+import { enrichSeedRoutes, type EnrichSeedDeps } from './routes/enrich-seed'
 import { sessionRoutes } from './routes/sessions'
 import { listenLaterRoutes } from './routes/listen-later'
 import { memoriesRoutes } from './routes/memories'
@@ -47,7 +48,9 @@ export type SessionUser = { id: string; isAnonymous?: boolean | null }
 
 export type AppVars = { user: { id: string; isAnonymous: boolean }; sessionId?: string }
 
-export type EnrichWiring = { deps?: EnrichDeps; artwork?: ArtworkDeps; adminToken: string }
+// seed: the catalogue seed's Apple client (routes/enrich-seed.ts), present
+// with MusicKit configured.
+export type EnrichWiring = { deps?: EnrichDeps; artwork?: ArtworkDeps; seed?: EnrichSeedDeps; adminToken: string }
 export type { SeedsWiring }
 export type DjWiring = { deps: DjDeps }
 // Present only with ALBUM_PICKS on (src/index.ts buildAlbumDeps).
@@ -183,9 +186,10 @@ export function createApp({
     app.use('/me/funnel-events/*', requireSession(auth))
     app.route('/me/funnel-events', funnelEventsRoutes(db))
 
-    if (enrich && (enrich.deps || enrich.artwork)) {
+    if (enrich && (enrich.deps || enrich.artwork || enrich.seed)) {
       app.use('/enrich/*', requireAdmin(enrich.adminToken))
       app.route('/enrich', enrichRoutes(db, enrich))
+      if (enrich.seed) app.route('/enrich', enrichSeedRoutes(db, enrich.seed))
     }
 
     if (dj) {

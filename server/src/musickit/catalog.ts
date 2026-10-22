@@ -65,6 +65,20 @@ export type AppleCatalogAlbumClient = {
   getAlbums(storefront: string, ids: readonly string[]): Promise<Map<string, CatalogAlbum>>
 }
 
+// One page of a chart or a playlist's songs. next is the offset of the
+// following page when Apple reports one, else null.
+export type CatalogSongPage = { songs: CatalogSong[]; next: number | null }
+
+export type CatalogPlaylist = { id: string; name: string; curator: string | null }
+
+// The catalogue seed's lists (spec 2026-10-21 everyone-gets-a-mix, step 3).
+export type AppleCatalogSeedClient = {
+  chartSongs(storefront: string, genreId: string | null, limit: number, offset?: number): Promise<CatalogSongPage>
+  searchPlaylists(storefront: string, term: string, limit: number): Promise<CatalogPlaylist[]>
+  // An unknown playlist (404) is an empty page.
+  playlistTracks(storefront: string, playlistId: string, limit: number, offset?: number): Promise<CatalogSongPage>
+}
+
 export type AppleCatalogErrorCategory =
   | 'authorization'
   | 'rate_limit'
@@ -108,6 +122,10 @@ const MAX_ALBUM_IDS_PER_REQUEST = 100
 const MAX_ALBUM_SEARCH_LIMIT = 10
 const MAX_ARTIST_SEARCH_LIMIT = 25
 const MAX_TOP_SONGS_LIMIT = 30
+const MAX_CHART_LIMIT = 200
+const MAX_PLAYLIST_SEARCH_LIMIT = 25
+const MAX_PLAYLIST_TRACKS_LIMIT = 100
+const MAX_PAGE_OFFSET = 100_000
 const MAX_INT32 = 2147483647
 const DEFAULT_TIMEOUT_MS = 5000
 const DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024
@@ -207,6 +225,42 @@ function parseAlbum(value: unknown): CatalogAlbum | null {
   }
 }
 
+function parsePlaylist(value: unknown): CatalogPlaylist | null {
+  if (!isRecord(value) || value.type !== 'playlists' || typeof value.id !== 'string' || !isRecord(value.attributes)) return null
+  const attributes = value.attributes
+  if (typeof attributes.name !== 'string' || attributes.name.trim().length === 0) return null
+  return {
+    id: value.id,
+    name: attributes.name,
+    curator: typeof attributes.curatorName === 'string' ? attributes.curatorName : null,
+  }
+}
+
+// The offset Apple's next link names, when it moves forward from this page.
+function nextOffset(next: unknown, offset: number): number | null {
+  if (typeof next !== 'string') return null
+  let raw: string | null
+  try {
+    raw = new URL(next, API_ROOT).searchParams.get('offset')
+  } catch {
+    return null
+  }
+  if (raw === null || !/^\d+$/.test(raw)) return null
+  const value = Number(raw)
+  return value > offset ? value : null
+}
+
+const validOffset = (offset: number) => Number.isInteger(offset) && offset >= 0 && offset <= MAX_PAGE_OFFSET
+
+function songPage(data: unknown[], next: unknown, offset: number): CatalogSongPage {
+  const songs = uniqueById(
+    data.map(parseSong).filter((song) => song != null && isAppleSongId(song.appleId)),
+    (song) => song.appleId,
+  )
+  // A page with no entries at all ends the list whatever next says.
+  return { songs, next: data.length > 0 ? nextOffset(next, offset) : null }
+}
+
 function categoryForStatus(status: number): AppleCatalogErrorCategory {
   if (status === 401 || status === 403) return 'authorization'
   if (status === 429) return 'rate_limit'
@@ -268,7 +322,7 @@ export function createAppleCatalogClient({
   tokenCache?: AppleCatalogTokenCache
   tokenCacheKey?: string
 }): AppleCatalogClient & AppleIsrcCatalogClient & AppleCatalogSearchClient & AppleCatalogAlbumClient
-  & AppleCatalogArtistClient {
+  & AppleCatalogArtistClient & AppleCatalogSeedClient {
   async function token(): Promise<string> {
     let cachedToken = tokenCache.get(tokenCacheKey)
     if (!cachedToken || cachedToken.expiresAt - TOKEN_REFRESH_MARGIN_SECONDS <= nowSeconds()) {
@@ -327,6 +381,100 @@ export function createAppleCatalogClient({
   }
 
   return {
+    async chartSongs(storefront, genreId, limit, offset = 0) {
+      if (
+        !/^[a-z]{2}$/.test(storefront)
+        || (genreId !== null && !/^\d{1,12}$/.test(genreId))
+        || !Number.isInteger(limit)
+        || limit < 1
+        || !validOffset(offset)
+      ) throw new AppleCatalogError('response')
+
+      const url = new URL(API_ROOT)
+      url.pathname = `/v1/catalog/${encodeURIComponent(storefront)}/charts`
+      url.searchParams.set('types', 'songs')
+      if (genreId !== null) url.searchParams.set('genre', genreId)
+      // Caps on purpose: the seed route pages with its own limit.
+      url.searchParams.set('limit', String(Math.min(limit, MAX_CHART_LIMIT)))
+      if (offset > 0) url.searchParams.set('offset', String(offset))
+      let payload: unknown
+      try {
+        payload = await request(url)
+      } catch (error) {
+        // Apple does not chart every subgenre in every storefront: it answers
+        // 404, or 400 for a genre it does not chart there. Either is an empty list.
+        if (error instanceof AppleCatalogError
+          && (error.status === 404 || (error.status === 400 && genreId !== null))) return { songs: [], next: null }
+        throw error
+      }
+      if (!isRecord(payload) || !isRecord(payload.results) || payload.errors != null) {
+        throw new AppleCatalogError('response', 200)
+      }
+      // Apple omits the songs key, or sends no chart, for a genre it does not chart.
+      const charts = payload.results.songs
+      if (charts === undefined || (Array.isArray(charts) && charts.length === 0)) return { songs: [], next: null }
+      if (!Array.isArray(charts) || !isRecord(charts[0]) || !Array.isArray(charts[0].data)) {
+        throw new AppleCatalogError('response', 200)
+      }
+      return songPage(charts[0].data, charts[0].next, offset)
+    },
+    async searchPlaylists(storefront, term, limit) {
+      const normalizedTerm = term.trim()
+      if (
+        !/^[a-z]{2}$/.test(storefront)
+        || normalizedTerm.length < 1
+        || normalizedTerm.length > 120
+        || !Number.isInteger(limit)
+        || limit < 1
+      ) throw new AppleCatalogError('response')
+
+      const url = new URL(API_ROOT)
+      url.pathname = `/v1/catalog/${encodeURIComponent(storefront)}/search`
+      url.searchParams.set('term', normalizedTerm)
+      url.searchParams.set('types', 'playlists')
+      url.searchParams.set('limit', String(Math.min(limit, MAX_PLAYLIST_SEARCH_LIMIT)))
+      const payload = await request(url)
+      if (!isRecord(payload) || !isRecord(payload.results) || payload.errors != null) {
+        throw new AppleCatalogError('response', 200)
+      }
+      // Apple omits the playlists key entirely when nothing matches.
+      if (payload.results.playlists === undefined) return []
+      if (!isRecord(payload.results.playlists) || !Array.isArray(payload.results.playlists.data)) {
+        throw new AppleCatalogError('response', 200)
+      }
+      return uniqueById(
+        payload.results.playlists.data.map(parsePlaylist)
+          .filter((playlist) => playlist != null && isAppleCatalogId(playlist.id)),
+        (playlist) => playlist.id,
+      )
+    },
+    async playlistTracks(storefront, playlistId, limit, offset = 0) {
+      if (
+        !/^[a-z]{2}$/.test(storefront)
+        || !isAppleCatalogId(playlistId)
+        // '.' and '..' pass the id pattern but the pathname setter collapses them.
+        || /^\.+$/.test(playlistId)
+        || !Number.isInteger(limit)
+        || limit < 1
+        || !validOffset(offset)
+      ) throw new AppleCatalogError('response')
+
+      const url = new URL(API_ROOT)
+      url.pathname = `/v1/catalog/${encodeURIComponent(storefront)}/playlists/${encodeURIComponent(playlistId)}/tracks`
+      url.searchParams.set('limit', String(Math.min(limit, MAX_PLAYLIST_TRACKS_LIMIT)))
+      if (offset > 0) url.searchParams.set('offset', String(offset))
+      let payload: unknown
+      try {
+        payload = await request(url)
+      } catch (error) {
+        if (error instanceof AppleCatalogError && error.status === 404) return { songs: [], next: null }
+        throw error
+      }
+      if (!isRecord(payload) || !Array.isArray(payload.data) || payload.errors != null) {
+        throw new AppleCatalogError('response', 200)
+      }
+      return songPage(payload.data, payload.next, offset)
+    },
     async searchArtists(storefront, term, limit) {
       const normalizedTerm = term.trim()
       if (
