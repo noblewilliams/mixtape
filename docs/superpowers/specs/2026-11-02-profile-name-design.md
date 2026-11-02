@@ -1,6 +1,6 @@
 # Profile name — design
 
-Status: draft 2026-11-02. Decisions taken by the founder the same day (see
+Status: implemented on branch `profile-name` 2026-11-02, not merged or deployed. Implementation note: the DJ's first name rides in the listener-data context, with the "use it rarely" rule in the static persona, not in the system prompt as data.  Decisions taken by the founder the same day (see
 `../../decisions.md` → 2026-11-02 profile name). Board pending:
 `../../mockups/2026-11-02-profile-name-states.html`.
 

@@ -63,6 +63,12 @@ uncommitted release work).
    against the board (light, dark, 390), iOS widget tests and an unsigned
    simulator build.
 
+## Done (2026-11-02)
+
+All seven tasks done with a review and fix round each: `1ceb8f2`, `6709c69` (server); `f7bf3be`, `510bc1b`, `fd29f91`, `c5c8838`, `8b3b2f3` (web); `9b0632e`, `949c34d`, `b8aa751`, `379d220`, `9d32ae5`, `f6083aa` (iOS). Departures from the contract, all reviewed: the server stamps `namePromptedAt` itself from any truthy value and never clears it; a non-string `name` is a 400; ZWJ and ZWNJ are kept and the cap takes whole graphemes; `link-social` ignores `idToken.user`, so linking sends only the token; both clients release the post-sign-in hold after 3.5 s and settle Skip only after its write succeeds.
+
+**Merge note:** the main checkout holds another session's uncommitted `server/drizzle/0045_ai_consents.sql`. Whichever lands second regenerates its migration as 0046 from the merged schema (fresh journal `when`).
+
 ## Founder gates
 
 1. Apply 0045 and deploy the Worker from a clean worktree of the merged
