@@ -10,6 +10,7 @@ import '../../data/auth/token_store.dart';
 import '../../data/auth/sign_in_preference_store.dart';
 import 'device_providers.dart';
 import 'library_sync_provider.dart' show authorStoreProvider;
+import 'name_page_provider.dart' show namePageSettledProvider;
 
 final tokenStoreProvider = Provider<TokenStore>((ref) => SecureTokenStore());
 
@@ -166,6 +167,9 @@ class AuthNotifier extends Notifier<AuthStatus> {
         throw const AuthOperationCancelled();
       }
       ref.invalidate(lastSignInProvider);
+      // Whoever this is, the root waits for /me's askName before the shell
+      // (2026-11-02 profile name); set before the session lands.
+      ref.read(namePageSettledProvider.notifier).reset();
       _isAnonymous = false;
       if (linking) {
         // Rebuild re-reads the stored (now account) token.

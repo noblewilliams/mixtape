@@ -37,12 +37,44 @@ final mergedModeReaderProvider = Provider<Future<MergedMode?> Function()>((
   ref.watch(authProvider);
   Me? answered;
   return () async {
+    final held = ref.read(heldMergeProvider.notifier).take();
+    if (held != null) {
+      // The held result is the first read's; the current one is a reread.
+      answered = ref.read(meProvider).value;
+      return held;
+    }
     final me = await ref.read(meProvider.future);
     if (me == null || identical(me, answered)) return null;
     answered = me;
     return me.merged;
   };
 });
+
+/// A merge result kept across a `/me` reread that happens before Home has
+/// read it: the name page's Continue refreshes `/me` for the new name, and
+/// the server clears `merged` on the first read, so the page holds it here.
+/// User-scoped, like the reader.
+class HeldMergeNotifier extends Notifier<MergedMode?> {
+  @override
+  MergedMode? build() {
+    ref.watch(authProvider);
+    return null;
+  }
+
+  void hold(MergedMode? merged) {
+    if (merged != null) state = merged;
+  }
+
+  MergedMode? take() {
+    final merged = state;
+    state = null;
+    return merged;
+  }
+}
+
+final heldMergeProvider = NotifierProvider<HeldMergeNotifier, MergedMode?>(
+  HeldMergeNotifier.new,
+);
 
 /// The notice to show now, if any. Never throws: a failed read says nothing.
 Future<String?> readMergeNotice(WidgetRef ref) async {

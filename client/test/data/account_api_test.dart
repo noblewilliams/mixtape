@@ -372,6 +372,27 @@ void main() {
       expect(const Me(id: 'u1', isAnonymous: false).neverRefuse, isFalse);
     });
 
+    test('askName reads the server flag; absent or non-true is off', () async {
+      final on = await meWith({
+        'user': {'id': 'u1', 'isAnonymous': false, 'name': ''},
+        'merged': null,
+        'askName': true,
+      });
+      expect(on.askName, isTrue);
+      final off = await meWith({
+        'user': {'id': 'u1', 'isAnonymous': false},
+        'merged': null,
+        'askName': 'yes',
+      });
+      expect(off.askName, isFalse);
+      final older = await meWith({
+        'user': {'id': 'u1', 'isAnonymous': false},
+        'merged': null,
+      });
+      expect(older.askName, isFalse);
+      expect(const Me(id: 'u1', isAnonymous: false).askName, isFalse);
+    });
+
     test('maps each merged value to MergedMode', () async {
       for (final entry in {
         'all': MergedMode.all,

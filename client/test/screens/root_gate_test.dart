@@ -29,6 +29,10 @@ import 'package:mixtape/presentation/screens/account_screen.dart';
 import 'package:mixtape/presentation/screens/home_screen.dart';
 import 'package:mixtape/presentation/screens/shell/shell_screen.dart';
 import 'package:mixtape/presentation/screens/first_run/welcome_screen.dart';
+import 'package:mixtape/presentation/screens/first_run/name_screen.dart';
+import 'package:mixtape/data/auth/account_api.dart' show AccountProvider;
+import 'package:mixtape/data/auth/name_page_store.dart';
+import 'package:mixtape/presentation/providers/name_page_provider.dart';
 import '../helpers/fake_bridge.dart'
     show FakeBridge, song, apiWith, emptyPlaylistSyncResponse;
 import '../helpers/fake_listening_api.dart';
@@ -246,6 +250,117 @@ void main() {
       expect(_containerOf(tester).read(isAnonymousProvider), isTrue);
     },
   );
+
+  group('the name page (2026-11-02 profile name)', () {
+    /// The server: /me asks while no name is stored; update-user stores it.
+    ({List<String> writes, List<dynamic> overrides}) server(
+      InMemoryTokenStore store, {
+      InMemoryNamePageStore? names,
+    }) {
+      final writes = <String>[];
+      var asked = false;
+      final api = ApiClient(
+        baseUrl: 'http://x',
+        tokenStore: store,
+        inner: MockClient((req) async {
+          switch (req.url.path) {
+            case '/me':
+              return http.Response(
+                '{"user":{"id":"u1","isAnonymous":false,"name":""},'
+                '"merged":null,"askName":${!asked}}',
+                200,
+              );
+            case '/api/auth/update-user':
+              writes.add(req.body);
+              asked = true;
+              return http.Response('{"status":true}', 200);
+            case '/api/auth/sign-in/social':
+              return http.Response(
+                '{}',
+                200,
+                headers: {'set-auth-token': 'account-token'},
+              );
+          }
+          return http.Response('{}', 404);
+        }),
+      );
+      return (
+        writes: writes,
+        overrides: [
+          tokenStoreProvider.overrideWithValue(store),
+          apiClientProvider.overrideWithValue(api),
+          appleAuthGatewayProvider.overrideWithValue(_Apple()),
+          signInPreferenceStoreProvider.overrideWithValue(
+            InMemorySignInPreferenceStore(),
+          ),
+          namePageStoreProvider.overrideWithValue(
+            names ?? InMemoryNamePageStore(),
+          ),
+          djApiProvider.overrideWithValue(_FakeDjApi()),
+          listeningApiProvider.overrideWithValue(FakeListeningApi()),
+          reminderSchedulerProvider.overrideWithValue(FakeReminderScheduler()),
+          servicePreferenceStoreProvider.overrideWithValue(
+            InMemoryServicePreferenceStore(),
+          ),
+          funnelOnceStoreProvider.overrideWithValue(InMemoryFunnelOnceStore()),
+        ],
+      );
+    }
+
+    testWidgets('at launch, an account /me asks about gets the page before '
+        'the shell, then Skip opens Home', (tester) async {
+      final store = InMemoryTokenStore();
+      await store.write('tok');
+      final s = server(store);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: s.overrides.cast(),
+          child: const MixtapeApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(NameScreen), findsOneWidget);
+      expect(find.byType(ShellScreen), findsNothing);
+
+      await tester.tap(find.text('Skip'));
+      await tester.pumpAndSettle();
+      expect(s.writes, ['{"namePromptedAt":true}']);
+      expect(find.byType(NameScreen), findsNothing);
+      expect(find.byType(HomeScreen), findsOneWidget);
+    });
+
+    testWidgets('after signing in from an anonymous session (Keep this mix), '
+        'the page comes first, and Continue lands on Home', (tester) async {
+      final store = InMemoryTokenStore();
+      await store.write('anon', anonymous: true);
+      // A device that settled an earlier account: the sign-in resets it.
+      final s = server(store, names: InMemoryNamePageStore(settled: true));
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: s.overrides.cast(),
+          child: const MixtapeApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(HomeScreen), findsOneWidget);
+
+      await _containerOf(
+        tester,
+      ).read(authProvider.notifier).signIn(provider: AccountProvider.apple);
+      await tester.pump();
+      expect(find.byType(HomeScreen), findsNothing);
+      await tester.pumpAndSettle();
+      expect(find.byType(NameScreen), findsOneWidget);
+      expect(find.byType(HomeScreen), findsNothing);
+
+      await tester.enterText(find.byKey(NameScreen.fieldKey), 'Ada');
+      await tester.pump();
+      await tester.tap(find.byKey(NameScreen.continueKey));
+      await tester.pumpAndSettle();
+      expect(s.writes, ['{"name":"Ada","namePromptedAt":true}']);
+      expect(find.byType(HomeScreen), findsOneWidget);
+    });
+  });
 
   testWidgets('sign-out returns to the first-run welcome', (tester) async {
     final store = InMemoryTokenStore();

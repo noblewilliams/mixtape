@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'presentation/providers/auth_provider.dart';
 import 'presentation/providers/first_run_provider.dart';
+import 'presentation/providers/name_page_provider.dart';
 import 'presentation/theme/mixtape_theme.dart';
 import 'presentation/screens/debug/foundation_gallery_screen.dart';
 import 'presentation/screens/first_run/first_run_flow.dart';
+import 'presentation/screens/first_run/name_screen.dart';
 import 'presentation/screens/shell/shell_screen.dart';
 import 'presentation/widgets/foundation/gradient_background.dart';
 
@@ -31,6 +33,9 @@ class MixtapeApp extends ConsumerWidget {
     final auth = ref.watch(authProvider);
     final anonymous = ref.watch(isAnonymousProvider);
     final firstRunActive = ref.watch(firstRunActiveProvider);
+    // The name page's device flag loads from launch, beside the token, so
+    // the account root rarely has to wait for it (2026-11-02 profile name).
+    ref.listen(namePageSettledProvider, (_, _) {});
     final root = switch (auth) {
       AuthStatus.unknown => _Root.unknown,
       AuthStatus.noSession => _Root.firstRun,
@@ -60,7 +65,9 @@ class MixtapeApp extends ConsumerWidget {
                 body: Center(child: CircularProgressIndicator()),
               ),
               _Root.firstRun => const FirstRunFlow(),
-              _Root.shell => const ShellScreen(),
+              // An account's shell waits behind the name page when /me
+              // asks for a name; anonymous sessions pass straight through.
+              _Root.shell => const NameGateView(child: ShellScreen()),
             },
     );
   }

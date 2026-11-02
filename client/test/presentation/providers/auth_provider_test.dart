@@ -8,6 +8,7 @@ import 'package:http/testing.dart';
 import 'package:mixtape/data/api/api_client.dart';
 import 'package:mixtape/data/auth/account_api.dart';
 import 'package:mixtape/data/auth/google_auth_gateway.dart';
+import 'package:mixtape/data/auth/name_page_store.dart';
 import 'package:mixtape/data/auth/sign_in_preference_store.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/listening/listening_models.dart';
@@ -16,6 +17,7 @@ import 'package:mixtape/data/onboarding/service_preference_store.dart';
 import 'package:mixtape/data/settings/author_store.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/device_providers.dart';
+import 'package:mixtape/presentation/providers/name_page_provider.dart';
 import 'package:mixtape/presentation/providers/library_sync_provider.dart'
     show authorStoreProvider;
 
@@ -61,11 +63,13 @@ class _FlippableAuth extends AuthNotifier {
 /// A container whose API answers the anonymous and social sign-in endpoints,
 /// recording each request's path and Authorization header.
 ({ProviderContainer container, List<(String, String?)> requests}) _authHarness(
-  InMemoryTokenStore store,
-) {
+  InMemoryTokenStore store, {
+  NamePageStore? names,
+}) {
   final requests = <(String, String?)>[];
   final container = ProviderContainer(overrides: [
     tokenStoreProvider.overrideWithValue(store),
+    if (names != null) namePageStoreProvider.overrideWithValue(names),
     googleAuthGatewayProvider.overrideWithValue(_Google()),
     apiClientProvider.overrideWithValue(ApiClient(
       baseUrl: 'https://example.test',
@@ -259,6 +263,29 @@ void main() {
       expect(h.container.read(userScoped), greaterThan(before));
       expect(await store.read(), 'account-token');
       expect(await store.readAnonymous(), isFalse);
+    });
+
+    test('a sign-in resets the name page flag before the session lands, so '
+        'the root waits for /me (2026-11-02 profile name)', () async {
+      final store = InMemoryTokenStore();
+      final names = InMemoryNamePageStore(settled: true);
+      final h = _authHarness(store, names: names);
+      final c = h.container;
+      addTearDown(c.dispose);
+      c.listen(namePageSettledProvider, (_, _) {});
+      await _settle();
+      expect(c.read(namePageSettledProvider), isTrue);
+
+      bool? atSession;
+      c.listen<AuthStatus>(authProvider, (_, next) {
+        if (next == AuthStatus.session) {
+          atSession = c.read(namePageSettledProvider);
+        }
+      });
+      await c.read(authProvider.notifier).signIn(provider: AccountProvider.google);
+      await _settle();
+      expect(atSession, isFalse);
+      expect(await names.read(), isFalse);
     });
 
     test('signing out of an anonymous session clears anonymity', () async {

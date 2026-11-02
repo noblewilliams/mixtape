@@ -66,7 +66,13 @@ class Me {
     this.albumPicks = false,
     this.neverRefuse = false,
     this.name,
+    this.askName = false,
   });
+
+  /// The server's verdict that this account should see the name page
+  /// (signed in, no usable name, never asked). Clients never recompute it;
+  /// absent on an older server, which reads as off.
+  final bool askName;
 
   /// Better Auth's user.name, trimmed; null when unset or blank.
   final String? name;
@@ -114,6 +120,7 @@ class AccountApi {
       albumPicks: value['albumPicks'] == true,
       neverRefuse: value['neverRefuse'] == true,
       name: _displayName(user['name']),
+      askName: value['askName'] == true,
     );
   }
 
