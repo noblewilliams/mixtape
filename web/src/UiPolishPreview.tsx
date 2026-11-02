@@ -32,6 +32,7 @@ import { BackButton } from './components/first-run/FirstRunPage'
 import { SignInPage } from './components/AuthGate'
 import { createFirstRunServices } from './components/first-run/services'
 import type { MusicKitClient } from './musickit/client'
+import { NamePage, type NamePageInitial } from './components/first-run/NamePage'
 
 const previewPlaylist: ApiPlaylistSummary = { id: 'preview', name: '“just a girl”', source: 'spotify_export', kind: 'user', origin: 'unknown', curatorName: null, artworkUrlTemplate: null, artworkBgColor: null, artworkWidth: null, artworkHeight: null, entryCount: 14, knownDurationMs: null, durationComplete: false, lastModifiedAt: null, syncedAt: '2026-09-18T12:00:00Z', inLibrary: true, capability: 'copy_only' }
 const previewEntries = ['Present Tense', 'If You Say the Word', 'The Girl Is Mine', 'Let My Baby Stay', 'Do What You Gotta Do', 'Home recording'].map((title, position) => ({ id: String(position), position, trackId: null, appleCatalogId: null, spotifyId: position === 5 ? null : '4uLU6hMCjMI75M1A2tKUQC', title, artist: 'Synthetic artist', album: null, durationMs: null, artworkUrlTemplate: null, artworkWidth: null, artworkHeight: null, artworkBgColor: null, resolved: false }))
@@ -118,6 +119,22 @@ function SettingsPreview({ state, onMemories }: { state: SettingsPreviewState; o
   return <AppSettings api={previewSettingsApi} playback={playback} userName={name} signInMethod="apple" onAccount={() => {}} onMemories={onMemories} onSignOut={() => {}} onAccountDeleted={() => {}} saveName={saveName} initialNameEdit={previewNameEdits[state]} />
 }
 
+// Profile name board NW1 (empty), NW2 (typing), NW3 (saving), NW4 (failed). Continue resolves after a
+// beat and closes the page; the failed state keeps failing so Retry shows Saving then the error again.
+type NamePreviewState = 'name-page' | 'name-page-typing' | 'name-page-saving' | 'name-page-failed'
+const previewNamePages: Partial<Record<NamePreviewState, NamePageInitial>> = {
+  'name-page-typing': { draft: 'Ada Okafor' },
+  'name-page-saving': { draft: 'Ada Okafor', saving: true },
+  'name-page-failed': { draft: 'Ada Okafor', failed: true },
+}
+function NamePagePreview({ state, onDone }: { state: NamePreviewState; onDone: () => void }) {
+  const saveName = () => new Promise<void>((resolve, reject) => setTimeout(() => {
+    if (state === 'name-page-failed') reject(new Error('preview'))
+    else resolve()
+  }, 900))
+  return <div className="first-run fr-root fr-root--over"><div className="fr-stage fr-stage--fade"><NamePage saveName={saveName} onSaved={onDone} onSkip={onDone} initial={previewNamePages[state]} /></div></div>
+}
+
 export default function UiPolishPreview() {
   const [state, setState] = useState('populated')
   const [sessions, setSessions] = useState(demoSessions.slice(0, 4).map((session, index) => ({ ...session, caseColor: tapeColors[index * 9][1] as string })))
@@ -126,7 +143,7 @@ export default function UiPolishPreview() {
   const openTab = (tab: MixesTab) => setState(tab === 'archived' ? 'archived' : tab === 'listen-later' ? 'listen-later' : 'populated')
   async function color(id: string, caseColor: string) { setSessions(current => current.map(s => s.id === id ? { ...s, caseColor } : s)) }
   const close = () => setState('populated')
-  const options = ['home', 'home-loading', 'home-empty', 'home-error', 'populated', 'loading', 'empty', 'archived', 'load-error', 'refresh-error', 'settings', 'success', 'error', 'info', 'playlist', 'preference', 'memory', 'sources', 'library', 'library-loading', 'conversation', 'conversation-blank', 'album', 'album-refined', 'listen-later', 'listen-later-empty', 'first-run', 'keep-sheet', 'sign-in-keep', 'sign-in-cap', 'merge-notice', 'delete-account', 'settings-named', 'settings-unnamed', 'settings-editing', 'settings-failed']
+  const options = ['home', 'home-loading', 'home-empty', 'home-error', 'populated', 'loading', 'empty', 'archived', 'load-error', 'refresh-error', 'settings', 'success', 'error', 'info', 'playlist', 'preference', 'memory', 'sources', 'library', 'library-loading', 'conversation', 'conversation-blank', 'album', 'album-refined', 'listen-later', 'listen-later-empty', 'first-run', 'keep-sheet', 'sign-in-keep', 'sign-in-cap', 'merge-notice', 'delete-account', 'settings-named', 'settings-unnamed', 'settings-editing', 'settings-failed', 'name-page', 'name-page-typing', 'name-page-saving', 'name-page-failed']
   return <>
     <div style={{ position: 'fixed', right: 12, top: 8, zIndex: 200, display: 'flex', gap: 8, alignItems: 'center', background: '#f7f4f8', color: '#1c1a1e', padding: 8, borderRadius: 8, fontSize: 12 }}>
       <label htmlFor="ui-preview-state">UI preview · synthetic data</label><select id="ui-preview-state" value={state} onChange={e => setState(e.target.value)}>{options.map(option => <option key={option}>{option}</option>)}</select>
@@ -150,6 +167,7 @@ export default function UiPolishPreview() {
     {state === 'keep-sheet' && <KeepSheet onKeep={() => setState('sign-in-keep')} onNotNow={close} />}
     {(state === 'sign-in-keep' || state === 'sign-in-cap') && <div className="first-run fr-root fr-root--over"><div className="fr-sign-in"><BackButton onBack={close} className="fr-back--over" /><SignInPage variant={state === 'sign-in-cap' ? 'cap' : 'keep'} auth={{ signIn: async () => ({}) }} preferences={{ lastUsed: () => 'apple', begin: () => {}, promotePending: () => null, clearPending: () => {}, forget: () => {} }} lastUsed="apple" error="" /></div></div>}
     {state === 'merge-notice' && <Toast tone="success" message="Your mixes are in. This account already had a library, so we kept that one." />}
+    {state.startsWith('name-page') && <NamePagePreview key={state} state={state as NamePreviewState} onDone={close} />}
     {state === 'first-run' && <FirstRun services={previewFirstRunServices} signIn={{ auth: { signIn: async () => ({}) }, preferences: { lastUsed: () => null, begin: () => {}, promotePending: () => null, clearPending: () => {}, forget: () => {} }, lastUsed: null, error: '' }} onDone={close} />}
     {state === 'playlist' && <SaveDialog defaultName="Evening colours" newToYouCount={2} onSave={()=>setState('success')} onClose={close} />}
     {/* Confirming fails after a beat, so both the in-flight and failure states show. */}

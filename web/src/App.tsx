@@ -61,6 +61,8 @@ import { clearFunnelFlags, hasPostedFunnelEvent, postFunnelEventOnce } from './l
 import { clearKeptPrompt, keepPrompt, readKeptPrompt } from './lib/kept-prompt'
 import type { DraftSeed, ModeSeed } from './components/HomeComposer'
 import { clearServiceChoice, readServiceChoice, writeServiceChoice, type ServiceChoice } from './lib/service-preference'
+import { NamePage, NamePageHold } from './components/first-run/NamePage'
+import { markNamePageSettled, mayAskName } from './lib/name-page'
 
 type DialogState = 'new-tape' | 'save-playlist' | 'account' | 'interview' | null
 type MusicConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
@@ -442,20 +444,50 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   // sign-in from the in-app page (the new account remounts the workspace).
   const mergeRead = useRef(false)
   const [albumPicks, setAlbumPicks] = useState(false)
+  // The name page (2026-11-02 profile name): GET /me's askName decides. An
+  // account that may be asked waits behind the sign-in image ('hold') rather
+  // than flashing the workspace first; the merge notice waits for the answer.
+  const canSaveName = Boolean(accountAuth.updateName)
+  const [heldForName] = useState(() => canSaveName && mayAskName(user))
+  const [nameGate, setNameGate] = useState<'hold' | 'ask' | 'off'>(heldForName ? 'hold' : 'off')
+  const heldNotice = useRef<string | null>(null)
   useEffect(() => {
     if (restoring || anonymous || mergeRead.current) return
     mergeRead.current = true
     void Promise.resolve()
       .then(() => api.getMe())
-      .then(({ merged, albumPicks }) => {
+      .then(({ merged, albumPicks, askName }) => {
         setAlbumPicks(albumPicks)
+        const asking = askName && canSaveName
+        setNameGate(asking ? 'ask' : 'off')
+        if (!asking && heldForName) markNamePageSettled(user.id)
         const notice = mergeNotice(merged)
         if (!notice) return
-        announce(notice, 'success', 6000)
-        noticeHeld.current = true
+        if (asking) heldNotice.current = notice
+        else showMergeNotice(notice)
       })
-      .catch(() => undefined)
+      .catch(() => setNameGate((gate) => (gate === 'hold' ? 'off' : gate)))
   }, [restoring, anonymous])
+
+  function showMergeNotice(notice: string) {
+    announce(notice, 'success', 6000)
+    noticeHeld.current = true
+  }
+
+  /** Continue (after the save and session re-read) or Skip: the workspace, then any held notice. */
+  function closeNamePage() {
+    markNamePageSettled(user.id)
+    setNameGate('off')
+    const notice = heldNotice.current
+    heldNotice.current = null
+    if (notice) showMergeNotice(notice)
+  }
+
+  // Skip records the flag and moves on even if that write fails: the page may show once more next launch.
+  function skipNamePage() {
+    void Promise.resolve(accountAuth.markNamePrompted?.()).catch(() => undefined)
+    closeNamePage()
+  }
 
   // Keep this mix, the sign-in page over the shell, and the cap.
   const [keepSheet, setKeepSheet] = useState(false)
@@ -1372,7 +1404,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
 
   return (
     <>
-    <div className={`app-shell ${activeView !== 'session' || !activeSession ? 'app-shell--home' : ''}`} style={shellStyle} inert={addingMusic || keepSheet || signInPage !== null}>
+    <div className={`app-shell ${activeView !== 'session' || !activeSession ? 'app-shell--home' : ''}`} style={shellStyle} inert={addingMusic || keepSheet || signInPage !== null || nameGate !== 'off'}>
       <Sidebar activeView={activeView}
         onOpenHome={() => setActiveView('home')}
         onOpenMusic={openMusic}
@@ -1536,6 +1568,13 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
             onSignedIn={() => { void refetchSession?.() }}
           />
         </div>
+      </div>
+    ) : null}
+    {nameGate === 'hold' ? (
+      <div className="first-run fr-root fr-root--over"><NamePageHold /></div>
+    ) : nameGate === 'ask' && saveName ? (
+      <div className="first-run fr-root fr-root--over" data-testid="name-page">
+        <div className="fr-stage fr-stage--fade"><NamePage saveName={saveName} onSaved={closeNamePage} onSkip={skipNamePage} /></div>
       </div>
     ) : null}
     </>

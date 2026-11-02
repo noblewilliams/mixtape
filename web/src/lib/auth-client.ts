@@ -101,6 +101,13 @@ export const browserAuth: AuthBridge & Required<AccountBridge> & { forgetSession
     const result = await authClient.updateUser(body)
     if (result.error) throw new Error(result.error.message || 'Could not save the name.')
   },
+  // Skip on the name page: only the flag (the server stamps its own time).
+  markNamePrompted: async () => {
+    // The client's inferred body only knows the core fields, none of which this sends.
+    const body = { namePromptedAt: new Date().toISOString() } as Parameters<typeof authClient.updateUser>[0]
+    const result = await authClient.updateUser(body)
+    if (result.error) throw new Error(result.error.message || 'Could not record the name page.')
+  },
   signOut: () => {
     observedToken = null
     sessionTokenStore.clear()

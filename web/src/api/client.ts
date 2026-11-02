@@ -400,6 +400,8 @@ export type MeResponse = {
   albumPicks: boolean
   /** Whether a listener with no music still gets a mix (NEVER_REFUSE); false on older servers. */
   neverRefuse: boolean
+  /** Show the name page: a signed-in account with no usable name that was never asked; false on older servers. */
+  askName: boolean
 }
 /** The public flags, readable before any session exists. */
 export type PublicConfig = { neverRefuse: boolean }
@@ -619,12 +621,14 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
         merged?: MergedMode | null
         albumPicks?: boolean
         neverRefuse?: boolean
+        askName?: boolean
       }>('/me', { signal })
       return {
         user: { id: body.user.id, isAnonymous: body.user.isAnonymous === true },
         merged: body.merged ?? null,
         albumPicks: body.albumPicks === true,
         neverRefuse: body.neverRefuse === true,
+        askName: body.askName === true,
       }
     },
     getConfig: async (signal) => {

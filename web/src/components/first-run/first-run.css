@@ -331,3 +331,22 @@
 /* Making your mix: the welcome page's image and cassette, nothing to press. */
 .fr-making { display: flex; flex-direction: column; }
 .fr-making > .fr-page { flex: 1; }
+
+/* What should we call you? (board 2026-11-02 profile name, NW1 to NW6): the
+   artists' paper field at 16 px, a reserved status line, one pill, Skip. */
+.fr-nform { display: flex; flex-direction: column; }
+.fr-nfield { display: flex; align-items: center; min-height: 56px; margin-top: 24px; padding: 0 16px; border-radius: 16px; background: var(--fr-paper); color: var(--fr-ink-muted); }
+.fr-nfield input { flex: 1; min-width: 0; height: 52px; padding: 0; border: 0; background: transparent; color: var(--fr-ink); font: inherit; font-size: 1rem; }
+.fr-nfield input::placeholder { color: var(--fr-ink-muted); opacity: 1; }
+.fr-nfield input:focus { outline: none; box-shadow: none; }
+.fr-nfield input[readonly] { color: var(--fr-ink-muted); }
+.fr-nfield:focus-within { box-shadow: 0 0 0 2px var(--fr-cream); }
+.fr-ncount { flex: none; padding-left: 10px; font-size: .78em; color: #4a434a; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fr-status.fr-nstatus { min-height: 1.4em; margin-top: 10px; }
+/* Saving: three still dots, never animated. */
+.fr-dots { display: inline-flex; gap: 4px; margin-left: 2px; }
+.fr-dots i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: .55; }
+.fr-pill--busy { cursor: default; }
+/* After a sign-in there is no page to push from: the name page fades in over the hold. */
+.fr-stage.fr-stage--fade { animation: fr-fade .2s ease both; }
+.fr-hold { min-height: 100%; }

@@ -161,4 +161,16 @@ describe('browser auth name updates', () => {
     fake.updateUser.mockResolvedValueOnce({ data: null as never, error: { message: 'nope' } })
     await expect(browserAuth.updateName('')).rejects.toThrow()
   })
+
+  it('records that the name page was asked without touching the name (Skip)', async () => {
+    const { browserAuth } = await load()
+    await browserAuth.markNamePrompted()
+    expect(fake.updateUser).toHaveBeenCalledWith({ namePromptedAt: '2026-11-02T15:00:00.000Z' })
+  })
+
+  it('rejects the Skip write when Better Auth reports an error', async () => {
+    const { browserAuth } = await load()
+    fake.updateUser.mockResolvedValueOnce({ data: null as never, error: { message: 'nope' } })
+    await expect(browserAuth.markNamePrompted()).rejects.toThrow()
+  })
 })

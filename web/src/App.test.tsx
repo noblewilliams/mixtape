@@ -264,7 +264,7 @@ describe('Mixtape web shell', () => {
   })
 
   it('hides the mode control when albums are off', async () => {
-    const getMe = vi.fn(async () => ({ user: { id: user.id, isAnonymous: false }, merged: null, albumPicks: false, neverRefuse: false }))
+    const getMe = vi.fn(async () => ({ user: { id: user.id, isAnonymous: false }, merged: null, albumPicks: false, neverRefuse: false, askName: false }))
     renderApp({ api: createFakeApi({ getMe }) })
     await waitFor(() => expect(getMe).toHaveBeenCalled())
     expect(await screen.findByRole('button', { name: 'Energy journey' })).toBeInTheDocument()
