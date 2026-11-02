@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../api/api_client.dart';
+import 'identity_token.dart';
 
 enum AccountProvider { apple, google }
 
@@ -117,16 +118,25 @@ class AccountApi {
   }
 
   /// Explicit linking never signs in or replaces the existing session token.
+  ///
+  /// [givenName] / [familyName] are what Apple disclosed with the token, if
+  /// anything; they ride along as `idToken.user.name` when non-blank.
   Future<void> link({
     required AccountProvider provider,
     required String token,
+    String? givenName,
+    String? familyName,
   }) async {
     _identifier(token);
     final value = _object(
       await _request(
         () async => (await _client.postJson('/api/auth/link-social', {
           'provider': provider.name,
-          'idToken': {'token': token},
+          'idToken': idTokenJson(
+            token,
+            givenName: givenName,
+            familyName: familyName,
+          ),
         })).body,
       ),
     );

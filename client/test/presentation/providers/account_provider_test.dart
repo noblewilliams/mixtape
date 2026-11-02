@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/auth/account_api.dart';
 import 'package:mixtape/data/auth/apple_auth_gateway.dart';
+import 'package:mixtape/data/auth/identity_token.dart';
 import 'package:mixtape/presentation/providers/account_provider.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'dj_providers_test.dart' show TestAuthNotifier;
@@ -13,6 +14,7 @@ class FakeAccountApi implements AccountApi {
   Future<void> Function(LinkedAccount) onUnlink = (_) async {};
   int links = 0;
   int unlinks = 0;
+  final linkedNames = <(String?, String?)>[];
   @override
   Future<List<LinkedAccount>> list() => onList();
   @override
@@ -21,8 +23,11 @@ class FakeAccountApi implements AccountApi {
   Future<void> link({
     required AccountProvider provider,
     required String token,
+    String? givenName,
+    String? familyName,
   }) {
     links++;
+    linkedNames.add((givenName, familyName));
     return onLink(provider, token);
   }
 
@@ -60,7 +65,7 @@ void main() {
       overrides: [
         accountApiProvider.overrideWithValue(api),
         accountIdentityTokenProvider.overrideWithValue(
-          (_) async => 'identity-token',
+          (_) async => const IdentityToken('identity-token'),
         ),
         authProvider.overrideWith(() => auth),
       ],
@@ -68,6 +73,24 @@ void main() {
     container.listen(accountProvider, (_, _) {});
   });
   tearDown(() => container.dispose());
+
+  test('link passes the names Apple gave to the link request', () async {
+    container.updateOverrides([
+      accountApiProvider.overrideWithValue(api),
+      accountIdentityTokenProvider.overrideWithValue(
+        (_) async => const IdentityToken(
+          'identity-token',
+          givenName: 'Ada',
+          familyName: 'Lovelace',
+        ),
+      ),
+      authProvider.overrideWith(() => auth),
+    ]);
+    await flush();
+    api.onList = () async => [apple, google];
+    await container.read(accountProvider.notifier).link(AccountProvider.google);
+    expect(api.linkedNames, [('Ada', 'Lovelace')]);
+  });
 
   test('lost link response reconciles canonical methods', () async {
     await flush();
@@ -109,7 +132,7 @@ void main() {
   test(
     'provider authentication serializes writes and ignores account changes',
     () async {
-      final token = Completer<String>();
+      final token = Completer<IdentityToken>();
       container.updateOverrides([
         accountApiProvider.overrideWithValue(api),
         accountIdentityTokenProvider.overrideWithValue((_) => token.future),
@@ -121,7 +144,7 @@ void main() {
       expect(await notifier.link(AccountProvider.google), isFalse);
       auth.set(AuthStatus.noSession);
       await flush();
-      token.complete('old-account-token');
+      token.complete(const IdentityToken('old-account-token'));
       expect(await link, isFalse);
       expect(api.links, 0);
       expect(container.read(accountProvider).accounts, isNull);

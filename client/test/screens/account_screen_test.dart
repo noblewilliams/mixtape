@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/auth/account_api.dart';
 import 'package:mixtape/data/auth/apple_auth_gateway.dart';
+import 'package:mixtape/data/auth/identity_token.dart';
 import 'package:mixtape/data/auth/google_auth_gateway.dart';
 import 'package:mixtape/presentation/providers/account_provider.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
@@ -51,7 +52,8 @@ class _Apple implements AppleAuthGateway {
   final Future<String> Function()? onCode;
   int codes = 0;
   @override
-  Future<String> getIdentityToken() async => 'identity';
+  Future<IdentityToken> getIdentityToken() async =>
+      const IdentityToken('identity');
   @override
   Future<String> getAuthorizationCode() async {
     codes++;

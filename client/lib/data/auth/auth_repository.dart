@@ -5,6 +5,7 @@ import 'apple_auth_gateway.dart';
 import 'account_api.dart';
 import 'sign_in_preference_store.dart';
 import 'google_auth_gateway.dart';
+import 'identity_token.dart';
 import 'token_store.dart';
 
 class AuthOperationBusy implements Exception {
@@ -58,7 +59,10 @@ class AuthRepository {
     if (google == null || !google.isAvailable) {
       throw const GoogleSignInUnavailable();
     }
-    return _signIn('google', google.getIdentityToken);
+    return _signIn(
+      'google',
+      () async => IdentityToken(await google.getIdentityToken()),
+    );
   }
 
   /// Creates an anonymous session and stores its token flagged anonymous.
@@ -74,16 +78,15 @@ class AuthRepository {
   /// response's token is the account's and replaces the anonymous one.
   Future<void> _signIn(
     String provider,
-    Future<String> Function() identity,
+    Future<IdentityToken> Function() identity,
   ) => _authenticate(
     path: '/api/auth/sign-in/social',
     body: () async {
       final idToken = await identity();
-      if (idToken.trim().isEmpty) throw StateError('Missing identity token');
-      return {
-        'provider': provider,
-        'idToken': {'token': idToken},
-      };
+      if (idToken.token.trim().isEmpty) {
+        throw StateError('Missing identity token');
+      }
+      return {'provider': provider, 'idToken': idToken.toJson()};
     },
     provider: provider,
   );

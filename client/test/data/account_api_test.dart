@@ -77,6 +77,41 @@ void main() {
     },
   );
 
+  test('Apple link carries the names Apple gave, trimmed', () async {
+    final bodies = <Object?>[];
+    final api = apiWith((request) async {
+      bodies.add(jsonDecode(request.body));
+      return http.Response('{"status":true,"redirect":false,"url":""}', 200);
+    });
+    await api.link(
+      provider: AccountProvider.apple,
+      token: 'identity-token',
+      givenName: ' Ada ',
+      familyName: 'Lovelace',
+    );
+    await api.link(
+      provider: AccountProvider.apple,
+      token: 'identity-token',
+      givenName: ' ',
+      familyName: '',
+    );
+    expect(bodies, [
+      {
+        'provider': 'apple',
+        'idToken': {
+          'token': 'identity-token',
+          'user': {
+            'name': {'firstName': 'Ada', 'lastName': 'Lovelace'},
+          },
+        },
+      },
+      {
+        'provider': 'apple',
+        'idToken': {'token': 'identity-token'},
+      },
+    ]);
+  });
+
   test(
     'unlink uses the Better Auth row id, not the provider subject',
     () async {

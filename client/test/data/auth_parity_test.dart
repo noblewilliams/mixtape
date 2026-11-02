@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:mixtape/data/api/api_client.dart';
 import 'package:mixtape/data/auth/apple_auth_gateway.dart';
+import 'package:mixtape/data/auth/identity_token.dart';
 import 'package:mixtape/data/auth/auth_repository.dart';
 import 'package:mixtape/data/auth/google_auth_gateway.dart';
 import 'package:mixtape/data/auth/token_store.dart';
@@ -12,8 +13,8 @@ import 'package:mixtape/data/auth/token_store.dart';
 class Apple implements AppleAuthGateway {
   Future<String> Function()? onToken;
   @override
-  Future<String> getIdentityToken() async =>
-      onToken == null ? 'apple-id' : onToken!();
+  Future<IdentityToken> getIdentityToken() async =>
+      IdentityToken(onToken == null ? 'apple-id' : await onToken!());
   @override
   Future<String> getAuthorizationCode() async => 'apple-code';
 }

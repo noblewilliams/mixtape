@@ -5,18 +5,23 @@ import 'package:http/testing.dart';
 import 'package:mixtape/data/api/api_client.dart';
 import 'package:mixtape/data/auth/apple_auth_gateway.dart';
 import 'package:mixtape/data/auth/auth_repository.dart';
+import 'package:mixtape/data/auth/identity_token.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 
 class FakeGateway implements AppleAuthGateway {
+  FakeGateway({this.givenName, this.familyName});
+  final String? givenName;
+  final String? familyName;
   @override
-  Future<String> getIdentityToken() async => 'apple-id-token';
+  Future<IdentityToken> getIdentityToken() async =>
+      IdentityToken('apple-id-token', givenName: givenName, familyName: familyName);
   @override
   Future<String> getAuthorizationCode() async => 'apple-code';
 }
 
 class CancellingGateway implements AppleAuthGateway {
   @override
-  Future<String> getIdentityToken() async => throw AppleSignInCancelled();
+  Future<IdentityToken> getIdentityToken() async => throw AppleSignInCancelled();
   @override
   Future<String> getAuthorizationCode() async => 'apple-code';
 }
@@ -41,6 +46,61 @@ void main() {
     expect(sentBody['provider'], 'apple');
     expect(sentBody['idToken'], {'token': 'apple-id-token'});
     expect(await store.read(), 'bearer-abc');
+  });
+
+  group('Apple name', () {
+    Future<Map<String, dynamic>> sentIdToken(FakeGateway gateway) async {
+      late Map<String, dynamic> sentBody;
+      final store = InMemoryTokenStore();
+      final repo = AuthRepository(
+        tokenStore: store,
+        gateway: gateway,
+        api: ApiClient(
+          baseUrl: 'http://x',
+          tokenStore: store,
+          inner: MockClient((req) async {
+            sentBody = jsonDecode(req.body) as Map<String, dynamic>;
+            return http.Response('{"user":{}}', 200, headers: {'set-auth-token': 'bearer-abc'});
+          }),
+        ),
+      );
+      await repo.signInWithApple();
+      return sentBody['idToken'] as Map<String, dynamic>;
+    }
+
+    test('carries both name parts, trimmed', () async {
+      expect(await sentIdToken(FakeGateway(givenName: ' Ada ', familyName: 'Lovelace')), {
+        'token': 'apple-id-token',
+        'user': {
+          'name': {'firstName': 'Ada', 'lastName': 'Lovelace'},
+        },
+      });
+    });
+
+    test('carries only the part Apple gave', () async {
+      expect(await sentIdToken(FakeGateway(givenName: 'Ada', familyName: '  ')), {
+        'token': 'apple-id-token',
+        'user': {
+          'name': {'firstName': 'Ada'},
+        },
+      });
+      expect(await sentIdToken(FakeGateway(familyName: 'Lovelace')), {
+        'token': 'apple-id-token',
+        'user': {
+          'name': {'lastName': 'Lovelace'},
+        },
+      });
+    });
+
+    test('absent or blank names leave the body as before', () async {
+      for (final gateway in [
+        FakeGateway(),
+        FakeGateway(givenName: '', familyName: ''),
+        FakeGateway(givenName: '  ', familyName: '\n'),
+      ]) {
+        expect(await sentIdToken(gateway), {'token': 'apple-id-token'});
+      }
+    });
   });
 
   test('throws when the server omits set-auth-token', () async {

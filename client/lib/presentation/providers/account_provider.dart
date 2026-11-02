@@ -6,6 +6,7 @@ import '../../data/api/api_client.dart';
 import '../../data/auth/account_api.dart';
 import '../../data/auth/apple_auth_gateway.dart';
 import '../../data/auth/google_auth_gateway.dart';
+import '../../data/auth/identity_token.dart';
 import 'auth_provider.dart';
 
 final accountApiProvider = Provider<AccountApi>((ref) {
@@ -16,12 +17,14 @@ final accountApiProvider = Provider<AccountApi>((ref) {
 /// Authentication for linking only obtains a provider token. It must never
 /// invoke the sign-in repository or replace the current Mixtape session.
 final accountIdentityTokenProvider =
-    Provider<Future<String> Function(AccountProvider)>((ref) {
+    Provider<Future<IdentityToken> Function(AccountProvider)>((ref) {
       final apple = ref.watch(appleAuthGatewayProvider);
       final google = ref.watch(googleAuthGatewayProvider);
       return (provider) => switch (provider) {
         AccountProvider.apple => apple.getIdentityToken(),
-        AccountProvider.google => google.getIdentityToken(),
+        AccountProvider.google => google.getIdentityToken().then(
+          IdentityToken.new,
+        ),
       };
     });
 
@@ -118,11 +121,11 @@ class AccountNotifier extends Notifier<AccountState> {
     final api = ref.read(accountApiProvider);
     final identityToken = ref.read(accountIdentityTokenProvider);
     state = AccountState(accounts: accounts, writing: true);
-    late String token;
+    late IdentityToken token;
     try {
       token = await identityToken(provider);
       if (!_current(generation, operation)) return false;
-      if (token.trim().isEmpty) {
+      if (token.token.trim().isEmpty) {
         throw const AccountActionException('missing_identity_token');
       }
     } catch (error) {
@@ -139,7 +142,12 @@ class AccountNotifier extends Notifier<AccountState> {
       api: api,
       generation: generation,
       operation: operation,
-      write: () => api.link(provider: provider, token: token),
+      write: () => api.link(
+        provider: provider,
+        token: token.token,
+        givenName: token.givenName,
+        familyName: token.familyName,
+      ),
       succeeded: (current) =>
           current.any((account) => account.providerId == provider.name),
     );

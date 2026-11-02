@@ -10,6 +10,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:mixtape/data/api/api_client.dart';
 import 'package:mixtape/data/auth/apple_auth_gateway.dart';
+import 'package:mixtape/data/auth/identity_token.dart';
 import 'package:mixtape/data/auth/sign_in_preference_store.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/dj/dj_api.dart';
@@ -117,7 +118,8 @@ class _FakeDjApi implements DjApi {
 
 class _Apple implements AppleAuthGateway {
   @override
-  Future<String> getIdentityToken() async => 'apple-id';
+  Future<IdentityToken> getIdentityToken() async =>
+      const IdentityToken('apple-id');
   @override
   Future<String> getAuthorizationCode() async => 'apple-code';
 }

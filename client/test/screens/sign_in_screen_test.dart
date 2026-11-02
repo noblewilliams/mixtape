@@ -6,6 +6,7 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/auth/apple_auth_gateway.dart';
+import 'package:mixtape/data/auth/identity_token.dart';
 import 'package:mixtape/data/auth/auth_repository.dart';
 import 'package:mixtape/data/auth/account_api.dart';
 import 'package:mixtape/data/auth/google_auth_gateway.dart';
@@ -20,14 +21,15 @@ import 'package:mixtape/presentation/widgets/foundation/gradient_background.dart
 
 class _CancellingGateway implements AppleAuthGateway {
   @override
-  Future<String> getIdentityToken() async => throw AppleSignInCancelled();
+  Future<IdentityToken> getIdentityToken() async =>
+      throw AppleSignInCancelled();
   @override
   Future<String> getAuthorizationCode() async => 'apple-code';
 }
 
 class _BrokenGateway implements AppleAuthGateway {
   @override
-  Future<String> getIdentityToken() async =>
+  Future<IdentityToken> getIdentityToken() async =>
       throw StateError('native bridge unavailable');
   @override
   Future<String> getAuthorizationCode() async => 'apple-code';
@@ -36,7 +38,8 @@ class _BrokenGateway implements AppleAuthGateway {
 class _PendingGateway implements AppleAuthGateway {
   final Completer<String> token = Completer<String>();
   @override
-  Future<String> getIdentityToken() => token.future;
+  Future<IdentityToken> getIdentityToken() async =>
+      IdentityToken(await token.future);
   @override
   Future<String> getAuthorizationCode() async => 'apple-code';
 }
