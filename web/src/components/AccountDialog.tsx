@@ -11,6 +11,8 @@ export type AccountBridge = {
   listAccounts: () => Promise<LinkedAccount[]>
   linkProvider: (provider: AuthProvider) => Promise<{ error?: string }>
   unlinkAccount: (accountId: string) => Promise<{ error?: string }>
+  /** Sets the account name (blank removes it) and marks the name page as asked; rejects on failure. */
+  updateName?: (name: string) => Promise<void>
 }
 
 type AccountDialogProps = {

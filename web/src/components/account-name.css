@@ -1,0 +1,17 @@
+/* Settings › Account name (board 2026-11-02 profile name, W-S1 to W-S6). */
+.setting-row-actions{display:flex;gap:6px;align-items:center;flex:none}
+.account-name>span:first-child{min-width:0}
+.account-name strong{overflow-wrap:anywhere}
+.account-name-edit{flex:1;min-width:0;max-width:360px}
+.setting-row .account-name-field{flex-shrink:1;accent-color:auto;display:block;width:100%;height:30px;margin:0;padding:0;border:0;border-bottom:1px solid var(--muted);border-radius:0;background:transparent;color:inherit;font:inherit;font-size:14px;line-height:1.3}
+.account-name-field::placeholder{color:var(--muted);opacity:1}
+/* Focus is the underline thickening to 2 px slate, not a ring. */
+.setting-row .account-name-field:focus,.setting-row .account-name-field:focus-visible{outline:none;border-bottom:2px solid var(--slate);padding-top:1px}
+.setting-row .account-name-field[readonly]{color:var(--muted);border-bottom:1px dotted var(--muted);padding-top:0}
+.setting-row .account-name-field[aria-invalid="true"]:not(:focus){border-bottom-color:currentColor}
+.account-name-edit small{margin-top:6px}
+.setting-row .account-name-error{display:flex;gap:6px;align-items:center;color:#993e55}
+:where(:root[data-theme="dark"]) .setting-row .account-name-error{color:#eda4b7}
+.account-name-error svg{width:14px;height:14px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round}
+.account-name-count{float:right;margin-left:12px;font-variant-numeric:tabular-nums}
+.setting-row .account-name-save{font-weight:600}

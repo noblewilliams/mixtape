@@ -326,6 +326,12 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     clearFunnelFlags(user.id)
     ;(onAccountDeleted ?? onSignOut)()
   }, [clearLocalAccount, signInPreferences, user.id, onAccountDeleted, onSignOut])
+  // Settings shows the new name once the session re-read lands.
+  const updateName = accountAuth.updateName
+  const saveName = useMemo(() => updateName && (async (name: string) => {
+    await updateName(name)
+    await refetchSession?.()
+  }), [updateName, refetchSession])
   const activeMessages = activeSession ? messagesBySession[activeSession.id] ?? [] : []
   const activeQueue = activeSession ? queuesBySession[activeSession.id] ?? [] : []
   const activeIsAlbum = activeSession?.kind === 'album'
@@ -1374,7 +1380,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
         onOpenSettings={() => setActiveView('settings')}
       />
 
-      {activeView === 'settings' ? <AppSettings api={api} playback={playback} userName={user.name} signInMethod={lastSignInProvider} onAccount={() => setDialog('account')} onMemories={() => setActiveView('memories')} onSignOut={signOut} onAccountDeleted={accountDeleted} anonymous={anonymous} onSignIn={() => openSignIn('keep')}/> : activeView === 'home' ? <HomeDashboard
+      {activeView === 'settings' ? <AppSettings api={api} playback={playback} userName={user.name} signInMethod={lastSignInProvider} saveName={saveName} onAccount={() => setDialog('account')} onMemories={() => setActiveView('memories')} onSignOut={signOut} onAccountDeleted={accountDeleted} anonymous={anonymous} onSignIn={() => openSignIn('keep')}/> : activeView === 'home' ? <HomeDashboard
         sessions={sessions} loading={loadingCollection} error={collectionError} busy={creatingTape}
         onRetry={() => void retryCollection()} onOpenSession={openSession} onOpenMixes={() => { setMixesTab('active'); setActiveView('mixes') }}
         albumPicks={albumPicks} anonymous={anonymous} onSubmit={(prompt, { kind, shape }) => createTape(prompt, false, true, shape, undefined, kind)} transcribe={(audio,signal) => api.transcribe(audio,signal)} draftSeed={draftSeed} modeSeed={modeSeed}

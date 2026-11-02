@@ -45,6 +45,7 @@ function renderApp(options: {
   initialSessionId?: string
   initialSession?: CreateSessionResponse
   user?: typeof user & { isAnonymous?: boolean }
+  refetchSession?: () => void | Promise<void>
 } = {}) {
   const api = options.api ?? createFakeApi()
   const accountAuth = options.accountAuth ?? createFakeAccountAuth()
@@ -59,6 +60,7 @@ function renderApp(options: {
       onSignOut={vi.fn()}
       initialSessionId={options.initialSessionId}
       initialSession={options.initialSession}
+      refetchSession={options.refetchSession}
     />,
   )
   return { api, accountAuth, musicKit }
@@ -194,6 +196,22 @@ describe('Mixtape web shell', () => {
 
     expect(await screen.findByRole('dialog', { name: 'Ways to sign in' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Close account settings' })).toHaveClass('account-dialog-close')
+  })
+
+  it('saves the name from Settings through the account bridge and re-reads the session', async () => {
+    const order: string[] = []
+    const updateName = vi.fn(async () => { order.push('update') })
+    const refetchSession = vi.fn(async () => { order.push('refetch') })
+    renderApp({ accountAuth: { ...createFakeAccountAuth(), updateName }, refetchSession })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }))
+    fireEvent.click(await screen.findByRole('button', { name: /Edit name|Add your name/ }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Your name' }), { target: { value: 'Grace Hopper' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(await screen.findByText('Name saved')).toBeInTheDocument()
+    expect(updateName).toHaveBeenCalledWith('Grace Hopper')
+    expect(order).toEqual(['update', 'refetch'])
   })
 
   it('renders every closet tape as a single navigation target', async () => {

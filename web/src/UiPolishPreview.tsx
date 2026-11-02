@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { HomeDashboard } from './components/HomeDashboard'
 import { Home } from './components/Home'
 import { Sidebar } from './components/Sidebar'
@@ -6,7 +6,8 @@ import { SaveDialog, Toast } from './components/Overlays'
 import { EmptyState } from './components/UiStates'
 import { ControlModal } from './components/ControlModal'
 import { TapeSettings } from './components/TapeSettings'
-import { DeleteAccountDialog } from './components/AppSettings'
+import { AppSettings, DeleteAccountDialog, type NameEdit } from './components/AppSettings'
+import { PlaybackController } from './playback/controller'
 import { AppleMusicMark, SpotifyMark } from './components/ProviderMarks'
 import { demoAlbumMessages, demoAlbumPick, demoAlbumRefinedPick, demoAlbumRunnersUp, demoMessages, demoQueue, demoSessions, demoShelfPreviewEntries } from './data/demo'
 import { AlbumPanel } from './components/AlbumPanel'
@@ -94,6 +95,29 @@ function ListenLaterPreview({ empty, sessions, onTab, onFindAlbum }: { empty: bo
     }} />
 }
 
+// Profile name board W-S1 (unnamed), W-S2 (named), W-S3 (editing), W-S5 (failed). Saves resolve
+// after a beat and update the shown name; the failed state keeps failing so Retry shows Saving then the error again.
+const previewSettingsApi = {
+  getSuggestions: async () => ({ enabled: true, suggestion: null, dismissed: false }),
+  saveSuggestionPreference: async (enabled: boolean) => ({ enabled }),
+  playbackPreferences: async () => ({ enabled: true, revision: 1 }),
+} as unknown as MixtapeApi
+type SettingsPreviewState = 'settings-named' | 'settings-unnamed' | 'settings-editing' | 'settings-failed'
+const previewNameEdits: Partial<Record<SettingsPreviewState, NameEdit>> = {
+  'settings-editing': { draft: 'Ada Okafor' },
+  'settings-failed': { draft: 'Ada Okafor', failed: true },
+}
+function SettingsPreview({ state, onMemories }: { state: SettingsPreviewState; onMemories: () => void }) {
+  const playback = useMemo(() => new PlaybackController(previewSettingsApi, {} as MusicKitClient, 'ui-preview'), [])
+  useEffect(() => { void playback.initialize(); return () => playback.dispose() }, [playback])
+  const [name, setName] = useState(state === 'settings-unnamed' ? '' : 'Ada Okafor')
+  const saveName = (next: string) => new Promise<void>((resolve, reject) => setTimeout(() => {
+    if (state === 'settings-failed') reject(new Error('preview'))
+    else { setName(next); resolve() }
+  }, 900))
+  return <AppSettings api={previewSettingsApi} playback={playback} userName={name} signInMethod="apple" onAccount={() => {}} onMemories={onMemories} onSignOut={() => {}} onAccountDeleted={() => {}} saveName={saveName} initialNameEdit={previewNameEdits[state]} />
+}
+
 export default function UiPolishPreview() {
   const [state, setState] = useState('populated')
   const [sessions, setSessions] = useState(demoSessions.slice(0, 4).map((session, index) => ({ ...session, caseColor: tapeColors[index * 9][1] as string })))
@@ -102,17 +126,18 @@ export default function UiPolishPreview() {
   const openTab = (tab: MixesTab) => setState(tab === 'archived' ? 'archived' : tab === 'listen-later' ? 'listen-later' : 'populated')
   async function color(id: string, caseColor: string) { setSessions(current => current.map(s => s.id === id ? { ...s, caseColor } : s)) }
   const close = () => setState('populated')
-  const options = ['home', 'home-loading', 'home-empty', 'home-error', 'populated', 'loading', 'empty', 'archived', 'load-error', 'refresh-error', 'settings', 'success', 'error', 'info', 'playlist', 'preference', 'memory', 'sources', 'library', 'library-loading', 'conversation', 'conversation-blank', 'album', 'album-refined', 'listen-later', 'listen-later-empty', 'first-run', 'keep-sheet', 'sign-in-keep', 'sign-in-cap', 'merge-notice', 'delete-account']
+  const options = ['home', 'home-loading', 'home-empty', 'home-error', 'populated', 'loading', 'empty', 'archived', 'load-error', 'refresh-error', 'settings', 'success', 'error', 'info', 'playlist', 'preference', 'memory', 'sources', 'library', 'library-loading', 'conversation', 'conversation-blank', 'album', 'album-refined', 'listen-later', 'listen-later-empty', 'first-run', 'keep-sheet', 'sign-in-keep', 'sign-in-cap', 'merge-notice', 'delete-account', 'settings-named', 'settings-unnamed', 'settings-editing', 'settings-failed']
   return <>
     <div style={{ position: 'fixed', right: 12, top: 8, zIndex: 200, display: 'flex', gap: 8, alignItems: 'center', background: '#f7f4f8', color: '#1c1a1e', padding: 8, borderRadius: 8, fontSize: 12 }}>
       <label htmlFor="ui-preview-state">UI preview · synthetic data</label><select id="ui-preview-state" value={state} onChange={e => setState(e.target.value)}>{options.map(option => <option key={option}>{option}</option>)}</select>
     </div>
     <div className={state.startsWith('conversation') || state.startsWith('album') ? 'app-shell' : 'app-shell app-shell--home'}>
-      <Sidebar activeView={state.startsWith('home') ? 'home' : state === 'sources' ? 'music' : 'mixes'} onOpenHome={() => setState('home')} onOpenMusic={() => setState('sources')} onOpenMixes={close} onOpenSettings={() => setState('preference')} />
+      <Sidebar activeView={state.startsWith('home') ? 'home' : state === 'sources' ? 'music' : state.startsWith('settings-') ? 'settings' : 'mixes'} onOpenHome={() => setState('home')} onOpenMusic={() => setState('sources')} onOpenMixes={close} onOpenSettings={() => setState('preference')} />
       {state.startsWith('conversation') ? <>
         <Conversation session={sessions[0]} messages={state === 'conversation' ? demoMessages : []} thinking={false} onSend={() => {}} onOpenQueue={() => {}} attachment={<PlaylistAttachment api={previewLibraryApis.library} value={null} onSelect={async () => {}} onSessionExpired={() => {}} />} />
         <QueuePanel key={state} session={sessions[0]} tracks={state === 'conversation' ? previewQueue : []} playing={false} playbackBusy={false} musicConnection="connected" open={false} onConnect={() => {}} onTogglePlay={() => {}} onSave={() => {}} onClose={() => {}} onPreviewTracks={() => {}} onCommitQueueOp={async () => {}} />
       </>
+      : state.startsWith('settings-') ? <SettingsPreview key={state} state={state as SettingsPreviewState} onMemories={() => setState('memory')} />
       : state === 'album' || state === 'album-refined' ? <AlbumPreview key={state} state={state} session={sessions[0]} />
       : state === 'listen-later' || state === 'listen-later-empty' ? <ListenLaterPreview key={state} empty={state === 'listen-later-empty'} sessions={sessions} onTab={openTab} onFindAlbum={() => { setModeSeed({ kind: 'album', id: Date.now() }); setState('home') }} />
       : state.startsWith('home') ? <HomeDashboard sessions={state === 'home' ? sessions : []} loading={state === 'home-loading'} error={state === 'home-error' ? 'Unavailable' : ''} busy={false} player={null} suggestions={state === 'home' ? <section className="routine-suggestions"><h2>For this moment</h2><div className="routine-card"><img className="routine-tape" src="/tape.svg" alt=""/><div className="routine-copy"><h3>A softer evening</h3><p>You often slow things down around this time.</p></div><div className="routine-actions"><button className="routine-primary">Make this mix</button><button>Not today</button></div></div></section> : null} onRetry={() => setState('home')} onOpenSession={close} onOpenMixes={close} albumPicks anonymous={false} onSubmit={async()=>{setState('populated')}} transcribe={async()=>({text:'A softer evening'})} modeSeed={modeSeed} onRename={async()=>{}} onArchive={async()=>{}} onColor={color}/> : state === 'memory' ? <main className="wc-view"><h1>What the DJ knows</h1><EmptyState kind="memory" title="No saved preferences yet" description="Tell the DJ what you would like it to remember." /></main>

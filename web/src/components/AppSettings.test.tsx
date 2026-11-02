@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { StrictMode } from 'react'
-import { AppSettings, DeleteAccountDialog } from './AppSettings'
+import { AppSettings, DeleteAccountDialog, limitNameInput } from './AppSettings'
 import type { MixtapeApi, SuggestionsResponse } from '../api/client'
 import type { MusicKitClient } from '../musickit/client'
 import { PlaybackController } from '../playback/controller'
@@ -10,11 +10,11 @@ import { createFakeApi } from '../test/fake-api'
 const controllers: PlaybackController[] = []
 afterEach(() => { cleanup(); controllers.splice(0).forEach(controller => controller.dispose()) })
 const preferences = (enabled: boolean): SuggestionsResponse => ({ enabled, suggestion: null, dismissed: false })
-async function setup(api: MixtapeApi, extra: { anonymous?: boolean; onAccountDeleted?: () => void; onSignOut?: () => void } = {}) {
+async function setup(api: MixtapeApi, extra: { anonymous?: boolean; onAccountDeleted?: () => void; onSignOut?: () => void; userName?: string; saveName?: (name: string) => Promise<void> } = {}) {
   const playback = new PlaybackController(api, {} as MusicKitClient, 'settings-test')
   controllers.push(playback)
   await playback.initialize()
-  return render(<AppSettings api={api} playback={playback} userName="Test listener" signInMethod="google" onAccount={vi.fn()} onMemories={vi.fn()} onSignOut={extra.onSignOut ?? vi.fn()} onAccountDeleted={extra.onAccountDeleted ?? vi.fn()} anonymous={extra.anonymous} />)
+  return render(<AppSettings api={api} playback={playback} userName={extra.userName ?? 'Test listener'} signInMethod="google" onAccount={vi.fn()} onMemories={vi.fn()} onSignOut={extra.onSignOut ?? vi.fn()} onAccountDeleted={extra.onAccountDeleted ?? vi.fn()} anonymous={extra.anonymous} saveName={extra.saveName ?? vi.fn(async () => undefined)} />)
 }
 const recommendationToggle = () => screen.getByRole('checkbox', { name: /Recommend mixes/ })
 
@@ -167,4 +167,136 @@ it('shows the failure under StrictMode, where effects mount twice', async () => 
   fireEvent.click(confirmButton())
   expect(await within(dialog()).findByText('Couldn’t delete your account. Try again.')).toBeInTheDocument()
   expect(confirmButton()).toBeEnabled()
+})
+
+describe('the name in Settings › Account', () => {
+  const field = () => screen.getByRole('textbox', { name: 'Your name' })
+  const editName = () => screen.getByRole('button', { name: 'Edit name' })
+  const HINT = 'Up to 40 characters. Leave it blank to remove your name.'
+
+  it('reads "Your account" with Add name when the name is blank', async () => {
+    await setup(createFakeApi(), { userName: '  ' })
+    expect(screen.getByText('Your account')).toBeInTheDocument()
+    const add = screen.getByRole('button', { name: 'Add your name' })
+    expect(add).toHaveTextContent('Add name')
+    expect(screen.queryByRole('button', { name: 'Edit name' })).not.toBeInTheDocument()
+  })
+
+  it('offers Edit name before Manage account for a named account', async () => {
+    await setup(createFakeApi(), { userName: 'Ada Okafor' })
+    expect(screen.getByText('Ada Okafor')).toBeInTheDocument()
+    const buttons = screen.getAllByRole('button').map(button => button.textContent)
+    expect(buttons.indexOf('Edit name')).toBeGreaterThan(-1)
+    expect(buttons.indexOf('Edit name')).toBe(buttons.indexOf('Manage account') - 1)
+  })
+
+  it('is hidden for anonymous listeners', async () => {
+    await setup(createFakeApi(), { anonymous: true, userName: 'Listener' })
+    expect(screen.queryByRole('button', { name: /Edit name|Add your name/ })).not.toBeInTheDocument()
+    expect(screen.queryByText('Your account')).not.toBeInTheDocument()
+  })
+
+  it('edits inline: the name becomes a focused field described by the hint', async () => {
+    await setup(createFakeApi(), { userName: 'Ada Okafor' })
+    fireEvent.click(editName())
+    expect(field()).toHaveValue('Ada Okafor')
+    expect(field()).toHaveFocus()
+    expect(field()).toHaveAccessibleDescription(HINT)
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Manage account' })).not.toBeInTheDocument()
+  })
+
+  it('Escape and Cancel leave the name alone and return focus to Edit name', async () => {
+    const saveName = vi.fn(async () => undefined)
+    await setup(createFakeApi(), { userName: 'Ada Okafor', saveName })
+    fireEvent.click(editName())
+    fireEvent.change(field(), { target: { value: 'Grace' } })
+    fireEvent.keyDown(field(), { key: 'Escape' })
+    expect(screen.queryByRole('textbox', { name: 'Your name' })).not.toBeInTheDocument()
+    expect(editName()).toHaveFocus()
+    fireEvent.click(editName())
+    expect(field()).toHaveValue('Ada Okafor')
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(editName()).toHaveFocus()
+    expect(saveName).not.toHaveBeenCalled()
+  })
+
+  it('Enter saves, announces "Name saved" and returns focus to Edit name', async () => {
+    const saveName = vi.fn(async () => undefined)
+    await setup(createFakeApi(), { userName: 'Ada Okafor', saveName })
+    fireEvent.click(editName())
+    fireEvent.change(field(), { target: { value: 'Grace Hopper' } })
+    fireEvent.keyDown(field(), { key: 'Enter' })
+    await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Your name' })).not.toBeInTheDocument())
+    expect(saveName).toHaveBeenCalledWith('Grace Hopper')
+    expect(screen.getByRole('status')).toHaveTextContent('Name saved')
+    expect(editName()).toHaveFocus()
+  })
+
+  it('shows Saving… with the field read-only and the actions disabled', async () => {
+    let finish!: () => void
+    await setup(createFakeApi(), { userName: 'Ada Okafor', saveName: () => new Promise<void>(done => { finish = done }) })
+    fireEvent.click(editName())
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(screen.getByText('Saving…')).toHaveAttribute('role', 'status')
+    expect(field()).toHaveAttribute('readonly')
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
+    fireEvent.keyDown(field(), { key: 'Escape' })
+    expect(field()).toBeInTheDocument()
+    await act(async () => finish())
+  })
+
+  it('saves a blank field as a removal and announces "Name removed"', async () => {
+    const saveName = vi.fn(async () => undefined)
+    await setup(createFakeApi(), { userName: 'Ada Okafor', saveName })
+    fireEvent.click(editName())
+    fireEvent.change(field(), { target: { value: '   ' } })
+    expect(field()).toHaveAccessibleDescription('Saving a blank name removes it.')
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(saveName).toHaveBeenCalledWith(''))
+    expect(await screen.findByText('Name removed')).toBeInTheDocument()
+  })
+
+  it('stops at 40 characters, counts from 30 and says why a paste was cut', async () => {
+    await setup(createFakeApi(), { userName: '' })
+    fireEvent.click(screen.getByRole('button', { name: 'Add your name' }))
+    fireEvent.change(field(), { target: { value: 'a'.repeat(29) } })
+    expect(screen.queryByText(/of 40/)).not.toBeInTheDocument()
+    fireEvent.change(field(), { target: { value: 'a'.repeat(30) } })
+    expect(screen.getByText('30 of 40')).toBeInTheDocument()
+    fireEvent.change(field(), { target: { value: 'Oluwaseun Adaeze Okafor-Whitfield Balogun' } })
+    expect(field()).toHaveValue('Oluwaseun Adaeze Okafor-Whitfield Balogu')
+    expect(screen.getByText('40 of 40')).toBeInTheDocument()
+    expect(field()).toHaveAccessibleDescription(/Names stop at 40 characters\./)
+  })
+
+  it('never splits an emoji at the cap and turns pasted line breaks into spaces', async () => {
+    await setup(createFakeApi(), { userName: '' })
+    fireEvent.click(screen.getByRole('button', { name: 'Add your name' }))
+    fireEvent.change(field(), { target: { value: `${'a'.repeat(39)}😀😀` } })
+    expect(field()).toHaveValue(`${'a'.repeat(39)}😀`)
+    // A text input drops line breaks itself in jsdom, so the rule is checked directly.
+    expect(limitNameInput('Ada\nOkafor\u0007\u200b')).toEqual({ value: 'Ada Okafor', cut: false })
+    fireEvent.change(field(), { target: { value: 'Ada\tOkafor\u0007' } })
+    expect(field()).toHaveValue('Ada Okafor')
+  })
+
+  it('keeps the text after a failure and offers Retry', async () => {
+    const saveName = vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(undefined)
+    await setup(createFakeApi(), { userName: 'Ada Okafor', saveName })
+    fireEvent.click(editName())
+    fireEvent.change(field(), { target: { value: 'Grace Hopper' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t save your name.')
+    expect(field()).toHaveValue('Grace Hopper')
+    expect(field()).toHaveAttribute('aria-invalid', 'true')
+    const retry = screen.getByRole('button', { name: 'Retry' })
+    expect(retry).toHaveFocus()
+    fireEvent.click(retry)
+    await waitFor(() => expect(saveName).toHaveBeenCalledTimes(2))
+    expect(saveName).toHaveBeenLastCalledWith('Grace Hopper')
+    expect(await screen.findByText('Name saved')).toBeInTheDocument()
+  })
 })

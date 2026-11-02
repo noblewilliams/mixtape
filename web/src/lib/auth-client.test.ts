@@ -13,6 +13,7 @@ const fake = vi.hoisted(() => ({
   signOut: vi.fn(async () => ({})),
   notify: vi.fn(),
   anonymous: vi.fn(),
+  updateUser: vi.fn(async (_body: Record<string, unknown>) => ({ data: { status: true }, error: null as { message?: string } | null })),
 }))
 
 vi.mock('better-auth/react', () => ({
@@ -21,6 +22,7 @@ vi.mock('better-auth/react', () => ({
     signOut: fake.signOut,
     signIn: { anonymous: fake.anonymous },
     $store: { notify: fake.notify },
+    updateUser: fake.updateUser,
   }),
 }))
 
@@ -134,5 +136,31 @@ describe('browser auth token handling', () => {
     await fresh.ensureSession()
     expect(localStorage.length).toBe(0)
     expect(sessionStorage.length).toBe(0)
+  })
+})
+
+describe('browser auth name updates', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-11-02T15:00:00.000Z'))
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    fake.updateUser.mockClear()
+  })
+
+  it('sends the name with namePromptedAt so the name page never asks later', async () => {
+    const { browserAuth } = await load()
+    await browserAuth.updateName('Ada Okafor')
+    expect(fake.updateUser).toHaveBeenCalledOnce()
+    const body = fake.updateUser.mock.calls[0][0]
+    expect(JSON.parse(JSON.stringify(body))).toEqual({ name: 'Ada Okafor', namePromptedAt: '2026-11-02T15:00:00.000Z' })
+  })
+
+  it('rejects when Better Auth reports an error', async () => {
+    const { browserAuth } = await load()
+    fake.updateUser.mockResolvedValueOnce({ data: null as never, error: { message: 'nope' } })
+    await expect(browserAuth.updateName('')).rejects.toThrow()
   })
 })

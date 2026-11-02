@@ -1,6 +1,6 @@
 import { appReturnUrl } from './app-url'
 import { createAuthClient } from 'better-auth/react'
-import { anonymousClient } from 'better-auth/client/plugins'
+import { anonymousClient, inferAdditionalFields } from 'better-auth/client/plugins'
 import { AUTH_URL } from '../config'
 import type { AuthBridge } from '../components/AuthGate'
 import type { AccountBridge } from '../components/AccountDialog'
@@ -12,7 +12,8 @@ export const authClient = createAuthClient({
   // credentials: 'include' also carries an anonymous session's cookie into a
   // social sign-in, which is how the server links it to the account.
   fetchOptions: { credentials: 'include' },
-  plugins: [anonymousClient()],
+  // namePromptedAt mirrors the server's user.additionalFields entry.
+  plugins: [anonymousClient(), inferAdditionalFields({ user: { namePromptedAt: { type: 'date', required: false } } })],
 })
 
 // The token useSession last saw. A token ensureSession() stored before the
@@ -24,7 +25,7 @@ function providerLabel(provider: AuthProvider): string {
   return provider === 'apple' ? 'Apple' : 'Google'
 }
 
-export const browserAuth: AuthBridge & AccountBridge & { forgetSession: () => void } = {
+export const browserAuth: AuthBridge & Required<AccountBridge> & { forgetSession: () => void } = {
   useSession: () => {
     const session = authClient.useSession()
     const token = session.data?.session.token
@@ -89,6 +90,14 @@ export const browserAuth: AuthBridge & AccountBridge & { forgetSession: () => vo
     } catch {
       return { error: 'Could not remove that sign-in method.' }
     }
+  },
+  // Better Auth refreshes the session after /update-user, so the new name
+  // reaches every useSession reader. Saving from Settings also records that
+  // the name page was asked (2026-11-02 profile name contract).
+  updateName: async (name) => {
+    // Sent as JSON, so the date travels as an ISO string.
+    const result = await authClient.updateUser({ name, namePromptedAt: new Date() })
+    if (result.error) throw new Error(result.error.message || 'Could not save the name.')
   },
   signOut: () => {
     observedToken = null
