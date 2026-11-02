@@ -1,9 +1,10 @@
 import { TapeRackSkeleton } from './TapeRack'
 import type { CollectionView } from '../domain'
+import { publicAsset } from '../lib/public-asset'
 export function EmptyState({ kind = 'tape', title, description, action }: { kind?: 'tape' | 'memory' | 'error'; title: string; description: string; action?: { label: string; onClick: () => void } }) {
   const art = kind === 'memory' ? 'memory-object' : kind === 'error' ? 'connection-object' : 'cassette'
   return <section className="polish-empty" role={kind === 'error' ? 'alert' : undefined}>
-    <img src={kind === 'tape' ? '/tape.svg' : `/ui/${art}.svg`} alt="" />
+    <img src={publicAsset(kind === 'tape' ? 'tape.svg' : `ui/${art}.svg`)} alt="" />
     <h2>{title}</h2><p>{description}</p>
     {action && <button className={kind === 'error' ? 'minimal-retry' : 'dialog-confirm'} onClick={action.onClick}>{action.label}</button>}
   </section>

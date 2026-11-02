@@ -3,6 +3,7 @@ import { PlaylistTasteControls } from './PlaylistTasteControls'
 import { useEffect, useRef, useState } from 'react'
 import { ApiError, type ApiPlaylistSummary, type MixtapeApi } from '../api/client'
 import { MusicIcon } from './Icons'
+import { publicAsset } from '../lib/public-asset'
 
 const sourceLabel = (source: ApiPlaylistSummary['source']) =>
   source === 'spotify_export' ? 'Spotify' : 'Apple Music'
@@ -50,7 +51,7 @@ export function MusicEmpty({
 }) {
   return (
     <section className="ym-empty">
-      <img className="music-empty-art" src={title.startsWith('Couldn’t') ? '/ui/connection-object.svg' : '/tape.svg'} alt="" />
+      <img className="music-empty-art" src={publicAsset(title.startsWith('Couldn’t') ? 'ui/connection-object.svg' : 'tape.svg')} alt="" />
       <h2>{title}</h2>
       <p>{children}</p>
       <button className={title.startsWith('Couldn’t') ? 'minimal-retry' : 'btn primary'} onClick={onAction}>

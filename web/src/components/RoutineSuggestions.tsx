@@ -3,6 +3,7 @@ import type { MixtapeApi, SuggestionsResponse } from '../api/client'
 import { useRestorableState, useWorkspaceRestoring } from '../lib/workspace-restore'
 import { MixSkeletons } from './UiStates'
 import './routine-suggestions.css'
+import { publicAsset } from '../lib/public-asset'
 const zone = () => Intl.DateTimeFormat().resolvedOptions().timeZone
 export function RoutineSuggestions({
   api,
@@ -78,7 +79,7 @@ export function RoutineSuggestions({
       aria-busy={working}
     >
       {suggestion && (
-        <><h2>For this moment</h2><div className="routine-card"><img className="routine-tape" src="/tape.svg" alt=""/><div className="routine-copy"><h3>{suggestion.title}</h3><p>{suggestion.reason}</p></div>
+        <><h2>For this moment</h2><div className="routine-card"><img className="routine-tape" src={publicAsset('tape.svg')} alt=""/><div className="routine-copy"><h3>{suggestion.title}</h3><p>{suggestion.reason}</p></div>
           <div className="routine-actions">
             <button
               className="routine-primary"

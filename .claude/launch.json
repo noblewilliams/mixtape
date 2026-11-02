@@ -74,6 +74,22 @@
         "NEVER_REFUSE:on"
       ],
       "port": 8798
+    },
+    {
+      "name": "web-preview-app",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "web",
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "4181",
+        "--strictPort",
+        "--base=/app/"
+      ],
+      "port": 4181
     }
   ]
 }
