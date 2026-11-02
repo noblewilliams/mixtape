@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CreateSessionResponse, FunnelEventType } from '../../api/client'
+import { ApiError, type CreateSessionResponse, type FunnelEventType } from '../../api/client'
 import { createDeferredFunnel } from '../../lib/funnel-once'
 import type { AuthPreferenceStore, AuthProvider } from '../../lib/auth-provider'
+import { AiConsentDialog } from '../AiConsent'
 import { SignInPage, type AuthBridge } from '../AuthGate'
 import { Artists, ARTISTS_HEADLINE } from './Artists'
 import { ChooseMethod, METHOD_HEADLINE, type AddMethod } from './ChooseMethod'
@@ -131,6 +132,10 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [syncStartFailed, setSyncStartFailed] = useState(false)
+  // AI consent, asked once per flow right before the first POST /sessions.
+  // `asking` holds the prompt the dialog stands in front of.
+  const consented = useRef(false)
+  const [asking, setAsking] = useState<{ text: string; ensured: boolean } | null>(null)
   const page = trail.current[depth] ?? trail.current[0]
 
   // The first run's funnel (not Library's add flow). Events wait in memory
@@ -254,6 +259,8 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
     if (!services) return setError(MIX_FAILED)
     // A request is already running (the listener went back and pressed again): show it.
     if (mixing.current) return push({ id: 'making' })
+    // The page stays as it is behind the dialog; Not now leaves it there, unsent.
+    if (!consented.current) return setAsking({ text, ensured })
     mixing.current = true
     push({ id: 'making' })
     try {
@@ -268,6 +275,26 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
         window.history.back()
       } else setError(MIX_FAILED)
     }
+  }
+
+  /**
+   * Agree: make sure of the session (the consent row is the listener's),
+   * record the answer, then make the mix. A 404 is an older Worker with no
+   * consent route; it cannot enforce consent either, so the mix goes ahead.
+   * Any other failure rejects, and the dialog says so and stays.
+   */
+  async function agreeToAi() {
+    if (!services || !asking) return
+    const { text, ensured } = asking
+    if (!ensured) await ensure()
+    try {
+      await services.api.grantAiConsent()
+    } catch (cause) {
+      if (!(cause instanceof ApiError && cause.status === 404)) throw cause
+    }
+    consented.current = true
+    setAsking(null)
+    void makeMix(text, true)
   }
 
   /**
@@ -428,6 +455,7 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
   return (
     <div className={`first-run fr-root${adding ? ' fr-root--add' : ''}`} data-testid="first-run">
       <div className="fr-stage" key={key}>{content}</div>
+      {asking ? <AiConsentDialog onAgree={agreeToAi} onNotNow={() => setAsking(null)} /> : null}
     </div>
   )
 }

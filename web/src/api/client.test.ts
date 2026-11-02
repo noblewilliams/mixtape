@@ -323,6 +323,42 @@ describe('Mixtape API client', () => {
     }))
   })
 
+  it('reads AI consent from /me and treats an older server (no field) as granted', async () => {
+    vi.stubGlobal('fetch', fetchMock)
+    fetchMock.mockResolvedValueOnce(json({ user: { id: 'user-1', isAnonymous: false }, merged: null, aiConsent: false }))
+    fetchMock.mockResolvedValueOnce(json({ user: { id: 'user-1', isAnonymous: false }, merged: null, aiConsent: true }))
+    fetchMock.mockResolvedValueOnce(json({ user: { id: 'user-1', isAnonymous: false }, merged: null }))
+    const api = createMixtapeApi('https://api.mixtape.test')
+
+    expect((await api.getMe()).aiConsent).toBe(false)
+    expect((await api.getMe()).aiConsent).toBe(true)
+    expect((await api.getMe()).aiConsent).toBe(true)
+  })
+
+  it('records AI consent with POST /me/ai-consent and the current version', async () => {
+    fetchMock.mockResolvedValueOnce(json({ aiConsent: true }))
+    vi.stubGlobal('fetch', fetchMock)
+    const api = createMixtapeApi('https://api.mixtape.test', () => 'consent-token')
+
+    await expect(api.grantAiConsent()).resolves.toEqual({ aiConsent: true })
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('https://api.mixtape.test/me/ai-consent')
+    expect(init?.method).toBe('POST')
+    expect(init?.body).toBe(JSON.stringify({ version: '2026-11-02' }))
+    expect(new Headers(init?.headers).get('authorization')).toBe('Bearer consent-token')
+  })
+
+  it('rejects a consent answer the server did not record', async () => {
+    vi.stubGlobal('fetch', fetchMock)
+    fetchMock.mockResolvedValueOnce(json({ error: 'stale_consent_version' }, 409))
+    fetchMock.mockResolvedValueOnce(json({ aiConsent: false }))
+    const api = createMixtapeApi('https://api.mixtape.test')
+
+    await expect(api.grantAiConsent()).rejects.toMatchObject({ name: 'ApiError', status: 409, code: 'stale_consent_version' })
+    await expect(api.grantAiConsent()).rejects.toThrow()
+  })
+
   it('deletes the account with DELETE /me and no body', async () => {
     fetchMock.mockResolvedValueOnce(json({ deleted: true, apple: 'not_linked' }))
     vi.stubGlobal('fetch', fetchMock)
@@ -608,7 +644,7 @@ describe('Mixtape API client: listening import and onboarding', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('https://api.mixtape.test/me', expect.objectContaining({ credentials: 'include' }))
     expect(new Headers(fetchMock.mock.calls[0][1]!.headers).get('authorization')).toBe('Bearer me-token')
-    expect(result).toEqual({ user: { id: 'user-1', isAnonymous: false }, merged: 'mixes_only', albumPicks: false, neverRefuse: false })
+    expect(result).toEqual({ user: { id: 'user-1', isAnonymous: false }, merged: 'mixes_only', albumPicks: false, neverRefuse: false, aiConsent: true })
   })
 
   it('reports an anonymous user with no merge as merged null', async () => {
@@ -620,7 +656,7 @@ describe('Mixtape API client: listening import and onboarding', () => {
 
     const result = await createMixtapeApi('https://api.mixtape.test').getMe()
 
-    expect(result).toEqual({ user: { id: 'anon-1', isAnonymous: true }, merged: null, albumPicks: false, neverRefuse: false })
+    expect(result).toEqual({ user: { id: 'anon-1', isAnonymous: true }, merged: null, albumPicks: false, neverRefuse: false, aiConsent: true })
   })
 
   it('maps the anonymous mix cap on a new mix to AnonymousCapError', async () => {

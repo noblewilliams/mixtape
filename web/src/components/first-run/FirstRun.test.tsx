@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AuthPreferenceStore } from '../../lib/auth-provider'
-import { AnonymousCapError } from '../../api/client'
+import { AnonymousCapError, ApiError } from '../../api/client'
 import { createdSession, fakeServices, syncResult } from '../../test/first-run-fakes'
 import { FirstRun, SKIP_CONFIG_WAIT_MS, type FirstRunProps } from './FirstRun'
 
@@ -42,6 +42,11 @@ function typePrompt(text: string) {
   fireEvent.click(screen.getByRole('button', { name: 'Make a mix' }))
 }
 
+/** Answers the AI consent dialog the first mix asks behind. */
+async function agree() {
+  fireEvent.click(await screen.findByRole('button', { name: 'Agree and continue' }))
+}
+
 function nameArtists(...names: string[]) {
   const labels = ['First artist', 'Second artist', 'Third artist']
   names.forEach((name, index) => fireEvent.change(screen.getByRole('textbox', { name: labels[index] }), { target: { value: name } }))
@@ -65,12 +70,14 @@ describe('path A, make a mix now', () => {
 
     nameArtists('Burna Boy', 'Tems', 'Sade')
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    await agree()
 
     await waitFor(() => expect(onDone).toHaveBeenCalledWith(madeMix))
     expect(ensureSession).toHaveBeenCalledOnce()
     expect(actions(log)).toEqual([
       'ensureSession',
       'putArtistSeeds:Burna Boy|Tems|Sade',
+      'grantAiConsent',
       'createSession:something for a rainy commute, no talking',
     ])
   })
@@ -130,6 +137,7 @@ describe('the first mix failing', () => {
     await heading('Who do you love?')
     nameArtists('Burna Boy', 'Tems', 'Sade')
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    await agree()
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t make your mix. Try again.')
     expect(await heading('Who do you love?')).toBeInTheDocument()
@@ -152,6 +160,7 @@ describe('the first mix failing', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
     await heading('What do you want to hear?')
     typePrompt('warm up for a long run')
+    await agree()
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t make your mix. Try again.')
     expect(screen.getByRole('textbox', { name: 'Describe your mix' })).toHaveValue('warm up for a long run')
@@ -181,6 +190,7 @@ describe('making your mix', () => {
     await heading('Who do you love?')
     nameArtists('Burna Boy', 'Tems', 'Sade')
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    await agree()
     return { ...fakes, pending }
   }
 
@@ -258,6 +268,7 @@ describe('making your mix', () => {
     const pending = deferred<ReturnType<typeof createdSession>>()
     api.createSession.mockImplementationOnce(() => pending.promise)
     typePrompt('warm up for a long run')
+    await agree()
 
     expect(await heading(MAKING)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument()
@@ -276,6 +287,7 @@ describe('making your mix', () => {
     const pending = deferred<ReturnType<typeof createdSession>>()
     api.createSession.mockImplementationOnce(() => pending.promise)
     typePrompt('warm up for a long run')
+    await agree()
     await heading(MAKING)
     await act(async () => pending.reject(new TypeError('Failed to fetch')))
 
@@ -370,8 +382,9 @@ describe('path B, add my music first', () => {
     expect(screen.queryByRole('button', { name: 'Add my music first' })).not.toBeInTheDocument()
 
     typePrompt('warm up for a long run')
+    await agree()
     await waitFor(() => expect(onDone).toHaveBeenCalledWith(madeMix))
-    expect(actions(log)).toEqual(['ensureSession', 'putArtistSeeds:Burna Boy|Tems|Sade', 'ensureSession', 'createSession:warm up for a long run'])
+    expect(actions(log)).toEqual(['ensureSession', 'putArtistSeeds:Burna Boy|Tems|Sade', 'ensureSession', 'grantAiConsent', 'createSession:warm up for a long run'])
   })
 
   it('syncs Apple Music after making sure of the session, then asks with the count', async () => {
@@ -394,6 +407,7 @@ describe('path B, add my music first', () => {
     expect(screen.queryByTestId('fr-progress')).not.toBeInTheDocument()
 
     typePrompt('90s R&B, no ballads')
+    await agree()
     await waitFor(() => expect(onDone).toHaveBeenCalledWith(madeMix))
     expect(api.putArtistSeeds).not.toHaveBeenCalled()
   })
@@ -460,10 +474,11 @@ describe('never refuse, Skip for now on Step 1', () => {
     expect(screen.queryByText(/songs in/)).not.toBeInTheDocument()
 
     typePrompt('warm up for a long run')
+    await agree()
     await waitFor(() => expect(onDone).toHaveBeenCalledWith(madeMix))
     expect(screen.queryByRole('heading', { name: 'Who do you love?' })).not.toBeInTheDocument()
     expect(api.putArtistSeeds).not.toHaveBeenCalled()
-    expect(actions(log)).toEqual(['ensureSession', 'createSession:warm up for a long run'])
+    expect(actions(log)).toEqual(['ensureSession', 'grantAiConsent', 'createSession:warm up for a long run'])
   })
 
   it('with the flag on, the welcome path still asks for artists', async () => {
@@ -542,6 +557,7 @@ describe('history', () => {
       await heading('Who do you love?')
       nameArtists('Burna Boy', 'Tems', 'Sade')
       fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+      await agree()
       await waitFor(() => expect(onDone).toHaveBeenCalledWith(madeMix))
       // Welcome, Who do you love? and Making your mix.
       expect(go).toHaveBeenCalledWith(-2)
@@ -644,6 +660,7 @@ describe('first-run funnel events', () => {
 
     nameArtists('Burna Boy', 'Tems', 'Sade')
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    await agree()
     await waitFor(() => expect(onDone).toHaveBeenCalledWith(madeMix))
     expect(log.indexOf('ensureSession')).toBeLessThan(log.indexOf('postFunnelEvent:first_run_opened'))
     expect(funnelPosts(log)).toEqual(['first_run_opened', 'chose_make_mix'])
@@ -675,5 +692,92 @@ describe('first-run funnel events', () => {
     await waitFor(() => expect(syncRun.start).toHaveBeenCalledOnce())
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(funnelPosts(log)).toEqual([])
+  })
+})
+
+describe('AI consent before the first mix', () => {
+  async function toConsent() {
+    const fakes = renderFlow()
+    typePrompt('late night drive')
+    await heading('Who do you love?')
+    nameArtists('Burna Boy', 'Tems', 'Sade')
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(await screen.findByRole('dialog', { name: 'Before your first mix' })).toBeInTheDocument()
+    return fakes
+  }
+
+  it('asks before POST /sessions, and Agree records consent and then makes the mix', async () => {
+    const { api, onDone, log } = await toConsent()
+    expect(api.createSession).not.toHaveBeenCalled()
+    expect(api.grantAiConsent).not.toHaveBeenCalled()
+    expect(screen.getByRole('link', { name: 'Privacy policy' })).toHaveAttribute('href', 'https://miixtape.netlify.app/privacy/')
+
+    await agree()
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith(madeMix))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(log.indexOf('grantAiConsent')).toBeLessThan(log.indexOf('createSession:late night drive'))
+  })
+
+  it('Not now stays on the page with what was typed and sends nothing', async () => {
+    const { api, onDone } = await toConsent()
+    fireEvent.click(screen.getByRole('button', { name: 'Not now' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByRole('heading', { level: 1, name: 'Who do you love?' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Third artist' })).toHaveValue('Sade')
+    expect(api.grantAiConsent).not.toHaveBeenCalled()
+    expect(api.createSession).not.toHaveBeenCalled()
+    expect(onDone).not.toHaveBeenCalled()
+
+    // Asking again asks again.
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(await screen.findByRole('dialog', { name: 'Before your first mix' })).toBeInTheDocument()
+  })
+
+  it('makes sure of the session before recording consent on a page that has not', async () => {
+    const { log } = renderFlow({}, { neverRefuse: true })
+    fireEvent.click(screen.getByRole('button', { name: 'Add my music first' }))
+    await heading('Step 1 of 3, Which do you use?')
+    await act(async () => {})
+    fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }))
+    await heading('What do you want to hear?')
+    typePrompt('warm up for a long run')
+    await screen.findByRole('dialog', { name: 'Before your first mix' })
+    expect(actions(log)).toEqual([])
+
+    await agree()
+    await waitFor(() => expect(actions(log)).toEqual(['ensureSession', 'grantAiConsent', 'createSession:warm up for a long run']))
+  })
+
+  it('says so inline when the answer cannot be saved and does not make the mix', async () => {
+    const { api, onDone } = await toConsent()
+    api.grantAiConsent.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    await agree()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t save that. Try again.')
+    expect(screen.getByRole('dialog', { name: 'Before your first mix' })).toBeInTheDocument()
+    expect(api.createSession).not.toHaveBeenCalled()
+    expect(onDone).not.toHaveBeenCalled()
+
+    await agree()
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith(madeMix))
+  })
+
+  it('still makes the mix against an older server that has no consent route', async () => {
+    const { api, onDone } = await toConsent()
+    api.grantAiConsent.mockRejectedValueOnce(new ApiError(404, { error: 'not_found' }))
+    await agree()
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith(madeMix))
+  })
+
+  it('asks once per flow: a retry after a failed mix goes straight to making', async () => {
+    const { api, onDone } = await toConsent()
+    api.createSession.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    await agree()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t make your mix. Try again.')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith(madeMix))
+    expect(api.grantAiConsent).toHaveBeenCalledOnce()
   })
 })

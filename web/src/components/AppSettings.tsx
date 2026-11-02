@@ -4,6 +4,7 @@ import type { PlaybackController } from '../playback/controller'
 import { useRestorableState, useWorkspaceRestoring } from '../lib/workspace-restore'
 import { PlaybackPanel } from './PlaybackPanel'
 import { ControlModal } from './ControlModal'
+import { PRIVACY_POLICY_URL } from './AiConsent'
 
 type Props = {
   api: MixtapeApi
@@ -95,6 +96,12 @@ export function AppSettings({
     }
   }
 
+  const privacyRow = (
+    <div className="setting-row setting-row--action">
+      <a className="wc-text settings-link" href={PRIVACY_POLICY_URL} target="_blank" rel="noopener noreferrer">Privacy policy</a>
+    </div>
+  )
+
   return (
     <main className="app-settings">
       <h1>Settings</h1>
@@ -168,7 +175,7 @@ export function AppSettings({
           <PlaybackPanel controller={playback} settingsOnly />
         </div>
       </section>
-      {anonymous ? null : <section>
+      {anonymous ? <section>{privacyRow}</section> : <section>
         <h2>Account</h2>
         <div className="setting-row">
           <span>
@@ -185,6 +192,7 @@ export function AppSettings({
           <span>Sign out of Mixtape</span>
           <button className="wc-text" onClick={onSignOut}>Sign out</button>
         </div>
+        {privacyRow}
         <div className="setting-row setting-row--action">
           <button className="wc-text wc-danger" onClick={() => setDeleting(true)}>Delete account</button>
         </div>

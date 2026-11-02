@@ -400,7 +400,19 @@ export type MeResponse = {
   albumPicks: boolean
   /** Whether a listener with no music still gets a mix (NEVER_REFUSE); false on older servers. */
   neverRefuse: boolean
+  /**
+   * Whether the listener agreed to the current AI-processing terms. An older
+   * server sends no field and is read as granted: it can neither record the
+   * answer nor enforce it, so the client never gates against it.
+   */
+  aiConsent: boolean
 }
+/** The server's 403 on a request that would reach a model (AI_CONSENT=enforce) without consent. */
+export function isAiConsentRequired(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 403 && error.code === 'ai_consent_required'
+}
+/** The consent version this client asks for; the server answers 409 for any other. */
+export const AI_CONSENT_VERSION = '2026-11-02'
 /** The public flags, readable before any session exists. */
 export type PublicConfig = { neverRefuse: boolean }
 export type DeleteAccountResponse = {
@@ -410,6 +422,8 @@ export type DeleteAccountResponse = {
 export type MixtapeApi = {
   /** `merged` is reported once after an anonymous session joins an account; the server clears it on read. */
   getMe: (signal?: AbortSignal) => Promise<MeResponse>
+  /** Records consent to the current AI_CONSENT_VERSION (idempotent); rejects unless the server confirms it. */
+  grantAiConsent: () => Promise<{ aiConsent: true }>
   /** Reads GET /health, which needs no session; never creates one. */
   getConfig: (signal?: AbortSignal) => Promise<PublicConfig>
   transcribe: (audio: File, signal?: AbortSignal) => Promise<{text:string;language:string}>
@@ -619,13 +633,23 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
         merged?: MergedMode | null
         albumPicks?: boolean
         neverRefuse?: boolean
+        aiConsent?: boolean
       }>('/me', { signal })
       return {
         user: { id: body.user.id, isAnonymous: body.user.isAnonymous === true },
         merged: body.merged ?? null,
         albumPicks: body.albumPicks === true,
         neverRefuse: body.neverRefuse === true,
+        aiConsent: body.aiConsent !== false,
       }
+    },
+    grantAiConsent: async () => {
+      const body = await request<{ aiConsent?: boolean }>('/me/ai-consent', {
+        method: 'POST',
+        body: JSON.stringify({ version: AI_CONSENT_VERSION }),
+      })
+      if (body.aiConsent !== true) throw new Error('AI consent was not recorded')
+      return { aiConsent: true }
     },
     getConfig: async (signal) => {
       const body = await request<{ neverRefuse?: boolean }>('/health', { signal })
