@@ -31,6 +31,7 @@ import {
   playlistEditDrafts,
   playbackSettings,
   suggestionSettings,
+  aiConsents,
 } from '../../src/db/schema'
 
 // Every table that carries user_id. Children keyed only by a parent id
@@ -271,6 +272,36 @@ describe('linkAnonymousRows', () => {
       expect(third).toEqual({ mode: 'none' })
       expect(await countsFor(db, target)).toEqual(afterDelete)
     }
+  })
+
+  it('carries AI consent into an account that has none, and keeps the account answer otherwise', async () => {
+    const db = await createTestDb()
+    const anon = await makeUser(db, { anonymous: true })
+    const fresh = await makeUser(db, { anonymous: false })
+    await seedEverything(db, anon)
+    await db.insert(aiConsents).values({ userId: anon, version: '2026-11-02' })
+    await linkAnonymousRows(db, { anonymousUserId: anon, newUserId: fresh })
+    expect((await db.select().from(aiConsents)).map((r) => r.userId)).toEqual([fresh])
+
+    const anon2 = await makeUser(db, { anonymous: true })
+    const held = await makeUser(db, { anonymous: false })
+    await seedEverything(db, anon2)
+    await db.insert(aiConsents).values([{ userId: anon2, version: '2026-11-02' }, { userId: held, version: 'older' }])
+    await linkAnonymousRows(db, { anonymousUserId: anon2, newUserId: held })
+    const heldRow = (await db.select().from(aiConsents)).find((r) => r.userId === held)
+    expect(heldRow?.version).toBe('older')
+  })
+
+  it('moves an AI consent answer alone without a merge notice or funnel event', async () => {
+    const db = await createTestDb()
+    const anon = await makeUser(db, { anonymous: true })
+    const target = await makeUser(db, { anonymous: false })
+    await db.insert(djSessions).values({ userId: target, title: 'own' })
+    await db.insert(aiConsents).values({ userId: anon, version: '2026-11-02' })
+
+    expect(await linkAnonymousRows(db, { anonymousUserId: anon, newUserId: target })).toEqual({ mode: 'none' })
+    expect((await db.select().from(aiConsents)).map((r) => r.userId)).toEqual([target])
+    expect(await db.select().from(funnelEvents).where(eq(funnelEvents.userId, target))).toEqual([])
   })
 
   it('returns none and writes nothing when the ids are the same', async () => {

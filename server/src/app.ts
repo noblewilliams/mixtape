@@ -26,6 +26,7 @@ import { funnelEventsRoutes } from './routes/funnel-events'
 import { musicKitRoutes } from './routes/musickit'
 import { transcribeRoutes } from './routes/transcribe'
 import { deleteAccount, type AccountDeletionWiring } from './routes/account-deletion'
+import { aiConsentRoutes, hasAiConsent, requireAiConsent, type AiConsentMode } from './routes/ai-consent'
 import type { FetchLike } from './musickit/catalog'
 import type { Db } from './db/types'
 import type { EnrichDeps } from './enrich/pipeline'
@@ -76,6 +77,7 @@ export function createApp({
   seeds,
   transcribe,
   accountDeletion,
+  aiConsent = 'off',
   allowedOrigins = [],
 }: {
   auth: AuthLike
@@ -88,6 +90,8 @@ export function createApp({
   seeds?: SeedsWiring
   transcribe?: TranscribeWiring
   accountDeletion?: AccountDeletionWiring
+  // AI_CONSENT in wrangler.jsonc: 'enforce' refuses AI routes without consent.
+  aiConsent?: AiConsentMode
   allowedOrigins?: string[]
 }) {
   const app = new Hono<{ Variables: AppVars }>()
@@ -138,9 +142,12 @@ export function createApp({
   app.get('/me', requireSession(auth), async (c) => {
     const sessionId = c.get('sessionId')
     const merged = db && sessionId ? await takeMergedMode(db, sessionId) : null
+    // aiConsent: whether the listener agreed to the current AI consent copy
+    // (absent without a db; clients read absent as granted).
+    const aiConsentGranted = db ? await hasAiConsent(db, c.get('user').id) : undefined
     // albumPicks: whether clients may offer album sessions and Listen later.
     // neverRefuse: whether a listener with no music still gets a mix.
-    return c.json({ user: c.get('user'), merged, albumPicks: Boolean(albums), neverRefuse })
+    return c.json({ user: c.get('user'), merged, albumPicks: Boolean(albums), neverRefuse, aiConsent: aiConsentGranted })
   })
 
   if (musicKit) {
@@ -152,11 +159,14 @@ export function createApp({
   // outside the db block, next to /musickit.
   if (transcribe) {
     app.use('/transcribe', requireSession(auth))
+    if (db) app.use('/transcribe', requireAiConsent(db, aiConsent))
     app.route('/transcribe', transcribeRoutes(transcribe))
   }
 
   if (db) {
     app.delete('/me', requireSession(auth), (c) => deleteAccount(c, db, accountDeletion))
+    app.use('/me/ai-consent', requireSession(auth))
+    app.route('/me/ai-consent', aiConsentRoutes(db))
 
     app.use('/suggestions', requireSession(auth))
     app.use('/suggestions/*', requireSession(auth))
@@ -174,6 +184,7 @@ export function createApp({
     app.route('/playlists', playlistsRoutes(db))
 
     app.use('/playlist-edit-drafts/*', requireSession(auth))
+    app.use('/playlist-edit-drafts/:draftId/messages', requireAiConsent(db, aiConsent))
     app.route('/playlist-edit-drafts', playlistEditDraftRoutes(db, playlistEditing?.deps))
 
     app.use('/me/memories/*', requireSession(auth))
@@ -205,6 +216,9 @@ export function createApp({
 
     if (dj) {
       app.use('/sessions/*', requireSession(auth))
+      // Starting a mix or album and every later turn reach the model.
+      app.use('/sessions', requireAiConsent(db, aiConsent))
+      app.use('/sessions/:id/messages', requireAiConsent(db, aiConsent))
       app.route('/sessions', sessionRoutes(db, dj.deps, albums?.deps))
     }
 
