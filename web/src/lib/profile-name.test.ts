@@ -32,6 +32,13 @@ describe('cleanNameInput (what the field accepts as you type)', () => {
 describe('applyNameEdit (hard stop at 40)', () => {
   const full = 'a'.repeat(40)
 
+  it('never splits a surrogate pair when one emoji replaces another', () => {
+    expect(applyNameEdit('a😀b', 'a😃b', 3)).toEqual({ value: 'a😃b', caret: 3, cut: false })
+    expect(applyNameEdit('a😀b', 'a😃b', null)).toEqual({ value: 'a😃b', caret: 3, cut: false })
+    expect(applyNameEdit('😀', '😃', 2)).toEqual({ value: '😃', caret: 2, cut: false })
+    expect(applyNameEdit('😀', '😃', null)).toEqual({ value: '😃', caret: 2, cut: false })
+  })
+
   it('refuses typed input at the limit and keeps the caret where it was', () => {
     const typed = 'a'.repeat(20) + 'X' + 'a'.repeat(20)
     expect(applyNameEdit(full, typed, 21)).toEqual({ value: full, caret: 20, cut: true })

@@ -41,6 +41,9 @@ export function capWhole(text: string, max: number): string {
   return out
 }
 
+const isHighSurrogate = (unit: number) => unit >= 0xd800 && unit <= 0xdbff
+const isLowSurrogate = (unit: number) => unit >= 0xdc00 && unit <= 0xdfff
+
 export type NameEditResult = { value: string; caret: number; cut: boolean }
 
 /**
@@ -56,9 +59,13 @@ export function applyNameEdit(prev: string, next: string, caret: number | null):
   } else {
     while (suffix < prev.length && suffix < next.length && prev[prev.length - 1 - suffix] === next[next.length - 1 - suffix]) suffix++
   }
+  // The scans compare UTF-16 units: never start the kept suffix on the low
+  // half of a pair, or end the kept prefix on the high half.
+  if (suffix > 0 && isLowSurrogate(prev.charCodeAt(prev.length - suffix))) suffix--
   const limit = Math.min(prev.length - suffix, next.length - suffix)
   let prefix = 0
   while (prefix < limit && prev[prefix] === next[prefix]) prefix++
+  if (prefix > 0 && isHighSurrogate(prev.charCodeAt(prefix - 1))) prefix--
 
   const before = prev.slice(0, prefix)
   const after = prev.slice(prev.length - suffix)
