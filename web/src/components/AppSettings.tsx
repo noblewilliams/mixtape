@@ -1,10 +1,11 @@
-import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { MixtapeApi, PlaybackPreferences } from '../api/client'
 import type { PlaybackController } from '../playback/controller'
 import { useRestorableState, useWorkspaceRestoring } from '../lib/workspace-restore'
 import { PlaybackPanel } from './PlaybackPanel'
 import { ControlModal } from './ControlModal'
 import './account-name.css'
+import { applyNameEdit, nameLength, normalizeProfileName, PROFILE_NAME_MAX } from '../lib/profile-name'
 
 type Props = {
   api: MixtapeApi
@@ -207,21 +208,9 @@ export function AppSettings({
   )
 }
 
-export const NAME_LIMIT = 40
 export const NAME_SAVE_FAILED = 'Couldn’t save your name.'
-
-/**
- * What the field accepts: line breaks and tabs become spaces, other control
- * and format characters go, and input stops at 40 characters by code point so
- * an emoji is never split. The server applies the full rule again on save.
- */
-export function limitNameInput(value: string): { value: string; cut: boolean } {
-  const cleaned = value.replace(/[\r\n\t]/g, ' ').replace(/[\p{Cc}\p{Cf}]/gu, '')
-  const characters = Array.from(cleaned)
-  return { value: characters.slice(0, NAME_LIMIT).join(''), cut: characters.length > NAME_LIMIT }
-}
-
-const nameLength = (value: string) => Array.from(value).length
+// Long enough for a screen reader to read the newly focused Edit name first.
+const ANNOUNCE_AFTER_FOCUS_MS = 250
 
 /** Settings › Account identity row: the name (or "Your account") and its inline editor. */
 function AccountName({
@@ -237,24 +226,47 @@ function AccountName({
   saveName?: (name: string) => Promise<void>
   initialEdit?: NameEdit
 }) {
-  const named = name.trim() !== ''
+  // The saved name, shown until the session re-read brings a new `name`, so
+  // "Name saved" is never announced beside the old one.
+  const [saved, setSaved] = useState<string | null>(null)
+  const lastName = useRef(name)
+  useEffect(() => {
+    if (lastName.current === name) return
+    lastName.current = name
+    setSaved(null)
+  }, [name])
+  const shown = saved ?? name
+  const named = shown.trim() !== ''
   const [draft, setDraft] = useState<string | null>(initialEdit?.draft ?? null)
   const [saving, setSaving] = useState(false)
   const [failed, setFailed] = useState(initialEdit?.failed ?? false)
   const [cut, setCut] = useState(false)
   const [announcement, setAnnouncement] = useState('')
+  const [, setCaretTick] = useState(0)
   const hintId = useId()
   const field = useRef<HTMLInputElement>(null)
   const editButton = useRef<HTMLButtonElement>(null)
   const saveButton = useRef<HTMLButtonElement>(null)
   const focusAfter = useRef<'field' | 'edit' | 'retry' | null>(initialEdit ? (initialEdit.failed ? 'retry' : 'field') : null)
+  const pendingCaret = useRef<number | null>(null)
+  // The draft when an IME composition began; the limit applies when it ends.
+  const composeFrom = useRef<string | null>(null)
+  const announceTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const inFlight = useRef(false)
   const mounted = useRef(true)
   useEffect(() => {
     mounted.current = true
-    return () => { mounted.current = false }
+    return () => {
+      mounted.current = false
+      clearTimeout(announceTimer.current)
+    }
   }, [])
 
+  useLayoutEffect(() => {
+    const caret = pendingCaret.current
+    pendingCaret.current = null
+    if (caret !== null && field.current) field.current.setSelectionRange(caret, caret)
+  })
   useEffect(() => {
     const target = focusAfter.current
     focusAfter.current = null
@@ -268,26 +280,40 @@ function AccountName({
   })
 
   function open() {
+    clearTimeout(announceTimer.current)
     setAnnouncement('')
     setFailed(false)
     setCut(false)
-    setDraft(name)
+    setDraft(shown)
     focusAfter.current = 'field'
   }
 
   function close() {
     if (inFlight.current) return
+    composeFrom.current = null
     setDraft(null)
     setFailed(false)
     focusAfter.current = 'edit'
   }
 
+  function edit(prev: string, input: HTMLInputElement) {
+    const result = applyNameEdit(prev, input.value, input.selectionEnd)
+    setDraft(result.value)
+    setCut(result.cut)
+    if (result.value !== input.value) {
+      pendingCaret.current = result.caret
+      setCaretTick(tick => tick + 1)
+    }
+  }
+
   async function save() {
     if (inFlight.current || draft === null || !saveName) return
-    const next = draft.trim()
+    const next = normalizeProfileName(draft)
     inFlight.current = true
+    clearTimeout(announceTimer.current)
     setSaving(true)
     setFailed(false)
+    setAnnouncement('Saving…')
     try {
       await saveName(next)
     } catch {
@@ -295,6 +321,7 @@ function AccountName({
       if (mounted.current) {
         setSaving(false)
         setFailed(true)
+        setAnnouncement('')
         focusAfter.current = 'retry'
       }
       return
@@ -303,28 +330,32 @@ function AccountName({
     if (!mounted.current) return
     setSaving(false)
     setDraft(null)
-    setAnnouncement(next === '' ? 'Name removed' : 'Name saved')
+    if (next !== name) setSaved(next)
+    setAnnouncement('')
     focusAfter.current = 'edit'
+    announceTimer.current = setTimeout(() => {
+      if (mounted.current) setAnnouncement(next === '' ? 'Name removed' : 'Name saved')
+    }, ANNOUNCE_AFTER_FOCUS_MS)
   }
 
   const length = draft === null ? 0 : nameLength(draft)
-  const hint = cut || length >= NAME_LIMIT
+  const hint = cut || length >= PROFILE_NAME_MAX
     ? 'Names stop at 40 characters.'
     : draft?.trim() === ''
       ? 'Saving a blank name removes it.'
       : 'Up to 40 characters. Leave it blank to remove your name.'
 
-  // One status element for both modes, so the announcement lands in a live region that already exists.
+  // One status element for both modes, so announcements land in a live region that already exists.
   return <>
     {draft === null ? (
       <div key="name" className="setting-row account-name">
         <span>
-          <strong>{named ? name : 'Your account'}</strong>
+          <strong>{named ? shown : 'Your account'}</strong>
           <small>{signedInWith}</small>
         </span>
         <span className="setting-row-actions">
           {saveName ? (
-            <button ref={editButton} className="wc-text" aria-label={named ? undefined : 'Add your name'} onClick={open}>
+            <button ref={editButton} className="wc-text" onClick={open}>
               {named ? 'Edit name' : 'Add name'}
             </button>
           ) : null}
@@ -345,12 +376,20 @@ function AccountName({
             spellCheck={false}
             value={draft}
             readOnly={saving}
+            onCompositionStart={() => { composeFrom.current = draft }}
+            onCompositionEnd={(event) => {
+              const from = composeFrom.current ?? draft
+              composeFrom.current = null
+              edit(from, event.currentTarget)
+            }}
             onChange={(event) => {
-              const limited = limitNameInput(event.target.value)
-              setDraft(limited.value)
-              setCut(limited.cut)
+              setFailed(false)
+              const composing = composeFrom.current !== null || (event.nativeEvent as InputEvent).isComposing
+              if (composing) setDraft(event.target.value)
+              else edit(draft, event.target)
             }}
             onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing || event.keyCode === 229 || composeFrom.current !== null) return
               if (event.key === 'Enter') {
                 event.preventDefault()
                 void save()
@@ -362,7 +401,7 @@ function AccountName({
             }}
           />
           {saving ? (
-            <small id={hintId} role="status">Saving…</small>
+            <small id={hintId}>Saving…</small>
           ) : failed ? (
             <small id={hintId} className="account-name-error" role="alert">
               <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 7.5v6M12 17h.01" /></svg>
@@ -371,7 +410,7 @@ function AccountName({
           ) : (
             <small id={hintId}>
               {hint}
-              {length >= 30 ? <span className="account-name-count"> {length} of {NAME_LIMIT}</span> : null}
+              {length >= 30 ? <span className="account-name-count"> {length} of {PROFILE_NAME_MAX}</span> : null}
             </small>
           )}
         </span>

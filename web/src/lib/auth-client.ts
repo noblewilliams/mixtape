@@ -1,6 +1,6 @@
 import { appReturnUrl } from './app-url'
 import { createAuthClient } from 'better-auth/react'
-import { anonymousClient, inferAdditionalFields } from 'better-auth/client/plugins'
+import { anonymousClient } from 'better-auth/client/plugins'
 import { AUTH_URL } from '../config'
 import type { AuthBridge } from '../components/AuthGate'
 import type { AccountBridge } from '../components/AccountDialog'
@@ -12,8 +12,7 @@ export const authClient = createAuthClient({
   // credentials: 'include' also carries an anonymous session's cookie into a
   // social sign-in, which is how the server links it to the account.
   fetchOptions: { credentials: 'include' },
-  // namePromptedAt mirrors the server's user.additionalFields entry.
-  plugins: [anonymousClient(), inferAdditionalFields({ user: { namePromptedAt: { type: 'date', required: false } } })],
+  plugins: [anonymousClient()],
 })
 
 // The token useSession last saw. A token ensureSession() stored before the
@@ -95,8 +94,11 @@ export const browserAuth: AuthBridge & Required<AccountBridge> & { forgetSession
   // reaches every useSession reader. Saving from Settings also records that
   // the name page was asked (2026-11-02 profile name contract).
   updateName: async (name) => {
-    // Sent as JSON, so the date travels as an ISO string.
-    const result = await authClient.updateUser({ name, namePromptedAt: new Date() })
+    // namePromptedAt is a server-only additional field (not inferred here, so
+    // nothing reads it off the session as a typed value; GET /me's askName is
+    // the source of truth). It is written as an ISO string.
+    const body: { name: string; namePromptedAt: string } = { name, namePromptedAt: new Date().toISOString() }
+    const result = await authClient.updateUser(body)
     if (result.error) throw new Error(result.error.message || 'Could not save the name.')
   },
   signOut: () => {

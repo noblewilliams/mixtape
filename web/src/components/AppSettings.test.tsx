@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { StrictMode } from 'react'
-import { AppSettings, DeleteAccountDialog, limitNameInput } from './AppSettings'
+import { AppSettings, DeleteAccountDialog } from './AppSettings'
 import type { MixtapeApi, SuggestionsResponse } from '../api/client'
 import type { MusicKitClient } from '../musickit/client'
 import { PlaybackController } from '../playback/controller'
@@ -169,6 +169,14 @@ it('shows the failure under StrictMode, where effects mount twice', async () => 
   expect(confirmButton()).toBeEnabled()
 })
 
+/** Sets the value the way a browser does (caret after the inserted text), so the change handler sees the selection. */
+function typeInto(input: HTMLElement, value: string, caret?: number, composing = false) {
+  const element = input as HTMLInputElement
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(element, value)
+  element.setSelectionRange(caret ?? value.length, caret ?? value.length)
+  fireEvent.input(element, { isComposing: composing })
+}
+
 describe('the name in Settings › Account', () => {
   const field = () => screen.getByRole('textbox', { name: 'Your name' })
   const editName = () => screen.getByRole('button', { name: 'Edit name' })
@@ -177,8 +185,8 @@ describe('the name in Settings › Account', () => {
   it('reads "Your account" with Add name when the name is blank', async () => {
     await setup(createFakeApi(), { userName: '  ' })
     expect(screen.getByText('Your account')).toBeInTheDocument()
-    const add = screen.getByRole('button', { name: 'Add your name' })
-    expect(add).toHaveTextContent('Add name')
+    // WCAG 2.5.3: the accessible name is the visible text.
+    expect(screen.getByRole('button', { name: 'Add name' })).toHaveTextContent('Add name')
     expect(screen.queryByRole('button', { name: 'Edit name' })).not.toBeInTheDocument()
   })
 
@@ -192,7 +200,7 @@ describe('the name in Settings › Account', () => {
 
   it('is hidden for anonymous listeners', async () => {
     await setup(createFakeApi(), { anonymous: true, userName: 'Listener' })
-    expect(screen.queryByRole('button', { name: /Edit name|Add your name/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Edit name|Add name/ })).not.toBeInTheDocument()
     expect(screen.queryByText('Your account')).not.toBeInTheDocument()
   })
 
@@ -230,8 +238,9 @@ describe('the name in Settings › Account', () => {
     fireEvent.keyDown(field(), { key: 'Enter' })
     await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Your name' })).not.toBeInTheDocument())
     expect(saveName).toHaveBeenCalledWith('Grace Hopper')
-    expect(screen.getByRole('status')).toHaveTextContent('Name saved')
     expect(editName()).toHaveFocus()
+    // Announced a beat after focus lands, so a screen reader reads both.
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Name saved'))
   })
 
   it('shows Saving… with the field read-only and the actions disabled', async () => {
@@ -239,7 +248,7 @@ describe('the name in Settings › Account', () => {
     await setup(createFakeApi(), { userName: 'Ada Okafor', saveName: () => new Promise<void>(done => { finish = done }) })
     fireEvent.click(editName())
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-    expect(screen.getByText('Saving…')).toHaveAttribute('role', 'status')
+    expect(screen.getByRole('status')).toHaveTextContent('Saving…')
     expect(field()).toHaveAttribute('readonly')
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
@@ -261,7 +270,7 @@ describe('the name in Settings › Account', () => {
 
   it('stops at 40 characters, counts from 30 and says why a paste was cut', async () => {
     await setup(createFakeApi(), { userName: '' })
-    fireEvent.click(screen.getByRole('button', { name: 'Add your name' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add name' }))
     fireEvent.change(field(), { target: { value: 'a'.repeat(29) } })
     expect(screen.queryByText(/of 40/)).not.toBeInTheDocument()
     fireEvent.change(field(), { target: { value: 'a'.repeat(30) } })
@@ -272,15 +281,70 @@ describe('the name in Settings › Account', () => {
     expect(field()).toHaveAccessibleDescription(/Names stop at 40 characters\./)
   })
 
-  it('never splits an emoji at the cap and turns pasted line breaks into spaces', async () => {
+  it('keeps joined emoji and ZWNJ spellings and never splits a flag at the cap', async () => {
     await setup(createFakeApi(), { userName: '' })
-    fireEvent.click(screen.getByRole('button', { name: 'Add your name' }))
-    fireEvent.change(field(), { target: { value: `${'a'.repeat(39)}😀😀` } })
-    expect(field()).toHaveValue(`${'a'.repeat(39)}😀`)
-    // A text input drops line breaks itself in jsdom, so the rule is checked directly.
-    expect(limitNameInput('Ada\nOkafor\u0007\u200b')).toEqual({ value: 'Ada Okafor', cut: false })
-    fireEvent.change(field(), { target: { value: 'Ada\tOkafor\u0007' } })
-    expect(field()).toHaveValue('Ada Okafor')
+    fireEvent.click(screen.getByRole('button', { name: 'Add name' }))
+    typeInto(field(), 'Ada 👩‍👩‍👧 می\u200cخواهم')
+    expect(field()).toHaveValue('Ada 👩‍👩‍👧 می\u200cخواهم')
+    typeInto(field(), 'a'.repeat(39))
+    typeInto(field(), `${'a'.repeat(39)}🇳🇬`)
+    expect(field()).toHaveValue('a'.repeat(39))
+    expect(field()).toHaveAccessibleDescription(/Names stop at 40 characters\./)
+  })
+
+  it('refuses a mid-text insert at the cap and keeps the text after the caret', async () => {
+    await setup(createFakeApi(), { userName: '' })
+    fireEvent.click(screen.getByRole('button', { name: 'Add name' }))
+    const full = 'b'.repeat(20) + 'c'.repeat(20)
+    typeInto(field(), full)
+    typeInto(field(), 'b'.repeat(20) + 'X' + 'c'.repeat(20), 21)
+    expect(field()).toHaveValue(full)
+    expect((field() as HTMLInputElement).selectionStart).toBe(20)
+  })
+
+  it('ignores Enter and Escape while an IME is composing and limits on compositionend', async () => {
+    const saveName = vi.fn(async () => undefined)
+    await setup(createFakeApi(), { userName: '', saveName })
+    fireEvent.click(screen.getByRole('button', { name: 'Add name' }))
+    fireEvent.compositionStart(field())
+    typeInto(field(), 'a'.repeat(45), undefined, true)
+    expect(field()).toHaveValue('a'.repeat(45))
+    fireEvent.keyDown(field(), { key: 'Enter', isComposing: true })
+    fireEvent.keyDown(field(), { key: 'Escape', keyCode: 229 })
+    expect(saveName).not.toHaveBeenCalled()
+    expect(field()).toBeInTheDocument()
+    fireEvent.compositionEnd(field())
+    expect(field()).toHaveValue('a'.repeat(40))
+  })
+
+  it('saves the name in the server shape', async () => {
+    const saveName = vi.fn(async () => undefined)
+    await setup(createFakeApi(), { userName: 'Ada', saveName })
+    fireEvent.click(editName())
+    typeInto(field(), '  Grace   Hopper ')
+    fireEvent.keyDown(field(), { key: 'Enter' })
+    await waitFor(() => expect(saveName).toHaveBeenCalledWith('Grace Hopper'))
+  })
+
+  it('shows the saved name until the session catches up', async () => {
+    await setup(createFakeApi(), { userName: 'Ada Okafor', saveName: vi.fn(async () => undefined) })
+    fireEvent.click(editName())
+    typeInto(field(), 'Grace  Hopper')
+    fireEvent.keyDown(field(), { key: 'Enter' })
+    expect(await screen.findByText('Grace Hopper')).toBeInTheDocument()
+    expect(screen.queryByText('Ada Okafor')).not.toBeInTheDocument()
+  })
+
+  it('editing after a failure brings back the hint, the count and Save', async () => {
+    await setup(createFakeApi(), { userName: 'Ada Okafor', saveName: vi.fn().mockRejectedValue(new Error('offline')) })
+    fireEvent.click(editName())
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await screen.findByRole('alert')
+    typeInto(field(), 'a'.repeat(31))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(field()).not.toHaveAttribute('aria-invalid')
+    expect(screen.getByText('31 of 40')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument()
   })
 
   it('keeps the text after a failure and offers Retry', async () => {
