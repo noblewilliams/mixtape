@@ -394,6 +394,7 @@ export function App({ downloadUrl = DOWNLOAD_URL }: { downloadUrl?: string }) {
               <a href="#how-it-works">How it works</a>
               <a href="#your-music">Your library</a>
               <a href="#questions">Questions</a>
+              <a href="/privacy/">Privacy</a>
 
               <a href="#top">Back to top</a>
             </nav>

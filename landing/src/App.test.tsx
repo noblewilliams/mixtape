@@ -11,6 +11,15 @@ describe("landing entry points", () => {
       screen.queryByRole("button", { name: /animations|Motion on/i }),
     ).not.toBeInTheDocument();
   });
+  it("links the privacy policy from the footer", () => {
+    render(<App />);
+    const footer = screen.getByRole("navigation", {
+      name: "Footer navigation",
+    });
+    expect(
+      within(footer).getByRole("link", { name: "Privacy" }),
+    ).toHaveAttribute("href", "/privacy/");
+  });
   it("keeps browser entry available when the download URL is not configured", () => {
     render(<App downloadUrl="" />);
     fireEvent.click(
