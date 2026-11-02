@@ -125,15 +125,13 @@ class AccountApi {
 
   /// Explicit linking never signs in or replaces the existing session token.
   ///
-  /// [givenName] and [familyName] are accepted and ignored: Better Auth
-  /// (1.7.2, `link-social`) drops `idToken.user` and never updates the
-  /// user's name from a link, so sending them would only suggest otherwise.
-  /// The name page and Account are where a linked account gets a name.
+  /// Only the token: Better Auth (1.7.2, `link-social`) drops
+  /// `idToken.user` and never updates the user's name from a link, so a name
+  /// Apple discloses here is not sent. The name page and Account are where a
+  /// linked account gets a name.
   Future<void> link({
     required AccountProvider provider,
     required String token,
-    String? givenName,
-    String? familyName,
   }) async {
     _identifier(token);
     final value = _object(

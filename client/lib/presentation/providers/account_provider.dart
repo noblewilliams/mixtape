@@ -142,12 +142,7 @@ class AccountNotifier extends Notifier<AccountState> {
       api: api,
       generation: generation,
       operation: operation,
-      write: () => api.link(
-        provider: provider,
-        token: token.token,
-        givenName: token.givenName,
-        familyName: token.familyName,
-      ),
+      write: () => api.link(provider: provider, token: token.token),
       succeeded: (current) =>
           current.any((account) => account.providerId == provider.name),
     );

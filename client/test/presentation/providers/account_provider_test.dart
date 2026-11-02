@@ -14,7 +14,7 @@ class FakeAccountApi implements AccountApi {
   Future<void> Function(LinkedAccount) onUnlink = (_) async {};
   int links = 0;
   int unlinks = 0;
-  final linkedNames = <(String?, String?)>[];
+  final linkedTokens = <String>[];
   @override
   Future<List<LinkedAccount>> list() => onList();
   @override
@@ -23,11 +23,9 @@ class FakeAccountApi implements AccountApi {
   Future<void> link({
     required AccountProvider provider,
     required String token,
-    String? givenName,
-    String? familyName,
   }) {
     links++;
-    linkedNames.add((givenName, familyName));
+    linkedTokens.add(token);
     return onLink(provider, token);
   }
 
@@ -77,7 +75,7 @@ void main() {
   });
   tearDown(() => container.dispose());
 
-  test('link passes the names Apple gave to the link request', () async {
+  test('link sends only the token, never the names Apple gave', () async {
     container.updateOverrides([
       accountApiProvider.overrideWithValue(api),
       accountIdentityTokenProvider.overrideWithValue(
@@ -92,7 +90,9 @@ void main() {
     await flush();
     api.onList = () async => [apple, google];
     await container.read(accountProvider.notifier).link(AccountProvider.google);
-    expect(api.linkedNames, [('Ada', 'Lovelace')]);
+    // Better Auth's link-social ignores idToken.user; names reach an
+    // account through the name page or Account instead.
+    expect(api.linkedTokens, ['identity-token']);
   });
 
   test('lost link response reconciles canonical methods', () async {

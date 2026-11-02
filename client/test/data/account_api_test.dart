@@ -87,8 +87,6 @@ void main() {
     await api.link(
       provider: AccountProvider.apple,
       token: 'identity-token',
-      givenName: ' Ada ',
-      familyName: 'Lovelace',
     );
     expect(bodies, [
       {
