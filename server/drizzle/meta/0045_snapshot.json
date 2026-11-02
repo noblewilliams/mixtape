@@ -1,9 +1,55 @@
 {
-  "id": "207fdbbf-3460-496f-9dac-74046feef493",
+  "id": "25533a0b-8e89-4b10-9570-903b5097669a",
   "prevId": "333ab7d3-eb2a-4f05-b389-a285f6b528a2",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
+    "public.ai_consents": {
+      "name": "ai_consents",
+      "schema": "",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "granted_at": {
+          "name": "granted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "ai_consents_user_id_user_id_fk": {
+          "name": "ai_consents_user_id_user_id_fk",
+          "tableFrom": "ai_consents",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.album_picks": {
       "name": "album_picks",
       "schema": "",
@@ -6966,12 +7012,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
-        },
-        "name_prompted_at": {
-          "name": "name_prompted_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
         },
         "created_at": {
           "name": "created_at",

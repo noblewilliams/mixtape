@@ -11,6 +11,8 @@
 /// Pushed inside a tab `Navigator`: glass back and action clusters, no app bar.
 library;
 
+import '../../data/api/api_client.dart' show AiConsentRequiredException;
+import '../widgets/ai_consent_sheet.dart';
 import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -80,13 +82,42 @@ class _PlaylistEditScreenState extends ConsumerState<PlaylistEditScreen> {
     super.dispose();
   }
 
+  /// A message on its way through the AI-consent sheet.
+  bool _askingConsent = false;
+
   Future<void> _send() async {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
-    _controller.clear();
-    await ref
-        .read(playlistEditThreadProvider(widget.draftId).notifier)
-        .send(text);
+    await _deliver(text, fromComposer: true);
+  }
+
+  /// Sends [text] to the DJ once AI consent is in hand. Not now sends
+  /// nothing and leaves the composer as it was; a `403
+  /// ai_consent_required` puts the text back and asks again, and Agree
+  /// sends it.
+  Future<void> _deliver(String text, {required bool fromComposer}) async {
+    if (_askingConsent) return;
+    _askingConsent = true;
+    final agreed = await confirmAiConsent(context);
+    _askingConsent = false;
+    if (!agreed || !mounted) return;
+    if (fromComposer) _controller.clear();
+    try {
+      await ref
+          .read(playlistEditThreadProvider(widget.draftId).notifier)
+          .send(text);
+    } on AiConsentRequiredException {
+      if (!mounted) return;
+      if (fromComposer && _controller.text.isEmpty) _controller.text = text;
+      _askingConsent = true;
+      final again = await confirmAiConsentAfterRefusal(context);
+      _askingConsent = false;
+      if (!again || !mounted) return;
+      await _deliver(
+        fromComposer ? _controller.text.trim() : text,
+        fromComposer: fromComposer,
+      );
+    }
   }
 
   Future<void> _openMore(BuildContext anchor) async {
@@ -222,11 +253,7 @@ class _PlaylistEditScreenState extends ConsumerState<PlaylistEditScreen> {
               text: message.message.content,
               onRetry: message.retryContent == null || state.sending
                   ? null
-                  : () => ref
-                        .read(
-                          playlistEditThreadProvider(widget.draftId).notifier,
-                        )
-                        .send(message.retryContent!),
+                  : () => _deliver(message.retryContent!, fromComposer: false),
             )
           else
             ConversationTurn(

@@ -63,6 +63,7 @@ type Bindings = {
   OUTSIDE_PICKS?: string
   ALBUM_PICKS?: string
   NEVER_REFUSE?: string
+  AI_CONSENT?: string
 }
 
 // This cache holds signed server tokens only. The key is the non-secret Apple
@@ -120,6 +121,12 @@ export function albumPicksEnabled(env: { ALBUM_PICKS?: string }): boolean {
 // Never refuse (spec 2026-10-21 everyone-gets-a-mix, step 4): a listener
 // with too few seeds gets songs the DJ proposes, verified on Apple, instead
 // of a refusal. Same exact-"on" rule as outside picks.
+// Plan 2026-11-02 AI consent: 'enforce' refuses AI routes to listeners who
+// have not agreed. Anything else is off.
+export function aiConsentMode(env: { AI_CONSENT?: string }): 'off' | 'enforce' {
+  return env.AI_CONSENT === 'enforce' ? 'enforce' : 'off'
+}
+
 export function neverRefuseEnabled(env: { NEVER_REFUSE?: string }): boolean {
   return env.NEVER_REFUSE === 'on'
 }
@@ -313,7 +320,7 @@ export default {
         : undefined
       const transcribe = buildTranscribe(env)
       const accountDeletion = { apple: buildAppleRevoke(env) }
-      const app = createApp({ auth, db, enrich, dj, albums, playlistEditing, musicKit, transcribe, accountDeletion, allowedOrigins })
+      const app = createApp({ auth, db, enrich, dj, albums, playlistEditing, musicKit, transcribe, accountDeletion, aiConsent: aiConsentMode(env), allowedOrigins })
       return await app.fetch(req, env, ctx)
     } finally {
       // Closes the pool's socket(s) after the response is built rather than

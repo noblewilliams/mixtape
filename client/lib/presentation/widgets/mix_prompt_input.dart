@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/config.dart';
 import '../providers/voice_providers.dart';
 import '../theme/mixtape_theme.dart';
+import 'ai_consent_sheet.dart';
 import 'foundation/prism_stripe.dart';
 import 'foundation/text_action.dart';
 import 'voice_level_meter.dart';
@@ -241,11 +242,24 @@ class _MixPromptInputState extends State<MixPromptInput>
     if (voice == null || widget.busy) return;
     if (voice.state == VoiceComposerState.listening) {
       final transcript = await voice.stop();
-      if (!mounted || transcript == null) return;
+      if (!mounted) return;
+      if (transcript == null &&
+          voice.failure?.failure == VoiceInputFailure.consentRequired) {
+        // `/transcribe` wants AI consent: the sheet, not a failure line. The
+        // clip is gone; what was typed stays. The next mic tap asks first.
+        voice.clearFailure();
+        await confirmAiConsentAfterRefusal(context);
+        return;
+      }
+      if (transcript == null) return;
       _insert(transcript);
       return;
     }
     if (voice.busy) return;
+    // A clip goes to Groq, so the AI-consent sheet comes first when the
+    // listener has not agreed; Not now leaves the mic closed.
+    if (!await confirmAiConsent(context) || !mounted) return;
+    if (voice.busy || widget.busy) return;
     await voice.start();
   }
 

@@ -33,7 +33,8 @@ export function ControlModal({
         'button:not(:disabled),input:not(:disabled),textarea:not(:disabled),[tabindex="0"]',
       ),
     ]
-    ;(focusable()[0] ?? ref.current)?.focus()
+    // A dialog can name its first stop with data-autofocus (else the first control).
+    ;(ref.current!.querySelector<HTMLElement>('[data-autofocus]') ?? focusable()[0] ?? ref.current)?.focus()
     const keydown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()

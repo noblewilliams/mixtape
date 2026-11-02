@@ -28,7 +28,7 @@ uncommitted release work).
   name, `sanitizeForPrompt`, at most 20 characters; the mix and album system
   prompts gain one data line ("The listener's first name: X. Use it rarely, at
   most once in a conversation, never as a greeting.") only when present.
-- **Migration 0045** adds the nullable column; additive, no backfill.
+- **Migration 0046** (regenerated at merge; 0045 is ai_consents) adds the nullable column; additive, no backfill.
 
 ## Tasks
 
@@ -67,11 +67,11 @@ uncommitted release work).
 
 All seven tasks done with a review and fix round each: `1ceb8f2`, `6709c69` (server); `f7bf3be`, `510bc1b`, `fd29f91`, `c5c8838`, `8b3b2f3` (web); `9b0632e`, `949c34d`, `b8aa751`, `379d220`, `9d32ae5`, `f6083aa` (iOS). Departures from the contract, all reviewed: the server stamps `namePromptedAt` itself from any truthy value and never clears it; a non-string `name` is a 400; ZWJ and ZWNJ are kept and the cap takes whole graphemes; `link-social` ignores `idToken.user`, so linking sends only the token; both clients release the post-sign-in hold after 3.5 s and settle Skip only after its write succeeds.
 
-**Merge note:** the main checkout holds another session's uncommitted `server/drizzle/0045_ai_consents.sql`. Whichever lands second regenerates its migration as 0046 from the merged schema (fresh journal `when`).
+**Merged 2026-11-02:** `0045_ai_consents` landed and was applied first, so this branch's migration was regenerated as `0046_name_prompted_at` from the merged schema. On web the AI consent dialog now waits for the name page.
 
 ## Founder gates
 
-1. Apply 0045 and deploy the Worker from a clean worktree of the merged
+1. Apply 0046 and deploy the Worker from a clean worktree of the merged
    commit. Check `GET /me` returns `askName`.
 2. Web: Netlify publishes `main`; in a private window, sign in with a test
    account that has no name, see the page once, Skip, reload, no page.

@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import type { DjSession } from '../domain'
 import './tape-rack.css'
+import { publicAsset } from '../lib/public-asset'
 
 function ink(color: string) {
   const rgb = color.replace('#', '').match(/.{2}/g)?.map(hex => {
@@ -32,7 +33,7 @@ function Tape({ session, onOpen }: { session: DjSession; onOpen: () => void }) {
 }
 
 function Plant({ secondary = false }: { secondary?: boolean }) {
-  return <span aria-hidden="true" className={`rack-plant${secondary ? ' rack-plant-secondary' : ''}`}><img alt="" src={`/rack/${secondary ? 'string-of-hearts' : 'pothos'}.webp`} /></span>
+  return <span aria-hidden="true" className={`rack-plant${secondary ? ' rack-plant-secondary' : ''}`}><img alt="" src={publicAsset(`rack/${secondary ? 'string-of-hearts' : 'pothos'}.webp`)} /></span>
 }
 
 export function TapeRack({ sessions, onOpenSession }: { sessions: DjSession[]; onOpenSession: (id: string) => void }) {
@@ -56,7 +57,7 @@ export function TapeRack({ sessions, onOpenSession }: { sessions: DjSession[]; o
   return <section className="tape-rack-scroll" aria-label="Tape closet">
     <div ref={cabinet} className="tape-rack">
       {rows.map((row, index) => {
-        const trinket = index === birdRow ? <span className="rack-bird" aria-hidden="true"><img src="/rack/bird.webp" alt="" /></span> : null
+        const trinket = index === birdRow ? <span className="rack-bird" aria-hidden="true"><img src={publicAsset('rack/bird.webp')} alt="" /></span> : null
         return <div className="rack-row" key={index}>
           {index > 0 && index === rows.length - 1 && <Plant secondary />}
           {bird.before && trinket}
@@ -73,7 +74,7 @@ export function TapeRackSkeleton() {
   return <section className="tape-rack-scroll" role="status" aria-label="Loading mixes">
     <div className="tape-rack"><div className="rack-row">
       {Array.from({ length: 3 }, (_, index) => <span key={index} className="rack-tape rack-ghost" aria-hidden="true"><span className="rack-insert" /></span>)}
-      <span className="rack-bird" aria-hidden="true"><img src="/rack/bird.webp" alt="" /></span>
+      <span className="rack-bird" aria-hidden="true"><img src={publicAsset('rack/bird.webp')} alt="" /></span>
       <Plant />
     </div></div>
   </section>

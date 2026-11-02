@@ -1638,3 +1638,13 @@ export const suggestionSettings = pgTable('suggestion_settings', {
   enabled: boolean('enabled').notNull().default(true),
   dismissed: jsonb('dismissed').$type<Record<string, string>>().notNull().default({}),
 })
+
+// Plan 2026-11-02 AI consent: the listener's permission to send their data to
+// the AI processors the consent copy names. One row per user; a new consent
+// version (a new processor, new data) is a new answer, so the row records
+// which one was agreed to.
+export const aiConsents = pgTable('ai_consents', {
+  userId: text('user_id').primaryKey().references(() => user.id, { onDelete: 'cascade' }),
+  version: text('version').notNull(),
+  grantedAt: timestamp('granted_at', { withTimezone: true }).notNull().defaultNow(),
+})

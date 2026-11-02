@@ -364,3 +364,14 @@ describe('the name in Settings › Account', () => {
     expect(await screen.findByText('Name saved')).toBeInTheDocument()
   })
 })
+
+it('links the privacy policy in a new tab, for accounts and anonymous listeners alike', async () => {
+  for (const anonymous of [false, true]) {
+    await setup(createFakeApi(), { anonymous })
+    const link = screen.getByRole('link', { name: 'Privacy policy' })
+    expect(link).toHaveAttribute('href', 'https://miixtape.netlify.app/privacy/')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'))
+    cleanup()
+  }
+})

@@ -24,6 +24,30 @@ class NetworkException implements Exception {
   String toString() => 'NetworkException: $cause';
 }
 
+/// `403 {error: 'ai_consent_required'}`: the server enforces AI consent
+/// (`AI_CONSENT=enforce`) and this listener has not agreed. The caller shows
+/// the consent sheet instead of an error, and keeps what was typed.
+class AiConsentRequiredException implements Exception {
+  const AiConsentRequiredException();
+
+  /// The server's error code.
+  static const String code = 'ai_consent_required';
+
+  /// Whether [statusCode] and [body] are this answer.
+  static bool matches(int statusCode, String body) {
+    if (statusCode != 403) return false;
+    try {
+      final decoded = jsonDecode(body);
+      return decoded is Map && decoded['error'] == code;
+    } on FormatException {
+      return false;
+    }
+  }
+
+  @override
+  String toString() => 'AiConsentRequiredException';
+}
+
 class ApiClient {
   ApiClient({
     required this.baseUrl,

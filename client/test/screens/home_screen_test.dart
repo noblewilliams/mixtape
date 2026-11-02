@@ -38,6 +38,10 @@ import 'package:mixtape/presentation/widgets/home_panel.dart';
 import 'package:mixtape/presentation/screens/shell/shell_route_observer.dart';
 import 'package:mixtape/presentation/widgets/foundation/liquid_glass_surface.dart';
 import 'package:mixtape/presentation/widgets/foundation/mixtape_sheet.dart';
+import 'package:mixtape/data/auth/account_api.dart';
+import 'package:mixtape/presentation/providers/account_provider.dart';
+import 'package:mixtape/presentation/widgets/ai_consent_sheet.dart';
+import '../helpers/fake_ai_consent.dart';
 import '../helpers/fake_listening_api.dart';
 import 'routine_suggestions_test.dart' show FakeSuggestions;
 
@@ -224,8 +228,10 @@ ProviderContainer _makeContainer(
   bool albumPicks = true,
   bool anonymous = false,
   bool Function(Ref ref)? albumPicksFrom,
+  AccountApi? account,
 }) {
   final overrides = [
+    if (account != null) accountApiProvider.overrideWithValue(account),
     tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
     djApiProvider.overrideWithValue(api),
     // Home watches onboarding for the Spotify waiting card; an Apple
@@ -1422,5 +1428,118 @@ void main() {
         expect(panelAllowsNative(tester), isTrue);
       },
     );
+  });
+
+  group('AI consent (plan 2026-11-02)', () {
+    FakeDjApi recordingApi() {
+      final api = FakeDjApi();
+      api.onListSessions = () async => [];
+      api.onCreateSession = (prompt) async {
+        api.prompts.add(prompt);
+        return SessionDetail(
+          session: _session(id: 'new-1'),
+          messages: [],
+          queue: [],
+        );
+      };
+      api.onGetSession = (id) async => SessionDetail(
+        session: _session(id: id),
+        messages: [],
+        queue: [],
+      );
+      return api;
+    }
+
+    Future<void> send(WidgetTester tester, String text) async {
+      await tester.enterText(find.byKey(const Key('prompt-field')), text);
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('start-session')));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('a send without consent re-shows the sheet instead', (
+      tester,
+    ) async {
+      final api = recordingApi();
+      final account = FakeConsentAccountApi();
+      await _pump(tester, _makeContainer(api, account: account));
+
+      await send(tester, 'rainy drive');
+      expect(find.byKey(AiConsentCopy.titleKey), findsOneWidget);
+      expect(api.prompts, isEmpty);
+
+      await tester.tap(find.byKey(AiConsentCopy.notNowKey));
+      await tester.pumpAndSettle();
+      expect(api.prompts, isEmpty);
+      expect(find.text('rainy drive'), findsOneWidget);
+      expect(find.byType(ChatScreen), findsNothing);
+    });
+
+    testWidgets('Agree records consent and the mix starts', (tester) async {
+      final api = recordingApi();
+      final account = FakeConsentAccountApi();
+      await _pump(tester, _makeContainer(api, account: account));
+
+      await send(tester, 'rainy drive');
+      await tester.tap(find.byKey(AiConsentCopy.agreeKey));
+      await tester.pumpAndSettle();
+
+      expect(account.grants, 1);
+      expect(api.prompts, ['rainy drive']);
+      expect(find.byType(ChatScreen), findsOneWidget);
+    });
+
+    testWidgets('an album pick asks too', (tester) async {
+      final api = recordingApi();
+      await _pump(
+        tester,
+        _makeContainer(api, account: FakeConsentAccountApi()),
+      );
+      await tester.tap(find.byKey(HomeScreen.modeAlbumKey));
+      await tester.pumpAndSettle();
+
+      await send(tester, 'something warm');
+      expect(find.byKey(AiConsentCopy.titleKey), findsOneWidget);
+      expect(api.kinds, isEmpty);
+    });
+
+    testWidgets('a 403 ai_consent_required shows the sheet and keeps the '
+        'prompt; Agree sends it again', (tester) async {
+      final api = recordingApi();
+      var refuse = true;
+      final create = api.onCreateSession!;
+      api.onCreateSession = (prompt) async {
+        if (refuse) {
+          api.prompts.add(prompt);
+          throw const AiConsentRequiredException();
+        }
+        return create(prompt);
+      };
+      final account = FakeConsentAccountApi(aiConsent: true);
+      await _pump(tester, _makeContainer(api, account: account));
+
+      await send(tester, 'rainy drive');
+      expect(find.byKey(AiConsentCopy.titleKey), findsOneWidget);
+      expect(find.text('rainy drive'), findsOneWidget);
+      expect(find.byType(ChatScreen), findsNothing);
+
+      refuse = false;
+      await tester.tap(find.byKey(AiConsentCopy.agreeKey));
+      await tester.pumpAndSettle();
+      expect(account.grants, 1);
+      expect(api.prompts, ['rainy drive', 'rainy drive']);
+      expect(find.byType(ChatScreen), findsOneWidget);
+    });
+
+    testWidgets('no sheet once /me says granted', (tester) async {
+      final api = recordingApi();
+      await _pump(
+        tester,
+        _makeContainer(api, account: FakeConsentAccountApi(aiConsent: true)),
+      );
+      await send(tester, 'rainy drive');
+      expect(find.byKey(AiConsentCopy.titleKey), findsNothing);
+      expect(api.prompts, ['rainy drive']);
+    });
   });
 }

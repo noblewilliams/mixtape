@@ -8,6 +8,7 @@ import { ControlModal } from './components/ControlModal'
 import { TapeSettings } from './components/TapeSettings'
 import { AppSettings, DeleteAccountDialog, type NameEdit } from './components/AppSettings'
 import { PlaybackController } from './playback/controller'
+import { AiConsentDialog } from './components/AiConsent'
 import { AppleMusicMark, SpotifyMark } from './components/ProviderMarks'
 import { demoAlbumMessages, demoAlbumPick, demoAlbumRefinedPick, demoAlbumRunnersUp, demoMessages, demoQueue, demoSessions, demoShelfPreviewEntries } from './data/demo'
 import { AlbumPanel } from './components/AlbumPanel'
@@ -33,6 +34,7 @@ import { SignInPage } from './components/AuthGate'
 import { createFirstRunServices } from './components/first-run/services'
 import type { MusicKitClient } from './musickit/client'
 import { NamePage, type NamePageInitial } from './components/first-run/NamePage'
+import { publicAsset } from './lib/public-asset'
 
 const previewPlaylist: ApiPlaylistSummary = { id: 'preview', name: '“just a girl”', source: 'spotify_export', kind: 'user', origin: 'unknown', curatorName: null, artworkUrlTemplate: null, artworkBgColor: null, artworkWidth: null, artworkHeight: null, entryCount: 14, knownDurationMs: null, durationComplete: false, lastModifiedAt: null, syncedAt: '2026-09-18T12:00:00Z', inLibrary: true, capability: 'copy_only' }
 const previewEntries = ['Present Tense', 'If You Say the Word', 'The Girl Is Mine', 'Let My Baby Stay', 'Do What You Gotta Do', 'Home recording'].map((title, position) => ({ id: String(position), position, trackId: null, appleCatalogId: null, spotifyId: position === 5 ? null : '4uLU6hMCjMI75M1A2tKUQC', title, artist: 'Synthetic artist', album: null, durationMs: null, artworkUrlTemplate: null, artworkWidth: null, artworkHeight: null, artworkBgColor: null, resolved: false }))
@@ -50,7 +52,7 @@ const previewQueue = demoQueue.map((track, index) =>
 
 // Synthetic first-run services: seeds and the first mix resolve, a sync fails at once (no API here).
 const previewFirstRunServices = () => createFirstRunServices({
-  api: { createSession: async () => ({ session: { id: 'preview' } }), putArtistSeeds: async () => ({ seeds: [] }), postFunnelEvent: async () => ({ ok: true }) } as unknown as MixtapeApi,
+  api: { createSession: async () => ({ session: { id: 'preview' } }), putArtistSeeds: async () => ({ seeds: [] }), postFunnelEvent: async () => ({ ok: true }), grantAiConsent: async () => ({ aiConsent: true }) } as unknown as MixtapeApi,
   musicKit: { connect: async () => { throw new Error('preview') } } as unknown as MusicKitClient,
   ensureSession: async () => undefined,
 })
@@ -135,15 +137,21 @@ function NamePagePreview({ state, onDone }: { state: NamePreviewState; onDone: (
   return <div className="first-run fr-root fr-root--over"><div className="fr-stage fr-stage--fade"><NamePage saveName={saveName} onSaved={onDone} onSkip={onDone} initial={previewNamePages[state]} /></div></div>
 }
 
+function previewConsent() {
+  let tries = 0
+  return () => new Promise<void>((resolve, reject) => setTimeout(() => (tries++ === 0 ? reject(new Error('preview')) : resolve()), 1000))
+}
+
 export default function UiPolishPreview() {
   const [state, setState] = useState('populated')
   const [sessions, setSessions] = useState(demoSessions.slice(0, 4).map((session, index) => ({ ...session, caseColor: tapeColors[index * 9][1] as string })))
   const [collectionView, setCollectionView] = useState<CollectionView>('list')
   const [modeSeed, setModeSeed] = useState<ModeSeed | null>(null)
+  const [consentAgree] = useState(previewConsent)
   const openTab = (tab: MixesTab) => setState(tab === 'archived' ? 'archived' : tab === 'listen-later' ? 'listen-later' : 'populated')
   async function color(id: string, caseColor: string) { setSessions(current => current.map(s => s.id === id ? { ...s, caseColor } : s)) }
   const close = () => setState('populated')
-  const options = ['home', 'home-loading', 'home-empty', 'home-error', 'populated', 'loading', 'empty', 'archived', 'load-error', 'refresh-error', 'settings', 'success', 'error', 'info', 'playlist', 'preference', 'memory', 'sources', 'library', 'library-loading', 'conversation', 'conversation-blank', 'album', 'album-refined', 'listen-later', 'listen-later-empty', 'first-run', 'keep-sheet', 'sign-in-keep', 'sign-in-cap', 'merge-notice', 'delete-account', 'settings-named', 'settings-unnamed', 'settings-editing', 'settings-failed', 'name-page', 'name-page-typing', 'name-page-saving', 'name-page-failed']
+  const options = ['home', 'home-loading', 'home-empty', 'home-error', 'populated', 'loading', 'empty', 'archived', 'load-error', 'refresh-error', 'settings', 'success', 'error', 'info', 'playlist', 'preference', 'memory', 'sources', 'library', 'library-loading', 'conversation', 'conversation-blank', 'album', 'album-refined', 'listen-later', 'listen-later-empty', 'first-run', 'keep-sheet', 'sign-in-keep', 'sign-in-cap', 'merge-notice', 'delete-account', 'settings-named', 'settings-unnamed', 'settings-editing', 'settings-failed', 'name-page', 'name-page-typing', 'name-page-saving', 'name-page-failed', 'first-run-consent', 'ai-consent']
   return <>
     <div style={{ position: 'fixed', right: 12, top: 8, zIndex: 200, display: 'flex', gap: 8, alignItems: 'center', background: '#f7f4f8', color: '#1c1a1e', padding: 8, borderRadius: 8, fontSize: 12 }}>
       <label htmlFor="ui-preview-state">UI preview · synthetic data</label><select id="ui-preview-state" value={state} onChange={e => setState(e.target.value)}>{options.map(option => <option key={option}>{option}</option>)}</select>
@@ -157,7 +165,7 @@ export default function UiPolishPreview() {
       : state.startsWith('settings-') ? <SettingsPreview key={state} state={state as SettingsPreviewState} onMemories={() => setState('memory')} />
       : state === 'album' || state === 'album-refined' ? <AlbumPreview key={state} state={state} session={sessions[0]} />
       : state === 'listen-later' || state === 'listen-later-empty' ? <ListenLaterPreview key={state} empty={state === 'listen-later-empty'} sessions={sessions} onTab={openTab} onFindAlbum={() => { setModeSeed({ kind: 'album', id: Date.now() }); setState('home') }} />
-      : state.startsWith('home') ? <HomeDashboard sessions={state === 'home' ? sessions : []} loading={state === 'home-loading'} error={state === 'home-error' ? 'Unavailable' : ''} busy={false} player={null} suggestions={state === 'home' ? <section className="routine-suggestions"><h2>For this moment</h2><div className="routine-card"><img className="routine-tape" src="/tape.svg" alt=""/><div className="routine-copy"><h3>A softer evening</h3><p>You often slow things down around this time.</p></div><div className="routine-actions"><button className="routine-primary">Make this mix</button><button>Not today</button></div></div></section> : null} onRetry={() => setState('home')} onOpenSession={close} onOpenMixes={close} albumPicks anonymous={false} onSubmit={async()=>{setState('populated')}} transcribe={async()=>({text:'A softer evening'})} modeSeed={modeSeed} onRename={async()=>{}} onArchive={async()=>{}} onColor={color}/> : state === 'memory' ? <main className="wc-view"><h1>What the DJ knows</h1><EmptyState kind="memory" title="No saved preferences yet" description="Tell the DJ what you would like it to remember." /></main>
+      : state.startsWith('home') ? <HomeDashboard sessions={state === 'home' ? sessions : []} loading={state === 'home-loading'} error={state === 'home-error' ? 'Unavailable' : ''} busy={false} player={null} suggestions={state === 'home' ? <section className="routine-suggestions"><h2>For this moment</h2><div className="routine-card"><img className="routine-tape" src={publicAsset('tape.svg')} alt=""/><div className="routine-copy"><h3>A softer evening</h3><p>You often slow things down around this time.</p></div><div className="routine-actions"><button className="routine-primary">Make this mix</button><button>Not today</button></div></div></section> : null} onRetry={() => setState('home')} onOpenSession={close} onOpenMixes={close} albumPicks anonymous={false} onSubmit={async()=>{setState('populated')}} transcribe={async()=>({text:'A softer evening'})} modeSeed={modeSeed} onRename={async()=>{}} onArchive={async()=>{}} onColor={color}/> : state === 'memory' ? <main className="wc-view"><h1>What the DJ knows</h1><EmptyState kind="memory" title="No saved preferences yet" description="Tell the DJ what you would like it to remember." /></main>
       : state === 'library' || state === 'library-loading' ? <main className="ym-view"><header className="ym-header"><h1>Library</h1></header><Tabs label="Library sections" current="playlists" onSelect={close} items={[{ id: 'playlists', label: 'Playlists' }, { id: 'sources', label: 'Sources' }]} /><div className="ym-content"><PlaylistBrowser key={state} api={previewLibraryApis[state]} onInspire={close} onSources={close} onSessionExpired={close} /></div></main>
       : state === 'sources' ? <main className="ym-view"><header className="ym-header"><h1>Library</h1></header><div className="library-source-badges"><button className="library-source-badge"><AppleMusicMark />Apple Music<small>Connected</small></button><button className="library-source-badge"><SpotifyMark />Spotify<small>Imported</small></button></div><EmptyState title="No playlists yet" description="Playlists you bring from your music services will appear here." /></main>
       : <Home sessions={['loading','empty','archived','load-error'].includes(state) ? [] : sessions} tab={state === 'archived' ? 'archived' : 'active'} albumPicks loading={state === 'loading'} error={state.endsWith('error') ? 'Couldn’t load' : undefined} onRetry={close} onTab={openTab} onColor={color} onRename={async(id,title) => setSessions(current=>current.map(s=>s.id === id ? {...s,title}:s))} onArchive={async()=>setState('info')} onRestore={async()=>setState('success')} collectionView={collectionView} onChangeCollectionView={setCollectionView} onOpenSession={() => {}} onNewTape={()=>setState('playlist')} />}
@@ -168,6 +176,9 @@ export default function UiPolishPreview() {
     {(state === 'sign-in-keep' || state === 'sign-in-cap') && <div className="first-run fr-root fr-root--over"><div className="fr-sign-in"><BackButton onBack={close} className="fr-back--over" /><SignInPage variant={state === 'sign-in-cap' ? 'cap' : 'keep'} auth={{ signIn: async () => ({}) }} preferences={{ lastUsed: () => 'apple', begin: () => {}, promotePending: () => null, clearPending: () => {}, forget: () => {} }} lastUsed="apple" error="" /></div></div>}
     {state === 'merge-notice' && <Toast tone="success" message="Your mixes are in. This account already had a library, so we kept that one." />}
     {state.startsWith('name-page') && <NamePagePreview key={state} state={state as NamePreviewState} onDone={close} />}
+    {/* The consent dialog: over the first run's prompt page, and over the app. The first Agree fails after a beat (busy, then the inline error); the next one goes through. */}
+    {state === 'first-run-consent' && <><FirstRun services={previewFirstRunServices} onDone={close} /><AiConsentDialog onAgree={async () => { await consentAgree(); setState('first-run') }} onNotNow={() => setState('first-run')} /></>}
+    {state === 'ai-consent' && <AiConsentDialog onAgree={async () => { await consentAgree(); close() }} onNotNow={close} />}
     {state === 'first-run' && <FirstRun services={previewFirstRunServices} signIn={{ auth: { signIn: async () => ({}) }, preferences: { lastUsed: () => null, begin: () => {}, promotePending: () => null, clearPending: () => {}, forget: () => {} }, lastUsed: null, error: '' }} onDone={close} />}
     {state === 'playlist' && <SaveDialog defaultName="Evening colours" newToYouCount={2} onSave={()=>setState('success')} onClose={close} />}
     {/* Confirming fails after a beat, so both the in-flight and failure states show. */}

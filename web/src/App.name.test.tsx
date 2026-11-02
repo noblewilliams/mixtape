@@ -34,8 +34,8 @@ function musicKit(): MusicKitClient {
 
 const preferences: AuthPreferenceStore = { lastUsed: () => null, begin: vi.fn(), promotePending: () => null, clearPending: vi.fn(), forget: vi.fn() }
 
-const me = (askName: boolean, merged: MergedMode | null = null, id = unnamed.id): MeResponse =>
-  ({ user: { id, isAnonymous: false }, merged, albumPicks: false, neverRefuse: false, askName })
+const me = (askName: boolean, merged: MergedMode | null = null, id = unnamed.id, aiConsent = true): MeResponse =>
+  ({ user: { id, isAnonymous: false }, merged, albumPicks: false, neverRefuse: false, aiConsent, askName })
 
 type Options = {
   user?: AuthUser
@@ -209,6 +209,19 @@ describe('the name page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Skip' }))
     await waitFor(() => expect(document.activeElement).not.toBe(document.body))
     expect(shell().contains(document.activeElement)).toBe(true)
+  })
+
+  it('holds the AI consent dialog until the name page closes', async () => {
+    renderApp({ getMe: async () => me(true, null, unnamed.id, false) })
+    await screen.findByRole('heading', { level: 1, name: 'What should we call you?' })
+    expect(screen.queryByRole('button', { name: 'Agree and continue' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Skip' }))
+    expect(await screen.findByRole('button', { name: 'Agree and continue' })).toBeInTheDocument()
+  })
+
+  it('opens the AI consent dialog straight away when no name is asked', async () => {
+    renderApp({ getMe: async () => me(false, null, unnamed.id, false) })
+    expect(await screen.findByRole('button', { name: 'Agree and continue' })).toBeInTheDocument()
   })
 
   it('after Keep this mix: asks, makes the kept mix underneath, then shows the merge notice', async () => {

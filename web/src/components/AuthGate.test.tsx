@@ -270,6 +270,7 @@ describe('first-run flow', () => {
       fireEvent.change(await screen.findByRole('textbox', { name: label }), { target: { value: name } })
     }
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Agree and continue' }))
 
     expect(await screen.findByText('Shell opens session-new')).toBeInTheDocument()
     expect(screen.queryByTestId('first-run')).not.toBeInTheDocument()

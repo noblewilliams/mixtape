@@ -11,6 +11,7 @@ import '../../data/listening/listening_models.dart';
 import '../format/import_format.dart';
 import '../format/relative_time.dart';
 import '../theme/mixtape_theme.dart';
+import '../widgets/ai_consent_sheet.dart';
 import '../widgets/foundation/cassette_tile.dart';
 import '../widgets/foundation/flush_row.dart';
 import '../widgets/foundation/frosted_dock.dart' show kFrostedDockHeight;
@@ -135,6 +136,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
   double _panelHeight = 0;
   bool _measuring = false;
   bool _starting = false;
+
+  /// A start waiting on the AI-consent sheet: guards a second start without
+  /// drawing the composer busy under the sheet.
+  bool _askingConsent = false;
   String? _error;
 
   /// The Shape chip's state. Never written into the draft — the sentence is
@@ -451,11 +456,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
     bool kept = false,
     SessionKind kind = SessionKind.mix,
   }) async {
-    if (_starting) return;
+    if (_starting || _askingConsent) return;
+    // Nothing reaches the DJ (a mix or an album pick) before the listener
+    // has agreed; Not now leaves the composer as it was.
+    _askingConsent = true;
+    final agreed = await confirmAiConsent(context);
+    _askingConsent = false;
+    if (!agreed || !mounted) return;
     setState(() {
       _starting = true;
       _error = null;
     });
+    var consentRefused = false;
     try {
       final sessionId = await ref.read(sessionStarterProvider)(
         prompt,
@@ -487,6 +499,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
       } else {
         setState(() => _error = e.message);
       }
+    } on AiConsentRequiredException {
+      // Enforcement is on and `/me` was out of date: the sheet, not an
+      // error line, once the composer is no longer busy (below).
+      consentRefused = true;
     } on AnonymousCapException {
       // The fourth new mix: the composer stays exactly as it is, prompt and
       // all, and the sign-in page says why (C2). Nothing about the cap is
@@ -510,6 +526,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
       if (mounted) setState(() => _starting = false);
       _showPendingNotice();
     }
+    if (!consentRefused || !mounted) return;
+    // The prompt is still in the field. Agree sends it again.
+    _askingConsent = true;
+    final again = await confirmAiConsentAfterRefusal(context);
+    _askingConsent = false;
+    if (!again || !mounted) return;
+    await _start(prompt, draft: draft, arc: arc, kept: kept, kind: kind);
   }
 
   void _navigateToChat(String sessionId, {String? initialError}) {

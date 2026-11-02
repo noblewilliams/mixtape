@@ -192,6 +192,18 @@ void main() {
       }
     });
 
+    test('403 ai_consent_required -> AiConsentRequiredException on a start and a turn', () async {
+      final inner = MockClient((_) async => http.Response(jsonEncode({'error': 'ai_consent_required'}), 403));
+      await expectLater(
+        _api(inner: inner).createSession('late'),
+        throwsA(isA<AiConsentRequiredException>()),
+      );
+      await expectLater(
+        _api(inner: inner).sendMessage('s1', 'more'),
+        throwsA(isA<AiConsentRequiredException>()),
+      );
+    });
+
     test('403 anonymous_cap -> AnonymousCapException carrying the limit', () async {
       final inner = MockClient((req) async {
         expect(req.method, 'POST');

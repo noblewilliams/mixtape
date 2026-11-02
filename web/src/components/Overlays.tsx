@@ -2,6 +2,7 @@ import { ControlModal } from './ControlModal'
 import { EnergyControl, type EnergyArc } from './EnergyJourney'
 import { useId, useState, type FormEvent, type ReactNode } from 'react'
 import { CloseIcon } from './Icons'
+import { publicAsset } from '../lib/public-asset'
 
 type NewTapeDialogProps = {
   attachment?: ReactNode
@@ -124,7 +125,7 @@ export function SaveDialog({ busy = false, error = '', defaultName, newToYouCoun
 
 export function Toast({ message, tone, action }: { message: string; tone: 'success' | 'error' | 'info'; action?: { label: string; onClick: () => void; disabled?: boolean } }) {
   return <div className={`toast toast--${tone}`} role={tone === 'error' ? 'alert' : 'status'}>
-    <img src={`/ui/status-${tone}.svg`} alt="" aria-hidden="true" />
+    <img src={publicAsset(`ui/status-${tone}.svg`)} alt="" aria-hidden="true" />
     <span>{message}</span>
     {action && <button type="button" disabled={action.disabled} onClick={action.onClick}>{action.label}</button>}
   </div>

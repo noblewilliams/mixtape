@@ -7,17 +7,21 @@ import 'package:mixtape/data/playlists/playlist_edit_api.dart';
 import 'package:mixtape/data/playlists/playlist_edit_models.dart';
 import 'package:mixtape/data/playlists/playlist_models.dart';
 import 'package:mixtape/data/musickit/playlist_apply_bridge.dart';
+import 'package:mixtape/presentation/providers/account_provider.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/playlist_providers.dart';
 import 'package:mixtape/presentation/screens/playlist_browser_screen.dart';
 import 'package:mixtape/presentation/screens/playlist_detail_screen.dart';
 import 'package:mixtape/presentation/screens/playlist_edit_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
+import 'package:mixtape/presentation/widgets/ai_consent_sheet.dart';
 import 'package:mixtape/presentation/widgets/conversation_turn.dart';
 import 'package:mixtape/presentation/widgets/foundation/glass_cluster.dart';
 import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
 import 'package:mixtape/presentation/widgets/foundation/text_action.dart';
 import 'package:mixtape/presentation/widgets/mix_prompt_input.dart';
+
+import '../helpers/fake_ai_consent.dart';
 
 class TestAuthNotifier extends AuthNotifier {
   @override
@@ -318,9 +322,14 @@ ProviderContainer _container(
   FakePlaylistApi playlists,
   FakePlaylistEditApi edit, {
   FakePlaylistApplyBridge? apply,
+  FakeConsentAccountApi? account,
 }) {
   final container = ProviderContainer(
     overrides: [
+      // `/me` for the AI-consent check: already agreed unless a test says.
+      accountApiProvider.overrideWithValue(
+        account ?? FakeConsentAccountApi(aiConsent: true),
+      ),
       authProvider.overrideWith(TestAuthNotifier.new),
       playlistApiProvider.overrideWithValue(playlists),
       playlistEditApiProvider.overrideWithValue(edit),
@@ -790,5 +799,84 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('I placed them where they fit best.'), findsOneWidget);
     expect(find.byKey(const Key('playlist-edit-back')), findsOneWidget);
+  });
+
+  group('AI consent (plan 2026-11-02)', () {
+    const draftId = '00000000-0000-4000-8000-000000000010';
+
+    ({ProviderContainer container, FakePlaylistEditApi edit}) make(
+      FakeConsentAccountApi account,
+    ) {
+      final summary = _summary();
+      final playlists = FakePlaylistApi(
+        page: PlaylistPage(playlists: [summary]),
+        detail: PlaylistDetail(playlist: summary, entries: const []),
+      );
+      final edit = FakePlaylistEditApi(view: _editView(changed: false));
+      return (
+        container: _container(playlists, edit, account: account),
+        edit: edit,
+      );
+    }
+
+    testWidgets('a DJ message asks first; Not now sends nothing, keeps text', (
+      tester,
+    ) async {
+      final account = FakeConsentAccountApi();
+      final h = make(account);
+      await _pump(
+        tester,
+        h.container,
+        const PlaylistEditScreen(draftId: draftId),
+      );
+
+      await _compose(tester, 'move the closer later');
+      expect(find.byKey(AiConsentCopy.titleKey), findsOneWidget);
+      expect(h.edit.sends, 0);
+
+      await tester.tap(find.byKey(AiConsentCopy.notNowKey));
+      await tester.pumpAndSettle();
+      expect(h.edit.sends, 0);
+      expect(find.text('move the closer later'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('start-session')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(AiConsentCopy.agreeKey));
+      await tester.pumpAndSettle();
+      expect(account.grants, 1);
+      expect(h.edit.sends, 1);
+    });
+
+    testWidgets('a 403 ai_consent_required shows the sheet, not an error', (
+      tester,
+    ) async {
+      final account = FakeConsentAccountApi(aiConsent: true);
+      final h = make(account);
+      h.edit.sendError = const AiConsentRequiredException();
+      await _pump(
+        tester,
+        h.container,
+        const PlaylistEditScreen(draftId: draftId),
+      );
+
+      await _compose(tester, 'move the closer later');
+      expect(h.edit.sends, 1);
+      expect(find.byKey(AiConsentCopy.titleKey), findsOneWidget);
+      expect(find.byKey(ConversationTurn.errorKey), findsNothing);
+      final thread = h.container
+          .read(playlistEditThreadProvider(draftId))
+          .requireValue;
+      expect(thread.messages, isEmpty, reason: 'the turn is taken back');
+
+      await tester.tap(find.byKey(AiConsentCopy.notNowKey));
+      await tester.pumpAndSettle();
+      expect(find.text('move the closer later'), findsOneWidget);
+
+      // Later sends gate first now, whatever /me said.
+      await tester.tap(find.byKey(const Key('start-session')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(AiConsentCopy.titleKey), findsOneWidget);
+      expect(h.edit.sends, 1);
+    });
   });
 }

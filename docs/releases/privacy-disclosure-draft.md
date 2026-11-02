@@ -1,8 +1,11 @@
 # Privacy disclosure — implementation draft
 
-**Status:** working draft, not published or submitted. Prepared 2026-09-08 from
-local code at `05ba8b1` and the web-controls changes. Business-policy facts and
-production service settings remain unverified.
+**Status:** source for the public policy at `/privacy/`
+(`landing/public/privacy/index.html`, written 2026-11-02 with the founder's
+operator, retention and deletion facts; not yet deployed). Prepared 2026-09-08
+from local code at `05ba8b1` and the web-controls changes. Vendor regions,
+retention/training settings and backup windows remain unverified; the App Store
+privacy answers are not yet submitted.
 
 ## Proposed listener-facing explanation
 

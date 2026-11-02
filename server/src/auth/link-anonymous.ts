@@ -44,6 +44,14 @@ const MIX_MOVES: Move[] = [
   { table: 'playback_evidence', unique: ['playback_id', 'sequence'] },
 ]
 
+// Moved on every link, outside the merge probe: an answer is not data worth a
+// merge notice or a funnel event. The account's own answer wins; otherwise
+// the anonymous listener's agreement carries over, so signing up never
+// re-asks (plan 2026-11-02 AI consent).
+const ANSWER_MOVES: Move[] = [
+  { table: 'ai_consents', unique: [] },
+]
+
 // Moved only for an account with no mixes and no library ('all'). Such an
 // account can still hold settings, seeds, memories or an open import, hence
 // the guards. user_tracks and user_track_library_sources are absent: they
@@ -131,6 +139,8 @@ export async function linkAnonymousRows(db: Db, input: LinkAnonymousRowsInput): 
         (${ownsAny(MIX_MOVES.map((m) => m.table), anon)}) AS anon_has_mixes
     `))[0]!
     const mode: MergeMode = probe.next_has_data ? 'mixes_only' : 'all'
+
+    for (const move of ANSWER_MOVES) await tx.execute(moveStatement(move, anon, next))
 
     // Nothing to move (a retried callback after the rows already moved, or an
     // anonymous user with nothing the mode would carry): write nothing.

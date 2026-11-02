@@ -407,10 +407,67 @@ void main() {
       expect(future.merged, isNull);
     });
 
+    test('aiConsent reads the flag; absent reads as granted', () async {
+      final on = await meWith({
+        'user': {'id': 'u1', 'isAnonymous': false},
+        'merged': null,
+        'aiConsent': true,
+      });
+      expect(on.aiConsent, isTrue);
+      final off = await meWith({
+        'user': {'id': 'u1', 'isAnonymous': true},
+        'merged': null,
+        'aiConsent': false,
+      });
+      expect(off.aiConsent, isFalse);
+      // An older Worker that cannot record the answer never gates.
+      final older = await meWith({
+        'user': {'id': 'u1', 'isAnonymous': false},
+        'merged': null,
+      });
+      expect(older.aiConsent, isTrue);
+      expect(const Me(id: 'u1', isAnonymous: false).aiConsent, isTrue);
+    });
+
     test('a body without a user is a model error', () async {
       await expectLater(
         meWith({'merged': null}),
         throwsA(isA<AccountModelException>()),
+      );
+    });
+  });
+  group('grantAiConsent', () {
+    test('posts the current version and needs aiConsent true back', () async {
+      final api = apiWith((request) async {
+        expect(request.method, 'POST');
+        expect(request.url.path, '/me/ai-consent');
+        expect(jsonDecode(request.body), {'version': '2026-11-02'});
+        return http.Response('{"aiConsent":true}', 200);
+      });
+      await api.grantAiConsent();
+      expect(aiConsentVersion, '2026-11-02');
+    });
+
+    test('an unconfirmed answer is a model error', () async {
+      for (final body in ['{}', '{"aiConsent":false}', '[]', 'not-json']) {
+        final api = apiWith((_) async => http.Response(body, 200));
+        await expectLater(
+          api.grantAiConsent(),
+          throwsA(isA<AccountModelException>()),
+        );
+      }
+    });
+
+    test('a stale version keeps its status', () async {
+      final api = apiWith(
+        (_) async =>
+            http.Response('{"error":"stale_consent_version"}', 409),
+      );
+      await expectLater(
+        api.grantAiConsent(),
+        throwsA(
+          isA<AccountApiException>().having((e) => e.statusCode, 'status', 409),
+        ),
       );
     });
   });

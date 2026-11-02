@@ -33,6 +33,7 @@ import '../../providers/library_sync_provider.dart' show accountNameProvider;
 import '../../providers/onboarding_provider.dart' show onboardingProvider;
 import '../../providers/playback_provider.dart';
 import '../../theme/mixtape_theme.dart';
+import '../../widgets/ai_consent_sheet.dart' show openPrivacyPolicy;
 import '../../widgets/foundation/flush_row.dart';
 import '../../widgets/foundation/gradient_background.dart';
 import '../../widgets/foundation/inset_group.dart';
@@ -137,6 +138,18 @@ class YouTab extends ConsumerWidget {
                           color: tokens.muted,
                         ),
                       ),
+                    ),
+                    // Everyone, anonymous or not: the AI-consent plan links
+                    // the policy from You (2026-11-02).
+                    InsetGroup(
+                      children: [
+                        InsetRow(
+                          key: const Key('you-privacy'),
+                          leading: const Icon(Icons.lock_outline),
+                          title: 'Privacy policy',
+                          onTap: () => openPrivacyPolicy(ref),
+                        ),
+                      ],
                     ),
                     if (!anonymous)
                       InsetGroup(

@@ -99,6 +99,7 @@ void main() {
       (502, 'upstream', TranscriptionFailure.upstream),
       (401, 'unauthorized', TranscriptionFailure.unauthorized),
       (403, 'forbidden', TranscriptionFailure.unauthorized),
+      (403, 'ai_consent_required', TranscriptionFailure.consentRequired),
       (500, 'boom', TranscriptionFailure.upstream),
     ];
 

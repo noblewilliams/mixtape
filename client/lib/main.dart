@@ -1,6 +1,7 @@
-import 'package:flutter/foundation.dart' show kDebugMode;
+import 'package:flutter/foundation.dart' show kDebugMode, kReleaseMode;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'core/config.dart';
 import 'presentation/providers/auth_provider.dart';
 import 'presentation/providers/first_run_provider.dart';
 import 'presentation/providers/name_page_provider.dart';
@@ -16,6 +17,12 @@ import 'presentation/widgets/foundation/gradient_background.dart';
 const bool showFoundationGallery = bool.fromEnvironment('MIXTAPE_GALLERY');
 
 void main() {
+  // Fail fast: a store build missing its production define must not ship.
+  final problem = releaseConfigProblem(
+    AppConfig.apiBaseUrl,
+    release: kReleaseMode,
+  );
+  if (problem != null) throw StateError(problem);
   runApp(const ProviderScope(child: MixtapeApp()));
 }
 

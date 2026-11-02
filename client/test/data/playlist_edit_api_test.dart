@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:mixtape/data/api/api_client.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/playlists/playlist_edit_api.dart';
 import 'package:mixtape/data/playlists/playlist_edit_models.dart';
@@ -310,4 +311,16 @@ void main() {
       }
     },
   );
+
+  test('403 ai_consent_required is the consent exception, not an edit error', () async {
+    final api = await apiWith(
+      MockClient(
+        (_) async => http.Response('{"error":"ai_consent_required"}', 403),
+      ),
+    );
+    await expectLater(
+      api.sendMessage('00000000-0000-4000-8000-000000000010', 'later', 1),
+      throwsA(isA<AiConsentRequiredException>()),
+    );
+  });
 }

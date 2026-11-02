@@ -1,6 +1,6 @@
 import { useRestorableState } from '../lib/workspace-restore'
 import { TapeSettings } from './TapeSettings'
-import { PromptComposer, type PromptComposerProps } from './PromptComposer'
+import { PromptComposer, PromptKept, type PromptComposerProps } from './PromptComposer'
 import { EnergyControl, type EnergyArc } from './EnergyJourney'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { AlbumPick, DjMessage, DjSession, SessionKind } from '../domain'
@@ -175,7 +175,12 @@ export function Conversation({ currentShape, transcribe = unavailableTranscripti
       <div className="composer-area">
         {player}
         <PromptComposer draft={draft} setDraft={setDraft}
-          onSubmit={text => { const request = shape ? onSend(text, shape) : onSend(text); setDraft(''); return request }} transcribe={transcribe}
+          onSubmit={async text => {
+            const request = shape ? onSend(text, shape) : onSend(text)
+            setDraft('')
+            // A kept prompt (the consent dialog answered instead) comes back to the field.
+            try { await request } catch (cause) { if (cause instanceof PromptKept) setDraft(text); throw cause }
+          }} transcribe={transcribe}
           busy={thinking || loading || selectionBusy}
           inputLabel="Message your DJ" sendLabel="Send message"
           inputPlaceholder={album ? 'Another? Older? Something you do not know?' : 'Tell the DJ what to change…'}

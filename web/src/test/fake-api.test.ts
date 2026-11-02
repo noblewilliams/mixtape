@@ -74,6 +74,12 @@ describe('fake API album flow', () => {
   it('reports album picks on by default', async () => {
     expect((await createFakeApi().getMe()).albumPicks).toBe(true)
   })
+
+  it('reports AI consent granted by default and records a grant', async () => {
+    const api = createFakeApi()
+    expect((await api.getMe()).aiConsent).toBe(true)
+    await expect(api.grantAiConsent()).resolves.toEqual({ aiConsent: true })
+  })
 })
 
 describe('fake API Listen later', () => {

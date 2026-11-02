@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode, type Dispatch, type SetStateAction } from 'react'
+import { useAiConsentGate } from './AiConsent'
 import { SendIcon } from './Icons'
 import './home-composer.css'
 
@@ -38,6 +39,8 @@ export function PromptComposer({ draft, setDraft, tools, inputLabel = 'Describe 
   const generation = useRef(0)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const mounted = useRef(true)
+  // Missing AI consent re-opens the consent dialog; nothing is sent or recorded and the text stays.
+  const consentReady = useAiConsentGate()
 
   function releaseMicrophone() {
     if (timer.current) clearTimeout(timer.current)
@@ -78,6 +81,7 @@ export function PromptComposer({ draft, setDraft, tools, inputLabel = 'Describe 
 
   async function startRecording() {
     if (busy || sending || voice !== 'idle') return
+    if (!consentReady()) return
     setError(null)
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
       setError('Voice recording isn’t available in this browser. You can still type.')
@@ -129,9 +133,10 @@ export function PromptComposer({ draft, setDraft, tools, inputLabel = 'Describe 
           setDraft(value => [value.trimEnd(), result.text.trim()].filter(Boolean).join(' ').slice(0, maxLength))
           setVoice('idle')
           requestAnimationFrame(() => input.current?.focus())
-        } catch {
+        } catch (cause) {
           if (mounted.current && version === generation.current && !request.signal.aborted) {
-            setError('Couldn’t transcribe that recording. Try again or type.')
+            // PromptKept: the caller already answered (the consent dialog); no error line.
+            if (!(cause instanceof PromptKept)) setError('Couldn’t transcribe that recording. Try again or type.')
             setVoice('idle')
           }
         } finally {
@@ -153,6 +158,7 @@ export function PromptComposer({ draft, setDraft, tools, inputLabel = 'Describe 
 
   async function submit() {
     if (!draft.trim() || busy || sending || voice !== 'idle') return
+    if (!consentReady()) return
     setSending(true)
     setError(null)
     try {

@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import {
   AnonymousCapError,
   ApiError,
+  isAiConsentRequired,
   type AlbumPickResponse,
   type ApiQueueTrack,
   type ApiPlaylistSeed,
@@ -25,6 +26,7 @@ import {
 } from './api/client'
 import { toAlbumPickState, toDjMessage, toDjSession, toListenLaterEntry, toQueueTrack } from './api/mappers'
 import { AlbumPanel } from './components/AlbumPanel'
+import { AiConsentDialog, AiConsentGate } from './components/AiConsent'
 import { useMediaQuery } from './lib/use-media-query'
 import { SignInPage, signInHeadline, type AuthBridge, type AuthUser, type SignInVariant } from './components/AuthGate'
 import { BackButton } from './components/first-run/FirstRunPage'
@@ -463,6 +465,34 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   const nameGateRef = useRef(nameGate)
   const heldNotice = useRef<string | null>(null)
   const deferredToast = useRef<{ message: string; tone: ToastState['tone']; duration: number; action?: ToastAction } | null>(null)
+  // AI consent (docs/superpowers/plans/2026-11-02-ai-consent-and-privacy.md):
+  // when /me says no, the dialog shows once over the app; Not now closes it
+  // for this page load, and anything that would reach the DJ re-opens it
+  // instead of sending. Until /me answers (or when it fails) nothing is gated.
+  const consentMissing = useRef(false)
+  const [consentOpen, setConsentOpen] = useState(false)
+  const consentReady = useCallback(() => {
+    if (!consentMissing.current) return true
+    setConsentOpen(true)
+    return false
+  }, [])
+  // The server's 403 ai_consent_required (a listener /me never asked, such as
+  // an anonymous one): the same dialog, and later sends are gated here too.
+  // After Agree the listener sends again themselves; nothing is re-sent.
+  const consentRequired = useCallback(() => {
+    consentMissing.current = true
+    setConsentOpen(true)
+  }, [])
+  const transcribe = useCallback((audio: File, signal: AbortSignal) => api.transcribe(audio, signal).catch((cause: unknown) => {
+    if (!isAiConsentRequired(cause)) throw cause
+    consentRequired()
+    throw new PromptKept()
+  }), [api, consentRequired])
+  async function grantConsent() {
+    await api.grantAiConsent()
+    consentMissing.current = false
+    setConsentOpen(false)
+  }
   useEffect(() => {
     if (restoring || anonymous || mergeRead.current) return
     mergeRead.current = true
@@ -471,10 +501,15 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     const holdTimer = heldForName ? setTimeout(() => { if (nameGateRef.current === 'hold') setNameGate('off') }, NAME_HOLD_MS) : undefined
     void Promise.resolve()
       .then(() => api.getMe())
-      .then(({ merged, albumPicks, askName }) => {
+      .then(({ merged, albumPicks, askName, aiConsent }) => {
         clearTimeout(holdTimer)
         setAlbumPicks(albumPicks)
         const asking = askName && canSaveName
+        // The consent dialog waits for the name page: one question at a time.
+        if (!aiConsent) {
+          consentMissing.current = true
+          if (!asking) setConsentOpen(true)
+        }
         const notice = mergeNotice(merged)
         if (asking) heldNotice.current = notice
         setNameGate(asking ? 'ask' : 'off')
@@ -508,6 +543,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   /** Continue (after the save) or Skip: the workspace, then any held notice, with focus on the workspace's heading. */
   function closeNamePage() {
     setNameGate('off')
+    if (consentMissing.current) setConsentOpen(true)
     // After the shell stops being inert.
     requestAnimationFrame(() => {
       const heading = document.querySelector<HTMLElement>('.app-shell main h1, .app-shell h1')
@@ -977,6 +1013,11 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   /** `inspiration` overrides the dialog's seed (the kept mix re-sent after sign-in). */
   async function createTape(prompt: string, useInspiration = true, propagateError = false, shape?: EnergyArc, inspiration?: InitialPlaylistSeed | null, kind: SessionKind = 'mix') {
     if (creatingTape) return
+    // New mix, a routine suggestion, an album ask: the dialog answers and the prompt stays where it was.
+    if (!consentReady()) {
+      if (propagateError) throw new PromptKept()
+      return
+    }
     const signal = controlLife.current.signal
     setCreatingTape(true)
     const seed = inspiration !== undefined
@@ -990,6 +1031,12 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       if ((response.session.kind ?? 'mix') === 'mix') notePersonalMix(response.session, response.queue?.length ?? 0)
     } catch (requestError) {
       if (signal.aborted) return
+      if (isAiConsentRequired(requestError)) {
+        // The prompt stays where it was typed (the New mix dialog stays open).
+        consentRequired()
+        if (propagateError) throw new PromptKept()
+        return
+      }
       if (requestError instanceof AnonymousCapError) {
         // The composer stays as it is; the sign-in page answers (board C2).
         postFunnelEventOnce(api, user.id, 'cap_reached')
@@ -1009,9 +1056,11 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     }
   }
 
-  async function sendMessage(text: string, shape?: EnergyArc) {
+  /** `keepPrompt`: a consent 403 rejects with PromptKept so the composer puts the text back. */
+  async function sendMessage(text: string, shape?: EnergyArc, keepPrompt = false) {
     const signal = controlLife.current.signal
     if (!activeSession || seedWrites.current.has(activeSession.id)) return
+    if (!consentReady()) return
     const sessionId = activeSession.id
     contentRevision.current[sessionId] = (contentRevision.current[sessionId] ?? 0) + 1
     const metadataAtStart = metadataRevision.current[sessionId] ?? 0
@@ -1065,6 +1114,16 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       void refreshSessionAfterTurn(sessionId)
     } catch (requestError) {
       if (signal.aborted) return
+      if (isAiConsentRequired(requestError)) {
+        // Nothing reached the DJ: the pending turn goes, no error turn is added.
+        setMessagesBySession((current) => ({
+          ...current,
+          [sessionId]: (current[sessionId] ?? []).filter((message) => message.id !== userMessage.id),
+        }))
+        consentRequired()
+        if (keepPrompt) throw new PromptKept()
+        return
+      }
       const message = errorCopy(requestError)
       setMessagesBySession((current) => ({
         ...current,
@@ -1444,7 +1503,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   ) : null
 
   return (
-    <>
+    <AiConsentGate.Provider value={consentReady}>
     <div className={`app-shell ${activeView !== 'session' || !activeSession ? 'app-shell--home' : ''}`} style={shellStyle} inert={addingMusic || keepSheet || signInPage !== null || nameGate !== 'off'}>
       <Sidebar activeView={activeView}
         onOpenHome={() => setActiveView('home')}
@@ -1456,7 +1515,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       {activeView === 'settings' ? <AppSettings api={api} playback={playback} userName={user.name} signInMethod={lastSignInProvider} saveName={saveName} onAccount={() => setDialog('account')} onMemories={() => setActiveView('memories')} onSignOut={signOut} onAccountDeleted={accountDeleted} anonymous={anonymous} onSignIn={() => openSignIn('keep')}/> : activeView === 'home' ? <HomeDashboard
         sessions={sessions} loading={loadingCollection} error={collectionError} busy={creatingTape}
         onRetry={() => void retryCollection()} onOpenSession={openSession} onOpenMixes={() => { setMixesTab('active'); setActiveView('mixes') }}
-        albumPicks={albumPicks} anonymous={anonymous} onSubmit={(prompt, { kind, shape }) => createTape(prompt, false, true, shape, undefined, kind)} transcribe={(audio,signal) => api.transcribe(audio,signal)} draftSeed={draftSeed} modeSeed={modeSeed}
+        albumPicks={albumPicks} anonymous={anonymous} onSubmit={(prompt, { kind, shape }) => createTape(prompt, false, true, shape, undefined, kind)} transcribe={transcribe} draftSeed={draftSeed} modeSeed={modeSeed}
         suggestions={<RoutineSuggestions key={user.id} api={api} busy={creatingTape} onCreate={prompt => createTape(prompt, false, true).catch((cause) => { if (!(cause instanceof PromptKept)) throw cause })}/>}
         player={<PlaybackPanel controller={playback}/>}
         onColor={(id,color) => updateMix(id,{caseColor:color})} onRename={(id,title) => updateMix(id,{title})} onArchive={id => updateMix(id,{status:'archived'})}
@@ -1517,7 +1576,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
           {!historySessionId && <Conversation
             key={activeSession.id}
             currentShape={mixShapes[`${activeSession.id}:${activeSession.queueVersion}`]}
-            transcribe={(audio, signal) => api.transcribe(audio, signal)}
+            transcribe={transcribe}
             selectionBusy={seedBusy === activeSession.id}
             attachment={<PlaylistAttachment api={api} onReload={!playlistSeeds[activeSession.id] ? () => reloadInspiration(activeSession.id) : undefined} value={attachmentValue(playlistSeeds[activeSession.id])} disabled={!playlistSeeds[activeSession.id] || thinkingSessionId === activeSession.id} onSelect={(value) => selectInspiration(activeSession.id, value)} onSessionExpired={signOut} />}
             onColor={color => updateMix(activeSession.id, { caseColor: color })}
@@ -1529,7 +1588,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
             thinking={thinkingSessionId === activeSession.id}
             player={<PlaybackPanel controller={playback} />}
             energySummary={activeIsAlbum ? undefined : <MixEnergySummary onShape={shape => setMixShapes(current => ({ ...current, [`${activeSession.id}:${activeSession.queueVersion}`]: shape }))} key={`${activeSession.id}:${activeSession.queueVersion}`} api={api} sessionId={activeSession.id} version={activeSession.queueVersion} />}
-            onSend={sendMessage}
+            onSend={(text, shape) => sendMessage(text, shape, true)}
             onOpenHistory={activeIsAlbum ? undefined : (version) => { setHistoryVersion(version); setHistorySessionId(activeSession.id) }}
             onOpenQueue={activeIsAlbum ? undefined : () => setQueueOpen(true)}
             kind={activeSession.kind}
@@ -1618,6 +1677,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
         <div className="fr-stage fr-stage--fade"><NamePage saveName={saveName} onSaved={saveFromNamePage} onSkip={skipNamePage} /></div>
       </div>
     ) : null}
-    </>
+    {consentOpen ? <AiConsentDialog onAgree={grantConsent} onNotNow={() => setConsentOpen(false)} /> : null}
+    </AiConsentGate.Provider>
   )
 }

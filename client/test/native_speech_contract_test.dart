@@ -72,6 +72,17 @@ void main() {
     }
   });
 
+  // file_picker links a photo picker (DKImagePickerController), so App Store
+  // processing rejects the binary without this string (ITMS-90683, build
+  // 202611021606) even though Mixtape never opens the photo library.
+  test('Info.plist explains the photo library the file picker links', () {
+    expect(plist, contains('<key>NSPhotoLibraryUsageDescription</key>'));
+    expect(
+      plist,
+      contains('<string>Mixtape only opens files you choose, such as a music export. It never reads your photos.</string>'),
+    );
+  });
+
   test('Info.plist explains the microphone and the recogniser', () {
     expect(plist, contains('<key>NSMicrophoneUsageDescription</key>'));
     expect(
