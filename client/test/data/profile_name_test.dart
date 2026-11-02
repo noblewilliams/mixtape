@@ -83,6 +83,22 @@ void main() {
       expect(edit.cut, isFalse);
     });
 
+    test('replacing an emoji never splits its surrogate pair', () {
+      // 😀 → 😃 share the high surrogate; the scan must not stop between.
+      final edit = applyNameEdit(_at('a\u{1F600}b', 3), _at('a\u{1F603}b', 3));
+      expect(edit.value.text, 'a\u{1F603}b');
+      expect(normalizeProfileName(edit.value.text), 'a\u{1F603}b');
+    });
+
+    test('a shared low surrogate at the end is not split either', () {
+      // 😀 (D83D DE00) → 🈀 (D83C DE00), no caret to guide the scan.
+      final edit = applyNameEdit(
+        const TextEditingValue(text: 'a\u{1F600}'),
+        const TextEditingValue(text: 'a\u{1F200}'),
+      );
+      expect(edit.value.text, 'a\u{1F200}');
+    });
+
     test('deleting is always allowed', () {
       final edit = applyNameEdit(_at('a' * 40), _at('a' * 39));
       expect(edit.value.text, 'a' * 39);

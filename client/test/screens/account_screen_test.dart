@@ -597,6 +597,8 @@ void main() {
 
   group('name', () {
     Finder field() => find.byKey(AccountScreen.nameFieldKey);
+    _Auth auth(ProviderContainer container) =>
+        container.read(authProvider.notifier) as _Auth;
     String fieldText(WidgetTester tester) =>
         tester.widget<TextField>(field()).controller!.text;
 
@@ -882,6 +884,116 @@ void main() {
         find.byKey(AccountScreen.nameSaveKey).hitTestable(),
         findsOneWidget,
       );
+    });
+
+    testWidgets('the count is read by VoiceOver', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await _pump(tester, _Accounts(const AccountState(accounts: [_apple])));
+      await tester.tap(find.byKey(AccountScreen.nameRowKey));
+      await tester.pumpAndSettle();
+      await tester.enterText(field(), 'a' * 34);
+      await tester.pump();
+      expect(find.bySemanticsLabel('34 of 40'), findsOneWidget);
+      semantics.dispose();
+    });
+
+    testWidgets('marked (composing) text is not counted or capped', (
+      tester,
+    ) async {
+      await _pump(tester, _Accounts(const AccountState(accounts: [_apple])));
+      await tester.tap(find.byKey(AccountScreen.nameRowKey));
+      await tester.pumpAndSettle();
+      await tester.enterText(field(), 'a' * 39);
+      await tester.pump();
+      tester.testTextInput.updateEditingValue(
+        TextEditingValue(
+          text: '${'a' * 39}にほん',
+          selection: const TextSelection.collapsed(offset: 42),
+          composing: const TextRange(start: 39, end: 42),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('39 of 40'), findsOneWidget);
+      expect(find.text(AccountScreen.nameHint), findsOneWidget);
+      expect(find.text(AccountScreen.nameCut), findsNothing);
+    });
+
+    testWidgets('a 401 on save takes the session-expired path, not Retry', (
+      tester,
+    ) async {
+      final api = _NameApi(
+        onWrite: (_) async => throw AccountApiException(401, 'private', null),
+      );
+      final container = await _pump(
+        tester,
+        _Accounts(const AccountState(accounts: [_apple])),
+        api: api,
+      );
+      await tester.tap(find.byKey(AccountScreen.nameRowKey));
+      await tester.pumpAndSettle();
+      await tester.enterText(field(), 'Ada');
+      await tester.tap(find.byKey(AccountScreen.nameSaveKey));
+      await tester.pumpAndSettle();
+
+      expect(auth(container).signsOut, 1);
+      expect(find.text(AccountScreen.nameFailed), findsNothing);
+      expect(find.text('Retry'), findsNothing);
+    });
+
+    testWidgets('a 401 whose sign-out fails says the session expired and '
+        'offers Sign in again', (tester) async {
+      final api = _NameApi(
+        onWrite: (_) async => throw AccountApiException(401, 'private', null),
+      );
+      final container = await _pump(
+        tester,
+        _Accounts(const AccountState(accounts: [_apple])),
+        api: api,
+      );
+      auth(container).failSignOut = true;
+      await tester.tap(find.byKey(AccountScreen.nameRowKey));
+      await tester.pumpAndSettle();
+      await tester.enterText(field(), 'Ada');
+      await tester.tap(find.byKey(AccountScreen.nameSaveKey));
+      await tester.pumpAndSettle();
+
+      expect(find.text(AccountScreen.nameExpired), findsOneWidget);
+      expect(find.text('Retry'), findsNothing);
+      expect(find.byKey(const Key('account-sign-out')), findsOneWidget);
+    });
+
+    testWidgets('leaving mid-save still refreshes /me for You and chat', (
+      tester,
+    ) async {
+      var stored = 'Noble';
+      final saving = Completer<void>();
+      final api = _NameApi(
+        onWrite: (name) async {
+          await saving.future;
+          stored = name!;
+        },
+      );
+      final container = await _pump(
+        tester,
+        _Accounts(const AccountState(accounts: [_apple])),
+        api: api,
+        liveName: () => stored,
+      );
+      container.listen(accountNameProvider, (_, _) {});
+      await tester.tap(find.byKey(AccountScreen.nameRowKey));
+      await tester.pumpAndSettle();
+      await tester.enterText(field(), 'Ada');
+      await tester.tap(find.byKey(AccountScreen.nameSaveKey));
+      await tester.pump();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: SizedBox()),
+        ),
+      );
+      saving.complete();
+      await tester.pumpAndSettle();
+      expect(await container.read(accountNameProvider.future), 'Ada');
     });
 
     testWidgets('an unchanged name closes without a write', (tester) async {

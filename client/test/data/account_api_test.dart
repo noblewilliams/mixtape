@@ -77,7 +77,8 @@ void main() {
     },
   );
 
-  test('Apple link carries the names Apple gave, trimmed', () async {
+  test('Apple link sends only the token: Better Auth drops idToken.user '
+      'on link-social', () async {
     final bodies = <Object?>[];
     final api = apiWith((request) async {
       bodies.add(jsonDecode(request.body));
@@ -89,22 +90,7 @@ void main() {
       givenName: ' Ada ',
       familyName: 'Lovelace',
     );
-    await api.link(
-      provider: AccountProvider.apple,
-      token: 'identity-token',
-      givenName: ' ',
-      familyName: '',
-    );
     expect(bodies, [
-      {
-        'provider': 'apple',
-        'idToken': {
-          'token': 'identity-token',
-          'user': {
-            'name': {'firstName': 'Ada', 'lastName': 'Lovelace'},
-          },
-        },
-      },
       {
         'provider': 'apple',
         'idToken': {'token': 'identity-token'},

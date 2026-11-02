@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import '../api/api_client.dart';
-import 'identity_token.dart';
 
 enum AccountProvider { apple, google }
 
@@ -126,8 +125,10 @@ class AccountApi {
 
   /// Explicit linking never signs in or replaces the existing session token.
   ///
-  /// [givenName] / [familyName] are what Apple disclosed with the token, if
-  /// anything; they ride along as `idToken.user.name` when non-blank.
+  /// [givenName] and [familyName] are accepted and ignored: Better Auth
+  /// (1.7.2, `link-social`) drops `idToken.user` and never updates the
+  /// user's name from a link, so sending them would only suggest otherwise.
+  /// The name page and Account are where a linked account gets a name.
   Future<void> link({
     required AccountProvider provider,
     required String token,
@@ -139,11 +140,7 @@ class AccountApi {
       await _request(
         () async => (await _client.postJson('/api/auth/link-social', {
           'provider': provider.name,
-          'idToken': idTokenJson(
-            token,
-            givenName: givenName,
-            familyName: familyName,
-          ),
+          'idToken': {'token': token},
         })).body,
       ),
     );

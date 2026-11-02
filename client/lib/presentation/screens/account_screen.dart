@@ -70,6 +70,7 @@ class AccountScreen extends ConsumerStatefulWidget {
   static const String nameCut = 'Names stop at 40 characters.';
   static const String nameSaving = 'Saving…';
   static const String nameFailed = 'Couldn’t save your name.';
+  static const String nameExpired = 'Your session expired. Sign in again.';
   static const String nameSaved = 'Name saved';
   static const String nameRemoved = 'Name removed';
 
@@ -127,6 +128,14 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
     } finally {
       if (mounted) setState(() => _signingOut = false);
     }
+  }
+
+  /// A name save answered 401: the same expiry as the methods' 401, so the
+  /// listener signs in again rather than retrying a dead session. If signing
+  /// out fails, "Sign in again" stays offered.
+  void _nameSessionExpired() {
+    if (ref.read(authProvider) != AuthStatus.session) return;
+    unawaited(_signOut());
   }
 
   Future<void> _deleteAccount() async {
@@ -237,7 +246,11 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _Identity(name: name, editable: canDelete),
+                  _Identity(
+                    name: name,
+                    editable: canDelete,
+                    onSessionExpired: _nameSessionExpired,
+                  ),
                   InsetGroup(
                     header: const SectionWord('Login methods'),
                     children: [
@@ -464,7 +477,14 @@ class _MethodRow extends ConsumerWidget {
 /// (`docs/mockups/2026-11-02-profile-name-states.html` → A1–A7). Done on the
 /// keyboard saves; leaving the field does not (no silent saves).
 class _Identity extends ConsumerStatefulWidget {
-  const _Identity({required this.name, required this.editable});
+  const _Identity({
+    required this.name,
+    required this.editable,
+    required this.onSessionExpired,
+  });
+
+  /// A save answered 401.
+  final VoidCallback onSessionExpired;
 
   /// The saved name from `/me`, or null.
   final String? name;
@@ -484,6 +504,7 @@ class _IdentityState extends ConsumerState<_Identity> {
   bool _saving = false;
   bool _failed = false;
   bool _cut = false;
+  bool _expired = false;
 
   String? get _saved {
     final name = widget.name?.trim();
@@ -550,6 +571,7 @@ class _IdentityState extends ConsumerState<_Identity> {
     setState(() {
       _editing = true;
       _failed = false;
+      _expired = false;
       _cut = false;
     });
     _focus.requestFocus();
@@ -561,6 +583,7 @@ class _IdentityState extends ConsumerState<_Identity> {
     setState(() {
       _editing = false;
       _failed = false;
+      _expired = false;
       _cut = false;
     });
   }
@@ -578,24 +601,34 @@ class _IdentityState extends ConsumerState<_Identity> {
       _failed = false;
     });
     _announce('Saving');
+    // Held across the awaits: if the listener leaves mid-save, /me is still
+    // refreshed so You, chat and the save dialog's author default update.
+    final container = ProviderScope.containerOf(context, listen: false);
     try {
-      await ref.read(accountApiProvider).updateUser(name: next);
-    } catch (_) {
+      await container.read(accountApiProvider).updateUser(name: next);
+    } catch (error) {
       if (!mounted) return;
+      final expired = error is ApiException && error.statusCode == 401;
       setState(() {
         _saving = false;
-        _failed = true;
+        _failed = !expired;
+        _expired = expired;
       });
-      _announce(AccountScreen.nameFailed);
+      if (expired) {
+        _announce(AccountScreen.nameExpired);
+        widget.onSessionExpired();
+      } else {
+        _announce(AccountScreen.nameFailed);
+      }
       return;
     }
-    if (!mounted) return;
     // `/me` is the one reader: Account, You and the save dialog's author
     // default all derive from it. Wait for the stored (normalised) name so
     // the row never flashes the old one.
-    ref.invalidate(meProvider);
+    container.invalidate(meProvider);
+    if (!mounted) return;
     try {
-      await ref.read(accountNameProvider.future);
+      await container.read(accountNameProvider.future);
     } catch (_) {
       // The write landed; a failed reread only leaves the row stale.
     }
@@ -683,13 +716,14 @@ class _IdentityState extends ConsumerState<_Identity> {
       );
     }
 
-    final length = nameLength(_field.text);
+    // Marked text an IME is still composing is neither counted nor capped.
+    final length = nameLength(committedText(_field.value));
     final atCap = _cut || length >= profileNameMax;
     final Widget line;
     if (_saving) {
       // Keeps the line's height so nothing shifts.
       line = Text(' ', style: tokens.meta);
-    } else if (_failed) {
+    } else if (_failed || _expired) {
       line = Row(
         children: [
           Icon(
@@ -700,7 +734,7 @@ class _IdentityState extends ConsumerState<_Identity> {
           const SizedBox(width: 6),
           Expanded(
             child: Text(
-              AccountScreen.nameFailed,
+              _expired ? AccountScreen.nameExpired : AccountScreen.nameFailed,
               style: tokens.meta.copyWith(color: tokens.errInk),
             ),
           ),
@@ -742,18 +776,13 @@ class _IdentityState extends ConsumerState<_Identity> {
                   color: _saving ? tokens.muted : tokens.text,
                 ),
                 cursorColor: tokens.plum,
-                decoration:
-                    InputDecoration.collapsed(
-                      hintText: AccountScreen.nameLabel,
-                      hintStyle: tokens.rowTitle.copyWith(
-                        fontWeight: FontWeight.w400,
-                        color: tokens.muted,
-                      ),
-                    ).copyWith(
-                      semanticCounterText: length >= AccountScreen.nameCountFrom
-                          ? '$length of $profileNameMax'
-                          : null,
-                    ),
+                decoration: InputDecoration.collapsed(
+                  hintText: AccountScreen.nameLabel,
+                  hintStyle: tokens.rowTitle.copyWith(
+                    fontWeight: FontWeight.w400,
+                    color: tokens.muted,
+                  ),
+                ),
               ),
               trailing: showClear
                   ? Semantics(
@@ -795,7 +824,7 @@ class _IdentityState extends ConsumerState<_Identity> {
                           : _failed
                           ? 'Retry'
                           : 'Save',
-                      onPressed: _saving ? null : _save,
+                      onPressed: _saving || _expired ? null : _save,
                     ),
                     TextAction(
                       key: AccountScreen.nameCancelKey,
@@ -806,13 +835,11 @@ class _IdentityState extends ConsumerState<_Identity> {
                   ],
                 ),
               ),
-              // Read with the field (its counter), not twice.
+              // Its own stop for VoiceOver, after Save and Cancel.
               if (length >= AccountScreen.nameCountFrom)
-                ExcludeSemantics(
-                  child: Text(
-                    '$length of $profileNameMax',
-                    style: tokens.meta.copyWith(color: tokens.muted),
-                  ),
+                Text(
+                  '$length of $profileNameMax',
+                  style: tokens.meta.copyWith(color: tokens.muted),
                 ),
             ],
           ),

@@ -22,10 +22,19 @@ final meProvider = FutureProvider<Me?>((ref) async {
 }, retry: (_, _) => null);
 
 /// Album picks are offered only to a signed-in account (never anonymous,
-/// decision 2026-10-20) whose server says the flag is on. False while `/me`
-/// is loading or after it failed: the Mix-only app is the safe default.
+/// decision 2026-10-20) whose server says the flag is on. False while the
+/// first `/me` is loading or after it failed: the Mix-only app is the safe
+/// default.
+///
+/// An explicit refresh (`ref.invalidate(meProvider)` after a name save) keeps
+/// the last answer while it rereads, and if the reread fails, so saving a
+/// name never drops the listener out of Albums. A rebuild from an auth
+/// change (reloading) does not carry it over; sign-out passes through a null
+/// `/me` anyway.
 final albumPicksEnabledProvider = Provider<bool>((ref) {
   if (ref.watch(authProvider) != AuthStatus.session) return false;
   if (ref.watch(isAnonymousProvider)) return false;
-  return ref.watch(meProvider).unwrapPrevious().value?.albumPicks ?? false;
+  final me = ref.watch(meProvider);
+  final current = me.isReloading ? me.unwrapPrevious() : me;
+  return current.value?.albumPicks ?? false;
 });

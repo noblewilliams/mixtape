@@ -19,6 +19,16 @@ class FakeGateway implements AppleAuthGateway {
   Future<String> getAuthorizationCode() async => 'apple-code';
 }
 
+class _SequenceGateway implements AppleAuthGateway {
+  _SequenceGateway(this.tokens);
+  final List<IdentityToken> tokens;
+  var _next = 0;
+  @override
+  Future<IdentityToken> getIdentityToken() async => tokens[_next++];
+  @override
+  Future<String> getAuthorizationCode() async => 'apple-code';
+}
+
 class CancellingGateway implements AppleAuthGateway {
   @override
   Future<IdentityToken> getIdentityToken() async => throw AppleSignInCancelled();
@@ -100,6 +110,83 @@ void main() {
       ]) {
         expect(await sentIdToken(gateway), {'token': 'apple-id-token'});
       }
+    });
+  });
+
+  group('Apple name across a failed sign-in', () {
+    // A JWT-shaped token whose payload carries Apple's subject.
+    String jwt(String sub) {
+      String part(Object value) =>
+          base64Url.encode(utf8.encode(jsonEncode(value))).replaceAll('=', '');
+      return '${part({'alg': 'none'})}.${part({'sub': sub})}.sig';
+    }
+
+    test('a retry after a failed POST still sends the name Apple gave once',
+        () async {
+      final tokens = [
+        IdentityToken(jwt('apple-1'), givenName: 'Ada', familyName: 'Lovelace'),
+        IdentityToken(jwt('apple-1')),
+        IdentityToken(jwt('apple-1')),
+      ];
+      final sent = <Object?>[];
+      var fail = true;
+      final store = InMemoryTokenStore();
+      final repo = AuthRepository(
+        tokenStore: store,
+        gateway: _SequenceGateway(tokens),
+        api: ApiClient(
+          baseUrl: 'http://x',
+          tokenStore: store,
+          inner: MockClient((req) async {
+            sent.add((jsonDecode(req.body) as Map<String, dynamic>)['idToken']);
+            if (fail) return http.Response('{"code":"X"}', 500);
+            return http.Response('{"user":{}}', 200,
+                headers: {'set-auth-token': 'bearer-abc'});
+          }),
+        ),
+      );
+      await expectLater(repo.signInWithApple(), throwsA(isA<ApiException>()));
+      fail = false;
+      await repo.signInWithApple();
+      // Used up by the successful sign-in.
+      await repo.signInWithApple();
+
+      const named = {
+        'name': {'firstName': 'Ada', 'lastName': 'Lovelace'},
+      };
+      expect(sent, [
+        {'token': jwt('apple-1'), 'user': named},
+        {'token': jwt('apple-1'), 'user': named},
+        {'token': jwt('apple-1')},
+      ]);
+    });
+
+    test('a different Apple ID on the retry does not get the name', () async {
+      final tokens = [
+        IdentityToken(jwt('apple-1'), givenName: 'Ada'),
+        IdentityToken(jwt('apple-2')),
+      ];
+      final sent = <Object?>[];
+      var fail = true;
+      final store = InMemoryTokenStore();
+      final repo = AuthRepository(
+        tokenStore: store,
+        gateway: _SequenceGateway(tokens),
+        api: ApiClient(
+          baseUrl: 'http://x',
+          tokenStore: store,
+          inner: MockClient((req) async {
+            sent.add((jsonDecode(req.body) as Map<String, dynamic>)['idToken']);
+            if (fail) return http.Response('{}', 500);
+            return http.Response('{"user":{}}', 200,
+                headers: {'set-auth-token': 'bearer-abc'});
+          }),
+        ),
+      );
+      await expectLater(repo.signInWithApple(), throwsA(isA<ApiException>()));
+      fail = false;
+      await repo.signInWithApple();
+      expect(sent.last, {'token': jwt('apple-2')});
     });
   });
 

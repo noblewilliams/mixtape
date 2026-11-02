@@ -71,6 +71,9 @@ NameEdit applyNameEdit(TextEditingValue previous, TextEditingValue next) {
       suffix++;
     }
   }
+  // Never end the kept tail inside a surrogate pair (😀 → 🈀 share the low
+  // half): give the whole character to the edit.
+  if (suffix > 0 && _isLow(prev.codeUnitAt(prev.length - suffix))) suffix--;
   final limit = (prev.length - suffix) < (text.length - suffix)
       ? prev.length - suffix
       : text.length - suffix;
@@ -78,6 +81,8 @@ NameEdit applyNameEdit(TextEditingValue previous, TextEditingValue next) {
   while (prefix < limit && prev[prefix] == text[prefix]) {
     prefix++;
   }
+  // Nor start the edit inside one (😀 → 😃 share the high half).
+  if (prefix > 0 && _isHigh(prev.codeUnitAt(prefix - 1))) prefix--;
 
   final before = prev.substring(0, prefix);
   final after = prev.substring(prev.length - suffix);
@@ -104,6 +109,17 @@ NameEdit applyNameEdit(TextEditingValue previous, TextEditingValue next) {
     ),
     cut: cut,
   );
+}
+
+bool _isHigh(int unit) => unit >= 0xD800 && unit <= 0xDBFF;
+bool _isLow(int unit) => unit >= 0xDC00 && unit <= 0xDFFF;
+
+/// The text the keyboard has committed: [value] without its composing
+/// (marked) range, which an IME may still change.
+String committedText(TextEditingValue value) {
+  final composing = value.composing;
+  if (!composing.isValid || composing.isCollapsed) return value.text;
+  return composing.textBefore(value.text) + composing.textAfter(value.text);
 }
 
 /// The field's hard stop. Composing (marked) text from an IME passes through

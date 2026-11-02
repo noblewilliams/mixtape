@@ -52,7 +52,34 @@ class AuthRepository {
 
   bool get googleAvailable => googleGateway?.isAvailable ?? false;
 
-  Future<void> signInWithApple() => _signIn('apple', gateway.getIdentityToken);
+  /// Apple discloses the name only on the first-ever authorization. If that
+  /// sign-in's POST fails, the retry's token comes without it, so the name
+  /// is held here (memory only, this app session) for a retry by the same
+  /// Apple ID, and dropped once a sign-in succeeds.
+  _HeldAppleName? _heldAppleName;
+
+  Future<void> signInWithApple() async {
+    IdentityToken? sent;
+    await _signIn('apple', () async {
+      final identity = await gateway.getIdentityToken();
+      final subject = _jwtSubject(identity.token);
+      final held = _heldAppleName;
+      if (_hasName(identity)) {
+        _heldAppleName = _HeldAppleName(subject, identity);
+        sent = identity;
+      } else if (held != null && subject != null && held.subject == subject) {
+        sent = IdentityToken(
+          identity.token,
+          givenName: held.identity.givenName,
+          familyName: held.identity.familyName,
+        );
+      } else {
+        sent = identity;
+      }
+      return sent!;
+    });
+    _heldAppleName = null;
+  }
 
   Future<void> signInWithGoogle() {
     final google = googleGateway;
@@ -214,6 +241,32 @@ class AuthRepository {
   void dispose() {
     _disposed = true;
     cancelPending();
+  }
+}
+
+class _HeldAppleName {
+  const _HeldAppleName(this.subject, this.identity);
+  final String? subject;
+  final IdentityToken identity;
+}
+
+bool _hasName(IdentityToken identity) =>
+    (identity.givenName?.trim().isNotEmpty ?? false) ||
+    (identity.familyName?.trim().isNotEmpty ?? false);
+
+/// The `sub` claim of a JWT, read without verifying it: only used to tell
+/// whether a retry is the same Apple ID. Null when it cannot be read.
+String? _jwtSubject(String token) {
+  final parts = token.split('.');
+  if (parts.length != 3) return null;
+  try {
+    final payload = jsonDecode(
+      utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))),
+    );
+    final sub = payload is Map<String, dynamic> ? payload['sub'] : null;
+    return sub is String && sub.isNotEmpty ? sub : null;
+  } catch (_) {
+    return null;
   }
 }
 
