@@ -21,18 +21,24 @@ import 'package:mixtape/presentation/widgets/foundation/gradient_background.dart
 class _CancellingGateway implements AppleAuthGateway {
   @override
   Future<String> getIdentityToken() async => throw AppleSignInCancelled();
+  @override
+  Future<String> getAuthorizationCode() async => 'apple-code';
 }
 
 class _BrokenGateway implements AppleAuthGateway {
   @override
   Future<String> getIdentityToken() async =>
       throw StateError('native bridge unavailable');
+  @override
+  Future<String> getAuthorizationCode() async => 'apple-code';
 }
 
 class _PendingGateway implements AppleAuthGateway {
   final Completer<String> token = Completer<String>();
   @override
   Future<String> getIdentityToken() => token.future;
+  @override
+  Future<String> getAuthorizationCode() async => 'apple-code';
 }
 
 /// Refuses every method the way the server does for an unknown identity.
@@ -59,6 +65,8 @@ class _GoogleGateway implements GoogleAuthGateway {
   @override
   Future<String> getIdentityToken() async =>
       onToken == null ? throw const GoogleSignInCancelled() : onToken!();
+  @override
+  Future<void> disconnect() async {}
 }
 
 ProviderSignInButton _button(WidgetTester tester, String key) =>

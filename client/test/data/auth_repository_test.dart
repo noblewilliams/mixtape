@@ -10,11 +10,15 @@ import 'package:mixtape/data/auth/token_store.dart';
 class FakeGateway implements AppleAuthGateway {
   @override
   Future<String> getIdentityToken() async => 'apple-id-token';
+  @override
+  Future<String> getAuthorizationCode() async => 'apple-code';
 }
 
 class CancellingGateway implements AppleAuthGateway {
   @override
   Future<String> getIdentityToken() async => throw AppleSignInCancelled();
+  @override
+  Future<String> getAuthorizationCode() async => 'apple-code';
 }
 
 void main() {

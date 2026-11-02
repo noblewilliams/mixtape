@@ -15,6 +15,8 @@ class _Apple implements AppleAuthGateway {
   final token = Completer<String>();
   @override
   Future<String> getIdentityToken() => token.future;
+  @override
+  Future<String> getAuthorizationCode() async => 'apple-code';
 }
 
 class _Google implements GoogleAuthGateway {
@@ -22,6 +24,8 @@ class _Google implements GoogleAuthGateway {
   bool get isAvailable => true;
   @override
   Future<String> getIdentityToken() async => 'google-token';
+  @override
+  Future<void> disconnect() async {}
 }
 
 void main() {

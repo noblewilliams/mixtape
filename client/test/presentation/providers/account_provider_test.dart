@@ -31,6 +31,10 @@ class FakeAccountApi implements AccountApi {
     unlinks++;
     return onUnlink(account);
   }
+
+  @override
+  Future<void> deleteAccount({String? appleAuthorizationCode}) =>
+      throw UnimplementedError();
 }
 
 const apple = LinkedAccount(

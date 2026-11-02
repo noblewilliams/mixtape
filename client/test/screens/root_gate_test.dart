@@ -1,15 +1,21 @@
 import 'package:mixtape/data/playlists/playlist_context_models.dart';
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart' show CupertinoDialogAction;
+import 'package:flutter/material.dart';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:mixtape/data/api/api_client.dart';
+import 'package:mixtape/data/auth/apple_auth_gateway.dart';
+import 'package:mixtape/data/auth/sign_in_preference_store.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/dj/dj_api.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
 import 'package:mixtape/data/library/library_sync_service.dart';
+import 'package:mixtape/data/settings/author_store.dart';
 import 'package:mixtape/main.dart';
 import 'package:mixtape/data/onboarding/funnel_once_store.dart';
 import 'package:mixtape/data/onboarding/service_preference_store.dart';
@@ -18,6 +24,7 @@ import 'package:mixtape/presentation/providers/device_providers.dart';
 import 'package:mixtape/presentation/providers/dj_providers.dart';
 import 'package:mixtape/presentation/providers/library_sync_provider.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
+import 'package:mixtape/presentation/screens/account_screen.dart';
 import 'package:mixtape/presentation/screens/home_screen.dart';
 import 'package:mixtape/presentation/screens/shell/shell_screen.dart';
 import 'package:mixtape/presentation/screens/first_run/welcome_screen.dart';
@@ -106,6 +113,13 @@ class _FakeDjApi implements DjApi {
 
   @override
   void close() {}
+}
+
+class _Apple implements AppleAuthGateway {
+  @override
+  Future<String> getIdentityToken() async => 'apple-id';
+  @override
+  Future<String> getAuthorizationCode() async => 'apple-code';
 }
 
 /// An ApiClient whose postJson calls block on [gate] until it's completed —
@@ -254,6 +268,81 @@ void main() {
     expect(find.byType(WelcomeScreen), findsOneWidget);
     expect(await store.read(), isNull);
   });
+
+  testWidgets(
+    'deleting the account from Account returns to the first-run welcome',
+    (tester) async {
+      final store = InMemoryTokenStore();
+      await store.write('tok');
+      final deletes = <String>[];
+      final author = InMemoryAuthorStore('Noble');
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            tokenStoreProvider.overrideWithValue(store),
+            apiClientProvider.overrideWithValue(
+              ApiClient(
+                baseUrl: 'http://x',
+                tokenStore: store,
+                inner: MockClient((req) async {
+                  if (req.method == 'DELETE' && req.url.path == '/me') {
+                    deletes.add(req.body);
+                    return http.Response(
+                      '{"deleted":true,"apple":"revoked"}',
+                      200,
+                    );
+                  }
+                  if (req.url.path == '/api/auth/list-accounts') {
+                    return http.Response(
+                      '[{"id":"a","accountId":"sub","providerId":"apple"}]',
+                      200,
+                    );
+                  }
+                  return http.Response('{}', 404);
+                }),
+              ),
+            ),
+            appleAuthGatewayProvider.overrideWithValue(_Apple()),
+            authorStoreProvider.overrideWithValue(author),
+            signInPreferenceStoreProvider.overrideWithValue(
+              InMemorySignInPreferenceStore(),
+            ),
+            djApiProvider.overrideWithValue(_FakeDjApi()),
+            listeningApiProvider.overrideWithValue(FakeListeningApi()),
+            reminderSchedulerProvider.overrideWithValue(
+              FakeReminderScheduler(),
+            ),
+            servicePreferenceStoreProvider.overrideWithValue(
+              InMemoryServicePreferenceStore(),
+            ),
+            funnelOnceStoreProvider.overrideWithValue(
+              InMemoryFunnelOnceStore(),
+            ),
+          ],
+          child: const MixtapeApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      tester
+          .state<NavigatorState>(find.byType(Navigator).first)
+          .push(MaterialPageRoute<void>(builder: (_) => const AccountScreen()));
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.byKey(const Key('account-delete')));
+      await tester.tap(find.byKey(const Key('account-delete')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.widgetWithText(CupertinoDialogAction, AccountScreen.deleteLabel),
+      );
+      await tester.pumpAndSettle();
+
+      expect(deletes, ['{"appleAuthorizationCode":"apple-code"}']);
+      expect(find.byType(WelcomeScreen), findsOneWidget);
+      expect(find.byType(AccountScreen), findsNothing);
+      expect(await store.read(), isNull);
+      expect(await author.read(), isNull);
+    },
+  );
 
   testWidgets(
     "signing back in as a new user doesn't show the previous user's stale sync result",

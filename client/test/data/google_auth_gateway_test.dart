@@ -27,6 +27,14 @@ class FakeGoogleSdk implements GoogleNativeSdk {
     requests++;
     return onToken == null ? 'google-identity' : onToken!();
   }
+
+  int disconnects = 0;
+  Object? disconnectError;
+  @override
+  Future<void> disconnect() async {
+    disconnects++;
+    if (disconnectError != null) throw disconnectError!;
+  }
 }
 
 const configured = GoogleAuthConfiguration(
@@ -199,4 +207,43 @@ void main() {
       expect(sdk.requests, 1);
     },
   );
+
+  group('disconnect', () {
+    test('an unavailable gateway never touches the SDK', () async {
+      final sdk = FakeGoogleSdk();
+      await RealGoogleAuthGateway(
+        sdk: sdk,
+        supportedPlatform: true,
+      ).disconnect();
+      expect(sdk.initialized, 0);
+      expect(sdk.disconnects, 0);
+    });
+
+    test('initializes once, then disconnects', () async {
+      final sdk = FakeGoogleSdk();
+      final gateway = RealGoogleAuthGateway(
+        sdk: sdk,
+        configuration: configured,
+        supportedPlatform: true,
+      );
+      await gateway.getIdentityToken();
+      await gateway.disconnect();
+      expect(sdk.initialized, 1);
+      expect(sdk.disconnects, 1);
+    });
+
+    test('is best effort: an SDK failure never throws', () async {
+      final sdk = FakeGoogleSdk()
+        ..disconnectError = const GoogleSignInException(
+          code: GoogleSignInExceptionCode.unknownError,
+        );
+      final gateway = RealGoogleAuthGateway(
+        sdk: sdk,
+        configuration: configured,
+        supportedPlatform: true,
+      );
+      await gateway.disconnect();
+      expect(sdk.disconnects, 1);
+    });
+  });
 }

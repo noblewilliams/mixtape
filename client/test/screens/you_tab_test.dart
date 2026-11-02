@@ -83,6 +83,8 @@ class _Google implements GoogleAuthGateway {
   bool get isAvailable => true;
   @override
   Future<String> getIdentityToken() async => 'identity';
+  @override
+  Future<void> disconnect() async {}
 }
 
 /// The DJ's memory list only; every other call fails loudly.

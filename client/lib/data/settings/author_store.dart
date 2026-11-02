@@ -8,6 +8,9 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 abstract class AuthorStore {
   Future<String?> read();
   Future<void> write(String author);
+
+  /// Only a deleted account forgets the name; sign-out keeps it.
+  Future<void> clear();
 }
 
 class SecureAuthorStore implements AuthorStore {
@@ -22,6 +25,9 @@ class SecureAuthorStore implements AuthorStore {
 
   @override
   Future<void> write(String author) => _storage.write(key: _key, value: author);
+
+  @override
+  Future<void> clear() => _storage.delete(key: _key);
 }
 
 class InMemoryAuthorStore implements AuthorStore {
@@ -33,4 +39,7 @@ class InMemoryAuthorStore implements AuthorStore {
 
   @override
   Future<void> write(String author) async => _author = author;
+
+  @override
+  Future<void> clear() async => _author = null;
 }

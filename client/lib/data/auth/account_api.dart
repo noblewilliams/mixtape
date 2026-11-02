@@ -146,6 +146,23 @@ class AccountApi {
     if (value['status'] != true) throw const AccountModelException();
   }
 
+  /// `DELETE /me`. Every session of the user is gone on success, so the
+  /// caller clears local state without a sign-out request. The Apple code,
+  /// from a fresh native Apple sheet, lets the server revoke Apple's tokens.
+  Future<void> deleteAccount({String? appleAuthorizationCode}) async {
+    final value = _object(
+      await _request(
+        () async => (await _client.deleteJson(
+          '/me',
+          body: appleAuthorizationCode == null
+              ? null
+              : {'appleAuthorizationCode': appleAuthorizationCode},
+        )).body,
+      ),
+    );
+    if (value['deleted'] != true) throw const AccountModelException();
+  }
+
   Future<Object?> _request(Future<String> Function() call) async {
     late String body;
     try {

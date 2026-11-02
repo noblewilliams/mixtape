@@ -1,9 +1,12 @@
 import 'dart:async';
 import '../helpers/auth_ui_snapshot.dart';
+import 'package:flutter/cupertino.dart'
+    show CupertinoAlertDialog, CupertinoDialogAction, CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/auth/account_api.dart';
+import 'package:mixtape/data/auth/apple_auth_gateway.dart';
 import 'package:mixtape/data/auth/google_auth_gateway.dart';
 import 'package:mixtape/presentation/providers/account_provider.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
@@ -11,12 +14,20 @@ import 'package:mixtape/presentation/providers/library_sync_provider.dart'
     show accountNameProvider;
 import 'package:mixtape/presentation/screens/account_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
+import 'package:mixtape/presentation/widgets/foundation/inset_group.dart';
 import 'package:mixtape/presentation/widgets/foundation/status_word.dart';
 import 'package:mixtape/presentation/widgets/foundation/text_action.dart';
 
 class _Auth extends AuthNotifier {
+  _Auth({this.anonymous = false});
+  final bool anonymous;
   int signsOut = 0;
   bool failSignOut = false;
+  final deletions = <String?>[];
+  bool failDelete = false;
+  Completer<void>? deleting;
+  @override
+  bool get isAnonymous => anonymous;
   @override
   AuthStatus build() => AuthStatus.session;
   @override
@@ -24,6 +35,27 @@ class _Auth extends AuthNotifier {
     signsOut++;
     if (failSignOut) throw StateError('keychain unavailable');
     state = AuthStatus.noSession;
+  }
+
+  @override
+  Future<void> deleteAccount({String? appleAuthorizationCode}) async {
+    deletions.add(appleAuthorizationCode);
+    if (deleting != null) await deleting!.future;
+    if (failDelete) throw AccountApiException(500, 'private-sentinel', null);
+    state = AuthStatus.noSession;
+  }
+}
+
+class _Apple implements AppleAuthGateway {
+  _Apple({this.onCode});
+  final Future<String> Function()? onCode;
+  int codes = 0;
+  @override
+  Future<String> getIdentityToken() async => 'identity';
+  @override
+  Future<String> getAuthorizationCode() async {
+    codes++;
+    return onCode == null ? 'apple-code' : onCode!();
   }
 }
 
@@ -33,6 +65,8 @@ class _Google implements GoogleAuthGateway {
   final bool isAvailable;
   @override
   Future<String> getIdentityToken() async => 'identity';
+  @override
+  Future<void> disconnect() async {}
 }
 
 class _Accounts extends AccountNotifier {
@@ -86,6 +120,9 @@ const _google = LinkedAccount(
 TextAction _action(WidgetTester tester, String key) =>
     tester.widget<TextAction>(find.byKey(Key(key)));
 
+InsetRow _deleteRow(WidgetTester tester) =>
+    tester.widget<InsetRow>(find.byKey(const Key('account-delete')));
+
 Future<ProviderContainer> _pump(
   WidgetTester tester,
   _Accounts accounts, {
@@ -93,11 +130,14 @@ Future<ProviderContainer> _pump(
   String? name = 'Noble',
   double scale = 1,
   Brightness brightness = Brightness.light,
+  bool anonymous = false,
+  _Apple? apple,
 }) async {
   final container = ProviderContainer(
     overrides: [
       accountProvider.overrideWith(() => accounts),
-      authProvider.overrideWith(_Auth.new),
+      authProvider.overrideWith(() => _Auth(anonymous: anonymous)),
+      appleAuthGatewayProvider.overrideWithValue(apple ?? _Apple()),
       googleAuthGatewayProvider.overrideWithValue(
         _Google(isAvailable: googleAvailable),
       ),
@@ -339,6 +379,190 @@ void main() {
       expect(auth.signsOut, 2);
     },
   );
+
+  group('Delete account', () {
+    Future<void> confirm(WidgetTester tester) async {
+      await tester.ensureVisible(find.byKey(const Key('account-delete')));
+      await tester.tap(find.byKey(const Key('account-delete')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.widgetWithText(CupertinoDialogAction, AccountScreen.deleteLabel),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    _Auth auth(ProviderContainer container) =>
+        container.read(authProvider.notifier) as _Auth;
+
+    testWidgets('is offered to accounts, never to anonymous listeners', (
+      tester,
+    ) async {
+      await _pump(tester, _Accounts(const AccountState(accounts: [_apple])));
+      expect(_deleteRow(tester).title, 'Delete account');
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('account-delete')),
+          matching: find.byIcon(CupertinoIcons.trash),
+        ),
+        findsOneWidget,
+      );
+      expect(_deleteRow(tester).destructive, isTrue);
+      expect(_deleteRow(tester).onTap, isNotNull);
+
+      await _pump(
+        tester,
+        _Accounts(const AccountState(accounts: [_apple])),
+        anonymous: true,
+      );
+      expect(find.byKey(const Key('account-delete')), findsNothing);
+    });
+
+    testWidgets('asks first in a native alert; Cancel deletes nothing', (
+      tester,
+    ) async {
+      final apple = _Apple();
+      final container = await _pump(
+        tester,
+        _Accounts(const AccountState(accounts: [_apple])),
+        apple: apple,
+      );
+      await tester.ensureVisible(find.byKey(const Key('account-delete')));
+      await tester.tap(find.byKey(const Key('account-delete')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(CupertinoAlertDialog), findsOneWidget);
+      expect(find.text(AccountScreen.deleteTitle), findsOneWidget);
+      expect(find.text(AccountScreen.deleteBody), findsOneWidget);
+      final destructive = tester.widget<CupertinoDialogAction>(
+        find.widgetWithText(CupertinoDialogAction, AccountScreen.deleteLabel),
+      );
+      expect(destructive.isDestructiveAction, isTrue);
+
+      await tester.tap(find.widgetWithText(CupertinoDialogAction, 'Cancel'));
+      await tester.pumpAndSettle();
+      expect(find.byType(CupertinoAlertDialog), findsNothing);
+      expect(auth(container).deletions, isEmpty);
+      expect(apple.codes, 0);
+    });
+
+    testWidgets('an Apple login reconfirms with Apple and sends its code', (
+      tester,
+    ) async {
+      final apple = _Apple();
+      final container = await _pump(
+        tester,
+        _Accounts(const AccountState(accounts: [_apple, _google])),
+        apple: apple,
+      );
+      await confirm(tester);
+
+      expect(apple.codes, 1);
+      expect(auth(container).deletions, ['apple-code']);
+      expect(container.read(authProvider), AuthStatus.noSession);
+    });
+
+    testWidgets('a Google-only account deletes without the Apple sheet', (
+      tester,
+    ) async {
+      final apple = _Apple();
+      final container = await _pump(
+        tester,
+        _Accounts(const AccountState(accounts: [_google])),
+        apple: apple,
+      );
+      await confirm(tester);
+
+      expect(apple.codes, 0);
+      expect(auth(container).deletions, [null]);
+    });
+
+    testWidgets('dismissing the Apple sheet quietly deletes nothing', (
+      tester,
+    ) async {
+      final container = await _pump(
+        tester,
+        _Accounts(const AccountState(accounts: [_apple])),
+        apple: _Apple(onCode: () async => throw AppleSignInCancelled()),
+      );
+      await confirm(tester);
+
+      expect(auth(container).deletions, isEmpty);
+      expect(find.text(AccountScreen.deleteFailed), findsNothing);
+      expect(_deleteRow(tester).onTap, isNotNull);
+    });
+
+    testWidgets('a failure says so without diagnostics and can be retried', (
+      tester,
+    ) async {
+      final accounts = _Accounts(const AccountState(accounts: [_apple]));
+      final container = await _pump(tester, accounts);
+      auth(container).failDelete = true;
+      await confirm(tester);
+
+      expect(find.text(AccountScreen.deleteFailed), findsOneWidget);
+      expect(find.textContaining('private-sentinel'), findsNothing);
+      expect(container.read(authProvider), AuthStatus.session);
+
+      auth(container).failDelete = false;
+      await confirm(tester);
+      expect(auth(container).deletions, hasLength(2));
+      expect(container.read(authProvider), AuthStatus.noSession);
+    });
+
+    testWidgets('an Apple sheet that fails (not cancelled) still deletes, '
+        'without a code', (tester) async {
+      final container = await _pump(
+        tester,
+        _Accounts(const AccountState(accounts: [_apple])),
+        apple: _Apple(onCode: () async => throw StateError('private-sentinel')),
+      );
+      await confirm(tester);
+
+      expect(auth(container).deletions, [null]);
+      expect(find.text(AccountScreen.deleteFailed), findsNothing);
+      expect(container.read(authProvider), AuthStatus.noSession);
+    });
+
+    testWidgets('unverified methods keep it disabled until a refresh', (
+      tester,
+    ) async {
+      final accounts = _Accounts(
+        AccountState(error: AccountApiException(503, 'private', null)),
+      );
+      await _pump(tester, accounts);
+      expect(_deleteRow(tester).onTap, isNull);
+
+      await tester.tap(find.byKey(const Key('refresh-methods')));
+      await tester.pumpAndSettle();
+      expect(_deleteRow(tester).onTap, isNotNull);
+    });
+
+    testWidgets('is disabled while deleting and while methods load', (
+      tester,
+    ) async {
+      final container = await _pump(
+        tester,
+        _Accounts(const AccountState(accounts: [_google])),
+      );
+      final pending = Completer<void>();
+      auth(container).deleting = pending;
+      await tester.ensureVisible(find.byKey(const Key('account-delete')));
+      await tester.tap(find.byKey(const Key('account-delete')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.widgetWithText(CupertinoDialogAction, AccountScreen.deleteLabel),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(_deleteRow(tester).onTap, isNull);
+      expect(_action(tester, 'link-apple').onPressed, isNull);
+      pending.complete();
+      await tester.pumpAndSettle();
+
+      await _pump(tester, _Accounts(const AccountState(loading: true)));
+      expect(_deleteRow(tester).onTap, isNull);
+    });
+  });
 
   for (final brightness in Brightness.values) {
     testWidgets('native account snapshot in ${brightness.name}', (

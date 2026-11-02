@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -5,12 +8,16 @@ import 'package:http/testing.dart';
 import 'package:mixtape/data/api/api_client.dart';
 import 'package:mixtape/data/auth/account_api.dart';
 import 'package:mixtape/data/auth/google_auth_gateway.dart';
+import 'package:mixtape/data/auth/sign_in_preference_store.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/listening/listening_models.dart';
 import 'package:mixtape/data/onboarding/funnel_once_store.dart';
 import 'package:mixtape/data/onboarding/service_preference_store.dart';
+import 'package:mixtape/data/settings/author_store.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/device_providers.dart';
+import 'package:mixtape/presentation/providers/library_sync_provider.dart'
+    show authorStoreProvider;
 
 import '../../helpers/fake_listening_api.dart';
 
@@ -28,10 +35,13 @@ class ThrowingTokenStore implements TokenStore {
 Future<void> _settle() => Future<void>.delayed(Duration.zero);
 
 class _Google implements GoogleAuthGateway {
+  int disconnects = 0;
   @override
   bool get isAvailable => true;
   @override
   Future<String> getIdentityToken() async => 'google-id';
+  @override
+  Future<void> disconnect() async => disconnects++;
 }
 
 /// Holds a session and flips the flag the way AuthNotifier's private setter
@@ -369,6 +379,161 @@ void main() {
       await container.read(authProvider.notifier).signOut();
 
       expect(container.read(isAnonymousProvider), isFalse);
+    });
+  });
+
+  group('deleteAccount', () {
+    ({
+      ProviderContainer container,
+      List<(String, String, String)> requests,
+      InMemorySignInPreferenceStore hints,
+      InMemoryServicePreferenceStore prefs,
+      FakeReminderScheduler reminders,
+      InMemoryAuthorStore author,
+      _Google google,
+    }) deleteHarness(
+      InMemoryTokenStore store, {
+      int status = 200,
+      Future<void>? hold,
+    }) {
+      final requests = <(String, String, String)>[];
+      final hints = InMemorySignInPreferenceStore();
+      final author = InMemoryAuthorStore('Noble');
+      final google = _Google();
+      final prefs = InMemoryServicePreferenceStore();
+      final reminders = FakeReminderScheduler();
+      final container = ProviderContainer(overrides: [
+        tokenStoreProvider.overrideWithValue(store),
+        googleAuthGatewayProvider.overrideWithValue(google),
+        signInPreferenceStoreProvider.overrideWithValue(hints),
+        authorStoreProvider.overrideWithValue(author),
+        servicePreferenceStoreProvider.overrideWithValue(prefs),
+        funnelOnceStoreProvider.overrideWithValue(InMemoryFunnelOnceStore()),
+        reminderSchedulerProvider.overrideWithValue(reminders),
+        apiClientProvider.overrideWithValue(ApiClient(
+          baseUrl: 'https://example.test',
+          tokenStore: store,
+          inner: MockClient((req) async {
+            requests.add((req.method, req.url.path, req.body));
+            if (hold != null) await hold;
+            return status == 200
+                ? http.Response('{"deleted":true,"apple":"revoked"}', 200)
+                : http.Response('{"error":"internal"}', status);
+          }),
+        )),
+      ]);
+      return (
+        container: container,
+        requests: requests,
+        hints: hints,
+        prefs: prefs,
+        reminders: reminders,
+        author: author,
+        google: google,
+      );
+    }
+
+    test('deletes on the server, then forgets everything locally without a '
+        'sign-out request', () async {
+      final store = InMemoryTokenStore();
+      await store.write('account-token');
+      final h = deleteHarness(store);
+      addTearDown(h.container.dispose);
+      await h.hints.write(AccountProvider.apple);
+      await h.prefs.write('u1', 'apple');
+      var builds = 0;
+      final userScoped = Provider<int>((ref) {
+        ref.watch(authProvider);
+        return ++builds;
+      });
+      h.container.listen(userScoped, (_, __) {});
+      await _settle();
+      expect(h.container.read(authProvider), AuthStatus.session);
+      final before = h.container.read(userScoped);
+
+      await h.container
+          .read(authProvider.notifier)
+          .deleteAccount(appleAuthorizationCode: 'apple-code');
+
+      expect(h.requests, hasLength(1));
+      expect(h.requests.single.$1, 'DELETE');
+      expect(h.requests.single.$2, '/me');
+      expect(
+        jsonDecode(h.requests.single.$3),
+        {'appleAuthorizationCode': 'apple-code'},
+      );
+      expect(h.container.read(authProvider), AuthStatus.noSession);
+      expect(h.container.read(authProvider.notifier).isAnonymous, isFalse);
+      expect(h.container.read(userScoped), greaterThan(before));
+      expect(await store.read(), isNull);
+      expect(await h.hints.read(), isNull);
+      expect(await h.prefs.read('u1'), isNull);
+      expect(h.reminders.cancelled, 1);
+      expect(await h.author.read(), isNull);
+      expect(h.google.disconnects, 1);
+    });
+
+    test('a 401 means the account is already gone: forget it locally',
+        () async {
+      final store = InMemoryTokenStore();
+      await store.write('account-token');
+      final h = deleteHarness(store, status: 401);
+      addTearDown(h.container.dispose);
+      await h.hints.write(AccountProvider.apple);
+      h.container.read(authProvider);
+      await _settle();
+
+      await h.container.read(authProvider.notifier).deleteAccount();
+
+      expect(h.container.read(authProvider), AuthStatus.noSession);
+      expect(await store.read(), isNull);
+      expect(await h.hints.read(), isNull);
+      expect(await h.author.read(), isNull);
+    });
+
+    test('a sign-out landing mid-delete still gets the full local cleanup',
+        () async {
+      final store = InMemoryTokenStore();
+      await store.write('account-token');
+      final release = Completer<void>();
+      final h = deleteHarness(store, hold: release.future);
+      addTearDown(h.container.dispose);
+      await h.hints.write(AccountProvider.google);
+      h.container.read(authProvider);
+      await _settle();
+
+      final deleting = h.container.read(authProvider.notifier).deleteAccount();
+      await _settle();
+      await h.container.read(authProvider.notifier).signOut();
+      release.complete();
+      await deleting;
+
+      expect(h.container.read(authProvider), AuthStatus.noSession);
+      expect(await h.hints.read(), isNull);
+      expect(await h.author.read(), isNull);
+      expect(h.google.disconnects, 1);
+    });
+
+    test('a failed delete keeps the session and the token', () async {
+      final store = InMemoryTokenStore();
+      await store.write('account-token');
+      final h = deleteHarness(store, status: 500);
+      addTearDown(h.container.dispose);
+      await h.hints.write(AccountProvider.google);
+      h.container.read(authProvider);
+      await _settle();
+
+      await expectLater(
+        h.container.read(authProvider.notifier).deleteAccount(),
+        throwsA(isA<ApiException>()),
+      );
+
+      expect(h.requests.single.$3, isEmpty);
+      expect(h.container.read(authProvider), AuthStatus.session);
+      expect(await store.read(), 'account-token');
+      expect(await h.hints.read(), AccountProvider.google);
+      expect(h.reminders.cancelled, 0);
+      expect(await h.author.read(), 'Noble');
     });
   });
 }

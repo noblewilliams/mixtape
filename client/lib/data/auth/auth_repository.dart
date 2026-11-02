@@ -186,6 +186,24 @@ class AuthRepository {
     }
   }
 
+  /// After `DELETE /me` succeeded: the server already ended every session,
+  /// so this is local only. The token goes first, behind any write in
+  /// flight, as on sign-out; then the last-used hint (it named an account
+  /// that no longer exists) and the Google grant, both best effort.
+  Future<void> forgetDeletedAccount() async {
+    await signOut();
+    try {
+      await preferenceStore?.clear();
+    } catch (_) {
+      // A convenience hint must not leave the deleted account half-forgotten.
+    }
+    try {
+      await googleGateway?.disconnect();
+    } catch (_) {
+      // Best effort by contract; a fake or plugin failure changes nothing.
+    }
+  }
+
   void cancelPending() {
     _generation++;
   }

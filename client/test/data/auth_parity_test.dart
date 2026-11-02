@@ -14,6 +14,8 @@ class Apple implements AppleAuthGateway {
   @override
   Future<String> getIdentityToken() async =>
       onToken == null ? 'apple-id' : onToken!();
+  @override
+  Future<String> getAuthorizationCode() async => 'apple-code';
 }
 
 class Google implements GoogleAuthGateway {
@@ -21,6 +23,8 @@ class Google implements GoogleAuthGateway {
   bool get isAvailable => true;
   @override
   Future<String> getIdentityToken() async => 'google-id';
+  @override
+  Future<void> disconnect() async {}
 }
 
 class SlowStore extends InMemoryTokenStore {

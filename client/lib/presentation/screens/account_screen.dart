@@ -6,14 +6,26 @@
 /// status, whether it was the last one used, and a single trailing action.
 /// Signing out belongs to You; the only sign-in action here is the deliberate
 /// one a stale session or a failed expiry asks for.
+///
+/// Delete account closes the screen (`docs/superpowers/plans/
+/// 2026-11-02-account-deletion.md`): one destructive alert, then, for an
+/// account with an Apple login, a fresh Apple sheet whose code lets the
+/// server revoke Apple's tokens. Success moves auth to noSession and the
+/// root gate takes the listener to the welcome.
 library;
 
 import 'dart:async';
-import 'package:flutter/cupertino.dart' show CupertinoIcons;
+import 'package:flutter/cupertino.dart'
+    show
+        CupertinoAlertDialog,
+        CupertinoDialogAction,
+        CupertinoIcons,
+        showCupertinoDialog;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/api/api_client.dart';
 import '../../data/auth/account_api.dart';
+import '../../data/auth/apple_auth_gateway.dart';
 import '../../data/auth/google_auth_gateway.dart';
 import '../providers/account_provider.dart';
 import '../providers/auth_provider.dart';
@@ -44,13 +56,24 @@ class AccountScreen extends ConsumerStatefulWidget {
   /// Why the only remaining method cannot be unlinked.
   static const String lastMethodReason = 'Add another method first';
 
+  /// Account deletion copy, fixed by the plan for both clients.
+  static const String deleteLabel = 'Delete account';
+  static const String deleteTitle = 'Delete your account?';
+  static const String deleteBody =
+      'This permanently deletes your mixes, library, memories and listening '
+      'history from Mixtape. Your Apple Music and Spotify libraries are not '
+      'touched.';
+  static const String deleteFailed = 'Couldn’t delete your account. Try again.';
+
   @override
   ConsumerState<AccountScreen> createState() => _AccountScreenState();
 }
 
 class _AccountScreenState extends ConsumerState<AccountScreen> {
   bool _signingOut = false;
+  bool _deleting = false;
   String? _localError;
+  String? _deleteError;
   AccountState? _expiryAttempted;
 
   void _expireIfCurrent(AccountState observed) {
@@ -83,6 +106,67 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
     }
   }
 
+  Future<void> _deleteAccount() async {
+    if (_deleting) return;
+    final confirmed = await showCupertinoDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) => CupertinoAlertDialog(
+        title: const Text(AccountScreen.deleteTitle),
+        content: const Text(AccountScreen.deleteBody),
+        actions: [
+          CupertinoDialogAction(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          CupertinoDialogAction(
+            isDestructiveAction: true,
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text(AccountScreen.deleteLabel),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted || _deleting) return;
+    setState(() {
+      _deleting = true;
+      _deleteError = null;
+    });
+    try {
+      // The row is disabled until the methods are verified, so this list is
+      // known: a native Apple sign-in leaves no token on the server, and the
+      // fresh code from this sheet is the only way to revoke Apple's grant.
+      final apple =
+          ref
+              .read(accountProvider)
+              .accounts
+              ?.any((a) => a.providerId == AccountProvider.apple.name) ??
+          false;
+      String? code;
+      if (apple) {
+        try {
+          code = await ref
+              .read(appleAuthGatewayProvider)
+              .getAuthorizationCode();
+        } on AppleSignInCancelled {
+          // Dismissing the Apple sheet is changing one's mind, not an error.
+          return;
+        } catch (_) {
+          // `unknown` is common without iCloud and on the simulator: the
+          // listener still asked for their data to go, so delete without it.
+          code = null;
+        }
+      }
+      await ref
+          .read(authProvider.notifier)
+          .deleteAccount(appleAuthorizationCode: code);
+    } catch (_) {
+      if (mounted) setState(() => _deleteError = AccountScreen.deleteFailed);
+    } finally {
+      if (mounted) setState(() => _deleting = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
@@ -90,6 +174,10 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
     final lastUsed = ref.watch(lastSignInProvider).value;
     final googleAvailable = ref.watch(googleAuthGatewayProvider).isAvailable;
     final name = ref.watch(accountNameProvider).value;
+    // Offered to accounts only; anonymous data expires on its own.
+    final canDelete =
+        ref.watch(authProvider) == AuthStatus.session &&
+        !ref.watch(isAnonymousProvider);
     ref.listen(accountProvider, (_, next) {
       if (next.error case ApiException(statusCode: 401)) _expireIfCurrent(next);
     });
@@ -98,8 +186,11 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
       _expireIfCurrent(account);
     }
 
-    final busy = account.writing || _signingOut;
+    final busy = account.writing || _signingOut || _deleting;
     final verifying = account.loading || account.writing;
+    // Unverified methods (loading or failed) keep deletion off: whether an
+    // Apple login needs revoking is unknown. Refresh methods is the retry.
+    final deleteEnabled = !busy && account.canModify;
     final signInAgain =
         _needsFreshSession(account.error) || _localError != null;
 
@@ -205,6 +296,39 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                         onPressed: _signingOut ? null : _signOut,
                       ),
                     ),
+                  if (canDelete) ...[
+                    InsetGroup(
+                      children: [
+                        Opacity(
+                          opacity: deleteEnabled ? 1 : 0.5,
+                          child: InsetRow(
+                            key: const Key('account-delete'),
+                            leading: Icon(
+                              CupertinoIcons.trash,
+                              color: tokens.errInk,
+                            ),
+                            title: AccountScreen.deleteLabel,
+                            destructive: true,
+                            trailing: const SizedBox.shrink(),
+                            onTap: deleteEnabled ? _deleteAccount : null,
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (_deleteError != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Semantics(
+                          liveRegion: true,
+                          child: Text(
+                            _deleteError!,
+                            style: tokens.secondary.copyWith(
+                              color: tokens.errInk,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                   const SizedBox(height: 24),
                 ],
               ),

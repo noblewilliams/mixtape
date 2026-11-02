@@ -25,6 +25,10 @@ class GoogleAuthConfiguration {
 abstract class GoogleAuthGateway {
   bool get isAvailable;
   Future<String> getIdentityToken();
+
+  /// Revokes the app's Google grant on this device when an account is
+  /// deleted. Best effort: never throws, never shows UI.
+  Future<void> disconnect();
 }
 
 class GoogleSignInCancelled implements Exception {
@@ -58,6 +62,7 @@ abstract class GoogleNativeSdk {
     required String serverClientId,
   });
   Future<String?> authenticateIdentityToken();
+  Future<void> disconnect();
 }
 
 class _OfficialGoogleSdk implements GoogleNativeSdk {
@@ -101,6 +106,9 @@ class _OfficialGoogleSdk implements GoogleNativeSdk {
     final account = await _google.authenticate();
     return account.authentication.idToken;
   }
+
+  @override
+  Future<void> disconnect() => _google.disconnect();
 }
 
 class RealGoogleAuthGateway implements GoogleAuthGateway {
@@ -155,6 +163,23 @@ class RealGoogleAuthGateway implements GoogleAuthGateway {
       throw const GoogleSignInFailed();
     } finally {
       _busy = false;
+    }
+  }
+
+  @override
+  Future<void> disconnect() async {
+    if (!isAvailable) return;
+    try {
+      if (!_initialized) {
+        await _sdk.initialize(
+          clientId: configuration.iosClientId,
+          serverClientId: configuration.serverClientId,
+        );
+        _initialized = true;
+      }
+      await _sdk.disconnect();
+    } catch (_) {
+      if (kDebugMode) debugPrint('Google disconnect failed');
     }
   }
 }

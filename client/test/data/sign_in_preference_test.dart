@@ -12,13 +12,23 @@ import 'package:mixtape/data/auth/token_store.dart';
 class _Apple implements AppleAuthGateway {
   @override
   Future<String> getIdentityToken() async => 'apple-id';
+  @override
+  Future<String> getAuthorizationCode() async => 'apple-code';
 }
 
 class _Google implements GoogleAuthGateway {
+  _Google({this.failDisconnect = false});
+  final bool failDisconnect;
+  int disconnects = 0;
   @override
   bool get isAvailable => true;
   @override
   Future<String> getIdentityToken() async => 'google-id';
+  @override
+  Future<void> disconnect() async {
+    disconnects++;
+    if (failDisconnect) throw StateError('sdk unavailable');
+  }
 }
 
 class _BrokenHint implements SignInPreferenceStore {
@@ -27,6 +37,8 @@ class _BrokenHint implements SignInPreferenceStore {
   @override
   Future<void> write(AccountProvider provider) async =>
       throw StateError('storage unavailable');
+  @override
+  Future<void> clear() async => throw StateError('storage unavailable');
 }
 
 void main() {
@@ -96,4 +108,46 @@ void main() {
       expect(await tokens.read(), 'session');
     },
   );
+  test('a deleted account forgets the token, the hint and the Google grant '
+      'without a request', () async {
+    final tokens = InMemoryTokenStore();
+    await tokens.write('session');
+    final hints = InMemorySignInPreferenceStore();
+    await hints.write(AccountProvider.apple);
+    final google = _Google();
+    var requests = 0;
+    final repo = AuthRepository(
+      tokenStore: tokens,
+      gateway: _Apple(),
+      googleGateway: google,
+      preferenceStore: hints,
+      api: ApiClient(
+        baseUrl: 'https://example.test',
+        tokenStore: tokens,
+        inner: MockClient((_) async {
+          requests++;
+          return http.Response('{}', 200);
+        }),
+      ),
+    );
+    await repo.forgetDeletedAccount();
+    expect(await tokens.read(), isNull);
+    expect(await hints.read(), isNull);
+    expect(google.disconnects, 1);
+    expect(requests, 0);
+  });
+  test('forgetting a deleted account still clears the token when the hint and '
+      'Google fail', () async {
+    final tokens = InMemoryTokenStore();
+    await tokens.write('session');
+    final repo = AuthRepository(
+      tokenStore: tokens,
+      gateway: _Apple(),
+      googleGateway: _Google(failDisconnect: true),
+      preferenceStore: _BrokenHint(),
+      api: ApiClient(baseUrl: 'https://example.test', tokenStore: tokens),
+    );
+    await repo.forgetDeletedAccount();
+    expect(await tokens.read(), isNull);
+  });
 }

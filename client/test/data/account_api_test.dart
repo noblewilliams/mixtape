@@ -186,6 +186,52 @@ void main() {
     );
   });
 
+  group('deleteAccount', () {
+    test('sends DELETE /me with the Apple code only when given', () async {
+      final bodies = <String>[];
+      final api = apiWith((request) async {
+        expect(request.method, 'DELETE');
+        expect(request.url.path, '/me');
+        bodies.add(request.body);
+        return http.Response('{"deleted":true,"apple":"revoked"}', 200);
+      });
+
+      await api.deleteAccount(appleAuthorizationCode: 'apple-code');
+      await api.deleteAccount();
+
+      expect(jsonDecode(bodies[0]), {'appleAuthorizationCode': 'apple-code'});
+      expect(bodies[1], isEmpty);
+    });
+
+    test('success must be explicitly confirmed', () async {
+      for (final body in ['{}', '{"deleted":false}', '[]', 'not-json']) {
+        final api = apiWith((_) async => http.Response(body, 200));
+        await expectLater(
+          api.deleteAccount(),
+          throwsA(isA<AccountModelException>()),
+        );
+      }
+    });
+
+    test('a rejection keeps its status without leaking text', () async {
+      final api = apiWith(
+        (_) async => http.Response('{"error":"private-sentinel"}', 400),
+      );
+      await expectLater(
+        api.deleteAccount(appleAuthorizationCode: 'apple-code'),
+        throwsA(
+          isA<AccountApiException>()
+              .having((e) => e.statusCode, 'status', 400)
+              .having(
+                (e) => e.toString(),
+                'safe description',
+                isNot(contains('private-sentinel')),
+              ),
+        ),
+      );
+    });
+  });
+
   group('me', () {
     Future<Me> meWith(Object? body) => apiWith((request) async {
       expect(request.method, 'GET');

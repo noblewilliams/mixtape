@@ -7,6 +7,9 @@ abstract class SignInPreferenceStore {
   Future<AccountProvider?> read();
   Future<void> write(AccountProvider provider);
 
+  /// Sign-out keeps the hint; only a deleted account forgets it.
+  Future<void> clear();
+
   static AccountProvider? parse(String? value) => switch (value) {
     'apple' => AccountProvider.apple,
     'google' => AccountProvider.google,
@@ -27,6 +30,9 @@ class SecureSignInPreferenceStore implements SignInPreferenceStore {
   @override
   Future<void> write(AccountProvider provider) =>
       _storage.write(key: _key, value: provider.name);
+
+  @override
+  Future<void> clear() => _storage.delete(key: _key);
 }
 
 class InMemorySignInPreferenceStore implements SignInPreferenceStore {
@@ -35,4 +41,6 @@ class InMemorySignInPreferenceStore implements SignInPreferenceStore {
   Future<AccountProvider?> read() async => _provider;
   @override
   Future<void> write(AccountProvider provider) async => _provider = provider;
+  @override
+  Future<void> clear() async => _provider = null;
 }

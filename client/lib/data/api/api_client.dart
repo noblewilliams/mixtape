@@ -103,10 +103,15 @@ class ApiClient {
     return res;
   }
 
-  Future<http.Response> deleteJson(String path) async {
+  /// [body], when given, is sent as JSON; without it the request has none.
+  Future<http.Response> deleteJson(String path, {Object? body}) async {
     final headers = await _headers();
-    final res = await _guard(
-        () => _inner.delete(Uri.parse(baseUrl).resolve(path), headers: headers));
+    if (body != null) headers['content-type'] = 'application/json';
+    final res = await _guard(() => _inner.delete(
+          Uri.parse(baseUrl).resolve(path),
+          headers: headers,
+          body: body == null ? null : jsonEncode(body),
+        ));
     if (res.statusCode >= 400) throw ApiException(res.statusCode, res.body);
     return res;
   }

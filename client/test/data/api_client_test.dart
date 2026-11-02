@@ -249,6 +249,28 @@ void main() {
     );
   });
 
+  test('deleteJson with a body sends it as JSON with the content type', () async {
+    late http.Request seen;
+    final client = ApiClient(
+      baseUrl: 'http://x',
+      tokenStore: InMemoryTokenStore(),
+      inner: MockClient((req) async {
+        seen = req;
+        return http.Response('{}', 200);
+      }),
+    );
+
+    await client.deleteJson('/me', body: {'appleAuthorizationCode': 'c'});
+
+    expect(seen.method, 'DELETE');
+    expect(seen.headers['content-type'], startsWith('application/json'));
+    expect(jsonDecode(seen.body), {'appleAuthorizationCode': 'c'});
+
+    await client.deleteJson('/me');
+    expect(seen.headers['content-type'], isNull);
+    expect(seen.body, isEmpty);
+  });
+
   test('InMemoryTokenStore write -> read -> clear -> read round-trip', () async {
     final store = InMemoryTokenStore();
     expect(await store.read(), isNull);

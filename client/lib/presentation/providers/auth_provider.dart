@@ -9,6 +9,7 @@ import '../../data/auth/auth_repository.dart';
 import '../../data/auth/token_store.dart';
 import '../../data/auth/sign_in_preference_store.dart';
 import 'device_providers.dart';
+import 'library_sync_provider.dart' show authorStoreProvider;
 
 final tokenStoreProvider = Provider<TokenStore>((ref) => SecureTokenStore());
 
@@ -191,6 +192,50 @@ class AuthNotifier extends Notifier<AuthStatus> {
       // Reset protected state before slower, best-effort device cleanup.
       _isAnonymous = false;
       state = AuthStatus.noSession;
+      await _forgetDeviceState();
+    } finally {
+      if (operation == _operation) _busy = false;
+    }
+  }
+
+  /// Deletes the account on the server (`DELETE /me`), then forgets it here
+  /// the way [signOut] does. No sign-out request: the deletion already ended
+  /// every session. Moving to noSession resets every user-scoped provider,
+  /// and the root gate routes to the welcome. A server failure rethrows with
+  /// the session untouched. A 401 means the account is already gone (a
+  /// retry after a lost response), so it is forgotten as on success.
+  Future<void> deleteAccount({String? appleAuthorizationCode}) async {
+    if (_busy) throw const AuthOperationBusy();
+    _busy = true;
+    final operation = ++_operation;
+    // Read up front: once the server has deleted, the local cleanup runs
+    // even if a sign-out or rebuild supersedes this operation meanwhile.
+    final repository = ref.read(authRepositoryProvider);
+    final author = ref.read(authorStoreProvider);
+    try {
+      try {
+        await AccountApi(
+          ref.read(apiClientProvider),
+        ).deleteAccount(appleAuthorizationCode: appleAuthorizationCode);
+      } on ApiException catch (error) {
+        if (error.statusCode != 401) rethrow;
+      }
+      try {
+        await repository.forgetDeletedAccount();
+      } catch (_) {
+        if (kDebugMode) debugPrint('deleted account local clear failed');
+      }
+      try {
+        await author.clear();
+      } catch (_) {
+        if (kDebugMode) debugPrint('playlist author clear failed');
+      }
+      if (!ref.mounted) return;
+      ref.invalidate(lastSignInProvider);
+      if (operation == _operation) {
+        _isAnonymous = false;
+        state = AuthStatus.noSession;
+      }
       await _forgetDeviceState();
     } finally {
       if (operation == _operation) _busy = false;
