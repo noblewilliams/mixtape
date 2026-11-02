@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mayAskName, markNamePageSettled } from './name-page'
+import { clearNamePageSettled, mayAskName, markNamePageSettled } from './name-page'
 
 afterEach(() => {
   localStorage.clear()
@@ -19,6 +19,12 @@ describe('mayAskName (whether to hold the workspace for GET /me)', () => {
     markNamePageSettled('u')
     expect(mayAskName({ id: 'u', name: '' })).toBe(false)
     expect(mayAskName({ id: 'v', name: '' })).toBe(true)
+  })
+
+  it('forgets the settled mark when the account is deleted', () => {
+    markNamePageSettled('u')
+    clearNamePageSettled('u')
+    expect(mayAskName({ id: 'u', name: '' })).toBe(true)
   })
 
   it('holds when storage is blocked, and never throws', () => {

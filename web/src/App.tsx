@@ -62,7 +62,7 @@ import { clearKeptPrompt, keepPrompt, readKeptPrompt } from './lib/kept-prompt'
 import type { DraftSeed, ModeSeed } from './components/HomeComposer'
 import { clearServiceChoice, readServiceChoice, writeServiceChoice, type ServiceChoice } from './lib/service-preference'
 import { NamePage, NamePageHold } from './components/first-run/NamePage'
-import { markNamePageSettled, mayAskName } from './lib/name-page'
+import { clearNamePageSettled, markNamePageSettled, mayAskName } from './lib/name-page'
 
 type DialogState = 'new-tape' | 'save-playlist' | 'account' | 'interview' | null
 type MusicConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
@@ -94,6 +94,9 @@ type AppProps = {
 }
 
 type SignInPageState = Exclude<SignInVariant, 'welcome'>
+
+/** How long a nameless account waits behind the sign-in image for GET /me before the workspace opens. */
+const NAME_HOLD_MS = 3500
 
 const NO_SIGN_IN: Pick<AuthBridge, 'signIn'> = { signIn: async () => ({ error: 'Sign-in is not available here.' }) }
 
@@ -326,13 +329,15 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     clearLocalAccount()
     signInPreferences.forget()
     clearFunnelFlags(user.id)
+    clearNamePageSettled(user.id)
     ;(onAccountDeleted ?? onSignOut)()
   }, [clearLocalAccount, signInPreferences, user.id, onAccountDeleted, onSignOut])
   // Settings shows the new name once the session re-read lands.
   const updateName = accountAuth.updateName
+  // The write is what counts: a failed re-read must not report the save as failed.
   const saveName = useMemo(() => updateName && (async (name: string) => {
     await updateName(name)
-    await refetchSession?.()
+    await Promise.resolve(refetchSession?.()).catch(() => undefined)
   }), [updateName, refetchSession])
   const activeMessages = activeSession ? messagesBySession[activeSession.id] ?? [] : []
   const activeQueue = activeSession ? queuesBySession[activeSession.id] ?? [] : []
@@ -434,6 +439,11 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   // While the merge notice shows, a new tape's own toast does not replace it.
   const noticeHeld = useRef(false)
   function announce(message: string, tone: ToastState['tone'] = 'success', duration = 2800, action?: ToastAction) {
+    // Behind the name page (or its hold) the shell is inert and a toast goes unheard: keep the latest for after.
+    if (nameGateRef.current !== 'off') {
+      deferredToast.current = { message, tone, duration, action }
+      return
+    }
     setToast({ message, tone, ...(action ? { action } : {}) })
     if (toastTimer.current) clearTimeout(toastTimer.current)
     toastTimer.current = setTimeout(() => { noticeHeld.current = false; setToast(null) }, duration)
@@ -449,43 +459,74 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   // than flashing the workspace first; the merge notice waits for the answer.
   const canSaveName = Boolean(accountAuth.updateName)
   const [heldForName] = useState(() => canSaveName && mayAskName(user))
-  const [nameGate, setNameGate] = useState<'hold' | 'ask' | 'off'>(heldForName ? 'hold' : 'off')
+  const [nameGate, setNameGateState] = useState<'hold' | 'ask' | 'off'>(heldForName ? 'hold' : 'off')
+  const nameGateRef = useRef(nameGate)
   const heldNotice = useRef<string | null>(null)
+  const deferredToast = useRef<{ message: string; tone: ToastState['tone']; duration: number; action?: ToastAction } | null>(null)
   useEffect(() => {
     if (restoring || anonymous || mergeRead.current) return
     mergeRead.current = true
+    // A hanging /me must not strand the listener on the hold: the workspace
+    // opens after a moment, and a late askName still opens the page over it.
+    const holdTimer = heldForName ? setTimeout(() => { if (nameGateRef.current === 'hold') setNameGate('off') }, NAME_HOLD_MS) : undefined
     void Promise.resolve()
       .then(() => api.getMe())
       .then(({ merged, albumPicks, askName }) => {
+        clearTimeout(holdTimer)
         setAlbumPicks(albumPicks)
         const asking = askName && canSaveName
+        const notice = mergeNotice(merged)
+        if (asking) heldNotice.current = notice
         setNameGate(asking ? 'ask' : 'off')
         if (!asking && heldForName) markNamePageSettled(user.id)
-        const notice = mergeNotice(merged)
-        if (!notice) return
-        if (asking) heldNotice.current = notice
-        else showMergeNotice(notice)
+        if (notice && !asking) showMergeNotice(notice)
       })
-      .catch(() => setNameGate((gate) => (gate === 'hold' ? 'off' : gate)))
+      .catch(() => {
+        clearTimeout(holdTimer)
+        if (nameGateRef.current === 'hold') setNameGate('off')
+      })
   }, [restoring, anonymous])
+
+  /** Moves the gate; opening the workspace plays what waited behind it (the merge notice wins over a tape toast). */
+  function setNameGate(next: 'hold' | 'ask' | 'off') {
+    nameGateRef.current = next
+    setNameGateState(next)
+    if (next !== 'off') return
+    const notice = heldNotice.current
+    const toast = deferredToast.current
+    heldNotice.current = null
+    deferredToast.current = null
+    if (notice) showMergeNotice(notice)
+    else if (toast) announce(toast.message, toast.tone, toast.duration, toast.action)
+  }
 
   function showMergeNotice(notice: string) {
     announce(notice, 'success', 6000)
     noticeHeld.current = true
   }
 
-  /** Continue (after the save and session re-read) or Skip: the workspace, then any held notice. */
+  /** Continue (after the save) or Skip: the workspace, then any held notice, with focus on the workspace's heading. */
   function closeNamePage() {
-    markNamePageSettled(user.id)
     setNameGate('off')
-    const notice = heldNotice.current
-    heldNotice.current = null
-    if (notice) showMergeNotice(notice)
+    // After the shell stops being inert.
+    requestAnimationFrame(() => {
+      const heading = document.querySelector<HTMLElement>('.app-shell main h1, .app-shell h1')
+      if (!heading) return
+      if (!heading.hasAttribute('tabindex')) heading.tabIndex = -1
+      heading.focus({ preventScroll: true })
+    })
   }
 
-  // Skip records the flag and moves on even if that write fails: the page may show once more next launch.
+  function saveFromNamePage() {
+    markNamePageSettled(user.id)
+    closeNamePage()
+  }
+
+  // Skip moves on at once; only a recorded flag settles the page on this
+  // browser, so after a failed write the next launch holds and asks again.
   function skipNamePage() {
-    void Promise.resolve(accountAuth.markNamePrompted?.()).catch(() => undefined)
+    const mark = accountAuth.markNamePrompted
+    if (mark) void mark().then(() => markNamePageSettled(user.id), () => undefined)
     closeNamePage()
   }
 
@@ -1574,7 +1615,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       <div className="first-run fr-root fr-root--over"><NamePageHold /></div>
     ) : nameGate === 'ask' && saveName ? (
       <div className="first-run fr-root fr-root--over" data-testid="name-page">
-        <div className="fr-stage fr-stage--fade"><NamePage saveName={saveName} onSaved={closeNamePage} onSkip={skipNamePage} /></div>
+        <div className="fr-stage fr-stage--fade"><NamePage saveName={saveName} onSaved={saveFromNamePage} onSkip={skipNamePage} /></div>
       </div>
     ) : null}
     </>

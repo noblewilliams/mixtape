@@ -91,10 +91,16 @@ describe('What should we call you?', () => {
     expect(onSaved).toHaveBeenCalledOnce()
   })
 
-  it('saves on Enter, but not while an IME is composing', () => {
+  it('saves on Enter, but blocks the Enter that ends an IME composition', () => {
     const { saveName } = renderPage()
     type('Ada')
-    fireEvent.keyDown(field(), { key: 'Enter', isComposing: true })
+    // fireEvent returns false when the handler prevented the default (the form's submit).
+    expect(fireEvent.keyDown(field(), { key: 'Enter', isComposing: true })).toBe(false)
+    expect(fireEvent.keyDown(field(), { key: 'Enter', keyCode: 229 })).toBe(false)
+    fireEvent.compositionStart(field())
+    expect(fireEvent.keyDown(field(), { key: 'Enter' })).toBe(false)
+    fireEvent.compositionEnd(field(), { target: { value: 'Ada', selectionEnd: 3 } })
+    expect(fireEvent.keyDown(field(), { key: 'Enter' })).toBe(true)
     expect(saveName).not.toHaveBeenCalled()
     fireEvent.submit(field().closest('form')!)
     expect(saveName).toHaveBeenCalledWith('Ada')

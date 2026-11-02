@@ -42,11 +42,13 @@ type Options = {
   getMe?: () => Promise<MeResponse>
   updateName?: AccountBridge['updateName']
   markNamePrompted?: AccountBridge['markNamePrompted']
+  refetchSession?: () => Promise<void>
+  createSession?: Parameters<typeof createFakeApi>[0] extends infer O ? O extends { createSession?: infer C } ? C : never : never
 }
 
 function renderApp(options: Options = {}) {
   const getMe = vi.fn(options.getMe ?? (async () => me(true)))
-  const api = createFakeApi({ getMe })
+  const api = createFakeApi({ getMe, ...(options.createSession ? { createSession: options.createSession } : {}) })
   const accountAuth: AccountBridge = {
     listAccounts: vi.fn(async () => []),
     linkProvider: vi.fn(async () => ({})),
@@ -54,7 +56,7 @@ function renderApp(options: Options = {}) {
     updateName: options.updateName ?? vi.fn(async () => undefined),
     markNamePrompted: options.markNamePrompted ?? vi.fn(async () => undefined),
   }
-  const refetchSession = vi.fn(async () => undefined)
+  const refetchSession = vi.fn(options.refetchSession ?? (async () => undefined))
   const view = render(
     <App
       api={api}
@@ -158,6 +160,84 @@ describe('the name page', () => {
     expect(accountAuth.updateName).not.toHaveBeenCalled()
     await waitFor(() => expect(namePage()).not.toBeInTheDocument())
     expect(shell()).not.toHaveAttribute('inert')
+  })
+
+  it('holds the next launch again when the Skip write failed', async () => {
+    renderApp({ markNamePrompted: vi.fn(async () => { throw new Error('offline') }) })
+    await screen.findByRole('heading', { level: 1, name: 'What should we call you?' })
+    fireEvent.click(screen.getByRole('button', { name: 'Skip' }))
+    await waitFor(() => expect(namePage()).not.toBeInTheDocument())
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    cleanup()
+
+    renderApp({ getMe: () => new Promise<MeResponse>(() => {}) })
+    expect(hold()).toBeInTheDocument()
+  })
+
+  it('releases the hold to the workspace when GET /me hangs, and still asks if it answers later', async () => {
+    vi.useFakeTimers()
+    try {
+      const answer = deferred<MeResponse>()
+      renderApp({ getMe: () => answer.promise })
+      expect(hold()).toBeInTheDocument()
+      await act(async () => { await vi.advanceTimersByTimeAsync(3400) })
+      expect(hold()).toBeInTheDocument()
+      await act(async () => { await vi.advanceTimersByTimeAsync(200) })
+      expect(hold()).not.toBeInTheDocument()
+      expect(shell()).not.toHaveAttribute('inert')
+
+      await act(async () => answer.resolve(me(true)))
+      expect(namePage()).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps the page closed on Continue when only the session re-read fails', async () => {
+    const { accountAuth } = renderApp({ refetchSession: async () => { throw new Error('offline') } })
+    await screen.findByRole('heading', { level: 1, name: 'What should we call you?' })
+    fireEvent.change(screen.getByRole('textbox', { name: 'Your name' }), { target: { value: 'Ada' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    await waitFor(() => expect(namePage()).not.toBeInTheDocument())
+    expect(accountAuth.updateName).toHaveBeenCalledWith('Ada')
+    expect(screen.queryByText('Couldn’t save your name.')).not.toBeInTheDocument()
+  })
+
+  it('moves focus into the workspace when the page closes', async () => {
+    renderApp()
+    await screen.findByRole('heading', { level: 1, name: 'What should we call you?' })
+    fireEvent.click(screen.getByRole('button', { name: 'Skip' }))
+    await waitFor(() => expect(document.activeElement).not.toBe(document.body))
+    expect(shell().contains(document.activeElement)).toBe(true)
+  })
+
+  it('after Keep this mix: asks, makes the kept mix underneath, then shows the merge notice', async () => {
+    sessionStorage.setItem('mixtape.kept-prompt', JSON.stringify({ prompt: 'late night drive', inspiration: null, shape: null }))
+    const createSession = vi.fn((prompt: string) => createFakeApi().createSession(prompt))
+    renderApp({ getMe: async () => me(true, 'mixes_only'), createSession })
+    await screen.findByRole('heading', { level: 1, name: 'What should we call you?' })
+    await waitFor(() => expect(createSession).toHaveBeenCalledOnce())
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const notice = 'Your mixes are in. This account already had a library, so we kept that one.'
+    expect(screen.queryByText(notice)).not.toBeInTheDocument()
+    expect(screen.queryByText('Your new tape is ready.')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Skip' }))
+    expect(await screen.findByText(notice)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'late night drive' })).toBeInTheDocument()
+  })
+
+  it('announces the kept mix only once the page is answered', async () => {
+    sessionStorage.setItem('mixtape.kept-prompt', JSON.stringify({ prompt: 'late night drive', inspiration: null, shape: null }))
+    const createSession = vi.fn((prompt: string) => createFakeApi().createSession(prompt))
+    renderApp({ createSession })
+    await screen.findByRole('heading', { level: 1, name: 'What should we call you?' })
+    await waitFor(() => expect(createSession).toHaveBeenCalledOnce())
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(screen.queryByText('Your new tape is ready.')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Skip' }))
+    expect(await screen.findByText('Your new tape is ready.')).toBeInTheDocument()
   })
 
   it('does not hold the next launch once this browser saw it answered', async () => {

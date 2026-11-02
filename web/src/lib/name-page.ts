@@ -28,3 +28,12 @@ export function markNamePageSettled(userId: string) {
     // Storage blocked: the next launch waits for /me again.
   }
 }
+
+/** Account deletion: the id never signs in again, so its mark goes too. */
+export function clearNamePageSettled(userId: string) {
+  try {
+    window.localStorage.removeItem(key(userId))
+  } catch {
+    // Storage blocked: nothing was remembered.
+  }
+}
