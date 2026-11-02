@@ -8,6 +8,8 @@
 	<string>mixtape reads your music library and play counts to learn your taste and build queues for you.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Mixtape listens while you describe the mix you want.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Mixtape only opens files you choose, such as a music export. It never reads your photos.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Used only if the server transcription is unavailable.</string>
 	<key>CFBundleDevelopmentRegion</key>
