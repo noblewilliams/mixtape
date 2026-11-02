@@ -25,6 +25,7 @@ import { interviewRoutes } from './routes/interview'
 import { funnelEventsRoutes } from './routes/funnel-events'
 import { musicKitRoutes } from './routes/musickit'
 import { transcribeRoutes } from './routes/transcribe'
+import { deleteAccount, type AccountDeletionWiring } from './routes/account-deletion'
 import type { FetchLike } from './musickit/catalog'
 import type { Db } from './db/types'
 import type { EnrichDeps } from './enrich/pipeline'
@@ -74,6 +75,7 @@ export function createApp({
   musicKit,
   seeds,
   transcribe,
+  accountDeletion,
   allowedOrigins = [],
 }: {
   auth: AuthLike
@@ -85,6 +87,7 @@ export function createApp({
   musicKit?: MusicKitWiring
   seeds?: SeedsWiring
   transcribe?: TranscribeWiring
+  accountDeletion?: AccountDeletionWiring
   allowedOrigins?: string[]
 }) {
   const app = new Hono<{ Variables: AppVars }>()
@@ -153,6 +156,8 @@ export function createApp({
   }
 
   if (db) {
+    app.delete('/me', requireSession(auth), (c) => deleteAccount(c, db, accountDeletion))
+
     app.use('/suggestions', requireSession(auth))
     app.use('/suggestions/*', requireSession(auth))
     app.route('/suggestions', suggestionRoutes(db))

@@ -2,7 +2,8 @@ import type { ExecutionContext } from 'hono'
 import { Pool } from '@neondatabase/serverless'
 import { drizzle } from 'drizzle-orm/neon-serverless'
 import * as schema from './db/schema'
-import { createAuth, parseWebOrigins } from './auth/create-auth'
+import { createAuth, generateAppleClientSecret, parseWebOrigins } from './auth/create-auth'
+import type { AppleRevokeDeps } from './auth/apple-revoke'
 import { createApp } from './app'
 import { resolveAndFetchFeatures } from './enrich/reccobeats'
 import { fetchTracksBySpotifyIds, fetchAudioFeaturesBySpotifyIds } from './enrich/reccobeats-by-id'
@@ -269,6 +270,22 @@ export function buildSpotifyArtworkDeps(fetchLike: FetchLike = fetch): SpotifyAr
   }
 }
 
+// Plan 2026-11-02 account deletion: the same Sign in with Apple key that signs
+// the web client secret signs one for whichever client a token belongs to.
+// createAuth has already failed fast on a missing Apple binding.
+function buildAppleRevoke(env: Bindings): AppleRevokeDeps {
+  return {
+    bundleId: env.APPLE_BUNDLE_ID,
+    webClientId: env.APPLE_WEB_CLIENT_ID,
+    clientSecret: (clientId) => generateAppleClientSecret({
+      clientId,
+      teamId: env.APPLE_TEAM_ID,
+      keyId: env.APPLE_KEY_ID,
+      privateKey: env.APPLE_PRIVATE_KEY,
+    }),
+  }
+}
+
 export default {
   async fetch(req: Request, env: Bindings, ctx: ExecutionContext) {
     const { db, pool } = buildDb(env)
@@ -295,7 +312,8 @@ export default {
         ? { adminToken: env.ENRICH_ADMIN_TOKEN, deps, artwork, seed }
         : undefined
       const transcribe = buildTranscribe(env)
-      const app = createApp({ auth, db, enrich, dj, albums, playlistEditing, musicKit, transcribe, allowedOrigins })
+      const accountDeletion = { apple: buildAppleRevoke(env) }
+      const app = createApp({ auth, db, enrich, dj, albums, playlistEditing, musicKit, transcribe, accountDeletion, allowedOrigins })
       return await app.fetch(req, env, ctx)
     } finally {
       // Closes the pool's socket(s) after the response is built rather than
