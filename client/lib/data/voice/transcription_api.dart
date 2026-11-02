@@ -29,6 +29,9 @@ enum TranscriptionFailure {
 
   /// No session, or a session the server rejected.
   unauthorized,
+
+  /// `403 ai_consent_required`: the listener has not agreed to the AI notice.
+  consentRequired,
 }
 
 class TranscriptionException implements Exception {
@@ -154,6 +157,9 @@ class TranscriptionApi {
   }
 
   static TranscriptionFailure _failureFor(int status, String? code) {
+    if (status == 403 && code == AiConsentRequiredException.code) {
+      return TranscriptionFailure.consentRequired;
+    }
     if (status == 401 || status == 403) {
       return TranscriptionFailure.unauthorized;
     }

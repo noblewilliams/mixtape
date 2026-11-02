@@ -35,6 +35,11 @@ import 'package:mixtape/presentation/widgets/foundation/text_action.dart';
 import 'package:mixtape/presentation/widgets/playlist_inspiration.dart';
 import 'package:mixtape/presentation/widgets/queue_card.dart';
 
+import 'package:mixtape/data/auth/account_api.dart' show AccountApi;
+import 'package:mixtape/presentation/providers/account_provider.dart'
+    show accountApiProvider;
+import 'package:mixtape/presentation/widgets/ai_consent_sheet.dart';
+import '../helpers/fake_ai_consent.dart';
 import '../data/playback/playback_controller_test.dart' as playback
     show FakeApi, FakeBridge;
 import '../presentation/providers/playlist_context_provider_test.dart'
@@ -277,6 +282,7 @@ ProviderContainer _makeContainer(
   FakeBridge? bridge,
   AuthorStore? authorStore,
   String? accountName,
+  AccountApi? account,
 }) {
   // The screen watches the Mixes summaries for the title it shows while the
   // transcript loads, and posts session events on an output.
@@ -290,6 +296,7 @@ ProviderContainer _makeContainer(
         authorStore ?? InMemoryAuthorStore(),
       ),
       accountNameProvider.overrideWith((ref) async => accountName),
+      if (account != null) accountApiProvider.overrideWithValue(account),
       mixEnergyProvider.overrideWith((ref, key) async => <String, dynamic>{}),
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
       djApiProvider.overrideWithValue(api),
@@ -1432,6 +1439,86 @@ void main() {
             .color,
         ConversationTurn.djFillDark,
       );
+    });
+  });
+
+  group('AI consent (plan 2026-11-02)', () {
+    testWidgets('a turn without consent re-shows the sheet, keeping the draft', (
+      tester,
+    ) async {
+      final sent = <String>[];
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(), messages: [], queue: []);
+      api.onSendMessage = (id, text) async {
+        sent.add(text);
+        return TurnResult(
+          djMessage: _msg('m2', 'dj', 'here you go'),
+          queue: [],
+          queueVersion: 1,
+        );
+      };
+      final account = FakeConsentAccountApi();
+      await _pump(tester, _makeContainer(api, account: account));
+
+      await tester.enterText(find.byKey(const Key('prompt-field')), 'more jazz');
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('start-session')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(AiConsentCopy.titleKey), findsOneWidget);
+      await tester.tap(find.byKey(AiConsentCopy.notNowKey));
+      await tester.pumpAndSettle();
+      expect(sent, isEmpty);
+      expect(find.text('more jazz'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('start-session')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(AiConsentCopy.agreeKey));
+      await tester.pumpAndSettle();
+      expect(account.grants, 1);
+      expect(sent, ['more jazz']);
+    });
+
+    testWidgets('a 403 ai_consent_required takes the turn back and asks', (
+      tester,
+    ) async {
+      var refuse = true;
+      final sent = <String>[];
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(), messages: [], queue: []);
+      api.onSendMessage = (id, text) async {
+        sent.add(text);
+        if (refuse) throw const AiConsentRequiredException();
+        return TurnResult(
+          djMessage: _msg('m2', 'dj', 'here you go'),
+          queue: [],
+          queueVersion: 1,
+        );
+      };
+      final account = FakeConsentAccountApi(aiConsent: true);
+      await _pump(tester, _makeContainer(api, account: account));
+
+      await tester.enterText(find.byKey(const Key('prompt-field')), 'more jazz');
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('start-session')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(AiConsentCopy.titleKey), findsOneWidget);
+      expect(find.byKey(ConversationTurn.errorKey), findsNothing);
+      // The draft is back in the composer, not a sent bubble.
+      final field = tester.widget<TextField>(
+        find.byKey(const Key('prompt-field')),
+      );
+      expect(field.controller!.text, 'more jazz');
+
+      refuse = false;
+      await tester.tap(find.byKey(AiConsentCopy.agreeKey));
+      await tester.pumpAndSettle();
+      expect(account.grants, 1);
+      expect(sent, ['more jazz', 'more jazz']);
+      expect(find.text('here you go'), findsOneWidget);
     });
   });
 }

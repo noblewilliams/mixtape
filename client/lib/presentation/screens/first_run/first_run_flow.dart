@@ -27,6 +27,7 @@ import '../../providers/first_run_flags_provider.dart';
 import '../../providers/first_run_funnel_provider.dart';
 import '../../providers/first_run_provider.dart';
 import '../../providers/onboarding_provider.dart';
+import '../../widgets/ai_consent_sheet.dart';
 import 'artists_screen.dart';
 import 'choose_service_screen.dart';
 import 'making_screen.dart';
@@ -218,7 +219,54 @@ Future<void> saveArtistSeeds(WidgetRef ref, List<String> names) async {
 /// (possible only if this flow's session already had three mixes) gets
 /// [onCap], the sign-in page, and no sentence: nothing about the cap is
 /// drawn by the composer.
+///
+/// Nothing is sent before the AI-consent sheet has been agreed to (plan
+/// `2026-11-02-ai-consent-and-privacy.md`): Agree creates the anonymous
+/// listener, records consent and goes on; Not now returns null with nothing
+/// sent, leaving the listener on the caller's page with what they typed.
+/// [onSending] says when the prompt is really going out (true) and when it
+/// is back to waiting on the sheet (false), so a caller draws its busy state
+/// only while sending, never under the sheet. A `403 ai_consent_required`
+/// (enforcement on, `/me` out of date) asks again and, on Agree, resends.
 Future<String?> startFirstMix(
+  BuildContext context,
+  WidgetRef ref,
+  String prompt, {
+  void Function()? onCap,
+  void Function(bool sending)? onSending,
+}) async {
+  final agreed = await confirmAiConsent(
+    context,
+    beforeSession: true,
+    beforeGrant: () => ensureAnonymousSession(ref),
+  );
+  if (!agreed || !context.mounted) return null;
+  return _sendAskingAgainIfRefused(context, ref, prompt, onCap, onSending);
+}
+
+Future<String?> _sendAskingAgainIfRefused(
+  BuildContext context,
+  WidgetRef ref,
+  String prompt,
+  void Function()? onCap,
+  void Function(bool sending)? onSending,
+) async {
+  onSending?.call(true);
+  final outcome = await _sendFirstMix(context, ref, prompt, onCap: onCap);
+  if (outcome is! _ConsentRefused) return outcome as String?;
+  onSending?.call(false);
+  if (!context.mounted) return null;
+  final again = await confirmAiConsentAfterRefusal(context);
+  if (!again || !context.mounted) return null;
+  return _sendAskingAgainIfRefused(context, ref, prompt, onCap, onSending);
+}
+
+/// [startFirstMix]'s answer when the server wants consent first.
+final class _ConsentRefused {
+  const _ConsentRefused();
+}
+
+Future<Object?> _sendFirstMix(
   BuildContext context,
   WidgetRef ref,
   String prompt, {
@@ -246,6 +294,9 @@ Future<String?> startFirstMix(
         .read(firstRunActiveProvider.notifier)
         .handOff(PendingConversation(sessionId));
     return null;
+  } on AiConsentRequiredException {
+    leaveMaking();
+    return const _ConsentRefused();
   } on AnonymousCapException {
     leaveMaking();
     onCap?.call();

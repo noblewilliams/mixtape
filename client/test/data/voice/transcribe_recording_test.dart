@@ -267,6 +267,30 @@ void main() {
     expect(File(path).existsSync(), isFalse);
   });
 
+  test('a consent 403 is its own failure, not retried and not a sign-out', () async {
+    final use = build(
+      server: (_) => throw const TranscriptionException(
+        TranscriptionFailure.consentRequired,
+      ),
+    );
+    await use.begin();
+    final path = recorder.startedAt!;
+
+    await expectLater(
+      use.finish(),
+      throwsA(
+        isA<VoiceInputException>().having(
+          (e) => e.failure,
+          'failure',
+          VoiceInputFailure.consentRequired,
+        ),
+      ),
+    );
+    expect(expiries, 0);
+    expect(attempts, ['server']);
+    expect(File(path).existsSync(), isFalse);
+  });
+
   test('only a 401 expires the session', () async {
     final use = build(
       server: (_) =>

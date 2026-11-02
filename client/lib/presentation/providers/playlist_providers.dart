@@ -307,6 +307,11 @@ class PlaylistEditThreadNotifier
           ],
         ),
       );
+    } on AiConsentRequiredException {
+      // Not a failed turn: the server wants consent first. The message is
+      // taken back and the screen asks, keeping the text.
+      _merge((current) => current.copyWith(messages: messagesBefore));
+      rethrow;
     } on PlaylistEditApiException catch (error) {
       if (error.kind == 'conflict') {
         await _refreshAfterConflict(

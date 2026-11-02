@@ -81,6 +81,10 @@ class WelcomeScreen extends ConsumerStatefulWidget {
 class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
   final _controller = TextEditingController();
   bool _starting = false;
+
+  /// A send in hand, possibly waiting on the AI-consent sheet: guards a
+  /// second send without drawing the composer busy under the sheet.
+  bool _sending = false;
   String? _error;
 
   @override
@@ -101,7 +105,7 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
       widget.seedsSaved || widget.withoutMusic || (widget.songsIn ?? 0) > 0;
 
   Future<void> _send() async {
-    if (_starting) return;
+    if (_starting || _sending) return;
     final prompt = _controller.text.trim();
     if (prompt.isEmpty) return;
     if (!widget.isPrompt) {
@@ -112,20 +116,22 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
       unawaited(pushFirstRunPage<void>(context, ArtistsScreen(prompt: prompt)));
       return;
     }
-    setState(() {
-      _starting = true;
-      _error = null;
-    });
+    _sending = true;
+    setState(() => _error = null);
     final error = await startFirstMix(
       context,
       ref,
       prompt,
+      onSending: (sending) {
+        if (mounted) setState(() => _starting = sending);
+      },
       onCap: () {
         if (mounted) {
           unawaited(openCapSignIn(context, KeptPrompt(prompt)));
         }
       },
     );
+    _sending = false;
     if (!mounted) return;
     setState(() {
       _starting = false;

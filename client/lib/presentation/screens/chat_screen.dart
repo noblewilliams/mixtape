@@ -20,6 +20,7 @@ import 'package:flutter/cupertino.dart'
         CupertinoTextField,
         showCupertinoDialog;
 import 'package:flutter/material.dart';
+import '../widgets/ai_consent_sheet.dart';
 import '../widgets/open_tape_settings.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -93,6 +94,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   bool _showListeningCaption = false;
   bool _seededInitialError = false;
   bool _keepSheetChecked = false;
+
+  /// A send waiting on the AI-consent sheet.
+  bool _askingConsent = false;
   bool _changingStatus = false;
 
   @override
@@ -170,12 +174,35 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     if (trimmed.isEmpty ||
         ref.read(mixOperationProvider(widget.sessionId)) != null ||
         ref.read(sessionPlaylistContextProvider(widget.sessionId)).writing ||
-        ref.read(chatProvider(widget.sessionId)).value?.sending == true) {
+        ref.read(chatProvider(widget.sessionId)).value?.sending == true ||
+        _askingConsent) {
       return;
     }
+    // Nothing reaches the DJ before the listener has agreed; Not now keeps
+    // the draft in the composer.
+    _askingConsent = true;
+    final agreed = await confirmAiConsent(context);
+    _askingConsent = false;
+    if (!agreed || !mounted) return;
     if (fromComposer) _textController.clear();
     try {
       await ref.read(chatProvider(widget.sessionId).notifier).send(trimmed);
+    } on AiConsentRequiredException {
+      // Enforcement is on and `/me` was out of date: the turn was taken
+      // back. The text goes back in the composer, the sheet asks, and
+      // Agree sends it again.
+      if (!mounted) return;
+      if (fromComposer && _textController.text.isEmpty) {
+        _textController.text = trimmed;
+      }
+      _askingConsent = true;
+      final again = await confirmAiConsentAfterRefusal(context);
+      _askingConsent = false;
+      if (!again || !mounted) return;
+      await _send(
+        fromComposer ? _textController.text : trimmed,
+        fromComposer: fromComposer,
+      );
     } catch (_) {
       if (!mounted) return;
       _snack('something unexpected happened', kind: FeedbackKind.error);

@@ -26,6 +26,10 @@ enum VoiceInputFailure {
 
   /// Recorded, but neither transcriber could read it.
   failed,
+
+  /// The server wants AI consent first: the composer shows the consent sheet
+  /// rather than a line.
+  consentRequired,
 }
 
 /// A voice-input failure and the one sentence the composer shows for it.
@@ -69,6 +73,10 @@ class TranscribeRecording {
   static const String failedCopy =
       'Could not hear that. Type your idea instead.';
   static const String unauthorizedCopy = 'Sign in again to speak your idea.';
+
+  /// Never drawn: the composer shows the consent sheet for this failure.
+  static const String consentRequiredCopy =
+      'Agree to how Mixtape uses AI to speak your idea.';
 
   final VoiceCaptureService _capture;
   final Future<String> Function(File clip) _server;
@@ -136,7 +144,8 @@ class TranscribeRecording {
         // weaker transcriber the same question wastes the listener's time.
         TranscriptionFailure.tooShort ||
         TranscriptionFailure.tooLarge ||
-        TranscriptionFailure.unauthorized => false,
+        TranscriptionFailure.unauthorized ||
+        TranscriptionFailure.consentRequired => false,
       };
 
   Future<void> _settle(File clip) async {
@@ -182,6 +191,10 @@ class TranscribeRecording {
         TranscriptionFailure.unauthorized => const VoiceInputException(
           VoiceInputFailure.unauthorized,
           unauthorizedCopy,
+        ),
+        TranscriptionFailure.consentRequired => const VoiceInputException(
+          VoiceInputFailure.consentRequired,
+          consentRequiredCopy,
         ),
         _ => const VoiceInputException(VoiceInputFailure.failed, failedCopy),
       };

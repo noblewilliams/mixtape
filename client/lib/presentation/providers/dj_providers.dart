@@ -514,6 +514,20 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       if (filled) _noteFilledMix(result.queue.length);
       await _adoptSessionFlags(generation);
       if (_current(generation)) _notePersonalMix();
+    } on AiConsentRequiredException {
+      // Not a failed turn: the server wants consent first. The turn is
+      // taken back and the screen asks, keeping the text.
+      if (_current(generation)) {
+        _mergeCurrent(
+          (c) => c.copyWith(
+            messages: [
+              for (final m in c.messages)
+                if (!identical(m, userMessage)) m,
+            ],
+          ),
+        );
+      }
+      rethrow;
     } on DjApiException catch (e) {
       if (!_current(generation)) return;
       if (e.kind == 'stale') {

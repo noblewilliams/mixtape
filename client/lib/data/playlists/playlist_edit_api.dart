@@ -130,7 +130,10 @@ class PlaylistEditApi {
     throw const PlaylistEditModelException();
   }
 
-  PlaylistEditApiException _translate(ApiException error) {
+  Exception _translate(ApiException error) {
+    if (AiConsentRequiredException.matches(error.statusCode, error.body)) {
+      return const AiConsentRequiredException();
+    }
     final decoded = _decode(error.body);
     final serverKind = decoded?['error'];
     final kind = serverKind is String

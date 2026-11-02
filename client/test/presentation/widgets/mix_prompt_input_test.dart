@@ -1,11 +1,23 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixtape/data/auth/token_store.dart';
+import 'package:mixtape/presentation/providers/account_provider.dart';
+import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/voice_providers.dart';
+import 'package:mixtape/presentation/widgets/ai_consent_sheet.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/mix_prompt_input.dart';
 import 'package:mixtape/presentation/widgets/voice_level_meter.dart';
+
+import '../../helpers/fake_ai_consent.dart';
+
+class _SessionAuth extends AuthNotifier {
+  @override
+  AuthStatus build() => AuthStatus.session;
+}
 
 void main() {
   testWidgets(
@@ -597,6 +609,121 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('A slow Sunday morning'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      v.dispose();
+      controller.dispose();
+    });
+
+    testWidgets('without AI consent the mic asks first and opens on Agree', (
+      tester,
+    ) async {
+      final controller = TextEditingController();
+      final v = voice();
+      final account = FakeConsentAccountApi();
+      final container = ProviderContainer(
+        overrides: [
+          tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
+          authProvider.overrideWith(_SessionAuth.new),
+          accountApiProvider.overrideWithValue(account),
+        ],
+      );
+      addTearDown(container.dispose);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            theme: MixtapeTheme.light(),
+            home: Scaffold(
+              body: MixPromptInput(
+                controller: controller,
+                busy: false,
+                onSubmit: () {},
+                showVoiceInput: true,
+                voiceController: v,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('voice-input')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(AiConsentCopy.titleKey), findsOneWidget);
+      expect(calls, isEmpty);
+
+      await tester.tap(find.byKey(AiConsentCopy.notNowKey));
+      await tester.pumpAndSettle();
+      expect(calls, isEmpty);
+      expect(v.state, VoiceComposerState.idle);
+
+      await tester.tap(find.byKey(const Key('voice-input')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(AiConsentCopy.agreeKey));
+      await tester.pumpAndSettle();
+      expect(account.grants, 1);
+      expect(calls, ['start']);
+
+      await tester.pumpWidget(const SizedBox());
+      v.dispose();
+      controller.dispose();
+    });
+
+    testWidgets('a transcribe 403 ai_consent_required shows the sheet, not a '
+        'failure line', (tester) async {
+      final controller = TextEditingController(text: 'kept');
+      final account = FakeConsentAccountApi(aiConsent: true);
+      final v = VoiceComposerController(
+        onStart: () async {},
+        onStop: () async => throw const VoiceInputException(
+          VoiceInputFailure.consentRequired,
+          TranscribeRecording.consentRequiredCopy,
+        ),
+        onCancel: () async {},
+        amplitude: const Stream<double>.empty(),
+      );
+      final container = ProviderContainer(
+        overrides: [
+          tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
+          authProvider.overrideWith(_SessionAuth.new),
+          accountApiProvider.overrideWithValue(account),
+        ],
+      );
+      addTearDown(container.dispose);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            theme: MixtapeTheme.light(),
+            home: Scaffold(
+              body: MixPromptInput(
+                controller: controller,
+                busy: false,
+                onSubmit: () {},
+                showVoiceInput: true,
+                voiceController: v,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('voice-input')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('voice-input')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(AiConsentCopy.titleKey), findsOneWidget);
+      expect(find.text(TranscribeRecording.consentRequiredCopy), findsNothing);
+      expect(v.failure, isNull);
+      expect(controller.text, 'kept');
+
+      await tester.tap(find.byKey(AiConsentCopy.notNowKey));
+      await tester.pumpAndSettle();
+      // The next tap on the mic asks first now.
+      await tester.tap(find.byKey(const Key('voice-input')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(AiConsentCopy.titleKey), findsOneWidget);
+
       await tester.pumpWidget(const SizedBox());
       v.dispose();
       controller.dispose();

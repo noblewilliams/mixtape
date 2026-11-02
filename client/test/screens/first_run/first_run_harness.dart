@@ -11,6 +11,8 @@ import 'package:mixtape/data/library/library_sync_service.dart';
 import 'package:mixtape/data/onboarding/funnel_once_store.dart';
 import 'package:mixtape/data/onboarding/service_preference_store.dart';
 import 'package:mixtape/data/playlists/playlist_context_models.dart';
+import 'package:mixtape/presentation/providers/account_provider.dart';
+import 'package:mixtape/presentation/providers/ai_consent_provider.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/device_providers.dart';
 import 'package:mixtape/presentation/providers/first_run_flags_provider.dart';
@@ -20,6 +22,7 @@ import 'package:mixtape/presentation/providers/listening_import_provider.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 
+import '../../helpers/fake_ai_consent.dart';
 import '../../helpers/fake_import_service.dart';
 import '../../helpers/fake_listening_api.dart';
 import '../../helpers/onboarding_harness.dart';
@@ -179,14 +182,19 @@ class ControlledSync extends LibrarySyncNotifier {
 }
 
 class FirstRunHarness {
+  /// [consentGiven] false runs the real AI-consent gate against [account];
+  /// left true, consent is already given and the pages send as before.
   FirstRunHarness({
     AuthStatus status = AuthStatus.noSession,
     bool anonymous = false,
+    this.consentGiven = true,
   }) : auth = FirstRunAuth(status, anonymous: anonymous) {
     config = FakeConfigApi(auth);
   }
 
   final FirstRunAuth auth;
+  final bool consentGiven;
+  final FakeConsentAccountApi account = FakeConsentAccountApi(anonymous: true);
   late final FakeConfigApi config;
   final FirstRunDjApi dj = FirstRunDjApi();
   final FakeListeningApi listening = FakeListeningApi(
@@ -212,6 +220,8 @@ class FirstRunHarness {
     listeningImportServiceProvider.overrideWithValue(FakeImportService()),
     archivePickerProvider.overrideWithValue(picker),
     openedArchiveSourceProvider.overrideWithValue(FakeOpenedArchiveSource()),
+    accountApiProvider.overrideWithValue(account),
+    if (consentGiven) aiConsentProvider.overrideWith(GrantedAiConsent.new),
   ];
 
   late final ProviderContainer container = () {

@@ -351,6 +351,9 @@ class DjApi {
         }
         return e;
       case 403:
+        if (AiConsentRequiredException.matches(e.statusCode, e.body)) {
+          return const AiConsentRequiredException();
+        }
         final decoded = _tryDecode(e.body);
         if (decoded?['error'] == 'anonymous_albums') {
           return DjApiException(

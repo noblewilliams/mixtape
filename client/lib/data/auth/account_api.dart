@@ -65,6 +65,7 @@ class Me {
     this.albumPicks = false,
     this.neverRefuse = false,
     this.name,
+    this.aiConsent = true,
   });
 
   /// Better Auth's user.name, trimmed; null when unset or blank.
@@ -81,7 +82,17 @@ class Me {
   /// The server's never-refuse flag (`NEVER_REFUSE`); absent on an older
   /// server, which reads as off.
   final bool neverRefuse;
+
+  /// Whether the listener has agreed to the current AI-processing notice
+  /// ([aiConsentVersion]). Absent on an older server, which reads as
+  /// granted: the app never gates against a server that cannot record the
+  /// answer (plan `2026-11-02-ai-consent-and-privacy.md` → Contract).
+  final bool aiConsent;
 }
+
+/// The AI-processing notice the app asks about. A new version (a new
+/// processor, new data) asks again; the server answers 409 to any other.
+const String aiConsentVersion = '2026-11-02';
 
 class AccountApi {
   const AccountApi(this._client);
@@ -113,7 +124,21 @@ class AccountApi {
       albumPicks: value['albumPicks'] == true,
       neverRefuse: value['neverRefuse'] == true,
       name: _displayName(user['name']),
+      aiConsent: value['aiConsent'] != false,
     );
+  }
+
+  /// `POST /me/ai-consent` for [aiConsentVersion]. Idempotent; succeeds only
+  /// when the server confirms `aiConsent: true`.
+  Future<void> grantAiConsent() async {
+    final value = _object(
+      await _request(
+        () async => (await _client.postJson('/me/ai-consent', {
+          'version': aiConsentVersion,
+        })).body,
+      ),
+    );
+    if (value['aiConsent'] != true) throw const AccountModelException();
   }
 
   /// Explicit linking never signs in or replaces the existing session token.

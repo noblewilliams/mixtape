@@ -246,6 +246,9 @@ class _ApiSlot {
 
 late _ApiSlot _slot;
 
+/// The addresses You opened outside the app.
+late List<Uri> _opened;
+
 ProviderContainer _container({
   _Auth? auth,
   String? name = 'Ada',
@@ -256,6 +259,7 @@ ProviderContainer _container({
   String? chosenService = 'apple',
 }) {
   _slot = _ApiSlot(suggestions ?? FakeSuggestionsApi());
+  final opened = _opened = <Uri>[];
   final container = ProviderContainer(
     overrides: [
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
@@ -275,6 +279,10 @@ ProviderContainer _container({
       ),
       suggestionsApiProvider.overrideWith((ref) => _slot.api),
       suggestionTimeZoneProvider.overrideWithValue(() async => 'UTC'),
+      linkOpenerProvider.overrideWithValue((uri) async {
+        opened.add(uri);
+        return true;
+      }),
     ],
   );
   addTearDown(container.dispose);
@@ -353,14 +361,15 @@ void main() {
         expect(find.text('A'), findsOneWidget, reason: 'the avatar initial');
         expect(
           find.byType(InsetGroup),
-          findsNWidgets(4),
-          reason: 'identity, toggles, the Together ghost, account',
+          findsNWidgets(5),
+          reason: 'identity, toggles, the Together ghost, privacy, account',
         );
         for (final key in const [
           'you-memories',
           'you-learning-switch',
           'you-suggestions-switch',
           'you-together',
+          'you-privacy',
           'you-account',
           'you-signout',
         ]) {
@@ -451,6 +460,9 @@ void main() {
       tester,
     ) async {
       await _pump(tester, _container(), dockInset: true);
+      // The end of the list is past the fold on this phone.
+      await tester.drag(find.byType(Scrollable).first, const Offset(0, -2000));
+      await tester.pumpAndSettle();
 
       final media = MediaQuery.of(tester.element(find.byType(YouTab)));
       expect(media.padding.bottom, kFrostedDockHeight);
@@ -620,6 +632,19 @@ void main() {
       expect(find.byType(MemoryScreen), findsOneWidget);
     });
 
+    for (final anonymous in [false, true]) {
+      testWidgets('Privacy policy opens the policy outside the app'
+          '${anonymous ? ' (anonymous)' : ''}', (tester) async {
+        await _pump(tester, _container(auth: _Auth(anonymous: anonymous)));
+
+        expect(find.text('Privacy policy'), findsOneWidget);
+        await tester.tap(find.byKey(const Key('you-privacy')));
+        await tester.pump();
+
+        expect(_opened, [Uri.parse('https://miixtape.netlify.app/privacy/')]);
+      });
+    }
+
     testWidgets('Account opens the account screen', (tester) async {
       await _pump(tester, _container());
 
@@ -696,8 +721,8 @@ void main() {
       expect(find.text(YouTab.learningFootnote), findsOneWidget);
       expect(
         find.byType(InsetGroup),
-        findsNWidgets(2),
-        reason: 'toggles and the Together ghost only',
+        findsNWidgets(3),
+        reason: 'toggles, the Together ghost and privacy only',
       );
     });
 
