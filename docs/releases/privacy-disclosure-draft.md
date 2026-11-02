@@ -69,8 +69,11 @@ collected” from an optional import button. Source checked September 8:
   See `server/src/listening/cleanup.ts` and shared playlist cleanup constants.
 - No general lifetime limit for completed listening history, conversation,
   memory, funnel events, or account records was established in this pass.
-- Source deletion is not account deletion. No end-to-end account deletion flow
-  was verified. Do not promise an in-app account-deletion control without proof.
+- Source deletion is not account deletion. In-app account deletion (2026-11-02,
+  `DELETE /me`) removes the account and every user-keyed row at once and revokes
+  Sign in with Apple tokens; funnel milestones survive with the account link
+  removed. Not yet verified end to end on production (plan
+  `superpowers/plans/2026-11-02-account-deletion.md` → Gate).
 - Backup retention, vendor retention/training settings, hosted logs, and deletion
   propagation require production/operator verification.
 

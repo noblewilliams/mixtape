@@ -1,5 +1,22 @@
 # Decision Log
 
+## 2026-11-02 — Profile name: provider first, ask once if missing
+
+Founder decisions for `superpowers/specs/2026-11-02-profile-name-design.md`:
+
+- Keep the name the provider gives. iOS stops discarding the name Apple
+  discloses at the first-ever sign-in and sends it with the identity token.
+- If an account still has no usable name after sign-in, ask once with an
+  optional first-run-style page ("What should we call you?", Continue or
+  Skip). Either answer records that it was asked, on every device. Not shown
+  to anonymous listeners. Rejected: no page at all (Apple users who hide
+  their name would stay "Your account"), and a page after every sign-up (one
+  more step for listeners whose provider already named them).
+- The name is edited only in Account (iOS) and Settings › Account (web). The
+  playlist author field stays separate.
+- The DJ receives the first name and may use it rarely, at most once a
+  conversation. Rejected: leaving the DJ unchanged.
+
 ## 2026-10-22 — Never refuse means model-proposed songs verified on Apple
 
 Gate 3's first seeding sitting tripled the catalogue to 15,488 tracks in
@@ -1088,3 +1105,7 @@ hit area), which supersedes the always-on 44px rule above. The playlist picker
 is a 256px search-and-list popover with single-line rows, no header, and no
 focus ring on its search field. The mix panel has a hairline left edge so chat
 and queue read as separate surfaces.
+
+## 2026-11-02 — Account deletion is a hard delete that revokes Apple
+
+App Store guideline 5.1.1(v) needs an in-app way to delete an account. `DELETE /me` removes the `user` row in one statement; every user-keyed table cascades and `funnel_events` is `SET NULL`, pinned by a schema test (`server/test/account-deletion.test.ts`), so a new user table without a cascade fails CI. Sign in with Apple tokens are revoked before the delete: iOS shows the Apple sheet once and sends a fresh authorization code, which the server exchanges with the bundle id and revokes; a web sign-in revokes the token Better Auth stored, with the Services ID. Revocation is best effort and never blocks the delete, because the listener asked for their data to go; the response reports `apple` as `revoked`, `failed`, `not_linked` or `no_token`. Clients offer it to accounts only (anonymous data already expires after 30 days), behind one destructive alert. Nothing in Apple Music or Spotify is touched. Founder choices 2026-11-02: reconfirm with Apple on iOS, one alert rather than type-to-confirm. Plan `superpowers/plans/2026-11-02-account-deletion.md`. **Reopens if:** we keep data a deletion must not take (billing records, legal holds), which would make this a soft delete with a purge job.
