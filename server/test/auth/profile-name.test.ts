@@ -6,6 +6,7 @@ import { testAuthEnv } from '../helpers/auth'
 import { createAuth } from '../../src/auth/create-auth'
 import { firstName, isUsableName, normalizeProfileName, PROFILE_NAME_MAX } from '../../src/auth/profile-name'
 import { user } from '../../src/db/auth-schema'
+import { createApp } from '../../src/app'
 
 describe('normalizeProfileName', () => {
   it('trims and collapses inner whitespace, tabs and newlines included', () => {
@@ -18,6 +19,25 @@ describe('normalizeProfileName', () => {
     expect(normalizeProfileName('A\u0000d\u0007a')).toBe('Ada')
     expect(normalizeProfileName('​Ada‎﻿')).toBe('Ada')
     expect(normalizeProfileName('Ada‮ecalevoL')).toBe('AdaecalevoL')
+  })
+
+  it('keeps ZWJ and ZWNJ, which joined emoji and Persian or Indic spelling need', () => {
+    expect(normalizeProfileName('👨\u200d👩\u200d👧')).toBe('👨\u200d👩\u200d👧')
+    expect(normalizeProfileName('می\u200cخواهم')).toBe('می\u200cخواهم')
+    expect(normalizeProfileName('क्\u200dष')).toBe('क्\u200dष')
+  })
+
+  it('drops every bidi control', () => {
+    const bidi = '\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069\u200e\u200f\u061c'
+    expect(normalizeProfileName(`${bidi}Ada${bidi}`)).toBe('Ada')
+  })
+
+  it('never cuts a flag or a letter from its combining mark at the cap', () => {
+    // 39 letters then a two-code-point flag: the flag would be the 40th and
+    // 41st code points, so it goes whole rather than half.
+    expect(normalizeProfileName(`${'a'.repeat(39)}🇳🇬`)).toBe('a'.repeat(39))
+    expect(normalizeProfileName(`${'a'.repeat(38)}🇳🇬x`)).toBe(`${'a'.repeat(38)}🇳🇬`)
+    expect(normalizeProfileName(`${'a'.repeat(39)}e\u0301`)).toBe('a'.repeat(39))
   })
 
   it('drops a lone surrogate rather than storing broken text', () => {
@@ -77,6 +97,10 @@ describe('firstName', () => {
   it('caps at 20 code points without splitting a surrogate pair', () => {
     expect(firstName(`${'b'.repeat(30)} Smith`)).toBe('b'.repeat(20))
     expect(firstName(`${'b'.repeat(19)}😀😀`)).toBe(`${'b'.repeat(19)}😀`)
+  })
+
+  it('never cuts a flag at the 20 cap', () => {
+    expect(firstName(`${'b'.repeat(19)}🇳🇬 Smith`)).toBe('b'.repeat(19))
   })
 
   it('carries no control characters into the prompt', () => {
@@ -158,16 +182,65 @@ describe('POST /api/auth/update-user', () => {
     return { db, auth, userId: created.id, token: session.token }
   }
 
-  it('lets the owner set namePromptedAt and normalises a name sent with it', async () => {
-    const { db, auth, userId, token } = await signedIn()
-    const at = '2026-11-02T10:00:00.000Z'
+  async function promptedAt(db: Awaited<ReturnType<typeof signedIn>>['db'], userId: string) {
+    const [row] = await db.select().from(user).where(eq(user.id, userId))
+    return row?.namePromptedAt ?? null
+  }
 
-    const res = await post(auth, '/update-user', { name: '  Ada   Lovelace ', namePromptedAt: at }, token)
+  it('sets namePromptedAt to the server clock, whatever date the client sends, and normalises a name sent with it', async () => {
+    const { db, auth, userId, token } = await signedIn()
+    const before = Date.now()
+
+    const res = await post(auth, '/update-user', { name: '  Ada   Lovelace ', namePromptedAt: '2001-01-01T00:00:00.000Z' }, token)
 
     expect(res.status).toBe(200)
     const [row] = await db.select().from(user).where(eq(user.id, userId))
     expect(row?.name).toBe('Ada Lovelace')
-    expect(row?.namePromptedAt?.toISOString()).toBe(at)
+    expect(row?.namePromptedAt?.getTime()).toBeGreaterThanOrEqual(before - 1000)
+  })
+
+  it.each([['garbage'], [12345], [{}], [[]], [true]])('a truthy but malformed namePromptedAt (%j) still sets the flag, never a 500', async (value) => {
+    const { db, auth, userId, token } = await signedIn()
+    const before = Date.now()
+
+    const res = await post(auth, '/update-user', { namePromptedAt: value }, token)
+
+    expect(res.status).toBe(200)
+    expect((await promptedAt(db, userId))?.getTime()).toBeGreaterThanOrEqual(before - 1000)
+  })
+
+  it.each([[null], [false], ['']])('namePromptedAt %j never clears the flag and never 500s', async (value) => {
+    const { db, auth, userId, token } = await signedIn()
+    await post(auth, '/update-user', { namePromptedAt: true }, token)
+    const set = await promptedAt(db, userId)
+    expect(set).not.toBeNull()
+
+    const res = await post(auth, '/update-user', { namePromptedAt: value }, token)
+
+    expect(res.status).toBeLessThan(500)
+    expect(await promptedAt(db, userId)).toEqual(set)
+  })
+
+  it('namePromptedAt alone leaves the name alone', async () => {
+    const { db, auth, userId, token } = await signedIn()
+    await post(auth, '/update-user', { name: 'Ada' }, token)
+
+    const res = await post(auth, '/update-user', { namePromptedAt: true }, token)
+
+    expect(res.status).toBe(200)
+    const [row] = await db.select().from(user).where(eq(user.id, userId))
+    expect(row?.name).toBe('Ada')
+  })
+
+  it.each([[123], [null], [{}], [['Ada']]])('rejects a non-string name (%j) with a 400 and keeps the stored one', async (value) => {
+    const { db, auth, userId, token } = await signedIn()
+    await post(auth, '/update-user', { name: 'Ada' }, token)
+
+    const res = await post(auth, '/update-user', { name: value }, token)
+
+    expect(res.status).toBe(400)
+    const [row] = await db.select().from(user).where(eq(user.id, userId))
+    expect(row?.name).toBe('Ada')
   })
 
   it('a blank name clears it to an empty string', async () => {
@@ -179,6 +252,38 @@ describe('POST /api/auth/update-user', () => {
     expect(res.status).toBe(200)
     const [row] = await db.select().from(user).where(eq(user.id, userId))
     expect(row?.name).toBe('')
+  })
+})
+
+// The link path: an anonymous listener signs in with a provider that gives no
+// name, so the new account has none and the name page must follow.
+describe('anonymous to account with no provider name', () => {
+  it('leaves askName true on the linked account', async () => {
+    const db = await createTestDb()
+    const auth = createAuth(db, testAuthEnv)
+    const app = createApp({ auth, db })
+    const ctx = await auth.$context
+    const google = ctx.socialProviders.find((p) => p.id === 'google')!
+    google.options = { ...google.options, verifyIdToken: async () => true }
+    google.getUserInfo = async () => ({
+      user: { email: 'noname@example.com', name: '', emailVerified: true },
+      data: { sub: 'google-sub-noname', email: 'noname@example.com' },
+    })
+    const anon = await post(auth, '/sign-in/anonymous', {})
+    expect(anon.status).toBe(200)
+
+    const social = await post(auth, '/sign-in/social', {
+      provider: 'google', idToken: { token: 'fake-google-id-token' },
+    }, anon.headers.get('set-auth-token')!)
+    expect(social.status).toBe(200)
+
+    const me = await app.request('http://localhost:8787/me', {
+      headers: { authorization: `Bearer ${social.headers.get('set-auth-token')}` },
+    })
+    const body = await me.json() as { askName: boolean; user: { isAnonymous: boolean; name: string } }
+    expect(body.user.isAnonymous).toBe(false)
+    expect(body.user.name).toBe('')
+    expect(body.askName).toBe(true)
   })
 })
 

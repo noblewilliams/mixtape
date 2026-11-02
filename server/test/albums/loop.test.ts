@@ -19,6 +19,7 @@ import type { LlmClient, LlmRequest, LlmToolCall, LlmTurn } from '../../src/dj/l
 import { AppleCatalogError, type AppleCatalogAlbumClient, type CatalogAlbum } from '../../src/musickit/catalog'
 import { albumPicks, albums, djMessages, djSessions, listenLater, tracks, trackMeanings, userMusicProfiles, userTracks, user } from '../../src/db/schema'
 import type { Embedder } from '../../src/enrich/embedder'
+import { FIRST_NAME_PERSONA_LINE } from '../../src/dj/listener-name'
 
 const DIMS = 1024
 const BRIEF = (() => { const v = new Array(DIMS).fill(0); v[0] = 1; return v })()
@@ -567,9 +568,11 @@ describe("album DJ: listener's first name", () => {
   it('adds one data line with the first name and the use-it-rarely rule', async () => {
     const { context, system } = await contextFor('Ada Lovelace')
     const lines = context.split('\n').filter((l) => l.includes('first name'))
-    expect(lines).toEqual([
-      "The listener's first name: Ada. Use it rarely, at most once in a conversation, never as a greeting.",
-    ])
+    expect(lines).toEqual(["The listener's first name: Ada."])
+    // The rule is fixed text, so it sits in the static persona, outside the
+    // listener-data block.
+    expect(system).toContain(FIRST_NAME_PERSONA_LINE)
+    expect(context).not.toContain('rarely')
     expect(context).not.toContain('Lovelace')
     expect(system).toBe(ALBUM_PERSONA)
   })

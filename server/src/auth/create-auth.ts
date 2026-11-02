@@ -1,4 +1,5 @@
 import { betterAuth } from 'better-auth'
+import { APIError } from 'better-auth/api'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { anonymous, bearer } from 'better-auth/plugins'
 import { importPKCS8, SignJWT } from 'jose'
@@ -89,11 +90,21 @@ function linkSurface(ctx: { path?: string; body?: unknown }): 'ios' | 'web' {
   return ctx.path === '/sign-in/social' && body?.idToken ? 'ios' : 'web'
 }
 
-// The name rule on every write, whoever writes it: a provider name at
-// sign-up, the name page, an Account edit. Anything that is not a string
-// (update-user forwards the body's name as is) stores as no name.
-function withProfileName<T extends { name?: unknown }>(data: T): T {
-  return { ...data, name: typeof data.name === 'string' ? normalizeProfileName(data.name) : '' }
+// The profile fields on every user write, whoever writes it: a provider
+// name at sign-up, the name page, an Account edit.
+// - name: the name rule. update-user forwards the body's name as is, so a
+//   non-string there is a 400 rather than a silent wipe; at creation a
+//   missing or non-string provider name stores as no name.
+// - namePromptedAt: the server owns the value. Any truthy value means "asked
+//   now" and becomes the server clock; null, false or '' is ignored, so the
+//   flag can never be cleared and a malformed date never reaches the driver.
+function withProfileFields<T extends Record<string, unknown>>(data: T, write: 'create' | 'update'): T {
+  const out: Record<string, unknown> = { ...data }
+  if (typeof data.name === 'string') out.name = normalizeProfileName(data.name)
+  else if (write === 'create') out.name = ''
+  else if (data.name !== undefined) throw new APIError('BAD_REQUEST', { message: 'name must be a string' })
+  if ('namePromptedAt' in data) out.namePromptedAt = data.namePromptedAt ? new Date() : undefined
+  return out as T
 }
 
 // db is any drizzle pg database (neon-http in prod, pglite in tests)
@@ -136,16 +147,16 @@ export function createAuth(db: object, env: AuthEnv) {
     },
     user: {
       // The owner sets it through POST /api/auth/update-user when they answer
-      // the name page (Continue or Skip) or save a name in Account.
+      // the name page (Continue or Skip) or save a name in Account. The value
+      // sent is only a signal: withProfileFields stamps the server clock.
       additionalFields: {
         namePromptedAt: { type: 'date', required: false, input: true },
       },
     },
     databaseHooks: {
       user: {
-        create: { before: async (data) => ({ data: withProfileName(data) }) },
-        // update-user passes name: undefined when only other fields change.
-        update: { before: async (data) => (data.name === undefined ? undefined : { data: withProfileName(data) }) },
+        create: { before: async (data) => ({ data: withProfileFields(data, 'create') }) },
+        update: { before: async (data) => ({ data: withProfileFields(data, 'update') }) },
       },
     },
     socialProviders: {

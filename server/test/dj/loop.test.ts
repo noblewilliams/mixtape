@@ -38,6 +38,7 @@ import {
 } from '../../src/db/schema'
 import type { Embedder } from '../../src/enrich/embedder'
 import { createApp, type AuthLike } from '../../src/app'
+import { FIRST_NAME_PERSONA_LINE } from '../../src/dj/listener-name'
 
 const DIMS = 1024
 
@@ -2466,11 +2467,15 @@ describe("listener's first name", () => {
   it('adds one data line with the first name and the use-it-rarely rule', async () => {
     const { context, system } = await contextFor('Ada Lovelace')
     const lines = context.split('\n').filter((l) => l.includes('first name'))
-    expect(lines).toEqual([
-      "The listener's first name: Ada. Use it rarely, at most once in a conversation, never as a greeting.",
-    ])
+    expect(lines).toEqual(["The listener's first name: Ada."])
+    // The rule is fixed text, so it sits in the static persona, outside the
+    // listener-data block.
+    expect(system).toContain(FIRST_NAME_PERSONA_LINE)
+    expect(context).not.toContain('rarely')
     expect(context).not.toContain('Lovelace')
     expect(system).not.toContain('Ada')
+    expect(PERSONA_PROMPT).toContain(FIRST_NAME_PERSONA_LINE)
+    expect(PERSONA_PROMPT_WITH_OUTSIDE).toContain(FIRST_NAME_PERSONA_LINE)
   })
 
   it('adds nothing when the name is blank or the anonymous default', async () => {

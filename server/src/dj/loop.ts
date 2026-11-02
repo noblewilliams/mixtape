@@ -41,7 +41,7 @@ import {
 import { resolveMarket } from '../albums/verify'
 import { sanitizeForPrompt, sanitizeTitleText, stripEmDashes } from './sanitize'
 import { insertMemoryNote, MAX_MEMORY_NOTES } from './memory-notes'
-import { formatFirstNameLine, loadFirstName } from './listener-name'
+import { FIRST_NAME_PERSONA_LINE, formatFirstNameLine, loadFirstName } from './listener-name'
 import { insertMissingArtistSeeds } from '../seeds/artist-seeds'
 import { findPlaylistSeeds, PlaylistSeedError, playlistSeedContext, readPlaylistSeed, selectPlaylistSeed } from '../playlists/seed'
 import {
@@ -290,6 +290,7 @@ const PERSONA_LINES = [
   'Call rename_session ONLY when the listener explicitly asks to rename or retitle this session (e.g. "call ' +
     'this tape Lagos Nights", "rename this to Sunday Chill"). Never on your own initiative, and never as a ' +
     'reaction to anything else.',
+  FIRST_NAME_PERSONA_LINE,
   'Keep spoken replies SHORT, a sentence or two, like a text from a friend who runs the board.',
   'Never use em dashes in your replies. Use a comma or a full stop instead.',
 ]

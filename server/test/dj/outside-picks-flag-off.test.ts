@@ -5,6 +5,7 @@ import { outsidePicksEnabled } from '../../src/index'
 import { curate } from '../../src/dj/curate'
 import { DJ_TOOLS, intentSchema } from '../../src/dj/contracts'
 import { PERSONA_PROMPT } from '../../src/dj/loop'
+import { FIRST_NAME_PERSONA_LINE } from '../../src/dj/listener-name'
 import type { LlmClient, LlmRequest } from '../../src/dj/llm'
 import type { PoolTrack } from '../../src/dj/pool'
 
@@ -52,8 +53,11 @@ describe('flag off is byte-for-byte today', () => {
     expect(sha(stripped)).toBe(PINNED.tools)
   })
 
-  it('sends the same persona', () => {
-    expect(sha(PERSONA_PROMPT)).toBe(PINNED.persona)
+  // The first-name rule (profile name spec 2026-11-02) is a deliberate change
+  // to the persona, flag on or off; with it stripped, the persona is still
+  // the pre-outside one.
+  it('sends the same persona, bar the first-name rule', () => {
+    expect(sha(PERSONA_PROMPT.replace(`${FIRST_NAME_PERSONA_LINE}\n`, ''))).toBe(PINNED.persona)
   })
 
   it('sends the same curation request for a pool with no outside rows', async () => {
