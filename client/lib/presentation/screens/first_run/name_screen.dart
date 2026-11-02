@@ -37,15 +37,38 @@ class NameGateView extends ConsumerStatefulWidget {
 }
 
 class _NameGateViewState extends ConsumerState<NameGateView> {
+  Timer? _holdTimer;
+
   @override
   void initState() {
     super.initState();
     // /me said no: this device need not wait for it on the next launch.
+    // Only a settled answer counts; a value carried while /me reloads for
+    // a new session belongs to the previous one.
     ref.listenManual<AsyncValue<Me?>>(meProvider, (_, next) {
+      if (next.isLoading) return;
       final me = next.value;
       if (me == null || me.isAnonymous || me.askName) return;
       ref.read(namePageSettledProvider.notifier).markSettled();
     }, fireImmediately: true);
+    // The image waits for /me at most [nameHoldTimeout], then the shell.
+    ref.listenManual<NameGate>(nameGateProvider, (_, gate) {
+      if (gate != NameGate.hold) {
+        _holdTimer?.cancel();
+        _holdTimer = null;
+        return;
+      }
+      _holdTimer ??= Timer(nameHoldTimeout, () {
+        _holdTimer = null;
+        if (mounted) ref.read(nameHoldExpiredProvider.notifier).expire();
+      });
+    }, fireImmediately: true);
+  }
+
+  @override
+  void dispose() {
+    _holdTimer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -189,7 +212,7 @@ class _NameScreenState extends ConsumerState<NameScreen> {
     // Success closes the page; the next screen announces itself.
   }
 
-  /// Moves on at once; a save in flight finishes on its own.
+  /// Moves on at once; the asked flag is written behind it.
   void _skip() => ref.read(namePageProvider.notifier).skip();
 
   @override
@@ -227,7 +250,8 @@ class _NameScreenState extends ConsumerState<NameScreen> {
       showBack: false,
       body: [const SizedBox(height: 24), _input(context), _status(context)],
       actions: [pill],
-      foot: FootLink(label: 'Skip', onPressed: _skip),
+      // Off while a save is in flight, so its failure is never hidden.
+      foot: FootLink(label: 'Skip', onPressed: _saving ? null : _skip),
     );
   }
 

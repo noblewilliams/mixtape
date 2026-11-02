@@ -187,6 +187,54 @@ void main() {
       expect(failed.read(nameGateProvider), NameGate.off);
     });
 
+    test('a value carried across an auth change is not an answer: the link '
+        'holds instead of flashing the shell', () async {
+      final auth = _Auth(AuthStatus.session, anonymous: true);
+      Completer<Me?>? pending;
+      final c = _container(
+        auth: auth,
+        me: () =>
+            pending?.future ??
+            Future.value(const Me(id: 'anon', isAnonymous: true)),
+      );
+      await c.read(meProvider.future);
+      expect(c.read(nameGateProvider), NameGate.off);
+
+      pending = Completer<Me?>();
+      c.read(namePageSettledProvider.notifier).reset();
+      // The link: the real notifier rebuilds itself (unknown, then the
+      // restored account session).
+      auth.become(AuthStatus.unknown);
+      await _settle();
+      auth.become(AuthStatus.session);
+      await _settle();
+      expect(c.read(meProvider).isReloading, isTrue);
+      expect(c.read(nameGateProvider), NameGate.hold);
+
+      pending.complete(_askMe);
+      await _settle();
+      expect(c.read(nameGateProvider), NameGate.ask);
+    });
+
+    test('an account switch does not reuse the last account answer', () async {
+      final auth = _Auth(AuthStatus.session);
+      Completer<Me?>? pending;
+      final c = _container(
+        auth: auth,
+        me: () => pending?.future ?? Future.value(_named),
+      );
+      await c.read(meProvider.future);
+      expect(c.read(nameGateProvider), NameGate.off);
+      pending = Completer<Me?>();
+      // Sign-out, then the next account's sign-in.
+      auth.become(AuthStatus.noSession);
+      await _settle();
+      c.read(namePageSettledProvider.notifier).reset();
+      auth.become(AuthStatus.session);
+      await _settle();
+      expect(c.read(nameGateProvider), NameGate.hold);
+    });
+
     test('a sign-in clears the device flag, so the next account is held', () {
       final store = _Store(settled: true);
       final c = _container(auth: _Auth(AuthStatus.noSession), store: store);
@@ -256,9 +304,24 @@ void main() {
         expect(c.read(nameGateProvider), NameGate.off);
         await _settle();
         expect(api.writes, [null]);
-        expect(store.settled, isTrue);
+        // Not settled: the next launch waits for /me, which may ask again.
+        expect(store.settled, isFalse);
+        expect(c.read(namePageSettledProvider), isFalse);
       },
     );
+
+    test('a Skip whose write lands settles the device', () async {
+      final store = _Store();
+      final c = _container(
+        auth: _Auth(AuthStatus.session),
+        store: store,
+        me: () async => _askMe,
+      );
+      await c.read(meProvider.future);
+      c.read(namePageProvider.notifier).skip();
+      await _settle();
+      expect(store.settled, isTrue);
+    });
 
     test(
       'closing is per auth generation: a new account is asked again',
@@ -296,24 +359,6 @@ void main() {
       expect(await reader(), MergedMode.mixesOnly);
       // Answered once, as the server does.
       expect(await reader(), isNull);
-    });
-
-    test('Skip during a save moves on and lets the save finish', () async {
-      final api = _Api()..gate = Completer<void>();
-      var reads = 0;
-      final c = _container(
-        auth: _Auth(AuthStatus.session),
-        api: api,
-        me: () async => ++reads == 1 ? _askMe : _named,
-      );
-      await c.read(meProvider.future);
-      final saving = c.read(namePageProvider.notifier).save('Ada');
-      c.read(namePageProvider.notifier).skip();
-      expect(c.read(nameGateProvider), NameGate.off);
-      api.gate!.complete();
-      await saving;
-      expect(api.writes, ['Ada', null]);
-      expect(reads, 2);
     });
   });
 }

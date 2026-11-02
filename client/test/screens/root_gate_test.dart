@@ -33,6 +33,8 @@ import 'package:mixtape/presentation/screens/first_run/name_screen.dart';
 import 'package:mixtape/data/auth/account_api.dart' show AccountProvider;
 import 'package:mixtape/data/auth/name_page_store.dart';
 import 'package:mixtape/presentation/providers/name_page_provider.dart';
+import 'package:mixtape/presentation/providers/keep_mixes_provider.dart';
+import 'package:mixtape/presentation/widgets/merge_notice.dart';
 import '../helpers/fake_bridge.dart'
     show FakeBridge, song, apiWith, emptyPlaylistSyncResponse;
 import '../helpers/fake_listening_api.dart';
@@ -118,6 +120,22 @@ class _FakeDjApi implements DjApi {
 
   @override
   void close() {}
+}
+
+/// Records each new mix and fails its turn with nothing persisted, so Home
+/// is free (not starting) and can show the merge notice.
+class _StartingDjApi extends _FakeDjApi {
+  final prompts = <String>[];
+
+  @override
+  Future<SessionDetail> createSession(
+    String prompt, {
+    InitialPlaylistSeed? playlistSeed,
+    SessionKind kind = SessionKind.mix,
+  }) async {
+    prompts.add(prompt);
+    throw DjApiException(kind: 'turn', message: 'The DJ is busy.');
+  }
 }
 
 class _Apple implements AppleAuthGateway {
@@ -360,6 +378,116 @@ void main() {
       expect(s.writes, ['{"name":"Ada","namePromptedAt":true}']);
       expect(find.byType(HomeScreen), findsOneWidget);
     });
+  });
+
+  testWidgets('Keep this mix into an account /me asks about: the image '
+      'holds (never the shell), the kept prompt is sent once after the page, '
+      'and the merge notice shows once', (tester) async {
+    final store = InMemoryTokenStore();
+    await store.write('anon', anonymous: true);
+    var mergedUnread = true;
+    final api = ApiClient(
+      baseUrl: 'http://x',
+      tokenStore: store,
+      inner: MockClient((req) async {
+        switch (req.url.path) {
+          case '/me':
+            // A real round trip, so the account's /me is still loading
+            // while the root remounts as the account.
+            await Future<void>.delayed(const Duration(milliseconds: 500));
+            if (req.headers['Authorization'] != 'Bearer account-token') {
+              return http.Response(
+                '{"user":{"id":"anon","isAnonymous":true,"name":"Listener"},'
+                '"merged":null,"askName":false}',
+                200,
+              );
+            }
+            final merged = mergedUnread ? '"mixes_only"' : 'null';
+            mergedUnread = false;
+            return http.Response(
+              '{"user":{"id":"u1","isAnonymous":false,"name":""},'
+              '"merged":$merged,"askName":true}',
+              200,
+            );
+          case '/api/auth/update-user':
+            return http.Response('{"status":true}', 200);
+          case '/api/auth/sign-in/social':
+            return http.Response(
+              '{}',
+              200,
+              headers: {'set-auth-token': 'account-token'},
+            );
+        }
+        return http.Response('{}', 404);
+      }),
+    );
+    final dj = _StartingDjApi();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          tokenStoreProvider.overrideWithValue(store),
+          apiClientProvider.overrideWithValue(api),
+          appleAuthGatewayProvider.overrideWithValue(_Apple()),
+          signInPreferenceStoreProvider.overrideWithValue(
+            InMemorySignInPreferenceStore(),
+          ),
+          namePageStoreProvider.overrideWithValue(InMemoryNamePageStore()),
+          djApiProvider.overrideWithValue(dj),
+          listeningApiProvider.overrideWithValue(FakeListeningApi()),
+          reminderSchedulerProvider.overrideWithValue(FakeReminderScheduler()),
+          servicePreferenceStoreProvider.overrideWithValue(
+            InMemoryServicePreferenceStore(),
+          ),
+          funnelOnceStoreProvider.overrideWithValue(InMemoryFunnelOnceStore()),
+        ],
+        child: const MixtapeApp(),
+      ),
+    );
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    expect(find.byType(HomeScreen), findsOneWidget);
+
+    final container = _containerOf(tester);
+    container
+        .read(keptPromptProvider.notifier)
+        .keep(const KeptPrompt('rainy sunday'));
+    unawaited(
+      container
+          .read(authProvider.notifier)
+          .signIn(provider: AccountProvider.apple),
+    );
+    var shellFrames = 0;
+    var holdFrames = 0;
+    var noticeFrames = 0;
+    for (var i = 0; i < 60; i++) {
+      await tester.pump(const Duration(milliseconds: 20));
+      if (find.byType(ShellScreen).evaluate().isNotEmpty) shellFrames++;
+      if (find.byType(NamePageHold).evaluate().isNotEmpty) holdFrames++;
+      if (find.text(MergeNotice.mixesOnly).evaluate().isNotEmpty) {
+        noticeFrames++;
+      }
+    }
+    await tester.pumpAndSettle();
+    expect(shellFrames, 0);
+    expect(holdFrames, greaterThan(0));
+    expect(noticeFrames, 0);
+    expect(find.byType(NameScreen), findsOneWidget);
+    expect(dj.prompts, isEmpty);
+
+    await tester.enterText(find.byKey(NameScreen.fieldKey), 'Ada');
+    await tester.pump();
+    await tester.tap(find.byKey(NameScreen.continueKey));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    expect(find.byType(HomeScreen), findsOneWidget);
+    expect(dj.prompts, ['rainy sunday']);
+    expect(find.text(MergeNotice.mixesOnly), findsOneWidget);
+
+    // Shown once: gone after its time, and never again.
+    await tester.pump(MergeNotice.duration + const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    expect(find.text(MergeNotice.mixesOnly), findsNothing);
+    expect(dj.prompts, ['rainy sunday']);
   });
 
   testWidgets('sign-out returns to the first-run welcome', (tester) async {

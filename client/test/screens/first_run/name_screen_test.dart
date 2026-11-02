@@ -22,6 +22,8 @@ class _Auth extends AuthNotifier {
   AuthStatus build() => AuthStatus.session;
   @override
   bool get isAnonymous => false;
+
+  void become(AuthStatus next) => state = next;
 }
 
 class _Api implements AccountApi {
@@ -277,6 +279,22 @@ void main() {
     expect(find.byKey(_shell), findsOneWidget);
   });
 
+  testWidgets('Skip is off while a save is in flight', (tester) async {
+    phone(tester);
+    final page = _Page()..api.gate = Completer<void>();
+    await page.pump(tester);
+    await tester.enterText(_field, 'Ada');
+    await tester.pump();
+    await tester.tap(find.byKey(NameScreen.continueKey));
+    await tester.pump();
+    final skip = tester.widget<TextButton>(
+      find.ancestor(of: find.text('Skip'), matching: find.byType(TextButton)),
+    );
+    expect(skip.onPressed, isNull);
+    page.api.gate!.complete();
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('N5: a longer paste is cut at 40 with the line and the count, '
       'announced once', (tester) async {
     phone(tester);
@@ -338,6 +356,56 @@ void main() {
   });
 
   group('NameGateView', () {
+    testWidgets('a hung /me holds the image for 3.5 s, then the shell; a '
+        'late ask still opens the page', (tester) async {
+      phone(tester);
+      final page = _Page()..meGate = Completer<Me?>();
+      await page.pump(tester);
+      expect(find.byKey(NamePageHold.holdKey), findsOneWidget);
+      // The launch settle above already spent part of the 3.5 s.
+      await tester.pump(const Duration(milliseconds: 2500));
+      expect(find.byKey(NamePageHold.holdKey), findsOneWidget);
+      expect(find.byKey(_shell), findsNothing);
+      await tester.pump(const Duration(milliseconds: 1000));
+      await tester.pumpAndSettle();
+      expect(find.byKey(_shell), findsOneWidget);
+      expect(find.byKey(NamePageHold.holdKey), findsNothing);
+
+      page.meGate!.complete(_Page._ask);
+      await tester.pumpAndSettle();
+      expect(find.text('What should we call you?'), findsOneWidget);
+    });
+
+    testWidgets('a stale answer carried across an auth change never settles '
+        'the device for the next account', (tester) async {
+      phone(tester);
+      final store = InMemoryNamePageStore();
+      final page = _Page(
+        first: const Me(id: 'u1', isAnonymous: false, name: 'Ada'),
+        store: store,
+      );
+      await page.pump(tester);
+      expect(await store.read(), isTrue);
+
+      // The next account: the sign-in resets the flag, /me is slow.
+      final auth = page.container.read(authProvider.notifier) as _Auth;
+      auth.become(AuthStatus.noSession);
+      await tester.pump();
+      page.container.read(namePageSettledProvider.notifier).reset();
+      page.meGate = Completer<Me?>();
+      auth.become(AuthStatus.session);
+      await tester.pump();
+      // Past the cross-fade from the signed-out frame (in the app that root
+      // is the first-run flow, not this gate).
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(page.container.read(namePageSettledProvider), isFalse);
+      expect(await store.read(), isFalse);
+      expect(find.byKey(NamePageHold.holdKey), findsOneWidget);
+      expect(find.byKey(_shell), findsNothing);
+      page.meGate!.complete(_Page._ask);
+      await tester.pumpAndSettle();
+    });
+
     testWidgets('holds on the sign-in image while /me answers, then asks', (
       tester,
     ) async {

@@ -111,15 +111,20 @@ class NamePageNotifier extends Notifier<bool> {
     _close();
   }
 
-  /// Skip: records that it was asked and moves on at once, even if that
-  /// write fails (the page may then show once more on a later launch).
+  /// Skip: moves on at once and records that it was asked. The device is
+  /// settled only once that write lands; if it fails, the next launch waits
+  /// for `/me` again and the page may show once more, as on web.
   void skip() {
     final api = ref.read(accountApiProvider);
-    _close();
+    final settled = ref.read(namePageSettledProvider.notifier);
+    state = true;
     unawaited(
-      Future.sync(() => api.updateUser()).catchError((Object _) {
-        if (kDebugMode) debugPrint('name page skip flag write failed');
-      }),
+      Future.sync(() => api.updateUser()).then(
+        (_) => settled.markSettled(),
+        onError: (Object _) {
+          if (kDebugMode) debugPrint('name page skip flag write failed');
+        },
+      ),
     );
   }
 
@@ -131,6 +136,26 @@ class NamePageNotifier extends Notifier<bool> {
 
 final namePageProvider = NotifierProvider<NamePageNotifier, bool>(
   NamePageNotifier.new,
+);
+
+/// How long the sign-in image may wait for `/me` before the shell shows
+/// anyway (web's hold is the same). A `/me` that asks later still opens the
+/// page over it.
+const Duration nameHoldTimeout = Duration(milliseconds: 3500);
+
+/// The hold ran out in this auth generation. Set by the root's timer.
+class NameHoldExpiredNotifier extends Notifier<bool> {
+  @override
+  bool build() {
+    ref.watch(authProvider);
+    return false;
+  }
+
+  void expire() => state = true;
+}
+
+final nameHoldExpiredProvider = NotifierProvider<NameHoldExpiredNotifier, bool>(
+  NameHoldExpiredNotifier.new,
 );
 
 /// What the account root shows.
@@ -154,10 +179,16 @@ final nameGateProvider = Provider<NameGate>((ref) {
   if (ref.watch(isAnonymousProvider)) return NameGate.off;
   if (ref.watch(namePageProvider)) return NameGate.off;
   final me = ref.watch(meProvider);
-  if (me.hasValue) {
-    return me.value?.askName == true ? NameGate.ask : NameGate.off;
+  // After an auth change `/me` reloads carrying the previous session's
+  // answer (the anonymous listener's, or nothing): that is no answer for
+  // this account. Continue's own reread is a refresh and keeps its value.
+  if (!me.isReloading) {
+    if (me.hasValue) {
+      return me.value?.askName == true ? NameGate.ask : NameGate.off;
+    }
+    if (me.hasError) return NameGate.off;
   }
-  if (me.hasError) return NameGate.off;
+  if (ref.watch(nameHoldExpiredProvider)) return NameGate.off;
   return switch (ref.watch(namePageSettledProvider)) {
     null => NameGate.wait,
     true => NameGate.off,

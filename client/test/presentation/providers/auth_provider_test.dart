@@ -18,6 +18,7 @@ import 'package:mixtape/data/settings/author_store.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/device_providers.dart';
 import 'package:mixtape/presentation/providers/name_page_provider.dart';
+import 'package:mixtape/presentation/providers/capabilities_provider.dart';
 import 'package:mixtape/presentation/providers/library_sync_provider.dart'
     show authorStoreProvider;
 
@@ -389,6 +390,27 @@ void main() {
       expect(log.first, 'AuthStatus.session -> AuthStatus.session');
       expect(h.container.read(isAnonymousProvider), isFalse);
       expect(h.container.read(authProvider), AuthStatus.session);
+    });
+
+    test('the link reads /me once for the account: the server clears '
+        '`merged` on the first read, so a second read would lose it', () async {
+      final store = InMemoryTokenStore();
+      await store.write('anon-token', anonymous: true);
+      final h = _authHarness(store);
+      addTearDown(h.container.dispose);
+      h.container.listen(meProvider, (_, _) {});
+      await _settle();
+      h.requests.clear();
+
+      await h.container
+          .read(authProvider.notifier)
+          .signIn(provider: AccountProvider.google);
+      for (var i = 0; i < 5; i++) {
+        await _settle();
+      }
+      expect(h.requests.where((r) => r.$1 == '/me').toList(), [
+        ('/me', 'Bearer account-token'),
+      ]);
     });
 
     test('follows the restored flag and sign-out', () async {
