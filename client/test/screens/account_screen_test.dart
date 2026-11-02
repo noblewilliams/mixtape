@@ -11,6 +11,8 @@ import 'package:mixtape/data/auth/identity_token.dart';
 import 'package:mixtape/data/auth/google_auth_gateway.dart';
 import 'package:mixtape/presentation/providers/account_provider.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
+import 'package:mixtape/presentation/providers/capabilities_provider.dart'
+    show meProvider;
 import 'package:mixtape/presentation/providers/library_sync_provider.dart'
     show accountNameProvider;
 import 'package:mixtape/presentation/screens/account_screen.dart';
@@ -119,6 +121,21 @@ const _google = LinkedAccount(
   providerId: 'google',
 );
 
+/// The name write only; everything else is unused by these tests.
+class _NameApi implements AccountApi {
+  _NameApi({this.onWrite});
+  final Future<void> Function(String?)? onWrite;
+  final writes = <String?>[];
+  @override
+  Future<void> updateUser({String? name}) async {
+    writes.add(name);
+    if (onWrite != null) await onWrite!(name);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
 TextAction _action(WidgetTester tester, String key) =>
     tester.widget<TextAction>(find.byKey(Key(key)));
 
@@ -134,6 +151,8 @@ Future<ProviderContainer> _pump(
   Brightness brightness = Brightness.light,
   bool anonymous = false,
   _Apple? apple,
+  _NameApi? api,
+  String? Function()? liveName,
 }) async {
   final container = ProviderContainer(
     overrides: [
@@ -144,7 +163,17 @@ Future<ProviderContainer> _pump(
         _Google(isAvailable: googleAvailable),
       ),
       lastSignInProvider.overrideWith((_) async => AccountProvider.apple),
-      accountNameProvider.overrideWith((_) async => name),
+      if (liveName == null)
+        accountNameProvider.overrideWith((_) async => name)
+      else ...[
+        // As the real one: derived from /me, so invalidating /me refreshes it.
+        meProvider.overrideWith((_) async => null),
+        accountNameProvider.overrideWith((ref) async {
+          await ref.watch(meProvider.future);
+          return liveName();
+        }),
+      ],
+      if (api != null) accountApiProvider.overrideWithValue(api),
     ],
   );
   addTearDown(container.dispose);
@@ -563,6 +592,312 @@ void main() {
 
       await _pump(tester, _Accounts(const AccountState(loading: true)));
       expect(_deleteRow(tester).onTap, isNull);
+    });
+  });
+
+  group('name', () {
+    Finder field() => find.byKey(AccountScreen.nameFieldKey);
+    String fieldText(WidgetTester tester) =>
+        tester.widget<TextField>(field()).controller!.text;
+
+    testWidgets('unnamed: the row offers Add name and is one button', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      await _pump(
+        tester,
+        _Accounts(const AccountState(accounts: [_apple])),
+        name: null,
+      );
+      expect(find.text(AccountScreen.unnamedListener), findsOneWidget);
+      expect(find.text(AccountScreen.addName), findsOneWidget);
+      expect(find.byIcon(Icons.chevron_right), findsNothing);
+      expect(find.bySemanticsLabel('Your account. Add name'), findsOneWidget);
+      semantics.dispose();
+    });
+
+    testWidgets('named: the row says Edit and reads the name', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await _pump(tester, _Accounts(const AccountState(accounts: [_apple])));
+      expect(find.text('Noble'), findsOneWidget);
+      expect(find.text(AccountScreen.editName), findsOneWidget);
+      expect(find.bySemanticsLabel('Noble, your name. Edit'), findsOneWidget);
+      expect(
+        tester.getSize(find.byKey(AccountScreen.nameRowKey)).height,
+        greaterThanOrEqualTo(44),
+      );
+      semantics.dispose();
+    });
+
+    testWidgets('anonymous listeners get no edit', (tester) async {
+      await _pump(
+        tester,
+        _Accounts(const AccountState(accounts: [_apple])),
+        anonymous: true,
+        name: null,
+      );
+      expect(find.text(AccountScreen.addName), findsNothing);
+      await tester.tap(find.text(AccountScreen.unnamedListener));
+      await tester.pumpAndSettle();
+      expect(field(), findsNothing);
+    });
+
+    testWidgets('tapping the row edits in place with the hint and actions', (
+      tester,
+    ) async {
+      await _pump(tester, _Accounts(const AccountState(accounts: [_apple])));
+      await tester.tap(find.byKey(AccountScreen.nameRowKey));
+      await tester.pumpAndSettle();
+
+      expect(field(), findsOneWidget);
+      expect(fieldText(tester), 'Noble');
+      final editable = tester.widget<EditableText>(find.byType(EditableText));
+      expect(editable.focusNode.hasFocus, isTrue);
+      expect(editable.controller.selection.baseOffset, 5);
+      expect(find.text(AccountScreen.nameHint), findsOneWidget);
+      expect(find.byKey(AccountScreen.nameSaveKey), findsOneWidget);
+      expect(find.byKey(AccountScreen.nameCancelKey), findsOneWidget);
+      expect(find.text(AccountScreen.editName), findsNothing);
+      expect(find.byKey(AccountScreen.nameClearKey), findsOneWidget);
+      expect(
+        tester.getSize(find.byKey(AccountScreen.nameClearKey)),
+        const Size(44, 44),
+      );
+    });
+
+    testWidgets('Cancel restores the name without writing', (tester) async {
+      final api = _NameApi();
+      await _pump(
+        tester,
+        _Accounts(const AccountState(accounts: [_apple])),
+        api: api,
+      );
+      await tester.tap(find.byKey(AccountScreen.nameRowKey));
+      await tester.pumpAndSettle();
+      await tester.enterText(field(), 'Somebody');
+      await tester.tap(find.byKey(AccountScreen.nameCancelKey));
+      await tester.pumpAndSettle();
+      expect(field(), findsNothing);
+      expect(find.text('Noble'), findsOneWidget);
+      expect(api.writes, isEmpty);
+    });
+
+    testWidgets('the count shows from 30 and typing stops at 40', (
+      tester,
+    ) async {
+      await _pump(tester, _Accounts(const AccountState(accounts: [_apple])));
+      await tester.tap(find.byKey(AccountScreen.nameRowKey));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(field(), 'a' * 29);
+      await tester.pump();
+      expect(find.textContaining(' of 40'), findsNothing);
+
+      await tester.enterText(field(), 'a' * 34);
+      await tester.pump();
+      expect(find.text('34 of 40'), findsOneWidget);
+      expect(find.text(AccountScreen.nameHint), findsOneWidget);
+    });
+
+    testWidgets('a longer paste is cut with the message, announced once', (
+      tester,
+    ) async {
+      await _pump(tester, _Accounts(const AccountState(accounts: [_apple])));
+      await tester.tap(find.byKey(AccountScreen.nameRowKey));
+      await tester.pumpAndSettle();
+      tester.takeAnnouncements();
+
+      await tester.enterText(
+        field(),
+        'Oluwaseun Adaeze Okafor-Whitfield Balogun',
+      );
+      await tester.pump();
+      expect(fieldText(tester), 'Oluwaseun Adaeze Okafor-Whitfield Balogu');
+      expect(find.text('40 of 40'), findsOneWidget);
+      expect(find.text(AccountScreen.nameCut), findsOneWidget);
+      expect(find.text(AccountScreen.nameHint), findsNothing);
+
+      // More typing does nothing and is not announced again.
+      await tester.enterText(field(), '${fieldText(tester)}x');
+      await tester.pump();
+      expect(fieldText(tester), 'Oluwaseun Adaeze Okafor-Whitfield Balogu');
+      expect(tester.takeAnnouncements().map((a) => a.message), [
+        AccountScreen.nameCut,
+      ]);
+    });
+
+    testWidgets('saving writes the normalised name, refreshes /me and '
+        'announces it', (tester) async {
+      var stored = 'Noble';
+      final saving = Completer<void>();
+      late _NameApi api;
+      api = _NameApi(
+        onWrite: (name) async {
+          await saving.future;
+          stored = name!;
+        },
+      );
+      await _pump(
+        tester,
+        _Accounts(const AccountState(accounts: [_apple])),
+        api: api,
+        liveName: () => stored,
+      );
+      await tester.tap(find.byKey(AccountScreen.nameRowKey));
+      await tester.pumpAndSettle();
+      tester.takeAnnouncements();
+      await tester.enterText(field(), '  Ada   Okafor ');
+      await tester.tap(find.byKey(AccountScreen.nameSaveKey));
+      await tester.pump();
+
+      // Saving: read-only field, both actions off, no hint.
+      expect(find.text(AccountScreen.nameSaving), findsOneWidget);
+      expect(tester.widget<TextField>(field()).readOnly, isTrue);
+      expect(
+        _action(tester, AccountScreen.nameCancelKey.value).onPressed,
+        isNull,
+      );
+      expect(find.text(AccountScreen.nameHint), findsNothing);
+
+      saving.complete();
+      await tester.pumpAndSettle();
+      expect(api.writes, ['Ada Okafor']);
+      expect(field(), findsNothing);
+      expect(find.text('Ada Okafor'), findsOneWidget);
+      expect(find.text(AccountScreen.editName), findsOneWidget);
+      expect(
+        tester.takeAnnouncements().map((a) => a.message),
+        contains(AccountScreen.nameSaved),
+      );
+    });
+
+    testWidgets('Done on the keyboard saves', (tester) async {
+      final api = _NameApi();
+      await _pump(
+        tester,
+        _Accounts(const AccountState(accounts: [_apple])),
+        api: api,
+      );
+      await tester.tap(find.byKey(AccountScreen.nameRowKey));
+      await tester.pumpAndSettle();
+      await tester.enterText(field(), 'Ada');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(api.writes, ['Ada']);
+    });
+
+    testWidgets('blank saves remove the name', (tester) async {
+      String? stored = 'Noble';
+      final api = _NameApi(onWrite: (name) async => stored = name);
+      await _pump(
+        tester,
+        _Accounts(const AccountState(accounts: [_apple])),
+        api: api,
+        liveName: () => (stored?.isEmpty ?? true) ? null : stored,
+      );
+      await tester.tap(find.byKey(AccountScreen.nameRowKey));
+      await tester.pumpAndSettle();
+      tester.takeAnnouncements();
+      await tester.tap(find.byKey(AccountScreen.nameClearKey));
+      await tester.pump();
+      expect(fieldText(tester), isEmpty);
+      await tester.enterText(field(), '   ');
+      await tester.tap(find.byKey(AccountScreen.nameSaveKey));
+      await tester.pumpAndSettle();
+
+      expect(api.writes, ['']);
+      expect(find.text(AccountScreen.unnamedListener), findsOneWidget);
+      expect(find.text(AccountScreen.addName), findsOneWidget);
+      expect(
+        tester.takeAnnouncements().map((a) => a.message),
+        contains(AccountScreen.nameRemoved),
+      );
+    });
+
+    testWidgets('a failure keeps the text, offers Retry, and typing clears '
+        'the error', (tester) async {
+      var fail = true;
+      final api = _NameApi(
+        onWrite: (_) async {
+          if (fail) throw AccountApiException(500, 'private', null);
+        },
+      );
+      await _pump(
+        tester,
+        _Accounts(const AccountState(accounts: [_apple])),
+        api: api,
+      );
+      await tester.tap(find.byKey(AccountScreen.nameRowKey));
+      await tester.pumpAndSettle();
+      tester.takeAnnouncements();
+      await tester.enterText(field(), 'Ada');
+      await tester.tap(find.byKey(AccountScreen.nameSaveKey));
+      await tester.pumpAndSettle();
+
+      expect(fieldText(tester), 'Ada');
+      expect(find.text(AccountScreen.nameFailed), findsOneWidget);
+      expect(find.text(AccountScreen.nameHint), findsNothing);
+      expect(_action(tester, AccountScreen.nameSaveKey.value).label, 'Retry');
+      expect(
+        tester.takeAnnouncements().map((a) => a.message),
+        contains(AccountScreen.nameFailed),
+      );
+      expect(find.textContaining('private'), findsNothing);
+
+      await tester.enterText(field(), 'Adaa');
+      await tester.pump();
+      expect(find.text(AccountScreen.nameFailed), findsNothing);
+      expect(find.text(AccountScreen.nameHint), findsOneWidget);
+      expect(_action(tester, AccountScreen.nameSaveKey.value).label, 'Save');
+
+      fail = false;
+      await tester.tap(find.byKey(AccountScreen.nameSaveKey));
+      await tester.pumpAndSettle();
+      expect(api.writes, ['Ada', 'Adaa']);
+      expect(field(), findsNothing);
+    });
+
+    testWidgets('large text on a narrow screen wraps instead of overflowing', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(320, 568);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await _pump(
+        tester,
+        _Accounts(const AccountState(accounts: [_apple])),
+        scale: 2,
+        name: null,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.byKey(AccountScreen.nameRowKey));
+      await tester.pumpAndSettle();
+      await tester.enterText(field(), 'a' * 34);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.ensureVisible(find.byKey(AccountScreen.nameSaveKey));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(AccountScreen.nameSaveKey).hitTestable(),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('an unchanged name closes without a write', (tester) async {
+      final api = _NameApi();
+      await _pump(
+        tester,
+        _Accounts(const AccountState(accounts: [_apple])),
+        api: api,
+      );
+      await tester.tap(find.byKey(AccountScreen.nameRowKey));
+      await tester.pumpAndSettle();
+      await tester.enterText(field(), ' Noble ');
+      await tester.tap(find.byKey(AccountScreen.nameSaveKey));
+      await tester.pumpAndSettle();
+      expect(api.writes, isEmpty);
+      expect(field(), findsNothing);
     });
   });
 

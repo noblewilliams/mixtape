@@ -156,6 +156,22 @@ class AccountApi {
     if (value['status'] != true) throw const AccountModelException();
   }
 
+  /// Better Auth `POST /api/auth/update-user`. Always records that the name
+  /// was asked (`namePromptedAt`; the server stamps the time), and writes
+  /// [name] when given. The server normalises the name; `''` removes it.
+  /// The caller refetches `/me` for the stored value.
+  Future<void> updateUser({String? name}) async {
+    final value = _object(
+      await _request(
+        () async => (await _client.postJson('/api/auth/update-user', {
+          'name': ?name,
+          'namePromptedAt': true,
+        })).body,
+      ),
+    );
+    if (value['status'] != true) throw const AccountModelException();
+  }
+
   /// `DELETE /me`. Every session of the user is gone on success, so the
   /// caller clears local state without a sign-out request. The Apple code,
   /// from a fresh native Apple sheet, lets the server revoke Apple's tokens.

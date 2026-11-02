@@ -22,13 +22,16 @@ import 'package:flutter/cupertino.dart'
         CupertinoIcons,
         showCupertinoDialog;
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/api/api_client.dart';
 import '../../data/auth/account_api.dart';
 import '../../data/auth/apple_auth_gateway.dart';
 import '../../data/auth/google_auth_gateway.dart';
+import '../../data/auth/profile_name.dart';
 import '../providers/account_provider.dart';
 import '../providers/auth_provider.dart';
+import '../providers/capabilities_provider.dart' show meProvider;
 import '../providers/library_sync_provider.dart' show accountNameProvider;
 import '../theme/mixtape_theme.dart';
 import '../widgets/foundation/glass_cluster.dart';
@@ -52,6 +55,26 @@ class AccountScreen extends ConsumerStatefulWidget {
 
   /// Shown until `/me` answers with a name; it never blocks the screen.
   static const String unnamedListener = 'Your account';
+
+  /// The name edit (`docs/mockups/approved/2026-11-02-profile-name.md`).
+  static const Key nameRowKey = Key('account-name-row');
+  static const Key nameFieldKey = Key('account-name-field');
+  static const Key nameClearKey = Key('account-name-clear');
+  static const ValueKey<String> nameSaveKey = ValueKey('account-name-save');
+  static const ValueKey<String> nameCancelKey = ValueKey('account-name-cancel');
+  static const String addName = 'Add name';
+  static const String editName = 'Edit';
+  static const String nameLabel = 'Your name';
+  static const String nameHint =
+      'Up to 40 characters. Leave it blank to remove your name.';
+  static const String nameCut = 'Names stop at 40 characters.';
+  static const String nameSaving = 'Saving…';
+  static const String nameFailed = 'Couldn’t save your name.';
+  static const String nameSaved = 'Name saved';
+  static const String nameRemoved = 'Name removed';
+
+  /// The count appears from this many characters.
+  static const int nameCountFrom = 30;
 
   /// Why the only remaining method cannot be unlinked.
   static const String lastMethodReason = 'Add another method first';
@@ -214,16 +237,7 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  InsetGroup(
-                    children: [
-                      InsetRow(
-                        leading: const _PrismAvatar(),
-                        title: (name == null || name.trim().isEmpty)
-                            ? AccountScreen.unnamedListener
-                            : name.trim(),
-                      ),
-                    ],
-                  ),
+                  _Identity(name: name, editable: canDelete),
                   InsetGroup(
                     header: const SectionWord('Login methods'),
                     children: [
@@ -439,6 +453,372 @@ class _MethodRow extends ConsumerWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// The identity block: the square prism avatar and the name, or "Your
+/// account". For an account the whole row is the button, with a trailing
+/// "Edit" or "Add name"; editing happens in place, the title turning into the
+/// field and Save and Cancel sitting under the group
+/// (`docs/mockups/2026-11-02-profile-name-states.html` → A1–A7). Done on the
+/// keyboard saves; leaving the field does not (no silent saves).
+class _Identity extends ConsumerStatefulWidget {
+  const _Identity({required this.name, required this.editable});
+
+  /// The saved name from `/me`, or null.
+  final String? name;
+
+  /// Accounts only: anonymous listeners have nothing to name.
+  final bool editable;
+
+  @override
+  ConsumerState<_Identity> createState() => _IdentityState();
+}
+
+class _IdentityState extends ConsumerState<_Identity> {
+  final _field = TextEditingController();
+  final _focus = FocusNode();
+  late final _formatter = ProfileNameFormatter(onCut: _onCut);
+  bool _editing = false;
+  bool _saving = false;
+  bool _failed = false;
+  bool _cut = false;
+
+  String? get _saved {
+    final name = widget.name?.trim();
+    return (name == null || name.isEmpty) ? null : name;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _field.addListener(_changed);
+    _focus.addListener(_changed);
+  }
+
+  @override
+  void didUpdateWidget(covariant _Identity oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Signed out or became anonymous mid-edit: nothing left to name.
+    if (!widget.editable && _editing && !_saving) _editing = false;
+  }
+
+  @override
+  void dispose() {
+    _field.removeListener(_changed);
+    _focus.removeListener(_changed);
+    _field.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  String _text = '';
+
+  void _changed() {
+    if (!mounted) return;
+    final typed = _field.text != _text;
+    _text = _field.text;
+    // Typing after a failure clears the error; Save is Save again.
+    setState(() {
+      if (typed && _failed) _failed = false;
+    });
+  }
+
+  void _onCut(bool cut) {
+    if (cut && !_cut) _announce(AccountScreen.nameCut);
+    if (cut != _cut) setState(() => _cut = cut);
+  }
+
+  void _announce(String message) {
+    unawaited(
+      SemanticsService.announce(
+        message,
+        Directionality.maybeOf(context) ?? TextDirection.ltr,
+        assertiveness: Assertiveness.polite,
+      ),
+    );
+  }
+
+  void _edit() {
+    final current = _saved ?? '';
+    _text = current;
+    _field.value = TextEditingValue(
+      text: current,
+      selection: TextSelection.collapsed(offset: current.length),
+    );
+    setState(() {
+      _editing = true;
+      _failed = false;
+      _cut = false;
+    });
+    _focus.requestFocus();
+  }
+
+  void _cancel() {
+    if (_saving) return;
+    _focus.unfocus();
+    setState(() {
+      _editing = false;
+      _failed = false;
+      _cut = false;
+    });
+  }
+
+  Future<void> _save() async {
+    if (_saving || !_editing) return;
+    final next = normalizeProfileName(_field.text);
+    if (next == (_saved ?? '')) {
+      _cancel();
+      return;
+    }
+    _focus.unfocus();
+    setState(() {
+      _saving = true;
+      _failed = false;
+    });
+    _announce('Saving');
+    try {
+      await ref.read(accountApiProvider).updateUser(name: next);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _failed = true;
+      });
+      _announce(AccountScreen.nameFailed);
+      return;
+    }
+    if (!mounted) return;
+    // `/me` is the one reader: Account, You and the save dialog's author
+    // default all derive from it. Wait for the stored (normalised) name so
+    // the row never flashes the old one.
+    ref.invalidate(meProvider);
+    try {
+      await ref.read(accountNameProvider.future);
+    } catch (_) {
+      // The write landed; a failed reread only leaves the row stale.
+    }
+    if (!mounted) return;
+    setState(() {
+      _saving = false;
+      _editing = false;
+      _cut = false;
+    });
+    _announce(
+      next.isEmpty ? AccountScreen.nameRemoved : AccountScreen.nameSaved,
+    );
+  }
+
+  /// The row's frame, as [InsetRow]'s: the avatar, then [middle] taking the
+  /// width it is given, then [trailing].
+  Widget _row(Widget middle, {Widget? trailing}) => ConstrainedBox(
+    constraints: const BoxConstraints(minHeight: InsetGroup.rowInset),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(
+        vertical: InsetRow.verticalPadding,
+        horizontal: 16,
+      ),
+      child: Row(
+        children: [
+          const _PrismAvatar(),
+          const SizedBox(width: 12),
+          Expanded(child: middle),
+          if (trailing != null) ...[const SizedBox(width: 12), trailing],
+        ],
+      ),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    final saved = _saved;
+    if (!widget.editable) {
+      return InsetGroup(
+        children: [
+          InsetRow(
+            leading: const _PrismAvatar(),
+            title: saved ?? AccountScreen.unnamedListener,
+          ),
+        ],
+      );
+    }
+    if (!_editing) {
+      final action = saved == null
+          ? AccountScreen.addName
+          : AccountScreen.editName;
+      return InsetGroup(
+        children: [
+          // The whole row is one button: "Your account. Add name, button."
+          Semantics(
+            container: true,
+            button: true,
+            label: saved == null
+                ? '${AccountScreen.unnamedListener}. $action'
+                : '$saved, your name. $action',
+            onTap: _edit,
+            excludeSemantics: true,
+            child: Material(
+              type: MaterialType.transparency,
+              child: InkWell(
+                key: AccountScreen.nameRowKey,
+                onTap: _edit,
+                child: _row(
+                  // A long name wraps; never an ellipsis.
+                  Text(
+                    saved ?? AccountScreen.unnamedListener,
+                    style: tokens.rowTitle,
+                  ),
+                  // Shares the width with the name at large sizes, so both
+                  // wrap rather than overflow.
+                  trailing: Flexible(
+                    child: TextAction(label: action, onPressed: _edit),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    final length = nameLength(_field.text);
+    final atCap = _cut || length >= profileNameMax;
+    final Widget line;
+    if (_saving) {
+      // Keeps the line's height so nothing shifts.
+      line = Text(' ', style: tokens.meta);
+    } else if (_failed) {
+      line = Row(
+        children: [
+          Icon(
+            CupertinoIcons.exclamationmark_circle,
+            size: 15,
+            color: tokens.errInk,
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              AccountScreen.nameFailed,
+              style: tokens.meta.copyWith(color: tokens.errInk),
+            ),
+          ),
+        ],
+      );
+    } else {
+      line = Text(
+        atCap ? AccountScreen.nameCut : AccountScreen.nameHint,
+        style: tokens.meta.copyWith(color: tokens.muted),
+      );
+    }
+    final showClear = _focus.hasFocus && !_saving && _field.text.isNotEmpty;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        InsetGroup(
+          children: [
+            _row(
+              TextField(
+                key: AccountScreen.nameFieldKey,
+                controller: _field,
+                focusNode: _focus,
+                readOnly: _saving,
+                inputFormatters: [_formatter],
+                textInputAction: TextInputAction.done,
+                textCapitalization: TextCapitalization.words,
+                autocorrect: false,
+                keyboardType: TextInputType.name,
+                autofillHints: const [AutofillHints.name],
+                onSubmitted: (_) => _save(),
+                // Done saves; leaving the field does nothing (no silent
+                // saves), so a tap outside must not close the keyboard.
+                onTapOutside: (_) {},
+                maxLines: null,
+                style: tokens.rowTitle.copyWith(
+                  fontWeight: FontWeight.w400,
+                  color: _saving ? tokens.muted : tokens.text,
+                ),
+                cursorColor: tokens.plum,
+                decoration:
+                    InputDecoration.collapsed(
+                      hintText: AccountScreen.nameLabel,
+                      hintStyle: tokens.rowTitle.copyWith(
+                        fontWeight: FontWeight.w400,
+                        color: tokens.muted,
+                      ),
+                    ).copyWith(
+                      semanticCounterText: length >= AccountScreen.nameCountFrom
+                          ? '$length of $profileNameMax'
+                          : null,
+                    ),
+              ),
+              trailing: showClear
+                  ? Semantics(
+                      button: true,
+                      label: 'Clear text',
+                      excludeSemantics: true,
+                      onTap: _field.clear,
+                      child: GestureDetector(
+                        key: AccountScreen.nameClearKey,
+                        behavior: HitTestBehavior.opaque,
+                        onTap: _field.clear,
+                        child: SizedBox.square(
+                          dimension: MixtapeMetrics.minTarget,
+                          child: Icon(
+                            CupertinoIcons.clear_circled_solid,
+                            size: 17,
+                            color: tokens.muted,
+                          ),
+                        ),
+                      ),
+                    )
+                  : null,
+            ),
+          ],
+        ),
+        Padding(
+          padding: const EdgeInsets.only(left: 8, right: 16),
+          child: Row(
+            children: [
+              // Save and Cancel wrap onto two lines before shrinking.
+              Expanded(
+                child: Wrap(
+                  spacing: 4,
+                  children: [
+                    TextAction(
+                      key: AccountScreen.nameSaveKey,
+                      label: _saving
+                          ? AccountScreen.nameSaving
+                          : _failed
+                          ? 'Retry'
+                          : 'Save',
+                      onPressed: _saving ? null : _save,
+                    ),
+                    TextAction(
+                      key: AccountScreen.nameCancelKey,
+                      label: 'Cancel',
+                      quiet: true,
+                      onPressed: _saving ? null : _cancel,
+                    ),
+                  ],
+                ),
+              ),
+              // Read with the field (its counter), not twice.
+              if (length >= AccountScreen.nameCountFrom)
+                ExcludeSemantics(
+                  child: Text(
+                    '$length of $profileNameMax',
+                    style: tokens.meta.copyWith(color: tokens.muted),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 8), child: line),
+      ],
     );
   }
 }

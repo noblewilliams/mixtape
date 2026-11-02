@@ -267,6 +267,52 @@ void main() {
     });
   });
 
+  group('updateUser', () {
+    test(
+      'posts the name (if any) and the asked flag to Better Auth update-user',
+      () async {
+        final bodies = <Object?>[];
+        final api = apiWith((request) async {
+          expect(request.method, 'POST');
+          expect(request.url.path, '/api/auth/update-user');
+          bodies.add(jsonDecode(request.body));
+          return http.Response('{"status":true}', 200);
+        });
+
+        await api.updateUser(name: 'Ada Okafor');
+        await api.updateUser(name: '');
+        await api.updateUser();
+
+        expect(bodies, [
+          {'name': 'Ada Okafor', 'namePromptedAt': true},
+          {'name': '', 'namePromptedAt': true},
+          {'namePromptedAt': true},
+        ]);
+        expect(await store.read(), 'existing-session');
+      },
+    );
+
+    test('success must be explicitly confirmed', () async {
+      for (final body in ['{}', '{"status":false}', '[]', 'not-json']) {
+        final api = apiWith((_) async => http.Response(body, 200));
+        await expectLater(
+          api.updateUser(name: 'Ada'),
+          throwsA(isA<AccountModelException>()),
+        );
+      }
+    });
+
+    test('a rejection keeps its status', () async {
+      final api = apiWith((_) async => http.Response('{"code":"X"}', 400));
+      await expectLater(
+        api.updateUser(name: 'Ada'),
+        throwsA(
+          isA<AccountApiException>().having((e) => e.statusCode, 'status', 400),
+        ),
+      );
+    });
+  });
+
   group('me', () {
     Future<Me> meWith(Object? body) => apiWith((request) async {
       expect(request.method, 'GET');

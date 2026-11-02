@@ -40,6 +40,9 @@ class FakeAccountApi implements AccountApi {
   @override
   Future<void> deleteAccount({String? appleAuthorizationCode}) =>
       throw UnimplementedError();
+
+  @override
+  Future<void> updateUser({String? name}) => throw UnimplementedError();
 }
 
 const apple = LinkedAccount(
