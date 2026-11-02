@@ -6,6 +6,7 @@ import * as schema from '../db/schema'
 import type { AuthLike } from '../app'
 import type { Db } from '../db/types'
 import { linkAnonymousAccount } from './link-anonymous'
+import { normalizeProfileName } from './profile-name'
 
 export type AuthEnv = {
   BETTER_AUTH_SECRET: string
@@ -88,6 +89,13 @@ function linkSurface(ctx: { path?: string; body?: unknown }): 'ios' | 'web' {
   return ctx.path === '/sign-in/social' && body?.idToken ? 'ios' : 'web'
 }
 
+// The name rule on every write, whoever writes it: a provider name at
+// sign-up, the name page, an Account edit. Anything that is not a string
+// (update-user forwards the body's name as is) stores as no name.
+function withProfileName<T extends { name?: unknown }>(data: T): T {
+  return { ...data, name: typeof data.name === 'string' ? normalizeProfileName(data.name) : '' }
+}
+
 // db is any drizzle pg database (neon-http in prod, pglite in tests)
 export function createAuth(db: object, env: AuthEnv) {
   if (!env.BETTER_AUTH_SECRET || env.BETTER_AUTH_SECRET.length < 32) {
@@ -124,6 +132,20 @@ export function createAuth(db: object, env: AuthEnv) {
       // Written by the anonymous-link hook, read once by GET /me.
       additionalFields: {
         mergedMode: { type: 'string', required: false, input: false },
+      },
+    },
+    user: {
+      // The owner sets it through POST /api/auth/update-user when they answer
+      // the name page (Continue or Skip) or save a name in Account.
+      additionalFields: {
+        namePromptedAt: { type: 'date', required: false, input: true },
+      },
+    },
+    databaseHooks: {
+      user: {
+        create: { before: async (data) => ({ data: withProfileName(data) }) },
+        // update-user passes name: undefined when only other fields change.
+        update: { before: async (data) => (data.name === undefined ? undefined : { data: withProfileName(data) }) },
       },
     },
     socialProviders: {

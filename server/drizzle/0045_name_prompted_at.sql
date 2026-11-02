@@ -1,0 +1,1 @@
+ALTER TABLE "user" ADD COLUMN "name_prompted_at" timestamp;

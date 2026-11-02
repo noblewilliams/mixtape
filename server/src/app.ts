@@ -6,6 +6,7 @@ import { HTTPException } from 'hono/http-exception'
 import { requireSession } from './middleware/require-session'
 import { requireAdmin } from './middleware/require-admin'
 import { takeMergedMode } from './auth/link-anonymous'
+import { isUsableName } from './auth/profile-name'
 import { ingestRoutes } from './routes/ingest'
 import { libraryIngestRoutes } from './routes/library-ingest'
 import { listeningIngestRoutes } from './routes/listening-ingest'
@@ -44,10 +45,19 @@ export type AuthLike = {
 
 // isAnonymous comes from Better Auth's anonymous plugin. Loose on the auth
 // seam so test stubs that only carry an id stay valid; requireSession
-// normalizes it, so routes always read a real boolean.
-export type SessionUser = { id: string; isAnonymous?: boolean | null }
+// normalizes it, so routes always read a real boolean. name and
+// namePromptedAt (an additional user field) feed GET /me's askName.
+export type SessionUser = {
+  id: string
+  isAnonymous?: boolean | null
+  name?: string | null
+  namePromptedAt?: Date | string | null
+}
 
-export type AppVars = { user: { id: string; isAnonymous: boolean }; sessionId?: string }
+export type AppVars = {
+  user: { id: string; isAnonymous: boolean; name?: string | null; namePromptedAt?: Date | string | null }
+  sessionId?: string
+}
 
 // seed: the catalogue seed's Apple client (routes/enrich-seed.ts), present
 // with MusicKit configured.
@@ -140,7 +150,11 @@ export function createApp({
     const merged = db && sessionId ? await takeMergedMode(db, sessionId) : null
     // albumPicks: whether clients may offer album sessions and Listen later.
     // neverRefuse: whether a listener with no music still gets a mix.
-    return c.json({ user: c.get('user'), merged, albumPicks: Boolean(albums), neverRefuse })
+    // askName: show the "What should we call you?" page. Never for anonymous
+    // listeners, and once answered (Continue or Skip) never again.
+    const user = c.get('user')
+    const askName = !user.isAnonymous && !isUsableName(user.name) && user.namePromptedAt == null
+    return c.json({ user, merged, albumPicks: Boolean(albums), neverRefuse, askName })
   })
 
   if (musicKit) {

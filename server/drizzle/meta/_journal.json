@@ -316,6 +316,13 @@
       "when": 1792661558071,
       "tag": "0044_proposed_mix_funnel_event",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1793633187021,
+      "tag": "0045_name_prompted_at",
+      "breakpoints": true
     }
   ]
 }

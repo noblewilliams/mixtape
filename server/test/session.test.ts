@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { createApp, type AuthLike } from '../src/app'
+import { createApp, type AuthLike, type SessionUser } from '../src/app'
 import { createTestDb } from './helpers/db'
 import { testAuthEnv } from './helpers/auth'
 import { createAuth } from '../src/auth/create-auth'
 import type { DjDeps } from '../src/dj/loop'
 
-function stubAuth(session: { user: { id: string } } | null): AuthLike {
+function stubAuth(session: { user: SessionUser } | null): AuthLike {
   return {
     handler: () => new Response('ok'),
     api: { getSession: async () => session },
@@ -24,7 +24,7 @@ describe('session middleware', () => {
     const app = createApp({ auth: stubAuth({ user: { id: 'user-1' } }) })
     const res = await app.request('http://x/me')
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ user: { id: 'user-1', isAnonymous: false }, merged: null, albumPicks: false, neverRefuse: false })
+    expect(await res.json()).toEqual({ user: { id: 'user-1', isAnonymous: false }, merged: null, albumPicks: false, neverRefuse: false, askName: true })
   })
 
   it('authenticates a real bearer session end-to-end', async () => {
@@ -42,6 +42,53 @@ describe('session middleware', () => {
     expect(((await ok.json()) as { user: { id: string } }).user.id).toBe(u.id)
     const bad = await app.request('http://x/me', { headers: { Authorization: 'Bearer bogus' } })
     expect(bad.status).toBe(401)
+  })
+})
+
+// askName: the server's one answer to "show the name page?" (profile-name
+// spec). Clients never recompute the rule.
+describe('askName on GET /me', () => {
+  async function askName(u: SessionUser): Promise<boolean> {
+    const res = await createApp({ auth: stubAuth({ user: u }) }).request('http://x/me')
+    return ((await res.json()) as { askName: boolean }).askName
+  }
+
+  it('asks a signed-in listener with no usable name who was never asked', async () => {
+    expect(await askName({ id: 'u', name: '' })).toBe(true)
+    expect(await askName({ id: 'u', name: '   ' })).toBe(true)
+    expect(await askName({ id: 'u', name: 'Listener', isAnonymous: false })).toBe(true)
+    expect(await askName({ id: 'u', name: '', namePromptedAt: null })).toBe(true)
+  })
+
+  it('does not ask a listener with a usable name', async () => {
+    expect(await askName({ id: 'u', name: 'Ada' })).toBe(false)
+  })
+
+  it('does not ask once the page has been answered', async () => {
+    expect(await askName({ id: 'u', name: '', namePromptedAt: new Date('2026-11-02T10:00:00Z') })).toBe(false)
+  })
+
+  it('never asks an anonymous listener', async () => {
+    expect(await askName({ id: 'u', name: 'Listener', isAnonymous: true })).toBe(false)
+  })
+
+  it('reads the real user row through Better Auth', async () => {
+    const db = await createTestDb()
+    const auth = createAuth(db, testAuthEnv)
+    const ctx = await auth.$context
+    const u = await ctx.internalAdapter.createUser(
+      { email: 'noname@example.com', name: '', emailVerified: true },
+      { method: 'oauth' },
+    )
+    const { token } = await ctx.internalAdapter.createSession(u.id, undefined)
+    const app = createApp({ auth })
+    const me = async () => ((await (await app.request('http://x/me', {
+      headers: { Authorization: `Bearer ${token}` },
+    })).json()) as { askName: boolean }).askName
+
+    expect(await me()).toBe(true)
+    await ctx.internalAdapter.updateUser(u.id, { namePromptedAt: new Date() })
+    expect(await me()).toBe(false)
   })
 })
 

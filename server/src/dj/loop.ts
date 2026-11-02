@@ -41,6 +41,7 @@ import {
 import { resolveMarket } from '../albums/verify'
 import { sanitizeForPrompt, sanitizeTitleText, stripEmDashes } from './sanitize'
 import { insertMemoryNote, MAX_MEMORY_NOTES } from './memory-notes'
+import { formatFirstNameLine, loadFirstName } from './listener-name'
 import { insertMissingArtistSeeds } from '../seeds/artist-seeds'
 import { findPlaylistSeeds, PlaylistSeedError, playlistSeedContext, readPlaylistSeed, selectPlaylistSeed } from '../playlists/seed'
 import {
@@ -1290,10 +1291,11 @@ async function attemptTurn(
 ): Promise<AttemptResult> {
   const stats: AttemptStats = { llmCalls: 0, toolCalls: 0, inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0 }
   try {
-    const [history, sessionContext, startVersion] = await Promise.all([
+    const [history, sessionContext, startVersion, listenerFirstName] = await Promise.all([
       loadHistory(db, session.id, userRowSeq),
       buildSessionContext(db, session.id, session.userId, options.energyArc, deps.outsidePicks === true),
       getSessionQueueVersion(db, session.id),
+      loadFirstName(db, session.userId),
     ])
 
     // Wraps deps.llm to accumulate usage across EVERY call this turn makes —
@@ -1324,7 +1326,11 @@ async function attemptTurn(
     // (track titles/artists) and must NEVER sit at system altitude — it's a
     // leading USER turn instead, ahead of history and the current message.
     // The static persona is the only thing left in `system`.
-    const contextMessage: LlmMessage = { role: 'user', content: sessionContext }
+    // The first-name line rides the conversational context only, not
+    // sessionContext, so curate() (which picks tracks) never sees it. Last,
+    // so the queue listing still opens the block.
+    const nameLine = formatFirstNameLine(listenerFirstName)
+    const contextMessage: LlmMessage = { role: 'user', content: nameLine ? `${sessionContext}\n${nameLine}` : sessionContext }
     const baseMessages: LlmMessage[] = [contextMessage, ...history, { role: 'user', content: userText }]
     const liveMessages: LlmMessage[] = []
 

@@ -14,6 +14,10 @@ export const user = pgTable("user", {
   image: text("image"),
   // Added by Better Auth's anonymous plugin (first-run flow, 2026-10-20).
   isAnonymous: boolean("is_anonymous").default(false).notNull(),
+  // When the "What should we call you?" page was answered (Continue or Skip).
+  // Declared to Better Auth as user.additionalFields.namePromptedAt (profile
+  // name spec 2026-11-02); GET /me reads it for askName.
+  namePromptedAt: timestamp("name_prompted_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at")
     .defaultNow()
