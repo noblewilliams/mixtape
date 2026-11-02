@@ -11,6 +11,7 @@ type FakeSession = {
 const fake = vi.hoisted(() => ({
   session: { data: null, isPending: false, error: null, refetch: () => undefined } as FakeSession,
   signOut: vi.fn(async () => ({})),
+  notify: vi.fn(),
   anonymous: vi.fn(),
 }))
 
@@ -19,6 +20,7 @@ vi.mock('better-auth/react', () => ({
     useSession: () => fake.session,
     signOut: fake.signOut,
     signIn: { anonymous: fake.anonymous },
+    $store: { notify: fake.notify },
   }),
 }))
 
@@ -51,6 +53,7 @@ describe('browser auth token handling', () => {
   afterEach(() => {
     fake.anonymous.mockReset()
     fake.signOut.mockClear()
+    fake.notify.mockClear()
   })
 
   it('keeps a token ensureSession stored through renders with no session data, pending or not', async () => {
@@ -94,6 +97,22 @@ describe('browser auth token handling', () => {
     expect(sessionTokenStore.read()).toBeNull()
 
     // A later token from ensureSession is not treated as the observed one.
+    sessionTokenStore.write('next-anon-token')
+    fake.session = empty(false)
+    rerender()
+    expect(sessionTokenStore.read()).toBe('next-anon-token')
+  })
+
+  it('forgetSession clears local state and re-reads the session without a server sign-out', async () => {
+    const { browserAuth, sessionTokenStore } = await load()
+    fake.session = withToken('session-token')
+    const { rerender } = renderHook(() => browserAuth.useSession())
+
+    browserAuth.forgetSession()
+    expect(fake.signOut).not.toHaveBeenCalled()
+    expect(fake.notify).toHaveBeenCalledWith('$sessionSignal')
+    expect(sessionTokenStore.read()).toBeNull()
+
     sessionTokenStore.write('next-anon-token')
     fake.session = empty(false)
     rerender()

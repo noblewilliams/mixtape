@@ -323,6 +323,19 @@ describe('Mixtape API client', () => {
     }))
   })
 
+  it('deletes the account with DELETE /me and no body', async () => {
+    fetchMock.mockResolvedValueOnce(json({ deleted: true, apple: 'not_linked' }))
+    vi.stubGlobal('fetch', fetchMock)
+    const api = createMixtapeApi('https://api.mixtape.test')
+
+    await expect(api.deleteAccount()).resolves.toEqual({ deleted: true, apple: 'not_linked' })
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('https://api.mixtape.test/me')
+    expect(init?.method).toBe('DELETE')
+    expect(init?.body).toBeUndefined()
+  })
+
   it('marks an expired browser session as unauthorized', async () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ error: 'unauthorized' }), {

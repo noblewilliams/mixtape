@@ -24,7 +24,7 @@ function providerLabel(provider: AuthProvider): string {
   return provider === 'apple' ? 'Apple' : 'Google'
 }
 
-export const browserAuth: AuthBridge & AccountBridge = {
+export const browserAuth: AuthBridge & AccountBridge & { forgetSession: () => void } = {
   useSession: () => {
     const session = authClient.useSession()
     const token = session.data?.session.token
@@ -94,5 +94,13 @@ export const browserAuth: AuthBridge & AccountBridge = {
     observedToken = null
     sessionTokenStore.clear()
     return authClient.signOut()
+  },
+  // After DELETE /me every server session is already gone, so a server
+  // sign-out has nothing to end: clear local state and re-read the session,
+  // which comes back empty and lands on the signed-out state.
+  forgetSession: () => {
+    observedToken = null
+    sessionTokenStore.clear()
+    authClient.$store.notify('$sessionSignal')
   },
 }

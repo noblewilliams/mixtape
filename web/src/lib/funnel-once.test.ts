@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createDeferredFunnel, funnelFlagKey, hasPostedFunnelEvent, postFunnelEventOnce } from './funnel-once'
+import { clearFunnelFlags, createDeferredFunnel, funnelFlagKey, hasPostedFunnelEvent, postFunnelEventOnce } from './funnel-once'
 
 const settled = () => new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -17,6 +17,22 @@ describe('once-per-user funnel events', () => {
     expect(postFunnelEvent).toHaveBeenCalledTimes(1)
     expect(postFunnelEvent).toHaveBeenCalledWith({ type: 'first_output', surface: 'web' })
     expect(localStorage.getItem(funnelFlagKey('first_output', 'user-1'))).toBeTruthy()
+  })
+
+  it('clears every flag of one user and leaves other users and keys alone', () => {
+    localStorage.setItem(funnelFlagKey('first_output', 'user-1'), 'x')
+    localStorage.setItem(funnelFlagKey('first_personal_mix', 'user-1'), 'x')
+    localStorage.setItem(funnelFlagKey('first_output', 'user-10'), 'x')
+    localStorage.setItem(funnelFlagKey('first_output', 'user-2'), 'x')
+    localStorage.setItem('mixtape.last-sign-in-provider', 'apple')
+
+    clearFunnelFlags('user-1')
+
+    expect(hasPostedFunnelEvent('user-1', 'first_output')).toBe(false)
+    expect(hasPostedFunnelEvent('user-1', 'first_personal_mix')).toBe(false)
+    expect(hasPostedFunnelEvent('user-10', 'first_output')).toBe(true)
+    expect(hasPostedFunnelEvent('user-2', 'first_output')).toBe(true)
+    expect(localStorage.getItem('mixtape.last-sign-in-provider')).toBe('apple')
   })
 
   it('keeps the flag per user and per event type', () => {

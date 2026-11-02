@@ -377,6 +377,7 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}, options: Fake
     confirmPlaylistTaste: async () => { throw new Error('Configure taste confirmation for this scenario') },
     listMemories: async () => ({ memories: [] }),
     deleteMemory: async () => ({ ok: true }),
+    deleteAccount: async () => ({ deleted: true, apple: 'not_linked' }),
     getMusicCollectionSummary: async () => ({ apple: { songs: null, playlists: 0, librarySyncedAt: null }, spotify: { playlists: 0 } }),
     listPlaylists: async () => ({ playlists: [], nextCursor: null, total: 0 }),
     getPlaylist: async () => {

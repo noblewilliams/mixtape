@@ -38,4 +38,18 @@ describe('auth provider preference', () => {
     expect(store.lastUsed()).toBeNull()
     expect(store.promotePending()).toBeNull()
   })
+
+  it('forget drops the last-used and pending provider', () => {
+    const local = memoryStorage()
+    const session = memoryStorage()
+    const store = createAuthPreferenceStore(local, session)
+    store.begin('apple')
+    store.promotePending()
+    store.begin('google')
+
+    store.forget()
+
+    expect(store.lastUsed()).toBeNull()
+    expect(store.promotePending()).toBeNull()
+  })
 })

@@ -67,7 +67,7 @@ const accountAuth: AccountBridge = {
 }
 
 function renderApp(
-  options: { api?: ReturnType<typeof createFakeApi>; musicKit?: MusicKitClient; onSignOut?: () => void; initialSession?: CreateSessionResponse } = {},
+  options: { api?: ReturnType<typeof createFakeApi>; musicKit?: MusicKitClient; onSignOut?: () => void; onAccountDeleted?: () => void; initialSession?: CreateSessionResponse } = {},
 ) {
   const api = options.api ?? createFakeApi()
   const musicKit = options.musicKit ?? createFakeMusicKit()
@@ -80,6 +80,7 @@ function renderApp(
       musicKit={musicKit}
       user={user}
       onSignOut={onSignOut}
+      onAccountDeleted={options.onAccountDeleted}
       importParser={createDirectParser()}
       initialSession={options.initialSession}
     />,
@@ -221,6 +222,8 @@ describe('service choice persistence', () => {
 
   it('forgets the remembered choice on sign-out', async () => {
     writeServiceChoice('user-1', 'apple')
+    localStorage.setItem('mixtape.last-sign-in-provider', 'apple')
+    localStorage.setItem('mixtape:funnel:first_output:user-1', 'x')
     const api = createFakeApi()
     const { onSignOut } = renderApp({ api, onSignOut: vi.fn() })
     await settled(api)
@@ -230,6 +233,33 @@ describe('service choice persistence', () => {
 
     expect(onSignOut).toHaveBeenCalledTimes(1)
     expect(localStorage.getItem('mixtape:service-choice:user-1')).toBeNull()
+    // Sign-out keeps the sign-in hint and the once-per-user funnel flags.
+    expect(localStorage.getItem('mixtape.last-sign-in-provider')).toBe('apple')
+    expect(localStorage.getItem('mixtape:funnel:first_output:user-1')).toBeTruthy()
+  })
+
+  it('signs out locally after deleting the account, without the server sign-out', async () => {
+    writeServiceChoice('user-1', 'apple')
+    localStorage.setItem('mixtape.last-sign-in-provider', 'apple')
+    localStorage.setItem('mixtape:funnel:first_output:user-1', 'x')
+    localStorage.setItem('mixtape:funnel:first_output:user-2', 'x')
+    const deleteAccount = vi.fn(async () => ({ deleted: true as const, apple: 'not_linked' as const }))
+    const api = createFakeApi({ deleteAccount })
+    const onAccountDeleted = vi.fn()
+    const { onSignOut } = renderApp({ api, onSignOut: vi.fn(), onAccountDeleted })
+    await settled(api)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete account' }))
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete account' }))
+
+    await waitFor(() => expect(onAccountDeleted).toHaveBeenCalledTimes(1))
+    expect(deleteAccount).toHaveBeenCalledTimes(1)
+    expect(onSignOut).not.toHaveBeenCalled()
+    expect(localStorage.getItem('mixtape:service-choice:user-1')).toBeNull()
+    expect(localStorage.getItem('mixtape.last-sign-in-provider')).toBeNull()
+    expect(localStorage.getItem('mixtape:funnel:first_output:user-1')).toBeNull()
+    expect(localStorage.getItem('mixtape:funnel:first_output:user-2')).toBe('x')
   })
 
   it('signs out when the onboarding read says the session has ended', async () => {

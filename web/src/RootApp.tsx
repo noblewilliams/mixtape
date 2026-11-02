@@ -28,6 +28,12 @@ function signOut() {
   void browserAuth.signOut()
 }
 
+// DELETE /me already ended every session; a server sign-out would have nothing to end.
+function accountDeleted() {
+  clearWorkspaceRestore()
+  browserAuth.forgetSession()
+}
+
 export function RootApp() {
   return (
     <AuthGate auth={browserAuth} firstRunServices={firstRunServices}>
@@ -46,7 +52,7 @@ function SignedInApp({ user, lastSignInProvider, restoring, initialSession, refe
   // Browser authorization and pending work belong to this sign-in, never a module singleton.
   const musicKit = useMemo(() => createMusicKitClient({ getDeveloperToken: gate.api.getMusicKitToken }), [])
   return <>
-    <App api={gate.api} initialSession={initialSession ?? undefined} accountAuth={browserAuth} signInAuth={browserAuth} refetchSession={refetch} signInError={signInError} lastSignInProvider={lastSignInProvider} musicKit={musicKit} user={user} onSignOut={signOut} />
+    <App api={gate.api} initialSession={initialSession ?? undefined} accountAuth={browserAuth} signInAuth={browserAuth} refetchSession={refetch} signInError={signInError} lastSignInProvider={lastSignInProvider} musicKit={musicKit} user={user} onSignOut={signOut} onAccountDeleted={accountDeleted} />
     {!restoring && pendingReads > 0 && <div className="session-refresh-badge" role="status"><span className="session-refresh-spinner" aria-hidden="true" />Refreshing…</div>}
   </>
 }

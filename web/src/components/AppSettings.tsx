@@ -3,6 +3,7 @@ import type { MixtapeApi, PlaybackPreferences } from '../api/client'
 import type { PlaybackController } from '../playback/controller'
 import { useRestorableState, useWorkspaceRestoring } from '../lib/workspace-restore'
 import { PlaybackPanel } from './PlaybackPanel'
+import { ControlModal } from './ControlModal'
 
 type Props = {
   api: MixtapeApi
@@ -12,6 +13,8 @@ type Props = {
   onAccount: () => void
   onMemories: () => void
   onSignOut: () => void
+  /** After DELETE /me succeeds: clear local state without a server sign-out (every session is gone). */
+  onAccountDeleted: () => void
   /** An anonymous listener: one sign-in row instead of the identity block, no Sign out. */
   anonymous?: boolean
   /** The anonymous row: opens the sign-in page. */
@@ -28,6 +31,7 @@ export function AppSettings({
   onAccount,
   onMemories,
   onSignOut,
+  onAccountDeleted,
   anonymous = false,
   onSignIn,
 }: Props) {
@@ -43,6 +47,7 @@ export function AppSettings({
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [reload, setReload] = useState(0)
+  const [deleting, setDeleting] = useState(false)
   const [reading, setReading] = useState(true)
   const mounted = useRef(true)
 
@@ -180,7 +185,73 @@ export function AppSettings({
           <span>Sign out of Mixtape</span>
           <button className="wc-text" onClick={onSignOut}>Sign out</button>
         </div>
+        <div className="setting-row setting-row--action">
+          <button className="wc-text wc-danger" onClick={() => setDeleting(true)}>Delete account</button>
+        </div>
       </section>}
+      {deleting && (
+        <DeleteAccountDialog
+          deleteAccount={() => api.deleteAccount()}
+          onDeleted={onAccountDeleted}
+          onClose={() => setDeleting(false)}
+        />
+      )}
     </main>
+  )
+}
+
+export const DELETE_ACCOUNT_FAILED = 'Couldn’t delete your account. Try again.'
+
+/** The one destructive confirmation; copy is fixed by the account-deletion plan. */
+export function DeleteAccountDialog({
+  deleteAccount,
+  onDeleted,
+  onClose,
+}: {
+  deleteAccount: () => Promise<unknown>
+  onDeleted: () => void
+  onClose: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const inFlight = useRef(false)
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+
+  async function confirm() {
+    if (inFlight.current) return
+    inFlight.current = true
+    setBusy(true)
+    setError('')
+    try {
+      await deleteAccount()
+    } catch {
+      inFlight.current = false
+      if (mounted.current) {
+        setBusy(false)
+        setError(DELETE_ACCOUNT_FAILED)
+      }
+      return
+    }
+    onDeleted()
+  }
+
+  return (
+    <ControlModal title="Delete your account?" alert onClose={() => { if (!inFlight.current) onClose() }}>
+      <p>
+        This permanently deletes your mixes, library, memories and listening history from Mixtape. Your Apple Music
+        and Spotify libraries are not touched.
+      </p>
+      {error && <p className="wc-danger" role="alert">{error}</p>}
+      <div className="wc-actions">
+        <button className="wc-text" disabled={busy} onClick={onClose}>Cancel</button>
+        <button className="wc-text wc-danger" disabled={busy} onClick={() => void confirm()}>
+          {busy ? 'Deleting…' : 'Delete account'}
+        </button>
+      </div>
+    </ControlModal>
   )
 }

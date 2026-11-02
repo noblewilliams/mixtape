@@ -17,7 +17,7 @@ function content(api: MixtapeApi, playback: PlaybackController, restoring: boole
     <HomeComposer albumPicks={false} anonymous={false} onSubmit={vi.fn()} transcribe={vi.fn()} />
     <RoutineSuggestions api={api} onCreate={vi.fn()} />
     <MemoryControls api={api} onClose={vi.fn()} onSessionExpired={vi.fn()} />
-    <AppSettings api={api} playback={playback} userName="Listener" signInMethod="google" onAccount={vi.fn()} onMemories={vi.fn()} onSignOut={vi.fn()} />
+    <AppSettings api={api} playback={playback} userName="Listener" signInMethod="google" onAccount={vi.fn()} onMemories={vi.fn()} onSignOut={vi.fn()} onAccountDeleted={vi.fn()} />
   </WorkspaceRestoreProvider>
 }
 

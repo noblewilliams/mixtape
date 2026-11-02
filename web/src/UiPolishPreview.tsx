@@ -6,6 +6,7 @@ import { SaveDialog, Toast } from './components/Overlays'
 import { EmptyState } from './components/UiStates'
 import { ControlModal } from './components/ControlModal'
 import { TapeSettings } from './components/TapeSettings'
+import { DeleteAccountDialog } from './components/AppSettings'
 import { AppleMusicMark, SpotifyMark } from './components/ProviderMarks'
 import { demoAlbumMessages, demoAlbumPick, demoAlbumRefinedPick, demoAlbumRunnersUp, demoMessages, demoQueue, demoSessions, demoShelfPreviewEntries } from './data/demo'
 import { AlbumPanel } from './components/AlbumPanel'
@@ -101,7 +102,7 @@ export default function UiPolishPreview() {
   const openTab = (tab: MixesTab) => setState(tab === 'archived' ? 'archived' : tab === 'listen-later' ? 'listen-later' : 'populated')
   async function color(id: string, caseColor: string) { setSessions(current => current.map(s => s.id === id ? { ...s, caseColor } : s)) }
   const close = () => setState('populated')
-  const options = ['home', 'home-loading', 'home-empty', 'home-error', 'populated', 'loading', 'empty', 'archived', 'load-error', 'refresh-error', 'settings', 'success', 'error', 'info', 'playlist', 'preference', 'memory', 'sources', 'library', 'library-loading', 'conversation', 'conversation-blank', 'album', 'album-refined', 'listen-later', 'listen-later-empty', 'first-run', 'keep-sheet', 'sign-in-keep', 'sign-in-cap', 'merge-notice']
+  const options = ['home', 'home-loading', 'home-empty', 'home-error', 'populated', 'loading', 'empty', 'archived', 'load-error', 'refresh-error', 'settings', 'success', 'error', 'info', 'playlist', 'preference', 'memory', 'sources', 'library', 'library-loading', 'conversation', 'conversation-blank', 'album', 'album-refined', 'listen-later', 'listen-later-empty', 'first-run', 'keep-sheet', 'sign-in-keep', 'sign-in-cap', 'merge-notice', 'delete-account']
   return <>
     <div style={{ position: 'fixed', right: 12, top: 8, zIndex: 200, display: 'flex', gap: 8, alignItems: 'center', background: '#f7f4f8', color: '#1c1a1e', padding: 8, borderRadius: 8, fontSize: 12 }}>
       <label htmlFor="ui-preview-state">UI preview · synthetic data</label><select id="ui-preview-state" value={state} onChange={e => setState(e.target.value)}>{options.map(option => <option key={option}>{option}</option>)}</select>
@@ -122,10 +123,12 @@ export default function UiPolishPreview() {
     {state === 'settings' && <TapeSettings session={sessions[0]} onColor={caseColor=>color(sessions[0].id,caseColor)} onClose={close} />}
     {['success','error','info'].includes(state) && <Toast tone={state as 'success'|'error'|'info'} message={state === 'success' ? 'Playlist created' : state === 'error' ? 'Couldn’t save. Try again.' : 'Mix archived'} action={state === 'info' ? { label: 'Undo', onClick:close }:undefined} />}
     {state === 'keep-sheet' && <KeepSheet onKeep={() => setState('sign-in-keep')} onNotNow={close} />}
-    {(state === 'sign-in-keep' || state === 'sign-in-cap') && <div className="first-run fr-root fr-root--over"><div className="fr-sign-in"><BackButton onBack={close} className="fr-back--over" /><SignInPage variant={state === 'sign-in-cap' ? 'cap' : 'keep'} auth={{ signIn: async () => ({}) }} preferences={{ lastUsed: () => 'apple', begin: () => {}, promotePending: () => null, clearPending: () => {} }} lastUsed="apple" error="" /></div></div>}
+    {(state === 'sign-in-keep' || state === 'sign-in-cap') && <div className="first-run fr-root fr-root--over"><div className="fr-sign-in"><BackButton onBack={close} className="fr-back--over" /><SignInPage variant={state === 'sign-in-cap' ? 'cap' : 'keep'} auth={{ signIn: async () => ({}) }} preferences={{ lastUsed: () => 'apple', begin: () => {}, promotePending: () => null, clearPending: () => {}, forget: () => {} }} lastUsed="apple" error="" /></div></div>}
     {state === 'merge-notice' && <Toast tone="success" message="Your mixes are in. This account already had a library, so we kept that one." />}
-    {state === 'first-run' && <FirstRun services={previewFirstRunServices} signIn={{ auth: { signIn: async () => ({}) }, preferences: { lastUsed: () => null, begin: () => {}, promotePending: () => null, clearPending: () => {} }, lastUsed: null, error: '' }} onDone={close} />}
+    {state === 'first-run' && <FirstRun services={previewFirstRunServices} signIn={{ auth: { signIn: async () => ({}) }, preferences: { lastUsed: () => null, begin: () => {}, promotePending: () => null, clearPending: () => {}, forget: () => {} }, lastUsed: null, error: '' }} onDone={close} />}
     {state === 'playlist' && <SaveDialog defaultName="Evening colours" newToYouCount={2} onSave={()=>setState('success')} onClose={close} />}
+    {/* Confirming fails after a beat, so both the in-flight and failure states show. */}
+    {state === 'delete-account' && <DeleteAccountDialog deleteAccount={() => new Promise((_, reject) => setTimeout(() => reject(new Error('preview')), 1200))} onDeleted={close} onClose={close} />}
     {state === 'preference' && <ControlModal title="Forget this preference?" alert onClose={close}><p>Keep vocals in the background for dinner.</p><p>The DJ will stop using this note. You can’t undo this.</p><div className="wc-actions"><button className="wc-text" onClick={close}>Cancel</button><button className="wc-text wc-danger" onClick={()=>setState('success')}>Forget preference</button></div></ControlModal>}
   </>
 }

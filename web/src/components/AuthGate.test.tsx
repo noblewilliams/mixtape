@@ -12,6 +12,7 @@ function preferences(lastUsed: 'apple' | 'google' | null = null): AuthPreference
     begin: vi.fn(),
     promotePending: vi.fn(() => null),
     clearPending: vi.fn(),
+    forget: vi.fn(),
   }
 }
 

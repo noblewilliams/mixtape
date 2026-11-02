@@ -11,6 +11,22 @@ export function funnelFlagKey(type: FunnelEventType, userId: string) {
   return `mixtape:funnel:${type}:${userId}`
 }
 
+/** Removes every once-flag this user has on this device (account deletion; sign-out keeps them). */
+export function clearFunnelFlags(userId: string) {
+  try {
+    const storage = window.localStorage
+    const suffix = `:${userId}`
+    const keys: string[] = []
+    for (let index = 0; index < storage.length; index++) {
+      const key = storage.key(index)
+      if (key?.startsWith('mixtape:funnel:') && key.endsWith(suffix)) keys.push(key)
+    }
+    keys.forEach((key) => storage.removeItem(key))
+  } catch {
+    // Storage blocked: nothing was remembered.
+  }
+}
+
 /** Posts the event unless this user already has; returns whether it posted. */
 export function postFunnelEventOnce(
   api: Pick<MixtapeApi, 'postFunnelEvent'>,

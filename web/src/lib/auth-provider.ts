@@ -12,6 +12,8 @@ export type AuthPreferenceStore = {
   begin: (next: AuthProvider) => void
   promotePending: () => AuthProvider | null
   clearPending: () => void
+  /** Drops the last-used and pending provider (account deletion; sign-out keeps them). */
+  forget: () => void
 }
 
 export function createAuthPreferenceStore(local: Storage, session: Storage): AuthPreferenceStore {
@@ -26,6 +28,10 @@ export function createAuthPreferenceStore(local: Storage, session: Storage): Aut
       return pending
     },
     clearPending: () => session.removeItem(PENDING_KEY),
+    forget: () => {
+      local.removeItem(LAST_USED_KEY)
+      session.removeItem(PENDING_KEY)
+    },
   }
 }
 

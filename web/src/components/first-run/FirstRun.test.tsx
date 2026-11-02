@@ -10,6 +10,7 @@ const preferences: AuthPreferenceStore = {
   begin: vi.fn(),
   promotePending: () => null,
   clearPending: vi.fn(),
+  forget: vi.fn(),
 }
 
 function renderFlow(props: Partial<FirstRunProps> = {}, options: { neverRefuse?: boolean } = {}) {

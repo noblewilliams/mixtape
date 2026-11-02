@@ -53,7 +53,7 @@ const accountAuth: AccountBridge = {
   unlinkAccount: vi.fn(async () => ({})),
 }
 
-const preferences: AuthPreferenceStore = { lastUsed: () => null, begin: vi.fn(), promotePending: () => null, clearPending: vi.fn() }
+const preferences: AuthPreferenceStore = { lastUsed: () => null, begin: vi.fn(), promotePending: () => null, clearPending: vi.fn(), forget: vi.fn() }
 
 type Options = {
   user?: AuthUser

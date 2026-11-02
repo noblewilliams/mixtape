@@ -403,6 +403,10 @@ export type MeResponse = {
 }
 /** The public flags, readable before any session exists. */
 export type PublicConfig = { neverRefuse: boolean }
+export type DeleteAccountResponse = {
+  deleted: true
+  apple: 'revoked' | 'failed' | 'not_linked' | 'no_token'
+}
 export type MixtapeApi = {
   /** `merged` is reported once after an anonymous session joins an account; the server clears it on read. */
   getMe: (signal?: AbortSignal) => Promise<MeResponse>
@@ -452,6 +456,8 @@ export type MixtapeApi = {
   ) => Promise<{ playlistSeed: ApiPlaylistSeed }>
   listMemories: (signal?: AbortSignal) => Promise<{ memories: ApiMemory[] }>
   deleteMemory: (memoryId: string, signal?: AbortSignal) => Promise<{ ok: true }>
+  /** DELETE /me: hard-deletes the account and every session (no body on web; the server revokes Apple with its stored tokens). */
+  deleteAccount: (signal?: AbortSignal) => Promise<DeleteAccountResponse>
   confirmPlaylistTaste: (playlistId: string, confirmed: boolean, signal?: AbortSignal) => Promise<{ ok: true }>
   getMusicCollectionSummary: (signal?: AbortSignal) => Promise<MusicCollectionSummary>
   listPlaylists: (options?: {
@@ -685,6 +691,7 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
     listMemories: (signal) => request('/me/memories', { signal }),
     deleteMemory: (memoryId, signal) =>
       request(`/me/memories/${encodeURIComponent(memoryId)}`, { method: 'DELETE', signal }),
+    deleteAccount: (signal) => request('/me', { method: 'DELETE', signal }),
     confirmPlaylistTaste: (playlistId, confirmed, signal) =>
       request(`/playlists/${encodeURIComponent(playlistId)}/taste-confirmation`, {
         method: 'PUT', body: JSON.stringify({ confirmed }), signal,

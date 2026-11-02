@@ -57,7 +57,7 @@ import { createListeningImportService } from './import/import-service'
 import { createLazyParser, createPageParser, type PageParser } from './import/page-parser'
 import { MusicKitClientError, type MusicKitClient } from './musickit/client'
 import { browserAuthPreferences, type AuthPreferenceStore, type AuthProvider } from './lib/auth-provider'
-import { hasPostedFunnelEvent, postFunnelEventOnce } from './lib/funnel-once'
+import { clearFunnelFlags, hasPostedFunnelEvent, postFunnelEventOnce } from './lib/funnel-once'
 import { clearKeptPrompt, keepPrompt, readKeptPrompt } from './lib/kept-prompt'
 import type { DraftSeed, ModeSeed } from './components/HomeComposer'
 import { clearServiceChoice, readServiceChoice, writeServiceChoice, type ServiceChoice } from './lib/service-preference'
@@ -74,6 +74,8 @@ type AppProps = {
   musicKit: MusicKitClient
   user: AuthUser
   onSignOut: () => void
+  /** Local-only sign-out after the account is deleted (no server call); falls back to onSignOut. */
+  onAccountDeleted?: () => void
   /** The export parser the import page drives; the lazy Worker parser unless a test injects one. */
   importParser?: PageParser
   /** The mix the first run just made, seeded the way a new tape is. */
@@ -196,7 +198,7 @@ function conflictSnapshot(error: unknown): { queue: ApiQueueTrack[]; queueVersio
 
 export function App(props: AppProps) { return <SignedInWorkspace key={props.user.id} {...props} /> }
 
-function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, user, onSignOut, importParser, initialSession, initialSessionId, signInAuth = NO_SIGN_IN, signInPreferences = browserAuthPreferences, refetchSession, signInError = '' }: AppProps) {
+function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, user, onSignOut, onAccountDeleted, importParser, initialSession, initialSessionId, signInAuth = NO_SIGN_IN, signInPreferences = browserAuthPreferences, refetchSession, signInError = '' }: AppProps) {
   const anonymous = user.isAnonymous === true
   const restoring = useWorkspaceRestoring()
   const refreshedSessions = useRef(new Set<string>())
@@ -309,12 +311,21 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
         : onboarding,
     [onboarding, localChoice],
   )
-  const signOut = useCallback(() => {
+  const clearLocalAccount = useCallback(() => {
     importRun.dispose()
     syncRun.dispose()
     clearServiceChoice(user.id)
+  }, [importRun, syncRun, user.id])
+  const signOut = useCallback(() => {
+    clearLocalAccount()
     onSignOut()
-  }, [importRun, syncRun, onSignOut, user.id])
+  }, [clearLocalAccount, onSignOut])
+  const accountDeleted = useCallback(() => {
+    clearLocalAccount()
+    signInPreferences.forget()
+    clearFunnelFlags(user.id)
+    ;(onAccountDeleted ?? onSignOut)()
+  }, [clearLocalAccount, signInPreferences, user.id, onAccountDeleted, onSignOut])
   const activeMessages = activeSession ? messagesBySession[activeSession.id] ?? [] : []
   const activeQueue = activeSession ? queuesBySession[activeSession.id] ?? [] : []
   const activeIsAlbum = activeSession?.kind === 'album'
@@ -1363,7 +1374,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
         onOpenSettings={() => setActiveView('settings')}
       />
 
-      {activeView === 'settings' ? <AppSettings api={api} playback={playback} userName={user.name} signInMethod={lastSignInProvider} onAccount={() => setDialog('account')} onMemories={() => setActiveView('memories')} onSignOut={signOut} anonymous={anonymous} onSignIn={() => openSignIn('keep')}/> : activeView === 'home' ? <HomeDashboard
+      {activeView === 'settings' ? <AppSettings api={api} playback={playback} userName={user.name} signInMethod={lastSignInProvider} onAccount={() => setDialog('account')} onMemories={() => setActiveView('memories')} onSignOut={signOut} onAccountDeleted={accountDeleted} anonymous={anonymous} onSignIn={() => openSignIn('keep')}/> : activeView === 'home' ? <HomeDashboard
         sessions={sessions} loading={loadingCollection} error={collectionError} busy={creatingTape}
         onRetry={() => void retryCollection()} onOpenSession={openSession} onOpenMixes={() => { setMixesTab('active'); setActiveView('mixes') }}
         albumPicks={albumPicks} anonymous={anonymous} onSubmit={(prompt, { kind, shape }) => createTape(prompt, false, true, shape, undefined, kind)} transcribe={(audio,signal) => api.transcribe(audio,signal)} draftSeed={draftSeed} modeSeed={modeSeed}
