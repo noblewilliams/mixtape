@@ -55,3 +55,41 @@ Color? tapeColor(String? hex) {
   if (hex == null || !RegExp(r'^#[0-9a-fA-F]{6}$').hasMatch(hex)) return null;
   return Color(0xFF000000 | int.parse(hex.substring(1), radix: 16));
 }
+
+/// The palette's eight families, in palette order: six colours each. The
+/// tape settings sheet picks a family first, then one of its cassettes.
+const tapeFamilyNames = <String>[
+  'Reds',
+  'Oranges',
+  'Yellows',
+  'Greens',
+  'Teals',
+  'Blues',
+  'Purples',
+  'Neutrals',
+];
+
+/// The colours of family [index] (0–7), as `(name, '#hex')`.
+List<(String, String)> tapeFamily(int index) =>
+    tapePalette.skip(index * 6).take(6).toList(growable: false);
+
+/// The family a palette colour belongs to, or null for a colour that is not
+/// in the palette.
+int? tapeFamilyOf(String hex) {
+  final at = tapePalette.indexWhere(
+    (entry) => entry.$2.toLowerCase() == hex.toLowerCase(),
+  );
+  return at < 0 ? null : at ~/ 6;
+}
+
+/// The swatch each family shows: the board draws its second colour (Cherry,
+/// Tangerine, Marigold, Moss, Teal, Blue, Violet, Taupe), except where that
+/// colour sits elsewhere in the family.
+const _familySwatchIndex = <int>[1, 1, 1, 3, 2, 1, 1, 2];
+
+String tapeFamilySwatch(int index) =>
+    tapeFamily(index)[_familySwatchIndex[index]].$2;
+
+/// The hex string for [color], `#rrggbb`.
+String tapeHex(Color color) =>
+    '#${(color.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
