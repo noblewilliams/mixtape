@@ -60,8 +60,11 @@ note 8 (menus as bottom action sheets), as recorded in `docs/decisions.md`.
     popover with "Play here" and "Play in Apple Music". The current default
     carries a tick. Picking one plays there and becomes the default.
   - "Playing" with the prism meter shows when the app player is on this mix.
-  - Spotify listeners keep today's rules, and the transfer-tool handoff takes
-    the arrow's place.
+  - A mix with anything Apple Music can play keeps the arrow; with Spotify
+    ids too, its popover ends with "Send to a transfer tool" behind a
+    separator. Only a mix Apple Music can play nothing of keeps the Spotify
+    layout, with the transfer handoff in the arrow's place (amended in the
+    fix round; `docs/decisions.md`, 2026-11-03).
 - **Headers.** Back on the left, the title, one More button on the right.
   - The conversation loses its queue button.
   - The tape screen loses its history button; Version history is in More.
