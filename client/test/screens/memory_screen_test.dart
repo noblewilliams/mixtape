@@ -309,7 +309,7 @@ void main() {
       await tester.tap(find.text('Forget note'));
       await tester.pumpAndSettle();
       expect(find.text('Gentle mornings'), findsNothing);
-      expect(find.text(MemoryScreen.uncertainResult), findsOneWidget);
+      expect(find.text(MemoryScreen.uncertainTitle), findsOneWidget);
       expect(_dialog, findsNothing);
       api.onListMemories = () async => [_memory(note: 'Still remembered')];
       await tester.tap(find.byKey(MemoryScreen.retryKey));

@@ -25,6 +25,7 @@ import '../providers/playlist_providers.dart';
 import '../providers/playlist_taste_provider.dart';
 import '../providers/shell_providers.dart';
 import '../theme/mixtape_theme.dart';
+import '../widgets/foundation/empty_state.dart';
 import '../widgets/foundation/flush_row.dart';
 import '../widgets/foundation/glass_cluster.dart';
 import '../widgets/foundation/gradient_background.dart';
@@ -243,7 +244,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
           slivers: detail.when(
             loading: () => const [_Skeleton()],
             error: (_, __) => [
-              SliverToBoxAdapter(
+              EmptyStateSliver(
                 child: _Failure(
                   onRetry: () =>
                       ref.invalidate(playlistDetailProvider(widget.playlistId)),
@@ -644,26 +645,9 @@ class _Failure extends StatelessWidget {
   final VoidCallback onRetry;
 
   @override
-  Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    return Padding(
-      padding: const EdgeInsets.only(top: 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text("Couldn't load this playlist.", style: tokens.body),
-          const SizedBox(height: 14),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TapeButton(
-              key: PlaylistDetailScreen.retryKey,
-              label: 'Try again',
-              onPressed: onRetry,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => LoadErrorState(
+    title: "Couldn't load this playlist",
+    retryKey: PlaylistDetailScreen.retryKey,
+    onRetry: onRetry,
+  );
 }

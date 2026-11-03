@@ -40,11 +40,11 @@ import '../providers/dj_providers.dart';
 import '../providers/library_sync_provider.dart';
 import '../providers/onboarding_provider.dart';
 import '../theme/mixtape_theme.dart';
+import '../widgets/foundation/empty_state.dart';
 import '../widgets/foundation/cassette_tile.dart';
 import '../widgets/foundation/glass_cluster.dart';
 import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/remove_band.dart';
-import '../widgets/foundation/tape_button.dart';
 import '../widgets/mix_handoff.dart';
 import '../widgets/track_row.dart';
 import 'mix_history_screen.dart';
@@ -865,37 +865,17 @@ class _ErrorState extends StatelessWidget {
   final VoidCallback onRetry;
 
   @override
-  Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.error_outline, size: 36, color: tokens.errInk),
-            const SizedBox(height: 14),
-            Text(
-              "Couldn't load this tape",
-              textAlign: TextAlign.center,
-              style: tokens.section,
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Check your connection and try again. The mix itself is safe.',
-              textAlign: TextAlign.center,
-              style: tokens.secondary,
-            ),
-            const SizedBox(height: 12),
-            KeyedSubtree(
-              key: const Key('queue-retry'),
-              child: TapeButton(label: 'Try again', onPressed: onRetry),
-            ),
-          ],
-        ),
+  Widget build(BuildContext context) => Center(
+    child: SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: LoadErrorState(
+        title: "Couldn't load this tape",
+        body: 'Check your connection and try again. The mix itself is safe.',
+        retryKey: const Key('queue-retry'),
+        onRetry: onRetry,
       ),
-    );
-  }
+    ),
+  );
 }
 
 /// E3: a conversation that has not produced an arrangement yet.

@@ -16,6 +16,7 @@ import 'package:flutter/material.dart';
 import '../../theme/mixtape_theme.dart';
 import 'cassette_tile.dart';
 import 'large_title_scaffold.dart';
+import 'tape_button.dart';
 
 enum EmptyStateArtwork { cassette, memory, connection }
 
@@ -73,6 +74,44 @@ class EmptyState extends StatelessWidget {
       ],
     );
   }
+}
+
+/// The one load-failure state: the unplugged-cable illustration, what did
+/// not load, one line, and a tape "Try again" (founder smoke, 2026-11-03:
+/// Library's bare line and Mixes' outlined button were two designs for one
+/// thing). Put it in an [EmptyStateSliver] on a tab or list screen, or centre
+/// it on a pushed one.
+class LoadErrorState extends StatelessWidget {
+  const LoadErrorState({
+    super.key,
+    required this.title,
+    required this.onRetry,
+    this.body = defaultBody,
+    this.actionLabel = 'Try again',
+    this.retryKey,
+  });
+
+  /// What did not load, as a heading: "Couldn’t load your mixes".
+  final String title;
+  final String body;
+  final String actionLabel;
+  final VoidCallback onRetry;
+
+  /// The button's key, for the screen's own tests.
+  final Key? retryKey;
+
+  static const String defaultBody = 'Try again in a moment.';
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    liveRegion: true,
+    child: EmptyState(
+      title: title,
+      body: body,
+      artwork: EmptyStateArtwork.connection,
+      action: TapeButton(key: retryKey, label: actionLabel, onPressed: onRetry),
+    ),
+  );
 }
 
 /// The placement: the cassette centred in what the title chrome and the dock

@@ -21,6 +21,7 @@ import '../../data/playlists/playlist_edit_models.dart';
 import '../providers/playlist_providers.dart';
 import '../theme/mixtape_theme.dart';
 import '../widgets/conversation_turn.dart';
+import '../widgets/foundation/empty_state.dart';
 import '../widgets/foundation/glass_cluster.dart';
 import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/liquid_glass_surface.dart';
@@ -770,17 +771,13 @@ class _Failure extends StatelessWidget {
   final VoidCallback onRetry;
 
   @override
-  Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text("Couldn't load this private draft.", style: tokens.body),
-          const SizedBox(height: 14),
-          TapeButton(label: 'Try again', onPressed: onRetry),
-        ],
+  Widget build(BuildContext context) => Center(
+    child: SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: LoadErrorState(
+        title: "Couldn't load this private draft",
+        onRetry: onRetry,
       ),
-    );
-  }
+    ),
+  );
 }

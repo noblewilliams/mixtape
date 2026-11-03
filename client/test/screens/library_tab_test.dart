@@ -35,6 +35,7 @@ import 'package:mixtape/presentation/screens/tabs/library_tab.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
 import 'package:mixtape/presentation/widgets/foundation/empty_state.dart';
+import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
 import 'package:mixtape/presentation/widgets/foundation/flush_row.dart';
 import 'package:mixtape/presentation/widgets/foundation/frosted_dock.dart'
     show kFrostedDockHeight;
@@ -517,8 +518,13 @@ void main() {
       listening.onGetOnboarding = () async => throw StateError('boom');
       await _pump(tester, _container(listening: listening));
 
-      expect(find.text("couldn't load your sources"), findsOneWidget);
-      expect(find.byKey(LibraryTab.sourcesRetryKey), findsOneWidget);
+      // The shared load-error state, placed like the empty one.
+      expect(find.byType(LoadErrorState), findsOneWidget);
+      expect(find.text(kSourcesLoadFailedTitle), findsOneWidget);
+      expect(
+        tester.widget(find.byKey(LibraryTab.sourcesRetryKey)),
+        isA<TapeButton>(),
+      );
     });
   });
 

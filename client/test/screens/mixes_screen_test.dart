@@ -11,6 +11,7 @@ import 'package:flutter/semantics.dart'
     show CustomSemanticsAction, SemanticsData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
 import 'package:mixtape/data/api/api_client.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/dj/dj_api.dart';
@@ -515,12 +516,10 @@ void main() {
 
       expect(find.text("Couldn’t load your mixes"), findsOneWidget);
       expect(find.byKey(const Key('sessions-retry')), findsOneWidget);
+      // The shared load-error state's tape button, as Library has.
       expect(
-        find.descendant(
-          of: find.byKey(const Key('sessions-retry')),
-          matching: find.byType(OutlinedButton),
-        ),
-        findsOneWidget,
+        tester.widget(find.byKey(const Key('sessions-retry'))),
+        isA<TapeButton>(),
       );
 
       shouldFail = false;

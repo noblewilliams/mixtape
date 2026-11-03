@@ -35,7 +35,6 @@ import '../widgets/foundation/glass_cluster.dart';
 import '../widgets/foundation/mixtape_menu.dart';
 import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/large_title_scaffold.dart';
-import '../widgets/foundation/tape_button.dart';
 import '../widgets/foundation/text_action.dart';
 import 'interview_screen.dart';
 
@@ -54,11 +53,11 @@ class MemoryScreen extends ConsumerStatefulWidget {
       'Tell the DJ what you like in a conversation, or in the taste '
       'interview.';
 
-  static const String loadFailed = 'Couldn’t load your notes.';
-  static const String uncertainResult =
-      'Couldn’t confirm the result. Reload your notes before trying again.';
-  static const String expired =
-      'Your session expired. Sign in again to manage your notes.';
+  static const String loadFailed = 'Couldn’t load your notes';
+  static const String uncertainTitle = 'Couldn’t confirm the result';
+  static const String uncertainBody = 'Reload your notes before trying again.';
+  static const String expiredTitle = 'Your session expired';
+  static const String expiredBody = 'Sign in again to manage your notes.';
   static const String tryAgain = 'Try again';
   static const String signInAgain = 'Sign in again';
 
@@ -335,11 +334,16 @@ class _MemoryScreenState extends ConsumerState<MemoryScreen> {
   Widget _body(AsyncValue<List<DjMemory>> memories, bool sessionExpired) {
     if (memories.hasError) {
       return _MemoryNotice(
-        message: sessionExpired
-            ? MemoryScreen.expired
+        title: sessionExpired
+            ? MemoryScreen.expiredTitle
             : _uncertain
-            ? MemoryScreen.uncertainResult
+            ? MemoryScreen.uncertainTitle
             : MemoryScreen.loadFailed,
+        body: sessionExpired
+            ? MemoryScreen.expiredBody
+            : _uncertain
+            ? MemoryScreen.uncertainBody
+            : LoadErrorState.defaultBody,
         action: sessionExpired
             ? MemoryScreen.signInAgain
             : MemoryScreen.tryAgain,
@@ -381,41 +385,27 @@ class _MemoryScreenState extends ConsumerState<MemoryScreen> {
 /// The offline, uncertain and expired states: one line and one tape button.
 class _MemoryNotice extends StatelessWidget {
   const _MemoryNotice({
-    required this.message,
+    required this.title,
+    required this.body,
     required this.action,
     required this.onAction,
   });
 
-  final String message;
+  final String title;
+  final String body;
   final String action;
   final VoidCallback onAction;
 
   @override
-  Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    return SliverFillRemaining(
-      hasScrollBody: false,
-      child: Padding(
-        padding: const EdgeInsets.only(top: 24, bottom: 48),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Semantics(
-              liveRegion: true,
-              child: Text(message, style: tokens.body),
-            ),
-            const SizedBox(height: 16),
-            TapeButton(
-              key: MemoryScreen.retryKey,
-              label: action,
-              onPressed: onAction,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => EmptyStateSliver(
+    child: LoadErrorState(
+      title: title,
+      body: body,
+      actionLabel: action,
+      retryKey: MemoryScreen.retryKey,
+      onRetry: onAction,
+    ),
+  );
 }
 
 /// Nothing remembered yet: the app's one empty state, in its one place.

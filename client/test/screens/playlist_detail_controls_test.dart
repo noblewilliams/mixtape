@@ -374,11 +374,11 @@ void main() {
     };
     await pumpDetail(tester, reads: reads, writes: WriteApi());
 
-    expect(find.text("Couldn't load this playlist."), findsOneWidget);
+    expect(find.text("Couldn't load this playlist"), findsOneWidget);
     expect(find.byType(TapeButton), findsOneWidget);
     await tester.tap(find.text('Try again'));
     await tester.pumpAndSettle();
-    expect(find.text("Couldn't load this playlist."), findsNothing);
+    expect(find.text("Couldn't load this playlist"), findsNothing);
   });
 
   testWidgets('dark renders the same states', (tester) async {

@@ -56,7 +56,6 @@ class LibraryTab extends ConsumerStatefulWidget {
   static const Key emptySetupKey = Key('library-empty-setup');
   static const Key emptyKey = Key('library-sources-empty');
 
-  /// The sources list failed to load.
   static const Key sourcesRetryKey = Key('library-sources-retry');
 
   /// The skeleton shown while the sources are in flight.
@@ -151,6 +150,9 @@ class _LibraryTabState extends ConsumerState<LibraryTab> {
     final state = onboarding.value;
     final hasSources = state != null && state.sources.isNotEmpty;
     final noSources = state != null && state.sources.isEmpty;
+    // Riverpod retries a failed provider, which parks it back in loading
+    // with the error still attached: failure is "no value and an error".
+    final failed = state == null && onboarding.hasError;
     _playlistsShown = hasSources;
 
     return GradientBackground(
@@ -190,7 +192,16 @@ class _LibraryTabState extends ConsumerState<LibraryTab> {
           slivers: [
             // Nothing to list: the shared placement puts the block at the
             // same height Mixes puts its own (smoke round three, note 7).
-            if (noSources)
+            if (failed)
+              EmptyStateSliver(
+                child: LoadErrorState(
+                  title: kSourcesLoadFailedTitle,
+                  retryKey: LibraryTab.sourcesRetryKey,
+                  onRetry: () =>
+                      ref.read(onboardingProvider.notifier).refresh(),
+                ),
+              )
+            else if (noSources)
               EmptyStateSliver(child: _sources(onboarding, state))
             else ...[
               SliverToBoxAdapter(child: _sources(onboarding, state)),
@@ -217,32 +228,8 @@ class _LibraryTabState extends ConsumerState<LibraryTab> {
     AsyncValue<OnboardingState> onboarding,
     OnboardingState? state,
   ) {
-    final tokens = context.tokens;
-
     if (state == null) {
-      // Riverpod retries a failed provider, which parks it back in loading
-      // with the error still attached: failure is "no value and an error".
-      if (onboarding.hasError) {
-        return Padding(
-          padding: const EdgeInsets.only(top: 40),
-          child: Column(
-            children: [
-              Text(
-                "couldn't load your sources",
-                textAlign: TextAlign.center,
-                style: tokens.body,
-              ),
-              const SizedBox(height: 16),
-              TapeButton(
-                key: LibraryTab.sourcesRetryKey,
-                label: 'Try again',
-                onPressed: () =>
-                    ref.read(onboardingProvider.notifier).refresh(),
-              ),
-            ],
-          ),
-        );
-      }
+      // A failure is the whole tab's state, drawn by build.
       return const Padding(
         key: LibraryTab.sourcesSkeletonKey,
         padding: EdgeInsets.only(top: 16),

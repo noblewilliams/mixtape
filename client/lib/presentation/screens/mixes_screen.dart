@@ -630,7 +630,7 @@ class _Bar extends StatelessWidget {
   );
 }
 
-/// Home's cloud-off state, restyled on a [TapeButton].
+/// The shared load-error state, placed like the empty one.
 class _SessionsErrorState extends StatelessWidget {
   const _SessionsErrorState({
     required this.onRetry,
@@ -645,18 +645,7 @@ class _SessionsErrorState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return EmptyStateSliver(
-      child: EmptyState(
-        title: title,
-        body: 'Try again in a moment.',
-        artwork: EmptyStateArtwork.connection,
-        action: KeyedSubtree(
-          key: retryKey,
-          child: OutlinedButton(
-            onPressed: onRetry,
-            child: const Text('Try again'),
-          ),
-        ),
-      ),
+      child: LoadErrorState(title: title, retryKey: retryKey, onRetry: onRetry),
     );
   }
 }

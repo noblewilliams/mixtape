@@ -23,6 +23,7 @@ import '../format/import_format.dart';
 import '../format/source_labels.dart';
 import '../providers/onboarding_provider.dart';
 import '../theme/mixtape_theme.dart';
+import '../widgets/foundation/empty_state.dart';
 import '../widgets/foundation/flush_row.dart';
 import '../widgets/foundation/glass_cluster.dart';
 import '../widgets/foundation/gradient_background.dart';
@@ -36,6 +37,9 @@ import '../widgets/library_sync_dialog.dart';
 import 'import_sheet.dart';
 import 'playlist_browser_screen.dart';
 import 'spotify_request_screen.dart';
+
+/// What Library and Your music say when the sources fail to load.
+const String kSourcesLoadFailedTitle = 'Couldn’t load your music';
 
 const _removeFailedMessage = "couldn't remove — try again";
 
@@ -232,12 +236,23 @@ class MusicSourcesScreen extends ConsumerWidget {
         ],
       ),
       slivers: [
-        SliverPadding(
-          padding: const EdgeInsets.only(
-            bottom: LibraryBackScaffold.bottomInset,
+        // Riverpod retries a failed provider, which parks it back in loading
+        // with the error still attached: failure is "no value and an error".
+        if (onboarding.hasError && !onboarding.hasValue)
+          EmptyStateSliver(
+            child: LoadErrorState(
+              title: kSourcesLoadFailedTitle,
+              retryKey: const Key('sources-retry'),
+              onRetry: () => ref.read(onboardingProvider.notifier).refresh(),
+            ),
+          )
+        else
+          SliverPadding(
+            padding: const EdgeInsets.only(
+              bottom: LibraryBackScaffold.bottomInset,
+            ),
+            sliver: SliverToBoxAdapter(child: _body(context, ref, onboarding)),
           ),
-          sliver: SliverToBoxAdapter(child: _body(context, ref, onboarding)),
-        ),
       ],
     );
   }
@@ -247,23 +262,6 @@ class MusicSourcesScreen extends ConsumerWidget {
     WidgetRef ref,
     AsyncValue<OnboardingState> onboarding,
   ) {
-    if (onboarding.hasError && !onboarding.hasValue) {
-      return _Centred(
-        children: [
-          Text(
-            "couldn't load your sources",
-            textAlign: TextAlign.center,
-            style: context.tokens.body,
-          ),
-          const SizedBox(height: 16),
-          TapeButton(
-            key: const Key('sources-retry'),
-            label: 'Try again',
-            onPressed: () => ref.read(onboardingProvider.notifier).refresh(),
-          ),
-        ],
-      );
-    }
     final state = onboarding.value;
     if (state == null) {
       // The same quiet stand-in rows the playlists use while they load.
