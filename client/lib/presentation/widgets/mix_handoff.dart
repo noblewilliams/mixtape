@@ -36,6 +36,7 @@ import 'package:flutter/cupertino.dart'
         CupertinoAlertDialog,
         CupertinoTheme,
         CupertinoDialogAction,
+        CupertinoIcons,
         CupertinoTextField,
         showCupertinoDialog;
 import 'package:flutter/material.dart';
@@ -504,9 +505,10 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
 /// target, opens a popover to choose (and remember) where to play.
 ///
 /// "Playing", with the prism meter, shows while the app player is on this
-/// mix; tapping it opens Now Playing. A mix with anything Spotify can act on
-/// keeps today's rules: the transfer-tool handoff takes the arrow's place,
-/// and a mix Apple Music can do nothing with is the handoff alone.
+/// mix; tapping it opens Now Playing. A mix with anything Apple Music can
+/// play keeps the arrow; when it also carries Spotify ids, the arrow's menu
+/// ends with "Send to a transfer tool" behind a separator. Only a mix Apple
+/// Music can do nothing with (and Spotify can) is the handoff alone.
 class MixSplitPlay extends ConsumerWidget {
   const MixSplitPlay({
     super.key,
@@ -565,9 +567,10 @@ class MixSplitPlay extends ConsumerWidget {
   Future<void> _choose(
     BuildContext arrowContext,
     WidgetRef ref,
-    PlayDestination current,
-  ) async {
-    final picked = await showMixtapeMenu<PlayDestination>(
+    PlayDestination current, {
+    required bool canShare,
+  }) async {
+    final picked = await showMixtapeMenu<Object>(
       arrowContext,
       actions: [
         MixtapeMenuAction(
@@ -581,13 +584,33 @@ class MixSplitPlay extends ConsumerWidget {
           value: PlayDestination.appleMusic,
           label: 'Play in Apple Music',
           isSelected: current == PlayDestination.appleMusic,
+          icon: CupertinoIcons.music_note,
         ),
+        if (canShare)
+          MixtapeMenuAction(
+            key: keys.share,
+            value: _shareChoice,
+            label: shareLabel,
+            separatorBefore: true,
+            icon: CupertinoIcons.share,
+            enabled: !sharing && onShare != null,
+          ),
       ],
     );
-    if (picked == null) return;
+    // The host can rebuild without this Play while the menu is up; its ref
+    // is gone with it.
+    if (picked == null || !arrowContext.mounted) return;
+    if (picked == _shareChoice) {
+      onShare?.call(arrowContext);
+      return;
+    }
+    if (picked is! PlayDestination) return;
     unawaited(ref.read(playDestinationProvider.notifier).choose(picked));
     onPlay(picked);
   }
+
+  /// The menu value of the transfer-tool entry.
+  static const Object _shareChoice = #shareToTransferTool;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -650,37 +673,26 @@ class MixSplitPlay extends ConsumerWidget {
               ],
             ),
           ),
-          side: spotify
-              ? Builder(
-                  builder: (shareContext) => _Segment(
-                    key: keys.share,
-                    label: shareLabel,
-                    width: arrowWidth,
-                    onTap: enabled && !sharing && onShare != null
-                        ? () => onShare!(shareContext)
-                        : null,
-                    child: Icon(
-                      Icons.ios_share,
-                      size: 16,
-                      color: _ink(context),
-                    ),
-                  ),
-                )
-              : Builder(
-                  builder: (arrowContext) => _Segment(
-                    key: keys.playMenu,
-                    label: arrowLabel,
-                    width: arrowWidth,
-                    onTap: live
-                        ? () => _choose(arrowContext, ref, destination)
-                        : null,
-                    child: Icon(
-                      Icons.keyboard_arrow_down_rounded,
-                      size: 20,
-                      color: _ink(context),
-                    ),
-                  ),
-                ),
+          side: Builder(
+            builder: (arrowContext) => _Segment(
+              key: keys.playMenu,
+              label: arrowLabel,
+              width: arrowWidth,
+              onTap: live
+                  ? () => _choose(
+                      arrowContext,
+                      ref,
+                      destination,
+                      canShare: spotify,
+                    )
+                  : null,
+              child: Icon(
+                Icons.keyboard_arrow_down_rounded,
+                size: 20,
+                color: _ink(context),
+              ),
+            ),
+          ),
         );
       },
     );

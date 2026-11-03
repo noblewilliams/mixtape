@@ -1479,14 +1479,18 @@ void main() {
         final share = find.byKey(const Key('share-button'));
         expect(play, findsOneWidget);
         expect(tester.widget<LabelChip>(save).onPressed, isNotNull);
-        // The Spotify half of a mixed mix is reachable too (plan: Outputs):
-        // the transfer handoff takes the arrow's place.
-        expect(share, findsOneWidget);
-        expect(find.byKey(const Key('play-menu-button')), findsNothing);
         // Apple first in reading order — the actions row wraps at narrow
         // widths, so "first" is by run and then by position within it.
-        expect(_precedes(tester, play, share), isTrue);
-        expect(_precedes(tester, share, save), isTrue);
+        expect(_precedes(tester, play, save), isTrue);
+        // The Spotify half of a mixed mix is reachable too (plan: Outputs):
+        // the arrow keeps its place, and its menu ends with the handoff.
+        expect(share, findsNothing);
+        await tester.tap(find.byKey(const Key('play-menu-button')));
+        await tester.pumpAndSettle();
+        expect(share, findsOneWidget);
+        expect(find.text('Play in Apple Music'), findsOneWidget);
+        await tester.tap(find.byKey(const Key('mixtape-menu-barrier')));
+        await tester.pumpAndSettle();
         expect(find.byKey(const Key('open-in-spotify-t0')), findsNothing);
         expect(find.byKey(const Key('open-in-spotify-t1')), findsOneWidget);
       },
