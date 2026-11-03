@@ -6,8 +6,7 @@
 ///
 /// Reads the same source rows the onboarding state carries (they are the
 /// `/me/music-sources` rows), so Home's waiting card, the Library tab and this
-/// list never disagree. Pushed from the Library tab's More menu and from an
-/// Apple source row.
+/// list never disagree. Pushed from the Library tab's "Your music" button.
 library;
 
 import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
@@ -33,7 +32,7 @@ import '../widgets/foundation/service_marks.dart';
 import '../widgets/foundation/status_word.dart';
 import '../widgets/foundation/tape_button.dart';
 import '../widgets/foundation/text_action.dart';
-import '../widgets/library_sync_sheet.dart';
+import '../widgets/library_sync_dialog.dart';
 import 'import_sheet.dart';
 import 'playlist_browser_screen.dart';
 import 'spotify_request_screen.dart';
@@ -141,7 +140,11 @@ class SourceMark extends StatelessWidget {
   @override
   Widget build(BuildContext context) => SizedBox.square(
     dimension: kSourceMarkSize,
-    child: Center(child: source.startsWith('apple') ? const AppleMusicMark(size: 24) : const SpotifyMark(size: 24)),
+    child: Center(
+      child: source.startsWith('apple')
+          ? const AppleMusicMark(size: 24)
+          : const SpotifyMark(size: 24),
+    ),
   );
 }
 
@@ -216,7 +219,7 @@ class MusicSourcesScreen extends ConsumerWidget {
             key: syncKey,
             icon: Icons.sync,
             label: 'Sync library',
-            onPressed: () => LibrarySyncSheet.show(context),
+            onPressed: () => showLibrarySync(context, ref),
           ),
           GlassButton(
             key: const Key('browse-playlists'),

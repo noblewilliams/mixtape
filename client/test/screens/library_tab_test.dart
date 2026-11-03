@@ -1,7 +1,8 @@
 // The Library tab (plan `docs/superpowers/plans/2026-09-17-native-design-
-// implementation.md` task 8.1; board frame L1): Sources and Playlists as two
-// flush lists under bold section words, the glass Sync/More cluster at the
-// title, and the states the approved record names — empty, loading, failed.
+// implementation.md` task 8.1; reworked by `docs/mockups/approved/2026-11-03-
+// library-sources.md`): the sources strip and the Playlists list, the labelled
+// Sync / Your music cluster at the title, and the states the approved records
+// name — empty, loading, failed.
 //
 // The tab hosts Your music and the playlist browser unchanged; both are
 // pushed, and this file asserts by pushed type.
@@ -38,9 +39,8 @@ import 'package:mixtape/presentation/widgets/foundation/flush_row.dart';
 import 'package:mixtape/presentation/widgets/foundation/frosted_dock.dart'
     show kFrostedDockHeight;
 import 'package:mixtape/presentation/widgets/foundation/glass_cluster.dart';
-import 'package:mixtape/presentation/widgets/foundation/service_marks.dart';
-import 'package:mixtape/presentation/widgets/foundation/status_word.dart';
-import 'package:mixtape/presentation/widgets/library_sync_sheet.dart';
+import 'package:flutter/cupertino.dart' show CupertinoAlertDialog;
+import 'package:mixtape/presentation/widgets/library_sync_dialog.dart';
 
 import '../helpers/fake_import_service.dart';
 import '../helpers/fake_listening_api.dart';
@@ -130,10 +130,8 @@ class _SlowApi extends _PagedApi {
   }
 }
 
-MusicSource _apple() => musicSource(
-  source: 'apple_live',
-  lastImportedAt: DateTime(2026, 9, 4, 10),
-);
+MusicSource _apple() =>
+    musicSource(source: 'apple_live', lastImportedAt: DateTime(2026, 9, 4, 10));
 
 MusicSource _spotify() => musicSource(
   packages: ['spotify_account'],
@@ -237,7 +235,7 @@ Future<void> _pump(
   }
 }
 
-/// A sync already under way, so the sheet's running copy can be asserted
+/// A sync already under way, so the alert's running copy can be asserted
 /// without touching the MusicKit bridge.
 class _RunningSync extends LibrarySyncNotifier {
   @override
@@ -255,17 +253,22 @@ void main() {
         expect(find.text('Sources'), findsNothing);
         expect(find.text('Playlists'), findsOneWidget);
         expect(find.byType(GlassCluster), findsOneWidget);
-        expect(find.byKey(LibraryTab.syncButtonKey), findsOneWidget);
-        // It syncs Apple Music, so it wears Apple Music's mark rather than
-        // the generic sync arrows (smoke round four, note 3).
+        // The buttons say what they do (2026-11-03 approval).
         expect(
           find.descendant(
             of: find.byKey(LibraryTab.syncButtonKey),
-            matching: find.byType(AppleMusicMark),
+            matching: find.text('Sync'),
           ),
           findsOneWidget,
         );
-        expect(find.byKey(LibraryTab.moreButtonKey), findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byKey(LibraryTab.yourMusicKey),
+            matching: find.text('Your music'),
+          ),
+          findsOneWidget,
+        );
+        expect(find.byIcon(Icons.more_horiz), findsNothing);
         expect(tester.takeException(), isNull);
       });
     }
@@ -309,72 +312,95 @@ void main() {
       );
 
       expect(find.text('Library'), findsOneWidget);
-      expect(find.byKey(LibraryTab.addSpotifyKey), findsOneWidget);
+      expect(find.byKey(LibraryTab.spotifySourceKey), findsOneWidget);
+      expect(find.byKey(LibraryTab.syncButtonKey), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   });
 
   group('sources', () {
-    testWidgets('each source is a compact badge with its service logo', (
+    testWidgets('one strip of two halves, each with its status', (
       tester,
     ) async {
       await _pump(tester, _container());
 
-      expect(find.byKey(LibraryTab.sourceRowKey('apple_live')), findsOneWidget);
+      final apple = find.byKey(LibraryTab.appleSourceKey);
+      final spotify = find.byKey(LibraryTab.spotifySourceKey);
       expect(
-        find.byKey(LibraryTab.sourceRowKey('spotify_export')),
+        find.descendant(of: apple, matching: find.text('Apple Music')),
         findsOneWidget,
       );
-      expect(find.text('Apple Music'), findsOneWidget);
-      expect(find.text('Spotify'), findsOneWidget);
-      expect(find.byType(StatusWord), findsNothing);
-      expect(find.byType(SourceMark), findsNWidgets(2));
+      expect(
+        find.descendant(of: apple, matching: find.text('Synced 4 Sep')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: spotify, matching: find.text('1 of 2 in')),
+        findsOneWidget,
+      );
+      // Side by side, on one row.
+      expect(
+        tester.getCenter(apple).dy,
+        moreOrLessEquals(tester.getCenter(spotify).dy, epsilon: 1),
+      );
+      expect(
+        tester.getSize(apple).height,
+        lessThan(80),
+        reason: 'the strip is one compact row',
+      );
     });
 
-    testWidgets('the Apple row opens Your music', (tester) async {
-      await _pump(tester, _container());
-
-      await tester.tap(find.byKey(LibraryTab.sourceRowKey('apple_live')));
-      await tester.pumpAndSettle();
-
-      expect(find.byType(MusicSourcesScreen), findsOneWidget);
-    });
-
-    testWidgets('an imported source offers Import again and Remove, keeping '
-        'the approved confirmation', (tester) async {
+    testWidgets('a service with nothing in yet invites adding it', (
+      tester,
+    ) async {
       final listening = FakeListeningApi(
         onboarding: onboardingState(
-          chosenService: 'spotify',
-          sources: [_spotify()],
+          chosenService: 'apple',
+          hasLibrary: true,
+          sources: [_apple()],
         ),
       );
       await _pump(tester, _container(listening: listening));
 
-      await tester.tap(find.byKey(LibraryTab.sourceRowKey('spotify_export')));
-      await tester.pumpAndSettle();
       expect(
-        find.byKey(LibraryTab.sourceImportAgainKey('spotify_export')),
+        find.descendant(
+          of: find.byKey(LibraryTab.spotifySourceKey),
+          matching: find.text('Add music'),
+        ),
         findsOneWidget,
       );
-
-      await tester.tap(find.byKey(LibraryTab.sourceRemoveKey('spotify_export')));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Remove Spotify · account data?'), findsOneWidget);
-      expect(find.byKey(const Key('remove-keep')), findsOneWidget);
-      await tester.tap(find.byKey(const Key('remove-confirm')));
-      await tester.pumpAndSettle();
-
-      expect(listening.deletedSources, ['spotify_export']);
     });
 
-    testWidgets('Add Spotify music opens the import guide', (tester) async {
+    testWidgets('the halves stack at large text', (tester) async {
+      await _pump(tester, _container(), textScale: 1.5);
+
+      final apple = tester.getRect(find.byKey(LibraryTab.appleSourceKey));
+      final spotify = tester.getRect(find.byKey(LibraryTab.spotifySourceKey));
+      expect(spotify.top, greaterThanOrEqualTo(apple.bottom));
+    });
+
+    testWidgets('the Apple half opens Add your music on Apple Music', (
+      tester,
+    ) async {
       await _pump(tester, _container());
 
-      await tester.tap(find.byKey(LibraryTab.addSpotifyKey));
+      await tester.tap(find.byKey(LibraryTab.appleSourceKey));
       await tester.pumpAndSettle();
 
       expect(find.byType(SpotifyRequestScreen), findsOneWidget);
+      expect(find.byKey(SpotifyRequestScreen.appleSyncKey), findsOneWidget);
+    });
+
+    testWidgets('the Spotify half opens Add your music on Spotify', (
+      tester,
+    ) async {
+      await _pump(tester, _container());
+
+      await tester.tap(find.byKey(LibraryTab.spotifySourceKey));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(SpotifyRequestScreen), findsOneWidget);
+      expect(find.byKey(const Key('open-exportify')), findsOneWidget);
     });
 
     testWidgets('no sources: the cassette, the words and a way in', (
@@ -613,17 +639,20 @@ void main() {
   });
 
   group('cluster', () {
-    testWidgets('Sync opens the shared library sync sheet', (tester) async {
+    testWidgets('Sync asks before syncing again, in a centred alert', (
+      tester,
+    ) async {
       await _pump(tester, _container());
 
       await tester.tap(find.byKey(LibraryTab.syncButtonKey));
       await tester.pumpAndSettle();
 
-      expect(find.byType(LibrarySyncSheet), findsOneWidget);
-      expect(find.byKey(LibrarySyncSheet.startKey), findsOneWidget);
+      expect(find.byType(CupertinoAlertDialog), findsOneWidget);
+      expect(find.text(LibrarySyncDialog.resyncTitle), findsOneWidget);
+      expect(find.textContaining('Last synced 4 Sep.'), findsOneWidget);
     });
 
-    testWidgets('the sheet shows a sync already running', (tester) async {
+    testWidgets('the alert shows a sync already running', (tester) async {
       await _pump(
         tester,
         _container(
@@ -638,21 +667,33 @@ void main() {
         ),
       );
 
+      // The strip carries the run as well.
+      expect(find.text('Syncing… 40%'), findsOneWidget);
+
       await tester.tap(find.byKey(LibraryTab.syncButtonKey));
       await tester.pumpAndSettle();
 
-      expect(find.text('Syncing… 40%'), findsOneWidget);
-      expect(find.byKey(LibrarySyncSheet.startKey), findsNothing);
+      expect(find.byKey(LibrarySyncDialog.progressKey), findsOneWidget);
+      expect(find.byKey(LibrarySyncDialog.startKey), findsNothing);
     });
 
-    testWidgets('More holds Your music, and nothing else is lost', (
+    testWidgets('a Spotify listener with no Apple library gets no Sync', (
       tester,
     ) async {
-      await _pump(tester, _container());
+      final listening = FakeListeningApi(
+        onboarding: onboardingState(
+          chosenService: 'spotify',
+          sources: [_spotify()],
+        ),
+      );
+      await _pump(tester, _container(listening: listening));
 
-      await tester.tap(find.byKey(LibraryTab.moreButtonKey));
-      await tester.pumpAndSettle();
+      expect(find.byKey(LibraryTab.syncButtonKey), findsNothing);
       expect(find.byKey(LibraryTab.yourMusicKey), findsOneWidget);
+    });
+
+    testWidgets('Your music opens straight from the title', (tester) async {
+      await _pump(tester, _container());
 
       await tester.tap(find.byKey(LibraryTab.yourMusicKey));
       await tester.pumpAndSettle();

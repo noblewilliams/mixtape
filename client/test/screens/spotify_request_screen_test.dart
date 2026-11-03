@@ -11,7 +11,7 @@ import 'package:mixtape/presentation/widgets/foundation/section_word.dart';
 import 'package:mixtape/presentation/widgets/foundation/segmented_toggle.dart';
 import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
 import 'package:mixtape/presentation/widgets/foundation/text_action.dart';
-import 'package:mixtape/presentation/widgets/library_sync_sheet.dart';
+import 'package:mixtape/presentation/widgets/library_sync_dialog.dart';
 
 import '../helpers/fake_import_service.dart';
 import '../helpers/fake_listening_api.dart';
@@ -70,7 +70,8 @@ void expectNativeControls(WidgetTester tester, Finder root) {
           w is InsetRow ||
           w is Switch ||
           w is SegmentedToggle ||
-          (w is InkWell && w.key == const Key('link-spotify-privacy')),
+          (w is InkWell && w.key == const Key('link-spotify-privacy')) ||
+          (w is InkWell && w.key == SpotifyRequestScreen.goDeeperKey),
     ),
   );
   expect(controls, findsWidgets);
@@ -93,6 +94,15 @@ void expectNativeControls(WidgetTester tester, Finder root) {
   }
 }
 
+/// The disclosure row sits under the pane's sections, below the fold on a
+/// test surface.
+Future<void> openDeeper(WidgetTester tester) async {
+  final row = find.byKey(SpotifyRequestScreen.goDeeperKey);
+  await tester.ensureVisible(row);
+  await tester.pumpAndSettle();
+  await tester.tap(row);
+}
+
 void main() {
   testWidgets(
     'renders the eight request steps, word for word, with the address as a link',
@@ -111,7 +121,7 @@ void main() {
       // gate's own copy is pinned by its own test below.
       expect(find.text('Add your music'), findsOneWidget);
       expect(find.byKey(const Key('link-spotify-privacy')), findsNothing);
-      await tester.tap(find.byKey(const Key('go-deeper')));
+      await openDeeper(tester);
       await tester.pumpAndSettle();
       expect(spotifyRequestSteps, hasLength(8));
       for (var i = 1; i <= 8; i++) {
@@ -184,7 +194,7 @@ void main() {
 
       expect(
         tester.widget<SectionWord>(find.byType(SectionWord).first).text,
-        'Export your saved music',
+        'Saved music',
       );
       expect(exportifyQuickStartSteps, hasLength(3));
       for (var i = 0; i < exportifyQuickStartSteps.length; i++) {
@@ -192,7 +202,9 @@ void main() {
         expect(find.text(exportifyQuickStartSteps[i]), findsOneWidget);
       }
       expect(
-        tester.widget<TapeButton>(find.byKey(const Key('open-exportify'))).label,
+        tester
+            .widget<TapeButton>(find.byKey(const Key('open-exportify')))
+            .label,
         'Open Exportify ↗',
       );
       expect(
@@ -205,8 +217,8 @@ void main() {
       // round four, note 4).
       expect(find.text(exportifyRowNote), findsOneWidget);
       expect(find.text('Opens exportify.app outside Mixtape.'), findsNothing);
-      // The deeper block is one inset group, not a bordered card.
-      expect(find.byType(InsetGroup), findsOneWidget);
+      // Flush sections now: no inset box around the deeper block.
+      expect(find.byType(InsetGroup), findsNothing);
       expectNativeControls(tester, find.byType(SpotifyRequestScreen));
 
       await tester.tap(find.byKey(const Key('open-exportify')));
@@ -236,7 +248,7 @@ void main() {
         onboardingContainer(listening: listening, reminders: reminders),
         const SpotifyRequestScreen(),
       );
-      await tester.tap(find.byKey(const Key('go-deeper')));
+      await openDeeper(tester);
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('requested-elapsed')), findsNothing);
       expect(
@@ -285,7 +297,7 @@ void main() {
         ),
         findsNothing,
       );
-      await tester.tap(find.byKey(const Key('go-deeper')));
+      await openDeeper(tester);
       await tester.pumpAndSettle();
       expect(find.text('Requested 2 days ago'), findsOneWidget);
       expect(reminders.scheduled, isEmpty);
@@ -342,7 +354,7 @@ void main() {
     );
 
     expect(find.text('Add your music'), findsOneWidget);
-    await tester.tap(find.byKey(const Key('go-deeper')));
+    await openDeeper(tester);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('mark-requested')), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -363,7 +375,7 @@ void main() {
     expect(find.text(exportifyRowNote), findsOneWidget);
     await tester.ensureVisible(find.byKey(const Key('go-deeper')));
     await tester.pump();
-    await tester.tap(find.byKey(const Key('go-deeper')));
+    await openDeeper(tester);
     await tester.pumpAndSettle();
     expect(find.text('spotify.com/account/privacy'), findsOneWidget);
     expectNativeControls(tester, find.byType(SpotifyRequestScreen));
@@ -443,15 +455,28 @@ void main() {
           const SpotifyRequestScreen(),
         );
 
-        // The same sheet the Library tab's Sync button opens.
+        // Never synced: the sync is the pane's one tape button, and it opens
+        // the same alert the Library tab's Sync button does.
+        expect(
+          find.descendant(
+            of: find.byKey(SpotifyRequestScreen.appleSyncKey),
+            matching: find.text('Sync your library'),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          tester.widget(find.byKey(const Key('choose-apple-files'))),
+          isA<LabelChip>(),
+        );
         await tester.tap(find.byKey(SpotifyRequestScreen.appleSyncKey));
         await tester.pumpAndSettle();
-        expect(find.byType(LibrarySyncSheet), findsOneWidget);
-        await tester.tapAt(const Offset(10, 10));
+        expect(find.byType(LibrarySyncDialog), findsOneWidget);
+        expect(find.text(LibrarySyncDialog.firstTitle), findsOneWidget);
+        await tester.tap(find.byKey(LibrarySyncDialog.cancelKey));
         await tester.pumpAndSettle();
 
         // Apple's own request steps, behind the same disclosure row.
-        await tester.tap(find.byKey(SpotifyRequestScreen.goDeeperKey));
+        await openDeeper(tester);
         await tester.pumpAndSettle();
         expect(find.text('privacy.apple.com'), findsNWidgets(2));
         expect(
@@ -468,6 +493,114 @@ void main() {
         expect(find.byKey(SpotifyRequestScreen.appleSyncKey), findsNothing);
       },
     );
+
+    testWidgets(
+      'synced: the status row offers Sync again and the Apple file is the '
+      'tape button, in plain sight',
+      (tester) async {
+        final listening = FakeListeningApi(
+          onboarding: onboardingState(
+            chosenService: 'apple',
+            hasLibrary: true,
+            sources: [
+              musicSource(
+                source: 'apple_live',
+                lastImportedAt: DateTime(DateTime.now().year, 11, 2),
+              ),
+            ],
+          ),
+        );
+        await pumpRequest(
+          tester,
+          onboardingContainer(listening: listening),
+          const SpotifyRequestScreen(),
+        );
+
+        expect(find.text('Synced 2 Nov'), findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byKey(SpotifyRequestScreen.appleSyncKey),
+            matching: find.text('Sync again'),
+          ),
+          findsOneWidget,
+        );
+        expect(find.text('Listening history'), findsOneWidget);
+        expect(
+          tester.widget(find.byKey(const Key('choose-apple-files'))),
+          isA<TapeButton>(),
+        );
+        // The request steps stay folded until asked for.
+        expect(find.byKey(const Key('link-apple-privacy')), findsNothing);
+
+        await tester.tap(find.byKey(SpotifyRequestScreen.appleSyncKey));
+        await tester.pumpAndSettle();
+        expect(find.text(LibrarySyncDialog.resyncTitle), findsOneWidget);
+      },
+    );
+
+    testWidgets('history added: its status and Replace file, no steps', (
+      tester,
+    ) async {
+      final listening = FakeListeningApi(
+        onboarding: onboardingState(
+          chosenService: 'apple',
+          hasLibrary: true,
+          sources: [
+            musicSource(
+              source: 'apple_live',
+              lastImportedAt: DateTime(DateTime.now().year, 11, 2),
+            ),
+            musicSource(
+              source: 'apple_export',
+              lastImportedAt: DateTime(DateTime.now().year, 10, 28),
+            ),
+          ],
+        ),
+      );
+      await pumpRequest(
+        tester,
+        onboardingContainer(listening: listening),
+        const SpotifyRequestScreen(),
+      );
+
+      expect(find.text('History added 28 Oct'), findsOneWidget);
+      expect(
+        tester
+            .widget<TextAction>(find.byKey(const Key('choose-apple-files')))
+            .label,
+        'Replace file',
+      );
+      expect(find.byKey(SpotifyRequestScreen.goDeeperKey), findsNothing);
+    });
+
+    testWidgets('saved music in: Import again on the status row, the '
+        'Exportify block gone', (tester) async {
+      final listening = FakeListeningApi(
+        onboarding: onboardingState(
+          chosenService: 'spotify',
+          sources: [
+            musicSource(
+              packages: ['spotify_exportify'],
+              lastImportedAt: DateTime(DateTime.now().year, 10, 12),
+            ),
+          ],
+        ),
+      );
+      await pumpRequest(
+        tester,
+        onboardingContainer(listening: listening),
+        const SpotifyRequestScreen(),
+      );
+
+      expect(find.text('Saved music imported'), findsOneWidget);
+      expect(
+        find.byKey(SpotifyRequestScreen.spotifyImportAgainKey),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('open-exportify')), findsNothing);
+      expect(find.byKey(const Key('choose-import-files')), findsOneWidget);
+      expectNativeControls(tester, find.byType(SpotifyRequestScreen));
+    });
 
     testWidgets(
       'Open Exportify and Choose files spread across one row at 1x and stack '

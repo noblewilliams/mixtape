@@ -9,7 +9,7 @@ import 'package:mixtape/presentation/screens/spotify_request_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/flush_row.dart';
 import 'package:mixtape/presentation/widgets/foundation/status_word.dart';
-import 'package:mixtape/presentation/widgets/library_sync_sheet.dart';
+import 'package:mixtape/presentation/widgets/library_sync_dialog.dart';
 
 import '../helpers/fake_import_service.dart';
 import '../helpers/fake_listening_api.dart';
@@ -385,8 +385,8 @@ void main() {
     await tester.tap(find.byKey(MusicSourcesScreen.syncKey));
     await tester.pumpAndSettle();
 
-    expect(find.byType(LibrarySyncSheet), findsOneWidget);
-    expect(find.byKey(LibrarySyncSheet.startKey), findsOneWidget);
+    expect(find.byType(LibrarySyncDialog), findsOneWidget);
+    expect(find.byKey(LibrarySyncDialog.startKey), findsOneWidget);
   });
 
   testWidgets('holds at 200% text on a 320 pt phone, in dark', (tester) async {
