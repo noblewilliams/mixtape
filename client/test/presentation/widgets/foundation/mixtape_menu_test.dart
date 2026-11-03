@@ -131,6 +131,26 @@ void main() {
     expect(menu.right, closeTo(anchor.right, 0.5));
   });
 
+  testWidgets('a control in the lower half opens above even with room below', (
+    tester,
+  ) async {
+    // The conversation's Play arrow sits above the composer: a menu below
+    // it would cover what the listener is typing.
+    await _host(
+      tester,
+      actions: _plain,
+      alignment: const Alignment(1, 0.3),
+    );
+    await _open(tester);
+
+    final menu = tester.getRect(find.byKey(mixtapeMenuKey));
+    final anchor = tester.getRect(find.byKey(_anchorKey));
+    expect(anchor.center.dy, greaterThan(844 / 2));
+    expect(844 - 14 - anchor.bottom, greaterThan(menu.height + 6));
+    expect(menu.bottom, lessThanOrEqualTo(anchor.top));
+    expect(anchor.top - menu.bottom, lessThan(16));
+  });
+
   testWidgets('rows are 44 pt with subtitle, tick, icon and leading', (
     tester,
   ) async {

@@ -80,8 +80,9 @@ const Key mixtapeMenuLiftKey = Key('mixtape-menu-lift');
 
 /// Presents [actions] in a popover anchored to [context]'s render box.
 ///
-/// It opens below the anchor, or above it when there is no room, clamped to
-/// the screen with 14 pt margins. When [context] has no laid-out box it sits
+/// It opens below an anchor in the upper half of the screen and above one in
+/// the lower half, taking the other side only when there is no room, clamped
+/// to the screen with 14 pt margins. When [context] has no laid-out box it sits
 /// centred near the top of the screen.
 ///
 /// [lifted], when given, builds a copy of the anchor that is drawn over the
@@ -323,8 +324,9 @@ MixtapeTokens _tokensOf(ThemeData theme) =>
         ? MixtapeTokens.dark
         : MixtapeTokens.light);
 
-/// Places the popover below [anchor], or above it when there is no room,
-/// clamped to the screen's margins.
+/// Places the popover below an [anchor] in the upper half, above one in the
+/// lower half (the other side when there is no room), clamped to the
+/// screen's margins.
 class _MenuLayout extends SingleChildLayoutDelegate {
   const _MenuLayout({required this.anchor, required this.padding});
 
@@ -368,10 +370,17 @@ class _MenuLayout extends SingleChildLayoutDelegate {
 
     final below = a.bottom + MixtapeMenuMetrics.anchorGap;
     final above = a.top - MixtapeMenuMetrics.anchorGap - child.height;
+    final fitsBelow = below + child.height <= bottom;
+    final fitsAbove = above >= top;
+    // A control in the lower half opens upward, like the board's Play
+    // arrow over the composer; one in the upper half opens downward.
+    final preferAbove = a.center.dy >= size.height / 2;
     final double y;
-    if (below + child.height <= bottom) {
+    if (preferAbove && fitsAbove) {
+      y = above;
+    } else if (fitsBelow) {
       y = below;
-    } else if (above >= top) {
+    } else if (fitsAbove) {
       y = above;
     } else {
       // Neither side fits whole: take the roomier side, then clamp.
