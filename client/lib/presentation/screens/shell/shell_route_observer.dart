@@ -15,7 +15,7 @@ import 'package:flutter/material.dart';
 /// `ModalRoute<dynamic>` rather than `ModalRoute<void>` on purpose:
 /// [RouteObserver] notifies a subscriber only when both the route arriving and
 /// the route below it are of its own type, and the sheets that open over Home
-/// carry results (the shape sheet returns an `EnergyShapeChoice`).
+/// carry results (the menus and pickers return what was chosen).
 typedef ShellRouteObserver = RouteObserver<ModalRoute<dynamic>>;
 
 /// Publishes a tab's [ShellRouteObserver] to everything built inside it.

@@ -532,8 +532,6 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(EnergyControl.presetKey(EnergyArc.fall)));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(EnergyControl.confirmKey));
-      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('start-session')));
       await tester.pumpAndSettle();
 
