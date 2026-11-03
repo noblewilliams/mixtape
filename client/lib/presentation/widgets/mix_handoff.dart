@@ -584,7 +584,7 @@ class MixSplitPlay extends ConsumerWidget {
           value: PlayDestination.appleMusic,
           label: 'Play in Apple Music',
           isSelected: current == PlayDestination.appleMusic,
-          icon: CupertinoIcons.music_note,
+          icon: MixMenuIcons.playInMusic,
         ),
         if (canShare)
           MixtapeMenuAction(

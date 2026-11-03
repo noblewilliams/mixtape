@@ -69,6 +69,22 @@ class MixtapeMenuAction<T> {
   final IconData? icon;
 }
 
+/// The trailing glyphs the board gives the mix menus (`.pop .ico`): the
+/// nearest Material and Cupertino shapes to its drawn icons.
+abstract final class MixMenuIcons {
+  static const IconData history = Icons.history_rounded;
+
+  /// Two reels and the tape between them: the board's cassette glyph.
+  static const IconData tape = Icons.voicemail_rounded;
+  static const IconData rename = CupertinoIcons.pencil;
+  static const IconData archive = CupertinoIcons.archivebox;
+  static const IconData playInMusic = CupertinoIcons.music_note;
+  static const IconData startFromPlaylist = Icons.playlist_add_rounded;
+
+  /// One curve: the shape the energy takes.
+  static const IconData shape = Icons.show_chart_rounded;
+}
+
 /// The popover itself, for tests.
 const Key mixtapeMenuKey = Key('mixtape-menu');
 

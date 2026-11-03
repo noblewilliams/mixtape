@@ -345,14 +345,27 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
     final action = await showMixtapeMenu<String>(
       anchor,
       actions: [
-        const MixtapeMenuAction(value: 'history', label: 'Version history'),
-        const MixtapeMenuAction(value: 'tape-settings', label: 'Tape settings'),
-        const MixtapeMenuAction(value: 'rename', label: 'Rename'),
+        const MixtapeMenuAction(
+          value: 'history',
+          label: 'Version history',
+          icon: MixMenuIcons.history,
+        ),
+        const MixtapeMenuAction(
+          value: 'tape-settings',
+          label: 'Tape settings',
+          icon: MixMenuIcons.tape,
+        ),
+        const MixtapeMenuAction(
+          value: 'rename',
+          label: 'Rename',
+          icon: MixMenuIcons.rename,
+        ),
         MixtapeMenuAction(
           value: 'status',
           label: archived ? 'Restore' : 'Archive',
           isDestructive: !archived,
           separatorBefore: true,
+          icon: MixMenuIcons.archive,
         ),
       ],
     );

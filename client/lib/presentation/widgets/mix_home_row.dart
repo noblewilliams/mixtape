@@ -109,18 +109,28 @@ class _MixHomeRowState extends State<MixHomeRow> {
   /// so it offers Rename and Archive/Restore only.
   List<MixtapeMenuAction<String>> _menuItems(bool archived) => [
     if (widget.onCaseColor != null && !_isAlbum)
-      const MixtapeMenuAction(value: 'tape-settings', label: 'Tape settings'),
-    const MixtapeMenuAction(value: MixHomeRow.renameAction, label: 'Rename'),
+      const MixtapeMenuAction(
+        value: 'tape-settings',
+        label: 'Tape settings',
+        icon: MixMenuIcons.tape,
+      ),
+    const MixtapeMenuAction(
+      value: MixHomeRow.renameAction,
+      label: 'Rename',
+      icon: MixMenuIcons.rename,
+    ),
     if (!_isAlbum)
       const MixtapeMenuAction(
         value: MixHomeRow.versionHistoryAction,
         label: 'Version history',
+        icon: MixMenuIcons.history,
       ),
     MixtapeMenuAction(
       value: MixHomeRow.statusAction,
       label: archived ? 'Restore' : 'Archive',
       isDestructive: !archived,
       separatorBefore: true,
+      icon: MixMenuIcons.archive,
     ),
   ];
 

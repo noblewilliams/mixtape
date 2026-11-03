@@ -282,18 +282,28 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       anchor,
       actions: [
         if (!album)
-          const MixtapeMenuAction(value: 'history', label: 'Version history'),
+          const MixtapeMenuAction(
+            value: 'history',
+            label: 'Version history',
+            icon: MixMenuIcons.history,
+          ),
         if (!album)
           const MixtapeMenuAction(
             value: 'tape-settings',
             label: 'Tape settings',
+            icon: MixMenuIcons.tape,
           ),
-        const MixtapeMenuAction(value: 'rename', label: 'Rename'),
+        const MixtapeMenuAction(
+          value: 'rename',
+          label: 'Rename',
+          icon: MixMenuIcons.rename,
+        ),
         MixtapeMenuAction(
           value: 'status',
           label: archived ? 'Restore' : 'Archive',
           isDestructive: !archived,
           separatorBefore: true,
+          icon: MixMenuIcons.archive,
         ),
       ],
     );
@@ -1093,6 +1103,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           value: 'playlist',
           label: 'Start from a playlist',
           enabled: inspiration.canSelect,
+          icon: MixMenuIcons.startFromPlaylist,
         ),
         if (shapeable)
           const MixtapeMenuAction(
@@ -1100,6 +1111,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             value: 'shape',
             label: 'Shape the energy',
             subtitle: 'Steady, build, wind down…',
+            icon: MixMenuIcons.shape,
           ),
       ],
     );

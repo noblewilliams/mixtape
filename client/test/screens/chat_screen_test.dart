@@ -5,6 +5,7 @@ import 'package:mixtape/presentation/widgets/mix_energy_summary.dart';
 import 'package:mixtape/data/playlists/playlist_context_models.dart';
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -28,6 +29,7 @@ import 'package:mixtape/presentation/screens/mix_history_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/screens/queue_screen.dart';
 import 'package:mixtape/presentation/screens/playback_screen.dart';
+import 'package:mixtape/presentation/widgets/foundation/mixtape_menu.dart';
 import 'package:mixtape/presentation/widgets/lyric_turn.dart';
 import 'package:mixtape/presentation/widgets/energy_journey.dart';
 import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
@@ -1250,6 +1252,38 @@ void main() {
       await tester.tap(find.text('Restore'));
       await tester.pumpAndSettle();
       expect(find.text('Mix restored'), findsOneWidget);
+    });
+
+    testWidgets('every entry wears the board\'s trailing glyph', (tester) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(queueVersion: 0), messages: [], queue: []);
+      await _pump(tester, _makeContainer(api));
+
+      Map<String, IconData?> icons() => {
+        for (final item in tester.widgetList<MixtapeMenuItem<String>>(
+          find.byType(MixtapeMenuItem<String>),
+        ))
+          item.action.label: item.action.icon,
+      };
+
+      await tester.tap(find.byKey(const Key('chat-actions')));
+      await tester.pumpAndSettle();
+      expect(icons(), {
+        'Version history': Icons.history_rounded,
+        'Tape settings': Icons.voicemail_rounded,
+        'Rename': CupertinoIcons.pencil,
+        'Archive': CupertinoIcons.archivebox,
+      });
+      await tester.tap(find.byKey(mixtapeMenuBarrierKey));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('chat-plus')));
+      await tester.pumpAndSettle();
+      expect(icons(), {
+        'Start from a playlist': Icons.playlist_add_rounded,
+        'Shape the energy': Icons.show_chart_rounded,
+      });
     });
 
     testWidgets('Version history opens the history screen', (tester) async {
