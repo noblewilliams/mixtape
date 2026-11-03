@@ -73,9 +73,14 @@ class MixHistoryScreen extends ConsumerStatefulWidget {
     super.key,
     required this.sessionId,
     this.initialVersion,
+    this.fromTape = false,
   });
   final String sessionId;
   final int? initialVersion;
+
+  /// Opened from the tape screen: "Now" goes back to it rather than stacking
+  /// a second copy on top.
+  final bool fromTape;
   @override
   ConsumerState<MixHistoryScreen> createState() => _MixHistoryScreenState();
 }
@@ -396,8 +401,13 @@ class _MixHistoryScreenState extends ConsumerState<MixHistoryScreen> {
     ];
   }
 
-  /// "Now" opens the tape itself.
+  /// "Now" opens the tape itself — by going back to it, when that is where
+  /// the listener came from.
   void _openTape() {
+    if (widget.fromTape) {
+      Navigator.of(context).pop();
+      return;
+    }
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => QueueScreen(sessionId: widget.sessionId),

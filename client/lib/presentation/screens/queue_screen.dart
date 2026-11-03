@@ -330,7 +330,8 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
   void _openHistory() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => MixHistoryScreen(sessionId: widget.sessionId),
+        builder: (_) =>
+            MixHistoryScreen(sessionId: widget.sessionId, fromTape: true),
       ),
     );
   }

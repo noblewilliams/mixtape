@@ -203,6 +203,39 @@ void main() {
     expect(find.byType(QueueScreen), findsOneWidget);
   });
 
+  testWidgets('opened from the tape, Now goes back to that tape', (
+    tester,
+  ) async {
+    final api = FakeHistory();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: _overrides(api),
+        child: MaterialApp(
+          theme: MixtapeTheme.light(),
+          home: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) =>
+                      const MixHistoryScreen(sessionId: 's', fromTape: true),
+                ),
+              ),
+              child: const Text('the tape'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('the tape'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Version 3'));
+    await tester.pumpAndSettle();
+    expect(find.byType(MixHistoryScreen), findsNothing);
+    expect(find.byType(QueueScreen), findsNothing);
+    expect(find.text('the tape'), findsOneWidget);
+  });
+
   testWidgets('an earlier version previews with its header, made-from and a '
       'sticky Use this version; Back returns to the list', (tester) async {
     final api = FakeHistory();
