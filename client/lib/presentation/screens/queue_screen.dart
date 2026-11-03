@@ -44,8 +44,11 @@ import '../widgets/foundation/cassette_tile.dart';
 import '../widgets/foundation/glass_cluster.dart';
 import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/remove_band.dart';
+import '../widgets/foundation/label_chip.dart';
 import '../widgets/foundation/tape_button.dart';
 import '../widgets/mix_handoff.dart';
+import '../widgets/mix_tape_colour.dart';
+import '../widgets/tape_header.dart';
 import '../widgets/track_row.dart';
 import 'mix_history_screen.dart';
 import '../widgets/foundation/mixtape_menu.dart';
@@ -100,6 +103,35 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
   /// (track ids) rather than as ready-made positional ops.
   final List<_QueueIntent> _intents = [];
   bool _draining = false;
+
+  /// The tape screen scrolls as one; once the cassette header has scrolled
+  /// away, the small title fades into the navigation bar.
+  final _scroll = ScrollController();
+  final _headerKey = GlobalKey();
+  bool _titleShown = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _scroll.addListener(_syncTitle);
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _syncTitle() {
+    final header = _headerKey.currentContext?.findRenderObject();
+    final height = header is RenderBox && header.hasSize
+        ? header.size.height
+        : 0.0;
+    final shown = height > 0 && _scroll.hasClients
+        ? _scroll.offset >= height - 24
+        : false;
+    if (shown != _titleShown) setState(() => _titleShown = shown);
+  }
 
   @override
   String get mixSessionId => widget.sessionId;
@@ -303,25 +335,28 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
     );
   }
 
-  /// The More menu the conversation already carries, minus Version history —
-  /// which has its own button in the cluster here.
+  /// The More menu, the same as the conversation's: Version history, Tape
+  /// settings, Rename, then Archive or Restore behind a separator.
   Future<void> _openMore(BuildContext anchor) async {
     final archived =
         ref.read(chatProvider(widget.sessionId)).value?.session.status ==
         'archived';
     final action = await showMixtapeMenu<String>(
-      context,
+      anchor,
       actions: [
-        const MixtapeMenuAction(value: 'rename', label: 'Rename'),
+        const MixtapeMenuAction(value: 'history', label: 'Version history'),
         const MixtapeMenuAction(value: 'tape-settings', label: 'Tape settings'),
+        const MixtapeMenuAction(value: 'rename', label: 'Rename'),
         MixtapeMenuAction(
           value: 'status',
           label: archived ? 'Restore' : 'Archive',
           isDestructive: !archived,
+          separatorBefore: true,
         ),
       ],
     );
     if (!mounted || action == null) return;
+    if (action == 'history') return _openHistory();
     if (action == 'rename') return _openRenameDialog();
     if (action == 'tape-settings') {
       return openTapeSettings(context, ref, widget.sessionId);
@@ -459,14 +494,38 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
 
     final reducedMotion = MediaQuery.disableAnimationsOf(context);
 
+    final caseColour = watchMixTapeColour(
+      ref,
+      widget.sessionId,
+      saved: state.session.caseColor,
+    );
+
     return _shell(
       title: state.session.title,
       hasContent: true,
-      // One scroll view, not a Column with a fixed header: at 200% text the
-      // meta line and the wrapped actions are taller than a small phone, and
-      // a header that cannot scroll would overflow the list off the screen.
+      bottomBar: visibleQueue.isEmpty
+          ? null
+          : _stickyBar(state, visibleQueue),
+      // One scroll view: the cassette header scrolls away with the songs,
+      // and at 200% text nothing is pinned that could crowd the list out.
       body: CustomScrollView(
+        controller: _scroll,
         slivers: [
+          if (visibleQueue.isNotEmpty)
+            SliverToBoxAdapter(
+              child: KeyedSubtree(
+                key: _headerKey,
+                child: TapeHeader(
+                  caseColor: caseColour,
+                  title: state.session.title,
+                  meta: tapeMetaLine(
+                    visibleQueue.length,
+                    _durationLabel(visibleQueue),
+                    state.queueVersion,
+                  ),
+                ),
+              ),
+            ),
           if (state.session.notPersonal)
             const SliverToBoxAdapter(
               child: Padding(
@@ -476,37 +535,15 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
                 child: _NotPersonalBlock(),
               ),
             ),
-          if (visibleQueue.isNotEmpty)
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: MixtapeMetrics.screenSidePadding,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _MetaLine(
-                      songs: visibleQueue.length,
-                      version: state.queueVersion,
-                      durationLabel: _durationLabel(visibleQueue),
-                    ),
-                    _actionsRow(state, visibleQueue),
-                  ],
-                ),
-              ),
-            ),
           if (visibleQueue.isEmpty)
             const SliverFillRemaining(
               hasScrollBody: false,
               child: _EmptyState(),
             )
-          else
+          else ...[
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(
-                MixtapeMetrics.screenSidePadding,
-                0,
-                MixtapeMetrics.screenSidePadding,
-                24,
+              padding: const EdgeInsets.symmetric(
+                horizontal: MixtapeMetrics.screenSidePadding,
               ),
               sliver: SliverReorderableList(
                 itemCount: visibleQueue.length,
@@ -536,17 +573,34 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
                 ),
               ),
             ),
+            // `.hint`: under the last song, not beside the counts.
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                child: Text(
+                  tapeHint,
+                  key: const Key('arrangement-hint'),
+                  textAlign: TextAlign.center,
+                  style: context.tokens.meta.copyWith(
+                    color: context.tokens.muted,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
 
-  /// Chrome shared by every state: the gradient, the glass clusters and the
-  /// floating SnackBars (no dock on this route, so they sit 16 pt in).
+  /// Chrome shared by every state: the gradient, the glass header buttons,
+  /// the floating SnackBars (no dock on this route, so they sit 16 pt in)
+  /// and, once there are songs, the bar that stays at the bottom.
   Widget _shell({
     required String title,
     required Widget body,
     bool hasContent = false,
+    Widget? bottomBar,
   }) {
     final theme = Theme.of(context);
     return GradientBackground(
@@ -559,47 +613,74 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
         ),
         child: Scaffold(
           backgroundColor: Colors.transparent,
-          body: SafeArea(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _TopBar(
+          // As the bottom bar, so floating toasts land above it rather than
+          // over Play.
+          bottomNavigationBar: bottomBar,
+          body: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SafeArea(
+                bottom: false,
+                child: _TopBar(
                   title: title,
+                  // No cassette header (loading, empty, failed): the bar carries it.
+                  titleShown: _titleShown || bottomBar == null,
                   onBack: () => Navigator.of(context).maybePop(),
-                  onHistory: hasContent ? _openHistory : null,
                   onMore: hasContent ? _openMore : null,
                 ),
-                Expanded(child: body),
-              ],
-            ),
+              ),
+              Expanded(
+                child: SafeArea(
+                  top: false,
+                  bottom: bottomBar == null,
+                  child: body,
+                ),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
 
-  /// The shared handoff row (`widgets/mix_handoff.dart`), which the
-  /// conversation draws too. This screen has no busy gate of its own, so the
-  /// row is always live; [MixActionsRow] applies the Apple/Spotify rules.
-  Widget _actionsRow(ChatState state, List<QueueTrack> visibleQueue) {
-    return MixActionsRow(
-      keys: MixHandoffKeys.arrangement,
-      queue: visibleQueue,
-      enabled: true,
-      padding: const EdgeInsets.only(top: 2, bottom: 10),
-      isPlayingThisMix: isPlayingThisMix,
-      onPlayNow: () => playHere(state, visibleQueue),
-      onCreatePlaylist: () => createPlaylist(
+  /// `.sticky`: split Play and Create playlist, which stay put while the
+  /// songs scroll. A mix Apple Music can do nothing with keeps the transfer
+  /// handoff alone, and any reason Play cannot work sits above the bar.
+  Widget _stickyBar(ChatState state, List<QueueTrack> visibleQueue) {
+    const keys = MixHandoffKeys.arrangement;
+    final live =
+        visibleQueue.isNotEmpty && mixActionsDisabledReason(visibleQueue) == null;
+    return TapeBar(
+      reason: MixPlayReason(keys: keys, queue: visibleQueue),
+      primary: MixSplitPlay(
+        keys: keys,
         queue: visibleQueue,
-        defaultName: state.session.title,
-        keys: MixHandoffKeys.arrangement,
+        enabled: true,
+        expand: true,
+        isPlayingThisMix: isPlayingThisMix,
+        onPlay: (destination) => playAt(destination, state, visibleQueue),
+        onOpenNowPlaying: openNowPlaying,
+        onShare: (buttonContext) => shareToTransferTool(
+          buttonContext,
+          visibleQueue,
+          state.session.title,
+        ),
+        sendingToMusic: sendingToMusic,
+        sharing: sharingMix,
       ),
-      onSendToMusic: () => sendToMusic(visibleQueue),
-      onShare: (buttonContext) =>
-          shareToTransferTool(buttonContext, visibleQueue, state.session.title),
-      saving: savingPlaylist,
-      sendingToMusic: sendingToMusic,
-      sharing: sharingMix,
+      secondary: mixHasAppleActions(visibleQueue)
+          ? LabelChip(
+              key: keys.createPlaylist,
+              label: 'Create playlist',
+              onPressed: live && !savingPlaylist
+                  ? () => createPlaylist(
+                      queue: visibleQueue,
+                      defaultName: state.session.title,
+                      keys: keys,
+                    )
+                  : null,
+            )
+          : null,
     );
   }
 
@@ -735,26 +816,28 @@ class _MoveIntent extends _QueueIntent {
   }
 }
 
-/// Back on the left, the mix title centred, Version history and More on the
-/// right — all in the board's glass clusters, with no app bar.
+/// Back on the left and More on the right, each its own glass button. The
+/// small title sits between them only once the cassette header has scrolled
+/// away (board section 2).
 class _TopBar extends StatelessWidget {
   const _TopBar({
     required this.title,
+    required this.titleShown,
     required this.onBack,
-    required this.onHistory,
     required this.onMore,
   });
 
   final String title;
+  final bool titleShown;
   final VoidCallback onBack;
-  final VoidCallback? onHistory;
   final Future<void> Function(BuildContext anchor)? onMore;
 
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
+    final reduced = MediaQuery.disableAnimationsOf(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+      padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
       child: Row(
         children: [
           GlassCluster(
@@ -770,23 +853,29 @@ class _TopBar extends StatelessWidget {
           Expanded(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Text(
-                title,
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: tokens.smallTitle,
+              // Hidden from VoiceOver too while it is invisible: the header
+              // already reads the title.
+              child: AnimatedOpacity(
+                key: const Key('arrangement-nav-title'),
+                opacity: titleShown ? 1 : 0,
+                duration: reduced
+                    ? Duration.zero
+                    : const Duration(milliseconds: 180),
+                child: ExcludeSemantics(
+                  excluding: !titleShown,
+                  child: Text(
+                    title,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: tokens.smallTitle,
+                  ),
+                ),
               ),
             ),
           ),
           GlassCluster(
             children: [
-              GlassButton(
-                key: const Key('arrangement-history'),
-                icon: Icons.history,
-                label: 'Version history',
-                onPressed: onHistory,
-              ),
               Builder(
                 builder: (anchor) => GlassButton(
                   key: const Key('arrangement-more'),
@@ -797,60 +886,6 @@ class _TopBar extends StatelessWidget {
               ),
             ],
           ),
-        ],
-      ),
-    );
-  }
-}
-
-/// "18 songs · 1 h 12 · version 2" on the left, the tap hint on the right.
-/// The hint steps aside at large text rather than squeezing the counts.
-class _MetaLine extends StatelessWidget {
-  const _MetaLine({
-    required this.songs,
-    required this.version,
-    required this.durationLabel,
-  });
-
-  final int songs;
-  final int version;
-  final String? durationLabel;
-
-  static const String hint = 'Tap a song for its note';
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    final style = tokens.meta.copyWith(color: tokens.muted);
-    final crowded = MediaQuery.textScalerOf(context).scale(100) / 100 >= 1.5;
-    final line = [
-      '$songs song${songs == 1 ? '' : 's'}',
-      if (durationLabel != null) durationLabel!,
-      'version $version',
-    ].join(' · ');
-
-    return Padding(
-      padding: const EdgeInsets.only(top: 2, bottom: 6),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              line,
-              key: const Key('arrangement-meta'),
-              style: style,
-              maxLines: crowded ? null : 1,
-              overflow: crowded ? null : TextOverflow.ellipsis,
-            ),
-          ),
-          if (!crowded) ...[
-            const SizedBox(width: 8),
-            Text(
-              hint,
-              style: style,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
         ],
       ),
     );

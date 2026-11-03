@@ -25,14 +25,17 @@ import 'package:mixtape/presentation/providers/dj_providers.dart';
 import 'package:mixtape/presentation/providers/library_sync_provider.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
 import 'package:mixtape/presentation/screens/chat_screen.dart';
+import 'package:mixtape/presentation/providers/play_destination_provider.dart';
 import 'package:mixtape/presentation/providers/playback_provider.dart';
 import 'package:mixtape/presentation/screens/mix_history_screen.dart';
 import 'package:mixtape/presentation/screens/playback_screen.dart';
 import 'package:mixtape/presentation/screens/queue_screen.dart';
+import 'package:mixtape/presentation/widgets/mix_handoff.dart';
+import 'package:mixtape/presentation/widgets/tape_header.dart';
+import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/label_chip.dart';
 import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
-import 'package:mixtape/presentation/widgets/foundation/text_action.dart';
 import 'package:mixtape/presentation/widgets/track_row.dart';
 
 import '../data/playback/playback_controller_test.dart'
@@ -400,6 +403,9 @@ ProviderContainer _makeContainer(
 }) {
   final container = ProviderContainer(
     overrides: [
+      playDestinationStoreProvider.overrideWithValue(
+        InMemoryPlayDestinationStore(),
+      ),
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
       djApiProvider.overrideWithValue(api),
       authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.session)),
@@ -461,6 +467,14 @@ Future<void> _pump(
     ),
   );
   await tester.pumpAndSettle();
+}
+
+/// Split Play's arrow, then "Play in Apple Music" (keyed as the old Send to
+/// Music button was).
+Future<void> _playInMusic(WidgetTester tester) async {
+  await tester.tap(find.byKey(const Key('play-menu-button')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(const Key('play-button')));
 }
 
 /// Whether [a] comes before [b] in reading order (row, then position).
@@ -620,7 +634,7 @@ void main() {
       final container = _makeContainer(api, bridge: bridge);
       await _pump(tester, container);
 
-      await tester.tap(find.byKey(const Key('play-button')));
+      await _playInMusic(tester);
       await tester.pumpAndSettle();
 
       expect(bridge.playCalls.single, ['apple-0', 'apple-1', 'apple-2']);
@@ -641,7 +655,7 @@ void main() {
       final container = _makeContainer(api, bridge: bridge);
       await _pump(tester, container);
 
-      await tester.tap(find.byKey(const Key('play-button')));
+      await _playInMusic(tester);
       await tester.pumpAndSettle();
 
       expect(bridge.playCalls.single, ['apple-0', 'apple-2']);
@@ -668,22 +682,16 @@ void main() {
 
       expect(
         tester
-            .widget<TextAction>(find.byKey(const Key('play-button')))
-            .onPressed,
-        isNull,
-      );
-      expect(
-        tester
             .widget<LabelChip>(find.byKey(const Key('save-button')))
             .onPressed,
         isNull,
       );
-      expect(
-        tester
-            .widget<TapeButton>(find.byKey(const Key('play-here-button')))
-            .onPressed,
-        isNull,
-      );
+      // Neither half of split Play does anything.
+      await tester.tap(find.byKey(const Key('play-here-button')));
+      await tester.tap(find.byKey(const Key('play-menu-button')));
+      await tester.pumpAndSettle();
+      expect(find.text('Play in Apple Music'), findsNothing);
+      expect(find.byType(PlaybackScreen), findsNothing);
       // The reason is written beside the actions, never left to a tooltip.
       expect(find.text("these tracks aren't in Apple Music"), findsOneWidget);
       // Without a Spotify id either, there is nothing to send anywhere.
@@ -1077,7 +1085,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const Key('play-button')));
+      await _playInMusic(tester);
       await tester.pumpAndSettle();
 
       expect(bridge.playCalls.single, ['apple-0', 'apple-2']);
@@ -1098,7 +1106,7 @@ void main() {
       final container = _makeContainer(api, bridge: bridge);
       await _pump(tester, container);
 
-      await tester.tap(find.byKey(const Key('play-button')));
+      await _playInMusic(tester);
       await tester.pumpAndSettle();
 
       // The bridge message (Apple's actual failure reason) must reach the
@@ -1145,7 +1153,7 @@ void main() {
         final container = _makeContainer(api);
         await _pump(tester, container);
 
-        await tester.tap(find.byKey(const Key('play-button')));
+        await _playInMusic(tester);
         await tester.pumpAndSettle();
 
         expect(api.postedEvents, [(sessionId: 's1', type: 'played')]);
@@ -1214,7 +1222,7 @@ void main() {
       final container = _makeContainer(api, bridge: bridge);
       await _pump(tester, container);
 
-      await tester.tap(find.byKey(const Key('play-button')));
+      await _playInMusic(tester);
       await tester.pumpAndSettle();
 
       expect(api.postedEvents, isEmpty);
@@ -1234,7 +1242,7 @@ void main() {
         final container = _makeContainer(api);
         await _pump(tester, container);
 
-        await tester.tap(find.byKey(const Key('play-button')));
+        await _playInMusic(tester);
         await tester.pumpAndSettle();
 
         // The event post failed (silently — never awaited by the UI), but the
@@ -1257,7 +1265,7 @@ void main() {
         final container = _makeContainer(api);
         await _pump(tester, container);
 
-        await tester.tap(find.byKey(const Key('play-button')));
+        await _playInMusic(tester);
         await tester.pumpAndSettle();
         expect(api.postedEvents, hasLength(1));
 
@@ -1448,7 +1456,7 @@ void main() {
         expect(tester.widget<TapeButton>(share).onPressed, isNotNull);
         // The reason the Apple actions are absent is written beside it.
         expect(
-          find.text('Play now and Create playlist need Apple Music'),
+          find.text('Play and Create playlist need Apple Music'),
           findsOneWidget,
         );
       },
@@ -1466,17 +1474,19 @@ void main() {
         final container = _makeContainer(api);
         await _pump(tester, container);
 
-        final play = find.byKey(const Key('play-button'));
+        final play = find.byKey(const Key('play-here-button'));
         final save = find.byKey(const Key('save-button'));
         final share = find.byKey(const Key('share-button'));
-        expect(tester.widget<TextAction>(play).onPressed, isNotNull);
+        expect(play, findsOneWidget);
         expect(tester.widget<LabelChip>(save).onPressed, isNotNull);
-        // The Spotify half of a mixed mix is reachable too (plan: Outputs).
-        expect(tester.widget<TapeButton>(share).onPressed, isNotNull);
+        // The Spotify half of a mixed mix is reachable too (plan: Outputs):
+        // the transfer handoff takes the arrow's place.
+        expect(share, findsOneWidget);
+        expect(find.byKey(const Key('play-menu-button')), findsNothing);
         // Apple first in reading order — the actions row wraps at narrow
         // widths, so "first" is by run and then by position within it.
         expect(_precedes(tester, play, share), isTrue);
-        expect(_precedes(tester, save, share), isTrue);
+        expect(_precedes(tester, share, save), isTrue);
         expect(find.byKey(const Key('open-in-spotify-t0')), findsNothing);
         expect(find.byKey(const Key('open-in-spotify-t1')), findsOneWidget);
       },
@@ -1493,12 +1503,7 @@ void main() {
       );
       await _pump(tester, _makeContainer(api));
 
-      expect(
-        tester
-            .widget<TextAction>(find.byKey(const Key('play-button')))
-            .onPressed,
-        isNotNull,
-      );
+      expect(find.byKey(const Key('play-menu-button')), findsOneWidget);
       expect(find.byKey(const Key('share-button')), findsNothing);
     });
 
@@ -1644,7 +1649,13 @@ void main() {
         );
 
         // Play is an Apple output, not a Spotify one: it adds nothing here.
-        await tester.tap(find.byKey(const Key('play-button')));
+        // (A mixed mix's arrow is the transfer handoff, so Apple Music is
+        // the remembered destination here.)
+        await container
+            .read(playDestinationProvider.notifier)
+            .choose(PlayDestination.appleMusic);
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('play-here-button')));
         await tester.pumpAndSettle();
         expect(listening.funnelEvents, [FunnelEventType.firstOutput]);
 
@@ -1679,7 +1690,7 @@ void main() {
         final container = _makeContainer(api, listening: listening);
         await _pump(tester, container);
 
-        await tester.tap(find.byKey(const Key('play-button')));
+        await _playInMusic(tester);
         await tester.pumpAndSettle();
 
         expect(find.text('Playing in Apple Music'), findsOneWidget);
@@ -1692,48 +1703,82 @@ void main() {
 
   group('chrome, meta and version history', () {
     testWidgets(
-      'the top bar carries Back, the centred title, history and More',
+      'the header: Back and More only; the title appears once the cassette '
+      'scrolls away',
       (tester) async {
         final api = FakeDjApi();
         api.onGetSession = (_) async => SessionDetail(
           session: _session(title: 'Night bus notes'),
           messages: [],
-          queue: [_track(0)],
+          queue: [for (var i = 0; i < 20; i++) _track(i)],
         );
         await _pump(tester, _makeContainer(api));
 
         expect(find.byKey(const Key('arrangement-back')), findsOneWidget);
-        expect(find.byKey(const Key('arrangement-history')), findsOneWidget);
+        expect(find.byKey(const Key('arrangement-history')), findsNothing);
         expect(find.byKey(const Key('arrangement-more')), findsOneWidget);
         expect(find.byType(AppBar), findsNothing);
-        final title = find.text('Night bus notes');
-        expect(title, findsOneWidget);
-        expect(tester.widget<Text>(title).overflow, TextOverflow.ellipsis);
-        // Centred: the title box sits between the two clusters.
-        final back = tester.getTopRight(
-          find.byKey(const Key('arrangement-back')),
+        // The cassette header leads, in the tape colour, tilted.
+        expect(find.byKey(TapeHeader.cassetteKey), findsOneWidget);
+        expect(
+          tester.widget<CassetteTile>(find.byKey(TapeHeader.cassetteKey)).width,
+          150,
         );
-        final history = tester.getTopLeft(
-          find.byKey(const Key('arrangement-history')),
+        expect(find.byKey(TapeHeader.titleKey), findsOneWidget);
+        AnimatedOpacity navTitle() => tester.widget<AnimatedOpacity>(
+          find.byKey(const Key('arrangement-nav-title')),
         );
-        expect(tester.getCenter(title).dx, greaterThan(back.dx));
-        expect(tester.getCenter(title).dx, lessThan(history.dx));
+        expect(navTitle().opacity, 0);
+
+        await tester.drag(find.byType(CustomScrollView), const Offset(0, -500));
+        await tester.pumpAndSettle();
+        expect(navTitle().opacity, 1);
+        // The bar at the bottom stays put.
+        expect(find.byKey(const Key('play-here-button')).hitTestable(), findsOneWidget);
+        expect(find.byKey(const Key('save-button')).hitTestable(), findsOneWidget);
       },
     );
 
-    testWidgets('Version history pushes the history screen', (tester) async {
+    testWidgets('More holds Version history, which pushes the history screen', (
+      tester,
+    ) async {
       final api = FakeDjApi();
       api.onGetSession = (_) async =>
           SessionDetail(session: _session(), messages: [], queue: [_track(0)]);
       await _pump(tester, _makeContainer(api));
 
-      await tester.tap(find.byKey(const Key('arrangement-history')));
+      await tester.tap(find.byKey(const Key('arrangement-more')));
+      await tester.pumpAndSettle();
+      expect(find.text('Tape settings'), findsOneWidget);
+      expect(find.text('Rename'), findsOneWidget);
+      expect(find.text('Archive'), findsOneWidget);
+      await tester.tap(find.text('Version history'));
       // A single pump, not pumpAndSettle: the history screen's own load is
       // not this screen's business (and reaches a real client here).
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
 
       expect(find.byType(MixHistoryScreen), findsOneWidget);
+    });
+
+    testWidgets('every cassette wears the saved tape colour', (tester) async {
+      final api = FakeDjApi();
+      final saved = DjSession(
+        id: 's1',
+        title: 'Lagos',
+        status: 'active',
+        queueVersion: 2,
+        updatedAt: DateTime(2026, 1, 1),
+        caseColor: '#617f9c',
+      );
+      api.onListSessions = () async => [saved];
+      api.onGetSession = (_) async =>
+          SessionDetail(session: saved, messages: [], queue: [_track(0)]);
+      await _pump(tester, _makeContainer(api));
+      expect(
+        tester.widget<CassetteTile>(find.byKey(TapeHeader.cassetteKey)).caseColor,
+        const Color(0xFF617F9C),
+      );
     });
 
     testWidgets(
@@ -1749,7 +1794,11 @@ void main() {
         await _pump(tester, _makeContainer(api));
 
         expect(find.text('3 songs · 9 min · version 2'), findsOneWidget);
-        expect(find.text('Tap a song for its note'), findsOneWidget);
+        // The hint sits under the last song.
+        expect(
+          tester.getTopLeft(find.text('Tap a song for its note')).dy,
+          greaterThan(tester.getBottomLeft(find.text('Title 2')).dy),
+        );
       },
     );
 
@@ -1831,14 +1880,11 @@ void main() {
       addTearDown(player.dispose);
       await _pump(tester, _makeContainer(api, player: player));
 
-      final button = tester.widget<TapeButton>(
-        find.byKey(const Key('play-here-button')),
-      );
-      expect(button.label, 'Playing');
-      expect(button.playing, isTrue);
+      expect(find.text('Playing'), findsOneWidget);
+      expect(find.byKey(MixHandoffKeys.meterKey), findsOneWidget);
     });
 
-    testWidgets('another mix playing leaves this button as Play now', (
+    testWidgets('another mix playing leaves this button as Play', (
       tester,
     ) async {
       final api = FakeDjApi();
@@ -1855,11 +1901,8 @@ void main() {
       addTearDown(player.dispose);
       await _pump(tester, _makeContainer(api, player: player));
 
-      final button = tester.widget<TapeButton>(
-        find.byKey(const Key('play-here-button')),
-      );
-      expect(button.label, 'Play now');
-      expect(button.playing, isFalse);
+      expect(find.text('Play'), findsOneWidget);
+      expect(find.byKey(MixHandoffKeys.meterKey), findsNothing);
     });
   });
 
@@ -2138,7 +2181,11 @@ void main() {
       expect(tester.takeException(), isNull);
       // The header is taller than a 320 x 640 phone at 200%, so the rows sit
       // below the fold — reachable by scrolling, never clipped off the list.
-      await tester.drag(find.byType(CustomScrollView), const Offset(0, -400));
+      await tester.dragUntilVisible(
+        find.text('Title 0'),
+        find.byType(CustomScrollView),
+        const Offset(0, -80),
+      );
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
       expect(find.text('Title 0'), findsOneWidget);
