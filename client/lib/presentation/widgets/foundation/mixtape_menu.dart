@@ -170,6 +170,12 @@ class _MixtapeMenuRoute<T> extends PopupRoute<T> {
   @override
   Duration get reverseTransitionDuration => const Duration(milliseconds: 120);
 
+  /// Pops this menu once: a second tap while it animates out would otherwise
+  /// pop the screen beneath it.
+  void _close(BuildContext context, [T? value]) {
+    if (isCurrent) Navigator.of(context).pop(value);
+  }
+
   @override
   Widget buildPage(
     BuildContext context,
@@ -183,7 +189,7 @@ class _MixtapeMenuRoute<T> extends PopupRoute<T> {
       title: title,
       message: message,
       reduceTransparency: reduceTransparency,
-      onSelected: (value) => Navigator.of(context).pop(value),
+      onSelected: (value) => _close(context, value),
     );
     final lift = lifted;
     final belowAnchor =
@@ -216,12 +222,12 @@ class _MixtapeMenuRoute<T> extends PopupRoute<T> {
                 child: Semantics(
                   button: true,
                   label: barrierLabel,
-                  onTap: () => Navigator.of(context).pop(),
+                  onTap: () => _close(context),
                   excludeSemantics: true,
                   child: GestureDetector(
                     key: mixtapeMenuBarrierKey,
                     behavior: HitTestBehavior.opaque,
-                    onTap: () => Navigator.of(context).pop(),
+                    onTap: () => _close(context),
                     child: ColoredBox(
                       color: dark
                           ? const Color.fromRGBO(0, 0, 0, 0.4)

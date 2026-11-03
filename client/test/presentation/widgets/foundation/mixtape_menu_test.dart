@@ -209,6 +209,19 @@ void main() {
     expect(archiveRow.top - settings.bottom, closeTo(6, 0.5));
   });
 
+  testWidgets('a second tap while it closes never pops the screen below', (
+    tester,
+  ) async {
+    final answers = await _host(tester, actions: _plain);
+    await _open(tester);
+    await tester.tap(find.byKey(const Key('rename')));
+    await tester.pump(const Duration(milliseconds: 20));
+    await tester.tap(find.byKey(const Key('rename')), warnIfMissed: false);
+    await tester.pumpAndSettle();
+    expect(answers, ['rename']);
+    expect(find.byKey(_anchorKey), findsOneWidget);
+  });
+
   testWidgets('a disabled entry does nothing', (tester) async {
     final answers = await _host(
       tester,
