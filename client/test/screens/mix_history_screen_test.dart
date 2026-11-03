@@ -1,16 +1,69 @@
 import 'package:flutter/cupertino.dart' show CupertinoDialogAction;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/api/api_client.dart';
 import 'package:mixtape/data/history/mix_history_api.dart';
 import 'package:mixtape/presentation/screens/mix_history_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
-import 'package:mixtape/presentation/widgets/foundation/status_word.dart';
 import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
+import 'package:mixtape/data/dj/dj_models.dart';
+import 'package:mixtape/presentation/providers/dj_providers.dart';
+import 'package:mixtape/presentation/screens/queue_screen.dart';
+import 'package:mixtape/presentation/widgets/tape_header.dart';
 
 import '../helpers/auth_ui_snapshot.dart';
+import 'queue_screen_test.dart' show FakeDjApi;
+
+DjMessage _msg(String id, String role, String content, {int? version}) =>
+    DjMessage(
+      id: id,
+      role: role,
+      content: content,
+      queueVersion: version,
+      createdAt: DateTime(2026, 1, 1),
+    );
+
+/// The conversation the versions read their "made from" lines out of, and
+/// the saved tape colour (Denim).
+FakeDjApi _transcriptApi() {
+  final session = DjSession(
+    id: 's',
+    title: 'Lagos',
+    status: 'active',
+    queueVersion: 3,
+    updatedAt: DateTime(2026, 1, 1),
+    caseColor: '#617f9c',
+  );
+  return FakeDjApi()
+    ..onListSessions = (() async => [session])
+    ..onGetSession = (_) async => SessionDetail(
+      session: session,
+      messages: [
+        _msg('m1', 'user', 'Driving to Lekki with Tolu'),
+        _msg('m2', 'dj', 'A smooth drive.', version: 1),
+        _msg('m3', 'user', 'Make the end wind down'),
+        _msg('m4', 'dj', 'Done.', version: 3),
+      ],
+      queue: [
+        QueueTrack(
+          position: 0,
+          trackId: 't0',
+          appleId: 'a0',
+          title: 'Song',
+          artist: 'Artist',
+          durationMs: 46 * 60000,
+        ),
+      ],
+    );
+}
+
+List<Override> _overrides(FakeHistory api) => [
+  mixHistoryApiProvider.overrideWithValue(api),
+  djApiProvider.overrideWithValue(_transcriptApi()),
+];
 
 class FakeHistory implements MixHistoryApi {
   final List<Map<String, dynamic>> requests = [];
@@ -88,7 +141,7 @@ class FakeHistory implements MixHistoryApi {
 
 Widget _app(FakeHistory api, {Brightness brightness = Brightness.light}) =>
     ProviderScope(
-      overrides: [mixHistoryApiProvider.overrideWithValue(api)],
+      overrides: _overrides(api),
       child: MaterialApp(
         theme: brightness == Brightness.dark
             ? MixtapeTheme.dark()
@@ -107,41 +160,66 @@ Future<void> open(WidgetTester tester, FakeHistory api) async {
 }
 
 void main() {
-  testWidgets('the version list carries the shell: cassette rows, a Current '
-      'word and a meta line', (tester) async {
-    final api = FakeHistory();
-    await tester.pumpWidget(_app(api, brightness: Brightness.dark));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Version history'), findsOneWidget);
-    expect(find.byKey(const Key('mix-history-back')), findsOneWidget);
-    expect(find.byType(CassetteTile), findsNWidgets(3));
-    final current = tester.widget<StatusWord>(find.byType(StatusWord));
-    expect(current.label, 'Current');
-    expect(current.kind, StatusKind.ok);
-    expect(find.textContaining('1 song ·'), findsOneWidget);
-    expect(find.text('2 songs · 3h ago · restored from version 1'), findsOneWidget);
-    // Nothing in the payload says a version was generated or edited, so the
-    // meta line stops after the age rather than guessing.
-    expect(find.text('3 songs · 4m ago'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('the current version lists its songs and offers no restore', (
+  testWidgets('Versions: Now and Earlier, readable times, made-from lines', (
     tester,
   ) async {
     final api = FakeHistory();
     await tester.pumpWidget(_app(api, brightness: Brightness.dark));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Version 3'));
+    expect(find.text('Versions'), findsOneWidget);
+    expect(find.byKey(const Key('mix-history-back')), findsOneWidget);
+    expect(find.text('NOW'), findsOneWidget);
+    expect(find.text('EARLIER'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('Version 3')).dy,
+      lessThan(tester.getTopLeft(find.text('EARLIER')).dy),
+    );
+    // Every cassette is 64 pt and wears the saved colour.
+    final tiles = tester.widgetList<CassetteTile>(find.byType(CassetteTile));
+    expect(tiles.length, 3);
+    expect(tiles.map((t) => t.width).toSet(), {64});
+    expect(tiles.map((t) => t.caseColor).toSet(), {const Color(0xFF617F9C)});
+    // No Current badge, no footnote; times read like a person would say them.
+    expect(find.text('Current'), findsNothing);
+    expect(find.textContaining('may not have been saved'), findsNothing);
+    expect(find.textContaining(RegExp(r'^Today, \d\d:\d\d · 3 songs · 46 min$')), findsOneWidget);
+    expect(find.textContaining('· 1 song'), findsOneWidget);
+    // The message that made each version, from the transcript.
+    expect(find.text('“Make the end wind down”'), findsOneWidget);
+    expect(find.text('“Driving to Lekki with Tolu”'), findsOneWidget);
+    expect(find.text('Restored from version 1'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('tapping Now opens the tape', (tester) async {
+    final api = FakeHistory();
+    await tester.pumpWidget(_app(api, brightness: Brightness.dark));
     await tester.pumpAndSettle();
 
+    await tester.tap(find.text('Version 3'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(QueueScreen), findsOneWidget);
+  });
+
+  testWidgets('an earlier version previews with its header, made-from and a '
+      'sticky Use this version; Back returns to the list', (tester) async {
+    final api = FakeHistory();
+    await open(tester, api);
+
+    expect(find.byKey(TapeHeader.cassetteKey), findsOneWidget);
+    expect(find.byKey(const Key('mix-history-made-from')), findsOneWidget);
+    expect(find.text('“Driving to Lekki with Tolu”'), findsOneWidget);
     expect(find.text('Song'), findsOneWidget);
-    expect(find.text('Song 3'), findsOneWidget);
+    expect(find.byKey(TapeBar.barKey), findsOneWidget);
+    expect(find.text('Use this version'), findsOneWidget);
+    expect(find.text('Back to versions'), findsNothing);
+
+    await tester.tap(find.byKey(const Key('mix-history-back')));
+    await tester.pumpAndSettle();
+    expect(find.text('Versions'), findsOneWidget);
     expect(find.text('Use this version'), findsNothing);
-    expect(find.text('Back to versions'), findsOneWidget);
-    expect(tester.takeException(), isNull);
   });
 
   testWidgets(
@@ -155,7 +233,7 @@ void main() {
       final api = FakeHistory();
       await tester.pumpWidget(
         ProviderScope(
-          overrides: [mixHistoryApiProvider.overrideWithValue(api)],
+          overrides: _overrides(api),
           child: RepaintBoundary(
             key: authSnapshotKey,
             child: MaterialApp(
@@ -173,7 +251,7 @@ void main() {
       tester.view.physicalSize = const Size(320, 568);
       await tester.pumpWidget(
         ProviderScope(
-          overrides: [mixHistoryApiProvider.overrideWithValue(api)],
+          overrides: _overrides(api),
           child: MaterialApp(
             theme: MixtapeTheme.light(),
             builder: (context, child) => MediaQuery(
@@ -280,7 +358,7 @@ void main() {
     await tester.tap(find.text('Close'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Back to versions'));
+    await tester.tap(find.byKey(const Key('mix-history-back')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Version 2'));
     await tester.pumpAndSettle();

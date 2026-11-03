@@ -2,6 +2,13 @@
 /// (`docs/decisions.md` → "Mix history keeps immutable versions"; the
 /// September 9 six-feature approval).
 ///
+/// Laid out per the mix conversation redesign
+/// (`docs/mockups/approved/2026-11-03-mix-conversation-redesign.md` →
+/// Versions; board section 4): "Versions" with Now and Earlier sections,
+/// readable times, and each version's "made from" line taken from the
+/// transcript the app already holds. An earlier version opens a preview with
+/// the tape screen's cassette header and a sticky "Use this version".
+///
 /// Restyled for the native shell (`docs/mockups/approved/2026-09-17-mobile-shell.md`):
 /// the large title, flush rows with a cassette tile, the tape button and the
 /// plain text action. Behaviour, copy and provider calls are the approved ones —
@@ -34,9 +41,11 @@ import '../widgets/foundation/glass_cluster.dart';
 import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/large_title_scaffold.dart';
 import '../widgets/foundation/square_art.dart';
-import '../widgets/foundation/status_word.dart';
 import '../widgets/foundation/tape_button.dart';
 import '../widgets/foundation/text_action.dart';
+import '../widgets/mix_tape_colour.dart';
+import '../widgets/tape_header.dart';
+import 'queue_screen.dart';
 
 export '../providers/mix_history_provider.dart';
 
@@ -222,45 +231,60 @@ class _MixHistoryScreenState extends ConsumerState<MixHistoryScreen> {
     _confirming = false;
   }
 
+  /// Back from a preview opened from the list returns to the list; a
+  /// preview opened straight from the conversation's marker leaves.
+  bool get _backToList => _detail != null && _list != null && _done == null;
+
+  void _closePreview() => setState(() {
+    _detail = null;
+    _request = null;
+    _error = null;
+  });
+
   @override
   Widget build(BuildContext context) {
+    final transcript = ref.watch(chatProvider(widget.sessionId)).value;
+    final colour = watchMixTapeColour(
+      ref,
+      widget.sessionId,
+      saved: transcript?.session.caseColor,
+    );
     return _WithTokens(
       // Below the tokens, not beside them: the slivers read them as they build.
       child: Builder(
         builder: (context) => GradientBackground(
           child: PopScope(
-            canPop: !_busy,
+            canPop: !_busy && !_backToList,
+            onPopInvokedWithResult: (didPop, _) {
+              if (!didPop && !_busy && _backToList) _closePreview();
+            },
             child: Scaffold(
               backgroundColor: Colors.transparent,
-              body: LargeTitleScaffold(
-                title: 'Version history',
-                leading: GlassCluster(
-                  children: [
-                    GlassButton(
-                      key: const Key('mix-history-back'),
-                      icon: CupertinoIcons.chevron_left,
-                      label: 'Back',
-                      onPressed: _busy
-                          ? null
-                          : () => Navigator.of(context).maybePop(),
+              body: _detail != null && _done == null
+                  ? _preview(context, colour, transcript)
+                  : LargeTitleScaffold(
+                      title: 'Versions',
+                      leading: GlassCluster(
+                        children: [
+                          GlassButton(
+                            key: const Key('mix-history-back'),
+                            icon: CupertinoIcons.chevron_left,
+                            label: 'Back',
+                            onPressed: _busy
+                                ? null
+                                : () => Navigator.of(context).maybePop(),
+                          ),
+                        ],
+                      ),
+                      slivers: _done != null
+                          ? [SliverToBoxAdapter(child: _doneState(context))]
+                          : _listSlivers(context, colour, transcript),
                     ),
-                  ],
-                ),
-                slivers: _slivers(context),
-              ),
             ),
           ),
         ),
       ),
     );
-  }
-
-  List<Widget> _slivers(BuildContext context) {
-    if (_done != null) {
-      return [SliverToBoxAdapter(child: _doneState(context))];
-    }
-    if (_detail != null) return _detailSlivers(context);
-    return _listSlivers(context);
   }
 
   /// The error and the in-flight line, above whichever state is showing.
@@ -319,26 +343,66 @@ class _MixHistoryScreenState extends ConsumerState<MixHistoryScreen> {
     );
   }
 
-  List<Widget> _listSlivers(BuildContext context) {
-    final versions = (_list?['versions'] as List?) ?? const [];
+  List<Widget> _listSlivers(
+    BuildContext context,
+    Color colour,
+    ChatState? transcript,
+  ) {
+    final versions = [
+      for (final v in (_list?['versions'] as List?) ?? const []) v as Map<String, dynamic>,
+    ];
+    final currentVersion = _list?['currentVersion'];
+    final now = versions.where((v) => v['version'] == currentVersion).toList();
+    final earlier = versions
+        .where((v) => v['version'] != currentVersion)
+        .toList();
+    Widget row(Map<String, dynamic> version, {required bool isFirst}) {
+      final number = version['version'] as int;
+      final isCurrent = number == currentVersion;
+      return _VersionRow(
+        key: ValueKey('mix-version-$number'),
+        version: version,
+        caseColor: colour,
+        madeFrom: madeFromMessage(transcript?.messages, number),
+        duration: isCurrent && transcript != null
+            ? tapeDurationLabel(transcript.queue)
+            : null,
+        isFirst: isFirst,
+        onTap: _busy
+            ? null
+            : isCurrent
+            ? _openTape
+            : () => _view(number),
+      );
+    }
+
     return [
       SliverToBoxAdapter(child: _status(context)),
-      SliverList.builder(
-        itemCount: versions.length,
-        itemBuilder: (context, index) {
-          final version = versions[index] as Map<String, dynamic>;
-          return _VersionRow(
-            key: ValueKey('mix-version-${version['version']}'),
-            sessionId: widget.sessionId,
-            version: version,
-            isCurrent: version['version'] == _list?['currentVersion'],
-            isFirst: index == 0,
-            onTap: _busy ? null : () => _view(version['version'] as int),
-          );
-        },
-      ),
+      if (now.isNotEmpty) ...[
+        const SliverToBoxAdapter(child: _SectionHeader('Now')),
+        SliverList.list(
+          children: [for (final v in now) row(v, isFirst: true)],
+        ),
+      ],
+      if (earlier.isNotEmpty) ...[
+        const SliverToBoxAdapter(child: _SectionHeader('Earlier')),
+        SliverList.builder(
+          itemCount: earlier.length,
+          itemBuilder: (context, index) =>
+              row(earlier[index], isFirst: index == 0),
+        ),
+      ],
       SliverToBoxAdapter(child: _listFooter(context, versions)),
     ];
+  }
+
+  /// "Now" opens the tape itself.
+  void _openTape() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => QueueScreen(sessionId: widget.sessionId),
+      ),
+    );
   }
 
   Widget _listFooter(BuildContext context, List<dynamic> versions) {
@@ -352,15 +416,6 @@ class _MixHistoryScreenState extends ConsumerState<MixHistoryScreen> {
             padding: const EdgeInsets.symmetric(vertical: 12),
             child: Text(
               'No versions yet. History starts with your first mix.',
-              style: tokens.secondary.copyWith(color: tokens.smoke),
-            ),
-          ),
-        if (versions.length == 1)
-          Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: Text(
-              'Earlier versions may not have been saved. '
-              'Future changes will be kept.',
               style: tokens.secondary.copyWith(color: tokens.smoke),
             ),
           ),
@@ -389,144 +444,327 @@ class _MixHistoryScreenState extends ConsumerState<MixHistoryScreen> {
     );
   }
 
-  List<Widget> _detailSlivers(BuildContext context) {
+  /// An earlier version's preview: the tape screen's cassette header, the
+  /// message it was made from, its songs, and "Use this version" in a bar
+  /// that stays put. The system Back returns to the list.
+  Widget _preview(BuildContext context, Color colour, ChatState? transcript) {
     final tokens = context.tokens;
     final detail = _detail!;
+    final number = detail['version'] as int;
     final entries = (detail['entries'] as List?) ?? const [];
-    final isCurrent = detail['version'] == detail['currentVersion'];
+    final isCurrent = number == detail['currentVersion'];
     final unavailable = entries.any((e) => e['available'] != true);
-    return [
-      SliverToBoxAdapter(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _status(context),
-            const SizedBox(height: 4),
-            Wrap(
-              spacing: 8,
-              runSpacing: 4,
-              crossAxisAlignment: WrapCrossAlignment.center,
+    final listed = ((_list?['versions'] as List?) ?? const [])
+        .cast<Map<String, dynamic>>()
+        .where((v) => v['version'] == number)
+        .firstOrNull;
+    final createdAt = DateTime.tryParse(listed?['createdAt'] as String? ?? '');
+    final arc = EnergyArc.values
+        .where((a) => a.name == detail['energyArc'])
+        .firstOrNull;
+    final meta = [
+      if (createdAt != null) versionTime(createdAt),
+      '${entries.length} ${entries.length == 1 ? 'song' : 'songs'}',
+      if (arc != null) 'energy ${arc.label.toLowerCase()}',
+    ].join(' · ');
+    final madeFrom = madeFromMessage(transcript?.messages, number);
+    final restoredFrom = detail['restoredFrom'] ?? listed?['restoredFrom'];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+            child: Row(
               children: [
-                Text('Version ${detail['version']}', style: tokens.section),
-                if (isCurrent)
-                  const StatusWord(label: 'Current', kind: StatusKind.ok),
+                GlassCluster(
+                  children: [
+                    GlassButton(
+                      key: const Key('mix-history-back'),
+                      icon: CupertinoIcons.chevron_left,
+                      label: 'Back',
+                      onPressed: _busy
+                          ? null
+                          : () => _backToList
+                                ? _closePreview()
+                                : Navigator.of(context).maybePop(),
+                    ),
+                  ],
+                ),
+                Expanded(
+                  child: Text(
+                    'Version $number',
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: tokens.smallTitle,
+                  ),
+                ),
+                const SizedBox(width: MixtapeMetrics.minTarget),
               ],
             ),
-            EnergyAssessment(detail: detail),
-            if (entries.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                child: Text(
-                  'This version has no songs.',
-                  style: tokens.secondary.copyWith(color: tokens.smoke),
+          ),
+        ),
+        Expanded(
+          child: CustomScrollView(
+            slivers: [
+              SliverToBoxAdapter(
+                child: TapeHeader(
+                  caseColor: colour,
+                  title: 'Version $number',
+                  meta: meta,
+                  cassetteWidth: 110,
+                  titleStyle: tokens.largeTitle.copyWith(
+                    fontSize: 21,
+                    height: 1.12,
+                  ),
                 ),
               ),
-          ],
-        ),
-      ),
-      SliverList.builder(
-        itemCount: entries.length,
-        itemBuilder: (context, index) => _SongRow(
-          entry: entries[index] as Map<String, dynamic>,
-          isFirst: index == 0,
-        ),
-      ),
-      SliverToBoxAdapter(
-        child: Padding(
-          padding: const EdgeInsets.only(top: 16),
-          child: Wrap(
-            spacing: 12,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              // The current version is where the mix already is: there is
-              // nothing to restore it to.
-              if (!isCurrent)
-                TapeButton(
-                  label: 'Use this version',
-                  onPressed: _busy || unavailable ? null : _confirmRestore,
+              if (restoredFrom != null || madeFrom != null)
+                SliverToBoxAdapter(
+                  child: _MadeFrom(
+                    text: restoredFrom != null
+                        ? 'Restored from version $restoredFrom'
+                        : '“$madeFrom”',
+                  ),
                 ),
-              TextAction(
-                label: 'Back to versions',
-                quiet: true,
-                onPressed: _busy
-                    ? null
-                    : () => _list == null
-                          ? _load()
-                          : setState(() {
-                              _detail = null;
-                              _request = null;
-                            }),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: MixtapeMetrics.screenSidePadding,
+                  ),
+                  child: _status(context),
+                ),
+              ),
+              if (entries.isEmpty)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Text(
+                      'This version has no songs.',
+                      style: tokens.secondary.copyWith(color: tokens.smoke),
+                    ),
+                  ),
+                ),
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(
+                  MixtapeMetrics.screenSidePadding,
+                  0,
+                  MixtapeMetrics.screenSidePadding,
+                  24,
+                ),
+                sliver: SliverList.builder(
+                  itemCount: entries.length,
+                  itemBuilder: (context, index) => _SongRow(
+                    entry: entries[index] as Map<String, dynamic>,
+                    isFirst: index == 0,
+                  ),
+                ),
               ),
             ],
           ),
         ),
-      ),
-    ];
+        // The current version is where the mix already is: there is
+        // nothing to restore it to.
+        if (!isCurrent)
+          TapeBar(
+            reason: unavailable
+                ? Text(
+                    'A song in this version is no longer available.',
+                    key: const Key('mix-history-unavailable'),
+                    textAlign: TextAlign.center,
+                    style: tokens.meta.copyWith(color: tokens.muted),
+                  )
+                : null,
+            primary: Center(
+              child: TapeButton(
+                label: 'Use this version',
+                onPressed: _busy || unavailable ? null : _confirmRestore,
+              ),
+            ),
+          ),
+      ],
+    );
   }
 }
 
-/// One saved version: the cassette, "Version N", and a meta line of song
-/// count, age and where the version came from.
+/// The user message that produced [version]: the last one before the reply
+/// that carries it. Null when the transcript does not hold that reply (a
+/// restore writes none, and an old mix may predate its history).
+String? madeFromMessage(List<ChatMessage>? messages, int version) {
+  if (messages == null) return null;
+  final reply = messages.indexWhere(
+    (m) => !m.isError && m.message.queueVersion == version,
+  );
+  if (reply < 0) return null;
+  for (var i = reply - 1; i >= 0; i--) {
+    final message = messages[i];
+    if (!message.isError && message.message.role == 'user') {
+      final text = message.message.content.trim();
+      return text.isEmpty ? null : text;
+    }
+  }
+  return null;
+}
+
+/// `.vh`: Now and Earlier.
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    return Padding(
+      padding: const EdgeInsets.only(top: 18, bottom: 4),
+      child: Semantics(
+        header: true,
+        child: Text(
+          label.toUpperCase(),
+          style: tokens.meta.copyWith(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 1.6,
+            color: tokens.muted,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// `.vask`: "Made from" and the message, centred under the header.
+class _MadeFrom extends StatelessWidget {
+  const _MadeFrom({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    return Container(
+      key: const Key('mix-history-made-from'),
+      margin: const EdgeInsets.fromLTRB(22, 6, 22, 12),
+      padding: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: tokens.hairline)),
+      ),
+      child: Column(
+        children: [
+          Text(
+            'MADE FROM',
+            style: tokens.meta.copyWith(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 1.5,
+              color: tokens.muted,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            text,
+            textAlign: TextAlign.center,
+            style: tokens.body.copyWith(
+              fontWeight: FontWeight.w600,
+              color: tokens.smoke,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One saved version (`.vrow`): a 64 pt tilted cassette in the tape
+/// colour, "Version n", "Today, 15:40 · N songs · M min", and the message
+/// that made it, clamped to two lines — or "Restored from version n".
 class _VersionRow extends StatelessWidget {
   const _VersionRow({
     super.key,
-    required this.sessionId,
     required this.version,
-    required this.isCurrent,
+    required this.caseColor,
+    required this.madeFrom,
+    required this.duration,
     required this.isFirst,
     required this.onTap,
   });
 
-  final String sessionId;
   final Map<String, dynamic> version;
-  final bool isCurrent, isFirst;
+  final Color caseColor;
+  final String? madeFrom;
+  final String? duration;
+  final bool isFirst;
   final VoidCallback? onTap;
 
-  static const double _tile = 44;
+  static const double _tile = 64;
 
-  /// The only origin the payload actually records. Everything else — whether
-  /// a version came from a new mix or an edit — would be a guess, so the meta
-  /// line simply leaves it out.
-  static String? originOf(Map<String, dynamic> version) {
-    final from = version['restoredFrom'];
-    return from == null ? null : 'restored from version $from';
-  }
-
-  static String metaFor(Map<String, dynamic> version) {
+  static String metaFor(Map<String, dynamic> version, {String? duration}) {
     final count = version['trackCount'] as int? ?? 0;
     final createdAt = DateTime.tryParse(version['createdAt'] as String? ?? '');
-    final origin = originOf(version);
     return [
+      if (createdAt != null) versionTime(createdAt),
       '$count ${count == 1 ? 'song' : 'songs'}',
-      if (createdAt != null) relativeTime(createdAt),
-      if (origin != null) origin,
+      ?duration,
     ].join(' · ');
   }
 
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
-    return FlushRow(
-      leading: CassetteTile(width: _tile, seedId: sessionId),
-      leadingSize: _tile,
-      isFirst: isFirst,
-      title: 'Version ${version['version']}',
-      subtitleWidget: Wrap(
-        spacing: 8,
-        runSpacing: 2,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          if (isCurrent)
-            const StatusWord(label: 'Current', kind: StatusKind.ok),
-          Text(
-            metaFor(version),
-            style: tokens.meta.copyWith(fontSize: 12.5, color: tokens.muted),
-          ),
-        ],
-      ),
+    final from = version['restoredFrom'];
+    final second = from != null
+        ? 'Restored from version $from'
+        : (madeFrom == null ? null : '“$madeFrom”');
+    final meta = metaFor(version, duration: duration);
+    return Semantics(
+      button: onTap != null,
+      label: [
+        'Version ${version['version']}',
+        meta,
+        if (from != null)
+          'Restored from version $from'
+        else if (madeFrom != null)
+          'Made from: $madeFrom',
+      ].join('. '),
       onTap: onTap,
+      excludeSemantics: true,
+      child: FlushRow(
+        leading: Transform.rotate(
+          angle: TapeHeader.tilt,
+          child: CassetteTile(width: _tile, caseColor: caseColor, shadow: true),
+        ),
+        leadingSize: _tile,
+        isFirst: isFirst,
+        title: 'Version ${version['version']}',
+        subtitleWidget: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              meta,
+              style: tokens.meta.copyWith(fontSize: 12.5, color: tokens.muted),
+            ),
+            if (second != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  second,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: tokens.meta.copyWith(
+                    fontSize: 13.5,
+                    height: 1.35,
+                    color: tokens.smoke,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        onTap: onTap,
+      ),
     );
   }
 }

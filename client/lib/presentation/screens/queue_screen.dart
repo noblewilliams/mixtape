@@ -520,7 +520,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
                   title: state.session.title,
                   meta: tapeMetaLine(
                     visibleQueue.length,
-                    _durationLabel(visibleQueue),
+                    tapeDurationLabel(visibleQueue),
                     state.queueVersion,
                   ),
                 ),
@@ -725,15 +725,6 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
       child: row,
     );
   }
-}
-
-/// "18 songs · 1 h 12 · version 2" — the duration is dropped when any track's
-/// length is unknown rather than reported short.
-String? _durationLabel(List<QueueTrack> queue) {
-  if (queue.isEmpty || queue.any((t) => t.durationMs == null)) return null;
-  final minutes = queue.fold<int>(0, (sum, t) => sum + t.durationMs!) ~/ 60000;
-  if (minutes < 60) return '$minutes min';
-  return '${minutes ~/ 60} h ${(minutes % 60).toString().padLeft(2, '0')}';
 }
 
 /// One queued queue-mutation, held in terms of TRACK IDS rather than

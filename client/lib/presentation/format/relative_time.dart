@@ -25,3 +25,26 @@ String elapsedWait(DateTime since, {DateTime? now}) {
 }
 
 String _ago(int count, String unit) => '$count ${count == 1 ? unit : '${unit}s'} ago';
+
+const _monthAbbreviations = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+
+/// A version's time as the versions list reads it: "Today, 15:40",
+/// "Yesterday, 09:12", "30 Aug", or "30 Aug 2025" from another year. [now]
+/// is injectable so tests pin the day boundaries.
+String versionTime(DateTime at, {DateTime? now}) {
+  final local = at.toLocal();
+  final today = (now ?? DateTime.now()).toLocal();
+  final day = DateTime(local.year, local.month, local.day);
+  final todayStart = DateTime(today.year, today.month, today.day);
+  final clock =
+      '${local.hour.toString().padLeft(2, '0')}:'
+      '${local.minute.toString().padLeft(2, '0')}';
+  final days = todayStart.difference(day).inDays;
+  if (days == 0) return 'Today, $clock';
+  if (days == 1) return 'Yesterday, $clock';
+  final date = '${local.day} ${_monthAbbreviations[local.month - 1]}';
+  return local.year == today.year ? date : '$date ${local.year}';
+}

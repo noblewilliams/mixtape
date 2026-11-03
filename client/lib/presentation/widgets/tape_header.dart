@@ -9,6 +9,7 @@ import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 
+import '../../data/dj/dj_models.dart';
 import '../theme/mixtape_theme.dart';
 import 'foundation/cassette_tile.dart';
 
@@ -21,6 +22,15 @@ String tapeMetaLine(int songs, String? duration, int version) => [
   ?duration,
   'version $version',
 ].join(' · ');
+
+/// "46 min", "1 h 12": a mix's running time, or null when any song's length
+/// is unknown (never reported short).
+String? tapeDurationLabel(List<QueueTrack> queue) {
+  if (queue.isEmpty || queue.any((t) => t.durationMs == null)) return null;
+  final minutes = queue.fold<int>(0, (sum, t) => sum + t.durationMs!) ~/ 60000;
+  if (minutes < 60) return '$minutes min';
+  return '${minutes ~/ 60} h ${(minutes % 60).toString().padLeft(2, '0')}';
+}
 
 /// A 150 pt cassette in the tape colour, tilted −4°, then the title (up to
 /// two lines) and the meta line.

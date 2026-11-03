@@ -1,11 +1,12 @@
 /// The mix handoff: everything that takes a finished arrangement OUT of this
-/// app — Play now (the app's own Apple player), Send to Music (Apple's
+/// app — Play here (the app's own Apple player), Play in Apple Music (Apple's
 /// player), Create playlist (an Apple Music playlist with a remembered
 /// author), and Send to a transfer tool (the Spotify listener's text handoff).
 ///
 /// Locked by `docs/mockups/approved/2026-09-17-mobile-arrangement-states.md`
-/// (Locked behaviour → the actions row, Play now, Create playlist, the
-/// Spotify listener) and drawn on two screens: the conversation
+/// (Create playlist, the Spotify listener) and, for split Play, by
+/// `docs/mockups/approved/2026-11-03-mix-conversation-redesign.md`. Drawn on
+/// two screens: the conversation
 /// (`screens/chat_screen.dart`) and the arrangement
 /// (`screens/queue_screen.dart`). Both carried byte-near copies of this until
 /// plan task 5.3; the copy, the gating and the toasts now live here once so
@@ -18,7 +19,8 @@
 ///   [mixHasSpotifyActions]) — no widgets, no providers;
 /// * [MixHandoff], a mixin on `ConsumerState` holding the four actions
 ///   themselves, their in-flight guards and their toasts;
-/// * [MixActionsRow] and [MixSaveDialog], the two surfaces they drive.
+/// * [MixSplitPlay], [MixPlayReason] and [MixSaveDialog], the surfaces they
+///   drive.
 ///
 /// Each host screen keeps its own keys and its own toast geometry
 /// ([MixHandoffKeys], `showMixSnack`) — the arrangement's toast sits inside
