@@ -6,6 +6,7 @@ import 'package:mixtape/presentation/screens/mix_history_screen.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
 import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
 import 'package:mixtape/presentation/widgets/foundation/flush_row.dart';
+import 'package:mixtape/presentation/widgets/foundation/mixtape_menu.dart';
 import 'package:mixtape/presentation/widgets/mix_home_row.dart';
 
 void main() {
@@ -132,6 +133,20 @@ void main() {
     expect(find.text('Rename'), findsOneWidget);
     expect(find.text('Version history'), findsOneWidget);
     expect(find.text('Archive'), findsOneWidget);
+    // The row lifts over the dim, in place, and the menu sits under it.
+    final lift = find.byKey(mixtapeMenuLiftKey);
+    expect(
+      find.descendant(of: lift, matching: find.text('Sunday')),
+      findsOneWidget,
+    );
+    expect(
+      tester.getRect(lift).center,
+      tester.getRect(find.byType(FlushRow).first).center,
+    );
+    expect(
+      tester.getTopLeft(find.byKey(mixtapeMenuKey)).dy,
+      greaterThanOrEqualTo(tester.getBottomLeft(lift).dy),
+    );
 
     await tester.tap(find.text('Version history'));
     await tester.pumpAndSettle();

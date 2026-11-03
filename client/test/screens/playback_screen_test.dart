@@ -453,7 +453,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.byKey(PlaybackScreen.moreKey));
     await tester.pumpAndSettle();
-    // The sheet has a Cancel of its own, so the entry is found by its key.
+    // Found by its key: the entry reads Cancel while a command is in flight.
     expect(
       find.descendant(
         of: find.byKey(PlaybackScreen.stopActionKey),

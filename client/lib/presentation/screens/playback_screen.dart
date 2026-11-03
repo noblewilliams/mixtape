@@ -443,10 +443,16 @@ class _NowPlaying extends StatelessWidget {
     final navigator = Navigator.of(context);
     final action = await showMixtapeMenu<_NowPlayingMenu>(
       context,
+      // Stop is the destructive entry, so it sits last behind a separator
+      // (board section 5).
       actions: [
         const MixtapeMenuAction(
           value: _NowPlayingMenu.repeat,
           label: 'Repeat song',
+        ),
+        const MixtapeMenuAction(
+          value: _NowPlayingMenu.listening,
+          label: 'Listening preferences',
         ),
         MixtapeMenuAction(
           key: PlaybackScreen.stopActionKey,
@@ -455,10 +461,7 @@ class _NowPlaying extends StatelessWidget {
           // the word HEAD's player used for exactly this call.
           label: player.busy ? 'Cancel' : 'Stop',
           isDestructive: true,
-        ),
-        const MixtapeMenuAction(
-          value: _NowPlayingMenu.listening,
-          label: 'Listening preferences',
+          separatorBefore: true,
         ),
       ],
     );
@@ -478,7 +481,10 @@ class _NowPlaying extends StatelessWidget {
     }
   }
 
-  Widget _more(BuildContext context) {
+  Widget _more(BuildContext context) => Builder(builder: _moreButton);
+
+  /// Its own context, so the menu anchors to the button.
+  Widget _moreButton(BuildContext context) {
     final tokens = context.tokens;
     return Semantics(
       button: true,

@@ -121,15 +121,26 @@ class _MixHomeRowState extends State<MixHomeRow> {
       value: MixHomeRow.statusAction,
       label: archived ? 'Restore' : 'Archive',
       isDestructive: !archived,
+      separatorBefore: true,
     ),
   ];
 
-  /// The board's long-press: the same menu, as the app's action sheet.
+  /// The board's long-press (section 5, "Long-press on a row"): the row lifts
+  /// onto the sheet surface over the dim and the menu anchors under it.
   Future<void> _openActionsMenu(BuildContext rowContext, bool archived) async {
     final action = await showMixtapeMenu<String>(
       rowContext,
-      title: widget.session.title,
       actions: _menuItems(archived),
+      lifted: (_) => MixtapeMenuLift(
+        child: FlushRow(
+          leading: _tile,
+          leadingSize: MixHomeRow.artSize,
+          title: widget.session.title,
+          subtitle: _subtitle,
+          isFirst: true,
+          onTap: () {},
+        ),
+      ),
     );
     if (action != null && mounted) _handleAction(action);
   }

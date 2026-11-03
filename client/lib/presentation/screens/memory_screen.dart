@@ -195,18 +195,20 @@ class _MemoryScreenState extends ConsumerState<MemoryScreen> {
 
   Future<void> _openMore(BuildContext anchor) async {
     final action = await showMixtapeMenu<_MoreAction>(
-      context,
+      anchor,
+      // Destructive entries sit last, behind a separator (board section 5).
       actions: const [
+        MixtapeMenuAction(
+          key: MemoryScreen.interviewKey,
+          value: _MoreAction.interview,
+          label: MemoryScreen.tellTheDj,
+        ),
         MixtapeMenuAction(
           key: MemoryScreen.clearLearnedKey,
           value: _MoreAction.clearLearned,
           label: MemoryScreen.clearLearned,
           isDestructive: true,
-        ),
-        MixtapeMenuAction(
-          key: MemoryScreen.interviewKey,
-          value: _MoreAction.interview,
-          label: MemoryScreen.tellTheDj,
+          separatorBefore: true,
         ),
       ],
     );
