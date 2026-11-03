@@ -1125,3 +1125,19 @@ Flutter's `Switch.adaptive` draws the pre-iOS 26 switch, so the You tab's toggle
 ## 2026-11-03 — Library sources: labelled buttons, a sync alert, history in plain sight
 
 Founder smoke of build 202611030734: the Library title glyphs were unreadable, the More menu held one row, the sync sheet spoke as if nothing had ever synced, and the Apple history file was hidden behind a disclosure on Add your music. The Library title now carries labelled "Sync" and "Your music" buttons; the sources above Playlists are one row of two halves with a mark and a status line, each opening Add your music on its own segment; sync is a centred alert with re-sync copy and the last date; Add your music's two panes share one grammar (status row, then sections) with "Choose your Apple file" visible without opening anything. Single-tone service marks stay (2026-09-18). Sync is hidden for Spotify-chosen listeners with no Apple library. Approval: `mockups/approved/2026-11-03-library-sources.md`. **Reopens if:** a third service joins the strip, which would make it a list rather than two halves.
+
+## 2026-11-03 — Mix conversation redesign: lyric transcript, split Play, popover menus
+
+The founder approved revision 3 of the mix conversation board
+(`docs/mockups/approved/2026-11-03-mix-conversation-redesign.md`). The
+conversation drops bubbles for a lyric-style transcript. Play now and Send to
+Music merge into one split Play button whose arrow chooses the player and
+remembers the choice. The app's own player stays the default because it is
+the one that learns from listening (2026-09-09). Create playlist moves to the
+tape screen. Shape leaves the panel after the first mix.
+
+Menus become anchored glass popovers app-wide, with no Cancel row. This
+reverses smoke round three, note 8: that rejection was of grey Material boxes
+dropping from glass buttons, and the new popover is drawn in the sheet
+surface. Header buttons become separate 34 pt liquid-glass circles. Sheets
+remain only for content.
