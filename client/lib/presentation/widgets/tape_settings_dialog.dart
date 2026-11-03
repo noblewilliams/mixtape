@@ -5,14 +5,15 @@
 ///
 /// The 48 colours sit in the palette's eight families. A row of family
 /// swatches picks one; its six colours appear as real cassettes with their
-/// names. Picking a cassette saves at once; Done only closes (and keeps a
-/// changed name).
+/// names. Picking a cassette saves at once. A changed name is kept however
+/// the sheet closes — Done, the keyboard's Done, a swipe or a tap on the dim.
 library;
 
 import 'package:flutter/material.dart';
 
 import '../theme/mixtape_theme.dart';
 import 'foundation/cassette_tile.dart';
+import 'foundation/mixtape_feedback.dart';
 import 'foundation/mixtape_sheet.dart';
 import 'tape_palette.dart';
 
@@ -66,6 +67,8 @@ class TapeSettingsSheet extends StatefulWidget {
   static const double cassetteWidth = 92;
 
   static const String failedMessage = 'Couldn’t save tape colour. Try again.';
+  static const String renameFailedMessage =
+      'Couldn’t rename this mix. Try again.';
 
   @override
   State<TapeSettingsSheet> createState() => _TapeSettingsSheetState();
@@ -80,6 +83,7 @@ class _TapeSettingsSheetState extends State<TapeSettingsSheet> {
   bool _saving = false;
   bool _failed = false;
   bool _closing = false;
+  bool _committed = false;
 
   @override
   void dispose() {
@@ -109,95 +113,117 @@ class _TapeSettingsSheetState extends State<TapeSettingsSheet> {
     });
   }
 
-  Future<void> _done() async {
+  /// Done, on the sheet or the keyboard: close, and [_commitName] runs as
+  /// the route pops.
+  void _done() {
     if (_closing) return;
     _closing = true;
+    Navigator.of(context).pop();
+  }
+
+  /// Writes a changed name, once, whatever closed the sheet. A refusal is a
+  /// toast on the screen beneath, since the sheet is already gone.
+  Future<void> _commitName() async {
+    if (_committed) return;
+    _committed = true;
     final name = _name.text.trim();
     final rename = widget.onRename;
-    Navigator.of(context).pop();
-    if (rename != null && name.isNotEmpty && name != widget.title.trim()) {
-      await rename(name);
+    if (rename == null || name.isEmpty || name == widget.title.trim()) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    var ok = false;
+    try {
+      ok = await rename(name);
+    } catch (_) {
+      ok = false;
     }
+    if (ok) return;
+    messenger?.showSnackBar(
+      mixtapeSnackBar(
+        message: TapeSettingsSheet.renameFailedMessage,
+        kind: FeedbackKind.error,
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final tokens = MixtapeSheet.tokensOf(context);
     final colours = tapeFamily(_family);
-    return Material(
-      key: TapeSettingsSheet.sheetKey,
-      color: MixtapeSheet.surfaceColorOf(context),
-      child: Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.viewInsetsOf(context).bottom,
-        ),
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // `.shd`: the heading and Done.
-              ConstrainedBox(
-                constraints: const BoxConstraints(
-                  minHeight: MixtapeMetrics.minTarget,
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Semantics(
-                        header: true,
-                        child: Text(
-                          'Tape',
-                          style: tokens.rowTitle.copyWith(
-                            fontWeight: FontWeight.w700,
+    return PopScope<void>(
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) _commitName();
+      },
+      child: Material(
+        key: TapeSettingsSheet.sheetKey,
+        color: MixtapeSheet.surfaceColorOf(context),
+        child: Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.viewInsetsOf(context).bottom,
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // `.shd`: the heading and Done.
+                ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    minHeight: MixtapeMetrics.minTarget,
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Semantics(
+                          header: true,
+                          child: Text(
+                            'Tape',
+                            style: tokens.rowTitle.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                    TextButton(
-                      key: TapeSettingsSheet.doneKey,
-                      onPressed: _done,
-                      style: TextButton.styleFrom(
-                        minimumSize: const Size(
-                          MixtapeMetrics.minTarget,
-                          MixtapeMetrics.minTarget,
+                      TextButton(
+                        key: TapeSettingsSheet.doneKey,
+                        onPressed: _done,
+                        style: TextButton.styleFrom(
+                          minimumSize: const Size(
+                            MixtapeMetrics.minTarget,
+                            MixtapeMetrics.minTarget,
+                          ),
+                          foregroundColor: tokens.plum,
                         ),
-                        foregroundColor: tokens.plum,
+                        child: const Text(
+                          'Done',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
                       ),
-                      child: const Text(
-                        'Done',
-                        style: TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 4),
-              _NameField(controller: _name, onSubmitted: (_) => _done()),
-              const SizedBox(height: 14),
-              _Families(
-                selected: _family,
-                onPick: (index) => setState(() => _family = index),
-              ),
-              const SizedBox(height: 14),
-              _Grid(
-                colours: colours,
-                selected: _selected,
-                onPick: _pick,
-              ),
-              if (_failed)
-                Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: Semantics(
-                    liveRegion: true,
-                    child: Text(
-                      TapeSettingsSheet.failedMessage,
-                      style: tokens.meta.copyWith(color: tokens.errInk),
-                    ),
+                    ],
                   ),
                 ),
-            ],
+                const SizedBox(height: 4),
+                _NameField(controller: _name, onSubmitted: (_) => _done()),
+                const SizedBox(height: 14),
+                _Families(
+                  selected: _family,
+                  onPick: (index) => setState(() => _family = index),
+                ),
+                const SizedBox(height: 14),
+                _Grid(colours: colours, selected: _selected, onPick: _pick),
+                if (_failed)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        TapeSettingsSheet.failedMessage,
+                        style: tokens.meta.copyWith(color: tokens.errInk),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),

@@ -9,6 +9,7 @@ class _Writes {
   final colours = <String>[];
   final names = <String>[];
   bool colourOk = true;
+  bool renameOk = true;
 }
 
 Future<_Writes> _open(
@@ -17,8 +18,11 @@ Future<_Writes> _open(
   String title = 'Smooth Cruise',
   Brightness brightness = Brightness.light,
   bool colourOk = true,
+  bool renameOk = true,
 }) async {
-  final writes = _Writes()..colourOk = colourOk;
+  final writes = _Writes()
+    ..colourOk = colourOk
+    ..renameOk = renameOk;
   await tester.pumpWidget(
     MaterialApp(
       theme: brightness == Brightness.dark
@@ -38,7 +42,7 @@ Future<_Writes> _open(
                 },
                 onRename: (name) async {
                   writes.names.add(name);
-                  return true;
+                  return writes.renameOk;
                 },
               ),
               child: const Text('open'),
@@ -165,5 +169,70 @@ void main() {
     await tester.pumpAndSettle();
     expect(writes.names, ['Lekki drive']);
     expect(writes.colours, isEmpty);
+  });
+
+  testWidgets('a changed name is saved when the sheet is swiped away', (
+    tester,
+  ) async {
+    final writes = await _open(tester);
+    await tester.enterText(
+      find.byKey(TapeSettingsSheet.nameFieldKey),
+      'Lekki drive',
+    );
+    await tester.pump();
+    await tester.fling(
+      find.byKey(TapeSettingsSheet.sheetKey),
+      const Offset(0, 600),
+      2000,
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(TapeSettingsSheet.sheetKey), findsNothing);
+    expect(writes.names, ['Lekki drive']);
+  });
+
+  testWidgets('a changed name is saved when the dim is tapped', (tester) async {
+    final writes = await _open(tester);
+    await tester.enterText(
+      find.byKey(TapeSettingsSheet.nameFieldKey),
+      'Lekki drive',
+    );
+    await tester.pump();
+    await tester.tapAt(const Offset(20, 20));
+    await tester.pumpAndSettle();
+    expect(find.byKey(TapeSettingsSheet.sheetKey), findsNothing);
+    expect(writes.names, ['Lekki drive']);
+  });
+
+  testWidgets('the keyboard\'s Done saves the name once and closes', (
+    tester,
+  ) async {
+    final writes = await _open(tester);
+    await tester.enterText(
+      find.byKey(TapeSettingsSheet.nameFieldKey),
+      'Lekki drive',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(find.byKey(TapeSettingsSheet.sheetKey), findsNothing);
+    expect(writes.names, ['Lekki drive']);
+  });
+
+  testWidgets('an unchanged name writes nothing on close', (tester) async {
+    final writes = await _open(tester);
+    await tester.tapAt(const Offset(20, 20));
+    await tester.pumpAndSettle();
+    expect(writes.names, isEmpty);
+  });
+
+  testWidgets('a refused rename says so in a toast', (tester) async {
+    final writes = await _open(tester, renameOk: false);
+    await tester.enterText(
+      find.byKey(TapeSettingsSheet.nameFieldKey),
+      'Lekki drive',
+    );
+    await tester.tap(find.byKey(TapeSettingsSheet.doneKey));
+    await tester.pumpAndSettle();
+    expect(writes.names, ['Lekki drive']);
+    expect(find.text(TapeSettingsSheet.renameFailedMessage), findsOneWidget);
   });
 }
