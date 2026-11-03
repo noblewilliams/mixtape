@@ -28,6 +28,7 @@ import '../../data/playback/playback_controller.dart';
 import '../../data/shell/mini_player_state.dart';
 import '../providers/library_sync_provider.dart';
 import '../providers/playback_provider.dart';
+import '../widgets/mix_tape_colour.dart';
 import '../theme/mixtape_theme.dart';
 import '../widgets/energy_journey.dart';
 import '../widgets/mix_energy_summary.dart';
@@ -521,7 +522,7 @@ class _NowPlaying extends StatelessWidget {
       children: [
         CassetteTile(
           width: PlaybackScreen.mixLineCassetteWidth,
-          seedId: player.sessionId,
+          caseColor: watchMixTapeColour(ref, player.sessionId!),
         ),
         const SizedBox(width: 8),
         Expanded(

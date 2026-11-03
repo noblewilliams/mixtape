@@ -304,35 +304,6 @@ Future<void> showEnergyShapeMenu(
   onChanged(arc);
 }
 
-/// The conversation's flavour: there is no session-start message to fold the
-/// sentence into on a later turn, so choosing a shape mid-conversation still
-/// writes it into the draft and toasts. Nothing is sent.
-///
-/// Kept for the conversation screen until its + menu calls
-/// [showEnergyShapeMenu] itself (mix conversation redesign, Track B).
-Future<void> showEnergyShapeSheet(
-  BuildContext anchor,
-  TextEditingController controller,
-) {
-  final messenger = ScaffoldMessenger.maybeOf(anchor);
-  return showEnergyShapeMenu(
-    anchor,
-    controller: controller,
-    onChanged: (arc) {
-      if (arc == null) return;
-      final next = energyBrief(controller.text, arc);
-      if (next == null) return;
-      controller.value = TextEditingValue(
-        text: next,
-        selection: TextSelection.collapsed(offset: next.length),
-      );
-      messenger?.showSnackBar(
-        mixtapeSnackBar(message: energyShapeToast, kind: FeedbackKind.info),
-      );
-    },
-  );
-}
-
 /// One shape's curve, as the board draws it (`.sh`: a 34 × 20 viewBox,
 /// 2 pt round-capped stroke in plum): flat, rise, fall and arc. Scaled to
 /// [size]; the chip wears it at 18 × 11.

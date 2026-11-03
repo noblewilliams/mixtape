@@ -466,14 +466,3 @@ class _TapeChoiceState extends State<_TapeChoice>
     );
   }
 }
-
-/// The old centred dialog's name, kept only so callers outside the mix
-/// surfaces still build until they move to [showTapeSettingsSheet].
-class TapeSettingsDialog extends TapeSettingsSheet {
-  const TapeSettingsDialog({
-    super.key,
-    required super.title,
-    required super.initialColor,
-    required super.onSave,
-  });
-}

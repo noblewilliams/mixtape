@@ -315,35 +315,6 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('the conversation flavour writes the sentence and toasts', (
-    tester,
-  ) async {
-    final controller = TextEditingController(text: 'Sunday');
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: MixtapeTheme.light(),
-        home: Scaffold(
-          body: Center(
-            child: Builder(
-              builder: (anchor) => TextButton(
-                onPressed: () => showEnergyShapeSheet(anchor, controller),
-                child: const Text('Shape'),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.tap(find.text('Shape'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(EnergyControl.presetKey(EnergyArc.arc)));
-    await tester.pumpAndSettle();
-    expect(controller.text, 'Sunday\nEnergy journey: ${EnergyArc.arc.label}.');
-    expect(find.text(energyShapeToast), findsOneWidget);
-    await tester.pumpWidget(const SizedBox());
-    controller.dispose();
-  });
-
   testWidgets('each glyph draws its own curve at the board size', (
     tester,
   ) async {

@@ -83,15 +83,14 @@ class _MixHomeRowState extends State<MixHomeRow> {
   void _handleAction(String action) {
     switch (action) {
       case 'tape-settings':
-        showDialog<void>(
-          context: context,
-          builder: (_) => TapeSettingsDialog(
-            title: widget.session.title,
-            initialColor:
-                widget.session.caseColor ??
-                '#${CassetteTile.caseColorFor(widget.session.id).toARGB32().toRadixString(16).substring(2)}',
-            onSave: widget.onCaseColor!,
-          ),
+        showTapeSettingsSheet(
+          context,
+          title: widget.session.title,
+          initialColor:
+              widget.session.caseColor ??
+              '#${CassetteTile.caseColorFor(widget.session.id).toARGB32().toRadixString(16).substring(2)}',
+          onSave: widget.onCaseColor!,
+          onRename: widget.onRename,
         );
       case MixHomeRow.renameAction:
         _rename();
