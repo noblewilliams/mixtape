@@ -77,9 +77,9 @@ class CollectionReviewForm extends StatelessWidget {
 
   /// One choice over every file at once (smoke round six, note 4). "As
   /// detected" is the suggestion the parse itself made, file by file.
-  Future<void> _setAll(BuildContext context) async {
+  Future<void> _setAll(BuildContext anchor) async {
     final choice = await showMixtapeMenu<String>(
-      context,
+      anchor,
       title: 'Set all files',
       actions: const [
         MixtapeMenuAction(
@@ -170,11 +170,13 @@ class CollectionReviewForm extends StatelessWidget {
                     ),
             ),
             const SizedBox(width: 12),
-            LabelChip(
-              key: setAllKey,
-              label: 'Set all…',
-              hole: false,
-              onPressed: () => _setAll(context),
+            Builder(
+              builder: (anchor) => LabelChip(
+                key: setAllKey,
+                label: 'Set all…',
+                hole: false,
+                onPressed: () => _setAll(anchor),
+              ),
             ),
           ],
         ),
@@ -327,7 +329,11 @@ class CollectionReviewForm extends StatelessWidget {
 
   /// What the file represents, as a flush toggle row — or, once the text is
   /// too large for three segments, as rows inside the same group.
-  List<Widget> _roleChoice(BuildContext context, int index, CollectionFile file) {
+  List<Widget> _roleChoice(
+    BuildContext context,
+    int index,
+    CollectionFile file,
+  ) {
     void choose(String role) => _fileChanged(index, file.change(role: role));
     final key = ValueKey('collection-role-$index');
     if (_stacked(context)) {

@@ -175,7 +175,9 @@ class TapeButton extends StatelessWidget {
       excludeSemantics: true,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: onPressed,
+        // Disabled, it still claims the tap rather than passing it to
+        // whatever it sits on (the tape strip opens the tape).
+        onTap: onPressed ?? () {},
         child: ConstrainedBox(
           constraints: const BoxConstraints(
             minHeight: MixtapeMetrics.minTarget,

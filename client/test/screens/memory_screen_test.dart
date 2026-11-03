@@ -7,7 +7,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/cupertino.dart'
-    show CupertinoActionSheet, CupertinoAlertDialog, CupertinoDialogAction;
+    show CupertinoAlertDialog, CupertinoDialogAction;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -54,24 +54,33 @@ class FakeDjApi implements DjApi {
   Duration get timeout => const Duration(seconds: 120);
 
   @override
-  Future<AlbumPickState> choosePick(String sessionId, {required String albumId, int? expectedVersion}) =>
+  Future<AlbumPickState> choosePick(
+    String sessionId, {
+    required String albumId,
+    int? expectedVersion,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<AlbumPickState> goBackToPick(
+    String sessionId, {
+    required int version,
+    int? expectedVersion,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<List<ListenLaterEntry>> listListenLater() =>
       throw UnimplementedError();
 
   @override
-  Future<AlbumPickState> goBackToPick(String sessionId, {required int version, int? expectedVersion}) =>
+  Future<ListenLaterEntry> saveForLater(String albumId, {String? sessionId}) =>
       throw UnimplementedError();
-
-  @override
-  Future<List<ListenLaterEntry>> listListenLater() => throw UnimplementedError();
-
-  @override
-  Future<ListenLaterEntry> saveForLater(String albumId, {String? sessionId}) => throw UnimplementedError();
 
   @override
   Future<void> unsaveForLater(String albumId) => throw UnimplementedError();
 
   @override
-  Future<ListenLaterEntry> markListened(String albumId) => throw UnimplementedError();
+  Future<ListenLaterEntry> markListened(String albumId) =>
+      throw UnimplementedError();
 
   @override
   Future<SessionDetail> createSession(
@@ -102,7 +111,8 @@ class FakeDjApi implements DjApi {
       throw UnimplementedError();
 
   @override
-  Future<DjSession> setCaseColor(String id, String caseColor) => throw UnimplementedError();
+  Future<DjSession> setCaseColor(String id, String caseColor) =>
+      throw UnimplementedError();
 
   @override
   Future<DjSession> renameSession(String id, String title) =>
@@ -199,7 +209,10 @@ void main() {
       await tester.tap(find.byKey(const Key('forget-memory-m1')));
       await tester.pumpAndSettle();
       expect(find.text('Forget this preference?'), findsOneWidget);
-      expect(find.text('The DJ will stop using this note. You can’t undo this.'), findsOneWidget);
+      expect(
+        find.text('The DJ will stop using this note. You can’t undo this.'),
+        findsOneWidget,
+      );
       await tester.tapAt(const Offset(8, 8));
       await tester.pumpAndSettle();
       expect(_dialog, findsNothing);
@@ -249,7 +262,10 @@ void main() {
     expect(find.text('Undo'), findsNothing);
     expect(find.text(MemoryScreen.emptyTitle), findsOneWidget);
     expect(find.text(MemoryScreen.emptyBody), findsOneWidget);
-    expect(tester.widget<EmptyState>(find.byType(EmptyState)).artwork, EmptyStateArtwork.memory);
+    expect(
+      tester.widget<EmptyState>(find.byType(EmptyState)).artwork,
+      EmptyStateArtwork.memory,
+    );
     expect(
       tester.widget<Image>(find.byType(Image)).width,
       MemoryScreen.emptyCassetteWidth,
@@ -507,7 +523,7 @@ void main() {
       expect(find.text(MemoryScreen.cleared), findsOneWidget);
     });
 
-    testWidgets('is a native action sheet, not a Material popup', (
+    testWidgets('is the anchored popover, destructive entry last', (
       tester,
     ) async {
       final api = FakeDjApi()..onListMemories = () async => [_memory()];
@@ -516,19 +532,30 @@ void main() {
       await tester.tap(find.byKey(MemoryScreen.moreKey));
       await tester.pumpAndSettle();
 
-      expect(find.byType(CupertinoActionSheet), findsOneWidget);
+      final menu = find.byKey(mixtapeMenuKey);
+      expect(menu, findsOneWidget);
       expect(
-        find.byType(PopupMenuItem<Object?>),
-        findsNothing,
-        reason: 'the Material popup box is gone',
+        tester.getTopLeft(menu).dy,
+        greaterThanOrEqualTo(
+          tester.getBottomLeft(find.byKey(MemoryScreen.moreKey)).dy,
+        ),
       );
-      expect(find.byKey(MemoryScreen.clearLearnedKey), findsOneWidget);
       expect(find.byKey(MemoryScreen.interviewKey), findsOneWidget);
-      expect(find.byKey(mixtapeMenuCancelKey), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.byKey(MemoryScreen.clearLearnedKey)).dy,
+        greaterThan(
+          tester.getTopLeft(find.byKey(MemoryScreen.interviewKey)).dy,
+        ),
+      );
+      expect(find.text('Cancel'), findsNothing);
 
-      await tester.tap(find.byKey(mixtapeMenuCancelKey));
+      // Tapping outside dismisses it.
+      await tester.tapAt(
+        tester.getBottomLeft(find.byKey(mixtapeMenuBarrierKey)) +
+            const Offset(4, -4),
+      );
       await tester.pumpAndSettle();
-      expect(find.byType(CupertinoActionSheet), findsNothing);
+      expect(menu, findsNothing);
     });
 
     testWidgets('opens the taste interview', (tester) async {
@@ -634,35 +661,36 @@ void main() {
     expect(find.text('remembered just now'), findsNWidgets(2));
   });
 
-  testWidgets('initial read error offers Try again and keeps route navigation', (
-    tester,
-  ) async {
-    final api = FakeDjApi()
-      ..onListMemories = () async => throw ApiException(500, 'offline');
-    final container = _makeContainer(api);
-    final navigator = GlobalKey<NavigatorState>();
-    await tester.pumpWidget(
-      UncontrolledProviderScope(
-        container: container,
-        child: MaterialApp(
-          theme: MixtapeTheme.light(),
-          navigatorKey: navigator,
-          home: const Scaffold(body: Text('Home')),
+  testWidgets(
+    'initial read error offers Try again and keeps route navigation',
+    (tester) async {
+      final api = FakeDjApi()
+        ..onListMemories = () async => throw ApiException(500, 'offline');
+      final container = _makeContainer(api);
+      final navigator = GlobalKey<NavigatorState>();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            theme: MixtapeTheme.light(),
+            navigatorKey: navigator,
+            home: const Scaffold(body: Text('Home')),
+          ),
         ),
-      ),
-    );
-    navigator.currentState!.push(
-      MaterialPageRoute<void>(builder: (_) => const MemoryScreen()),
-    );
-    await tester.pumpAndSettle();
-    expect(find.text(MemoryScreen.loadFailed), findsOneWidget);
-    expect(find.byKey(MemoryScreen.retryKey), findsOneWidget);
-    api.onListMemories = () async => [];
-    await tester.tap(find.byKey(MemoryScreen.retryKey));
-    await tester.pumpAndSettle();
-    expect(find.text(MemoryScreen.emptyTitle), findsOneWidget);
-    await tester.tap(find.byKey(MemoryScreen.backKey));
-    await tester.pumpAndSettle();
-    expect(find.text('Home'), findsOneWidget);
-  });
+      );
+      navigator.currentState!.push(
+        MaterialPageRoute<void>(builder: (_) => const MemoryScreen()),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text(MemoryScreen.loadFailed), findsOneWidget);
+      expect(find.byKey(MemoryScreen.retryKey), findsOneWidget);
+      api.onListMemories = () async => [];
+      await tester.tap(find.byKey(MemoryScreen.retryKey));
+      await tester.pumpAndSettle();
+      expect(find.text(MemoryScreen.emptyTitle), findsOneWidget);
+      await tester.tap(find.byKey(MemoryScreen.backKey));
+      await tester.pumpAndSettle();
+      expect(find.text('Home'), findsOneWidget);
+    },
+  );
 }

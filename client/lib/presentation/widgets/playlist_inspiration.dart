@@ -213,7 +213,7 @@ class InspirationChip extends StatelessWidget {
     final action = await showMixtapeMenu<_ChipAction>(
       context,
       actions: [
-        // Not an action but a word of explanation, which the sheet can only
+        // Not an action but a word of explanation, which the menu can only
         // carry as a disabled entry; kept keyed as the menu item was.
         if (tone == InspirationChipTone.insufficient)
           const MixtapeMenuAction(

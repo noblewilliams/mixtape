@@ -1,7 +1,10 @@
-/// The energy shape: the Shape chip beside the composer and the sheet it opens
-/// (`docs/mockups/approved/2026-09-17-mobile-conversation-states.md` → Energy
-/// shape sheet; frame A1 and `.sheet` / `.preset` on
-/// `docs/mockups/2026-09-17-mobile-conversation-states.html`).
+/// The energy shape: the Shape chip beside the composer and the popover it
+/// opens (`docs/mockups/approved/2026-11-03-mix-conversation-redesign.md` →
+/// Shape; "Shape on Home" and `.sh` on
+/// `docs/mockups/2026-11-03-mix-conversation-redesign.html`, section 5).
+///
+/// Each shape is a menu row with its curve drawn beside it. Picking one
+/// applies it at once: there is no "Use this shape" step any more.
 ///
 /// The shape is state on the chip, not text in the field (smoke round three,
 /// note 5): the chip wears the chosen arc, the draft is never touched, and
@@ -9,15 +12,13 @@
 /// until they do.
 library;
 
-import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/mixtape_theme.dart';
 import 'foundation/frosted_surface.dart';
-import 'foundation/mixtape_sheet.dart';
+import 'foundation/mixtape_feedback.dart';
+import 'foundation/mixtape_menu.dart';
 import 'foundation/segmented_toggle.dart';
-import 'foundation/tape_button.dart';
-import 'foundation/text_action.dart';
 
 enum EnergyArc {
   steady('Steady', 'A consistent feel from start to finish.'),
@@ -30,11 +31,12 @@ enum EnergyArc {
   final String description;
 }
 
-/// The order the approved board draws the presets in (frame A1).
+/// The order the approved board draws the shapes in (revision 3, "Shape on
+/// Home").
 const List<EnergyArc> energyArcOrder = [
+  EnergyArc.steady,
   EnergyArc.rise,
   EnergyArc.fall,
-  EnergyArc.steady,
   EnergyArc.arc,
 ];
 
@@ -81,42 +83,22 @@ String? energyLine(Map<String, dynamic> detail) {
   return '${arc.label} · ${energyLineVerdict(status)}';
 }
 
-/// The sheet's own copy.
-const String energySheetTitle = 'Give the mix a shape.';
-
-/// The shape no longer lands in the field, so the blurb no longer promises it
-/// will (smoke round three, note 5).
-const String energySheetBlurb =
-    'Goes out with your brief. You still send it yourself.';
+/// The toast when the brief has no room for the shape's sentence. Home also
+/// says it under the composer when a send would overflow.
 const String energySheetTooLong =
     'Shorten your brief to make room for the shape.';
 const String energyShapeToast = 'Shape added to your brief. Send when ready.';
 
-/// What the shape sheet answers with.
-///
-/// A null result from the sheet itself is a dismissal and changes nothing; a
-/// choice carrying a null [arc] is the listener pressing Clear.
-@immutable
-class EnergyShapeChoice {
-  const EnergyShapeChoice(this.arc);
-
-  final EnergyArc? arc;
-
-  @override
-  bool operator ==(Object other) =>
-      other is EnergyShapeChoice && other.arc == arc;
-
-  @override
-  int get hashCode => arc.hashCode;
-}
+/// The menu's last entry, offered only while a shape is set.
+const String energyClearShapeLabel = 'Clear shape';
 
 /// Home's `Shape` control: a glass pill marked with the wave glyph. Home draws
 /// it [compact] on the panel's row above the composer, trailing the Mix | Album
 /// control (album picks board H1, 2026-10-20); before that it sat in the
 /// large-title row (smoke round five, note 1).
 ///
-/// With no shape chosen it reads "Shape" over the generic wave; with one it
-/// wears that arc's own name and its own wave, and the sheet opens on it.
+/// With no shape chosen it reads "Shape" beside the generic curve; with one it
+/// wears that arc's own name and curve, and the menu ticks it.
 class EnergyControl extends StatelessWidget {
   const EnergyControl({
     super.key,
@@ -129,11 +111,11 @@ class EnergyControl extends StatelessWidget {
 
   /// The Home panel's row size (album picks board H1, `.moderow .chip`):
   /// drawn [compactHeight] tall in [compactFontSize] type, with an invisible
-  /// band above and below that keeps the target 44 pt tall. The sheet and its
+  /// band above and below that keeps the target 44 pt tall. The menu and its
   /// flow are the same either way.
   final bool compact;
 
-  /// The draft, which the sheet reads to judge the composed message's length.
+  /// The draft, which the menu reads to judge the composed message's length.
   /// It is never written to.
   final TextEditingController controller;
   final bool enabled;
@@ -147,16 +129,16 @@ class EnergyControl extends StatelessWidget {
   /// What the chip says with nothing chosen.
   static const String unsetLabel = 'Shape';
 
-  /// The wave the unset chip wears.
+  /// The curve the unset chip wears.
   static const EnergyArc genericArc = EnergyArc.arc;
 
   static const Key chipKey = Key('energy-shape-chip');
 
-  /// The glass pill's own geometry: the board's 46 pt title-row cluster around
-  /// a 44 pt target, and the wave that marks it.
+  /// The glass pill's own geometry: a 44 pt target and the curve that marks
+  /// it.
   static const double pillHeight = MixtapeMetrics.minTarget;
   static const double pillSidePadding = 12;
-  static const double waveWidth = 18;
+  static const double waveWidth = 20;
   static const double waveHeight = 12;
   static const double waveGap = 6;
 
@@ -165,31 +147,28 @@ class EnergyControl extends StatelessWidget {
   static const double compactHeight = SegmentedToggle.compactTrackHeight;
   static const double compactFontSize = 11.5;
   static const double compactSidePadding = 9;
-  static const double compactWaveWidth = 14;
-  static const double compactWaveHeight = 9;
+
+  /// The board's chip curve (`.moderow .chip svg`: 18 × 11).
+  static const double compactWaveWidth = 18;
+  static const double compactWaveHeight = 11;
   static const double compactWaveGap = 5;
 
   /// The label stops growing here rather than pushing the title off its row.
   static const double maxLabelWidth = 132;
 
-  /// The sheet's own keys, published here so callers and tests have one place
+  /// The menu's row keys, published here so callers and tests have one place
   /// to look for them.
-  static const Key sheetKey = Key('energy-shape-sheet');
-  static const Key confirmKey = Key('energy-shape-confirm');
   static const Key clearKey = Key('energy-shape-clear');
-  static const Key tooLongKey = Key('energy-shape-too-long');
 
   static Key presetKey(EnergyArc arc) => ValueKey('energy-preset-${arc.name}');
 
-  Future<void> _open(BuildContext context) async {
-    final choice = await pickEnergyShape(
-      context,
-      controller,
-      selected: selectedArc,
-    );
-    if (choice == null) return;
-    onArcChanged?.call(choice.arc);
-  }
+  /// Anchored to the chip itself.
+  Future<void> _open(BuildContext context) => showEnergyShapeMenu(
+    context,
+    controller: controller,
+    selected: selectedArc,
+    onChanged: (arc) => onArcChanged?.call(arc),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -229,10 +208,11 @@ class EnergyControl extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      EnergyWave(
-                        arc: arc ?? genericArc,
-                        width: compact ? compactWaveWidth : waveWidth,
-                        height: compact ? compactWaveHeight : waveHeight,
+                      EnergyShapeGlyph(
+                        arc ?? genericArc,
+                        size: compact
+                            ? const Size(compactWaveWidth, compactWaveHeight)
+                            : const Size(waveWidth, waveHeight),
                       ),
                       SizedBox(width: compact ? compactWaveGap : waveGap),
                       ConstrainedBox(
@@ -269,222 +249,153 @@ class EnergyControl extends StatelessWidget {
   }
 }
 
-/// Opens the shape sheet on [selected] and returns what the listener did.
-Future<EnergyShapeChoice?> pickEnergyShape(
-  BuildContext context,
-  TextEditingController controller, {
+/// What a shape row answers with; [_clearShape] is the Clear row.
+const String _clearShape = 'clear';
+
+/// The shape popover (revision 3, "Shape on Home"), anchored to [anchor]'s
+/// render box: one row per shape with its curve and shipped subtitle, a tick
+/// on [selected], and "Clear shape" behind a separator only when a shape is
+/// set.
+///
+/// A pick applies at once: [onChanged] hears the arc, or null for Clear.
+/// When [controller]'s brief has no room for the shape's sentence, nothing
+/// changes and the listener gets [energySheetTooLong] as a toast. Tapping
+/// outside changes nothing.
+Future<void> showEnergyShapeMenu(
+  BuildContext anchor, {
+  required TextEditingController controller,
   EnergyArc? selected,
-}) => showMixtapeSheet<EnergyShapeChoice>(
-  context,
-  isScrollControlled: true,
-  builder: (_) => _EnergyShapeSheet(controller: controller, selected: selected),
-);
-
-/// The conversation's chip: there is no session-start message to fold the
-/// sentence into on a later turn, so choosing a shape mid-conversation still
-/// writes it into the draft and toasts. Nothing is sent.
-Future<void> showEnergyShapeSheet(
-  BuildContext context,
-  TextEditingController controller,
-) async {
-  final choice = await pickEnergyShape(context, controller);
-  final result = choice?.arc;
-  if (!context.mounted || result == null) return;
-  final next = energyBrief(controller.text, result);
-  if (next == null) return;
-  controller.value = TextEditingValue(
-    text: next,
-    selection: TextSelection.collapsed(offset: next.length),
+  required ValueChanged<EnergyArc?> onChanged,
+}) async {
+  final messenger = ScaffoldMessenger.maybeOf(anchor);
+  final picked = await showMixtapeMenu<String>(
+    anchor,
+    actions: [
+      for (final arc in energyArcOrder)
+        MixtapeMenuAction(
+          key: EnergyControl.presetKey(arc),
+          value: arc.name,
+          label: arc.label,
+          subtitle: arc.description,
+          isSelected: arc == selected,
+          leading: EnergyShapeGlyph(arc),
+        ),
+      if (selected != null)
+        const MixtapeMenuAction(
+          key: EnergyControl.clearKey,
+          value: _clearShape,
+          label: energyClearShapeLabel,
+          separatorBefore: true,
+        ),
+    ],
   );
-  ScaffoldMessenger.of(context).showSnackBar(
-    mixtapeSnackBar(message: energyShapeToast, kind: FeedbackKind.info),
-  );
+  if (picked == null) return;
+  if (picked == _clearShape) {
+    onChanged(null);
+    return;
+  }
+  final arc = EnergyArc.values.byName(picked);
+  if (energyBrief(controller.text, arc) == null) {
+    messenger?.showSnackBar(
+      mixtapeSnackBar(message: energySheetTooLong, kind: FeedbackKind.error),
+    );
+    return;
+  }
+  onChanged(arc);
 }
 
-class _EnergyShapeSheet extends StatefulWidget {
-  const _EnergyShapeSheet({required this.controller, this.selected});
+/// One shape's curve, as the board draws it (`.sh`: a 34 × 20 viewBox,
+/// 2 pt round-capped stroke in plum): flat, rise, fall and arc. Scaled to
+/// [size]; the chip wears it at 18 × 11.
+class EnergyShapeGlyph extends StatelessWidget {
+  const EnergyShapeGlyph(
+    this.arc, {
+    super.key,
+    this.size = boardSize,
+    this.color,
+  });
 
-  final TextEditingController controller;
+  final EnergyArc arc;
+  final Size size;
 
-  /// The shape the chip is already wearing, which the radio opens on and
-  /// which is what makes Clear worth offering.
-  final EnergyArc? selected;
+  /// Defaults to `tokens.plum`.
+  final Color? color;
+
+  /// The board's `.sh` box.
+  static const Size boardSize = Size(34, 20);
 
   @override
-  State<_EnergyShapeSheet> createState() => _EnergyShapeSheetState();
+  Widget build(BuildContext context) => SizedBox.fromSize(
+    size: size,
+    child: CustomPaint(
+      painter: _ShapeGlyphPainter(arc, color ?? context.tokens.plum),
+    ),
+  );
 }
 
-class _EnergyShapeSheetState extends State<_EnergyShapeSheet> {
-  late EnergyArc arc = widget.selected ?? EnergyControl.genericArc;
+class _ShapeGlyphPainter extends CustomPainter {
+  const _ShapeGlyphPainter(this.arc, this.color);
+
+  final EnergyArc arc;
+  final Color color;
+
+  /// The board's paths, in its 34 × 20 viewBox.
+  static Path pathFor(EnergyArc arc) {
+    final path = Path();
+    switch (arc) {
+      case EnergyArc.steady:
+        path
+          ..moveTo(2, 10)
+          ..lineTo(32, 10);
+      case EnergyArc.rise:
+        path
+          ..moveTo(2, 17)
+          ..cubicTo(14, 16, 22, 10, 32, 3);
+      case EnergyArc.fall:
+        path
+          ..moveTo(2, 3)
+          ..cubicTo(12, 4, 20, 10, 32, 17);
+      case EnergyArc.arc:
+        // `C10 16 12 3 17 3 S24 16 32 16`: the S reflects (12, 3) about
+        // (17, 3) for its first control point.
+        path
+          ..moveTo(2, 16)
+          ..cubicTo(10, 16, 12, 3, 17, 3)
+          ..cubicTo(22, 3, 24, 16, 32, 16);
+    }
+    return path;
+  }
 
   @override
-  Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    final tooLong = energyBrief(widget.controller.text, arc) == null;
-
-    return Semantics(
-      key: EnergyControl.sheetKey,
-      container: true,
-      label: energySheetTitle,
-      child: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(energySheetTitle, style: MixtapeSheet.headingOf(context)),
-              const SizedBox(height: 2),
-              Padding(
-                // The heading block's own gap plus the founder's extra air
-                // above the first row (smoke round three, note 4).
-                padding: const EdgeInsets.only(
-                  bottom: 8 + MixtapeSheet.headingGap,
-                ),
-                child: Text(
-                  energySheetBlurb,
-                  style: MixtapeSheet.subtitleOf(context),
-                ),
-              ),
-              for (var i = 0; i < energyArcOrder.length; i++)
-                _preset(tokens, energyArcOrder[i], separated: i > 0),
-              if (tooLong)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(
-                    energySheetTooLong,
-                    key: EnergyControl.tooLongKey,
-                    style: tokens.secondary.copyWith(color: tokens.errInk),
-                  ),
-                ),
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                // Cancel at the left edge, the action at the right: the
-                // two are not a huddle (smoke round two, note 3).
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        TextAction(
-                          label: 'Cancel',
-                          quiet: true,
-                          onPressed: () => Navigator.of(context).pop(),
-                        ),
-                        // Only worth offering once there is a shape to take
-                        // off the chip.
-                        if (widget.selected != null) ...[
-                          const SizedBox(width: 4),
-                          TextAction(
-                            key: EnergyControl.clearKey,
-                            label: 'Clear',
-                            onPressed: () => Navigator.of(
-                              context,
-                            ).pop(const EnergyShapeChoice(null)),
-                          ),
-                        ],
-                      ],
-                    ),
-                    Flexible(
-                      child: TapeButton(
-                        key: EnergyControl.confirmKey,
-                        label: 'Use this shape',
-                        onPressed: tooLong
-                            ? null
-                            : () => Navigator.of(
-                                context,
-                              ).pop(EnergyShapeChoice(arc)),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+  void paint(Canvas canvas, Size size) {
+    final box = EnergyShapeGlyph.boardSize;
+    final scaleX = size.width / box.width;
+    final scaleY = size.height / box.height;
+    final scale = (scaleX + scaleY) / 2;
+    canvas.save();
+    canvas.scale(scaleX, scaleY);
+    canvas.drawPath(
+      pathFor(arc),
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        // The board's 2 pt in viewBox units, but never thinner than 1.5 pt on
+        // screen: at the chip's size a scaled stroke disappears.
+        ..strokeWidth = (2 * scale).clamp(1.5, double.infinity) / scale
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round,
     );
+    canvas.restore();
   }
 
-  /// `.preset`: the wave glyph, the label and its description, and the radio.
-  Widget _preset(
-    MixtapeTokens tokens,
-    EnergyArc option, {
-    required bool separated,
-  }) {
-    final selected = option == arc;
-    return Semantics(
-      button: true,
-      inMutuallyExclusiveGroup: true,
-      selected: selected,
-      label: '${option.label}. ${option.description}',
-      // `excludeSemantics` drops the detector's own tap action, and a node
-      // with no action cannot be activated by VoiceOver. Declare it here.
-      onTap: () => setState(() => arc = option),
-      excludeSemantics: true,
-      child: GestureDetector(
-        key: EnergyControl.presetKey(option),
-        behavior: HitTestBehavior.opaque,
-        onTap: () => setState(() => arc = option),
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 56),
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          decoration: separated
-              ? BoxDecoration(
-                  border: Border(top: BorderSide(color: tokens.hairline)),
-                )
-              : null,
-          child: Row(
-            children: [
-              EnergyWave(
-                arc: option,
-                width: 44,
-                height: 28,
-                color: tokens.plum,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      option.label,
-                      style: tokens.rowTitle.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    Text(
-                      option.description,
-                      style: tokens.meta.copyWith(color: tokens.muted),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              Container(
-                width: 22,
-                height: 22,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: selected ? tokens.plum : tokens.muted,
-                    width: selected ? 7 : 1.5,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  @override
+  bool shouldRepaint(_ShapeGlyphPainter oldDelegate) =>
+      arc != oldDelegate.arc || color != oldDelegate.color;
 }
 
-/// The board's `.preset svg.w` path for one arc, drawn on a 44 × 28 box and
-/// scaled to whatever size it is given. Also the energy line's glyph.
+/// The earlier board's `.preset svg.w` path for one arc, drawn on a 44 × 28
+/// box and scaled to whatever size it is given: the energy line's glyph. The
+/// chip and the shape menu draw [EnergyShapeGlyph] instead.
 class EnergyWave extends StatelessWidget {
   const EnergyWave({
     super.key,

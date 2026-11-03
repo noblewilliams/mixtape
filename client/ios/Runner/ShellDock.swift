@@ -602,7 +602,11 @@ final class LiquidGlassViewFactory: NSObject, FlutterPlatformViewFactory {
     let params = args as? [String: Any]
     let isDark = params?["isDark"] as? Bool
     let cornerRadius = (params?["cornerRadius"] as? NSNumber)?.doubleValue ?? 0
-    return LiquidGlassPlatformView(frame: frame, isDark: isDark, cornerRadius: cornerRadius)
+    // The header buttons are true circles; the continuous curve would draw
+    // them as squircles at half the side.
+    let circle = params?["circle"] as? Bool ?? false
+    return LiquidGlassPlatformView(
+      frame: frame, isDark: isDark, cornerRadius: cornerRadius, circle: circle)
   }
 
   func createArgsCodec() -> FlutterMessageCodec & NSObjectProtocol {
@@ -613,7 +617,7 @@ final class LiquidGlassViewFactory: NSObject, FlutterPlatformViewFactory {
 final class LiquidGlassPlatformView: NSObject, FlutterPlatformView {
   private let effectView: UIVisualEffectView
 
-  init(frame: CGRect, isDark: Bool?, cornerRadius: Double) {
+  init(frame: CGRect, isDark: Bool?, cornerRadius: Double, circle: Bool = false) {
     if #available(iOS 26, *) {
       effectView = UIVisualEffectView(effect: UIGlassEffect())
     } else {
@@ -630,7 +634,7 @@ final class LiquidGlassPlatformView: NSObject, FlutterPlatformView {
     // itself to the radius the widget was given (the Home panel's 32 pt).
     if cornerRadius > 0 {
       effectView.layer.cornerRadius = CGFloat(cornerRadius)
-      effectView.layer.cornerCurve = .continuous
+      effectView.layer.cornerCurve = circle ? .circular : .continuous
       effectView.clipsToBounds = true
     }
     super.init()

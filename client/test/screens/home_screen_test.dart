@@ -354,8 +354,6 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.byKey(EnergyControl.presetKey(EnergyArc.fall)));
         await tester.pumpAndSettle();
-        await tester.tap(find.byKey(EnergyControl.confirmKey));
-        await tester.pumpAndSettle();
 
         // The chip wears it; the field is exactly what was typed.
         expect(find.text(EnergyArc.fall.label), findsOneWidget);
@@ -419,8 +417,6 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(EnergyControl.presetKey(EnergyArc.rise)));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(EnergyControl.confirmKey));
-      await tester.pumpAndSettle();
       expect(find.text(EnergyArc.rise.label), findsOneWidget);
 
       await tester.tap(find.byKey(EnergyControl.chipKey));
@@ -452,8 +448,6 @@ void main() {
         await tester.tap(find.byKey(EnergyControl.chipKey));
         await tester.pumpAndSettle();
         await tester.tap(find.byKey(EnergyControl.presetKey(EnergyArc.rise)));
-        await tester.pumpAndSettle();
-        await tester.tap(find.byKey(EnergyControl.confirmKey));
         await tester.pumpAndSettle();
 
         await tester.enterText(
@@ -1022,8 +1016,6 @@ void main() {
       await tester.tap(find.byKey(EnergyControl.chipKey));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(EnergyControl.presetKey(arc)));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(EnergyControl.confirmKey));
       await tester.pumpAndSettle();
     }
 

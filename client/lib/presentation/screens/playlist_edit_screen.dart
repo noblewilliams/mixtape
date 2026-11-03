@@ -123,7 +123,7 @@ class _PlaylistEditScreenState extends ConsumerState<PlaylistEditScreen> {
 
   Future<void> _openMore(BuildContext anchor) async {
     final action = await showMixtapeMenu<String>(
-      context,
+      anchor,
       actions: const [
         MixtapeMenuAction(value: 'refresh', label: 'Refresh draft'),
       ],

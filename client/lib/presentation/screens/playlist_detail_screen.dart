@@ -189,7 +189,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
   /// screen reads as the playlist, not as an editing surface.
   Future<void> _openMore(BuildContext anchor) async {
     final action = await showMixtapeMenu<String>(
-      context,
+      anchor,
       actions: [
         MixtapeMenuAction(
           key: PlaylistDetailScreen.editWithDjKey,

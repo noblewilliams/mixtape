@@ -52,6 +52,7 @@ class FrostedSurface extends StatelessWidget {
     this.tint,
     this.hairline = true,
     this.shadow = true,
+    this.shadows,
     this.opaque = false,
   });
 
@@ -65,6 +66,10 @@ class FrostedSurface extends StatelessWidget {
   final Color? tint;
   final bool hairline;
   final bool shadow;
+
+  /// Replaces the default soft shadow when [shadow] is on — the header
+  /// buttons' small circles want a tighter one (board `.gbtn::before`).
+  final List<BoxShadow>? shadows;
 
   /// Force the opaque material, whatever the ambient mode.
   final bool opaque;
@@ -118,13 +123,14 @@ class FrostedSurface extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: radius,
         boxShadow: shadow
-            ? [
-                BoxShadow(
-                  color: tokens.glassShadow,
-                  blurRadius: 24,
-                  offset: const Offset(0, 8),
-                ),
-              ]
+            ? shadows ??
+                  [
+                    BoxShadow(
+                      color: tokens.glassShadow,
+                      blurRadius: 24,
+                      offset: const Offset(0, 8),
+                    ),
+                  ]
             : null,
       ),
       // The blur is expensive; keep it off its neighbours' repaint list.

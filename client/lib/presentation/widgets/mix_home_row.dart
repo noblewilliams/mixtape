@@ -83,15 +83,14 @@ class _MixHomeRowState extends State<MixHomeRow> {
   void _handleAction(String action) {
     switch (action) {
       case 'tape-settings':
-        showDialog<void>(
-          context: context,
-          builder: (_) => TapeSettingsDialog(
-            title: widget.session.title,
-            initialColor:
-                widget.session.caseColor ??
-                '#${CassetteTile.caseColorFor(widget.session.id).toARGB32().toRadixString(16).substring(2)}',
-            onSave: widget.onCaseColor!,
-          ),
+        showTapeSettingsSheet(
+          context,
+          title: widget.session.title,
+          initialColor:
+              widget.session.caseColor ??
+              '#${CassetteTile.caseColorFor(widget.session.id).toARGB32().toRadixString(16).substring(2)}',
+          onSave: widget.onCaseColor!,
+          onRename: widget.onRename,
         );
       case MixHomeRow.renameAction:
         _rename();
@@ -110,26 +109,47 @@ class _MixHomeRowState extends State<MixHomeRow> {
   /// so it offers Rename and Archive/Restore only.
   List<MixtapeMenuAction<String>> _menuItems(bool archived) => [
     if (widget.onCaseColor != null && !_isAlbum)
-      const MixtapeMenuAction(value: 'tape-settings', label: 'Tape settings'),
-    const MixtapeMenuAction(value: MixHomeRow.renameAction, label: 'Rename'),
+      const MixtapeMenuAction(
+        value: 'tape-settings',
+        label: 'Tape settings',
+        icon: MixMenuIcons.tape,
+      ),
+    const MixtapeMenuAction(
+      value: MixHomeRow.renameAction,
+      label: 'Rename',
+      icon: MixMenuIcons.rename,
+    ),
     if (!_isAlbum)
       const MixtapeMenuAction(
         value: MixHomeRow.versionHistoryAction,
         label: 'Version history',
+        icon: MixMenuIcons.history,
       ),
     MixtapeMenuAction(
       value: MixHomeRow.statusAction,
       label: archived ? 'Restore' : 'Archive',
       isDestructive: !archived,
+      separatorBefore: true,
+      icon: MixMenuIcons.archive,
     ),
   ];
 
-  /// The board's long-press: the same menu, as the app's action sheet.
+  /// The board's long-press (section 5, "Long-press on a row"): the row lifts
+  /// onto the sheet surface over the dim and the menu anchors under it.
   Future<void> _openActionsMenu(BuildContext rowContext, bool archived) async {
     final action = await showMixtapeMenu<String>(
       rowContext,
-      title: widget.session.title,
       actions: _menuItems(archived),
+      lifted: (_) => MixtapeMenuLift(
+        child: FlushRow(
+          leading: _tile,
+          leadingSize: MixHomeRow.artSize,
+          title: widget.session.title,
+          subtitle: _subtitle,
+          isFirst: true,
+          onTap: () {},
+        ),
+      ),
     );
     if (action != null && mounted) _handleAction(action);
   }

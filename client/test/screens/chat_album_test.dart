@@ -5,6 +5,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixtape/presentation/widgets/tape_strip.dart';
 import 'package:mixtape/data/api/api_client.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/dj/dj_api.dart';
@@ -25,7 +26,6 @@ import 'package:mixtape/presentation/widgets/conversation_turn.dart';
 import 'package:mixtape/presentation/widgets/foundation/idea_pill.dart';
 import 'package:mixtape/presentation/widgets/mix_energy_summary.dart';
 import 'package:mixtape/presentation/widgets/mix_handoff.dart';
-import 'package:mixtape/presentation/widgets/playlist_inspiration.dart';
 
 import '../data/playback/playback_controller_test.dart'
     as playback
@@ -204,7 +204,7 @@ void main() {
       expect(find.text('Rename mix'), findsNothing);
     });
 
-    testWidgets('the panel: inspiration stays, no Shape, no mix actions', (
+    testWidgets('the panel: a playlist to start from, no Shape, no strip', (
       tester,
     ) async {
       final api = _AlbumApi()
@@ -212,9 +212,12 @@ void main() {
             _detail(pickState: AlbumPickState(version: 1, pick: first));
       await _pump(tester, _container(api));
 
-      expect(find.byType(InspirationChip), findsOneWidget);
-      expect(find.byKey(const Key('chat-shape-chip')), findsNothing);
-      expect(find.byType(MixActionsRow), findsNothing);
+      expect(find.byType(MixSplitPlay), findsNothing);
+      expect(find.byKey(TapeStrip.stripKey), findsNothing);
+      await tester.tap(find.byKey(const Key('chat-plus')));
+      await tester.pumpAndSettle();
+      expect(find.text('Start from a playlist'), findsOneWidget);
+      expect(find.text('Shape the energy'), findsNothing);
     });
 
     testWidgets('the placeholder suggests refinements once there is a pick', (
@@ -268,8 +271,7 @@ void main() {
       tester.getSemantics(find.byKey(WorkingIndicator.indicatorKey)).label,
       'Finding your album',
     );
-    expect(find.byKey(WorkingIndicator.captionKey), findsNothing);
-    await tester.pump(const Duration(seconds: 11));
+    // The line sits beside the cassette from the start, as the mix's does.
     expect(
       find.text('Finding your album · checking Apple Music'),
       findsOneWidget,

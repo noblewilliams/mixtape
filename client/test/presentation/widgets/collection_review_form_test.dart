@@ -216,88 +216,91 @@ void main() {
     expect(find.byKey(const ValueKey('collection-mode')), findsOneWidget);
     expect(find.byKey(const ValueKey('collection-target-0')), findsNothing);
 
-    expect(current().change(confirmed: true).canUpload(parsed.snapshot), isTrue);
+    expect(
+      current().change(confirmed: true).canUpload(parsed.snapshot),
+      isTrue,
+    );
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('every file is its own group, under a caption of file and count', (
-    tester,
-  ) async {
-    final snapshot = snapshotOf(['Dopamine', 'Late night']);
-    await pumpForm(
-      tester,
-      snapshot,
-      selectionFor(snapshot),
-      paths: const [
-        'spotify_playlists/dopamine.csv',
-        'spotify_playlists/late_night.csv',
-      ],
-      surface: const Size(390, 1400),
-      sidePadding: 20,
-    );
-
-    // The caption spreads: file name on the left, count on the right.
-    expect(find.text('DOPAMINE.CSV'), findsOneWidget);
-    expect(find.text('LATE_NIGHT.CSV'), findsOneWidget);
-    expect(find.text('1 ENTRY'), findsNWidgets(2));
-    final name = tester.getRect(find.text('DOPAMINE.CSV'));
-    final count = tester.getRect(find.text('1 ENTRY').first);
-    expect(name.left, lessThan(count.left));
-    // The count is pushed to the far edge of its own entry, not tucked in
-    // behind the name.
-    expect(count.left - name.right, greaterThan(100));
-    expect(
-      count.right,
-      greaterThan(tester.getRect(find.text('LATE_NIGHT.CSV')).right),
-    );
-    // Every entry is a bordered card, and nothing is left to choose about
-    // where a playlist lands, so that row is not drawn at all.
-    for (var i = 0; i < 2; i++) {
-      expect(
-        tester
-            .widget<InsetGroup>(find.byKey(ValueKey('collection-file-$i')))
-            .outlined,
-        isTrue,
+  testWidgets(
+    'every file is its own group, under a caption of file and count',
+    (tester) async {
+      final snapshot = snapshotOf(['Dopamine', 'Late night']);
+      await pumpForm(
+        tester,
+        snapshot,
+        selectionFor(snapshot),
+        paths: const [
+          'spotify_playlists/dopamine.csv',
+          'spotify_playlists/late_night.csv',
+        ],
+        surface: const Size(390, 1400),
+        sidePadding: 20,
       );
-      expect(find.byKey(ValueKey('collection-target-$i')), findsNothing);
-    }
-    // No track or artist name anywhere: file names, counts and the playlist
-    // names the listener is naming themselves.
-    expect(find.textContaining('T0'), findsNothing);
-    expect(find.text('Use as'), findsNothing, reason: 'the toggle says it');
 
-    // The bordered box itself, inside the group's own bottom margin.
-    Rect surfaceOf(int i) => tester.getRect(
-      find
-          .descendant(
+      // The caption spreads: file name on the left, count on the right.
+      expect(find.text('DOPAMINE.CSV'), findsOneWidget);
+      expect(find.text('LATE_NIGHT.CSV'), findsOneWidget);
+      expect(find.text('1 ENTRY'), findsNWidgets(2));
+      final name = tester.getRect(find.text('DOPAMINE.CSV'));
+      final count = tester.getRect(find.text('1 ENTRY').first);
+      expect(name.left, lessThan(count.left));
+      // The count is pushed to the far edge of its own entry, not tucked in
+      // behind the name.
+      expect(count.left - name.right, greaterThan(100));
+      expect(
+        count.right,
+        greaterThan(tester.getRect(find.text('LATE_NIGHT.CSV')).right),
+      );
+      // Every entry is a bordered card, and nothing is left to choose about
+      // where a playlist lands, so that row is not drawn at all.
+      for (var i = 0; i < 2; i++) {
+        expect(
+          tester
+              .widget<InsetGroup>(find.byKey(ValueKey('collection-file-$i')))
+              .outlined,
+          isTrue,
+        );
+        expect(find.byKey(ValueKey('collection-target-$i')), findsNothing);
+      }
+      // No track or artist name anywhere: file names, counts and the playlist
+      // names the listener is naming themselves.
+      expect(find.textContaining('T0'), findsNothing);
+      expect(find.text('Use as'), findsNothing, reason: 'the toggle says it');
+
+      // The bordered box itself, inside the group's own bottom margin.
+      Rect surfaceOf(int i) => tester.getRect(
+        find
+            .descendant(
+              of: find.byKey(ValueKey('collection-file-$i')),
+              matching: find.byType(DecoratedBox),
+            )
+            .first,
+      );
+      expect(
+        surfaceOf(1).top - surfaceOf(0).bottom,
+        moreOrLessEquals(InsetGroup.bottomMargin, epsilon: 0.5),
+      );
+      for (var i = 0; i < 2; i++) {
+        expect(
+          find.descendant(
             of: find.byKey(ValueKey('collection-file-$i')),
-            matching: find.byType(DecoratedBox),
-          )
-          .first,
-    );
-    expect(
-      surfaceOf(1).top - surfaceOf(0).bottom,
-      moreOrLessEquals(InsetGroup.bottomMargin, epsilon: 0.5),
-    );
-    for (var i = 0; i < 2; i++) {
-      expect(
-        find.descendant(
-          of: find.byKey(ValueKey('collection-file-$i')),
-          matching: find.byKey(ValueKey('collection-role-$i')),
-        ),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(
-          of: find.byKey(ValueKey('collection-file-$i')),
-          matching: find.byKey(ValueKey('collection-name-$i')),
-        ),
-        findsOneWidget,
-      );
-    }
-    expect(tester.takeException(), isNull);
-  });
-
+            matching: find.byKey(ValueKey('collection-role-$i')),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: find.byKey(ValueKey('collection-file-$i')),
+            matching: find.byKey(ValueKey('collection-name-$i')),
+          ),
+          findsOneWidget,
+        );
+      }
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('with nothing to attach to, the file still creates a new '
       'playlist and shows no action row', (tester) async {
@@ -358,7 +361,19 @@ void main() {
       await tester.pump();
       await tester.tap(find.byKey(CollectionReviewForm.setAllKey));
       await tester.pumpAndSettle();
-      expect(find.byKey(mixtapeMenuCancelKey), findsOneWidget);
+      // The popover anchors to the chip that opened it.
+      final chip = tester.getRect(find.byKey(CollectionReviewForm.setAllKey));
+      final menu = tester.getRect(find.byKey(mixtapeMenuKey));
+      expect(
+        menu.top >= chip.bottom || menu.bottom <= chip.top,
+        isTrue,
+        reason: 'the menu sits just above or below the chip',
+      );
+      expect(
+        (menu.top - chip.bottom).abs() < 16 ||
+            (chip.top - menu.bottom).abs() < 16,
+        isTrue,
+      );
       await tester.tap(find.text(label));
       await tester.pumpAndSettle();
     }

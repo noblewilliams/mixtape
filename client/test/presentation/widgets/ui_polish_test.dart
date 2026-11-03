@@ -223,7 +223,7 @@ void main() {
                           artwork: EmptyStateArtwork.memory,
                         ),
                         const SizedBox(height: 20),
-                        TapeSettingsDialog(
+                        TapeSettingsSheet(
                           title: 'A slow Sunday',
                           initialColor: '#88c9b3',
                           onSave: (_) async => true,

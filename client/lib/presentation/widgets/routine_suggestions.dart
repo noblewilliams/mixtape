@@ -232,10 +232,19 @@ class _RoutinePillBodyState extends State<_RoutinePillBody>
     );
   }
 
-  /// The board's native context menu on the pill, as an action sheet.
-  Future<void> _openMenu(RoutineSuggestion suggestion) async {
+  /// The board's context menu on the pill: the pill lifts and the popover
+  /// anchors to it, as a long-pressed row does.
+  Future<void> _openMenu(
+    BuildContext anchor,
+    RoutineSuggestion suggestion,
+  ) async {
     final choice = await showMixtapeMenu<_RoutineAction>(
-      context,
+      anchor,
+      lifted: (_) => MixtapeMenuLift(
+        padding: EdgeInsets.zero,
+        radius: MixtapeMetrics.pillRadius,
+        child: IdeaPill(label: suggestion.title, onPressed: () {}),
+      ),
       actions: const [
         MixtapeMenuAction(
           key: RoutinePillSlot.notTodayKey,
@@ -252,6 +261,7 @@ class _RoutinePillBodyState extends State<_RoutinePillBody>
           value: _RoutineAction.turnOff,
           label: RoutinePillSlot.turnOffLabel,
           isDestructive: true,
+          separatorBefore: true,
         ),
       ],
     );
@@ -298,13 +308,17 @@ class _RoutinePillBodyState extends State<_RoutinePillBody>
           ): () =>
               unawaited(_turnOff()),
         },
-        child: GestureDetector(
-          onLongPress: live ? () => unawaited(_openMenu(suggestion)) : null,
-          child: IdeaPill(
-            key: RoutinePillSlot.pillKey,
-            label: suggestion.title,
-            dimmed: widget.dimmed,
-            onPressed: live ? () => unawaited(_fill(suggestion)) : null,
+        child: Builder(
+          builder: (anchor) => GestureDetector(
+            onLongPress: live
+                ? () => unawaited(_openMenu(anchor, suggestion))
+                : null,
+            child: IdeaPill(
+              key: RoutinePillSlot.pillKey,
+              label: suggestion.title,
+              dimmed: widget.dimmed,
+              onPressed: live ? () => unawaited(_fill(suggestion)) : null,
+            ),
           ),
         ),
       ),

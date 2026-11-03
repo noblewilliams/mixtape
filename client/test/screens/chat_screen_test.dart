@@ -5,10 +5,11 @@ import 'package:mixtape/presentation/widgets/mix_energy_summary.dart';
 import 'package:mixtape/data/playlists/playlist_context_models.dart';
 import 'dart:async';
 
-import 'package:flutter/cupertino.dart' show CupertinoTextField;
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/api/api_client.dart';
 import 'package:mixtape/data/auth/token_store.dart';
@@ -20,20 +21,21 @@ import 'package:mixtape/data/settings/author_store.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/dj_providers.dart';
 import 'package:mixtape/presentation/providers/library_sync_provider.dart';
+import 'package:mixtape/presentation/providers/play_destination_provider.dart';
 import 'package:mixtape/presentation/providers/playback_provider.dart';
 import 'package:mixtape/presentation/providers/playlist_context_provider.dart';
 import 'package:mixtape/presentation/screens/chat_screen.dart';
 import 'package:mixtape/presentation/screens/mix_history_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/screens/queue_screen.dart';
-import 'package:mixtape/presentation/widgets/conversation_turn.dart';
+import 'package:mixtape/presentation/screens/playback_screen.dart';
+import 'package:mixtape/presentation/widgets/foundation/mixtape_menu.dart';
+import 'package:mixtape/presentation/widgets/lyric_turn.dart';
 import 'package:mixtape/presentation/widgets/energy_journey.dart';
 import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
-import 'package:mixtape/presentation/widgets/foundation/label_chip.dart';
-import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
-import 'package:mixtape/presentation/widgets/foundation/text_action.dart';
 import 'package:mixtape/presentation/widgets/playlist_inspiration.dart';
-import 'package:mixtape/presentation/widgets/queue_card.dart';
+import 'package:mixtape/presentation/widgets/tape_strip.dart';
+import 'package:mixtape/presentation/widgets/version_marker.dart';
 
 import 'package:mixtape/data/auth/account_api.dart' show AccountApi;
 import 'package:mixtape/presentation/providers/account_provider.dart'
@@ -283,6 +285,8 @@ ProviderContainer _makeContainer(
   AuthorStore? authorStore,
   String? accountName,
   AccountApi? account,
+  PlaybackController? player,
+  PlayDestinationStore? destinations,
 }) {
   // The screen watches the Mixes summaries for the title it shows while the
   // transcript loads, and posts session events on an output.
@@ -298,6 +302,9 @@ ProviderContainer _makeContainer(
       accountNameProvider.overrideWith((ref) async => accountName),
       if (account != null) accountApiProvider.overrideWithValue(account),
       mixEnergyProvider.overrideWith((ref, key) async => <String, dynamic>{}),
+      playDestinationStoreProvider.overrideWithValue(
+        destinations ?? InMemoryPlayDestinationStore(),
+      ),
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
       djApiProvider.overrideWithValue(api),
       authProvider.overrideWith(() => TestAuthNotifier(AuthStatus.session)),
@@ -306,7 +313,7 @@ ProviderContainer _makeContainer(
       // The real controller reaches the player method channel and GET
       // /playback; the mix actions watch it to know whether THIS mix plays.
       playbackProvider.overrideWithValue(
-        PlaybackController(playback.FakeApi(), playback.FakeBridge()),
+        player ?? PlaybackController(playback.FakeApi(), playback.FakeBridge()),
       ),
     ],
   );
@@ -350,7 +357,7 @@ abstract final class _MixActionsKeys {
 
 void main() {
   group('the frame', () {
-    testWidgets('draws the back, arrangement and More clusters around the title', (
+    testWidgets('the header is Back, the title and one More: no queue button', (
       tester,
     ) async {
       final api = FakeDjApi();
@@ -359,7 +366,7 @@ void main() {
       await _pump(tester, _makeContainer(api));
 
       expect(find.byKey(const Key('chat-back')), findsOneWidget);
-      expect(find.byKey(const Key('chat-arrangement')), findsOneWidget);
+      expect(find.byKey(const Key('chat-arrangement')), findsNothing);
       expect(find.byKey(const Key('chat-actions')), findsOneWidget);
       expect(find.text('Night bus notes'), findsOneWidget);
       // The shell owns the chrome now: no Material app bar anywhere.
@@ -367,7 +374,7 @@ void main() {
       expect(find.byKey(const Key('chat-not-personal')), findsNothing);
     });
 
-    testWidgets('the Arrangement button pushes the arrangement for this mix', (
+    testWidgets('tapping the strip away from Play opens the tape for this mix', (
       tester,
     ) async {
       final api = FakeDjApi();
@@ -378,7 +385,7 @@ void main() {
       );
       await _pump(tester, _makeContainer(api), sessionId: 'session-42');
 
-      await tester.tap(find.byKey(const Key('chat-arrangement')));
+      await tester.tap(find.byKey(TapeStrip.openKey));
       await tester.pumpAndSettle();
 
       expect(
@@ -413,15 +420,15 @@ void main() {
       );
       await _pump(tester, _makeContainer(api));
 
-      expect(find.byKey(ConversationTurn.userKey), findsOneWidget);
-      expect(find.byKey(ConversationTurn.djKey), findsOneWidget);
-      expect(find.byKey(ConversationTurn.errorKey), findsNothing);
+      expect(find.byKey(LyricTurn.userKey), findsOneWidget);
+      expect(find.byKey(LyricTurn.djKey), findsOneWidget);
+      expect(find.byKey(LyricTurn.errorKey), findsNothing);
       expect(find.byKey(const Key('dj-accent-bar')), findsNothing);
     });
 
     testWidgets(
-      'the tape card sits under the latest current-version reply; earlier '
-      'versions are Version chips',
+      'version markers: the current one reads current, earlier ones open '
+      'history; no tape card',
       (tester) async {
         final api = FakeDjApi();
         api.onGetSession = (_) async => SessionDetail(
@@ -434,47 +441,50 @@ void main() {
         );
         await _pump(tester, _makeContainer(api));
 
-        expect(find.byKey(QueueCard.cardKey), findsOneWidget);
-        expect(find.text('The tape'), findsOneWidget);
-        expect(find.text('2 songs · 6 min · version 2'), findsOneWidget);
-        expect(find.text('Version 1'), findsOneWidget);
-        expect(find.text('Version 2'), findsNothing);
+        expect(find.byKey(VersionMarker.keyFor(1)), findsOneWidget);
+        expect(find.byKey(VersionMarker.keyFor(2)), findsOneWidget);
+        expect(find.textContaining('2 songs · current'), findsOneWidget);
+        expect(find.text('The tape'), findsNothing);
+        expect(find.text('Open'), findsNothing);
+        // The marker follows the reply that made it.
+        expect(
+          tester.getTopLeft(find.byKey(VersionMarker.keyFor(2))).dy,
+          greaterThan(tester.getTopLeft(find.text('second cut')).dy),
+        );
       },
     );
 
-    testWidgets('the tape card reports hours once the mix is long enough', (tester) async {
+    testWidgets('every cassette wears the saved tape colour', (tester) async {
       final api = FakeDjApi();
+      final saved = DjSession(
+        id: 's1',
+        title: 'Lagos',
+        status: 'active',
+        queueVersion: 2,
+        updatedAt: DateTime(2026, 1, 1),
+        caseColor: '#617f9c',
+      );
+      api.onListSessions = () async => [saved];
       api.onGetSession = (_) async => SessionDetail(
-        session: _session(queueVersion: 2),
-        messages: [_msg('m1', 'dj', 'here', queueVersion: 2)],
-        queue: [
-          for (var i = 0; i < 18; i++) _track(i, durationMs: 240000),
+        session: saved,
+        messages: [
+          _msg('m1', 'dj', 'first cut', queueVersion: 1),
+          _msg('m2', 'dj', 'second cut', queueVersion: 2),
         ],
+        queue: [_track(0)],
       );
       await _pump(tester, _makeContainer(api));
 
-      expect(find.text('18 songs · 1 h 12 · version 2'), findsOneWidget);
+      final colours = tester
+          .widgetList<CassetteTile>(find.byType(CassetteTile))
+          .map((tile) => tile.caseColor)
+          .toSet();
+      // Two markers and the strip.
+      expect(find.byType(CassetteTile), findsNWidgets(3));
+      expect(colours, {const Color(0xFF617F9C)});
     });
 
-    testWidgets('Open pushes the arrangement for this session', (tester) async {
-      final api = FakeDjApi();
-      api.onGetSession = (_) async => SessionDetail(
-        session: _session(queueVersion: 1, id: 'session-42'),
-        messages: [_msg('m1', 'dj', 'here you go', queueVersion: 1)],
-        queue: [_track(0)],
-      );
-      await _pump(tester, _makeContainer(api), sessionId: 'session-42');
-
-      await tester.tap(find.byKey(QueueCard.openKey));
-      await tester.pumpAndSettle();
-
-      expect(
-        tester.widget<QueueScreen>(find.byType(QueueScreen)).sessionId,
-        'session-42',
-      );
-    });
-
-    testWidgets('a Version chip opens history at that version', (tester) async {
+    testWidgets('an earlier version marker opens history at that version', (tester) async {
       final api = FakeDjApi();
       api.onGetSession = (_) async => SessionDetail(
         session: _session(queueVersion: 3),
@@ -487,13 +497,14 @@ void main() {
       await _pump(tester, _makeContainer(api));
 
       await tester.tap(find.text('Version 1'));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
 
       final pushed = tester.widget<MixHistoryScreen>(find.byType(MixHistoryScreen));
       expect(pushed.initialVersion, 1);
     });
 
-    testWidgets('a Version chip is a button VoiceOver can activate', (
+    testWidgets('an earlier version marker is a button VoiceOver can activate', (
       tester,
     ) async {
       final handle = tester.ensureSemantics();
@@ -551,7 +562,7 @@ void main() {
       expect(find.text('Build, then settle · limited coverage'), findsOneWidget);
     });
 
-    testWidgets('no tape card when the current turn emptied the queue', (tester) async {
+    testWidgets('no current marker when the current turn emptied the queue', (tester) async {
       final api = FakeDjApi();
       api.onGetSession = (_) async => SessionDetail(
         session: _session(queueVersion: 3),
@@ -560,11 +571,13 @@ void main() {
       );
       await _pump(tester, _makeContainer(api));
 
-      expect(find.byKey(QueueCard.cardKey), findsNothing);
-      expect(find.text('Version 3'), findsNothing);
+      expect(find.byKey(VersionMarker.keyFor(3)), findsNothing);
+      expect(find.byKey(TapeStrip.stripKey), findsNothing);
     });
 
-    testWidgets('a standalone tape card lands below every turn', (tester) async {
+    testWidgets('a current version no reply carries is marked below every turn', (
+      tester,
+    ) async {
       final api = FakeDjApi();
       api.onGetSession = (_) async => SessionDetail(
         session: _session(queueVersion: 5),
@@ -576,10 +589,10 @@ void main() {
       );
       await _pump(tester, _makeContainer(api));
 
-      expect(find.byKey(QueueCard.cardKey), findsOneWidget);
-      expect(find.text('Version 1'), findsOneWidget);
+      expect(find.byKey(VersionMarker.keyFor(5)), findsOneWidget);
+      expect(find.byKey(VersionMarker.keyFor(1)), findsOneWidget);
       expect(
-        tester.getTopLeft(find.byKey(QueueCard.cardKey)).dy,
+        tester.getTopLeft(find.byKey(VersionMarker.keyFor(5))).dy,
         greaterThan(tester.getTopLeft(find.text('second thought')).dy),
       );
     });
@@ -592,16 +605,50 @@ void main() {
 
       final listView = tester.widget<ListView>(find.byType(ListView).first);
       expect(listView.childrenDelegate, isA<SliverChildBuilderDelegate>());
+      // Each turn fades by its own paint, so no per-turn repaint boundary.
+      expect(
+        (listView.childrenDelegate as SliverChildBuilderDelegate)
+            .addRepaintBoundaries,
+        isFalse,
+      );
+      expect(find.byType(LyricFade), findsOneWidget);
+    });
+
+    testWidgets('the latest exchange is full ink; older turns still fade', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(),
+        messages: [
+          _msg('m1', 'user', 'first ask'),
+          _msg('m2', 'dj', 'older reply'),
+          _msg('m3', 'user', 'now this'),
+          _msg('m4', 'dj', 'here you go'),
+        ],
+        queue: [],
+      );
+      await _pump(tester, _makeContainer(api));
+
+      RenderLyricFade fadeOf(String text) => tester.renderObject<RenderLyricFade>(
+        find.ancestor(of: find.text(text), matching: find.byType(LyricFade)),
+      );
+      // Short content: nothing scrolls, so nothing in the latest exchange
+      // may sit faded at the top.
+      expect(fadeOf('now this').lastOpacity, 1);
+      expect(fadeOf('here you go').lastOpacity, 1);
+      expect(fadeOf('first ask').lastOpacity, lessThan(1));
     });
   });
 
   group('the DJ working', () {
-    testWidgets('three dots in place, the caption after the delay, then the reply', (
+    testWidgets('the cassette takes the next line\'s place, then the reply', (
       tester,
     ) async {
       final completer = Completer<TurnResult>();
       final api = FakeDjApi();
-      api.onGetSession = (_) async => SessionDetail(session: _session(), messages: [], queue: []);
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(queueVersion: 0), messages: [], queue: []);
       api.onSendMessage = (id, text) => completer.future;
       await _pump(tester, _makeContainer(api));
 
@@ -611,33 +658,71 @@ void main() {
       await tester.pump();
 
       expect(find.text('play jazz'), findsOneWidget);
-      expect(find.byKey(WorkingIndicator.indicatorKey), findsOneWidget);
-      expect(find.byKey(WorkingIndicator.captionKey), findsNothing);
-      // The composer and the attachments go inert in place, not away.
+      expect(find.byKey(WorkingCassette.indicatorKey), findsOneWidget);
+      expect(find.text('The DJ is listening…'), findsOneWidget);
+      // Before the first mix the cassette wears the default case.
+      expect(
+        tester
+            .widget<CassetteTile>(find.byKey(WorkingCassette.cassetteKey))
+            .caseColor,
+        CassetteTile.caseColors.first,
+      );
+      expect(
+        tester.getTopLeft(find.byKey(WorkingCassette.indicatorKey)).dy,
+        greaterThan(tester.getTopLeft(find.text('play jazz')).dy),
+      );
+      // The composer and + go inert in place, not away.
       expect(
         tester.widget<TextField>(find.byKey(const Key('prompt-field'))).readOnly,
         isTrue,
       );
-      expect(find.byKey(const Key('chat-shape-chip')), findsOneWidget);
-      expect(
-        tester.widget<LabelChip>(find.byKey(const Key('chat-shape-chip'))).onPressed,
-        isNull,
-      );
-
-      await tester.pump(const Duration(seconds: 11));
-      expect(find.text('the DJ is listening…'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('chat-plus')));
+      await tester.pump();
+      expect(find.text('Start from a playlist'), findsNothing);
 
       completer.complete(
         TurnResult(djMessage: _msg('m2', 'dj', 'here you go'), queue: [], queueVersion: 1),
       );
       await tester.pumpAndSettle();
 
-      expect(find.byKey(WorkingIndicator.indicatorKey), findsNothing);
+      expect(find.byKey(WorkingCassette.indicatorKey), findsNothing);
       expect(find.text('here you go'), findsOneWidget);
       expect(
         tester.widget<TextField>(find.byKey(const Key('prompt-field'))).readOnly,
         isFalse,
       );
+    });
+
+    testWidgets('a mix being changed keeps its strip playable', (tester) async {
+      final completer = Completer<TurnResult>();
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(queueVersion: 2),
+        messages: [_msg('m1', 'dj', 'here', queueVersion: 2)],
+        queue: [_track(0)],
+      );
+      api.onSendMessage = (id, text) => completer.future;
+      final bridge = FakeBridge();
+      await _pump(tester, _makeContainer(api, bridge: bridge));
+
+      await tester.enterText(find.byKey(const Key('prompt-field')), 'softer');
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('start-session')));
+      await tester.pump();
+
+      expect(find.byKey(WorkingCassette.indicatorKey), findsOneWidget);
+      await tester.tap(find.byKey(const Key('chat-play-menu')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(find.byKey(const Key('chat-send-to-music')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(bridge.playedIds, ['apple-0']);
+
+      completer.complete(
+        TurnResult(djMessage: _msg('m2', 'dj', 'softer now'), queue: [_track(0)], queueVersion: 3),
+      );
+      await tester.pumpAndSettle();
     });
   });
 
@@ -662,16 +747,16 @@ void main() {
       await tester.tap(find.byKey(const Key('start-session')));
       await tester.pumpAndSettle();
 
-      expect(find.byKey(ConversationTurn.errorKey), findsOneWidget);
+      expect(find.byKey(LyricTurn.errorKey), findsOneWidget);
       expect(find.text('the DJ is stuck, try again'), findsOneWidget);
 
-      await tester.tap(find.byKey(ConversationTurn.resendKey));
+      await tester.tap(find.byKey(LyricTurn.resendKey));
       await tester.pumpAndSettle();
 
       expect(sendCall, 2);
       expect(find.text('play jazz'), findsNWidgets(2)); // original + resend
       expect(find.text('sorted, here you go'), findsOneWidget);
-      expect(find.byKey(ConversationTurn.errorKey), findsOneWidget);
+      expect(find.byKey(LyricTurn.errorKey), findsOneWidget);
     });
 
     testWidgets('Resend never clears an in-progress draft', (tester) async {
@@ -692,7 +777,7 @@ void main() {
 
       await tester.enterText(find.byKey(const Key('prompt-field')), 'unsent draft');
       await tester.pump();
-      await tester.tap(find.byKey(ConversationTurn.resendKey));
+      await tester.tap(find.byKey(LyricTurn.resendKey));
       await tester.pumpAndSettle();
 
       expect(sendCall, 2);
@@ -727,10 +812,9 @@ void main() {
       await tester.tap(find.byKey(const Key('start-session')));
       await tester.pump();
 
-      expect(
-        tester.widget<IconButton>(find.byKey(ConversationTurn.resendKey)).onPressed,
-        isNull,
-      );
+      await tester.tap(find.byKey(LyricTurn.resendKey));
+      await tester.pump();
+      expect(find.text('Resend'), findsOneWidget);
       expect(sendCall, 2);
 
       inFlight.complete(
@@ -760,8 +844,8 @@ void main() {
       addTearDown(container.dispose);
       await _pump(tester, container);
 
-      expect(find.byKey(ConversationTurn.errorKey), findsOneWidget);
-      expect(find.byKey(ConversationTurn.resendKey), findsNothing);
+      expect(find.byKey(LyricTurn.errorKey), findsOneWidget);
+      expect(find.byKey(LyricTurn.resendKey), findsNothing);
     });
 
     testWidgets('an initialError seeds one error turn whose Resend works', (tester) async {
@@ -778,10 +862,10 @@ void main() {
       };
       await _pump(tester, _makeContainer(api), initialError: 'the DJ hiccupped');
 
-      expect(find.byKey(ConversationTurn.errorKey), findsOneWidget);
+      expect(find.byKey(LyricTurn.errorKey), findsOneWidget);
       expect(find.text('the DJ hiccupped'), findsOneWidget);
 
-      await tester.tap(find.byKey(ConversationTurn.resendKey));
+      await tester.tap(find.byKey(LyricTurn.resendKey));
       await tester.pumpAndSettle();
 
       expect(sendCall, 1);
@@ -793,7 +877,7 @@ void main() {
       api.onGetSession = (_) async => SessionDetail(session: _session(), messages: [], queue: []);
       await _pump(tester, _makeContainer(api));
 
-      expect(find.byKey(ConversationTurn.errorKey), findsNothing);
+      expect(find.byKey(LyricTurn.errorKey), findsNothing);
     });
   });
 
@@ -820,10 +904,10 @@ void main() {
       expect(find.byKey(const Key('prompt-field')), findsOneWidget);
       expect(find.byType(AppBar), findsNothing);
       // Nothing is actionable until the transcript lands.
-      expect(
-        tester.widget<TapeButton>(find.byKey(const Key('chat-play-now'))).onPressed,
-        isNull,
-      );
+      expect(find.byKey(const Key('chat-play-now')), findsNothing);
+      await tester.tap(find.byKey(const Key('chat-plus')));
+      await tester.pump();
+      expect(find.text('Start from a playlist'), findsNothing);
     });
 
     testWidgets('the skeleton keeps the real title and announces Opening <title>', (
@@ -942,7 +1026,7 @@ void main() {
   });
 
   group('the panel', () {
-    testWidgets('the mix actions are inert until the mix has an arrangement', (
+    testWidgets('before the first mix: + and the composer only, no strip', (
       tester,
     ) async {
       final api = FakeDjApi();
@@ -950,59 +1034,82 @@ void main() {
           SessionDetail(session: _session(queueVersion: 0), messages: [], queue: []);
       await _pump(tester, _makeContainer(api));
 
-      expect(
-        tester.widget<TapeButton>(find.byKey(const Key('chat-play-now'))).onPressed,
-        isNull,
-      );
-      expect(
-        tester.widget<LabelChip>(find.byKey(const Key('chat-create-playlist'))).onPressed,
-        isNull,
-      );
-      expect(
-        tester.widget<TextAction>(find.byKey(const Key('chat-send-to-music'))).onPressed,
-        isNull,
-      );
-      expect(find.text('Play now'), findsOneWidget);
+      expect(find.byKey(TapeStrip.stripKey), findsNothing);
+      expect(find.byKey(const Key('chat-play-now')), findsNothing);
+      expect(find.byKey(const Key('chat-create-playlist')), findsNothing);
+      expect(find.byKey(const Key('chat-shape-chip')), findsNothing);
+      expect(find.byType(InspirationChip), findsNothing);
+      final plus = find.byKey(const Key('chat-plus'));
+      expect(tester.getSize(plus), const Size(44, 44));
+
+      // The + menu holds a playlist to start from and, before the first
+      // mix, Shape.
+      await tester.tap(plus);
+      await tester.pumpAndSettle();
+      expect(find.text('Start from a playlist'), findsOneWidget);
+      expect(find.text('Shape the energy'), findsOneWidget);
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pumpAndSettle();
+      expect(find.text('Start from a playlist'), findsNothing);
     });
 
-    testWidgets('an arrangement makes all three actions live', (tester) async {
+    testWidgets('a mix: the strip holds the tape and the only Play', (tester) async {
       final api = FakeDjApi();
       api.onGetSession = (_) async => SessionDetail(
-        session: _session(queueVersion: 2),
+        session: _session(queueVersion: 2, title: 'Smooth Cruise'),
         messages: [_msg('m1', 'dj', 'here', queueVersion: 2)],
-        queue: [_track(0)],
+        queue: [_track(0), _track(1)],
       );
       await _pump(tester, _makeContainer(api));
 
-      expect(
-        tester.widget<TapeButton>(find.byKey(const Key('chat-play-now'))).onPressed,
-        isNotNull,
-      );
-      expect(
-        tester.widget<LabelChip>(find.byKey(const Key('chat-create-playlist'))).onPressed,
-        isNotNull,
-      );
-      expect(
-        tester.widget<TextAction>(find.byKey(const Key('chat-send-to-music'))).onPressed,
-        isNotNull,
-      );
+      expect(find.byKey(TapeStrip.stripKey), findsOneWidget);
+      expect(find.text('Version 2 · 2 songs'), findsOneWidget);
+      expect(find.byKey(const Key('chat-play-now')), findsOneWidget);
+      expect(find.byKey(const Key('chat-play-menu')), findsOneWidget);
+      // Create playlist stays on the tape screen; nothing else competes.
+      expect(find.byKey(const Key('chat-create-playlist')), findsNothing);
+      expect(find.text('Play now'), findsNothing);
+      expect(find.text('Play'), findsOneWidget);
+
+      // Once a mix exists Shape leaves the + menu.
+      await tester.tap(find.byKey(const Key('chat-plus')));
+      await tester.pumpAndSettle();
+      expect(find.text('Start from a playlist'), findsOneWidget);
+      expect(find.text('Shape the energy'), findsNothing);
     });
 
-    testWidgets('the Shape chip writes the brief into the composer', (tester) async {
+    testWidgets('Play plays here by default and opens Now Playing', (tester) async {
       final api = FakeDjApi();
-      api.onGetSession = (_) async => SessionDetail(session: _session(), messages: [], queue: []);
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(queueVersion: 3),
+        messages: [_msg('m1', 'dj', 'here', queueVersion: 3)],
+        queue: [_track(0)],
+      );
+      FlutterSecureStorage.setMockInitialValues({});
+      final player = PlaybackController(playback.FakeApi(), playback.FakeBridge());
+      addTearDown(player.dispose);
+      await _pump(tester, _makeContainer(api, player: player));
+
+      await tester.tap(find.byKey(const Key('chat-play-now')));
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      expect(player.sessionId, 's1');
+      expect(player.version, 3);
+    });
+
+    testWidgets('Shape from + writes the brief into the composer', (tester) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(session: _session(queueVersion: 0), messages: [], queue: []);
       await _pump(tester, _makeContainer(api));
 
       await tester.enterText(find.byKey(const Key('prompt-field')), 'Sunday morning');
       await tester.pump();
-      await tester.tap(find.byKey(const Key('chat-shape-chip')));
+      await tester.tap(find.byKey(const Key('chat-plus')));
       await tester.pumpAndSettle();
-
-      expect(find.byKey(EnergyControl.sheetKey), findsOneWidget);
-      expect(find.text('Give the mix a shape.'), findsOneWidget);
+      await tester.tap(find.text('Shape the energy'));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(EnergyControl.presetKey(EnergyArc.fall)));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(EnergyControl.confirmKey));
       await tester.pumpAndSettle();
 
       expect(
@@ -1013,6 +1120,37 @@ void main() {
         'Sunday morning\nEnergy journey: Wind down.',
       );
       expect(find.text('Shape added to your brief. Send when ready.'), findsOneWidget);
+      ScaffoldMessenger.of(
+        tester.element(find.byType(ChatScreen)),
+      ).removeCurrentSnackBar();
+      await tester.pumpAndSettle();
+
+      // The menu ticks the shape the brief asks for, and Clear takes it out.
+      await tester.tap(find.byKey(const Key('chat-plus')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Shape the energy'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(EnergyControl.clearKey));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('prompt-field')))
+            .controller!
+            .text,
+        'Sunday morning',
+      );
+    });
+
+    testWidgets('Start from a playlist opens the playlist picker', (tester) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(session: _session(), messages: [], queue: []);
+      await _pump(tester, _makeContainer(api, inspiration: FakeContextApi()));
+      await tester.tap(find.byKey(const Key('chat-plus')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('chat-plus-playlist')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(find.byKey(PlaylistPicker.sheetKey), findsOneWidget);
     });
 
     testWidgets('an unavailable playlist keeps its name and offers detach', (tester) async {
@@ -1067,7 +1205,7 @@ void main() {
         findsOneWidget,
       );
       // The arrangement and the unsent text are untouched.
-      expect(find.byKey(QueueCard.cardKey), findsOneWidget);
+      expect(find.byKey(TapeStrip.stripKey), findsOneWidget);
       expect(find.text('and nothing before 2010'), findsOneWidget);
     });
   });
@@ -1116,6 +1254,38 @@ void main() {
       expect(find.text('Mix restored'), findsOneWidget);
     });
 
+    testWidgets('every entry wears the board\'s trailing glyph', (tester) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(queueVersion: 0), messages: [], queue: []);
+      await _pump(tester, _makeContainer(api));
+
+      Map<String, IconData?> icons() => {
+        for (final item in tester.widgetList<MixtapeMenuItem<String>>(
+          find.byType(MixtapeMenuItem<String>),
+        ))
+          item.action.label: item.action.icon,
+      };
+
+      await tester.tap(find.byKey(const Key('chat-actions')));
+      await tester.pumpAndSettle();
+      expect(icons(), {
+        'Version history': Icons.history_rounded,
+        'Tape settings': Icons.voicemail_rounded,
+        'Rename': CupertinoIcons.pencil,
+        'Archive': CupertinoIcons.archivebox,
+      });
+      await tester.tap(find.byKey(mixtapeMenuBarrierKey));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('chat-plus')));
+      await tester.pumpAndSettle();
+      expect(icons(), {
+        'Start from a playlist': Icons.playlist_add_rounded,
+        'Shape the energy': Icons.show_chart_rounded,
+      });
+    });
+
     testWidgets('Version history opens the history screen', (tester) async {
       final api = FakeDjApi();
       api.onGetSession = (_) async => SessionDetail(session: _session(), messages: [], queue: []);
@@ -1136,7 +1306,7 @@ void main() {
 
 
   group('the handoffs', () {
-    testWidgets('Send to Music uses the arrangement\'s exact skipped-track copy', (
+    testWidgets('a remembered Apple Music plays there, with the skipped-track copy', (
       tester,
     ) async {
       final api = FakeDjApi();
@@ -1146,9 +1316,17 @@ void main() {
         queue: [_track(0), _spotifyTrack(1)], // one has no Apple match
       );
       final bridge = FakeBridge();
-      await _pump(tester, _makeContainer(api, bridge: bridge));
+      await _pump(
+        tester,
+        _makeContainer(
+          api,
+          bridge: bridge,
+          destinations: InMemoryPlayDestinationStore(PlayDestination.appleMusic),
+        ),
+      );
 
-      await tester.tap(find.byKey(const Key('chat-send-to-music')));
+      expect(find.text('Play in Music'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('chat-play-now')));
       await tester.pumpAndSettle();
 
       expect(bridge.playedIds, ['apple-0']);
@@ -1158,7 +1336,7 @@ void main() {
       );
     });
 
-    testWidgets('a failed save reports Apple\'s own reason, capitalised as shipped', (
+    testWidgets('the arrow plays in Apple Music and makes it the default', (
       tester,
     ) async {
       final api = FakeDjApi();
@@ -1167,77 +1345,18 @@ void main() {
         messages: [_msg('m1', 'dj', 'here', queueVersion: 2)],
         queue: [_track(0)],
       );
-      final bridge = FakeBridge()..failWith = MusicKitException('not authorised');
-      await _pump(tester, _makeContainer(api, bridge: bridge));
+      final bridge = FakeBridge();
+      final store = InMemoryPlayDestinationStore();
+      await _pump(tester, _makeContainer(api, bridge: bridge, destinations: store));
 
-      await tester.tap(find.byKey(const Key('chat-create-playlist')));
+      await tester.tap(find.byKey(const Key('chat-play-menu')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('chat-playlist-save')));
-      await tester.pumpAndSettle();
-
-      expect(
-        find.text("Couldn't save the playlist — not authorised"),
-        findsOneWidget,
-      );
-    });
-
-    testWidgets('the save dialog prefills the author from the account name', (
-      tester,
-    ) async {
-      final api = FakeDjApi();
-      api.onGetSession = (_) async => SessionDetail(
-        session: _session(queueVersion: 2, title: 'Night bus notes'),
-        messages: [_msg('m1', 'dj', 'here', queueVersion: 2)],
-        queue: [_track(0)],
-      );
-      await _pump(
-        tester,
-        _makeContainer(api, accountName: 'Ada'),
-      );
-
-      await tester.tap(find.byKey(const Key('chat-create-playlist')));
+      await tester.tap(find.byKey(const Key('chat-send-to-music')));
       await tester.pumpAndSettle();
 
-      expect(
-        tester
-            .widget<CupertinoTextField>(find.byKey(const Key('chat-playlist-author')))
-            .controller!
-            .text,
-        'Ada',
-      );
-      expect(
-        tester
-            .widget<CupertinoTextField>(find.byKey(const Key('chat-playlist-name')))
-            .controller!
-            .text,
-        'Night bus notes',
-      );
-    });
-
-    testWidgets('a device-remembered author beats the account name', (tester) async {
-      final api = FakeDjApi();
-      api.onGetSession = (_) async => SessionDetail(
-        session: _session(queueVersion: 2),
-        messages: [_msg('m1', 'dj', 'here', queueVersion: 2)],
-        queue: [_track(0)],
-      );
-      final store = InMemoryAuthorStore();
-      await store.write('Grace');
-      await _pump(
-        tester,
-        _makeContainer(api, authorStore: store, accountName: 'Ada'),
-      );
-
-      await tester.tap(find.byKey(const Key('chat-create-playlist')));
-      await tester.pumpAndSettle();
-
-      expect(
-        tester
-            .widget<CupertinoTextField>(find.byKey(const Key('chat-playlist-author')))
-            .controller!
-            .text,
-        'Grace',
-      );
+      expect(bridge.playedIds, ['apple-0']);
+      expect(await store.read(), PlayDestination.appleMusic);
+      expect(find.text('Play in Music'), findsOneWidget);
     });
 
     testWidgets('a Spotify-only mix trades Play and Create for the transfer tool', (
@@ -1279,10 +1398,11 @@ void main() {
       await _pump(tester, _makeContainer(api));
 
       expect(find.text("these tracks aren't in Apple Music"), findsOneWidget);
-      expect(
-        tester.widget<TapeButton>(find.byKey(const Key('chat-play-now'))).onPressed,
-        isNull,
-      );
+      final bridge = FakeBridge();
+      await tester.tap(find.byKey(const Key('chat-play-now')));
+      await tester.pumpAndSettle();
+      expect(bridge.playedIds, isNull);
+      expect(find.byType(PlaybackScreen), findsNothing);
       expect(find.text('Send to a transfer tool'), findsNothing);
     });
 
@@ -1409,14 +1529,17 @@ void main() {
       );
 
       expect(tester.takeException(), isNull);
-      expect(find.byKey(QueueCard.cardKey), findsOneWidget);
-      // The cassette keeps its 52 pt even at 200% text.
-      expect(
-        tester.getSize(find.byType(CassetteTile)).width,
-        QueueCard.cassetteWidth,
+      // The strip stacks: Play takes a full row under the wrapped title.
+      expect(find.byKey(TapeStrip.stripKey), findsOneWidget);
+      final play = tester.getRect(find.byKey(const Key('chat-play-now')));
+      final title = tester.getRect(
+        find.descendant(
+          of: find.byKey(TapeStrip.stripKey),
+          matching: find.text('Night bus notes'),
+        ),
       );
-      // The mix actions wrap rather than truncate, and the composer stays
-      // reachable above the keyboard-free bottom.
+      expect(play.top, greaterThan(title.bottom));
+      // The composer stays reachable above the keyboard-free bottom.
       expect(find.byKey(const Key('prompt-field')).hitTestable(), findsOneWidget);
     });
 
@@ -1434,10 +1557,12 @@ void main() {
 
       expect(tester.takeException(), isNull);
       expect(
-        (tester.widget<Container>(find.byKey(ConversationTurn.djKey)).decoration
-                as BoxDecoration)
-            .color,
-        ConversationTurn.djFillDark,
+        tester.widget<Text>(find.byKey(LyricTurn.djKey)).style!.color,
+        MixtapeTokens.dark.text,
+      );
+      expect(
+        tester.widget<Text>(find.byKey(LyricTurn.userKey)).style!.color,
+        MixtapeTokens.dark.smoke,
       );
     });
   });
@@ -1506,7 +1631,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(AiConsentCopy.titleKey), findsOneWidget);
-      expect(find.byKey(ConversationTurn.errorKey), findsNothing);
+      expect(find.byKey(LyricTurn.errorKey), findsNothing);
       // The draft is back in the composer, not a sent bubble.
       final field = tester.widget<TextField>(
         find.byKey(const Key('prompt-field')),

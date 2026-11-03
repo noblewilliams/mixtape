@@ -1,11 +1,12 @@
 /// The mix handoff: everything that takes a finished arrangement OUT of this
-/// app — Play now (the app's own Apple player), Send to Music (Apple's
+/// app — Play here (the app's own Apple player), Play in Apple Music (Apple's
 /// player), Create playlist (an Apple Music playlist with a remembered
 /// author), and Send to a transfer tool (the Spotify listener's text handoff).
 ///
 /// Locked by `docs/mockups/approved/2026-09-17-mobile-arrangement-states.md`
-/// (Locked behaviour → the actions row, Play now, Create playlist, the
-/// Spotify listener) and drawn on two screens: the conversation
+/// (Create playlist, the Spotify listener) and, for split Play, by
+/// `docs/mockups/approved/2026-11-03-mix-conversation-redesign.md`. Drawn on
+/// two screens: the conversation
 /// (`screens/chat_screen.dart`) and the arrangement
 /// (`screens/queue_screen.dart`). Both carried byte-near copies of this until
 /// plan task 5.3; the copy, the gating and the toasts now live here once so
@@ -18,7 +19,8 @@
 ///   [mixHasSpotifyActions]) — no widgets, no providers;
 /// * [MixHandoff], a mixin on `ConsumerState` holding the four actions
 ///   themselves, their in-flight guards and their toasts;
-/// * [MixActionsRow] and [MixSaveDialog], the two surfaces they drive.
+/// * [MixSplitPlay], [MixPlayReason] and [MixSaveDialog], the surfaces they
+///   drive.
 ///
 /// Each host screen keeps its own keys and its own toast geometry
 /// ([MixHandoffKeys], `showMixSnack`) — the arrangement's toast sits inside
@@ -34,6 +36,7 @@ import 'package:flutter/cupertino.dart'
         CupertinoAlertDialog,
         CupertinoTheme,
         CupertinoDialogAction,
+        CupertinoIcons,
         CupertinoTextField,
         showCupertinoDialog;
 import 'package:flutter/material.dart';
@@ -47,13 +50,16 @@ import '../providers/dj_providers.dart';
 import '../providers/funnel_provider.dart';
 import '../providers/library_sync_provider.dart';
 import '../providers/onboarding_provider.dart';
+import '../providers/play_destination_provider.dart';
 import '../providers/playback_provider.dart';
 import '../screens/playback_screen.dart';
 import '../theme/mixtape_theme.dart';
-import 'foundation/label_chip.dart';
 import 'foundation/mixtape_feedback.dart';
+import 'foundation/mixtape_menu.dart';
+import 'foundation/prism_stripe.dart';
 import 'foundation/tape_button.dart';
-import 'foundation/text_action.dart';
+
+export '../providers/play_destination_provider.dart' show PlayDestination;
 
 /// The transfer tool the Spotify handoff opens, matching the web rail's
 /// TRANSFER_TOOL_URL (`web/src/components/QueuePanel.tsx`). TuneMyMusic is
@@ -66,7 +72,7 @@ final mixTransferToolUrl = Uri.https('www.tunemymusic.com', '/transfer');
 const mixNoAppleMatchReason = "these tracks aren't in Apple Music";
 
 /// The whole-row line a Spotify-only mix carries instead of Play/Create.
-const mixAppleNeededReason = 'Play now and Create playlist need Apple Music';
+const mixAppleNeededReason = 'Play and Create playlist need Apple Music';
 
 String mixPlaySuccessMessage(int skipped) => skipped > 0
     ? 'Playing in Apple Music · $skipped song${skipped == 1 ? '' : 's'} '
@@ -138,6 +144,8 @@ Rect mixShareOrigin(BuildContext buttonContext, BuildContext screenContext) {
 class MixHandoffKeys {
   const MixHandoffKeys({
     required this.playNow,
+    required this.playMenu,
+    required this.playHere,
     required this.createPlaylist,
     required this.sendToMusic,
     required this.share,
@@ -149,8 +157,17 @@ class MixHandoffKeys {
     required this.saveDialogTitle,
   });
 
+  /// Split Play's main part.
   final Key playNow;
+
+  /// Split Play's arrow, "Choose where to play".
+  final Key playMenu;
+
+  /// The arrow popover's "Play here".
+  final Key playHere;
   final Key createPlaylist;
+
+  /// The arrow popover's "Play in Apple Music".
   final Key sendToMusic;
   final Key share;
   final Key reason;
@@ -160,9 +177,14 @@ class MixHandoffKeys {
   final Key saveConfirm;
   final String saveDialogTitle;
 
+  /// The Playing meter on the main part, for tests.
+  static const Key meterKey = Key('split-play-meter');
+
   /// `screens/queue_screen.dart`.
   static const arrangement = MixHandoffKeys(
     playNow: Key('play-here-button'),
+    playMenu: Key('play-menu-button'),
+    playHere: Key('play-here-option'),
     createPlaylist: Key('save-button'),
     sendToMusic: Key('play-button'),
     share: Key('share-button'),
@@ -177,6 +199,8 @@ class MixHandoffKeys {
   /// `screens/chat_screen.dart`.
   static const conversation = MixHandoffKeys(
     playNow: Key('chat-play-now'),
+    playMenu: Key('chat-play-menu'),
+    playHere: Key('chat-play-here-option'),
     createPlaylist: Key('chat-create-playlist'),
     sendToMusic: Key('chat-send-to-music'),
     share: Key('chat-share'),
@@ -265,6 +289,24 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
         queue,
       ),
     );
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(builder: (_) => const PlaybackScreen()),
+    );
+  }
+
+  /// Plays [queue] at [destination]: the app's own player, or Apple Music's.
+  void playAt(
+    PlayDestination destination,
+    ChatState state,
+    List<QueueTrack> queue,
+  ) => destination == PlayDestination.appleMusic
+      ? unawaited(sendToMusic(queue))
+      : playHere(state, queue);
+
+  /// "Playing" was tapped: Now Playing opens over the screen, and the
+  /// player is left exactly as it is.
+  void openNowPlaying() {
     Navigator.push(
       context,
       MaterialPageRoute<void>(builder: (_) => const PlaybackScreen()),
@@ -456,117 +498,385 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
   }
 }
 
-/// The mix actions row: Play now, Create playlist, Send to Music — with the
-/// Spotify variant's transfer-tool button and the muted reason line — wrapping
-/// before any of them truncates.
-class MixActionsRow extends ConsumerWidget {
-  const MixActionsRow({
+/// Split Play (`docs/mockups/approved/2026-11-03-mix-conversation-redesign.md`
+/// → Split Play; `.split` on the board): the main part plays at the
+/// remembered destination — the app's own player unless the listener chose
+/// Apple Music, when it reads "Play in Music" — and the arrow, its own 44 pt
+/// target, opens a popover to choose (and remember) where to play.
+///
+/// "Playing", with the prism meter, shows while the app player is on this
+/// mix; tapping it opens Now Playing. A mix with anything Apple Music can
+/// play keeps the arrow; when it also carries Spotify ids, the arrow's menu
+/// ends with "Send to a transfer tool" behind a separator. Only a mix Apple
+/// Music can do nothing with (and Spotify can) is the handoff alone.
+class MixSplitPlay extends ConsumerWidget {
+  const MixSplitPlay({
     super.key,
     required this.keys,
     required this.queue,
     required this.enabled,
-    required this.padding,
     required this.isPlayingThisMix,
-    required this.onPlayNow,
-    required this.onCreatePlaylist,
-    required this.onSendToMusic,
+    required this.onPlay,
+    required this.onOpenNowPlaying,
     required this.onShare,
-    required this.saving,
-    required this.sendingToMusic,
-    required this.sharing,
+    this.sendingToMusic = false,
+    this.sharing = false,
+    this.expand = false,
   });
 
-  /// The host screen's keys and alert title.
   final MixHandoffKeys keys;
 
   /// The arrangement this mix currently has; empty until the DJ makes one.
   final List<QueueTrack> queue;
 
-  /// False while a turn, an arrangement op or an inspiration write is in
-  /// flight — the whole row goes inert in place. The arrangement, which has
-  /// no such gate, passes true.
+  /// False while an arrangement edit is in flight: the button goes inert in
+  /// place.
   final bool enabled;
 
-  /// The row's own padding: the two screens sit it differently in their
-  /// layouts.
-  final EdgeInsetsGeometry padding;
-
   final bool Function() isPlayingThisMix;
-  final VoidCallback? onPlayNow;
-  final VoidCallback? onCreatePlaylist;
-  final VoidCallback? onSendToMusic;
 
-  /// Takes the button's own context: the share sheet's iPad popover anchor.
+  /// Plays the mix at [destination].
+  final void Function(PlayDestination destination) onPlay;
+
+  /// "Playing" was tapped: the app player is already on this mix.
+  final VoidCallback onOpenNowPlaying;
+
+  /// Takes the segment's own context: the share sheet's iPad popover anchor.
   final void Function(BuildContext buttonContext)? onShare;
 
-  final bool saving;
   final bool sendingToMusic;
   final bool sharing;
 
+  /// Fills the width it is given (the tape screen's bar, the strip at large
+  /// text) rather than shrink-wrapping its label.
+  final bool expand;
+
+  /// `.split .tape:last-child`: the arrow's segment, a 44 pt target.
+  static const double arrowWidth = 44;
+
+  static const String arrowLabel = 'Choose where to play';
+  static const String shareLabel = 'Send to a transfer tool';
+
+  static String mainLabel({
+    required bool playing,
+    required PlayDestination destination,
+  }) => playing
+      ? 'Playing'
+      : (destination == PlayDestination.appleMusic ? 'Play in Music' : 'Play');
+
+  Future<void> _choose(
+    BuildContext arrowContext,
+    WidgetRef ref,
+    PlayDestination current, {
+    required bool canShare,
+  }) async {
+    final picked = await showMixtapeMenu<Object>(
+      arrowContext,
+      actions: [
+        MixtapeMenuAction(
+          key: keys.playHere,
+          value: PlayDestination.here,
+          label: 'Play here',
+          isSelected: current == PlayDestination.here,
+        ),
+        MixtapeMenuAction(
+          key: keys.sendToMusic,
+          value: PlayDestination.appleMusic,
+          label: 'Play in Apple Music',
+          isSelected: current == PlayDestination.appleMusic,
+          icon: MixMenuIcons.playInMusic,
+        ),
+        if (canShare)
+          MixtapeMenuAction(
+            key: keys.share,
+            value: _shareChoice,
+            label: shareLabel,
+            separatorBefore: true,
+            icon: CupertinoIcons.share,
+            enabled: !sharing && onShare != null,
+          ),
+      ],
+    );
+    // The host can rebuild without this Play while the menu is up; its ref
+    // is gone with it.
+    if (picked == null || !arrowContext.mounted) return;
+    if (picked == _shareChoice) {
+      onShare?.call(arrowContext);
+      return;
+    }
+    if (picked is! PlayDestination) return;
+    unawaited(ref.read(playDestinationProvider.notifier).choose(picked));
+    onPlay(picked);
+  }
+
+  /// The menu value of the transfer-tool entry.
+  static const Object _shareChoice = #shareToTransferTool;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final tokens = context.tokens;
-    final muted = tokens.meta.copyWith(color: tokens.muted);
+    final destination = ref.watch(playDestinationProvider);
     final reason = mixActionsDisabledReason(queue);
     final live = enabled && queue.isNotEmpty && reason == null;
-    final appleActions = mixHasAppleActions(queue);
+    final spotify = mixHasSpotifyActions(queue);
+
+    if (!mixHasAppleActions(queue)) {
+      return Builder(
+        builder: (buttonContext) => TapeButton(
+          key: keys.share,
+          label: shareLabel,
+          onPressed: enabled && !sharing && onShare != null
+              ? () => onShare!(buttonContext)
+              : null,
+        ),
+      );
+    }
 
     return ListenableBuilder(
       listenable: ref.read(playbackProvider),
       builder: (context, _) {
-        final playingHere = isPlayingThisMix();
-        return Padding(
-          padding: padding,
-          child: Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              if (appleActions) ...[
-                TapeButton(
-                  key: keys.playNow,
-                  label: playingHere ? 'Playing' : 'Play now',
-                  playing: playingHere,
-                  onPressed: live ? onPlayNow : null,
-                ),
-                LabelChip(
-                  key: keys.createPlaylist,
-                  label: 'Create playlist',
-                  onPressed: live && !saving ? onCreatePlaylist : null,
-                ),
-                TextAction(
-                  key: keys.sendToMusic,
-                  label: 'Send to Music',
-                  onPressed: live && !sendingToMusic ? onSendToMusic : null,
+        final playing = isPlayingThisMix();
+        final label = mainLabel(playing: playing, destination: destination);
+        final VoidCallback? onMain = playing
+            ? onOpenNowPlaying
+            : (!live ||
+                      (destination == PlayDestination.appleMusic &&
+                          sendingToMusic))
+            ? null
+            : () => onPlay(destination);
+        return _SplitShell(
+          expand: expand,
+          playing: playing,
+          main: _Segment(
+            key: keys.playNow,
+            label: label,
+            onTap: onMain,
+            expand: expand,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (!playing) ...[
+                  Icon(Icons.play_arrow_rounded, size: 16, color: _ink(context)),
+                  const SizedBox(width: 4),
+                ],
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: _ink(context),
+                    ),
+                  ),
                 ),
               ],
-              // The Builder is the share sheet's popover anchor on iPad: its
-              // context resolves to the button's own render object.
-              if (mixHasSpotifyActions(queue))
-                Builder(
-                  builder: (buttonContext) => TapeButton(
-                    key: keys.share,
-                    label: 'Send to a transfer tool',
-                    onPressed: enabled && !sharing && onShare != null
-                        ? () => onShare!(buttonContext)
-                        : null,
-                  ),
-                ),
-              if (appleActions && reason != null)
-                Text(key: keys.reason, reason, style: muted),
-              if (!appleActions)
-                SizedBox(
-                  width: double.infinity,
-                  child: Text(
-                    mixAppleNeededReason,
-                    key: keys.appleNeeded,
-                    style: muted,
-                  ),
-                ),
-            ],
+            ),
+          ),
+          side: Builder(
+            builder: (arrowContext) => _Segment(
+              key: keys.playMenu,
+              label: arrowLabel,
+              width: arrowWidth,
+              onTap: live
+                  ? () => _choose(
+                      arrowContext,
+                      ref,
+                      destination,
+                      canShare: spotify,
+                    )
+                  : null,
+              child: Icon(
+                Icons.keyboard_arrow_down_rounded,
+                size: 20,
+                color: _ink(context),
+              ),
+            ),
           ),
         );
       },
+    );
+  }
+
+  static Color _ink(BuildContext context) => context.tokens.tapeInk;
+}
+
+/// The muted line a mix carries when its Play cannot do what it says: no
+/// Apple Music match at all, or nothing Apple Music can play beside a
+/// Spotify handoff. Draws nothing otherwise.
+class MixPlayReason extends StatelessWidget {
+  const MixPlayReason({super.key, required this.keys, required this.queue});
+
+  final MixHandoffKeys keys;
+  final List<QueueTrack> queue;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    final style = tokens.meta.copyWith(color: tokens.muted);
+    if (!mixHasAppleActions(queue)) {
+      return Text(mixAppleNeededReason, key: keys.appleNeeded, style: style);
+    }
+    final reason = mixActionsDisabledReason(queue);
+    if (reason == null) return const SizedBox.shrink();
+    return Text(reason, key: keys.reason, style: style);
+  }
+}
+
+/// One tape shell holding both segments, with the shell's prism stripe along
+/// the bottom and, while playing, the meter at the main part's trailing edge.
+class _SplitShell extends StatelessWidget {
+  const _SplitShell({
+    required this.main,
+    required this.side,
+    required this.playing,
+    required this.expand,
+  });
+
+  final Widget main;
+  final Widget side;
+  final bool playing;
+  final bool expand;
+
+  static const BorderRadius _radius = BorderRadius.only(
+    topLeft: Radius.circular(MixtapeMetrics.tapeRadiusTop),
+    topRight: Radius.circular(MixtapeMetrics.tapeRadiusTop),
+    bottomLeft: Radius.circular(MixtapeMetrics.tapeRadiusBottom),
+    bottomRight: Radius.circular(MixtapeMetrics.tapeRadiusBottom),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: MixtapeMetrics.minTarget),
+      child: Center(
+        widthFactor: expand ? null : 1,
+        heightFactor: 1,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: tokens.tapeFill,
+            borderRadius: _radius,
+            border: Border.all(color: tokens.tapeEdge),
+            boxShadow: [
+              BoxShadow(color: tokens.tapeShadow, offset: const Offset(0, 2)),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: _radius,
+            child: Stack(
+              children: [
+                IntrinsicHeight(
+                  child: Row(
+                    mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (expand) Expanded(child: main) else Flexible(child: main),
+                      if (playing)
+                        DecoratedBox(
+                          key: MixHandoffKeys.meterKey,
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: tokens.prism
+                                  .take(5)
+                                  .toList()
+                                  .reversed
+                                  .toList(growable: false),
+                            ),
+                          ),
+                          child: const SizedBox(width: 8),
+                        ),
+                      Container(
+                        width: 1,
+                        color: Colors.white.withValues(alpha: 0.18),
+                      ),
+                      side,
+                    ],
+                  ),
+                ),
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: Container(
+                    height: 1,
+                    color: Colors.white.withValues(alpha: 0.13),
+                  ),
+                ),
+                const Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: PrismStripe(
+                    horizontal: true,
+                    height: TapeButton.stripeHeight,
+                    width: double.infinity,
+                    borderRadius: BorderRadius.zero,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A tappable part of the split shell: a button to assistive technology,
+/// at least 44 pt tall, dimmed when inert.
+class _Segment extends StatelessWidget {
+  const _Segment({
+    super.key,
+    required this.label,
+    required this.onTap,
+    required this.child,
+    this.width,
+    this.expand = false,
+  });
+
+  final String label;
+  final VoidCallback? onTap;
+  final Widget child;
+  final double? width;
+  final bool expand;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onTap != null;
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: label,
+      onTap: onTap,
+      excludeSemantics: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        // Inert, it still claims the tap: the strip around it opens the tape
+        // on any tap that reaches it.
+        onTap: onTap ?? () {},
+        child: Opacity(
+          opacity: enabled ? 1 : 0.5,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: MixtapeMetrics.minTarget,
+              minWidth: width ?? 0,
+              maxWidth: width ?? double.infinity,
+            ),
+            child: Padding(
+              padding: width == null
+                  ? const EdgeInsets.fromLTRB(10, 0, 14, 0)
+                  : EdgeInsets.zero,
+              child: Center(
+                widthFactor: expand || width != null ? null : 1,
+                child: child,
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

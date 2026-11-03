@@ -36,12 +36,11 @@ import '../providers/shell_providers.dart';
 import '../providers/mix_operation_gate.dart';
 import '../theme/mixtape_theme.dart';
 import '../widgets/album_card.dart';
-import '../widgets/conversation_turn.dart';
+import '../widgets/lyric_turn.dart';
 import '../widgets/energy_journey.dart';
 import '../widgets/foundation/glass_cluster.dart';
 import '../widgets/foundation/idea_pill.dart';
 import '../widgets/foundation/gradient_background.dart';
-import '../widgets/foundation/label_chip.dart';
 import '../widgets/foundation/liquid_glass_surface.dart';
 import '../widgets/foundation/tape_button.dart';
 import '../widgets/foundation/text_action.dart';
@@ -50,8 +49,10 @@ import '../widgets/keep_sheet.dart';
 import '../widgets/mix_energy_summary.dart';
 import '../widgets/mix_handoff.dart';
 import '../widgets/mix_prompt_input.dart';
+import '../widgets/mix_tape_colour.dart';
 import '../widgets/playlist_inspiration.dart';
-import '../widgets/queue_card.dart';
+import '../widgets/tape_strip.dart';
+import '../widgets/version_marker.dart';
 import 'mix_history_screen.dart';
 import 'queue_screen.dart';
 import '../widgets/foundation/mixtape_menu.dart';
@@ -90,8 +91,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   final _panelKey = GlobalKey();
 
   int _lastMessageCount = -1;
-  Timer? _listeningTimer;
-  bool _showListeningCaption = false;
   bool _seededInitialError = false;
   bool _keepSheetChecked = false;
 
@@ -117,7 +116,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     _scrollController.dispose();
     _textController.dispose();
     _promptFocus.dispose();
-    _listeningTimer?.cancel();
     super.dispose();
   }
 
@@ -143,20 +141,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         curve: Curves.easeOut,
       );
     });
-  }
-
-  void _startListeningTimer() {
-    _showListeningCaption = false;
-    _listeningTimer?.cancel();
-    _listeningTimer = Timer(const Duration(seconds: 10), () {
-      if (mounted) setState(() => _showListeningCaption = true);
-    });
-  }
-
-  void _cancelListeningTimer() {
-    _listeningTimer?.cancel();
-    _listeningTimer = null;
-    _showListeningCaption = false;
   }
 
   /// Unforeseen-exception guard: [ChatNotifier.send] already resolves every
@@ -286,35 +270,49 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     );
   }
 
-  /// The board's More menu: Version history, Rename, Archive or Restore.
-  /// An album session keeps Rename and Archive only: it has no versions to
+  /// The More menu (board section 2, the same on the tape): Version history,
+  /// Tape settings, Rename, then Archive or Restore behind a separator. An
+  /// album session keeps Rename and Archive only: it has no versions to
   /// browse and no tape to dress.
   Future<void> _actions(BuildContext anchor) async {
     final session = ref.read(chatProvider(widget.sessionId)).value?.session;
     final archived = session?.status == 'archived';
     final album = session?.kind == SessionKind.album;
     final action = await showMixtapeMenu<String>(
-      context,
+      anchor,
       actions: [
         if (!album)
-          const MixtapeMenuAction(value: 'history', label: 'Version history'),
-        const MixtapeMenuAction(value: 'rename', label: 'Rename'),
+          const MixtapeMenuAction(
+            value: 'history',
+            label: 'Version history',
+            icon: MixMenuIcons.history,
+          ),
         if (!album)
           const MixtapeMenuAction(
             value: 'tape-settings',
             label: 'Tape settings',
+            icon: MixMenuIcons.tape,
           ),
+        const MixtapeMenuAction(
+          value: 'rename',
+          label: 'Rename',
+          icon: MixMenuIcons.rename,
+        ),
         MixtapeMenuAction(
           value: 'status',
           label: archived ? 'Restore' : 'Archive',
           isDestructive: !archived,
+          separatorBefore: true,
+          icon: MixMenuIcons.archive,
         ),
       ],
     );
     if (!mounted || action == null) return;
     if (action == 'history') return _openHistory();
     if (action == 'rename') return _rename();
-    if (action == 'tape-settings') return openTapeSettings(context, ref, widget.sessionId);
+    if (action == 'tape-settings') {
+      return openTapeSettings(context, ref, widget.sessionId);
+    }
     await _setArchived(archived);
   }
 
@@ -486,12 +484,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         ref.read(chatProvider(widget.sessionId).notifier).clearTransientError();
       }
 
+      // The working cassette takes the DJ's next line's place: bring it
+      // into view as the send starts, as a new turn would be.
       final wasSending = previous?.value?.sending ?? false;
-      if (state.sending && !wasSending) {
-        _startListeningTimer();
-      } else if (!state.sending && wasSending) {
-        _cancelListeningTimer();
-      }
+      if (state.sending != wasSending) _scrollToBottom();
 
       if (state.messages.length != _lastMessageCount) {
         _lastMessageCount = state.messages.length;
@@ -572,7 +568,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       final title = _knownTitle();
       return _frame(
         title: title ?? '',
-        showArrangement: _knownKind() != SessionKind.album,
         body: _SkeletonTurns(title: title),
         panel: _panel(state: null, inspiration: inspiration, busy: true),
       );
@@ -584,23 +579,19 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     return _frame(
       title: state.session.title,
       notPersonal: state.session.notPersonal,
-      showArrangement: state.kind != SessionKind.album,
-      onArrangement: _openArrangement,
       onMore: _changingStatus ? null : _actions,
       body: _transcript(state, busy: busy),
       panel: _panel(state: state, inspiration: inspiration, busy: busy),
     );
   }
 
-  /// Chrome shared by every state: the gradient, the glass clusters, the
-  /// floating SnackBars (no dock on this route, so they sit 16 pt in) and the
-  /// panel floating over the transcript.
+  /// Chrome shared by every state: the gradient, the header (Back, the
+  /// title, More), the floating SnackBars (no dock on this route, so they sit
+  /// 16 pt in) and the panel floating over the transcript.
   Widget _frame({
     required String title,
     required Widget body,
     bool notPersonal = false,
-    bool showArrangement = true,
-    VoidCallback? onArrangement,
     Future<void> Function(BuildContext anchor)? onMore,
     Widget? panel,
   }) {
@@ -621,8 +612,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                       title: title,
                       notPersonal: notPersonal,
                       onBack: () => Navigator.of(context).maybePop(),
-                      onArrangement: showArrangement ? onArrangement : null,
-                      showArrangement: showArrangement,
                       onMore: onMore,
                     ),
                     Expanded(child: body),
@@ -643,97 +632,144 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     );
   }
 
-  /// The turns, flush on the gradient, scrolled to the last one.
+  /// Whether this mix has a tape yet: before the first one, the working
+  /// cassette wears the default case.
+  bool _hasTape(ChatState state) =>
+      state.queue.isNotEmpty || state.queueVersion > 0;
+
+  /// The colour every cassette of this mix wears.
+  Color _tapeColour(ChatState state) => watchMixTapeColour(
+    ref,
+    widget.sessionId,
+    saved: state.session.caseColor,
+  );
+
+  /// The turns as lyrics, scrolled to the last one. Each version-changing
+  /// reply is followed by its marker; the current version's reads
+  /// "current" (the strip below holds it, so there is no tape card).
   Widget _transcript(ChatState state, {required bool busy}) {
     if (state.kind == SessionKind.album) {
       return _albumTranscript(state, busy: busy);
     }
     final currentVersion = state.queueVersion;
+    final colour = _tapeColour(state);
 
-    // The LATEST message whose queueVersion matches the current one carries
-    // the tape card; every OTHER version-bearing message gets a Version chip.
-    int? liveQueueMessageIndex;
+    // The LATEST message carrying the current version gets the current
+    // marker; every other version-bearing message gets an earlier one.
+    int? liveIndex;
     for (var i = state.messages.length - 1; i >= 0; i--) {
       if (state.messages[i].message.queueVersion == currentVersion) {
-        liveQueueMessageIndex = i;
+        liveIndex = i;
         break;
       }
     }
-    final needsStandaloneCard =
-        liveQueueMessageIndex == null && state.queue.isNotEmpty;
 
+    List<Widget> current() => [
+      VersionMarker(
+        key: VersionMarker.keyFor(currentVersion),
+        version: currentVersion,
+        caseColor: colour,
+        songs: state.queue.length,
+        current: true,
+      ),
+      if (currentVersion > 0)
+        MixEnergySummary(sessionId: widget.sessionId, version: currentVersion),
+    ];
+
+    final lastUser = _lastUserIndex(state);
+    int? pinnedFrom;
     final items = <Widget>[];
     for (var i = 0; i < state.messages.length; i++) {
-      final message = state.messages[i];
-      // A dead resend (no preceding user turn — a synthesized transcript
-      // could lack one) hides the button entirely rather than wiring it to a
-      // no-op.
-      final precedingText = message.isError
-          ? _precedingUserText(state.messages, i)
-          : '';
-      items.add(
-        ConversationTurn(
-          text: message.message.content,
-          kind: message.isError
-              ? ConversationTurnKind.error
-              : (message.message.role == 'user'
-                    ? ConversationTurnKind.user
-                    : ConversationTurnKind.dj),
-          onResend: message.isError && precedingText.isNotEmpty
-              ? () => _send(precedingText)
-              : null,
-          resendEnabled: !busy,
-        ),
-      );
-      final version = message.message.queueVersion;
-      if (version != null) {
-        if (i == liveQueueMessageIndex) {
-          // The server tags version-changed messages even when a turn EMPTIES
-          // the queue — an empty tape card would be a header with nothing
-          // under it, so it is skipped entirely.
-          if (state.queue.isNotEmpty) items.addAll(_tapeCard(state));
-        } else {
-          items.add(
-            _VersionChip(
-              version: version,
-              onOpen: () => _openHistory(version: version),
-            ),
-          );
-        }
+      if (i == lastUser) pinnedFrom = items.length;
+      items.add(_turn(state, i, busy: busy));
+      final version = state.messages[i].message.queueVersion;
+      if (version == null) continue;
+      if (i == liveIndex) {
+        // The server tags version-changed messages even when a turn EMPTIES
+        // the queue; a marker for an empty tape would point at nothing.
+        if (state.queue.isNotEmpty) items.addAll(current());
+      } else {
+        items.add(
+          VersionMarker(
+            key: VersionMarker.keyFor(version),
+            version: version,
+            caseColor: colour,
+            onOpen: () => _openHistory(version: version),
+          ),
+        );
       }
     }
-    if (needsStandaloneCard) items.addAll(_tapeCard(state));
+    // A current version no message carries (a restore writes none).
+    if (liveIndex == null && state.queue.isNotEmpty && currentVersion > 0) {
+      items.addAll(current());
+    }
     // C3's one quiet line under the last turn, in the words the arrangement's
     // own corpus-mode block uses. The title carries "Not personal yet"; this
     // is the explanation that goes with it.
     if (state.session.notPersonal) items.add(const _NotPersonalLine());
     if (state.sending) {
-      items.add(WorkingIndicator(showCaption: _showListeningCaption));
+      items.add(WorkingCassette(caseColor: _hasTape(state) ? colour : null));
     }
 
-    return _list(items);
+    return _list(items, pinnedFrom: pinnedFrom);
   }
 
-  Widget _list(List<Widget> items) {
-    return ListView.builder(
-      controller: _scrollController,
-      padding: EdgeInsets.fromLTRB(
-        MixtapeMetrics.screenSidePadding,
-        8,
-        MixtapeMetrics.screenSidePadding,
-        _panelHeight + 8,
+  /// Where the latest exchange starts: the last thing the listener said.
+  static int? _lastUserIndex(ChatState state) {
+    for (var i = state.messages.length - 1; i >= 0; i--) {
+      final message = state.messages[i];
+      if (!message.isError && message.message.role == 'user') return i;
+    }
+    return null;
+  }
+
+  /// The transcript list: no repaint boundary per turn, so each one repaints
+  /// as it scrolls and [LyricFade] can fade it; the top fades out under the
+  /// header. Items from [pinnedFrom] on — the latest exchange, with the
+  /// working cassette or a failed line — stay at full ink.
+  Widget _list(List<Widget> items, {int? pinnedFrom}) {
+    return ShaderMask(
+      key: const Key('chat-transcript-mask'),
+      blendMode: BlendMode.dstIn,
+      shaderCallback: (rect) => LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: const [Color(0x00000000), Color(0xFF000000)],
+        stops: [0, (_topFade / rect.height).clamp(0.0, 1.0)],
+      ).createShader(rect),
+      child: ListView.builder(
+        controller: _scrollController,
+        addRepaintBoundaries: false,
+        padding: EdgeInsets.fromLTRB(
+          _lyricSidePadding,
+          _topFade,
+          _lyricSidePadding,
+          _panelHeight + 16,
+        ),
+        itemCount: items.length,
+        itemBuilder: (context, index) => LyricFade(
+          bottomInset: _panelHeight,
+          pinned: pinnedFrom != null && index >= pinnedFrom,
+          child: Padding(
+            padding: EdgeInsets.only(top: index == 0 ? 0 : _lyricGap),
+            child: items[index],
+          ),
+        ),
       ),
-      itemCount: items.length,
-      itemBuilder: (context, index) => items[index],
     );
   }
+
+  /// `.lyr { padding: 0 22px; gap: 16px }`, and the top fade's depth.
+  static const double _lyricSidePadding = 22;
+  static const double _lyricGap = 16;
+  static const double _topFade = 36;
 
   Widget _turn(ChatState state, int i, {required bool busy}) {
     final message = state.messages[i];
     final precedingText = message.isError
         ? _precedingUserText(state.messages, i)
         : '';
-    return ConversationTurn(
+    return LyricTurn(
       text: message.message.content,
       kind: message.isError
           ? ConversationTurnKind.error
@@ -820,8 +856,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     );
 
     final seenVersions = <int>{};
+    final lastUser = _lastUserIndex(state);
+    int? pinnedFrom;
     final items = <Widget>[];
     for (var i = 0; i < state.messages.length; i++) {
+      if (i == lastUser) pinnedFrom = items.length;
       items.add(_turn(state, i, busy: busy));
       final version = state.messages[i].message.queueVersion;
       if (i == cardIndex) {
@@ -839,14 +878,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     }
     if (state.sending) {
       items.add(
-        WorkingIndicator(
-          showCaption: _showListeningCaption,
-          captionText: WorkingIndicator.albumCaption,
-          announcementText: WorkingIndicator.albumAnnouncement,
+        const WorkingCassette(
+          captionText: WorkingCassette.albumCaption,
+          announcementText: WorkingCassette.albumAnnouncement,
         ),
       );
     }
-    return _list(items);
+    return _list(items, pinnedFrom: pinnedFrom);
   }
 
   /// A refinement pill is the next turn in its own words; "Add my music"
@@ -860,22 +898,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     _send(suggestion);
   }
 
-  /// The tape card and, under it, the energy line for the same version.
-  List<Widget> _tapeCard(ChatState state) => [
-    QueueCard(
-      sessionId: widget.sessionId,
-      queue: state.queue,
-      version: state.queueVersion,
-    ),
-    if (state.queueVersion > 0)
-      MixEnergySummary(
-        sessionId: widget.sessionId,
-        version: state.queueVersion,
-      ),
-  ];
-
-  /// The bottom panel: the drag handle, the attachment row, the composer and
-  /// the mix actions, on HomePanel's glass.
+  /// The bottom panel, top to bottom: the tape strip once a mix exists, any
+  /// attached playlist (with its locked states), then + beside the composer.
+  /// There is no attachment row and no action row: Play lives on the strip,
+  /// everything that used to sit beside the composer lives behind +.
   Widget _panel({
     required ChatState? state,
     required SessionPlaylistContextState inspiration,
@@ -890,6 +916,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     final enabled = state != null && !busy;
     final status = _inspirationStatus(inspiration);
     final album = state?.kind == SessionKind.album;
+    final attached = inspiration.seed?.playlistId != null;
+    final showStatus =
+        state != null &&
+        status != null &&
+        // Nothing attached and nothing wrong: nothing to say.
+        (attached || _canReloadInspiration(inspiration));
 
     return ConstrainedBox(
       // At 200% text with the keyboard up the panel wants more room than the
@@ -903,14 +935,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       ),
       child: LiquidGlassSurface(
         borderRadius: const BorderRadius.vertical(
-          top: Radius.circular(HomePanel.topRadius),
+          top: Radius.circular(_panelRadius),
         ),
         fallbackBlurSigma: 30,
         fallbackTint: tokens.panel,
         child: Padding(
           padding: EdgeInsets.fromLTRB(
             HomePanel.sidePadding,
-            8,
+            10,
             HomePanel.sidePadding,
             bottom,
           ),
@@ -924,111 +956,88 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Center(
-                    child: Container(
-                      key: HomePanel.handleKey,
-                      width: HomePanel.handleWidth,
-                      height: HomePanel.handleHeight,
-                      margin: const EdgeInsets.only(top: 2, bottom: 12),
-                      decoration: const BoxDecoration(
-                        color: HomePanel.handleColor,
-                        borderRadius: BorderRadius.all(Radius.circular(3)),
+                  if (state != null && !album && state.queue.isNotEmpty)
+                    _strip(state),
+                  if (state != null && attached)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: _inspirationChip(inspiration, enabled: enabled),
                       ),
                     ),
-                  ),
-                  if (state != null) ...[
-                    _attachments(inspiration, enabled: enabled, album: album),
-                    if (status != null)
-                      Padding(
-                        padding: const EdgeInsets.only(left: 2, bottom: 4),
-                        // A Wrap, not a Row: at 200% text the message and
-                        // the action do not fit on one line, and each needs
-                        // the whole width to wrap into.
-                        child: Wrap(
-                          spacing: 8,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            Text(
-                              status,
-                              key: const Key('inspiration-status'),
-                              style: tokens.meta.copyWith(color: tokens.muted),
+                  if (showStatus)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 2, bottom: 6),
+                      // A Wrap, not a Row: at 200% text the message and the
+                      // action do not fit on one line, and each needs the
+                      // whole width to wrap into.
+                      child: Wrap(
+                        spacing: 8,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Text(
+                            status,
+                            key: const Key('inspiration-status'),
+                            style: tokens.meta.copyWith(color: tokens.muted),
+                          ),
+                          // A selection that cannot be read is a READ
+                          // failure: the way out is another read, never a
+                          // write against a revision we do not have.
+                          if (_canReloadInspiration(inspiration))
+                            TextAction(
+                              key: const Key('inspiration-reload'),
+                              label: 'Reload inspiration',
+                              quiet: true,
+                              onPressed:
+                                  inspiration.loading || inspiration.writing
+                                  ? null
+                                  : () => ref
+                                        .read(
+                                          sessionPlaylistContextProvider(
+                                            widget.sessionId,
+                                          ).notifier,
+                                        )
+                                        .refresh(),
                             ),
-                            // A selection that cannot be read is a READ
-                            // failure: the way out is another read, never a
-                            // write against a revision we do not have.
-                            if (_canReloadInspiration(inspiration))
-                              TextAction(
-                                key: const Key('inspiration-reload'),
-                                label: 'Reload inspiration',
-                                quiet: true,
-                                onPressed:
-                                    inspiration.loading || inspiration.writing
-                                    ? null
-                                    : () => ref
-                                          .read(
-                                            sessionPlaylistContextProvider(
-                                              widget.sessionId,
-                                            ).notifier,
-                                          )
-                                          .refresh(),
-                              ),
-                          ],
+                        ],
+                      ),
+                    ),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 2),
+                        child: _PlusButton(
+                          onPressed: enabled
+                              ? (anchor) => _plusMenu(anchor, state)
+                              : null,
                         ),
                       ),
-                  ],
-                  // The Shape chip lives in the attachment row above; the
-                  // composer itself draws none (Home's is in its title row).
-                  MixPromptInput(
-                    key: _composerKey,
-                    controller: _textController,
-                    focusNode: _promptFocus,
-                    busy: !enabled,
-                    // An album session's composer suggests the refinements
-                    // once there is a pick (board A2), else asks for more.
-                    placeholder: album
-                        ? (state?.pickState?.pick != null
-                              ? 'Another? Older? Something you do not know?'
-                              : 'Tell the DJ more…')
-                        : null,
-                    onSubmit: () =>
-                        _send(_textController.text, fromComposer: true),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: MixPromptInput(
+                          key: _composerKey,
+                          controller: _textController,
+                          focusNode: _promptFocus,
+                          busy: !enabled,
+                          // An album session's composer suggests the
+                          // refinements once there is a pick (board A2),
+                          // else asks for more; a mix asks for a change once
+                          // there is one.
+                          placeholder: album
+                              ? (state?.pickState?.pick != null
+                                    ? 'Another? Older? Something you do not know?'
+                                    : 'Tell the DJ more…')
+                              : (state != null && state.queue.isNotEmpty
+                                    ? 'Ask for a change…'
+                                    : null),
+                          onSubmit: () =>
+                              _send(_textController.text, fromComposer: true),
+                        ),
+                      ),
+                    ],
                   ),
-                  // The shared handoff row (`widgets/mix_handoff.dart`),
-                  // which the arrangement draws too: a mix Apple Music
-                  // cannot touch drops Play/Create and says why; anything
-                  // with a Spotify id gains the transfer handoff.
-                  // An album has its own actions on the card.
-                  if (!album)
-                    MixActionsRow(
-                      keys: MixHandoffKeys.conversation,
-                      queue: state?.queue ?? const [],
-                      enabled: enabled,
-                      padding: const EdgeInsets.only(top: 8),
-                      isPlayingThisMix: isPlayingThisMix,
-                      onPlayNow: state == null
-                          ? null
-                          : () => playHere(state, state.queue),
-                      onCreatePlaylist: state == null
-                          ? null
-                          : () => createPlaylist(
-                              queue: state.queue,
-                              defaultName: state.session.title,
-                              keys: MixHandoffKeys.conversation,
-                            ),
-                      onSendToMusic: state == null
-                          ? null
-                          : () => sendToMusic(state.queue),
-                      onShare: state == null
-                          ? null
-                          : (buttonContext) => shareToTransferTool(
-                              buttonContext,
-                              state.queue,
-                              state.session.title,
-                            ),
-                      saving: savingPlaylist,
-                      sendingToMusic: sendingToMusic,
-                      sharing: sharingMix,
-                    ),
                 ],
               ),
             ),
@@ -1038,54 +1047,135 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     );
   }
 
-  /// `.attach`: the playlist chip and the Shape chip on one wrapping row.
-  Widget _attachments(
+  /// `.bp { border-radius: 26px 26px 0 0 }`.
+  static const double _panelRadius = 26;
+
+  /// The tape strip. Play stays live while the DJ works on the next version:
+  /// the current arrangement stays playable, as locked, and a reply that
+  /// changes it arrives as a new state anyway.
+  Widget _strip(ChatState state) {
+    const keys = MixHandoffKeys.conversation;
+    return TapeStrip(
+      title: state.session.title,
+      version: state.queueVersion,
+      songs: state.queue.length,
+      caseColor: _tapeColour(state),
+      onOpen: _openArrangement,
+      reason: Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: MixPlayReason(keys: keys, queue: state.queue),
+      ),
+      play: ({required bool expand}) => MixSplitPlay(
+        keys: keys,
+        queue: state.queue,
+        enabled: true,
+        expand: expand,
+        isPlayingThisMix: isPlayingThisMix,
+        onPlay: (destination) => playAt(destination, state, state.queue),
+        onOpenNowPlaying: openNowPlaying,
+        onShare: (buttonContext) => shareToTransferTool(
+          buttonContext,
+          state.queue,
+          state.session.title,
+        ),
+        sendingToMusic: sendingToMusic,
+        sharing: sharingMix,
+      ),
+    );
+  }
+
+  /// The + menu: "Start from a playlist" always, and before the first mix
+  /// "Shape the energy" too (an album has no energy line to shape).
+  Future<void> _plusMenu(BuildContext anchor, ChatState? state) async {
+    final shapeable =
+        state != null &&
+        state.kind != SessionKind.album &&
+        state.queue.isEmpty &&
+        state.queueVersion == 0;
+    final inspiration = ref.read(
+      sessionPlaylistContextProvider(widget.sessionId),
+    );
+    final choice = await showMixtapeMenu<String>(
+      anchor,
+      actions: [
+        MixtapeMenuAction(
+          key: const Key('chat-plus-playlist'),
+          value: 'playlist',
+          label: 'Start from a playlist',
+          enabled: inspiration.canSelect,
+          icon: MixMenuIcons.startFromPlaylist,
+        ),
+        if (shapeable)
+          const MixtapeMenuAction(
+            key: Key('chat-plus-shape'),
+            value: 'shape',
+            label: 'Shape the energy',
+            subtitle: 'Steady, build, wind down…',
+            icon: MixMenuIcons.shape,
+          ),
+      ],
+    );
+    if (!mounted || choice == null) return;
+    if (choice == 'playlist') return _pickInspiration();
+    if (choice == 'shape' && anchor.mounted) {
+      // The shape menu opens from + too, applying the pick at once: the
+      // sentence goes into the draft (nothing is sent) with the shipped
+      // toast, or comes out again on Clear.
+      final messenger = ScaffoldMessenger.of(context);
+      await showEnergyShapeMenu(
+        anchor,
+        controller: _textController,
+        selected: _shapeInDraft(),
+        onChanged: (arc) {
+          final next = arc == null
+              ? _textController.text.replaceAll(_shapeSentence, '').trim()
+              : energyBrief(_textController.text, arc);
+          if (next == null) return;
+          _textController.value = TextEditingValue(
+            text: next,
+            selection: TextSelection.collapsed(offset: next.length),
+          );
+          if (arc != null) {
+            messenger.showSnackBar(
+              mixtapeSnackBar(message: energyShapeToast),
+            );
+          }
+        },
+      );
+    }
+  }
+
+  /// The energy sentence [energyBrief] writes into a draft.
+  static final RegExp _shapeSentence = RegExp(
+    r'(?:^|\n)Energy journey: (?:Steady|Build gradually|Wind down|Build, then settle)\.(?=\n|$)',
+  );
+
+  /// The shape the draft already asks for, so the menu ticks it.
+  EnergyArc? _shapeInDraft() {
+    final match = _shapeSentence.firstMatch(_textController.text);
+    if (match == null) return null;
+    final said = match.group(0)!.trim();
+    for (final arc in EnergyArc.values) {
+      if (said == 'Energy journey: ${arc.label}.') return arc;
+    }
+    return null;
+  }
+
+  /// The attached playlist's chip, with Replace and Detach as locked.
+  Widget _inspirationChip(
     SessionPlaylistContextState inspiration, {
     required bool enabled,
-    bool album = false,
   }) {
-    final attached = inspiration.seed?.playlistId != null;
     final canWrite = enabled && inspiration.canSelect;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 2),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 4,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          InspirationChip(
-            name: attached
-                ? (inspiration.seed?.name ?? 'Unavailable playlist')
-                : null,
-            tone: _chipTone(inspiration),
-            onPick: canWrite ? _pickInspiration : null,
-            onDetach: attached && canWrite
-                ? () => ref
-                      .read(
-                        sessionPlaylistContextProvider(
-                          widget.sessionId,
-                        ).notifier,
-                      )
-                      .select(playlistId: null)
-                : null,
-          ),
-          // No Shape for an album: there is no energy line to shape.
-          if (!album)
-            LabelChip(
-              key: const Key('chat-shape-chip'),
-              label: 'Shape',
-              hole: false,
-              leading: const EnergyWave(
-                arc: EnergyArc.arc,
-                width: 18,
-                height: 12,
-              ),
-              onPressed: enabled
-                  ? () => showEnergyShapeSheet(context, _textController)
-                  : null,
-            ),
-        ],
-      ),
+    return InspirationChip(
+      name: inspiration.seed?.name ?? 'Unavailable playlist',
+      tone: _chipTone(inspiration),
+      onPick: canWrite ? _pickInspiration : null,
+      onDetach: canWrite
+          ? () => ref
+                .read(sessionPlaylistContextProvider(widget.sessionId).notifier)
+                .select(playlistId: null)
+          : null,
     );
   }
 
@@ -1101,15 +1191,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     return (title == null || title.isEmpty) ? null : title;
   }
 
-  /// This session's kind before its own transcript has loaded, from the
-  /// Mixes list; null when that list was never read.
-  SessionKind? _knownKind() => ref
-      .watch(sessionsProvider)
-      .value
-      ?.where((session) => session.id == widget.sessionId)
-      .firstOrNull
-      ?.kind;
-
   /// The text of the nearest USER message before [index] — that's the turn an
   /// error turn at [index] answers, and what "resend" means.
   String _precedingUserText(List<ChatMessage> messages, int index) {
@@ -1122,32 +1203,26 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   }
 }
 
-/// The board's `.navbar`: the back cluster, the centred title (with the
-/// corpus-mode subtitle under it) and the Arrangement / More cluster.
+/// The header: Back on the left, the title (with the corpus-mode subtitle
+/// under it), one More on the right — each button its own glass circle.
 class _TopBar extends StatelessWidget {
   const _TopBar({
     required this.title,
     required this.notPersonal,
     required this.onBack,
-    required this.onArrangement,
     required this.onMore,
-    this.showArrangement = true,
   });
 
   final String title;
   final bool notPersonal;
   final VoidCallback onBack;
-  final VoidCallback? onArrangement;
-
-  /// False for an album session: an album has no arrangement (board A1).
-  final bool showArrangement;
   final Future<void> Function(BuildContext anchor)? onMore;
 
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 6, 14, 6),
+      padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
       child: Row(
         children: [
           GlassCluster(
@@ -1162,22 +1237,26 @@ class _TopBar extends StatelessWidget {
           ),
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 6),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     title,
-                    textAlign: TextAlign.center,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
+                    // The header title shrinks at large sizes rather than
+                    // crowding the buttons.
+                    textScaler: MediaQuery.textScalerOf(
+                      context,
+                    ).clamp(maxScaleFactor: 1.3),
                     style: tokens.smallTitle,
                   ),
                   if (notPersonal)
                     Text(
                       'Not personal yet',
                       key: const Key('chat-not-personal'),
-                      textAlign: TextAlign.center,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: tokens.meta.copyWith(color: tokens.muted),
@@ -1188,13 +1267,6 @@ class _TopBar extends StatelessWidget {
           ),
           GlassCluster(
             children: [
-              if (showArrangement)
-                GlassButton(
-                  key: const Key('chat-arrangement'),
-                  icon: Icons.queue_music,
-                  label: 'Arrangement',
-                  onPressed: onArrangement,
-                ),
               Builder(
                 builder: (anchor) => GlassButton(
                   key: const Key('chat-actions'),
@@ -1211,62 +1283,41 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-/// `.vchip`: an earlier arrangement, opening history at that version.
-class _VersionChip extends StatelessWidget {
-  const _VersionChip({required this.version, required this.onOpen});
+/// `.plus`: the 44 pt round button beside the composer that opens the +
+/// menu, anchored to itself.
+class _PlusButton extends StatelessWidget {
+  const _PlusButton({required this.onPressed});
 
-  final int version;
-  final VoidCallback onOpen;
+  final void Function(BuildContext anchor)? onPressed;
 
-  static Key keyFor(int version) => ValueKey('version-chip-$version');
+  static const Key buttonKey = Key('chat-plus');
 
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Semantics(
+    final enabled = onPressed != null;
+    return Builder(
+      builder: (anchor) => Semantics(
         button: true,
-        label: 'Version $version',
-        // `excludeSemantics` drops the detector's own tap action, and a node
-        // with no action cannot be activated by VoiceOver. Declare it here.
-        onTap: onOpen,
+        enabled: enabled,
+        label: 'Add',
+        onTap: enabled ? () => onPressed!(anchor) : null,
         excludeSemantics: true,
         child: GestureDetector(
-          key: keyFor(version),
+          key: buttonKey,
           behavior: HitTestBehavior.opaque,
-          onTap: onOpen,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(
-              minHeight: MixtapeMetrics.minTarget,
-            ),
-            child: Center(
-              widthFactor: 1,
-              child: Container(
-                constraints: const BoxConstraints(minHeight: 30),
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                decoration: const BoxDecoration(
-                  color: Color.fromRGBO(120, 110, 120, 0.14),
-                  borderRadius: BorderRadius.all(
-                    Radius.circular(MixtapeMetrics.pillRadius),
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.history, size: 14, color: tokens.plum),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Version $version',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: tokens.plum,
-                      ),
-                    ),
-                  ],
-                ),
+          onTap: enabled ? () => onPressed!(anchor) : null,
+          child: Opacity(
+            opacity: enabled ? 1 : 0.5,
+            child: Container(
+              width: MixtapeMetrics.minTarget,
+              height: MixtapeMetrics.minTarget,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: tokens.field,
+                border: Border.all(color: tokens.hairline),
               ),
+              child: Icon(Icons.add_rounded, size: 22, color: tokens.plum),
             ),
           ),
         ),
@@ -1287,11 +1338,11 @@ class _SkeletonTurns extends StatelessWidget {
 
   /// Alignment and height of each placeholder turn, as the board draws them.
   static const List<(bool, double)> _rows = [
-    (true, 40),
-    (false, 56),
-    (false, 60),
-    (true, 40),
-    (false, 56),
+    (true, 20),
+    (false, 44),
+    (false, 44),
+    (true, 20),
+    (false, 44),
   ];
 
   @override
@@ -1321,9 +1372,7 @@ class _SkeletonTurns extends StatelessWidget {
                   margin: const EdgeInsets.symmetric(vertical: 5),
                   decoration: BoxDecoration(
                     color: tokens.hairline,
-                    borderRadius: mine
-                        ? ConversationTurn.userRadius
-                        : ConversationTurn.djRadius,
+                    borderRadius: BorderRadius.circular(8),
                   ),
                 ),
               ),

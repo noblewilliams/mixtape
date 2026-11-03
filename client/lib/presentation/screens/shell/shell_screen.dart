@@ -29,6 +29,7 @@ import '../../providers/shell_providers.dart';
 import '../../widgets/ai_consent_sheet.dart';
 import '../../widgets/foundation/frosted_dock.dart';
 import '../../widgets/foundation/frosted_surface.dart';
+import '../../widgets/foundation/glass_occlusion.dart';
 import '../../widgets/foundation/gradient_background.dart';
 import '../chat_screen.dart';
 import '../home_screen.dart';
@@ -68,6 +69,13 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
   late final List<_TabRouteObserver> _observers = [
     for (var index = 0; index < AppTab.values.length; index++)
       _TabRouteObserver(onChanged: _syncDockVisibility),
+  ];
+
+  /// Lets native glass on a tab's screens step down under what that tab
+  /// stacks over them.
+  late final List<GlassOcclusionObserver> _glassObservers = [
+    for (var index = 0; index < AppTab.values.length; index++)
+      GlassOcclusionObserver(),
   ];
 
   /// Whether the tab that is up has a route above its root — a conversation,
@@ -375,7 +383,10 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
                             key: ShellScreen.tabKey(tab),
                             child: Navigator(
                               key: _navigators[tab.index],
-                              observers: [_observers[tab.index]],
+                              observers: [
+                                _observers[tab.index],
+                                _glassObservers[tab.index],
+                              ],
                               onGenerateRoute: (settings) =>
                                   MaterialPageRoute<void>(
                                     settings: settings,

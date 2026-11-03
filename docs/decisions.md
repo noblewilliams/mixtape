@@ -1133,3 +1133,26 @@ Founder smoke: Library's sources failure was a bare line under the title while M
 ## 2026-11-03 — A 401 signs the listener out at once
 
 Founder smoke: an expired session left every screen showing "Couldn’t load…" while the app still looked signed in. `ApiClient` now reports any 401 on a request that carried a token (sign-in endpoints excepted, where a 401 is a refused sign-in) to `AuthNotifier.expireSession`, which signs out the same way the listener would, so the root gate routes to the welcome. It only acts when the rejected token is still the stored one, so a response that lands after a fresh sign-in cannot undo it, and a burst of 401s signs out once. The DJ and playlist-edit clients inherit the hook from the shared client. The per-screen 401 handling that predates this (notes, Account, chat) stays as a fallback. **Reopens if:** we add token refresh, when a 401 should first try a refresh.
+
+## 2026-11-03 — Mix conversation redesign: lyric transcript, split Play, popover menus
+
+The founder approved revision 3 of the mix conversation board
+(`docs/mockups/approved/2026-11-03-mix-conversation-redesign.md`). The
+conversation drops bubbles for a lyric-style transcript. Play now and Send to
+Music merge into one split Play button whose arrow chooses the player and
+remembers the choice. The app's own player stays the default because it is
+the one that learns from listening (2026-09-09). Create playlist moves to the
+tape screen. Shape leaves the panel after the first mix.
+
+Menus become anchored glass popovers app-wide, with no Cancel row. This
+reverses smoke round three, note 8: that rejection was of grey Material boxes
+dropping from glass buttons, and the new popover is drawn in the sheet
+surface. Header buttons become separate 34 pt liquid-glass circles. Sheets
+remain only for content.
+
+The play destination is a device preference, not an account one, like the
+playlist author, so its provider deliberately does not watch `authProvider`.
+A mix with any track Apple Music can play keeps the arrow; when it also
+carries Spotify ids, the arrow's menu ends with "Send to a transfer tool"
+behind a separator. Only a mix with nothing Apple Music can play keeps the
+Spotify-only layout, with the transfer handoff in the arrow's place.

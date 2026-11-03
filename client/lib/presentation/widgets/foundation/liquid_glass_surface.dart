@@ -12,10 +12,12 @@ import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform, visibleForTesting;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show PlatformViewHitTestBehavior;
+import 'package:flutter/scheduler.dart' show SchedulerBinding, SchedulerPhase;
 import 'package:flutter/services.dart' show StandardMessageCodec;
 
 import '../../../data/shell/shell_channel.dart';
 import 'frosted_surface.dart';
+import 'glass_occlusion.dart';
 
 class LiquidGlassSurface extends StatefulWidget {
   const LiquidGlassSurface({
@@ -24,6 +26,8 @@ class LiquidGlassSurface extends StatefulWidget {
     this.fallbackBlurSigma = 20,
     this.fallbackTint,
     this.borderRadius,
+    this.circle = false,
+    this.fallbackShadows,
     this.allowNative = true,
     this.channel,
   });
@@ -44,8 +48,22 @@ class LiquidGlassSurface extends StatefulWidget {
   /// What the native view is asked to round its corners by.
   double get nativeCornerRadius => borderRadius?.topLeft.x ?? 0;
 
+  /// A true circle (the header buttons): the native view rounds with the
+  /// circular corner curve rather than the continuous one, which would read
+  /// as a squircle at half the side. Pair it with a [borderRadius] of half the
+  /// diameter.
+  final bool circle;
+
+  /// Replaces the [FrostedSurface] fallback's default shadow.
+  final List<BoxShadow>? fallbackShadows;
+
   /// Set false while a Flutter sheet or dialog is open: a `UiKitView`
   /// composites above route barriers and would punch through the dim.
+  ///
+  /// Routes take care of themselves: the surface also falls back while its
+  /// route is not current, or while [GlassOcclusion] sees any route above it
+  /// on any watched navigator (a root-navigator menu over a tab's screen,
+  /// through that menu's exit). This flag is for overlays that are not routes.
   final bool allowNative;
 
   /// The bridge that answers whether the native dock — and so the glass — is
@@ -85,8 +103,47 @@ class _LiquidGlassSurfaceState extends State<LiquidGlassSurface> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    GlassOcclusion.changes.removeListener(_occlusionChanged);
+    GlassOcclusion.changes.addListener(_occlusionChanged);
+  }
+
+  @override
+  void dispose() {
+    GlassOcclusion.changes.removeListener(_occlusionChanged);
+    super.dispose();
+  }
+
+  bool _covered = false;
+
+  void _occlusionChanged() {
+    if (!mounted || _nativeAvailable != true) return;
+    final covered = GlassOcclusion.isCovered(context);
+    if (covered == _covered) return;
+    // A navigator can report a route while it builds; rebuild after it.
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() {});
+      });
+    } else {
+      setState(() {});
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (widget.allowNative && _nativeAvailable == true) {
+    // Reduced transparency asks for an opaque fill, which only the fallback
+    // draws.
+    final reduce = FrostedSurfaceMode.of(context).reduceTransparency;
+    final current = ModalRoute.of(context)?.isCurrent ?? true;
+    _covered = _nativeAvailable == true && GlassOcclusion.isCovered(context);
+    if (widget.allowNative &&
+        current &&
+        !_covered &&
+        !reduce &&
+        _nativeAvailable == true) {
       // The effect view resolves its material against the iOS *system*
       // appearance, so the app's own brightness is handed over at creation.
       final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -98,12 +155,13 @@ class _LiquidGlassSurfaceState extends State<LiquidGlassSurface> {
             child: UiKitView(
               // Creation params are read once, so a theme flip has to build a
               // fresh view — hence the brightness-derived key.
-              key: ValueKey<String>('$isDark-$radius'),
+              key: ValueKey<String>('$isDark-$radius-${widget.circle}'),
               viewType: LiquidGlassSurface.viewType,
               hitTestBehavior: PlatformViewHitTestBehavior.transparent,
               creationParams: <String, Object?>{
                 'isDark': isDark,
                 'cornerRadius': radius,
+                'circle': widget.circle,
               },
               creationParamsCodec: const StandardMessageCodec(),
             ),
@@ -117,6 +175,7 @@ class _LiquidGlassSurfaceState extends State<LiquidGlassSurface> {
       borderRadius: widget.borderRadius,
       blurSigma: widget.fallbackBlurSigma,
       tint: widget.fallbackTint,
+      shadows: widget.fallbackShadows,
       child: widget.child,
     );
   }

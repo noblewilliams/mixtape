@@ -109,6 +109,9 @@ void main() {
     expect(dock, contains('"cornerRadius"'));
     expect(dock, contains('effectView.layer.cornerRadius'));
     expect(dock, contains('effectView.clipsToBounds = true'));
+    // The header buttons ask for a true circle (revision 3, header buttons).
+    expect(dock, contains('params?["circle"]'));
+    expect(dock, contains('circle ? .circular : .continuous'));
     expect(appDelegate, contains('mixtape/liquid_glass'));
     expect(appDelegate, contains('LiquidGlassViewFactory()'));
   });
