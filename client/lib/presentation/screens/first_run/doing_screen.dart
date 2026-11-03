@@ -330,6 +330,7 @@ class _DoingScreenState extends ConsumerState<DoingScreen> {
       background: FirstRunBackground.step3,
       headline: DoingScreen.syncHeadline,
       step: 3,
+      centerTop: true,
       top: Center(
         child: Transform.rotate(
           angle: 0.07,

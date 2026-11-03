@@ -12,6 +12,7 @@ class InsetGroup extends StatelessWidget {
     required this.children,
     this.header,
     this.outlined = false,
+    this.dividerInset = rowInset,
   });
 
   final List<Widget> children;
@@ -24,6 +25,10 @@ class InsetGroup extends StatelessWidget {
   /// round seven, note 2). Off everywhere else, which is the board's own
   /// borderless group.
   final bool outlined;
+
+  /// Where the hairline between rows starts: under the titles, so wider
+  /// leading glyphs (an `IconTile`) push it right.
+  final double dividerInset;
 
   /// The rule between rows.
   static const Key hairlineKey = Key('inset-group-hairline');
@@ -48,7 +53,7 @@ class InsetGroup extends StatelessWidget {
       if (i > 0) {
         rows.add(
           Padding(
-            padding: const EdgeInsets.only(left: rowInset),
+            padding: EdgeInsets.only(left: dividerInset),
             child: Container(
               key: hairlineKey,
               height: 1,

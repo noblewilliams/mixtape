@@ -14,9 +14,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/suggestions/suggestions_api.dart';
 import '../providers/suggestions_provider.dart';
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
+
+import 'foundation/glass_switch.dart';
+import 'foundation/icon_tile.dart';
 import 'foundation/inset_group.dart';
 
-/// An [InsetRow] with a native switch bound to the routine-suggestions
+/// An [InsetRow] with a [GlassSwitch] bound to the routine-suggestions
 /// setting. Belongs inside an [InsetGroup].
 class SuggestionSettings extends ConsumerStatefulWidget {
   const SuggestionSettings({super.key});
@@ -92,10 +96,13 @@ class _SuggestionSettingsState extends ConsumerState<SuggestionSettings> {
     final live = !changed && _enabled != null && !_saving;
 
     return InsetRow(
-      leading: const Icon(Icons.auto_awesome_outlined),
+      leading: const IconTile(
+        icon: CupertinoIcons.clock_fill,
+        color: IconTile.amber,
+      ),
       title: SuggestionSettings.title,
       subtitle: subtitle,
-      trailing: Switch.adaptive(
+      trailing: GlassSwitch(
         key: SuggestionSettings.switchKey,
         value: _enabled ?? false,
         onChanged: live ? _toggle : null,

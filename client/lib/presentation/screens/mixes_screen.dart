@@ -484,14 +484,26 @@ class _MixesSegmentedControl extends StatelessWidget {
       return width;
     }
 
-    const labelStyle = TextStyle(fontSize: 13, fontWeight: FontWeight.w600);
+    // Measured in the styles the Scaffold's text actually resolves to: a bare
+    // style misses the theme's iOS font family, which measured the control
+    // narrower than it draws and let "Mixes" wrap beside it (founder,
+    // 2026-11-03).
+    final inherited = Theme.of(context).textTheme.bodyMedium!;
+    final labelStyle = inherited.merge(
+      const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+    );
     final widest = _threeLabels
         .map((label) => measure(label, labelStyle, labelScaler))
         .reduce((a, b) => a > b ? a : b);
     final control =
-        _threeLabels.length * (widest + 2 * SegmentedToggle.segmentPadding) +
+        _threeLabels.length *
+            (widest.ceilToDouble() + 2 * SegmentedToggle.segmentPadding) +
         2 * SegmentedToggle.chrome;
-    final titleWidth = measure(title, context.tokens.largeTitle, scaler);
+    final titleWidth = measure(
+      title,
+      inherited.merge(context.tokens.largeTitle),
+      scaler,
+    ).ceilToDouble();
     final available =
         MediaQuery.sizeOf(context).width - 2 * MixtapeMetrics.screenSidePadding;
     return titleWidth + LargeTitleScaffold.titleGap + control <= available;

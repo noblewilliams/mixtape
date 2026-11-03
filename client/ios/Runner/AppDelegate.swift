@@ -76,6 +76,13 @@ import UIKit
         withId: "mixtape/liquid_glass"
       )
     }
+    // Native switches, for the Liquid Glass thumb only UIKit draws.
+    if let switchRegistrar = registrar(forPlugin: "mixtape.native_switch") {
+      switchRegistrar.register(
+        NativeSwitchViewFactory(messenger: switchRegistrar.messenger()),
+        withId: "mixtape/native_switch"
+      )
+    }
     GeneratedPluginRegistrant.register(with: self)
     // A launch that exists only to open a file delivers it through the open
     // hook below, which runs straight after this returns. Copying the launch

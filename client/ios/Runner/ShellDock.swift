@@ -640,3 +640,109 @@ final class LiquidGlassPlatformView: NSObject, FlutterPlatformView {
     return effectView
   }
 }
+
+// MARK: - Native switch platform view
+
+/// A real `UISwitch` for Flutter (viewType `mixtape/native_switch`), so the
+/// You tab's toggles get iOS 26's Liquid Glass thumb — the compact track and
+/// the lens that swells under a finger — which no Flutter-drawn switch has.
+///
+/// Each view talks over its own channel, `mixtape/native_switch_<id>`:
+/// Flutter sends `setValue` / `setEnabled`, the switch sends `valueChanged`.
+/// The switch is centred in a view larger than itself, because the glass
+/// thumb grows past the track while it is held.
+final class NativeSwitchViewFactory: NSObject, FlutterPlatformViewFactory {
+  private let messenger: FlutterBinaryMessenger
+
+  init(messenger: FlutterBinaryMessenger) {
+    self.messenger = messenger
+    super.init()
+  }
+
+  func create(
+    withFrame frame: CGRect,
+    viewIdentifier viewId: Int64,
+    arguments args: Any?
+  ) -> FlutterPlatformView {
+    let params = args as? [String: Any]
+    return NativeSwitchPlatformView(
+      frame: frame,
+      channel: FlutterMethodChannel(
+        name: "mixtape/native_switch_\(viewId)",
+        binaryMessenger: messenger
+      ),
+      value: params?["value"] as? Bool ?? false,
+      enabled: params?["enabled"] as? Bool ?? true,
+      isDark: params?["isDark"] as? Bool
+    )
+  }
+
+  func createArgsCodec() -> FlutterMessageCodec & NSObjectProtocol {
+    return FlutterStandardMessageCodec.sharedInstance()
+  }
+}
+
+final class NativeSwitchPlatformView: NSObject, FlutterPlatformView {
+  private let container: UIView
+  private let toggle = UISwitch()
+  private let channel: FlutterMethodChannel
+
+  init(
+    frame: CGRect,
+    channel: FlutterMethodChannel,
+    value: Bool,
+    enabled: Bool,
+    isDark: Bool?
+  ) {
+    container = UIView(frame: frame)
+    self.channel = channel
+    super.init()
+
+    container.backgroundColor = .clear
+    switch isDark {
+    case .some(true): container.overrideUserInterfaceStyle = .dark
+    case .some(false): container.overrideUserInterfaceStyle = .light
+    case .none: container.overrideUserInterfaceStyle = .unspecified
+    }
+
+    toggle.isOn = value
+    toggle.isEnabled = enabled
+    toggle.translatesAutoresizingMaskIntoConstraints = false
+    toggle.addTarget(self, action: #selector(changed), for: .valueChanged)
+    container.addSubview(toggle)
+    NSLayoutConstraint.activate([
+      toggle.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+      toggle.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+    ])
+
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self else { return result(nil) }
+      let args = call.arguments as? [String: Any]
+      switch call.method {
+      case "setValue":
+        self.toggle.setOn(
+          args?["value"] as? Bool ?? self.toggle.isOn,
+          animated: args?["animated"] as? Bool ?? true
+        )
+        result(nil)
+      case "setEnabled":
+        self.toggle.isEnabled = args?["enabled"] as? Bool ?? true
+        result(nil)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+  }
+
+  deinit {
+    channel.setMethodCallHandler(nil)
+  }
+
+  func view() -> UIView {
+    return container
+  }
+
+  @objc private func changed() {
+    channel.invokeMethod("valueChanged", arguments: ["value": toggle.isOn])
+  }
+}

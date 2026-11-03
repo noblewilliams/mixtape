@@ -34,6 +34,7 @@ import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/frosted_dock.dart'
     show kFrostedDockHeight;
 import 'package:mixtape/presentation/widgets/foundation/inset_group.dart';
+import 'package:mixtape/presentation/widgets/foundation/glass_switch.dart';
 import 'package:mixtape/presentation/widgets/suggestion_settings.dart';
 
 import '../data/playback/playback_controller_test.dart'
@@ -331,8 +332,8 @@ Future<void> _pump(
   await tester.pumpAndSettle();
 }
 
-Switch _switchAt(WidgetTester tester, Key key) =>
-    tester.widget<Switch>(find.byKey(key));
+GlassSwitch _switchAt(WidgetTester tester, Key key) =>
+    tester.widget<GlassSwitch>(find.byKey(key));
 
 const _learningSwitch = Key('you-learning-switch');
 

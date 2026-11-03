@@ -15,6 +15,7 @@ import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/screens/first_run/artists_screen.dart';
 import 'package:mixtape/presentation/screens/first_run/choose_method_screen.dart';
 import 'package:mixtape/presentation/screens/first_run/doing_screen.dart';
+import 'package:mixtape/presentation/screens/first_run/step_scaffold.dart';
 import 'package:mixtape/presentation/screens/first_run/welcome_screen.dart';
 import 'package:mixtape/presentation/screens/spotify_request_screen.dart';
 
@@ -47,6 +48,21 @@ void main() {
       expect(enabled(tester, DoingScreen.doneKey), isFalse);
       // Retry's slot is held but nothing is there to press.
       expect(find.text('Retry').hitTestable(), findsNothing);
+    });
+
+    testWidgets('the cassette sits midway between the top bar and the '
+        'headline', (tester) async {
+      final h = FirstRunHarness();
+      await h.pump(tester, const DoingScreen(method: AddMethod.appleSync));
+
+      final tape = tester.getRect(find.byKey(DoingScreen.cassetteKey));
+      final headline = tester.getRect(find.byKey(StepScaffold.headlineKey));
+      final bar = tester.getRect(find.byKey(StepScaffold.progressKey));
+      final above = tape.top - bar.bottom;
+      final below = headline.top - tape.bottom;
+      // The tile is tilted, so its bounds are a little taller than the tape.
+      expect((above - below).abs(), lessThan(40));
+      expect(above, greaterThan(100));
     });
 
     testWidgets('done: the count, Done turns full and leads to the prompt '

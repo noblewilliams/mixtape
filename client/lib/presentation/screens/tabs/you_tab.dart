@@ -19,6 +19,7 @@
 library;
 
 import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -35,7 +36,9 @@ import '../../providers/playback_provider.dart';
 import '../../theme/mixtape_theme.dart';
 import '../../widgets/ai_consent_sheet.dart' show openPrivacyPolicy;
 import '../../widgets/foundation/flush_row.dart';
+import '../../widgets/foundation/glass_switch.dart';
 import '../../widgets/foundation/gradient_background.dart';
+import '../../widgets/foundation/icon_tile.dart';
 import '../../widgets/foundation/inset_group.dart';
 import '../../widgets/foundation/large_title_scaffold.dart';
 import '../../widgets/suggestion_settings.dart';
@@ -67,7 +70,7 @@ class YouTab extends ConsumerWidget {
       'What the DJ knows.';
 
   /// The Together ghost's accessibility label; the row is not tappable.
-  static const String togetherLabel = 'Together, planned';
+  static const String togetherLabel = 'Together, upcoming';
 
   /// The anonymous listener's row (C3), in place of the identity block.
   static const String keepMixesRow = 'Sign in to keep your mixes';
@@ -114,10 +117,14 @@ class YouTab extends ConsumerWidget {
                         ],
                       ),
                     InsetGroup(
+                      dividerInset: IconTile.rowDividerInset,
                       children: [
                         InsetRow(
                           key: const Key('you-memories'),
-                          leading: const Icon(Icons.psychology_outlined),
+                          leading: const IconTile(
+                            icon: Icons.psychology_rounded,
+                            color: IconTile.plum,
+                          ),
                           title: 'What the DJ knows',
                           subtitle: rememberedLine(memories?.length),
                           onTap: () => _push(context, MemoryScreen.new),
@@ -145,7 +152,10 @@ class YouTab extends ConsumerWidget {
                       children: [
                         InsetRow(
                           key: const Key('you-privacy'),
-                          leading: const Icon(Icons.lock_outline),
+                          leading: const IconTile(
+                            icon: CupertinoIcons.hand_raised_fill,
+                            color: IconTile.sky,
+                          ),
                           title: 'Privacy policy',
                           onTap: () => openPrivacyPolicy(ref),
                         ),
@@ -153,10 +163,14 @@ class YouTab extends ConsumerWidget {
                     ),
                     if (!anonymous)
                       InsetGroup(
+                        dividerInset: IconTile.rowDividerInset,
                         children: [
                           InsetRow(
                             key: const Key('you-account'),
-                            leading: const Icon(Icons.person_outline),
+                            leading: const IconTile(
+                              icon: CupertinoIcons.person_crop_circle_fill,
+                              color: IconTile.slate,
+                            ),
                             title: 'Account',
                             subtitle: 'Login methods, linked providers',
                             onTap: () => _push(context, AccountScreen.new),
@@ -362,10 +376,13 @@ class _LearningRowState extends ConsumerState<_LearningRow> {
             : _error ?? (value == null ? _LearningRow.unavailable : null);
 
         return InsetRow(
-          leading: const Icon(Icons.hearing_outlined),
+          leading: const IconTile(
+            icon: CupertinoIcons.waveform,
+            color: IconTile.rose,
+          ),
           title: _LearningRow.title,
           subtitle: subtitle,
-          trailing: Switch.adaptive(
+          trailing: GlassSwitch(
             key: _LearningRow.switchKey,
             value: value ?? false,
             // Disabled only while a write is in flight: a failed save must
@@ -378,8 +395,9 @@ class _LearningRowState extends ConsumerState<_LearningRow> {
   }
 }
 
-/// Together, drawn as the board's planned ghost: dashed outline, muted ink, a
-/// Planned tag, and no tap of any kind.
+/// Together, drawn as the board's ghost: dashed outline, a dimmed tile, muted
+/// ink, an Upcoming tag, and no tap of any kind. "Planned" read as internal
+/// once other people used the app (founder, 2026-11-03).
 class _TogetherRow extends StatelessWidget {
   const _TogetherRow();
 
@@ -400,7 +418,13 @@ class _TogetherRow extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
             child: Row(
               children: [
-                Icon(Icons.people_outline, size: 22, color: tokens.muted),
+                const Opacity(
+                  opacity: 0.45,
+                  child: IconTile(
+                    icon: CupertinoIcons.person_2_fill,
+                    color: IconTile.slate,
+                  ),
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -422,7 +446,7 @@ class _TogetherRow extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 12),
-                _PlannedTag(color: tokens.muted),
+                _UpcomingTag(color: tokens.muted),
               ],
             ),
           ),
@@ -433,8 +457,8 @@ class _TogetherRow extends StatelessWidget {
 }
 
 /// The board's `.tag`: a small dashed box holding one uppercase word.
-class _PlannedTag extends StatelessWidget {
-  const _PlannedTag({required this.color});
+class _UpcomingTag extends StatelessWidget {
+  const _UpcomingTag({required this.color});
 
   final Color color;
 
@@ -444,7 +468,7 @@ class _PlannedTag extends StatelessWidget {
     child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
       child: Text(
-        'PLANNED',
+        'UPCOMING',
         style: TextStyle(
           fontSize: 9,
           height: 1,
@@ -544,7 +568,10 @@ class _SignOutRowState extends ConsumerState<_SignOutRow> {
   @override
   Widget build(BuildContext context) => InsetRow(
     key: const Key('you-signout'),
-    leading: Icon(Icons.stop_rounded, color: context.tokens.errInk),
+    leading: const IconTile(
+      icon: CupertinoIcons.stop_fill,
+      color: IconTile.red,
+    ),
     title: 'Sign out',
     destructive: true,
     trailing: const SizedBox.shrink(),

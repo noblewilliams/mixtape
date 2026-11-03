@@ -475,7 +475,8 @@ class FootNote extends StatelessWidget {
 
 /// One first-run page.
 ///
-/// [top] sits at the top of the column (the wordmark, the cassette) and the
+/// [top] sits at the top of the column (the wordmark), or, with [centerTop],
+/// midway between the top bar and the headline (the working cassette); the
 /// rest is anchored at the foot: [headline], [line], [body], [actions], then
 /// [foot]. When the content is taller than the screen (200 % text) the whole
 /// column scrolls and the foot follows the content.
@@ -487,6 +488,7 @@ class StepScaffold extends StatelessWidget {
     this.step,
     this.showBack = true,
     this.top,
+    this.centerTop = false,
     this.line,
     this.body = const [],
     this.actions = const [],
@@ -500,6 +502,10 @@ class StepScaffold extends StatelessWidget {
   final int? step;
   final bool showBack;
   final Widget? top;
+
+  /// Centres [top] in the space the foot leaves free, rather than pinning it
+  /// under the top bar (founder, 2026-11-03: the syncing tape sat too high).
+  final bool centerTop;
   final String? line;
   final List<Widget> body;
   final List<Widget> actions;
@@ -632,6 +638,9 @@ class StepScaffold extends StatelessWidget {
               ? MainAxisAlignment.end
               : MainAxisAlignment.spaceBetween,
           children: [
+            // An empty first child: spaceBetween then splits the free height
+            // evenly above and below [top].
+            if (top != null && centerTop) const SizedBox.shrink(),
             ?top,
             Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,

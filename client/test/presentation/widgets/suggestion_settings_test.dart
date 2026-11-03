@@ -11,6 +11,7 @@ import 'package:mixtape/data/suggestions/suggestions_api.dart';
 import 'package:mixtape/presentation/providers/suggestions_provider.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/inset_group.dart';
+import 'package:mixtape/presentation/widgets/foundation/glass_switch.dart';
 import 'package:mixtape/presentation/widgets/suggestion_settings.dart';
 
 /// Records saves and can fail or hold either call.
@@ -91,8 +92,8 @@ Future<void> _pump(
   await tester.pumpAndSettle();
 }
 
-Switch _switch(WidgetTester tester) =>
-    tester.widget<Switch>(find.byKey(SuggestionSettings.switchKey));
+GlassSwitch _switch(WidgetTester tester) =>
+    tester.widget<GlassSwitch>(find.byKey(SuggestionSettings.switchKey));
 
 void main() {
   testWidgets('reflects the loaded setting', (tester) async {

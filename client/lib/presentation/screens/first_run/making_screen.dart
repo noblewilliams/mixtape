@@ -57,6 +57,7 @@ class _MakingScreenState extends State<MakingScreen> {
         headline: MakingScreen.headline,
         line: MakingScreen.line,
         showBack: false,
+        centerTop: true,
         top: Center(
           child: Transform.rotate(
             angle: 0.07,
