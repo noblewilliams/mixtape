@@ -31,11 +31,13 @@ class PlaylistEditApi {
     required TokenStore tokenStore,
     http.Client? inner,
     Duration timeout = const Duration(seconds: 120),
+    Future<void> Function(String token)? onUnauthorized,
   }) : _client = ApiClient(
          baseUrl: baseUrl,
          tokenStore: tokenStore,
          inner: inner,
          timeout: timeout,
+         onUnauthorized: onUnauthorized,
        );
 
   factory PlaylistEditApi.from(
@@ -47,6 +49,7 @@ class PlaylistEditApi {
     tokenStore: base.tokenStore,
     inner: inner,
     timeout: timeout,
+    onUnauthorized: base.onUnauthorized,
   );
 
   final ApiClient _client;

@@ -101,11 +101,13 @@ class DjApi {
     required TokenStore tokenStore,
     http.Client? inner,
     Duration timeout = const Duration(seconds: 120),
+    Future<void> Function(String token)? onUnauthorized,
   }) : _client = ApiClient(
          baseUrl: baseUrl,
          tokenStore: tokenStore,
          inner: inner,
          timeout: timeout,
+         onUnauthorized: onUnauthorized,
        );
 
   /// Builds a [DjApi] over the SAME baseUrl/tokenStore as an existing
@@ -123,6 +125,7 @@ class DjApi {
     tokenStore: base.tokenStore,
     inner: inner,
     timeout: timeout,
+    onUnauthorized: base.onUnauthorized,
   );
 
   final ApiClient _client;

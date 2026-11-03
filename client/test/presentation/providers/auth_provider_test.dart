@@ -126,6 +126,69 @@ void main() {
     expect(container.read(authProvider), AuthStatus.noSession);
   });
 
+  group('an expired session signs out at once', () {
+    Future<(ProviderContainer, InMemoryTokenStore)> signedIn() async {
+      final store = InMemoryTokenStore();
+      await store.write('tok-123');
+      final container = ProviderContainer(overrides: [
+        tokenStoreProvider.overrideWithValue(store),
+      ]);
+      addTearDown(container.dispose);
+      container.read(authProvider);
+      await _settle();
+      return (container, store);
+    }
+
+    test('the rejected token is the stored one: noSession, store emptied',
+        () async {
+      final (container, store) = await signedIn();
+
+      await container.read(authProvider.notifier).expireSession('tok-123');
+
+      expect(container.read(authProvider), AuthStatus.noSession);
+      expect(await store.read(), isNull);
+    });
+
+    test('a token already replaced by a new sign-in is left alone', () async {
+      final (container, store) = await signedIn();
+      await store.write('tok-new');
+
+      await container.read(authProvider.notifier).expireSession('tok-123');
+
+      expect(container.read(authProvider), AuthStatus.session);
+      expect(await store.read(), 'tok-new');
+    });
+
+    test('a burst of 401s signs out once', () async {
+      final (container, _) = await signedIn();
+      final notifier = container.read(authProvider.notifier);
+
+      await Future.wait([
+        notifier.expireSession('tok-123'),
+        notifier.expireSession('tok-123'),
+        notifier.expireSession('tok-123'),
+      ]);
+
+      expect(container.read(authProvider), AuthStatus.noSession);
+    });
+
+    test('an ignored 401 does not block a later expiry', () async {
+      final (container, store) = await signedIn();
+      final notifier = container.read(authProvider.notifier);
+
+      await notifier.expireSession('stale');
+      await notifier.expireSession('tok-123');
+
+      expect(container.read(authProvider), AuthStatus.noSession);
+      expect(await store.read(), isNull);
+    });
+
+    test('the shared API client is wired to it', () async {
+      final (container, _) = await signedIn();
+      expect(container.read(apiClientProvider).onUnauthorized, isNotNull);
+    });
+  });
+
   test('signOut() moves to noSession and empties the store', () async {
     final store = InMemoryTokenStore();
     await store.write('tok-123');

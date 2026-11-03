@@ -18,6 +18,11 @@ final apiClientProvider = Provider<ApiClient>((ref) {
   final client = ApiClient(
     baseUrl: AppConfig.apiBaseUrl,
     tokenStore: ref.watch(tokenStoreProvider),
+    // Any 401 on a signed-in request ends the session here, once, for every
+    // screen (founder, 2026-11-03). Read at call time: the auth notifier
+    // itself depends on this client.
+    onUnauthorized: (token) =>
+        ref.read(authProvider.notifier).expireSession(token),
   );
   ref.onDispose(client.close);
   return client;
@@ -185,6 +190,30 @@ class AuthNotifier extends Notifier<AuthStatus> {
     } finally {
       if (operation == _operation) _busy = false;
     }
+  }
+
+  /// The sign-out in flight for an expired session, so a burst of 401s from
+  /// screens loading at once signs out once.
+  Future<void>? _expiring;
+
+  /// The server answered 401 to a request carrying [rejectedToken]: sign out
+  /// now, the same way the listener would, so the root gate routes to the
+  /// welcome instead of every screen showing a load failure. Ignored when the
+  /// stored token is no longer [rejectedToken] — a sign-in landed after the
+  /// request left, and that session is not the one that expired.
+  Future<void> expireSession(String rejectedToken) {
+    final pending = _expiring;
+    if (pending != null) return pending;
+    late final Future<void> run;
+    run = () async {
+      if (state != AuthStatus.session) return;
+      final stored = await ref.read(tokenStoreProvider).read();
+      if (stored != rejectedToken || !ref.mounted) return;
+      await signOut();
+    }().whenComplete(() {
+      if (identical(_expiring, run)) _expiring = null;
+    });
+    return _expiring = run;
   }
 
   Future<void> signOut() async {

@@ -54,6 +54,7 @@ class ApiClient {
     required this.tokenStore,
     http.Client? inner,
     this.timeout = const Duration(seconds: 30),
+    this.onUnauthorized,
   })  : _inner = inner ?? http.Client(),
         _ownsInner = inner == null;
 
@@ -63,11 +64,39 @@ class ApiClient {
   final http.Client _inner;
   final bool _ownsInner;
 
+  /// Called with the token a request carried when the server answered 401:
+  /// the session is over, and the auth layer signs the listener out rather
+  /// than leave every screen failing one by one. Not called for requests
+  /// that carried no token, nor for the sign-in endpoints, whose 401 is a
+  /// refused sign-in rather than an expired session. The request still
+  /// throws its [ApiException].
+  final Future<void> Function(String token)? onUnauthorized;
+
+  static const String _signInPrefix = '/api/auth/sign-in/';
+
   Future<Map<String, String>> _headers() async {
     final token = await tokenStore.read();
     return {
       if (token != null) 'Authorization': 'Bearer $token',
     };
+  }
+
+  /// Throws for a failed status, reporting an expired session first.
+  void _check(http.Response res, String path, Map<String, String> headers) {
+    if (res.statusCode < 400) return;
+    final auth = headers['Authorization'];
+    if (res.statusCode == 401 &&
+        auth != null &&
+        !path.startsWith(_signInPrefix)) {
+      // Detached: the caller's error path must not wait on, or fail with,
+      // the sign-out.
+      unawaited(
+        onUnauthorized
+            ?.call(auth.substring('Bearer '.length))
+            .catchError((Object _) {}),
+      );
+    }
+    throw ApiException(res.statusCode, res.body);
   }
 
   Future<T> _guard<T>(Future<T> Function() call) async {
@@ -91,7 +120,7 @@ class ApiClient {
           headers: headers,
           body: jsonEncode(body),
         ));
-    if (res.statusCode >= 400) throw ApiException(res.statusCode, res.body);
+    _check(res, path, headers);
     return res;
   }
 
@@ -103,7 +132,7 @@ class ApiClient {
           headers: headers,
           body: jsonEncode(body),
         ));
-    if (res.statusCode >= 400) throw ApiException(res.statusCode, res.body);
+    _check(res, path, headers);
     return res;
   }
 
@@ -115,7 +144,7 @@ class ApiClient {
           headers: headers,
           body: jsonEncode(body),
         ));
-    if (res.statusCode >= 400) throw ApiException(res.statusCode, res.body);
+    _check(res, path, headers);
     return res;
   }
 
@@ -123,7 +152,7 @@ class ApiClient {
     final headers = await _headers();
     final res = await _guard(
         () => _inner.get(Uri.parse(baseUrl).resolve(path), headers: headers));
-    if (res.statusCode >= 400) throw ApiException(res.statusCode, res.body);
+    _check(res, path, headers);
     return res;
   }
 
@@ -136,7 +165,7 @@ class ApiClient {
           headers: headers,
           body: body == null ? null : jsonEncode(body),
         ));
-    if (res.statusCode >= 400) throw ApiException(res.statusCode, res.body);
+    _check(res, path, headers);
     return res;
   }
 

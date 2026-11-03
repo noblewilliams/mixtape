@@ -281,4 +281,63 @@ void main() {
     await store.clear();
     expect(await store.read(), isNull);
   });
+
+  group('a 401 on a signed-in request reports the rejected token', () {
+    Future<List<String>> run(
+      int status, {
+      String? token = 'tok-123',
+      String path = '/me',
+    }) async {
+      final store = InMemoryTokenStore();
+      if (token != null) await store.write(token);
+      final rejected = <String>[];
+      final client = ApiClient(
+        baseUrl: 'http://x',
+        tokenStore: store,
+        inner: MockClient((_) async => http.Response('{}', status)),
+        onUnauthorized: (token) async => rejected.add(token),
+      );
+      await expectLater(client.getJson(path), throwsA(isA<ApiException>()));
+      return rejected;
+    }
+
+    test('with the token it sent', () async {
+      expect(await run(401), ['tok-123']);
+    });
+
+    test('not for other failures', () async {
+      expect(await run(403), isEmpty);
+      expect(await run(500), isEmpty);
+    });
+
+    test('not when no token was sent', () async {
+      expect(await run(401, token: null), isEmpty);
+    });
+
+    test('not from the sign-in endpoints, whose 401 is a refused sign-in',
+        () async {
+      expect(await run(401, path: '/api/auth/sign-in/social'), isEmpty);
+    });
+
+    test('on every verb', () async {
+      final store = InMemoryTokenStore();
+      await store.write('tok');
+      final rejected = <String>[];
+      final client = ApiClient(
+        baseUrl: 'http://x',
+        tokenStore: store,
+        inner: MockClient((_) async => http.Response('{}', 401)),
+        onUnauthorized: (token) async => rejected.add(token),
+      );
+      for (final call in <Future<Object?> Function()>[
+        () => client.postJson('/a', {}),
+        () => client.patchJson('/a', {}),
+        () => client.putJson('/a', {}),
+        () => client.deleteJson('/a'),
+      ]) {
+        await expectLater(call(), throwsA(isA<ApiException>()));
+      }
+      expect(rejected, hasLength(4));
+    });
+  });
 }
