@@ -163,7 +163,8 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
       background: FirstRunBackground.welcome,
       headline: WelcomeScreen.headline,
       showBack: widget.isPrompt,
-      top: const _Hero(),
+      top: const _Wordmark(),
+      middle: const _Tape(),
       body: [
         const SizedBox(height: 24),
         withTokens(
@@ -207,6 +208,7 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
         if (!widget.isPrompt)
           FirstRunPill(
             key: WelcomeScreen.addMusicKey,
+            compact: true,
             label: WelcomeScreen.addMusicLabel,
             onPressed: _starting ? null : _addMusic,
           ),
@@ -221,46 +223,43 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
   }
 }
 
-/// The wordmark over the turning cassette.
-class _Hero extends StatelessWidget {
-  const _Hero();
+/// The wordmark, pinned under the bar.
+class _Wordmark extends StatelessWidget {
+  const _Wordmark();
 
   @override
-  Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Align(
-          alignment: Alignment.centerLeft,
-          child: Transform.rotate(
-            angle: -0.035,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              'mixtape',
-              style: tokens.wordmark.copyWith(fontSize: 30),
-            ),
-          ),
+  Widget build(BuildContext context) => Align(
+    alignment: Alignment.centerLeft,
+    child: Transform.rotate(
+      angle: -0.035,
+      alignment: Alignment.centerLeft,
+      child: Text(
+        'mixtape',
+        style: context.tokens.wordmark.copyWith(fontSize: 30),
+      ),
+    ),
+  );
+}
+
+/// The turning cassette, centred between the wordmark and the headline.
+class _Tape extends StatelessWidget {
+  const _Tape();
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: Transform.rotate(
+      angle: 0.07,
+      child: const ExcludeSemantics(
+        child: CassetteTile(
+          key: WelcomeScreen.cassetteKey,
+          width: WelcomeScreen.cassetteWidth,
+          // The tile holds the hubs still under reduced motion.
+          spinning: true,
+          shadow: true,
         ),
-        const SizedBox(height: 24),
-        Center(
-          child: Transform.rotate(
-            angle: 0.07,
-            child: const ExcludeSemantics(
-              child: CassetteTile(
-                key: WelcomeScreen.cassetteKey,
-                width: WelcomeScreen.cassetteWidth,
-                // The tile holds the hubs still under reduced motion.
-                spinning: true,
-                shadow: true,
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
+      ),
+    ),
+  );
 }
 
 /// The board's `.fr-or`: a hairline, "or", a hairline.

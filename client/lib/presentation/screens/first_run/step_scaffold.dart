@@ -304,10 +304,19 @@ class FirstRunPill extends StatelessWidget {
     this.trailing,
     this.semanticsHint,
     this.disabledHint,
+    this.compact = false,
   });
 
   final String label;
   final VoidCallback? onPressed;
+
+  /// The secondary pill: [compactHeight] tall at [compactFontSize], as wide
+  /// as its label and centred, so it reads under the composer rather than
+  /// beside it (founder, 2026-11-03: Welcome's "Add my music first").
+  final bool compact;
+
+  static const double compactHeight = 44;
+  static const double compactFontSize = 15;
 
   /// The board's `.fp.go`: the bold primary action.
   final bool emphasis;
@@ -333,20 +342,28 @@ class FirstRunPill extends StatelessWidget {
         : (emphasis || forward)
         ? FontWeight.w700
         : FontWeight.w600;
-    final style = FirstRunType.pill(
-      tokens,
-    ).copyWith(color: ink, fontWeight: weight);
+    final style = FirstRunType.pill(tokens).copyWith(
+      color: ink,
+      fontWeight: weight,
+      fontSize: compact ? compactFontSize : null,
+    );
     // Merged, so the hint is read on the button rather than beside it.
-    return MergeSemantics(
+    final pill = MergeSemantics(
       child: Semantics(
         hint: enabled ? semanticsHint : (disabledHint ?? semanticsHint),
         child: TextButton(
           onPressed: onPressed,
           style: ButtonStyle(
-            minimumSize: const WidgetStatePropertyAll(Size.fromHeight(height)),
-            padding: const WidgetStatePropertyAll(
-              EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            minimumSize: WidgetStatePropertyAll(
+              compact ? const Size(0, compactHeight) : Size.fromHeight(height),
             ),
+            padding: WidgetStatePropertyAll(
+              EdgeInsets.symmetric(
+                horizontal: compact ? 24 : 20,
+                vertical: compact ? 8 : 10,
+              ),
+            ),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             shape: const WidgetStatePropertyAll(StadiumBorder()),
             elevation: const WidgetStatePropertyAll(0),
             backgroundColor: WidgetStateProperty.resolveWith(
@@ -364,6 +381,7 @@ class FirstRunPill extends StatelessWidget {
             child: IconTheme.merge(
               data: IconThemeData(color: ink, size: 18),
               child: Row(
+                mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   if (leading != null) ...[leading!, const SizedBox(width: 10)],
@@ -393,6 +411,7 @@ class FirstRunPill extends StatelessWidget {
         ),
       ),
     );
+    return compact ? Center(child: pill) : pill;
   }
 }
 
@@ -489,6 +508,7 @@ class StepScaffold extends StatelessWidget {
     this.showBack = true,
     this.top,
     this.centerTop = false,
+    this.middle,
     this.line,
     this.body = const [],
     this.actions = const [],
@@ -506,6 +526,11 @@ class StepScaffold extends StatelessWidget {
   /// Centres [top] in the space the foot leaves free, rather than pinning it
   /// under the top bar (founder, 2026-11-03: the syncing tape sat too high).
   final bool centerTop;
+
+  /// Midway between [top] and the headline, with [top] still pinned under
+  /// the bar (founder, 2026-11-03: Welcome's tape, centred under the
+  /// wordmark).
+  final Widget? middle;
   final String? line;
   final List<Widget> body;
   final List<Widget> actions;
@@ -642,6 +667,7 @@ class StepScaffold extends StatelessWidget {
             // evenly above and below [top].
             if (top != null && centerTop) const SizedBox.shrink(),
             ?top,
+            ?middle,
             Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               mainAxisSize: MainAxisSize.min,

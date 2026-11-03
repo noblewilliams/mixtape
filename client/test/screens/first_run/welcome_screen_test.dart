@@ -43,6 +43,47 @@ void main() {
       expect(find.byKey(const Key('voice-input')), findsNothing);
     });
 
+    testWidgets('the tape sits midway between the wordmark and the headline', (
+      tester,
+    ) async {
+      final h = FirstRunHarness();
+      await h.pump(tester, const WelcomeScreen());
+
+      final wordmark = tester.getRect(find.text('mixtape'));
+      final headline = tester.getRect(find.byKey(StepScaffold.headlineKey));
+      final tape = tester.getRect(find.byKey(WelcomeScreen.cassetteKey));
+      expect(
+        tape.center.dy,
+        moreOrLessEquals((wordmark.bottom + headline.top) / 2, epsilon: 12),
+      );
+    });
+
+    testWidgets('Add my music first is the smaller, secondary pill', (
+      tester,
+    ) async {
+      final h = FirstRunHarness();
+      await h.pump(tester, const WelcomeScreen());
+
+      final pill = tester.getRect(
+        find.descendant(
+          of: find.byKey(WelcomeScreen.addMusicKey),
+          matching: find.byType(TextButton),
+        ),
+      );
+      // The row it is centred in spans the content width.
+      final row = tester.getRect(find.byKey(WelcomeScreen.addMusicKey));
+      expect(pill.height, FirstRunPill.compactHeight);
+      expect(pill.width, lessThan(row.width));
+      expect(pill.center.dx, moreOrLessEquals(row.center.dx, epsilon: 1));
+      final label = tester.widget<Text>(
+        find.descendant(
+          of: find.byKey(WelcomeScreen.addMusicKey),
+          matching: find.text(WelcomeScreen.addMusicLabel),
+        ),
+      );
+      expect(label.style?.fontSize, FirstRunPill.compactFontSize);
+    });
+
     testWidgets('the field opens on the first of the three spec examples', (
       tester,
     ) async {
@@ -243,7 +284,12 @@ void main() {
         scrollable: scrollable,
       );
       await tester.pumpAndSettle();
-      final pill = tester.getRect(find.byKey(WelcomeScreen.addMusicKey));
+      final pill = tester.getRect(
+        find.descendant(
+          of: find.byKey(WelcomeScreen.addMusicKey),
+          matching: find.byType(TextButton),
+        ),
+      );
       final foot = tester.getRect(find.byKey(WelcomeScreen.signInKey));
       expect(foot.top, greaterThanOrEqualTo(pill.bottom));
       final viewport = tester.getRect(scrollable);
