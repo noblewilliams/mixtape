@@ -842,7 +842,9 @@ class _Segment extends StatelessWidget {
       excludeSemantics: true,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: onTap,
+        // Inert, it still claims the tap: the strip around it opens the tape
+        // on any tap that reaches it.
+        onTap: onTap ?? () {},
         child: Opacity(
           opacity: enabled ? 1 : 0.5,
           child: ConstrainedBox(

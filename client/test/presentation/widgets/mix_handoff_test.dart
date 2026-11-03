@@ -745,6 +745,64 @@ void main() {
       expect(played.destinations, isEmpty);
     });
 
+    testWidgets('an inert segment absorbs its tap instead of passing it on', (
+      tester,
+    ) async {
+      // The tape strip opens the tape on any tap that reaches it.
+      var opened = 0;
+      Future<void> pump(List<QueueTrack> queue, {bool enabled = true}) async {
+        final container = ProviderContainer(
+          overrides: [
+            playbackProvider.overrideWithValue(
+              PlaybackController(playback.FakeApi(), playback.FakeBridge()),
+            ),
+            playDestinationStoreProvider.overrideWithValue(
+              InMemoryPlayDestinationStore(),
+            ),
+          ],
+        );
+        addTearDown(container.dispose);
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: MaterialApp(
+              theme: MixtapeTheme.light(),
+              home: Scaffold(
+                body: Center(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => opened++,
+                    child: MixSplitPlay(
+                      keys: MixHandoffKeys.conversation,
+                      queue: queue,
+                      enabled: enabled,
+                      isPlayingThisMix: () => false,
+                      onPlay: (_) {},
+                      onOpenNowPlaying: () {},
+                      onShare: (_) {},
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+      }
+
+      final keys = MixHandoffKeys.conversation;
+      await pump([_track(0, appleId: null)]);
+      await tester.tap(find.byKey(keys.playNow));
+      await tester.tap(find.byKey(keys.playMenu));
+      await tester.pumpAndSettle();
+      expect(opened, 0);
+
+      await pump([_track(0, appleId: null, spotifyId: 'sp0')], enabled: false);
+      await tester.tap(find.byKey(keys.share));
+      await tester.pumpAndSettle();
+      expect(opened, 0);
+    });
+
     testWidgets('the conversation draws it under its own keys', (tester) async {
       await _pumpSplit(
         tester,
