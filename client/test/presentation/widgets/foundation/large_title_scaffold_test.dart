@@ -417,12 +417,12 @@ void main() {
       await tester.pump();
       expect(plays, 1);
 
-      // The board's pill: one frosted surface holding both buttons.
-      expect(find.byType(FrostedSurface), findsOneWidget);
+      // Revision 3: each button is its own glass circle, no shared capsule.
+      expect(find.byType(FrostedSurface), findsNWidgets(2));
       handle.dispose();
     });
 
-    testWidgets('paints a 20 pt glyph in the title ink', (tester) async {
+    testWidgets('paints a 17 pt glyph in the title ink', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
           theme: MixtapeTheme.light(),
@@ -437,7 +437,7 @@ void main() {
       );
 
       final icon = tester.widget<Icon>(find.byType(Icon));
-      expect(icon.size, 20);
+      expect(icon.size, 17);
       expect(icon.color, MixtapeTokens.light.text);
     });
   });

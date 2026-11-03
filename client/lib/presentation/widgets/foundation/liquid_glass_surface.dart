@@ -24,6 +24,8 @@ class LiquidGlassSurface extends StatefulWidget {
     this.fallbackBlurSigma = 20,
     this.fallbackTint,
     this.borderRadius,
+    this.circle = false,
+    this.fallbackShadows,
     this.allowNative = true,
     this.channel,
   });
@@ -43,6 +45,15 @@ class LiquidGlassSurface extends StatefulWidget {
 
   /// What the native view is asked to round its corners by.
   double get nativeCornerRadius => borderRadius?.topLeft.x ?? 0;
+
+  /// A true circle (the header buttons): the native view rounds with the
+  /// circular corner curve rather than the continuous one, which would read
+  /// as a squircle at half the side. Pair it with a [borderRadius] of half the
+  /// diameter.
+  final bool circle;
+
+  /// Replaces the [FrostedSurface] fallback's default shadow.
+  final List<BoxShadow>? fallbackShadows;
 
   /// Set false while a Flutter sheet or dialog is open: a `UiKitView`
   /// composites above route barriers and would punch through the dim.
@@ -86,7 +97,10 @@ class _LiquidGlassSurfaceState extends State<LiquidGlassSurface> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.allowNative && _nativeAvailable == true) {
+    // Reduced transparency asks for an opaque fill, which only the fallback
+    // draws.
+    final reduce = FrostedSurfaceMode.of(context).reduceTransparency;
+    if (widget.allowNative && !reduce && _nativeAvailable == true) {
       // The effect view resolves its material against the iOS *system*
       // appearance, so the app's own brightness is handed over at creation.
       final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -98,12 +112,13 @@ class _LiquidGlassSurfaceState extends State<LiquidGlassSurface> {
             child: UiKitView(
               // Creation params are read once, so a theme flip has to build a
               // fresh view — hence the brightness-derived key.
-              key: ValueKey<String>('$isDark-$radius'),
+              key: ValueKey<String>('$isDark-$radius-${widget.circle}'),
               viewType: LiquidGlassSurface.viewType,
               hitTestBehavior: PlatformViewHitTestBehavior.transparent,
               creationParams: <String, Object?>{
                 'isDark': isDark,
                 'cornerRadius': radius,
+                'circle': widget.circle,
               },
               creationParamsCodec: const StandardMessageCodec(),
             ),
@@ -117,6 +132,7 @@ class _LiquidGlassSurfaceState extends State<LiquidGlassSurface> {
       borderRadius: widget.borderRadius,
       blurSigma: widget.fallbackBlurSigma,
       tint: widget.fallbackTint,
+      shadows: widget.fallbackShadows,
       child: widget.child,
     );
   }
