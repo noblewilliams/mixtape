@@ -294,10 +294,20 @@ class WorkingCassette extends StatelessWidget {
 /// must not add repaint boundaries per item, or scrolling would not repaint
 /// it.
 class LyricFade extends SingleChildRenderObjectWidget {
-  const LyricFade({super.key, this.bottomInset = 0, super.child});
+  const LyricFade({
+    super.key,
+    this.bottomInset = 0,
+    this.pinned = false,
+    super.child,
+  });
 
   /// How much of the viewport's bottom the floating panel covers.
   final double bottomInset;
+
+  /// Always full ink, wherever it sits: the latest exchange (the last thing
+  /// the listener said, and everything after it) never fades, so a short
+  /// conversation is not half grey before it has scrolled at all.
+  final bool pinned;
 
   /// `.past { opacity: .34 }`.
   static const double fadedOpacity = 0.34;
@@ -326,22 +336,34 @@ class LyricFade extends SingleChildRenderObjectWidget {
 
   @override
   RenderLyricFade createRenderObject(BuildContext context) =>
-      RenderLyricFade(bottomInset: bottomInset);
+      RenderLyricFade(bottomInset: bottomInset, pinned: pinned);
 
   @override
   void updateRenderObject(BuildContext context, RenderLyricFade renderObject) {
-    renderObject.bottomInset = bottomInset;
+    renderObject
+      ..bottomInset = bottomInset
+      ..pinned = pinned;
   }
 }
 
 class RenderLyricFade extends RenderProxyBox {
-  RenderLyricFade({double bottomInset = 0}) : _bottomInset = bottomInset;
+  RenderLyricFade({double bottomInset = 0, bool pinned = false})
+    : _bottomInset = bottomInset,
+      _pinned = pinned;
 
   double _bottomInset;
   double get bottomInset => _bottomInset;
   set bottomInset(double value) {
     if (value == _bottomInset) return;
     _bottomInset = value;
+    markNeedsPaint();
+  }
+
+  bool _pinned;
+  bool get pinned => _pinned;
+  set pinned(bool value) {
+    if (value == _pinned) return;
+    _pinned = value;
     markNeedsPaint();
   }
 
@@ -360,7 +382,7 @@ class RenderLyricFade extends RenderProxyBox {
     if (child == null) return;
     var opacity = 1.0;
     final RenderObject? viewport = RenderAbstractViewport.maybeOf(this);
-    if (viewport is RenderBox && viewport.hasSize) {
+    if (!_pinned && viewport is RenderBox && viewport.hasSize) {
       final top = localToGlobal(Offset.zero, ancestor: viewport).dy;
       opacity = LyricFade.opacityFor(
         itemBottom: top + size.height,

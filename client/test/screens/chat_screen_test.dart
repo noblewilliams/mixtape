@@ -611,6 +611,32 @@ void main() {
       );
       expect(find.byType(LyricFade), findsOneWidget);
     });
+
+    testWidgets('the latest exchange is full ink; older turns still fade', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(),
+        messages: [
+          _msg('m1', 'user', 'first ask'),
+          _msg('m2', 'dj', 'older reply'),
+          _msg('m3', 'user', 'now this'),
+          _msg('m4', 'dj', 'here you go'),
+        ],
+        queue: [],
+      );
+      await _pump(tester, _makeContainer(api));
+
+      RenderLyricFade fadeOf(String text) => tester.renderObject<RenderLyricFade>(
+        find.ancestor(of: find.text(text), matching: find.byType(LyricFade)),
+      );
+      // Short content: nothing scrolls, so nothing in the latest exchange
+      // may sit faded at the top.
+      expect(fadeOf('now this').lastOpacity, 1);
+      expect(fadeOf('here you go').lastOpacity, 1);
+      expect(fadeOf('first ask').lastOpacity, lessThan(1));
+    });
   });
 
   group('the DJ working', () {

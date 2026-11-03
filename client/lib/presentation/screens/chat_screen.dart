@@ -666,8 +666,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         MixEnergySummary(sessionId: widget.sessionId, version: currentVersion),
     ];
 
+    final lastUser = _lastUserIndex(state);
+    int? pinnedFrom;
     final items = <Widget>[];
     for (var i = 0; i < state.messages.length; i++) {
+      if (i == lastUser) pinnedFrom = items.length;
       items.add(_turn(state, i, busy: busy));
       final version = state.messages[i].message.queueVersion;
       if (version == null) continue;
@@ -698,13 +701,23 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       items.add(WorkingCassette(caseColor: _hasTape(state) ? colour : null));
     }
 
-    return _list(items);
+    return _list(items, pinnedFrom: pinnedFrom);
+  }
+
+  /// Where the latest exchange starts: the last thing the listener said.
+  static int? _lastUserIndex(ChatState state) {
+    for (var i = state.messages.length - 1; i >= 0; i--) {
+      final message = state.messages[i];
+      if (!message.isError && message.message.role == 'user') return i;
+    }
+    return null;
   }
 
   /// The transcript list: no repaint boundary per turn, so each one repaints
   /// as it scrolls and [LyricFade] can fade it; the top fades out under the
-  /// header.
-  Widget _list(List<Widget> items) {
+  /// header. Items from [pinnedFrom] on — the latest exchange, with the
+  /// working cassette or a failed line — stay at full ink.
+  Widget _list(List<Widget> items, {int? pinnedFrom}) {
     return ShaderMask(
       key: const Key('chat-transcript-mask'),
       blendMode: BlendMode.dstIn,
@@ -726,6 +739,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         itemCount: items.length,
         itemBuilder: (context, index) => LyricFade(
           bottomInset: _panelHeight,
+          pinned: pinnedFrom != null && index >= pinnedFrom,
           child: Padding(
             padding: EdgeInsets.only(top: index == 0 ? 0 : _lyricGap),
             child: items[index],
@@ -832,8 +846,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     );
 
     final seenVersions = <int>{};
+    final lastUser = _lastUserIndex(state);
+    int? pinnedFrom;
     final items = <Widget>[];
     for (var i = 0; i < state.messages.length; i++) {
+      if (i == lastUser) pinnedFrom = items.length;
       items.add(_turn(state, i, busy: busy));
       final version = state.messages[i].message.queueVersion;
       if (i == cardIndex) {
@@ -857,7 +874,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         ),
       );
     }
-    return _list(items);
+    return _list(items, pinnedFrom: pinnedFrom);
   }
 
   /// A refinement pill is the next turn in its own words; "Add my music"
