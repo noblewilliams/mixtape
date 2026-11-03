@@ -1141,3 +1141,10 @@ reverses smoke round three, note 8: that rejection was of grey Material boxes
 dropping from glass buttons, and the new popover is drawn in the sheet
 surface. Header buttons become separate 34 pt liquid-glass circles. Sheets
 remain only for content.
+
+The play destination is a device preference, not an account one, like the
+playlist author, so its provider deliberately does not watch `authProvider`.
+A mix with any track Apple Music can play keeps the arrow; when it also
+carries Spotify ids, the arrow's menu ends with "Send to a transfer tool"
+behind a separator. Only a mix with nothing Apple Music can play keeps the
+Spotify-only layout, with the transfer handoff in the arrow's place.
