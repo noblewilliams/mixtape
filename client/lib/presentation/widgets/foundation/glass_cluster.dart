@@ -39,9 +39,10 @@ class GlassCluster extends StatelessWidget {
 }
 
 /// The glass a header control sits on: [LiquidGlassSurface] with the board's
-/// tighter shadow, and native glass only while its route is on top — a
-/// platform view composites above Flutter's route barriers, so a sheet or
-/// dialog over the screen would otherwise show the circle through its dim.
+/// tighter shadow. The surface keeps native glass only while nothing sits
+/// above its route on any navigator — a platform view composites above
+/// Flutter's route barriers, so a menu, sheet or dialog over the screen would
+/// otherwise show the circle through its dim.
 class _HeaderGlass extends StatelessWidget {
   const _HeaderGlass({
     required this.radius,
@@ -69,7 +70,6 @@ class _HeaderGlass extends StatelessWidget {
           offset: const Offset(0, 3),
         ),
       ],
-      allowNative: ModalRoute.of(context)?.isCurrent ?? true,
       child: child,
     );
   }

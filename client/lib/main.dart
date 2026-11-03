@@ -10,6 +10,7 @@ import 'presentation/screens/debug/foundation_gallery_screen.dart';
 import 'presentation/screens/first_run/first_run_flow.dart';
 import 'presentation/screens/first_run/name_screen.dart';
 import 'presentation/screens/shell/shell_screen.dart';
+import 'presentation/widgets/foundation/glass_occlusion.dart';
 import 'presentation/widgets/foundation/gradient_background.dart';
 
 /// Run with `flutter run --dart-define=MIXTAPE_GALLERY=true` to open the
@@ -32,6 +33,11 @@ void main() {
 /// is the shell.
 enum _Root { unknown, firstRun, shell }
 
+/// One [GlassOcclusionObserver] per root navigator: each root key below
+/// builds a fresh navigator, and an observer watches one at a time. Menus
+/// and alerts go on the root navigator, over a tab's screen and its glass.
+final _rootGlassObservers = <Object, GlassOcclusionObserver>{};
+
 class MixtapeApp extends ConsumerWidget {
   const MixtapeApp({super.key});
 
@@ -49,6 +55,11 @@ class MixtapeApp extends ConsumerWidget {
       AuthStatus.session =>
         anonymous && firstRunActive ? _Root.firstRun : _Root.shell,
     };
+    final appKey = (root, root == _Root.shell && anonymous);
+    final glassObserver = _rootGlassObservers.putIfAbsent(
+      appKey,
+      GlassOcclusionObserver.new,
+    );
     return MaterialApp(
       // Replacing only `home` leaves pushed account screens and dialogs above
       // sign-in. Give every root its own navigator history — keyed by the
@@ -58,7 +69,8 @@ class MixtapeApp extends ConsumerWidget {
       // always remounts it as the account (dropping the sign-in page pushed
       // over it, and letting Home send a capped prompt), even when the
       // auth provider's pass through `unknown` lands within one frame.
-      key: ValueKey((root, root == _Root.shell && anonymous)),
+      key: ValueKey(appKey),
+      navigatorObservers: [glassObserver],
       title: 'mixtape',
       theme: MixtapeTheme.light(),
       darkTheme: MixtapeTheme.dark(),

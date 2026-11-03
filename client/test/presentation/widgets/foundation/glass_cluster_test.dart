@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -7,6 +9,7 @@ import 'package:mixtape/data/shell/shell_channel.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/frosted_surface.dart';
 import 'package:mixtape/presentation/widgets/foundation/glass_cluster.dart';
+import 'package:mixtape/presentation/widgets/foundation/glass_occlusion.dart';
 import 'package:mixtape/presentation/widgets/foundation/liquid_glass_surface.dart';
 
 Widget _app(Widget child, {bool reduceTransparency = false}) => MaterialApp(
@@ -148,6 +151,93 @@ void main() {
         PageRouteBuilder<void>(
           opaque: false,
           pageBuilder: (_, _, _) => const SizedBox.expand(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(UiKitView), findsNothing);
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    // A tab's screen stays current on its own navigator while a menu or an
+    // alert sits on the root one above it.
+    // Keyed: an observer only sees the routes pushed after it is attached,
+    // so the app must not be the one [primeNative] already built.
+    Widget nested(Widget child) => MaterialApp(
+      key: const ValueKey('nested'),
+      theme: MixtapeTheme.light(),
+      navigatorObservers: [GlassOcclusionObserver()],
+      home: Navigator(
+        observers: [GlassOcclusionObserver()],
+        onGenerateRoute: (settings) => MaterialPageRoute<void>(
+          settings: settings,
+          builder: (_) => Scaffold(body: Center(child: child)),
+        ),
+      ),
+    );
+
+    testWidgets(
+      'a button under a root-navigator dialog stays frosted, through its pop',
+      (tester) async {
+        await primeNative(tester);
+        await tester.pumpWidget(nested(_pair));
+        expect(find.byType(UiKitView), findsNWidgets(2));
+
+        final context = tester.element(find.byType(GlassButton).first);
+        unawaited(
+          showCupertinoDialog<void>(
+            context: context,
+            builder: (_) => const Center(child: Text('alert')),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('alert'), findsOneWidget);
+        expect(find.byType(UiKitView), findsNothing);
+
+        Navigator.of(context, rootNavigator: true).pop();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 40));
+        expect(
+          find.byType(UiKitView),
+          findsNothing,
+          reason: 'the dim is still fading out',
+        );
+        await tester.pumpAndSettle();
+        expect(find.byType(UiKitView), findsNWidgets(2));
+        debugDefaultTargetPlatformOverride = null;
+      },
+    );
+
+    testWidgets('a button inside the dialog itself keeps its native glass', (
+      tester,
+    ) async {
+      await primeNative(tester);
+      await tester.pumpWidget(nested(const SizedBox()));
+      final context = tester.element(find.byType(SizedBox).last);
+      unawaited(
+        showCupertinoDialog<void>(
+          context: context,
+          builder: (_) => Center(child: _pair),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(UiKitView), findsNWidgets(2));
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    testWidgets('any glass surface under a sheet on its navigator steps down', (
+      tester,
+    ) async {
+      // The conversation's bottom panel showed through the tape sheet.
+      await primeNative(tester);
+      await tester.pumpWidget(
+        nested(LiquidGlassSurface(channel: channel, child: const SizedBox())),
+      );
+      expect(find.byType(UiKitView), findsOneWidget);
+      final context = tester.element(find.byType(LiquidGlassSurface));
+      unawaited(
+        showModalBottomSheet<void>(
+          context: context,
+          builder: (_) => const SizedBox(height: 200),
         ),
       );
       await tester.pumpAndSettle();
