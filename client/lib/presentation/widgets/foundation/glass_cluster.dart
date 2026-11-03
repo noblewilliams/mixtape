@@ -108,3 +108,81 @@ class GlassButton extends StatelessWidget {
     );
   }
 }
+
+/// A glass button that says what it does: a glyph and a word inside a
+/// [GlassCluster] (approval `docs/mockups/approved/2026-11-03-library-
+/// sources.md`: the Library title's "Sync" and "Your music").
+///
+/// The same 40 pt of visible glass inside a 44 pt target as [GlassButton];
+/// the word stops growing at [maxTextScale] so a pair always fits one line.
+class GlassLabelButton extends StatelessWidget {
+  const GlassLabelButton({
+    super.key,
+    required this.icon,
+    required this.label,
+    this.semanticLabel,
+    this.onPressed,
+  });
+
+  final IconData icon;
+
+  /// The word on the button.
+  final String label;
+
+  /// What a screen reader says, when it is more than the word ("Sync Apple
+  /// Music" for "Sync").
+  final String? semanticLabel;
+  final VoidCallback? onPressed;
+
+  static const double iconSize = 18;
+  static const double maxTextScale = 1.3;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    final enabled = onPressed != null;
+
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: semanticLabel ?? label,
+      onTap: onPressed,
+      excludeSemantics: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onPressed,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(
+            minHeight: MixtapeMetrics.minTarget,
+            minWidth: MixtapeMetrics.minTarget,
+          ),
+          child: Opacity(
+            opacity: enabled ? 1 : 0.4,
+            child: Padding(
+              padding: const EdgeInsets.only(left: 10, right: 12),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: iconSize, color: tokens.text),
+                  const SizedBox(width: 6),
+                  Text(
+                    label,
+                    maxLines: 1,
+                    textScaler: MediaQuery.textScalerOf(
+                      context,
+                    ).clamp(maxScaleFactor: maxTextScale),
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                      color: tokens.text,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

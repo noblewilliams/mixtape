@@ -323,7 +323,9 @@ class _LargeTitleScaffoldState extends State<LargeTitleScaffold>
                     for (var i = 0; i < accessories.length; i++) ...[
                       if (i > 0)
                         const SizedBox(width: LargeTitleScaffold.titleGap),
-                      accessories[i],
+                      // Bounded, so an accessory that scales itself down
+                      // (the Library's labelled cluster) can.
+                      Flexible(child: accessories[i]),
                     ],
                   ],
                 ),

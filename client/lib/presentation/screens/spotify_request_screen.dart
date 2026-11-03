@@ -2,6 +2,12 @@
 /// control under the title — Apple Music | Spotify (founder, smoke round four,
 /// note 4).
 ///
+/// Both panes share one grammar (approval `docs/mockups/approved/2026-11-03-
+/// library-sources.md`): a status row saying where the service stands, then
+/// flush sections — Apple's "Listening history" with the file picker in plain
+/// sight, Spotify's "Saved music" and "Listening history" — with the request
+/// steps folded under a disclosure row.
+///
 /// The Spotify pane is the September 8 Exportify approval
 /// (`docs/mockups/approved/2026-09-08-exportify-import.md`) over the September
 /// 4 web import record, restyled onto the September 17 shell by plan task 8.7:
@@ -30,8 +36,8 @@ import '../providers/library_sync_provider.dart';
 import '../providers/onboarding_provider.dart';
 import '../theme/mixtape_theme.dart';
 import '../widgets/foundation/glass_cluster.dart';
+import '../widgets/foundation/service_marks.dart';
 import '../widgets/foundation/gradient_background.dart';
-import '../widgets/foundation/inset_group.dart';
 import '../widgets/foundation/label_chip.dart';
 import '../widgets/foundation/large_title_scaffold.dart';
 import '../widgets/foundation/section_word.dart';
@@ -39,8 +45,10 @@ import '../widgets/foundation/segmented_toggle.dart';
 import '../widgets/foundation/status_word.dart';
 import '../widgets/foundation/tape_button.dart';
 import '../widgets/foundation/text_action.dart';
-import '../widgets/library_sync_sheet.dart';
+import '../format/source_labels.dart';
+import '../widgets/library_sync_dialog.dart';
 import 'import_sheet.dart';
+import 'music_sources_screen.dart' show sourceDetailFor, sourceStatusFor;
 
 /// The address in step 1, as it reads on screen and where it opens.
 const String spotifyPrivacyAddress = 'spotify.com/account/privacy';
@@ -119,11 +127,18 @@ const String appleFileNote =
     'An Apple Media Services ZIP, read on this device first. Mixtape shows counts '
     'only — never a song or artist name — and you review before uploading.';
 
-/// The Apple pane's opening line, from the web's own sync panel
-/// (`web/src/components/AppleMusicSyncPanel.tsx`).
+/// The Apple pane's opening line before a first sync, from the web's own sync
+/// panel (`web/src/components/AppleMusicSyncPanel.tsx`).
 const String appleSyncIntro =
-    'Bring your Apple Music songs and playlists into Mixtape, so the DJ builds '
-    'from what you already listen to.';
+    'Sync your Apple Music songs and playlists, so the DJ builds from what you '
+    'already listen to.';
+
+/// The "Listening history" lines under each pane's section word.
+const String appleHistoryIntro =
+    "Optional. Apple can send you everything you've played, so the DJ learns "
+    'the songs you return to, not only the ones you saved.';
+const String spotifyHistoryIntro =
+    'Optional. Spotify can send you years of plays; it takes days to arrive.';
 
 /// "Add your music": the Apple pane (library sync, then the optional Media
 /// Services export) and the Spotify pane (the Exportify quick start, the eight
@@ -157,8 +172,15 @@ class SpotifyRequestScreen extends ConsumerStatefulWidget {
   /// "Open Exportify ↗" and "Choose files", which share one row.
   static const Key exportifyRowKey = Key('exportify-row');
 
-  /// The Apple pane's "Sync your library".
+  /// The Apple pane's sync: "Sync your library" before a first sync, the
+  /// status row's "Sync again" after.
   static const Key appleSyncKey = Key('add-music-apple-sync');
+
+  /// Each pane's status row.
+  static const Key statusRowKey = Key('add-music-status');
+
+  /// "Import again" on the Spotify status row, once saved music is in.
+  static const Key spotifyImportAgainKey = Key('spotify-import-again');
 
   /// The panes, in segment order.
   static const int appleSegment = 0;
@@ -330,185 +352,349 @@ class _SpotifyRequestScreenState extends ConsumerState<SpotifyRequestScreen> {
     ],
   );
 
-  /// Apple: sync the live library, then the optional Media Services export.
+  /// Apple: where the library sync stands, then the listening history with
+  /// its file first and the request steps folded under it.
   Widget _applePane(Future<bool> Function(Uri) openLink) {
     final tokens = context.tokens;
+    final onboarding = ref.watch(onboardingProvider).value;
+    final sync = ref.watch(librarySyncProvider);
+    final status = appleSyncStatus(sync, onboarding);
+    final synced = appleLiveSource(onboarding) != null;
+    MusicSource? history;
+    for (final source in onboarding?.sources ?? const <MusicSource>[]) {
+      if (source.source == 'apple_export' && source.lastImportedAt != null) {
+        history = source;
+      }
+    }
+    void startSync() => unawaited(showLibrarySync(context, ref));
+    void choose() => unawaited(openImportFlow(context, ref));
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SectionWord('Sync your Apple Music'),
-        Text(appleSyncIntro, style: tokens.body),
-        const SizedBox(height: 12),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TapeButton(
-            key: SpotifyRequestScreen.appleSyncKey,
-            label: 'Sync your library',
-            onPressed: () => LibrarySyncSheet.show(context),
-          ),
+        _StatusRow(
+          mark: AppleMusicMark(size: _StatusRow.markSize, color: tokens.text),
+          title: 'Apple Music library',
+          status: status,
+          action: synced && sync is! SyncRunning
+              ? TextAction(
+                  key: SpotifyRequestScreen.appleSyncKey,
+                  label: 'Sync again',
+                  onPressed: startSync,
+                )
+              : null,
         ),
-        const _AppleSyncStatus(),
-        const SizedBox(height: 20),
-        InsetGroup(
-          children: [
-            InsetRow(
-              key: SpotifyRequestScreen.goDeeperKey,
-              title: 'Go deeper with your history',
-              subtitle:
-                  'Apple can send you everything you have played. Optional, '
-                  'and the sync above works without it.',
-              trailing: Icon(
-                _deeperOpen ? Icons.expand_less : Icons.expand_more,
-                size: 20,
-                color: tokens.muted,
-              ),
-              onTap: () => setState(() => _deeperOpen = !_deeperOpen),
+        if (!synced && sync is! SyncRunning) ...[
+          const SizedBox(height: 14),
+          Text(appleSyncIntro, style: tokens.secondary),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TapeButton(
+              key: SpotifyRequestScreen.appleSyncKey,
+              label: 'Sync your library',
+              onPressed: startSync,
             ),
-            if (_deeperOpen)
-              _AppleSteps(
-                onOpenAddress: () => unawaited(openLink(applePrivacyUrl)),
+          ),
+        ],
+        const SectionWord('Listening history'),
+        if (history != null) ...[
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    StatusWord(
+                      key: const Key('apple-history-status'),
+                      label:
+                          'History added ${shortDate(history.lastImportedAt!)}',
+                      kind: StatusKind.ok,
+                    ),
+                    if (ledgerRange(history.ledgerFrom, history.ledgerTo)
+                        case final range?)
+                      Text(range, style: tokens.meta),
+                  ],
+                ),
               ),
-          ],
-        ),
+              TextAction(
+                key: const Key('choose-apple-files'),
+                label: 'Replace file',
+                onPressed: choose,
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Got a newer export from Apple? Choose it here.',
+            style: tokens.meta,
+          ),
+        ] else ...[
+          Text(appleHistoryIntro, style: tokens.secondary),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            // One primary action per pane: before a first sync the sync is
+            // the tape button and the file drops to a chip.
+            child: synced
+                ? TapeButton(
+                    key: const Key('choose-apple-files'),
+                    label: 'Choose your Apple file',
+                    onPressed: choose,
+                  )
+                : LabelChip(
+                    key: const Key('choose-apple-files'),
+                    label: 'Choose your Apple file',
+                    onPressed: choose,
+                  ),
+          ),
+          const SizedBox(height: 8),
+          Text(appleFileNote, style: tokens.meta),
+          const SizedBox(height: 14),
+          _Disclosure(
+            title: 'How to request it from Apple',
+            subtitle: _deeperOpen
+                ? 'Five steps on privacy.apple.com'
+                : "Haven't asked Apple yet? Start here",
+            open: _deeperOpen,
+            onTap: () => setState(() => _deeperOpen = !_deeperOpen),
+          ),
+          if (_deeperOpen)
+            _AppleSteps(
+              onOpenAddress: () => unawaited(openLink(applePrivacyUrl)),
+            ),
+        ],
       ],
     );
   }
 
-  /// Spotify: the quick start, the two actions on one row, and the deeper
-  /// block with the eight official steps.
+  /// Spotify: where the import stands, the Exportify quick start until saved
+  /// music is in, then the listening history with the official steps folded.
   Widget _spotifyPane(Future<bool> Function(Uri) openLink, DateTime? markedAt) {
     final tokens = context.tokens;
+    final onboarding = ref.watch(onboardingProvider).value;
+    final source = onboarding == null ? null : spotifySource(onboarding);
+    final status = source == null
+        ? (kind: StatusKind.muted, label: 'Not added yet')
+        : sourceStatusFor(source, onboarding!);
+    final savedIn = source?.packages.contains('spotify_exportify') ?? false;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SectionWord('Export your saved music'),
-        for (var i = 0; i < exportifyQuickStartSteps.length; i++)
-          _NumberedRow(
-            number: '${i + 1}',
-            isFirst: i == 0,
-            child: Text(exportifyQuickStartSteps[i], style: tokens.body),
-          ),
-        const SizedBox(height: 12),
-        _exportifyRow(openLink),
-        Text(exportifyRowNote, style: tokens.meta),
-        const SizedBox(height: 20),
-        InsetGroup(
-          children: [
-            InsetRow(
-              key: SpotifyRequestScreen.goDeeperKey,
-              title: 'Go deeper with your history',
-              // Collapsed, the row carries the wait so the listener sees it
-              // without opening the block; open, the block's own line says it
-              // and the row goes back to its description.
-              subtitle: !_deeperOpen && markedAt != null
-                  ? 'Requested ${elapsedWait(markedAt)}'
-                  : 'Help the DJ learn your repeat favourites and past listening.',
-              trailing: Icon(
-                _deeperOpen ? Icons.expand_less : Icons.expand_more,
-                size: 20,
-                color: tokens.muted,
-              ),
-              onTap: () => setState(() => _deeperOpen = !_deeperOpen),
-            ),
-            if (_deeperOpen)
-              _DeeperSteps(
-                markedAt: markedAt,
-                onOpenAddress: () => unawaited(openLink(spotifyPrivacyUrl)),
-                onMarkRequested: _markRequested,
-              ),
-          ],
+        _StatusRow(
+          mark: SpotifyMark(size: _StatusRow.markSize, color: tokens.text),
+          title: 'Spotify',
+          status: status,
+          detail: source == null ? null : sourceDetailFor(source),
+          action: savedIn
+              ? TextAction(
+                  key: SpotifyRequestScreen.spotifyImportAgainKey,
+                  label: 'Import again',
+                  onPressed: () => unawaited(openImportFlow(context, ref)),
+                )
+              : null,
         ),
+        if (!savedIn) ...[
+          const SectionWord('Saved music'),
+          for (var i = 0; i < exportifyQuickStartSteps.length; i++)
+            _NumberedRow(
+              number: '${i + 1}',
+              isFirst: i == 0,
+              child: Text(exportifyQuickStartSteps[i], style: tokens.body),
+            ),
+          const SizedBox(height: 12),
+          _exportifyRow(openLink),
+          Text(exportifyRowNote, style: tokens.meta),
+        ],
+        const SectionWord('Listening history'),
+        Text(spotifyHistoryIntro, style: tokens.secondary),
+        const SizedBox(height: 14),
+        _Disclosure(
+          title: 'How to request it from Spotify',
+          // Collapsed, the row carries the wait so the listener sees it
+          // without opening the block; open, the block's own line says it.
+          subtitle: !_deeperOpen && markedAt != null
+              ? 'Requested ${elapsedWait(markedAt)}'
+              : 'Eight steps, mostly waiting for email',
+          open: _deeperOpen,
+          onTap: () => setState(() => _deeperOpen = !_deeperOpen),
+        ),
+        if (_deeperOpen)
+          _DeeperSteps(
+            markedAt: markedAt,
+            onOpenAddress: () => unawaited(openLink(spotifyPrivacyUrl)),
+            onMarkRequested: _markRequested,
+          ),
+        if (savedIn) ...[
+          const SizedBox(height: 14),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: LabelChip(
+              key: const Key('choose-import-files'),
+              label: 'Choose files',
+              onPressed: () => unawaited(openImportFlow(context, ref)),
+            ),
+          ),
+        ],
       ],
     );
   }
 }
 
-/// Where the Apple library sync got to, under the Sync button: the run this
-/// session started, or the date the account last had one.
-class _AppleSyncStatus extends ConsumerWidget {
-  const _AppleSyncStatus();
+/// Where a service stands, at the top of its pane: the mark, the name, the
+/// status line and the one action that belongs to it.
+class _StatusRow extends StatelessWidget {
+  const _StatusRow({
+    required this.mark,
+    required this.title,
+    required this.status,
+    this.detail,
+    this.action,
+  });
 
-  static const Key statusKey = Key('apple-sync-status');
+  final Widget mark;
+  final String title;
+  final ({StatusKind kind, String label}) status;
+  final String? detail;
+  final Widget? action;
+
+  static const double markSize = 34;
+
+  /// The status word, for tests.
+  static const Key statusKey = Key('add-music-status-word');
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final sync = ref.watch(librarySyncProvider);
-    final onboarding = ref.watch(onboardingProvider).value;
-    MusicSource? live;
-    for (final source in onboarding?.sources ?? const <MusicSource>[]) {
-      if (source.source == 'apple_live') live = source;
-    }
-
-    final (StatusKind kind, String label) = switch (sync) {
-      SyncRunning(:final progress) => (
-        StatusKind.warn,
-        progress == 0 ? 'Syncing…' : 'Syncing… ${(progress * 100).round()}%',
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    return DecoratedBox(
+      key: SpotifyRequestScreen.statusRowKey,
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: tokens.hairline)),
       ),
-      SyncFailed() => (StatusKind.err, "Last sync didn't finish"),
-      SyncDone() => (StatusKind.ok, 'Synced just now'),
-      SyncIdle() when live != null => (
-        StatusKind.ok,
-        'Last synced ${shortDate(live.lastImportedAt ?? live.connectedAt)}',
-      ),
-      SyncIdle() => (StatusKind.warn, 'Not synced yet'),
-    };
-
-    return Padding(
-      padding: const EdgeInsets.only(top: 6, left: 2),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: StatusWord(key: statusKey, label: label, kind: kind),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 64),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Row(
+            children: [
+              mark,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: tokens.rowTitle.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    StatusWord(
+                      key: statusKey,
+                      label: status.label,
+                      kind: status.kind,
+                    ),
+                    if (detail != null) Text(detail!, style: tokens.meta),
+                  ],
+                ),
+              ),
+              if (action != null) action!,
+            ],
+          ),
+        ),
       ),
     );
   }
 }
 
-/// Apple's request steps and the way back in with the ZIP, inside the deeper
-/// group.
-class _AppleSteps extends ConsumerWidget {
+/// A flush disclosure row between hairlines: the request steps live under it.
+class _Disclosure extends StatelessWidget {
+  const _Disclosure({
+    required this.title,
+    required this.subtitle,
+    required this.open,
+    required this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final bool open;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    final hairline = BorderSide(color: tokens.hairline);
+    return Semantics(
+      button: true,
+      expanded: open,
+      child: InkWell(
+        key: SpotifyRequestScreen.goDeeperKey,
+        onTap: onTap,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            border: Border(
+              top: hairline,
+              bottom: open ? BorderSide.none : hairline,
+            ),
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 52),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(title, style: tokens.rowTitle),
+                        Text(subtitle, style: tokens.meta),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    open
+                        ? CupertinoIcons.chevron_up
+                        : CupertinoIcons.chevron_down,
+                    size: 18,
+                    color: tokens.muted,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Apple's request steps, flush under the disclosure row.
+class _AppleSteps extends StatelessWidget {
   const _AppleSteps({required this.onOpenAddress});
 
   final VoidCallback onOpenAddress;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final tokens = context.tokens;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'Apple will send you a copy of what you have played. Here is how to '
-            'ask for it.',
-            style: tokens.body,
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      for (var i = 0; i < appleRequestSteps.length; i++)
+        _NumberedRow(
+          number: '${i + 1}.',
+          isFirst: i == 0,
+          child: _StepText(
+            text: appleRequestSteps[i],
+            address: applePrivacyAddress,
+            linkKey: const Key('link-apple-privacy'),
+            onOpenAddress: onOpenAddress,
           ),
-          const SizedBox(height: 12),
-          for (var i = 0; i < appleRequestSteps.length; i++)
-            _NumberedRow(
-              number: '${i + 1}.',
-              isFirst: i == 0,
-              child: _StepText(
-                text: appleRequestSteps[i],
-                address: applePrivacyAddress,
-                linkKey: const Key('link-apple-privacy'),
-                onOpenAddress: onOpenAddress,
-              ),
-            ),
-          const SizedBox(height: 14),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: LabelChip(
-              key: const Key('choose-apple-files'),
-              label: 'Choose files',
-              onPressed: () => unawaited(openImportFlow(context, ref)),
-            ),
-          ),
-          Text(appleFileNote, style: tokens.meta),
-        ],
-      ),
-    );
-  }
+        ),
+    ],
+  );
 }
 
 /// The eight official steps, the iOS note, the two emails, and the checkpoint,
@@ -528,15 +714,10 @@ class _DeeperSteps extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = context.tokens;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      padding: const EdgeInsets.only(bottom: 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Spotify will send you your listening history. Here is how to ask for it.',
-            style: tokens.body,
-          ),
-          const SizedBox(height: 12),
           for (var i = 0; i < spotifyRequestSteps.length; i++)
             _NumberedRow(
               number: '${i + 1}.',

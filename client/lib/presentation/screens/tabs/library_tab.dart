@@ -3,38 +3,40 @@
 /// plan `docs/superpowers/plans/2026-09-17-native-design-implementation.md`
 /// task 8.1).
 ///
-/// Two flush lists under bold section words: the sources the listener has
-/// connected or imported, each with a status word, and the playlists they
-/// own. The glass cluster at the title carries Sync library and More; More
-/// holds the full "Your music" screen, so nothing the September 4 approval
-/// shipped is out of reach.
+/// The sources strip and the playlists the listener owns. The strip is one
+/// row of two halves, Apple Music and Spotify, each a mark, the service name
+/// and where it stands; each opens Add your music on its own segment. The
+/// glass cluster at the title says what it does: "Sync" and "Your music"
+/// (approval `docs/mockups/approved/2026-11-03-library-sources.md`, which
+/// supersedes the More menu and the chip-row sources).
 ///
 /// It lives inside a tab `Navigator`, so it never assumes it is the app root:
 /// pushes go to the nearest [Navigator] and it draws no app bar of its own.
 library;
 
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../data/listening/listening_models.dart';
+import '../../format/source_labels.dart';
+import '../../providers/library_sync_provider.dart';
 import '../../providers/onboarding_provider.dart';
 import '../../providers/playlist_providers.dart';
 import '../../theme/mixtape_theme.dart';
 import '../../widgets/foundation/empty_state.dart';
-import '../../widgets/foundation/flush_row.dart';
 import '../../widgets/foundation/glass_cluster.dart';
 import '../../widgets/foundation/gradient_background.dart';
 import '../../widgets/foundation/large_title_scaffold.dart';
 import '../../widgets/foundation/section_word.dart';
 import '../../widgets/foundation/service_marks.dart';
+import '../../widgets/foundation/status_word.dart';
 import '../../widgets/foundation/tape_button.dart';
-import '../../widgets/library_sync_sheet.dart';
+import '../../widgets/library_sync_dialog.dart';
 import '../first_run/first_run_flow.dart';
-import '../import_sheet.dart';
 import '../music_sources_screen.dart';
 import '../playlist_browser_screen.dart';
 import '../spotify_request_screen.dart';
-import '../../widgets/foundation/mixtape_sheet.dart';
 
 /// The Library tab.
 class LibraryTab extends ConsumerStatefulWidget {
@@ -47,15 +49,8 @@ class LibraryTab extends ConsumerStatefulWidget {
 
   static const Key syncButtonKey = Key('library-sync');
 
-  /// The Apple Music note on the Sync button: a touch smaller than the
-  /// cluster's 20 pt glyphs, which the drawn mark out-weighs at the same side.
-  static const double syncMarkSize = 18;
-  static const Key moreButtonKey = Key('library-more');
-
-  /// The More menu's entry to the full Your music screen.
+  /// The title's way into the full Your music screen.
   static const Key yourMusicKey = Key('library-your-music');
-
-  static const Key addSpotifyKey = Key('library-add-spotify');
 
   /// The no-sources empty state's action.
   static const Key emptySetupKey = Key('library-empty-setup');
@@ -67,12 +62,12 @@ class LibraryTab extends ConsumerStatefulWidget {
   /// The skeleton shown while the sources are in flight.
   static const Key sourcesSkeletonKey = Key('library-sources-skeleton');
 
-  /// A source's own row, and the actions its sheet offers.
-  static Key sourceRowKey(String source) => Key('library-source-$source');
-  static Key sourceImportAgainKey(String source) =>
-      Key('library-source-import-again-$source');
-  static Key sourceRemoveKey(String source) =>
-      Key('library-source-remove-$source');
+  /// The strip's two halves.
+  static const Key appleSourceKey = Key('library-source-apple');
+  static const Key spotifySourceKey = Key('library-source-spotify');
+
+  /// At this text scale the halves stack into full-width rows.
+  static const double stackStripScale = 1.3;
 
   /// The empty state's words.
   static const String emptyTitle = 'No music yet';
@@ -146,76 +141,9 @@ class _LibraryTabState extends ConsumerState<LibraryTab> {
     if (mounted) await ref.read(onboardingProvider.notifier).refresh();
   }
 
-  void _openMore() {
-    showMixtapeSheet<void>(
-      context,
-      builder: (sheetContext) => _LibrarySheet(
-        children: [
-          FlushRow(
-            key: LibraryTab.yourMusicKey,
-            leading: const SizedBox.square(
-              dimension: kSourceMarkSize,
-              child: Center(child: Icon(Icons.library_music_outlined)),
-            ),
-            leadingSize: kSourceMarkSize,
-            title: 'Your music',
-            subtitle: 'Sources, imports and playlists',
-            onTap: () {
-              Navigator.of(sheetContext).pop();
-              _push(const MusicSourcesScreen());
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// A source row's detail: the Apple library opens Your music, an imported
-  /// source offers what can be done to it.
-  void _openSource(MusicSource source) {
-    final removable =
-        source.source == 'spotify_export' || source.source == 'apple_export';
-    if (!removable) {
-      _push(const MusicSourcesScreen());
-      return;
-    }
-    showMixtapeSheet<void>(
-      context,
-      builder: (sheetContext) => _LibrarySheet(
-        children: [
-          if (source.source == 'spotify_export')
-            FlushRow(
-              key: LibraryTab.sourceImportAgainKey(source.source),
-              leading: const SizedBox.square(
-                dimension: kSourceMarkSize,
-                child: Center(child: Icon(Icons.file_upload_outlined)),
-              ),
-              leadingSize: kSourceMarkSize,
-              title: 'Import again',
-              trailing: const SizedBox.shrink(),
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                openImportFlow(context, ref);
-              },
-            ),
-          FlushRow(
-            key: LibraryTab.sourceRemoveKey(source.source),
-            leading: const SizedBox.square(
-              dimension: kSourceMarkSize,
-              child: Center(child: Icon(Icons.delete_outline)),
-            ),
-            leadingSize: kSourceMarkSize,
-            title: 'Remove',
-            trailing: const SizedBox.shrink(),
-            onTap: () {
-              Navigator.of(sheetContext).pop();
-              removeSourceFlow(context, ref, source);
-            },
-          ),
-        ],
-      ),
-    );
-  }
+  /// Add your music on the segment a half names.
+  void _openService(int segment) =>
+      _push(SpotifyRequestScreen(initialSegment: segment));
 
   @override
   Widget build(BuildContext context) {
@@ -233,26 +161,31 @@ class _LibraryTabState extends ConsumerState<LibraryTab> {
         body: LargeTitleScaffold(
           title: 'Library',
           controller: _controller,
-          trailing: GlassCluster(
-            children: [
-              GlassButton(
-                key: LibraryTab.syncButtonKey,
-                label: 'Sync library',
-                onPressed: () => LibrarySyncSheet.show(context),
-                // It is Apple Music's sync, so it wears Apple Music's mark
-                // rather than the generic arrows (smoke round four, note 3).
-                child: AppleMusicMark(
-                  size: LibraryTab.syncMarkSize,
-                  color: context.tokens.text,
+          // Stacked over the title at large text, the labelled pair scales
+          // down rather than overflow a narrow phone.
+          trailing: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: GlassCluster(
+              children: [
+                // Sync is Apple Music's; a Spotify listener with no Apple
+                // library would only be asked for access they have no use for.
+                if (!(state?.chosenService == 'spotify' &&
+                    appleLiveSource(state) == null))
+                  GlassLabelButton(
+                    key: LibraryTab.syncButtonKey,
+                    icon: CupertinoIcons.arrow_2_circlepath,
+                    label: 'Sync',
+                    semanticLabel: 'Sync Apple Music',
+                    onPressed: () => showLibrarySync(context, ref),
+                  ),
+                GlassLabelButton(
+                  key: LibraryTab.yourMusicKey,
+                  icon: CupertinoIcons.music_albums,
+                  label: 'Your music',
+                  onPressed: () => _push(const MusicSourcesScreen()),
                 ),
-              ),
-              GlassButton(
-                key: LibraryTab.moreButtonKey,
-                icon: Icons.more_horiz,
-                label: 'More',
-                onPressed: _openMore,
-              ),
-            ],
+              ],
+            ),
           ),
           slivers: [
             // Nothing to list: the shared placement puts the block at the
@@ -330,70 +263,206 @@ class _LibraryTabState extends ConsumerState<LibraryTab> {
       );
     }
 
+    return _SourcesStrip(
+      state: state,
+      sync: ref.watch(librarySyncProvider),
+      onApple: () => _openService(SpotifyRequestScreen.appleSegment),
+      onSpotify: () => _openService(SpotifyRequestScreen.spotifySegment),
+    );
+  }
+}
+
+/// The sources strip: Apple Music and Spotify side by side, or stacked at
+/// large text, flush on the background with a hairline under it.
+class _SourcesStrip extends StatelessWidget {
+  const _SourcesStrip({
+    required this.state,
+    required this.sync,
+    required this.onApple,
+    required this.onSpotify,
+  });
+
+  final OnboardingState state;
+  final SyncState sync;
+  final VoidCallback onApple;
+  final VoidCallback onSpotify;
+
+  /// Apple: the library sync's own line; an account that only imported the
+  /// Apple history says so; nothing at all is an invitation.
+  ({StatusKind kind, String label})? get _appleStatus {
+    MusicSource? export;
+    for (final source in state.sources) {
+      if (source.source == 'apple_export') export = source;
+    }
+    final live = appleLiveSource(state);
+    if (live == null && sync is SyncIdle) {
+      if (export?.lastImportedAt != null) {
+        return (kind: StatusKind.ok, label: 'History added');
+      }
+      return null;
+    }
+    return appleSyncStatus(sync, state);
+  }
+
+  ({StatusKind kind, String label})? get _spotifyStatus {
+    final source = spotifySource(state);
+    return source == null ? null : sourceStatusFor(source, state);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    final stacked =
+        MediaQuery.textScalerOf(context).scale(1) >= LibraryTab.stackStripScale;
+
+    final apple = _SourceHalf(
+      key: LibraryTab.appleSourceKey,
+      mark: AppleMusicMark(size: _SourceHalf.markSize, color: tokens.text),
+      emptyMark: AppleMusicMark(
+        size: _SourceHalf.markSize,
+        color: tokens.muted,
+      ),
+      name: 'Apple Music',
+      status: _appleStatus,
+      stacked: stacked,
+      onTap: onApple,
+    );
+    final spotify = _SourceHalf(
+      key: LibraryTab.spotifySourceKey,
+      mark: SpotifyMark(size: _SourceHalf.markSize, color: tokens.text),
+      emptyMark: SpotifyMark(size: _SourceHalf.markSize, color: tokens.muted),
+      name: 'Spotify',
+      status: _spotifyStatus,
+      stacked: stacked,
+      onTap: onSpotify,
+    );
+    final hairline = Container(height: 1, color: tokens.hairline);
+
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 4,
-        crossAxisAlignment: WrapCrossAlignment.center,
+      padding: const EdgeInsets.only(top: 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          for (final source in state.sources)
-            OutlinedButton(
-              key: LibraryTab.sourceRowKey(source.source),
-              onPressed: () => _openSource(source),
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                minimumSize: const Size(44, 44),
-                side: BorderSide(color: tokens.hairline),
-              ),
+          if (stacked) ...[
+            apple,
+            hairline,
+            spotify,
+          ] else
+            IntrinsicHeight(
               child: Row(
-                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: FittedBox(child: SourceMark(source: source.source)),
-                  ),
-                  const SizedBox(width: 6),
-                  Flexible(
-                    child: Text(
-                      source.source.startsWith('spotify')
-                          ? 'Spotify'
-                          : 'Apple Music',
-                      style: tokens.meta.copyWith(fontSize: 12),
+                  Expanded(child: apple),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 14,
                     ),
+                    child: Container(width: 1, color: tokens.hairline),
                   ),
+                  Expanded(child: spotify),
                 ],
               ),
             ),
-          TextButton(
-            key: LibraryTab.addSpotifyKey,
-            onPressed: () => _push(
-              const SpotifyRequestScreen(
-                initialSegment: SpotifyRequestScreen.spotifySegment,
-              ),
-            ),
-            child: const Text(
-              'Add Spotify music',
-              style: TextStyle(fontSize: 12),
-            ),
-          ),
+          hairline,
         ],
       ),
     );
   }
 }
 
-/// The tab's own action sheets. The shared sheet supplies the material, the
-/// handle and the bottom inset; this is only the rows.
-class _LibrarySheet extends StatelessWidget {
-  const _LibrarySheet({required this.children});
+/// One service in the strip: its mark, its name and its status line, or
+/// "Add music" when nothing of it is in yet. The whole half is the button.
+class _SourceHalf extends StatelessWidget {
+  const _SourceHalf({
+    super.key,
+    required this.mark,
+    required this.emptyMark,
+    required this.name,
+    required this.status,
+    required this.stacked,
+    required this.onTap,
+  });
 
-  final List<Widget> children;
+  final Widget mark;
+  final Widget emptyMark;
+  final String name;
+  final ({StatusKind kind, String label})? status;
+  final bool stacked;
+  final VoidCallback onTap;
+
+  static const double markSize = 28;
+  static const String addLabel = 'Add music';
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
-    child: FlushList(children: children),
-  );
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    final status = this.status;
+    final line = status == null
+        ? Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(CupertinoIcons.add, size: 13, color: tokens.plum),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  addLabel,
+                  maxLines: stacked ? 2 : 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: tokens.plum,
+                  ),
+                ),
+              ),
+            ],
+          )
+        : StatusWord(label: status.label, kind: status.kind);
+
+    return Semantics(
+      button: true,
+      label: '$name, ${status?.label ?? 'not added. $addLabel'}',
+      excludeSemantics: true,
+      child: InkWell(
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 62),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              children: [
+                status == null ? emptyMark : mark,
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        name,
+                        maxLines: stacked ? 2 : 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: tokens.rowTitle.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      line,
+                    ],
+                  ),
+                ),
+                if (stacked)
+                  Icon(
+                    CupertinoIcons.chevron_right,
+                    size: 18,
+                    color: tokens.muted,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
