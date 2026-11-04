@@ -84,6 +84,12 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
   final _controller = TextEditingController();
   bool _starting = false;
 
+  /// The mic's controller, bound a frame after mount. Watching it from build
+  /// would create it mid-build, and on a sign-out (which lands here) that
+  /// marks the provider scope dirty while the tree is building. The listener
+  /// still follows the replacement an anonymous sign-in makes.
+  VoiceComposerController? _voice;
+
   /// A send in hand, possibly waiting on the AI-consent sheet: guards a
   /// second send without drawing the composer busy under the sheet.
   bool _sending = false;
@@ -95,6 +101,16 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
     if (!widget.isPrompt) {
       ref.read(firstRunFunnelProvider).record(FunnelEventType.firstRunOpened);
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref.listenManual<VoiceComposerController>(
+        voiceComposerControllerProvider,
+        (_, next) {
+          if (mounted) setState(() => _voice = next);
+        },
+        fireImmediately: true,
+      );
+    });
   }
 
   @override
@@ -197,8 +213,7 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
             busy: _starting,
             onSubmit: () => unawaited(_send()),
             exampleSet: WelcomeScreen.examples,
-            // Watched, not read once: the anonymous sign-in replaces it.
-            voiceController: ref.watch(voiceComposerControllerProvider),
+            voiceController: _voice,
             beforeVoice: _beforeVoice,
           ),
         ),
