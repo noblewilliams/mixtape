@@ -20,6 +20,7 @@ import 'package:mixtape/presentation/providers/dj_providers.dart';
 import 'package:mixtape/presentation/providers/library_sync_provider.dart';
 import 'package:mixtape/presentation/providers/listening_import_provider.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
+import 'package:mixtape/presentation/providers/voice_providers.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 
 import '../../helpers/fake_ai_consent.dart';
@@ -206,6 +207,11 @@ class FirstRunHarness {
   final ControlledSync sync = ControlledSync();
   final InMemoryServicePreferenceStore prefs = InMemoryServicePreferenceStore();
 
+  /// The microphone: each start records the auth status it began under, and
+  /// each stop transcribes to [transcript].
+  final List<AuthStatus> voiceStarts = [];
+  String transcript = 'late night drive';
+
   List<Override> get overrides => [
     authProvider.overrideWith(() => auth),
     tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
@@ -222,6 +228,17 @@ class FirstRunHarness {
     openedArchiveSourceProvider.overrideWithValue(FakeOpenedArchiveSource()),
     accountApiProvider.overrideWithValue(account),
     if (consentGiven) aiConsentProvider.overrideWith(GrantedAiConsent.new),
+    // User-scoped like the real one: an auth change builds a new controller.
+    voiceComposerControllerProvider.overrideWith((ref) {
+      final status = ref.watch(authProvider);
+      final controller = VoiceComposerController(
+        onStart: () async => voiceStarts.add(status),
+        onStop: () async => transcript,
+        onCancel: () async {},
+      );
+      ref.onDispose(controller.dispose);
+      return controller;
+    }),
   ];
 
   late final ProviderContainer container = () {

@@ -82,6 +82,54 @@ describe('path A, make a mix now', () => {
     ])
   })
 
+  it('skips the artists page and makes the mix from the prompt alone', async () => {
+    const { onDone, log, api } = renderFlow()
+    typePrompt('late night drive')
+    await heading('Who do you love?')
+    fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }))
+    await agree()
+
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith(madeMix))
+    expect(api.putArtistSeeds).not.toHaveBeenCalled()
+    expect(actions(log)).toEqual(['ensureSession', 'grantAiConsent', 'createSession:late night drive'])
+  })
+
+  it('saves fewer than three artists', async () => {
+    const { onDone, log } = renderFlow()
+    typePrompt('late night drive')
+    await heading('Who do you love?')
+    nameArtists('Sade')
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    await agree()
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith(madeMix))
+    expect(actions(log)).toContain('putArtistSeeds:Sade')
+  })
+
+  it('asks consent before the first recording, then makes sure of the session and transcribes', async () => {
+    const getUserMedia = vi.fn().mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] })
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia } })
+    class Recorder {
+      static isTypeSupported() { return true }
+      state = 'inactive'; mimeType = 'audio/webm'; ondataavailable: ((event: { data: Blob }) => void) | null = null; onstop: (() => void) | null = null; onerror: (() => void) | null = null
+      start() { this.state = 'recording' }
+      stop() { this.state = 'inactive'; this.ondataavailable?.({ data: new Blob(['x'.repeat(2048)]) }); this.onstop?.() }
+    }
+    vi.stubGlobal('MediaRecorder', Recorder)
+    const { log, api } = renderFlow()
+    await heading('What do you want to hear?')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Record a voice prompt' }))
+    await agree()
+    expect(getUserMedia).not.toHaveBeenCalled()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Record a voice prompt' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop recording' }))
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Describe your mix' })).toHaveValue('late night drive'))
+    expect(api.createSession).not.toHaveBeenCalled()
+    expect(actions(log)).toEqual(['ensureSession', 'grantAiConsent', 'ensureSession', 'transcribe'])
+    vi.unstubAllGlobals()
+  })
+
   it('keeps the artists page and says so when the seeds cannot be saved', async () => {
     const { api, onDone } = renderFlow()
     api.putArtistSeeds.mockRejectedValueOnce(new Error('offline'))

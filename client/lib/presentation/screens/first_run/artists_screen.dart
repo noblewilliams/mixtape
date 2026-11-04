@@ -1,10 +1,11 @@
 /// Who do you love? (board frames A3 and A4).
 ///
-/// Three plain artist fields, each becoming a chip once entered. Continue
-/// enables at three. It writes the seeds a corpus mix needs through
-/// `/me/artist-seeds` (creating the anonymous listener lazily), then sends
-/// the prompt from Welcome; reached without one (Skip for now, I've requested
-/// it), it goes on to the prompt page instead.
+/// Three optional artist fields under a visible label, each becoming a chip
+/// once entered. Continue enables at one name and writes the seeds through
+/// `/me/artist-seeds` (creating the anonymous listener lazily); Skip for now
+/// writes none, and the DJ works from the prompt alone (NEVER_REFUSE). Either
+/// way it then sends the prompt from Welcome; reached without one (Step 1's
+/// Skip for now, I've requested it), it goes on to the prompt page instead.
 library;
 
 import 'dart:async';
@@ -28,16 +29,26 @@ class ArtistsScreen extends ConsumerStatefulWidget {
 
   static const String headline = 'Who do you love?';
   static const String line =
-      'Three artists is enough. The DJ borrows from the shared catalogue '
-      'until your music is in.';
+      'Name a few and the DJ tailors your mix to them. Optional: skip and it '
+      'works from what you asked for.';
+  static const String label = 'Artists you love (optional)';
+  static const String skipLabel = 'Skip for now';
   static const List<String> placeholders = [
+    'Type an artist',
+    'Another artist',
+    'One more',
+  ];
+
+  /// What VoiceOver reads for each field.
+  static const List<String> fieldNames = [
     'First artist',
     'Second artist',
     'Third artist',
   ];
-  static const int needed = 3;
+  static const int slots = 3;
 
   static const Key continueKey = Key('first-run-continue');
+  static const Key skipKey = Key('first-run-artists-skip');
   static const Key errorKey = Key('first-run-artists-error');
   static Key fieldKey(int i) => Key('artist-field-$i');
   static Key chipKey(int i) => Key('artist-chip-$i');
@@ -49,19 +60,19 @@ class ArtistsScreen extends ConsumerStatefulWidget {
 
 class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
   final _controllers = [
-    for (var i = 0; i < ArtistsScreen.needed; i++) TextEditingController(),
+    for (var i = 0; i < ArtistsScreen.slots; i++) TextEditingController(),
   ];
-  final _focus = [for (var i = 0; i < ArtistsScreen.needed; i++) FocusNode()];
+  final _focus = [for (var i = 0; i < ArtistsScreen.slots; i++) FocusNode()];
 
   /// The entered names, a chip each; null while the slot is a field.
-  final List<String?> _chips = List.filled(ArtistsScreen.needed, null);
+  final List<String?> _chips = List.filled(ArtistsScreen.slots, null);
   bool _busy = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    for (var i = 0; i < ArtistsScreen.needed; i++) {
+    for (var i = 0; i < ArtistsScreen.slots; i++) {
       _controllers[i].addListener(() => setState(() {}));
       _focus[i].addListener(() {
         if (!_focus[i].hasFocus) _commit(i);
@@ -84,11 +95,11 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
   String _name(int i) => (_chips[i] ?? _controllers[i].text).trim();
 
   List<String> get _names => [
-    for (var i = 0; i < ArtistsScreen.needed; i++)
+    for (var i = 0; i < ArtistsScreen.slots; i++)
       if (_name(i).isNotEmpty) _name(i),
   ];
 
-  bool get _ready => _names.length >= ArtistsScreen.needed;
+  bool get _ready => _names.isNotEmpty;
 
   void _commit(int i) {
     if (!mounted) return;
@@ -115,22 +126,24 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
     _focus[i].requestFocus();
   }
 
-  Future<void> _continue() async {
-    if (_busy || !_ready) return;
+  /// Continue saves the names; Skip for now ([skip]) saves nothing.
+  Future<void> _continue({bool skip = false}) async {
+    if (_busy || (!skip && !_ready)) return;
     setState(() {
       _busy = true;
       _error = null;
     });
-    final names = _names;
-    try {
-      await saveArtistSeeds(ref, names);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _busy = false;
-        _error = FirstRunErrors.seeds;
-      });
-      return;
+    if (!skip) {
+      try {
+        await saveArtistSeeds(ref, _names);
+      } catch (e) {
+        if (!mounted) return;
+        setState(() {
+          _busy = false;
+          _error = FirstRunErrors.seeds;
+        });
+        return;
+      }
     }
     if (!mounted) return;
     final prompt = widget.prompt;
@@ -139,7 +152,7 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
       unawaited(
         pushFirstRunPage<void>(
           context,
-          const WelcomeScreen.prompt(seedsSaved: true),
+          const WelcomeScreen.prompt(artistsPassed: true),
         ),
       );
       return;
@@ -169,7 +182,19 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
       line: ArtistsScreen.line,
       body: [
         const SizedBox(height: 24),
-        for (var i = 0; i < ArtistsScreen.needed; i++) ...[
+        ExcludeSemantics(
+          child: Text(
+            ArtistsScreen.label.toUpperCase(),
+            style: context.tokens.meta.copyWith(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 1.3,
+              color: FirstRunColors.cream.withValues(alpha: 0.8),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        for (var i = 0; i < ArtistsScreen.slots; i++) ...[
           if (i > 0) const SizedBox(height: 10),
           _slot(i),
         ],
@@ -192,10 +217,15 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
           key: ArtistsScreen.continueKey,
           label: 'Continue',
           forward: true,
-          disabledHint: 'Add three artists.',
+          disabledHint: 'Add an artist, or skip for now.',
           onPressed: _ready && !_busy ? () => unawaited(_continue()) : null,
         ),
       ],
+      foot: FootLink(
+        key: ArtistsScreen.skipKey,
+        label: ArtistsScreen.skipLabel,
+        onPressed: _busy ? null : () => unawaited(_continue(skip: true)),
+      ),
     );
   }
 
@@ -205,38 +235,36 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
     return ConstrainedBox(
       constraints: const BoxConstraints(minHeight: 56),
       child: DecoratedBox(
+        // Outlined and inset so it reads as a place to type, not a pill.
         decoration: BoxDecoration(
           color: FirstRunColors.paper,
           borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: FirstRunColors.ink.withValues(alpha: 0.22)),
+          boxShadow: [
+            BoxShadow(
+              color: FirstRunColors.ink.withValues(alpha: 0.14),
+              blurRadius: 3,
+              offset: const Offset(0, 1),
+            ),
+          ],
         ),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
           child: Align(
             alignment: Alignment.centerLeft,
             child: chip == null
-                ? TextField(
-                    key: ArtistsScreen.fieldKey(i),
-                    controller: _controllers[i],
-                    focusNode: _focus[i],
-                    textInputAction: i == ArtistsScreen.needed - 1
-                        ? TextInputAction.done
-                        : TextInputAction.next,
-                    textCapitalization: TextCapitalization.words,
-                    autocorrect: false,
-                    onSubmitted: (_) => _submitted(i),
-                    cursorColor: FirstRunColors.ink,
-                    style: tokens.body.copyWith(color: FirstRunColors.ink),
-                    decoration: InputDecoration(
-                      hintText: ArtistsScreen.placeholders[i],
-                      hintStyle: tokens.body.copyWith(
-                        color: FirstRunColors.paperMuted,
+                ? Row(
+                    children: [
+                      const ExcludeSemantics(
+                        child: Icon(
+                          Icons.edit_outlined,
+                          size: 18,
+                          color: FirstRunColors.paperMuted,
+                        ),
                       ),
-                      border: InputBorder.none,
-                      enabledBorder: InputBorder.none,
-                      focusedBorder: InputBorder.none,
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
+                      const SizedBox(width: 10),
+                      Expanded(child: _field(i, tokens)),
+                    ],
                   )
                 : _Chip(
                     key: ArtistsScreen.chipKey(i),
@@ -249,6 +277,33 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
       ),
     );
   }
+
+  Widget _field(int i, MixtapeTokens tokens) => Semantics(
+    label: ArtistsScreen.fieldNames[i],
+    textField: true,
+    child: TextField(
+      key: ArtistsScreen.fieldKey(i),
+      controller: _controllers[i],
+      focusNode: _focus[i],
+      textInputAction: i == ArtistsScreen.slots - 1
+          ? TextInputAction.done
+          : TextInputAction.next,
+      textCapitalization: TextCapitalization.words,
+      autocorrect: false,
+      onSubmitted: (_) => _submitted(i),
+      cursorColor: FirstRunColors.ink,
+      style: tokens.body.copyWith(color: FirstRunColors.ink),
+      decoration: InputDecoration(
+        hintText: ArtistsScreen.placeholders[i],
+        hintStyle: tokens.body.copyWith(color: FirstRunColors.paperMuted),
+        border: InputBorder.none,
+        enabledBorder: InputBorder.none,
+        focusedBorder: InputBorder.none,
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(vertical: 14),
+      ),
+    ),
+  );
 }
 
 /// An entered artist (the board's `.achip`), with a 44 pt remove target.

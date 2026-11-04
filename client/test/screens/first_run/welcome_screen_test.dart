@@ -39,8 +39,47 @@ void main() {
       expect(find.byKey(TapeBackButton.defaultKey), findsNothing);
       expect(find.byKey(StepScaffold.counterKey), findsNothing);
       expect(find.byKey(StepScaffold.progressKey), findsNothing);
-      // The mic is not part of this composer.
-      expect(find.byKey(const Key('voice-input')), findsNothing);
+      expect(find.byKey(const Key('voice-input')), findsOneWidget);
+    });
+
+    testWidgets('the mic asks consent, creates the anonymous listener, then '
+        'records into the field without sending', (tester) async {
+      final h = FirstRunHarness(consentGiven: false);
+      await h.pump(tester, const WelcomeScreen());
+
+      await tester.tap(find.byKey(const Key('voice-input')));
+      await tester.pumpAndSettle();
+      expect(h.voiceStarts, isEmpty);
+      await tester.tap(find.text('Agree and continue'));
+      await tester.pumpAndSettle();
+
+      expect(h.auth.anonymousSignIns, 1);
+      expect(h.voiceStarts, [AuthStatus.session]);
+      await tester.tap(find.byKey(const Key('voice-input')));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('prompt-field')))
+            .controller!
+            .text,
+        'late night drive',
+      );
+      expect(h.dj.prompts, isEmpty);
+    });
+
+    testWidgets('Not now on the consent sheet leaves the mic closed', (
+      tester,
+    ) async {
+      final h = FirstRunHarness(consentGiven: false);
+      await h.pump(tester, const WelcomeScreen());
+
+      await tester.tap(find.byKey(const Key('voice-input')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Not now'));
+      await tester.pumpAndSettle();
+
+      expect(h.voiceStarts, isEmpty);
+      expect(h.auth.anonymousSignIns, 0);
     });
 
     testWidgets('the tape sits midway between the wordmark and the headline', (

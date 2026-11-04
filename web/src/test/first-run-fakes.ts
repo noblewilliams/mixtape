@@ -103,6 +103,10 @@ export function fakeServices({ neverRefuse = false }: { neverRefuse?: boolean } 
       log.push('grantAiConsent')
       return { aiConsent: true }
     }),
+    transcribe: vi.fn(async (_audio: File, _signal?: AbortSignal) => {
+      log.push('transcribe')
+      return { text: 'late night drive', language: 'en' }
+    }),
     postFunnelEvent: vi.fn(async (event: { type: string }) => {
       log.push(`postFunnelEvent:${event.type}`)
       return { ok: true as const }

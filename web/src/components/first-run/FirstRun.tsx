@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ApiError, type CreateSessionResponse, type FunnelEventType } from '../../api/client'
 import { createDeferredFunnel } from '../../lib/funnel-once'
 import type { AuthPreferenceStore, AuthProvider } from '../../lib/auth-provider'
-import { AiConsentDialog } from '../AiConsent'
+import { AiConsentDialog, AiConsentGate } from '../AiConsent'
 import { SignInPage, type AuthBridge } from '../AuthGate'
 import { Artists, ARTISTS_HEADLINE } from './Artists'
 import { ChooseMethod, METHOD_HEADLINE, type AddMethod } from './ChooseMethod'
@@ -127,15 +127,18 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
   const [prompt, setPrompt] = useState('')
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null)
   const [artists, setArtists] = useState<string[]>([])
-  const [seedsSaved, setSeedsSaved] = useState(false)
+  // The artists page was answered, with names or Skip for now: it is optional
+  // and never asked again in this flow.
+  const [artistsPassed, setArtistsPassed] = useState(false)
   const [songsIn, setSongsIn] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [syncStartFailed, setSyncStartFailed] = useState(false)
-  // AI consent, asked once per flow right before the first POST /sessions.
-  // `asking` holds the prompt the dialog stands in front of.
+  // AI consent, asked once per flow right before the first POST /sessions or
+  // the first recording. `asking` holds the prompt the dialog stands in front
+  // of; none for the microphone, which the listener taps again after Agree.
   const consented = useRef(false)
-  const [asking, setAsking] = useState<{ text: string; ensured: boolean } | null>(null)
+  const [asking, setAsking] = useState<{ text?: string; ensured: boolean } | null>(null)
   const page = trail.current[depth] ?? trail.current[0]
 
   // The first run's funnel (not Library's add flow). Events wait in memory
@@ -214,6 +217,22 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [adding, exit, flow, setDepth])
+
+  // The welcome microphone: consent first (the gate opens the dialog), then
+  // the session, then the transcriber.
+  const consentGate = useCallback(() => {
+    if (consented.current) return true
+    setAsking({ ensured: false })
+    return false
+  }, [])
+  const transcribe = useCallback(
+    async (audio: File, signal: AbortSignal) => {
+      if (!services) throw new Error('Transcription unavailable')
+      await ensure()
+      return services.api.transcribe(audio, signal)
+    },
+    [services, ensure],
+  )
 
   const { headline, step } = headlineOf(page)
   useEffect(() => {
@@ -294,32 +313,40 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
     }
     consented.current = true
     setAsking(null)
-    void makeMix(text, true)
+    if (text !== undefined) void makeMix(text, true)
   }
 
   /**
-   * Path A: with nothing synced in this flow, the artists page comes first,
-   * except on the prompt page Skip for now opened with never refuse on.
+   * Path A: with nothing synced in this flow, the artists page comes first
+   * (once; it can be skipped), except on the prompt page Skip for now opened
+   * with never refuse on.
    */
   function send(text: string) {
     if (page.id === 'welcome') record('chose_make_mix')
     // neverRefuse on the prompt page: only Skip for now's route lands there without seeds or songs today.
-    if (seedsSaved || (songsIn ?? 0) > 0 || (neverRefuse && page.id === 'prompt')) void makeMix(text)
+    if (artistsPassed || (songsIn ?? 0) > 0 || (neverRefuse && page.id === 'prompt')) void makeMix(text)
     else {
       setPendingPrompt(text)
       push({ id: 'artists' })
     }
   }
 
+  /** Continue saves the names; Skip for now (none) saves nothing and the DJ works from the prompt. */
   async function saveArtists(names: string[]) {
     setArtists(names)
+    if (!names.length) {
+      setArtistsPassed(true)
+      if (pendingPrompt) void makeMix(pendingPrompt)
+      else push({ id: 'prompt' })
+      return
+    }
     if (!services) return setError(SAVE_FAILED)
     setBusy(true)
     setError('')
     try {
       await ensure()
       await services.api.putArtistSeeds(names)
-      setSeedsSaved(true)
+      setArtistsPassed(true)
     } catch {
       setError(SAVE_FAILED)
       setBusy(false)
@@ -373,7 +400,7 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
     record('sync_done')
     if (adding) return finish({})
     setSongsIn(songs)
-    push(songs > 0 || seedsSaved ? { id: 'prompt' } : { id: 'artists' })
+    push(songs > 0 || artistsPassed ? { id: 'prompt' } : { id: 'artists' })
   }
 
   // Library's add flow opens over the shell, so its first page takes focus too.
@@ -389,6 +416,7 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
           draft={prompt}
           onDraft={setPrompt}
           onSend={send}
+          transcribe={services ? transcribe : undefined}
           onAddMusic={page.id === 'welcome' ? () => { record('chose_add_music'); setPendingPrompt(null); push({ id: 'service' }) } : undefined}
           line={page.id === 'prompt' && songsIn ? `${songsIn.toLocaleString()} songs in. Ask for anything.` : undefined}
           onSignIn={() => push({ id: 'sign-in' })}
@@ -434,7 +462,7 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
           syncStartFailed={syncStartFailed}
           onSynced={added}
           onImported={added}
-          onRequested={() => (adding ? finish({}) : push(seedsSaved ? { id: 'prompt' } : { id: 'artists' }))}
+          onRequested={() => (adding ? finish({}) : push(artistsPassed ? { id: 'prompt' } : { id: 'artists' }))}
           importDoneLabel={adding ? 'Done' : undefined}
         />
       ) : null
@@ -454,7 +482,9 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
 
   return (
     <div className={`first-run fr-root${adding ? ' fr-root--add' : ''}`} data-testid="first-run">
-      <div className="fr-stage" key={key}>{content}</div>
+      <AiConsentGate.Provider value={consentGate}>
+        <div className="fr-stage" key={key}>{content}</div>
+      </AiConsentGate.Provider>
       {asking ? <AiConsentDialog onAgree={agreeToAi} onNotNow={() => setAsking(null)} /> : null}
     </div>
   )

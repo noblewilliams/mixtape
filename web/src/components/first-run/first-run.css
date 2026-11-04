@@ -176,8 +176,16 @@
   background: var(--fr-paper);
   box-shadow: none;
 }
-.fr-composer textarea { color: var(--fr-ink); font-size: 1rem; }
-.fr-composer textarea::placeholder { color: var(--fr-ink-muted); }
+/* Doubled class: home-composer.css styles `.home-composer textarea` at the same
+   specificity and may load later (graphite text, light in dark mode; 14px,
+   which makes iOS zoom on focus). */
+.fr-composer.home-composer textarea { color: var(--fr-ink); -webkit-text-fill-color: var(--fr-ink); caret-color: var(--fr-ink); font-size: 1rem; }
+.fr-composer.home-composer textarea::placeholder { color: var(--fr-ink-muted); -webkit-text-fill-color: var(--fr-ink-muted); opacity: 1; }
+.fr-voice.home-voice-button { width: 44px; height: 44px; color: var(--fr-ink); border-radius: 999px; }
+.fr-voice.home-voice-button svg { width: 20px; height: 20px; }
+.fr-voice.home-voice-button:hover { background: rgba(28, 26, 30, .08); }
+.fr-voice.home-voice-button[aria-pressed=true] { color: #a03650; background: rgba(160, 54, 80, .12); }
+.fr-composer .home-voice-status { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; min-height: 40px; color: var(--fr-ink); font-size: 1rem; }
 .fr-stripe { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); width: 4px; height: 1.6em; max-height: 60%; border-radius: 2px; background: linear-gradient(180deg, #c9687f, #d18a65, #d2c76f, #709778, #688fa8); }
 .fr-composer:focus-within .fr-stripe { opacity: 0; }
 .fr-composer:focus-within::after {
@@ -198,14 +206,19 @@
 .fr-send:disabled i { background: transparent; }
 .fr-send.home-send-button:not(:disabled):hover { background: transparent; }
 
-/* Artists: three paper fields, each a chip once entered. */
+/* Artists: three optional fields under a label, each a chip once entered.
+   Fields are inset and outlined so they read as places to type, not pills. */
 .fr-afields { display: flex; flex-direction: column; gap: 10px; margin-top: 24px; }
 .fr-afields .fr-acts { margin-top: 18px; }
-.fr-afield { display: flex; align-items: center; min-height: 56px; padding: 0 8px 0 16px; border-radius: 16px; background: var(--fr-paper); color: var(--fr-ink-muted); }
-.fr-afield input { flex: 1; min-width: 0; height: 52px; padding: 0; border: 0; background: transparent; color: var(--fr-ink); font: inherit; font-size: 1rem; }
-.fr-afield input::placeholder { color: var(--fr-ink-muted); }
+.fr-alabel { margin: 0 0 -2px; font: 600 11px/1.2 -apple-system, BlinkMacSystemFont, sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--fr-cream-muted); }
+.fr-afield { display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 0 8px 0 16px; border: 1px solid rgba(28, 26, 30, .22); border-radius: 16px; background: var(--fr-paper); box-shadow: inset 0 1px 3px rgba(28, 26, 30, .14); color: var(--fr-ink-muted); cursor: text; }
+.fr-afield--chip { cursor: default; }
+.fr-afield-pen { flex: none; color: var(--fr-ink-muted); }
+.fr-afield input { flex: 1; min-width: 0; height: 52px; padding: 0; border: 0; background: transparent; color: var(--fr-ink); -webkit-text-fill-color: var(--fr-ink); caret-color: var(--fr-ink); font: inherit; font-size: 1rem; }
+.fr-afield input::placeholder { color: var(--fr-ink-muted); -webkit-text-fill-color: var(--fr-ink-muted); opacity: 1; }
 .fr-afield input:focus { outline: none; box-shadow: none; }
 .fr-afield:focus-within { box-shadow: 0 0 0 2px var(--fr-cream); }
+.fr-afields + .fr-foot { margin-top: 4px; }
 .fr-achip { display: inline-flex; align-items: center; min-height: 36px; margin-left: -6px; padding-left: 14px; border-radius: 999px; background: var(--fr-chip); color: var(--fr-ink); font-weight: 600; font-size: .95em; }
 .fr-achip-x { width: 44px; height: 44px; margin: -4px 0; padding: 0; display: grid; place-items: center; border: 0; border-radius: 999px; background: transparent; color: #3f383f; cursor: pointer; }
 .fr-achip-x svg { width: 14px; height: 14px; }

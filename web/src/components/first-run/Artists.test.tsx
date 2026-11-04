@@ -9,11 +9,13 @@ function type(label: string, value: string) {
 describe('Who do you love?', () => {
   afterEach(cleanup)
 
-  it('carries the approved copy, three fields, back, and no counter', () => {
+  it('carries the copy, a visible optional label, three fields, back, and no counter', () => {
     render(<Artists onContinue={vi.fn()} onBack={vi.fn()} />)
 
     expect(screen.getByRole('heading', { level: 1, name: 'Who do you love?' })).toBeInTheDocument()
-    expect(screen.getByText('Three artists is enough. The DJ borrows from the shared catalogue until your music is in.')).toBeInTheDocument()
+    expect(screen.getByText('Name a few and the DJ tailors your mix to them. Optional: skip and it works from what you asked for.')).toBeInTheDocument()
+    expect(screen.getByRole('form', { name: 'Artists you love (optional)' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'First artist' })).toHaveAttribute('placeholder', 'Type an artist')
     expect(screen.getByRole('textbox', { name: 'First artist' })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Second artist' })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Third artist' })).toBeInTheDocument()
@@ -22,18 +24,14 @@ describe('Who do you love?', () => {
     expect(screen.queryByTestId('fr-progress')).not.toBeInTheDocument()
   })
 
-  it('enables Continue only at three artists, with the dimmed hint until then', () => {
+  it('enables Continue from one artist, with the dimmed hint until then', () => {
     render(<Artists onContinue={vi.fn()} onBack={vi.fn()} />)
     const next = screen.getByRole('button', { name: 'Continue' })
     expect(next).toBeDisabled()
-    expect(next).toHaveAccessibleDescription('Add three artists.')
+    expect(next).toHaveAccessibleDescription('Add an artist, or skip for now.')
     expect(next.querySelector('.fr-ff--hollow')).not.toBeNull()
 
     type('First artist', 'Burna Boy')
-    type('Second artist', 'Tems')
-    expect(next).toBeDisabled()
-
-    type('Third artist', 'Sade')
     expect(next).toBeEnabled()
     expect(next).not.toHaveAccessibleDescription()
     expect(next.querySelector('.fr-ff--hollow')).toBeNull()
@@ -68,6 +66,21 @@ describe('Who do you love?', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
 
     expect(onContinue).toHaveBeenCalledWith(['Burna Boy', 'Tems', 'Sade'])
+  })
+
+  it('continues with fewer than three', () => {
+    const onContinue = vi.fn()
+    render(<Artists onContinue={onContinue} onBack={vi.fn()} />)
+    type('Second artist', 'Tems')
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(onContinue).toHaveBeenCalledWith(['Tems'])
+  })
+
+  it('skips with no artists', () => {
+    const onContinue = vi.fn()
+    render(<Artists onContinue={onContinue} onBack={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }))
+    expect(onContinue).toHaveBeenCalledWith([])
   })
 
   it('keeps chips from an earlier visit', () => {

@@ -24,6 +24,7 @@ class MixPromptInput extends StatefulWidget {
     this.exampleSet,
     this.showVoiceInput = voiceInputEnabled,
     this.voiceController,
+    this.beforeVoice,
   });
   final TextEditingController controller;
   final bool busy;
@@ -64,6 +65,11 @@ class MixPromptInput extends StatefulWidget {
   /// the Riverpod scope around it, so Home and a conversation share one
   /// microphone; tests hand one in directly.
   final VoiceComposerController? voiceController;
+
+  /// What a mic tap waits on before recording; false leaves the mic closed.
+  /// Left out, it is the AI-consent sheet. The first run passes its own,
+  /// which also creates the anonymous listener the transcriber needs.
+  final Future<bool> Function()? beforeVoice;
 
   /// The rotating placeholders, in order.
   ///
@@ -258,9 +264,13 @@ class _MixPromptInputState extends State<MixPromptInput>
     if (voice.busy) return;
     // A clip goes to Groq, so the AI-consent sheet comes first when the
     // listener has not agreed; Not now leaves the mic closed.
-    if (!await confirmAiConsent(context) || !mounted) return;
-    if (voice.busy || widget.busy) return;
-    await voice.start();
+    final gate = widget.beforeVoice ?? () => confirmAiConsent(context);
+    if (!await gate() || !mounted) return;
+    // The gate may have changed who is signed in, and with it the
+    // controller: record on the one bound now.
+    final current = _voice;
+    if (current == null || current.busy || widget.busy) return;
+    await current.start();
   }
 
   /// Land a transcript where the cursor is, and hand the field back with the

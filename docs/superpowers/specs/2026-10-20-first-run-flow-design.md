@@ -301,8 +301,11 @@ rows after the first mix.
   Sign in."
 - Making: "Making your mix." Line "The DJ is listening. This takes about a
   minute."
-- Artists headline: "Who do you love?" Line: "Three artists is enough. The
-  DJ borrows from the shared catalogue until your music is in."
+- Artists headline: "Who do you love?" Line: "Name a few and the DJ tailors
+  your mix to them. Optional: skip and it works from what you asked for."
+  Label "Artists you love (optional)"; placeholders "Type an artist",
+  "Another artist", "One more"; Continue from one name; link "Skip for now"
+  (2026-11-03, see decisions.md).
 - Step 1: "Which do you use?" Line "Mixes get better when the DJ knows your
   music." Pills "Apple Music", "Spotify". Link "Skip for now".
 - Step 2 (Apple): "How do you want to add it?" Pills "Sync my library",

@@ -98,7 +98,7 @@ void main() {
   ) async {
     final h = FirstRunHarness(consentGiven: false);
     await h.pump(tester, const ArtistsScreen(prompt: 'late'));
-    for (var i = 0; i < ArtistsScreen.needed; i++) {
+    for (var i = 0; i < ArtistsScreen.slots; i++) {
       await tester.enterText(find.byKey(ArtistsScreen.fieldKey(i)), 'A$i');
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pump();

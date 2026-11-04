@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Welcome, WELCOME_EXAMPLES } from './Welcome'
 import { useState } from 'react'
@@ -8,8 +8,54 @@ function Harness(props: Partial<Parameters<typeof Welcome>[0]>) {
   return <Welcome draft={draft} onDraft={setDraft} onSend={vi.fn()} onSignIn={vi.fn()} {...props} />
 }
 
+function stubRecorder() {
+  const getUserMedia = vi.fn().mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] })
+  Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia } })
+  class Recorder {
+    static isTypeSupported() { return true }
+    state = 'inactive'; mimeType = 'audio/webm'; ondataavailable: ((event: { data: Blob }) => void) | null = null; onstop: (() => void) | null = null; onerror: (() => void) | null = null
+    start() { this.state = 'recording' }
+    stop() { this.state = 'inactive'; this.ondataavailable?.({ data: new Blob(['x'.repeat(2048)]) }); this.onstop?.() }
+  }
+  vi.stubGlobal('MediaRecorder', Recorder)
+  return { getUserMedia }
+}
+
 describe('Welcome', () => {
-  afterEach(cleanup)
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+  })
+
+  it('has no microphone without a transcriber', () => {
+    render(<Harness onAddMusic={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: 'Record a voice prompt' })).not.toBeInTheDocument()
+  })
+
+  it('records a voice prompt into the field to edit, without sending', async () => {
+    stubRecorder()
+    const onSend = vi.fn()
+    const transcribe = vi.fn().mockResolvedValue({ text: 'late night drive' })
+    render(<Harness onSend={onSend} transcribe={transcribe} onAddMusic={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Record a voice prompt' }))
+    expect(await screen.findByText('Listening…')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Stop recording' }))
+
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Describe your mix' })).toHaveValue('late night drive'))
+    expect(transcribe).toHaveBeenCalledWith(expect.any(File), expect.any(AbortSignal))
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it('says so when the transcription fails, keeping the field', async () => {
+    stubRecorder()
+    const transcribe = vi.fn().mockRejectedValue(new Error('offline'))
+    render(<Harness transcribe={transcribe} onAddMusic={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Record a voice prompt' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop recording' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t transcribe that recording. Try again or type.')
+    expect(screen.getByRole('textbox', { name: 'Describe your mix' })).toBeInTheDocument()
+  })
 
   it('carries the approved copy and controls with no counter or back', () => {
     render(<Harness onAddMusic={vi.fn()} />)

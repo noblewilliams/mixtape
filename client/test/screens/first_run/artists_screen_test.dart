@@ -38,9 +38,8 @@ Widget _above(Widget page) => Builder(
 void main() {
   reduceMotion();
 
-  testWidgets('copy, three fields, and a dimmed Continue with no counter', (
-    tester,
-  ) async {
+  testWidgets('copy, the optional label, three fields, a dimmed Continue '
+      'and Skip for now, with no counter', (tester) async {
     final h = FirstRunHarness();
     final semantics = tester.ensureSemantics();
     await h.pump(tester, const ArtistsScreen(prompt: 'late'));
@@ -48,20 +47,23 @@ void main() {
     expect(find.text('Who do you love?'), findsOneWidget);
     expect(
       find.text(
-        'Three artists is enough. The DJ borrows from the shared catalogue '
-        'until your music is in.',
+        'Name a few and the DJ tailors your mix to them. Optional: skip and '
+        'it works from what you asked for.',
       ),
       findsOneWidget,
     );
-    for (final hint in ['First artist', 'Second artist', 'Third artist']) {
+    expect(find.text('ARTISTS YOU LOVE (OPTIONAL)'), findsOneWidget);
+    for (final hint in ['Type an artist', 'Another artist', 'One more']) {
       expect(find.text(hint), findsOneWidget);
     }
+    expect(find.byKey(ArtistsScreen.skipKey), findsOneWidget);
+    expect(find.text('Skip for now'), findsOneWidget);
     expect(enabled(tester, ArtistsScreen.continueKey), isFalse);
     expect(
       tester.getSemantics(find.byKey(ArtistsScreen.continueKey)),
       matchesSemantics(
         label: 'Continue',
-        hint: 'Add three artists.',
+        hint: 'Add an artist, or skip for now.',
         isButton: true,
         hasEnabledState: true,
       ),
@@ -71,25 +73,68 @@ void main() {
     semantics.dispose();
   });
 
-  testWidgets('Continue enables only at three artists, which become chips; '
-      'removing one dims it again', (tester) async {
+  testWidgets('Continue enables at one artist, which becomes a chip; '
+      'removing it dims Continue again', (tester) async {
     final h = FirstRunHarness();
     await h.pump(tester, const ArtistsScreen(prompt: 'late'));
 
+    expect(enabled(tester, ArtistsScreen.continueKey), isFalse);
     await _enter(tester, 0, 'Burna Boy');
     expect(find.byKey(ArtistsScreen.chipKey(0)), findsOneWidget);
-    expect(enabled(tester, ArtistsScreen.continueKey), isFalse);
-    await _enter(tester, 1, 'Tems');
-    expect(enabled(tester, ArtistsScreen.continueKey), isFalse);
-    await _enter(tester, 2, 'Sade');
-    expect(find.byKey(ArtistsScreen.chipKey(2)), findsOneWidget);
     expect(enabled(tester, ArtistsScreen.continueKey), isTrue);
 
-    await tester.tap(find.byKey(ArtistsScreen.removeKey(1)));
+    await tester.tap(find.byKey(ArtistsScreen.removeKey(0)));
     await tester.pumpAndSettle();
-    expect(find.byKey(ArtistsScreen.chipKey(1)), findsNothing);
-    expect(find.byKey(ArtistsScreen.fieldKey(1)), findsOneWidget);
+    expect(find.byKey(ArtistsScreen.chipKey(0)), findsNothing);
+    expect(find.byKey(ArtistsScreen.fieldKey(0)), findsOneWidget);
     expect(enabled(tester, ArtistsScreen.continueKey), isFalse);
+  });
+
+  testWidgets('Continue with one artist saves just that one', (tester) async {
+    final h = FirstRunHarness();
+    await h.pump(tester, const ArtistsScreen(prompt: 'rainy commute'));
+
+    await _enter(tester, 1, 'Sade');
+    await tester.tap(find.byKey(ArtistsScreen.continueKey));
+    await tester.pumpAndSettle();
+
+    expect(h.listening.putSeeds, [
+      ['Sade'],
+    ]);
+    expect(h.dj.prompts, ['rainy commute']);
+  });
+
+  testWidgets('Skip for now saves no seeds and makes the mix from the '
+      'prompt alone', (tester) async {
+    final h = FirstRunHarness();
+    h.container.read(firstRunActiveProvider);
+    await h.pump(tester, const ArtistsScreen(prompt: 'rainy commute'));
+
+    await tester.tap(find.byKey(ArtistsScreen.skipKey));
+    await tester.pumpAndSettle();
+
+    expect(h.listening.putSeeds, isEmpty);
+    expect(h.auth.anonymousSignIns, 1);
+    expect(h.dj.prompts, ['rainy commute']);
+    expect(h.container.read(firstRunActiveProvider), isFalse);
+  });
+
+  testWidgets('Skip for now without a prompt goes on to the prompt page, '
+      'whose send starts the mix', (tester) async {
+    final h = FirstRunHarness();
+    await h.pump(tester, const ArtistsScreen());
+
+    await tester.tap(find.byKey(ArtistsScreen.skipKey));
+    await tester.pumpAndSettle();
+
+    final prompt = tester.widget<WelcomeScreen>(find.byType(WelcomeScreen));
+    expect(prompt.artistsPassed, isTrue);
+    await tester.enterText(find.byKey(const Key('prompt-field')), 'late');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('start-session')));
+    await tester.pumpAndSettle();
+    expect(h.listening.putSeeds, isEmpty);
+    expect(h.dj.prompts, ['late']);
   });
 
   testWidgets('Continue signs in anonymously once, saves the seeds, starts '
@@ -168,7 +213,7 @@ void main() {
 
     final prompt = tester.widget<WelcomeScreen>(find.byType(WelcomeScreen));
     expect(prompt.isPrompt, isTrue);
-    expect(prompt.seedsSaved, isTrue);
+    expect(prompt.artistsPassed, isTrue);
     expect(find.byKey(WelcomeScreen.addMusicKey), findsNothing);
 
     await tester.enterText(find.byKey(const Key('prompt-field')), 'late');

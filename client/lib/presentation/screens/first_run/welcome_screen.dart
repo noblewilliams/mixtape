@@ -14,6 +14,8 @@ import '../../providers/first_run_funnel_provider.dart';
 import '../../theme/mixtape_theme.dart';
 import '../../widgets/foundation/cassette_tile.dart';
 import '../../providers/keep_mixes_provider.dart' show KeptPrompt;
+import '../../providers/voice_providers.dart';
+import '../../widgets/ai_consent_sheet.dart';
 import '../../widgets/keep_sheet.dart';
 import '../../widgets/mix_prompt_input.dart';
 import '../sign_in_screen.dart';
@@ -33,24 +35,24 @@ class WelcomeScreen extends ConsumerStatefulWidget {
   const WelcomeScreen({super.key})
     : songsIn = null,
       isPrompt = false,
-      seedsSaved = false,
+      artistsPassed = false,
       withoutMusic = false;
 
   /// The prompt page. [songsIn] is the real count from the sync or import;
-  /// [seedsSaved] is set when Who do you love? has already run, so a send
-  /// goes straight to the mix. [withoutMusic] is Step 1's "Skip for now"
+  /// [artistsPassed] is set when Who do you love? has already run (names
+  /// saved or skipped), so a send goes straight to the mix. [withoutMusic] is Step 1's "Skip for now"
   /// under the server's never-refuse flag: no songs and no artists, and a
   /// send still goes straight to the mix.
   const WelcomeScreen.prompt({
     super.key,
     this.songsIn,
-    this.seedsSaved = false,
+    this.artistsPassed = false,
     this.withoutMusic = false,
   }) : isPrompt = true;
 
   final int? songsIn;
   final bool isPrompt;
-  final bool seedsSaved;
+  final bool artistsPassed;
   final bool withoutMusic;
 
   static const String headline = 'What do you want to hear?';
@@ -102,7 +104,7 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
   }
 
   bool get _goesStraightToMix =>
-      widget.seedsSaved || widget.withoutMusic || (widget.songsIn ?? 0) > 0;
+      widget.artistsPassed || widget.withoutMusic || (widget.songsIn ?? 0) > 0;
 
   Future<void> _send() async {
     if (_starting || _sending) return;
@@ -137,6 +139,26 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
       _starting = false;
       _error = error;
     });
+  }
+
+  /// The mic's gate: the AI-consent sheet (a clip goes to the transcriber),
+  /// then the anonymous listener the transcriber needs. Creating it rebuilds
+  /// the voice controller, so wait a frame for the composer to rebind.
+  Future<bool> _beforeVoice() async {
+    final agreed = await confirmAiConsent(
+      context,
+      beforeSession: true,
+      beforeGrant: () => ensureAnonymousSession(ref),
+    );
+    if (!agreed || !mounted) return false;
+    try {
+      await ensureAnonymousSession(ref);
+    } catch (_) {
+      if (mounted) setState(() => _error = FirstRunErrors.generic);
+      return false;
+    }
+    await WidgetsBinding.instance.endOfFrame;
+    return mounted;
   }
 
   void _addMusic() {
@@ -175,7 +197,9 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
             busy: _starting,
             onSubmit: () => unawaited(_send()),
             exampleSet: WelcomeScreen.examples,
-            showVoiceInput: false,
+            // Watched, not read once: the anonymous sign-in replaces it.
+            voiceController: ref.watch(voiceComposerControllerProvider),
+            beforeVoice: _beforeVoice,
           ),
         ),
         if (_error != null) ...[
