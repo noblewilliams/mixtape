@@ -1,5 +1,15 @@
 # Decision Log
 
+## 2026-11-04 — Sequential iOS build numbers (founder)
+
+- Replace timestamp build numbers with positive integers: 1, 2, 3, and so on.
+- Start the sequence at `1.0.1+1`, since the `1.0.0` TestFlight version already
+  has timestamp-numbered uploads. Increment the `+` build number for each
+  subsequent upload; rebuilding the same candidate keeps its number.
+- `scripts/build-ios-release.sh` reads the build number from `client/pubspec.yaml`
+  unless explicitly overridden. The checked-in export options disable Xcode's
+  automatic version/build-number management so the exported number is preserved.
+
 ## 2026-11-04 — Mobile layout and conversation corrections (founder)
 
 - Library keeps its full-size heading with Sync / Your music below it.
