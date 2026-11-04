@@ -1156,3 +1156,26 @@ A mix with any track Apple Music can play keeps the arrow; when it also
 carries Spotify ids, the arrow's menu ends with "Send to a transfer tool"
 behind a separator. Only a mix with nothing Apple Music can play keeps the
 Spotify-only layout, with the transfer handoff in the arrow's place.
+
+## 2026-11-04 — Web on phones takes the native shell; the web app is installable
+
+Founder smoke on iPhone Safari: a dead band under the composer, the page
+scrolling the nav out of view, no navigation at the bottom, and the mix panel
+and dialogs not fitting. The band came from `body`/`#root` at `100vh`, which on
+iOS is the height with Safari's toolbars hidden, so the page was taller than
+the screen. They now use `100dvh`, and at 760 px and below the page never
+scrolls; each view scrolls inside the shell.
+
+At that width the web follows the approved native shell
+(`docs/mockups/approved/2026-09-17-mobile-shell.md`): a bottom tab bar (Home,
+Mixes, Library, Settings, in the native order, which the desktop sidebar now
+shares), hidden inside a mix with a Back button in the mix header; Your mix as
+a full-height sheet; every dialog as a bottom sheet inside the safe areas. The
+theme toggle has no room in the tab bar, so phones get a Dark mode row in
+Settings under This device. All of it lives in `components/mobile-shell.css`.
+
+The app ships a web manifest, icons, and a service worker scoped to `/app/`,
+so it installs from Chrome's prompt or Safari's Add to Home Screen. Settings
+offers Install where the browser allows it. The worker only goes network-first
+for pages and caches hashed build assets; it never touches API or auth
+requests. **Reopens if:** we want real offline use or push notifications.
