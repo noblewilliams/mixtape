@@ -1606,6 +1606,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
             onSuggestion={takeSuggestion}
             inlinePanel={activeIsAlbum && narrow && activeAlbums ? albumPanel(true) : undefined}
             inlinePanelVersion={activeAlbums?.version}
+            onBack={() => { setMixesTab('active'); setActiveView('mixes') }}
           />}
           {activeIsAlbum ? (narrow ? null : activeAlbums ? albumPanel(false) : <aside className="album-panel" aria-label="The album" />) : <QueuePanel
             session={activeSession}

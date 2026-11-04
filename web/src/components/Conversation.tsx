@@ -38,6 +38,8 @@ type ConversationProps = {
   /** The album panel folded into the transcript (narrow widths), under the reply at this version. */
   inlinePanel?: ReactNode
   inlinePanelVersion?: number
+  /** Phones: the tab bar hides inside a mix, so the header carries the way back. */
+  onBack?: () => void
 }
 
 /**
@@ -73,7 +75,7 @@ function PassedRow({ album, onGoBack }: { album: AlbumPick; onGoBack?: (version:
 
 const unavailableTranscription = async () => { throw new Error('Transcription unavailable') }
 
-export function Conversation({ currentShape, transcribe = unavailableTranscription, selectionBusy = false, attachment, energySummary, player, onColor, onRename, onArchive, session, messages, loading = false, thinking, onSend, onOpenQueue, onOpenHistory, kind = 'mix', passed = [], onGoBack, suggestions = [], onSuggestion, inlinePanel, inlinePanelVersion }: ConversationProps) {
+export function Conversation({ currentShape, transcribe = unavailableTranscription, selectionBusy = false, attachment, energySummary, player, onColor, onRename, onArchive, session, messages, loading = false, thinking, onSend, onOpenQueue, onOpenHistory, kind = 'mix', passed = [], onGoBack, suggestions = [], onSuggestion, inlinePanel, inlinePanelVersion, onBack }: ConversationProps) {
   const album = kind === 'album'
   const [settings, setSettings] = useState(false)
   const [options, setOptions] = useState(false)
@@ -102,6 +104,7 @@ export function Conversation({ currentShape, transcribe = unavailableTranscripti
   return (
     <main className="conversation-panel">
       <header className="conversation-header">
+        {onBack && <button className="conversation-back" type="button" onClick={onBack} aria-label="Back to mixes"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg></button>}
         <div>
           <p className="quiet-kicker">{album ? 'Current album' : 'Current tape'}</p>
           <h1><InlineMixName title={session.title} onRename={onRename ?? (() => Promise.resolve())} /></h1>

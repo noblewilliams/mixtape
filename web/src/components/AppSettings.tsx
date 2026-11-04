@@ -7,6 +7,8 @@ import { ControlModal } from './ControlModal'
 import './account-name.css'
 import { applyNameEdit, nameLength, normalizeProfileName, PROFILE_NAME_MAX } from '../lib/profile-name'
 import { PRIVACY_POLICY_URL } from './AiConsent'
+import { ThemeToggle } from './ThemeToggle'
+import { InstallAppRow } from '../lib/install-app'
 
 type Props = {
   api: MixtapeApi
@@ -184,6 +186,14 @@ export function AppSettings({
           </span>
           <PlaybackPanel controller={playback} settingsOnly />
         </div>
+      </section>
+      <section>
+        <h2>This device</h2>
+        <div className="setting-row settings-appearance">
+          <span><strong>Dark mode</strong></span>
+          <ThemeToggle/>
+        </div>
+        <InstallAppRow/>
       </section>
       {anonymous ? <section>{privacyRow}</section> : <section>
         <h2>Account</h2>

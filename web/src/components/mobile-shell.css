@@ -1,0 +1,236 @@
+/* Phones: the web app takes the native app's shell (docs/mockups/approved/2026-09-17-mobile-shell.md).
+   The page never scrolls; each view scrolls inside the shell, a tab bar sits at the bottom, the tab bar
+   hides inside a mix (Back returns to Mixes), and modals rise as bottom sheets inside the safe area. */
+
+.conversation-back,
+.settings-appearance {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  html,
+  body {
+    height: 100%;
+    overscroll-behavior: none;
+  }
+
+  body,
+  #root {
+    min-height: 0;
+  }
+
+  #root {
+    height: 100%;
+  }
+
+  /* 100vw counts a scrollbar and 100vh counts Safari's hidden toolbars; both overflow the screen. */
+  .app-shell,
+  .app-shell--home {
+    width: 100%;
+    height: 100dvh;
+    padding-top: env(safe-area-inset-top);
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .app-shell > :not(.sidebar) {
+    grid-row: 1;
+    grid-column: 1;
+  }
+
+  /* Tab bar: 56px, glyph over label, sitting on the home indicator's inset. */
+  .app-shell > .sidebar.primary-sidebar {
+    grid-row: 2;
+    grid-column: 1;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-rows: 56px;
+    gap: 0;
+    padding: 0 8px env(safe-area-inset-bottom);
+    border: 0;
+    border-top: 1px solid var(--hairline);
+    background: color-mix(in srgb, var(--surface) 78%, transparent);
+    backdrop-filter: blur(24px) saturate(1.4);
+  }
+
+  .primary-sidebar .wordmark,
+  .primary-sidebar-bottom .theme-toggle {
+    display: none;
+  }
+
+  .primary-sidebar .primary-nav button,
+  .primary-sidebar-bottom .primary-nav button {
+    grid-row: 1;
+    grid-column: auto;
+    flex-direction: column;
+    gap: 3px;
+    min-height: 48px;
+    margin: 4px 2px;
+    padding: 4px 2px;
+    border: 0;
+    border-radius: 16px;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.1;
+  }
+
+  .primary-sidebar .primary-nav button svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .primary-sidebar .primary-nav button:hover {
+    background: transparent;
+  }
+
+  .primary-sidebar .primary-nav button[aria-current='page'] {
+    color: var(--graphite);
+    background: color-mix(in srgb, var(--graphite) 9%, transparent);
+  }
+
+  /* Inside a mix the tab bar steps aside; the conversation's composer owns the bottom edge. */
+  .app-shell:not(.app-shell--home) {
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .app-shell:not(.app-shell--home) > .sidebar.primary-sidebar {
+    display: none;
+  }
+
+  /* Mix header: Back, a one-line title, then the mix and options buttons. */
+  .conversation-header {
+    min-height: 0;
+    padding: 6px 8px 8px;
+    align-items: center;
+    gap: 4px;
+    border-bottom: 1px solid var(--hairline);
+  }
+
+  .conversation-header > div:not(.conversation-header-actions) {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .conversation-header .quiet-kicker {
+    display: none;
+  }
+
+  .conversation-header h1 {
+    max-width: none;
+    font-size: 20px;
+  }
+
+  .conversation-header > div > p:last-child {
+    margin-top: 2px;
+    font-size: 12px;
+  }
+
+  .conversation-header .bare-icon-button {
+    display: inline-grid;
+    place-items: center;
+  }
+
+  .conversation-back {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 0;
+    border-radius: 12px;
+    color: var(--graphite);
+    background: transparent;
+  }
+
+  .conversation-back svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .conversation-scroll {
+    padding: 20px 16px 16px;
+  }
+
+  .conversation-turn--dj {
+    max-width: 100%;
+  }
+
+  .composer-area {
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+  }
+
+  /* Your mix: a full-height sheet from the bottom edge rather than a floating card. */
+  .queue-panel {
+    width: 100%;
+    top: calc(env(safe-area-inset-top) + 8px);
+    right: 0;
+    bottom: 0;
+    left: 0;
+    padding: 14px 14px max(12px, env(safe-area-inset-bottom));
+    border: 0;
+    border-top: 1px solid var(--hairline);
+    border-radius: 20px 20px 0 0;
+    box-shadow: none;
+    transform: translateY(100%);
+    visibility: hidden;
+    transition: transform 0.28s cubic-bezier(0.2, 0.7, 0.2, 1), visibility 0s linear 0.28s;
+  }
+
+  .queue-panel.is-open {
+    transform: none;
+    visibility: visible;
+    box-shadow: 0 -12px 40px rgba(22, 19, 23, 0.28);
+    transition: transform 0.28s cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+
+  .queue-header {
+    min-height: 0;
+  }
+
+  /* Dialogs: bottom sheets, edge to edge, never taller than the screen. */
+  .overlay,
+  .wc-overlay {
+    padding: env(safe-area-inset-top) 0 0;
+    place-items: end stretch;
+    align-items: flex-end;
+    justify-content: stretch;
+  }
+
+  .overlay > *,
+  .wc-overlay > * {
+    width: 100%;
+    max-width: none;
+    max-height: calc(100dvh - env(safe-area-inset-top) - 12px);
+    margin: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-bottom: calc(24px + env(safe-area-inset-bottom));
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 20px 20px 0 0;
+  }
+
+  .wc-modal:has(.wc-danger) {
+    width: 100%;
+  }
+
+  /* Toasts and Undo clear the tab bar. */
+  .toast,
+  .wc-undo {
+    bottom: calc(72px + env(safe-area-inset-bottom));
+  }
+
+  .app-shell:not(.app-shell--home) ~ .toast,
+  .app-shell:not(.app-shell--home) ~ .wc-undo {
+    bottom: calc(96px + env(safe-area-inset-bottom));
+  }
+
+  .settings-appearance {
+    display: flex;
+  }
+
+  .settings-appearance .theme-toggle {
+    margin: 0;
+  }
+}

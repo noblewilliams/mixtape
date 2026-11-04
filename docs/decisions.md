@@ -1187,3 +1187,26 @@ Spotify-only layout, with the transfer handoff in the arrow's place.
 ## 2026-11-03 — Artists page is optional; welcome field takes voice
 
 Founder smoke on the web first run (applies to web and iOS): the artist fields read as buttons, and three names was a wall. The artists page (the 2026-10-20 "floor") is now optional: Continue from one name, "Skip for now" goes on with none and saves no seeds, and the flow never asks again (`artistsPassed` on both clients; iOS's `WelcomeScreen.prompt(seedsSaved:)` is renamed to match). This leans on NEVER_REFUSE (live since 2026-10-22): a skipped listener gets a proposed, Apple-verified mix from the prompt alone. Fields carry a visible "Artists you love (optional)" label, a pencil glyph and an inset outline so they read as places to type. The welcome field gains the Home composer's microphone. On web, voice capture moved into a shared `useVoicePrompt` hook; on iOS, `MixPromptInput` takes a `beforeVoice` gate. A tap asks AI consent first (the flow's existing dialog or sheet), then makes the anonymous session, then transcribes into the field to edit. On iOS the welcome watches `voiceComposerControllerProvider` because the anonymous sign-in rebuilds it, and the composer records on whichever controller is bound after the gate. Also fixed: `.home-composer textarea` overrode the welcome field's ink colour and 16px size (light text on paper; iOS zoom on focus). **Reopens if:** NEVER_REFUSE is turned off, when a skipped artists page would meet a refusal.
+
+## 2026-11-04 — Web on phones takes the native shell; the web app is installable
+
+Founder smoke on iPhone Safari: a dead band under the composer, the page
+scrolling the nav out of view, no navigation at the bottom, and the mix panel
+and dialogs not fitting. The band came from `body`/`#root` at `100vh`, which on
+iOS is the height with Safari's toolbars hidden, so the page was taller than
+the screen. They now use `100dvh`, and at 760 px and below the page never
+scrolls; each view scrolls inside the shell.
+
+At that width the web follows the approved native shell
+(`docs/mockups/approved/2026-09-17-mobile-shell.md`): a bottom tab bar (Home,
+Mixes, Library, Settings, in the native order, which the desktop sidebar now
+shares), hidden inside a mix with a Back button in the mix header; Your mix as
+a full-height sheet; every dialog as a bottom sheet inside the safe areas. The
+theme toggle has no room in the tab bar, so phones get a Dark mode row in
+Settings under This device. All of it lives in `components/mobile-shell.css`.
+
+The app ships a web manifest, icons, and a service worker scoped to `/app/`,
+so it installs from Chrome's prompt or Safari's Add to Home Screen. Settings
+offers Install where the browser allows it. The worker only goes network-first
+for pages and caches hashed build assets; it never touches API or auth
+requests. **Reopens if:** we want real offline use or push notifications.

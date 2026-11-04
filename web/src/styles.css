@@ -42,6 +42,7 @@ html {
 body {
   min-width: 320px;
   min-height: 100vh;
+  min-height: 100dvh;
   margin: 0;
   overflow: hidden;
   background:
@@ -105,6 +106,7 @@ html[data-focus="pointer"] .import-pick-pill .fr-pill:focus-within {
 
 #root {
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .sr-only {
