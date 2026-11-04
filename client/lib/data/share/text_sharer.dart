@@ -1,4 +1,4 @@
-// The system share sheet behind "Send to a transfer tool" (plan: Outputs).
+// The system share sheet behind "Play on Spotify" (plan: Outputs).
 // Wrapped so the queue screen's tests hand text to a fake instead of the
 // share_plus platform channel.
 import 'dart:ui';

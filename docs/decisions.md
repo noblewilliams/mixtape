@@ -19,6 +19,13 @@ Amends the mix rail in `mockups/approved/2026-09-04-web-spotify-import.md`.
   return.
 - For that listener, a track with no Spotify id opens a Spotify search for
   "artist title", as album picks already do.
+- iOS follows the same rule (`mixSpotifyOnly` in `mix_handoff.dart`). On
+  split Play the main part reads Play on Spotify and runs the share-sheet
+  handoff; the arrow keeps Play here and Play in Apple Music for a mix Apple
+  Music can play, without repeating the handoff. Create playlist (an Apple
+  Music playlist) and the "need Apple Music" reason line are dropped for
+  them. The connect-hang fix below is web only: iOS authorizes through
+  native MusicKit, not a browser window.
 - Web Apple connect loads MusicKit and the developer token while the Connect
   control is on screen, so the tap reaches `authorize()` without a network
   wait. Safari blocks the sign-in window once a tap's user activation is

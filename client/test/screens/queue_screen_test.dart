@@ -1434,7 +1434,7 @@ void main() {
     );
 
     testWidgets(
-      'a Spotify-only queue hides Play and Save and offers "Send to a transfer tool" instead',
+      'a Spotify-only queue hides Play and Save and offers "Play on Spotify" instead',
       (tester) async {
         final api = FakeDjApi();
         api.onGetSession = (_) async => SessionDetail(
@@ -1451,7 +1451,7 @@ void main() {
         expect(share, findsOneWidget);
         expect(
           tester.widget<TapeButton>(share).label,
-          'Send to a transfer tool',
+          'Play on Spotify',
         );
         expect(tester.widget<TapeButton>(share).onPressed, isNotNull);
         // The reason the Apple actions are absent is written beside it.
@@ -1459,6 +1459,41 @@ void main() {
           find.text('Play and Create playlist need Apple Music'),
           findsOneWidget,
         );
+      },
+    );
+
+    testWidgets(
+      'a Spotify-only listener gets Play on Spotify, no Create playlist, and a search link on every row',
+      (tester) async {
+        final api = FakeDjApi();
+        // A catalogue mix: Apple ids only.
+        api.onGetSession = (_) async => SessionDetail(
+          session: _session(),
+          messages: [],
+          queue: [_track(0), _track(1)],
+        );
+        final links = FakeLinkOpener();
+        final container = _makeContainer(
+          api,
+          links: links,
+          listening: FakeListeningApi(
+            onboarding: onboardingState(chosenService: 'spotify'),
+          ),
+        );
+        await _pump(tester, container);
+
+        expect(find.text('Play on Spotify'), findsOneWidget);
+        expect(find.byKey(const Key('save-button')), findsNothing);
+        expect(
+          find.text('Play and Create playlist need Apple Music'),
+          findsNothing,
+        );
+
+        await tester.tap(find.byKey(const Key('open-in-spotify-t0')));
+        await tester.pumpAndSettle();
+        expect(links.opened, [
+          Uri.parse('https://open.spotify.com/search/Artist%200%20Title%200'),
+        ]);
       },
     );
 
@@ -1512,7 +1547,7 @@ void main() {
     });
 
     testWidgets(
-      'Send to a transfer tool shares one "Artist – Title" line per track under the session title, then confirms',
+      'Play on Spotify shares one "Artist – Title" line per track under the session title, then confirms',
       (tester) async {
         final api = FakeDjApi();
         api.onGetSession = (_) async => SessionDetail(

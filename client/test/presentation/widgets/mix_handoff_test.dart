@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
+import 'package:mixtape/data/listening/listening_models.dart';
 import 'package:mixtape/data/musickit/musickit_bridge.dart';
 import 'package:mixtape/data/playback/playback_controller.dart';
 import 'package:mixtape/data/settings/author_store.dart';
@@ -134,6 +135,7 @@ Future<_Played> _pumpSplit(
   bool playing = false,
   MixHandoffKeys keys = MixHandoffKeys.arrangement,
   PlayDestinationStore? store,
+  bool spotifyOnly = false,
 }) async {
   final played = _Played();
   final container = ProviderContainer(
@@ -163,6 +165,7 @@ Future<_Played> _pumpSplit(
               onPlay: played.destinations.add,
               onOpenNowPlaying: () => played.nowPlaying++,
               onShare: (_) => played.shares++,
+              spotifyOnly: spotifyOnly,
             ),
           ),
         ),
@@ -274,6 +277,91 @@ void main() {
         mixHasAppleActions([_track(0), _track(1, appleId: null, spotifyId: 'sp1')]),
         isTrue,
       );
+    });
+  });
+
+  group('a Spotify-only listener', () {
+    OnboardingState listener({String? service = 'spotify', bool appleLive = false}) =>
+        OnboardingState(
+          userId: 'u1',
+          sources: [
+            if (appleLive)
+              MusicSource(
+                source: 'apple_live',
+                connectedAt: DateTime(2026),
+                lastImportedAt: null,
+                ledgerFrom: null,
+                ledgerTo: null,
+              ),
+          ],
+          hasLibrary: true,
+          chosenService: service,
+          markedRequestedAt: null,
+          interviewCompletedAt: null,
+          importCompletedAt: null,
+        );
+
+    test('chose Spotify and has no live Apple library', () {
+      expect(mixSpotifyOnly(listener()), isTrue);
+      expect(mixSpotifyOnly(listener(appleLive: true)), isFalse);
+      expect(mixSpotifyOnly(listener(service: 'apple')), isFalse);
+      expect(mixSpotifyOnly(null), isFalse);
+    });
+
+    test('a track with no Spotify id opens a Spotify search for it', () {
+      expect(
+        mixSpotifySearch(_track(0)).toString(),
+        'https://open.spotify.com/search/Artist%200%20Title%200',
+      );
+    });
+
+    testWidgets('a catalogue mix leads with Play on Spotify; Apple waits behind the arrow', (
+      tester,
+    ) async {
+      final played = await _pumpSplit(
+        tester,
+        queue: [_track(0), _track(1)],
+        spotifyOnly: true,
+      );
+      final keys = MixHandoffKeys.arrangement;
+      expect(find.text('Play on Spotify'), findsOneWidget);
+      expect(find.text('Play'), findsNothing);
+
+      await tester.tap(find.byKey(keys.share));
+      expect(played.shares, 1);
+      expect(played.destinations, isEmpty);
+
+      await tester.tap(find.byKey(keys.playMenu));
+      await tester.pumpAndSettle();
+      expect(find.text('Play here'), findsOneWidget);
+      expect(find.text('Play in Apple Music'), findsOneWidget);
+      // Play on Spotify is the main part; the menu does not repeat it.
+      expect(find.text('Play on Spotify'), findsOneWidget);
+    });
+
+    testWidgets('a mix with no Apple match is Play on Spotify alone, with no reason line', (
+      tester,
+    ) async {
+      final queue = [_track(0, appleId: null)];
+      final played = await _pumpSplit(tester, queue: queue, spotifyOnly: true);
+      final keys = MixHandoffKeys.arrangement;
+      expect(find.byKey(keys.playMenu), findsNothing);
+      expect(
+        tester.widget<TapeButton>(find.byKey(keys.share)).label,
+        'Play on Spotify',
+      );
+      await tester.tap(find.byKey(keys.share));
+      expect(played.shares, 1);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: MixtapeTheme.light(),
+          home: Scaffold(
+            body: MixPlayReason(keys: keys, queue: queue, spotifyOnly: true),
+          ),
+        ),
+      );
+      expect(find.byType(Text), findsNothing);
     });
   });
 
@@ -674,7 +762,7 @@ void main() {
       expect(find.byKey(keys.playMenu), findsNothing);
       expect(
         tester.widget<TapeButton>(find.byKey(keys.share)).label,
-        'Send to a transfer tool',
+        'Play on Spotify',
       );
       await tester.tap(find.byKey(keys.share));
       expect(played.shares, 1);
@@ -716,7 +804,7 @@ void main() {
           .widgetList<MixtapeMenuItem<Object>>(find.byType(MixtapeMenuItem<Object>))
           .map((item) => item.action)
           .toList();
-      expect(items.last.label, 'Send to a transfer tool');
+      expect(items.last.label, 'Play on Spotify');
       expect(items.last.separatorBefore, isTrue);
 
       await tester.tap(find.byKey(keys.share));
@@ -731,7 +819,7 @@ void main() {
       await _pumpSplit(tester, queue: [_track(0)]);
       await tester.tap(find.byKey(MixHandoffKeys.arrangement.playMenu));
       await tester.pumpAndSettle();
-      expect(find.text('Send to a transfer tool'), findsNothing);
+      expect(find.text('Play on Spotify'), findsNothing);
     });
 
     testWidgets('a choice made after Play has left the screen does nothing', (

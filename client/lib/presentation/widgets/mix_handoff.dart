@@ -1,7 +1,8 @@
 /// The mix handoff: everything that takes a finished arrangement OUT of this
 /// app — Play here (the app's own Apple player), Play in Apple Music (Apple's
 /// player), Create playlist (an Apple Music playlist with a remembered
-/// author), and Send to a transfer tool (the Spotify listener's text handoff).
+/// author), and Play on Spotify (the Spotify listener's text handoff to a
+/// transfer tool).
 ///
 /// Locked by `docs/mockups/approved/2026-09-17-mobile-arrangement-states.md`
 /// (Create playlist, the Spotify listener) and, for split Play, by
@@ -43,7 +44,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/dj/dj_models.dart';
-import '../../data/listening/listening_models.dart' show FunnelEventType;
+import '../../data/listening/listening_models.dart'
+    show FunnelEventType, OnboardingState;
 import '../../data/musickit/musickit_bridge.dart';
 import '../providers/device_providers.dart';
 import '../providers/dj_providers.dart';
@@ -58,6 +60,7 @@ import 'foundation/mixtape_feedback.dart';
 import 'foundation/mixtape_menu.dart';
 import 'foundation/prism_stripe.dart';
 import 'foundation/tape_button.dart';
+import 'library_sync_dialog.dart' show appleLiveSource;
 
 export '../providers/play_destination_provider.dart' show PlayDestination;
 
@@ -122,6 +125,21 @@ bool mixHasSpotifyActions(List<QueueTrack> queue) =>
 /// drops them for the transfer handoff alone.
 bool mixHasAppleActions(List<QueueTrack> queue) =>
     queue.any((t) => t.appleId != null) || !mixHasSpotifyActions(queue);
+
+/// A Spotify-only listener (docs/decisions.md 2026-11-03): chose Spotify and
+/// has no live Apple library. Play on Spotify leads every mix for them, even a
+/// catalogue mix that carries Apple ids only, and Apple waits behind the arrow.
+bool mixSpotifyOnly(OnboardingState? onboarding) =>
+    onboarding?.chosenService == 'spotify' &&
+    appleLiveSource(onboarding) == null;
+
+/// Where a row with no Spotify id sends a Spotify-only listener: a search by
+/// artist and title. One path segment, so a slash in a name is encoded.
+Uri mixSpotifySearch(QueueTrack track) => Uri(
+  scheme: 'https',
+  host: 'open.spotify.com',
+  pathSegments: ['search', '${track.artist} ${track.title}'],
+);
 
 /// The anchor the share sheet points at. On iPad the sheet is a popover and
 /// UIKit raises without a source rect, so this is the share button's own rect
@@ -522,9 +540,14 @@ class MixSplitPlay extends ConsumerWidget {
     this.sendingToMusic = false,
     this.sharing = false,
     this.expand = false,
+    this.spotifyOnly = false,
   });
 
   final MixHandoffKeys keys;
+
+  /// [mixSpotifyOnly]: the main part is Play on Spotify, and the arrow keeps
+  /// Play here and Play in Apple Music for a mix Apple Music can play.
+  final bool spotifyOnly;
 
   /// The arrangement this mix currently has; empty until the DJ makes one.
   final List<QueueTrack> queue;
@@ -555,7 +578,10 @@ class MixSplitPlay extends ConsumerWidget {
   static const double arrowWidth = 44;
 
   static const String arrowLabel = 'Choose where to play';
-  static const String shareLabel = 'Send to a transfer tool';
+
+  /// The transfer-tool handoff. Named for what the listener wants, not the
+  /// mechanism: "transfer tool" meant nothing to them (decisions 2026-11-03).
+  static const String shareLabel = 'Play on Spotify';
 
   static String mainLabel({
     required bool playing,
@@ -618,8 +644,9 @@ class MixSplitPlay extends ConsumerWidget {
     final reason = mixActionsDisabledReason(queue);
     final live = enabled && queue.isNotEmpty && reason == null;
     final spotify = mixHasSpotifyActions(queue);
+    final appleLive = queue.any((t) => t.appleId != null);
 
-    if (!mixHasAppleActions(queue)) {
+    if (!mixHasAppleActions(queue) || (spotifyOnly && !appleLive)) {
       return Builder(
         builder: (buttonContext) => TapeButton(
           key: keys.share,
@@ -635,19 +662,25 @@ class MixSplitPlay extends ConsumerWidget {
       listenable: ref.read(playbackProvider),
       builder: (context, _) {
         final playing = isPlayingThisMix();
-        final label = mainLabel(playing: playing, destination: destination);
+        final toSpotify = spotifyOnly && !playing;
+        final label = toSpotify
+            ? shareLabel
+            : mainLabel(playing: playing, destination: destination);
         final VoidCallback? onMain = playing
             ? onOpenNowPlaying
+            : toSpotify
+            ? (enabled && !sharing && onShare != null
+                  ? () => onShare!(context)
+                  : null)
             : (!live ||
-                      (destination == PlayDestination.appleMusic &&
-                          sendingToMusic))
+                  (destination == PlayDestination.appleMusic && sendingToMusic))
             ? null
             : () => onPlay(destination);
         return _SplitShell(
           expand: expand,
           playing: playing,
           main: _Segment(
-            key: keys.playNow,
+            key: toSpotify ? keys.share : keys.playNow,
             label: label,
             onTap: onMain,
             expand: expand,
@@ -655,7 +688,11 @@ class MixSplitPlay extends ConsumerWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (!playing) ...[
-                  Icon(Icons.play_arrow_rounded, size: 16, color: _ink(context)),
+                  Icon(
+                    Icons.play_arrow_rounded,
+                    size: 16,
+                    color: _ink(context),
+                  ),
                   const SizedBox(width: 4),
                 ],
                 Flexible(
@@ -683,7 +720,7 @@ class MixSplitPlay extends ConsumerWidget {
                       arrowContext,
                       ref,
                       destination,
-                      canShare: spotify,
+                      canShare: spotify && !spotifyOnly,
                     )
                   : null,
               child: Icon(
@@ -705,15 +742,25 @@ class MixSplitPlay extends ConsumerWidget {
 /// Apple Music match at all, or nothing Apple Music can play beside a
 /// Spotify handoff. Draws nothing otherwise.
 class MixPlayReason extends StatelessWidget {
-  const MixPlayReason({super.key, required this.keys, required this.queue});
+  const MixPlayReason({
+    super.key,
+    required this.keys,
+    required this.queue,
+    this.spotifyOnly = false,
+  });
 
   final MixHandoffKeys keys;
   final List<QueueTrack> queue;
+
+  /// A Spotify-only listener's Play on Spotify always works, so there is no
+  /// Apple shortfall to explain.
+  final bool spotifyOnly;
 
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
     final style = tokens.meta.copyWith(color: tokens.muted);
+    if (spotifyOnly) return const SizedBox.shrink();
     if (!mixHasAppleActions(queue)) {
       return Text(mixAppleNeededReason, key: keys.appleNeeded, style: style);
     }
@@ -771,7 +818,10 @@ class _SplitShell extends StatelessWidget {
                     mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      if (expand) Expanded(child: main) else Flexible(child: main),
+                      if (expand)
+                        Expanded(child: main)
+                      else
+                        Flexible(child: main),
                       if (playing)
                         DecoratedBox(
                           key: MixHandoffKeys.meterKey,

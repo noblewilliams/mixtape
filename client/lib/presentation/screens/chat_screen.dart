@@ -31,6 +31,7 @@ import '../providers/dj_providers.dart';
 import '../providers/keep_mixes_provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/library_sync_provider.dart';
+import '../providers/onboarding_provider.dart';
 import '../providers/playlist_context_provider.dart';
 import '../providers/shell_providers.dart';
 import '../providers/mix_operation_gate.dart';
@@ -1055,6 +1056,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   /// changes it arrives as a new state anyway.
   Widget _strip(ChatState state) {
     const keys = MixHandoffKeys.conversation;
+    final spotifyOnly = mixSpotifyOnly(ref.watch(onboardingProvider).value);
     return TapeStrip(
       title: state.session.title,
       version: state.queueVersion,
@@ -1063,7 +1065,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       onOpen: _openArrangement,
       reason: Padding(
         padding: const EdgeInsets.only(top: 4),
-        child: MixPlayReason(keys: keys, queue: state.queue),
+        child: MixPlayReason(
+          keys: keys,
+          queue: state.queue,
+          spotifyOnly: spotifyOnly,
+        ),
       ),
       play: ({required bool expand}) => MixSplitPlay(
         keys: keys,
@@ -1080,6 +1086,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         ),
         sendingToMusic: sendingToMusic,
         sharing: sharingMix,
+        spotifyOnly: spotifyOnly,
       ),
     );
   }

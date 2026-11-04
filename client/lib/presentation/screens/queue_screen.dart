@@ -10,10 +10,12 @@
 ///
 /// Spotify listeners (plan `2026-09-02-listening-export-p2-spotify-import.md`,
 /// Outputs): a row with a Spotify id trades its grip for "Open in Spotify";
-/// any queue with a Spotify id gains "Send to a transfer tool" (and one Apple
-/// Music can do nothing with drops Play/Create entirely, with the reason
-/// written beside the action that remains); a corpus-mode session carries the
-/// "Not personal yet" block above the list.
+/// any queue with a Spotify id gains "Play on Spotify" (and one Apple Music
+/// can do nothing with drops Play/Create entirely, with the reason written
+/// beside the action that remains); a corpus-mode session carries the "Not
+/// personal yet" block above the list. A Spotify-only listener
+/// ([mixSpotifyOnly], decisions 2026-11-03) gets Play on Spotify first and an
+/// Open on every row (a search when there is no id), with no Create playlist.
 ///
 /// Every mutation goes through one FIFO of [_QueueIntent]s rather than
 /// firing straight at the provider — see [_QueueScreenState._enqueue] for
@@ -285,17 +287,23 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
     BuildContext screenContext,
     QueueTrack track,
   ) async {
-    final id = track.spotifyId!;
-    final app = Uri.parse('spotify:track:$id');
+    final id = track.spotifyId;
+    // No id: the https search, which the Spotify app claims as a universal
+    // link when it is installed.
+    final app = id == null ? null : Uri.parse('spotify:track:$id');
     var canOpenApp = false;
-    try {
-      canOpenApp = await ref.read(linkProbeProvider)(app);
-    } catch (_) {
-      canOpenApp = false;
+    if (app != null) {
+      try {
+        canOpenApp = await ref.read(linkProbeProvider)(app);
+      } catch (_) {
+        canOpenApp = false;
+      }
     }
     if (!mounted) return;
     final target = canOpenApp
-        ? app
+        ? app!
+        : id == null
+        ? mixSpotifySearch(track)
         : Uri.https('open.spotify.com', '/track/$id');
     var opened = false;
     try {
@@ -664,8 +672,13 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
     const keys = MixHandoffKeys.arrangement;
     final live =
         visibleQueue.isNotEmpty && mixActionsDisabledReason(visibleQueue) == null;
+    final spotifyOnly = mixSpotifyOnly(ref.watch(onboardingProvider).value);
     return TapeBar(
-      reason: MixPlayReason(keys: keys, queue: visibleQueue),
+      reason: MixPlayReason(
+        keys: keys,
+        queue: visibleQueue,
+        spotifyOnly: spotifyOnly,
+      ),
       primary: MixSplitPlay(
         keys: keys,
         queue: visibleQueue,
@@ -681,8 +694,11 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
         ),
         sendingToMusic: sendingToMusic,
         sharing: sharingMix,
+        spotifyOnly: spotifyOnly,
       ),
-      secondary: mixHasAppleActions(visibleQueue)
+      // Create playlist makes an Apple Music playlist: nothing for a
+      // Spotify-only listener.
+      secondary: mixHasAppleActions(visibleQueue) && !spotifyOnly
           ? LabelChip(
               key: keys.createPlaylist,
               label: 'Create playlist',
@@ -706,6 +722,11 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
     required bool reducedMotion,
   }) {
     final track = visibleQueue[index];
+    // Every row opens in Spotify for a Spotify-only listener: the exact track
+    // when we hold its id, a search for it otherwise.
+    final opensInSpotify =
+        track.spotifyId != null ||
+        mixSpotifyOnly(ref.watch(onboardingProvider).value);
     final row = TrackRow(
       number: index + 1,
       track: track,
@@ -713,10 +734,10 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
       onTap: () => _toggleReason(track.trackId),
       isFirst: index == 0,
       lifted: lifted,
-      dragIndex: (lifted || track.spotifyId != null) ? null : index,
-      onOpenInSpotify: track.spotifyId == null
-          ? null
-          : () => _openInSpotify(context, track),
+      dragIndex: (lifted || opensInSpotify) ? null : index,
+      onOpenInSpotify: opensInSpotify
+          ? () => _openInSpotify(context, track)
+          : null,
       onMoveUp: index == 0
           ? null
           : () => _moveTo(visibleQueue, index, index - 1),

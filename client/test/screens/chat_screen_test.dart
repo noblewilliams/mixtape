@@ -1373,7 +1373,7 @@ void main() {
       expect(find.byKey(const Key('chat-play-now')), findsNothing);
       expect(find.byKey(const Key('chat-create-playlist')), findsNothing);
       expect(find.byKey(const Key('chat-send-to-music')), findsNothing);
-      expect(find.text('Send to a transfer tool'), findsOneWidget);
+      expect(find.text('Play on Spotify'), findsOneWidget);
       expect(find.byKey(_MixActionsKeys.appleNeeded), findsOneWidget);
     });
 
@@ -1403,7 +1403,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(bridge.playedIds, isNull);
       expect(find.byType(PlaybackScreen), findsNothing);
-      expect(find.text('Send to a transfer tool'), findsNothing);
+      expect(find.text('Play on Spotify'), findsNothing);
     });
 
     testWidgets('an arrangement with no reason to refuse shows no reason line', (
