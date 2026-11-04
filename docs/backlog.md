@@ -154,3 +154,12 @@ Approved board implemented locally: separate Home/Mixes, bottom 14px composer wi
 ### Mixes views and theme switch — 2026-10-03
 
 [Approved board](mockups/approved/2026-10-03-mixes-view-controls.md) implemented locally on web: shared Tabs on Library and Mixes, icon List / Grid / Closet switch, flush list, new unboxed grid, centred empty states, closet shelves on the page without the wall, and the reel-sun theme switch with a circular page reveal. Remaining acceptance: founder check of the reveal and icon morph in Chrome and Safari. Open: no way back to "match my system" once a theme is chosen; older unused styles (`.collection-toolbar`, `.tape-card`, `.closet*`, `.tape-spine`, `.wc-closet-mix`) are still in `web/src/styles.css` and `web-controls.css`.
+
+### Flutter floating text defaults — 2026-11-04
+
+Fixed yellow double underlines in the fallback dock used below iOS 26 and on
+Android. The dock now supplies themed text defaults outside the shell Scaffold;
+the app root also supplies defaults for custom routes and overlays. Regression
+coverage uses the real sibling-of-Scaffold layout and checks rendered text.
+Remaining acceptance: TestFlight smoke on an iPhone below iOS 26, including
+navigation labels and mini-player title/artist in light and dark appearance.

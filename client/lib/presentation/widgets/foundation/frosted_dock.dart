@@ -84,50 +84,54 @@ class FrostedDock extends StatelessWidget {
     final media = MediaQuery.of(context);
     final still = media.disableAnimations;
 
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-        MixtapeMetrics.dockSideMargin,
-        0,
-        MixtapeMetrics.dockSideMargin,
-        media.padding.bottom + _dockBottomInset,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SizedBox(
-            height: MixtapeMetrics.miniPlayerHeight,
-            // Offstage, not absent: the band stays reserved so the tab bar
-            // never moves when a mix starts.
-            child: Offstage(
-              offstage: !mini.visible,
-              child: AnimatedOpacity(
-                opacity: mini.visible ? 1 : 0,
-                duration: still ? Duration.zero : _fade,
-                curve: Curves.easeOut,
-                child: _MiniPlayer(
-                  key: miniPlayerKey,
-                  mini: mini,
-                  onTap: onMiniTap,
-                  onPlayPause: onMiniPlayPause,
-                  onNext: onMiniNext,
+    // This dock floats beside the Scaffold, outside its Material text defaults.
+    return DefaultTextStyle(
+      style: Theme.of(context).textTheme.bodyMedium!,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          MixtapeMetrics.dockSideMargin,
+          0,
+          MixtapeMetrics.dockSideMargin,
+          media.padding.bottom + _dockBottomInset,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              height: MixtapeMetrics.miniPlayerHeight,
+              // Offstage, not absent: the band stays reserved so the tab bar
+              // never moves when a mix starts.
+              child: Offstage(
+                offstage: !mini.visible,
+                child: AnimatedOpacity(
+                  opacity: mini.visible ? 1 : 0,
+                  duration: still ? Duration.zero : _fade,
+                  curve: Curves.easeOut,
+                  child: _MiniPlayer(
+                    key: miniPlayerKey,
+                    mini: mini,
+                    onTap: onMiniTap,
+                    onPlayPause: onMiniPlayPause,
+                    onNext: onMiniNext,
+                  ),
                 ),
               ),
             ),
-          ),
-          const SizedBox(height: MixtapeMetrics.dockGap),
-          AnimatedScale(
-            key: tabScaleKey,
-            scale: minimized ? _minimizedScale : 1,
-            alignment: Alignment.bottomCenter,
-            duration: still ? Duration.zero : _minimize,
-            curve: Curves.easeOut,
-            child: _TabBar(
-              key: tabBarKey,
-              currentIndex: currentIndex,
-              onTap: onTap,
+            const SizedBox(height: MixtapeMetrics.dockGap),
+            AnimatedScale(
+              key: tabScaleKey,
+              scale: minimized ? _minimizedScale : 1,
+              alignment: Alignment.bottomCenter,
+              duration: still ? Duration.zero : _minimize,
+              curve: Curves.easeOut,
+              child: _TabBar(
+                key: tabBarKey,
+                currentIndex: currentIndex,
+                onTap: onTap,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

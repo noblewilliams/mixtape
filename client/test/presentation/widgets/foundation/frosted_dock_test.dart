@@ -25,10 +25,11 @@ Future<void> _pump(
           padding: const EdgeInsets.only(bottom: 34),
           disableAnimations: disableAnimations,
         ),
-        child: Scaffold(
-          body: Stack(
-            children: [Positioned(left: 0, right: 0, bottom: 0, child: dock)],
-          ),
+        child: Stack(
+          children: [
+            const Scaffold(),
+            Positioned(left: 0, right: 0, bottom: 0, child: dock),
+          ],
         ),
       ),
     ),
@@ -44,6 +45,31 @@ const _mini = MiniPlayerState(
 );
 
 void main() {
+  for (final dark in [false, true]) {
+    testWidgets('floating dock text has no fallback underline (dark: $dark)', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        FrostedDock(currentIndex: 0, onTap: (_) {}, mini: _mini),
+        dark: dark,
+      );
+      for (final label in [..._tabs, _mini.title, _mini.artist]) {
+        final richText = tester.widget<RichText>(
+          find.descendant(
+            of: find.text(label),
+            matching: find.byType(RichText),
+          ),
+        );
+        expect(
+          richText.text.style?.decoration ?? TextDecoration.none,
+          TextDecoration.none,
+          reason: label,
+        );
+      }
+    });
+  }
+
   testWidgets('draws four labelled tabs and reports the one tapped', (
     tester,
   ) async {
@@ -155,7 +181,8 @@ void main() {
       expect(
         data.hasAction(SemanticsAction.tap),
         isTrue,
-        reason: '$label: a node with no tap action cannot be activated by '
+        reason:
+            '$label: a node with no tap action cannot be activated by '
             'VoiceOver',
       );
       expect(data.flagsCollection.isButton, isTrue);

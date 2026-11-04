@@ -76,7 +76,12 @@ class MixtapeApp extends ConsumerWidget {
       darkTheme: MixtapeTheme.dark(),
       // Scaffolds are transparent by theme; the gradient paints behind every
       // route (sign-in and onboarding included), not only inside the shell.
-      builder: (context, child) => GradientBackground(child: child!),
+      builder: (context, child) => DefaultTextStyle(
+        // Custom routes and floating overlays may sit outside a Scaffold.
+        // Replace MaterialApp's fallback style instead of inheriting it.
+        style: Theme.of(context).textTheme.bodyMedium!,
+        child: GradientBackground(child: child!),
+      ),
       home: showFoundationGallery && kDebugMode
           ? const FoundationGalleryScreen()
           : switch (root) {
