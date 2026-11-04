@@ -173,3 +173,11 @@ changes; attached-playlist refinement actions remain available. The current
 version marker opens the mix, and conversations start at the latest turn
 without an entrance scroll. Widget regressions cover these behaviors; physical
 iPhone confirmation of native glass and chat entry remains pending.
+
+### Account compact layout — 2026-11-04
+
+Implemented the [approved compact Account layout](mockups/approved/2026-11-04-account-compact.md):
+trailing Edit, quiet heading with Refresh, wrapping inline provider metadata,
+a shared last-method footnote, and retained trash icon. Account widget tests
+pass, including 320 pt / 200% text; light/dark Flutter snapshots inspected.
+Physical-device acceptance remains pending.

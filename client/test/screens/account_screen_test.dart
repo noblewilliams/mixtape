@@ -3,6 +3,7 @@ import '../helpers/auth_ui_snapshot.dart';
 import 'package:flutter/cupertino.dart'
     show CupertinoAlertDialog, CupertinoDialogAction, CupertinoIcons;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/auth/account_api.dart';
@@ -154,6 +155,20 @@ Future<ProviderContainer> _pump(
   _NameApi? api,
   String? Function()? liveName,
 }) async {
+  await loadAuthSnapshotFonts(tester);
+  var theme = brightness == Brightness.dark
+      ? MixtapeTheme.dark()
+      : MixtapeTheme.light();
+  if (const bool.hasEnvironment('AUTH_UI_SNAPSHOT_FONT')) {
+    theme = theme.copyWith(
+      textTheme: theme.textTheme.apply(fontFamily: 'AuthSnapshot'),
+    );
+    final icons = FontLoader('packages/cupertino_icons/CupertinoIcons')
+      ..addFont(
+        rootBundle.load('packages/cupertino_icons/assets/CupertinoIcons.ttf'),
+      );
+    await tester.runAsync(icons.load);
+  }
   final container = ProviderContainer(
     overrides: [
       accountProvider.overrideWith(() => accounts),
@@ -181,9 +196,7 @@ Future<ProviderContainer> _pump(
     UncontrolledProviderScope(
       container: container,
       child: MaterialApp(
-        theme: brightness == Brightness.dark
-            ? MixtapeTheme.dark()
-            : MixtapeTheme.light(),
+        theme: theme,
         builder: (context, child) => MediaQuery(
           data: MediaQuery.of(
             context,
@@ -202,6 +215,30 @@ Future<ProviderContainer> _pump(
 }
 
 void main() {
+  testWidgets(
+    'compact account aligns actions and keeps provider metadata inline',
+    (tester) async {
+      tester.view.physicalSize = const Size(430, 932);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await _pump(tester, _Accounts(const AccountState(accounts: [_apple])));
+      final row = tester.getRect(find.byKey(AccountScreen.nameRowKey));
+      final edit = tester.getRect(find.text(AccountScreen.editName));
+      expect(row.right - edit.right, closeTo(24, 1));
+      expect(
+        tester.getCenter(find.text('Linked')).dy,
+        closeTo(tester.getCenter(find.text('Last used')).dy, 2),
+      );
+      expect(
+        tester.getCenter(find.text('Login methods')).dy,
+        closeTo(tester.getCenter(find.text('Refresh')).dy, 2),
+      );
+      expect(find.byIcon(CupertinoIcons.trash), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('the identity block names the listener and the title is large', (
     tester,
   ) async {
@@ -227,21 +264,27 @@ void main() {
           .toList();
       expect(statuses.map((word) => word.label), ['Linked', 'Not linked']);
       expect(statuses.map((word) => word.kind), [
-        StatusKind.ok,
+        StatusKind.muted,
         StatusKind.muted,
       ]);
       expect(find.text('Last used'), findsOneWidget);
 
       // Apple is the only method: unlinking is refused, with the reason.
       expect(_action(tester, 'remove-apple').onPressed, isNull);
-      expect(find.text('Add another method first'), findsOneWidget);
+      expect(
+        find.text('Add another method before unlinking Apple.'),
+        findsOneWidget,
+      );
       expect(_action(tester, 'link-google').label, 'Link');
       expect(_action(tester, 'remove-apple').label, 'Unlink');
 
       await tester.tap(find.byKey(const Key('link-google')));
       await tester.pumpAndSettle();
       expect(accounts.links, 1);
-      expect(find.text('Add another method first'), findsNothing);
+      expect(
+        find.text('Add another method before unlinking Apple.'),
+        findsNothing,
+      );
 
       await tester.tap(find.byKey(const Key('remove-google')));
       await tester.pumpAndSettle();

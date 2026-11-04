@@ -38,7 +38,6 @@ import '../widgets/foundation/glass_cluster.dart';
 import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/inset_group.dart';
 import '../widgets/foundation/large_title_scaffold.dart';
-import '../widgets/foundation/section_word.dart';
 import '../widgets/foundation/status_word.dart';
 import '../widgets/foundation/text_action.dart';
 import 'sign_in_screen.dart' show AppleMark, GoogleMark, SignInScreen;
@@ -78,7 +77,7 @@ class AccountScreen extends ConsumerStatefulWidget {
   static const int nameCountFrom = 30;
 
   /// Why the only remaining method cannot be unlinked.
-  static const String lastMethodReason = 'Add another method first';
+  static const String lastMethodReason = 'Add another method before unlinking';
 
   /// Account deletion copy, fixed by the plan for both clients.
   static const String deleteLabel = 'Delete account';
@@ -252,7 +251,28 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                     onSessionExpired: _nameSessionExpired,
                   ),
                   InsetGroup(
-                    header: const SectionWord('Login methods'),
+                    header: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Login methods',
+                            style: tokens.meta.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        TextAction(
+                          key: const Key('refresh-methods'),
+                          label: 'Refresh',
+                          quiet: true,
+                          onPressed: busy || account.loading
+                              ? null
+                              : () => ref
+                                    .read(accountProvider.notifier)
+                                    .refresh(),
+                        ),
+                      ],
+                    ),
                     children: [
                       for (final provider in AccountProvider.values)
                         _MethodRow(
@@ -264,16 +284,14 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                         ),
                     ],
                   ),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextAction(
-                      key: const Key('refresh-methods'),
-                      label: 'Refresh methods',
-                      onPressed: busy || account.loading
-                          ? null
-                          : () => ref.read(accountProvider.notifier).refresh(),
+                  if (!verifying && account.accounts?.length == 1)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+                      child: Text(
+                        '${AccountScreen.lastMethodReason} ${account.accounts!.single.providerId == 'apple' ? 'Apple' : 'Google'}.',
+                        style: tokens.meta.copyWith(color: tokens.muted),
+                      ),
                     ),
-                  ),
                   if (verifying)
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
@@ -369,7 +387,7 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
 
 /// One login method: mark, name, status, and the single action that changes
 /// it. The last remaining method carries the reason it cannot be removed
-/// beside its disabled action, not as a separate warning.
+/// in a shared footnote below the group.
 class _MethodRow extends ConsumerWidget {
   const _MethodRow({
     required this.provider,
@@ -398,7 +416,6 @@ class _MethodRow extends ConsumerWidget {
             .toList() ??
         const <LinkedAccount>[];
     final linked = matching.isNotEmpty;
-    final onlyMethod = linked && accounts != null && accounts.length == 1;
     final canRemove =
         account.canModify && matching.length == 1 && accounts!.length > 1;
     final canLink =
@@ -413,7 +430,7 @@ class _MethodRow extends ConsumerWidget {
             style: tokens.meta.copyWith(color: tokens.muted),
           )
         : linked
-        ? const StatusWord(label: 'Linked', kind: StatusKind.ok)
+        ? const StatusWord(label: 'Linked', kind: StatusKind.muted, icon: false)
         : const StatusWord(label: 'Not linked', kind: StatusKind.muted);
 
     return ConstrainedBox(
@@ -434,17 +451,19 @@ class _MethodRow extends ConsumerWidget {
                 children: [
                   Text(nameOf(provider), style: tokens.rowTitle),
                   const SizedBox(height: 2),
-                  status,
-                  if (lastUsed && linked)
-                    Text(
-                      'Last used',
-                      style: tokens.meta.copyWith(color: tokens.muted),
-                    ),
-                  if (onlyMethod)
-                    Text(
-                      AccountScreen.lastMethodReason,
-                      style: tokens.meta.copyWith(color: tokens.muted),
-                    ),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 2,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      status,
+                      if (lastUsed && linked && !account.loading)
+                        Text(
+                          'Last used',
+                          style: tokens.meta.copyWith(color: tokens.muted),
+                        ),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -703,9 +722,11 @@ class _IdentityState extends ConsumerState<_Identity> {
                     saved ?? AccountScreen.unnamedListener,
                     style: tokens.rowTitle,
                   ),
-                  // Shares the width with the name at large sizes, so both
-                  // wrap rather than overflow.
-                  trailing: Flexible(
+                  // Reserve only the action's width; cap it for large text.
+                  trailing: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: MediaQuery.sizeOf(context).width * 0.3,
+                    ),
                     child: TextAction(label: action, onPressed: _edit),
                   ),
                 ),
