@@ -4,8 +4,7 @@
 /// cassette in the mix's tape colour, "Version n" and the song count.
 ///
 /// An earlier version carries a chevron and opens history at that version.
-/// The current one reads "current", has no chevron and opens nothing: the
-/// strip below already holds it.
+/// The current one reads "current" and opens the mix.
 library;
 
 import 'dart:math' as math;
@@ -33,7 +32,7 @@ class VersionMarker extends StatelessWidget {
   final int? songs;
   final bool current;
 
-  /// Earlier versions only: opens history at this version.
+  /// Opens the mix for the current version, or history for an earlier one.
   final VoidCallback? onOpen;
 
   /// `.vmark .cs { width: 34px }`.
@@ -54,7 +53,7 @@ class VersionMarker extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = context.tokens;
     final line = detail(songs: songs, current: current);
-    final tappable = !current && onOpen != null;
+    final tappable = onOpen != null;
     final row = ConstrainedBox(
       constraints: const BoxConstraints(minHeight: MixtapeMetrics.minTarget),
       child: Row(

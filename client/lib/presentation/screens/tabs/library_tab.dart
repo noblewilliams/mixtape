@@ -162,9 +162,9 @@ class _LibraryTabState extends ConsumerState<LibraryTab> {
         backgroundColor: Colors.transparent,
         body: LargeTitleScaffold(
           title: 'Library',
+          accessoriesBelowTitle: true,
           controller: _controller,
-          // Stacked over the title at large text, the labelled pair scales
-          // down rather than overflow a narrow phone.
+          // Keep the full title above the actions, including on narrow phones.
           trailing: FittedBox(
             fit: BoxFit.scaleDown,
             child: GlassCluster(

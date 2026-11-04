@@ -251,6 +251,10 @@ void main() {
         await _pump(tester, _container(), brightness: brightness);
 
         expect(find.text('Library'), findsOneWidget);
+        expect(
+          tester.getBottomLeft(find.text('Library')).dy,
+          lessThan(tester.getTopLeft(find.byKey(LibraryTab.syncButtonKey)).dy),
+        );
         expect(find.text('Sources'), findsNothing);
         expect(find.text('Playlists'), findsOneWidget);
         expect(find.byType(GlassCluster), findsOneWidget);

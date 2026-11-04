@@ -91,7 +91,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   final _composerKey = GlobalKey();
   final _panelKey = GlobalKey();
 
-  int _lastMessageCount = -1;
   bool _seededInitialError = false;
   bool _keepSheetChecked = false;
 
@@ -137,7 +136,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
       _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
+        0,
         duration: const Duration(milliseconds: 200),
         curve: Curves.easeOut,
       );
@@ -488,10 +487,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       // The working cassette takes the DJ's next line's place: bring it
       // into view as the send starts, as a new turn would be.
       final wasSending = previous?.value?.sending ?? false;
-      if (state.sending != wasSending) _scrollToBottom();
+      if (previous?.value != null && state.sending != wasSending) {
+        _scrollToBottom();
+      }
 
-      if (state.messages.length != _lastMessageCount) {
-        _lastMessageCount = state.messages.length;
+      // Initial content is already anchored at the end. Only new turns
+      // arriving in an open conversation need an animated follow.
+      if (previous?.value != null &&
+          state.messages.length != previous!.value!.messages.length) {
         _scrollToBottom();
       }
     });
@@ -639,11 +642,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       state.queue.isNotEmpty || state.queueVersion > 0;
 
   /// The colour every cassette of this mix wears.
-  Color _tapeColour(ChatState state) => watchMixTapeColour(
-    ref,
-    widget.sessionId,
-    saved: state.session.caseColor,
-  );
+  Color _tapeColour(ChatState state) =>
+      watchMixTapeColour(ref, widget.sessionId, saved: state.session.caseColor);
 
   /// The turns as lyrics, scrolled to the last one. Each version-changing
   /// reply is followed by its marker; the current version's reads
@@ -672,6 +672,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         caseColor: colour,
         songs: state.queue.length,
         current: true,
+        onOpen: _openArrangement,
       ),
       if (currentVersion > 0)
         MixEnergySummary(sessionId: widget.sessionId, version: currentVersion),
@@ -740,6 +741,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       ).createShader(rect),
       child: ListView.builder(
         controller: _scrollController,
+        reverse: true,
         addRepaintBoundaries: false,
         padding: EdgeInsets.fromLTRB(
           _lyricSidePadding,
@@ -748,14 +750,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           _panelHeight + 16,
         ),
         itemCount: items.length,
-        itemBuilder: (context, index) => LyricFade(
-          bottomInset: _panelHeight,
-          pinned: pinnedFrom != null && index >= pinnedFrom,
-          child: Padding(
-            padding: EdgeInsets.only(top: index == 0 ? 0 : _lyricGap),
-            child: items[index],
-          ),
-        ),
+        itemBuilder: (context, reversedIndex) {
+          final index = items.length - 1 - reversedIndex;
+          return LyricFade(
+            bottomInset: _panelHeight,
+            pinned: pinnedFrom != null && index >= pinnedFrom,
+            child: Padding(
+              padding: EdgeInsets.only(top: index == 0 ? 0 : _lyricGap),
+              child: items[index],
+            ),
+          );
+        },
       ),
     );
   }
@@ -1143,9 +1148,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             selection: TextSelection.collapsed(offset: next.length),
           );
           if (arc != null) {
-            messenger.showSnackBar(
-              mixtapeSnackBar(message: energyShapeToast),
-            );
+            messenger.showSnackBar(mixtapeSnackBar(message: energyShapeToast));
           }
         },
       );

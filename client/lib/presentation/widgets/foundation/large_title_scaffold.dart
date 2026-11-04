@@ -306,7 +306,7 @@ class _LargeTitleScaffoldState extends State<LargeTitleScaffold>
                   for (var i = 0; i < accessories.length; i++) ...[
                     if (i > 0)
                       const SizedBox(width: LargeTitleScaffold.titleGap),
-                    accessories[i],
+                    Flexible(child: accessories[i]),
                   ],
                 ],
               ),

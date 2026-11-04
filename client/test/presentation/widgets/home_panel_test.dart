@@ -27,7 +27,7 @@ import '../../screens/routine_suggestions_test.dart' show FakeSuggestions;
 List<String> get _starters => [
   for (final example in MixPromptInput.examples)
     if (example != MixPromptInput.initialPlaceholder) example,
-].take(3).toList();
+].take(2).toList();
 
 class _Harness {
   _Harness({FakeSuggestions? api})
@@ -104,6 +104,41 @@ List<IdeaPill> _pills(WidgetTester tester) =>
     tester.widgetList<IdeaPill>(find.byType(IdeaPill)).toList();
 
 void main() {
+  testWidgets('switching modes retains the loaded routine suggestion', (
+    tester,
+  ) async {
+    final api = FakeSuggestions();
+    final controller = TextEditingController();
+    addTearDown(controller.dispose);
+    Future<void> show(bool mix) => tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          suggestionsApiProvider.overrideWithValue(api),
+          suggestionTimeZoneProvider.overrideWithValue(() async => 'UTC'),
+        ],
+        child: MaterialApp(
+          theme: MixtapeTheme.light(),
+          home: Scaffold(
+            body: HomePanel(
+              controller: controller,
+              onSubmit: () {},
+              routineSuggestion: mix,
+            ),
+          ),
+        ),
+      ),
+    );
+    await show(true);
+    await tester.pumpAndSettle();
+    expect(api.loads, 1);
+    await show(false);
+    await tester.pumpAndSettle();
+    await show(true);
+    await tester.pump();
+    expect(api.loads, 1);
+    expect(find.text(FakeSuggestions.eligible.title), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
   testWidgets('the panel is as round as a bottom sheet', (tester) async {
     // The founder's smoke round three, note 2: 24 read like a card.
     expect(HomePanel.floatingRadius, 32);
@@ -135,7 +170,7 @@ void main() {
         .evaluate()
         .map((e) => tester.getRect(find.byWidget(e.widget)))
         .toList();
-    expect(rects.length, 3);
+    expect(rects.length, 2);
     // Every pill that starts a new row clears the one above it by 4 pt.
     var rows = 0;
     for (var i = 1; i < rects.length; i++) {
@@ -150,7 +185,7 @@ void main() {
     expect(rows, greaterThan(0), reason: 'the pills do wrap at this width');
   });
 
-  testWidgets('the panel draws a handle, the composer and three pills', (
+  testWidgets('the panel draws a handle, the composer and two pills', (
     tester,
   ) async {
     await _pumpPanel(tester);
@@ -160,10 +195,9 @@ void main() {
     expect(find.byType(MixPromptInput), findsOneWidget);
     expect(find.byKey(const Key('prompt-field')), findsOneWidget);
     final pills = _pills(tester);
-    expect(pills.length, 3);
+    expect(pills.length, 2);
     expect(pills.first.label, FakeSuggestions.eligible.title);
     expect(pills[1].label, _starters[0]);
-    expect(pills[2].label, _starters[1]);
     // The composer sits above the pills.
     expect(
       tester.getRect(find.byKey(const Key('prompt-field'))).bottom,
@@ -181,11 +215,10 @@ void main() {
     await tester.pump();
 
     var pills = _pills(tester);
-    expect(pills.length, 3);
+    expect(pills.length, 2);
     expect(pills.first.skeleton, isTrue);
     expect(pills[1].skeleton, isFalse);
     expect(pills[1].label, _starters[0]);
-    expect(pills[2].label, _starters[1]);
 
     harness.api.loadGate!.complete();
     await tester.pumpAndSettle();
@@ -194,14 +227,14 @@ void main() {
     expect(pills.first.label, FakeSuggestions.eligible.title);
   });
 
-  testWidgets('with nothing eligible the slot becomes a third starter', (
+  testWidgets('with nothing eligible the slot becomes a second starter', (
     tester,
   ) async {
     await _pumpPanel(tester, api: FakeSuggestions()..enabled = false);
     await tester.pumpAndSettle();
 
     final pills = _pills(tester);
-    expect(pills.length, 3);
+    expect(pills.length, 2);
     // The two known starters keep their places and a third joins them at the
     // end, so nothing moves when the routine resolves to nothing.
     expect(pills.map((pill) => pill.label), _starters);
@@ -314,7 +347,10 @@ void main() {
               width: 360,
               child: Wrap(
                 spacing: HomePanel.pillGap,
-                children: [IdeaPill(label: 'Coffee'), IdeaPill(label: 'Rain')],
+                children: [
+                  IdeaPill(label: 'Coffee'),
+                  IdeaPill(label: 'Rain'),
+                ],
               ),
             ),
           ),
@@ -414,7 +450,12 @@ void main() {
                       left: 0,
                       right: 0,
                       bottom: 0,
-                      child: HomePanel(controller: controller, onSubmit: () {}),
+                      child: HomePanel(
+                        controller: controller,
+                        onSubmit: () {},
+                        error:
+                            'A long error message that needs enough space to keep the panel scrollable with two suggestions and the keyboard open.',
+                      ),
                     ),
                   ],
                 ),
@@ -477,7 +518,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
-    expect(_pills(tester).length, 3);
+    expect(_pills(tester).length, 2);
   });
 
   testWidgets('the rotating placeholder never repeats a visible pill', (
@@ -487,10 +528,13 @@ void main() {
     await tester.pumpAndSettle();
     final shown = _pills(tester).map((pill) => pill.label).toSet();
 
-    String hint() => tester
-        .widget<TextField>(find.byKey(const Key('prompt-field')))
-        .decoration!
-        .hintText!;
+    String hint() =>
+        (tester
+                    .widget<TextField>(find.byKey(const Key('prompt-field')))
+                    .decoration!
+                    .hint!
+                as Text)
+            .data!;
 
     expect(shown, isNotEmpty);
     expect(shown, isNot(contains(hint())));
@@ -542,7 +586,12 @@ void main() {
                     left: 0,
                     right: 0,
                     bottom: 0,
-                    child: HomePanel(controller: controller, onSubmit: () {}),
+                    child: HomePanel(
+                      controller: controller,
+                      onSubmit: () {},
+                      error:
+                          'A long error message that needs enough space to keep the panel scrollable with two suggestions and the keyboard open.',
+                    ),
                   ),
                 ],
               ),
@@ -571,6 +620,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
-    expect(_pills(tester).length, 3);
+    expect(_pills(tester).length, 2);
   });
 }

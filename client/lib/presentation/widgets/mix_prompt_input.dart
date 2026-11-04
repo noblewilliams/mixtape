@@ -399,7 +399,12 @@ class _MixPromptInputState extends State<MixPromptInput>
       cursorColor: tokens.plum,
       style: fieldStyle,
       decoration: InputDecoration(
-        hintText: widget.placeholder ?? _rotation[_example % _rotation.length],
+        hint: Text(
+          widget.placeholder ?? _rotation[_example % _rotation.length],
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          softWrap: false,
+        ),
         hintStyle: fieldStyle.copyWith(color: tokens.muted),
         counterText: '',
         isDense: true,

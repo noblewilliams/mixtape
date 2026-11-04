@@ -228,10 +228,12 @@ void main() {
             _detail(pickState: AlbumPickState(version: 1, pick: first));
       await _pump(tester, _container(api));
       expect(
-        tester
-            .widget<TextField>(find.byKey(const Key('prompt-field')))
-            .decoration!
-            .hintText,
+        (tester
+                    .widget<TextField>(find.byKey(const Key('prompt-field')))
+                    .decoration!
+                    .hint!
+                as Text)
+            .data,
         'Another? Older? Something you do not know?',
       );
     });
@@ -242,10 +244,12 @@ void main() {
             _detail(version: 0, pickState: const AlbumPickState(version: 0));
       await _pump(tester, _container(api));
       expect(
-        tester
-            .widget<TextField>(find.byKey(const Key('prompt-field')))
-            .decoration!
-            .hintText,
+        (tester
+                    .widget<TextField>(find.byKey(const Key('prompt-field')))
+                    .decoration!
+                    .hint!
+                as Text)
+            .data,
         'Tell the DJ more…',
       );
     });

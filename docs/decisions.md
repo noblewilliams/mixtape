@@ -1,5 +1,17 @@
 # Decision Log
 
+## 2026-11-04 — Mobile layout and conversation corrections (founder)
+
+- Library keeps its full-size heading with Sync / Your music below it.
+- Rotating and fixed composer placeholders are one line, truncated with an
+  ellipsis. Typed drafts keep their existing multiline behavior.
+- Home shows two starter/routine suggestions instead of three, including
+  Album mode. Switching mode or opening Shape retains routine loading state.
+- The current version marker opens the mix, just like the tape strip. Earlier
+  markers continue to open the selected version in history.
+- Opening a conversation starts at its end without an animated entrance scroll;
+  newly arriving turns can still scroll into view.
+
 ## 2026-11-03 — Spotify-only mix rail: Play on Spotify leads (founder)
 
 Amends the mix rail in `mockups/approved/2026-09-04-web-spotify-import.md`.

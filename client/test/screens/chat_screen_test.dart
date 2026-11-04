@@ -328,6 +328,7 @@ Future<void> _pump(
   String? initialError,
   Brightness brightness = Brightness.light,
   double textScale = 1,
+  bool settle = true,
 }) async {
   await tester.pumpWidget(
     UncontrolledProviderScope(
@@ -347,7 +348,7 @@ Future<void> _pump(
       ),
     ),
   );
-  await tester.pumpAndSettle();
+  if (settle) await tester.pumpAndSettle();
 }
 
 /// The mix-action reason keys, mirrored from the screen's private row.
@@ -356,6 +357,42 @@ abstract final class _MixActionsKeys {
 }
 
 void main() {
+  testWidgets('loaded chat starts at its end without an entrance scroll', (
+    tester,
+  ) async {
+    final result = Completer<SessionDetail>();
+    final api = FakeDjApi()..onGetSession = (_) => result.future;
+    await _pump(tester, _makeContainer(api), settle: false);
+    result.complete(
+      SessionDetail(
+        session: _session(),
+        queue: [_track(0)],
+        messages: [
+          for (var i = 0; i < 40; i++)
+            _msg(
+              'm$i',
+              'dj',
+              'Turn $i with enough words to fill the conversation.',
+            ),
+        ],
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(
+      find.text('Turn 39 with enough words to fill the conversation.'),
+      findsOneWidget,
+    );
+    final list = find.descendant(
+      of: find.byKey(const Key('chat-transcript-mask')),
+      matching: find.byType(Scrollable),
+    );
+    final position = tester.state<ScrollableState>(list).position;
+    expect(position.isScrollingNotifier.value, isFalse);
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(position.isScrollingNotifier.value, isFalse);
+  });
+
   group('the frame', () {
     testWidgets('the header is Back, the title and one More: no queue button', (
       tester,
@@ -444,6 +481,11 @@ void main() {
         expect(find.byKey(VersionMarker.keyFor(1)), findsOneWidget);
         expect(find.byKey(VersionMarker.keyFor(2)), findsOneWidget);
         expect(find.textContaining('2 songs · current'), findsOneWidget);
+        await tester.tap(find.byKey(VersionMarker.keyFor(2)));
+        await tester.pumpAndSettle();
+        expect(find.byType(QueueScreen), findsOneWidget);
+        Navigator.of(tester.element(find.byType(QueueScreen))).pop();
+        await tester.pumpAndSettle();
         expect(find.text('The tape'), findsNothing);
         expect(find.text('Open'), findsNothing);
         // The marker follows the reply that made it.
@@ -622,7 +664,7 @@ void main() {
         session: _session(),
         messages: [
           _msg('m1', 'user', 'first ask'),
-          _msg('m2', 'dj', 'older reply'),
+          _msg('m2', 'dj', List.filled(12, 'An older reply with a little more to say.').join(' ')),
           _msg('m3', 'user', 'now this'),
           _msg('m4', 'dj', 'here you go'),
         ],

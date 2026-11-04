@@ -20,6 +20,45 @@ class _SessionAuth extends AuthNotifier {
 }
 
 void main() {
+  testWidgets('long placeholders stay on one line without resizing the field', (
+    tester,
+  ) async {
+    final controller = TextEditingController();
+    addTearDown(controller.dispose);
+    Future<void> show(String hint) => tester.pumpWidget(
+      MaterialApp(
+        theme: MixtapeTheme.light(),
+        home: Scaffold(
+          body: SizedBox(
+            width: 280,
+            child: MixPromptInput(
+              controller: controller,
+              busy: false,
+              onSubmit: () {},
+              placeholder: hint,
+            ),
+          ),
+        ),
+      ),
+    );
+    await show('Short');
+    final height = tester.getSize(find.byKey(const Key('prompt-field'))).height;
+    await show(
+      'Something like my very long favourite playlist name, but softer and slower',
+    );
+    expect(
+      tester.getSize(find.byKey(const Key('prompt-field'))).height,
+      height,
+    );
+    final hint = tester.widget<Text>(
+      find.text(
+        'Something like my very long favourite playlist name, but softer and slower',
+      ),
+    );
+    expect(hint.maxLines, 1);
+    expect(hint.overflow, TextOverflow.ellipsis);
+    await tester.pumpWidget(const SizedBox());
+  });
   testWidgets(
     'rotates only empty unfocused prompts and never changes entered text',
     (tester) async {

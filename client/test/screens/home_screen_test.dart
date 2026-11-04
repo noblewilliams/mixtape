@@ -707,7 +707,7 @@ void main() {
       // The dock's mini-player replaces Home's own (task 2.1).
       expect(find.byType(PlaybackMini), findsNothing);
       // Three idea pills, and the hint above them.
-      expect(find.byType(IdeaPill), findsNWidgets(3));
+      expect(find.byType(IdeaPill), findsNWidgets(2));
       expect(
         tester.getRect(find.byKey(HomeScreen.hintKey)).bottom,
         lessThan(tester.getRect(find.byType(HomePanel)).top),
@@ -957,7 +957,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
         expect(find.byKey(const Key('prompt-field')), findsOneWidget);
-        expect(find.byType(IdeaPill), findsNWidgets(3));
+        expect(find.byType(IdeaPill), findsNWidgets(2));
         if (output.isNotEmpty) {
           final boundary = tester.renderObject<RenderRepaintBoundary>(
             find.byKey(boundaryKey),
@@ -1007,10 +1007,13 @@ void main() {
         .widget<IconButton>(find.byKey(const Key('start-session')))
         .tooltip!;
 
-    String? hint(WidgetTester tester) => tester
-        .widget<TextField>(find.byKey(const Key('prompt-field')))
-        .decoration!
-        .hintText;
+    String? hint(WidgetTester tester) =>
+        (tester
+                    .widget<TextField>(find.byKey(const Key('prompt-field')))
+                    .decoration!
+                    .hint!
+                as Text)
+            .data;
 
     Future<void> chooseShape(WidgetTester tester, EnergyArc arc) async {
       await tester.tap(find.byKey(EnergyControl.chipKey));
@@ -1076,11 +1079,10 @@ void main() {
         for (final pill in const [
           'Rainy evening, start to finish',
           'Something I have never heard',
-          'One I own and forgot',
         ]) {
           expect(find.widgetWithText(IdeaPill, pill), findsOneWidget);
         }
-        expect(find.byType(IdeaPill), findsNWidgets(3));
+        expect(find.byType(IdeaPill), findsNWidgets(2));
 
         await tester.enterText(
           find.byKey(const Key('prompt-field')),

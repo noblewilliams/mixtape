@@ -163,3 +163,13 @@ the app root also supplies defaults for custom routes and overlays. Regression
 coverage uses the real sibling-of-Scaffold layout and checks rendered text.
 Remaining acceptance: TestFlight smoke on an iPhone below iOS 26, including
 navigation labels and mini-player title/artist in light and dark appearance.
+
+### Flutter Home, Library and chat polish — 2026-11-04
+
+Library actions now sit below the full-size title. Composer placeholders stay
+on one line with ellipsis while typed drafts can still grow. Home shows two
+starter/routine suggestions and retains routine state across mode and glass
+changes; attached-playlist refinement actions remain available. The current
+version marker opens the mix, and conversations start at the latest turn
+without an entrance scroll. Widget regressions cover these behaviors; physical
+iPhone confirmation of native glass and chat entry remains pending.
