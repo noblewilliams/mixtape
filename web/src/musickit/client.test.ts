@@ -135,6 +135,71 @@ describe('MusicKit browser client', () => {
     )
   })
 
+  it('prepares Apple Music ahead of the tap so connect goes straight to authorization', async () => {
+    const { client, instance, musicKit } = setup()
+
+    await client.prepare?.()
+    const connecting = client.connect()
+
+    // Authorization starts in the same task as the tap, before any network wait.
+    expect(instance.authorize).toHaveBeenCalledOnce()
+    await connecting
+    expect(musicKit.configure).toHaveBeenCalledOnce()
+  })
+
+  it('fails fast when the Apple sign-in window never opens', async () => {
+    vi.useFakeTimers()
+    try {
+      const { client, instance } = setup()
+      // A blocked window: authorize() waits forever and this page keeps focus.
+      vi.mocked(instance.authorize).mockImplementation(() => new Promise(() => {}))
+
+      const settled = expect(client.connect()).rejects.toMatchObject({ code: 'authorization_failed' })
+      await vi.advanceTimersByTimeAsync(5000)
+      await settled
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps waiting while the Apple sign-in window has focus', async () => {
+    vi.useFakeTimers()
+    try {
+      const { client, instance } = setup()
+      let finish: (token: string) => void = () => {}
+      vi.mocked(instance.authorize).mockImplementation(() => {
+        window.dispatchEvent(new Event('blur'))
+        return new Promise((resolve) => { finish = resolve })
+      })
+
+      const connecting = client.connect()
+      await vi.advanceTimersByTimeAsync(30_000)
+      finish('music-user-token')
+      await expect(connecting).resolves.toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('gives up on an authorization that never settles', async () => {
+    vi.useFakeTimers()
+    try {
+      const { instance, getDeveloperToken, musicKit } = setup()
+      const client = createMusicKitClient({ getDeveloperToken, loadMusicKit: async () => musicKit, authorizeTimeoutMs: 1000 })
+      vi.mocked(instance.authorize).mockImplementation(() => {
+        window.dispatchEvent(new Event('blur'))
+        return new Promise(() => {})
+      })
+
+      const connecting = client.connect()
+      const settled = expect(connecting).rejects.toMatchObject({ code: 'authorization_failed' })
+      await vi.advanceTimersByTimeAsync(1000)
+      await settled
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('treats a dismissed Apple authorization sheet as a recoverable connection error', async () => {
     const { client, instance } = setup()
     vi.mocked(instance.authorize).mockResolvedValue(undefined)

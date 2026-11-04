@@ -4305,6 +4305,24 @@ button.mini:disabled {
   display: none;
 }
 
+/* The way back to Apple Music for a Spotify-only listener: quiet, not a button. */
+.rail-apple-link {
+  justify-self: center;
+  padding: 4px 8px;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  font: inherit;
+  font-size: var(--type-micro-size);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.rail-apple-link:hover {
+  color: var(--graphite);
+}
+
 .queue-toast-hint {
   display: block;
   margin-top: 2px;
@@ -4354,8 +4372,8 @@ button.mini:disabled {
 }
 
 @media (max-width: 760px) {
-  /* Spotify's mobile app cannot paste links into a playlist: only the
-     transfer handoff stays, and the row link shortens to "Open". */
+  /* Spotify's mobile app cannot paste links into a playlist: only Play on
+     Spotify stays, and the row link shortens to "Open". */
   .rail-action--desktop,
   .rail-hint--desktop,
   .open-tail {

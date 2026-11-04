@@ -28,8 +28,13 @@ type QueuePanelProps = {
   onClose: () => void
   onPreviewTracks: (tracks: QueueTrack[]) => void
   onCommitQueueOp: (op: QueueOp) => Promise<void>
-  /** A Spotify output happened: Open in Spotify, Copy for Spotify, or the transfer handoff. */
+  /** A Spotify output happened: Open in Spotify, Copy for Spotify, or Play on Spotify. */
   onOutput?: () => void
+  /**
+   * The listener chose Spotify and has no Apple path: Play on Spotify leads,
+   * Apple Music stays one quiet link away, and every row opens in Spotify.
+   */
+  spotifyOnly?: boolean
 }
 
 type SwipeState = {
@@ -65,16 +70,27 @@ const OUTPUT_TOAST_MS = 4000
 const WHEEL_RELEASE_MS = 120
 
 // Spotify outputs (docs/mockups/approved/2026-09-04-web-spotify-import.md,
-// "The mix rail for a Spotify listener"). The transfer tool is TuneMyMusic:
-// of the two candidates on the board it is the one whose transfer page
-// accepts pasted "Artist – Title" text without an account.
+// "The mix rail for a Spotify listener", amended in docs/decisions.md
+// 2026-11-03). Play on Spotify hands off to TuneMyMusic: of the two
+// candidates on the board it is the one whose transfer page accepts pasted
+// "Artist – Title" text without an account.
 const SPOTIFY_TRACK_URL = 'https://open.spotify.com/track/'
+const SPOTIFY_SEARCH_URL = 'https://open.spotify.com/search/'
 const TRANSFER_TOOL_URL = 'https://www.tunemymusic.com/transfer'
 const COPY_HINT = 'Paste the links into a new playlist in Spotify on your computer.'
 const COPY_FAILED = 'Couldn’t copy on this browser.'
+const PLAY_HINT = 'Copies your songs and opens TuneMyMusic, which builds the playlist in Spotify for you.'
+const COPY_AND_PLAY_HINT =
+  'Copy for Spotify gives you links to paste into a Spotify playlist on your computer. Play on Spotify builds the playlist for you on any device.'
 
 function spotifyTrackUrl(spotifyId: string) {
   return `${SPOTIFY_TRACK_URL}${encodeURIComponent(spotifyId)}`
+}
+
+/** The exact track when we hold its Spotify id; otherwise a Spotify search for it. */
+function spotifyOpenUrl(track: QueueTrack, spotifyOnly: boolean) {
+  if (track.spotifyId) return spotifyTrackUrl(track.spotifyId)
+  return spotifyOnly ? `${SPOTIFY_SEARCH_URL}${encodeURIComponent(`${track.artist} ${track.title}`)}` : null
 }
 
 async function copyText(text: string) {
@@ -127,6 +143,7 @@ export function QueuePanel({
   onPreviewTracks,
   onCommitQueueOp,
   onOutput,
+  spotifyOnly = false,
 }: QueuePanelProps) {
   const [displayTracks, setDisplayTracks] = useState(() => withPositions(tracks))
   const [swipe, setSwipeState] = useState<SwipeState | null>(null)
@@ -149,9 +166,13 @@ export function QueuePanel({
   // The Apple controls render whenever any track has an Apple id and the
   // Spotify actions whenever any track has a Spotify id, so a Spotify-only
   // mix gets the Spotify actions in the Apple slot and a mixed mix shows
-  // both, Apple first.
+  // both, Apple first. A Spotify-only listener gets the Spotify actions on
+  // every mix (catalogue mixes carry Apple ids only); the Apple controls
+  // return once they start connecting Apple Music.
   const hasApple = displayTracks.some((track) => track.appleId)
   const hasSpotify = displayTracks.some((track) => track.spotifyId)
+  const showApple = hasApple && (!spotifyOnly || musicConnection !== 'disconnected')
+  const showSpotify = hasSpotify || spotifyOnly
 
   useEffect(() => {
     const normalized = withPositions(tracks)
@@ -288,7 +309,7 @@ export function QueuePanel({
     onOutput?.()
   }
 
-  async function sendToTransferTool() {
+  async function playOnSpotify() {
     const lines = displayTracksRef.current.map((track) => `${track.artist} – ${track.title}`)
     // Start the clipboard write and open the tool in the same gesture frame:
     // the write needs this document still focused, the new tab needs the
@@ -515,6 +536,7 @@ export function QueuePanel({
           {displayTracks.map((track, index) => {
             const currentSwipe = swipe?.trackId === track.trackId ? swipe : null
             const artwork = artworkSource(track.artworkUrl)
+            const openUrl = spotifyOpenUrl(track, spotifyOnly)
             const reasonId = `track-reason-${track.trackId}`
             const rowStyle = {
               '--swipe-reveal': `${currentSwipe?.reveal ?? 0}px`,
@@ -533,7 +555,7 @@ export function QueuePanel({
                 onWheel={(event) => handleTrackpad(event, track.trackId)}
               >
                 <div
-                  className={`track-swipe-surface ${track.spotifyId ? 'has-open' : ''}`}
+                  className={`track-swipe-surface ${openUrl ? 'has-open' : ''}`}
                   data-testid="track-swipe-surface"
                   tabIndex={0}
                   aria-label={`${track.title} by ${track.artist}, track ${index + 1}${track.newToYou ? ', new to you' : ''}`}
@@ -556,10 +578,10 @@ export function QueuePanel({
                     )}
                     <em id={reasonId}>{track.reason || 'Chosen to hold the shape of this mix.'}</em>
                   </span>
-                  {track.spotifyId ? (
+                  {openUrl ? (
                     <a
                       className="open"
-                      href={spotifyTrackUrl(track.spotifyId)}
+                      href={openUrl}
                       target="_blank"
                       rel="noopener"
                       draggable={false}
@@ -609,7 +631,7 @@ export function QueuePanel({
         Use the three-line handle or its Arrow keys to reorder. Swipe left with one finger or two fingers on a trackpad to remove. Delete reveals Remove and Escape closes it.
       </p>
 
-      {displayTracks.length > 0 && hasApple ? (
+      {displayTracks.length > 0 && showApple ? (
         <div className="music-actions">
           {musicConnection === 'connected' ? (
             <>
@@ -647,18 +669,27 @@ export function QueuePanel({
         </div>
       ) : null}
 
-      {displayTracks.length > 0 && hasSpotify ? (
+      {displayTracks.length > 0 && showSpotify ? (
         <div className="rail-actions">
-          <button className="btn primary rail-action--desktop" type="button" onClick={() => void copyForSpotify()}>
-            Copy for Spotify
+          <button className="btn primary" type="button" onClick={() => void playOnSpotify()}>
+            Play on Spotify
           </button>
-          <button className="btn" type="button" onClick={() => void sendToTransferTool()}>
-            Send to a transfer tool
-          </button>
-          <p className="rail-hint rail-hint--desktop">
-            Paste the links into a new playlist in Spotify on your computer. The transfer tool creates the playlist for you on any device.
-          </p>
-          <p className="rail-hint rail-hint--mobile">Copies “Artist – Title” lines and opens the tool, which creates the playlist in Spotify.</p>
+          {hasSpotify ? (
+            <>
+              <button className="btn rail-action--desktop" type="button" onClick={() => void copyForSpotify()}>
+                Copy for Spotify
+              </button>
+              <p className="rail-hint rail-hint--desktop">{COPY_AND_PLAY_HINT}</p>
+              <p className="rail-hint rail-hint--mobile">{PLAY_HINT}</p>
+            </>
+          ) : (
+            <p className="rail-hint">{PLAY_HINT}</p>
+          )}
+          {spotifyOnly && hasApple && !showApple ? (
+            <button className="rail-apple-link" type="button" onClick={onConnect}>
+              Use Apple Music instead
+            </button>
+          ) : null}
         </div>
       ) : null}
 

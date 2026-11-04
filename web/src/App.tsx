@@ -345,6 +345,14 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   const activeQueue = activeSession ? queuesBySession[activeSession.id] ?? [] : []
   const activeIsAlbum = activeSession?.kind === 'album'
   const activeAlbums = activeSession && activeIsAlbum ? albumsBySession[activeSession.id] : undefined
+  // Load MusicKit while Connect Apple Music is on screen, so the tap reaches
+  // Apple's sign-in window inside Safari's user-activation window.
+  const appleConnectOffered = musicConnection === 'disconnected'
+    && !isSpotifyOnly(effectiveOnboarding, musicConnection)
+    && (activeIsAlbum ? Boolean(activeAlbums?.pick?.appleId) : activeQueue.some((track) => track.appleId))
+  useEffect(() => {
+    if (appleConnectOffered) void musicKit.prepare?.().catch(() => undefined)
+  }, [appleConnectOffered, musicKit])
   const contentPaint = activeView === 'session' && activeSession ? activeSession.caseColor : '#45596d'
   const shellStyle = {
     '--content-paint': contentPaint,
@@ -1616,6 +1624,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
             onPreviewTracks={(tracks) => previewQueue(activeSession.id, tracks)}
             onCommitQueueOp={(op) => commitQueueOp(activeSession.id, op)}
             onOutput={() => postFunnelEventOnce(api, user.id, 'first_output')}
+            spotifyOnly={isSpotifyOnly(effectiveOnboarding, musicConnection)}
           />}
         </>
       )}

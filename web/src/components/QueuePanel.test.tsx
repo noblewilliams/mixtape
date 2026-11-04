@@ -60,6 +60,8 @@ function renderQueue(overrides: {
   onPreviewTracks?: (tracks: QueueTrack[]) => void
   onCommitQueueOp?: (op: QueueOp) => Promise<void>
   onOutput?: () => void
+  spotifyOnly?: boolean
+  onConnect?: () => void
 } = {}) {
   const onPreviewTracks = overrides.onPreviewTracks ?? vi.fn()
   const onCommitQueueOp = overrides.onCommitQueueOp ?? vi.fn(async () => undefined)
@@ -72,13 +74,14 @@ function renderQueue(overrides: {
       playbackBusy={false}
       musicConnection={overrides.musicConnection ?? 'disconnected'}
       open
-      onConnect={vi.fn()}
+      onConnect={overrides.onConnect ?? vi.fn()}
       onTogglePlay={vi.fn()}
       onSave={vi.fn()}
       onClose={vi.fn()}
       onPreviewTracks={onPreviewTracks}
       onCommitQueueOp={onCommitQueueOp}
       onOutput={onOutput}
+      spotifyOnly={overrides.spotifyOnly}
     />,
   )
   return { ...view, onPreviewTracks, onCommitQueueOp, onOutput }
@@ -298,9 +301,9 @@ describe('Spotify mix outputs', () => {
     expect(screen.queryByRole('button', { name: 'Create playlist' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Connect Apple Music' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Copy for Spotify' })).toHaveClass('rail-action--desktop')
-    expect(screen.getByRole('button', { name: 'Send to a transfer tool' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Play on Spotify' })).toBeInTheDocument()
     expect(
-      screen.getByText('Paste the links into a new playlist in Spotify on your computer. The transfer tool creates the playlist for you on any device.'),
+      screen.getByText('Copy for Spotify gives you links to paste into a Spotify playlist on your computer. Play on Spotify builds the playlist for you on any device.'),
     ).toBeInTheDocument()
   })
 
@@ -311,9 +314,9 @@ describe('Spotify mix outputs', () => {
     expect(screen.getByRole('button', { name: 'Create playlist' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open in Spotify: Window Seat' })).toBeInTheDocument()
     const copy = screen.getByRole('button', { name: 'Copy for Spotify' })
-    expect(screen.getByRole('button', { name: 'Send to a transfer tool' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Play on Spotify' })).toBeInTheDocument()
     expect(
-      screen.getByText('Paste the links into a new playlist in Spotify on your computer. The transfer tool creates the playlist for you on any device.'),
+      screen.getByText('Copy for Spotify gives you links to paste into a Spotify playlist on your computer. Play on Spotify builds the playlist for you on any device.'),
     ).toBeInTheDocument()
     expect(play.compareDocumentPosition(copy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
@@ -345,13 +348,13 @@ describe('Spotify mix outputs', () => {
     expect(onOutput).toHaveBeenCalledTimes(1)
   })
 
-  it('copies Artist – Title lines and opens the transfer tool in a new tab', async () => {
+  it('Play on Spotify copies Artist – Title lines and opens the transfer tool in a new tab', async () => {
     const writeText = vi.fn(async (_text: string) => undefined)
     stubClipboard(writeText)
     const open = vi.spyOn(window, 'open').mockImplementation(() => null)
     const { onOutput } = renderQueue({ tracks: spotifyTracks })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Send to a transfer tool' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Play on Spotify' }))
 
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Copied 3 songs'))
     expect(writeText).toHaveBeenCalledWith(TRANSFER_LINES)
@@ -367,7 +370,7 @@ describe('Spotify mix outputs', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Copy for Spotify' }))
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Couldn’t copy on this browser.'))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Send to a transfer tool' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Play on Spotify' }))
     await waitFor(() => expect(open).toHaveBeenCalledTimes(1))
     expect(screen.getByRole('status')).toHaveTextContent('Couldn’t copy on this browser.')
   })
@@ -448,5 +451,47 @@ describe('new to you mark', () => {
 
     expect(screen.getByRole('link', { name: 'Open in Spotify: Window Seat' })).toBeInTheDocument()
     expect(row('s-1').querySelector('.track-mark')).toHaveTextContent('New to you')
+  })
+})
+
+describe('a Spotify-only listener', () => {
+  afterEach(cleanup)
+
+  // A catalogue mix: every track has an Apple id and none a Spotify id.
+  const catalogueTracks: QueueTrack[] = [
+    { position: 0, trackId: 'c-1', appleId: 'apple-c-1', spotifyId: null, title: 'Comfort', artist: 'Julia Jacklin', durationMs: 187_000 },
+    { position: 1, trackId: 'c-2', appleId: 'apple-c-2', spotifyId: null, title: 'Walk On By', artist: 'Burt Bacharach', durationMs: 181_000 },
+  ]
+
+  it('leads with Play on Spotify instead of the Apple Music connect controls', () => {
+    renderQueue({ tracks: catalogueTracks, spotifyOnly: true })
+
+    expect(screen.queryByRole('button', { name: 'Connect Apple Music' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/Connect Apple Music to play this mix/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Play on Spotify' })).toHaveClass('primary')
+    // No Spotify ids means nothing for Copy for Spotify to copy.
+    expect(screen.queryByRole('button', { name: 'Copy for Spotify' })).not.toBeInTheDocument()
+    expect(screen.getByText('Copies your songs and opens TuneMyMusic, which builds the playlist in Spotify for you.')).toBeInTheDocument()
+  })
+
+  it('links each track without a Spotify id to a Spotify search for it', () => {
+    renderQueue({ tracks: catalogueTracks, spotifyOnly: true })
+
+    expect(screen.getByRole('link', { name: 'Open in Spotify: Comfort' })).toHaveAttribute(
+      'href',
+      'https://open.spotify.com/search/Julia%20Jacklin%20Comfort',
+    )
+  })
+
+  it('keeps a quiet way to connect Apple Music, and shows its progress once started', () => {
+    const onConnect = vi.fn()
+    const { unmount } = renderQueue({ tracks: catalogueTracks, spotifyOnly: true, onConnect })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use Apple Music instead' }))
+    expect(onConnect).toHaveBeenCalledOnce()
+    unmount()
+
+    renderQueue({ tracks: catalogueTracks, spotifyOnly: true, musicConnection: 'connecting' })
+    expect(screen.getByRole('button', { name: 'Connecting Apple Music…' })).toBeInTheDocument()
   })
 })

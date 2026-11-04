@@ -1,5 +1,32 @@
 # Decision Log
 
+## 2026-11-03 — Spotify-only mix rail: Play on Spotify leads (founder)
+
+Amends the mix rail in `mockups/approved/2026-09-04-web-spotify-import.md`.
+
+- The Spotify handoff button reads **Play on Spotify**, not "Send to a
+  transfer tool": listeners did not understand what a transfer tool is. It
+  still copies "Artist – Title" lines and opens TuneMyMusic, and the hint
+  names TuneMyMusic so the third-party page is not a surprise. It is the
+  primary rail action; Copy for Spotify (desktop) is secondary and shows only
+  when some track has a Spotify id.
+- A Spotify-only listener (`isSpotifyOnly`: chose Spotify, no live Apple
+  library, Apple not connected here) gets the Spotify rail on every mix, not
+  only when no track has an Apple id. Catalogue ("Not personal yet") mixes
+  carry Apple ids only, so the old per-track rule showed them a Connect Apple
+  Music block they could not use. Apple Music stays one quiet "Use Apple
+  Music instead" link away; once they start connecting, the Apple controls
+  return.
+- For that listener, a track with no Spotify id opens a Spotify search for
+  "artist title", as album picks already do.
+- Web Apple connect loads MusicKit and the developer token while the Connect
+  control is on screen, so the tap reaches `authorize()` without a network
+  wait. Safari blocks the sign-in window once a tap's user activation is
+  spent, and `authorize()` then never settles; it now fails as
+  `authorization_failed` when the page keeps focus for 5 s after the call
+  (the window never opened) or after 2 min overall, so the listener gets
+  "Try Apple Music again" instead of a permanent spinner.
+
 ## 2026-11-02 — Profile name: provider first, ask once if missing
 
 Founder decisions for `superpowers/specs/2026-11-02-profile-name-design.md`:

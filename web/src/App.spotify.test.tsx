@@ -778,7 +778,7 @@ describe('Spotify mix outputs', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy for Spotify' }))
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
-    fireEvent.click(screen.getByRole('button', { name: 'Send to a transfer tool' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Play on Spotify' }))
     await waitFor(() => expect(open).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(2))
 

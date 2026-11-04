@@ -43,6 +43,12 @@ export type MusicKitClient = {
   stop?: () => Promise<void>
   observe?: (listener:(sample:PlayerSample)=>void) => (()=>void)
 
+  /**
+   * Loads MusicKit and the developer token ahead of a connect, so the tap
+   * reaches `authorize()` while it still carries the user activation that
+   * Safari needs to open Apple's sign-in window.
+   */
+  prepare?: () => Promise<void>
   connect: () => Promise<void>
   snapshot: (options: {
     signal: AbortSignal
@@ -82,6 +88,9 @@ const MUSICKIT_SCRIPT_URL = 'https://js-cdn.music.apple.com/musickit/v3/musickit
 const PLAYLIST_URL = 'https://api.music.apple.com/v1/me/library/playlists'
 const APPLE_API_ORIGIN = 'https://api.music.apple.com'
 const TOKEN_REFRESH_MARGIN_SECONDS = 30
+// Long enough for an Apple ID sign-in with two-factor; a blocked window fails sooner.
+const AUTHORIZE_TIMEOUT_MS = 120_000
+const AUTHORIZE_OPEN_GRACE_MS = 5_000
 
 let musicKitLoadPromise: Promise<MusicKitGlobal> | null = null
 
@@ -149,6 +158,7 @@ type CreateMusicKitClientOptions = {
   loadMusicKit?: () => Promise<MusicKitGlobal>
   fetchImpl?: typeof fetch
   nowSeconds?: () => number
+  authorizeTimeoutMs?: number
 }
 
 function asClientError(
@@ -164,6 +174,7 @@ export function createMusicKitClient({
   loadMusicKit = loadMusicKitScript,
   fetchImpl = fetch,
   nowSeconds = () => Math.floor(Date.now() / 1000),
+  authorizeTimeoutMs = AUTHORIZE_TIMEOUT_MS,
 }: CreateMusicKitClientOptions): MusicKitClient {
   let playbackGeneration=0
   let playbackTail:Promise<unknown>=Promise.resolve()
@@ -201,10 +212,48 @@ export function createMusicKitClient({
     return configurationPromise
   }
 
+  function readyConfiguration() {
+    return configured && configured.expiresAt - TOKEN_REFRESH_MARGIN_SECONDS > nowSeconds() ? configured : null
+  }
+
+  /**
+   * `authorize()` opens Apple's sign-in window and settles only when that
+   * window reports back. A window the browser blocked never reports back.
+   * An opened window takes focus from this page (a popup) or hides it (a new
+   * tab on iOS), so a page that keeps focus past the grace period means the
+   * window never opened. The overall cap covers anything else.
+   */
+  function authorizeWithin(instance: MusicKitInstance) {
+    return new Promise<string | void>((resolve, reject) => {
+      const left = () => window.clearTimeout(openedGrace)
+      const onVisibility = () => { if (document.visibilityState === 'hidden') left() }
+      const finish = () => {
+        window.clearTimeout(openedGrace)
+        window.clearTimeout(overall)
+        window.removeEventListener('blur', left)
+        document.removeEventListener('visibilitychange', onVisibility)
+      }
+      const fail = (message: string) => {
+        finish()
+        reject(new MusicKitClientError('authorization_failed', message))
+      }
+      const openedGrace = window.setTimeout(() => fail('The Apple Music sign-in window did not open.'), AUTHORIZE_OPEN_GRACE_MS)
+      const overall = window.setTimeout(() => fail('Apple Music authorization took too long.'), authorizeTimeoutMs)
+      window.addEventListener('blur', left)
+      document.addEventListener('visibilitychange', onVisibility)
+      instance.authorize().then(
+        (value) => { finish(); resolve(value) },
+        (error: unknown) => { finish(); reject(error) },
+      )
+    })
+  }
+
   async function connect() {
-    const { instance } = await configure()
+    // No await before authorize() when MusicKit is ready: every await spends
+    // the tap's user activation, and Safari then blocks the sign-in window.
+    const { instance } = readyConfiguration() ?? (await configure())
     try {
-      const authorizedUser = await instance.authorize()
+      const authorizedUser = await authorizeWithin(instance)
       if (!authorizedUser) {
         musicUserToken = null
         throw new MusicKitClientError(
@@ -260,6 +309,9 @@ export function createMusicKitClient({
   }
 
   return {
+    async prepare() {
+      await configure()
+    },
     connect,
     async snapshot(options) {
       await requireConnection()
