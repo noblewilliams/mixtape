@@ -1,8 +1,11 @@
-/// Keep this mix (board frame A6; first-run spec → path A step 3, Copy) and
-/// the cap's hand-off to sign-in ("Cap reached", board C2).
+/// The sheet over a new anonymous listener's first mix (board frame A6;
+/// first-run spec → path A step 3, copy amended 2026-11-06) and the cap's
+/// hand-off to sign-in ("Cap reached", board C2).
 ///
-/// The sheet is the app's standard [showMixtapeSheet]: a headline, one line,
-/// one paper pill that pushes the sign-in page, and Not now. Provider buttons
+/// The sheet is the app's standard [showMixtapeSheet]: it says the mix is
+/// ready, its paper pill (Go to my mix) closes it onto the mix, and the
+/// quieter Create an account pushes the sign-in page — so nobody mistakes
+/// sign-in for the way to their mix. Provider buttons
 /// never appear in a sheet or the composer panel (founder, 2026-10-20); they
 /// live only on [KeepMixesSignInPage].
 library;
@@ -19,24 +22,25 @@ import '../screens/sign_in_screen.dart';
 import '../theme/mixtape_theme.dart';
 import 'foundation/mixtape_sheet.dart';
 
-/// What the listener chose in the sheet. The handle, the scrim and Not now
-/// all close it without a choice, which is Not now.
+/// What the listener chose in the sheet. The handle, the scrim and Go to my
+/// mix all close it without a choice, onto the mix.
 enum _KeepChoice { keep }
 
 abstract final class KeepSheet {
-  static const String headline = 'Keep this mix.';
+  static const String headline = 'Your mix is ready.';
   static const String line =
-      'Sign in and your mixes and music stay with you on any device.';
-  static const String keepLabel = 'Keep this mix';
-  static const String notNowLabel = 'Not now';
+      'It\u2019s saved on this device. Create an account to have it on your '
+      'other devices too.';
+  static const String goToMixLabel = 'Go to my mix';
+  static const String createAccountLabel = 'Create an account';
 
   /// The board's `.fp.paper` inset hairline on the pill.
   static const Color pillHairline = Color.fromRGBO(50, 44, 50, 0.14);
 
   static const Key headlineKey = Key('keep-sheet-headline');
   static const Key pillHairlineKey = Key('keep-sheet-pill-hairline');
-  static const Key keepKey = Key('keep-sheet-keep');
-  static const Key notNowKey = Key('keep-sheet-not-now');
+  static const Key goToMixKey = Key('keep-sheet-go-to-mix');
+  static const Key createAccountKey = Key('keep-sheet-create-account');
 }
 
 /// Shows the sheet over [context] and records what happened. Showing it is
@@ -52,7 +56,7 @@ Future<void> showKeepSheet(BuildContext context) async {
   );
   if (choice == _KeepChoice.keep) {
     funnel.record(FunnelEventType.keepSheetSignedIn);
-    if (context.mounted) await openKeepMixesSignIn(context);
+    if (context.mounted) await openKeepMixesSignIn(context, fromMix: true);
   } else {
     funnel.record(FunnelEventType.keepSheetDismissed);
   }
@@ -125,17 +129,17 @@ class _KeepSheetBody extends StatelessWidget {
                 ),
               ),
               child: FirstRunPill(
-                key: KeepSheet.keepKey,
-                label: KeepSheet.keepLabel,
+                key: KeepSheet.goToMixKey,
+                label: KeepSheet.goToMixLabel,
                 emphasis: true,
-                onPressed: () => Navigator.of(context).pop(_KeepChoice.keep),
+                onPressed: () => Navigator.of(context).pop(),
               ),
             ),
             const SizedBox(height: 8),
             Center(
               child: TextButton(
-                key: KeepSheet.notNowKey,
-                onPressed: () => Navigator.of(context).pop(),
+                key: KeepSheet.createAccountKey,
+                onPressed: () => Navigator.of(context).pop(_KeepChoice.keep),
                 style: TextButton.styleFrom(
                   foregroundColor: tokens.text,
                   minimumSize: const Size(
@@ -144,7 +148,7 @@ class _KeepSheetBody extends StatelessWidget {
                   ),
                 ),
                 child: Text(
-                  KeepSheet.notNowLabel,
+                  KeepSheet.createAccountLabel,
                   style: tokens.body.copyWith(
                     fontSize: 15,
                     fontWeight: FontWeight.w600,

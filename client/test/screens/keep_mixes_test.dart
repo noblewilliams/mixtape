@@ -260,8 +260,17 @@ void main() {
       expect(find.byType(ChatScreen), findsOneWidget);
       expect(_sheet, findsOneWidget);
       expect(find.text(KeepSheet.line), findsOneWidget);
-      expect(find.byKey(KeepSheet.keepKey), findsOneWidget);
-      expect(find.byKey(KeepSheet.notNowKey), findsOneWidget);
+      expect(find.byKey(KeepSheet.createAccountKey), findsOneWidget);
+      expect(find.byKey(KeepSheet.goToMixKey), findsOneWidget);
+      // The mix comes first: the pill takes the listener to it; the account
+      // is the quieter choice under it.
+      expect(find.text('Your mix is ready.'), findsOneWidget);
+      expect(find.text('Go to my mix'), findsOneWidget);
+      expect(find.text('Create an account'), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.byKey(KeepSheet.goToMixKey)).dy,
+        lessThan(tester.getTopLeft(find.byKey(KeepSheet.createAccountKey)).dy),
+      );
       expect(
         find.byType(ProviderSignInButton),
         findsNothing,
@@ -270,7 +279,7 @@ void main() {
       expect(r.events, contains(FunnelEventType.firstMixMade));
       expect(r.events, contains(FunnelEventType.keepSheetShown));
 
-      await tester.tap(find.byKey(KeepSheet.notNowKey));
+      await tester.tap(find.byKey(KeepSheet.goToMixKey));
       await tester.pumpAndSettle();
       expect(_sheet, findsNothing);
       expect(r.events, contains(FunnelEventType.keepSheetDismissed));
@@ -323,7 +332,7 @@ void main() {
       expect(_count(r.events, FunnelEventType.firstMixMade), 1);
       expect(_count(r.events, FunnelEventType.keepSheetShown), 1);
 
-      await tester.tap(find.byKey(KeepSheet.notNowKey));
+      await tester.tap(find.byKey(KeepSheet.goToMixKey));
       await tester.pumpAndSettle();
       await tester.enterText(
         find.descendant(of: chat, matching: find.byType(TextField)),
@@ -337,9 +346,7 @@ void main() {
       expect(_count(r.events, FunnelEventType.keepSheetShown), 1);
     });
 
-    testWidgets('the pill carries the board\'s inset hairline', (
-      tester,
-    ) async {
+    testWidgets('the pill carries the board\'s inset hairline', (tester) async {
       final r = _Rig();
       await r.pump(tester);
       await _send(tester, 'rainy commute');
@@ -371,7 +378,7 @@ void main() {
       await r.pump(tester);
       await _send(tester, 'rainy commute');
 
-      await tester.tap(find.byKey(KeepSheet.keepKey));
+      await tester.tap(find.byKey(KeepSheet.createAccountKey));
       await tester.pumpAndSettle();
 
       expect(_sheet, findsNothing);
@@ -392,6 +399,24 @@ void main() {
       // Back returns to the mix.
       await tester.tap(find.byKey(const Key('first-run-back')));
       await tester.pumpAndSettle();
+      expect(find.byType(ChatScreen), findsOneWidget);
+      expect(_sheet, findsNothing);
+    });
+
+    testWidgets('the sign-in page it opens offers Skip, go to my mix, which '
+        'returns to the mix', (tester) async {
+      final r = _Rig();
+      await r.pump(tester);
+      await _send(tester, 'rainy commute');
+
+      await tester.tap(find.byKey(KeepSheet.createAccountKey));
+      await tester.pumpAndSettle();
+      expect(find.byType(KeepMixesSignInPage), findsOneWidget);
+      expect(find.text('Skip, go to my mix'), findsOneWidget);
+
+      await tester.tap(find.byKey(KeepMixesSignInPage.skipKey));
+      await tester.pumpAndSettle();
+      expect(find.byType(KeepMixesSignInPage), findsNothing);
       expect(find.byType(ChatScreen), findsOneWidget);
       expect(_sheet, findsNothing);
     });
@@ -437,7 +462,7 @@ void main() {
       expect(top, lessThan(tester.getTopLeft(find.text(KeepSheet.line)).dy));
       expect(
         top,
-        lessThan(tester.getTopLeft(find.byKey(KeepSheet.keepKey)).dy),
+        lessThan(tester.getTopLeft(find.byKey(KeepSheet.goToMixKey)).dy),
       );
       semantics.dispose();
     });
@@ -520,9 +545,7 @@ void main() {
     });
 
     testWidgets('the shape is kept apart from the draft: only the draft goes '
-        'back in the field, and the brief is composed at send', (
-      tester,
-    ) async {
+        'back in the field, and the brief is composed at send', (tester) async {
       final r = _Rig();
       r.dj.failWith = const AnonymousCapException(3);
       await r.pump(tester);

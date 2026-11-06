@@ -341,7 +341,7 @@ describe('sign-in page variants', () => {
 
   it('from the sheet or the You row: "Keep your mixes." with the last-used note and a blank status line', () => {
     render(<SignInPage auth={bridge()} preferences={store()} lastUsed="apple" error="" variant="keep" />)
-    expect(screen.getByRole('heading', { name: 'Keep your mixes.' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Your mixes, on every device.' })).toBeInTheDocument()
     expect(screen.queryByText(CAP_LINE)).not.toBeInTheDocument()
     expect(screen.queryByText('Sign in to start a mix and keep your taste in sync.')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Continue with Apple' })).toHaveAccessibleDescription('last used')
@@ -349,7 +349,7 @@ describe('sign-in page variants', () => {
 
   it('at the cap: the cap line and no last-used note', () => {
     render(<SignInPage auth={bridge()} preferences={store()} lastUsed="apple" error="" variant="cap" />)
-    expect(screen.getByRole('heading', { name: 'Keep your mixes.' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Your mixes, on every device.' })).toBeInTheDocument()
     expect(screen.getByText('That’s three mixes on this device. Sign in to keep going, and to keep these.')).toBeInTheDocument()
     expect(screen.queryByText('last used')).not.toBeInTheDocument()
   })

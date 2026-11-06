@@ -54,7 +54,7 @@ class SignInScreen extends ConsumerStatefulWidget {
   final bool showLastUsed;
 
   static const String defaultHeadline = 'Your music, mixed for right\u00a0now.';
-  static const String keepMixesHeadline = 'Keep your mixes.';
+  static const String keepMixesHeadline = 'Your mixes, on every device.';
   static const String capLine =
       'That\u2019s three mixes on this device. Sign in to keep going, and to '
       'keep these.';
@@ -883,9 +883,20 @@ class _GoogleMarkPainter extends CustomPainter {
 /// drops the last-used note. Provider buttons appear only here, never in a
 /// sheet or the composer panel.
 class KeepMixesSignInPage extends StatelessWidget {
-  const KeepMixesSignInPage({super.key, this.cap = false});
+  const KeepMixesSignInPage({
+    super.key,
+    this.cap = false,
+    this.fromMix = false,
+  });
 
   final bool cap;
+
+  /// Reached from a new mix's sheet: a visible Skip, go to my mix that pops
+  /// back to it, so the small back tape is not the only way out.
+  final bool fromMix;
+
+  static const String skipLabel = 'Skip, go to my mix';
+  static const Key skipKey = Key('keep-mixes-skip');
 
   @override
   Widget build(BuildContext context) => Stack(
@@ -902,6 +913,31 @@ class KeepMixesSignInPage extends StatelessWidget {
           child: TapeBackButton(),
         ),
       ),
+      if (fromMix)
+        SafeArea(
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: TextButton(
+                key: skipKey,
+                onPressed: () => Navigator.of(context).maybePop(),
+                style: TextButton.styleFrom(
+                  foregroundColor: FirstRunColors.cream,
+                  minimumSize: const Size(
+                    MixtapeMetrics.minTarget,
+                    MixtapeMetrics.minTarget,
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                ),
+                child: const Text(
+                  skipLabel,
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+          ),
+        ),
     ],
   );
 }
@@ -909,7 +945,12 @@ class KeepMixesSignInPage extends StatelessWidget {
 /// Pushes [KeepMixesSignInPage] over everything (the root navigator, so the
 /// dock and any tab's page sit under it). Completes when the listener comes
 /// back from it; a sign-in that succeeds remounts the root instead.
-Future<void> openKeepMixesSignIn(BuildContext context, {bool cap = false}) =>
-    Navigator.of(context, rootNavigator: true).push<void>(
-      MaterialPageRoute<void>(builder: (_) => KeepMixesSignInPage(cap: cap)),
-    );
+Future<void> openKeepMixesSignIn(
+  BuildContext context, {
+  bool cap = false,
+  bool fromMix = false,
+}) => Navigator.of(context, rootNavigator: true).push<void>(
+  MaterialPageRoute<void>(
+    builder: (_) => KeepMixesSignInPage(cap: cap, fromMix: fromMix),
+  ),
+);

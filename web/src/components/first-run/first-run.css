@@ -252,6 +252,22 @@
   background: linear-gradient(180deg, rgba(10, 6, 10, .58) 0%, rgba(10, 6, 10, .44) 45%, rgba(10, 6, 10, .58) 100%);
 }
 .fr-sign-in { position: relative; min-height: 100%; }
+/* Skip, go to my mix: the way back to a new mix, a full-size text button so it reads as a real choice. */
+.auth-skip {
+  display: block;
+  min-height: 44px;
+  margin: 4px auto 0;
+  padding: 0 16px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.auth-skip:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 999px; }
+.auth-skip:disabled { opacity: .5; cursor: default; }
 .fr-back--over { position: absolute; top: 14px; left: 12px; z-index: 2; }
 
 @media (max-width: 480px) {
@@ -270,6 +286,7 @@
   .auth-page--graphic .auth-copy > p:last-child,
   .auth-page--graphic .auth-status { color: rgba(239, 230, 218, .82); }
   .auth-page--graphic .auth-error { color: #f6bfcb; }
+  .auth-page--graphic .auth-skip { color: #efe6da; }
   /* Full-width pills, so the last-used note inside them clears the label. */
   .auth-page--graphic .auth-provider-row { justify-content: stretch; }
 }

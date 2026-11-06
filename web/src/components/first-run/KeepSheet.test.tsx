@@ -6,23 +6,23 @@ beforeEach(() => sessionStorage.clear())
 afterEach(cleanup)
 
 describe('Keep this mix sheet', () => {
-  it('reads as the board: headline, line, one paper pill, Not now, no provider buttons', () => {
+  it('says the mix is ready: Go to my mix leads, Create an account under it, no provider buttons', () => {
     render(<KeepSheet onKeep={vi.fn()} onNotNow={vi.fn()} />)
-    const dialog = screen.getByRole('dialog', { name: 'Keep this mix.' })
+    const dialog = screen.getByRole('dialog', { name: 'Your mix is ready.' })
     expect(dialog).toHaveAttribute('aria-modal', 'true')
-    expect(screen.getByRole('heading', { level: 2, name: 'Keep this mix.' })).toHaveFocus()
-    expect(screen.getByText('Sign in and your mixes and music stay with you on any device.')).toBeInTheDocument()
-    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Keep this mix', 'Not now'])
-    expect(screen.getByRole('button', { name: 'Keep this mix' })).toHaveClass('fr-pill')
+    expect(screen.getByRole('heading', { level: 2, name: 'Your mix is ready.' })).toHaveFocus()
+    expect(screen.getByText('It’s saved on this device. Create an account to have it on your other devices too.')).toBeInTheDocument()
+    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Go to my mix', 'Create an account'])
+    expect(screen.getByRole('button', { name: 'Go to my mix' })).toHaveClass('fr-pill')
   })
 
-  it('the pill keeps; Not now, Escape, the handle and the backdrop dismiss', () => {
+  it('Create an account keeps; Go to my mix, Escape, the handle and the backdrop dismiss', () => {
     const onKeep = vi.fn()
     const onNotNow = vi.fn()
     render(<KeepSheet onKeep={onKeep} onNotNow={onNotNow} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Keep this mix' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create an account' }))
     expect(onKeep).toHaveBeenCalledOnce()
-    fireEvent.click(screen.getByRole('button', { name: 'Not now' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Go to my mix' }))
     fireEvent.keyDown(window, { key: 'Escape' })
     fireEvent.click(screen.getByTestId('keep-sheet-handle'))
     fireEvent.click(screen.getByTestId('keep-sheet-backdrop'))

@@ -577,6 +577,8 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   // Keep this mix, the sign-in page over the shell, and the cap.
   const [keepSheet, setKeepSheet] = useState(false)
   const [signInPage, setSignInPage] = useState<SignInPageState | null>(null)
+  // Whether the sign-in page came from a new mix's sheet: it then offers Skip, go to my mix.
+  const [signInFromMix, setSignInFromMix] = useState(false)
   const [signInPageError, setSignInPageError] = useState('')
   const [draftSeed, setDraftSeed] = useState<DraftSeed | null>(null)
   // Find an album's Album mode lasts one visit to Home: leaving Home spends it.
@@ -648,10 +650,11 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     return () => window.removeEventListener('popstate', onPop)
   }, [keepSheet, sheetEntry])
 
-  function openSignIn(variant: SignInPageState, options: { replace?: boolean; error?: string } = {}) {
+  function openSignIn(variant: SignInPageState, options: { replace?: boolean; error?: string; fromMix?: boolean } = {}) {
     if (!keepSheet) signInOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     setQueueOpen(false)
     setSignInPageError(options.error ?? '')
+    setSignInFromMix(options.fromMix ?? false)
     setSignInPage(variant)
     const state = withState({ mixtapeKeepSheet: undefined, mixtapeSignIn: variant })
     if (options.replace) window.history.replaceState(state, '')
@@ -664,7 +667,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     // The sheet's entry becomes the sign-in page's, so back returns to the mix.
     const replace = sheetEntry
     setSheetEntry(false)
-    openSignIn('keep', { replace })
+    openSignIn('keep', { replace, fromMix: true })
   }
 
   function dismissSheet(fromHistory = false) {
@@ -1676,6 +1679,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
             onStart={() => setSignInPageError('')}
             variant={signInPage}
             onSignedIn={() => { void refetchSession?.() }}
+            onSkip={signInFromMix && signInPage === 'keep' ? () => window.history.back() : undefined}
           />
         </div>
       </div>

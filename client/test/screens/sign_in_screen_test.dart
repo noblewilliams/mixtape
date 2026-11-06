@@ -671,6 +671,24 @@ void main() {
       expect(find.byKey(const Key('apple-sign-in')), findsOneWidget);
       expect(find.byKey(const Key('google-sign-in')), findsOneWidget);
       expect(find.byKey(const Key('first-run-back')), findsOneWidget);
+      expect(find.byKey(KeepMixesSignInPage.skipKey), findsNothing);
+    });
+
+    testWidgets('from a new mix: Skip, go to my mix', (tester) async {
+      _phone(tester);
+      await _pump(
+        tester,
+        _CancellingGateway(),
+        google: _GoogleGateway(),
+        screen: const KeepMixesSignInPage(fromMix: true),
+      );
+      expect(find.text('Your mixes, on every device.'), findsOneWidget);
+      expect(find.byKey(KeepMixesSignInPage.skipKey), findsOneWidget);
+      expect(find.text('Skip, go to my mix'), findsOneWidget);
+      expect(
+        find.byKey(KeepMixesSignInPage.skipKey).hitTestable(),
+        findsOneWidget,
+      );
     });
 
     testWidgets('the cap: its line, and no last-used note', (tester) async {

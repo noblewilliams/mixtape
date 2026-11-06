@@ -1239,3 +1239,21 @@ so it installs from Chrome's prompt or Safari's Add to Home Screen. Settings
 offers Install where the browser allows it. The worker only goes network-first
 for pages and caches hashed build assets; it never touches API or auth
 requests. **Reopens if:** we want real offline use or push notifications.
+
+## 2026-11-06 — The first-mix sheet leads with the mix, not sign-in (founder)
+
+Amends the Keep this mix sheet (board A6, `mockups/approved/2026-10-20-first-run-flow.md`).
+A tester who prompted without signing up could not find their mix: the sheet
+over it read "Keep this mix." with a big "Keep this mix" pill that opened the
+sign-in page, whose only way back was the small back tape. The sheet now reads
+**Your mix is ready.** / "It's saved on this device. Create an account to have
+it on your other devices too." Its pill is **Go to my mix** (closes onto the
+mix) and **Create an account** is the quieter text button under it. The
+sign-in page's headline is **Your mixes, on every device.**, and when it is
+opened from the sheet it carries a full-size **Skip, go to my mix** under the
+provider buttons; from the You row or Settings it has none (there is no new
+mix to go to). The cap page keeps its line. Funnel events are unchanged:
+Create an account records `keep_sheet_signed_in`, every other way out
+`keep_sheet_dismissed`. Web and iOS share the copy. **Reopens if:** sign-ups
+from the sheet fall enough to matter, which would argue for an inline note on
+the mix instead of a sheet.

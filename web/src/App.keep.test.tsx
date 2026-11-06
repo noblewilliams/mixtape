@@ -99,7 +99,7 @@ function sendFromHome(prompt: string) {
   fireEvent.click(screen.getByRole('button', { name: 'Make a mix' }))
 }
 
-const sheet = () => screen.queryByRole('dialog', { name: 'Keep this mix.' })
+const sheet = () => screen.queryByRole('dialog', { name: 'Your mix is ready.' })
 
 beforeEach(() => {
   sessionStorage.clear()
@@ -114,11 +114,11 @@ afterEach(() => {
 describe('Keep this mix sheet', () => {
   it('appears after an anonymous listener\'s first mix lands, with one pill and no provider buttons', async () => {
     const { api } = renderApp({ initialSession: await mix() })
-    const dialog = await screen.findByRole('dialog', { name: 'Keep this mix.' })
-    expect(within(dialog).getByRole('heading', { name: 'Keep this mix.' })).toHaveFocus()
+    const dialog = await screen.findByRole('dialog', { name: 'Your mix is ready.' })
+    expect(within(dialog).getByRole('heading', { name: 'Your mix is ready.' })).toHaveFocus()
     expect(within(dialog).getByText(KEEP_SHEET_LINE)).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: 'Keep this mix' })).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: 'Not now' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Create an account' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Go to my mix' })).toBeInTheDocument()
     expect(within(dialog).queryByRole('button', { name: /Continue with/ })).not.toBeInTheDocument()
     await waitFor(() => expect(funnel(api)).toEqual(['first_mix_made', 'keep_sheet_shown']))
   })
@@ -147,27 +147,37 @@ describe('Keep this mix sheet', () => {
     renderApp({ api, initialSession: await mix(false) })
     fireEvent.change(await screen.findByRole('textbox', { name: 'Message your DJ' }), { target: { value: 'Burna Boy, Tems, Sade' } })
     fireEvent.keyDown(screen.getByRole('textbox', { name: 'Message your DJ' }), { key: 'Enter' })
-    expect(await screen.findByRole('dialog', { name: 'Keep this mix.' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: 'Your mix is ready.' })).toBeInTheDocument()
     await waitFor(() => expect(funnel(api)).toEqual(['first_mix_refused', 'first_mix_made', 'keep_sheet_shown']))
   })
 
   it('opens the sign-in page with "Keep your mixes." from its pill', async () => {
     const { api } = renderApp({ initialSession: await mix() })
-    fireEvent.click(await screen.findByRole('button', { name: 'Keep this mix' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Create an account' }))
     expect(sheet()).not.toBeInTheDocument()
     const page = screen.getByTestId('sign-in-over-shell')
-    expect(within(page).getByRole('heading', { name: 'Keep your mixes.' })).toHaveFocus()
+    expect(within(page).getByRole('heading', { name: 'Your mixes, on every device.' })).toHaveFocus()
     expect(within(page).getByRole('button', { name: 'Continue with Apple' })).toBeInTheDocument()
     expect(within(page).getByRole('button', { name: 'Continue with Google' })).toBeInTheDocument()
     expect(within(page).queryByText(CAP_LINE)).not.toBeInTheDocument()
     expect(page.querySelector('.auth-page--graphic')?.getAttribute('style')).toContain('first-run/bg-sign-in.jpg')
-    expect(document.title).toBe('Keep your mixes.')
+    expect(document.title).toBe('Your mixes, on every device.')
     await waitFor(() => expect(funnel(api)).toContain('keep_sheet_signed_in'))
+  })
+
+  it('the sign-in page it opens offers Skip, go to my mix, which returns to the mix', async () => {
+    renderApp({ initialSession: await mix() })
+    fireEvent.click(await screen.findByRole('button', { name: 'Create an account' }))
+    const page = screen.getByTestId('sign-in-over-shell')
+    fireEvent.click(within(page).getByRole('button', { name: 'Skip, go to my mix' }))
+    await waitFor(() => expect(screen.queryByTestId('sign-in-over-shell')).not.toBeInTheDocument())
+    expect(screen.getByRole('heading', { name: 'Rainy commute' })).toBeInTheDocument()
+    expect(sheet()).not.toBeInTheDocument()
   })
 
   it('Not now dismisses for the session: the next mix shows no sheet', async () => {
     const { api } = renderApp({ initialSession: await mix() })
-    fireEvent.click(await screen.findByRole('button', { name: 'Not now' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Go to my mix' }))
     expect(sheet()).not.toBeInTheDocument()
     expect(sessionStorage.getItem('mixtape.keep-sheet-seen')).not.toBeNull()
     await waitFor(() => expect(funnel(api)).toContain('keep_sheet_dismissed'))
@@ -184,7 +194,7 @@ describe('Keep this mix sheet', () => {
     ['the backdrop', () => fireEvent.click(screen.getByTestId('keep-sheet-backdrop'))],
   ])('%s dismisses as Not now does', async (_label, dismiss) => {
     const { api } = renderApp({ initialSession: await mix() })
-    await screen.findByRole('dialog', { name: 'Keep this mix.' })
+    await screen.findByRole('dialog', { name: 'Your mix is ready.' })
     act(() => dismiss())
     expect(sheet()).not.toBeInTheDocument()
     expect(screen.queryByTestId('sign-in-over-shell')).not.toBeInTheDocument()
@@ -204,7 +214,7 @@ describe('the anonymous cap', () => {
     sendFromHome('late night drive')
 
     const page = await screen.findByTestId('sign-in-over-shell')
-    expect(within(page).getByRole('heading', { name: 'Keep your mixes.' })).toBeInTheDocument()
+    expect(within(page).getByRole('heading', { name: 'Your mixes, on every device.' })).toBeInTheDocument()
     expect(within(page).getByText(CAP_LINE)).toBeInTheDocument()
     expect(within(page).queryByText('last used')).not.toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Describe your mix', hidden: true })).toHaveValue('late night drive')
@@ -297,8 +307,9 @@ describe('the account surface', () => {
 
     fireEvent.click(row)
     const page = screen.getByTestId('sign-in-over-shell')
-    expect(within(page).getByRole('heading', { name: 'Keep your mixes.' })).toBeInTheDocument()
+    expect(within(page).getByRole('heading', { name: 'Your mixes, on every device.' })).toBeInTheDocument()
     expect(within(page).queryByText(CAP_LINE)).not.toBeInTheDocument()
+    expect(within(page).queryByRole('button', { name: 'Skip, go to my mix' })).not.toBeInTheDocument()
   })
 
   it('keeps the identity block and Sign out for an account, with no sign-in row', async () => {
@@ -380,7 +391,7 @@ describe('a sign-in that came back failed', () => {
     const createSession = vi.fn(async (prompt: string) => createFakeApi().createSession(prompt))
     renderApp({ api: createFakeApi({ createSession }), signInError: 'Google sign-in did not finish.' })
     const page = await screen.findByTestId('sign-in-over-shell')
-    expect(within(page).getByRole('heading', { name: 'Keep your mixes.' })).toBeInTheDocument()
+    expect(within(page).getByRole('heading', { name: 'Your mixes, on every device.' })).toBeInTheDocument()
     expect(within(page).getByText(CAP_LINE)).toBeInTheDocument()
     expect(within(page).getByRole('alert')).toHaveTextContent('Google sign-in did not finish.')
     await waitFor(() => expect(screen.getByRole('textbox', { name: 'Describe your mix', hidden: true })).toHaveValue('late night drive'))
@@ -397,7 +408,7 @@ describe('a sign-in that came back failed', () => {
   it('reopens the Keep variant with the error when nothing was kept', async () => {
     renderApp({ signInError: 'Apple sign-in did not finish.' })
     const page = await screen.findByTestId('sign-in-over-shell')
-    expect(within(page).getByRole('heading', { name: 'Keep your mixes.' })).toBeInTheDocument()
+    expect(within(page).getByRole('heading', { name: 'Your mixes, on every device.' })).toBeInTheDocument()
     expect(within(page).queryByText(CAP_LINE)).not.toBeInTheDocument()
     expect(within(page).getByRole('alert')).toHaveTextContent('Apple sign-in did not finish.')
   })
@@ -448,7 +459,7 @@ describe('the Keep sheet in history', () => {
     renderApp({ api })
     await screen.findByRole('heading', { name: 'Home' })
     sendFromHome('late night drive')
-    await screen.findByRole('dialog', { name: 'Keep this mix.' })
+    await screen.findByRole('dialog', { name: 'Your mix is ready.' })
     await waitFor(() => expect(window.history.state?.mixtapeKeepSheet).toBe(true))
     act(() => window.history.back())
     await waitFor(() => expect(sheet()).not.toBeInTheDocument())
@@ -460,11 +471,11 @@ describe('the Keep sheet in history', () => {
     renderApp()
     await screen.findByRole('heading', { name: 'Home' })
     sendFromHome('late night drive')
-    await screen.findByRole('dialog', { name: 'Keep this mix.' })
+    await screen.findByRole('dialog', { name: 'Your mix is ready.' })
     await waitFor(() => expect(window.history.state?.mixtapeKeepSheet).toBe(true))
     const back = vi.spyOn(window.history, 'back')
     try {
-      fireEvent.click(screen.getByRole('button', { name: 'Not now' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Go to my mix' }))
       expect(back).toHaveBeenCalledOnce()
     } finally {
       back.mockRestore()
@@ -477,11 +488,11 @@ describe('the Keep sheet in history', () => {
     renderApp()
     await screen.findByRole('heading', { name: 'Home' })
     sendFromHome('late night drive')
-    await screen.findByRole('dialog', { name: 'Keep this mix.' })
+    await screen.findByRole('dialog', { name: 'Your mix is ready.' })
     await waitFor(() => expect(window.history.state?.mixtapeKeepSheet).toBe(true))
     const push = vi.spyOn(window.history, 'pushState')
     try {
-      fireEvent.click(screen.getByRole('button', { name: 'Keep this mix' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Create an account' }))
       expect(push).not.toHaveBeenCalled()
     } finally {
       push.mockRestore()
@@ -497,7 +508,7 @@ describe('the Keep sheet in history', () => {
     const push = vi.spyOn(window.history, 'pushState')
     try {
       renderApp({ initialSession: await mix() })
-      await screen.findByRole('dialog', { name: 'Keep this mix.' })
+      await screen.findByRole('dialog', { name: 'Your mix is ready.' })
       expect(push).not.toHaveBeenCalled()
       act(() => { window.dispatchEvent(new PopStateEvent('popstate', { state: null })) })
       expect(push).toHaveBeenCalledOnce()

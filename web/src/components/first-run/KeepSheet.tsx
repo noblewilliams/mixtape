@@ -2,8 +2,8 @@ import { useEffect, useRef } from 'react'
 import { Pill } from './FirstRunPage'
 import './first-run.css'
 
-export const KEEP_SHEET_HEADLINE = 'Keep this mix.'
-export const KEEP_SHEET_LINE = 'Sign in and your mixes and music stay with you on any device.'
+export const KEEP_SHEET_HEADLINE = 'Your mix is ready.'
+export const KEEP_SHEET_LINE = 'It’s saved on this device. Create an account to have it on your other devices too.'
 
 const SEEN_KEY = 'mixtape.keep-sheet-seen'
 
@@ -26,17 +26,19 @@ export function markKeepSheetSeen() {
 }
 
 type Props = {
-  /** The pill: opens the sign-in page. */
+  /** Create an account: opens the sign-in page. */
   onKeep: () => void
-  /** Not now, Escape, the handle and the backdrop. */
+  /** The pill (Go to my mix), Escape, the handle and the backdrop: back to the mix under the sheet. */
   onNotNow: () => void
 }
 
 /**
- * The Keep this mix sheet (board A6): cream paper, the headline, one line,
- * one paper pill and Not now. A bottom sheet on narrow widths, a centred
- * compact modal on wide ones. Provider buttons never appear here; they live
- * only on the sign-in page.
+ * The sheet over a new anonymous listener's first mix (board A6, copy amended
+ * 2026-11-06): it says the mix is ready, leads with Go to my mix, and keeps
+ * Create an account as the quieter choice, so nobody mistakes sign-in for the
+ * way to their mix. A bottom sheet on narrow widths, a centred compact modal
+ * on wide ones. Provider buttons never appear here; they live only on the
+ * sign-in page.
  */
 export function KeepSheet({ onKeep, onNotNow }: Props) {
   const heading = useRef<HTMLHeadingElement>(null)
@@ -66,10 +68,10 @@ export function KeepSheet({ onKeep, onNotNow }: Props) {
         </h2>
         <p className="ks-line">{KEEP_SHEET_LINE}</p>
         <div className="ks-acts">
-          <Pill go onClick={onKeep}>Keep this mix</Pill>
+          <Pill go onClick={onNotNow}>Go to my mix</Pill>
         </div>
         <p className="ks-foot">
-          <button type="button" className="ks-link" onClick={onNotNow}>Not now</button>
+          <button type="button" className="ks-link" onClick={onKeep}>Create an account</button>
         </p>
       </section>
     </div>

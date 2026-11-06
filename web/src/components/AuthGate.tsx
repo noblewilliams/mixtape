@@ -172,7 +172,7 @@ export function AuthGate({ auth, preferences = browserAuthPreferences, children,
 }
 
 /** The sign-in headline from the Keep sheet, the cap and the You row. */
-export const KEEP_HEADLINE = 'Keep your mixes.'
+export const KEEP_HEADLINE = 'Your mixes, on every device.'
 /** The cap's line under that headline. */
 export const CAP_LINE = 'That’s three mixes on this device. Sign in to keep going, and to keep these.'
 const WELCOME_SIGN_IN_HEADLINE = 'Your music, mixed for right now.'
@@ -203,13 +203,15 @@ type SignInPageProps = {
    * for flows that do not leave the page.
    */
   onSignedIn?: () => void
+  /** Reached from a new mix's sheet: a visible way back to that mix. */
+  onSkip?: () => void
 }
 
 /**
  * The provider sign-in page: the existing screen on the plum-black sign-in
  * image. The only place provider buttons appear.
  */
-export function SignInPage({ auth, preferences, lastUsed, error, variant = 'welcome', onStart, onSignedIn }: SignInPageProps) {
+export function SignInPage({ auth, preferences, lastUsed, error, variant = 'welcome', onStart, onSignedIn, onSkip }: SignInPageProps) {
   const [redirecting, setRedirecting] = useState<AuthProvider | null>(null)
   const [localError, setLocalError] = useState<string | null>(null)
   const waiting = redirecting !== null
@@ -289,6 +291,9 @@ export function SignInPage({ auth, preferences, lastUsed, error, variant = 'welc
             <p className={`auth-error ${errorMessage ? 'is-visible' : ''}`} role={errorMessage ? 'alert' : undefined}>
               {errorMessage || '\u00a0'}
             </p>
+            {onSkip ? (
+              <button type="button" className="auth-skip" onClick={onSkip} disabled={waiting}>Skip, go to my mix</button>
+            ) : null}
           </div>
         </div>
       </section>
