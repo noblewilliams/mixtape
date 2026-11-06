@@ -16,6 +16,7 @@ import { userTracks, userMusicSources } from '../../src/db/schema'
 import {
   APPLE_ISRC_SUBREQUESTS,
   CRON_BATCH,
+  CRON_ENRICH_STEP,
   ENRICH_CRON_OVERHEAD_SUBREQUESTS,
   FALLBACK_ARTWORK_CALLS_PER_ROW,
   ENRICH_BATCH_CAP,
@@ -192,20 +193,24 @@ describe('enrichment subrequest budget', () => {
     expect(new Set(hosts)).toEqual(new Set(['open.spotify.com', 'api.deezer.com']))
   })
 
-  it('derives the batch from the measurement, then ships at the first step', () => {
-    expect(ENRICH_SUBREQUEST_BUDGET).toBe(40)
+  it('derives the batch from the paid plan\'s budget: the cron takes 10, the drain route stays at 5', () => {
+    // Workers Paid allows 1,000 subrequests per invocation; 100 are held back.
+    expect(ENRICH_SUBREQUEST_BUDGET).toBe(900)
     expect(ENRICH_CRON_OVERHEAD_SUBREQUESTS)
       .toBe(APPLE_ISRC_SUBREQUESTS + FALLBACK_ARTWORK_BATCH * FALLBACK_ARTWORK_CALLS_PER_ROW)
     expect(ENRICH_CRON_OVERHEAD_SUBREQUESTS).toBe(7)
-    expect(largestEnrichBatch(0)).toBe(7)
-    expect(largestEnrichBatch(ENRICH_CRON_OVERHEAD_SUBREQUESTS)).toBe(6)
+    // The cap is the shared ReccoBeats by-id lookup's batch, not the budget.
+    expect(largestEnrichBatch(0)).toBe(ENRICH_BATCH_CAP)
+    expect(largestEnrichBatch(ENRICH_CRON_OVERHEAD_SUBREQUESTS)).toBe(ENRICH_BATCH_CAP)
     expect(ENRICH_FIXED_SUBREQUESTS + ENRICH_SUBREQUESTS_PER_TRACK * MAX_BATCH)
       .toBeLessThanOrEqual(ENRICH_SUBREQUEST_BUDGET)
     expect(ENRICH_CRON_OVERHEAD_SUBREQUESTS + ENRICH_FIXED_SUBREQUESTS + ENRICH_SUBREQUESTS_PER_TRACK * CRON_BATCH)
       .toBeLessThanOrEqual(ENRICH_SUBREQUEST_BUDGET)
+    // LRCLIB answers 429 to a faster pace, so the steps are set by it, not the budget.
     expect(ENRICH_BATCH_STEP).toBe(5)
-    expect(CRON_BATCH).toBe(Math.min(largestEnrichBatch(ENRICH_CRON_OVERHEAD_SUBREQUESTS), ENRICH_BATCH_STEP))
-    expect(CRON_BATCH).toBe(5)
-    expect(MAX_BATCH).toBe(Math.min(largestEnrichBatch(0), ENRICH_BATCH_STEP))
+    expect(CRON_ENRICH_STEP).toBe(10)
+    expect(CRON_BATCH).toBe(10)
+    expect(MAX_BATCH).toBe(5)
   })
+
 })

@@ -15,7 +15,7 @@
   // Dispatched on event.cron (src/enrich/scheduled.ts); keep the two in step.
   // The free plan allows 5 triggers per account; one stays spare.
   "triggers": {
-    "crons": ["0 * * * *", "2 * * * *", "22 * * * *", "42 * * * *"]
+    "crons": ["0 * * * *", "2 * * * *", "12 * * * *", "22 * * * *", "32 * * * *", "42 * * * *", "52 * * * *"]
   },
   "vars": {
     // Public OAuth identifier, not a secret — it ships with `wrangler deploy`,

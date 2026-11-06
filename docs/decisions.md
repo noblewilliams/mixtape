@@ -1292,3 +1292,17 @@ TuneMyMusic.
 **Reopens if:** Spotify grants us extended API access (then: create the
 playlist directly), or TuneMyMusic's free-text page changes or caps lower than
 a mix.
+
+## 2026-11-06 — Enrichment cron runs every 10 minutes, 10 songs a run (Workers Paid)
+
+The founder confirmed the API is on Workers Paid (10M requests a month), so
+the free plan's 50-subrequest ceiling no longer shapes enrichment. Most chart
+songs seeded on 2026-10-22 had never been analysed (7,854 of 10,859), so the
+usable catalogue was still mostly the founder's own library and mixes leaned
+on their taste. The subrequest budget is now 900 of 1,000; the batch is set
+by LRCLIB's tolerance, not the budget: a cron run takes 10 songs
+(`CRON_ENRICH_STEP`), and enrichment crons run at :02, :12, :22, :32, :42 and
+:52 (about 1,400 songs a day). The drain route keeps 5 per call, the pace it
+has been seen to hold at a 10 s delay. **Reopens if:** LRCLIB 429s climb in
+the cron logs (drop the step), or a provider with a real rate limit replaces
+LRCLIB.

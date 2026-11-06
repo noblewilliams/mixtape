@@ -31,7 +31,8 @@ import {
   type SpotifyArtworkResult,
 } from '../artwork/spotify-fallback'
 
-// Free-plan Workers allow 50 subrequests per invocation. The database is not
+// Workers Paid allows 1,000 subrequests per invocation (confirmed 2026-11-06;
+// the free plan's 50 shaped the first version of this). The database is not
 // one of them: buildDb in src/index.ts uses the neon-serverless WebSocket
 // pool, so statements run over an open socket rather than one fetch each.
 // What counts is outbound fetches and the Workers AI binding, measured worst
@@ -45,8 +46,8 @@ import {
 // iTunes is a no-op in production and makes no request.
 export const ENRICH_FIXED_SUBREQUESTS = 2
 export const ENRICH_SUBREQUESTS_PER_TRACK = 5
-// 10 of the 50 are held back for the pool's connections and retries.
-export const ENRICH_SUBREQUEST_BUDGET = 40
+// 100 of the 1,000 are held back for the pool's connections and retries.
+export const ENRICH_SUBREQUEST_BUDGET = 900
 // runAppleIsrcBatch shares the enrichment cron's invocation: one catalogue
 // request for up to APPLE_ISRC_BATCH ISRCs.
 export const APPLE_ISRC_SUBREQUESTS = 1
@@ -57,7 +58,8 @@ export const FALLBACK_ARTWORK_CALLS_PER_ROW = 2
 // Apple ISRC linking (1) plus the fallback's worst case (3 rows x 2 = 6).
 export const ENRICH_CRON_OVERHEAD_SUBREQUESTS =
   APPLE_ISRC_SUBREQUESTS + FALLBACK_ARTWORK_BATCH * FALLBACK_ARTWORK_CALLS_PER_ROW
-export const ENRICH_BATCH_CAP = 8
+// The shared ReccoBeats by-id lookups take this many ids in one request.
+export const ENRICH_BATCH_CAP = 40
 
 // Largest batch whose worst case fits the budget alongside `otherSubrequests`.
 export function largestEnrichBatch(otherSubrequests: number): number {
@@ -65,13 +67,14 @@ export function largestEnrichBatch(otherSubrequests: number): number {
   return Math.min(ENRICH_BATCH_CAP, Math.max(0, Math.floor(room / ENRICH_SUBREQUESTS_PER_TRACK)))
 }
 
-// Step-up rule: subrequests allow 6 in the cron and 7 through /enrich/run, but
-// more tracks also spend more of the free plan's 10 ms CPU, which no test
-// measures. Ship at 5 first; the founder checks one day of `maintenance cron`
-// logs for CPU-limit kills or `failed` markers before this step is raised. It
-// never goes past largestEnrichBatch, which also enforces the cap of 8.
+// The budget is no longer what limits a batch: LRCLIB is. It answers 429 when
+// tracks come faster than a few seconds apart, and a 429 spends one of a
+// track's transient attempts. The drain route (/enrich/run, called every
+// 10 s by scripts/drain-enrichment.ts) keeps the 5 it has been proven at; a
+// cron run takes 10, spaced 10 minutes apart (decisions 2026-11-06).
 export const ENRICH_BATCH_STEP = 5
-export const CRON_BATCH = Math.min(largestEnrichBatch(ENRICH_CRON_OVERHEAD_SUBREQUESTS), ENRICH_BATCH_STEP)
+export const CRON_ENRICH_STEP = 10
+export const CRON_BATCH = Math.min(largestEnrichBatch(ENRICH_CRON_OVERHEAD_SUBREQUESTS), CRON_ENRICH_STEP)
 export const ARTWORK_CRON_BATCH = 300
 
 export type ScheduledDeps = {
@@ -89,14 +92,15 @@ export type ScheduledDeps = {
 // linking and the Spotify artwork fallback. Linking follows enrichment because
 // enrichment produces ISRCs; the fallback follows linking so Apple gets its
 // chance before a Spotify or Deezer thumbnail is written.
-// :22 and :42 repeat the enrichment set (spec 2026-10-21 Step 3b): three
-// times the pace, each run with its own budget, 20 minutes apart so LRCLIB
-// sees a gentle rate. Maintenance stays hourly. Four of the free plan's five
-// triggers; one stays spare.
+// :12 through :52 repeat the enrichment set (spec 2026-10-21 Step 3b, every
+// 10 minutes since 2026-11-06 on Workers Paid): each run with its own budget,
+// spaced so LRCLIB sees a gentle rate. Maintenance stays hourly.
 // Keep these equal to `triggers.crons` in wrangler.jsonc.
 export const MAINTENANCE_CRON = '0 * * * *'
 export const ENRICHMENT_CRON = '2 * * * *'
-export const ENRICHMENT_CRONS: readonly string[] = [ENRICHMENT_CRON, '22 * * * *', '42 * * * *']
+export const ENRICHMENT_CRONS: readonly string[] = [
+  ENRICHMENT_CRON, '12 * * * *', '22 * * * *', '32 * * * *', '42 * * * *', '52 * * * *',
+]
 
 export type ScheduledJobs = 'maintenance' | 'enrichment'
 

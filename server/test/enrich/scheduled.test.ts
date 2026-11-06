@@ -52,13 +52,14 @@ function recordingRunners(order: string[]) {
 }
 
 describe('cron dispatch', () => {
-  it('declares maintenance plus the three enrichment crons in wrangler.jsonc, inside the 5-trigger limit', () => {
+  it('declares maintenance plus an enrichment cron every 10 minutes in wrangler.jsonc', () => {
     const config = readFileSync(new URL('../../wrangler.jsonc', import.meta.url), 'utf8')
     const crons = /"crons"\s*:\s*(\[[^\]]*\])/.exec(config)?.[1]
     expect(JSON.parse(crons ?? 'null')).toEqual([MAINTENANCE_CRON, ...ENRICHMENT_CRONS])
-    expect([MAINTENANCE_CRON, ...ENRICHMENT_CRONS]).toEqual(['0 * * * *', '2 * * * *', '22 * * * *', '42 * * * *'])
+    expect([MAINTENANCE_CRON, ...ENRICHMENT_CRONS]).toEqual([
+      '0 * * * *', '2 * * * *', '12 * * * *', '22 * * * *', '32 * * * *', '42 * * * *', '52 * * * *',
+    ])
     expect(ENRICHMENT_CRONS[0]).toBe(ENRICHMENT_CRON)
-    expect(JSON.parse(crons ?? '[]').length).toBeLessThanOrEqual(4)
   })
 
   it('maps each cron to its job set and anything else to none', () => {
@@ -68,14 +69,14 @@ describe('cron dispatch', () => {
     expect(jobsForCron('')).toBeNull()
   })
 
-  it('runs the :22 and :42 triggers as the same enrichment-only set as :02', () => {
-    expect(jobsForCron('22 * * * *')).toBe(jobsForCron('2 * * * *'))
-    expect(jobsForCron('42 * * * *')).toBe(jobsForCron('2 * * * *'))
-    expect(jobsForCron('22 * * * *')).toBe('enrichment')
+  it('runs every enrichment trigger as the same enrichment-only set as :02', () => {
+    for (const cron of ['12 * * * *', '22 * * * *', '32 * * * *', '42 * * * *', '52 * * * *']) {
+      expect(jobsForCron(cron)).toBe('enrichment')
+    }
   })
 
   it('runs maintenance only at :00', () => {
-    const maintenance = ['0 * * * *', '2 * * * *', '22 * * * *', '42 * * * *'].filter((c) => jobsForCron(c) === 'maintenance')
+    const maintenance = [MAINTENANCE_CRON, ...ENRICHMENT_CRONS].filter((c) => jobsForCron(c) === 'maintenance')
     expect(maintenance).toEqual(['0 * * * *'])
     expect(jobsForCron('20 * * * *')).toBeNull()
     expect(jobsForCron('40 * * * *')).toBeNull()

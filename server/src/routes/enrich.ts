@@ -10,11 +10,11 @@ import {
   type ArtworkDeps,
 } from '../artwork/runner'
 
-// One request is one invocation with the free plan's 50-subrequest ceiling.
-// Database statements do not count (WebSocket pool, see buildDb); external
-// calls do, and their measured worst case lives beside CRON_BATCH in
-// enrich/scheduled.ts. Same step-up rule: ship at ENRICH_BATCH_STEP until a
-// day of logs shows no CPU-limit kills.
+// One request is one invocation with its own subrequest budget. Database
+// statements do not count (WebSocket pool, see buildDb); external calls do,
+// and their measured worst case lives beside CRON_BATCH in
+// enrich/scheduled.ts. The drain calls this every 10 s, so it stays at
+// ENRICH_BATCH_STEP, the pace LRCLIB has been seen to accept.
 export const MAX_BATCH = Math.min(largestEnrichBatch(0), ENRICH_BATCH_STEP)
 
 export type EnrichRouteDeps = {
