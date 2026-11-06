@@ -31,6 +31,7 @@ import 'package:mixtape/presentation/screens/mix_history_screen.dart';
 import 'package:mixtape/presentation/screens/playback_screen.dart';
 import 'package:mixtape/presentation/screens/queue_screen.dart';
 import 'package:mixtape/presentation/widgets/mix_handoff.dart';
+import 'package:mixtape/presentation/widgets/spotify_handoff_sheets.dart';
 import 'package:mixtape/presentation/widgets/tape_header.dart';
 import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
@@ -42,7 +43,7 @@ import '../data/playback/playback_controller_test.dart'
     as playback
     show FakeApi, FakeBridge;
 import '../helpers/fake_listening_api.dart';
-import '../helpers/fake_text_sharer.dart';
+import '../helpers/fake_clipboard_writer.dart';
 import '../helpers/onboarding_harness.dart' show FakeLinkOpener;
 
 /// Mirrors chat_screen_test.dart's FakeDjApi: implements DjApi's public
@@ -398,13 +399,14 @@ ProviderContainer _makeContainer(
   FunnelOnceStore? milestones,
   FakeLinkOpener? links,
   LinkProbe? probe,
-  FakeTextSharer? sharer,
+  FakeClipboardWriter? clipboard,
+  PlayDestinationStore? destinations,
   PlaybackController? player,
 }) {
   final container = ProviderContainer(
     overrides: [
       playDestinationStoreProvider.overrideWithValue(
-        InMemoryPlayDestinationStore(),
+        destinations ?? InMemoryPlayDestinationStore(),
       ),
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
       djApiProvider.overrideWithValue(api),
@@ -429,7 +431,9 @@ ProviderContainer _makeContainer(
       ),
       linkOpenerProvider.overrideWithValue((links ?? FakeLinkOpener()).call),
       linkProbeProvider.overrideWithValue(probe ?? (_) async => false),
-      textSharerProvider.overrideWithValue(sharer ?? FakeTextSharer()),
+      clipboardWriterProvider.overrideWithValue(
+        clipboard ?? FakeClipboardWriter(),
+      ),
       // The real controller reaches the player method channel and GET
       // /playback; the screen watches it to know whether THIS mix is playing.
       playbackProvider.overrideWithValue(
@@ -1547,56 +1551,63 @@ void main() {
     });
 
     testWidgets(
-      'Play on Spotify shares one "Artist – Title" line per track under the session title, then confirms',
+      'Play on Spotify explains once, then copies every song and opens TuneMyMusic',
       (tester) async {
         final api = FakeDjApi();
         api.onGetSession = (_) async => SessionDetail(
           session: _session(title: 'Late drive'),
           messages: [],
-          // A track with neither id still goes into the text: the tool searches by name.
+          // A track with neither id still goes into the list: the tool searches by name.
           queue: [_spotifyTrack(0), _spotifyTrack(1), _track(2, appleId: null)],
         );
-        final sharer = FakeTextSharer();
+        final clipboard = FakeClipboardWriter();
         final links = FakeLinkOpener();
-        final container = _makeContainer(api, sharer: sharer, links: links);
+        final store = InMemoryPlayDestinationStore();
+        final container = _makeContainer(
+          api,
+          clipboard: clipboard,
+          links: links,
+          destinations: store,
+        );
         await _pump(tester, container);
 
         await tester.tap(find.byKey(const Key('share-button')));
         await tester.pumpAndSettle();
 
-        expect(sharer.shares, hasLength(1));
-        expect(
-          sharer.shares.single.text,
-          'Artist 0 – Title 0\nArtist 1 – Title 1\nArtist 2 – Title 2',
-        );
-        expect(sharer.shares.single.subject, 'Mixtape · Late drive');
-        // iPad shows the sheet as a popover and needs an anchor: the share
-        // button's own rect, on screen (share_plus throws on an empty one).
-        final origin = sharer.shares.single.origin;
-        expect(origin.isEmpty, isFalse);
-        expect(
-          (Offset.zero &
-                  tester.view.physicalSize / tester.view.devicePixelRatio)
-              .contains(origin.topLeft),
-          isTrue,
-        );
-        expect(origin.width, greaterThanOrEqualTo(44));
-        // Parity with the web rail: the handoff also opens the tool's own page,
-        // so the listener has somewhere to paste what they just shared.
+        // The first time: what is about to happen, before anything does.
+        expect(find.text(SpotifyHandoffSheet.headline), findsOneWidget);
+        expect(find.text(SpotifyHandoffSheet.lineFor(3)), findsOneWidget);
+        expect(clipboard.copies, isEmpty);
+        expect(links.opened, isEmpty);
+
+        await tester.tap(find.byKey(SpotifyHandoffSheet.goKey));
+        await tester.pumpAndSettle();
+
+        expect(clipboard.copies, [
+          'Artist 0 - Title 0\nArtist 1 - Title 1\nArtist 2 - Title 2',
+        ]);
         expect(links.opened, [
-          Uri.parse('https://www.tunemymusic.com/transfer'),
+          Uri.parse('https://www.tunemymusic.com/transfer/freetext-to-spotify'),
         ]);
         expect(
-          find.text(
-            'Shared 3 songs · TuneMyMusic makes the playlist in Spotify',
-          ),
+          find.text('Copied 3 songs · paste them into TuneMyMusic'),
           findsOneWidget,
         );
+        expect(await store.spotifyIntroSeen(), isTrue);
+
+        // After that, a tap goes straight there.
+        await tester.pump(const Duration(seconds: 5));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('share-button')));
+        await tester.pumpAndSettle();
+        expect(find.text(SpotifyHandoffSheet.headline), findsNothing);
+        expect(clipboard.copies, hasLength(2));
+        expect(links.opened, hasLength(2));
       },
     );
 
     testWidgets(
-      'a share the listener dismissed confirms nothing and counts as no output',
+      'closing the explainer copies nothing and counts as no output',
       (tester) async {
         final api = FakeDjApi();
         api.onGetSession = (_) async => SessionDetail(
@@ -1604,24 +1615,29 @@ void main() {
           messages: [],
           queue: [_spotifyTrack(0)],
         );
-        final sharer = FakeTextSharer()..handedOff = false;
+        final clipboard = FakeClipboardWriter();
         final listening = FakeListeningApi();
         final links = FakeLinkOpener();
+        final store = InMemoryPlayDestinationStore();
         final container = _makeContainer(
           api,
-          sharer: sharer,
+          clipboard: clipboard,
           listening: listening,
           links: links,
+          destinations: store,
         );
         await _pump(tester, container);
 
         await tester.tap(find.byKey(const Key('share-button')));
         await tester.pumpAndSettle();
+        await tester.tap(find.byKey(SpotifyHandoffSheet.cancelKey));
+        await tester.pumpAndSettle();
 
-        expect(sharer.shares, hasLength(1));
-        expect(find.textContaining('shared'), findsNothing);
+        expect(find.text(SpotifyHandoffSheet.headline), findsNothing);
+        expect(clipboard.copies, isEmpty);
         expect(links.opened, isEmpty, reason: 'no handoff, no transfer tool');
         expect(listening.funnelEvents, isEmpty);
+        expect(await store.spotifyIntroSeen(), isFalse);
       },
     );
 

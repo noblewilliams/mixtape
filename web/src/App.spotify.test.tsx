@@ -748,6 +748,27 @@ describe('Spotify mix outputs', () => {
     await waitFor(() => expect(funnelTypes(api, 'first_personal_mix')).toHaveLength(1))
   })
 
+  it('asks a listener with no known service where they listen, and remembers Spotify', async () => {
+    const api = apiWithOnboarding({ chosenService: null })
+    Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn(async () => undefined) } })
+    vi.spyOn(window, 'open').mockImplementation(() => null)
+    renderApp({ api })
+    await settled(api)
+    fireEvent.click(screen.getByRole('button', { name: 'Mixes' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Blue hour, windows down' }))
+    await screen.findByRole('heading', { name: 'Blue hour, windows down' })
+
+    const ask = await screen.findByRole('group', { name: 'Where do you listen?' })
+    fireEvent.click(within(ask).getByRole('button', { name: 'Play on Spotify' }))
+    expect(localStorage.getItem('mixtape.plays-on')).toBe('spotify')
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy songs and open TuneMyMusic' }))
+
+    // From now on the mix leads with Spotify, and Apple waits behind a quiet link.
+    await waitFor(() => expect(screen.queryByRole('group', { name: 'Where do you listen?' })).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'Play on Spotify' })).toHaveClass('primary')
+    expect(screen.queryByRole('button', { name: 'Connect Apple Music' })).not.toBeInTheDocument()
+  })
+
   it('posts first_output once across Open in Spotify, Copy for Spotify, and the transfer handoff', async () => {
     const base = createFakeApi()
     const api = apiWithOnboarding(
@@ -779,6 +800,7 @@ describe('Spotify mix outputs', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Copy for Spotify' }))
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
     fireEvent.click(screen.getByRole('button', { name: 'Play on Spotify' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy songs and open TuneMyMusic' }))
     await waitFor(() => expect(open).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(2))
 

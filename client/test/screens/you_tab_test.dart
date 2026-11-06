@@ -9,6 +9,7 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixtape/presentation/providers/play_destination_provider.dart';
 import 'package:mixtape/data/auth/account_api.dart';
 import 'package:mixtape/data/auth/google_auth_gateway.dart';
 import 'package:mixtape/data/auth/token_store.dart';
@@ -258,12 +259,16 @@ ProviderContainer _container({
   PlaybackController? player,
   List<DjMemory> memories = const [],
   String? chosenService = 'apple',
+  PlayDestinationStore? destinations,
 }) {
   _slot = _ApiSlot(suggestions ?? FakeSuggestionsApi());
   final opened = _opened = <Uri>[];
   final container = ProviderContainer(
     overrides: [
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
+      playDestinationStoreProvider.overrideWithValue(
+        destinations ?? InMemoryPlayDestinationStore(),
+      ),
       authProvider.overrideWith(() => auth ?? _Auth()),
       accountProvider.overrideWith(() => _Accounts(accounts)),
       accountNameProvider.overrideWith((ref) async => name),
@@ -607,6 +612,42 @@ void main() {
     });
   });
 
+  group('Play mixes on', () {
+    testWidgets('shows where Play goes, and changes it', (tester) async {
+      final store = InMemoryPlayDestinationStore();
+      await _pump(tester, _container(destinations: store));
+
+      final row = find.byKey(YouTab.playsOnKey);
+      expect(row, findsOneWidget);
+      expect(find.text(YouTab.playsOnTitle), findsOneWidget);
+      expect(find.text('Not chosen yet'), findsOneWidget);
+
+      await tester.tap(row);
+      await tester.pumpAndSettle();
+      expect(find.text('Spotify'), findsOneWidget);
+      expect(find.text('Apple Music, in Mixtape'), findsOneWidget);
+      expect(find.text('Apple Music app'), findsOneWidget);
+
+      await tester.tap(find.text('Spotify'));
+      await tester.pumpAndSettle();
+      expect(await store.read(), PlayDestination.spotify);
+      expect(find.text('Spotify'), findsOneWidget);
+      expect(find.text('Not chosen yet'), findsNothing);
+    });
+
+    testWidgets('reads the remembered choice', (tester) async {
+      await _pump(
+        tester,
+        _container(
+          destinations: InMemoryPlayDestinationStore(
+            PlayDestination.appleMusic,
+          ),
+        ),
+      );
+      expect(find.text('Apple Music app'), findsOneWidget);
+    });
+  });
+
   group('Together', () {
     testWidgets('is a labelled ghost and takes no tap', (tester) async {
       final handle = tester.ensureSemantics();
@@ -661,6 +702,8 @@ void main() {
       final auth = _Auth();
       await _pump(tester, _container(auth: auth));
 
+      await tester.ensureVisible(find.byKey(const Key('you-signout')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('you-signout')));
       await tester.pumpAndSettle();
 
@@ -671,6 +714,8 @@ void main() {
       final auth = _Auth()..gate = Completer<void>();
       await _pump(tester, _container(auth: auth));
 
+      await tester.ensureVisible(find.byKey(const Key('you-signout')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('you-signout')));
       await tester.pump();
       // Disabled means the row drops its InkWell, so the second tap has
@@ -691,6 +736,8 @@ void main() {
       final auth = _Auth()..failSignOut = true;
       await _pump(tester, _container(auth: auth));
 
+      await tester.ensureVisible(find.byKey(const Key('you-signout')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('you-signout')));
       await tester.pumpAndSettle();
 

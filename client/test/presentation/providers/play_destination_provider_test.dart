@@ -8,10 +8,26 @@ class _BrokenStore implements PlayDestinationStore {
   @override
   Future<void> write(PlayDestination destination) async =>
       throw Exception('no keychain');
+  @override
+  Future<bool> spotifyIntroSeen() async => throw Exception('no keychain');
+  @override
+  Future<void> markSpotifyIntroSeen() async => throw Exception('no keychain');
 }
 
 void main() {
-  test('defaults to the app player and adopts the stored choice', () async {
+  test('Spotify is a destination of its own, on the wire as spotify', () {
+    expect(PlayDestination.spotify.wire, 'spotify');
+    expect(PlayDestination.fromWire('spotify'), PlayDestination.spotify);
+  });
+
+  test('the Spotify explainer is remembered as seen on the device', () async {
+    final store = InMemoryPlayDestinationStore();
+    expect(await store.spotifyIntroSeen(), isFalse);
+    await store.markSpotifyIntroSeen();
+    expect(await store.spotifyIntroSeen(), isTrue);
+  });
+
+  test('nothing is chosen until the listener chooses or the store says', () async {
     final container = ProviderContainer(
       overrides: [
         playDestinationStoreProvider.overrideWithValue(
@@ -20,7 +36,7 @@ void main() {
       ],
     );
     addTearDown(container.dispose);
-    expect(container.read(playDestinationProvider), PlayDestination.here);
+    expect(container.read(playDestinationProvider), isNull);
     await Future<void>.delayed(Duration.zero);
     expect(container.read(playDestinationProvider), PlayDestination.appleMusic);
   });
@@ -39,7 +55,7 @@ void main() {
     expect(await store.read(), PlayDestination.appleMusic);
   });
 
-  test('a store that fails leaves the default and still takes choices', () async {
+  test('a store that fails leaves nothing chosen and still takes choices', () async {
     final container = ProviderContainer(
       overrides: [
         playDestinationStoreProvider.overrideWithValue(_BrokenStore()),
@@ -48,7 +64,7 @@ void main() {
     addTearDown(container.dispose);
     container.read(playDestinationProvider);
     await Future<void>.delayed(Duration.zero);
-    expect(container.read(playDestinationProvider), PlayDestination.here);
+    expect(container.read(playDestinationProvider), isNull);
     await container
         .read(playDestinationProvider.notifier)
         .choose(PlayDestination.appleMusic);

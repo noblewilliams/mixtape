@@ -11,17 +11,18 @@ final playDestinationStoreProvider = Provider<PlayDestinationStore>(
   (ref) => SecurePlayDestinationStore(),
 );
 
-/// The Play button's remembered destination. Starts on the app's own player
-/// and adopts the stored choice once it is read; a store that cannot be read
-/// simply leaves the default.
-class PlayDestinationNotifier extends Notifier<PlayDestination> {
+/// The Play button's remembered destination: null until the listener has
+/// chosen (here or on an earlier launch), so a listener with no known service
+/// can be asked once. Callers fall back with [mixPlayDestination]. A store
+/// that cannot be read simply leaves nothing chosen.
+class PlayDestinationNotifier extends Notifier<PlayDestination?> {
   bool _chosen = false;
 
   @override
-  PlayDestination build() {
+  PlayDestination? build() {
     _chosen = false;
     unawaited(_load());
-    return PlayDestination.here;
+    return null;
   }
 
   Future<void> _load() async {
@@ -49,6 +50,6 @@ class PlayDestinationNotifier extends Notifier<PlayDestination> {
 }
 
 final playDestinationProvider =
-    NotifierProvider<PlayDestinationNotifier, PlayDestination>(
+    NotifierProvider<PlayDestinationNotifier, PlayDestination?>(
       PlayDestinationNotifier.new,
     );

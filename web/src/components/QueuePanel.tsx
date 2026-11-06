@@ -12,6 +12,8 @@ import { ApiError, type QueueOp } from '../api/client'
 import type { DjSession, QueueTrack } from '../domain'
 import { CloseIcon, ErrorCircleIcon, SuccessCircleIcon, UndoIcon } from './Icons'
 import { ConnectMusicButton, LabelButton, PlayButton } from './TapeActions'
+import { ControlModal } from './ControlModal'
+import { markSpotifyIntroSeen, spotifyIntroSeen, type PlaysOn } from '../lib/plays-on'
 
 export type MusicConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
 
@@ -35,6 +37,14 @@ type QueuePanelProps = {
    * Apple Music stays one quiet link away, and every row opens in Spotify.
    */
   spotifyOnly?: boolean
+  /**
+   * Nothing says where this listener listens (no service chosen, no Apple
+   * library, no remembered choice): the rail asks, with Spotify and Apple
+   * Music side by side, and the answer is remembered (decisions 2026-11-06).
+   */
+  askService?: boolean
+  /** The listener answered where they listen, from the ask or "Use Apple Music instead". */
+  onChooseService?: (choice: PlaysOn) => void
 }
 
 type SwipeState = {
@@ -71,12 +81,25 @@ const WHEEL_RELEASE_MS = 120
 
 // Spotify outputs (docs/mockups/approved/2026-09-04-web-spotify-import.md,
 // "The mix rail for a Spotify listener", amended in docs/decisions.md
-// 2026-11-03). Play on Spotify hands off to TuneMyMusic: of the two
-// candidates on the board it is the one whose transfer page accepts pasted
-// "Artist – Title" text without an account.
+// 2026-11-03 and 2026-11-06). Play on Spotify copies "Artist - Title" lines
+// and opens TuneMyMusic's free-text-to-Spotify page, which builds the
+// playlist: Spotify's own API is closed to apps our size.
 const SPOTIFY_TRACK_URL = 'https://open.spotify.com/track/'
 const SPOTIFY_SEARCH_URL = 'https://open.spotify.com/search/'
-const TRANSFER_TOOL_URL = 'https://www.tunemymusic.com/transfer'
+const TRANSFER_TOOL_URL = 'https://www.tunemymusic.com/transfer/freetext-to-spotify'
+const ASK_TITLE = 'Where do you listen?'
+const INTRO_TITLE = 'Make it a Spotify playlist'
+const INTRO_GO = 'Copy songs and open TuneMyMusic'
+
+function introLine(count: number) {
+  return count === 1
+    ? 'We’ll copy the song and open TuneMyMusic. Paste it in, connect Spotify, and it makes the playlist for you.'
+    : `We’ll copy your ${count} songs and open TuneMyMusic. Paste them in, connect Spotify, and it makes the playlist for you.`
+}
+
+function copiedSongs(count: number) {
+  return count === 1 ? 'Copied 1 song · paste it into TuneMyMusic' : `Copied ${count} songs · paste them into TuneMyMusic`
+}
 const COPY_HINT = 'Paste the links into a new playlist in Spotify on your computer.'
 const COPY_FAILED = 'Couldn’t copy on this browser.'
 const PLAY_HINT = 'Copies your songs and opens TuneMyMusic, which builds the playlist in Spotify for you.'
@@ -144,7 +167,10 @@ export function QueuePanel({
   onCommitQueueOp,
   onOutput,
   spotifyOnly = false,
+  askService = false,
+  onChooseService,
 }: QueuePanelProps) {
+  const [introOpen, setIntroOpen] = useState(false)
   const [displayTracks, setDisplayTracks] = useState(() => withPositions(tracks))
   const [swipe, setSwipeState] = useState<SwipeState | null>(null)
   const [draggedTrackId, setDraggedTrackId] = useState<string | null>(null)
@@ -171,8 +197,14 @@ export function QueuePanel({
   // return once they start connecting Apple Music.
   const hasApple = displayTracks.some((track) => track.appleId)
   const hasSpotify = displayTracks.some((track) => track.spotifyId)
-  const showApple = hasApple && (!spotifyOnly || musicConnection !== 'disconnected')
-  const showSpotify = hasSpotify || spotifyOnly
+  // Play on Spotify works on every mix (TuneMyMusic searches by name), so it
+  // is always offered: leading for a Spotify listener or a mix Apple cannot
+  // play, after the Apple controls otherwise. With nothing known, the rail
+  // asks instead (askService) and shows both as one choice.
+  const asking = askService && hasApple && musicConnection === 'disconnected'
+  const showApple = !asking && hasApple && (!spotifyOnly || musicConnection !== 'disconnected')
+  const showSpotify = !asking
+  const spotifyLeads = spotifyOnly || !showApple
 
   useEffect(() => {
     const normalized = withPositions(tracks)
@@ -309,8 +341,16 @@ export function QueuePanel({
     onOutput?.()
   }
 
-  async function playOnSpotify() {
-    const lines = displayTracksRef.current.map((track) => `${track.artist} – ${track.title}`)
+  function playOnSpotify() {
+    if (!spotifyIntroSeen()) {
+      setIntroOpen(true)
+      return
+    }
+    void handOffToSpotify()
+  }
+
+  async function handOffToSpotify() {
+    const lines = displayTracksRef.current.map((track) => `${track.artist} - ${track.title}`)
     // Start the clipboard write and open the tool in the same gesture frame:
     // the write needs this document still focused, the new tab needs the
     // user activation that an await would spend.
@@ -318,7 +358,17 @@ export function QueuePanel({
     window.open(TRANSFER_TOOL_URL, '_blank', 'noopener')
     onOutput?.()
     const copied = await write
-    showOutputToast(copied ? `Copied ${lines.length} ${lines.length === 1 ? 'song' : 'songs'}` : COPY_FAILED)
+    showOutputToast(copied ? copiedSongs(lines.length) : COPY_FAILED)
+  }
+
+  function chooseSpotify() {
+    onChooseService?.('spotify')
+    playOnSpotify()
+  }
+
+  function chooseApple() {
+    onChooseService?.('apple')
+    onConnect()
   }
 
   function moveTrack(from: number, to: number) {
@@ -669,9 +719,20 @@ export function QueuePanel({
         </div>
       ) : null}
 
+      {displayTracks.length > 0 && asking ? (
+        <div className="rail-actions rail-ask" role="group" aria-label={ASK_TITLE}>
+          <p className="rail-ask-title">{ASK_TITLE}</p>
+          <button className="btn primary" type="button" onClick={chooseSpotify}>
+            Play on Spotify
+          </button>
+          <ConnectMusicButton state="disconnected" onClick={chooseApple} />
+          <p className="rail-hint">We’ll remember it. You can change it in Settings.</p>
+        </div>
+      ) : null}
+
       {displayTracks.length > 0 && showSpotify ? (
         <div className="rail-actions">
-          <button className="btn primary" type="button" onClick={() => void playOnSpotify()}>
+          <button className={spotifyLeads ? 'btn primary' : 'btn'} type="button" onClick={playOnSpotify}>
             Play on Spotify
           </button>
           {hasSpotify ? (
@@ -686,7 +747,7 @@ export function QueuePanel({
             <p className="rail-hint">{PLAY_HINT}</p>
           )}
           {spotifyOnly && hasApple && !showApple ? (
-            <button className="rail-apple-link" type="button" onClick={onConnect}>
+            <button className="rail-apple-link" type="button" onClick={chooseApple}>
               Use Apple Music instead
             </button>
           ) : null}
@@ -706,6 +767,27 @@ export function QueuePanel({
             </button>
           ) : null}
         </div>
+      ) : null}
+
+      {introOpen ? (
+        <ControlModal title={INTRO_TITLE} onClose={() => setIntroOpen(false)}>
+          <p>{introLine(displayTracks.length)}</p>
+          <div className="wc-actions">
+            <button type="button" className="wc-text" onClick={() => setIntroOpen(false)}>Cancel</button>
+            <button
+              type="button"
+              className="wc-text"
+              data-autofocus
+              onClick={() => {
+                markSpotifyIntroSeen()
+                setIntroOpen(false)
+                void handOffToSpotify()
+              }}
+            >
+              {INTRO_GO}
+            </button>
+          </div>
+        </ControlModal>
       ) : null}
     </aside>
   )

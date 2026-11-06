@@ -1,6 +1,6 @@
 // The shared mix handoff (plan task 5.3): the copy the arrangement and the
 // conversation both toast, the Apple/Spotify gating both rows obey, the save
-// alert both open, and the share sheet's popover anchor. The two screen
+// alert both open, and the two Spotify sheets split Play opens. The two screen
 // suites still cover how each screen wires these up; this covers the unit
 // itself, so a copy change has exactly one place to break.
 import 'dart:async';
@@ -23,6 +23,7 @@ import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/mixtape_menu.dart';
 import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
 import 'package:mixtape/presentation/widgets/mix_handoff.dart';
+import 'package:mixtape/presentation/widgets/spotify_handoff_sheets.dart';
 import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 
 import '../../data/playback/playback_controller_test.dart' as playback
@@ -136,6 +137,7 @@ Future<_Played> _pumpSplit(
   MixHandoffKeys keys = MixHandoffKeys.arrangement,
   PlayDestinationStore? store,
   bool spotifyOnly = false,
+  bool askService = false,
 }) async {
   final played = _Played();
   final container = ProviderContainer(
@@ -166,6 +168,7 @@ Future<_Played> _pumpSplit(
               onOpenNowPlaying: () => played.nowPlaying++,
               onShare: (_) => played.shares++,
               spotifyOnly: spotifyOnly,
+              askService: askService,
             ),
           ),
         ),
@@ -215,19 +218,29 @@ void main() {
       );
     });
 
-    test('a share counts the songs and names the tool', () {
+    test('a copy counts the songs and says where to paste them', () {
       expect(
-        mixShareSuccessMessage(1),
-        'Shared 1 song · TuneMyMusic makes the playlist in Spotify',
+        mixSpotifyCopiedMessage(1),
+        'Copied 1 song · paste it into TuneMyMusic',
       );
       expect(
-        mixShareSuccessMessage(9),
-        'Shared 9 songs · TuneMyMusic makes the playlist in Spotify',
+        mixSpotifyCopiedMessage(9),
+        'Copied 9 songs · paste them into TuneMyMusic',
       );
     });
 
-    test('the share sheet opens the transfer tool the web rail uses', () {
-      expect(mixTransferToolUrl.toString(), 'https://www.tunemymusic.com/transfer');
+    test('Play on Spotify opens the paste-a-list page that makes a Spotify playlist', () {
+      expect(
+        mixTransferToolUrl.toString(),
+        'https://www.tunemymusic.com/transfer/freetext-to-spotify',
+      );
+    });
+
+    test('the copied list is one "Artist - Title" line per song, every song', () {
+      expect(
+        mixTransferText([_track(0), _track(1, appleId: null)]),
+        'Artist 0 - Title 0\nArtist 1 - Title 1',
+      );
     });
   });
 
@@ -308,6 +321,18 @@ void main() {
       expect(mixSpotifyOnly(null), isFalse);
     });
 
+    test('asks where they listen only when nothing says so', () {
+      expect(mixNeedsServiceChoice(null), isTrue);
+      expect(mixNeedsServiceChoice(listener(service: null)), isTrue);
+      expect(mixNeedsServiceChoice(listener(service: 'skipped')), isTrue);
+      expect(mixNeedsServiceChoice(listener()), isFalse);
+      expect(mixNeedsServiceChoice(listener(service: 'apple')), isFalse);
+      expect(
+        mixNeedsServiceChoice(listener(service: 'skipped', appleLive: true)),
+        isFalse,
+      );
+    });
+
     test('a track with no Spotify id opens a Spotify search for it', () {
       expect(
         mixSpotifySearch(_track(0)).toString(),
@@ -335,8 +360,21 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Play here'), findsOneWidget);
       expect(find.text('Play in Apple Music'), findsOneWidget);
-      // Play on Spotify is the main part; the menu does not repeat it.
-      expect(find.text('Play on Spotify'), findsOneWidget);
+      // The main part and the menu's ticked entry.
+      expect(find.text('Play on Spotify'), findsNWidgets(2));
+    });
+
+    testWidgets('one who picked Apple keeps Play', (tester) async {
+      final played = await _pumpSplit(
+        tester,
+        queue: [_track(0)],
+        spotifyOnly: true,
+        store: InMemoryPlayDestinationStore(PlayDestination.here),
+      );
+      expect(find.text('Play'), findsOneWidget);
+      await tester.tap(find.byKey(MixHandoffKeys.arrangement.playNow));
+      expect(played.destinations, [PlayDestination.here]);
+      expect(played.shares, 0);
     });
 
     testWidgets('a mix with no Apple match is Play on Spotify alone, with no reason line', (
@@ -362,72 +400,6 @@ void main() {
         ),
       );
       expect(find.byType(Text), findsNothing);
-    });
-  });
-
-  group('the share sheet anchor', () {
-    testWidgets('points at the button, in global coordinates', (tester) async {
-      late Rect origin;
-      late BuildContext screenContext;
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Builder(
-            builder: (outer) {
-              screenContext = outer;
-              return Center(
-                child: SizedBox(
-                  width: 120,
-                  height: 44,
-                  child: Builder(
-                    builder: (buttonContext) {
-                      // Read after layout, from a post-frame callback.
-                      WidgetsBinding.instance.addPostFrameCallback((_) {
-                        origin = mixShareOrigin(buttonContext, screenContext);
-                      });
-                      return const SizedBox.shrink();
-                    },
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      );
-      await tester.pump();
-
-      expect(origin.width, 120);
-      expect(origin.height, 44);
-      expect(origin.isEmpty, isFalse);
-    });
-
-    testWidgets('falls back to the whole screen when the button has no size', (
-      tester,
-    ) async {
-      late Rect origin;
-      late BuildContext screenContext;
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Builder(
-            builder: (outer) {
-              screenContext = outer;
-              return SizedBox.shrink(
-                child: Builder(
-                  builder: (buttonContext) {
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      origin = mixShareOrigin(buttonContext, screenContext);
-                    });
-                    return const SizedBox.shrink();
-                  },
-                ),
-              );
-            },
-          ),
-        ),
-      );
-      await tester.pump();
-
-      expect(origin, Offset.zero & tester.view.physicalSize / tester.view.devicePixelRatio);
-      expect(origin.isEmpty, isFalse, reason: 'share_plus throws on an empty rect');
     });
   });
 
@@ -813,13 +785,130 @@ void main() {
       expect(played.destinations, isEmpty);
     });
 
-    testWidgets('an Apple-only mix has no transfer entry in its menu', (
+    testWidgets(
+      'every mix offers Play on Spotify; picking it remembers Spotify',
+      (tester) async {
+        final store = InMemoryPlayDestinationStore();
+        final played = await _pumpSplit(
+          tester,
+          queue: [_track(0)],
+          store: store,
+        );
+        final keys = MixHandoffKeys.arrangement;
+        await tester.tap(find.byKey(keys.playMenu));
+        await tester.pumpAndSettle();
+        expect(find.text('Play on Spotify'), findsOneWidget);
+
+        await tester.tap(find.byKey(keys.share));
+        await tester.pumpAndSettle();
+        expect(played.shares, 1);
+        expect(await store.read(), PlayDestination.spotify);
+
+        // The main part now plays on Spotify.
+        expect(find.text('Play on Spotify'), findsOneWidget);
+        await tester.tap(find.byKey(keys.share));
+        expect(played.shares, 2);
+        expect(played.destinations, isEmpty);
+      },
+    );
+
+    testWidgets('a remembered Spotify reads Play on Spotify and hands off', (
       tester,
     ) async {
-      await _pumpSplit(tester, queue: [_track(0)]);
-      await tester.tap(find.byKey(MixHandoffKeys.arrangement.playMenu));
+      final played = await _pumpSplit(
+        tester,
+        queue: [_track(0)],
+        store: InMemoryPlayDestinationStore(PlayDestination.spotify),
+      );
+      expect(find.text('Play on Spotify'), findsOneWidget);
+      await tester.tap(find.byKey(MixHandoffKeys.arrangement.share));
+      expect(played.shares, 1);
+      expect(played.destinations, isEmpty);
+    });
+
+    testWidgets(
+      'with no known service, the first Play asks where they listen',
+      (tester) async {
+        final store = InMemoryPlayDestinationStore();
+        final played = await _pumpSplit(
+          tester,
+          queue: [_track(0)],
+          store: store,
+          askService: true,
+        );
+        await tester.tap(find.byKey(MixHandoffKeys.arrangement.playNow));
+        await tester.pumpAndSettle();
+        expect(find.text(WhereYouListenSheet.headline), findsOneWidget);
+        expect(find.byKey(WhereYouListenSheet.spotifyKey), findsOneWidget);
+        expect(find.byKey(WhereYouListenSheet.appleKey), findsOneWidget);
+        expect(played.destinations, isEmpty);
+        expect(played.shares, 0);
+
+        await tester.tap(find.byKey(WhereYouListenSheet.spotifyKey));
+        await tester.pumpAndSettle();
+        expect(find.text(WhereYouListenSheet.headline), findsNothing);
+        expect(played.shares, 1);
+        expect(await store.read(), PlayDestination.spotify);
+        expect(find.text('Play on Spotify'), findsOneWidget);
+
+        // Remembered: the next tap goes straight to Spotify.
+        await tester.tap(find.byKey(MixHandoffKeys.arrangement.share));
+        await tester.pumpAndSettle();
+        expect(find.text(WhereYouListenSheet.headline), findsNothing);
+        expect(played.shares, 2);
+      },
+    );
+
+    testWidgets('answering Apple Music plays here and remembers it', (
+      tester,
+    ) async {
+      final store = InMemoryPlayDestinationStore();
+      final played = await _pumpSplit(
+        tester,
+        queue: [_track(0)],
+        store: store,
+        askService: true,
+      );
+      await tester.tap(find.byKey(MixHandoffKeys.arrangement.playNow));
       await tester.pumpAndSettle();
-      expect(find.text('Play on Spotify'), findsNothing);
+      await tester.tap(find.byKey(WhereYouListenSheet.appleKey));
+      await tester.pumpAndSettle();
+      expect(played.destinations, [PlayDestination.here]);
+      expect(played.shares, 0);
+      expect(await store.read(), PlayDestination.here);
+    });
+
+    testWidgets('closing the question plays nothing and remembers nothing', (
+      tester,
+    ) async {
+      final store = InMemoryPlayDestinationStore();
+      final played = await _pumpSplit(
+        tester,
+        queue: [_track(0)],
+        store: store,
+        askService: true,
+      );
+      await tester.tap(find.byKey(MixHandoffKeys.arrangement.playNow));
+      await tester.pumpAndSettle();
+      await tester.tapAt(const Offset(20, 20));
+      await tester.pumpAndSettle();
+      expect(find.text(WhereYouListenSheet.headline), findsNothing);
+      expect(played.destinations, isEmpty);
+      expect(played.shares, 0);
+      expect(await store.read(), isNull);
+    });
+
+    testWidgets('a remembered choice is never asked about', (tester) async {
+      final played = await _pumpSplit(
+        tester,
+        queue: [_track(0)],
+        store: InMemoryPlayDestinationStore(PlayDestination.here),
+        askService: true,
+      );
+      await tester.tap(find.byKey(MixHandoffKeys.arrangement.playNow));
+      await tester.pumpAndSettle();
+      expect(find.text(WhereYouListenSheet.headline), findsNothing);
+      expect(played.destinations, [PlayDestination.here]);
     });
 
     testWidgets('a choice made after Play has left the screen does nothing', (

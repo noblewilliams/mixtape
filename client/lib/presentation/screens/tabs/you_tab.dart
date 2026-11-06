@@ -32,6 +32,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/dj_providers.dart' show memoriesProvider;
 import '../../providers/library_sync_provider.dart' show accountNameProvider;
 import '../../providers/onboarding_provider.dart' show onboardingProvider;
+import '../../providers/play_destination_provider.dart';
 import '../../providers/playback_provider.dart';
 import '../../theme/mixtape_theme.dart';
 import '../../widgets/ai_consent_sheet.dart' show openPrivacyPolicy;
@@ -41,6 +42,8 @@ import '../../widgets/foundation/gradient_background.dart';
 import '../../widgets/foundation/icon_tile.dart';
 import '../../widgets/foundation/inset_group.dart';
 import '../../widgets/foundation/large_title_scaffold.dart';
+import '../../widgets/foundation/mixtape_menu.dart';
+import '../../widgets/mix_handoff.dart' show mixPlayDestination, mixSpotifyOnly;
 import '../../widgets/suggestion_settings.dart';
 import '../account_screen.dart';
 import '../memory_screen.dart';
@@ -74,6 +77,11 @@ class YouTab extends ConsumerWidget {
 
   /// The anonymous listener's row (C3), in place of the identity block.
   static const String keepMixesRow = 'Sign in to keep your mixes';
+
+  /// Where a mix's Play goes (decisions 2026-11-06): the same remembered
+  /// destination the mix's own Play arrow sets.
+  static const String playsOnTitle = 'Play mixes on';
+  static const Key playsOnKey = Key('you-plays-on');
   static const Key keepMixesKey = Key('you-keep-mixes');
 
   void _push(BuildContext context, Widget Function() screen) {
@@ -131,6 +139,7 @@ class YouTab extends ConsumerWidget {
                         ),
                         const _LearningRow(),
                         const SuggestionSettings(),
+                        const _PlaysOnRow(),
                       ],
                     ),
                     // A block of its own: the ghost is not one of the live
@@ -283,6 +292,60 @@ class _KeepMixesRow extends StatelessWidget {
 
 /// "Learn from my listening", bound to the same controller call the Listening
 /// preferences screen writes (`playback_screen.dart` → `setLearning`).
+/// Play mixes on: where every mix's Play goes. Shows the effective choice
+/// (a Spotify-only listener who never chose reads Spotify) and opens the
+/// three destinations as a menu.
+class _PlaysOnRow extends ConsumerWidget {
+  const _PlaysOnRow();
+
+  static const String notChosen = 'Not chosen yet';
+
+  static String label(PlayDestination destination) => switch (destination) {
+    PlayDestination.spotify => 'Spotify',
+    PlayDestination.here => 'Apple Music, in Mixtape',
+    PlayDestination.appleMusic => 'Apple Music app',
+  };
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final chosen = ref.watch(playDestinationProvider);
+    final spotifyOnly = mixSpotifyOnly(ref.watch(onboardingProvider).value);
+    final shown = chosen == null && !spotifyOnly
+        ? null
+        : mixPlayDestination(chosen, spotifyOnly: spotifyOnly);
+    return Builder(
+      builder: (rowContext) => InsetRow(
+        key: YouTab.playsOnKey,
+        leading: const IconTile(
+          icon: CupertinoIcons.play_fill,
+          color: IconTile.amber,
+        ),
+        title: YouTab.playsOnTitle,
+        subtitle: shown == null ? notChosen : label(shown),
+        onTap: () async {
+          final picked = await showMixtapeMenu<PlayDestination>(
+            rowContext,
+            actions: [
+              for (final destination in const [
+                PlayDestination.spotify,
+                PlayDestination.here,
+                PlayDestination.appleMusic,
+              ])
+                MixtapeMenuAction(
+                  value: destination,
+                  label: label(destination),
+                  isSelected: destination == shown,
+                ),
+            ],
+          );
+          if (picked == null) return;
+          await ref.read(playDestinationProvider.notifier).choose(picked);
+        },
+      ),
+    );
+  }
+}
+
 class _LearningRow extends ConsumerStatefulWidget {
   const _LearningRow();
 

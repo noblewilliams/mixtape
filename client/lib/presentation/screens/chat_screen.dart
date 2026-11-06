@@ -48,6 +48,7 @@ import '../widgets/foundation/text_action.dart';
 import '../widgets/home_panel.dart' show HomePanel;
 import '../widgets/keep_sheet.dart';
 import '../widgets/mix_energy_summary.dart';
+import '../providers/play_destination_provider.dart';
 import '../widgets/mix_handoff.dart';
 import '../widgets/mix_prompt_input.dart';
 import '../widgets/mix_tape_colour.dart';
@@ -1061,7 +1062,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   /// changes it arrives as a new state anyway.
   Widget _strip(ChatState state) {
     const keys = MixHandoffKeys.conversation;
-    final spotifyOnly = mixSpotifyOnly(ref.watch(onboardingProvider).value);
+    final onboarding = ref.watch(onboardingProvider).value;
+    final spotifyOnly = mixListensOnSpotify(
+      onboarding,
+      ref.watch(playDestinationProvider),
+    );
     return TapeStrip(
       title: state.session.title,
       version: state.queueVersion,
@@ -1084,14 +1089,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         isPlayingThisMix: isPlayingThisMix,
         onPlay: (destination) => playAt(destination, state, state.queue),
         onOpenNowPlaying: openNowPlaying,
-        onShare: (buttonContext) => shareToTransferTool(
-          buttonContext,
-          state.queue,
-          state.session.title,
-        ),
+        onShare: (_) => playOnSpotify(state.queue),
         sendingToMusic: sendingToMusic,
         sharing: sharingMix,
         spotifyOnly: spotifyOnly,
+        askService: mixNeedsServiceChoice(onboarding),
       ),
     );
   }

@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { StrictMode } from 'react'
 import { AppSettings, DeleteAccountDialog } from './AppSettings'
 import type { MixtapeApi, SuggestionsResponse } from '../api/client'
@@ -374,4 +374,23 @@ it('links the privacy policy in a new tab, for accounts and anonymous listeners 
     expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'))
     cleanup()
   }
+})
+
+describe('Play mixes on, in Settings › This device', () => {
+  beforeEach(() => localStorage.clear())
+
+  it('starts unchosen, and a choice is remembered in this browser', async () => {
+    await setup(createFakeApi())
+    const select = screen.getByRole('combobox', { name: /Play mixes on/ })
+    expect(select).toHaveValue('')
+    fireEvent.change(select, { target: { value: 'spotify' } })
+    expect(localStorage.getItem('mixtape.plays-on')).toBe('spotify')
+    expect(select).toHaveValue('spotify')
+  })
+
+  it('shows the remembered choice', async () => {
+    localStorage.setItem('mixtape.plays-on', 'apple')
+    await setup(createFakeApi())
+    expect(screen.getByRole('combobox', { name: /Play mixes on/ })).toHaveValue('apple')
+  })
 })

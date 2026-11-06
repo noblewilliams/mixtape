@@ -7,7 +7,7 @@ import '../../data/files/opened_archive_channel.dart';
 import '../../data/onboarding/funnel_once_store.dart';
 import '../../data/onboarding/service_preference_store.dart';
 import '../../data/reminders/reminder_scheduler.dart';
-import '../../data/share/text_sharer.dart';
+import '../../data/share/clipboard_writer.dart';
 
 /// The one local reminder this app sends (the Spotify request nudge).
 final reminderSchedulerProvider =
@@ -21,8 +21,9 @@ final servicePreferenceStoreProvider =
 /// (keychain), cleared alongside the service flag on sign-out.
 final funnelOnceStoreProvider = Provider<FunnelOnceStore>((ref) => SecureFunnelOnceStore());
 
-/// The share sheet behind "Send to a transfer tool" on the queue screen.
-final textSharerProvider = Provider<TextSharer>((ref) => const SharePlusTextSharer());
+/// The clipboard behind "Play on Spotify" (the song list TuneMyMusic takes).
+final clipboardWriterProvider =
+    Provider<ClipboardWriter>((ref) => const SystemClipboardWriter());
 
 /// The ZIP picker behind "Choose a ZIP" (the document picker).
 final archivePickerProvider = Provider<ArchivePicker>((ref) => const FilePickerArchivePicker());

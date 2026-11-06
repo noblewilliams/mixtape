@@ -48,6 +48,7 @@ import '../widgets/foundation/glass_cluster.dart';
 import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/remove_band.dart';
 import '../widgets/foundation/label_chip.dart';
+import '../providers/play_destination_provider.dart';
 import '../widgets/mix_handoff.dart';
 import '../widgets/mix_tape_colour.dart';
 import '../widgets/tape_header.dart';
@@ -672,7 +673,11 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
     const keys = MixHandoffKeys.arrangement;
     final live =
         visibleQueue.isNotEmpty && mixActionsDisabledReason(visibleQueue) == null;
-    final spotifyOnly = mixSpotifyOnly(ref.watch(onboardingProvider).value);
+    final onboarding = ref.watch(onboardingProvider).value;
+    final spotifyOnly = mixListensOnSpotify(
+      onboarding,
+      ref.watch(playDestinationProvider),
+    );
     return TapeBar(
       reason: MixPlayReason(
         keys: keys,
@@ -687,14 +692,11 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
         isPlayingThisMix: isPlayingThisMix,
         onPlay: (destination) => playAt(destination, state, visibleQueue),
         onOpenNowPlaying: openNowPlaying,
-        onShare: (buttonContext) => shareToTransferTool(
-          buttonContext,
-          visibleQueue,
-          state.session.title,
-        ),
+        onShare: (_) => playOnSpotify(visibleQueue),
         sendingToMusic: sendingToMusic,
         sharing: sharingMix,
         spotifyOnly: spotifyOnly,
+        askService: mixNeedsServiceChoice(onboarding),
       ),
       // Create playlist makes an Apple Music playlist: nothing for a
       // Spotify-only listener.
@@ -726,7 +728,10 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
     // when we hold its id, a search for it otherwise.
     final opensInSpotify =
         track.spotifyId != null ||
-        mixSpotifyOnly(ref.watch(onboardingProvider).value);
+        mixListensOnSpotify(
+          ref.watch(onboardingProvider).value,
+          ref.watch(playDestinationProvider),
+        );
     final row = TrackRow(
       number: index + 1,
       track: track,

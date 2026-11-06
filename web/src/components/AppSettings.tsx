@@ -9,6 +9,7 @@ import { applyNameEdit, nameLength, normalizeProfileName, PROFILE_NAME_MAX } fro
 import { PRIVACY_POLICY_URL } from './AiConsent'
 import { ThemeToggle } from './ThemeToggle'
 import { InstallAppRow } from '../lib/install-app'
+import { usePlaysOn, writePlaysOn } from '../lib/plays-on'
 
 type Props = {
   api: MixtapeApi
@@ -193,6 +194,7 @@ export function AppSettings({
           <span><strong>Dark mode</strong></span>
           <ThemeToggle/>
         </div>
+        <PlaysOnRow/>
         <InstallAppRow/>
       </section>
       {anonymous ? <section>{privacyRow}</section> : <section>
@@ -497,5 +499,30 @@ export function DeleteAccountDialog({
         </button>
       </div>
     </ControlModal>
+  )
+}
+
+/** Where every mix's Play goes in this browser (decisions 2026-11-06). */
+function PlaysOnRow() {
+  const playsOn = usePlaysOn()
+  return (
+    <label className="setting-row">
+      <span>
+        <strong>Play mixes on</strong>
+        <small>Spotify copies your songs into TuneMyMusic, which makes the playlist.</small>
+      </span>
+      <select
+        className="settings-select"
+        value={playsOn ?? ''}
+        onChange={(event) => {
+          const value = event.target.value
+          if (value === 'spotify' || value === 'apple') writePlaysOn(value)
+        }}
+      >
+        {playsOn === null ? <option value="" disabled>Choose</option> : null}
+        <option value="spotify">Spotify</option>
+        <option value="apple">Apple Music</option>
+      </select>
+    </label>
   )
 }

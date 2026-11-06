@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { QueueOp } from '../api/client'
 import type { DjSession, QueueTrack } from '../domain'
 import { QueuePanel, type MusicConnectionState } from './QueuePanel'
@@ -53,6 +53,9 @@ const tracks: QueueTrack[] = [
   },
 ]
 
+// Where mixes play and the Spotify explainer are remembered in this browser.
+beforeEach(() => localStorage.clear())
+
 function renderQueue(overrides: {
   session?: DjSession
   tracks?: QueueTrack[]
@@ -62,6 +65,8 @@ function renderQueue(overrides: {
   onOutput?: () => void
   spotifyOnly?: boolean
   onConnect?: () => void
+  askService?: boolean
+  onChooseService?: (choice: 'spotify' | 'apple') => void
 } = {}) {
   const onPreviewTracks = overrides.onPreviewTracks ?? vi.fn()
   const onCommitQueueOp = overrides.onCommitQueueOp ?? vi.fn(async () => undefined)
@@ -82,6 +87,8 @@ function renderQueue(overrides: {
       onCommitQueueOp={onCommitQueueOp}
       onOutput={onOutput}
       spotifyOnly={overrides.spotifyOnly}
+      askService={overrides.askService}
+      onChooseService={overrides.onChooseService}
     />,
   )
   return { ...view, onPreviewTracks, onCommitQueueOp, onOutput }
@@ -255,7 +262,7 @@ const mixedTracks: QueueTrack[] = [
 
 const SPOTIFY_LINES =
   'https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC\nhttps://open.spotify.com/track/7ouMYWpwJ422jRcDASZB7P'
-const TRANSFER_LINES = 'Niko Vale – Window Seat\nJuniper North – Streetlight Weather\nAri Sola – Paper Tickets'
+const TRANSFER_LINES = 'Niko Vale - Window Seat\nJuniper North - Streetlight Weather\nAri Sola - Paper Tickets'
 
 function stubClipboard(writeText: ((text: string) => Promise<void>) | null) {
   Object.defineProperty(window.navigator, 'clipboard', {
@@ -286,12 +293,39 @@ describe('Spotify mix outputs', () => {
     expect(screen.queryByRole('link', { name: 'Open in Spotify: Paper Tickets' })).not.toBeInTheDocument()
   })
 
-  it('shows no Spotify link on an Apple-only mix', () => {
+  it('shows no Spotify link on an Apple-only mix, but still offers Play on Spotify after Apple', () => {
     renderQueue()
 
     expect(screen.queryByRole('link', { name: /^Open in Spotify: / })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Copy for Spotify' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Connect Apple Music' })).toBeInTheDocument()
+    const connect = screen.getByRole('button', { name: 'Connect Apple Music' })
+    const spotify = screen.getByRole('button', { name: 'Play on Spotify' })
+    expect(spotify).not.toHaveClass('primary')
+    expect(connect.compareDocumentPosition(spotify) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('with no known service, asks where they listen: Apple Music and Spotify side by side', () => {
+    const onConnect = vi.fn()
+    const onChooseService = vi.fn()
+    renderQueue({ askService: true, onConnect, onChooseService })
+
+    const ask = screen.getByRole('group', { name: 'Where do you listen?' })
+    expect(within(ask).getByRole('button', { name: 'Play on Spotify' })).toHaveClass('primary')
+    expect(within(ask).getByRole('button', { name: 'Connect Apple Music' })).toBeInTheDocument()
+    expect(screen.queryByText(/Connect Apple Music to play this mix/)).not.toBeInTheDocument()
+
+    fireEvent.click(within(ask).getByRole('button', { name: 'Connect Apple Music' }))
+    expect(onChooseService).toHaveBeenCalledWith('apple')
+    expect(onConnect).toHaveBeenCalledOnce()
+  })
+
+  it('answering Spotify remembers it and starts the handoff', () => {
+    const onChooseService = vi.fn()
+    renderQueue({ askService: true, onChooseService })
+
+    fireEvent.click(within(screen.getByRole('group', { name: 'Where do you listen?' })).getByRole('button', { name: 'Play on Spotify' }))
+    expect(onChooseService).toHaveBeenCalledWith('spotify')
+    expect(screen.getByRole('dialog', { name: 'Make it a Spotify playlist' })).toBeInTheDocument()
   })
 
   it('replaces the Apple controls with the Spotify actions when no track has an Apple id', () => {
@@ -348,21 +382,49 @@ describe('Spotify mix outputs', () => {
     expect(onOutput).toHaveBeenCalledTimes(1)
   })
 
-  it('Play on Spotify copies Artist – Title lines and opens the transfer tool in a new tab', async () => {
+  it('Play on Spotify explains once, then copies Artist - Title lines and opens TuneMyMusic', async () => {
     const writeText = vi.fn(async (_text: string) => undefined)
     stubClipboard(writeText)
     const open = vi.spyOn(window, 'open').mockImplementation(() => null)
     const { onOutput } = renderQueue({ tracks: spotifyTracks })
 
     fireEvent.click(screen.getByRole('button', { name: 'Play on Spotify' }))
+    const dialog = screen.getByRole('dialog', { name: 'Make it a Spotify playlist' })
+    expect(within(dialog).getByText('We’ll copy your 3 songs and open TuneMyMusic. Paste them in, connect Spotify, and it makes the playlist for you.')).toBeInTheDocument()
+    expect(writeText).not.toHaveBeenCalled()
+    expect(open).not.toHaveBeenCalled()
 
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Copied 3 songs'))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Copy songs and open TuneMyMusic' }))
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Copied 3 songs · paste them into TuneMyMusic'))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(writeText).toHaveBeenCalledWith(TRANSFER_LINES)
-    expect(open).toHaveBeenCalledWith('https://www.tunemymusic.com/transfer', '_blank', 'noopener')
+    expect(open).toHaveBeenCalledWith('https://www.tunemymusic.com/transfer/freetext-to-spotify', '_blank', 'noopener')
     expect(onOutput).toHaveBeenCalledTimes(1)
+
+    // Seen: the next tap goes straight there.
+    fireEvent.click(screen.getByRole('button', { name: 'Play on Spotify' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await waitFor(() => expect(open).toHaveBeenCalledTimes(2))
+  })
+
+  it('Cancel on the explainer copies and opens nothing', () => {
+    const writeText = vi.fn(async (_text: string) => undefined)
+    stubClipboard(writeText)
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+    const { onOutput } = renderQueue({ tracks: spotifyTracks })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play on Spotify' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(writeText).not.toHaveBeenCalled()
+    expect(open).not.toHaveBeenCalled()
+    expect(onOutput).not.toHaveBeenCalled()
+    expect(localStorage.getItem('mixtape.spotify-intro-seen')).toBeNull()
   })
 
   it('says so when this browser has no clipboard', async () => {
+    localStorage.setItem('mixtape.spotify-intro-seen', 'seen')
     stubClipboard(null)
     const open = vi.spyOn(window, 'open').mockImplementation(() => null)
     renderQueue({ tracks: spotifyTracks })
@@ -490,6 +552,12 @@ describe('a Spotify-only listener', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Use Apple Music instead' }))
     expect(onConnect).toHaveBeenCalledOnce()
     unmount()
+
+    const onChooseService = vi.fn()
+    const second = renderQueue({ tracks: catalogueTracks, spotifyOnly: true, onChooseService })
+    fireEvent.click(screen.getByRole('button', { name: 'Use Apple Music instead' }))
+    expect(onChooseService).toHaveBeenCalledWith('apple')
+    second.unmount()
 
     renderQueue({ tracks: catalogueTracks, spotifyOnly: true, musicConnection: 'connecting' })
     expect(screen.getByRole('button', { name: 'Connecting Apple Music…' })).toBeInTheDocument()

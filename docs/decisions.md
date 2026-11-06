@@ -1257,3 +1257,38 @@ Create an account records `keep_sheet_signed_in`, every other way out
 `keep_sheet_dismissed`. Web and iOS share the copy. **Reopens if:** sign-ups
 from the sheet fall enough to matter, which would argue for an inline note on
 the mix instead of a sheet.
+
+## 2026-11-06 — Play asks where you listen; Spotify is a remembered destination (founder)
+
+Amends the Spotify rail (2026-11-03). A tester who skipped the music step was
+treated as an Apple listener: Play opened Apple Music, and "Play on Spotify"
+opened the iOS share sheet with a text list (only a completed share then
+opened TuneMyMusic), which read as "what are we sharing?". Spotify's Web API
+is closed to apps our size (Development Mode is five test users; extended
+access needs ~250k MAU), so a real Spotify playlist still goes through
+TuneMyMusic.
+
+- **Spotify is a Play destination** beside Play here and Play in Apple Music
+  (iOS `PlayDestination.spotify`; web `mixtape.plays-on`). It is a device
+  preference, not account state, so it survives the anonymous-to-account
+  sign-in and does not trip the Spotify-export onboarding ("waiting for your
+  data").
+- **The first Play asks "Where do you listen?"** (Spotify / Apple Music) when
+  nothing says: no service chosen (or the gate skipped), no live Apple
+  library, nothing remembered. iOS asks in a sheet on the first Play tap; the
+  web rail shows the question in place of the Apple connect copy, with Play on
+  Spotify and Connect Apple Music side by side. The answer is remembered.
+- **Play on Spotify copies and opens; no share sheet.** It copies one
+  "Artist - Title" line per song and opens TuneMyMusic's free-text-to-Spotify
+  page. The first time on a device a short explainer says so ("Make it a
+  Spotify playlist", Copy songs and open TuneMyMusic / Cancel); after that the
+  tap goes straight there. Toast: "Copied N songs · paste them into
+  TuneMyMusic".
+- Play on Spotify is offered on every mix (it searches by name, so no Spotify
+  ids are needed): in the iOS Play arrow's menu, and after the Apple controls
+  on the web.
+- **Play mixes on** in You (iOS) and Settings › This device (web) changes it.
+
+**Reopens if:** Spotify grants us extended API access (then: create the
+playlist directly), or TuneMyMusic's free-text page changes or caps lower than
+a mix.

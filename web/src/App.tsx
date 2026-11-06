@@ -63,6 +63,7 @@ import { clearFunnelFlags, hasPostedFunnelEvent, postFunnelEventOnce } from './l
 import { clearKeptPrompt, keepPrompt, readKeptPrompt } from './lib/kept-prompt'
 import type { DraftSeed, ModeSeed } from './components/HomeComposer'
 import { clearServiceChoice, readServiceChoice, writeServiceChoice, type ServiceChoice } from './lib/service-preference'
+import { usePlaysOn, writePlaysOn } from './lib/plays-on'
 import { NamePage, NamePageHold } from './components/first-run/NamePage'
 import { clearNamePageSettled, markNamePageSettled, mayAskName } from './lib/name-page'
 
@@ -165,6 +166,16 @@ function isSpotifyOnly(onboarding: OnboardingResponse | null, musicConnection: M
   return onboarding?.chosenService === 'spotify'
     && !onboarding.sources.some((source) => source.source === 'apple_live')
     && musicConnection !== 'connected'
+}
+
+/**
+ * Nothing says where this listener listens: no service chosen and no live
+ * Apple library. The mix rail then asks (decisions 2026-11-06), unless this
+ * browser already remembers an answer.
+ */
+function needsServiceChoice(onboarding: OnboardingResponse | null): boolean {
+  if (onboarding?.sources.some((source) => source.source === 'apple_live')) return false
+  return onboarding?.chosenService !== 'spotify' && onboarding?.chosenService !== 'apple'
 }
 
 function durationLabel(tracks: QueueTrack[]) {
@@ -341,6 +352,11 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     await updateName(name)
     await Promise.resolve(refetchSession?.()).catch(() => undefined)
   }), [updateName, refetchSession])
+  // Where this browser's mixes play: the listener's answer, else Spotify for a
+  // Spotify-only listener. With neither, the mix rail asks.
+  const playsOn = usePlaysOn()
+  const spotifyLed = playsOn === 'spotify' || (playsOn === null && isSpotifyOnly(effectiveOnboarding, musicConnection))
+  const askService = playsOn === null && !spotifyLed && needsServiceChoice(effectiveOnboarding)
   const activeMessages = activeSession ? messagesBySession[activeSession.id] ?? [] : []
   const activeQueue = activeSession ? queuesBySession[activeSession.id] ?? [] : []
   const activeIsAlbum = activeSession?.kind === 'album'
@@ -348,7 +364,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   // Load MusicKit while Connect Apple Music is on screen, so the tap reaches
   // Apple's sign-in window inside Safari's user-activation window.
   const appleConnectOffered = musicConnection === 'disconnected'
-    && !isSpotifyOnly(effectiveOnboarding, musicConnection)
+    && !spotifyLed
     && (activeIsAlbum ? Boolean(activeAlbums?.pick?.appleId) : activeQueue.some((track) => track.appleId))
   useEffect(() => {
     if (appleConnectOffered) void musicKit.prepare?.().catch(() => undefined)
@@ -1504,7 +1520,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   const albumPanel = (inline: boolean) => activeAlbums ? (
     <AlbumPanel
       state={activeAlbums}
-      spotifyOnly={isSpotifyOnly(effectiveOnboarding, musicConnection)}
+      spotifyOnly={spotifyLed}
       busy={playbackBusy || albumBusy === activeSession?.id}
       onPlay={(album) => void playAlbum(album)}
       onToggleSaved={toggleAlbumSaved}
@@ -1562,7 +1578,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
           shelf={shelfOn ? {
             entries: listenLater,
             error: listenLaterError,
-            spotifyOnly: isSpotifyOnly(effectiveOnboarding, musicConnection),
+            spotifyOnly: spotifyLed,
             busy: playbackBusy,
             pendingIds: shelfPending,
             onRetry: () => setShelfReads((count) => count + 1),
@@ -1628,7 +1644,9 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
             onPreviewTracks={(tracks) => previewQueue(activeSession.id, tracks)}
             onCommitQueueOp={(op) => commitQueueOp(activeSession.id, op)}
             onOutput={() => postFunnelEventOnce(api, user.id, 'first_output')}
-            spotifyOnly={isSpotifyOnly(effectiveOnboarding, musicConnection)}
+            spotifyOnly={spotifyLed}
+            askService={askService}
+            onChooseService={writePlaysOn}
           />}
         </>
       )}

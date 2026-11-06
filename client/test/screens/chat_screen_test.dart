@@ -1120,7 +1120,7 @@ void main() {
       expect(find.text('Shape the energy'), findsNothing);
     });
 
-    testWidgets('Play plays here by default and opens Now Playing', (tester) async {
+    testWidgets('a remembered Play here plays here and opens Now Playing', (tester) async {
       final api = FakeDjApi();
       api.onGetSession = (_) async => SessionDetail(
         session: _session(queueVersion: 3),
@@ -1130,7 +1130,15 @@ void main() {
       FlutterSecureStorage.setMockInitialValues({});
       final player = PlaybackController(playback.FakeApi(), playback.FakeBridge());
       addTearDown(player.dispose);
-      await _pump(tester, _makeContainer(api, player: player));
+      // A listener with no known service is asked first (mix_handoff_test).
+      await _pump(
+        tester,
+        _makeContainer(
+          api,
+          player: player,
+          destinations: InMemoryPlayDestinationStore(PlayDestination.here),
+        ),
+      );
 
       await tester.tap(find.byKey(const Key('chat-play-now')));
       for (var i = 0; i < 6; i++) {

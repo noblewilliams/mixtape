@@ -1,8 +1,8 @@
 /// The mix handoff: everything that takes a finished arrangement OUT of this
 /// app — Play here (the app's own Apple player), Play in Apple Music (Apple's
 /// player), Create playlist (an Apple Music playlist with a remembered
-/// author), and Play on Spotify (the Spotify listener's text handoff to a
-/// transfer tool).
+/// author), and Play on Spotify (the song list copied, then TuneMyMusic's
+/// paste-a-list page builds the Spotify playlist; decisions 2026-11-06).
 ///
 /// Locked by `docs/mockups/approved/2026-09-17-mobile-arrangement-states.md`
 /// (Create playlist, the Spotify listener) and, for split Play, by
@@ -61,14 +61,25 @@ import 'foundation/mixtape_menu.dart';
 import 'foundation/prism_stripe.dart';
 import 'foundation/tape_button.dart';
 import 'library_sync_dialog.dart' show appleLiveSource;
+import 'spotify_handoff_sheets.dart';
 
 export '../providers/play_destination_provider.dart' show PlayDestination;
 
-/// The transfer tool the Spotify handoff opens, matching the web rail's
-/// TRANSFER_TOOL_URL (`web/src/components/QueuePanel.tsx`). TuneMyMusic is
-/// the tool of the two on the approved board whose transfer page accepts
-/// pasted text without an account, so the listener lands where they can paste.
-final mixTransferToolUrl = Uri.https('www.tunemymusic.com', '/transfer');
+/// The page Play on Spotify opens, matching the web rail's TRANSFER_TOOL_URL
+/// (`web/src/components/QueuePanel.tsx`): TuneMyMusic's free-text-to-Spotify
+/// transfer, which takes a pasted song list and builds a Spotify playlist.
+/// Spotify's own API is closed to apps our size (five test users), so this is
+/// the way a mix becomes a real Spotify playlist (decisions 2026-11-06).
+final mixTransferToolUrl = Uri.https(
+  'www.tunemymusic.com',
+  '/transfer/freetext-to-spotify',
+);
+
+/// What Play on Spotify copies: one "Artist - Title" line per song, every
+/// song — TuneMyMusic searches Spotify by name, so a song with no Spotify id
+/// still belongs in the list.
+String mixTransferText(List<QueueTrack> queue) =>
+    [for (final t in queue) '${t.artist} - ${t.title}'].join('\n');
 
 /// Written beside Play now / Create playlist when nothing in the mix has an
 /// Apple Music match.
@@ -94,11 +105,11 @@ String mixSaveSuccessMessage(int added, int failed) => failed > 0
 String mixSaveFailureMessage(String reason) =>
     "Couldn't save the playlist — $reason";
 
-String mixShareSuccessMessage(int count) =>
-    'Shared $count song${count == 1 ? '' : 's'} · '
-    'TuneMyMusic makes the playlist in Spotify';
+String mixSpotifyCopiedMessage(int count) => count == 1
+    ? 'Copied 1 song · paste it into TuneMyMusic'
+    : 'Copied $count songs · paste them into TuneMyMusic';
 
-const mixShareFailureMessage = "couldn't open the share sheet";
+const mixSpotifyFailureMessage = "couldn't copy the songs";
 
 /// Null when Play/Create are actionable; otherwise the reason they are not,
 /// written beside them rather than hidden in a tooltip: a mix whose tracks
@@ -133,6 +144,34 @@ bool mixSpotifyOnly(OnboardingState? onboarding) =>
     onboarding?.chosenService == 'spotify' &&
     appleLiveSource(onboarding) == null;
 
+/// Whether this listener's mixes go to Spotify: they chose Spotify as the
+/// Play destination, or they are Spotify-only and have not chosen otherwise.
+/// Drives what the rest of the mix hides or offers (Create playlist, rows
+/// opening in Spotify) so it agrees with what Play does.
+bool mixListensOnSpotify(
+  OnboardingState? onboarding,
+  PlayDestination? chosen,
+) =>
+    mixPlayDestination(chosen, spotifyOnly: mixSpotifyOnly(onboarding)) ==
+    PlayDestination.spotify;
+
+/// Whether the first Play should ask where the listener listens: nothing
+/// says yet — no service chosen (or the gate skipped) and no Apple library
+/// syncing live. The host passes this as [MixSplitPlay.askService]; a
+/// remembered Play destination answers it for good.
+bool mixNeedsServiceChoice(OnboardingState? onboarding) {
+  if (appleLiveSource(onboarding) != null) return false;
+  final service = onboarding?.chosenService;
+  return service != 'spotify' && service != 'apple';
+}
+
+/// Where Play goes: the listener's own choice, else Spotify for a
+/// Spotify-only listener, else the app's own player.
+PlayDestination mixPlayDestination(
+  PlayDestination? chosen, {
+  required bool spotifyOnly,
+}) => chosen ?? (spotifyOnly ? PlayDestination.spotify : PlayDestination.here);
+
 /// Where a row with no Spotify id sends a Spotify-only listener: a search by
 /// artist and title. One path segment, so a slash in a name is encoded.
 Uri mixSpotifySearch(QueueTrack track) => Uri(
@@ -140,19 +179,6 @@ Uri mixSpotifySearch(QueueTrack track) => Uri(
   host: 'open.spotify.com',
   pathSegments: ['search', '${track.artist} ${track.title}'],
 );
-
-/// The anchor the share sheet points at. On iPad the sheet is a popover and
-/// UIKit raises without a source rect, so this is the share button's own rect
-/// in global logical coordinates ([buttonContext] is the Builder wrapping it,
-/// whose first render object is the button). A button that has left the tree
-/// falls back to the whole screen, which centres it.
-Rect mixShareOrigin(BuildContext buttonContext, BuildContext screenContext) {
-  final box = buttonContext.findRenderObject();
-  if (box is RenderBox && box.hasSize && !box.size.isEmpty) {
-    return box.localToGlobal(Offset.zero) & box.size;
-  }
-  return Offset.zero & MediaQuery.sizeOf(screenContext);
-}
 
 /// The widget keys and the alert title each host screen puts on the shared
 /// surfaces. Two screens draw the same row and the same alert; their keys
@@ -255,7 +281,8 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
   /// True from opening the save alert until it closes.
   bool get savingPlaylist => _savingPlaylist;
 
-  /// True while the share sheet (and the tool's page) is being handed off.
+  /// True while Play on Spotify is in hand (its explainer, the copy and the
+  /// tool's page).
   bool get sharingMix => _sharingMix;
 
   /// Fire-and-forget `POST /sessions/:id/events` — see
@@ -471,45 +498,47 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
     }
   }
 
-  /// Text handoff for a Spotify mix: one "Artist – Title" per track (en
-  /// dash), every track — a transfer tool searches Spotify by name, so a
-  /// track with no id at all still belongs in the list. Once the sheet
-  /// reports the text went somewhere, the tool's own page opens, the same way
-  /// the web rail opens it in a new tab.
-  Future<void> shareToTransferTool(
-    BuildContext buttonContext,
-    List<QueueTrack> queue,
-    String title,
-  ) async {
+  /// Play on Spotify: the song list goes to the clipboard and TuneMyMusic's
+  /// paste-a-list page opens to build the Spotify playlist. The first time
+  /// on a device an explainer says so before anything happens; Cancel there
+  /// is no output at all.
+  Future<void> playOnSpotify(List<QueueTrack> queue) async {
     if (_sharingMix) return;
     setState(() => _sharingMix = true);
     try {
-      final text = [
-        for (final t in queue) '${t.artist} – ${t.title}',
-      ].join('\n');
-      final handedOff = await ref
-          .read(textSharerProvider)
-          .share(
-            text,
-            subject: 'Mixtape · $title',
-            origin: mixShareOrigin(buttonContext, context),
-          );
-      if (!mounted || !handedOff) return; // a dismissed sheet is no output
+      final store = ref.read(playDestinationStoreProvider);
+      var seen = false;
+      try {
+        seen = await store.spotifyIntroSeen();
+      } catch (_) {
+        // A device that cannot remember explains every time.
+      }
+      if (!mounted) return;
+      if (!seen) {
+        final go = await confirmSpotifyHandoff(context, queue.length);
+        if (!mounted || !go) return;
+        try {
+          await store.markSpotifyIntroSeen();
+        } catch (_) {
+          // Remembering is a nicety.
+        }
+      }
+      await ref.read(clipboardWriterProvider).copy(mixTransferText(queue));
       noteSpotifyOutput();
       try {
         await ref.read(linkOpenerProvider)(mixTransferToolUrl);
       } catch (_) {
-        // The text is already in the listener's hands; a browser that won't
-        // open isn't worth a second message on top of the confirmation.
+        // The songs are already copied; a browser that won't open isn't
+        // worth a second message on top of the confirmation.
       }
       if (!mounted) return;
       showMixSnack(
-        mixShareSuccessMessage(queue.length),
+        mixSpotifyCopiedMessage(queue.length),
         kind: FeedbackKind.success,
       );
     } catch (_) {
       if (!mounted) return;
-      showMixSnack(mixShareFailureMessage, kind: FeedbackKind.error);
+      showMixSnack(mixSpotifyFailureMessage, kind: FeedbackKind.error);
     } finally {
       if (mounted) setState(() => _sharingMix = false);
     }
@@ -517,16 +546,18 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
 }
 
 /// Split Play (`docs/mockups/approved/2026-11-03-mix-conversation-redesign.md`
-/// → Split Play; `.split` on the board): the main part plays at the
-/// remembered destination — the app's own player unless the listener chose
-/// Apple Music, when it reads "Play in Music" — and the arrow, its own 44 pt
-/// target, opens a popover to choose (and remember) where to play.
+/// → Split Play; `.split` on the board; Spotify added 2026-11-06): the main
+/// part plays at the remembered destination — the app's own player, "Play in
+/// Music" for Apple Music, "Play on Spotify" for the TuneMyMusic handoff —
+/// and the arrow, its own 44 pt target, opens a popover to choose (and
+/// remember) where to play. With nothing remembered and no known service
+/// ([askService]), the first Play asks where the listener listens.
 ///
 /// "Playing", with the prism meter, shows while the app player is on this
 /// mix; tapping it opens Now Playing. A mix with anything Apple Music can
-/// play keeps the arrow; when it also carries Spotify ids, the arrow's menu
-/// ends with "Send to a transfer tool" behind a separator. Only a mix Apple
-/// Music can do nothing with (and Spotify can) is the handoff alone.
+/// play keeps the arrow, whose menu always ends with Play on Spotify behind a
+/// separator. Only a mix Apple Music can do nothing with (and Spotify can)
+/// is the handoff alone.
 class MixSplitPlay extends ConsumerWidget {
   const MixSplitPlay({
     super.key,
@@ -541,12 +572,18 @@ class MixSplitPlay extends ConsumerWidget {
     this.sharing = false,
     this.expand = false,
     this.spotifyOnly = false,
+    this.askService = false,
   });
 
   final MixHandoffKeys keys;
 
-  /// [mixSpotifyOnly]: the main part is Play on Spotify, and the arrow keeps
-  /// Play here and Play in Apple Music for a mix Apple Music can play.
+  /// [mixNeedsServiceChoice]: nothing says where this listener listens, so
+  /// the first Play (with no remembered destination) asks.
+  final bool askService;
+
+  /// [mixSpotifyOnly]: until the listener chooses otherwise, the main part is
+  /// Play on Spotify, and the arrow keeps Play here and Play in Apple Music
+  /// for a mix Apple Music can play.
   final bool spotifyOnly;
 
   /// The arrangement this mix currently has; empty until the DJ makes one.
@@ -564,7 +601,7 @@ class MixSplitPlay extends ConsumerWidget {
   /// "Playing" was tapped: the app player is already on this mix.
   final VoidCallback onOpenNowPlaying;
 
-  /// Takes the segment's own context: the share sheet's iPad popover anchor.
+  /// Play on Spotify. Takes the tapped segment's own context.
   final void Function(BuildContext buttonContext)? onShare;
 
   final bool sendingToMusic;
@@ -579,7 +616,7 @@ class MixSplitPlay extends ConsumerWidget {
 
   static const String arrowLabel = 'Choose where to play';
 
-  /// The transfer-tool handoff. Named for what the listener wants, not the
+  /// The Spotify handoff. Named for what the listener wants, not the
   /// mechanism: "transfer tool" meant nothing to them (decisions 2026-11-03).
   static const String shareLabel = 'Play on Spotify';
 
@@ -588,14 +625,34 @@ class MixSplitPlay extends ConsumerWidget {
     required PlayDestination destination,
   }) => playing
       ? 'Playing'
-      : (destination == PlayDestination.appleMusic ? 'Play in Music' : 'Play');
+      : switch (destination) {
+          PlayDestination.appleMusic => 'Play in Music',
+          PlayDestination.spotify => shareLabel,
+          PlayDestination.here => 'Play',
+        };
+
+  /// Plays at [destination]: Spotify is the handoff, the rest [onPlay].
+  void _go(BuildContext context, PlayDestination destination) {
+    if (destination == PlayDestination.spotify) {
+      onShare?.call(context);
+    } else {
+      onPlay(destination);
+    }
+  }
+
+  /// The first Play with nothing known: ask, remember, then play there.
+  Future<void> _ask(BuildContext context, WidgetRef ref) async {
+    final answer = await askWhereYouListen(context);
+    if (answer == null || !context.mounted) return;
+    unawaited(ref.read(playDestinationProvider.notifier).choose(answer));
+    _go(context, answer);
+  }
 
   Future<void> _choose(
     BuildContext arrowContext,
     WidgetRef ref,
-    PlayDestination current, {
-    required bool canShare,
-  }) async {
+    PlayDestination current,
+  ) async {
     final picked = await showMixtapeMenu<Object>(
       arrowContext,
       actions: [
@@ -612,38 +669,31 @@ class MixSplitPlay extends ConsumerWidget {
           isSelected: current == PlayDestination.appleMusic,
           icon: MixMenuIcons.playInMusic,
         ),
-        if (canShare)
-          MixtapeMenuAction(
-            key: keys.share,
-            value: _shareChoice,
-            label: shareLabel,
-            separatorBefore: true,
-            icon: CupertinoIcons.share,
-            enabled: !sharing && onShare != null,
-          ),
+        MixtapeMenuAction(
+          key: keys.share,
+          value: PlayDestination.spotify,
+          label: shareLabel,
+          isSelected: current == PlayDestination.spotify,
+          separatorBefore: true,
+          icon: CupertinoIcons.music_note_2,
+          enabled: !sharing && onShare != null,
+        ),
       ],
     );
     // The host can rebuild without this Play while the menu is up; its ref
     // is gone with it.
     if (picked == null || !arrowContext.mounted) return;
-    if (picked == _shareChoice) {
-      onShare?.call(arrowContext);
-      return;
-    }
     if (picked is! PlayDestination) return;
     unawaited(ref.read(playDestinationProvider.notifier).choose(picked));
-    onPlay(picked);
+    _go(arrowContext, picked);
   }
-
-  /// The menu value of the transfer-tool entry.
-  static const Object _shareChoice = #shareToTransferTool;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final destination = ref.watch(playDestinationProvider);
+    final chosen = ref.watch(playDestinationProvider);
+    final destination = mixPlayDestination(chosen, spotifyOnly: spotifyOnly);
     final reason = mixActionsDisabledReason(queue);
     final live = enabled && queue.isNotEmpty && reason == null;
-    final spotify = mixHasSpotifyActions(queue);
     final appleLive = queue.any((t) => t.appleId != null);
 
     if (!mixHasAppleActions(queue) || (spotifyOnly && !appleLive)) {
@@ -662,10 +712,8 @@ class MixSplitPlay extends ConsumerWidget {
       listenable: ref.read(playbackProvider),
       builder: (context, _) {
         final playing = isPlayingThisMix();
-        final toSpotify = spotifyOnly && !playing;
-        final label = toSpotify
-            ? shareLabel
-            : mainLabel(playing: playing, destination: destination);
+        final toSpotify = destination == PlayDestination.spotify && !playing;
+        final label = mainLabel(playing: playing, destination: destination);
         final VoidCallback? onMain = playing
             ? onOpenNowPlaying
             : toSpotify
@@ -675,6 +723,8 @@ class MixSplitPlay extends ConsumerWidget {
             : (!live ||
                   (destination == PlayDestination.appleMusic && sendingToMusic))
             ? null
+            : askService && chosen == null
+            ? () => unawaited(_ask(context, ref))
             : () => onPlay(destination);
         return _SplitShell(
           expand: expand,
@@ -716,12 +766,7 @@ class MixSplitPlay extends ConsumerWidget {
               label: arrowLabel,
               width: arrowWidth,
               onTap: live
-                  ? () => _choose(
-                      arrowContext,
-                      ref,
-                      destination,
-                      canShare: spotify && !spotifyOnly,
-                    )
+                  ? () => _choose(arrowContext, ref, destination)
                   : null,
               child: Icon(
                 Icons.keyboard_arrow_down_rounded,
