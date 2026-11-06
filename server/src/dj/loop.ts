@@ -130,6 +130,18 @@ export const INSUFFICIENT_SEEDS_TEXT =
 export const CORPUS_NOTICE =
   "note: these picks come from the shared catalog and this listener's seeds, not their own listening history. Say so plainly."
 
+// A corpus mix with NEVER_REFUSE on (decisions 2026-11-06): this share of it
+// is proposed from the DJ's own knowledge and verified on Apple, so a
+// listener with no library is not handed a mix drawn mostly from whichever
+// libraries happen to be synced. The rest is curated from the catalogue as
+// before, and covers any proposal that does not verify.
+export const CORPUS_PROPOSE_SHARE = 0.5
+
+// Follows CORPUS_NOTICE when some of the mix was proposed. Goes to the MODEL.
+export function blendedNotice(count: number): string {
+  return `note: ${count} of these picks come from the DJ's own knowledge of music, each one checked against Apple Music.`
+}
+
 // Follows PROPOSED_NOTICE (dj/propose.ts) when fewer songs verified on Apple
 // than the mix needs, even after the replacement round. Goes to the MODEL.
 export const SHORT_VERIFIED_TEXT =
@@ -572,7 +584,7 @@ type FillLog = { inserted: number; enriched: number; subrequests: number; appleE
 // The never-refuse path's part of the turn log: counts only. `rounds` counts
 // proposal calls (a generate's two rounds and any edit's); `error` marks a
 // replacement round that failed and was let go.
-type ProposeLog = { proposed: number; verified: number; searches: number; rounds: number; error?: 'replacement' }
+type ProposeLog = { proposed: number; verified: number; searches: number; rounds: number; error?: 'replacement' | 'blend' }
 
 // What one turn's proposals verified, kept so a conflict retry or a second
 // generate_queue reuses them instead of spending the searches again.
@@ -586,7 +598,7 @@ type ProposeSpend = { log: ProposeLog; verifyMs: number }
 // into runDjTurn like RenameTracker): FILL_BUDGET is a per-request budget.
 // The proposals ride the same box for the same reason. turnStartedAt is the
 // turn's start on the fill's clock, for ROUND_TWO_CUTOFF_MS.
-type FillTracker = { ran: boolean; log?: FillLog; propose?: ProposeState; spend?: ProposeSpend; turnStartedAt: number }
+type FillTracker = { ran: boolean; log?: FillLog; propose?: ProposeState; blend?: VerifiedProposal[]; spend?: ProposeSpend; turnStartedAt: number }
 
 type TurnFill = { tracker: FillTracker; surface: Surface }
 
@@ -751,6 +763,59 @@ async function runProposals(
   return { verified, funnelWritten: false }
 }
 
+// The proposed share of a corpus mix: one round, no replacement (the
+// catalogue covers a shortfall). Never throws: a failed call or search
+// leaves the mix to the catalogue. Kept on the tracker so a conflict retry
+// or a second generate_queue this turn reuses it.
+async function blendProposals(
+  db: Db,
+  deps: DjDeps,
+  fill: FillDeps,
+  session: DjSessionRef,
+  intent: Intent,
+  userText: string,
+  sessionContext: string,
+  budget: CurationBudget,
+  tracker: FillTracker,
+): Promise<VerifiedProposal[]> {
+  if (tracker.blend) return tracker.blend
+  const want = Math.floor(intent.targetCount * CORPUS_PROPOSE_SHARE)
+  if (want <= 0) return []
+  const spend = proposeSpend(tracker)
+  try {
+    const ctx = await proposeContext(db, fill, session, userText, sessionContext)
+    const round = await proposeRound(db, deps, fill, ctx, { intent, want, count: want + PROPOSE_EXTRA }, budget, spend)
+    const verified = round?.result.verified ?? []
+    spend.log.verified += verified.length
+    tracker.blend = verified
+    return verified
+  } catch (e) {
+    // The turn's own budget tripping is the turn's failure, not the blend's.
+    if (e instanceof DjError) throw e
+    spend.log.error = 'blend'
+    tracker.blend = []
+    return []
+  }
+}
+
+// Spreads `proposed` evenly through `curated` (both already in mix order),
+// `total` songs long: the proposed songs fill as much of their share as
+// verified and the catalogue the rest, so neither run bunches at one end.
+export function interleaveBlend<T>(curated: T[], proposed: T[], total: number): T[] {
+  const p = Math.min(proposed.length, total)
+  const c = Math.min(curated.length, total - p)
+  const n = p + c
+  const out: T[] = []
+  let pi = 0
+  let ci = 0
+  for (let i = 0; i < n; i++) {
+    const proposedSlot = Math.floor(((i + 1) * p) / n) > Math.floor((i * p) / n)
+    if ((proposedSlot && pi < p) || ci >= c) out.push(proposed[pi++])
+    else out.push(curated[ci++])
+  }
+  return out
+}
+
 // Said to the model when the mix verified enough to stand but fewer songs
 // than were asked for.
 export function partialVerifiedNotice(confirmed: number, asked: number): string {
@@ -881,8 +946,20 @@ async function executeGenerateQueue(
     }
     return { resultText: 'no tracks in the library match those constraints', queueChanged: false, intent }
   }
+  const blending = poolMode.mode === 'corpus' && neverRefuse && deps.fill !== undefined
   budget.consume()
-  const picks = await curate(deps.llm, pool, intent, withPlaylistSeedContext(sessionContext, seed), { outsideCap: cap })
+  const [curated, proposedRaw] = await Promise.all([
+    curate(deps.llm, pool, intent, withPlaylistSeedContext(sessionContext, seed), { outsideCap: cap }),
+    blending ? blendProposals(db, deps, deps.fill!, session, intent, userText, sessionContext, budget, turn.tracker) : Promise.resolve([]),
+  ])
+  // A proposal the catalogue curation also picked is one song, queued once.
+  const curatedIds = new Set(curated.map((p) => p.trackId))
+  const proposed = proposedRaw.filter((p) => !curatedIds.has(p.trackId))
+  const proposedIds = new Set(proposed.map((p) => p.trackId))
+  const picks = proposed.length > 0
+    ? interleaveBlend<{ trackId: string; reason: string }>(curated, proposed, intent.targetCount)
+    : curated
+  const blendedCount = picks.filter((p) => proposedIds.has(p.trackId)).length
   const version = await replaceQueue(
     db,
     session.id,
@@ -904,6 +981,7 @@ async function executeGenerateQueue(
   return {
     resultText: [
       ...(poolMode.mode === 'corpus' ? [CORPUS_NOTICE] : []),
+      ...(blendedCount > 0 ? [blendedNotice(blendedCount)] : []),
       ...(outsideAt.length > 0 ? [outsidePicksNotice(outsideAt)] : []),
       `queue generated: ${picks.length} tracks (now version ${version})`,
       'Updated queue (positions are 0-based):',

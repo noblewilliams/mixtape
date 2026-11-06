@@ -1306,3 +1306,25 @@ by LRCLIB's tolerance, not the budget: a cron run takes 10 songs
 has been seen to hold at a 10 s delay. **Reopens if:** LRCLIB 429s climb in
 the cron logs (drop the step), or a provider with a real rate limit replaces
 LRCLIB.
+
+## 2026-11-06 — Half of a no-library listener's mix is proposed from the DJ's own knowledge
+
+The drain's yield on the remaining seeded songs fell to about 1 in 20, so
+analysis alone will not rebalance the catalogue: 61% of usable songs
+(4,874 of 7,962) were the founder's own library, and the last five mixes for
+listeners with no library were 69% the founder's songs. With NEVER_REFUSE on,
+a corpus-mode mix now runs one proposal round (`blendProposals`, dj/loop.ts)
+in parallel with the catalogue curation: `CORPUS_PROPOSE_SHARE` (0.5) of the
+mix is proposed and verified on Apple exactly as the never-refuse path does,
+and the rest is curated from the catalogue as before. The two are spread
+evenly (`interleaveBlend`); a proposal the curation also picked is queued
+once; a proposal call or search that fails, or songs that do not verify,
+leave the mix to the catalogue, so the mix is never shorter than before. No
+replacement round (the catalogue covers the shortfall). The model is told how
+many picks came from its own knowledge (`blendedNotice`). Personal listeners
+and edits (swap, extend) are unchanged. Turns cost one more model call and
+up to `want + PROPOSE_EXTRA` Apple searches, run alongside curation.
+Rejected: admitting unanalysed seeded songs (no meaning embedding, so they
+would rank by artist and genre only). **Reopens if:** corpus turns run close
+to the client's 120 s, proposals are judged worse than catalogue picks, or the
+analysed catalogue stops being dominated by one library (lower the share).

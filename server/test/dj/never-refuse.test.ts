@@ -6,6 +6,8 @@ import { djSessions, funnelEvents, trackFeatures, trackMeanings, tracks, user, u
 import {
   runDjTurn,
   CORPUS_NOTICE,
+  CORPUS_PROPOSE_SHARE,
+  blendedNotice,
   INSUFFICIENT_SEEDS_TEXT,
   SHORT_VERIFIED_TEXT,
   partialVerifiedNotice,
@@ -302,18 +304,99 @@ describe('never refuse: proposed songs verified on Apple', () => {
     expect(result.queue).toHaveLength(5)
   })
 
-  it('a corpus listener is unchanged with the flag on: curated, the corpus notice, no proposal', async () => {
-    const db = await createTestDb()
+  async function seedCorpusListener(db: TestDb) {
     await seedUser(db)
     for (const artist of ['SeedA', 'SeedB', 'SeedC']) {
       await db.insert(userArtistSeeds).values({ userId: 'u1', name: artist, source: 'interview' })
       await seedEnriched(db, artist, 9)
     }
-    const session = await seedSession(db)
+    return seedSession(db)
+  }
+
+  it('golden: a corpus listener gets about half the mix proposed and verified, spread among catalogue picks', async () => {
+    const db = await createTestDb()
+    const session = await seedCorpusListener(db)
+    const round = proposals('Song', 11)
+    const { fill, searches } = fakeFill(round)
+    const { llm, requests } = scriptedLlm([{ themes: 'x', targetCount: 6 }], [round])
+
+    const { value: result, logged } = await withLog(() =>
+      runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true }, { id: session.id, userId: 'u1' }, 'play'))
+
+    expect(result.queue).toHaveLength(6)
+    const titles = (await queueTitles(db, session.id)).map((r) => r.title)
+    const proposedAt = titles.flatMap((t, i) => (t.startsWith('Song ') ? [i] : []))
+    expect(proposedAt).toHaveLength(CORPUS_PROPOSE_SHARE * 6)
+    // Spread through the mix, never two proposed songs side by side.
+    for (let i = 1; i < proposedAt.length; i++) expect(proposedAt[i] - proposedAt[i - 1]).toBeGreaterThan(1)
+    // The rest is the catalogue's own curation.
+    expect(titles.filter((t) => t.startsWith('Held '))).toHaveLength(3)
+    expect(await notPersonal(db, session.id)).toBe(true)
+    const [text] = toolResults(requests)
+    expect(text.split('\n')[0]).toBe(CORPUS_NOTICE)
+    expect(text).toContain(blendedNotice(3))
+    expect(text).toContain('queue generated: 6 tracks')
+    // One proposal call; searching stopped once its share verified.
+    expect(proposalRequests(requests)).toHaveLength(1)
+    expect(searches).toHaveLength(3)
+    expect(logged.propose).toMatchObject({ verified: 3, searches: 3, rounds: 1 })
+  })
+
+  it('a corpus listener whose proposals all miss on Apple still gets a full catalogue mix', async () => {
+    const db = await createTestDb()
+    const session = await seedCorpusListener(db)
+    const { fill } = fakeFill([])
+    const { llm, requests } = scriptedLlm([{ themes: 'x', targetCount: 5 }], [proposals('Song', 10)])
+
+    const result = await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true }, { id: session.id, userId: 'u1' }, 'play')
+
+    expect(result.queue).toHaveLength(5)
+    expect((await queueTitles(db, session.id)).every((r) => r.title.startsWith('Held '))).toBe(true)
+    const [text] = toolResults(requests)
+    expect(text.split('\n')[0]).toBe(CORPUS_NOTICE)
+    expect(text).not.toContain('own knowledge')
+  })
+
+  it('a corpus listener whose proposal call fails still gets a full catalogue mix', async () => {
+    const db = await createTestDb()
+    const session = await seedCorpusListener(db)
+    const { fill } = fakeFill([])
+    const { llm: inner } = scriptedLlm([{ themes: 'x', targetCount: 5 }], [])
+    const llm: LlmClient = async (req) => {
+      if (req.system === PROPOSE_SYSTEM_PROMPT) throw new LlmError('overloaded', 529)
+      return inner(req)
+    }
+
+    const { value: result, logged } = await withLog(() =>
+      runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true }, { id: session.id, userId: 'u1' }, 'play'))
+
+    expect(result.queue).toHaveLength(5)
+    expect(logged.propose).toMatchObject({ error: 'blend' })
+  })
+
+  it('a proposed song the catalogue already picked is queued once', async () => {
+    const db = await createTestDb()
+    const session = await seedCorpusListener(db)
+    // Apple answers every proposal with the same held catalogue song.
+    const [held] = await db.select().from(tracks).where(eq(tracks.artist, 'SeedA')).limit(1)
+    const { fill } = fakeFill([])
+    fill.catalog.searchSongs = async () => [song(held.appleId!, held.title, held.artist)]
+    const { llm } = scriptedLlm([{ themes: 'x', targetCount: 6 }], [[{ title: held.title, artist: held.artist, reason: 'again' }]])
+
+    const result = await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true }, { id: session.id, userId: 'u1' }, 'play')
+
+    const ids = result.queue.map((q) => q.trackId)
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(ids).toHaveLength(6)
+  })
+
+  it('a corpus listener with the flag off is curated from the catalogue alone', async () => {
+    const db = await createTestDb()
+    const session = await seedCorpusListener(db)
     const { fill, searches } = fakeFill([])
     const { llm, requests } = scriptedLlm([{ themes: 'x', targetCount: 5 }], [])
 
-    const result = await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true }, { id: session.id, userId: 'u1' }, 'play')
+    const result = await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: false }, { id: session.id, userId: 'u1' }, 'play')
 
     expect(result.queue).toHaveLength(5)
     expect(toolResults(requests)[0].split('\n')[0]).toBe(CORPUS_NOTICE)
