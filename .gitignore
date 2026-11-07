@@ -7,3 +7,6 @@ node_modules/
 .wrangler/
 dist/
 coverage/
+
+# App Store screenshots: large, kept locally only
+docs/releases/*-app-store-screenshots/
