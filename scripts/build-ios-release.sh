@@ -21,6 +21,10 @@ for file in config/production.json config/google-ios.json; do
   [[ -f "$file" ]] || { echo "missing client/$file" >&2; exit 1; }
 done
 
+# A previous build's .ipa would satisfy the check below even when this
+# export fails, so start from an empty output folder.
+rm -rf build/ios/ipa
+
 flutter build ipa --release \
   --build-number="$build_number" \
   --export-options-plist=ios/ExportOptions.plist \
