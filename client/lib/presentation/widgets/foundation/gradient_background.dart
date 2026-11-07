@@ -64,13 +64,18 @@ class GradientBackground extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
+    final bleed = GradientBleed.rightOf(context);
     return Stack(
       fit: StackFit.passthrough,
       // A screen's dock shadow and overscroll must not be cut off; the painter
       // stays inside the background's own rect regardless.
       clipBehavior: Clip.none,
       children: [
-        Positioned.fill(
+        Positioned(
+          left: 0,
+          top: 0,
+          right: -bleed,
+          bottom: 0,
           child: RepaintBoundary(
             child: CustomPaint(
               painter: GradientBackgroundPainter(
@@ -84,6 +89,24 @@ class GradientBackground extends StatelessWidget {
       ],
     );
   }
+}
+
+/// How far a [GradientBackground] below this reaches past its trailing edge.
+///
+/// The wide-screen shell sets it to the side rail's extent: a screen inside
+/// the content column then paints the same gradient, at the same scale, as
+/// the shell paints behind the rail, so no seam shows where the column
+/// starts.
+class GradientBleed extends InheritedWidget {
+  const GradientBleed({super.key, required this.right, required super.child});
+
+  final double right;
+
+  static double rightOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<GradientBleed>()?.right ?? 0;
+
+  @override
+  bool updateShouldNotify(GradientBleed oldWidget) => oldWidget.right != right;
 }
 
 /// Paints [base] then [glows]. Its fields are public so widget tests can read

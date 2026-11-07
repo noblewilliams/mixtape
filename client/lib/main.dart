@@ -17,6 +17,10 @@ import 'presentation/widgets/foundation/gradient_background.dart';
 /// debug-only foundation gallery instead of the app.
 const bool showFoundationGallery = bool.fromEnvironment('MIXTAPE_GALLERY');
 
+/// `--dart-define=MIXTAPE_STORE_SHOTS=true` drops the debug banner so a
+/// simulator debug build can take App Store screenshots.
+const bool storeScreenshots = bool.fromEnvironment('MIXTAPE_STORE_SHOTS');
+
 void main() {
   // Fail fast: a store build missing its production define must not ship.
   final problem = releaseConfigProblem(
@@ -72,6 +76,7 @@ class MixtapeApp extends ConsumerWidget {
       key: ValueKey(appKey),
       navigatorObservers: [glassObserver],
       title: 'mixtape',
+      debugShowCheckedModeBanner: !storeScreenshots,
       theme: MixtapeTheme.light(),
       darkTheme: MixtapeTheme.dark(),
       // Scaffolds are transparent by theme; the gradient paints behind every

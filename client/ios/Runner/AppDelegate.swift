@@ -23,6 +23,7 @@ import UIKit
   /// before recording so the session is ours, or so recording is refused
   /// while our own MusicKit queue is playing.
   private var audioSessionChannel: FlutterMethodChannel?
+  private var deviceChannel: FlutterMethodChannel?
 
   /// Where those copies live. Everything under it is a listener's whole
   /// export — the identity and payment files the parser refuses to read
@@ -44,6 +45,7 @@ import UIKit
       MusicKitBridge.register(with: controller.binaryMessenger)
       registerOpenArchiveChannel(with: controller.binaryMessenger)
       registerVoiceChannels(with: controller.binaryMessenger)
+      registerDeviceChannel(with: controller.binaryMessenger)
       // The approved dock, in genuine Liquid Glass, on iOS 26 only.
       //
       // Hosted on the WINDOW, not on controller.view: that view is the
@@ -118,6 +120,21 @@ import UIKit
       AudioSessionBridge.handle(call, result: result)
     }
     audioSessionChannel = channel
+  }
+
+  /// Whether this is an iPad. The shell keeps the standard layout there and
+  /// docks to the side only on a wide iPhone (unfolded, or in landscape).
+  private func registerDeviceChannel(with messenger: FlutterBinaryMessenger) {
+    let channel = FlutterMethodChannel(name: "mixtape/device", binaryMessenger: messenger)
+    channel.setMethodCallHandler { call, result in
+      switch call.method {
+      case "isPad":
+        result(UIDevice.current.userInterfaceIdiom == .pad)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+    deviceChannel = channel
   }
 
   private func registerOpenArchiveChannel(with messenger: FlutterBinaryMessenger) {

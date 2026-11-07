@@ -11,6 +11,8 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/dj/dj_models.dart';
@@ -54,6 +56,23 @@ final selectedTabProvider = NotifierProvider<SelectedTabNotifier, int>(
 final nativeDockAvailableProvider = FutureProvider<bool>(
   (ref) => ShellChannel.instance.isAvailable,
 );
+
+/// True on an iPad, which keeps the standard bottom-dock layout at every
+/// width; the side rail is for a wide iPhone only (an unfolded foldable, or
+/// any iPhone in landscape). False off iOS and when the platform cannot say.
+final isPadProvider = FutureProvider<bool>((ref) async {
+  if (defaultTargetPlatform != TargetPlatform.iOS) return false;
+  try {
+    return await const MethodChannel(
+          'mixtape/device',
+        ).invokeMethod<bool>('isPad') ??
+        false;
+  } on PlatformException {
+    return false;
+  } on MissingPluginException {
+    return false;
+  }
+});
 
 /// iOS's Reduce Transparency setting: seeded from the platform and kept in
 /// step while the app runs, so glass, panels and blur go opaque the moment

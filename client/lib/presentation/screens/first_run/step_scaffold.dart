@@ -547,6 +547,9 @@ class StepScaffold extends StatelessWidget {
   static const double progressHeight = 2;
   static const double footPadding = 34;
 
+  /// Widest the page column grows on a wide window.
+  static const double maxPageWidth = 560;
+
   /// The accessible page name: "Step 2 of 3, How do you want to add it?".
   static String pageName(String headline, int? step) =>
       step == null ? headline : 'Step $step of $totalSteps, $headline';
@@ -570,7 +573,18 @@ class StepScaffold extends StatelessWidget {
           const DecoratedBox(
             decoration: BoxDecoration(gradient: FirstRunColors.scrim),
           ),
-          withTokens(context, firstRunTokens, Builder(builder: _page)),
+          // The image stays full-bleed; the page itself keeps a phone's
+          // column on an iPad or an unfolded foldable.
+          Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: maxPageWidth),
+              child: withTokens(
+                context,
+                firstRunTokens,
+                Builder(builder: _page),
+              ),
+            ),
+          ),
         ],
       ),
     );

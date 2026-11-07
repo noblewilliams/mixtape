@@ -35,6 +35,7 @@ import 'package:mixtape/presentation/screens/shell/shell_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/frosted_dock.dart';
 import 'package:mixtape/presentation/widgets/foundation/frosted_surface.dart';
+import 'package:mixtape/presentation/widgets/foundation/side_rail.dart';
 
 import '../helpers/fake_listening_api.dart';
 import '../data/playback/playback_controller_test.dart' show FakeApi, song;
@@ -102,24 +103,33 @@ class ShellDjApi implements DjApi {
   Future<void> recordPlaylistCreation(String sessionId, String appleId) async {}
 
   @override
-  Future<AlbumPickState> choosePick(String sessionId, {required String albumId, int? expectedVersion}) =>
+  Future<AlbumPickState> choosePick(
+    String sessionId, {
+    required String albumId,
+    int? expectedVersion,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<AlbumPickState> goBackToPick(
+    String sessionId, {
+    required int version,
+    int? expectedVersion,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<List<ListenLaterEntry>> listListenLater() =>
       throw UnimplementedError();
 
   @override
-  Future<AlbumPickState> goBackToPick(String sessionId, {required int version, int? expectedVersion}) =>
+  Future<ListenLaterEntry> saveForLater(String albumId, {String? sessionId}) =>
       throw UnimplementedError();
-
-  @override
-  Future<List<ListenLaterEntry>> listListenLater() => throw UnimplementedError();
-
-  @override
-  Future<ListenLaterEntry> saveForLater(String albumId, {String? sessionId}) => throw UnimplementedError();
 
   @override
   Future<void> unsaveForLater(String albumId) => throw UnimplementedError();
 
   @override
-  Future<ListenLaterEntry> markListened(String albumId) => throw UnimplementedError();
+  Future<ListenLaterEntry> markListened(String albumId) =>
+      throw UnimplementedError();
 
   @override
   Future<SessionDetail> createSession(
@@ -147,7 +157,8 @@ class ShellDjApi implements DjApi {
       throw UnimplementedError();
 
   @override
-  Future<DjSession> setCaseColor(String id, String caseColor) => throw UnimplementedError();
+  Future<DjSession> setCaseColor(String id, String caseColor) =>
+      throw UnimplementedError();
 
   @override
   Future<DjSession> renameSession(String id, String title) =>
@@ -190,6 +201,7 @@ ProviderContainer shellContainer({
   AuthNotifier? auth,
   PlaybackController? player,
   bool fakeMiniPlayer = false,
+  bool isPad = false,
 }) {
   final container = ProviderContainer(
     overrides: [
@@ -198,6 +210,7 @@ ProviderContainer shellContainer({
       listeningApiProvider.overrideWithValue(FakeListeningApi()),
       authProvider.overrideWith(() => auth ?? TestAuth(AuthStatus.session)),
       nativeDockAvailableProvider.overrideWith((ref) => nativeDock),
+      isPadProvider.overrideWith((ref) => isPad),
       if (player != null) playbackProvider.overrideWithValue(player),
       if (fakeMiniPlayer)
         miniPlayerStateProvider.overrideWith(FakeMiniPlayer.new),
@@ -211,7 +224,13 @@ Future<void> pumpShell(
   WidgetTester tester,
   ProviderContainer container, {
   Brightness brightness = Brightness.light,
+  Size window = const Size(402, 874),
 }) async {
+  // A phone in portrait unless a test asks otherwise: the default 800x600
+  // test surface is wide enough to dock to the side.
+  tester.view.physicalSize = window;
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
@@ -717,10 +736,7 @@ void main() {
 
       // The route below an opaque one stays in the tree, so a second push
       // would be found here.
-      expect(
-        find.byType(PlaybackScreen, skipOffstage: false),
-        findsOneWidget,
-      );
+      expect(find.byType(PlaybackScreen, skipOffstage: false), findsOneWidget);
 
       tabNavigator(tester, AppTab.home).pop();
       await tester.pumpAndSettle();
@@ -784,9 +800,8 @@ void main() {
       final (:player, :bridge) = livePlayer(RecordingBridge());
       await pumpShell(tester, shellContainer(player: player));
 
-      double bottomInset() => MediaQuery.of(
-        tester.element(find.byType(HomeScreen)),
-      ).padding.bottom;
+      double bottomInset() =>
+          MediaQuery.of(tester.element(find.byType(HomeScreen))).padding.bottom;
       final before = bottomInset();
       expect(
         find.descendant(
@@ -906,6 +921,92 @@ void main() {
         container.read(miniPlayerStateProvider),
         const MiniPlayerState.hidden(),
       );
+    });
+  });
+
+  group('wide screens', () {
+    Future<void> setWindow(WidgetTester tester, Size size) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+    }
+
+    const wide = Size(1024, 768);
+
+    iosWidgets('an unfolded or landscape window docks to the side', (
+      tester,
+    ) async {
+      await pumpShell(tester, shellContainer(nativeDock: true), window: wide);
+
+      expect(find.byType(SideRail), findsOneWidget);
+      expect(find.byType(FrostedDock), findsNothing);
+      // The native bottom dock stands down while the rail is up.
+      expect(callsTo('hide'), isNotEmpty);
+      expect(callsTo('show'), isEmpty);
+    });
+
+    iosWidgets('the rail switches tabs', (tester) async {
+      await pumpShell(tester, shellContainer(), window: wide);
+
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(SideRail.tabsKey),
+          matching: find.text('Library'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(stackIndex(tester), AppTab.library.index);
+    });
+
+    iosWidgets('the rail stays beside a pushed route', (tester) async {
+      await pumpShell(tester, shellContainer(), window: wide);
+
+      await pushInsideTab(tester, 'inside a mix');
+
+      expect(find.text('inside a mix'), findsOneWidget);
+      expect(find.byType(SideRail), findsOneWidget);
+    });
+
+    iosWidgets('folding back to a phone width restores the bottom dock', (
+      tester,
+    ) async {
+      await pumpShell(tester, shellContainer(nativeDock: true), window: wide);
+      calls.clear();
+
+      await setWindow(tester, const Size(400, 860));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(SideRail), findsNothing);
+      expect(callsTo('show'), isNotEmpty);
+    });
+
+    iosWidgets('an iPad keeps the standard bottom dock at any width', (
+      tester,
+    ) async {
+      await pumpShell(
+        tester,
+        shellContainer(nativeDock: true, isPad: true),
+        window: wide,
+      );
+
+      expect(find.byType(SideRail), findsNothing);
+      expect(callsTo('show'), isNotEmpty);
+    });
+
+    iosWidgets('the rail sits on the trailing edge', (tester) async {
+      await pumpShell(tester, shellContainer(), window: wide);
+
+      final rail = tester.getRect(find.byType(SideRail));
+      expect(rail.right, wide.width);
+      expect(rail.left, greaterThan(wide.width / 2));
+    });
+
+    iosWidgets('a phone in portrait keeps the bottom dock', (tester) async {
+      await pumpShell(tester, shellContainer());
+
+      expect(find.byType(SideRail), findsNothing);
+      expect(find.byType(FrostedDock), findsOneWidget);
     });
   });
 }

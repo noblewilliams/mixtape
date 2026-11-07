@@ -31,6 +31,7 @@ import '../../widgets/foundation/frosted_dock.dart';
 import '../../widgets/foundation/frosted_surface.dart';
 import '../../widgets/foundation/glass_occlusion.dart';
 import '../../widgets/foundation/gradient_background.dart';
+import '../../widgets/foundation/side_rail.dart';
 import '../chat_screen.dart';
 import '../home_screen.dart';
 import '../mixes_screen.dart';
@@ -86,6 +87,14 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
 
   /// Scroll has pushed the tab bar down to the active tab's size.
   bool _minimized = false;
+
+  /// The window is wide enough to dock to the side ([useSideRail]) and this
+  /// is not an iPad: an unfolded foldable iPhone, or an iPhone in landscape. The bottom dock —
+  /// native or Flutter — stands down and [SideRail] takes its place.
+  bool _wide = false;
+
+  /// Whether the bottom dock should be on screen right now.
+  bool get _bottomDockWanted => !_wide && !_routeAbove;
 
   Brightness? _appearance;
   final List<StreamSubscription<Object?>> _subscriptions = [];
@@ -162,10 +171,10 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
     if (!ref.read(nativeDockAvailableProvider).hasValue) return;
     _announced = true;
     _dock.setTab(_currentIndex);
-    if (_routeAbove) {
-      _dock.hide();
-    } else {
+    if (_bottomDockWanted) {
       _dock.show();
+    } else {
+      _dock.hide();
     }
     _dock.setMiniPlayer(ref.read(miniPlayerStateProvider));
     _dock.setAppearance(isDark: _appearance == Brightness.dark);
@@ -226,13 +235,27 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
     final routeAbove = _observers[_currentIndex].depth > 0;
     if (routeAbove == _routeAbove) return;
     _routeAbove = routeAbove;
-    if (routeAbove) {
-      _tell((dock) => dock.hide());
-    } else {
+    _applyBottomDock();
+    _rebuild();
+  }
+
+  /// Sends the bottom dock's visibility down after a route or width change.
+  void _applyBottomDock() {
+    if (_bottomDockWanted) {
       _tell((dock) => dock.show());
       _setMinimized(false);
+    } else {
+      _tell((dock) => dock.hide());
     }
-    _rebuild();
+  }
+
+  /// The window crossed [kSideRailBreakpoint]: a fold, an unfold, a rotation.
+  void _setWide(bool wide) {
+    if (wide == _wide) return;
+    _wide = wide;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _applyBottomDock();
+    });
   }
 
   /// goalympics' scroll-to-shrink, unchanged: shrink on the way down, restore
@@ -300,6 +323,8 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
       child: Builder(
         builder: (context) {
           final media = MediaQuery.of(context);
+          // Docked to the side, nothing floats over the bottom edge.
+          if (_wide) return root;
           return MediaQuery(
             data: media.copyWith(
               padding: media.padding.copyWith(
@@ -313,9 +338,57 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
     );
   }
 
+  /// Beside the rail on a wide window; [child] untouched otherwise.
+  Widget _wideLayout({
+    required bool wide,
+    required int currentIndex,
+    required MiniPlayerState mini,
+    required Widget child,
+  }) {
+    if (!wide) return child;
+    final railExtent = MediaQuery.paddingOf(context).right + kSideRailExtent;
+    // Docked on the trailing edge, under the thumb of the hand holding an
+    // unfolded phone. A Stack rather than a Row: the column's gradient bleeds
+    // under the rail (see [GradientBleed]), so the rail has to paint after it.
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Positioned(
+          left: 0,
+          top: 0,
+          right: railExtent,
+          bottom: 0,
+          // The rail already stands clear of the trailing safe area.
+          child: MediaQuery.removePadding(
+            context: context,
+            removeRight: true,
+            child: GradientBleed(right: railExtent, child: child),
+          ),
+        ),
+        Positioned(
+          right: 0,
+          top: 0,
+          bottom: 0,
+          child: SideRail(
+            currentIndex: currentIndex,
+            onTap: _onTabTapped,
+            mini: mini,
+            onMiniTap: _openNowPlaying,
+            onMiniPlayPause: _playPause,
+            onMiniNext: _next,
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentIndex = ref.watch(selectedTabProvider);
+    // An iPad keeps the standard layout; only a wide iPhone docks to the side.
+    final isPad = ref.watch(isPadProvider).value ?? false;
+    _setWide(!isPad && useSideRail(MediaQuery.sizeOf(context)));
+    final wide = _wide;
     // Until the platform has answered, no dock is drawn and nothing is sent:
     // on iOS 26 a Flutter dock drawn for that frame would flash beside the
     // real one.
@@ -369,37 +442,42 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
                 resizeToAvoidBottomInset: false,
                 body: NotificationListener<ScrollNotification>(
                   onNotification: _handleScroll,
-                  child: NavigatorPopHandler(
-                    // Android back and the iOS swipe pop the tab's own
-                    // history before they leave the shell.
-                    onPopWithResult: (result) =>
-                        _navigatorOf(currentIndex)?.maybePop(),
-                    child: IndexedStack(
-                      key: ShellScreen.tabStackKey,
-                      index: currentIndex,
-                      children: [
-                        for (final tab in AppTab.values)
-                          KeyedSubtree(
-                            key: ShellScreen.tabKey(tab),
-                            child: Navigator(
-                              key: _navigators[tab.index],
-                              observers: [
-                                _observers[tab.index],
-                                _glassObservers[tab.index],
-                              ],
-                              onGenerateRoute: (settings) =>
-                                  MaterialPageRoute<void>(
-                                    settings: settings,
-                                    builder: (_) => _rootFor(tab),
-                                  ),
+                  child: _wideLayout(
+                    wide: wide,
+                    currentIndex: currentIndex,
+                    mini: mini,
+                    child: NavigatorPopHandler(
+                      // Android back and the iOS swipe pop the tab's own
+                      // history before they leave the shell.
+                      onPopWithResult: (result) =>
+                          _navigatorOf(currentIndex)?.maybePop(),
+                      child: IndexedStack(
+                        key: ShellScreen.tabStackKey,
+                        index: currentIndex,
+                        children: [
+                          for (final tab in AppTab.values)
+                            KeyedSubtree(
+                              key: ShellScreen.tabKey(tab),
+                              child: Navigator(
+                                key: _navigators[tab.index],
+                                observers: [
+                                  _observers[tab.index],
+                                  _glassObservers[tab.index],
+                                ],
+                                onGenerateRoute: (settings) =>
+                                    MaterialPageRoute<void>(
+                                      settings: settings,
+                                      builder: (_) => _rootFor(tab),
+                                    ),
+                              ),
                             ),
-                          ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
-              if (resolved && !nativeDock && !_routeAbove)
+              if (resolved && !nativeDock && !_routeAbove && !wide)
                 Positioned(
                   left: 0,
                   right: 0,

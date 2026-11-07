@@ -1328,3 +1328,20 @@ Rejected: admitting unanalysed seeded songs (no meaning embedding, so they
 would rank by artist and genre only). **Reopens if:** corpus turns run close
 to the client's 120 s, proposals are judged worse than catalogue picks, or the
 analysed catalogue stops being dominated by one library (lower the share).
+
+## 2026-11-07 — A wide iPhone docks its tabs to the trailing edge; iPad keeps the standard layout
+
+For foldable iPhones (unfolded) and any iPhone in landscape, the shell swaps
+the bottom dock for a `SideRail` on the right edge once the window is at
+least 600 pt wide (`kSideRailBreakpoint`): the same four tabs, with the
+mini-player stood on end beneath them. The native `UITabBar` is hidden while
+the rail is up and comes back on fold or rotate. iPad is excluded through a
+native `mixtape/device` → `isPad` check and keeps the standard iPad layout at
+every width (founder, 2026-11-07: a side rail "looks strange on an iPad").
+The rail stays beside pushed routes (a conversation keeps its tabs). Screens
+paint their own gradient, so `GradientBleed` lets the content column's
+gradient run under the rail and no seam shows. First-run pages cap their
+column at 560 pt on wide windows; the background image stays full-bleed.
+Rejected: a left rail (founder wants it on the right), a width cap on tab
+content (sheet backdrops then read as a box). **Reopens if:** Apple ships a
+foldable with its own idiom or size class we should key on instead of width.
