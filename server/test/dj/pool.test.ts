@@ -5,6 +5,7 @@ import {
   buildPool,
   isAlbumGlue,
   hasPersonalCandidates,
+  musicReady,
   resolvePoolMode,
   MIN_SEED_ARTISTS,
   MIN_SEED_TRACKS,
@@ -1593,6 +1594,157 @@ describe('resolvePoolMode', () => {
     await seedUser(db, 'u1')
 
     expect(await resolvePoolMode(db, 'u1')).toEqual({ mode: 'insufficient_seeds', seedTracks: 0, seedArtists: 0 })
+  })
+})
+
+// The onboarding flag the remake button reads (spec 2026-11-09
+// add-your-music-loop, decision 6): resolvePoolMode's own-data checks AND
+// the candidate rule.
+describe('musicReady', () => {
+  it('a blank listener is not ready', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+
+    expect(await musicReady(db, 'u1')).toBe(false)
+  })
+
+  it('a corpus-mode listener (artist seeds and pasted songs only) is not ready, though seeded rows pass the candidate rule', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedCorpusArtist(db, 'ArtistA', 15)
+    await seedCorpusArtist(db, 'ArtistB', 15)
+    for (const name of ['ArtistA', 'ArtistB']) await seedArtistSeed(db, 'u1', name)
+    await seedTrack(db, 'u1', { inLibrary: false, seeded: true })
+
+    expect((await resolvePoolMode(db, 'u1')).mode).toBe('corpus')
+    expect(await hasPersonalCandidates(db, 'u1')).toBe(true)
+    expect(await musicReady(db, 'u1')).toBe(false)
+  })
+
+  it('a synced library with candidates is ready', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedSource(db, 'u1', 'apple_live', new Date())
+    await seedTrack(db, 'u1', { inLibrary: true })
+
+    expect(await musicReady(db, 'u1')).toBe(true)
+  })
+
+  it('an in_library row with no source row (a pre-ledger library) is ready', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedTrack(db, 'u1', { inLibrary: true })
+
+    expect(await musicReady(db, 'u1')).toBe(true)
+  })
+
+  it('an imported source whose tracks the candidate rule rejects is not ready, though the pool resolves personal', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedSource(db, 'u1', 'spotify_export', new Date())
+    const underPlayed = await seedTrack(db, 'u1', { inLibrary: false })
+    const outOfWindow = await seedTrack(db, 'u1', { inLibrary: false })
+    await seedPlays(db, 'u1', underPlayed.id, await dbDay(db, 3), RECENT_PLAY_MIN - 1)
+    await seedPlays(db, 'u1', outOfWindow.id, await dbDay(db, RECENT_PLAY_WINDOW_DAYS + 1), RECENT_PLAY_MIN)
+
+    expect((await resolvePoolMode(db, 'u1')).mode).toBe('personal')
+    expect(await musicReady(db, 'u1')).toBe(false)
+  })
+
+  it('an imported history with enough recent plays is ready with no library rows', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedSource(db, 'u1', 'spotify_export', new Date())
+    const t = await seedTrack(db, 'u1', { inLibrary: false })
+    await seedPlays(db, 'u1', t.id, await dbDay(db, 3), RECENT_PLAY_MIN)
+
+    expect(await musicReady(db, 'u1')).toBe(true)
+  })
+
+  it('Spotify account liked tracks (in_library rows from a spotify_export source) are ready', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedSource(db, 'u1', 'spotify_export', new Date())
+    await seedTrack(db, 'u1', { appleId: null, spotifyId: spotifyId(), inLibrary: true })
+
+    expect(await musicReady(db, 'u1')).toBe(true)
+  })
+
+  it('an abandoned begin (last_imported_at null) does not count, even beside a seeded row', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedSource(db, 'u1', 'spotify_export', null)
+    await seedTrack(db, 'u1', { inLibrary: false, seeded: true })
+
+    expect(await musicReady(db, 'u1')).toBe(false)
+  })
+
+  it("another listener's music never makes this one ready", async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedUser(db, 'u2')
+    await seedSource(db, 'u2', 'apple_live', new Date())
+    await seedTrack(db, 'u2', { inLibrary: true })
+
+    expect(await musicReady(db, 'u1')).toBe(false)
+  })
+
+  it('matches resolvePoolMode personal AND hasPersonalCandidates for every fixture', async () => {
+    const db = await createTestDb()
+    const fixtures: Record<string, () => Promise<unknown>> = {
+      blank: async () => {},
+      library: () => seedTrack(db, 'library', { inLibrary: true }),
+      rejected: async () => {
+        await seedSource(db, 'rejected', 'apple_export', new Date())
+        const t = await seedTrack(db, 'rejected', { inLibrary: false })
+        await seedPlays(db, 'rejected', t.id, await dbDay(db, 1), 1, 'apple_export')
+      },
+      played: async () => {
+        await seedSource(db, 'played', 'apple_export', new Date())
+        const t = await seedTrack(db, 'played', { inLibrary: false })
+        await seedPlays(db, 'played', t.id, await dbDay(db, 1), RECENT_PLAY_MIN, 'apple_export')
+      },
+      listed: async () => {
+        await seedSource(db, 'listed', 'apple_live', new Date())
+        const t = await seedTrack(db, 'listed', { inLibrary: false })
+        await seedPlaylistWith(db, t.id, { userId: 'listed' })
+      },
+      pasted: () => seedTrack(db, 'pasted', { inLibrary: false, seeded: true }),
+    }
+    for (const [id, seed] of Object.entries(fixtures)) {
+      await seedUser(db, id)
+      await seed()
+    }
+
+    for (const id of Object.keys(fixtures)) {
+      const expected = (await resolvePoolMode(db, id)).mode === 'personal' && (await hasPersonalCandidates(db, id))
+      expect(await musicReady(db, id), id).toBe(expected)
+    }
+  })
+
+  it('skips the candidate check when the listener holds nothing of their own', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'blank')
+    await seedUser(db, 'library')
+    await seedTrack(db, 'library', { inLibrary: true })
+    let calls = 0
+    const counted = new Proxy(db, {
+      get(target, prop, receiver) {
+        if (prop === 'execute') {
+          return (...args: Parameters<TestDb['execute']>) => {
+            calls += 1
+            return target.execute(...args)
+          }
+        }
+        return Reflect.get(target, prop, receiver)
+      },
+    })
+
+    expect(await musicReady(counted, 'blank')).toBe(false)
+    expect(calls).toBe(1)
+    calls = 0
+    expect(await musicReady(counted, 'library')).toBe(true)
+    expect(calls).toBe(2)
   })
 })
 

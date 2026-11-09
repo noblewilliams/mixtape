@@ -3,7 +3,9 @@ import { createApp, type AuthLike } from '../../src/app'
 import { djMemories, funnelEvents, listeningImportRuns, tracks, userArtistSeeds, userMusicSources, userTracks } from '../../src/db/schema'
 import { createListeningImportStore } from '../../src/listening/import-store'
 import { createTestDb, type TestDb } from '../helpers/db'
-import { APPLE_A, begin, day, now, publish, seedUser, track } from '../helpers/listening-fixtures'
+import {
+  APPLE_A, SPOTIFY_B, accountBegin, artist, begin, day, dbToday, libraryRow, now, publish, seedUser, shiftDay, track,
+} from '../helpers/listening-fixtures'
 
 const authFor = (id: string | null): AuthLike => ({
   handler: () => new Response('ok'),
@@ -26,6 +28,7 @@ const blank = {
   interviewCompletedAt: null,
   importCompletedAt: null,
   interview: null,
+  musicReady: false,
 }
 
 async function seedAppleLibraryTrack(db: TestDb, userId: string) {
@@ -84,6 +87,9 @@ describe('GET /me/onboarding', () => {
       interviewCompletedAt: null,
       importCompletedAt: null,
       interview: null,
+      // Fixed-date plays ride the clock-anchored recent-play window; the
+      // musicReady tests below pin the value with clock-relative days.
+      musicReady: expect.any(Boolean),
     })
   })
 
@@ -108,6 +114,7 @@ describe('GET /me/onboarding', () => {
       interviewCompletedAt: earlier.toISOString(),
       importCompletedAt: later.toISOString(),
       interview: { artists: 0, notes: 0 },
+      musicReady: true,
     })
   })
 
@@ -128,6 +135,7 @@ describe('GET /me/onboarding', () => {
       interviewCompletedAt: null,
       importCompletedAt: null,
       interview: null,
+      musicReady: true,
     })
   })
 
@@ -136,9 +144,14 @@ describe('GET /me/onboarding', () => {
     await seedUser(db, 'u1')
     await db.insert(userMusicSources).values({ userId: 'u1', source: 'apple_export', connectedAt: now })
 
-    const body = (await (await get(db, authFor('u1'))).json()) as { hasLibrary: boolean; chosenService: string | null }
+    const body = (await (await get(db, authFor('u1'))).json()) as {
+      hasLibrary: boolean
+      chosenService: string | null
+      musicReady: boolean
+    }
     expect(body.hasLibrary).toBe(false)
     expect(body.chosenService).toBe('apple')
+    expect(body.musicReady).toBe(false)
   })
 
   it("never leaks another user's events, sources, or library", async () => {
@@ -169,9 +182,11 @@ describe('GET /me/onboarding', () => {
     const body = (await (await get(db, authFor('u1'))).json()) as {
       hasLibrary: boolean
       chosenService: string | null
+      musicReady: boolean
     }
     expect(body.hasLibrary).toBe(true)
     expect(body.chosenService).toBe('spotify')
+    expect(body.musicReady).toBe(true)
   })
   it('lists the packages that have landed for a source and counts the interview', async () => {
     const db = await createTestDb()
@@ -204,5 +219,80 @@ describe('GET /me/onboarding', () => {
     }
     expect(body.sources[0].packages).toEqual(['spotify_account', 'spotify_extended'])
     expect(body.interview).toEqual({ artists: 2, notes: 2 })
+  })
+})
+
+// Whether a remake would draw from the listener's own music (spec
+// 2026-11-09 add-your-music-loop, decision 6): a landed source or library,
+// and something the candidate rule admits.
+describe('GET /me/onboarding musicReady', () => {
+  const ready = async (db: TestDb) =>
+    ((await (await get(db, authFor('u1'))).json()) as { musicReady: boolean }).musicReady
+
+  it('is false with artist seeds and pasted songs only (corpus mode)', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await db.insert(userArtistSeeds).values([
+      { userId: 'u1', name: 'Ivory Kestrel', source: 'interview' },
+      { userId: 'u1', name: 'Juniper North', source: 'pasted' },
+    ])
+    const [row] = await db
+      .insert(tracks)
+      .values({ appleId: APPLE_A, title: 'Pasted', artist: 'Juniper North' })
+      .returning({ id: tracks.id })
+    await db.insert(userTracks).values({ userId: 'u1', trackId: row.id, inLibrary: false, seeded: true })
+
+    expect(await ready(db)).toBe(false)
+  })
+
+  it('is true for a synced Apple library', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await db.insert(userMusicSources).values({ userId: 'u1', source: 'apple_live', connectedAt: now, lastImportedAt: now })
+    await seedAppleLibraryTrack(db, 'u1')
+
+    expect(await ready(db)).toBe(true)
+  })
+
+  it('is false for an imported history whose plays the candidate rule rejects', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const store = createListeningImportStore(db, { now: () => now })
+    await publish(store, 'u1', begin(), {
+      tracks: [track()],
+      days: [day({ day: shiftDay(await dbToday(db), -2), plays: 2 })],
+    })
+
+    const body = (await (await get(db, authFor('u1'))).json()) as {
+      sources: { lastImportedAt: string | null }[]
+      musicReady: boolean
+    }
+    expect(body.sources[0].lastImportedAt).not.toBeNull()
+    expect(body.musicReady).toBe(false)
+  })
+
+  it('is true for an imported history with enough recent plays', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const store = createListeningImportStore(db, { now: () => now })
+    await publish(store, 'u1', begin(), {
+      tracks: [track()],
+      days: [day({ day: shiftDay(await dbToday(db), -2), plays: 3 })],
+    })
+
+    expect(await ready(db)).toBe(true)
+  })
+
+  it('is true for Spotify account liked tracks', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const store = createListeningImportStore(db, { now: () => now })
+    await publish(store, 'u1', accountBegin(), {
+      tracks: [track(), track({ ordinal: 1, platformId: SPOTIFY_B, title: 'Other' })],
+      library: [libraryRow(), libraryRow({ ordinal: 1, platformId: SPOTIFY_B })],
+      artists: [artist()],
+    })
+
+    expect(await ready(db)).toBe(true)
   })
 })

@@ -335,9 +335,30 @@ type PoolRow = {
   score: number | string
 }
 
-type PoolModeRow = {
+// Whether the listener holds any data of their own, as two select-list
+// columns: a user_music_sources row whose import actually landed, or any
+// in_library row (see resolvePoolMode for why each counts). Shared by
+// resolvePoolMode and musicReady so "the pool resolves personal" is one rule.
+function ownMusicColumnsSql(userId: string): SQL {
+  return sql`
+      EXISTS (
+        SELECT 1 FROM user_music_sources
+        WHERE user_id = ${userId} AND last_imported_at IS NOT NULL
+      ) AS has_source,
+      EXISTS (
+        SELECT 1 FROM user_tracks
+        WHERE user_id = ${userId} AND in_library = true
+      ) AS has_library`
+}
+
+type OwnMusicRow = {
   has_source: boolean
   has_library: boolean
+}
+
+const holdsOwnMusic = (row: OwnMusicRow): boolean => Boolean(row.has_source || row.has_library)
+
+type PoolModeRow = OwnMusicRow & {
   seed_tracks: number | string
   seed_artists: number | string
 }
@@ -399,24 +420,37 @@ export async function resolvePoolMode(db: Db, userId: string): Promise<PoolModeR
       WHERE ut.user_id = ${userId} AND ut.seeded = true
     )
     SELECT
-      EXISTS (
-        SELECT 1 FROM user_music_sources
-        WHERE user_id = ${userId} AND last_imported_at IS NOT NULL
-      ) AS has_source,
-      EXISTS (
-        SELECT 1 FROM user_tracks
-        WHERE user_id = ${userId} AND in_library = true
-      ) AS has_library,
+      ${ownMusicColumnsSql(userId)},
       (SELECT COUNT(DISTINCT track_id) FROM seed_matches)::int AS seed_tracks,
       (SELECT COUNT(DISTINCT artist) FROM seed_matches)::int AS seed_artists
   `)
   const [row] = normalizeRows(res) as unknown as PoolModeRow[]
   const seedTracks = Number(row.seed_tracks)
   const seedArtists = Number(row.seed_artists)
-  if (row.has_source || row.has_library) return { mode: 'personal', seedTracks, seedArtists }
+  if (holdsOwnMusic(row)) return { mode: 'personal', seedTracks, seedArtists }
   const enough =
     (seedTracks >= MIN_SEED_TRACKS && seedArtists >= MIN_SEED_ARTISTS) || seedTracks >= SOLO_SEED_TRACKS
   return { mode: enough ? 'corpus' : 'insufficient_seeds', seedTracks, seedArtists }
+}
+
+/**
+ * Whether the DJ would draw this listener's mix from their own music: the
+ * pool resolves personal (resolvePoolMode's own-data checks) AND the
+ * candidate rule admits something (hasPersonalCandidates, the check
+ * dj/loop.ts makes before its EMPTY_LIBRARY reply). GET /onboarding serves
+ * it so the clients offer "Remake with my music" only when a remake would
+ * work (spec 2026-11-09 add-your-music-loop, decision 6): a landed source
+ * can still hold nothing usable, such as a history of one-off plays.
+ *
+ * Skips resolvePoolMode's seed-match CTE: seeds only choose between corpus
+ * and insufficient_seeds, and neither is the listener's own music. One round
+ * trip when they hold nothing; the candidate check runs only when they do.
+ */
+export async function musicReady(db: Db, userId: string): Promise<boolean> {
+  const res = await db.execute(sql`SELECT ${ownMusicColumnsSql(userId)}`)
+  const [row] = normalizeRows(res) as unknown as OwnMusicRow[]
+  if (!row || !holdsOwnMusic(row)) return false
+  return hasPersonalCandidates(db, userId)
 }
 
 // The CTEs every scored query reads, whatever its candidate source: the

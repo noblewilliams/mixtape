@@ -4,14 +4,16 @@ import type { AppVars } from '../app'
 import type { Db } from '../db/types'
 import { djMemories, funnelEvents, userArtistSeeds, userTracks } from '../db/schema'
 import type { FunnelEventType } from '../seeds/contracts'
+import { musicReady } from '../dj/pool'
 import { listMusicSources } from './music-sources'
 
 // Mounted at /me/onboarding, behind requireSession like every other /me*
 // route. One read for both clients' service gate and waiting state: what is
 // connected (same rows and serialization as /me/music-sources), whether any
 // library landed, which service the listener is on, and when they first
-// took each Spotify funnel step (spec 2026-09-01 → Funnel). Two queries,
-// both scoped to the caller.
+// took each Spotify funnel step (spec 2026-09-01 → Funnel), and whether a
+// mix would draw from their own music (musicReady, spec 2026-11-09
+// add-your-music-loop → decision 6). All scoped to the caller, in parallel.
 export function onboardingRoutes(db: Db) {
   const app = new Hono<{ Variables: AppVars }>()
 
@@ -30,7 +32,7 @@ export function onboardingRoutes(db: Db) {
         .where(and(eq(userTracks.userId, userId), eq(userTracks.inLibrary, true))),
     )
 
-    const [sources, [state]] = await Promise.all([
+    const [sources, [state], ready] = await Promise.all([
       listMusicSources(db, userId),
       db
         .select({
@@ -42,6 +44,7 @@ export function onboardingRoutes(db: Db) {
         })
         .from(funnelEvents)
         .where(eq(funnelEvents.userId, userId)),
+      musicReady(db, userId),
     ])
 
     // Choosing Spotify is an explicit act and wins outright, and so does a
@@ -92,6 +95,9 @@ export function onboardingRoutes(db: Db) {
       interviewCompletedAt: state.interviewCompletedAt,
       importCompletedAt: state.importCompletedAt,
       interview,
+      // The remake button's gate: true only when the DJ would draw this
+      // listener's mix from their own music (dj/pool.ts musicReady).
+      musicReady: ready,
     })
   })
 
