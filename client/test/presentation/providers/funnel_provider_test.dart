@@ -87,4 +87,27 @@ void main() {
     await _flush();
     expect(listening.funnelEvents, isEmpty);
   });
+
+  test('record posts every time, with no once-flag, and a dropped post is silent', () async {
+    final listening = FakeListeningApi();
+    var attempts = 0;
+    listening.onPostFunnelEvent = (_) async {
+      if (++attempts == 1) throw StateError('offline');
+    };
+    final store = InMemoryFunnelOnceStore();
+    final container = _container(listening: listening, store: store);
+
+    final funnel = container.read(funnelMilestonesProvider);
+    funnel.record(FunnelEventType.musicDoorTapped);
+    funnel.record(FunnelEventType.musicDoorTapped);
+    funnel.record(FunnelEventType.musicChipTapped);
+    await _flush();
+
+    expect(listening.funnelEvents, [
+      FunnelEventType.musicDoorTapped,
+      FunnelEventType.musicDoorTapped,
+      FunnelEventType.musicChipTapped,
+    ]);
+    expect(await store.has('user-1', FunnelEventType.musicDoorTapped), isFalse);
+  });
 }

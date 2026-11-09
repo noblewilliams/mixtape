@@ -23,6 +23,9 @@ class TapeButton extends StatelessWidget {
     this.fill = false,
     this.semanticsLabel,
     this.semanticsHint,
+    this.wrap = false,
+    this.minHeight,
+    this.leadingPadding,
   });
 
   final String label;
@@ -44,6 +47,18 @@ class TapeButton extends StatelessWidget {
 
   /// Read after the label, e.g. "Opens Now Playing".
   final String? semanticsHint;
+
+  /// Lets the label wrap, centred, instead of ellipsizing on one line: the
+  /// music door's Remake, which must read in full at accessibility sizes.
+  final bool wrap;
+
+  /// The shell's floor when a caller needs a taller one (the door's 52 pt at
+  /// large text); otherwise 40 pt, or 44 pt when it fills.
+  final double? minHeight;
+
+  /// The inset before the leading mark when it is not the usual 14 pt: the
+  /// reel sits 8 pt in (`.tape { padding: 0 14px 0 8px }`).
+  final double? leadingPadding;
 
   /// The Playing meter, for tests.
   static const Key meterKey = Key('tape-button-meter');
@@ -76,9 +91,9 @@ class TapeButton extends StatelessWidget {
     final shell = ConstrainedBox(
       // A floor, not a fixed height: the label must grow at 200% text.
       constraints: BoxConstraints(
-        minHeight: fill
-            ? MixtapeMetrics.minTarget
-            : MixtapeMetrics.tapeButtonHeight,
+        minHeight:
+            minHeight ??
+            (fill ? MixtapeMetrics.minTarget : MixtapeMetrics.tapeButtonHeight),
       ),
       child: DecoratedBox(
         decoration: BoxDecoration(
@@ -104,7 +119,7 @@ class TapeButton extends StatelessWidget {
             children: [
               Padding(
                 padding: EdgeInsets.only(
-                  left: _sidePadding,
+                  left: leadingPadding ?? _sidePadding,
                   right: playing ? _playingRightPadding : _sidePadding,
                 ),
                 child: Row(
@@ -122,8 +137,9 @@ class TapeButton extends StatelessWidget {
                     Flexible(
                       child: Text(
                         label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                        maxLines: wrap ? null : 1,
+                        overflow: wrap ? null : TextOverflow.ellipsis,
+                        textAlign: wrap ? TextAlign.center : null,
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,

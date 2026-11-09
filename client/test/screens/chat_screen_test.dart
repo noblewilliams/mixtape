@@ -31,6 +31,7 @@ import 'package:mixtape/presentation/screens/queue_screen.dart';
 import 'package:mixtape/presentation/screens/playback_screen.dart';
 import 'package:mixtape/presentation/widgets/foundation/mixtape_menu.dart';
 import 'package:mixtape/presentation/widgets/lyric_turn.dart';
+import 'package:mixtape/presentation/widgets/music_door.dart';
 import 'package:mixtape/presentation/widgets/energy_journey.dart';
 import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
 import 'package:mixtape/presentation/widgets/playlist_inspiration.dart';
@@ -39,10 +40,19 @@ import 'package:mixtape/presentation/widgets/tape_strip.dart';
 import 'package:mixtape/presentation/widgets/version_marker.dart';
 
 import 'package:mixtape/data/auth/account_api.dart' show AccountApi;
+import 'package:mixtape/data/files/archive_picker.dart';
+import 'package:mixtape/data/onboarding/funnel_once_store.dart';
+import 'package:mixtape/data/onboarding/service_preference_store.dart';
+import 'package:mixtape/presentation/providers/device_providers.dart';
+import 'package:mixtape/presentation/providers/listening_import_provider.dart';
+import 'package:mixtape/presentation/providers/onboarding_provider.dart';
+import 'package:mixtape/presentation/screens/import_sheet.dart';
 import 'package:mixtape/presentation/providers/account_provider.dart'
     show accountApiProvider;
 import 'package:mixtape/presentation/widgets/ai_consent_sheet.dart';
 import '../helpers/fake_ai_consent.dart';
+import '../helpers/fake_import_service.dart';
+import '../helpers/fake_listening_api.dart';
 import '../data/playback/playback_controller_test.dart' as playback
     show FakeApi, FakeBridge;
 import '../presentation/providers/playlist_context_provider_test.dart'
@@ -288,6 +298,8 @@ ProviderContainer _makeContainer(
   AccountApi? account,
   PlaybackController? player,
   MusicPlatformStore? destinations,
+  FakeListeningApi? listening,
+  ArchivePicker? picker,
 }) {
   // The screen watches the Mixes summaries for the title it shows while the
   // transcript loads, and posts session events on an output.
@@ -316,10 +328,36 @@ ProviderContainer _makeContainer(
       playbackProvider.overrideWithValue(
         player ?? PlaybackController(playback.FakeApi(), playback.FakeBridge()),
       ),
+      // The music door's onboarding read and the import flow it can open.
+      if (listening != null) ...[
+        listeningApiProvider.overrideWithValue(listening),
+        servicePreferenceStoreProvider.overrideWithValue(
+          InMemoryServicePreferenceStore(),
+        ),
+        funnelOnceStoreProvider.overrideWithValue(InMemoryFunnelOnceStore()),
+        listeningImportServiceProvider.overrideWithValue(FakeImportService()),
+        archivePickerProvider.overrideWithValue(picker ?? FakeArchivePicker()),
+        openedArchiveSourceProvider.overrideWithValue(
+          FakeOpenedArchiveSource(),
+        ),
+        deviceTimeZoneProvider.overrideWithValue(() async => 'Africa/Lagos'),
+      ],
     ],
   );
   addTearDown(container.dispose);
   return container;
+}
+
+/// A document picker held open until the test answers it.
+class _HeldPicker implements ArchivePicker {
+  final Completer<PickedArchive?> answer = Completer<PickedArchive?>();
+  int picks = 0;
+
+  @override
+  Future<PickedArchive?> pick() {
+    picks++;
+    return answer.future;
+  }
 }
 
 Future<void> _pump(
@@ -1518,7 +1556,11 @@ void main() {
   });
 
   group('corpus mode', () {
-    testWidgets('the explanatory line follows the last turn, under the subtitle', (
+    const catalogLine =
+        "From Mixtape's catalog for now. With your music, the DJ picks from "
+        'what you actually play.';
+
+    testWidgets('the music door follows the last turn, under the subtitle', (
       tester,
     ) async {
       final api = FakeDjApi();
@@ -1530,30 +1572,93 @@ void main() {
         ],
         queue: [],
       );
-      await _pump(tester, _makeContainer(api));
+      await _pump(
+        tester,
+        _makeContainer(
+          api,
+          destinations: InMemoryMusicPlatformStore(MusicPlatform.apple),
+        ),
+      );
 
       expect(find.byKey(const Key('chat-not-personal')), findsOneWidget);
+      expect(find.text('Not personal yet'), findsOneWidget);
+      final door = find.byType(MusicDoor);
+      expect(door, findsOneWidget);
+      expect(tester.widget<MusicDoor>(door).layout, MusicDoorLayout.transcript);
+      expect(find.text(catalogLine), findsOneWidget);
       expect(
-        find.text(
-          "Built from Mixtape's catalog and your interview, not your listening. "
-          'Import your Spotify data for the real thing.',
-        ),
+        find.descendant(of: door, matching: find.text('Sync Apple Music')),
         findsOneWidget,
       );
+      expect(find.textContaining('Import your Spotify data'), findsNothing);
       expect(
-        tester
-            .getTopLeft(
-              find.text(
-                "Built from Mixtape's catalog and your interview, not your listening. "
-                'Import your Spotify data for the real thing.',
-              ),
-            )
-            .dy,
+        tester.getTopLeft(find.text(catalogLine)).dy,
         greaterThan(tester.getTopLeft(find.text('Instrumental only?')).dy),
       );
     });
 
-    testWidgets('a personal mix carries neither the subtitle nor the line', (
+    testWidgets(
+      'Choose files during a send: the door keeps its place, and the sheet '
+      'opens once a file is picked after the turn lands',
+      (tester) async {
+        final turn = Completer<TurnResult>();
+        final picker = _HeldPicker();
+        final api = FakeDjApi();
+        api.onGetSession = (_) async => SessionDetail(
+          session: _session(notPersonal: true),
+          messages: [_msg('m1', 'dj', 'Fifteen for the bridge.')],
+          queue: [],
+        );
+        api.onSendMessage = (id, text) => turn.future;
+        await _pump(
+          tester,
+          _makeContainer(
+            api,
+            destinations: InMemoryMusicPlatformStore(MusicPlatform.spotify),
+            listening: FakeListeningApi(
+              onboarding: onboardingState(
+                chosenService: 'spotify',
+                markedRequestedAt: DateTime.utc(2026, 11, 2),
+              ),
+            ),
+            picker: picker,
+          ),
+        );
+        final door = tester.element(find.byType(MusicDoor));
+
+        await tester.enterText(find.byKey(const Key('prompt-field')), 'softer');
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('start-session')));
+        await tester.pump();
+        expect(find.byKey(WorkingCassette.indicatorKey), findsOneWidget);
+        expect(
+          identical(tester.element(find.byType(MusicDoor)), door),
+          isTrue,
+          reason: 'the cassette arriving under it does not remount the door',
+        );
+
+        await tester.tap(find.byKey(MusicDoor.actionKey));
+        await tester.pump();
+        expect(picker.picks, 1);
+
+        turn.complete(
+          TurnResult(
+            djMessage: _msg('m3', 'dj', 'Softer it is.'),
+            queue: [],
+            queueVersion: 1,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byKey(WorkingCassette.indicatorKey), findsNothing);
+        expect(identical(tester.element(find.byType(MusicDoor)), door), isTrue);
+
+        picker.answer.complete(extendedArchive);
+        await tester.pumpAndSettle();
+        expect(find.byType(ImportSheet), findsOneWidget);
+      },
+    );
+
+    testWidgets('a personal mix carries neither the subtitle nor the door', (
       tester,
     ) async {
       final api = FakeDjApi();
@@ -1562,7 +1667,8 @@ void main() {
       await _pump(tester, _makeContainer(api));
 
       expect(find.byKey(const Key('chat-not-personal')), findsNothing);
-      expect(find.byKey(const Key('chat-not-personal-line')), findsNothing);
+      expect(find.byType(MusicDoor), findsNothing);
+      expect(find.byKey(MusicDoor.lineKey), findsNothing);
     });
   });
 

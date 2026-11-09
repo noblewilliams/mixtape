@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show ProviderListenable;
 
 import '../../data/api/api_client.dart';
 import '../../data/files/archive_picker.dart';
@@ -113,16 +114,31 @@ class _LockedSheetState extends ConsumerState<_LockedSheet> {
 ///
 /// A run in progress (a file being read, an inventory, an upload) is shown
 /// where it got to instead; starting over would cancel it.
-Future<void> openImportFlow(BuildContext context, WidgetRef ref) async {
-  final state = ref.read(listeningImportProvider);
+Future<void> openImportFlow(BuildContext context, WidgetRef ref) =>
+    _openImportFlow(context, ref.read);
+
+/// [openImportFlow] for an opener that may be gone by the time the picker
+/// answers (the music door, rebuilt as the conversation moves): it reads
+/// through [container], which outlives any widget, and [context] should
+/// outlive the opener too (its navigator's).
+Future<void> openImportFlowIn(
+  BuildContext context,
+  ProviderContainer container,
+) => _openImportFlow(context, container.read);
+
+Future<void> _openImportFlow(
+  BuildContext context,
+  T Function<T>(ProviderListenable<T> provider) read,
+) async {
+  final state = read(listeningImportProvider);
   if (state.inProgress) {
     return showImportSheet(context, dismissible: state is! ImportUploading);
   }
-  final chosen = await ref.read(listeningImportProvider.notifier).chooseFile();
+  final chosen = await read(listeningImportProvider.notifier).chooseFile();
   if (!chosen || !context.mounted) return;
   await showImportSheet(
     context,
-    dismissible: ref.read(listeningImportProvider) is! ImportUploading,
+    dismissible: read(listeningImportProvider) is! ImportUploading,
   );
 }
 

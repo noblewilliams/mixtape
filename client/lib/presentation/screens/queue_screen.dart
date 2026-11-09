@@ -49,6 +49,7 @@ import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/remove_band.dart';
 import '../widgets/mix_handoff.dart';
 import '../widgets/mix_tape_colour.dart';
+import '../widgets/music_door.dart';
 import '../widgets/tape_header.dart';
 import '../widgets/track_row.dart';
 import 'mix_history_screen.dart';
@@ -954,43 +955,18 @@ class _EmptyState extends StatelessWidget {
 }
 
 /// The corpus-mode block (plan: Copy — "Not personal yet" wherever a session
-/// has `notPersonal`): the mix came from the shared catalog and the
-/// interview, not this listener's plays. A flush line with a hairline under
-/// it, per the board — text only, since Home is the only screen that pushes
-/// the import. A live region so a screen reader announces it when a turn
-/// flips the flag.
+/// has `notPersonal`): the music door's tape layout, the bold label over the
+/// line and its action, with a hairline under it (approval
+/// `docs/mockups/approved/2026-11-09-add-your-music-loop.md`, frame 1D). The
+/// tape is its own screen, so the action can show here and in the
+/// conversation without showing twice at once.
 class _NotPersonalBlock extends StatelessWidget {
   const _NotPersonalBlock();
 
   @override
-  Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    return Semantics(
-      key: const Key('not-personal-banner'),
-      container: true,
-      liveRegion: true,
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(0, 8, 0, 10),
-        margin: const EdgeInsets.only(bottom: 4),
-        decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: tokens.hairline)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Not personal yet',
-              style: tokens.rowTitle.copyWith(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              "Built from Mixtape's catalog and your interview, not your listening. "
-              'Import your Spotify data for the real thing.',
-              style: tokens.meta.copyWith(color: tokens.muted),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => const MusicDoor(
+    key: Key('not-personal-banner'),
+    notPersonal: true,
+    layout: MusicDoorLayout.tape,
+  );
 }

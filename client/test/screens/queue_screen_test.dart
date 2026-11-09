@@ -31,6 +31,7 @@ import 'package:mixtape/presentation/screens/mix_history_screen.dart';
 import 'package:mixtape/presentation/screens/playback_screen.dart';
 import 'package:mixtape/presentation/screens/queue_screen.dart';
 import 'package:mixtape/presentation/widgets/mix_handoff.dart';
+import 'package:mixtape/presentation/widgets/music_door.dart';
 import 'package:mixtape/presentation/widgets/spotify_handoff_sheets.dart';
 import 'package:mixtape/presentation/widgets/tape_header.dart';
 import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
@@ -1345,7 +1346,7 @@ void main() {
 
   group('Spotify outputs (C4)', () {
     const bannerLine =
-        "Built from Mixtape's catalog and your interview, not your listening. Import your Spotify data for the real thing.";
+        "From Mixtape's catalog for now. With your music, the DJ picks from what you actually play.";
 
     testWidgets(
       'a row with a Spotify id gets a keyed 44pt "Open in Spotify" action; rows without one get none',
@@ -1658,9 +1659,19 @@ void main() {
 
         final banner = find.byKey(const Key('not-personal-banner'));
         expect(banner, findsOneWidget);
-        expect(tester.widget<Semantics>(banner).properties.liveRegion, isTrue);
+        expect(tester.widget<MusicDoor>(banner).layout, MusicDoorLayout.tape);
+        final region = find.descendant(
+          of: banner,
+          matching: find.byKey(MusicDoor.lineKey),
+        );
+        expect(tester.widget<Semantics>(region).properties.liveRegion, isTrue);
         expect(find.text('Not personal yet'), findsOneWidget);
         expect(find.text(bannerLine), findsOneWidget);
+        // The listener's service is Apple Music (the fake's onboarding).
+        expect(
+          find.descendant(of: banner, matching: find.text('Sync Apple Music')),
+          findsOneWidget,
+        );
         expect(
           tester.getBottomLeft(banner).dy,
           lessThanOrEqualTo(

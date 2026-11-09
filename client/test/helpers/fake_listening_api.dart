@@ -148,6 +148,7 @@ OnboardingState onboardingState({
   bool hasLibrary = false,
   List<MusicSource> sources = const [],
   InterviewCounts? interview,
+  bool musicReady = false,
 }) => OnboardingState(
   userId: userId,
   sources: sources,
@@ -157,6 +158,7 @@ OnboardingState onboardingState({
   interviewCompletedAt: interviewCompletedAt,
   importCompletedAt: importCompletedAt,
   interview: interview,
+  musicReady: musicReady,
 );
 
 /// A connected source row; [packages] is what actually landed for it.

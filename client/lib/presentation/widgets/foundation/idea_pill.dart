@@ -18,12 +18,41 @@ class IdeaPill extends StatelessWidget {
     this.onPressed,
     this.dimmed = false,
     this.skeleton = false,
+    this.leading,
+    this.fill = false,
+    this.wrap = false,
+    this.minHeight,
+    this.labelWeight,
   });
 
   final String label;
   final VoidCallback? onPressed;
   final bool dimmed;
   final bool skeleton;
+
+  /// A mark before the label, 6 pt from it (`.pill { gap: 6px }`): the
+  /// music door's service mark or glyph. Decoration only; the label is what
+  /// VoiceOver reads.
+  final Widget? leading;
+
+  /// Fills the width it is given, at least 44 pt tall, the label centred:
+  /// the music door's action at large text (board frame 1E). Otherwise it
+  /// shrink-wraps its label.
+  final bool fill;
+
+  /// Lets the label wrap, centred, instead of ellipsizing on one line: the
+  /// music door's action, which must read in full at accessibility sizes.
+  final bool wrap;
+
+  /// The pill's floor when a caller needs a taller one (the door's 52 pt at
+  /// large text); otherwise 34 pt, or 44 pt when it fills.
+  final double? minHeight;
+
+  /// The label's weight when it is not the usual 500 (the door's 600).
+  final FontWeight? labelWeight;
+
+  /// `.pill { gap: 6px }`.
+  static const double leadingGap = 6;
 
   /// What VoiceOver hears while the routine slot loads.
   static const String skeletonLabel = 'Checking your usual moments';
@@ -40,7 +69,9 @@ class IdeaPill extends StatelessWidget {
     final pill = Container(
       // A floor, not a fixed height: the label must grow at 200% text.
       constraints: BoxConstraints(
-        minHeight: MixtapeMetrics.pillHeight,
+        minHeight:
+            minHeight ??
+            (fill ? MixtapeMetrics.minTarget : MixtapeMetrics.pillHeight),
         minWidth: skeleton ? _skeletonMinWidth : 0,
       ),
       padding: skeleton ? null : const EdgeInsets.symmetric(horizontal: 13),
@@ -58,19 +89,8 @@ class IdeaPill extends StatelessWidget {
       // pills take only the width their label needs (smoke round two, note 6).
       child: Align(
         alignment: Alignment.center,
-        widthFactor: 1,
-        child: skeleton
-            ? const SizedBox.shrink()
-            : Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  color: tokens.text,
-                ),
-              ),
+        widthFactor: fill ? null : 1,
+        child: skeleton ? const SizedBox.shrink() : _content(tokens),
       ),
     );
 
@@ -91,12 +111,43 @@ class IdeaPill extends StatelessWidget {
           ),
           child: Center(
             // Shrink-wrap: the target is 44 pt tall but never wider than the
-            // control itself.
-            widthFactor: 1,
-            child: Opacity(opacity: dimmed ? 0.45 : 1, child: pill),
+            // control itself — unless it fills its row.
+            widthFactor: fill ? null : 1,
+            child: Opacity(
+              opacity: dimmed ? 0.45 : 1,
+              child: fill
+                  ? SizedBox(width: double.infinity, child: pill)
+                  : pill,
+            ),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _content(MixtapeTokens tokens) {
+    final text = Text(
+      label,
+      maxLines: wrap ? null : 1,
+      overflow: wrap ? null : TextOverflow.ellipsis,
+      textAlign: wrap ? TextAlign.center : null,
+      style: TextStyle(
+        fontSize: 13,
+        fontWeight: labelWeight ?? FontWeight.w500,
+        color: tokens.text,
+      ),
+    );
+    final mark = leading;
+    if (mark == null) return text;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        mark,
+        const SizedBox(width: leadingGap),
+        // Loose, so the label shrink-wraps when there is room and ellipsizes
+        // when there is not; the mark never shrinks.
+        Flexible(child: text),
+      ],
     );
   }
 }

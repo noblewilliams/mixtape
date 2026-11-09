@@ -98,6 +98,21 @@ plus an "Add my music" pill that both clients turn into a link
      Settings link). The door returns to "No music".
    - Leaving the Exportify page without importing returns to the mix with
      the door unchanged.
+   - A finished sync re-reads onboarding itself. Until that read lands, the
+     door still says "Syncing", so it never flashes "No music" before
+     "Music in" (and the live region speaks once at the end).
+   - "Choose files" shows whenever the Spotify export is waiting, whatever
+     the device plays on, so the door's action always lands on the import
+     sheet then.
+   - "Sync didn't finish" shows only on an Apple Music (or unknown)
+     device. On a Spotify device a failed Apple sync never replaces the
+     Spotify states.
+   - `music_added_from_mix` (decision 7) counts only a run the router
+     opened: a sync started from its alert (followed past Hide to its end)
+     or a page it pushed. The alert closed with nothing started, or a sync
+     that failed or was cancelled, counts nothing. A failed onboarding read
+     decides nothing: the run stays counted-if-ready until the next good
+     read, or until the router opens again.
 
 4. **Remake with my music.** The payoff that proves the label.
    - Shown when the session is `notPersonal` and the listener's music is

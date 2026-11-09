@@ -228,6 +228,9 @@ S3, in the same file.
 - `chat_screen.dart`:
   - The door's Remake calls `notifier.remake()` and records
     `remake_tapped`. It is disabled while sending.
+  - The same applies on the tape screen (`queue_screen.dart`), which
+    passes no `onRemake` after C2 and so draws Remake disabled. Moved here
+    by the C2 review.
   - Resend (the failed-turn link) and the AI-consent retry call `remake()`
     when the failed message carries C1's `remake` marker. Otherwise
     `_send` would post a remake without its flag.

@@ -4,6 +4,8 @@
 // Spotify output action (or Play). Fire-and-forget like session events:
 // nothing here blocks the UI or surfaces an error, and the server tolerates
 // a repeat, so the per-device flag is a courtesy filter rather than a lock.
+// The signed-in funnel events that count every occurrence (add your music)
+// go through [FunnelMilestones.record], with no flag at all.
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -29,6 +31,19 @@ class FunnelMilestones {
   /// of the queue screen's output actions.
   void recordOnce(FunnelEventType type) =>
       unawaited(_recordOnce(type, gate: null));
+
+  /// Posts [type] every time it happens, with no once-flag: the add-your-
+  /// music events (spec 2026-11-09, decision 7) count taps and runs, not
+  /// listeners. Fire-and-forget like the rest.
+  void record(FunnelEventType type) => unawaited(_post(type));
+
+  Future<void> _post(FunnelEventType type) async {
+    try {
+      await _ref.read(listeningApiProvider).postFunnelEvent(type);
+    } catch (_) {
+      // Silent by design — no retry, no surfaced error.
+    }
+  }
 
   /// `first_personal_mix`: [session] came back with a queue built from the
   /// listener's own plays. Nothing before an EXPORT import counts — an Apple

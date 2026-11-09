@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
@@ -126,6 +127,160 @@ void main() {
       _targetHeight(tester, find.byType(IdeaPill).first),
       greaterThanOrEqualTo(MixtapeMetrics.minTarget),
     );
+  });
+
+  testWidgets('IdeaPill: a leading mark sits before the label, 6 pt apart', (
+    tester,
+  ) async {
+    await _pump(
+      tester,
+      const IdeaPill(
+        label: 'Sync Apple Music',
+        onPressed: _noop,
+        leading: SizedBox.square(key: Key('mark'), dimension: 18),
+      ),
+    );
+    final mark = tester.getRect(find.byKey(const Key('mark')));
+    final label = tester.getRect(find.text('Sync Apple Music'));
+    expect(label.left - mark.right, 6);
+    expect(mark.center.dy, closeTo(label.center.dy, 0.5));
+  });
+
+  testWidgets('IdeaPill: fill takes the width it is given, label centred', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: MixtapeTheme.light(),
+        home: const Scaffold(
+          body: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: 300,
+              child: IdeaPill(
+                label: 'Add your music',
+                onPressed: _noop,
+                fill: true,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    final pill = find.byType(IdeaPill);
+    expect(tester.getSize(pill).width, 300);
+    expect(
+      tester.getCenter(find.text('Add your music')).dx,
+      closeTo(tester.getCenter(pill).dx, 0.5),
+    );
+    expect(
+      tester.getSize(pill).height,
+      greaterThanOrEqualTo(MixtapeMetrics.minTarget),
+    );
+  });
+
+  testWidgets('wrap is opt-in: by default a long label stays on one line', (
+    tester,
+  ) async {
+    const label = 'Remake with my music';
+    for (final wrap in [false, true]) {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: MixtapeTheme.light(),
+          home: MediaQuery(
+            data: const MediaQueryData(textScaler: TextScaler.linear(3)),
+            child: Scaffold(
+              body: SingleChildScrollView(
+                child: SizedBox(
+                  width: 220,
+                  child: Column(
+                    children: [
+                      IdeaPill(
+                        key: const Key('pill'),
+                        label: label,
+                        onPressed: _noop,
+                        fill: true,
+                        wrap: wrap,
+                      ),
+                      TapeButton(
+                        key: const Key('tape'),
+                        label: label,
+                        onPressed: _noop,
+                        fill: true,
+                        wrap: wrap,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      for (final key in [const Key('pill'), const Key('tape')]) {
+        final words = tester.renderObject<RenderParagraph>(
+          find.descendant(
+            of: find.descendant(
+              of: find.byKey(key),
+              matching: find.text(label),
+            ),
+            matching: find.byType(RichText),
+          ),
+        );
+        expect(words.didExceedMaxLines, !wrap, reason: '$key, wrap: $wrap');
+      }
+    }
+  });
+
+  testWidgets('minHeight, labelWeight and leadingPadding are opt-in', (
+    tester,
+  ) async {
+    await _pump(
+      tester,
+      const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          IdeaPill(key: Key('plain'), label: 'Plain', onPressed: _noop),
+          IdeaPill(
+            key: Key('tall'),
+            label: 'Tall',
+            onPressed: _noop,
+            minHeight: 52,
+            labelWeight: FontWeight.w600,
+          ),
+          TapeButton(
+            key: Key('tape-plain'),
+            label: 'Plain tape',
+            onPressed: _noop,
+            leading: SizedBox.square(key: Key('mark-plain'), dimension: 10),
+          ),
+          TapeButton(
+            key: Key('tape-reel'),
+            label: 'Reel tape',
+            onPressed: _noop,
+            leading: SizedBox.square(key: Key('mark-reel'), dimension: 10),
+            leadingPadding: 8,
+            minHeight: 52,
+          ),
+        ],
+      ),
+    );
+    FontWeight? weight(String label) =>
+        tester.widget<Text>(find.text(label)).style?.fontWeight;
+    expect(weight('Plain'), FontWeight.w500);
+    expect(weight('Tall'), FontWeight.w600);
+    expect(tester.getSize(find.byKey(const Key('tall'))).height, 52);
+    expect(
+      tester.getSize(find.byKey(const Key('plain'))).height,
+      MixtapeMetrics.minTarget,
+    );
+
+    double inset(String button, String mark) =>
+        tester.getTopLeft(find.byKey(Key(mark))).dx -
+        tester.getTopLeft(find.byKey(Key(button))).dx;
+    expect(inset('tape-plain', 'mark-plain'), 14);
+    expect(inset('tape-reel', 'mark-reel'), 8);
+    expect(tester.getSize(find.byKey(const Key('tape-reel'))).height, 52);
   });
 
   testWidgets('controls grow instead of clipping at 200% text', (tester) async {

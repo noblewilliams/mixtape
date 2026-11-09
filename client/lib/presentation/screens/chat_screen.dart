@@ -50,6 +50,7 @@ import '../widgets/mix_energy_summary.dart';
 import '../widgets/mix_handoff.dart';
 import '../widgets/mix_prompt_input.dart';
 import '../widgets/mix_tape_colour.dart';
+import '../widgets/music_door.dart';
 import '../widgets/playlist_inspiration.dart';
 import '../widgets/tape_strip.dart';
 import '../widgets/version_marker.dart';
@@ -704,10 +705,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     if (liveIndex == null && state.queue.isNotEmpty && currentVersion > 0) {
       items.addAll(current());
     }
-    // C3's one quiet line under the last turn, in the words the arrangement's
-    // own corpus-mode block uses. The title carries "Not personal yet"; this
-    // is the explanation that goes with it.
-    if (state.session.notPersonal) items.add(const _NotPersonalLine());
+    // The music door under the last turn of a catalog mix: the line that
+    // says why, and the way to add their music. The title carries "Not
+    // personal yet"; this is the explanation and the action that go with it.
+    if (state.session.notPersonal) {
+      items.add(
+        const MusicDoor(
+          key: _musicDoorKey,
+          notPersonal: true,
+          layout: MusicDoorLayout.transcript,
+        ),
+      );
+    }
     if (state.sending) {
       items.add(WorkingCassette(caseColor: _hasTape(state) ? colour : null));
     }
@@ -742,6 +751,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         controller: _scrollController,
         reverse: true,
         addRepaintBoundaries: false,
+        // The door is found again by its key: the working cassette coming
+        // and going under it shifts the reversed indices, and a remount
+        // would re-announce its live region mid-flow.
+        findChildIndexCallback: (key) {
+          if (key != _musicDoorKey) return null;
+          final index = items.indexWhere((item) => item.key == _musicDoorKey);
+          return index < 0 ? null : items.length - 1 - index;
+        },
         padding: EdgeInsets.fromLTRB(
           _lyricSidePadding,
           _topFade,
@@ -752,6 +769,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         itemBuilder: (context, reversedIndex) {
           final index = items.length - 1 - reversedIndex;
           return LyricFade(
+            key: items[index].key == _musicDoorKey ? _musicDoorKey : null,
             bottomInset: _panelHeight,
             pinned: pinnedFrom != null && index >= pinnedFrom,
             child: Padding(
@@ -763,6 +781,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       ),
     );
   }
+
+  /// The transcript's one keyed item (see [_list]).
+  static const Key _musicDoorKey = ValueKey<String>('chat-music-door');
 
   /// `.lyr { padding: 0 22px; gap: 16px }`, and the top fade's depth.
   static const double _lyricSidePadding = 22;
@@ -1483,31 +1504,4 @@ class _RenameDialogState extends State<_RenameDialog> {
       ),
     ],
   );
-}
-
-/// C3's explanatory line for a Spotify listener before their import lands:
-/// the mix came from the shared catalog and the interview, not their plays.
-/// Live so a screen reader hears it when a turn flips the flag.
-class _NotPersonalLine extends StatelessWidget {
-  const _NotPersonalLine();
-
-  static const Key lineKey = Key('chat-not-personal-line');
-
-  static const String copy =
-      "Built from Mixtape's catalog and your interview, not your listening. "
-      'Import your Spotify data for the real thing.';
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    return Semantics(
-      key: lineKey,
-      container: true,
-      liveRegion: true,
-      child: Padding(
-        padding: const EdgeInsets.only(left: 2, top: 6, bottom: 4),
-        child: Text(copy, style: tokens.meta.copyWith(color: tokens.muted)),
-      ),
-    );
-  }
 }
