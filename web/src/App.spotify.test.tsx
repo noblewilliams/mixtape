@@ -23,6 +23,7 @@ const blank: OnboardingResponse = {
   interviewCompletedAt: null,
   importCompletedAt: null,
   interview: null,
+  musicReady: false,
 }
 
 const accountPackage: ApiMusicSource = {
@@ -172,6 +173,22 @@ describe('Library add flow', () => {
 
     await waitFor(() => expect(musicKit.connect).toHaveBeenCalledTimes(1))
     expect(await screen.findByRole('heading', { level: 1, name: 'Step 3 of 3, Syncing your library' })).toBeInTheDocument()
+  })
+
+  it('never counts music added from Library as added from a mix', async () => {
+    let ready = false
+    const api = createFakeApi({ getOnboarding: async () => ({ ...blank, musicReady: ready }) })
+    renderApp({ api })
+    await settled(api)
+    await openAddMusic()
+
+    ready = true
+    fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }))
+    await waitFor(() => expect(screen.queryByTestId('first-run')).not.toBeInTheDocument())
+    // The flow's own refresh reads musicReady true; let it land.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)))
+    const posted = api.calls.filter((call) => call.method === 'postFunnelEvent').map((call) => (call.args[0] as { type: string }).type)
+    expect(posted).not.toContain('music_added_from_mix')
   })
 
   it('leaves back to Library with Skip for now', async () => {

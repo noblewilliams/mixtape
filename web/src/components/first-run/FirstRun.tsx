@@ -42,6 +42,12 @@ export type FirstRunProps = {
    * ending back where it was opened.
    */
   mode?: 'first-run' | 'add'
+  /**
+   * add only, read once on open: open on this method's Step 3 page instead of
+   * Step 1 (the mix's Add your music). Back from it leaves the flow, as back
+   * from Step 1 does; the Apple sync page starts the sync as Step 2's tap would.
+   */
+  startAt?: AddMethod
   /** The runs and API; a factory is called once, on the first render. */
   services?: FirstRunServices | (() => FirstRunServices)
   /** The sign-in page behind the welcome foot link (first-run mode). */
@@ -98,14 +104,14 @@ function headlineOf(page: FirstRunPageId): { headline: string; step?: FirstRunSt
  * the first prompt, saves artists, starts a sync, or records a request, and
  * each of those calls ensureSession() first.
  */
-export function FirstRun({ mode = 'first-run', services: provided, signIn, onChooseService, onDone }: FirstRunProps) {
+export function FirstRun({ mode = 'first-run', startAt, services: provided, signIn, onChooseService, onDone }: FirstRunProps) {
   const adding = mode === 'add'
   const [flow] = useState(() => Math.random().toString(36).slice(2))
   const [services] = useState<FirstRunServices | null>(() =>
     typeof provided === 'function' ? provided() : provided ?? null,
   )
   const initial: FirstRunPageId[] = adding
-    ? [{ id: 'service' }]
+    ? [startAt ? { id: 'doing', method: startAt } : { id: 'service' }]
     : signIn?.error
       ? [{ id: 'welcome' }, { id: 'sign-in' }]
       : [{ id: 'welcome' }]
@@ -259,8 +265,13 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
 
   const back = () => window.history.back()
 
-  /** Leave for the shell or the Library, folding the flow's entries back first. */
+  /**
+   * Leave for the shell or the Library, folding the flow's entries back first.
+   * Once the flow has ended (a browser back left it while a request was still
+   * running), a late finish neither reports again nor steps history further.
+   */
   function finish(result: FirstRunResult) {
+    if (finished.current) return
     const at = depthRef.current
     const entries = adding ? at + 1 : at
     exit(result)
@@ -388,6 +399,14 @@ export function FirstRun({ mode = 'first-run', services: provided, signIn, onCho
       () => setSyncStartFailed(true),
     )
   }
+
+  // Opened on the Apple sync page: start the sync once, as choosing it on Step 2 does.
+  const openedSync = useRef(false)
+  useEffect(() => {
+    if (openedSync.current || trail.current[0]?.id !== 'doing' || trail.current[0].method !== 'apple-sync') return
+    openedSync.current = true
+    startSync()
+  }, [])
 
   function chooseMethod(method: AddMethod) {
     record('chose_method')

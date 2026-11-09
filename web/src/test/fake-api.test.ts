@@ -144,3 +144,54 @@ describe('fake API Listen later', () => {
     expect(revived.entry).toMatchObject({ sessionId: session.id, reason: runnerUp.reason })
   })
 })
+
+describe('fake API add your music', () => {
+  it('reports musicReady false until an import completes', async () => {
+    const api = createFakeApi()
+    expect((await api.getOnboarding()).musicReady).toBe(false)
+    const { importId } = await api.beginListeningImport({
+      source: 'spotify_export', package: 'spotify_exportify', timeZone: 'UTC', country: null,
+      expectedTracks: 0, expectedDays: 0, expectedLibraryTracks: 0, expectedArtists: 0, unresolvedRows: 0, unresolvedPlays: 0,
+    })
+    expect((await api.getOnboarding()).musicReady).toBe(false)
+    await api.completeListeningImport(importId)
+    expect((await api.getOnboarding()).musicReady).toBe(true)
+  })
+
+  it('accepts the client funnel types', async () => {
+    const api = createFakeApi()
+    for (const type of ['music_door_tapped', 'music_chip_tapped', 'music_added_from_mix', 'remake_tapped'] as const) {
+      expect(await api.postFunnelEvent({ type, surface: 'web' })).toEqual({ ok: true })
+    }
+  })
+
+  it('leaves the history pill off turns by default', async () => {
+    const api = createFakeApi()
+    const created = await api.createSession('Only my likes')
+    expect(created).not.toHaveProperty('addMusic')
+    expect(await api.sendMessage(created.session.id, 'More of that')).not.toHaveProperty('addMusic')
+  })
+
+  it('offers the history pill once per mix session when asked to', async () => {
+    const api = createFakeApi({}, { historyPill: true })
+    const created = await api.createSession('Only my likes')
+    expect(created.addMusic).toBe('history')
+    expect(await api.sendMessage(created.session.id, 'More of that')).not.toHaveProperty('addMusic')
+    expect((await api.sendMessage('demo-other-session', 'From my likes')).addMusic).toBe('history')
+    const album = await api.createSession('An album', undefined, undefined, 'album')
+    expect(album).not.toHaveProperty('addMusic')
+  })
+
+  it('takes a remake on a mix and refuses one on an album session', async () => {
+    const api = createFakeApi()
+    const mix = await api.createSession('A night drive')
+    const remade = await api.sendMessage(mix.session.id, 'Remake this with my music', undefined, { remake: true })
+    expect(remade.queue?.length).toBeGreaterThan(0)
+    expect(api.calls.at(-1)).toEqual({ method: 'sendMessage', args: [mix.session.id, 'Remake this with my music', undefined, { remake: true }] })
+
+    const album = await api.createSession('An album', undefined, undefined, 'album')
+    const refused = api.sendMessage(album.session.id, 'Remake this with my music', undefined, { remake: true })
+    await expect(refused).rejects.toBeInstanceOf(ApiError)
+    await expect(refused).rejects.toMatchObject({ status: 409, code: 'wrong_session_kind' })
+  })
+})

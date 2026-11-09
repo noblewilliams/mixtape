@@ -192,7 +192,7 @@ describe('Album sessions on the web', () => {
   })
 
   it('offers the Spotify search to a Spotify-only listener', async () => {
-    const blank: OnboardingResponse = { userId: 'user-1', sources: [], hasLibrary: false, chosenService: 'spotify', markedRequestedAt: null, interviewCompletedAt: null, importCompletedAt: null, interview: null }
+    const blank: OnboardingResponse = { userId: 'user-1', sources: [], hasLibrary: false, chosenService: 'spotify', markedRequestedAt: null, interviewCompletedAt: null, importCompletedAt: null, interview: null, musicReady: false }
     const api = createFakeApi({ getOnboarding: async () => blank })
     renderApp({ api })
     await waitFor(() => expect(callsOf(api, 'getOnboarding')).toHaveLength(1))

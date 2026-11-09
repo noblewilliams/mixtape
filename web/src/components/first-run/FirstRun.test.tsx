@@ -697,6 +697,109 @@ describe('Library add flow', () => {
   })
 })
 
+describe('Library add flow opened at a method (startAt)', () => {
+  function renderAt(startAt: NonNullable<FirstRunProps['startAt']>) {
+    const fakes = fakeServices()
+    const onDone = vi.fn()
+    render(<FirstRun mode="add" startAt={startAt} services={fakes.services} onDone={onDone} />)
+    return { ...fakes, onDone }
+  }
+
+  it.each([
+    ['apple-sync', 'Step 3 of 3, Syncing your library'],
+    ['exportify', 'Step 3 of 3, Export from Exportify'],
+    ['spotify-export', 'Step 3 of 3, Request your data'],
+  ] as const)('opens straight on the %s page, focused and titled', (method, name) => {
+    renderAt(method)
+    expect(screen.getByRole('heading', { level: 1, name })).toHaveFocus()
+    expect(document.title).toBe(name)
+    expect(screen.queryByRole('heading', { name: 'Step 1 of 3, Which do you use?' })).not.toBeInTheDocument()
+  })
+
+  it('starts the Apple sync on open, after making sure of the session, as Step 2 would', async () => {
+    const { syncRun, ensureSession } = renderAt('apple-sync')
+    await waitFor(() => expect(syncRun.start).toHaveBeenCalledOnce())
+    expect(ensureSession.mock.invocationCallOrder[0]).toBeLessThan(syncRun.start.mock.invocationCallOrder[0])
+  })
+
+  it('starts no sync on the Spotify pages', async () => {
+    const { syncRun } = renderAt('exportify')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(syncRun.start).not.toHaveBeenCalled()
+  })
+
+  it.each(['apple-sync', 'exportify', 'spotify-export'] as const)('Back from the %s page leaves the flow', async (method) => {
+    const { onDone } = renderAt(method)
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith({}))
+    expect(onDone).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('heading', { name: 'Step 2 of 3, How do you want to add it?' })).not.toBeInTheDocument()
+  })
+
+  it('answers the browser back the same way', async () => {
+    const { onDone } = renderAt('exportify')
+    act(() => window.history.back())
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith({}))
+  })
+
+  /** The mix's own entry, with one before it, so a step too far shows in history.state. */
+  function onTheMix() {
+    window.history.pushState({ page: 'before' }, '')
+    window.history.pushState({ page: 'mix' }, '')
+    return window.history.length
+  }
+  /** jsdom traverses history in queued tasks; let every one of them run. */
+  const traversed = () => act(() => new Promise((resolve) => setTimeout(resolve, 30)))
+
+  it('adds one history entry and folds it back when the page finishes', async () => {
+    const length = onTheMix()
+    const { onDone } = renderAt('spotify-export')
+    expect(window.history.length).toBe(length + 1)
+    expect(window.history.state).toMatchObject({ mixtapeFirstRun: { step: 0 } })
+
+    fireEvent.click(screen.getByRole('button', { name: "I’ve requested it" }))
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith({}))
+    await traversed()
+    expect(window.history.state).toEqual({ page: 'mix' })
+    expect(window.history.length).toBe(length + 1)
+  })
+
+  it('a browser back while the request is in flight leaves once, and its late answer steps no further', async () => {
+    const length = onTheMix()
+    const fakes = fakeServices()
+    let answer = () => {}
+    fakes.api.postFunnelEvent.mockImplementation(() => new Promise((resolve) => { answer = () => resolve({ ok: true }) }))
+    const onDone = vi.fn()
+    render(<FirstRun mode="add" startAt="spotify-export" services={fakes.services} onDone={onDone} />)
+
+    fireEvent.click(screen.getByRole('button', { name: "I’ve requested it" }))
+    await waitFor(() => expect(fakes.api.postFunnelEvent).toHaveBeenCalled())
+    act(() => window.history.back())
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith({}))
+    await traversed()
+    expect(window.history.state).toEqual({ page: 'mix' })
+
+    await act(async () => answer())
+    await traversed()
+    expect(onDone).toHaveBeenCalledOnce()
+    expect(window.history.state).toEqual({ page: 'mix' })
+    expect(window.history.length).toBe(length + 1)
+  })
+
+  it('leaves after the Apple sync is done', async () => {
+    const { onDone, syncRun } = renderAt('apple-sync')
+    await waitFor(() => expect(syncRun.start).toHaveBeenCalled())
+    act(() => syncRun.set(syncResult(40)))
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+    expect(onDone).toHaveBeenCalledWith({})
+  })
+
+  it('applies to add mode only: the first run still opens on Welcome', () => {
+    renderFlow({ startAt: 'exportify' })
+    expect(screen.getByRole('heading', { level: 1, name: 'What do you want to hear?' })).toBeInTheDocument()
+  })
+})
+
 describe('first-run funnel events', () => {
   it('posts nothing while no session exists, then the held events once after ensureSession', async () => {
     const { log, onDone } = renderFlow()

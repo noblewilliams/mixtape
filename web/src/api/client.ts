@@ -130,9 +130,16 @@ export type SessionDetailResponse = {
   queue?: ApiQueueTrack[]
 } & Partial<AlbumPickResponse>
 
+/**
+ * The history pill ("Add my listening history"): a turn carries it only when
+ * the DJ offers it, at most once per conversation. Absent otherwise, never null.
+ */
+export type AddMusicOffer = 'history'
+
 export type CreateSessionResponse = SessionDetailResponse & {
   sessionTitle?: string
   suggestions?: string[]
+  addMusic?: AddMusicOffer
 }
 
 /** A mix turn carries queue and queueVersion; an album turn the pick state instead. */
@@ -142,7 +149,16 @@ export type SendMessageResponse = {
   queueVersion?: number
   sessionTitle?: string
   suggestions?: string[]
+  addMusic?: AddMusicOffer
 } & Partial<AlbumPickResponse>
+
+/** The listener's line for a remake; the server reads `remake`, never meaning from the text. */
+export const REMAKE_TEXT = 'Remake this with my music'
+
+export type SendMessageOptions = {
+  /** Remake the mix from the listener's own music (mix sessions only; an album answers 409). */
+  remake?: boolean
+}
 
 export type QueueOp =
   | { op: 'remove'; position: number }
@@ -310,6 +326,11 @@ export type OnboardingResponse = {
   importCompletedAt: string | null
   /** What the interview produced; null until it has been completed. */
   interview: { artists: number; notes: number } | null
+  /**
+   * The DJ would pick from the listener's own music: a source or library
+   * with usable candidates. Read as false when an older server leaves it out.
+   */
+  musicReady: boolean
 }
 
 export type FunnelEventType =
@@ -334,6 +355,12 @@ export type FunnelEventType =
   | 'keep_sheet_signed_in'
   | 'keep_sheet_dismissed'
   | 'cap_reached'
+  // Add your music (spec 2026-11-09, decision 7). music_chip_offered and
+  // remake_made are written by the server and never posted.
+  | 'music_door_tapped'
+  | 'music_chip_tapped'
+  | 'music_added_from_mix'
+  | 'remake_tapped'
 export type FunnelEventInput = { type: FunnelEventType; surface: 'web' }
 
 export type InterviewInput = {
@@ -450,7 +477,7 @@ export type MixtapeApi = {
     energyArc?: EnergyArc,
     kind?: 'mix' | 'album',
   ) => Promise<CreateSessionResponse>
-  sendMessage: (sessionId: string, text: string, energyArc?: EnergyArc) => Promise<SendMessageResponse>
+  sendMessage: (sessionId: string, text: string, energyArc?: EnergyArc, options?: SendMessageOptions) => Promise<SendMessageResponse>
   applyQueueOps: (sessionId: string, ops: QueueOp[], expectedVersion?: number) => Promise<QueueOpsResponse>
   choosePick: (sessionId: string, input: ChoosePickInput, expectedVersion?: number) => Promise<AlbumPickResponse>
   listListenLater: (signal?: AbortSignal) => Promise<{ entries: ApiListenLaterEntry[] }>
@@ -578,6 +605,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
+/** Keeps `addMusic` only when it names an offer this client knows; otherwise the key is absent. */
+function withAddMusicOffer<T extends { addMusic?: unknown }>(response: T): T {
+  if (!isRecord(response) || !('addMusic' in response) || response.addMusic === 'history') return response
+  const { addMusic: _dropped, ...rest } = response
+  return rest as T
+}
+
 function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '')
 }
@@ -668,15 +702,15 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
           ...(playlistSeed ? { playlistSeed } : {}),
           ...(kind === 'album' ? { kind } : energyArc ? { energyArc } : {}),
         }),
-      }).catch((error: unknown) => {
+      }).then(withAddMusicOffer, (error: unknown) => {
         if (error instanceof ApiError && error.status === 403 && error.code === 'anonymous_cap') throw new AnonymousCapError(error.payload)
         throw error
       }),
-    sendMessage: (sessionId, text, energyArc) =>
-      request(`/sessions/${encodeURIComponent(sessionId)}/messages`, {
+    sendMessage: (sessionId, text, energyArc, options) =>
+      request<SendMessageResponse>(`/sessions/${encodeURIComponent(sessionId)}/messages`, {
         method: 'POST',
-        body: JSON.stringify({ text, ...(energyArc ? { energyArc } : {}) }),
-      }),
+        body: JSON.stringify({ text, ...(energyArc ? { energyArc } : {}), ...(options?.remake ? { remake: true } : {}) }),
+      }).then(withAddMusicOffer),
     applyQueueOps: (sessionId, ops, expectedVersion) =>
       request(`/sessions/${encodeURIComponent(sessionId)}/queue-ops`, {
         method: 'POST',
@@ -827,7 +861,12 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
         method: 'DELETE',
         signal,
       }),
-    getOnboarding: (signal) => request('/me/onboarding', { signal }),
+    getOnboarding: async (signal) => {
+      const body = await request<Omit<OnboardingResponse, 'musicReady'> & { musicReady?: unknown }>('/me/onboarding', { signal })
+      // An empty body (204, or no JSON) passes through as it always has.
+      if (!isRecord(body)) return body as unknown as OnboardingResponse
+      return { ...body, musicReady: body.musicReady === true }
+    },
     getMusicSources: (signal) => request('/me/music-sources', { signal }),
     postFunnelEvent: (event, signal) =>
       request('/me/funnel-events', {

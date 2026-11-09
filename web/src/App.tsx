@@ -36,6 +36,7 @@ import { AccountDialog, type AccountBridge } from './components/AccountDialog'
 import { FirstRun } from './components/first-run/FirstRun'
 import type { FirstRunServices } from './components/first-run/services'
 import type { MusicService } from './components/first-run/ChooseService'
+import type { AddMethod } from './components/first-run/ChooseMethod'
 import { MixHistory } from './components/MixHistory'
 import { Conversation } from './components/Conversation'
 import { HomeDashboard } from './components/HomeDashboard'
@@ -64,6 +65,8 @@ import { clearKeptPrompt, keepPrompt, readKeptPrompt } from './lib/kept-prompt'
 import type { DraftSeed, ModeSeed } from './components/HomeComposer'
 import { clearServiceChoice, readServiceChoice, writeServiceChoice, type ServiceChoice } from './lib/service-preference'
 import { usePlaysOn, writePlaysOn } from './lib/plays-on'
+import { addMusicFacts, addMusicRoute, type AddMusicTarget } from './lib/add-music-route'
+import { createMusicAddedWatch, type MusicAddedToken } from './lib/music-added-watch'
 import { NamePage, NamePageHold } from './components/first-run/NamePage'
 import { clearNamePageSettled, markNamePageSettled, mayAskName } from './lib/name-page'
 
@@ -71,6 +74,14 @@ type DialogState = 'new-tape' | 'save-playlist' | 'account' | 'interview' | null
 type MusicConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
 type ToastAction = { label: string; onClick: () => void }
 type ToastState = { message: string; tone: 'success' | 'error' | 'info'; action?: ToastAction }
+/**
+ * The add flow over the shell: Library's Add your music (Step 1, ends in
+ * Library), or a mix's (the router's page, ends back on the mix, with the mix
+ * panel open again if it was, and its own music_added_from_mix watch).
+ */
+type AddMusicRun =
+  | { from: 'library' }
+  | { from: 'mix'; startAt?: AddMethod; watch: MusicAddedToken | null; queueWasOpen: boolean }
 
 type AppProps = {
   api: MixtapeApi
@@ -739,9 +750,25 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     if (!anonymous) void createTape(kept.prompt, false, false, kept.shape ?? undefined, kept.inspiration)
   }, [restoring])
 
+  // music_added_from_mix: armed per router-opened run, heard on every onboarding read.
+  const musicWatch = useMemo(
+    () =>
+      createMusicAddedWatch({
+        gate: uploadGate,
+        syncRun,
+        importRun,
+        refresh: () => refreshRef.current(),
+        record: () => void api.postFunnelEvent({ type: 'music_added_from_mix', surface: 'web' }).catch(() => undefined),
+      }),
+    [api, uploadGate, syncRun, importRun],
+  )
+  useEffect(() => () => musicWatch.clear(), [musicWatch])
+
   async function refreshOnboarding() {
     try {
-      setOnboarding(await api.getOnboarding())
+      const next = await api.getOnboarding()
+      setOnboarding(next)
+      musicWatch.observe(next.musicReady)
     } catch (requestError) {
       if (requestError instanceof ApiError && requestError.status === 401) signOut()
     }
@@ -750,8 +777,9 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   refreshRef.current = refreshOnboarding
 
   // Library's Add your music: the first run's Step 1 to 3 pages over the
-  // shell, on the same runs, returning to Library when they finish.
-  const [addingMusic, setAddingMusic] = useState(false)
+  // shell, on the same runs, returning to Library when they finish. A mix's
+  // Add your music opens the same flow at the router's page (openAddMusicFor).
+  const [addingMusic, setAddingMusic] = useState<AddMusicRun | null>(null)
   // The control that opened the flow gets focus back when it ends.
   const addMusicOpener = useRef<HTMLElement | null>(null)
   const addMusicServices = useMemo<FirstRunServices>(
@@ -771,16 +799,46 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   }
 
   function openAddMusic() {
+    // Music added from Library is not counted as added from a mix.
+    musicWatch.clear()
     addMusicOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     setQueueOpen(false)
-    setAddingMusic(true)
+    setAddingMusic({ from: 'library' })
   }
 
   function finishAddingMusic() {
-    setAddingMusic(false)
+    setAddingMusic(null)
     setActiveView('music')
     void refreshOnboarding()
     // After the shell stops being inert.
+    requestAnimationFrame(() => addMusicOpener.current?.focus())
+  }
+
+  /**
+   * A mix's Add your music (the door, its sync retry, the history pill),
+   * routed by addMusicRoute to the add flow at the right page, or Step 1.
+   * Called by the door and the pill (W2).
+   */
+  function openAddMusicFor(target: AddMusicTarget) {
+    const route = addMusicRoute(target, addMusicFacts(playsOn, effectiveOnboarding))
+    if (route.kind === 'none') return
+    void api
+      .postFunnelEvent({ type: target === 'history' ? 'music_chip_tapped' : 'music_door_tapped', surface: 'web' })
+      .catch(() => undefined)
+    addMusicOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    // Only a known false can turn true; an unread or older onboarding arms nothing.
+    const watch = musicWatch.arm(effectiveOnboarding?.musicReady)
+    setAddingMusic({ from: 'mix', startAt: route.startAt, watch, queueWasOpen: queueOpen })
+    setQueueOpen(false)
+  }
+
+  /** Back on the mix it was opened from, with the door's state read again. */
+  function finishAddingMusicForMix(run: Extract<AddMusicRun, { from: 'mix' }>) {
+    setAddingMusic(null)
+    // The phone shell's mix panel held the opener: open it again before focusing.
+    if (run.queueWasOpen) setQueueOpen(true)
+    musicWatch.settle(run.watch)
+    // After the shell stops being inert and the panel is visible again.
     requestAnimationFrame(() => addMusicOpener.current?.focus())
   }
 
@@ -1531,7 +1589,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
 
   return (
     <AiConsentGate.Provider value={consentReady}>
-    <div className={`app-shell ${activeView !== 'session' || !activeSession ? 'app-shell--home' : ''}`} style={shellStyle} inert={addingMusic || keepSheet || signInPage !== null || nameGate !== 'off'}>
+    <div className={`app-shell ${activeView !== 'session' || !activeSession ? 'app-shell--home' : ''}`} style={shellStyle} inert={addingMusic !== null || keepSheet || signInPage !== null || nameGate !== 'off'}>
       <Sidebar activeView={activeView}
         onOpenHome={() => setActiveView('home')}
         onOpenMusic={openMusic}
@@ -1682,7 +1740,13 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       {toast ? <Toast message={toast.message} tone={toast.tone} action={toast.action} /> : null}
     </div>
     {addingMusic ? (
-      <FirstRun mode="add" services={addMusicServices} onChooseService={recordServiceChoice} onDone={finishAddingMusic} />
+      <FirstRun
+        mode="add"
+        startAt={addingMusic.from === 'mix' ? addingMusic.startAt : undefined}
+        services={addMusicServices}
+        onChooseService={recordServiceChoice}
+        onDone={addingMusic.from === 'mix' ? () => finishAddingMusicForMix(addingMusic) : finishAddingMusic}
+      />
     ) : null}
     {keepSheet ? <KeepSheet onKeep={keepFromSheet} onNotNow={() => dismissSheet()} /> : null}
     {signInPage ? (

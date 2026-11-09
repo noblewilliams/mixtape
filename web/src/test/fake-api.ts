@@ -95,6 +95,8 @@ type FakeShelfRow = { entry: ApiListenLaterEntry; removed: boolean }
 export type FakeApiOptions = {
   /** Listen later entries the fake starts with, e.g. demoListenLaterEntries for the preview harness. */
   listenLater?: ApiListenLaterEntry[]
+  /** Offer the history pill (`addMusic: 'history'`) on a mix session's first turn, once per session. */
+  historyPill?: boolean
 }
 
 const notFound = () => new ApiError(404, { error: 'not_found' })
@@ -161,6 +163,13 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}, options: Fake
       passed: [...(current.pick ? [current.pick] : []), ...current.passed],
     })
     return { djMessage: { ...djMessage }, ...picks }
+  }
+  // As the server's music_chip_at: the pill is offered at most once per session.
+  const pillOffered = new Set<string>()
+  const offerPill = (sessionId: string): { addMusic?: 'history' } => {
+    if (!options.historyPill || pillOffered.has(sessionId)) return {}
+    pillOffered.add(sessionId)
+    return { addMusic: 'history' }
   }
   const queueState = new Map<string, ApiQueueTrack[]>()
   const createdSessions = new Map<string, CreateSessionResponse>()
@@ -271,19 +280,27 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}, options: Fake
         queue: demoQueue.slice(0, 1).map(apiTrack),
       }
       createdSessions.set(created.session.id, created)
-      return created
+      return { ...created, ...offerPill(created.session.id) }
     },
-    sendMessage: async (sessionId, text) => albumSessions.has(sessionId) ? albumTurn(sessionId, text) : ({
-      djMessage: {
-        id: 'reply-message',
-        role: 'dj',
-        content: 'I kept the opening intact, then reshaped the middle around that feeling.',
+    sendMessage: async (sessionId, text, _arc, sendOptions) => {
+      if (albumSessions.has(sessionId)) {
+        // As the server: a remake is for mix sessions only.
+        if (sendOptions?.remake) throw new ApiError(409, { error: 'wrong_session_kind' })
+        return albumTurn(sessionId, text)
+      }
+      return {
+        djMessage: {
+          id: 'reply-message',
+          role: 'dj',
+          content: 'I kept the opening intact, then reshaped the middle around that feeling.',
+          queueVersion: 4,
+          createdAt: new Date().toISOString(),
+        },
+        queue: demoQueue.map(apiTrack),
         queueVersion: 4,
-        createdAt: new Date().toISOString(),
-      },
-      queue: demoQueue.map(apiTrack),
-      queueVersion: 4,
-    }),
+        ...offerPill(sessionId),
+      }
+    },
     applyQueueOps: async (sessionId, ops, expectedVersion = 3) => {
       const queue = currentQueue(sessionId)
       for (const op of ops) {
@@ -491,6 +508,8 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}, options: Fake
         interviewCompletedAt,
         importCompletedAt: firstAt('import_completed'),
         interview: interview ? { ...interview } : null,
+        // A completed import is music the DJ can pick from.
+        musicReady: musicSources.some((source) => source.lastImportedAt !== null),
       }
     },
     getMusicSources: async () => ({ sources: musicSources.map((source) => ({ ...source, packages: [...source.packages] })) }),

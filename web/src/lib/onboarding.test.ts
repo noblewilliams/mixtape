@@ -8,6 +8,7 @@ import {
   recentDayLabel,
   shortDate,
   sourceName,
+  spotifyExportWaiting,
   spotifyStatus,
 } from './onboarding'
 
@@ -20,6 +21,7 @@ const blank: OnboardingResponse = {
   interviewCompletedAt: null,
   importCompletedAt: null,
   interview: null,
+  musicReady: false,
 }
 
 const spotifySource: ApiMusicSource = {
@@ -120,6 +122,19 @@ describe('spotifyStatus', () => {
       label: 'Waiting',
       tone: 'wait',
     })
+  })
+})
+
+describe('spotifyExportWaiting', () => {
+  const requested = { ...blank, markedRequestedAt: '2026-09-02T08:00:00.000Z' }
+  it('is the Waiting status: requested, with no Spotify or Exportify package landed', () => {
+    expect(spotifyExportWaiting(requested)).toBe(true)
+    expect(spotifyExportWaiting({ ...requested, sources: [begunSource] })).toBe(true)
+    expect(spotifyExportWaiting({ ...requested, sources: [accountSource] })).toBe(false)
+    expect(spotifyExportWaiting({ ...requested, sources: [spotifySource] })).toBe(false)
+    expect(spotifyExportWaiting({ ...requested, sources: [{ ...begunSource, lastImportedAt: '2026-09-03T08:00:00.000Z', packages: ['spotify_exportify'] }] })).toBe(false)
+    expect(spotifyExportWaiting(blank)).toBe(false)
+    expect(spotifyExportWaiting(null)).toBe(false)
   })
 })
 

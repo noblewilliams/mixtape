@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { AnonymousCapError, ApiError, createMixtapeApi } from './client'
+import { AnonymousCapError, ApiError, createMixtapeApi, REMAKE_TEXT } from './client'
 
 const fetchMock = vi.fn<typeof fetch>()
 
@@ -144,6 +144,64 @@ describe('Mixtape API client', () => {
       'https://api.mixtape.test/sessions/session-1/messages',
       expect.objectContaining({ body: JSON.stringify({ text: 'Slower in the middle', energyArc: 'fall' }) }),
     )
+  })
+
+  it('sends remake: true only when asked', async () => {
+    const reply = () => new Response(JSON.stringify({ djMessage: { id: 'm', role: 'dj', content: 'ok', queueVersion: 4, createdAt: '2026-11-09T18:00:04.000Z' }, queue: [], queueVersion: 4 }), { status: 200, headers: { 'content-type': 'application/json' } })
+    fetchMock.mockImplementation(async () => reply())
+    vi.stubGlobal('fetch', fetchMock)
+    const api = createMixtapeApi('https://api.mixtape.test')
+
+    await api.sendMessage('session-1', REMAKE_TEXT, undefined, { remake: true })
+    await api.sendMessage('session-1', 'Slower in the middle', 'fall', { remake: true })
+    await api.sendMessage('session-1', 'Keep going', undefined, { remake: false })
+    await api.sendMessage('session-1', 'Keep going', undefined, {})
+    await api.sendMessage('session-1', 'Keep going')
+
+    expect(REMAKE_TEXT).toBe('Remake this with my music')
+    expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.body])).toEqual([
+      ['https://api.mixtape.test/sessions/session-1/messages', JSON.stringify({ text: 'Remake this with my music', remake: true })],
+      ['https://api.mixtape.test/sessions/session-1/messages', JSON.stringify({ text: 'Slower in the middle', energyArc: 'fall', remake: true })],
+      ['https://api.mixtape.test/sessions/session-1/messages', JSON.stringify({ text: 'Keep going' })],
+      ['https://api.mixtape.test/sessions/session-1/messages', JSON.stringify({ text: 'Keep going' })],
+      ['https://api.mixtape.test/sessions/session-1/messages', JSON.stringify({ text: 'Keep going' })],
+    ])
+  })
+
+  it('reads the history pill on a follow-up turn, and leaves the key out when it is missing or unknown', async () => {
+    const turn = (extra: Record<string, unknown>) => new Response(JSON.stringify({ djMessage: { id: 'm', role: 'dj', content: 'ok', queueVersion: 4, createdAt: '2026-11-09T18:00:04.000Z' }, queue: [], queueVersion: 4, ...extra }), { status: 200, headers: { 'content-type': 'application/json' } })
+    fetchMock
+      .mockResolvedValueOnce(turn({ addMusic: 'history' }))
+      .mockResolvedValueOnce(turn({}))
+      .mockResolvedValueOnce(turn({ addMusic: null }))
+      .mockResolvedValueOnce(turn({ addMusic: 'apple_export' }))
+    vi.stubGlobal('fetch', fetchMock)
+    const api = createMixtapeApi('https://api.mixtape.test')
+
+    expect((await api.sendMessage('session-1', 'Only my likes')).addMusic).toBe('history')
+    for (let call = 0; call < 3; call += 1) {
+      const response = await api.sendMessage('session-1', 'Only my likes')
+      expect(response).not.toHaveProperty('addMusic')
+      expect(response.queueVersion).toBe(4)
+    }
+  })
+
+  it('reads the history pill on a new mix, and leaves the key out when it is missing', async () => {
+    const created = (extra: Record<string, unknown>) => new Response(JSON.stringify({
+      session: { id: 'session-9', title: 'Likes', status: 'active', queueVersion: 1, notPersonal: false, updatedAt: '2026-11-09T18:00:00.000Z' },
+      messages: [],
+      queue: [],
+      suggestions: [],
+      ...extra,
+    }), { status: 200, headers: { 'content-type': 'application/json' } })
+    fetchMock.mockResolvedValueOnce(created({ addMusic: 'history' })).mockResolvedValueOnce(created({}))
+    vi.stubGlobal('fetch', fetchMock)
+    const api = createMixtapeApi('https://api.mixtape.test')
+
+    expect((await api.createSession('From my likes')).addMusic).toBe('history')
+    const plain = await api.createSession('From my likes')
+    expect(plain).not.toHaveProperty('addMusic')
+    expect(plain.session.id).toBe('session-9')
   })
 
   it('posts versioned manual queue operations', async () => {
@@ -559,6 +617,7 @@ describe('Mixtape API client: listening import and onboarding', () => {
       markedRequestedAt: '2026-09-01T12:00:00.000Z',
       interviewCompletedAt: null,
       importCompletedAt: '2026-09-02T12:00:00.000Z',
+      musicReady: true,
     }
     fetchMock
       .mockResolvedValueOnce(json(onboarding))
@@ -572,6 +631,42 @@ describe('Mixtape API client: listening import and onboarding', () => {
       ['https://api.mixtape.test/me/onboarding', undefined],
       ['https://api.mixtape.test/me/music-sources', undefined],
     ])
+  })
+
+  it('reads musicReady as false when an older server leaves it out, or sends anything but true', async () => {
+    const onboarding = {
+      userId: 'user-1',
+      sources: [],
+      hasLibrary: false,
+      chosenService: null,
+      markedRequestedAt: null,
+      interviewCompletedAt: null,
+      importCompletedAt: null,
+      interview: null,
+    }
+    fetchMock
+      .mockResolvedValueOnce(json(onboarding))
+      .mockResolvedValueOnce(json({ ...onboarding, musicReady: null }))
+      .mockResolvedValueOnce(json({ ...onboarding, musicReady: false }))
+    vi.stubGlobal('fetch', fetchMock)
+    const api = createMixtapeApi('https://api.mixtape.test')
+
+    expect(await api.getOnboarding()).toEqual({ ...onboarding, musicReady: false })
+    expect((await api.getOnboarding()).musicReady).toBe(false)
+    expect((await api.getOnboarding()).musicReady).toBe(false)
+  })
+
+  it('passes an empty or null onboarding body through as before, without throwing', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response('', { status: 200 }))
+      .mockResolvedValueOnce(json(null))
+    vi.stubGlobal('fetch', fetchMock)
+    const api = createMixtapeApi('https://api.mixtape.test')
+
+    await expect(api.getOnboarding()).resolves.toBeNull()
+    await expect(api.getOnboarding()).resolves.toBe('')
+    await expect(api.getOnboarding()).resolves.toBeNull()
   })
 
   it('posts funnel events and the interview as JSON', async () => {

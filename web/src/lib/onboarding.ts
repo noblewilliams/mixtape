@@ -79,6 +79,17 @@ export function spotifyPackages(source: ApiMusicSource | null): SpotifyPackages 
   return { extended, account, count: Number(extended) + Number(account) }
 }
 
+/**
+ * A Spotify data export is requested and nothing has landed yet: no account
+ * or extended package, and no Exportify package. The Waiting status, and the
+ * listener whose next step is choosing the files when the email arrives.
+ */
+export function spotifyExportWaiting(onboarding: OnboardingResponse | null): boolean {
+  if (!onboarding?.markedRequestedAt) return false
+  const source = spotifySource(onboarding)
+  return spotifyPackages(source).count === 0 && !source?.packages?.includes('spotify_exportify')
+}
+
 export type StatusTone = 'neutral' | 'ok' | 'wait' | 'err'
 
 export function spotifyStatus(onboarding: OnboardingResponse): { label: string; tone: StatusTone } {
