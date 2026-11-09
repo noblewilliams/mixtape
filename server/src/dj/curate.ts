@@ -80,7 +80,7 @@ function fmt(v: number | null, digits?: number): string {
 // these correctly.
 const POOL_LEGEND =
   'Candidate pool — one track per line, fields separated by |:\n' +
-  'id | title — artist | play count | bpm | energy 0-1 | valence 0-1 (bleak→bright) | release year\n' +
+  'id | title — artist | play count | bpm | energy 0-1 | valence 0-1 (bleak→bright) | release year | genre\n' +
   '"-" means unknown. Unknown is not a disqualifier.\n'
 
 // Outside picks (spec 2026-10-03 Part C). Every variant below applies only
@@ -106,6 +106,8 @@ function poolLine(t: PoolTrack): string {
     fmt(t.energy, 2),
     fmt(t.valence, 2),
     fmt(t.releaseYear),
+    // Catalogue data, but sanitized like the title: it lands in the prompt.
+    t.genre ? sanitizeForPrompt(t.genre) : '-',
     ...(t.outside ? ['new'] : []),
   ].join(' | ')
 }
@@ -174,6 +176,9 @@ const SYSTEM_RULES = [
     'be that genre or from that era. Mood words (soft, rainy, chill, dark) choose which tracks of that genre ' +
     'to pick; they never stand in for the genre. A soft indie song is not soft jazz, and a 70s song is not a ' +
     '90s one.\n' +
+    '- When the brief names a genre, each track\'s genre field is the evidence. Pick a track labelled with a ' +
+    'different genre only when that song is itself widely known as the named genre; a track with no genre ' +
+    '("-") needs the same certainty.\n' +
     '- The requested count is a ceiling, not a quota. Fill it when the pool holds that many tracks that fit; ' +
     'when it does not, return fewer. A shorter queue that fits beats a full one that does not.\n' +
     '- List the picks in the order they should play.\n' +

@@ -28,8 +28,9 @@ const PINNED = {
   // and the sentence-length note rule (spec every-song-earns-its-place,
   // decisions 1 and 7): deliberate changes, flag on or off. Re-pinned the
   // same day for the genre-or-era hard-constraint line, after the live rerun
-  // filled "soft jazz" with soft indie.
-  curation: 'be2057c8b67c37561d6acdb6f9ba178d029cb8520418340c89cd2a8560b2af8f',
+  // filled "soft jazz" with soft indie. Again for the genre field on each
+  // pool line and the rule that it is the evidence for a named genre.
+  curation: '81b2d4eb5df5878b9a1f612a2655601016a90eb3d46e2758043ee08c6a4b23b0',
 }
 
 function personalPool(n: number): PoolTrack[] {

@@ -337,7 +337,7 @@ describe('curate', () => {
 
   it('pool block opens with the legend and includes a fully-populated per-track line', async () => {
     const pool = makePool(5)
-    pool[0] = { ...pool[0], playCount: 42, tempo: 128, energy: 0.73, valence: 0.21, releaseYear: 1994 }
+    pool[0] = { ...pool[0], playCount: 42, tempo: 128, energy: 0.73, valence: 0.21, releaseYear: 1994, genre: 'R&B/Soul' }
     const { llm, requests } = scriptedLlm([textTurn([{ id: pool[0].trackId }])])
 
     await curate(llm, pool, intent({ themes: 'x', targetCount: 3 }))
@@ -347,9 +347,26 @@ describe('curate', () => {
     const blocks = message.content as Array<{ type: string; text?: string }>
     const poolText = blocks[0].text ?? ''
     expect(poolText).toContain(
-      'id | title — artist | play count | bpm | energy 0-1 | valence 0-1 (bleak→bright) | release year',
+      'id | title — artist | play count | bpm | energy 0-1 | valence 0-1 (bleak→bright) | release year | genre',
     )
-    expect(poolText).toContain(`${pool[0].trackId} | ${pool[0].title} — ${pool[0].artist} | 42 | 128 | 0.73 | 0.21 | 1994`)
+    expect(poolText).toContain(`${pool[0].trackId} | ${pool[0].title} — ${pool[0].artist} | 42 | 128 | 0.73 | 0.21 | 1994 | R&B/Soul`)
+  })
+
+  // A named genre is checked against Apple's genre label: the 2026-11-09
+  // own-music rerun called Alternative and Afrobeats library songs "soft
+  // jazz" because the curator never saw a genre.
+  it('shows each track its genre, "-" when unknown, and says the label is the evidence for a named genre', async () => {
+    const pool = makePool(3)
+    pool[0] = { ...pool[0], genre: 'Jazz' }
+    pool[1] = { ...pool[1], genre: null }
+    const { llm, requests } = scriptedLlm([textTurn([{ id: pool[0].trackId }])])
+
+    await curate(llm, pool, intent({ themes: 'x', targetCount: 3 }))
+
+    const poolText = blocksOf(requests[0])[0]
+    expect(poolText).toMatch(new RegExp(`${pool[0].trackId} \\|.*\\| Jazz$`, 'm'))
+    expect(poolText).toMatch(new RegExp(`${pool[1].trackId} \\|.*\\| -$`, 'm'))
+    expect(systemOf(requests[0])).toMatch(/genre field is the evidence/)
   })
 
   it('sanitizes control characters/newlines out of a track title before it reaches the pool block', async () => {

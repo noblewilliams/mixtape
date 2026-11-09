@@ -33,7 +33,12 @@ Worker `1b56ec3a`) found songs that do not belong in their mix:
    pick only tracks that truly fit the brief (genre, era, mood, and any hard
    constraint such as no vocals or clean), and to return fewer than asked
    rather than use a track that contradicts it. The requested count becomes a
-   ceiling, not a quota.
+   ceiling, not a quota. A genre or era named in the brief is a hard
+   constraint; mood words never stand in for it. Each pool line shows Apple's
+   genre label, which is the evidence for a named genre: a track labelled
+   otherwise fits only when the song itself is widely known as that genre.
+   Added after the live rerun, where an own-music "soft jazz" mix held
+   Alternative and Afrobeats songs.
 2. **A shortfall is filled from outside the library, then honestly.** When the
    curated picks fall short of `targetCount`, the listener allows outside music
    (`allowOutside` is not false), and the Apple fill is wired (`NEVER_REFUSE`

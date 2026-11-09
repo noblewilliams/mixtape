@@ -21,6 +21,10 @@ export type PoolTrack = {
   valence: number | null
   releaseYear: number | null
   durationMs: number | null
+  // Apple's primary genre label (tracks.genre), shown to the curator so a
+  // named genre is checked against it (spec 2026-11-09
+  // every-song-earns-its-place). Optional so hand-built pools need not set it.
+  genre?: string | null
   score: number
   // True for a catalogue row the listener holds no recording of (see
   // buildOutsidePool). Personal and corpus rows are always false.
@@ -327,6 +331,7 @@ type PoolRow = {
   valence: number | string | null
   release_year: number | null
   duration_ms: number | null
+  genre: string | null
   score: number | string
 }
 
@@ -971,6 +976,7 @@ export async function buildPool(
         f.valence AS valence,
         t.release_year AS release_year,
         t.duration_ms AS duration_ms,
+        t.genre AS genre,
         ${scoreExpr} AS score
       FROM ${candidateSource}
       CROSS JOIN seed_profile sp
@@ -1023,6 +1029,7 @@ function toPoolTrack(r: PoolRow, outside: boolean): PoolTrack {
     valence: num(r.valence),
     releaseYear: r.release_year,
     durationMs: r.duration_ms,
+    genre: r.genre ?? null,
     score: Number(r.score),
     outside,
   }
@@ -1186,6 +1193,7 @@ export async function buildOutsidePool(
         f.valence AS valence,
         t.release_year AS release_year,
         t.duration_ms AS duration_ms,
+        t.genre AS genre,
         ${scoreExpr} AS score
       FROM candidates c
       JOIN nearest tm ON tm.track_id = c.near_id
