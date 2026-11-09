@@ -1105,7 +1105,7 @@ class _Failed extends StatelessWidget {
         if (unreadable) ...[
           const SizedBox(height: 8),
           Text(
-            'Expected files: $expectedExportFiles.',
+            'Expected files: ${state.expectedFiles}.',
             key: const Key('import-expected'),
             style: tokens.meta,
           ),

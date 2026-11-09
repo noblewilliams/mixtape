@@ -63,6 +63,19 @@ Future<List<List<String>>> _csv(String text, CancelToken? token) async {
   return rows;
 }
 
+final _albumUri = RegExp(r'^spotify:album:[A-Za-z0-9]{22}$');
+
+/// An album list, such as the `saved_albums.csv` Export All has written
+/// beside the playlists since upstream #240 (October 2026): every row an
+/// album, its URI in the first column. Told apart by content, so a
+/// translated header or a renamed file reads the same. It holds no tracks,
+/// so the import sets it aside instead of failing on it.
+bool _isAlbumList(List<String> header, List<List<String>> rows) =>
+    rows.isNotEmpty &&
+    rows.every(
+      (r) => r.length == header.length && _albumUri.hasMatch(r.first.trim()),
+    );
+
 /// The ISRC as the import contract carries it: trimmed, hyphens and spaces
 /// removed, uppercase, and only when it is the 12-character ISRC shape.
 /// Anything else is null, so the field is omitted.
@@ -73,6 +86,72 @@ String? normalizeIsrc(String cell) {
       : null;
 }
 
+/// Exportify column labels beyond the ones the import maps
+/// ([exportifyHeaders]): the rest of the English track header, its optional
+/// add-on columns, and the album list's header.
+const _otherExportifyLabels = {
+  'Artist URI(s)',
+  'Album URI',
+  'Album Artist URI(s)',
+  'Album Artist Name(s)',
+  'Album Release Date',
+  'Album Image URL',
+  'Disc Number',
+  'Track Number',
+  'Track Preview URL',
+  'Explicit',
+  'Popularity',
+  'Added By',
+  'Artist Genres',
+  'Danceability',
+  'Energy',
+  'Key',
+  'Loudness',
+  'Mode',
+  'Speechiness',
+  'Acousticness',
+  'Instrumentalness',
+  'Liveness',
+  'Valence',
+  'Tempo',
+  'Time Signature',
+  'Album Genres',
+  'Label',
+  'Copyrights',
+  'Album Type',
+  'Total Tracks',
+  'UPC',
+};
+
+final Set<String> _knownLabels = {
+  for (final labels in exportifyHeaders.values)
+    for (final label in labels) label.trim().toLowerCase(),
+  for (final label in _otherExportifyLabels) label.toLowerCase(),
+};
+
+/// A CSV's header row and the count of rows under it, for the content-free
+/// failure report; null when the file does not parse as CSV. A header cell
+/// that is not a known Exportify label is reported as `?`, so a file whose
+/// first row is a song rather than a header never puts it in the report.
+Future<({List<String> headers, int rows})?> exportifyCsvShape(
+  ExportArchive archive,
+  String path,
+) async {
+  try {
+    final rows = await _csv(await archive.readText(path), null);
+    if (rows.isEmpty) return null;
+    return (
+      headers: [
+        for (final cell in rows.first)
+          _knownLabels.contains(cell.trim().toLowerCase()) ? cell.trim() : '?',
+      ],
+      rows: rows.length - 1,
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
 Future<ParsedExport> parseExportify(
   ExportArchive archive,
   ParseOptions options,
@@ -81,11 +160,12 @@ Future<ParsedExport> parseExportify(
     ..sort((a, b) => a.path.compareTo(b.path));
   final selected = files.where((f) => isCsvPath(f.path)).toList();
   final read = <InventoryReadFile>[];
+  final setAside = <String>{};
   ExportInventory inventory() => ExportInventory(
     package: ExportPackage.spotifyExportify,
     read: read,
     ignored: files
-        .where((f) => !isCsvPath(f.path))
+        .where((f) => !isCsvPath(f.path) || setAside.contains(f.path))
         .map((f) => InventoryIgnoredFile(path: f.path, bytes: f.bytes))
         .toList(),
   );
@@ -129,6 +209,11 @@ Future<ParsedExport> parseExportify(
         }
       }
       if (ambiguousIsrc) columns.remove('isrc');
+      if (!columns.containsKey('track_uri') && _isAlbumList(header, rows)) {
+        setAside.add(file.path);
+        completed++;
+        continue;
+      }
       if ([
         'track_uri',
         'track_name',

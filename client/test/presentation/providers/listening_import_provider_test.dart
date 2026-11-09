@@ -218,6 +218,28 @@ void main() {
     expect(failed.diagnostics, same(brokenDiagnostics));
   });
 
+  test('an unreadable Exportify file names Exportify files as the expected ones, not the '
+      'official export', () async {
+    final c = container();
+    service.inspectError = const UnreadableExportException(
+      file: 'odd.csv',
+      inventory: ExportInventory(
+        package: ExportPackage.spotifyExportify,
+        read: [InventoryReadFile(path: 'odd.csv', rows: null)],
+        ignored: [],
+      ),
+    );
+    await notifier(c).inspect(extendedArchive);
+    final exportify = c.read(listeningImportProvider) as ImportFailed;
+    expect(exportify.message, contains('odd.csv'));
+    expect(exportify.expectedFiles, expectedExportifyFiles);
+    expect(exportify.expectedFiles, contains('Exportify'));
+
+    service.inspectError = brokenError;
+    await notifier(c).inspect(extendedArchive);
+    expect((c.read(listeningImportProvider) as ImportFailed).expectedFiles, expectedExportFiles);
+  });
+
   test('a diagnoser failure still reports the failure, without a report', () async {
     final c = onboardingContainer(
       listening: FakeListeningApi(onboarding: onboardingState(chosenService: 'spotify')),

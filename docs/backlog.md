@@ -35,6 +35,13 @@ Single consolidated list. Detail lives in `decisions.md` (rationale) and the pla
   are real Export All/filtered-file acceptance and production rollout; see
   `testing/2026-09-08-exportify-import.md`.
   Filenames do not prove playlist identity or whole-library completeness.
+  **Saved albums (2026-11-09):** Export All now adds `saved_albums.csv`; a
+  tester's ZIP failed on it. Both parsers now set album lists aside and import
+  the playlists (spec, Source findings). Open: whether saved albums should
+  feed taste (album artists, or the albums' tracks through a catalogue
+  lookup); the web failure report still says `spotify_export` with no CSV
+  headers for an Exportify archive (iOS reports them); the review does not
+  say a file was set aside.
 
 Execution started, 2026-09-08: [release completion and web controls](superpowers/specs/2026-09-08-release-completion-design.md). Includes web memory, session rename/archive/restore, playlist inspiration and taste-confirmation controls, plus release preparation and acceptance. Revision 2 of the web state board is approved; all four web controls are implemented locally, including inline rename, swipe archive/restore, modal forgetting and composer attachments. Release and external access gates remain explicit in the spec. Evidence: [release completion record](releases/2026-09-08-release-completion.md).
 

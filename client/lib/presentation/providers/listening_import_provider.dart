@@ -33,6 +33,10 @@ final exportDiagnoserProvider = Provider<ExportDiagnoser>(
 const String expectedExportFiles =
     'Streaming_History_Audio_*.json, YourLibrary.json, Playlist*.json';
 
+/// The same, for a file that was read as an Exportify export.
+const String expectedExportifyFiles =
+    "Exportify's spotify_playlists.zip, or the playlist CSVs inside it";
+
 sealed class ImportFlowState {
   const ImportFlowState();
 
@@ -124,6 +128,7 @@ class ImportFailed extends ImportFlowState {
     required this.diagnostics,
     this.unreadable = false,
     this.diagnosing = false,
+    this.expectedFiles = expectedExportFiles,
   });
 
   /// Null when the failure came before a file was picked.
@@ -139,6 +144,10 @@ class ImportFailed extends ImportFlowState {
   /// off the main isolate; it cannot be cancelled, so the failure shows at
   /// once and the report attaches when it arrives.
   final bool diagnosing;
+
+  /// What an [unreadable] file should have held, for the failure copy: the
+  /// official export's files unless the file was read as Exportify's.
+  final String expectedFiles;
 
   /// Present when the file itself could not be read; null for a failure on
   /// the way to the server (nothing about the file to report), while the
@@ -461,7 +470,15 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
         : package == null
         ? "This doesn't look like a Spotify export: none of the expected files are in the ZIP."
         : "This file isn't a ZIP archive Mixtape can open.";
-    return _fail(generation, archive, message, diagnose: true);
+    return _fail(
+      generation,
+      archive,
+      message,
+      diagnose: true,
+      expectedFiles: package == ExportPackage.spotifyExportify
+          ? expectedExportifyFiles
+          : expectedExportFiles,
+    );
   }
 
   /// Lands on failed at once. For an unreadable file ([diagnose]) the
@@ -473,6 +490,7 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
     PickedArchive archive,
     String message, {
     bool diagnose = false,
+    String expectedFiles = expectedExportFiles,
   }) async {
     if (!_current(generation)) return;
     state = ImportFailed(
@@ -481,6 +499,7 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
       diagnostics: null,
       unreadable: diagnose,
       diagnosing: diagnose,
+      expectedFiles: expectedFiles,
     );
     if (!diagnose) {
       _discardHandedOver();
@@ -501,6 +520,7 @@ class ListeningImportNotifier extends Notifier<ImportFlowState> {
         message: message,
         diagnostics: diagnostics,
         unreadable: true,
+        expectedFiles: expectedFiles,
       ),
     );
   }

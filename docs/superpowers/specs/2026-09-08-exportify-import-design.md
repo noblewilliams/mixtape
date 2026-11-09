@@ -40,6 +40,27 @@ format evidence. A real ZIP remains an acceptance check before release.
 - [Documented columns](https://github.com/watsonbox/exportify#export-format)
   include track URI, credited artist names, album, duration, ISRC, image URL,
   added timestamp, and optional provider data. No listening ledger is present.
+- **Saved albums (found 2026-11-09 by a tester's real Export All ZIP):** since
+  upstream #240 (October 2026) Export All also writes `saved_albums.csv`:
+  one row per saved album (`Album URI`, `Album Name`, `Album Artist Name(s)`,
+  … `Added At`), no track columns. The import used to fail the whole ZIP on
+  it ("saved_albums.csv couldn't be read"). Both parsers (iOS
+  `client/lib/import/exportify_parser.dart`, web
+  `web/src/import/exportify-parser.ts`) now set an **album list** aside:
+  it has no track URI column, it has at least one row, and every row is
+  well-formed with a `spotify:album:` URI in the first column. Detection
+  goes by content, so a translated header or a renamed file is handled the
+  same way. The file is listed in the inventory's `ignored` files, never
+  `read` (the review pairs read files with playlists by index), and the
+  playlists beside it import as before. Any other CSV without track columns
+  still fails the import and names the file. Saved albums are not imported:
+  the official account parser does not import YourLibrary albums either.
+  Whether album artists should become a taste signal is an open backlog item.
+  The iOS failure report now covers Exportify CSVs. It sets `source` to
+  `spotify_exportify` and gives each CSV's row count and header row. Only
+  known Exportify column labels are shown; any other cell shows as `?`, so a
+  headerless CSV can't leak a song. The "Expected files" line names
+  Exportify's files.
 
 ## Review contract
 

@@ -267,7 +267,9 @@ class InventoryReadFile {
   Map<String, Object?> toCanonicalJson() => {'path': path, 'rows': rows};
 }
 
-/// Any other file entry: the parser knows its path and byte size only.
+/// Any other file entry: the inventory keeps its path and byte size only.
+/// An Exportify album list lands here too, read but set aside: it holds no
+/// tracks to import.
 class InventoryIgnoredFile {
   const InventoryIgnoredFile({required this.path, required this.bytes});
 
@@ -347,7 +349,7 @@ class ExportDiagnostics {
     required this.parserVersion,
   });
 
-  /// `spotify_export`, `apple_export`, or `unknown`.
+  /// `spotify_export`, `spotify_exportify`, `apple_export`, or `unknown`.
   final String source;
   final List<DiagnosticsFile> files;
   final String parserVersion;

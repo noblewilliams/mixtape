@@ -6,6 +6,8 @@ import 'package:mixtape/import/snapshot.dart';
 import 'package:mixtape/import/spotify_parser.dart';
 import 'package:mixtape/import/zip_reader.dart';
 
+import 'exportify_zip.dart';
+
 class FilesArchive extends ExportArchive {
   FilesArchive(this.files);
   final Map<String, String> files;
@@ -181,6 +183,107 @@ void main() {
       );
     },
   );
+  test(
+    'an Export All ZIP with saved albums imports every playlist and sets the '
+    'album list aside',
+    () async {
+      final archive = ZipExportArchive.fromBytes(exportifyExportAllZip());
+      try {
+        final parsed = await parseExport(
+          archive,
+          const ParseOptions(timeZone: 'UTC'),
+        );
+        expect(parsed.snapshot.package, ExportPackage.spotifyExportify);
+        expect(parsed.snapshot.playlists.map((p) => p.name).toList(), [
+          '#23',
+          "abba's vibe",
+          'audio hugs 🫂📝🥺💌',
+          'liked',
+          'zz last',
+        ]);
+        expect(
+          parsed.snapshot.tracks.map((t) => t.platformId).toSet(),
+          {'4uLU6hMCjMI75M1A2tKUQC', '7ouMYWpwJ422jRcDASZB7P'},
+        );
+        // The review pairs read files with playlists by index, so an album
+        // list is never among the read files.
+        expect(parsed.inventory.read.map((f) => f.path).toList(), [
+          '#23.csv',
+          "abba's_vibe.csv",
+          'audio_hugs_🫂📝🥺💌.csv',
+          'liked.csv',
+          'zz_last.csv',
+        ]);
+        expect(parsed.inventory.unreadableFile, isNull);
+        expect(parsed.inventory.ignored.map((f) => f.path).toList(), [
+          'saved_albums.csv',
+        ]);
+        expect(
+          parsed.inventory.ignored.single.bytes,
+          utf8.encode(savedAlbumsCsv).length,
+        );
+        expect(
+          (await inspectExport(archive)).ignored.map((f) => f.path),
+          ['saved_albums.csv'],
+        );
+      } finally {
+        await archive.close();
+      }
+    },
+  );
+  test('an album list is told apart by its album URIs, not its name or '
+      'language', () async {
+    final parsed = await parseExport(
+      FilesArchive({
+        'mes_albums.csv':
+            '"URI de l\'album","Nom de l\'album"\n'
+            '"spotify:album:1ATL5GLyefJaxhQzSPVrLX","Arrival"\n',
+        'a.csv': '$_head"spotify:track:$_id","One","A",""\n',
+      }),
+      const ParseOptions(timeZone: 'UTC'),
+    );
+    expect(parsed.snapshot.playlists.map((p) => p.name), ['a']);
+    expect(parsed.inventory.ignored.map((f) => f.path), ['mes_albums.csv']);
+  });
+  test('a CSV that is neither a track list nor an album list still stops the '
+      'import, naming the file', () async {
+    Future<String?> failing(Map<String, String> files) async {
+      try {
+        await parseExport(
+          FilesArchive(files),
+          const ParseOptions(timeZone: 'UTC'),
+        );
+      } on UnreadableExportException catch (e) {
+        return e.file;
+      }
+      return null;
+    }
+
+    final good = '$_head"spotify:track:$_id","One","A",""\n';
+    expect(
+      await failing({'a.csv': good, 'notes.csv': '"Name","Value"\n"x","y"\n'}),
+      'notes.csv',
+    );
+    // One row that is not an album makes it something else entirely.
+    expect(
+      await failing({
+        'a.csv': good,
+        'saved_albums.csv':
+            '"Album URI","Album Name"\n'
+            '"spotify:album:1ATL5GLyefJaxhQzSPVrLX","Arrival"\n'
+            '"spotify:track:$_id","Not an album"\n',
+      }),
+      'saved_albums.csv',
+    );
+    // A header with no rows says nothing about what the file is.
+    expect(
+      await failing({
+        'a.csv': good,
+        'saved_albums.csv': '$exportifySavedAlbumsHeader\n',
+      }),
+      'saved_albums.csv',
+    );
+  });
   test('rejects ISRC shapes outside the contract', () async {
     for (final cell in [
       'USRC1760783',

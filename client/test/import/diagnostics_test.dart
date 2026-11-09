@@ -1,9 +1,11 @@
 import 'dart:io';
 
+import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/import/diagnostics.dart';
 import 'package:mixtape/import/zip_reader.dart';
 
+import 'exportify_zip.dart';
 import 'fixtures.dart';
 
 void main() {
@@ -90,6 +92,74 @@ void main() {
     expect(diagnostics.source, 'spotify_export');
     expect(diagnostics.files.any((f) => f.rows == null), isTrue);
     expect(diagnostics.canonicalJsonString(), isNot(contains('"spotify_track_uri": "')));
+  });
+
+  test('an Exportify ZIP reports each CSV header row and row count, never a value', () async {
+    final archive = ZipExportArchive.fromBytes(exportifyExportAllZip());
+    try {
+      final diagnostics = await diagnoseExport(archive);
+      expect(diagnostics.source, 'spotify_exportify');
+      final byPath = {for (final f in diagnostics.files) f.path: f};
+      expect(byPath["abba's_vibe.csv"]!.rows, 2);
+      expect(byPath["abba's_vibe.csv"]!.headers, contains('Track URI'));
+      expect(byPath['saved_albums.csv']!.rows, 2);
+      expect(byPath['saved_albums.csv']!.headers, [
+        'Album URI',
+        'Album Name',
+        'Album Artist URI(s)',
+        'Album Artist Name(s)',
+        'Album Type',
+        'Album Release Date',
+        'Total Tracks',
+        'Label',
+        'UPC',
+        'Popularity',
+        'Album Image URL',
+        'Added At',
+      ]);
+      final text = diagnostics.canonicalJsonString();
+      for (final value in ['spotify:', 'ABBA', 'Arrival', 'One', 'Ana', '2025-']) {
+        expect(text, isNot(contains(value)), reason: 'value leaked: $value');
+      }
+    } finally {
+      await archive.close();
+    }
+  });
+
+  test('a CSV whose first row is a song, not a header, reports only placeholders', () async {
+    final built = Archive()
+      ..add(
+        ArchiveFile.string(
+          'loose.csv',
+          '"spotify:track:4uLU6hMCjMI75M1A2tKUQC","Secret Song","Secret Artist","Track Name"\n',
+        ),
+      );
+    final archive = ZipExportArchive.fromBytes(ZipEncoder().encodeBytes(built));
+    try {
+      final file = (await diagnoseExport(archive)).files.single;
+      expect(file.rows, 0);
+      expect(file.headers, ['?', '?', '?', 'Track Name']);
+    } finally {
+      await archive.close();
+    }
+  });
+
+  test('an Exportify CSV that cannot be parsed has null rows and headers', () async {
+    final built = Archive()
+      ..add(ArchiveFile.string('broken.csv', '"Track URI","Track Name\n"x"y",""\n'))
+      ..add(ArchiveFile.string('cover.jpg', 'jpeg'));
+    final archive = ZipExportArchive.fromBytes(ZipEncoder().encodeBytes(built));
+    try {
+      final diagnostics = await diagnoseExport(archive);
+      expect(diagnostics.source, 'spotify_exportify');
+      for (final file in diagnostics.files) {
+        expect(file.rows, isNull, reason: file.path);
+        expect(file.headers, isNull, reason: file.path);
+        expect(file.bytes, greaterThan(0), reason: file.path);
+      }
+    } finally {
+      await archive.close();
+    }
   });
 
   test('diagnoseExportFile reports a file that is not a ZIP as unknown with no files', () async {

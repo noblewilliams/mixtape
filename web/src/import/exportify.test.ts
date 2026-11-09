@@ -221,3 +221,80 @@ it('rejects ISRC shapes outside the contract', async () => {
     expect('isrc' in snapshot.tracks[0]).toBe(false)
   }
 })
+
+// Export All has written saved_albums.csv beside the playlists since upstream
+// #240 (October 2026): one row per album, no track columns.
+const trackHeader =
+  '"Track URI","Track Name","Artist URI(s)","Artist Name(s)","Album URI","Album Name",' +
+  '"Album Artist URI(s)","Album Artist Name(s)","Album Release Date","Album Image URL",' +
+  '"Disc Number","Track Number","Track Duration (ms)","Track Preview URL","Explicit",' +
+  '"Popularity","ISRC","Added By","Added At"\n'
+const trackRow = (name: string) =>
+  `"spotify:track:${id}","${name}","spotify:artist:0000000000000000000001","Ana",` +
+  '"spotify:album:0000000000000000000002","An Album","spotify:artist:0000000000000000000001",' +
+  '"Ana","2020-01-01","https://i.scdn.co/image/x","1","1","200000","","false","50",' +
+  '"USRC17607839","","2024-05-01T10:00:00Z"\n'
+const savedAlbums =
+  '"Album URI","Album Name","Album Artist URI(s)","Album Artist Name(s)","Album Type",' +
+  '"Album Release Date","Total Tracks","Label","UPC","Popularity","Album Image URL","Added At"\n' +
+  '"spotify:album:1ATL5GLyefJaxhQzSPVrLX","Arrival","spotify:artist:0LcJLqbBmaGUft1e9Mm8HV",' +
+  '"ABBA","album","1976-10-11","10","Polar Music","731454993620","70",' +
+  '"https://i.scdn.co/image/a","2025-01-02T03:04:05Z"\n'
+
+it('an Export All archive with saved albums imports every playlist and sets the album list aside', async () => {
+  const files = {
+    '#23.csv': trackHeader + trackRow('One'),
+    "abba's_vibe.csv": trackHeader + trackRow('One') + trackRow('Again'),
+    'audio_hugs_🫂📝🥺💌.csv': trackHeader + trackRow('One'),
+    'cover.jpg': 'jpeg',
+    'liked.csv': trackHeader + trackRow('One'),
+    'saved_albums.csv': savedAlbums,
+    'zz_last.csv': trackHeader + trackRow('One'),
+  }
+  const result = await parseExport(archive(files), options)
+  expect(result.snapshot.playlists.map((p) => p.name)).toEqual([
+    '#23',
+    "abba's vibe",
+    'audio hugs 🫂📝🥺💌',
+    'liked',
+    'zz last',
+  ])
+  // The review pairs read files with playlists by index, so an album list
+  // is never among the read files.
+  expect(result.inventory.read.map((f) => f.path)).toEqual([
+    '#23.csv',
+    "abba's_vibe.csv",
+    'audio_hugs_🫂📝🥺💌.csv',
+    'liked.csv',
+    'zz_last.csv',
+  ])
+  expect(result.inventory.ignored).toEqual([
+    { path: 'cover.jpg', bytes: 4 },
+    {
+      path: 'saved_albums.csv',
+      bytes: new TextEncoder().encode(savedAlbums).length,
+    },
+  ])
+})
+
+it('tells an album list apart by its album URIs, and still rejects any other CSV', async () => {
+  const good = `"Track URI","Track Name","Artist Name(s)"\n"spotify:track:${id}","One","A"\n`
+  const french =
+    '"URI de l\'album","Nom de l\'album"\n"spotify:album:1ATL5GLyefJaxhQzSPVrLX","Arrival"\n'
+  const result = await parseExport(
+    archive({ 'a.csv': good, 'mes_albums.csv': french }),
+    options,
+  )
+  expect(result.snapshot.playlists.map((p) => p.name)).toEqual(['a'])
+  expect(result.inventory.ignored.map((f) => f.path)).toEqual(['mes_albums.csv'])
+  for (const other of [
+    '"Name","Value"\n"x","y"\n',
+    '"Album URI","Album Name"\n"spotify:album:1ATL5GLyefJaxhQzSPVrLX","Arrival"\n' +
+      `"spotify:track:${id}","Not an album"\n`,
+    '"Album URI","Album Name"\n',
+  ]) {
+    await expect(
+      parseExport(archive({ 'a.csv': good, 'odd.csv': other }), options),
+    ).rejects.toMatchObject({ name: 'UnreadableExportError', file: 'odd.csv' })
+  }
+})

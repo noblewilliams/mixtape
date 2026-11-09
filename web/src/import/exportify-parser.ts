@@ -67,6 +67,22 @@ async function csv(text: string, signal?: AbortSignal): Promise<string[][]> {
 }
 const normalize = (s: string) => s.trim().normalize('NFC').toLowerCase()
 
+const ALBUM_URI = /^spotify:album:[A-Za-z0-9]{22}$/
+
+/**
+ * An album list, such as the `saved_albums.csv` Export All has written
+ * beside the playlists since upstream #240 (October 2026): every row an
+ * album, its URI in the first column. Told apart by content, so a translated
+ * header or a renamed file reads the same. It holds no tracks, so the import
+ * sets it aside instead of failing on it.
+ */
+const isAlbumList = (header: string[], rows: string[][]) =>
+  rows.length > 0 &&
+  rows.every((r) => r.length === header.length && ALBUM_URI.test(r[0].trim()))
+
+const byPath = (a: { path: string }, b: { path: string }) =>
+  a.path < b.path ? -1 : a.path > b.path ? 1 : 0
+
 /**
  * The ISRC as the import contract carries it: trimmed, hyphens and spaces
  * removed, uppercase, and only when it is the 12-character ISRC shape.
@@ -83,9 +99,7 @@ export async function parseExportify(
   archive: ExportArchive,
   options: ParseOptions,
 ): Promise<ParseResult> {
-  const files = [...(await archive.entries())].sort((a, b) =>
-    a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
-  )
+  const files = [...(await archive.entries())].sort(byPath)
   const selected = files.filter((f) => isCsvPath(f.path))
   const inventory: ExportInventory = {
     package: 'spotify_exportify',
@@ -104,7 +118,8 @@ export async function parseExportify(
   const tracks = new Map<string, SnapshotTrack>(),
     playlists: SnapshotPlaylist[] = []
   let unresolved = 0,
-    totalRows = 0
+    totalRows = 0,
+    setAside = 0
   options.signal?.throwIfAborted()
   options.onProgress?.({
     stage: 'listing',
@@ -116,7 +131,7 @@ export async function parseExportify(
     options.onProgress?.({
       stage: 'reading',
       file: file.path,
-      completed: playlists.length,
+      completed: playlists.length + setAside,
       total: selected.length,
     })
     try {
@@ -137,6 +152,12 @@ export async function parseExportify(
         }
       })
       if (ambiguousIsrc) columns.delete('isrc')
+      if (!columns.has('track_uri') && isAlbumList(header, rows)) {
+        inventory.ignored.push(file)
+        inventory.ignored.sort(byPath)
+        setAside++
+        continue
+      }
       if (
         ['track_uri', 'track_name', 'artist_names'].some((k) => !columns.has(k))
       )
