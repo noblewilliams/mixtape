@@ -441,7 +441,7 @@ describe('path B, add my music first', () => {
     await heading('Step 2 of 3, How do you want to add it?')
     expect(ensureSession).not.toHaveBeenCalled()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Sync my library' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sync Apple Music' }))
     expect(await heading('Step 3 of 3, Syncing your library')).toBeInTheDocument()
     await waitFor(() => expect(syncRun.start).toHaveBeenCalledOnce())
     expect(ensureSession.mock.invocationCallOrder[0]).toBeLessThan(syncRun.start.mock.invocationCallOrder[0])
@@ -463,7 +463,7 @@ describe('path B, add my music first', () => {
   it('puts Who do you love? before the prompt page when the sync brought nothing usable', async () => {
     const { syncRun } = await toStep1()
     fireEvent.click(screen.getByRole('button', { name: 'Apple Music' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Sync my library' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Sync Apple Music' }))
     await heading('Step 3 of 3, Syncing your library')
     act(() => syncRun.set(syncResult(0)))
     fireEvent.click(screen.getByRole('button', { name: 'Done' }))
@@ -477,7 +477,7 @@ describe('path B, add my music first', () => {
   it('continues with what came in after a failed sync', async () => {
     const { syncRun } = await toStep1()
     fireEvent.click(screen.getByRole('button', { name: 'Apple Music' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Sync my library' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Sync Apple Music' }))
     await heading('Step 3 of 3, Syncing your library')
     act(() => syncRun.set({ kind: 'running', progress: { stage: 'library_songs', completed: 612 } }))
     act(() => syncRun.set({ kind: 'error', failure: 'connection' }))
@@ -677,7 +677,7 @@ describe('Library add flow', () => {
   it('returns to Library after an Apple sync instead of the prompt page', async () => {
     const { onDone, syncRun } = renderAdd()
     fireEvent.click(screen.getByRole('button', { name: 'Apple Music' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Sync my library' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Sync Apple Music' }))
     await waitFor(() => expect(syncRun.start).toHaveBeenCalled())
     act(() => syncRun.set(syncResult(40)))
     fireEvent.click(screen.getByRole('button', { name: 'Done' }))
@@ -724,7 +724,7 @@ describe('first-run funnel events', () => {
     await heading('Step 2 of 3, How do you want to add it?')
     expect(funnelPosts(log)).toEqual([])
 
-    fireEvent.click(screen.getByRole('button', { name: 'Sync my library' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sync Apple Music' }))
     await waitFor(() => expect(syncRun.start).toHaveBeenCalledOnce())
     act(() => syncRun.set(syncResult(40)))
     fireEvent.click(screen.getByRole('button', { name: 'Done' }))
@@ -736,7 +736,7 @@ describe('first-run funnel events', () => {
   it('posts no first-run events from Library\'s add flow', async () => {
     const { log, syncRun } = renderFlow({ mode: 'add' })
     fireEvent.click(await screen.findByRole('button', { name: 'Apple Music' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Sync my library' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Sync Apple Music' }))
     await waitFor(() => expect(syncRun.start).toHaveBeenCalledOnce())
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(funnelPosts(log)).toEqual([])

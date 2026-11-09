@@ -1,8 +1,9 @@
 // The Library tab (plan `docs/superpowers/plans/2026-09-17-native-design-
 // implementation.md` task 8.1; reworked by `docs/mockups/approved/2026-11-03-
-// library-sources.md`): the sources strip and the Playlists list, the labelled
-// Sync / Your music cluster at the title, and the states the approved records
-// name — empty, loading, failed.
+// library-sources.md`; 2026-11-09 one Add your music button): the sources
+// strip and the Playlists list, the title's one labelled "Add your music"
+// button into Your music, and the states the approved records name — empty,
+// loading, failed. Sync lives with Apple Music, never on this title.
 //
 // The tab hosts Your music and the playlist browser unchanged; both are
 // pushed, and this file asserts by pushed type.
@@ -40,8 +41,6 @@ import 'package:mixtape/presentation/widgets/foundation/flush_row.dart';
 import 'package:mixtape/presentation/widgets/foundation/frosted_dock.dart'
     show kFrostedDockHeight;
 import 'package:mixtape/presentation/widgets/foundation/glass_cluster.dart';
-import 'package:flutter/cupertino.dart' show CupertinoAlertDialog;
-import 'package:mixtape/presentation/widgets/library_sync_dialog.dart';
 
 import '../helpers/fake_import_service.dart';
 import '../helpers/fake_listening_api.dart';
@@ -236,7 +235,7 @@ Future<void> _pump(
   }
 }
 
-/// A sync already under way, so the alert's running copy can be asserted
+/// A sync already under way, so the strip's running copy can be asserted
 /// without touching the MusicKit bridge.
 class _RunningSync extends LibrarySyncNotifier {
   @override
@@ -253,26 +252,29 @@ void main() {
         expect(find.text('Library'), findsOneWidget);
         expect(
           tester.getBottomLeft(find.text('Library')).dy,
-          lessThan(tester.getTopLeft(find.byKey(LibraryTab.syncButtonKey)).dy),
+          lessThan(tester.getTopLeft(find.byKey(LibraryTab.addMusicKey)).dy),
         );
         expect(find.text('Sources'), findsNothing);
         expect(find.text('Playlists'), findsOneWidget);
         expect(find.byType(GlassCluster), findsOneWidget);
-        // The buttons say what they do (2026-11-03 approval).
+        // One button that says what it does (2026-11-09): no Sync beside it,
+        // since sync is Apple Music's alone.
         expect(
           find.descendant(
-            of: find.byKey(LibraryTab.syncButtonKey),
-            matching: find.text('Sync'),
+            of: find.byType(GlassCluster),
+            matching: find.byType(GlassLabelButton),
           ),
           findsOneWidget,
         );
         expect(
           find.descendant(
-            of: find.byKey(LibraryTab.yourMusicKey),
-            matching: find.text('Your music'),
+            of: find.byKey(LibraryTab.addMusicKey),
+            matching: find.text('Add your music'),
           ),
           findsOneWidget,
         );
+        expect(find.text('Sync'), findsNothing);
+        expect(find.text('Your music'), findsNothing);
         expect(find.byIcon(Icons.more_horiz), findsNothing);
         expect(tester.takeException(), isNull);
       });
@@ -318,7 +320,7 @@ void main() {
 
       expect(find.text('Library'), findsOneWidget);
       expect(find.byKey(LibraryTab.spotifySourceKey), findsOneWidget);
-      expect(find.byKey(LibraryTab.syncButtonKey), findsOneWidget);
+      expect(find.byKey(LibraryTab.addMusicKey), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   });
@@ -422,6 +424,10 @@ void main() {
       expect(find.text(LibraryTab.emptyBody), findsOneWidget);
       // Nothing to list yet: the Playlists section stays away.
       expect(find.text('Playlists'), findsNothing);
+      // The empty state's own "Add your music" is the one way in; the title
+      // stands aside rather than offer a second one that goes elsewhere.
+      expect(find.byKey(LibraryTab.addMusicKey), findsNothing);
+      expect(find.text('Add your music'), findsOneWidget);
 
       await tester.tap(find.byKey(LibraryTab.emptySetupKey));
       await tester.pumpAndSettle();
@@ -648,21 +654,35 @@ void main() {
     });
   });
 
-  group('cluster', () {
-    testWidgets('Sync asks before syncing again, in a centred alert', (
-      tester,
-    ) async {
+  group('title', () {
+    testWidgets('Add your music opens Your music', (tester) async {
       await _pump(tester, _container());
 
-      await tester.tap(find.byKey(LibraryTab.syncButtonKey));
+      await tester.tap(find.byKey(LibraryTab.addMusicKey));
       await tester.pumpAndSettle();
-
-      expect(find.byType(CupertinoAlertDialog), findsOneWidget);
-      expect(find.text(LibrarySyncDialog.resyncTitle), findsOneWidget);
-      expect(find.textContaining('Last synced 4 Sep.'), findsOneWidget);
+      expect(find.byType(MusicSourcesScreen), findsOneWidget);
     });
 
-    testWidgets('the alert shows a sync already running', (tester) async {
+    for (final service in ['apple', 'spotify']) {
+      testWidgets('a $service listener gets no Sync on the title', (
+        tester,
+      ) async {
+        final listening = FakeListeningApi(
+          onboarding: onboardingState(
+            chosenService: service,
+            hasLibrary: service == 'apple',
+            sources: [if (service == 'apple') _apple(), _spotify()],
+          ),
+        );
+        await _pump(tester, _container(listening: listening));
+
+        expect(find.bySemanticsLabel('Sync Apple Music'), findsNothing);
+        expect(find.byType(GlassLabelButton), findsOneWidget);
+        expect(find.byKey(LibraryTab.addMusicKey), findsOneWidget);
+      });
+    }
+
+    testWidgets('the strip carries a sync already running', (tester) async {
       await _pump(
         tester,
         _container(
@@ -677,37 +697,7 @@ void main() {
         ),
       );
 
-      // The strip carries the run as well.
       expect(find.text('Syncing… 40%'), findsOneWidget);
-
-      await tester.tap(find.byKey(LibraryTab.syncButtonKey));
-      await tester.pumpAndSettle();
-
-      expect(find.byKey(LibrarySyncDialog.progressKey), findsOneWidget);
-      expect(find.byKey(LibrarySyncDialog.startKey), findsNothing);
-    });
-
-    testWidgets('a Spotify listener with no Apple library gets no Sync', (
-      tester,
-    ) async {
-      final listening = FakeListeningApi(
-        onboarding: onboardingState(
-          chosenService: 'spotify',
-          sources: [_spotify()],
-        ),
-      );
-      await _pump(tester, _container(listening: listening));
-
-      expect(find.byKey(LibraryTab.syncButtonKey), findsNothing);
-      expect(find.byKey(LibraryTab.yourMusicKey), findsOneWidget);
-    });
-
-    testWidgets('Your music opens straight from the title', (tester) async {
-      await _pump(tester, _container());
-
-      await tester.tap(find.byKey(LibraryTab.yourMusicKey));
-      await tester.pumpAndSettle();
-      expect(find.byType(MusicSourcesScreen), findsOneWidget);
     });
   });
 

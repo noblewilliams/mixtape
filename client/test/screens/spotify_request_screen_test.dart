@@ -455,12 +455,12 @@ void main() {
           const SpotifyRequestScreen(),
         );
 
-        // Never synced: the sync is the pane's one tape button, and it opens
-        // the same alert the Library tab's Sync button does.
+        // Never synced: the sync is the pane's one tape button, named for
+        // Apple Music, and it opens the same alert Your music's does.
         expect(
           find.descendant(
             of: find.byKey(SpotifyRequestScreen.appleSyncKey),
-            matching: find.text('Sync your library'),
+            matching: find.text('Sync Apple Music'),
           ),
           findsOneWidget,
         );
@@ -495,8 +495,8 @@ void main() {
     );
 
     testWidgets(
-      'synced: the status row offers Sync again and the Apple file is the '
-      'tape button, in plain sight',
+      'synced: the status row offers Sync Apple Music and the Apple file is '
+      'the tape button, in plain sight',
       (tester) async {
         final listening = FakeListeningApi(
           onboarding: onboardingState(
@@ -520,7 +520,7 @@ void main() {
         expect(
           find.descendant(
             of: find.byKey(SpotifyRequestScreen.appleSyncKey),
-            matching: find.text('Sync again'),
+            matching: find.text('Sync Apple Music'),
           ),
           findsOneWidget,
         );
@@ -535,6 +535,37 @@ void main() {
         await tester.tap(find.byKey(SpotifyRequestScreen.appleSyncKey));
         await tester.pumpAndSettle();
         expect(find.text(LibrarySyncDialog.resyncTitle), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'at 2x text on a 320 pt phone the status action drops under the status '
+      'rather than crushing the title',
+      (tester) async {
+        final listening = FakeListeningApi(
+          onboarding: onboardingState(
+            chosenService: 'apple',
+            hasLibrary: true,
+            sources: [musicSource(source: 'apple_live')],
+          ),
+        );
+        await pumpRequest(
+          tester,
+          onboardingContainer(listening: listening),
+          const SpotifyRequestScreen(),
+          brightness: Brightness.dark,
+          textScale: 2,
+          surface: const Size(320, 1400),
+        );
+
+        final title = tester.getRect(find.text('Apple Music library'));
+        final action = tester.getRect(
+          find.byKey(SpotifyRequestScreen.appleSyncKey),
+        );
+        expect(action.top, greaterThanOrEqualTo(title.bottom));
+        // The title keeps the row's width, not a column of letters.
+        expect(title.width, greaterThan(150));
+        expect(tester.takeException(), isNull);
       },
     );
 

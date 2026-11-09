@@ -125,6 +125,23 @@ void main() {
       expect(find.byKey(const Key('import-again-apple_export')), findsNothing);
       expect(find.byKey(const Key('remove-apple_export')), findsOneWidget);
       expect(find.byKey(const Key('browse-playlists')), findsOneWidget);
+      // Sync sits on the Apple Music row and says so (2026-11-09), not in
+      // the title where it read as syncing everything.
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('source-apple_live')),
+          matching: find.byKey(MusicSourcesScreen.syncKey),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(MusicSourcesScreen.syncKey),
+          matching: find.text('Sync Apple Music'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.byIcon(Icons.sync), findsNothing);
       _expectKeyedActions(const [
         Key('import-again-spotify_export'),
         Key('remove-spotify_export'),
@@ -185,9 +202,11 @@ void main() {
 
     expect(find.text('Nothing connected yet.'), findsOneWidget);
     _expectKeyedActions(const [
+      MusicSourcesScreen.syncKey,
       Key('sources-add-spotify'),
       Key('sources-import'),
     ]);
+    expect(find.text('Sync Apple Music'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('sources-import')));
     await tester.pumpAndSettle();
@@ -372,12 +391,16 @@ void main() {
     expect(find.text("couldn't remove — try again"), findsOneWidget);
   });
 
-  testWidgets('the Sync cluster opens the shared sync sheet', (tester) async {
+  testWidgets('Sync Apple Music on the Apple Music row opens the sync alert', (
+    tester,
+  ) async {
     final listening = FakeListeningApi(
       onboarding: onboardingState(
         chosenService: 'apple',
         hasLibrary: true,
-        sources: [musicSource(source: 'apple_live')],
+        sources: [
+          musicSource(source: 'apple_live', lastImportedAt: importedAt),
+        ],
       ),
     );
     await _pumpSources(tester, onboardingContainer(listening: listening));
@@ -386,8 +409,49 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(LibrarySyncDialog), findsOneWidget);
+    expect(find.text(LibrarySyncDialog.resyncTitle), findsOneWidget);
     expect(find.byKey(LibrarySyncDialog.startKey), findsOneWidget);
   });
+
+  testWidgets(
+    'no Apple library yet: a Sync Apple Music row beside Add Spotify music',
+    (tester) async {
+      final listening = FakeListeningApi(
+        onboarding: onboardingState(
+          chosenService: 'spotify',
+          sources: [
+            musicSource(
+              source: 'apple_export',
+              lastImportedAt: importedAt,
+            ),
+          ],
+        ),
+      );
+      await _pumpSources(
+        tester,
+        onboardingContainer(listening: listening),
+        brightness: Brightness.dark,
+        size: const Size(320, 844),
+        textScale: 2,
+      );
+
+      expect(
+        find.descendant(
+          of: find.byKey(MusicSourcesScreen.syncKey),
+          matching: find.text('Sync Apple Music'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('sources-add-spotify')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+
+      await tester.ensureVisible(find.byKey(MusicSourcesScreen.syncKey));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(MusicSourcesScreen.syncKey));
+      await tester.pumpAndSettle();
+      expect(find.text(LibrarySyncDialog.firstTitle), findsOneWidget);
+    },
+  );
 
   testWidgets('holds at 200% text on a 320 pt phone, in dark', (tester) async {
     final listening = FakeListeningApi(

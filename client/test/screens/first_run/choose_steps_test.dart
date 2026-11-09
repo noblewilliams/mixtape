@@ -147,7 +147,7 @@ void main() {
         find.bySemanticsLabel('Step 2 of 3, How do you want to add it?'),
         findsOneWidget,
       );
-      expect(find.text('Sync my library'), findsOneWidget);
+      expect(find.text('Sync Apple Music'), findsOneWidget);
       expect(find.text('Upload an Apple export'), findsOneWidget);
       expect(find.text('You can add more later from Library.'), findsOneWidget);
       expect(find.text(ChooseMethodScreen.spotifyLine), findsNothing);

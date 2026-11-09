@@ -1,12 +1,18 @@
-/// "Your music": every connected source with what landed and when, "Import
-/// again" on Spotify rows, and "Remove" on the export rows
+/// "Your music": every connected source with what landed and when, "Sync
+/// Apple Music" on the Apple Music row, "Import again" on Spotify rows, and
+/// "Remove" on the export rows
 /// (`docs/mockups/approved/2026-09-04-web-your-music-integration.md`,
 /// restyled for `docs/mockups/approved/2026-09-17-mobile-shell.md` → Library
 /// by plan task 8.1).
 ///
 /// Reads the same source rows the onboarding state carries (they are the
 /// `/me/music-sources` rows), so Home's waiting card, the Library tab and this
-/// list never disagree. Pushed from the Library tab's "Your music" button.
+/// list never disagree. Pushed from the Library tab's "Add your music" button.
+///
+/// Sync is Apple Music's alone, so it lives on Apple Music's row and says so
+/// (founder, 2026-11-09): a bare "Sync" in the title read as syncing
+/// everything, Spotify included. Without a live Apple library a "Sync Apple
+/// Music" row stands beside "Add Spotify music".
 library;
 
 import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
@@ -192,7 +198,11 @@ class MusicSourcesScreen extends ConsumerWidget {
   const MusicSourcesScreen({super.key});
 
   static const Key backKey = Key('sources-back');
+
+  /// "Sync Apple Music": on the Apple Music row once there is one, its own
+  /// row before that, and a text action in the empty state.
   static const Key syncKey = Key('sources-sync');
+  static const String syncLabel = 'Sync Apple Music';
 
   Future<void> _import(BuildContext context, WidgetRef ref) =>
       openImportFlow(context, ref);
@@ -219,12 +229,6 @@ class MusicSourcesScreen extends ConsumerWidget {
       backKey: backKey,
       trailing: GlassCluster(
         children: [
-          GlassButton(
-            key: syncKey,
-            icon: Icons.sync,
-            label: 'Sync library',
-            onPressed: () => showLibrarySync(context, ref),
-          ),
           GlassButton(
             key: const Key('browse-playlists'),
             icon: Icons.queue_music_rounded,
@@ -281,6 +285,11 @@ class MusicSourcesScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 8),
           TextAction(
+            key: syncKey,
+            label: syncLabel,
+            onPressed: () => showLibrarySync(context, ref),
+          ),
+          TextAction(
             key: const Key('sources-add-spotify'),
             label: 'Add Spotify music',
             onPressed: () => _addSpotify(context, ref),
@@ -298,6 +307,7 @@ class MusicSourcesScreen extends ConsumerWidget {
     final hasSpotify = state.sources.any(
       (source) => source.source == 'spotify_export',
     );
+    final hasAppleLibrary = appleLiveSource(state) != null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -309,6 +319,9 @@ class MusicSourcesScreen extends ConsumerWidget {
                 key: Key('source-${source.source}'),
                 source: source,
                 state: state,
+                onSync: source.source == 'apple_live'
+                    ? () => showLibrarySync(context, ref)
+                    : null,
                 onImportAgain: source.source == 'spotify_export'
                     ? () => _import(context, ref)
                     : null,
@@ -317,6 +330,20 @@ class MusicSourcesScreen extends ConsumerWidget {
                         source.source == 'apple_export'
                     ? () => removeSourceFlow(context, ref, source)
                     : null,
+              ),
+            if (!hasAppleLibrary)
+              FlushRow(
+                key: syncKey,
+                leading: const SizedBox.square(
+                  dimension: kSourceMarkSize,
+                  child: Center(
+                    child: Icon(CupertinoIcons.arrow_2_circlepath, size: 22),
+                  ),
+                ),
+                leadingSize: kSourceMarkSize,
+                title: syncLabel,
+                subtitle: 'Bring in your songs and playlists',
+                onTap: () => showLibrarySync(context, ref),
               ),
             if (!hasSpotify)
               FlushRow(
@@ -408,18 +435,28 @@ class SourceRow extends StatelessWidget {
     super.key,
     required this.source,
     required this.state,
+    this.onSync,
     required this.onImportAgain,
     required this.onRemove,
   });
 
   final MusicSource source;
   final OnboardingState state;
+
+  /// "Sync Apple Music", on the live Apple library's row.
+  final VoidCallback? onSync;
   final VoidCallback? onImportAgain;
   final VoidCallback? onRemove;
 
   @override
   Widget build(BuildContext context) {
     final actions = <Widget>[
+      if (onSync != null)
+        TextAction(
+          key: MusicSourcesScreen.syncKey,
+          label: MusicSourcesScreen.syncLabel,
+          onPressed: onSync,
+        ),
       if (onImportAgain != null)
         TextAction(
           key: Key('import-again-${source.source}'),

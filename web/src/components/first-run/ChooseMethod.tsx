@@ -24,7 +24,7 @@ export function ChooseMethod({ service, onChoose, onBack, focusHeading }: Props)
       {service === 'spotify' ? <p className="fr-line">{METHOD_SPOTIFY_LINE}</p> : null}
       <div className="fr-acts">
         {service === 'apple' ? (
-          <Pill onClick={() => onChoose('apple-sync')}>Sync my library</Pill>
+          <Pill onClick={() => onChoose('apple-sync')}>Sync Apple Music</Pill>
         ) : (
           <>
             <Pill onClick={() => onChoose('exportify')}>Exportify, a few minutes</Pill>

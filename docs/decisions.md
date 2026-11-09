@@ -55,6 +55,27 @@ Decision 5 of `superpowers/specs/2026-11-09-one-platform-play-design.md`.
 - "Different artist" is a different artist key, compared whole: "J Cole"
   and "J. Cole" are one artist, "Drake" and "Drakeo the Ruler" are two.
 
+## 2026-11-09 — Library: one "Add your music" button; every sync names Apple Music (founder)
+
+A bare "Sync" beside "Your music" on the Library title read as syncing
+everything, but sync only ever reads the Apple Music library.
+
+- The Library title carries one labelled glass button, "Add your music",
+  which opens Your music. It stands aside while the no-sources empty state
+  shows, since that state's own "Add your music" runs the guided flow and two
+  identical labels must not go to different places.
+- Your music loses its title sync glyph. Sync sits on the Apple Music row
+  as "Sync Apple Music"; without a live Apple library a "Sync Apple Music"
+  row stands beside "Add Spotify music", and the empty state offers it too.
+  Both open the existing sync alert.
+- Every sync control says "Sync Apple Music": the Apple pane of Add your
+  music (was "Sync your library" / "Sync again") and first-run Step 2 for
+  Apple Music on iOS and the web (was "Sync my library"). The alert's own
+  confirm stays "Sync" under its "Sync Apple Music?" title.
+- Supersedes the title cluster in `mockups/approved/2026-11-03-library-
+  sources.md` and the Step 2 pill copy in `mockups/approved/2026-10-20-first-
+  run-flow.md`. The sources strip is unchanged.
+
 ## 2026-11-04 — Sequential iOS build numbers (founder)
 
 - Replace timestamp build numbers with positive integers: 1, 2, 3, and so on.

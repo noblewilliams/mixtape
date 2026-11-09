@@ -12,7 +12,7 @@ describe('Step 2 of 3, How do you want to add it?', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Step 2 of 3, How do you want to add it?' })).toBeInTheDocument()
     expect(screen.getByText('You can add more later from Library.')).toBeInTheDocument()
     expect(screen.queryByText(/Exportify brings/)).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Sync my library' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sync Apple Music' }))
     expect(onChoose).toHaveBeenCalledWith('apple-sync')
   })
 

@@ -59,7 +59,7 @@ class ChooseMethodScreen extends StatelessWidget {
           ? [
               FirstRunPill(
                 key: appleSyncKey,
-                label: 'Sync my library',
+                label: 'Sync Apple Music',
                 onPressed: () => _choose(context, AddMethod.appleSync),
               ),
               FirstRunPill(

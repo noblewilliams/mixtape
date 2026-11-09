@@ -168,7 +168,7 @@ describe('Library add flow', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Apple Music' }))
     expect(localStorage.getItem('mixtape:service-choice:user-1')).toBe('apple')
-    fireEvent.click(await screen.findByRole('button', { name: 'Sync my library' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Sync Apple Music' }))
 
     await waitFor(() => expect(musicKit.connect).toHaveBeenCalledTimes(1))
     expect(await screen.findByRole('heading', { level: 1, name: 'Step 3 of 3, Syncing your library' })).toBeInTheDocument()

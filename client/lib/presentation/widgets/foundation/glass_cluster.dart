@@ -144,8 +144,8 @@ class GlassButton extends StatelessWidget {
 }
 
 /// A glass button that says what it does: a glyph and a word (approval
-/// `docs/mockups/approved/2026-11-03-library-sources.md`: the Library title's
-/// "Sync" and "Your music").
+/// `docs/mockups/approved/2026-11-03-library-sources.md`; the Library title's
+/// "Add your music" since 2026-11-09).
 ///
 /// With the shared capsule gone it wears its own: 34 pt of glass, as tall as
 /// a [GlassButton]'s circle, inside a 44 pt target. The word stops growing at
@@ -164,8 +164,7 @@ class GlassLabelButton extends StatelessWidget {
   /// The word on the button.
   final String label;
 
-  /// What a screen reader says, when it is more than the word ("Sync Apple
-  /// Music" for "Sync").
+  /// What a screen reader says, when it is more than the word.
   final String? semanticLabel;
   final VoidCallback? onPressed;
 

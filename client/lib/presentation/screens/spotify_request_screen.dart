@@ -172,8 +172,9 @@ class SpotifyRequestScreen extends ConsumerStatefulWidget {
   /// "Open Exportify ↗" and "Choose files", which share one row.
   static const Key exportifyRowKey = Key('exportify-row');
 
-  /// The Apple pane's sync: "Sync your library" before a first sync, the
-  /// status row's "Sync again" after.
+  /// The Apple pane's sync, "Sync Apple Music" wherever it stands: the tape
+  /// button before a first sync, the status row's text action after. Every
+  /// sync control names Apple Music (founder, 2026-11-09).
   static const Key appleSyncKey = Key('add-music-apple-sync');
 
   /// Each pane's status row.
@@ -379,7 +380,7 @@ class _SpotifyRequestScreenState extends ConsumerState<SpotifyRequestScreen> {
           action: synced && sync is! SyncRunning
               ? TextAction(
                   key: SpotifyRequestScreen.appleSyncKey,
-                  label: 'Sync again',
+                  label: 'Sync Apple Music',
                   onPressed: startSync,
                 )
               : null,
@@ -392,7 +393,7 @@ class _SpotifyRequestScreenState extends ConsumerState<SpotifyRequestScreen> {
             alignment: Alignment.centerLeft,
             child: TapeButton(
               key: SpotifyRequestScreen.appleSyncKey,
-              label: 'Sync your library',
+              label: 'Sync Apple Music',
               onPressed: startSync,
             ),
           ),
@@ -561,11 +562,26 @@ class _StatusRow extends StatelessWidget {
 
   static const double markSize = 34;
 
+  /// Under this width, or at [stackScale] text and above, the action drops
+  /// under the status line: beside it, "Sync Apple Music" would squeeze the
+  /// title into a column of letters.
+  static const double stackWidth = 340;
+  static const double stackScale = 1.3;
+
   /// The status word, for tests.
   static const Key statusKey = Key('add-music-status-word');
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) => _row(
+      context,
+      stacked:
+          constraints.maxWidth < stackWidth ||
+          MediaQuery.textScalerOf(context).scale(1) >= stackScale,
+    ),
+  );
+
+  Widget _row(BuildContext context, {required bool stacked}) {
     final tokens = context.tokens;
     return DecoratedBox(
       key: SpotifyRequestScreen.statusRowKey,
@@ -597,10 +613,17 @@ class _StatusRow extends StatelessWidget {
                       kind: status.kind,
                     ),
                     if (detail != null) Text(detail!, style: tokens.meta),
+                    if (stacked && action != null)
+                      // The action's own 8 pt inset, pulled back so its word
+                      // lines up with the title.
+                      Transform.translate(
+                        offset: const Offset(-8, 0),
+                        child: action!,
+                      ),
                   ],
                 ),
               ),
-              if (action != null) action!,
+              if (!stacked && action != null) action!,
             ],
           ),
         ),

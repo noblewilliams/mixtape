@@ -5,10 +5,13 @@
 ///
 /// The sources strip and the playlists the listener owns. The strip is one
 /// row of two halves, Apple Music and Spotify, each a mark, the service name
-/// and where it stands; each opens Add your music on its own segment. The
-/// glass cluster at the title says what it does: "Sync" and "Your music"
+/// and where it stands; each opens Add your music on its own segment
 /// (approval `docs/mockups/approved/2026-11-03-library-sources.md`, which
 /// supersedes the More menu and the chip-row sources).
+///
+/// The title carries one labelled button, "Add your music", into Your music,
+/// where each source lives (founder, 2026-11-09). Sync is Apple Music's alone,
+/// so it sits with Apple Music there and on Add your music, never here.
 ///
 /// It lives inside a tab `Navigator`, so it never assumes it is the app root:
 /// pushes go to the nearest [Navigator] and it draws no app bar of its own.
@@ -47,10 +50,8 @@ class LibraryTab extends ConsumerStatefulWidget {
   /// [LargeTitleScaffold] already emits at the end of the slivers.
   static const double defaultBottomInset = 16;
 
-  static const Key syncButtonKey = Key('library-sync');
-
-  /// The title's way into the full Your music screen.
-  static const Key yourMusicKey = Key('library-your-music');
+  /// The title's one button, "Add your music", which opens Your music.
+  static const Key addMusicKey = Key('library-add-music');
 
   /// The no-sources empty state's action.
   static const Key emptySetupKey = Key('library-empty-setup');
@@ -164,31 +165,24 @@ class _LibraryTabState extends ConsumerState<LibraryTab> {
           title: 'Library',
           accessoriesBelowTitle: true,
           controller: _controller,
-          // Keep the full title above the actions, including on narrow phones.
-          trailing: FittedBox(
-            fit: BoxFit.scaleDown,
-            child: GlassCluster(
-              children: [
-                // Sync is Apple Music's; a Spotify listener with no Apple
-                // library would only be asked for access they have no use for.
-                if (!(state?.chosenService == 'spotify' &&
-                    appleLiveSource(state) == null))
-                  GlassLabelButton(
-                    key: LibraryTab.syncButtonKey,
-                    icon: CupertinoIcons.arrow_2_circlepath,
-                    label: 'Sync',
-                    semanticLabel: 'Sync Apple Music',
-                    onPressed: () => showLibrarySync(context, ref),
+          // Keep the full title above the action, including on narrow phones.
+          // With no sources the empty state's own "Add your music" is the way
+          // in, so the title does not offer a second one that goes elsewhere.
+          trailing: noSources
+              ? null
+              : FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: GlassCluster(
+                    children: [
+                      GlassLabelButton(
+                        key: LibraryTab.addMusicKey,
+                        icon: CupertinoIcons.add,
+                        label: 'Add your music',
+                        onPressed: () => _push(const MusicSourcesScreen()),
+                      ),
+                    ],
                   ),
-                GlassLabelButton(
-                  key: LibraryTab.yourMusicKey,
-                  icon: CupertinoIcons.music_albums,
-                  label: 'Your music',
-                  onPressed: () => _push(const MusicSourcesScreen()),
                 ),
-              ],
-            ),
-          ),
           slivers: [
             // Nothing to list: the shared placement puts the block at the
             // same height Mixes puts its own (smoke round three, note 7).
