@@ -380,6 +380,10 @@ export const djSessions = pgTable(
     // set by the generate that made it and cleared by any other generate,
     // so a later turn's "add more" keeps to that artist.
     onlyArtist: text('only_artist'),
+    // When the "Add my listening history" pill was offered: the
+    // once-per-conversation guard (spec 2026-11-09 add-your-music-loop,
+    // decision 5).
+    musicChipAt: timestamp('music_chip_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .notNull()
@@ -544,8 +548,14 @@ export const funnelEvents = pgTable(
         'cap_reached',
         'account_linked_new',
         'account_linked_existing',
+        'music_door_tapped',
+        'music_chip_tapped',
+        'music_added_from_mix',
+        'remake_tapped',
         'catalogue_filled',
         'proposed_mix',
+        'music_chip_offered',
+        'remake_made',
       ],
     }).notNull(),
     surface: text('surface', { enum: ['ios', 'web'] }).notNull(),
@@ -556,7 +566,7 @@ export const funnelEvents = pgTable(
     index('funnel_events_user_idx').on(t.userId, t.createdAt),
     check(
       'funnel_events_type_check',
-      sql`${t.type} IN ('chose_spotify', 'marked_requested', 'interview_completed', 'file_inspected', 'import_completed', 'first_personal_mix', 'first_output', 'first_run_opened', 'chose_make_mix', 'chose_add_music', 'chose_service', 'chose_method', 'sync_done', 'first_mix_made', 'first_mix_refused', 'keep_sheet_shown', 'keep_sheet_signed_in', 'keep_sheet_dismissed', 'cap_reached', 'account_linked_new', 'account_linked_existing', 'catalogue_filled', 'proposed_mix')`,
+      sql`${t.type} IN ('chose_spotify', 'marked_requested', 'interview_completed', 'file_inspected', 'import_completed', 'first_personal_mix', 'first_output', 'first_run_opened', 'chose_make_mix', 'chose_add_music', 'chose_service', 'chose_method', 'sync_done', 'first_mix_made', 'first_mix_refused', 'keep_sheet_shown', 'keep_sheet_signed_in', 'keep_sheet_dismissed', 'cap_reached', 'account_linked_new', 'account_linked_existing', 'music_door_tapped', 'music_chip_tapped', 'music_added_from_mix', 'remake_tapped', 'catalogue_filled', 'proposed_mix', 'music_chip_offered', 'remake_made')`,
     ),
     check('funnel_events_surface_check', sql`${t.surface} IN ('ios', 'web')`),
   ],

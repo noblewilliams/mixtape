@@ -65,12 +65,31 @@ export const FIRST_RUN_FUNNEL_EVENT_TYPES = [
   'account_linked_new',
   'account_linked_existing',
 ] as const
+// Add-your-music loop, client side (spec 2026-11-09 add-your-music-loop →
+// Funnel): the music door, the history pill, music added from a mix, and the
+// remake button.
+export const MUSIC_NUDGE_FUNNEL_EVENT_TYPES = [
+  'music_door_tapped',
+  'music_chip_tapped',
+  'music_added_from_mix',
+  'remake_tapped',
+] as const
 // Written by the server itself, never posted by a client: the DJ loop's
-// catalogue fill (spec 2026-10-21 everyone-gets-a-mix, step 2) and its
-// verified proposals (step 4, NEVER_REFUSE).
-export const SERVER_FUNNEL_EVENT_TYPES = ['catalogue_filled', 'proposed_mix'] as const
+// catalogue fill (spec 2026-10-21 everyone-gets-a-mix, step 2), its verified
+// proposals (step 4, NEVER_REFUSE), the history pill being offered and a
+// remake landing (spec 2026-11-09 add-your-music-loop).
+export const SERVER_FUNNEL_EVENT_TYPES = [
+  'catalogue_filled',
+  'proposed_mix',
+  'music_chip_offered',
+  'remake_made',
+] as const
 // What POST /me/funnel-events accepts.
-export const CLIENT_FUNNEL_EVENT_TYPES = [...SPOTIFY_FUNNEL_EVENT_TYPES, ...FIRST_RUN_FUNNEL_EVENT_TYPES] as const
+export const CLIENT_FUNNEL_EVENT_TYPES = [
+  ...SPOTIFY_FUNNEL_EVENT_TYPES,
+  ...FIRST_RUN_FUNNEL_EVENT_TYPES,
+  ...MUSIC_NUDGE_FUNNEL_EVENT_TYPES,
+] as const
 // Every stored type; the schema check on funnel_events.type lists the same
 // values in the same order.
 export const FUNNEL_EVENT_TYPES = [...CLIENT_FUNNEL_EVENT_TYPES, ...SERVER_FUNNEL_EVENT_TYPES] as const

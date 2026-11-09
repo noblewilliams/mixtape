@@ -1,8 +1,16 @@
 import { describe, it, expect } from 'vitest'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
+import { PgDialect, getTableConfig } from 'drizzle-orm/pg-core'
 import { createApp, type AuthLike } from '../../src/app'
 import { funnelEvents } from '../../src/db/schema'
-import { CLIENT_FUNNEL_EVENT_TYPES, FUNNEL_EVENT_TYPES, funnelEventSchema } from '../../src/seeds/contracts'
+import {
+  CLIENT_FUNNEL_EVENT_TYPES,
+  FIRST_RUN_FUNNEL_EVENT_TYPES,
+  FUNNEL_EVENT_TYPES,
+  SERVER_FUNNEL_EVENT_TYPES,
+  SPOTIFY_FUNNEL_EVENT_TYPES,
+  funnelEventSchema,
+} from '../../src/seeds/contracts'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { seedUser } from '../helpers/listening-fixtures'
 
@@ -25,6 +33,14 @@ const FIRST_RUN_TYPES = [
   'keep_sheet_dismissed', 'cap_reached', 'account_linked_new', 'account_linked_existing',
 ]
 
+// Client-postable steps of the add-your-music loop (spec 2026-11-09).
+const MUSIC_NUDGE_TYPES = ['music_door_tapped', 'music_chip_tapped', 'music_added_from_mix', 'remake_tapped']
+// Server-only types, in the order they were added.
+const SERVER_TYPES = ['catalogue_filled', 'proposed_mix', 'music_chip_offered', 'remake_made']
+
+// The quoted literals of a check's IN list, in the order they appear.
+const literals = (text: string) => [...text.matchAll(/'([^']+)'/g)].map((m) => m[1])
+
 describe('funnelEventSchema', () => {
   it('accepts the first-run funnel types (spec 2026-10-20) and keeps the earlier ones', () => {
     for (const type of FIRST_RUN_TYPES) {
@@ -34,7 +50,37 @@ describe('funnelEventSchema', () => {
       'chose_spotify', 'marked_requested', 'interview_completed', 'file_inspected',
       'import_completed', 'first_personal_mix', 'first_output', ...FIRST_RUN_TYPES,
     ]))
-    expect(FUNNEL_EVENT_TYPES).toHaveLength(7 + FIRST_RUN_TYPES.length + 2)
+    expect(FUNNEL_EVENT_TYPES).toHaveLength(7 + FIRST_RUN_TYPES.length + MUSIC_NUDGE_TYPES.length + SERVER_TYPES.length)
+  })
+
+  it('accepts the music-nudge types (spec 2026-11-09), appended after the first-run group', () => {
+    for (const type of MUSIC_NUDGE_TYPES) {
+      expect(funnelEventSchema.safeParse({ type, surface: 'ios' }).success, type).toBe(true)
+    }
+    expect(CLIENT_FUNNEL_EVENT_TYPES).toEqual([
+      ...SPOTIFY_FUNNEL_EVENT_TYPES, ...FIRST_RUN_FUNNEL_EVENT_TYPES, ...MUSIC_NUDGE_TYPES,
+    ])
+  })
+
+  it('keeps every stored type in one order: client groups, then the server-only types', () => {
+    expect(SERVER_FUNNEL_EVENT_TYPES).toEqual(SERVER_TYPES)
+    expect(FUNNEL_EVENT_TYPES).toEqual([...CLIENT_FUNNEL_EVENT_TYPES, ...SERVER_FUNNEL_EVENT_TYPES])
+    expect(funnelEvents.type.enumValues).toEqual(FUNNEL_EVENT_TYPES)
+  })
+
+  it('the schema check on funnel_events.type lists FUNNEL_EVENT_TYPES in the same order', () => {
+    const check = getTableConfig(funnelEvents).checks.find((c) => c.name === 'funnel_events_type_check')
+    expect(check).toBeDefined()
+    expect(literals(new PgDialect().sqlToQuery(check!.value).sql)).toEqual(FUNNEL_EVENT_TYPES)
+  })
+
+  it('the migrated database check lists FUNNEL_EVENT_TYPES in the same order', async () => {
+    const db = await createTestDb()
+    const { rows } = await db.execute<{ def: string }>(
+      sql`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname = 'funnel_events_type_check'`,
+    )
+    expect(rows).toHaveLength(1)
+    expect(literals(rows[0].def)).toEqual(FUNNEL_EVENT_TYPES)
   })
 
   it('refuses the server-only catalogue_filled type from a client', () => {
@@ -45,6 +91,13 @@ describe('funnelEventSchema', () => {
   it('refuses the server-only proposed_mix type from a client', () => {
     expect(FUNNEL_EVENT_TYPES).toContain('proposed_mix')
     expect(funnelEventSchema.safeParse({ type: 'proposed_mix', surface: 'ios' }).success).toBe(false)
+  })
+
+  it('refuses the server-only music_chip_offered and remake_made types from a client', () => {
+    for (const type of ['music_chip_offered', 'remake_made']) {
+      expect(FUNNEL_EVENT_TYPES, type).toContain(type)
+      expect(funnelEventSchema.safeParse({ type, surface: 'web' }).success, type).toBe(false)
+    }
   })
 })
 
@@ -74,6 +127,25 @@ describe('POST /me/funnel-events', () => {
       expect((await post(db, authFor('u1'), { type, surface: 'ios' })).status, type).toBe(201)
     }
     expect(await db.select().from(funnelEvents).where(eq(funnelEvents.userId, 'u1'))).toHaveLength(CLIENT_FUNNEL_EVENT_TYPES.length)
+  })
+
+  it('accepts each music-nudge type from a client and stores it', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    for (const type of MUSIC_NUDGE_TYPES) {
+      expect((await post(db, authFor('u1'), { type, surface: 'web' })).status, type).toBe(201)
+    }
+    const rows = await db.select().from(funnelEvents).where(eq(funnelEvents.userId, 'u1'))
+    expect(rows.map((r) => r.type).sort()).toEqual([...MUSIC_NUDGE_TYPES].sort())
+  })
+
+  it('400s on the server-only music_chip_offered and remake_made types and stores nothing', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    for (const type of ['music_chip_offered', 'remake_made']) {
+      expect((await post(db, authFor('u1'), { type, surface: 'ios' })).status, type).toBe(400)
+    }
+    expect(await db.select().from(funnelEvents)).toHaveLength(0)
   })
 
   it('400s on an unknown type, an unknown surface, a missing field, or an unknown key', async () => {
