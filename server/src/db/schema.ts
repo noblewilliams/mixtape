@@ -376,6 +376,10 @@ export const djSessions = pgTable(
     notPersonal: boolean('not_personal').notNull().default(false),
     // An album session recommends one album instead of building a queue.
     kind: text('kind', { enum: ['mix', 'album'] }).notNull().default('mix'),
+    // The artist an artist-only mix was asked for (dj/loop.ts OnlyArtist),
+    // set by the generate that made it and cleared by any other generate,
+    // so a later turn's "add more" keeps to that artist.
+    onlyArtist: text('only_artist'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .notNull()

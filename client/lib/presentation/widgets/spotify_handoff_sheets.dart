@@ -1,10 +1,12 @@
-/// The two sheets behind Play for a Spotify listener (decisions 2026-11-06):
+/// The two platform sheets (decisions 2026-11-06; one platform,
+/// `docs/mockups/approved/2026-11-09-one-platform-play.md`):
 ///
-/// * [WhereYouListenSheet] — the first Play from a listener with no known
-///   service asks Spotify or Apple Music, once; the answer becomes the
-///   remembered Play destination.
-/// * [SpotifyHandoffSheet] — the first Play on Spotify says what is about to
-///   happen (copy the songs, open TuneMyMusic, paste) before it happens.
+/// * [WhereYouListenSheet] — asked once over the shell when nothing tells us
+///   the device's platform (`listen_on_prompt.dart`): Apple Music or
+///   Spotify, and nothing but an answer closes it.
+/// * [SpotifyHandoffSheet] — the first Spotify Create playlist on a device
+///   says what is about to happen (copy the songs, open TuneMyMusic, paste)
+///   before it happens.
 ///
 /// Both are the app's standard [showMixtapeSheet], laid out like the
 /// first-mix sheet (`keep_sheet.dart`): a headline, one line, paper pills.
@@ -12,48 +14,70 @@ library;
 
 import 'package:flutter/material.dart';
 
-import '../../data/settings/play_destination_store.dart';
-import '../screens/first_run/step_scaffold.dart' show FirstRunPill;
+import '../../data/settings/music_platform_store.dart';
+import '../screens/first_run/step_scaffold.dart'
+    show FirstRunColors, FirstRunPill;
 import '../theme/mixtape_theme.dart';
 import 'foundation/mixtape_sheet.dart';
+import 'foundation/service_marks.dart';
 
 abstract final class WhereYouListenSheet {
   static const String headline = 'Where do you listen?';
   static const String line =
-      'We’ll play your mixes there. You can change it any time in You.';
+      'Your mixes play or save there. You can change it any time in You.';
   static const String spotifyLabel = 'Spotify';
   static const String appleLabel = 'Apple Music';
 
   static const Key spotifyKey = Key('where-you-listen-spotify');
   static const Key appleKey = Key('where-you-listen-apple');
+
+  /// `.tape.sp .mk, .fpill .mk`: the marks beside the pill labels.
+  static const double markSize = 18;
 }
 
-/// Asks where the listener listens. Spotify, [PlayDestination.here] for
-/// Apple Music (the app's own player, which needs an Apple Music
-/// subscription), or null when the sheet was closed without an answer.
-Future<PlayDestination?> askWhereYouListen(BuildContext context) =>
-    showMixtapeSheet<PlayDestination>(
+/// Asks where the listener listens: Apple Music (listed first, the one
+/// platform the app can play) or Spotify, two equal pills with their marks.
+/// The answer decides every mix's actions, so there is no grab handle and
+/// neither the scrim, a drag nor back closes it. It goes on the root
+/// navigator, over the shell's tabs, dock and side rail, so no tab switch or
+/// rail tap can hide or pop it. Null only if something pops it from outside.
+Future<MusicPlatform?> askWhereYouListen(BuildContext context) =>
+    showMixtapeSheet<MusicPlatform>(
       context,
+      useRootNavigator: true,
       isScrollControlled: true,
-      builder: (sheetContext) => _SheetBody(
-        headline: WhereYouListenSheet.headline,
-        line: WhereYouListenSheet.line,
-        children: [
-          FirstRunPill(
-            key: WhereYouListenSheet.spotifyKey,
-            label: WhereYouListenSheet.spotifyLabel,
-            emphasis: true,
-            onPressed: () =>
-                Navigator.of(sheetContext).pop(PlayDestination.spotify),
-          ),
-          const SizedBox(height: 10),
-          FirstRunPill(
-            key: WhereYouListenSheet.appleKey,
-            label: WhereYouListenSheet.appleLabel,
-            onPressed: () =>
-                Navigator.of(sheetContext).pop(PlayDestination.here),
-          ),
-        ],
+      isDismissible: false,
+      enableDrag: false,
+      showHandle: false,
+      builder: (sheetContext) => PopScope(
+        canPop: false,
+        child: _SheetBody(
+          headline: WhereYouListenSheet.headline,
+          line: WhereYouListenSheet.line,
+          children: [
+            FirstRunPill(
+              key: WhereYouListenSheet.appleKey,
+              label: WhereYouListenSheet.appleLabel,
+              leading: const AppleMusicMark(
+                size: WhereYouListenSheet.markSize,
+                color: FirstRunColors.ink,
+              ),
+              onPressed: () =>
+                  Navigator.of(sheetContext).pop(MusicPlatform.apple),
+            ),
+            const SizedBox(height: 10),
+            FirstRunPill(
+              key: WhereYouListenSheet.spotifyKey,
+              label: WhereYouListenSheet.spotifyLabel,
+              leading: const SpotifyMark(
+                size: WhereYouListenSheet.markSize,
+                color: FirstRunColors.ink,
+              ),
+              onPressed: () =>
+                  Navigator.of(sheetContext).pop(MusicPlatform.spotify),
+            ),
+          ],
+        ),
       ),
     );
 
@@ -73,7 +97,7 @@ abstract final class SpotifyHandoffSheet {
             'in, connect Spotify, and it makes the playlist for you.';
 }
 
-/// The explainer before the first Spotify handoff. True to go ahead; false
+/// The explainer before the first Spotify playlist handoff on a device. True to go ahead; false
 /// for Cancel, the scrim or the handle.
 Future<bool> confirmSpotifyHandoff(BuildContext context, int count) async {
   final go = await showMixtapeSheet<bool>(

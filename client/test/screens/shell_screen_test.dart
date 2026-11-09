@@ -25,6 +25,7 @@ import 'package:mixtape/data/shell/mini_player_state.dart';
 import 'package:mixtape/data/shell/shell_channel.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/dj_providers.dart';
+import 'package:mixtape/presentation/providers/music_platform_provider.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
 import 'package:mixtape/presentation/providers/playback_provider.dart';
 import 'package:mixtape/presentation/providers/shell_providers.dart';
@@ -36,6 +37,7 @@ import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/frosted_dock.dart';
 import 'package:mixtape/presentation/widgets/foundation/frosted_surface.dart';
 import 'package:mixtape/presentation/widgets/foundation/side_rail.dart';
+import 'package:mixtape/presentation/widgets/spotify_handoff_sheets.dart';
 
 import '../helpers/fake_listening_api.dart';
 import '../data/playback/playback_controller_test.dart' show FakeApi, song;
@@ -202,12 +204,21 @@ ProviderContainer shellContainer({
   PlaybackController? player,
   bool fakeMiniPlayer = false,
   bool isPad = false,
+  String? chosenService = 'apple',
+  MusicPlatformStore? platformStore,
 }) {
   final container = ProviderContainer(
     overrides: [
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
       djApiProvider.overrideWithValue(ShellDjApi()),
-      listeningApiProvider.overrideWithValue(FakeListeningApi()),
+      listeningApiProvider.overrideWithValue(
+        FakeListeningApi(
+          onboarding: onboardingState(chosenService: chosenService),
+        ),
+      ),
+      musicPlatformStoreProvider.overrideWithValue(
+        platformStore ?? InMemoryMusicPlatformStore(),
+      ),
       authProvider.overrideWith(() => auth ?? TestAuth(AuthStatus.session)),
       nativeDockAvailableProvider.overrideWith((ref) => nativeDock),
       isPadProvider.overrideWith((ref) => isPad),
@@ -354,6 +365,70 @@ void main() {
       }
     });
   }
+
+  group('where you listen', () {
+    testWidgets('a platform nothing tells us is asked once, over Home', (
+      tester,
+    ) async {
+      final store = InMemoryMusicPlatformStore();
+      final container = shellContainer(
+        chosenService: 'skipped',
+        platformStore: store,
+      );
+      await pumpShell(tester, container);
+      expect(find.text(WhereYouListenSheet.headline), findsOneWidget);
+      expect(find.byType(HomeScreen), findsOneWidget);
+
+      await tester.tap(find.byKey(WhereYouListenSheet.appleKey));
+      await tester.pumpAndSettle();
+      expect(find.text(WhereYouListenSheet.headline), findsNothing);
+      expect(await store.read(), MusicPlatform.apple);
+    });
+
+    testWidgets('the side rail cannot dismiss it, and no dock floats over it', (
+      tester,
+    ) async {
+      await pumpShell(
+        tester,
+        shellContainer(chosenService: 'skipped'),
+        window: const Size(1024, 768),
+      );
+      expect(find.text(WhereYouListenSheet.headline), findsOneWidget);
+      expect(find.byType(SideRail), findsOneWidget);
+
+      // The rail sits under the sheet's barrier: a tap there reaches nothing.
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(SideRail.tabsKey),
+          matching: find.text('Home'),
+        ),
+        warnIfMissed: false,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text(WhereYouListenSheet.headline), findsOneWidget);
+      expect(stackIndex(tester), AppTab.home.index);
+    });
+
+    testWidgets('the bottom dock steps aside while it is up', (tester) async {
+      await pumpShell(tester, shellContainer(chosenService: 'skipped'));
+      expect(find.text(WhereYouListenSheet.headline), findsOneWidget);
+      expect(find.byType(FrostedDock), findsNothing);
+
+      await tester.tap(find.byKey(WhereYouListenSheet.spotifyKey));
+      await tester.pumpAndSettle();
+      expect(find.byType(FrostedDock), findsOneWidget);
+    });
+
+    testWidgets('a service chosen at first run is never asked', (tester) async {
+      final store = InMemoryMusicPlatformStore();
+      await pumpShell(
+        tester,
+        shellContainer(chosenService: 'spotify', platformStore: store),
+      );
+      expect(find.text(WhereYouListenSheet.headline), findsNothing);
+      expect(await store.read(), MusicPlatform.spotify);
+    });
+  });
 
   group('tabs', () {
     iosWidgets('each tab shows its own root', (tester) async {

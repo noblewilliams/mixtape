@@ -21,7 +21,8 @@ final servicePreferenceStoreProvider =
 /// (keychain), cleared alongside the service flag on sign-out.
 final funnelOnceStoreProvider = Provider<FunnelOnceStore>((ref) => SecureFunnelOnceStore());
 
-/// The clipboard behind "Play on Spotify" (the song list TuneMyMusic takes).
+/// The clipboard behind the Spotify Create playlist (the song list
+/// TuneMyMusic takes).
 final clipboardWriterProvider =
     Provider<ClipboardWriter>((ref) => const SystemClipboardWriter());
 

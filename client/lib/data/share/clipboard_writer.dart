@@ -1,5 +1,6 @@
-// The clipboard behind "Play on Spotify": the mix's song list is copied, then
-// TuneMyMusic's paste-a-list page opens to build the Spotify playlist.
+// The clipboard behind the Spotify Create playlist: the mix's song list is
+// copied, then TuneMyMusic's paste-a-list page opens to build the Spotify
+// playlist.
 // Wrapped so screen tests read what was copied instead of the platform
 // clipboard.
 import 'package:flutter/services.dart';

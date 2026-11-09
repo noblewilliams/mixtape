@@ -85,15 +85,21 @@ abstract final class MixtapeSheet {
 ///
 /// [isScrollControlled] is passed straight through for sheets that grow past
 /// Material's half-screen default; [isDismissible] and [enableDrag] for the
-/// import sheet, which locks itself while an upload is in flight.
+/// import sheet, which locks itself while an upload is in flight; with
+/// [showHandle] false for a sheet only an answer closes ("Where do you
+/// listen?"), and [useRootNavigator] for one that must cover the shell's
+/// own chrome (the side rail).
 Future<T?> showMixtapeSheet<T>(
   BuildContext context, {
   required WidgetBuilder builder,
   bool isScrollControlled = false,
   bool isDismissible = true,
   bool enableDrag = true,
+  bool showHandle = true,
+  bool useRootNavigator = false,
 }) => showModalBottomSheet<T>(
   context: context,
+  useRootNavigator: useRootNavigator,
   isScrollControlled: isScrollControlled,
   isDismissible: isDismissible,
   enableDrag: enableDrag,
@@ -105,14 +111,29 @@ Future<T?> showMixtapeSheet<T>(
   elevation: 0,
   shape: const RoundedRectangleBorder(borderRadius: MixtapeSheet.radius),
   clipBehavior: Clip.antiAlias,
-  builder: (sheetContext) => MixtapeSheetChrome(child: builder(sheetContext)),
+  builder: (sheetContext) =>
+      MixtapeSheetChrome(showHandle: showHandle, child: builder(sheetContext)),
 );
 
 /// The grab handle and the bottom inset every sheet shares.
 class MixtapeSheetChrome extends StatelessWidget {
-  const MixtapeSheetChrome({super.key, required this.child});
+  const MixtapeSheetChrome({
+    super.key,
+    required this.child,
+    this.showHandle = true,
+  });
 
   final Widget child;
+
+  /// False for a sheet nothing but an answer closes: a handle would promise
+  /// a drag that does nothing. The room it took stays, so the content sits
+  /// where it would.
+  final bool showHandle;
+
+  static const double _handleSpace =
+      MixtapeSheet.handleTopGap +
+      MixtapeSheet.handleHeight +
+      MixtapeSheet.handleBottomGap;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -122,23 +143,26 @@ class MixtapeSheetChrome extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.only(
-            top: MixtapeSheet.handleTopGap,
-            bottom: MixtapeSheet.handleBottomGap,
-          ),
-          child: Center(
-            child: Container(
-              key: MixtapeSheet.handleKey,
-              width: MixtapeSheet.handleWidth,
-              height: MixtapeSheet.handleHeight,
-              decoration: const BoxDecoration(
-                color: MixtapeSheet.handleColor,
-                borderRadius: BorderRadius.all(Radius.circular(3)),
+        if (!showHandle)
+          const SizedBox(height: _handleSpace)
+        else
+          Padding(
+            padding: const EdgeInsets.only(
+              top: MixtapeSheet.handleTopGap,
+              bottom: MixtapeSheet.handleBottomGap,
+            ),
+            child: Center(
+              child: Container(
+                key: MixtapeSheet.handleKey,
+                width: MixtapeSheet.handleWidth,
+                height: MixtapeSheet.handleHeight,
+                decoration: const BoxDecoration(
+                  color: MixtapeSheet.handleColor,
+                  borderRadius: BorderRadius.all(Radius.circular(3)),
+                ),
               ),
             ),
           ),
-        ),
         Flexible(child: child),
       ],
     ),

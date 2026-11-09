@@ -8,14 +8,13 @@
 /// other queue mutation in this app: reorder/remove/insert post an op and
 /// re-render from the response rather than editing local state optimistically.
 ///
-/// Spotify listeners (plan `2026-09-02-listening-export-p2-spotify-import.md`,
+/// Spotify (plan `2026-09-02-listening-export-p2-spotify-import.md`,
 /// Outputs): a row with a Spotify id trades its grip for "Open in Spotify";
-/// any queue with a Spotify id gains "Play on Spotify" (and one Apple Music
-/// can do nothing with drops Play/Create entirely, with the reason written
-/// beside the action that remains); a corpus-mode session carries the "Not
-/// personal yet" block above the list. A Spotify-only listener
-/// ([mixSpotifyOnly], decisions 2026-11-03) gets Play on Spotify first and an
-/// Open on every row (a search when there is no id), with no Create playlist.
+/// a corpus-mode session carries the "Not personal yet" block above the
+/// list. A Spotify device ([MusicPlatform.spotify],
+/// `docs/mockups/approved/2026-11-09-one-platform-play.md`) gets the one
+/// Spotify Create playlist on the bar and an Open on every row (a search
+/// when there is no id).
 ///
 /// Every mutation goes through one FIFO of [_QueueIntent]s rather than
 /// firing straight at the provider — see [_QueueScreenState._enqueue] for
@@ -40,6 +39,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/dj/dj_models.dart';
 import '../providers/dj_providers.dart';
 import '../providers/library_sync_provider.dart';
+import '../providers/music_platform_provider.dart';
 import '../providers/onboarding_provider.dart';
 import '../theme/mixtape_theme.dart';
 import '../widgets/foundation/empty_state.dart';
@@ -47,8 +47,6 @@ import '../widgets/foundation/cassette_tile.dart';
 import '../widgets/foundation/glass_cluster.dart';
 import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/remove_band.dart';
-import '../widgets/foundation/label_chip.dart';
-import '../providers/play_destination_provider.dart';
 import '../widgets/mix_handoff.dart';
 import '../widgets/mix_tape_colour.dart';
 import '../widgets/tape_header.dart';
@@ -666,53 +664,33 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
     );
   }
 
-  /// `.sticky`: split Play and Create playlist, which stay put while the
-  /// songs scroll. A mix Apple Music can do nothing with keeps the transfer
-  /// handoff alone, and any reason Play cannot work sits above the bar.
+  /// `.sticky`: the mix actions, which stay put while the songs scroll —
+  /// the same ones the conversation's strip carries. Any reason Play cannot
+  /// work sits above the bar.
   Widget _stickyBar(ChatState state, List<QueueTrack> visibleQueue) {
     const keys = MixHandoffKeys.arrangement;
-    final live =
-        visibleQueue.isNotEmpty && mixActionsDisabledReason(visibleQueue) == null;
-    final onboarding = ref.watch(onboardingProvider).value;
-    final spotifyOnly = mixListensOnSpotify(
-      onboarding,
-      ref.watch(playDestinationProvider),
-    );
     return TapeBar(
-      reason: MixPlayReason(
+      reason: MixPlayReason(keys: keys, queue: visibleQueue),
+      primary: MixActions(
         keys: keys,
         queue: visibleQueue,
-        spotifyOnly: spotifyOnly,
-      ),
-      primary: MixSplitPlay(
-        keys: keys,
-        queue: visibleQueue,
-        enabled: true,
-        expand: true,
+        spacing: 10,
         isPlayingThisMix: isPlayingThisMix,
-        onPlay: (destination) => playAt(destination, state, visibleQueue),
+        onPlay: () => unawaited(playHere(state, visibleQueue)),
         onOpenNowPlaying: openNowPlaying,
-        onShare: (_) => playOnSpotify(visibleQueue),
-        sendingToMusic: sendingToMusic,
+        onCreatePlaylist: () => unawaited(
+          createPlaylist(
+            queue: visibleQueue,
+            defaultName: state.session.title,
+            keys: keys,
+          ),
+        ),
+        onCreateSpotifyPlaylist: () =>
+            unawaited(createSpotifyPlaylist(visibleQueue)),
+        creatingPlaylist: savingPlaylist,
         sharing: sharingMix,
-        spotifyOnly: spotifyOnly,
-        askService: mixNeedsServiceChoice(onboarding),
+        sendingToMusic: sendingToMusic,
       ),
-      // Create playlist makes an Apple Music playlist: nothing for a
-      // Spotify-only listener.
-      secondary: mixHasAppleActions(visibleQueue) && !spotifyOnly
-          ? LabelChip(
-              key: keys.createPlaylist,
-              label: 'Create playlist',
-              onPressed: live && !savingPlaylist
-                  ? () => createPlaylist(
-                      queue: visibleQueue,
-                      defaultName: state.session.title,
-                      keys: keys,
-                    )
-                  : null,
-            )
-          : null,
     );
   }
 
@@ -724,14 +702,11 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
     required bool reducedMotion,
   }) {
     final track = visibleQueue[index];
-    // Every row opens in Spotify for a Spotify-only listener: the exact track
-    // when we hold its id, a search for it otherwise.
+    // Every row opens in Spotify on a Spotify device: the exact track when
+    // we hold its id, a search for it otherwise.
     final opensInSpotify =
         track.spotifyId != null ||
-        mixListensOnSpotify(
-          ref.watch(onboardingProvider).value,
-          ref.watch(playDestinationProvider),
-        );
+        ref.watch(musicPlatformProvider) == MusicPlatform.spotify;
     final row = TrackRow(
       number: index + 1,
       track: track,

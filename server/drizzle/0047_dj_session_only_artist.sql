@@ -1,0 +1,1 @@
+ALTER TABLE "dj_sessions" ADD COLUMN "only_artist" text;

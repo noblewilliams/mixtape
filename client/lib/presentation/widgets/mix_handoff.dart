@@ -1,12 +1,13 @@
 /// The mix handoff: everything that takes a finished arrangement OUT of this
-/// app — Play here (the app's own Apple player), Play in Apple Music (Apple's
-/// player), Create playlist (an Apple Music playlist with a remembered
-/// author), and Play on Spotify (the song list copied, then TuneMyMusic's
-/// paste-a-list page builds the Spotify playlist; decisions 2026-11-06).
+/// app — Play (the app's own Apple player, falling back to the Music app),
+/// Create playlist (an Apple Music playlist with a remembered author), and,
+/// for a Spotify device, Create playlist on Spotify (the song list copied,
+/// then TuneMyMusic's paste-a-list page builds the Spotify playlist;
+/// decisions 2026-11-06).
 ///
 /// Locked by `docs/mockups/approved/2026-09-17-mobile-arrangement-states.md`
-/// (Create playlist, the Spotify listener) and, for split Play, by
-/// `docs/mockups/approved/2026-11-03-mix-conversation-redesign.md`. Drawn on
+/// (Create playlist) and, for the fixed per-platform actions, by
+/// `docs/mockups/approved/2026-11-09-one-platform-play.md`. Drawn on
 /// two screens: the conversation
 /// (`screens/chat_screen.dart`) and the arrangement
 /// (`screens/queue_screen.dart`). Both carried byte-near copies of this until
@@ -16,11 +17,10 @@
 /// Three pieces:
 ///
 /// * pure copy builders and gating rules ([mixPlaySuccessMessage] and
-///   friends, [mixActionsDisabledReason], [mixHasAppleActions],
-///   [mixHasSpotifyActions]) — no widgets, no providers;
-/// * [MixHandoff], a mixin on `ConsumerState` holding the four actions
+///   friends, [mixActionsDisabledReason]) — no widgets, no providers;
+/// * [MixHandoff], a mixin on `ConsumerState` holding the actions
 ///   themselves, their in-flight guards and their toasts;
-/// * [MixSplitPlay], [MixPlayReason] and [MixSaveDialog], the surfaces they
+/// * [MixActions], [MixPlayReason] and [MixSaveDialog], the surfaces they
 ///   drive.
 ///
 /// Each host screen keeps its own keys and its own toast geometry
@@ -37,35 +37,34 @@ import 'package:flutter/cupertino.dart'
         CupertinoAlertDialog,
         CupertinoTheme,
         CupertinoDialogAction,
-        CupertinoIcons,
         CupertinoTextField,
         showCupertinoDialog;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/dj/dj_api.dart' show DjApi;
 import '../../data/dj/dj_models.dart';
-import '../../data/listening/listening_models.dart'
-    show FunnelEventType, OnboardingState;
+import '../../data/listening/listening_models.dart' show FunnelEventType;
 import '../../data/musickit/musickit_bridge.dart';
+import '../../data/playback/playback_controller.dart' show PlaybackStart;
 import '../providers/device_providers.dart';
 import '../providers/dj_providers.dart';
 import '../providers/funnel_provider.dart';
 import '../providers/library_sync_provider.dart';
+import '../providers/music_platform_provider.dart';
 import '../providers/onboarding_provider.dart';
-import '../providers/play_destination_provider.dart';
 import '../providers/playback_provider.dart';
 import '../screens/playback_screen.dart';
 import '../theme/mixtape_theme.dart';
+import 'foundation/label_chip.dart';
 import 'foundation/mixtape_feedback.dart';
-import 'foundation/mixtape_menu.dart';
-import 'foundation/prism_stripe.dart';
+import 'foundation/service_marks.dart';
 import 'foundation/tape_button.dart';
-import 'library_sync_dialog.dart' show appleLiveSource;
 import 'spotify_handoff_sheets.dart';
 
-export '../providers/play_destination_provider.dart' show PlayDestination;
+export '../providers/music_platform_provider.dart' show MusicPlatform;
 
-/// The page Play on Spotify opens, matching the web rail's TRANSFER_TOOL_URL
+/// The page Create playlist on Spotify opens, matching the web rail's TRANSFER_TOOL_URL
 /// (`web/src/components/QueuePanel.tsx`): TuneMyMusic's free-text-to-Spotify
 /// transfer, which takes a pasted song list and builds a Spotify playlist.
 /// Spotify's own API is closed to apps our size (five test users), so this is
@@ -75,18 +74,15 @@ final mixTransferToolUrl = Uri.https(
   '/transfer/freetext-to-spotify',
 );
 
-/// What Play on Spotify copies: one "Artist - Title" line per song, every
+/// What Create playlist on Spotify copies: one "Artist - Title" line per song, every
 /// song — TuneMyMusic searches Spotify by name, so a song with no Spotify id
 /// still belongs in the list.
 String mixTransferText(List<QueueTrack> queue) =>
     [for (final t in queue) '${t.artist} - ${t.title}'].join('\n');
 
-/// Written beside Play now / Create playlist when nothing in the mix has an
+/// Written beside Play / Create playlist when nothing in the mix has an
 /// Apple Music match.
 const mixNoAppleMatchReason = "these tracks aren't in Apple Music";
-
-/// The whole-row line a Spotify-only mix carries instead of Play/Create.
-const mixAppleNeededReason = 'Play and Create playlist need Apple Music';
 
 String mixPlaySuccessMessage(int skipped) => skipped > 0
     ? 'Playing in Apple Music · $skipped song${skipped == 1 ? '' : 's'} '
@@ -94,6 +90,16 @@ String mixPlaySuccessMessage(int skipped) => skipped > 0
     : 'Playing in Apple Music';
 
 String mixPlayFailureMessage(String reason) => "Couldn't play — $reason";
+
+/// Play here's failure toast when neither the app's player nor the Music
+/// app could play, and Apple said the account has no subscription.
+const mixPlaySubscriptionMessage = 'Playing needs an Apple Music subscription.';
+
+/// Play here when neither player could start it for any other reason. Plain
+/// on purpose: the Music app's reason is Apple's raw error text
+/// ("MPMusicPlayerControllerErrorDomain error 6"), which tells a listener
+/// nothing.
+const mixPlayFallbackFailedMessage = "Apple Music couldn't play this mix.";
 
 String mixSaveSuccessMessage(int added, int failed) => failed > 0
     ? 'Saved $added songs to Apple Music ($failed failed)'
@@ -123,56 +129,7 @@ String? mixActionsDisabledReason(List<QueueTrack> queue) =>
     ? mixNoAppleMatchReason
     : null;
 
-/// Each platform's controls appear when the mix has anything that platform
-/// can act on (plan `2026-09-02-listening-export-p2-spotify-import.md`,
-/// Outputs), so a mixed mix shows both — Apple first, since Play is still the
-/// primary action for a mix Apple Music can play.
-bool mixHasSpotifyActions(List<QueueTrack> queue) =>
-    queue.any((t) => t.spotifyId != null);
-
-/// A mix with no Spotify ids at all keeps the Apple pair (carrying
-/// [mixActionsDisabledReason] when it has no matches either) rather than an
-/// empty bar; only a mix Apple Music can do nothing with AND Spotify can
-/// drops them for the transfer handoff alone.
-bool mixHasAppleActions(List<QueueTrack> queue) =>
-    queue.any((t) => t.appleId != null) || !mixHasSpotifyActions(queue);
-
-/// A Spotify-only listener (docs/decisions.md 2026-11-03): chose Spotify and
-/// has no live Apple library. Play on Spotify leads every mix for them, even a
-/// catalogue mix that carries Apple ids only, and Apple waits behind the arrow.
-bool mixSpotifyOnly(OnboardingState? onboarding) =>
-    onboarding?.chosenService == 'spotify' &&
-    appleLiveSource(onboarding) == null;
-
-/// Whether this listener's mixes go to Spotify: they chose Spotify as the
-/// Play destination, or they are Spotify-only and have not chosen otherwise.
-/// Drives what the rest of the mix hides or offers (Create playlist, rows
-/// opening in Spotify) so it agrees with what Play does.
-bool mixListensOnSpotify(
-  OnboardingState? onboarding,
-  PlayDestination? chosen,
-) =>
-    mixPlayDestination(chosen, spotifyOnly: mixSpotifyOnly(onboarding)) ==
-    PlayDestination.spotify;
-
-/// Whether the first Play should ask where the listener listens: nothing
-/// says yet — no service chosen (or the gate skipped) and no Apple library
-/// syncing live. The host passes this as [MixSplitPlay.askService]; a
-/// remembered Play destination answers it for good.
-bool mixNeedsServiceChoice(OnboardingState? onboarding) {
-  if (appleLiveSource(onboarding) != null) return false;
-  final service = onboarding?.chosenService;
-  return service != 'spotify' && service != 'apple';
-}
-
-/// Where Play goes: the listener's own choice, else Spotify for a
-/// Spotify-only listener, else the app's own player.
-PlayDestination mixPlayDestination(
-  PlayDestination? chosen, {
-  required bool spotifyOnly,
-}) => chosen ?? (spotifyOnly ? PlayDestination.spotify : PlayDestination.here);
-
-/// Where a row with no Spotify id sends a Spotify-only listener: a search by
+/// Where a row with no Spotify id sends a Spotify listener: a search by
 /// artist and title. One path segment, so a slash in a name is encoded.
 Uri mixSpotifySearch(QueueTrack track) => Uri(
   scheme: 'https',
@@ -188,52 +145,38 @@ Uri mixSpotifySearch(QueueTrack track) => Uri(
 class MixHandoffKeys {
   const MixHandoffKeys({
     required this.playNow,
-    required this.playMenu,
-    required this.playHere,
     required this.createPlaylist,
-    required this.sendToMusic,
-    required this.share,
+    required this.spotifyPlaylist,
     required this.reason,
-    required this.appleNeeded,
     required this.nameField,
     required this.authorField,
     required this.saveConfirm,
     required this.saveDialogTitle,
   });
 
-  /// Split Play's main part.
+  /// Apple Music's Play (Playing while the app's player is on this mix).
   final Key playNow;
 
-  /// Split Play's arrow, "Choose where to play".
-  final Key playMenu;
-
-  /// The arrow popover's "Play here".
-  final Key playHere;
+  /// Apple Music's Create playlist.
   final Key createPlaylist;
 
-  /// The arrow popover's "Play in Apple Music".
-  final Key sendToMusic;
-  final Key share;
+  /// Spotify's one action, Create playlist through TuneMyMusic.
+  final Key spotifyPlaylist;
   final Key reason;
-  final Key appleNeeded;
   final Key nameField;
   final Key authorField;
   final Key saveConfirm;
   final String saveDialogTitle;
 
-  /// The Playing meter on the main part, for tests.
-  static const Key meterKey = Key('split-play-meter');
+  /// The Playing meter on Play, for tests.
+  static const Key meterKey = TapeButton.meterKey;
 
   /// `screens/queue_screen.dart`.
   static const arrangement = MixHandoffKeys(
     playNow: Key('play-here-button'),
-    playMenu: Key('play-menu-button'),
-    playHere: Key('play-here-option'),
     createPlaylist: Key('save-button'),
-    sendToMusic: Key('play-button'),
-    share: Key('share-button'),
+    spotifyPlaylist: Key('share-button'),
     reason: Key('actions-reason'),
-    appleNeeded: Key('apple-needed-reason'),
     nameField: Key('playlist-name-field'),
     authorField: Key('playlist-author-field'),
     saveConfirm: Key('save-confirm-button'),
@@ -243,13 +186,9 @@ class MixHandoffKeys {
   /// `screens/chat_screen.dart`.
   static const conversation = MixHandoffKeys(
     playNow: Key('chat-play-now'),
-    playMenu: Key('chat-play-menu'),
-    playHere: Key('chat-play-here-option'),
     createPlaylist: Key('chat-create-playlist'),
-    sendToMusic: Key('chat-send-to-music'),
-    share: Key('chat-share'),
+    spotifyPlaylist: Key('chat-share'),
     reason: Key('chat-actions-reason'),
-    appleNeeded: Key('chat-apple-needed-reason'),
     nameField: Key('chat-playlist-name'),
     authorField: Key('chat-playlist-author'),
     saveConfirm: Key('chat-playlist-save'),
@@ -257,7 +196,7 @@ class MixHandoffKeys {
   );
 }
 
-/// The four handoff actions, mixed into the screen that draws them so they
+/// The handoff actions, mixed into the screen that draws them so they
 /// keep that screen's `ref`, `context` and in-flight guards.
 ///
 /// A host supplies [mixSessionId] (the mix these actions belong to) and
@@ -281,8 +220,8 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
   /// True from opening the save alert until it closes.
   bool get savingPlaylist => _savingPlaylist;
 
-  /// True while Play on Spotify is in hand (its explainer, the copy and the
-  /// tool's page).
+  /// True while the Spotify playlist handoff is in hand (its explainer, the
+  /// copy and the tool's page).
   bool get sharingMix => _sharingMix;
 
   /// Fire-and-forget `POST /sessions/:id/events` — see
@@ -324,30 +263,55 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
 
   /// Play now: the app-owned Apple player takes the arrangement and the Now
   /// Playing screen opens over it. Nothing on the list changes.
-  void playHere(ChatState state, List<QueueTrack> queue) {
+  ///
+  /// The player starts FIRST and Now Playing opens only once it plays. The
+  /// alternative (open at once, pop on failure) slides a screen showing the
+  /// failure out from under the toast, and leaves it behind the system access
+  /// prompt. Starting first stays responsive: the controller marks the mix
+  /// `waiting` before the native call, so Play reads Playing from the tap.
+  ///
+  /// When the app's player cannot play it (access refused, a song it cannot
+  /// find, a native failure) the mix goes to the Music app instead, which
+  /// played where this did not; no error screen (decision 4 of
+  /// `docs/superpowers/specs/2026-11-09-one-platform-play-design.md`). No
+  /// subscription tries the Music app too, and only if that also fails says
+  /// why.
+  Future<void> playHere(ChatState state, List<QueueTrack> queue) async {
     final player = ref.read(playbackProvider);
-    unawaited(
-      player.start(
-        mixSessionId,
-        state.queueVersion,
-        state.session.title,
-        queue,
-      ),
+    // Read up front: the listener may leave while Apple answers, and a
+    // failed start must still be cleaned up and still reach the Music app.
+    final music = ref.read(musicKitBridgeProvider);
+    final api = ref.read(djApiProvider);
+    final sessionId = mixSessionId;
+    final outcome = await player.start(
+      sessionId,
+      state.queueVersion,
+      state.session.title,
+      queue,
     );
-    Navigator.push(
-      context,
-      MaterialPageRoute<void>(builder: (_) => const PlaybackScreen()),
-    );
+    switch (outcome) {
+      case PlaybackStart.superseded:
+        return;
+      case PlaybackStart.started:
+        if (!mounted) return;
+        await Navigator.push(
+          context,
+          MaterialPageRoute<void>(builder: (_) => const PlaybackScreen()),
+        );
+      case PlaybackStart.unavailable:
+      case PlaybackStart.subscriptionRequired:
+        player.release();
+        await _handToMusic(
+          queue,
+          music: music,
+          api: api,
+          sessionId: sessionId,
+          failureMessage: outcome == PlaybackStart.subscriptionRequired
+              ? mixPlaySubscriptionMessage
+              : mixPlayFallbackFailedMessage,
+        );
+    }
   }
-
-  /// Plays [queue] at [destination]: the app's own player, or Apple Music's.
-  void playAt(
-    PlayDestination destination,
-    ChatState state,
-    List<QueueTrack> queue,
-  ) => destination == PlayDestination.appleMusic
-      ? unawaited(sendToMusic(queue))
-      : playHere(state, queue);
 
   /// "Playing" was tapped: Now Playing opens over the screen, and the
   /// player is left exactly as it is.
@@ -360,24 +324,56 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
 
   /// Send to Music: the mix goes to Apple Music's own player, which reports
   /// how many songs it had no match for.
-  Future<void> sendToMusic(List<QueueTrack> queue) async {
+  ///
+  /// [failureMessage] replaces the Music app's own reason when it fails, for
+  /// a caller that knows the real cause (Play here with no subscription).
+  Future<void> sendToMusic(List<QueueTrack> queue, {String? failureMessage}) =>
+      _handToMusic(
+        queue,
+        music: ref.read(musicKitBridgeProvider),
+        api: ref.read(djApiProvider),
+        sessionId: mixSessionId,
+        failureMessage: failureMessage,
+      );
+
+  /// [sendToMusic] with its dependencies already in hand, so it finishes
+  /// (and posts its event) even when the screen has gone; only the toast
+  /// and the in-flight flag need the screen.
+  Future<void> _handToMusic(
+    List<QueueTrack> queue, {
+    required MusicKitBridge music,
+    required DjApi api,
+    required String sessionId,
+    String? failureMessage,
+  }) async {
     if (_sendingToMusic) return;
-    setState(() => _sendingToMusic = true);
+    _sendingToMusic = true;
+    if (mounted) setState(() {});
     try {
       final ids = [
         for (final t in queue)
           if (t.appleId != null) t.appleId!,
       ];
       final skipped = queue.length - ids.length;
-      await ref.read(musicKitBridgeProvider).playQueue(ids);
-      postMixEvent('played');
+      await music.playQueue(ids);
+      // As [postMixEvent], fire-and-forget and silent.
+      unawaited(
+        api.postSessionEvent(sessionId, 'played').catchError((Object _) {}),
+      );
       if (!mounted) return;
       showMixSnack(mixPlaySuccessMessage(skipped), kind: FeedbackKind.success);
     } on MusicKitException catch (e) {
+      // A plain failureMessage hides Apple's reason from the listener; keep
+      // it in the device log so a failure stays diagnosable.
+      if (failureMessage != null) debugPrint('Music app hand-off: ${e.message}');
       if (!mounted) return;
-      showMixSnack(mixPlayFailureMessage(e.message), kind: FeedbackKind.error);
+      showMixSnack(
+        failureMessage ?? mixPlayFailureMessage(e.message),
+        kind: FeedbackKind.error,
+      );
     } finally {
-      if (mounted) setState(() => _sendingToMusic = false);
+      _sendingToMusic = false;
+      if (mounted) setState(() {});
     }
   }
 
@@ -498,15 +494,15 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
     }
   }
 
-  /// Play on Spotify: the song list goes to the clipboard and TuneMyMusic's
-  /// paste-a-list page opens to build the Spotify playlist. The first time
-  /// on a device an explainer says so before anything happens; Cancel there
-  /// is no output at all.
-  Future<void> playOnSpotify(List<QueueTrack> queue) async {
+  /// Create playlist on Spotify: the song list goes to the clipboard and
+  /// TuneMyMusic's paste-a-list page opens to build the Spotify playlist.
+  /// The first time on a device an explainer says so before anything
+  /// happens; Cancel there is no output at all.
+  Future<void> createSpotifyPlaylist(List<QueueTrack> queue) async {
     if (_sharingMix) return;
     setState(() => _sharingMix = true);
     try {
-      final store = ref.read(playDestinationStoreProvider);
+      final store = ref.read(musicPlatformStoreProvider);
       var seen = false;
       try {
         seen = await store.spotifyIntroSeen();
@@ -545,433 +541,170 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
   }
 }
 
-/// Split Play (`docs/mockups/approved/2026-11-03-mix-conversation-redesign.md`
-/// → Split Play; `.split` on the board; Spotify added 2026-11-06): the main
-/// part plays at the remembered destination — the app's own player, "Play in
-/// Music" for Apple Music, "Play on Spotify" for the TuneMyMusic handoff —
-/// and the arrow, its own 44 pt target, opens a popover to choose (and
-/// remember) where to play. With nothing remembered and no known service
-/// ([askService]), the first Play asks where the listener listens.
+/// The mix actions (`docs/mockups/approved/2026-11-09-one-platform-play.md`),
+/// fixed by the device's platform and identical on the conversation's strip
+/// and the tape's bar. No arrow, no menu: nothing changes on a tap but Play
+/// becoming Playing.
 ///
-/// "Playing", with the prism meter, shows while the app player is on this
-/// mix; tapping it opens Now Playing. A mix with anything Apple Music can
-/// play keeps the arrow, whose menu always ends with Play on Spotify behind a
-/// separator. Only a mix Apple Music can do nothing with (and Spotify can)
-/// is the handoff alone.
-class MixSplitPlay extends ConsumerWidget {
-  const MixSplitPlay({
+/// * Apple Music (and a platform not chosen yet): Play, which reads Playing
+///   with the prism meter while the app's player is on this mix and then
+///   opens Now Playing, beside Create playlist. Both share the row, Play on
+///   the left; with no Apple Music match both stay, inert, and
+///   [MixPlayReason] says why.
+/// * Spotify: one full-width tape, Create playlist with the Spotify mark,
+///   read as "Create Spotify playlist". There is no Play.
+///
+/// At accessibility text sizes the pair stacks, each full width.
+class MixActions extends ConsumerWidget {
+  const MixActions({
     super.key,
     required this.keys,
     required this.queue,
-    required this.enabled,
     required this.isPlayingThisMix,
     required this.onPlay,
     required this.onOpenNowPlaying,
-    required this.onShare,
-    this.sendingToMusic = false,
+    required this.onCreatePlaylist,
+    required this.onCreateSpotifyPlaylist,
+    this.enabled = true,
+    this.creatingPlaylist = false,
     this.sharing = false,
-    this.expand = false,
-    this.spotifyOnly = false,
-    this.askService = false,
+    this.sendingToMusic = false,
+    this.spacing = 8,
   });
 
   final MixHandoffKeys keys;
-
-  /// [mixNeedsServiceChoice]: nothing says where this listener listens, so
-  /// the first Play (with no remembered destination) asks.
-  final bool askService;
-
-  /// [mixSpotifyOnly]: until the listener chooses otherwise, the main part is
-  /// Play on Spotify, and the arrow keeps Play here and Play in Apple Music
-  /// for a mix Apple Music can play.
-  final bool spotifyOnly;
 
   /// The arrangement this mix currently has; empty until the DJ makes one.
   final List<QueueTrack> queue;
 
-  /// False while an arrangement edit is in flight: the button goes inert in
-  /// place.
+  /// False while the host is busy: the actions go inert in place.
   final bool enabled;
 
   final bool Function() isPlayingThisMix;
-
-  /// Plays the mix at [destination].
-  final void Function(PlayDestination destination) onPlay;
+  final VoidCallback onPlay;
 
   /// "Playing" was tapped: the app player is already on this mix.
   final VoidCallback onOpenNowPlaying;
+  final VoidCallback onCreatePlaylist;
+  final VoidCallback onCreateSpotifyPlaylist;
 
-  /// Play on Spotify. Takes the tapped segment's own context.
-  final void Function(BuildContext buttonContext)? onShare;
+  /// The Apple save alert is up.
+  final bool creatingPlaylist;
 
-  final bool sendingToMusic;
+  /// The Spotify handoff is in hand.
   final bool sharing;
 
-  /// Fills the width it is given (the tape screen's bar, the strip at large
-  /// text) rather than shrink-wrapping its label.
-  final bool expand;
+  /// The mix is on its way to the Music app (Play's fallback): Play is inert
+  /// so a second tap cannot start it twice.
+  final bool sendingToMusic;
 
-  /// `.split .tape:last-child`: the arrow's segment, a 44 pt target.
-  static const double arrowWidth = 44;
+  /// The gap between the pair: `.strip .acts { gap: 8px }`,
+  /// `.sticky { gap: 10px }`.
+  final double spacing;
 
-  static const String arrowLabel = 'Choose where to play';
+  static const String playLabel = 'Play';
+  static const String playingLabel = 'Playing';
+  static const String playingHint = 'Opens Now Playing';
+  static const String createPlaylistLabel = 'Create playlist';
+  static const String spotifyPlaylistSemantics = 'Create Spotify playlist';
 
-  /// The Spotify handoff. Named for what the listener wants, not the
-  /// mechanism: "transfer tool" meant nothing to them (decisions 2026-11-03).
-  static const String shareLabel = 'Play on Spotify';
+  /// `.tape.sp .mk`.
+  static const double markSize = 18;
 
-  static String mainLabel({
-    required bool playing,
-    required PlayDestination destination,
-  }) => playing
-      ? 'Playing'
-      : switch (destination) {
-          PlayDestination.appleMusic => 'Play in Music',
-          PlayDestination.spotify => shareLabel,
-          PlayDestination.here => 'Play',
-        };
-
-  /// Plays at [destination]: Spotify is the handoff, the rest [onPlay].
-  void _go(BuildContext context, PlayDestination destination) {
-    if (destination == PlayDestination.spotify) {
-      onShare?.call(context);
-    } else {
-      onPlay(destination);
-    }
-  }
-
-  /// The first Play with nothing known: ask, remember, then play there.
-  Future<void> _ask(BuildContext context, WidgetRef ref) async {
-    final answer = await askWhereYouListen(context);
-    if (answer == null || !context.mounted) return;
-    unawaited(ref.read(playDestinationProvider.notifier).choose(answer));
-    _go(context, answer);
-  }
-
-  Future<void> _choose(
-    BuildContext arrowContext,
-    WidgetRef ref,
-    PlayDestination current,
-  ) async {
-    final picked = await showMixtapeMenu<Object>(
-      arrowContext,
-      actions: [
-        MixtapeMenuAction(
-          key: keys.playHere,
-          value: PlayDestination.here,
-          label: 'Play here',
-          isSelected: current == PlayDestination.here,
-        ),
-        MixtapeMenuAction(
-          key: keys.sendToMusic,
-          value: PlayDestination.appleMusic,
-          label: 'Play in Apple Music',
-          isSelected: current == PlayDestination.appleMusic,
-          icon: MixMenuIcons.playInMusic,
-        ),
-        MixtapeMenuAction(
-          key: keys.share,
-          value: PlayDestination.spotify,
-          label: shareLabel,
-          isSelected: current == PlayDestination.spotify,
-          separatorBefore: true,
-          icon: CupertinoIcons.music_note_2,
-          enabled: !sharing && onShare != null,
-        ),
-      ],
-    );
-    // The host can rebuild without this Play while the menu is up; its ref
-    // is gone with it.
-    if (picked == null || !arrowContext.mounted) return;
-    if (picked is! PlayDestination) return;
-    unawaited(ref.read(playDestinationProvider.notifier).choose(picked));
-    _go(arrowContext, picked);
-  }
+  /// From here on the pair stacks (the strip's own threshold).
+  static const double stackScale = 1.5;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final chosen = ref.watch(playDestinationProvider);
-    final destination = mixPlayDestination(chosen, spotifyOnly: spotifyOnly);
-    final reason = mixActionsDisabledReason(queue);
-    final live = enabled && queue.isNotEmpty && reason == null;
-    final appleLive = queue.any((t) => t.appleId != null);
-
-    if (!mixHasAppleActions(queue) || (spotifyOnly && !appleLive)) {
-      return Builder(
-        builder: (buttonContext) => TapeButton(
-          key: keys.share,
-          label: shareLabel,
-          onPressed: enabled && !sharing && onShare != null
-              ? () => onShare!(buttonContext)
-              : null,
-        ),
+    final platform = ref.watch(musicPlatformProvider) ?? MusicPlatform.apple;
+    final ink = context.tokens.tapeInk;
+    if (platform == MusicPlatform.spotify) {
+      return TapeButton(
+        key: keys.spotifyPlaylist,
+        label: createPlaylistLabel,
+        semanticsLabel: spotifyPlaylistSemantics,
+        fill: true,
+        leading: SpotifyMark(size: markSize, color: ink),
+        onPressed: enabled && !sharing && queue.isNotEmpty
+            ? onCreateSpotifyPlaylist
+            : null,
       );
     }
 
+    final live =
+        enabled && queue.isNotEmpty && mixActionsDisabledReason(queue) == null;
+    final stacked =
+        MediaQuery.textScalerOf(context).scale(100) / 100 >= stackScale;
+    final create = LabelChip(
+      key: keys.createPlaylist,
+      label: createPlaylistLabel,
+      fill: true,
+      onPressed: live && !creatingPlaylist ? onCreatePlaylist : null,
+    );
     return ListenableBuilder(
       listenable: ref.read(playbackProvider),
       builder: (context, _) {
-        final playing = isPlayingThisMix();
-        final toSpotify = destination == PlayDestination.spotify && !playing;
-        final label = mainLabel(playing: playing, destination: destination);
-        final VoidCallback? onMain = playing
-            ? onOpenNowPlaying
-            : toSpotify
-            ? (enabled && !sharing && onShare != null
-                  ? () => onShare!(context)
-                  : null)
-            : (!live ||
-                  (destination == PlayDestination.appleMusic && sendingToMusic))
-            ? null
-            : askService && chosen == null
-            ? () => unawaited(_ask(context, ref))
-            : () => onPlay(destination);
-        return _SplitShell(
-          expand: expand,
+        final player = ref.read(playbackProvider);
+        // A start in flight marks the mix `waiting` before Apple answers, and
+        // may yet fail and go to the Music app: until it settles, Play is
+        // inert and never reads Playing (nor opens an empty Now Playing).
+        final starting = player.busy;
+        final playing = !starting && isPlayingThisMix();
+        final play = TapeButton(
+          key: keys.playNow,
+          label: playing ? playingLabel : playLabel,
+          semanticsHint: playing ? playingHint : null,
           playing: playing,
-          main: _Segment(
-            key: toSpotify ? keys.share : keys.playNow,
-            label: label,
-            onTap: onMain,
-            expand: expand,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (!playing) ...[
-                  Icon(
-                    Icons.play_arrow_rounded,
-                    size: 16,
-                    color: _ink(context),
-                  ),
-                  const SizedBox(width: 4),
-                ],
-                Flexible(
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: _ink(context),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          side: Builder(
-            builder: (arrowContext) => _Segment(
-              key: keys.playMenu,
-              label: arrowLabel,
-              width: arrowWidth,
-              onTap: live
-                  ? () => _choose(arrowContext, ref, destination)
-                  : null,
-              child: Icon(
-                Icons.keyboard_arrow_down_rounded,
-                size: 20,
-                color: _ink(context),
-              ),
-            ),
-          ),
+          fill: true,
+          leading: Icon(Icons.play_arrow_rounded, size: 16, color: ink),
+          onPressed: playing
+              ? onOpenNowPlaying
+              : (live && !starting && !sendingToMusic ? onPlay : null),
+        );
+        if (stacked) {
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              play,
+              SizedBox(height: spacing),
+              create,
+            ],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(child: play),
+            SizedBox(width: spacing),
+            Expanded(child: create),
+          ],
         );
       },
     );
   }
-
-  static Color _ink(BuildContext context) => context.tokens.tapeInk;
 }
 
-/// The muted line a mix carries when its Play cannot do what it says: no
-/// Apple Music match at all, or nothing Apple Music can play beside a
-/// Spotify handoff. Draws nothing otherwise.
-class MixPlayReason extends StatelessWidget {
-  const MixPlayReason({
-    super.key,
-    required this.keys,
-    required this.queue,
-    this.spotifyOnly = false,
-  });
+/// The muted line an Apple Music mix carries when Play and Create playlist
+/// cannot work: no Apple Music match at all. Draws nothing otherwise, and
+/// nothing for a Spotify device, whose one action always works.
+class MixPlayReason extends ConsumerWidget {
+  const MixPlayReason({super.key, required this.keys, required this.queue});
 
   final MixHandoffKeys keys;
   final List<QueueTrack> queue;
 
-  /// A Spotify-only listener's Play on Spotify always works, so there is no
-  /// Apple shortfall to explain.
-  final bool spotifyOnly;
-
   @override
-  Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    final style = tokens.meta.copyWith(color: tokens.muted);
-    if (spotifyOnly) return const SizedBox.shrink();
-    if (!mixHasAppleActions(queue)) {
-      return Text(mixAppleNeededReason, key: keys.appleNeeded, style: style);
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (ref.watch(musicPlatformProvider) == MusicPlatform.spotify) {
+      return const SizedBox.shrink();
     }
     final reason = mixActionsDisabledReason(queue);
     if (reason == null) return const SizedBox.shrink();
-    return Text(reason, key: keys.reason, style: style);
-  }
-}
-
-/// One tape shell holding both segments, with the shell's prism stripe along
-/// the bottom and, while playing, the meter at the main part's trailing edge.
-class _SplitShell extends StatelessWidget {
-  const _SplitShell({
-    required this.main,
-    required this.side,
-    required this.playing,
-    required this.expand,
-  });
-
-  final Widget main;
-  final Widget side;
-  final bool playing;
-  final bool expand;
-
-  static const BorderRadius _radius = BorderRadius.only(
-    topLeft: Radius.circular(MixtapeMetrics.tapeRadiusTop),
-    topRight: Radius.circular(MixtapeMetrics.tapeRadiusTop),
-    bottomLeft: Radius.circular(MixtapeMetrics.tapeRadiusBottom),
-    bottomRight: Radius.circular(MixtapeMetrics.tapeRadiusBottom),
-  );
-
-  @override
-  Widget build(BuildContext context) {
     final tokens = context.tokens;
-    return ConstrainedBox(
-      constraints: const BoxConstraints(minHeight: MixtapeMetrics.minTarget),
-      child: Center(
-        widthFactor: expand ? null : 1,
-        heightFactor: 1,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: tokens.tapeFill,
-            borderRadius: _radius,
-            border: Border.all(color: tokens.tapeEdge),
-            boxShadow: [
-              BoxShadow(color: tokens.tapeShadow, offset: const Offset(0, 2)),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: _radius,
-            child: Stack(
-              children: [
-                IntrinsicHeight(
-                  child: Row(
-                    mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (expand)
-                        Expanded(child: main)
-                      else
-                        Flexible(child: main),
-                      if (playing)
-                        DecoratedBox(
-                          key: MixHandoffKeys.meterKey,
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: tokens.prism
-                                  .take(5)
-                                  .toList()
-                                  .reversed
-                                  .toList(growable: false),
-                            ),
-                          ),
-                          child: const SizedBox(width: 8),
-                        ),
-                      Container(
-                        width: 1,
-                        color: Colors.white.withValues(alpha: 0.18),
-                      ),
-                      side,
-                    ],
-                  ),
-                ),
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  child: Container(
-                    height: 1,
-                    color: Colors.white.withValues(alpha: 0.13),
-                  ),
-                ),
-                const Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: PrismStripe(
-                    horizontal: true,
-                    height: TapeButton.stripeHeight,
-                    width: double.infinity,
-                    borderRadius: BorderRadius.zero,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// A tappable part of the split shell: a button to assistive technology,
-/// at least 44 pt tall, dimmed when inert.
-class _Segment extends StatelessWidget {
-  const _Segment({
-    super.key,
-    required this.label,
-    required this.onTap,
-    required this.child,
-    this.width,
-    this.expand = false,
-  });
-
-  final String label;
-  final VoidCallback? onTap;
-  final Widget child;
-  final double? width;
-  final bool expand;
-
-  @override
-  Widget build(BuildContext context) {
-    final enabled = onTap != null;
-    return Semantics(
-      button: true,
-      enabled: enabled,
-      label: label,
-      onTap: onTap,
-      excludeSemantics: true,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        // Inert, it still claims the tap: the strip around it opens the tape
-        // on any tap that reaches it.
-        onTap: onTap ?? () {},
-        child: Opacity(
-          opacity: enabled ? 1 : 0.5,
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              minHeight: MixtapeMetrics.minTarget,
-              minWidth: width ?? 0,
-              maxWidth: width ?? double.infinity,
-            ),
-            child: Padding(
-              padding: width == null
-                  ? const EdgeInsets.fromLTRB(10, 0, 14, 0)
-                  : EdgeInsets.zero,
-              child: Center(
-                widthFactor: expand || width != null ? null : 1,
-                child: child,
-              ),
-            ),
-          ),
-        ),
-      ),
+    return Text(
+      reason,
+      key: keys.reason,
+      style: tokens.meta.copyWith(color: tokens.muted),
     );
   }
 }

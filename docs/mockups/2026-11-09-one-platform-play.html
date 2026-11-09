@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>One platform play</title>
+<style>
+/* ---------- Review page (from the 2026-09-17 Home board) ---------- */
+*{box-sizing:border-box}
+html{background:#1d1d21}
+body{margin:0;background:#1d1d21;color:#eee9ed;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1280px;margin:auto;padding:28px 24px 80px}
+h1{font-size:30px;line-height:1.15;margin:0 0 10px}
+h2{font-size:22px;margin:60px 0 6px;padding-top:18px;border-top:1px solid #3b393f}
+h3{font-size:16px;margin:26px 0 8px}
+p{max-width:840px}
+a{color:#c0daed}
+code{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;color:#e6dde6}
+.kicker{font:700 11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:#c5adbd;margin:0 0 8px}
+.note{color:#cfc5d1;font-size:14px;max-width:840px}
+.callout{background:#2b2830;border:1px solid #47434c;border-radius:10px;padding:14px 16px;max-width:840px;margin:14px 0}
+.callout strong{color:#fff}
+ul.tight,ol.tight{margin:6px 0 0;padding-left:20px}ul.tight li,ol.tight li{margin:4px 0}
+.badge{display:inline-flex;align-items:center;gap:6px;font:700 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em;text-transform:uppercase;padding:5px 8px;border-radius:5px;white-space:nowrap}
+.badge::before{content:"";width:8px;height:8px;border-radius:50%;background:currentColor}
+.b-work{color:#a7d8b4;background:rgba(112,151,120,.18);border:1px solid rgba(112,151,120,.5)}
+.b-plan{color:#bcd0de;border:1px dashed #8fa5b5}.b-plan::before{background:transparent;border:1.5px solid currentColor;width:6px;height:6px}
+.rec{display:inline-block;font:700 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em;text-transform:uppercase;padding:3px 6px;border-radius:4px;color:#a7d8b4;border:1px solid rgba(112,151,120,.6);margin-left:6px;vertical-align:1px}
+.rec.dflt{color:#ecd39a;border-color:rgba(209,138,101,.6)}
+.frames{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;margin-top:14px}
+.frame{width:390px;max-width:100%}.frame.wide{width:auto;max-width:100%}
+.frame figcaption{font-size:13px;color:#cfc5d1;margin:10px 4px 0;line-height:1.45;max-width:390px}
+.frame.wide figcaption{max-width:760px}
+.frame figcaption b{color:#fff;font-weight:600;display:block}
+figure{margin:0}
+.flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;max-width:840px;margin-top:12px}
+.flow div{background:#26242a;border:1px solid #3d3a42;border-radius:10px;padding:10px 12px;font-size:13px;color:#d8d0da}
+.flow b{display:block;color:#fff;margin-bottom:4px}
+
+/* ---------- Native language (from the 2026-09-17 Home board) ---------- */
+.phone{width:390px;height:844px;max-width:100%;border-radius:46px;padding:10px;background:#0b0b0d;border:1px solid #4b4950;box-shadow:0 22px 60px rgba(0,0,0,.5);position:relative;overflow:hidden;color-scheme:light}
+.screen{
+  --text:#1c1a1e;--plum:#544451;--smoke:#696269;--muted:#857e86;--hair:rgba(50,44,50,.14);
+  --pink:#c9687f;--orange:#d18a65;--yellow:#d2c76f;--green:#709778;--blue:#688fa8;--violet:#6e5c8f;
+  --prism:linear-gradient(135deg,var(--pink) 0%,var(--orange) 22%,var(--yellow) 42%,var(--green) 62%,var(--blue) 82%,var(--violet) 100%);
+  --prism-v:linear-gradient(180deg,var(--pink),var(--orange),var(--yellow),var(--green),var(--blue));
+  --tape:#4d404b;--tape-edge:#3b3039;--tape-shadow:#2d272e;--tape-ink:#f5f0f2;
+  --glass:rgba(255,255,255,.62);--glass-hi:rgba(255,255,255,.9);--glass-shadow:0 8px 24px rgba(30,24,30,.16);
+  --panel:rgba(255,255,255,.55);--field:rgba(255,255,255,.75);
+  --pillbg:rgba(255,255,255,.75);--sheet:rgba(250,248,246,.9);--pencil:#66505e;--wm:#42515e;
+  --ok-ink:#1f543a;--warn-ink:#7a4d12;--err-ink:#7e2f46;
+  --bgrgb:248,246,243;
+  position:relative;height:100%;border-radius:38px;overflow:hidden;
+  background:
+    radial-gradient(ellipse 90% 45% at 50% 108%,rgba(110,92,143,.55),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 0% 92%,rgba(201,104,127,.28),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 100% 80%,rgba(104,143,168,.32),transparent 70%),
+    linear-gradient(180deg,#f9f7f4 0%,#f1eeee 45%,#e6e0ea 100%);
+  color:var(--text);font:16px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;display:flex;flex-direction:column}
+.phone.dark{color-scheme:dark}
+.phone.dark .screen,.browser.dark .screen{
+  --text:#f2eef1;--plum:#f0ebef;--smoke:#b0a9b1;--muted:#98929a;--hair:rgba(255,255,255,.13);
+  --tape:#5a4957;--tape-shadow:#17131a;
+  --glass:rgba(60,56,66,.5);--glass-hi:rgba(255,255,255,.2);--glass-shadow:0 8px 24px rgba(0,0,0,.5);
+  --panel:rgba(40,36,54,.55);--field:rgba(255,255,255,.1);
+  --pillbg:rgba(255,255,255,.12);--sheet:rgba(34,30,44,.92);--pencil:rgba(240,235,239,.72);--wm:#f0ebef;
+  --ok-ink:#a7c7ae;--warn-ink:#e6c98f;--err-ink:#efb2c0;
+  --bgrgb:8,8,12;
+  background:
+    radial-gradient(ellipse 90% 45% at 50% 108%,rgba(96,78,170,.85),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 0% 88%,rgba(201,104,127,.35),transparent 70%),
+    radial-gradient(ellipse 60% 35% at 100% 78%,rgba(80,120,170,.4),transparent 70%),
+    linear-gradient(180deg,#050507 0%,#0c0b12 45%,#1a1530 100%)}
+.phone.large .screen{font-size:30px;line-height:1.25}
+.statusbar{height:54px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 30px 8px;font:600 15px -apple-system,sans-serif;position:relative;z-index:5}
+.statusbar .right{display:flex;gap:6px;align-items:center}
+.statusbar .cell{width:18px;height:11px;background:currentColor;clip-path:polygon(0 70%,22% 70%,22% 45%,49% 45%,49% 25%,76% 25%,76% 0,100% 0,100% 100%,0 100%)}
+.statusbar .batt{width:26px;height:12px;border:1.5px solid currentColor;border-radius:4px;position:relative;opacity:.9}.statusbar .batt::after{content:"";position:absolute;inset:2px 6px 2px 2px;background:currentColor;border-radius:1.5px}
+.homebar{position:absolute;left:0;right:0;bottom:0;height:34px;display:grid;place-items:center;z-index:10}.homebar i{width:134px;height:5px;border-radius:3px;background:var(--text);opacity:.8}
+.large-title{flex:none;padding:30px 20px 8px;display:flex;align-items:flex-end;justify-content:space-between;gap:10px}
+.large-title h1{margin:0;font:800 1.75em/1.05 -apple-system,BlinkMacSystemFont,"SF Pro Display",sans-serif;letter-spacing:-.02em;color:var(--text);border:0;padding:0}
+.content{flex:1;min-height:0;overflow:hidden;padding:0 20px;display:flex;flex-direction:column;position:relative;z-index:1}
+/* Inset-grouped list (You) */
+.group{background:rgba(255,255,255,.62);border-radius:22px;overflow:hidden;margin-bottom:16px}
+.phone.dark .group{background:rgba(255,255,255,.08)}
+.grow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;align-items:center;min-height:52px;padding:8px 16px;position:relative}
+.grow+.grow::before{content:"";position:absolute;left:52px;right:0;top:0;height:1px;background:var(--hair)}
+.grow svg{width:22px;height:22px;stroke:var(--plum);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.grow strong{display:block;font-weight:500;font-size:1em}.grow small{display:block;color:var(--muted);font-size:.78em}
+.grow .chev{stroke:var(--muted);width:18px;height:18px;opacity:.6}
+.gnote{color:var(--muted);font-size:.78em;margin:-8px 16px 16px}
+.toggle{width:51px;height:31px;border-radius:16px;background:#34c759;position:relative;flex:none}.toggle::after{content:"";position:absolute;top:2px;right:2px;width:27px;height:27px;border-radius:50%;background:#fff;box-shadow:0 2px 4px rgba(0,0,0,.2)}
+.toggle.off{background:rgba(120,120,128,.32)}.toggle.off::after{right:auto;left:2px}
+/* Composer, panel and pills */
+.bpanel{position:absolute;left:0;right:0;bottom:0;z-index:5;padding:8px 14px 150px;border-radius:30px 30px 0 0;background:var(--panel);-webkit-backdrop-filter:blur(30px) saturate(150%);backdrop-filter:blur(30px) saturate(150%);box-shadow:0 -1px 0 rgba(255,255,255,.35) inset,0 -10px 40px rgba(30,24,40,.08)}
+.phone.dark .bpanel{box-shadow:0 -1px 0 rgba(255,255,255,.12) inset,0 -10px 40px rgba(0,0,0,.4)}
+.bpanel.chat{padding-bottom:36px;border-radius:26px 26px 0 0}
+.grab{width:36px;height:5px;border-radius:3px;background:rgba(127,120,130,.45);margin:2px auto 12px}
+.composer{position:relative;display:grid;grid-template-columns:minmax(0,1fr) 40px 40px;align-items:center;gap:6px;min-height:48px;padding:2px 4px 2px 14px;background:var(--field);border:1px solid var(--hair);border-radius:12px 12px 16px 16px;box-shadow:0 6px 18px rgba(61,53,60,.07),inset 0 1px 0 rgba(255,255,255,.7)}
+.phone.dark .composer,.browser.dark .composer{box-shadow:0 6px 18px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.06)}
+.composer .stripe{position:absolute;left:8px;top:50%;transform:translateY(-50%);width:4px;height:1.6em;max-height:60%;border-radius:2px;background:var(--prism-v)}
+.composer .field{min-width:0;margin-left:8px;color:var(--muted);font-size:.95em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.composer .field.typed{color:var(--text)}
+.composer.focus{border-color:transparent}
+.composer.focus::after{content:"";position:absolute;inset:-2px;padding:2px;border-radius:14px 14px 18px 18px;background:var(--prism);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none}
+.composer.focus .stripe{opacity:0}
+.mic,.send{width:40px;height:40px;display:grid;place-items:center;border:0;background:transparent;color:var(--plum);border-radius:999px}
+.mic svg,.send svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.send i{width:30px;height:30px;display:grid;place-items:center;border-radius:8px 8px 10px 10px;background:rgba(84,68,81,.1)}
+.phone.dark .send i,.browser.dark .send i{background:rgba(255,255,255,.12)}
+.send.off{color:var(--muted)}.send.off i{background:transparent}
+.pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.pill{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 13px;border-radius:999px;font:500 .82em -apple-system,sans-serif;color:var(--text);background:rgba(255,255,255,.55);border:1px solid var(--hair)}
+.phone.dark .pill{background:rgba(255,255,255,.1)}
+/* Tape button and label chip (mix actions) */
+.tape{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;min-height:40px;padding:0 14px 0 8px;border-radius:6px 6px 10px 10px;color:var(--tape-ink);background:var(--tape);border:1px solid var(--tape-edge);box-shadow:0 2px 0 var(--tape-shadow),inset 0 1px 0 rgba(255,255,255,.13);font:750 .8em -apple-system,sans-serif;position:relative;overflow:hidden}
+.tape .reel{width:20px;height:20px;flex:none;border-radius:50%;background:repeating-conic-gradient(#e4e1dd 0 24deg,transparent 24deg 45deg),#262329;border:2.5px solid #262329}
+.tape .meter{position:absolute;inset:0 0 0 auto;width:8px;background:linear-gradient(var(--blue),var(--green),var(--yellow),var(--orange),var(--pink))}
+.chip{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;min-height:36px;padding:0 11px;border-radius:6px 6px 10px 10px;font:650 .8em -apple-system,sans-serif;color:var(--plum);background:rgba(247,244,239,.6);border:1px solid rgba(73,64,72,.22);box-shadow:inset 0 0 0 2px rgba(255,255,255,.3)}
+.phone.dark .chip{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.16);box-shadow:none}
+.chip .hole{width:11px;height:11px;border-radius:50%;background:radial-gradient(circle,transparent 0 28%,var(--plum) 30% 40%,transparent 42%),repeating-conic-gradient(var(--plum) 0 18deg,transparent 18deg 45deg);border:1px solid rgba(73,64,72,.35)}
+/* Dock */
+.dock{position:absolute;left:0;right:0;bottom:32px;z-index:6;padding:0 22px;display:flex;flex-direction:column;gap:7px}
+.glass{background:var(--glass);-webkit-backdrop-filter:blur(26px) saturate(170%);backdrop-filter:blur(26px) saturate(170%);box-shadow:var(--glass-shadow),inset 0 1px 0 var(--glass-hi),inset 0 0 0 .5px rgba(255,255,255,.35)}
+.phone.dark .glass,.browser.dark .glass{box-shadow:var(--glass-shadow),inset 0 1px 0 var(--glass-hi),inset 0 0 0 .5px rgba(255,255,255,.12)}
+.tabs{display:grid;grid-template-columns:repeat(4,1fr);border-radius:999px;padding:4px}
+.tabs button{min-height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;border:0;background:transparent;color:var(--muted);font:600 .6em -apple-system,sans-serif;border-radius:999px}
+.tabs button svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.tabs button.on{color:var(--plum);background:rgba(255,255,255,.6);box-shadow:inset 0 0 0 .5px rgba(255,255,255,.6)}
+.phone.dark .tabs button.on{background:rgba(255,255,255,.14)}
+/* Conversation and arrangement */
+.turn{max-width:86%;padding:10px 14px;border-radius:18px;font-size:.95em;line-height:1.4;overflow-wrap:anywhere}
+.turn.dj{align-self:flex-start;background:rgba(255,255,255,.62);border-radius:4px 18px 18px 18px}
+.phone.dark .turn.dj{background:rgba(255,255,255,.1)}
+.turn.me{align-self:flex-end;background:var(--tape);color:var(--tape-ink);border-radius:18px 18px 4px 18px}
+.turn .dj-k{display:block;font:700 .68em/1.2 ui-monospace,Menlo,monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+.trow{display:grid;grid-template-columns:48px minmax(0,1fr) 36px;gap:12px;align-items:center;padding:8px 0;position:relative}
+.trow+.trow::before{content:"";position:absolute;left:60px;right:0;top:0;height:1px;background:var(--hair)}
+.trow .art{width:48px;height:48px;border-radius:3px;background:#e8e4e6;display:grid;place-items:center}
+.trow .art .cs{width:42px}
+.trow strong{display:block;font-weight:500;font-size:.95em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.trow small{display:block;color:var(--muted);font-size:.78em}
+.grip{width:36px;height:44px;display:grid;place-items:center;color:var(--muted)}.grip i{width:16px;height:2px;background:currentColor;border-radius:1px;box-shadow:0 -5px 0 currentColor,0 5px 0 currentColor;opacity:.6}
+.actsrow{display:flex;gap:8px;align-items:center;padding:8px 0 10px}
+.veil{position:absolute;inset:0;background:rgba(20,16,20,.28);z-index:8;border-radius:38px}
+/* Cassette */
+.cs{display:block;aspect-ratio:200/128;--case:#3f4851;--stock:#f2ede2}
+.cs svg{width:100%;height:100%;display:block;overflow:visible}
+.cs.c2{--case:#544451}.cs.c3{--case:#45596d}.cs.c4{--case:#6f5a4d}.cs.c5{--case:#2c2b33}
+.cs-case{fill:var(--case);stroke:#252328;stroke-width:2}.cs-edge{fill:none;stroke:rgba(255,255,255,.25);stroke-width:2}
+.cs-stock{fill:var(--stock)}.cs-rule{stroke:rgba(75,66,71,.34)}
+.cs-dark{fill:#17161a;stroke:#28262a;stroke-width:2}.cs-band{fill:#493638}
+.cs-ring{fill:#dedbd6;stroke:#28262a;stroke-width:4}.cs-tooth{fill:#28262a}.cs-hole{fill:#f4f1ec}
+.cs-guide{fill:#f2f0eb;stroke:#544e52;stroke-width:2}.cs-metal{fill:#9a9590;stroke:#4f4a4d;stroke-width:1.5}
+.spin .cs-hub{transform-box:fill-box;transform-origin:center;animation:hub 1.05s linear infinite}
+@keyframes hub{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.spin .cs-hub{animation:none}}
+
+
+/* ---------- Mix conversation redesign (new on this board) ---------- */
+.ico{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.tsvg{fill:currentColor;stroke:none}
+/* Header: back left, one More cluster right */
+.nav{flex:none;height:56px;display:flex;align-items:center;gap:10px;padding:0 14px;position:relative;z-index:6}
+.gbtn{width:44px;height:44px;flex:none;display:grid;place-items:center;color:var(--text);position:relative}
+.gbtn.glass{background:transparent;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none}
+.gbtn::before{content:"";position:absolute;width:34px;height:34px;left:5px;top:5px;border-radius:50%;
+  background:linear-gradient(160deg,rgba(255,255,255,.55),rgba(255,255,255,.18) 55%,rgba(255,255,255,.32));
+  -webkit-backdrop-filter:blur(10px) saturate(180%) brightness(1.06);backdrop-filter:blur(10px) saturate(180%) brightness(1.06);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.95),inset 0 -1px 1px rgba(255,255,255,.35),inset 0 0 0 .5px rgba(255,255,255,.7),0 3px 10px rgba(30,24,30,.12)}
+.phone.dark .gbtn::before{background:linear-gradient(160deg,rgba(255,255,255,.22),rgba(255,255,255,.06) 55%,rgba(255,255,255,.12));box-shadow:inset 0 1px 0 rgba(255,255,255,.35),inset 0 0 0 .5px rgba(255,255,255,.22),0 3px 10px rgba(0,0,0,.35)}
+.gbtn svg{width:17px;height:17px;position:relative}
+.nav{gap:4px;padding:0 8px}
+.hit{position:absolute;inset:0;border:1px dashed rgba(201,104,127,.8);border-radius:6px}
+.sh{width:34px;height:20px;flex:none;color:var(--plum)}.sh path{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.moderow{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 2px 8px;min-height:28px}
+.segc{display:inline-flex;padding:2px;border-radius:8px;background:rgba(120,110,120,.16)}
+.segc button{min-height:22px;padding:0 10px;border:0;border-radius:6px;background:transparent;color:var(--text);font:600 .72em -apple-system,sans-serif}
+.segc button.on{background:rgba(255,255,255,.92);box-shadow:0 1px 3px rgba(0,0,0,.14)}
+.moderow .chip{min-height:26px;padding:0 9px;font-size:.72em;gap:5px;border-radius:5px 5px 8px 8px}
+.pop .shrow{justify-content:flex-start;gap:12px}.pop .shrow .tick{margin-left:auto}
+.nav .ttl{flex:1;min-width:0;font:600 1.02em/1.2 -apple-system,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nav .ttl.c{text-align:center}
+.nav .ttl.hide{visibility:hidden}
+/* Lyric transcript */
+.lyr{flex:1;min-height:0;overflow:hidden;padding:0 22px;display:flex;flex-direction:column;justify-content:flex-end;gap:16px;
+  -webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 90px);mask-image:linear-gradient(to bottom,transparent 0,#000 90px)}
+.l-dj{margin:0;font:650 1.1em/1.32 -apple-system,BlinkMacSystemFont,"SF Pro Display",sans-serif;letter-spacing:-.012em;color:var(--text);max-width:94%}
+.l-me{margin:0;align-self:flex-end;text-align:right;max-width:84%;font:650 .92em/1.38 -apple-system,sans-serif;color:var(--smoke)}
+.past{opacity:.34}
+.l-ev{display:flex;align-items:center;gap:7px;font:500 .78em/1.2 -apple-system,sans-serif;color:var(--muted);margin:-8px 0 -4px}
+.l-ev svg{width:15px;height:15px}
+.dots{display:flex;gap:7px;padding:10px 0 2px}.dots i{width:10px;height:10px;border-radius:50%;background:var(--text);opacity:.85;animation:dot 1.2s ease-in-out infinite}
+.dots i:nth-child(2){animation-delay:.15s}.dots i:nth-child(3){animation-delay:.3s}
+@keyframes dot{50%{opacity:.25;transform:translateY(-3px)}}
+@media(prefers-reduced-motion:reduce){.dots i{animation:none}}
+.l-err{margin:-6px 0 0;align-self:flex-end;display:flex;gap:10px;align-items:center;font:600 .8em -apple-system,sans-serif;color:var(--err-ink)}
+.l-err b{color:var(--plum);font-weight:700;text-decoration:underline;text-underline-offset:3px}
+/* Working: the cassette's hubs turn */
+.loadtape{display:flex;align-items:center;gap:12px;padding:4px 0}
+.loadtape .cs{width:56px;transform:rotate(-4deg);filter:drop-shadow(0 3px 4px rgba(30,24,30,.22))}
+.loadtape span{font:500 .82em -apple-system,sans-serif;color:var(--muted)}
+/* Popover menu */
+.pop{position:absolute;z-index:9;min-width:232px;border-radius:14px;background:rgba(250,248,246,.97);box-shadow:0 18px 50px rgba(20,16,24,.28),0 0 0 .5px rgba(0,0,0,.06);overflow:hidden;font-size:.95em}
+.phone.dark .pop{background:rgba(44,40,52,.98)}
+.pop div{display:flex;justify-content:space-between;align-items:center;gap:16px;min-height:44px;padding:6px 16px;border-top:1px solid var(--hair)}
+.pop div:first-child{border-top:0}.pop .sep{border-top:6px solid var(--hair)}
+.pop svg{width:19px;height:19px;color:var(--plum);flex:none}
+.pop small{display:block;font-size:.76em;color:var(--muted);margin-top:1px}
+.pop .tick{width:16px;color:var(--plum);font-weight:700}
+.pop .red{color:#c0392b}.phone.dark .pop .red{color:#ff6b5e}
+.seg{display:grid;grid-template-columns:1fr 1fr;padding:2px;border-radius:9px;background:rgba(120,120,128,.14);font:600 .82em -apple-system,sans-serif;margin:0 20px}
+.seg span{text-align:center;padding:7px 0;border-radius:7px}.seg .on{background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.1)}
+/* Version marker in the transcript */
+.vmark{display:flex;align-items:center;gap:10px;margin:-6px 0;padding:6px 0;min-height:44px}
+.vmark .cs{width:34px;flex:none;transform:rotate(-4deg);filter:drop-shadow(0 2px 3px rgba(30,24,30,.22))}
+.vmark b{font:700 .84em -apple-system,sans-serif;color:var(--text)}
+.vmark span{font:500 .78em -apple-system,sans-serif;color:var(--muted)}
+.vmark svg.chev{width:14px;height:14px;color:var(--muted);margin-left:-4px}
+/* Bottom panel: tape strip + composer */
+.bp{position:relative;flex:none;z-index:5;padding:8px 14px 34px;border-radius:26px 26px 0 0;background:var(--panel);-webkit-backdrop-filter:blur(30px) saturate(150%);backdrop-filter:blur(30px) saturate(150%);box-shadow:0 -1px 0 rgba(255,255,255,.35) inset,0 -10px 40px rgba(30,24,40,.08)}
+.phone.dark .bp{box-shadow:0 -1px 0 rgba(255,255,255,.12) inset,0 -10px 40px rgba(0,0,0,.4)}
+.strip{display:grid;grid-template-columns:48px minmax(0,1fr) auto;gap:10px;align-items:center;padding:2px 4px 12px 2px;margin-bottom:10px;border-bottom:1px solid var(--hair)}
+.strip .cs{width:48px;transform:rotate(-5deg);filter:drop-shadow(0 4px 6px rgba(30,24,30,.25))}
+.strip strong{display:block;font:650 .95em/1.2 -apple-system,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.strip small{display:block;font-size:.76em;color:var(--muted);margin-top:2px}
+.crow{display:flex;gap:8px;align-items:center}
+.plus{width:44px;height:44px;flex:none;border-radius:999px;display:grid;place-items:center;color:var(--plum);background:var(--field);border:1px solid var(--hair)}
+.plus svg{width:20px;height:20px}
+.crow .composer{flex:1;min-width:0}
+.tape.play{padding:0 16px 0 9px}
+.tape.play svg{width:14px;height:14px}
+.tape.off{opacity:.45}
+/* Menus */
+.menu{position:absolute;z-index:9;min-width:236px;border-radius:14px;background:var(--sheet);-webkit-backdrop-filter:blur(30px);backdrop-filter:blur(30px);box-shadow:0 18px 50px rgba(20,16,24,.28);overflow:hidden;font-size:.95em}
+.menu div{display:flex;justify-content:space-between;align-items:center;gap:16px;min-height:44px;padding:0 16px;border-top:1px solid var(--hair)}
+.menu div:first-child{border-top:0}
+.menu div svg{width:19px;height:19px;color:var(--plum)}
+.menu .sep{border-top:6px solid var(--hair)}
+.menu .dim{color:var(--muted)}
+.menu small{display:block;font-size:.75em;color:var(--muted)}
+/* Tape screen */
+.thead{display:flex;flex-direction:column;align-items:center;text-align:center;padding:4px 22px 14px}
+.thead .cs{width:150px;transform:rotate(-4deg);filter:drop-shadow(0 12px 16px rgba(41,36,42,.28))}
+.thead h1{margin:18px 0 4px;font:800 1.5em/1.12 -apple-system,"SF Pro Display",sans-serif;letter-spacing:-.02em;border:0;padding:0;color:var(--text)}
+.thead p{margin:0;font-size:.82em;color:var(--muted)}
+.tlist{flex:1;min-height:0;overflow:hidden;padding:0 20px}
+.trow .no{width:22px;text-align:right;font-size:.78em;color:var(--muted)}
+.tlist .trow{grid-template-columns:22px 44px minmax(0,1fr) 36px}
+.tlist .trow .art{width:44px;height:44px}
+.tlist .trow+.trow::before{left:78px}
+.sticky{flex:none;position:relative;z-index:5;display:flex;gap:10px;align-items:center;justify-content:center;padding:12px 18px 36px;background:var(--panel);-webkit-backdrop-filter:blur(30px) saturate(150%);backdrop-filter:blur(30px) saturate(150%);border-top:1px solid var(--hair)}
+.sticky .tape,.sticky .chip{flex:1;justify-content:center;min-height:44px}
+.hint{text-align:center;font-size:.74em;color:var(--muted);padding:12px 0 6px}
+.art.a1{background:linear-gradient(135deg,#e2865f,#9b4b2f)!important}.art.a2{background:linear-gradient(135deg,#3967b3,#c0453a)!important}
+.art.a3{background:linear-gradient(135deg,#b23a35,#f0e7d9)!important}.art.a4{background:linear-gradient(135deg,#2a2627,#6f5a52)!important}
+.art.a5{background:linear-gradient(135deg,#7b3fd1,#c54ec2)!important}.art.a6{background:linear-gradient(135deg,#9a9a9a,#3b3b3b)!important}
+.art.a7{background:linear-gradient(135deg,#2a8f9a,#9adbd9)!important}
+/* Tape sheet */
+.sheet{position:absolute;left:0;right:0;bottom:0;z-index:9;background:#fbfaf8;border-radius:22px 22px 0 0;padding:8px 20px 40px;box-shadow:0 -20px 60px rgba(20,16,24,.3)}
+.phone.dark .sheet{background:#221e2c}
+.sheet .grab{margin-bottom:6px}
+.shd{display:flex;align-items:center;justify-content:space-between;min-height:44px}
+.shd b{font:700 1.05em -apple-system,sans-serif}.shd span{font:600 .95em -apple-system,sans-serif;color:var(--plum)}
+.namef{display:flex;align-items:center;gap:8px;min-height:44px;margin:4px 0 14px;padding:0 14px;border-radius:12px;background:var(--field);border:1px solid var(--hair);font-size:.95em}
+.namef small{margin-left:auto;color:var(--muted);font-size:.74em}
+.fam{display:flex;justify-content:space-between;margin:2px -4px 14px}
+.fam i{width:44px;height:44px;display:grid;place-items:center;border-radius:999px}
+.fam i::after{content:"";width:26px;height:26px;border-radius:50%;background:var(--sw)}
+.fam i.on{box-shadow:inset 0 0 0 2px var(--text)}
+.tapes{display:grid;grid-template-columns:repeat(3,1fr);gap:14px 12px}
+.tapes figure{display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px 0 4px;border-radius:12px}
+.tapes .cs{width:92px;height:59px;filter:drop-shadow(0 4px 5px rgba(30,24,30,.2));transition:transform .2s}
+.tapes figcaption{font:500 .74em -apple-system,sans-serif;color:var(--smoke)}
+.tapes figure.on{background:rgba(84,68,81,.07)}
+.phone.dark .tapes figure.on{background:rgba(255,255,255,.08)}
+.tapes figure.on .cs{transform:translateY(-4px) rotate(-4deg)}
+.tapes figure.on figcaption{font-weight:700;color:var(--text)}
+/* Versions */
+.vlist{flex:1;min-height:0;overflow:hidden;padding:0 20px}
+.vh{font:700 .72em/1 -apple-system,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:18px 0 4px}
+.vrow{display:grid;grid-template-columns:64px minmax(0,1fr) 18px;gap:14px;align-items:center;padding:12px 0;position:relative;min-height:64px}
+.vrow+.vrow::before{content:"";position:absolute;left:78px;right:0;top:0;height:1px;background:var(--hair)}
+.vrow .cs{width:64px;transform:rotate(-4deg);filter:drop-shadow(0 4px 5px rgba(30,24,30,.22))}
+.vrow strong{display:block;font:600 1em/1.25 -apple-system,sans-serif}
+.vrow small{display:block;font-size:.76em;color:var(--muted);margin-top:1px}
+.vrow q{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:.82em;line-height:1.35;color:var(--smoke);margin-top:4px;quotes:"“" "”"}
+.vrow svg.chev{width:16px;height:16px;color:var(--muted)}
+.vask{margin:6px 22px 12px;padding:0 0 12px;border-bottom:1px solid var(--hair);font:600 .95em/1.38 -apple-system,sans-serif;color:var(--smoke);text-align:center}
+.vask span{display:block;font:600 .68em/1 -apple-system,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.legend{font-size:12px;color:#cfc5d1;margin:6px 4px 0}
+.cmp{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:18px;max-width:1100px;margin-top:14px}
+.cmp .card{background:#26242a;border:1px solid #3d3a42;border-radius:12px;padding:14px}
+.cmp .card h4{margin:0 0 4px;font-size:14px}.cmp .card p{font-size:13px;color:#cfc5d1;margin:0 0 12px}
+.mini{border-radius:22px;overflow:hidden}
+.mini .screen{height:auto;border-radius:22px}
+.mini .bp{padding-bottom:16px}
+.split{display:inline-flex}.split .tape:first-child{border-radius:6px 0 0 10px;padding-right:12px}.split .tape:last-child{border-radius:0 6px 10px 0;border-left:1px solid rgba(255,255,255,.18);padding:0 9px}
+</style>
+<style>
+.strip.b{grid-template-columns:48px minmax(0,1fr)}
+.strip .acts{grid-column:1/-1;display:flex;gap:8px;margin-top:4px}
+.strip .acts .tape,.strip .acts .chip{flex:1;justify-content:center;min-height:44px}
+.strip .acts.col{flex-direction:column}
+.strip .acts.in{grid-column:auto;margin:0;gap:6px}.strip .acts.in .tape,.strip .acts.in .chip{flex:none}
+.chip.sm{padding:0 10px;min-height:40px}.chip.sm svg{width:18px;height:18px}
+.tape.sp .mk,.fpill .mk{width:18px;height:18px;flex:none}
+.sticky .tape.sp{flex:1;justify-content:center;min-height:44px}
+.grip.ext svg{width:18px;height:18px}
+.scrim{position:absolute;inset:0;background:rgba(20,16,24,.42);z-index:8}
+.sheet.ask{padding:26px 22px 46px}
+.sheet .shh{margin:0 0 6px;font:750 1.35em/1.2 -apple-system,sans-serif;color:var(--text)}
+.sheet .sl{margin:0 0 18px;font-size:.9em;color:var(--smoke)}
+.fpill{display:flex;align-items:center;justify-content:center;gap:9px;min-height:52px;margin-top:10px;border-radius:999px;font:650 1em -apple-system,sans-serif;color:#1c1a1e;background:#f3eee6;border:1px solid rgba(50,44,50,.16)}
+.fpill.em{background:#e8dfd0}
+.phone.dark .fpill{background:#efe9df}
+.sheet .cancel{text-align:center;font-weight:600;margin:16px 0 0;color:var(--text)}
+.alert{position:absolute;z-index:9;left:50%;top:44%;transform:translate(-50%,-50%);width:270px;border-radius:14px;background:rgba(242,242,247,.96);color:#000;text-align:center;overflow:hidden;font-family:-apple-system,sans-serif}
+.alert b{display:block;padding:18px 16px 2px;font-size:15px;line-height:1.3}
+.alert p{margin:4px 16px 16px;font-size:12.5px;line-height:1.35}
+.alert .ab{display:grid;grid-template-columns:1fr 1fr;border-top:.5px solid rgba(60,60,67,.3)}
+.alert .ab span{padding:11px 0;color:#007aff;font-size:16px}.alert .ab span+span{border-left:.5px solid rgba(60,60,67,.3)}
+.toast{position:absolute;z-index:9;left:50%;width:max-content;transform:translateX(-50%);bottom:250px;display:flex;align-items:center;gap:8px;max-width:330px;padding:10px 16px;border-radius:999px;background:rgba(28,26,32,.92);color:#fff;font:600 .82em -apple-system,sans-serif;box-shadow:0 10px 30px rgba(0,0,0,.3)}
+.toast svg{width:18px;height:18px;flex:none;color:#a7d8b4}
+.srow{display:grid;grid-template-columns:30px minmax(0,1fr) 16px;gap:12px;align-items:center;min-height:56px;padding:6px 14px}
+.srow+.srow{border-top:1px solid var(--hair)}
+.srow strong{display:block;font-weight:500;font-size:.95em}.srow small{display:block;color:var(--muted);font-size:.78em}
+.srow .chev{width:14px;height:14px;color:var(--muted)}
+.itile{width:30px;height:30px;border-radius:7px;display:grid;place-items:center;background:#d39b3e;color:#fff}.itile.g{background:#709778}.itile svg{width:16px;height:16px}
+.pop .tick{color:var(--plum);font-weight:700}
+</style>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="cassette" viewBox="0 0 200 128">
+    <rect class="cs-case" x="1" y="1" width="198" height="126" rx="9"/><rect class="cs-edge" x="3" y="3" width="194" height="122" rx="7"/>
+    <rect class="cs-stock" x="14" y="12" width="172" height="73" rx="5"/><path class="cs-rule" d="M22 31h156"/>
+    <path fill="#c9687f" d="M14 39h172v5H14z"/><path fill="#d18a65" d="M14 44h172v5H14z"/><path fill="#d2c76f" d="M14 49h172v5H14z"/><path fill="#709778" d="M14 54h172v5H14z"/><path fill="#688fa8" d="M14 59h172v5H14z"/>
+    <rect class="cs-dark" x="42" y="42" width="116" height="39" rx="7"/><rect class="cs-band" x="72" y="55" width="56" height="12" rx="2"/>
+    <g transform="translate(61 61)"><g class="cs-hub"><circle class="cs-ring" r="16"/><g class="cs-tooth"><rect x="-3" y="-15" width="6" height="6" rx="1"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(45)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(90)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(135)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(180)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(225)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(270)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(315)"/></g><circle class="cs-hole" r="5"/></g></g>
+    <g transform="translate(139 61)"><g class="cs-hub"><circle class="cs-ring" r="16"/><g class="cs-tooth"><rect x="-3" y="-15" width="6" height="6" rx="1"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(45)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(90)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(135)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(180)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(225)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(270)"/><rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(315)"/></g><circle class="cs-hole" r="5"/></g></g>
+    <path class="cs-dark" d="M48 89h104l12 30H36z"/><circle class="cs-guide" cx="58" cy="105" r="6"/><circle class="cs-guide" cx="142" cy="105" r="6"/>
+    <rect class="cs-metal" x="75" y="100" width="8" height="13" rx="2"/><rect class="cs-metal" x="117" y="100" width="8" height="13" rx="2"/>
+    <circle class="cs-metal" cx="100" cy="108" r="4"/><circle class="cs-metal" cx="9" cy="9" r="3"/><circle class="cs-metal" cx="191" cy="9" r="3"/><circle class="cs-metal" cx="9" cy="119" r="3"/><circle class="cs-metal" cx="191" cy="119" r="3"/>
+  </symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5M8 9l4-4 4 4"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></symbol>
+  <symbol id="i-rw" viewBox="0 0 24 24"><path d="M20 6l-8 6 8 6zM12 6l-8 6 8 6z"/></symbol>
+  <symbol id="i-ff" viewBox="0 0 24 24"><path d="m4 6 8 6-8 6zM12 6l8 6-8 6z"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9.5 5 7 7-7 7"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7.5A1.5 1.5 0 0 0 6 4.5v15A1.5 1.5 0 0 0 7.5 21h9a1.5 1.5 0 0 0 1.5-1.5V7z"/><path d="M14 3v4h4"/></symbol>
+  <symbol id="i-sync" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 8.2A7 7 0 0 1 18.4 6L20 8M4 16l1.6 2A7 7 0 0 0 18 15.8"/></symbol>
+  <symbol id="i-err" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v6M12 17h.01"/></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="m3.5 10 8.5-7 8.5 7v10.5h-6v-6h-5v6h-6z"/></symbol>
+  <symbol id="i-tape" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="1.5"/><circle cx="8.5" cy="12" r="2.2"/><circle cx="15.5" cy="12" r="2.2"/><path d="M8.5 9.8h7"/></symbol>
+  <symbol id="i-library" viewBox="0 0 24 24"><path d="M4 5v14M9 5v14M14 6l5 13"/></symbol>
+  <symbol id="i-person" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 19.5a7 7 0 0 1 14 0"/></symbol>
+  <symbol id="i-memory" viewBox="0 0 24 24"><path d="M12 3.5a5 5 0 0 1 5 5v1.2a3.5 3.5 0 0 1 .5 6.8V19a1.5 1.5 0 0 1-1.5 1.5H8A1.5 1.5 0 0 1 6.5 19v-2.5a3.5 3.5 0 0 1 .5-6.8V8.5a5 5 0 0 1 5-5z"/><path d="M9.5 20.5V17M14.5 20.5V17"/></symbol>
+  <symbol id="i-ear" viewBox="0 0 24 24"><path d="M6.5 10a5.5 5.5 0 0 1 11 0c0 3-2.5 3.5-2.5 6a2.5 2.5 0 0 1-5 0"/><path d="M9.5 10a2.5 2.5 0 0 1 5 0c0 1.5-1.5 2-1.5 3.5"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3.5 13.8 9l5.7 1.8-5.7 1.8L12 18.2l-1.8-5.6L4.5 10.8 10.2 9z"/></symbol>
+  <symbol id="i-apple" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M16.71 12.74c.02 2.15 1.89 2.87 1.91 2.88-.02.05-.3 1.02-.98 2.03-.59.87-1.21 1.73-2.18 1.75-.95.02-1.26-.57-2.35-.57s-1.43.55-2.33.59c-.94.03-1.65-.94-2.25-1.8-1.22-1.77-2.15-5-0.9-7.18a3.5 3.5 0 0 1 2.98-1.81c.93-.02 1.81.63 2.35.63.54 0 1.56-.78 2.63-.66.45.02 1.71.18 2.52 1.37-.07.04-1.5.88-1.4 2.77ZM14.89 7.47c.49-.6.83-1.43.74-2.26-.72.03-1.59.48-2.1 1.08-.46.53-.86 1.38-.75 2.19.8.06 1.62-.41 2.11-1.01Z"/></symbol>
+  <symbol id="m-google" viewBox="0 0 24 24"><path fill="#4285F4" d="M21.6 12.23c0-.71-.06-1.4-.18-2.06H12v3.89h5.38a4.6 4.6 0 0 1-2 3.02v2.52h3.24c1.9-1.74 2.98-4.31 2.98-7.37Z"/><path fill="#34A853" d="M12 22c2.7 0 4.97-.9 6.62-2.4l-3.24-2.52c-.9.6-2.05.96-3.38.96-2.61 0-4.82-1.76-5.61-4.13H3.04v2.6A10 10 0 0 0 12 22Z"/><path fill="#FBBC05" d="M6.39 13.91A6 6 0 0 1 6.08 12c0-.66.11-1.3.31-1.91v-2.6H3.04A10 10 0 0 0 2 12c0 1.61.39 3.14 1.04 4.51l3.35-2.6Z"/><path fill="#EA4335" d="M12 5.96c1.47 0 2.79.51 3.83 1.5l2.87-2.88A9.64 9.64 0 0 0 12 2a10 10 0 0 0-8.96 5.49l3.35 2.6C7.18 7.72 9.39 5.96 12 5.96Z"/></symbol>
+  <symbol id="m-am" viewBox="0 0 24 24"><rect width="24" height="24" rx="5.5" fill="#fa2d48"/><path fill="#fff" d="M16.4 5.1 10.1 6.4c-.4.1-.7.4-.7.8v7.6a2.4 2.4 0 1 0 1.3 2.1V10l5.3-1.1v4.4a2.4 2.4 0 1 0 1.3 2.1V5.7c0-.4-.4-.7-.9-.6Z"/></symbol>
+  <symbol id="m-sp" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#1ed760"/><path d="M6.4 9.3c3.8-1.1 8-.8 11.2 1M7 12.5c3.1-.9 6.4-.6 9.3.9M7.6 15.5c2.5-.7 5-.5 7.3.7" fill="none" stroke="#000" stroke-width="1.7" stroke-linecap="round"/></symbol>
+  <symbol id="g-ok" viewBox="0 0 24 24"><path d="M8 3h8l5 5v8l-5 5H8l-5-5V8Z" fill="currentColor" fill-opacity=".13"/><path d="M13 3H8L3 8v8l5 5h8l5-5v-3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="m7.5 11.5 4 4L21 5" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="18.5" cy="12" r="1.6" fill="currentColor"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12.5-7.5z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h7"/><path d="M17 15v6l4-3z" fill="currentColor"/></symbol>
+  <symbol id="i-shape" viewBox="0 0 24 24"><path d="M3 18c4 0 5-12 9-12s5 12 9 12"/></symbol>
+  <symbol id="i-hist" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5"/><path d="M4 4v4.5h4.5M12 8v4.5l3 2"/></symbol>
+  <symbol id="i-pen" viewBox="0 0 24 24"><path d="M5 19l1-4 10-10 3 3-10 10z"/></symbol>
+  <symbol id="i-arch" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="4" rx="1"/><path d="M5 8.5v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-10M10 12.5h4"/></symbol>
+  <symbol id="i-am" viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></symbol>
+  <symbol id="i-pl" viewBox="0 0 24 24"><path d="M4 6h12M4 11h12M4 16h7"/><path d="M18 13v7M14.5 16.5h7"/></symbol>
+  <symbol id="i-chevd" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+</svg>
+<main>
+<p class="kicker">Native · iOS · board for approval · 9 November 2026</p>
+<h1>One platform, fixed mix actions</h1>
+<p class="note">Answers a TestFlight recording from 9 November: a listener made a mix and couldn't play it. Play failed three times with a vague Apple Music error, and the arrow menu renamed and hid buttons as they tried things. Spec: <code>docs/superpowers/specs/2026-11-09-one-platform-play-design.md</code>. Everything else in the <a href="approved/2026-11-03-mix-conversation-redesign.md">3 November approval</a> stays. Names and songs are made up.</p>
+<div class="callout"><strong>What this board changes</strong>
+<ol class="tight">
+<li><b>Ask once where they listen.</b> If we don't already know, a sheet asks Apple Music or Spotify the first time the app opens after first run. Anyone who picked a service at sign-up never sees it.</li>
+<li><b>No arrow.</b> Split Play goes away. The bar is fixed by platform and is the same in the conversation and on the tape.</li>
+<li><b>Apple Music: Play + Create playlist.</b> Play asks for Apple Music access on the tap if needed. If Mixtape's player still can't start, the mix plays in the Music app instead.</li>
+<li><b>Spotify: Create playlist only.</b> No Play. "Play on Spotify" was really making a playlist through TuneMyMusic, so the button now says that.</li>
+<li><b>You → Listen on</b> has two choices, Apple Music or Spotify.</li>
+</ol></div>
+<p class="note"><b>Supersedes</b> the 3 November split Play (winner B) and the 3 November "Play on Spotify" label. Covers iOS, light and dark, default and largest text. Web is out of scope.</p>
+
+<h2>1 · Ask once</h2><p class="note">A sheet over Home, the first time the shell appears after first run, only when nothing tells us the platform. It has two equal answers, no grab handle, and the scrim doesn't close it, because the answer decides every mix's buttons. The answer is saved on the device. Apple Music is listed first because it is the one platform Mixtape can play.</p><div class="frames">
+<figure class="frame"><div class="phone "><div class="screen"><div class="statusbar"><span>4:15</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div><div class="nav"><span class="ttl" style="font:800 1.55em -apple-system,sans-serif;padding-left:12px">Home</span><span class="gbtn glass"><svg class="ico"><use href="#i-person"/></svg></span></div>
+  <div class="lyr" style="justify-content:flex-start;padding-top:20px"><p class="l-dj past">What are we listening to?</p></div>
+  <div class="bp"><div class="crow"><span class="plus"><svg class="ico"><use href="#i-plus"/></svg></span><div class="composer"><i class="stripe"></i><span class="field">A Sunday cook-up, Afro and slow jams</span><span class="mic"><svg class="ico"><use href="#i-mic"/></svg></span><span></span></div></div></div><div class="scrim"></div><div class="sheet ask">
+    <h3 class="shh">Where do you listen?</h3>
+    <p class="sl">Your mixes play or save there. You can change it any time in You.</p>
+    <span class="fpill"><svg class="mk"><use href="#m-am"/></svg>Apple Music</span>
+    <span class="fpill"><svg class="mk"><use href="#m-sp"/></svg>Spotify</span>
+  </div><div class="homebar"><i></i></div></div></div><figcaption><b>Where do you listen? <span class="rec">Recommended</span></b>The same sheet that today shows on the first Play, moved to app open. VoiceOver reads the headline, then "Apple Music, button", "Spotify, button". Focus starts on the headline.</figcaption></figure>
+<figure class="frame"><div class="phone dark"><div class="screen"><div class="statusbar"><span>4:15</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div><div class="nav"><span class="ttl" style="font:800 1.55em -apple-system,sans-serif;padding-left:12px">Home</span><span class="gbtn glass"><svg class="ico"><use href="#i-person"/></svg></span></div>
+  <div class="lyr" style="justify-content:flex-start;padding-top:20px"><p class="l-dj past">What are we listening to?</p></div>
+  <div class="bp"><div class="crow"><span class="plus"><svg class="ico"><use href="#i-plus"/></svg></span><div class="composer"><i class="stripe"></i><span class="field">A Sunday cook-up, Afro and slow jams</span><span class="mic"><svg class="ico"><use href="#i-mic"/></svg></span><span></span></div></div></div><div class="scrim"></div><div class="sheet ask">
+    <h3 class="shh">Where do you listen?</h3>
+    <p class="sl">Your mixes play or save there. You can change it any time in You.</p>
+    <span class="fpill"><svg class="mk"><use href="#m-am"/></svg>Apple Music</span>
+    <span class="fpill"><svg class="mk"><use href="#m-sp"/></svg>Spotify</span>
+  </div><div class="homebar"><i></i></div></div></div><figcaption><b>Dark</b>Same sheet in dark mode.</figcaption></figure>
+</div>
+<h2>2 · Apple Music listener</h2><p class="note">Play and Create playlist, side by side, in the strip and on the tape. Nothing on the bar changes except Play becoming Playing while Mixtape's player is on this mix. To give both buttons room, the strip puts them on their own row under the title (A). Squeezing them beside the title (B) cuts most mix names to a few letters.</p><div class="frames">
+<figure class="frame"><div class="phone "><div class="screen"><div class="statusbar"><span>4:15</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div><div class="nav"><span class="gbtn glass"><svg class="ico"><use href="#i-back"/></svg></span><span class="ttl">Smooth Cruise Through Lagos</span><span class="gbtn glass"><svg class="ico"><use href="#i-more"/></svg></span></div><div class="lyr">
+    <p class="l-me past">Driving to Lekki with Tolu, 45 minutes. Mellow, Afro side mainstream.</p>
+    <p class="l-dj">A smooth 45 minutes for you and Tolu: Asake and Tems up top, slower rap cuts for the quiet stretch.</p>
+    <div class="vmark"><span class="cs" style="--case:#617f9c"><svg><use href="#cassette"/></svg></span><b>Version 1</b><span>13 songs · current</span></div>
+  </div><div class="bp"><div class="strip b"><span class="cs" style="--case:#617f9c"><svg><use href="#cassette"/></svg></span><div><strong>Smooth Cruise Through Lagos</strong><small>Version 1 · 13 songs</small></div><div class="acts"><span class="tape play"><svg class="ico"><use href="#i-play"/></svg>Play</span><span class="chip"><span class="hole"></span>Create playlist</span></div></div><div class="crow"><span class="plus"><svg class="ico"><use href="#i-plus"/></svg></span><div class="composer"><i class="stripe"></i><span class="field">Ask for a change…</span><span class="mic"><svg class="ico"><use href="#i-mic"/></svg></span><span></span></div></div></div><div class="homebar"><i></i></div></div></div><figcaption><b>A · Strip with an actions row <span class="rec">Recommended</span></b>The title gets the full width; the actions sit under it, the same pair as the tape bar. The panel is about 52 pt taller than today. VoiceOver: "Smooth Cruise Through Lagos, version 1, 13 songs", then "Play, button", "Create playlist, button".</figcaption></figure>
+<figure class="frame"><div class="phone "><div class="screen"><div class="statusbar"><span>4:15</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div><div class="nav"><span class="gbtn glass"><svg class="ico"><use href="#i-back"/></svg></span><span class="ttl">Smooth Cruise Through Lagos</span><span class="gbtn glass"><svg class="ico"><use href="#i-more"/></svg></span></div><div class="lyr">
+    <p class="l-me past">Driving to Lekki with Tolu, 45 minutes. Mellow, Afro side mainstream.</p>
+    <p class="l-dj">A smooth 45 minutes for you and Tolu: Asake and Tems up top, slower rap cuts for the quiet stretch.</p>
+    <div class="vmark"><span class="cs" style="--case:#617f9c"><svg><use href="#cassette"/></svg></span><b>Version 1</b><span>13 songs · current</span></div>
+  </div><div class="bp"><div class="strip"><span class="cs" style="--case:#617f9c"><svg><use href="#cassette"/></svg></span><div><strong>Smooth Cruise Through Lagos</strong><small>Version 1 · 13 songs</small></div><span class="acts in"><span class="tape play"><svg class="ico"><use href="#i-play"/></svg>Play</span><span class="chip sm"><svg class="ico"><use href="#i-pl"/></svg></span></span></div><div class="crow"><span class="plus"><svg class="ico"><use href="#i-plus"/></svg></span><div class="composer"><i class="stripe"></i><span class="field">Ask for a change…</span><span class="mic"><svg class="ico"><use href="#i-mic"/></svg></span><span></span></div></div></div><div class="homebar"><i></i></div></div></div><figcaption><b>B · Inline, icon-only playlist</b>Keeps today's height, but Create playlist becomes an unlabeled icon. That kind of ambiguity is what the recording showed going wrong. Not recommended.</figcaption></figure>
+<figure class="frame"><div class="phone "><div class="screen"><div class="statusbar"><span>4:15</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div><div class="nav"><span class="gbtn glass"><svg class="ico"><use href="#i-back"/></svg></span><span class="ttl c hide">Smooth Cruise Through Lagos</span><span class="gbtn glass"><svg class="ico"><use href="#i-more"/></svg></span></div><div class="thead"><span class="cs" style="--case:#617f9c"><svg><use href="#cassette"/></svg></span><h1>Smooth Cruise Through Lagos</h1><p>13 songs · 46 min · version 1</p></div><div class="tlist"><div class="trow"><span class="no">1</span><span class="art a1"></span><span><strong>Vibe Out</strong><small>Tems</small></span><span class="grip"><i></i></span></div><div class="trow"><span class="no">2</span><span class="art a2"></span><span><strong>Tested, Approved &amp; Trusted</strong><small>Burna Boy</small></span><span class="grip"><i></i></span></div><div class="trow"><span class="no">3</span><span class="art a1"></span><span><strong>Crazy Tings</strong><small>Tems</small></span><span class="grip"><i></i></span></div><div class="trow"><span class="no">4</span><span class="art a3"></span><span><strong>Terminator</strong><small>Asake</small></span><span class="grip"><i></i></span></div><div class="trow"><span class="no">5</span><span class="art a3"></span><span><strong>Lonely at the Top</strong><small>Asake</small></span><span class="grip"><i></i></span></div><div class="trow"><span class="no">6</span><span class="art a5"></span><span><strong>Free Mind</strong><small>Tems</small></span><span class="grip"><i></i></span></div></div><div class="sticky"><span class="tape play"><svg class="ico"><use href="#i-play"/></svg>Play</span><span class="chip"><span class="hole"></span>Create playlist</span></div><div class="homebar"><i></i></div></div></div><figcaption><b>Tape</b>The tape bar keeps today's layout without the arrow. Play fills the left, Create playlist the right.</figcaption></figure>
+<figure class="frame"><div class="phone "><div class="screen"><div class="statusbar"><span>4:15</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div><div class="nav"><span class="gbtn glass"><svg class="ico"><use href="#i-back"/></svg></span><span class="ttl c hide">Smooth Cruise Through Lagos</span><span class="gbtn glass"><svg class="ico"><use href="#i-more"/></svg></span></div><div class="thead"><span class="cs" style="--case:#617f9c"><svg><use href="#cassette"/></svg></span><h1>Smooth Cruise Through Lagos</h1><p>13 songs · 46 min · version 1</p></div><div class="tlist"><div class="trow"><span class="no">1</span><span class="art a1"></span><span><strong>Vibe Out</strong><small>Tems</small></span><span class="grip"><i></i></span></div><div class="trow"><span class="no">2</span><span class="art a2"></span><span><strong>Tested, Approved &amp; Trusted</strong><small>Burna Boy</small></span><span class="grip"><i></i></span></div><div class="trow"><span class="no">3</span><span class="art a1"></span><span><strong>Crazy Tings</strong><small>Tems</small></span><span class="grip"><i></i></span></div><div class="trow"><span class="no">4</span><span class="art a3"></span><span><strong>Terminator</strong><small>Asake</small></span><span class="grip"><i></i></span></div><div class="trow"><span class="no">5</span><span class="art a3"></span><span><strong>Lonely at the Top</strong><small>Asake</small></span><span class="grip"><i></i></span></div><div class="trow"><span class="no">6</span><span class="art a5"></span><span><strong>Free Mind</strong><small>Tems</small></span><span class="grip"><i></i></span></div></div><div class="sticky"><span class="tape play"><svg class="ico"><use href="#i-play"/></svg>Playing<i class="meter"></i></span><span class="chip"><span class="hole"></span>Create playlist</span></div><div class="homebar"><i></i></div></div></div><figcaption><b>Playing</b>While Mixtape's player is on this mix. Tapping opens Now Playing, as today. The prism meter is the existing one. VoiceOver: "Playing, button, opens Now Playing".</figcaption></figure>
+<figure class="frame"><div class="phone dark"><div class="screen"><div class="statusbar"><span>4:15</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div><div class="nav"><span class="gbtn glass"><svg class="ico"><use href="#i-back"/></svg></span><span class="ttl">Smooth Cruise Through Lagos</span><span class="gbtn glass"><svg class="ico"><use href="#i-more"/></svg></span></div><div class="lyr">
+    <p class="l-me past">Driving to Lekki with Tolu, 45 minutes. Mellow, Afro side mainstream.</p>
+    <p class="l-dj">A smooth 45 minutes for you and Tolu: Asake and Tems up top, slower rap cuts for the quiet stretch.</p>
+    <div class="vmark"><span class="cs" style="--case:#617f9c"><svg><use href="#cassette"/></svg></span><b>Version 1</b><span>13 songs · current</span></div>
+  </div><div class="bp"><div class="strip b"><span class="cs" style="--case:#617f9c"><svg><use href="#cassette"/></svg></span><div><strong>Smooth Cruise Through Lagos</strong><small>Version 1 · 13 songs</small></div><div class="acts"><span class="tape play"><svg class="ico"><use href="#i-play"/></svg>Play</span><span class="chip"><span class="hole"></span>Create playlist</span></div></div><div class="crow"><span class="plus"><svg class="ico"><use href="#i-plus"/></svg></span><div class="composer"><i class="stripe"></i><span class="field">Ask for a change…</span><span class="mic"><svg class="ico"><use href="#i-mic"/></svg></span><span></span></div></div></div><div class="homebar"><i></i></div></div></div><figcaption><b>Dark</b>Strip in dark mode.</figcaption></figure>
+<figure class="frame"><div class="phone large"><div class="screen"><div class="statusbar"><span>4:15</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div><div class="nav"><span class="gbtn glass"><svg class="ico"><use href="#i-back"/></svg></span><span class="ttl">Smooth Cruise Through Lagos</span><span class="gbtn glass"><svg class="ico"><use href="#i-more"/></svg></span></div><div class="lyr"><p class="l-dj">A smooth 45 minutes for you and Tolu.</p></div><div class="bp"><div class="strip b"><span class="cs" style="--case:#617f9c"><svg><use href="#cassette"/></svg></span><div><strong style="white-space:normal">Smooth Cruise Through Lagos</strong><small>Version 1 · 13 songs</small></div><div class="acts col"><span class="tape play"><svg class="ico"><use href="#i-play"/></svg>Play</span><span class="chip"><span class="hole"></span>Create playlist</span></div></div></div><div class="homebar"><i></i></div></div></div><figcaption><b>Largest text</b>At accessibility sizes the two actions stack, each full width, and the title wraps to two lines.</figcaption></figure>
+</div>
+<h2>3 · Play, when something is in the way</h2><p class="note">Play always ends in music or an honest reason. The vague "Check access and your subscription" screen is gone.</p><div class="frames">
+<figure class="frame"><div class="phone "><div class="screen"><div class="statusbar"><span>4:15</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div><div class="nav"><span class="gbtn glass"><svg class="ico"><use href="#i-back"/></svg></span><span class="ttl">Smooth Cruise Through Lagos</span><span class="gbtn glass"><svg class="ico"><use href="#i-more"/></svg></span></div><div class="lyr">
+    <p class="l-me past">Driving to Lekki with Tolu, 45 minutes. Mellow, Afro side mainstream.</p>
+    <p class="l-dj">A smooth 45 minutes for you and Tolu: Asake and Tems up top, slower rap cuts for the quiet stretch.</p>
+    <div class="vmark"><span class="cs" style="--case:#617f9c"><svg><use href="#cassette"/></svg></span><b>Version 1</b><span>13 songs · current</span></div>
+  </div><div class="bp"><div class="strip b"><span class="cs" style="--case:#617f9c"><svg><use href="#cassette"/></svg></span><div><strong>Smooth Cruise Through Lagos</strong><small>Version 1 · 13 songs</small></div><div class="acts"><span class="tape play"><svg class="ico"><use href="#i-play"/></svg>Play</span><span class="chip"><span class="hole"></span>Create playlist</span></div></div><div class="crow"><span class="plus"><svg class="ico"><use href="#i-plus"/></svg></span><div class="composer"><i class="stripe"></i><span class="field">Ask for a change…</span><span class="mic"><svg class="ico"><use href="#i-mic"/></svg></span><span></span></div></div></div><div class="scrim"></div><div class="alert"><b>“mixtape” Would Like to Access Apple Music, Your Music and Video Activity, and Your Media Library</b><p>mixtape reads your music library and play counts to learn your taste and build queues for you.</p><div class="ab"><span>Don’t Allow</span><span><strong>Allow</strong></span></div></div><div class="homebar"><i></i></div></div></div><figcaption><b>First Play: iOS asks for access</b>If Apple Music access was never granted, the tap shows iOS's own prompt (text is the system's plus our usage string). Allow → the mix starts and Now Playing opens.</figcaption></figure>
+<figure class="frame"><div class="phone "><div class="screen"><div class="statusbar"><span>4:15</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div><div class="nav"><span class="gbtn glass"><svg class="ico"><use href="#i-back"/></svg></span><span class="ttl">Smooth Cruise Through Lagos</span><span class="gbtn glass"><svg class="ico"><use href="#i-more"/></svg></span></div><div class="lyr">
+    <p class="l-me past">Driving to Lekki with Tolu, 45 minutes. Mellow, Afro side mainstream.</p>
+    <p class="l-dj">A smooth 45 minutes for you and Tolu: Asake and Tems up top, slower rap cuts for the quiet stretch.</p>
+    <div class="vmark"><span class="cs" style="--case:#617f9c"><svg><use href="#cassette"/></svg></span><b>Version 1</b><span>13 songs · current</span></div>
+  </div><div class="bp"><div class="strip b"><span class="cs" style="--case:#617f9c"><svg><use href="#cassette"/></svg></span><div><strong>Smooth Cruise Through Lagos</strong><small>Version 1 · 13 songs</small></div><div class="acts"><span class="tape play"><svg class="ico"><use href="#i-play"/></svg>Play</span><span class="chip"><span class="hole"></span>Create playlist</span></div></div><div class="crow"><span class="plus"><svg class="ico"><use href="#i-plus"/></svg></span><div class="composer"><i class="stripe"></i><span class="field">Ask for a change…</span><span class="mic"><svg class="ico"><use href="#i-mic"/></svg></span><span></span></div></div></div><div class="toast"><svg class="ico"><use href="#g-ok"/></svg>Playing in Apple Music</div><div class="homebar"><i></i></div></div></div><figcaption><b>Fallback to the Music app</b>Access denied, or Mixtape's player can't start a song: the mix goes to the Music app instead (the path that worked in the recording) and the strip doesn't move. Announced as "Playing in Apple Music". If some songs have no match, the existing count shows: "Playing in Apple Music · 2 songs skipped (not in Apple Music)".</figcaption></figure>
+<figure class="frame"><div class="phone "><div class="screen"><div class="statusbar"><span>4:15</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div><div class="nav"><span class="gbtn glass"><svg class="ico"><use href="#i-back"/></svg></span><span class="ttl">Smooth Cruise Through Lagos</span><span class="gbtn glass"><svg class="ico"><use href="#i-more"/></svg></span></div><div class="lyr">
+    <p class="l-me past">Driving to Lekki with Tolu, 45 minutes. Mellow, Afro side mainstream.</p>
+    <p class="l-dj">A smooth 45 minutes for you and Tolu: Asake and Tems up top, slower rap cuts for the quiet stretch.</p>
+    <div class="vmark"><span class="cs" style="--case:#617f9c"><svg><use href="#cassette"/></svg></span><b>Version 1</b><span>13 songs · current</span></div>
+  </div><div class="bp"><div class="strip b"><span class="cs" style="--case:#617f9c"><svg><use href="#cassette"/></svg></span><div><strong>Smooth Cruise Through Lagos</strong><small>Version 1 · 13 songs</small></div><div class="acts"><span class="tape play"><svg class="ico"><use href="#i-play"/></svg>Play</span><span class="chip"><span class="hole"></span>Create playlist</span></div></div><div class="crow"><span class="plus"><svg class="ico"><use href="#i-plus"/></svg></span><div class="composer"><i class="stripe"></i><span class="field">Ask for a change…</span><span class="mic"><svg class="ico"><use href="#i-mic"/></svg></span><span></span></div></div></div><div class="toast"><svg class="ico"><use href="#i-err"/></svg>Playing needs an Apple Music subscription.</div><div class="homebar"><i></i></div></div></div><figcaption><b>No subscription</b>Only when the Music app can't play it either. The message names the real cause. Play stays where it was, so they can try again after subscribing.</figcaption></figure>
+</div>
+<h2>4 · Spotify listener</h2><p class="note">Mixtape can't play on Spotify, so there is no Play. The one action makes the playlist (copy the songs, open TuneMyMusic), with the Spotify mark so it's clear where it goes. Rows open the song in Spotify.</p><div class="frames">
+<figure class="frame"><div class="phone "><div class="screen"><div class="statusbar"><span>4:15</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div><div class="nav"><span class="gbtn glass"><svg class="ico"><use href="#i-back"/></svg></span><span class="ttl">Smooth Cruise Through Lagos</span><span class="gbtn glass"><svg class="ico"><use href="#i-more"/></svg></span></div><div class="lyr">
+    <p class="l-me past">Driving to Lekki with Tolu, 45 minutes. Mellow, Afro side mainstream.</p>
+    <p class="l-dj">A smooth 45 minutes for you and Tolu: Asake and Tems up top, slower rap cuts for the quiet stretch.</p>
+    <div class="vmark"><span class="cs" style="--case:#617f9c"><svg><use href="#cassette"/></svg></span><b>Version 1</b><span>13 songs · current</span></div>
+  </div><div class="bp"><div class="strip b"><span class="cs" style="--case:#617f9c"><svg><use href="#cassette"/></svg></span><div><strong>Smooth Cruise Through Lagos</strong><small>Version 1 · 13 songs</small></div><div class="acts"><span class="tape play sp"><svg class="mk"><use href="#m-sp"/></svg>Create playlist</span></div></div><div class="crow"><span class="plus"><svg class="ico"><use href="#i-plus"/></svg></span><div class="composer"><i class="stripe"></i><span class="field">Ask for a change…</span><span class="mic"><svg class="ico"><use href="#i-mic"/></svg></span><span></span></div></div></div><div class="homebar"><i></i></div></div></div><figcaption><b>Strip <span class="rec">Recommended</span></b>One full-width action. VoiceOver: "Create Spotify playlist, button".</figcaption></figure>
+<figure class="frame"><div class="phone "><div class="screen"><div class="statusbar"><span>4:15</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div><div class="nav"><span class="gbtn glass"><svg class="ico"><use href="#i-back"/></svg></span><span class="ttl c hide">Smooth Cruise Through Lagos</span><span class="gbtn glass"><svg class="ico"><use href="#i-more"/></svg></span></div><div class="thead"><span class="cs" style="--case:#617f9c"><svg><use href="#cassette"/></svg></span><h1>Smooth Cruise Through Lagos</h1><p>13 songs · 46 min · version 1</p></div><div class="tlist"><div class="trow"><span class="no">1</span><span class="art a1"></span><span><strong>Vibe Out</strong><small>Tems</small></span><span class="grip ext"><svg class="ico"><use href="#i-ext"/></svg></span></div><div class="trow"><span class="no">2</span><span class="art a2"></span><span><strong>Tested, Approved &amp; Trusted</strong><small>Burna Boy</small></span><span class="grip ext"><svg class="ico"><use href="#i-ext"/></svg></span></div><div class="trow"><span class="no">3</span><span class="art a1"></span><span><strong>Crazy Tings</strong><small>Tems</small></span><span class="grip ext"><svg class="ico"><use href="#i-ext"/></svg></span></div><div class="trow"><span class="no">4</span><span class="art a3"></span><span><strong>Terminator</strong><small>Asake</small></span><span class="grip ext"><svg class="ico"><use href="#i-ext"/></svg></span></div><div class="trow"><span class="no">5</span><span class="art a3"></span><span><strong>Lonely at the Top</strong><small>Asake</small></span><span class="grip ext"><svg class="ico"><use href="#i-ext"/></svg></span></div><div class="trow"><span class="no">6</span><span class="art a5"></span><span><strong>Free Mind</strong><small>Tems</small></span><span class="grip ext"><svg class="ico"><use href="#i-ext"/></svg></span></div></div><div class="sticky"><span class="tape play sp"><svg class="mk"><use href="#m-sp"/></svg>Create playlist</span></div><div class="homebar"><i></i></div></div></div><figcaption><b>Tape</b>Same single action. Each row ends with the open-in-Spotify mark (a search when we have no Spotify id), as today for Spotify listeners.</figcaption></figure>
+<figure class="frame"><div class="phone "><div class="screen"><div class="statusbar"><span>4:15</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div><div class="nav"><span class="gbtn glass"><svg class="ico"><use href="#i-back"/></svg></span><span class="ttl c hide">Smooth Cruise Through Lagos</span><span class="gbtn glass"><svg class="ico"><use href="#i-more"/></svg></span></div><div class="thead"><span class="cs" style="--case:#617f9c"><svg><use href="#cassette"/></svg></span><h1>Smooth Cruise Through Lagos</h1><p>13 songs · 46 min · version 1</p></div><div class="tlist"><div class="trow"><span class="no">1</span><span class="art a1"></span><span><strong>Vibe Out</strong><small>Tems</small></span><span class="grip ext"><svg class="ico"><use href="#i-ext"/></svg></span></div><div class="trow"><span class="no">2</span><span class="art a2"></span><span><strong>Tested, Approved &amp; Trusted</strong><small>Burna Boy</small></span><span class="grip ext"><svg class="ico"><use href="#i-ext"/></svg></span></div><div class="trow"><span class="no">3</span><span class="art a1"></span><span><strong>Crazy Tings</strong><small>Tems</small></span><span class="grip ext"><svg class="ico"><use href="#i-ext"/></svg></span></div><div class="trow"><span class="no">4</span><span class="art a3"></span><span><strong>Terminator</strong><small>Asake</small></span><span class="grip ext"><svg class="ico"><use href="#i-ext"/></svg></span></div><div class="trow"><span class="no">5</span><span class="art a3"></span><span><strong>Lonely at the Top</strong><small>Asake</small></span><span class="grip ext"><svg class="ico"><use href="#i-ext"/></svg></span></div><div class="trow"><span class="no">6</span><span class="art a5"></span><span><strong>Free Mind</strong><small>Tems</small></span><span class="grip ext"><svg class="ico"><use href="#i-ext"/></svg></span></div></div><div class="sticky"><span class="tape play sp"><svg class="mk"><use href="#m-sp"/></svg>Create playlist</span></div><div class="scrim"></div><div class="sheet ask"><h3 class="shh">Make it a Spotify playlist</h3><p class="sl">We’ll copy your 13 songs and open TuneMyMusic. Paste them in, connect Spotify, and it makes the playlist for you.</p><span class="fpill em">Copy songs and open TuneMyMusic</span><p class="cancel">Cancel</p></div><div class="homebar"><i></i></div></div></div><figcaption><b>First time on a device</b>The existing explainer, unchanged. Its headline now matches the button. After the first time, a tap copies and opens TuneMyMusic directly, with the toast "Copied 13 songs · paste them into TuneMyMusic".</figcaption></figure>
+<figure class="frame"><div class="phone dark"><div class="screen"><div class="statusbar"><span>4:15</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div><div class="nav"><span class="gbtn glass"><svg class="ico"><use href="#i-back"/></svg></span><span class="ttl">Smooth Cruise Through Lagos</span><span class="gbtn glass"><svg class="ico"><use href="#i-more"/></svg></span></div><div class="lyr">
+    <p class="l-me past">Driving to Lekki with Tolu, 45 minutes. Mellow, Afro side mainstream.</p>
+    <p class="l-dj">A smooth 45 minutes for you and Tolu: Asake and Tems up top, slower rap cuts for the quiet stretch.</p>
+    <div class="vmark"><span class="cs" style="--case:#617f9c"><svg><use href="#cassette"/></svg></span><b>Version 1</b><span>13 songs · current</span></div>
+  </div><div class="bp"><div class="strip b"><span class="cs" style="--case:#617f9c"><svg><use href="#cassette"/></svg></span><div><strong>Smooth Cruise Through Lagos</strong><small>Version 1 · 13 songs</small></div><div class="acts"><span class="tape play sp"><svg class="mk"><use href="#m-sp"/></svg>Create playlist</span></div></div><div class="crow"><span class="plus"><svg class="ico"><use href="#i-plus"/></svg></span><div class="composer"><i class="stripe"></i><span class="field">Ask for a change…</span><span class="mic"><svg class="ico"><use href="#i-mic"/></svg></span><span></span></div></div></div><div class="homebar"><i></i></div></div></div><figcaption><b>Dark</b>Strip in dark mode.</figcaption></figure>
+</div>
+<h2>5 · You → Listen on</h2><p class="note">The row keeps its place and icon. It now has two choices; the "Apple Music, in Mixtape" vs "Apple Music app" split is gone, because Play falls back to the Music app on its own. Changing it changes every mix's bar right away.</p><div class="frames">
+<figure class="frame"><div class="phone "><div class="screen"><div class="statusbar"><span>4:15</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div><div class="nav"><span class="ttl" style="font:800 1.55em -apple-system,sans-serif;padding-left:12px">You</span></div>
+<div style="padding:8px 16px"><div class="group"><div class="srow"><span class="itile"><svg class="ico"><use href="#i-play"/></svg></span><span><strong>Listen on</strong><small>Apple Music</small></span><svg class="ico chev"><use href="#i-chev"/></svg></div><div class="srow"><span class="itile g"><svg class="ico"><use href="#i-ear"/></svg></span><span><strong>Learn from my listening</strong><small>On</small></span><svg class="ico chev"><use href="#i-chev"/></svg></div></div></div>
+<div class="pop" style="left:120px;top:150px"><div>Apple Music<span class="tick">✓</span></div><div>Spotify</div></div><div class="homebar"><i></i></div></div></div><figcaption><b>Setting</b>An anchored popover, per the app-wide menu rule. The current choice carries a tick.</figcaption></figure>
+</div>
+<h2>6 · One-artist mixes (no new UI)</h2><p class="note">Server-side: a request for one artist's own music ("SZA songs", "just Drake", "Cole I can rap to") builds from that artist only, features included. "Like X" or "X vibes" still means similar artists. When we can find fewer songs than asked for, the DJ says so instead of padding with other artists.</p><div class="frames">
+<figure class="frame"><div class="phone "><div class="screen"><div class="statusbar"><span>4:15</span><span class="right"><i class="cell"></i><i class="batt"></i></span></div><div class="nav"><span class="gbtn glass"><svg class="ico"><use href="#i-back"/></svg></span><span class="ttl">Slow Sunday SZA</span><span class="gbtn glass"><svg class="ico"><use href="#i-more"/></svg></span></div><div class="lyr"><p class="l-me">SZA songs for a slow Sunday</p><p class="l-dj">All SZA, 11 songs, slow to start and warmer by the end. That's every one I could confirm that fits the mood. Ask for her upbeat side if you want it longer.</p><div class="vmark"><span class="cs" style="--case:#c9687f"><svg><use href="#cassette"/></svg></span><b>Version 1</b><span>11 songs · current</span></div></div><div class="bp"><div class="strip b"><span class="cs" style="--case:#c9687f"><svg><use href="#cassette"/></svg></span><div><strong>Slow Sunday SZA</strong><small>Version 1 · 11 songs</small></div><div class="acts"><span class="tape play"><svg class="ico"><use href="#i-play"/></svg>Play</span><span class="chip"><span class="hole"></span>Create playlist</span></div></div><div class="crow"><span class="plus"><svg class="ico"><use href="#i-plus"/></svg></span><div class="composer"><i class="stripe"></i><span class="field">Ask for a change…</span><span class="mic"><svg class="ico"><use href="#i-mic"/></svg></span><span></span></div></div></div><div class="homebar"><i></i></div></div></div><figcaption><b>Short, honest, one artist</b>Copy illustrates the tone; the DJ writes its own words.</figcaption></figure>
+</div>
+<h2>Asking you to approve</h2><div class="callout"><ol class="tight">
+<li><b>Strip layout A</b> (actions row under the title) over B (inline, icon-only playlist).</li>
+<li>The <b>ask-once sheet</b> can't be dismissed without an answer.</li>
+<li><b>Spotify listeners get no Play</b>; their one action is "Create playlist" with the Spotify mark.</li>
+<li>Not decided here: web parity (follow-up).</li></ol></div>
+</main></body></html>

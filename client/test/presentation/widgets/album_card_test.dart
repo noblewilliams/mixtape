@@ -9,6 +9,7 @@ import 'package:mixtape/data/dj/dj_models.dart';
 import 'package:mixtape/data/listening/listening_models.dart';
 import 'package:mixtape/data/musickit/musickit_bridge.dart';
 import 'package:mixtape/presentation/providers/library_sync_provider.dart';
+import 'package:mixtape/presentation/providers/music_platform_provider.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/album_card.dart';
@@ -138,6 +139,7 @@ _pump(
   AlbumPick? pick,
   List<AlbumPick> runnersUp = const [],
   String? service = 'apple',
+  MusicPlatform? platform,
   double textScale = 1,
   bool reducedMotion = false,
   Brightness brightness = Brightness.light,
@@ -154,6 +156,9 @@ _pump(
       overrides: [
         musicKitBridgeProvider.overrideWithValue(bridge),
         onboardingProvider.overrideWith(() => _Onboarding(service)),
+        musicPlatformStoreProvider.overrideWithValue(
+          InMemoryMusicPlatformStore(platform),
+        ),
         linkOpenerProvider.overrideWithValue((uri) async {
           opened.add(uri);
           return true;
@@ -416,6 +421,22 @@ void main() {
       );
     },
   );
+
+  testWidgets('the device platform decides, not the sign-up service', (
+    tester,
+  ) async {
+    await _pump(tester, service: 'apple', platform: MusicPlatform.spotify);
+    expect(find.byKey(AlbumCard.playKey), findsNothing);
+    expect(find.byKey(AlbumCard.spotifyKey), findsOneWidget);
+  });
+
+  testWidgets('an Apple Music device keeps Play now whatever sign-up said', (
+    tester,
+  ) async {
+    await _pump(tester, service: 'spotify', platform: MusicPlatform.apple);
+    expect(find.byKey(AlbumCard.playKey), findsOneWidget);
+    expect(find.byKey(AlbumCard.spotifyKey), findsNothing);
+  });
 
   testWidgets('a slash in a name stays inside the Spotify search', (
     tester,

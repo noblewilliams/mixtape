@@ -21,7 +21,7 @@ import 'package:mixtape/data/settings/author_store.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/dj_providers.dart';
 import 'package:mixtape/presentation/providers/library_sync_provider.dart';
-import 'package:mixtape/presentation/providers/play_destination_provider.dart';
+import 'package:mixtape/presentation/providers/music_platform_provider.dart';
 import 'package:mixtape/presentation/providers/playback_provider.dart';
 import 'package:mixtape/presentation/providers/playlist_context_provider.dart';
 import 'package:mixtape/presentation/screens/chat_screen.dart';
@@ -34,6 +34,7 @@ import 'package:mixtape/presentation/widgets/lyric_turn.dart';
 import 'package:mixtape/presentation/widgets/energy_journey.dart';
 import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
 import 'package:mixtape/presentation/widgets/playlist_inspiration.dart';
+import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
 import 'package:mixtape/presentation/widgets/tape_strip.dart';
 import 'package:mixtape/presentation/widgets/version_marker.dart';
 
@@ -286,7 +287,7 @@ ProviderContainer _makeContainer(
   String? accountName,
   AccountApi? account,
   PlaybackController? player,
-  PlayDestinationStore? destinations,
+  MusicPlatformStore? destinations,
 }) {
   // The screen watches the Mixes summaries for the title it shows while the
   // transcript loads, and posts session events on an output.
@@ -302,8 +303,8 @@ ProviderContainer _makeContainer(
       accountNameProvider.overrideWith((ref) async => accountName),
       if (account != null) accountApiProvider.overrideWithValue(account),
       mixEnergyProvider.overrideWith((ref, key) async => <String, dynamic>{}),
-      playDestinationStoreProvider.overrideWithValue(
-        destinations ?? InMemoryPlayDestinationStore(),
+      musicPlatformStoreProvider.overrideWithValue(
+        destinations ?? InMemoryMusicPlatformStore(),
       ),
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
       djApiProvider.overrideWithValue(api),
@@ -351,9 +352,16 @@ Future<void> _pump(
   if (settle) await tester.pumpAndSettle();
 }
 
-/// The mix-action reason keys, mirrored from the screen's private row.
-abstract final class _MixActionsKeys {
-  static const Key appleNeeded = Key('chat-apple-needed-reason');
+/// An app player that cannot start: Play then sends the mix to the Music
+/// app (decision 4 of the one-platform spec).
+PlaybackController _appPlayerRefuses() {
+  // The controller persists its pending listening events; without this the
+  // keychain channel hangs under testWidgets.
+  FlutterSecureStorage.setMockInitialValues({});
+  return PlaybackController(
+    playback.FakeApi(),
+    playback.FakeBridge()..failStart = true,
+  );
 }
 
 void main() {
@@ -745,7 +753,10 @@ void main() {
       );
       api.onSendMessage = (id, text) => completer.future;
       final bridge = FakeBridge();
-      await _pump(tester, _makeContainer(api, bridge: bridge));
+      await _pump(
+        tester,
+        _makeContainer(api, bridge: bridge, player: _appPlayerRefuses()),
+      );
 
       await tester.enterText(find.byKey(const Key('prompt-field')), 'softer');
       await tester.pump();
@@ -753,10 +764,7 @@ void main() {
       await tester.pump();
 
       expect(find.byKey(WorkingCassette.indicatorKey), findsOneWidget);
-      await tester.tap(find.byKey(const Key('chat-play-menu')));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
-      await tester.tap(find.byKey(const Key('chat-send-to-music')));
+      await tester.tap(find.byKey(const Key('chat-play-now')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
       expect(bridge.playedIds, ['apple-0']);
@@ -1095,7 +1103,7 @@ void main() {
       expect(find.text('Start from a playlist'), findsNothing);
     });
 
-    testWidgets('a mix: the strip holds the tape and the only Play', (tester) async {
+    testWidgets('a mix: the strip holds the tape, Play and Create playlist', (tester) async {
       final api = FakeDjApi();
       api.onGetSession = (_) async => SessionDetail(
         session: _session(queueVersion: 2, title: 'Smooth Cruise'),
@@ -1107,11 +1115,24 @@ void main() {
       expect(find.byKey(TapeStrip.stripKey), findsOneWidget);
       expect(find.text('Version 2 · 2 songs'), findsOneWidget);
       expect(find.byKey(const Key('chat-play-now')), findsOneWidget);
-      expect(find.byKey(const Key('chat-play-menu')), findsOneWidget);
-      // Create playlist stays on the tape screen; nothing else competes.
-      expect(find.byKey(const Key('chat-create-playlist')), findsNothing);
+      // The same pair as the tape's bar, on a row under the title; no arrow.
+      expect(find.byKey(const Key('chat-create-playlist')), findsOneWidget);
+      expect(find.byIcon(Icons.keyboard_arrow_down_rounded), findsNothing);
       expect(find.text('Play now'), findsNothing);
       expect(find.text('Play'), findsOneWidget);
+      expect(
+        tester.getRect(find.byKey(const Key('chat-play-now'))).top,
+        greaterThan(
+          tester
+              .getRect(
+                find.descendant(
+                  of: find.byKey(TapeStrip.stripKey),
+                  matching: find.text('Smooth Cruise'),
+                ),
+              )
+              .bottom,
+        ),
+      );
 
       // Once a mix exists Shape leaves the + menu.
       await tester.tap(find.byKey(const Key('chat-plus')));
@@ -1120,7 +1141,7 @@ void main() {
       expect(find.text('Shape the energy'), findsNothing);
     });
 
-    testWidgets('a remembered Play here plays here and opens Now Playing', (tester) async {
+    testWidgets('Play plays here and opens Now Playing', (tester) async {
       final api = FakeDjApi();
       api.onGetSession = (_) async => SessionDetail(
         session: _session(queueVersion: 3),
@@ -1130,13 +1151,15 @@ void main() {
       FlutterSecureStorage.setMockInitialValues({});
       final player = PlaybackController(playback.FakeApi(), playback.FakeBridge());
       addTearDown(player.dispose);
-      // A listener with no known service is asked first (mix_handoff_test).
       await _pump(
         tester,
         _makeContainer(
           api,
           player: player,
-          destinations: InMemoryPlayDestinationStore(PlayDestination.here),
+          // A Play destination stored by an earlier build reads as Apple.
+          destinations: InMemoryMusicPlatformStore(
+            MusicPlatform.fromWire('here'),
+          ),
         ),
       );
 
@@ -1356,75 +1379,101 @@ void main() {
 
 
   group('the handoffs', () {
-    testWidgets('a remembered Apple Music plays there, with the skipped-track copy', (
+    testWidgets(
+      'when the app player cannot start, Play goes to the Music app, with the skipped-track copy',
+      (tester) async {
+        final api = FakeDjApi();
+        api.onGetSession = (_) async => SessionDetail(
+          session: _session(queueVersion: 2),
+          messages: [_msg('m1', 'dj', 'here', queueVersion: 2)],
+          queue: [_track(0), _spotifyTrack(1)], // one has no Apple match
+        );
+        final bridge = FakeBridge();
+        await _pump(
+          tester,
+          _makeContainer(api, bridge: bridge, player: _appPlayerRefuses()),
+        );
+
+        expect(find.text('Play in Music'), findsNothing);
+        await tester.tap(find.byKey(const Key('chat-play-now')));
+        await tester.pumpAndSettle();
+
+        expect(bridge.playedIds, ['apple-0']);
+        expect(
+          find.text(
+            'Playing in Apple Music · 1 song skipped (not in Apple Music)',
+          ),
+          findsOneWidget,
+        );
+      },
+    );
+
+    testWidgets(
+      'Create playlist in the strip opens the conversation\'s save alert',
+      (tester) async {
+        final api = FakeDjApi();
+        api.onGetSession = (_) async => SessionDetail(
+          session: _session(queueVersion: 2, title: 'Smooth Cruise'),
+          messages: [_msg('m1', 'dj', 'here', queueVersion: 2)],
+          queue: [_track(0)],
+        );
+        await _pump(tester, _makeContainer(api));
+
+        await tester.tap(find.byKey(const Key('chat-create-playlist')));
+        await tester.pumpAndSettle();
+        expect(find.text('Create playlist'), findsWidgets);
+        expect(find.byKey(const Key('chat-playlist-name')), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'an Apple Music device keeps Play and Create on a Spotify-only mix, inert, with why',
+      (tester) async {
+        final api = FakeDjApi();
+        api.onGetSession = (_) async => SessionDetail(
+          session: _session(queueVersion: 2),
+          messages: [_msg('m1', 'dj', 'here', queueVersion: 2)],
+          queue: [_spotifyTrack(0), _spotifyTrack(1)],
+        );
+        await _pump(
+          tester,
+          _makeContainer(
+            api,
+            destinations: InMemoryMusicPlatformStore(MusicPlatform.apple),
+          ),
+        );
+
+        expect(find.byKey(const Key('chat-play-now')), findsOneWidget);
+        expect(find.byKey(const Key('chat-create-playlist')), findsOneWidget);
+        expect(find.byKey(const Key('chat-share')), findsNothing);
+        expect(find.text("these tracks aren't in Apple Music"), findsOneWidget);
+      },
+    );
+
+    testWidgets('a Spotify device: one Create playlist, no Play, no reason', (
       tester,
     ) async {
       final api = FakeDjApi();
       api.onGetSession = (_) async => SessionDetail(
         session: _session(queueVersion: 2),
         messages: [_msg('m1', 'dj', 'here', queueVersion: 2)],
-        queue: [_track(0), _spotifyTrack(1)], // one has no Apple match
+        queue: [_track(0), _spotifyTrack(1)],
       );
-      final bridge = FakeBridge();
       await _pump(
         tester,
         _makeContainer(
           api,
-          bridge: bridge,
-          destinations: InMemoryPlayDestinationStore(PlayDestination.appleMusic),
+          destinations: InMemoryMusicPlatformStore(MusicPlatform.spotify),
         ),
       );
 
-      expect(find.text('Play in Music'), findsOneWidget);
-      await tester.tap(find.byKey(const Key('chat-play-now')));
-      await tester.pumpAndSettle();
-
-      expect(bridge.playedIds, ['apple-0']);
-      expect(
-        find.text('Playing in Apple Music · 1 song skipped (not in Apple Music)'),
-        findsOneWidget,
-      );
-    });
-
-    testWidgets('the arrow plays in Apple Music and makes it the default', (
-      tester,
-    ) async {
-      final api = FakeDjApi();
-      api.onGetSession = (_) async => SessionDetail(
-        session: _session(queueVersion: 2),
-        messages: [_msg('m1', 'dj', 'here', queueVersion: 2)],
-        queue: [_track(0)],
-      );
-      final bridge = FakeBridge();
-      final store = InMemoryPlayDestinationStore();
-      await _pump(tester, _makeContainer(api, bridge: bridge, destinations: store));
-
-      await tester.tap(find.byKey(const Key('chat-play-menu')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('chat-send-to-music')));
-      await tester.pumpAndSettle();
-
-      expect(bridge.playedIds, ['apple-0']);
-      expect(await store.read(), PlayDestination.appleMusic);
-      expect(find.text('Play in Music'), findsOneWidget);
-    });
-
-    testWidgets('a Spotify-only mix trades Play and Create for the transfer tool', (
-      tester,
-    ) async {
-      final api = FakeDjApi();
-      api.onGetSession = (_) async => SessionDetail(
-        session: _session(queueVersion: 2),
-        messages: [_msg('m1', 'dj', 'here', queueVersion: 2)],
-        queue: [_spotifyTrack(0), _spotifyTrack(1)],
-      );
-      await _pump(tester, _makeContainer(api));
-
       expect(find.byKey(const Key('chat-play-now')), findsNothing);
       expect(find.byKey(const Key('chat-create-playlist')), findsNothing);
-      expect(find.byKey(const Key('chat-send-to-music')), findsNothing);
-      expect(find.text('Play on Spotify'), findsOneWidget);
-      expect(find.byKey(_MixActionsKeys.appleNeeded), findsOneWidget);
+      expect(
+        tester.widget<TapeButton>(find.byKey(const Key('chat-share'))).label,
+        'Create playlist',
+      );
+      expect(find.text("these tracks aren't in Apple Music"), findsNothing);
     });
 
     testWidgets('a mix Apple Music cannot match keeps the actions and says why', (
@@ -1453,7 +1502,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(bridge.playedIds, isNull);
       expect(find.byType(PlaybackScreen), findsNothing);
-      expect(find.text('Play on Spotify'), findsNothing);
+      expect(find.byKey(const Key('chat-create-playlist')), findsOneWidget);
     });
 
     testWidgets('an arrangement with no reason to refuse shows no reason line', (
@@ -1465,7 +1514,6 @@ void main() {
       await _pump(tester, _makeContainer(api));
 
       expect(find.text("these tracks aren't in Apple Music"), findsNothing);
-      expect(find.byKey(_MixActionsKeys.appleNeeded), findsNothing);
     });
   });
 
@@ -1579,9 +1627,15 @@ void main() {
       );
 
       expect(tester.takeException(), isNull);
-      // The strip stacks: Play takes a full row under the wrapped title.
+      // The strip stacks: Play, then Create playlist, each a full row under
+      // the wrapped title.
       expect(find.byKey(TapeStrip.stripKey), findsOneWidget);
       final play = tester.getRect(find.byKey(const Key('chat-play-now')));
+      final create = tester.getRect(
+        find.byKey(const Key('chat-create-playlist')),
+      );
+      expect(create.top, greaterThanOrEqualTo(play.bottom));
+      expect(create.width, play.width);
       final title = tester.getRect(
         find.descendant(
           of: find.byKey(TapeStrip.stripKey),

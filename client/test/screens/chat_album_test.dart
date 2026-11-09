@@ -212,7 +212,7 @@ void main() {
             _detail(pickState: AlbumPickState(version: 1, pick: first));
       await _pump(tester, _container(api));
 
-      expect(find.byType(MixSplitPlay), findsNothing);
+      expect(find.byType(MixActions), findsNothing);
       expect(find.byKey(TapeStrip.stripKey), findsNothing);
       await tester.tap(find.byKey(const Key('chat-plus')));
       await tester.pumpAndSettle();

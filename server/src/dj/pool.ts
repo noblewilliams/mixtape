@@ -45,6 +45,13 @@ export type BuildPoolOptions = {
   // it for an edit). Absent or 0 means no outside query at all, which is
   // what OUTSIDE_PICKS "off" passes. Personal mode only.
   outsideCap?: number
+  // Artist-only mixes (spec 2026-11-09 one-platform-play, decision 5): an
+  // artist key (dj/artist-keys.ts artistKey). Candidates are then only rows
+  // crediting that artist (tracks.artist_keys, so features count), drawn
+  // from the listener's own rows AND the shared catalogue in either mode;
+  // a catalogue row need not be enriched, only playable. No outside pool:
+  // the catalogue rows already ride in the main query.
+  onlyArtistKey?: string
 }
 
 // Outside picks (spec 2026-10-03 Part C): the share of a mix that may be
@@ -779,14 +786,40 @@ export async function buildPool(
   //    listener's own user_tracks row purely so the familiarity term can see
   //    `seeded`. A corpus-mode listener has no library and no ledger by
   //    construction (resolvePoolMode), so nothing else of theirs is read.
+  //  - artist-only (options.onlyArtistKey, either mode): the shared
+  //    catalogue LEFT JOINed as in corpus mode, cut to rows crediting the
+  //    artist (a GIN probe on artist_keys). A row passes as the listener's
+  //    own (the personal candidate rule) or as a catalogue row with an id a
+  //    player can open: the artist's whole pool is small, and a song Apple
+  //    lists for them is a fair pick before its enrichment lands (unknown
+  //    features score neutrally, as anywhere else). For a personal listener
+  //    that is their own player's id (platformPrefSql as a hard filter, as
+  //    buildOutsidePool uses it), so an Apple listener is never handed a
+  //    Spotify-only row; the recording dedupe below keeps an ISRC twin with
+  //    the right id. A corpus-mode listener has no player on record (the
+  //    preference defaults them to Spotify, and the Apple fill only inserts
+  //    Apple rows), so either id passes, as any enriched row does in corpus
+  //    mode. A personal listener who asked for only their own music
+  //    (allowOutside false) keeps to their own rows.
+  const onlyKey = options.onlyArtistKey
+  const ownOnly = mode === 'personal' && intent.allowOutside === false
   const candidateSource: SQL =
-    mode === 'corpus'
+    mode === 'corpus' || onlyKey !== undefined
       ? sql`tracks t LEFT JOIN user_tracks ut ON ut.track_id = t.id AND ut.user_id = ${userId}`
       : sql`user_tracks ut JOIN tracks t ON t.id = ut.track_id`
   const filters: SQL[] =
-    mode === 'corpus'
-      ? [sql`(f.track_id IS NOT NULL OR tm.track_id IS NOT NULL)`]
-      : [sql`ut.user_id = ${userId}`, PERSONAL_CANDIDATE_RULE]
+    onlyKey !== undefined
+      ? [
+          sql`t.artist_keys @> ARRAY[${onlyKey}]::text[]`,
+          ownOnly
+            ? sql`(ut.track_id IS NOT NULL AND ${PERSONAL_CANDIDATE_RULE})`
+            : mode === 'personal'
+              ? sql`((ut.track_id IS NOT NULL AND ${PERSONAL_CANDIDATE_RULE}) OR ${platformPrefSql(userId)})`
+              : sql`((ut.track_id IS NOT NULL AND ${PERSONAL_CANDIDATE_RULE}) OR t.apple_id IS NOT NULL OR t.spotify_id IS NOT NULL)`,
+        ]
+      : mode === 'corpus'
+        ? [sql`(f.track_id IS NOT NULL OR tm.track_id IS NOT NULL)`]
+        : [sql`ut.user_id = ${userId}`, PERSONAL_CANDIDATE_RULE]
   filters.push(...hardFilters(intent, excludeTrackIds,
     selectedPlaylistId !== null && options.playlistSeed?.excludeSourceTracks === true))
 
@@ -901,7 +934,7 @@ export async function buildPool(
   // still hear "nothing matched" or the empty-library text (dj/loop.ts), not
   // a mix made only of songs they do not have.
   const cap = options.outsideCap ?? 0
-  if (mode !== 'personal' || cap <= 0 || personal.length === 0) return personal
+  if (mode !== 'personal' || cap <= 0 || personal.length === 0 || onlyKey !== undefined) return personal
   const outside = await buildOutsidePool(db, embedding, userId, intent, cap, {
     excludeTrackIds,
     playlistSeed: options.playlistSeed,

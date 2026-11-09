@@ -9,7 +9,8 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mixtape/presentation/providers/play_destination_provider.dart';
+import 'package:mixtape/presentation/providers/music_platform_provider.dart';
+import 'package:mixtape/presentation/widgets/foundation/mixtape_menu.dart';
 import 'package:mixtape/data/auth/account_api.dart';
 import 'package:mixtape/data/auth/google_auth_gateway.dart';
 import 'package:mixtape/data/auth/token_store.dart';
@@ -259,15 +260,15 @@ ProviderContainer _container({
   PlaybackController? player,
   List<DjMemory> memories = const [],
   String? chosenService = 'apple',
-  PlayDestinationStore? destinations,
+  MusicPlatformStore? destinations,
 }) {
   _slot = _ApiSlot(suggestions ?? FakeSuggestionsApi());
   final opened = _opened = <Uri>[];
   final container = ProviderContainer(
     overrides: [
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
-      playDestinationStoreProvider.overrideWithValue(
-        destinations ?? InMemoryPlayDestinationStore(),
+      musicPlatformStoreProvider.overrideWithValue(
+        destinations ?? InMemoryMusicPlatformStore(),
       ),
       authProvider.overrideWith(() => auth ?? _Auth()),
       accountProvider.overrideWith(() => _Accounts(accounts)),
@@ -612,39 +613,69 @@ void main() {
     });
   });
 
-  group('Play mixes on', () {
-    testWidgets('shows where Play goes, and changes it', (tester) async {
-      final store = InMemoryPlayDestinationStore();
-      await _pump(tester, _container(destinations: store));
+  group('Listen on', () {
+    testWidgets('two choices in a popover, ticked, and a change sticks', (
+      tester,
+    ) async {
+      final store = InMemoryMusicPlatformStore();
+      await _pump(tester, _container(destinations: store, chosenService: null));
 
       final row = find.byKey(YouTab.playsOnKey);
       expect(row, findsOneWidget);
-      expect(find.text(YouTab.playsOnTitle), findsOneWidget);
+      expect(YouTab.playsOnTitle, 'Listen on');
+      expect(find.text('Listen on'), findsOneWidget);
       expect(find.text('Not chosen yet'), findsOneWidget);
 
       await tester.tap(row);
       await tester.pumpAndSettle();
-      expect(find.text('Spotify'), findsOneWidget);
-      expect(find.text('Apple Music, in Mixtape'), findsOneWidget);
-      expect(find.text('Apple Music app'), findsOneWidget);
+      final items = tester
+          .widgetList<MixtapeMenuItem<MusicPlatform>>(
+            find.byType(MixtapeMenuItem<MusicPlatform>),
+          )
+          .map((item) => item.action)
+          .toList();
+      expect(items.map((a) => a.label), ['Apple Music', 'Spotify']);
+      expect(items.any((a) => a.isSelected), isFalse);
 
       await tester.tap(find.text('Spotify'));
       await tester.pumpAndSettle();
-      expect(await store.read(), PlayDestination.spotify);
+      expect(await store.read(), MusicPlatform.spotify);
       expect(find.text('Spotify'), findsOneWidget);
       expect(find.text('Not chosen yet'), findsNothing);
+
+      await tester.tap(row);
+      await tester.pumpAndSettle();
+      final ticked = tester
+          .widgetList<MixtapeMenuItem<MusicPlatform>>(
+            find.byType(MixtapeMenuItem<MusicPlatform>),
+          )
+          .map((item) => item.action)
+          .where((a) => a.isSelected)
+          .map((a) => a.label);
+      expect(ticked, ['Spotify']);
     });
 
-    testWidgets('reads the remembered choice', (tester) async {
+    testWidgets('reads a legacy stored destination as Apple Music', (
+      tester,
+    ) async {
       await _pump(
         tester,
         _container(
-          destinations: InMemoryPlayDestinationStore(
-            PlayDestination.appleMusic,
+          chosenService: null,
+          destinations: InMemoryMusicPlatformStore(
+            MusicPlatform.fromWire('here'),
           ),
         ),
       );
-      expect(find.text('Apple Music app'), findsOneWidget);
+      expect(find.text('Apple Music'), findsOneWidget);
+    });
+
+    testWidgets('a service chosen at first run shows as the platform', (
+      tester,
+    ) async {
+      await _pump(tester, _container(chosenService: 'spotify'));
+      expect(find.text('Spotify'), findsOneWidget);
+      expect(find.text('Not chosen yet'), findsNothing);
     });
   });
 

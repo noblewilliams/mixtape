@@ -1,10 +1,11 @@
 import { z } from 'zod'
-import { and, count, desc, eq, gt, lt, inArray } from 'drizzle-orm'
+import { and, count, desc, eq, gt, isNotNull, isNull, lt, inArray, ne, or } from 'drizzle-orm'
 import type { Db } from '../db/types'
 import type { Embedder } from '../enrich/embedder'
 import { djMemories, djMessages, djSessions, funnelEvents, queueTracks, tracks, trackFeatures, mixVersions, userArtistSeeds } from '../db/schema'
 import type { Surface } from '../seeds/contracts'
-import { fillForSeeds, FILL_BUDGET, type FillDeps } from './catalogue-fill'
+import { fillForArtist, fillForSeeds, FILL_BUDGET, type FillDeps, type FillResult } from './catalogue-fill'
+import { artistKey } from './artist-keys'
 import type { LlmClient, LlmComplete, LlmMessage } from './llm'
 import { LlmError } from './llm'
 import {
@@ -148,6 +149,68 @@ export const SHORT_VERIFIED_TEXT =
   "note: only the songs listed below could be confirmed on Apple Music, so this mix is shorter than asked. Tell them " +
   'plainly how many you could confirm, and offer to loosen the request (a broader mood, more artists, another era) ' +
   'for a fuller mix.'
+
+// Artist-only mixes (spec 2026-11-09 one-platform-play, decision 5). A brief
+// about one artist's own music (generate_queue's onlyArtist) is made only of
+// songs crediting that artist, features included, from the listener's own
+// rows and the shared catalogue; fewer than asked is a shorter mix, never
+// padded with anyone else.
+export type OnlyArtist = { name: string; key: string }
+
+// The scope a brief asks for, if any. A second, different artist among the
+// named ones means the brief is not about one artist, whatever the model
+// set: two or more artists is today's mix. "Different" is a different
+// artist key (dj/artist-keys.ts), compared whole: "J Cole" beside "J. Cole"
+// is the same artist, "Drakeo the Ruler" beside "Drake" is another.
+export function resolveOnlyArtist(intent: { onlyArtist?: string; namedArtists?: string[] }): OnlyArtist | undefined {
+  const name = intent.onlyArtist?.trim()
+  if (!name) return undefined
+  const key = artistKey(name)
+  if (key === '') return undefined
+  return namesOtherArtist(intent.namedArtists, key) ? undefined : { name, key }
+}
+
+// Whether any of `names` is an artist other than the one keyed `key`.
+function namesOtherArtist(names: string[] | undefined, key: string): boolean {
+  return (names ?? []).some((n) => {
+    const k = artistKey(n)
+    return k !== '' && k !== key
+  })
+}
+
+// Records which artist-only mix the session holds (dj_sessions.only_artist),
+// or none: written by every generate that lands a queue. Skips a row that
+// already says so, as markNotPersonal does, so no spurious updatedAt.
+async function setSessionOnlyArtist(db: Db, sessionId: string, name: string | null): Promise<void> {
+  await db
+    .update(djSessions)
+    .set({ onlyArtist: name })
+    .where(and(eq(djSessions.id, sessionId), name === null ? isNotNull(djSessions.onlyArtist) : or(isNull(djSessions.onlyArtist), ne(djSessions.onlyArtist, name))))
+}
+
+async function sessionOnlyArtist(db: Db, sessionId: string): Promise<OnlyArtist | undefined> {
+  const [row] = await db.select({ onlyArtist: djSessions.onlyArtist }).from(djSessions).where(eq(djSessions.id, sessionId))
+  return row?.onlyArtist ? resolveOnlyArtist({ onlyArtist: row.onlyArtist }) : undefined
+}
+
+// The tool-result notes for an artist-only mix. Go to the MODEL.
+export function onlyArtistShortNotice(name: string, count: number, asked: number): string {
+  const artist = sanitizeForPrompt(name)
+  return `note: only ${count} ${count === 1 ? 'song' : 'songs'} credited to ${artist} could be found, so this mix is ` +
+    `${count} long instead of the ${asked} asked for, all of it ${artist}. Tell them plainly. Do not offer to fill it ` +
+    'with other artists unless they ask.'
+}
+
+export function onlyArtistNotFoundNotice(name: string): string {
+  const artist = sanitizeForPrompt(name)
+  return `note: no songs credited to ${artist} could be found, so this mix follows the rest of the request without ` +
+    `them. Tell them plainly that you couldn't find ${artist}'s songs, and check you have the right artist.`
+}
+
+export function onlyArtistExhaustedNotice(name: string): string {
+  return `note: no more songs credited to ${sanitizeForPrompt(name)} could be found, so fewer were added than asked. ` +
+    'Tell them plainly. Do not add other artists unless they ask.'
+}
 
 // Prepended to a generate/edit tool result when any pick THIS CALL landed
 // is a song the listener does not own (an outside pick, dj/pool.ts
@@ -598,7 +661,21 @@ type ProposeSpend = { log: ProposeLog; verifyMs: number }
 // into runDjTurn like RenameTracker): FILL_BUDGET is a per-request budget.
 // The proposals ride the same box for the same reason. turnStartedAt is the
 // turn's start on the fill's clock, for ROUND_TWO_CUTOFF_MS.
-type FillTracker = { ran: boolean; log?: FillLog; propose?: ProposeState; blend?: VerifiedProposal[]; spend?: ProposeSpend; turnStartedAt: number }
+// `artistRan` is the artist-only fill's (fillForArtist): at most one per
+// turn as well. `fillSpent` is every fill's subrequests this turn: the seed
+// fill and the artist fill can both run in one turn (an artist not found
+// falls back to today; a second generate names one), and they share one
+// FILL_BUDGET between them.
+type FillTracker = {
+  ran: boolean
+  artistRan?: boolean
+  fillSpent?: number
+  log?: FillLog
+  propose?: ProposeState
+  blend?: VerifiedProposal[]
+  spend?: ProposeSpend
+  turnStartedAt: number
+}
 
 type TurnFill = { tracker: FillTracker; surface: Surface }
 
@@ -610,28 +687,55 @@ type TurnFill = { tracker: FillTracker; surface: Surface }
 // (the never-refuse path spends those subrequests on Apple searches).
 async function fillCatalogue(db: Db, fill: FillDeps, session: DjSessionRef, intent: Intent, turn: TurnFill, enrich: boolean): Promise<void> {
   turn.tracker.ran = true
+  await recordFill(db, session, turn, (budget) => fillForSeeds(db, fill, {
+    userId: session.userId,
+    namedSongs: intent.namedSongs,
+    budget,
+    ...(enrich ? {} : { enrich: false }),
+  }))
+}
+
+// The artist-only fill, once per turn, for a generate or an edit. Never
+// throws, like fillCatalogue.
+async function fillArtistCatalogue(db: Db, fill: FillDeps, session: DjSessionRef, name: string, turn: TurnFill, enrich: boolean): Promise<void> {
+  turn.tracker.artistRan = true
+  await recordFill(db, session, turn, (budget) =>
+    fillForArtist(db, fill, { userId: session.userId, name, budget, ...(enrich ? {} : { enrich: false }) }))
+}
+
+// Runs one fill on what is left of the turn's FILL_BUDGET and writes its
+// counts to the turn log (added to an earlier fill's this turn) and its
+// funnel row. A fill that throws may have spent any part of its allowance
+// before it did, so it is charged all of it.
+async function recordFill(db: Db, session: DjSessionRef, turn: TurnFill, run: (budget: number) => Promise<FillResult>): Promise<void> {
+  const prev = turn.tracker.log && 'inserted' in turn.tracker.log ? turn.tracker.log : undefined
+  const budget = Math.max(0, FILL_BUDGET - (turn.tracker.fillSpent ?? 0))
+  let filled = false
   try {
-    const result = await fillForSeeds(db, fill, {
-      userId: session.userId,
-      namedSongs: intent.namedSongs,
-      budget: FILL_BUDGET,
-      ...(enrich ? {} : { enrich: false }),
-    })
+    let result: FillResult
+    try {
+      result = await run(budget)
+    } catch (e) {
+      turn.tracker.fillSpent = (turn.tracker.fillSpent ?? 0) + budget
+      throw e
+    }
+    turn.tracker.fillSpent = (turn.tracker.fillSpent ?? 0) + result.subrequests
+    filled = result.inserted > 0 || result.enriched > 0
     // Counts first: they live in the log, and a failed funnel insert below
     // must not replace them.
+    const appleError = result.appleError ?? prev?.appleError
     turn.tracker.log = {
-      inserted: result.inserted,
-      enriched: result.enriched,
-      subrequests: result.subrequests,
-      ...(result.appleError ? { appleError: result.appleError } : {}),
-      ...(result.timedOut ? { timedOut: true as const } : {}),
+      inserted: result.inserted + (prev?.inserted ?? 0),
+      enriched: result.enriched + (prev?.enriched ?? 0),
+      subrequests: result.subrequests + (prev?.subrequests ?? 0),
+      ...(appleError ? { appleError } : {}),
+      ...(result.timedOut || prev?.timedOut ? { timedOut: true as const } : {}),
     }
   } catch {
     turn.tracker.log = { error: 'internal' }
     return
   }
-  const log = turn.tracker.log
-  if ('inserted' in log && (log.inserted > 0 || log.enriched > 0)) {
+  if (filled) {
     try {
       // User and surface only; the counts are on the turn's log line.
       await db.insert(funnelEvents).values({ userId: session.userId, type: 'catalogue_filled', surface: turn.surface })
@@ -903,9 +1007,108 @@ async function executeGenerateQueue(
   // already holds (any source, any spelling of the same artist key) is left
   // as it is, so a later turn naming them again adds nothing. Capped at
   // PROMPT_SEEDS_MAX prompt rows per listener.
-  if (intent.namedArtists && intent.namedArtists.length > 0) {
-    await savePromptSeeds(db, session.userId, intent.namedArtists)
+  // The artist-only scope's artist is a seed like any named one.
+  const only = resolveOnlyArtist(parsed.data)
+  if (!only) delete intent.onlyArtist
+  const seedNames = [...(intent.namedArtists ?? []), ...(only ? [only.name] : [])]
+  if (seedNames.length > 0) {
+    await savePromptSeeds(db, session.userId, seedNames)
   }
+  if (only) {
+    const outcome = await executeOnlyArtistQueue(db, deps, session, intent, only, sessionContext, budget, startVersion, turn)
+    if (outcome) return outcome
+    // Nothing credits the artist anywhere, even after the fill: today's mix
+    // for the rest of the brief, and the DJ says it could not find them.
+    // The scope goes with it, so this turn's edits are not artist-only.
+    const { onlyArtist: _only, ...rest } = intent
+    const fallback = await generateFromBrief(db, deps, session, rest, userText, sessionContext, budget, startVersion, turn)
+    if (fallback.queueChanged) await setSessionOnlyArtist(db, session.id, null)
+    return { ...fallback, resultText: `${onlyArtistNotFoundNotice(only.name)}\n${fallback.resultText}` }
+  }
+  const outcome = await generateFromBrief(db, deps, session, intent, userText, sessionContext, budget, startVersion, turn)
+  // A fresh mix that is not artist-only ends the session's scope.
+  if (outcome.queueChanged) await setSessionOnlyArtist(db, session.id, null)
+  return outcome
+}
+
+// The artist-only mix (see OnlyArtist): the artist's pool, filled from Apple
+// first when the fill is wired, curated with the spread rule lifted, at most
+// as long as the pool. Null when the pool is empty, for the caller's
+// fallback. Never proposed (dj/propose.ts): the artist's own catalogue rows
+// are the never-refuse answer here, and a short mix of them is still a mix.
+async function executeOnlyArtistQueue(
+  db: Db,
+  deps: DjDeps,
+  session: DjSessionRef,
+  intent: Intent,
+  only: OnlyArtist,
+  sessionContext: string,
+  budget: CurationBudget,
+  startVersion: number,
+  turn: TurnFill,
+): Promise<GenerateOutcome | null> {
+  const seed = await readPlaylistSeed(db, session.id, session.userId)
+  if (seed.status !== 'none' && seed.status !== 'ready') return { resultText: `playlist inspiration is ${seed.status.replace('_', ' ')}; ask the listener to choose another playlist or clear it. The queue is unchanged.`, queueChanged: false, intent }
+  const resolved = await resolvePoolMode(db, session.userId)
+  // A listener without their own music is scored as the corpus is.
+  const mode: PoolMode = resolved.mode === 'personal' ? 'personal' : 'corpus'
+  if (deps.fill && !turn.tracker.artistRan) {
+    // As for the seed fill: with NEVER_REFUSE on, a listener with nothing
+    // of their own keeps the in-request subrequests free in case the
+    // artist is not found and the proposal path runs instead.
+    const enrich = !(deps.neverRefuse === true && resolved.mode === 'insufficient_seeds')
+    await fillArtistCatalogue(db, deps.fill, session, only.name, turn, enrich)
+  }
+  const selected = seed.status === 'ready' ? { playlistId: seed.playlistId!, excludeSourceTracks: seed.excludeSourceTracks } : undefined
+  const pool = await buildPool(db, deps.embed, session.userId, intent, undefined, { mode, playlistSeed: selected, onlyArtistKey: only.key })
+  if (pool.length === 0) return null
+  const asked = intent.targetCount
+  budget.consume()
+  const picks = await curate(deps.llm, pool, { ...intent, targetCount: Math.min(asked, pool.length) },
+    withPlaylistSeedContext(sessionContext, seed), { onlyArtist: only.name })
+  const version = await replaceQueue(
+    db,
+    session.id,
+    picks.map((p) => ({ trackId: p.trackId, reason: p.reason })),
+    'dj',
+    { queueVersion: startVersion, seedRevision: seed.revision, playlistId: seed.status === 'ready' ? seed.playlistId : null,
+      fingerprint: seed.status === 'ready' ? seed.fingerprint : null },
+    intent.energyArc ?? null,
+  )
+  if (mode === 'corpus') await markNotPersonal(db, session.id)
+  await setSessionOnlyArtist(db, session.id, only.name)
+  const updatedQueue = await getActiveQueue(db, session.id)
+  // Catalogue songs a personal listener does not own are new to them, and
+  // the DJ says which, as for outside picks (with no cap: the artist's
+  // catalogue is the pool here).
+  const newAt = mode === 'personal' ? updatedQueue.flatMap((t, i) => (t.newToYou ? [i] : [])) : []
+  return {
+    resultText: [
+      ...(mode === 'corpus' ? [CORPUS_NOTICE] : []),
+      ...(picks.length < asked ? [onlyArtistShortNotice(only.name, picks.length, asked)] : []),
+      ...(newAt.length > 0 ? [outsidePicksNotice(newAt)] : []),
+      `queue generated: ${picks.length} tracks (now version ${version})`,
+      'Updated queue (positions are 0-based):',
+      formatQueueListing(updatedQueue, deps.outsidePicks === true),
+    ].join('\n'),
+    queueChanged: true,
+    newVersion: version,
+    intent,
+  }
+}
+
+// Today's generate: everything after the brief is parsed and its seeds saved.
+async function generateFromBrief(
+  db: Db,
+  deps: DjDeps,
+  session: DjSessionRef,
+  intent: Intent,
+  userText: string,
+  sessionContext: string,
+  budget: CurationBudget,
+  startVersion: number,
+  turn: TurnFill,
+): Promise<GenerateOutcome> {
   // Resolved fresh before EVERY pool build (here and in executeEditQueue's
   // provider), never cached on the session: a listener's mode changes the
   // moment their import lands or a seed crosses the threshold, and the very
@@ -1027,6 +1230,37 @@ async function executeEditQueue(
   // listener (say, trimming a demo tape) still applies exactly as before.
   const needsPool = ops.some((op) => op.op === 'swap' || op.op === 'extend')
   let poolMode: PoolMode = 'personal'
+
+  // Artist-only scope (see OnlyArtist) for this batch's swaps and extends.
+  // The loop keeps no generate intent across turns (see the provider
+  // comment below), so the scope alone is persisted: the generate that made
+  // an artist-only mix records its artist on the session
+  // (dj_sessions.only_artist) and any other generate clears it. A later
+  // turn's "add more" or "make it longer" then keeps to that artist. The
+  // record is read here, after any generate earlier in this turn: such a
+  // generate rewrites it only when its queue landed (setSessionOnlyArtist
+  // runs beside replaceQueue), so one that landed nothing (no matches, too
+  // few seeds, a playlist inspiration not ready) leaves the standing
+  // queue's scope in force, and one that did sets this turn's. Every
+  // swap and extend INHERITS that scope, with or without an intent of its
+  // own ("swap 3 for something darker" stays that artist), unless:
+  //  - its intent sets onlyArtist itself: that artist instead; or
+  //  - its intent names a different artist ("add some Kendrick", by artist
+  //    key): that op steps outside the scope and is today's edit.
+  // The session's record is unchanged by an edit either way. Rejected:
+  // inferring the scope from a queue that is all one artist, which also
+  // caught a small one-artist library and changed today's behaviour for it.
+  const inherited = needsPool ? await sessionOnlyArtist(db, session.id) : undefined
+  const scopeFor = (opIntent: OpIntent | undefined): OnlyArtist | undefined => {
+    if (opIntent?.onlyArtist) return resolveOnlyArtist(opIntent)
+    if (!inherited || namesOtherArtist(opIntent?.namedArtists, inherited.key)) return undefined
+    return inherited
+  }
+  const anyScoped = ops.some((op) => (op.op === 'swap' || op.op === 'extend') && scopeFor(op.intent) !== undefined)
+  // Scored as executeOnlyArtistQueue scores: personal or corpus.
+  let artistMode: PoolMode = 'personal'
+  const artistShort = new Set<string>()
+  const artistLanded: string[] = []
   const seed = await readPlaylistSeed(db, session.id, session.userId)
   if (needsPool && seed.status !== 'none' && seed.status !== 'ready') {
     return { resultText: `playlist inspiration is ${seed.status.replace('_', ' ')}; ask the listener to choose another playlist or clear it. The queue is unchanged.`, queueChanged: false }
@@ -1039,13 +1273,16 @@ async function executeEditQueue(
   let proposedFill: FillDeps | undefined
   if (needsPool) {
     const resolved = await resolvePoolMode(db, session.userId)
+    // An artist-only op draws on the shared catalogue, so neither gate
+    // below holds it back.
     if (resolved.mode === 'insufficient_seeds') {
-      if (!(deps.neverRefuse === true && deps.fill)) return { resultText: INSUFFICIENT_SEEDS_TEXT, queueChanged: false }
-      proposedFill = deps.fill
+      if (deps.neverRefuse === true && deps.fill) proposedFill = deps.fill
+      else if (!anyScoped) return { resultText: INSUFFICIENT_SEEDS_TEXT, queueChanged: false }
     }
+    artistMode = resolved.mode === 'personal' ? 'personal' : 'corpus'
     // Same gate for a personal listener with nothing the candidate rule
     // admits: checked before applyOps, so no partial application.
-    if (resolved.mode === 'personal' && !(await hasPersonalCandidates(db, session.userId))) {
+    if (resolved.mode === 'personal' && !anyScoped && !(await hasPersonalCandidates(db, session.userId))) {
       return { resultText: EMPTY_LIBRARY_TEXT, queueChanged: false }
     }
     if (resolved.mode !== 'insufficient_seeds') poolMode = resolved.mode
@@ -1116,6 +1353,26 @@ async function executeEditQueue(
     // which this provider has no access to) — an acceptable, unlocked phase-1
     // read, same as everything else this provider touches before phase 2.
     const activeQueue = await getActiveQueue(db, session.id)
+    const scope = scopeFor(opIntent)
+    if (scope) {
+      // Only that artist's songs; fewer than asked adds fewer (a swap with
+      // none left keeps its track), never another artist's.
+      if (deps.fill && !turn.tracker.artistRan) {
+        await fillArtistCatalogue(db, deps.fill, session, scope.name, turn, proposedFill === undefined)
+      }
+      const pool = (await buildPool(db, deps.embed, session.userId, fullIntent, activeQueue.map((t) => t.trackId),
+        { mode: artistMode, playlistSeed: selectedSeed, onlyArtistKey: scope.key }))
+        .filter((t) => !returnedThisBatch.has(t.trackId))
+      if (pool.length < count) artistShort.add(scope.name)
+      if (pool.length === 0) return []
+      budget.consume()
+      const picks = await curate(deps.llm, pool, { ...fullIntent, targetCount: Math.min(count, pool.length) },
+        withPlaylistSeedContext(sessionContext, seed), { onlyArtist: scope.name })
+      if (artistMode === 'corpus' && picks.length > 0) corpusPicksLanded = true
+      for (const p of picks) returnedThisBatch.add(p.trackId)
+      artistLanded.push(...picks.map((p) => p.trackId))
+      return picks.map((p) => ({ trackId: p.trackId, reason: p.reason }))
+    }
     if (proposedFill) {
       // Never the songs in the queue or those taken out of it.
       proposeCtx ??= await proposeContext(db, proposedFill, session, userText, sessionContext)
@@ -1183,11 +1440,16 @@ async function executeEditQueue(
     // the model must describe results from this listing, never assumption.
     const updatedQueue = await getActiveQueue(db, session.id)
     // Only picks that actually landed count (materialize may drop one).
-    const outsideAt = outsidePositions(updatedQueue, new Set(outsideLanded))
+    // An artist-only pick a personal listener does not own is new to them.
+    const artistNew = artistMode === 'personal'
+      ? updatedQueue.filter((t) => t.newToYou && artistLanded.includes(t.trackId)).map((t) => t.trackId)
+      : []
+    const outsideAt = outsidePositions(updatedQueue, new Set([...outsideLanded, ...artistNew]))
     return {
       resultText: [
         ...(proposedPicksLanded ? [PROPOSED_NOTICE] : []),
         ...(corpusPicksLanded ? [CORPUS_NOTICE] : []),
+        ...[...artistShort].map(onlyArtistExhaustedNotice),
         ...(outsideAt.length > 0 ? [outsidePicksNotice(outsideAt)] : []),
         `queue edited — requested ${result.requested}, added ${result.added}, removed ${result.removed} (now version ${result.version})`,
         'Updated queue (positions are 0-based):',

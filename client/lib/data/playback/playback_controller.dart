@@ -19,6 +19,39 @@ String playbackUuid() {
   return '${h.substring(0, 8)}-${h.substring(8, 12)}-${h.substring(12, 16)}-${h.substring(16, 20)}-${h.substring(20)}';
 }
 
+/// How a [PlaybackController.start] ended, for whoever asked it to start.
+enum PlaybackStart {
+  /// The app's own player is playing the mix.
+  started,
+
+  /// A later start, a stop or disposal overtook this one (or another start
+  /// was already in hand): nothing to act on.
+  superseded,
+
+  /// The app's player cannot play it: access refused, a song it cannot find,
+  /// a native failure. [PlaybackController.failureCode] says which.
+  unavailable,
+
+  /// Apple says this account cannot play catalogue music.
+  subscriptionRequired,
+}
+
+/// The line the player shows for a native failure code. One per cause, so
+/// the listener reads what actually went wrong (decision 4 of
+/// `docs/superpowers/specs/2026-11-09-one-platform-play-design.md`).
+///
+/// Lines about access or a start Apple Music would not make begin with
+/// "Apple Music": `PlaybackScreen.connectErrorMark` reads that as the
+/// Connect Apple Music state.
+String playbackFailureLine(String code) => switch (code) {
+  'authorization_required' || 'authorization_denied' =>
+    'Apple Music access was not granted. Your mix is unchanged.',
+  'subscription_required' => 'Playing needs an Apple Music subscription.',
+  'song_unavailable' => 'This song cannot play here. Your mix is unchanged.',
+  'empty_queue' => 'None of these songs can play here. Your mix is unchanged.',
+  _ => 'Apple Music did not start playing. Try again.',
+};
+
 final _playbackStorageWrites = <String, Future<void>>{};
 
 class PlaybackController extends ChangeNotifier {
@@ -33,6 +66,11 @@ class PlaybackController extends ChangeNotifier {
   final clock = Stopwatch()..start();
   String? sessionId, owner;
   String title = '', playbackId = '', error = '';
+
+  /// The native `PlatformException.code` of the last failed start, intact
+  /// (`authorization_denied` when the access prompt was refused); null after
+  /// a start that worked.
+  String? failureCode;
   int? unavailableIndex;
   int version = 0, sequence = 0, _generation = 0;
   List<QueueTrack> tracks = [];
@@ -208,21 +246,28 @@ class PlaybackController extends ChangeNotifier {
     }
   }
 
-  Future<void> start(
+  /// Starts [queue] on the app's own player.
+  ///
+  /// Asks for Apple Music access itself when the native side reports it was
+  /// never granted (the system prompt shows on the Play tap; once decided,
+  /// `MusicAuthorization.request` answers without prompting), then tries
+  /// once more. Every other native failure keeps its code in [failureCode].
+  Future<PlaybackStart> start(
     String id,
     int mixVersion,
     String mixTitle,
     List<QueueTrack> queue,
   ) async {
-    if (busy) return;
+    if (busy) return PlaybackStart.superseded;
     busy = true;
     error = '';
+    failureCode = null;
     unavailableIndex = null;
     _startFailed = false;
     _notify();
     final generation = ++_generation;
     await initialize();
-    if (_disposed || generation != _generation) return;
+    if (_disposed || generation != _generation) return PlaybackStart.superseded;
     meter.finish('listen');
     sessionId = id;
     version = mixVersion;
@@ -232,23 +277,68 @@ class PlaybackController extends ChangeNotifier {
     sequence = 0;
     sample = const PlayerSample(index: null, positionMs: 0, status: 'waiting');
     _notify();
+    final ids = tracks.map((t) => t.appleId!).toList();
+    String? code;
     try {
-      await bridge.start(tracks.map((t) => t.appleId!).toList());
+      try {
+        await bridge.start(ids);
+      } on PlatformException catch (e) {
+        if (e.code != 'authorization_required') rethrow;
+        bool allowed;
+        try {
+          allowed = await bridge.authorize();
+        } catch (_) {
+          allowed = false;
+        }
+        if (_disposed || generation != _generation) {
+          return PlaybackStart.superseded;
+        }
+        if (!allowed) {
+          code = 'authorization_denied';
+        } else {
+          await bridge.start(ids);
+        }
+      }
     } catch (e) {
-      if (generation == _generation) _startFailed = true;
+      code = e is PlatformException ? e.code : 'playback_failed';
       if (e is PlatformException && e.details is Map) {
         unavailableIndex = (e.details as Map)['index'] as int?;
       }
-      if (generation == _generation) {
-        error =
-            'Apple Music could not play this song. Check access and your subscription. Your mix is unchanged.';
-      }
     } finally {
       if (!_disposed && generation == _generation) {
+        if (code != null) {
+          _startFailed = true;
+          failureCode = code;
+          error = playbackFailureLine(code);
+        }
         busy = false;
         _notify();
       }
     }
+    if (_disposed || generation != _generation) return PlaybackStart.superseded;
+    return switch (code) {
+      null => PlaybackStart.started,
+      'subscription_required' => PlaybackStart.subscriptionRequired,
+      _ => PlaybackStart.unavailable,
+    };
+  }
+
+  /// Forgets a mix the app's player could not start, once it has gone to the
+  /// Music app instead: no mini-player, no Now Playing left holding a
+  /// failure for a mix that is playing somewhere else.
+  void release() {
+    if (busy) return;
+    ++_generation;
+    meter.reset();
+    sessionId = null;
+    tracks = [];
+    title = '';
+    error = '';
+    failureCode = null;
+    unavailableIndex = null;
+    _startFailed = false;
+    sample = const PlayerSample(index: null, positionMs: 0, status: 'stopped');
+    _notify();
   }
 
   Future<void> command(String action, {double? seconds}) async {

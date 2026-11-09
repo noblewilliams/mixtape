@@ -16,6 +16,7 @@ class LabelChip extends StatelessWidget {
     this.onPressed,
     this.leading,
     this.hole = true,
+    this.fill = false,
   });
 
   final String label;
@@ -24,6 +25,11 @@ class LabelChip extends StatelessWidget {
   /// Replaces the reel hole when a different leading mark is wanted.
   final Widget? leading;
   final bool hole;
+
+  /// Fills the width it is given, 44 pt tall, the label centred: the mix
+  /// actions' `.strip .acts .chip` / `.sticky .chip` (`flex: 1;
+  /// min-height: 44px`). Otherwise it shrink-wraps its label at 36 pt.
+  final bool fill;
 
   static const BorderRadius _radius = BorderRadius.only(
     topLeft: Radius.circular(MixtapeMetrics.tapeRadiusTop),
@@ -52,7 +58,9 @@ class LabelChip extends StatelessWidget {
 
     final chip = Container(
       // A floor, not a fixed height: the label must grow at 200% text.
-      constraints: const BoxConstraints(minHeight: MixtapeMetrics.chipHeight),
+      constraints: BoxConstraints(
+        minHeight: fill ? MixtapeMetrics.minTarget : MixtapeMetrics.chipHeight,
+      ),
       padding: const EdgeInsets.symmetric(horizontal: 11),
       decoration: BoxDecoration(
         color: isDark ? Colors.white.withValues(alpha: 0.08) : _lightFill,
@@ -73,6 +81,8 @@ class LabelChip extends StatelessWidget {
             ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
+        // Filling, the row is as wide as the chip; the label stays centred.
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
           if (glyph != null) ...[glyph, const SizedBox(width: 6)],
           // Loose, so the label shrink-wraps when there is room and ellipsizes
@@ -103,16 +113,23 @@ class LabelChip extends StatelessWidget {
       excludeSemantics: true,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: onPressed,
+        // Disabled, it still claims the tap rather than passing it to
+        // whatever it sits on (the tape strip opens the tape).
+        onTap: onPressed ?? () {},
         child: ConstrainedBox(
           constraints: const BoxConstraints(
             minHeight: MixtapeMetrics.minTarget,
           ),
           child: Center(
             // Shrink-wrap: the target is 44 pt tall but never wider than the
-            // control itself.
-            widthFactor: 1,
-            child: Opacity(opacity: enabled ? 1 : 0.5, child: chip),
+            // control itself — unless it fills its row.
+            widthFactor: fill ? null : 1,
+            child: Opacity(
+              opacity: enabled ? 1 : 0.5,
+              child: fill
+                  ? SizedBox(width: double.infinity, child: chip)
+                  : chip,
+            ),
           ),
         ),
       ),

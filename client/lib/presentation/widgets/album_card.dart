@@ -18,6 +18,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/dj/dj_models.dart';
 import '../../data/musickit/musickit_bridge.dart';
 import '../providers/library_sync_provider.dart';
+import '../providers/music_platform_provider.dart';
 import '../providers/onboarding_provider.dart';
 import '../theme/mixtape_theme.dart';
 import 'foundation/mixtape_feedback.dart';
@@ -218,8 +219,10 @@ class _AlbumCardState extends ConsumerState<AlbumCard> {
     final tokens = context.tokens;
     final pick = widget.pick;
     final large = MediaQuery.textScalerOf(context).scale(1) >= 1.5;
+    // The device's platform (one platform per device, decision 1 of
+    // `docs/superpowers/specs/2026-11-09-one-platform-play-design.md`).
     final spotifyOnly =
-        ref.watch(onboardingProvider).value?.chosenService == 'spotify';
+        ref.watch(musicPlatformProvider) == MusicPlatform.spotify;
 
     final title = Text(
       pick.title,

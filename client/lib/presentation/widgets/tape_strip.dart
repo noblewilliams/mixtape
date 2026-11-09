@@ -1,11 +1,13 @@
 /// The tape strip at the top of the conversation's bottom panel
 /// (`docs/mockups/approved/2026-11-03-mix-conversation-redesign.md` →
 /// Bottom panel; `.strip` on the board, section 1): a 48 pt cassette in the
-/// tape colour, the title, "Version n · N songs" and split Play. Tapping
-/// anywhere but Play opens the tape.
+/// tape colour, the title, "Version n · N songs", and under them the mix
+/// actions on a row of their own (strip layout A,
+/// `docs/mockups/approved/2026-11-09-one-platform-play.md`). Tapping
+/// anywhere but an action opens the tape.
 ///
-/// At the largest text sizes it stacks: the title wraps beside the cassette
-/// and Play takes a full row.
+/// At the largest text sizes the title may wrap to two lines and the actions
+/// stack, each full width (the actions do that themselves).
 library;
 
 import 'dart:math' as math;
@@ -23,7 +25,7 @@ class TapeStrip extends StatelessWidget {
     required this.songs,
     required this.caseColor,
     required this.onOpen,
-    required this.play,
+    required this.actions,
     this.reason,
   });
 
@@ -33,9 +35,9 @@ class TapeStrip extends StatelessWidget {
   final Color caseColor;
   final VoidCallback onOpen;
 
-  /// Split Play (or the transfer handoff), built by the host so it keeps the
-  /// host's handoff state.
-  final Widget Function({required bool expand}) play;
+  /// The mix actions (`MixActions`), built by the host so they keep the
+  /// host's handoff state. They fill the row under the title.
+  final Widget actions;
 
   /// Why Play cannot work, under the strip; may draw nothing.
   final Widget? reason;
@@ -90,7 +92,7 @@ class TapeStrip extends StatelessWidget {
                   children: [
                     Text(
                       title,
-                      maxLines: stacked ? 3 : 1,
+                      maxLines: stacked ? 2 : 1,
                       overflow: TextOverflow.ellipsis,
                       style: tokens.rowTitle.copyWith(
                         fontWeight: FontWeight.w600,
@@ -126,18 +128,11 @@ class TapeStrip extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (stacked) ...[
-              details,
-              const SizedBox(height: 8),
-              play(expand: true),
-            ] else
-              Row(
-                children: [
-                  Expanded(child: details),
-                  const SizedBox(width: 10),
-                  play(expand: false),
-                ],
-              ),
+            details,
+            // `.strip { gap: 10px }` plus `.acts { margin-top: 4px }`: the
+            // 44 pt row above already carries about 4 pt below its text.
+            const SizedBox(height: 10),
+            actions,
             ?reason,
           ],
         ),

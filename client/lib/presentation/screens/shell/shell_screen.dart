@@ -32,6 +32,7 @@ import '../../widgets/foundation/frosted_surface.dart';
 import '../../widgets/foundation/glass_occlusion.dart';
 import '../../widgets/foundation/gradient_background.dart';
 import '../../widgets/foundation/side_rail.dart';
+import '../../widgets/listen_on_prompt.dart';
 import '../chat_screen.dart';
 import '../home_screen.dart';
 import '../mixes_screen.dart';
@@ -93,8 +94,20 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
   /// native or Flutter — stands down and [SideRail] takes its place.
   bool _wide = false;
 
+  /// The one-time "Where do you listen?" sheet is up. It sits on the root
+  /// navigator (over the side rail), not on a tab, so the route observers do
+  /// not see it; the bottom dock steps aside for it here instead.
+  bool _listenSheetUp = false;
+
+  void _setListenSheetUp(bool up) {
+    if (up == _listenSheetUp) return;
+    _listenSheetUp = up;
+    _applyBottomDock();
+    _rebuild();
+  }
+
   /// Whether the bottom dock should be on screen right now.
-  bool get _bottomDockWanted => !_wide && !_routeAbove;
+  bool get _bottomDockWanted => !_wide && !_routeAbove && !_listenSheetUp;
 
   Brightness? _appearance;
   final List<StreamSubscription<Object?>> _subscriptions = [];
@@ -426,73 +439,83 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
     }
 
     // The AI-consent sheet goes on the selected tab's navigator, so the dock
-    // steps aside for it as for any other sheet.
-    return AiConsentPrompt(
-      sheetContext: () => _navigatorOf(_currentIndex)?.context,
-      child: GradientBackground(
-        child: FrostedSurfaceMode(
-          reduceTransparency: reduceTransparency,
-          // The dock floats: it sits outside the Scaffold that resizes, so the
-          // keyboard comes up over it instead of carrying it.
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              Scaffold(
-                backgroundColor: Colors.transparent,
-                resizeToAvoidBottomInset: false,
-                body: NotificationListener<ScrollNotification>(
-                  onNotification: _handleScroll,
-                  child: _wideLayout(
-                    wide: wide,
-                    currentIndex: currentIndex,
-                    mini: mini,
-                    child: NavigatorPopHandler(
-                      // Android back and the iOS swipe pop the tab's own
-                      // history before they leave the shell.
-                      onPopWithResult: (result) =>
-                          _navigatorOf(currentIndex)?.maybePop(),
-                      child: IndexedStack(
-                        key: ShellScreen.tabStackKey,
-                        index: currentIndex,
-                        children: [
-                          for (final tab in AppTab.values)
-                            KeyedSubtree(
-                              key: ShellScreen.tabKey(tab),
-                              child: Navigator(
-                                key: _navigators[tab.index],
-                                observers: [
-                                  _observers[tab.index],
-                                  _glassObservers[tab.index],
-                                ],
-                                onGenerateRoute: (settings) =>
-                                    MaterialPageRoute<void>(
-                                      settings: settings,
-                                      builder: (_) => _rootFor(tab),
-                                    ),
+    // steps aside for it as for any other sheet. The one-time "Where do you
+    // listen?" goes on the root navigator, over the side rail, and the dock
+    // steps aside through [_setListenSheetUp]. The shell only exists after
+    // first run, so neither interrupts it.
+    return ListenOnPrompt(
+      onShowingChanged: _setListenSheetUp,
+      child: AiConsentPrompt(
+        sheetContext: () => _navigatorOf(_currentIndex)?.context,
+        child: GradientBackground(
+          child: FrostedSurfaceMode(
+            reduceTransparency: reduceTransparency,
+            // The dock floats: it sits outside the Scaffold that resizes, so the
+            // keyboard comes up over it instead of carrying it.
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Scaffold(
+                  backgroundColor: Colors.transparent,
+                  resizeToAvoidBottomInset: false,
+                  body: NotificationListener<ScrollNotification>(
+                    onNotification: _handleScroll,
+                    child: _wideLayout(
+                      wide: wide,
+                      currentIndex: currentIndex,
+                      mini: mini,
+                      child: NavigatorPopHandler(
+                        // Android back and the iOS swipe pop the tab's own
+                        // history before they leave the shell.
+                        onPopWithResult: (result) =>
+                            _navigatorOf(currentIndex)?.maybePop(),
+                        child: IndexedStack(
+                          key: ShellScreen.tabStackKey,
+                          index: currentIndex,
+                          children: [
+                            for (final tab in AppTab.values)
+                              KeyedSubtree(
+                                key: ShellScreen.tabKey(tab),
+                                child: Navigator(
+                                  key: _navigators[tab.index],
+                                  observers: [
+                                    _observers[tab.index],
+                                    _glassObservers[tab.index],
+                                  ],
+                                  onGenerateRoute: (settings) =>
+                                      MaterialPageRoute<void>(
+                                        settings: settings,
+                                        builder: (_) => _rootFor(tab),
+                                      ),
+                                ),
                               ),
-                            ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-              if (resolved && !nativeDock && !_routeAbove && !wide)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: FrostedDock(
-                    currentIndex: currentIndex,
-                    onTap: _onTabTapped,
-                    mini: mini,
-                    minimized: _minimized,
-                    onMiniTap: _openNowPlaying,
-                    onMiniPlayPause: _playPause,
-                    onMiniNext: _next,
+                if (resolved &&
+                    !nativeDock &&
+                    !_routeAbove &&
+                    !_listenSheetUp &&
+                    !wide)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: FrostedDock(
+                      currentIndex: currentIndex,
+                      onTap: _onTabTapped,
+                      mini: mini,
+                      minimized: _minimized,
+                      onMiniTap: _openNowPlaying,
+                      onMiniPlayPause: _playPause,
+                      onMiniNext: _next,
+                    ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

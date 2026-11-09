@@ -31,7 +31,6 @@ import '../providers/dj_providers.dart';
 import '../providers/keep_mixes_provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/library_sync_provider.dart';
-import '../providers/onboarding_provider.dart';
 import '../providers/playlist_context_provider.dart';
 import '../providers/shell_providers.dart';
 import '../providers/mix_operation_gate.dart';
@@ -48,7 +47,6 @@ import '../widgets/foundation/text_action.dart';
 import '../widgets/home_panel.dart' show HomePanel;
 import '../widgets/keep_sheet.dart';
 import '../widgets/mix_energy_summary.dart';
-import '../providers/play_destination_provider.dart';
 import '../widgets/mix_handoff.dart';
 import '../widgets/mix_prompt_input.dart';
 import '../widgets/mix_tape_colour.dart';
@@ -1057,16 +1055,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   /// `.bp { border-radius: 26px 26px 0 0 }`.
   static const double _panelRadius = 26;
 
-  /// The tape strip. Play stays live while the DJ works on the next version:
-  /// the current arrangement stays playable, as locked, and a reply that
-  /// changes it arrives as a new state anyway.
+  /// The tape strip. Its actions stay live while the DJ works on the next
+  /// version: the current arrangement stays playable, as locked, and a reply
+  /// that changes it arrives as a new state anyway.
   Widget _strip(ChatState state) {
     const keys = MixHandoffKeys.conversation;
-    final onboarding = ref.watch(onboardingProvider).value;
-    final spotifyOnly = mixListensOnSpotify(
-      onboarding,
-      ref.watch(playDestinationProvider),
-    );
     return TapeStrip(
       title: state.session.title,
       version: state.queueVersion,
@@ -1075,25 +1068,26 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       onOpen: _openArrangement,
       reason: Padding(
         padding: const EdgeInsets.only(top: 4),
-        child: MixPlayReason(
-          keys: keys,
-          queue: state.queue,
-          spotifyOnly: spotifyOnly,
-        ),
+        child: MixPlayReason(keys: keys, queue: state.queue),
       ),
-      play: ({required bool expand}) => MixSplitPlay(
+      actions: MixActions(
         keys: keys,
         queue: state.queue,
-        enabled: true,
-        expand: expand,
         isPlayingThisMix: isPlayingThisMix,
-        onPlay: (destination) => playAt(destination, state, state.queue),
+        onPlay: () => unawaited(playHere(state, state.queue)),
         onOpenNowPlaying: openNowPlaying,
-        onShare: (_) => playOnSpotify(state.queue),
-        sendingToMusic: sendingToMusic,
+        onCreatePlaylist: () => unawaited(
+          createPlaylist(
+            queue: state.queue,
+            defaultName: state.session.title,
+            keys: keys,
+          ),
+        ),
+        onCreateSpotifyPlaylist: () =>
+            unawaited(createSpotifyPlaylist(state.queue)),
+        creatingPlaylist: savingPlaylist,
         sharing: sharingMix,
-        spotifyOnly: spotifyOnly,
-        askService: mixNeedsServiceChoice(onboarding),
+        sendingToMusic: sendingToMusic,
       ),
     );
   }

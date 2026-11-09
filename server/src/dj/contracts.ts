@@ -1,6 +1,9 @@
 import { z } from 'zod'
 import type { LlmToolDef } from './llm'
 
+// Named artist and song spellings (see namedArtists below) share one bound.
+export const NAMED_NAME_MAX = 200
+
 const intentBase = z.object({
   themes: z.string().min(1),
   tempoMin: z.number().int().min(40).max(260).optional(),
@@ -17,6 +20,14 @@ const intentBase = z.object({
   allowOutside: z.boolean().optional(),
   familiarity: z.enum(['comfort', 'mix', 'adventurous']).default('mix'),
   targetCount: z.number().int().min(3).max(60).default(15),
+  // Artist-only mixes (spec 2026-11-09 one-platform-play, decision 5): the
+  // one artist whose own music the brief asks for. On swap/extend intents
+  // too, so an edit can keep (or name) the scope. Trimmed; a blank name is
+  // no scope at all rather than a schema error. Optional rather than
+  // defaulted, like allowOutside. Whether a brief naming two artists still
+  // counts is the loop's call (dj/loop.ts resolveOnlyArtist), not the
+  // schema's.
+  onlyArtist: z.string().min(1).max(NAMED_NAME_MAX).transform((s) => s.trim() || undefined).optional(),
 })
 
 // Shared by intentSchema and opIntentSchema: an inverted tempo/era window
@@ -43,7 +54,6 @@ function checkWindowOrdering(
 // one. Trimmed, blanks dropped, deduped case-insensitively (first spelling
 // kept); more than NAMED_MAX is a schema error the model can correct.
 export const NAMED_MAX = 5
-export const NAMED_NAME_MAX = 200
 const namedName = z.string().min(1).max(NAMED_NAME_MAX)
 
 function firstOfEach<T>(items: T[], key: (item: T) => string): T[] {
@@ -85,7 +95,14 @@ export type Intent = z.infer<typeof intentSchema>
 // there (swap replaces exactly one track, extend uses its own `count`) — a
 // full intentSchema would let zod inject targetCount:15 onto a 1-track swap,
 // and the agent loop (Task 7) would generate 15 replacements instead of 1.
-export const opIntentSchema = intentBase.omit({ targetCount: true }).superRefine(checkWindowOrdering)
+// namedArtists rides swap/extend intents too (2026-11-09 artist-only
+// mixes): naming another artist is how an edit steps outside an artist-only
+// session's scope (dj/loop.ts executeEditQueue). Named songs stay
+// generate-only.
+export const opIntentSchema = intentBase
+  .omit({ targetCount: true })
+  .extend({ namedArtists: namedArtistsSchema.optional() })
+  .superRefine(checkWindowOrdering)
 export type OpIntent = z.infer<typeof opIntentSchema>
 
 const removeOp = z.object({ op: z.literal('remove'), position: z.number().int().min(0) }).strict()
@@ -211,6 +228,21 @@ const intentPropertiesBase: Record<string, unknown> = {
     description:
       'How much to favor the listener\'s most-played tracks vs. deeper cuts. Defaults to "mix".',
   },
+  // The model's whole instruction for artist-only mixes, so it lists both
+  // sides of the line with the briefs that sit on each.
+  onlyArtist: {
+    type: 'string',
+    minLength: 1,
+    maxLength: NAMED_NAME_MAX,
+    description:
+      "Set ONLY when the listener asks for one artist's own music, so every song should be by that artist " +
+      '(features count): "Cole I can rap to", "just Drake", "SZA songs", "J. Cole deep cuts", "play some Frank ' +
+      'Ocean", "only Burna Boy". Give the artist\'s full name as credited ("J. Cole" for "Cole"). Do NOT set it for ' +
+      'a sound or a neighbourhood: "like X", "X vibes", "artists like X", "in the style of X", "sounds like X", ' +
+      '"X and similar". Do NOT set it when two or more artists are named. In a follow-up ("more", "make it ' +
+      'longer", "another one") keep it while the mix is still that one artist; when the listener asks for other ' +
+      'artists, leave it out and name them in namedArtists. Never invent one; leave it out whenever in doubt.',
+  },
 }
 
 // Longhand for namedArtists / namedSongs (generate_queue only; see
@@ -271,9 +303,11 @@ function intentJsonSchemas(properties: Record<string, unknown>): IntentJsonSchem
       required: ['themes'],
     }),
     // swap/extend's replacement intent, no targetCount, mirroring opIntentSchema.
+    // swap/extend's replacement intent, no targetCount, mirroring
+    // opIntentSchema: named artists, no named songs.
     op: Object.freeze({
       type: 'object' as const,
-      properties,
+      properties: { ...properties, namedArtists: namedProperties.namedArtists },
       required: ['themes'],
     }),
   }

@@ -152,9 +152,21 @@ const SYSTEM_RULES = [
 const SYSTEM_PROMPT = [SYSTEM_INTRO, ...SYSTEM_RULES].join('\n\n')
 const SYSTEM_PROMPT_WITH_OUTSIDE = [OUTSIDE_SYSTEM_INTRO, ...SYSTEM_RULES].join('\n\n')
 
+// Artist-only mixes (spec 2026-11-09 one-platform-play, decision 5): the
+// pool holds only that artist's songs (dj/pool.ts onlyArtistKey), so the
+// spread rule above is lifted. Said in the intent block, not the system
+// prompt, so the cached prefix stays one string for every mix.
+export const ONLY_ARTIST_RULE_PREFIX = 'Artist-only mix: every pool track is by'
+
+function onlyArtistLine(name: string): string {
+  return `${ONLY_ARTIST_RULE_PREFIX} ${sanitizeForPrompt(name)} or features them, as the listener asked. ` +
+    'The spread-the-artists rule does not apply; pick only from the pool.'
+}
+
 // `cap` is null when the pool holds no outside row, and the line is absent.
-function buildIntentBlock(intent: Intent, sessionContext: string | undefined, cap: number | null): string {
+function buildIntentBlock(intent: Intent, sessionContext: string | undefined, cap: number | null, onlyArtist?: string): string {
   const lines = [`Pick exactly ${intent.targetCount} tracks.`]
+  if (onlyArtist) lines.push(onlyArtistLine(onlyArtist))
   if (cap !== null) lines.push(`Pick at most ${cap} ${cap === 1 ? 'song' : 'songs'} marked new.`)
   lines.push(arcInstruction(intent.energyArc), `Themes: ${intent.themes}`)
   if (intent.tempoMin !== undefined || intent.tempoMax !== undefined) {
@@ -175,13 +187,14 @@ function buildRequest(
   sessionContext: string | undefined,
   maxTokens: number,
   cap: number | null,
+  onlyArtist?: string,
 ): LlmRequest {
   const poolBlock = (cap === null ? POOL_LEGEND : POOL_LEGEND_WITH_OUTSIDE) + pool.map(poolLine).join('\n')
   const message: LlmMessage = {
     role: 'user',
     content: [
       { type: 'text', text: poolBlock, cache_control: { type: 'ephemeral' } },
-      { type: 'text', text: buildIntentBlock(intent, sessionContext, cap) },
+      { type: 'text', text: buildIntentBlock(intent, sessionContext, cap, onlyArtist) },
     ],
   }
   return {
@@ -318,6 +331,8 @@ export type CurateOptions = {
   // of the queue's cap). Defaults to outsideCap(intent). Read only when the
   // pool holds an outside row.
   outsideCap?: number
+  // The artist an artist-only pool is made of; lifts the spread rule.
+  onlyArtist?: string
 }
 
 export async function curate(
@@ -331,7 +346,7 @@ export async function curate(
   const outsideIds = new Set(pool.filter((t) => t.outside).map((t) => t.trackId))
   const cap = outsideIds.size > 0 ? Math.max(0, options.outsideCap ?? outsideCap(intent)) : null
   const maxTokens = scaledMaxTokens(intent.targetCount)
-  const request = buildRequest(pool, intent, sessionContext, maxTokens, cap)
+  const request = buildRequest(pool, intent, sessionContext, maxTokens, cap, options.onlyArtist)
 
   let turn = await llm(request)
   if (turn.stopReason === 'max_tokens') {

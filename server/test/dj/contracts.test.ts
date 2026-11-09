@@ -456,6 +456,14 @@ const editQueueRows: OpsRow[] = [
     sample: { ops: [{ op: 'swap', position: 0, intent: { themes: 'x', tempoMin: 200, tempoMax: 100 } }] },
   },
   {
+    label: 'extend intent naming an artist is valid',
+    sample: { ops: [{ op: 'extend', count: 3, intent: { themes: 'x', namedArtists: ['Kendrick Lamar'] } }] },
+  },
+  {
+    label: 'swap intent with six named artists is invalid',
+    sample: { ops: [{ op: 'swap', position: 0, intent: { themes: 'x', namedArtists: ['a', 'b', 'c', 'd', 'e', 'f'] } }] },
+  },
+  {
     label: 'remove op with position -1 is invalid',
     sample: { ops: [{ op: 'remove', position: -1 }] },
   },
@@ -606,10 +614,69 @@ describe('generate_queue named artists and songs', () => {
     }
   })
 
-  it('is advertised on generate_queue only, not on swap/extend intents', () => {
+  // Named songs are generate_queue only. Named artists ride swap/extend
+  // intents too (2026-11-09): an edit naming another artist ("add some
+  // Kendrick") is how an op steps outside an artist-only session's scope.
+  it('named songs are advertised on generate_queue only; named artists on swap/extend intents too', () => {
     const ops = DJ_TOOLS.find((t) => t.name === 'edit_queue')!.input_schema.properties.ops as { items: { oneOf: Array<{ properties: { intent?: { properties: Record<string, unknown> } } }> } }
-    expect(ops.items.oneOf[2].properties.intent!.properties).not.toHaveProperty('namedArtists')
+    expect(ops.items.oneOf[2].properties.intent!.properties).toHaveProperty('namedArtists')
+    expect(ops.items.oneOf[3].properties.intent!.properties).toHaveProperty('namedArtists')
+    expect(ops.items.oneOf[2].properties.intent!.properties).not.toHaveProperty('namedSongs')
     expect(ops.items.oneOf[3].properties.intent!.properties).not.toHaveProperty('namedSongs')
-    expect(opIntentSchema.parse({ themes: 'x', namedArtists: ['a'] })).not.toHaveProperty('namedArtists')
+    expect(opIntentSchema.parse({ themes: 'x', namedArtists: [' Kendrick Lamar '] }).namedArtists).toEqual(['Kendrick Lamar'])
+    expect(opIntentSchema.parse({ themes: 'x', namedSongs: [{ title: 'a' }] })).not.toHaveProperty('namedSongs')
+  })
+})
+
+// Artist-only mixes (spec 2026-11-09 one-platform-play, decision 5).
+describe('onlyArtist', () => {
+  const genProps = () => DJ_TOOLS.find((t) => t.name === 'generate_queue')!.input_schema.properties as Record<string, { type: string; description: string; minLength?: number; maxLength?: number }>
+
+  it('parses one name, trimmed', () => {
+    expect(intentSchema.parse({ themes: 'bars to rap to', onlyArtist: '  J. Cole ' }).onlyArtist).toBe('J. Cole')
+  })
+
+  it('a blank name is dropped rather than kept as an empty scope', () => {
+    expect(intentSchema.parse({ themes: 'x', onlyArtist: '   ' }).onlyArtist).toBeUndefined()
+  })
+
+  it('a parsed intent carries no onlyArtist key when the model sent none', () => {
+    expect(intentSchema.parse({ themes: 'x' })).not.toHaveProperty('onlyArtist')
+  })
+
+  it('rejects an empty string, a list and an over-long name', () => {
+    expect(intentSchema.safeParse({ themes: 'x', onlyArtist: '' }).success).toBe(false)
+    expect(intentSchema.safeParse({ themes: 'x', onlyArtist: ['Drake'] }).success).toBe(false)
+    expect(intentSchema.safeParse({ themes: 'x', onlyArtist: 'a'.repeat(201) }).success).toBe(false)
+  })
+
+  it('rides swap/extend intents too, so an edit can keep the scope', () => {
+    expect(opIntentSchema.parse({ themes: 'x', onlyArtist: 'SZA' }).onlyArtist).toBe('SZA')
+    const ops = DJ_TOOLS.find((t) => t.name === 'edit_queue')!.input_schema.properties.ops as { items: { oneOf: Array<{ properties: { intent?: { properties: Record<string, unknown> } } }> } }
+    expect(ops.items.oneOf[2].properties.intent!.properties).toHaveProperty('onlyArtist')
+    expect(ops.items.oneOf[3].properties.intent!.properties).toHaveProperty('onlyArtist')
+  })
+
+  it('tells the model when to set it and, as plainly, when not to', () => {
+    const { description, type } = genProps().onlyArtist
+    expect(type).toBe('string')
+    // Golden briefs for the "only" side.
+    for (const brief of ['Cole I can rap to', 'just Drake', 'SZA songs', 'J. Cole deep cuts']) expect(description).toContain(brief)
+    // And the "like" side.
+    for (const not of ['like X', 'X vibes', 'artists like X', 'in the style of X', 'sounds like X']) expect(description).toContain(not)
+    expect(description).toMatch(/two or more artists/)
+    expect(description).toMatch(/full name/)
+    expect(description).toMatch(/never invent/i)
+  })
+
+  const rows: Row[] = [
+    { label: 'onlyArtist with namedArtists is valid', sample: { themes: 'x', onlyArtist: 'J. Cole', namedArtists: ['J. Cole'] } },
+    { label: 'an empty onlyArtist is invalid', sample: { themes: 'x', onlyArtist: '' } },
+    { label: 'an onlyArtist over 200 chars is invalid', sample: { themes: 'x', onlyArtist: 'a'.repeat(201) } },
+    { label: 'a non-string onlyArtist is invalid', sample: { themes: 'x', onlyArtist: 3 } },
+  ]
+  it.each(rows)('generate_queue agrees with zod: $label', ({ sample }) => {
+    const schema = DJ_TOOLS.find((t) => t.name === 'generate_queue')!.input_schema
+    expect(matchesJsonSchema(schema, sample)).toBe(intentSchema.safeParse(sample).success)
   })
 })

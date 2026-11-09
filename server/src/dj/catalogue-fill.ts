@@ -23,6 +23,13 @@ import type { NamedSong } from './contracts'
 // the hourly cron and the next prompt.
 export const FILL_FLOOR = 12
 export const FILL_PER_ARTIST = 10
+// Artist-only mixes (spec 2026-11-09 one-platform-play, decision 5): the
+// one artist a brief is about gets Apple's top songs up to this many
+// (Apple's own page cap, musickit/catalog.ts MAX_TOP_SONGS_LIMIT), looked up
+// while the catalogue holds fewer Apple rows crediting them. Still two Apple
+// calls: the larger allowance costs rows, not subrequests, and the in-line
+// enrichment stays inside FILL_BUDGET as for any fill.
+export const ONLY_ARTIST_FILL = 30
 // A turn with two curation calls plus database reconnects has reached the
 // free plan's 50 subrequests with 24 here.
 export const FILL_BUDGET = 20
@@ -354,8 +361,23 @@ export async function fillForSeeds(db: Db, deps: FillDeps, options: FillOptions)
   result.twins = Math.max(twins.features, twins.meanings)
 
   if (options.enrich === false) return result
-  const keys = plan.thin.map((s) => s.key)
-  if (keys.length === 0 && namedIds.size === 0) return result
+  await enrichDue(db, deps, result, plan.thin.map((s) => s.key), namedIds, left, expired)
+  return result
+}
+
+// The in-line enrichment both fills share: due rows crediting `keys` (and
+// the named songs' rows), interleaved, while the budget and deadline last.
+// Charges every stage to `result.subrequests`.
+async function enrichDue(
+  db: Db,
+  deps: FillDeps,
+  result: FillResult,
+  keys: string[],
+  namedIds: Set<string>,
+  left: () => number,
+  expired: () => boolean,
+): Promise<void> {
+  if (keys.length === 0 && namedIds.size === 0) return
   const filters: SQL[] = []
   if (keys.length > 0) filters.push(sql`t.artist_keys && ARRAY[${sql.join(keys.map((k) => sql`${k}`), sql`, `)}]::text[]`)
   if (namedIds.size > 0) filters.push(sql`t.id IN (${sql.join([...namedIds].map((id) => sql`${id}::uuid`), sql`, `)})`)
@@ -408,5 +430,63 @@ export async function fillForSeeds(db: Db, deps: FillDeps, options: FillOptions)
       await backToBacklog(row.track.id).catch(() => undefined)
     }
   }
+}
+
+export type ArtistFillOptions = {
+  userId: string
+  // The artist's name as the brief gave it; matched to Apple's by key.
+  name: string
+  budget?: number
+  // As FillOptions.enrich: false inserts and queues, enriching none.
+  enrich?: boolean
+}
+
+// The artist-only fill: unlike fillForSeeds, it runs for a personal listener
+// too (their own copies of the artist are usually few, and the mix is the
+// artist's, not a stranger's), for one artist, at ONLY_ARTIST_FILL. Apple
+// is skipped once the catalogue holds that many Apple rows crediting them.
+export async function fillForArtist(db: Db, deps: FillDeps, options: ArtistFillOptions): Promise<FillResult> {
+  const budget = options.budget ?? FILL_BUDGET
+  const result: FillResult = { inserted: 0, enriched: 0, twins: 0, subrequests: 0, artists: [] }
+  const key = artistKey(options.name)
+  if (key === '') return result
+  const left = () => budget - result.subrequests
+  const now = deps.now ?? Date.now
+  const started = now()
+  const expired = (): boolean => {
+    if (now() - started <= FILL_DEADLINE_MS) return false
+    result.timedOut = true
+    return true
+  }
+
+  const [row] = rowsOf(await db.execute(sql`
+    SELECT
+      (SELECT COUNT(*) FROM tracks t WHERE t.artist_keys @> ARRAY[${key}]::text[] AND t.apple_id IS NOT NULL)::int AS held,
+      (SELECT coalesce(p.apple_storefront, lower(p.country)) FROM user_music_profiles p WHERE p.user_id = ${options.userId}) AS storefront
+  `))
+  const storefront = typeof row?.storefront === 'string' && STOREFRONT.test(row.storefront) ? row.storefront : deps.defaultStorefront
+
+  const newIds: string[] = []
+  // Both Apple calls or neither, as in fillForSeeds.
+  if (Number(row?.held ?? 0) < ONLY_ARTIST_FILL && left() >= 2 * STAGE_SUBREQUESTS.apple && !expired()) {
+    try {
+      result.subrequests += STAGE_SUBREQUESTS.apple
+      const found = await deps.catalog.searchArtists(storefront, options.name, ARTIST_SEARCH_LIMIT)
+      const artist = found.find((a) => artistKey(a.name) === key)
+      if (artist && !expired()) {
+        result.subrequests += STAGE_SUBREQUESTS.apple
+        const songs = await deps.catalog.artistTopSongs(storefront, artist.id, ONLY_ARTIST_FILL)
+        newIds.push(...await addCatalogueSongs(db, songs.slice(0, ONLY_ARTIST_FILL), storefront))
+        result.artists.push(options.name)
+      }
+    } catch (e) {
+      result.appleError = appleErrorCategory(e)
+    }
+  }
+  result.inserted = newIds.length
+  const twins = await runTwinCopy(db, newIds.length, newIds)
+  result.twins = Math.max(twins.features, twins.meanings)
+  if (options.enrich === false) return result
+  await enrichDue(db, deps, result, [key], new Set(), left, expired)
   return result
 }

@@ -25,7 +25,7 @@ import 'package:mixtape/presentation/providers/dj_providers.dart';
 import 'package:mixtape/presentation/providers/library_sync_provider.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
 import 'package:mixtape/presentation/screens/chat_screen.dart';
-import 'package:mixtape/presentation/providers/play_destination_provider.dart';
+import 'package:mixtape/presentation/providers/music_platform_provider.dart';
 import 'package:mixtape/presentation/providers/playback_provider.dart';
 import 'package:mixtape/presentation/screens/mix_history_screen.dart';
 import 'package:mixtape/presentation/screens/playback_screen.dart';
@@ -400,13 +400,13 @@ ProviderContainer _makeContainer(
   FakeLinkOpener? links,
   LinkProbe? probe,
   FakeClipboardWriter? clipboard,
-  PlayDestinationStore? destinations,
+  MusicPlatformStore? destinations,
   PlaybackController? player,
 }) {
   final container = ProviderContainer(
     overrides: [
-      playDestinationStoreProvider.overrideWithValue(
-        destinations ?? InMemoryPlayDestinationStore(),
+      musicPlatformStoreProvider.overrideWithValue(
+        destinations ?? InMemoryMusicPlatformStore(),
       ),
       tokenStoreProvider.overrideWithValue(InMemoryTokenStore()),
       djApiProvider.overrideWithValue(api),
@@ -473,12 +473,23 @@ Future<void> _pump(
   await tester.pumpAndSettle();
 }
 
-/// Split Play's arrow, then "Play in Apple Music" (keyed as the old Send to
-/// Music button was).
+/// An app player that cannot start: Play then sends the mix to the Music
+/// app (decision 4 of the one-platform spec), the one path to Apple's own
+/// player now that the arrow menu is gone.
+PlaybackController _appPlayerRefuses() {
+  // The controller persists its pending listening events; without this the
+  // keychain channel hangs under testWidgets.
+  FlutterSecureStorage.setMockInitialValues({});
+  return PlaybackController(
+    playback.FakeApi(),
+    playback.FakeBridge()..failStart = true,
+  );
+}
+
+/// Play, on a container built with [_appPlayerRefuses]: the mix lands in the
+/// Music app.
 Future<void> _playInMusic(WidgetTester tester) async {
-  await tester.tap(find.byKey(const Key('play-menu-button')));
-  await tester.pumpAndSettle();
-  await tester.tap(find.byKey(const Key('play-button')));
+  await tester.tap(find.byKey(const Key('play-here-button')));
 }
 
 /// Whether [a] comes before [b] in reading order (row, then position).
@@ -635,7 +646,7 @@ void main() {
         queue: [_track(0), _track(1), _track(2)],
       );
       final bridge = FakeBridge();
-      final container = _makeContainer(api, bridge: bridge);
+      final container = _makeContainer(api, player: _appPlayerRefuses(), bridge: bridge);
       await _pump(tester, container);
 
       await _playInMusic(tester);
@@ -656,7 +667,7 @@ void main() {
         queue: [_track(0), _track(1, appleId: null), _track(2)],
       );
       final bridge = FakeBridge();
-      final container = _makeContainer(api, bridge: bridge);
+      final container = _makeContainer(api, player: _appPlayerRefuses(), bridge: bridge);
       await _pump(tester, container);
 
       await _playInMusic(tester);
@@ -690,11 +701,10 @@ void main() {
             .onPressed,
         isNull,
       );
-      // Neither half of split Play does anything.
+      // Play does nothing either, and there is no arrow to try instead.
       await tester.tap(find.byKey(const Key('play-here-button')));
-      await tester.tap(find.byKey(const Key('play-menu-button')));
       await tester.pumpAndSettle();
-      expect(find.text('Play in Apple Music'), findsNothing);
+      expect(find.byIcon(Icons.keyboard_arrow_down_rounded), findsNothing);
       expect(find.byType(PlaybackScreen), findsNothing);
       // The reason is written beside the actions, never left to a tooltip.
       expect(find.text("these tracks aren't in Apple Music"), findsOneWidget);
@@ -1080,7 +1090,7 @@ void main() {
         throw NetworkException('offline');
       };
       final bridge = FakeBridge();
-      final container = _makeContainer(api, bridge: bridge);
+      final container = _makeContainer(api, player: _appPlayerRefuses(), bridge: bridge);
       await _pump(tester, container);
 
       await tester.drag(
@@ -1100,22 +1110,23 @@ void main() {
   );
 
   testWidgets(
-    'a MusicKit failure while playing shows a snackbar carrying the real reason',
+    'a MusicKit failure while playing says so plainly, without Apple\'s raw text',
     (tester) async {
       final api = FakeDjApi();
       api.onGetSession = (_) async =>
           SessionDetail(session: _session(), messages: [], queue: [_track(0)]);
       final bridge = FakeBridge();
       bridge.onPlayQueue = (_) async => throw MusicKitException('boom');
-      final container = _makeContainer(api, bridge: bridge);
+      final container = _makeContainer(api, player: _appPlayerRefuses(), bridge: bridge);
       await _pump(tester, container);
 
       await _playInMusic(tester);
       await tester.pumpAndSettle();
 
-      // The bridge message (Apple's actual failure reason) must reach the
-      // user — a generic string made device failures undiagnosable.
-      expect(find.text("Couldn't play — boom"), findsOneWidget);
+      // Play's fallback never shows Apple's raw reason (it goes to the
+      // device log instead): 2026-11-09 one-platform spec, decision 4.
+      expect(find.text(mixPlayFallbackFailedMessage), findsOneWidget);
+      expect(find.textContaining('boom'), findsNothing);
     },
   );
 
@@ -1154,7 +1165,7 @@ void main() {
           messages: [],
           queue: [_track(0), _track(1)],
         );
-        final container = _makeContainer(api);
+        final container = _makeContainer(api, player: _appPlayerRefuses());
         await _pump(tester, container);
 
         await _playInMusic(tester);
@@ -1223,7 +1234,7 @@ void main() {
           SessionDetail(session: _session(), messages: [], queue: [_track(0)]);
       final bridge = FakeBridge();
       bridge.onPlayQueue = (_) async => throw MusicKitException('boom');
-      final container = _makeContainer(api, bridge: bridge);
+      final container = _makeContainer(api, player: _appPlayerRefuses(), bridge: bridge);
       await _pump(tester, container);
 
       await _playInMusic(tester);
@@ -1243,7 +1254,7 @@ void main() {
         );
         api.onPostSessionEvent = (id, type) async =>
             throw NetworkException('offline');
-        final container = _makeContainer(api);
+        final container = _makeContainer(api, player: _appPlayerRefuses());
         await _pump(tester, container);
 
         await _playInMusic(tester);
@@ -1266,7 +1277,7 @@ void main() {
           messages: [],
           queue: [_track(0)],
         );
-        final container = _makeContainer(api);
+        final container = _makeContainer(api, player: _appPlayerRefuses());
         await _pump(tester, container);
 
         await _playInMusic(tester);
@@ -1438,7 +1449,7 @@ void main() {
     );
 
     testWidgets(
-      'a Spotify-only queue hides Play and Save and offers "Play on Spotify" instead',
+      'an Apple Music device keeps Play and Create playlist on a Spotify-only queue, inert, with why',
       (tester) async {
         final api = FakeDjApi();
         api.onGetSession = (_) async => SessionDetail(
@@ -1446,28 +1457,31 @@ void main() {
           messages: [],
           queue: [_spotifyTrack(0), _spotifyTrack(1)],
         );
-        final container = _makeContainer(api);
+        final container = _makeContainer(
+          api,
+          destinations: InMemoryMusicPlatformStore(MusicPlatform.apple),
+        );
         await _pump(tester, container);
 
-        expect(find.byKey(const Key('play-button')), findsNothing);
-        expect(find.byKey(const Key('save-button')), findsNothing);
-        final share = find.byKey(const Key('share-button'));
-        expect(share, findsOneWidget);
         expect(
-          tester.widget<TapeButton>(share).label,
-          'Play on Spotify',
+          tester
+              .widget<TapeButton>(find.byKey(const Key('play-here-button')))
+              .onPressed,
+          isNull,
         );
-        expect(tester.widget<TapeButton>(share).onPressed, isNotNull);
-        // The reason the Apple actions are absent is written beside it.
         expect(
-          find.text('Play and Create playlist need Apple Music'),
-          findsOneWidget,
+          tester
+              .widget<LabelChip>(find.byKey(const Key('save-button')))
+              .onPressed,
+          isNull,
         );
+        expect(find.byKey(const Key('share-button')), findsNothing);
+        expect(find.text("these tracks aren't in Apple Music"), findsOneWidget);
       },
     );
 
     testWidgets(
-      'a Spotify-only listener gets Play on Spotify, no Create playlist, and a search link on every row',
+      'a Spotify device gets one Create playlist, no Play, and a search link on every row',
       (tester) async {
         final api = FakeDjApi();
         // A catalogue mix: Apple ids only.
@@ -1486,12 +1500,11 @@ void main() {
         );
         await _pump(tester, container);
 
-        expect(find.text('Play on Spotify'), findsOneWidget);
+        final share = find.byKey(const Key('share-button'));
+        expect(tester.widget<TapeButton>(share).label, 'Create playlist');
+        expect(find.byKey(const Key('play-here-button')), findsNothing);
         expect(find.byKey(const Key('save-button')), findsNothing);
-        expect(
-          find.text('Play and Create playlist need Apple Music'),
-          findsNothing,
-        );
+        expect(find.text("these tracks aren't in Apple Music"), findsNothing);
 
         await tester.tap(find.byKey(const Key('open-in-spotify-t0')));
         await tester.pumpAndSettle();
@@ -1502,7 +1515,7 @@ void main() {
     );
 
     testWidgets(
-      'a mixed Apple + Spotify queue shows BOTH sets of actions, Apple first',
+      'a mixed Apple + Spotify queue on Apple Music: Play then Create playlist, Spotify rows open in Spotify',
       (tester) async {
         final api = FakeDjApi();
         api.onGetSession = (_) async => SessionDetail(
@@ -1515,43 +1528,33 @@ void main() {
 
         final play = find.byKey(const Key('play-here-button'));
         final save = find.byKey(const Key('save-button'));
-        final share = find.byKey(const Key('share-button'));
         expect(play, findsOneWidget);
         expect(tester.widget<LabelChip>(save).onPressed, isNotNull);
-        // Apple first in reading order — the actions row wraps at narrow
-        // widths, so "first" is by run and then by position within it.
         expect(_precedes(tester, play, save), isTrue);
-        // The Spotify half of a mixed mix is reachable too (plan: Outputs):
-        // the arrow keeps its place, and its menu ends with the handoff.
-        expect(share, findsNothing);
-        await tester.tap(find.byKey(const Key('play-menu-button')));
-        await tester.pumpAndSettle();
-        expect(share, findsOneWidget);
-        expect(find.text('Play in Apple Music'), findsOneWidget);
-        await tester.tap(find.byKey(const Key('mixtape-menu-barrier')));
-        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('share-button')), findsNothing);
+        expect(find.byIcon(Icons.keyboard_arrow_down_rounded), findsNothing);
         expect(find.byKey(const Key('open-in-spotify-t0')), findsNothing);
         expect(find.byKey(const Key('open-in-spotify-t1')), findsOneWidget);
       },
     );
 
-    testWidgets('an Apple-only queue offers no transfer handoff', (
+    testWidgets('an Apple Music device offers no transfer handoff', (
       tester,
     ) async {
       final api = FakeDjApi();
       api.onGetSession = (_) async => SessionDetail(
         session: _session(),
         messages: [],
-        queue: [_track(0), _track(1)],
+        queue: [_track(0), _spotifyTrack(1)],
       );
       await _pump(tester, _makeContainer(api));
 
-      expect(find.byKey(const Key('play-menu-button')), findsOneWidget);
+      expect(find.byKey(const Key('play-here-button')), findsOneWidget);
       expect(find.byKey(const Key('share-button')), findsNothing);
     });
 
     testWidgets(
-      'Play on Spotify explains once, then copies every song and opens TuneMyMusic',
+      'Spotify Create playlist explains once, then copies every song and opens TuneMyMusic',
       (tester) async {
         final api = FakeDjApi();
         api.onGetSession = (_) async => SessionDetail(
@@ -1562,7 +1565,7 @@ void main() {
         );
         final clipboard = FakeClipboardWriter();
         final links = FakeLinkOpener();
-        final store = InMemoryPlayDestinationStore();
+        final store = InMemoryMusicPlatformStore(MusicPlatform.spotify);
         final container = _makeContainer(
           api,
           clipboard: clipboard,
@@ -1618,7 +1621,7 @@ void main() {
         final clipboard = FakeClipboardWriter();
         final listening = FakeListeningApi();
         final links = FakeLinkOpener();
-        final store = InMemoryPlayDestinationStore();
+        final store = InMemoryMusicPlatformStore(MusicPlatform.spotify);
         final container = _makeContainer(
           api,
           clipboard: clipboard,
@@ -1692,6 +1695,7 @@ void main() {
           api,
           listening: listening,
           milestones: milestones,
+          player: _appPlayerRefuses(),
         );
         await _pump(tester, container);
 
@@ -1704,12 +1708,6 @@ void main() {
         );
 
         // Play is an Apple output, not a Spotify one: it adds nothing here.
-        // (A mixed mix's arrow is the transfer handoff, so Apple Music is
-        // the remembered destination here.)
-        await container
-            .read(playDestinationProvider.notifier)
-            .choose(PlayDestination.appleMusic);
-        await tester.pump();
         await tester.tap(find.byKey(const Key('play-here-button')));
         await tester.pumpAndSettle();
         expect(listening.funnelEvents, [FunnelEventType.firstOutput]);
@@ -1723,7 +1721,12 @@ void main() {
         );
         await _pump(
           tester,
-          _makeContainer(api2, listening: listening, milestones: milestones),
+          _makeContainer(
+            api2,
+            listening: listening,
+            milestones: milestones,
+            destinations: InMemoryMusicPlatformStore(MusicPlatform.spotify),
+          ),
           sessionId: 's2',
         );
         await tester.tap(find.byKey(const Key('share-button')));
@@ -1742,7 +1745,7 @@ void main() {
           messages: [],
           queue: [_track(0)],
         );
-        final container = _makeContainer(api, listening: listening);
+        final container = _makeContainer(api, player: _appPlayerRefuses(), listening: listening);
         await _pump(tester, container);
 
         await _playInMusic(tester);

@@ -1,5 +1,60 @@
 # Decision Log
 
+## 2026-11-09 — One platform per device; fixed mix actions (founder)
+
+Decisions 1–4 of `superpowers/specs/2026-11-09-one-platform-play-design.md`;
+board approval `mockups/approved/2026-11-09-one-platform-play.md`. Prompted by
+a TestFlight recording: Play failed three times with a vague Apple Music
+error, and the split-Play menu renamed and hid buttons as the listener
+tried each option.
+
+- Each device has one platform, Apple Music or Spotify. It replaces the
+  three-way Play destination, and legacy stored values read as Apple Music.
+  A known service is adopted silently. Otherwise "Where do you listen?" asks
+  once over the shell, and that sheet can't be closed without an answer.
+  The first-Play ask is gone.
+- Split Play and its arrow are dropped. This reverses winner B of
+  2026-11-03, because it made the bar change shape on every menu choice.
+  Apple Music listeners get Play and Create playlist. Spotify listeners get
+  one "Create playlist" with the Spotify mark, which is the TuneMyMusic
+  handoff. It replaces the 2026-11-03 "Play on Spotify" label, because
+  nothing is played. The conversation strip and the tape bar show the same
+  actions.
+- Play asks for MusicKit access on the tap. When the app player can't
+  start, the mix goes to the Music app. Only a missing subscription, with
+  the Music app failing too, gives a message, and that message names the
+  cause.
+- Web parity is a follow-up.
+
+## 2026-11-09 — A mix asked for one artist is that artist (founder)
+
+Decision 5 of `superpowers/specs/2026-11-09-one-platform-play-design.md`.
+
+- The intent gains `onlyArtist` (one name), set for a brief about one
+  artist's own music ("Cole I can rap to", "just Drake", "SZA songs"), never
+  for "like X", "X vibes", "in the style of X" or two or more artists. The
+  loop also drops it when the brief names a second, different artist.
+- The pool is then only songs crediting that artist (`artist_keys`, so
+  features count), from the listener's own rows and the shared catalogue;
+  a catalogue song need only be playable on the listener's player (an
+  Apple listener never gets a Spotify-only row), not enriched. `allowOutside: false`
+  keeps a personal listener to their own copies.
+- The Apple fill runs for that artist, personal listeners included, at up
+  to 30 top songs (`ONLY_ARTIST_FILL`) inside the usual `FILL_BUDGET`.
+- The spread rule is lifted. Fewer songs than asked is a shorter mix and
+  the DJ says so; never padded with other artists. No songs at all: today's
+  mix, and the DJ says it couldn't find the artist.
+- Edits keep the scope: the generate that made the mix records the artist
+  on the session (`dj_sessions.only_artist`, migration 0047) and any other
+  generate clears it. Every swap and extend inherits that scope (or this
+  turn's generate's), its own intent or not: "swap 3 for something darker"
+  stays that artist. An op steps outside only when its intent names a
+  different artist ("add some Kendrick"); one that sets `onlyArtist` itself
+  uses that artist. Rejected: inferring the scope from a queue that is all
+  one artist, which also caught small one-artist libraries.
+- "Different artist" is a different artist key, compared whole: "J Cole"
+  and "J. Cole" are one artist, "Drake" and "Drakeo the Ruler" are two.
+
 ## 2026-11-04 — Sequential iOS build numbers (founder)
 
 - Replace timestamp build numbers with positive integers: 1, 2, 3, and so on.

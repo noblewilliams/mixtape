@@ -20,6 +20,9 @@ class TapeButton extends StatelessWidget {
     this.onPressed,
     this.playing = false,
     this.leading,
+    this.fill = false,
+    this.semanticsLabel,
+    this.semanticsHint,
   });
 
   final String label;
@@ -29,6 +32,21 @@ class TapeButton extends StatelessWidget {
   /// A leading mark, when a caller wants one. Nothing is drawn by default —
   /// the reel the board once showed is gone (smoke round two, note 2).
   final Widget? leading;
+
+  /// Fills the width it is given, 44 pt tall, the label centred: the mix
+  /// actions' `.strip .acts .tape` / `.sticky .tape` (`flex: 1;
+  /// min-height: 44px`). Otherwise it shrink-wraps its label at 40 pt.
+  final bool fill;
+
+  /// What assistive technology reads instead of [label], when the visible
+  /// word leans on a mark ("Create playlist" beside the Spotify mark).
+  final String? semanticsLabel;
+
+  /// Read after the label, e.g. "Opens Now Playing".
+  final String? semanticsHint;
+
+  /// The Playing meter, for tests.
+  static const Key meterKey = Key('tape-button-meter');
 
   static const BorderRadius _radius = BorderRadius.only(
     topLeft: Radius.circular(MixtapeMetrics.tapeRadiusTop),
@@ -57,8 +75,10 @@ class TapeButton extends StatelessWidget {
     final enabled = onPressed != null;
     final shell = ConstrainedBox(
       // A floor, not a fixed height: the label must grow at 200% text.
-      constraints: const BoxConstraints(
-        minHeight: MixtapeMetrics.tapeButtonHeight,
+      constraints: BoxConstraints(
+        minHeight: fill
+            ? MixtapeMetrics.minTarget
+            : MixtapeMetrics.tapeButtonHeight,
       ),
       child: DecoratedBox(
         decoration: BoxDecoration(
@@ -144,6 +164,7 @@ class TapeButton extends StatelessWidget {
                   bottom: 0,
                   right: 0,
                   child: DecoratedBox(
+                    key: meterKey,
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
@@ -168,7 +189,8 @@ class TapeButton extends StatelessWidget {
     return Semantics(
       button: true,
       enabled: enabled,
-      label: label,
+      label: semanticsLabel ?? label,
+      hint: semanticsHint,
       // `excludeSemantics` drops the detector's own tap action, and a node
       // with no action cannot be activated by VoiceOver. Declare it here.
       onTap: onPressed,
@@ -184,9 +206,14 @@ class TapeButton extends StatelessWidget {
           ),
           child: Center(
             // Shrink-wrap: the target is at least 44 pt tall but never wider
-            // than the control itself.
-            widthFactor: 1,
-            child: Opacity(opacity: enabled ? 1 : 0.5, child: shell),
+            // than the control itself — unless it fills its row.
+            widthFactor: fill ? null : 1,
+            child: Opacity(
+              opacity: enabled ? 1 : 0.5,
+              child: fill
+                  ? SizedBox(width: double.infinity, child: shell)
+                  : shell,
+            ),
           ),
         ),
       ),

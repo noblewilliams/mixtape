@@ -97,3 +97,14 @@ final aiConsentNeededProvider = Provider<bool>((ref) {
   if (ref.watch(aiConsentProvider).granted) return false;
   return ref.watch(meProvider).unwrapPrevious().value?.aiConsent == false;
 });
+
+/// Whether [aiConsentNeededProvider] has a real answer: false only while a
+/// session's `/me` is still loading, when "not needed" just means "not known
+/// yet". Another one-time sheet waits on this, so the consent sheet (which
+/// goes first) never lands on top of it.
+final aiConsentSettledProvider = Provider<bool>((ref) {
+  if (ref.watch(authProvider) != AuthStatus.session) return true;
+  if (ref.watch(aiConsentProvider).granted) return true;
+  final me = ref.watch(meProvider).unwrapPrevious();
+  return me.hasValue || me.hasError;
+});

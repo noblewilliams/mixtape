@@ -1,6 +1,7 @@
 // The shared mix handoff (plan task 5.3): the copy the arrangement and the
-// conversation both toast, the Apple/Spotify gating both rows obey, the save
-// alert both open, and the two Spotify sheets split Play opens. The two screen
+// conversation both toast, the gating both bars obey, the save alert both
+// open, and the fixed per-platform mix actions (one platform,
+// `docs/mockups/approved/2026-11-09-one-platform-play.md`). The two screen
 // suites still cover how each screen wires these up; this covers the unit
 // itself, so a copy change has exactly one place to break.
 import 'dart:async';
@@ -9,6 +10,8 @@ import 'package:flutter/cupertino.dart'
     show CupertinoActivityIndicator, CupertinoDialogAction, CupertinoTextField;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/services.dart' show PlatformException;
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
 import 'package:mixtape/data/listening/listening_models.dart';
@@ -17,13 +20,17 @@ import 'package:mixtape/data/playback/playback_controller.dart';
 import 'package:mixtape/data/settings/author_store.dart';
 import 'package:mixtape/presentation/providers/dj_providers.dart';
 import 'package:mixtape/presentation/providers/library_sync_provider.dart';
-import 'package:mixtape/presentation/providers/play_destination_provider.dart';
+import 'package:mixtape/presentation/providers/onboarding_provider.dart';
+import 'package:mixtape/presentation/providers/music_platform_provider.dart';
 import 'package:mixtape/presentation/providers/playback_provider.dart';
+import 'package:mixtape/presentation/screens/playback_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
-import 'package:mixtape/presentation/widgets/foundation/mixtape_menu.dart';
+import 'package:mixtape/presentation/widgets/foundation/label_chip.dart';
+import 'package:mixtape/presentation/widgets/foundation/service_marks.dart';
 import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
 import 'package:mixtape/presentation/widgets/mix_handoff.dart';
-import 'package:mixtape/presentation/widgets/spotify_handoff_sheets.dart';
+import 'package:mixtape/presentation/widgets/tape_header.dart' show TapeBar;
+import 'package:mixtape/presentation/widgets/tape_strip.dart';
 import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 
 import '../../data/playback/playback_controller_test.dart' as playback
@@ -73,14 +80,37 @@ class _HostState extends ConsumerState<_Host> with MixHandoff<_Host> {
     ref.watch(accountNameProvider);
     return Scaffold(
       body: Center(
-        child: TextButton(
-          key: const Key('open-save'),
-          onPressed: () => createPlaylist(
-            queue: widget.queue,
-            defaultName: widget.defaultName,
-            keys: MixHandoffKeys.arrangement,
-          ),
-          child: const Text('Create playlist'),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextButton(
+              key: const Key('open-save'),
+              onPressed: () => createPlaylist(
+                queue: widget.queue,
+                defaultName: widget.defaultName,
+                keys: MixHandoffKeys.arrangement,
+              ),
+              child: const Text('Create playlist'),
+            ),
+            TextButton(
+              key: const Key('host-play-here'),
+              onPressed: () => playHere(
+                ChatState(
+                  session: DjSession(
+                    id: 's1',
+                    title: 'Road Trip',
+                    status: 'active',
+                    queueVersion: 2,
+                    updatedAt: DateTime(2026, 1, 1),
+                  ),
+                  messages: const [],
+                  queue: widget.queue,
+                ),
+                widget.queue,
+              ),
+              child: const Text('Play here'),
+            ),
+          ],
         ),
       ),
     );
@@ -92,8 +122,10 @@ ProviderContainer _container({
   FakeBridge? bridge,
   AuthorStore? authorStore,
   String? accountName,
+  PlaybackController? player,
 }) => ProviderContainer(
   overrides: [
+    if (player != null) playbackProvider.overrideWithValue(player),
     djApiProvider.overrideWithValue(api ?? FakeDjApi()),
     musicKitBridgeProvider.overrideWithValue(bridge ?? FakeBridge()),
     authorStoreProvider.overrideWithValue(authorStore ?? InMemoryAuthorStore()),
@@ -118,57 +150,82 @@ Future<_HostState> _pumpHost(
   return tester.state<_HostState>(find.byType(_Host));
 }
 
-/// What the split button asked for, and the store its arrow remembers into.
-class _Played {
-  final destinations = <PlayDestination>[];
+/// What the mix actions asked for.
+class _Tapped {
+  int plays = 0;
   int nowPlaying = 0;
-  int shares = 0;
+  int playlists = 0;
+  int spotifyPlaylists = 0;
   late ProviderContainer container;
 }
 
-/// Split Play on its own: the design tokens it reads off the theme, the
-/// player it listens to for the Playing state, and the remembered
-/// destination.
-Future<_Played> _pumpSplit(
+/// The mix actions on their own: the design tokens they read off the theme,
+/// the player they listen to for the Playing state, and the device's
+/// platform.
+Future<_Tapped> _pumpActions(
   WidgetTester tester, {
   required List<QueueTrack> queue,
   bool enabled = true,
   bool playing = false,
   MixHandoffKeys keys = MixHandoffKeys.arrangement,
-  PlayDestinationStore? store,
-  bool spotifyOnly = false,
-  bool askService = false,
+  MusicPlatform? platform,
+  double textScale = 1,
+  double width = 390,
+  bool onTape = false,
+  bool sendingToMusic = false,
+  PlaybackController? player,
 }) async {
-  final played = _Played();
+  final tapped = _Tapped();
   final container = ProviderContainer(
     overrides: [
       playbackProvider.overrideWithValue(
-        PlaybackController(playback.FakeApi(), playback.FakeBridge()),
+        player ?? PlaybackController(playback.FakeApi(), playback.FakeBridge()),
       ),
-      playDestinationStoreProvider.overrideWithValue(
-        store ?? InMemoryPlayDestinationStore(),
+      musicPlatformStoreProvider.overrideWithValue(
+        InMemoryMusicPlatformStore(platform),
       ),
+      onboardingProvider.overrideWith(() => _Onboarding(null)),
     ],
   );
   addTearDown(container.dispose);
-  played.container = container;
+  tapped.container = container;
+  final actions = MixActions(
+    keys: keys,
+    queue: queue,
+    enabled: enabled,
+    isPlayingThisMix: () => playing,
+    onPlay: () => tapped.plays++,
+    onOpenNowPlaying: () => tapped.nowPlaying++,
+    onCreatePlaylist: () => tapped.playlists++,
+    onCreateSpotifyPlaylist: () => tapped.spotifyPlaylists++,
+    sendingToMusic: sendingToMusic,
+  );
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
       child: MaterialApp(
         theme: MixtapeTheme.light(),
-        home: Scaffold(
-          body: Center(
-            child: MixSplitPlay(
-              keys: keys,
-              queue: queue,
-              enabled: enabled,
-              isPlayingThisMix: () => playing,
-              onPlay: played.destinations.add,
-              onOpenNowPlaying: () => played.nowPlaying++,
-              onShare: (_) => played.shares++,
-              spotifyOnly: spotifyOnly,
-              askService: askService,
+        home: MediaQuery(
+          data: MediaQueryData(
+            size: Size(width, 800),
+            textScaler: TextScaler.linear(textScale),
+          ),
+          child: Scaffold(
+            body: Align(
+              alignment: Alignment.bottomCenter,
+              child: SizedBox(
+                width: width,
+                child: onTape
+                    ? TapeBar(primary: actions)
+                    : TapeStrip(
+                        title: 'Smooth Cruise Through Lagos',
+                        version: 1,
+                        songs: queue.length,
+                        caseColor: const Color(0xFF617F9C),
+                        onOpen: () {},
+                        actions: actions,
+                      ),
+              ),
             ),
           ),
         ),
@@ -176,7 +233,35 @@ Future<_Played> _pumpSplit(
     ),
   );
   await tester.pumpAndSettle();
-  return played;
+  return tapped;
+}
+
+/// An app player whose start fails only once a test lets it.
+class _LateFailBridge extends playback.FakeBridge {
+  final gate = Completer<void>();
+
+  @override
+  Future<void> start(List<String> ids) async {
+    starts++;
+    await gate.future;
+    throw PlatformException(code: 'playback_failed');
+  }
+}
+
+class _Onboarding extends OnboardingNotifier {
+  _Onboarding(this.service);
+  final String? service;
+
+  @override
+  Future<OnboardingState> build() async => OnboardingState(
+    userId: 'u1',
+    sources: const [],
+    hasLibrary: true,
+    chosenService: service,
+    markedRequestedAt: null,
+    interviewCompletedAt: null,
+    importCompletedAt: null,
+  );
 }
 
 void main() {
@@ -229,7 +314,7 @@ void main() {
       );
     });
 
-    test('Play on Spotify opens the paste-a-list page that makes a Spotify playlist', () {
+    test('the Spotify Create playlist opens the paste-a-list page that makes a Spotify playlist', () {
       expect(
         mixTransferToolUrl.toString(),
         'https://www.tunemymusic.com/transfer/freetext-to-spotify',
@@ -266,140 +351,14 @@ void main() {
     test('an arrangement that does not exist yet needs no reason', () {
       expect(mixActionsDisabledReason(const []), isNull);
     });
-
-    test('the transfer handoff appears only with a Spotify id present', () {
-      expect(mixHasSpotifyActions([_track(0)]), isFalse);
-      expect(
-        mixHasSpotifyActions([_track(0), _track(1, spotifyId: 'sp1')]),
-        isTrue,
-      );
-    });
-
-    test('Play and Create survive a mix with no ids of either kind', () {
-      expect(mixHasAppleActions(const []), isTrue);
-      expect(mixHasAppleActions([_track(0, appleId: null)]), isTrue);
-    });
-
-    test('only a Spotify-only mix trades them for the transfer tool', () {
-      expect(
-        mixHasAppleActions([_track(0, appleId: null, spotifyId: 'sp0')]),
-        isFalse,
-      );
-      // One Apple match among them is enough to keep the pair.
-      expect(
-        mixHasAppleActions([_track(0), _track(1, appleId: null, spotifyId: 'sp1')]),
-        isTrue,
-      );
-    });
   });
 
-  group('a Spotify-only listener', () {
-    OnboardingState listener({String? service = 'spotify', bool appleLive = false}) =>
-        OnboardingState(
-          userId: 'u1',
-          sources: [
-            if (appleLive)
-              MusicSource(
-                source: 'apple_live',
-                connectedAt: DateTime(2026),
-                lastImportedAt: null,
-                ledgerFrom: null,
-                ledgerTo: null,
-              ),
-          ],
-          hasLibrary: true,
-          chosenService: service,
-          markedRequestedAt: null,
-          interviewCompletedAt: null,
-          importCompletedAt: null,
-        );
-
-    test('chose Spotify and has no live Apple library', () {
-      expect(mixSpotifyOnly(listener()), isTrue);
-      expect(mixSpotifyOnly(listener(appleLive: true)), isFalse);
-      expect(mixSpotifyOnly(listener(service: 'apple')), isFalse);
-      expect(mixSpotifyOnly(null), isFalse);
-    });
-
-    test('asks where they listen only when nothing says so', () {
-      expect(mixNeedsServiceChoice(null), isTrue);
-      expect(mixNeedsServiceChoice(listener(service: null)), isTrue);
-      expect(mixNeedsServiceChoice(listener(service: 'skipped')), isTrue);
-      expect(mixNeedsServiceChoice(listener()), isFalse);
-      expect(mixNeedsServiceChoice(listener(service: 'apple')), isFalse);
-      expect(
-        mixNeedsServiceChoice(listener(service: 'skipped', appleLive: true)),
-        isFalse,
-      );
-    });
-
+  group('Spotify rows', () {
     test('a track with no Spotify id opens a Spotify search for it', () {
       expect(
         mixSpotifySearch(_track(0)).toString(),
         'https://open.spotify.com/search/Artist%200%20Title%200',
       );
-    });
-
-    testWidgets('a catalogue mix leads with Play on Spotify; Apple waits behind the arrow', (
-      tester,
-    ) async {
-      final played = await _pumpSplit(
-        tester,
-        queue: [_track(0), _track(1)],
-        spotifyOnly: true,
-      );
-      final keys = MixHandoffKeys.arrangement;
-      expect(find.text('Play on Spotify'), findsOneWidget);
-      expect(find.text('Play'), findsNothing);
-
-      await tester.tap(find.byKey(keys.share));
-      expect(played.shares, 1);
-      expect(played.destinations, isEmpty);
-
-      await tester.tap(find.byKey(keys.playMenu));
-      await tester.pumpAndSettle();
-      expect(find.text('Play here'), findsOneWidget);
-      expect(find.text('Play in Apple Music'), findsOneWidget);
-      // The main part and the menu's ticked entry.
-      expect(find.text('Play on Spotify'), findsNWidgets(2));
-    });
-
-    testWidgets('one who picked Apple keeps Play', (tester) async {
-      final played = await _pumpSplit(
-        tester,
-        queue: [_track(0)],
-        spotifyOnly: true,
-        store: InMemoryPlayDestinationStore(PlayDestination.here),
-      );
-      expect(find.text('Play'), findsOneWidget);
-      await tester.tap(find.byKey(MixHandoffKeys.arrangement.playNow));
-      expect(played.destinations, [PlayDestination.here]);
-      expect(played.shares, 0);
-    });
-
-    testWidgets('a mix with no Apple match is Play on Spotify alone, with no reason line', (
-      tester,
-    ) async {
-      final queue = [_track(0, appleId: null)];
-      final played = await _pumpSplit(tester, queue: queue, spotifyOnly: true);
-      final keys = MixHandoffKeys.arrangement;
-      expect(find.byKey(keys.playMenu), findsNothing);
-      expect(
-        tester.widget<TapeButton>(find.byKey(keys.share)).label,
-        'Play on Spotify',
-      );
-      await tester.tap(find.byKey(keys.share));
-      expect(played.shares, 1);
-
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: MixtapeTheme.light(),
-          home: Scaffold(
-            body: MixPlayReason(keys: keys, queue: queue, spotifyOnly: true),
-          ),
-        ),
-      );
-      expect(find.byType(Text), findsNothing);
     });
   });
 
@@ -642,315 +601,241 @@ void main() {
     });
   });
 
-  group('split Play', () {
-    testWidgets('plays here by default; the arrow is its own named target', (
+  group('mix actions', () {
+    Finder arrow() => find.byIcon(Icons.keyboard_arrow_down_rounded);
+
+    for (final onTape in [false, true]) {
+      final where = onTape ? 'the tape bar' : 'the strip';
+
+      testWidgets('Apple Music on $where: Play and Create playlist, no arrow', (
+        tester,
+      ) async {
+        final handle = tester.ensureSemantics();
+        final tapped = await _pumpActions(
+          tester,
+          queue: [_track(0), _track(1)],
+          platform: MusicPlatform.apple,
+          onTape: onTape,
+        );
+        const keys = MixHandoffKeys.arrangement;
+        expect(
+          tester.widget<TapeButton>(find.byKey(keys.playNow)).label,
+          'Play',
+        );
+        expect(
+          tester.widget<LabelChip>(find.byKey(keys.createPlaylist)).label,
+          'Create playlist',
+        );
+        expect(find.byKey(keys.spotifyPlaylist), findsNothing);
+        expect(arrow(), findsNothing);
+        expect(find.bySemanticsLabel('Choose where to play'), findsNothing);
+        expect(find.byKey(MixHandoffKeys.meterKey), findsNothing);
+
+        // Play on the left, Create playlist on the right, sharing the row.
+        final play = tester.getRect(find.byKey(keys.playNow));
+        final create = tester.getRect(find.byKey(keys.createPlaylist));
+        expect(play.right, lessThan(create.left));
+        expect(play.width, closeTo(create.width, 1));
+        expect(play.height, greaterThanOrEqualTo(44));
+
+        await tester.tap(find.byKey(keys.playNow));
+        await tester.tap(find.byKey(keys.createPlaylist));
+        expect(tapped.plays, 1);
+        expect(tapped.playlists, 1);
+        expect(tapped.spotifyPlaylists, 0);
+        handle.dispose();
+      });
+
+      testWidgets(
+        'Spotify on $where: one full-width Create playlist, no Play',
+        (tester) async {
+          final handle = tester.ensureSemantics();
+          final tapped = await _pumpActions(
+            tester,
+            queue: [_track(0), _track(1, appleId: null)],
+            platform: MusicPlatform.spotify,
+            onTape: onTape,
+          );
+          const keys = MixHandoffKeys.arrangement;
+          expect(find.byKey(keys.playNow), findsNothing);
+          expect(find.byKey(keys.createPlaylist), findsNothing);
+          expect(find.text('Play'), findsNothing);
+          expect(arrow(), findsNothing);
+          final button = find.byKey(keys.spotifyPlaylist);
+          expect(tester.widget<TapeButton>(button).label, 'Create playlist');
+          expect(
+            find.descendant(of: button, matching: find.byType(SpotifyMark)),
+            findsOneWidget,
+          );
+          expect(
+            find.bySemanticsLabel('Create Spotify playlist'),
+            findsOneWidget,
+          );
+          // Full width: the whole row the strip or bar gives it.
+          final row = tester.getRect(find.byType(MixActions));
+          expect(tester.getRect(button).width, row.width);
+
+          await tester.tap(button);
+          expect(tapped.spotifyPlaylists, 1);
+          expect(tapped.plays, 0);
+          handle.dispose();
+        },
+      );
+    }
+
+    testWidgets('an unknown platform draws the Apple Music pair', (
       tester,
     ) async {
-      final handle = tester.ensureSemantics();
-      final played = await _pumpSplit(tester, queue: [_track(0), _track(1)]);
-
-      final keys = MixHandoffKeys.arrangement;
-      expect(find.text('Play'), findsOneWidget);
-      expect(find.bySemanticsLabel('Choose where to play'), findsOneWidget);
-      expect(tester.getSize(find.byKey(keys.playMenu)).width, 44);
+      await _pumpActions(tester, queue: [_track(0)]);
+      expect(find.byKey(MixHandoffKeys.arrangement.playNow), findsOneWidget);
       expect(
-        tester.getSize(find.byKey(keys.playMenu)).height,
-        greaterThanOrEqualTo(44),
+        find.byKey(MixHandoffKeys.arrangement.createPlaylist),
+        findsOneWidget,
       );
-      expect(find.byKey(keys.share), findsNothing);
-      expect(find.byKey(MixHandoffKeys.meterKey), findsNothing);
-
-      await tester.tap(find.byKey(keys.playNow));
-      expect(played.destinations, [PlayDestination.here]);
-      handle.dispose();
     });
 
-    testWidgets('a remembered Apple Music reads Play in Music and plays there', (
-      tester,
-    ) async {
-      final played = await _pumpSplit(
-        tester,
-        queue: [_track(0)],
-        store: InMemoryPlayDestinationStore(PlayDestination.appleMusic),
-      );
-      expect(find.text('Play in Music'), findsOneWidget);
-      await tester.tap(find.byKey(MixHandoffKeys.arrangement.playNow));
-      expect(played.destinations, [PlayDestination.appleMusic]);
-    });
-
-    testWidgets('the arrow ticks the default; picking plays and remembers', (
-      tester,
-    ) async {
-      final store = InMemoryPlayDestinationStore();
-      final played = await _pumpSplit(tester, queue: [_track(0)], store: store);
-      final keys = MixHandoffKeys.arrangement;
-
-      await tester.tap(find.byKey(keys.playMenu));
-      await tester.pumpAndSettle();
-      expect(find.text('Play here'), findsOneWidget);
-      expect(find.text('Play in Apple Music'), findsOneWidget);
-
-      await tester.tap(find.byKey(keys.sendToMusic));
-      await tester.pumpAndSettle();
-      expect(played.destinations, [PlayDestination.appleMusic]);
-      expect(await store.read(), PlayDestination.appleMusic);
-      expect(find.text('Play in Music'), findsOneWidget);
-
-      await tester.tap(find.byKey(keys.playMenu));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(keys.playHere));
-      await tester.pumpAndSettle();
-      expect(played.destinations, [
-        PlayDestination.appleMusic,
-        PlayDestination.here,
-      ]);
-      expect(find.text('Play'), findsOneWidget);
-    });
-
-    testWidgets('while this mix plays here it reads Playing and opens Now Playing', (
-      tester,
-    ) async {
-      final played = await _pumpSplit(
-        tester,
-        queue: [_track(0)],
-        playing: true,
-      );
-      expect(find.text('Playing'), findsOneWidget);
-      expect(find.byKey(MixHandoffKeys.meterKey), findsOneWidget);
-      await tester.tap(find.byKey(MixHandoffKeys.arrangement.playNow));
-      expect(played.nowPlaying, 1);
-      expect(played.destinations, isEmpty);
-    });
-
-    testWidgets('a Spotify-only mix is the transfer handoff alone, with why', (
-      tester,
-    ) async {
-      final played = await _pumpSplit(
-        tester,
-        queue: [_track(0, appleId: null, spotifyId: 'sp0')],
-      );
-      final keys = MixHandoffKeys.arrangement;
-      expect(find.byKey(keys.playNow), findsNothing);
-      expect(find.byKey(keys.playMenu), findsNothing);
-      expect(
-        tester.widget<TapeButton>(find.byKey(keys.share)).label,
-        'Play on Spotify',
-      );
-      await tester.tap(find.byKey(keys.share));
-      expect(played.shares, 1);
-
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: MixtapeTheme.light(),
-          home: Scaffold(
-            body: MixPlayReason(
-              keys: keys,
-              queue: [_track(0, appleId: null, spotifyId: 'sp0')],
-            ),
+    testWidgets(
+      'while this mix plays here, Play reads Playing and opens Now Playing',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+        final tapped = await _pumpActions(
+          tester,
+          queue: [_track(0)],
+          playing: true,
+        );
+        const keys = MixHandoffKeys.arrangement;
+        expect(
+          tester.widget<TapeButton>(find.byKey(keys.playNow)).label,
+          'Playing',
+        );
+        expect(find.byKey(MixHandoffKeys.meterKey), findsOneWidget);
+        expect(
+          tester.getSemantics(find.byKey(keys.playNow)),
+          matchesSemantics(
+            label: 'Playing',
+            hint: 'Opens Now Playing',
+            isButton: true,
+            isEnabled: true,
+            hasEnabledState: true,
+            hasTapAction: true,
           ),
-        ),
+        );
+        // Nothing else on the bar changes.
+        expect(find.byKey(keys.createPlaylist), findsOneWidget);
+        await tester.tap(find.byKey(keys.playNow));
+        expect(tapped.nowPlaying, 1);
+        expect(tapped.plays, 0);
+        handle.dispose();
+      },
+    );
+
+    testWidgets('Play is inert while a start is in flight, and never opens Now Playing', (
+      tester,
+    ) async {
+      FlutterSecureStorage.setMockInitialValues({});
+      final gate = Completer<void>();
+      final player = PlaybackController(
+        playback.FakeApi(),
+        playback.FakeBridge()..pending = gate,
       );
+      final tapped = await _pumpActions(
+        tester,
+        queue: [_track(0)],
+        // The mix reads as this one's from the tap: the controller marks it
+        // `waiting` before the native call.
+        playing: true,
+        player: player,
+      );
+      const keys = MixHandoffKeys.arrangement;
+      unawaited(player.start('s1', 1, 'Mix', [_track(0)]));
+      await tester.pump();
+      await tester.pump();
+      expect(player.busy, isTrue);
+      final play = tester.widget<TapeButton>(find.byKey(keys.playNow));
+      expect(play.label, 'Play');
+      expect(play.onPressed, isNull);
+      expect(find.byKey(MixHandoffKeys.meterKey), findsNothing);
+      await tester.tap(find.byKey(keys.playNow));
+      expect(tapped.nowPlaying, 0);
+      expect(tapped.plays, 0);
+
+      gate.complete();
+      await tester.pump();
+      await tester.pump();
+      expect(player.busy, isFalse);
       expect(
-        tester.widget<Text>(find.byKey(keys.appleNeeded)).data,
-        'Play and Create playlist need Apple Music',
+        tester.widget<TapeButton>(find.byKey(keys.playNow)).label,
+        'Playing',
+      );
+      player.dispose();
+    });
+
+    testWidgets('Play is inert while the mix is on its way to the Music app', (
+      tester,
+    ) async {
+      final tapped = await _pumpActions(
+        tester,
+        queue: [_track(0)],
+        sendingToMusic: true,
+      );
+      const keys = MixHandoffKeys.arrangement;
+      expect(
+        tester.widget<TapeButton>(find.byKey(keys.playNow)).onPressed,
+        isNull,
+      );
+      await tester.tap(find.byKey(keys.playNow));
+      expect(tapped.plays, 0);
+      // Create playlist is a different action and stays live.
+      expect(
+        tester.widget<LabelChip>(find.byKey(keys.createPlaylist)).onPressed,
+        isNotNull,
       );
     });
 
-    testWidgets('a mixed mix keeps the arrow; the transfer handoff is in its menu', (
+    testWidgets('changing the platform changes the bar at once', (
       tester,
     ) async {
-      final played = await _pumpSplit(
+      final tapped = await _pumpActions(
         tester,
-        queue: [_track(0), _track(1, spotifyId: 'sp1')],
+        queue: [_track(0)],
+        platform: MusicPlatform.apple,
       );
-      final keys = MixHandoffKeys.arrangement;
+      const keys = MixHandoffKeys.arrangement;
       expect(find.byKey(keys.playNow), findsOneWidget);
-      expect(find.byKey(keys.playMenu), findsOneWidget);
-      expect(find.byKey(keys.share), findsNothing);
-
-      await tester.tap(find.byKey(keys.playMenu));
+      await tapped.container
+          .read(musicPlatformProvider.notifier)
+          .choose(MusicPlatform.spotify);
       await tester.pumpAndSettle();
-      expect(find.text('Play here'), findsOneWidget);
-      expect(find.text('Play in Apple Music'), findsOneWidget);
-      final items = tester
-          .widgetList<MixtapeMenuItem<Object>>(find.byType(MixtapeMenuItem<Object>))
-          .map((item) => item.action)
-          .toList();
-      expect(items.last.label, 'Play on Spotify');
-      expect(items.last.separatorBefore, isTrue);
-
-      await tester.tap(find.byKey(keys.share));
-      await tester.pumpAndSettle();
-      expect(played.shares, 1);
-      expect(played.destinations, isEmpty);
+      expect(find.byKey(keys.playNow), findsNothing);
+      expect(find.byKey(keys.spotifyPlaylist), findsOneWidget);
     });
 
-    testWidgets(
-      'every mix offers Play on Spotify; picking it remembers Spotify',
-      (tester) async {
-        final store = InMemoryPlayDestinationStore();
-        final played = await _pumpSplit(
-          tester,
-          queue: [_track(0)],
-          store: store,
-        );
-        final keys = MixHandoffKeys.arrangement;
-        await tester.tap(find.byKey(keys.playMenu));
-        await tester.pumpAndSettle();
-        expect(find.text('Play on Spotify'), findsOneWidget);
-
-        await tester.tap(find.byKey(keys.share));
-        await tester.pumpAndSettle();
-        expect(played.shares, 1);
-        expect(await store.read(), PlayDestination.spotify);
-
-        // The main part now plays on Spotify.
-        expect(find.text('Play on Spotify'), findsOneWidget);
-        await tester.tap(find.byKey(keys.share));
-        expect(played.shares, 2);
-        expect(played.destinations, isEmpty);
-      },
-    );
-
-    testWidgets('a remembered Spotify reads Play on Spotify and hands off', (
+    testWidgets('no Apple match keeps both, inert, beside the reason', (
       tester,
     ) async {
-      final played = await _pumpSplit(
+      final queue = [_track(0, appleId: null, spotifyId: 'sp0')];
+      final tapped = await _pumpActions(
         tester,
-        queue: [_track(0)],
-        store: InMemoryPlayDestinationStore(PlayDestination.spotify),
+        queue: queue,
+        platform: MusicPlatform.apple,
       );
-      expect(find.text('Play on Spotify'), findsOneWidget);
-      await tester.tap(find.byKey(MixHandoffKeys.arrangement.share));
-      expect(played.shares, 1);
-      expect(played.destinations, isEmpty);
-    });
+      const keys = MixHandoffKeys.arrangement;
+      expect(find.byKey(keys.playNow), findsOneWidget);
+      expect(find.byKey(keys.createPlaylist), findsOneWidget);
+      expect(find.byKey(keys.spotifyPlaylist), findsNothing);
+      await tester.tap(find.byKey(keys.playNow));
+      await tester.tap(find.byKey(keys.createPlaylist));
+      expect(tapped.plays, 0);
+      expect(tapped.playlists, 0);
 
-    testWidgets(
-      'with no known service, the first Play asks where they listen',
-      (tester) async {
-        final store = InMemoryPlayDestinationStore();
-        final played = await _pumpSplit(
-          tester,
-          queue: [_track(0)],
-          store: store,
-          askService: true,
-        );
-        await tester.tap(find.byKey(MixHandoffKeys.arrangement.playNow));
-        await tester.pumpAndSettle();
-        expect(find.text(WhereYouListenSheet.headline), findsOneWidget);
-        expect(find.byKey(WhereYouListenSheet.spotifyKey), findsOneWidget);
-        expect(find.byKey(WhereYouListenSheet.appleKey), findsOneWidget);
-        expect(played.destinations, isEmpty);
-        expect(played.shares, 0);
-
-        await tester.tap(find.byKey(WhereYouListenSheet.spotifyKey));
-        await tester.pumpAndSettle();
-        expect(find.text(WhereYouListenSheet.headline), findsNothing);
-        expect(played.shares, 1);
-        expect(await store.read(), PlayDestination.spotify);
-        expect(find.text('Play on Spotify'), findsOneWidget);
-
-        // Remembered: the next tap goes straight to Spotify.
-        await tester.tap(find.byKey(MixHandoffKeys.arrangement.share));
-        await tester.pumpAndSettle();
-        expect(find.text(WhereYouListenSheet.headline), findsNothing);
-        expect(played.shares, 2);
-      },
-    );
-
-    testWidgets('answering Apple Music plays here and remembers it', (
-      tester,
-    ) async {
-      final store = InMemoryPlayDestinationStore();
-      final played = await _pumpSplit(
-        tester,
-        queue: [_track(0)],
-        store: store,
-        askService: true,
-      );
-      await tester.tap(find.byKey(MixHandoffKeys.arrangement.playNow));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(WhereYouListenSheet.appleKey));
-      await tester.pumpAndSettle();
-      expect(played.destinations, [PlayDestination.here]);
-      expect(played.shares, 0);
-      expect(await store.read(), PlayDestination.here);
-    });
-
-    testWidgets('closing the question plays nothing and remembers nothing', (
-      tester,
-    ) async {
-      final store = InMemoryPlayDestinationStore();
-      final played = await _pumpSplit(
-        tester,
-        queue: [_track(0)],
-        store: store,
-        askService: true,
-      );
-      await tester.tap(find.byKey(MixHandoffKeys.arrangement.playNow));
-      await tester.pumpAndSettle();
-      await tester.tapAt(const Offset(20, 20));
-      await tester.pumpAndSettle();
-      expect(find.text(WhereYouListenSheet.headline), findsNothing);
-      expect(played.destinations, isEmpty);
-      expect(played.shares, 0);
-      expect(await store.read(), isNull);
-    });
-
-    testWidgets('a remembered choice is never asked about', (tester) async {
-      final played = await _pumpSplit(
-        tester,
-        queue: [_track(0)],
-        store: InMemoryPlayDestinationStore(PlayDestination.here),
-        askService: true,
-      );
-      await tester.tap(find.byKey(MixHandoffKeys.arrangement.playNow));
-      await tester.pumpAndSettle();
-      expect(find.text(WhereYouListenSheet.headline), findsNothing);
-      expect(played.destinations, [PlayDestination.here]);
-    });
-
-    testWidgets('a choice made after Play has left the screen does nothing', (
-      tester,
-    ) async {
-      final played = await _pumpSplit(tester, queue: [_track(0)]);
-      final keys = MixHandoffKeys.arrangement;
-      await tester.tap(find.byKey(keys.playMenu));
-      await tester.pumpAndSettle();
-
-      // The host rebuilds without Play while the menu is still up.
       await tester.pumpWidget(
         UncontrolledProviderScope(
-          container: played.container,
+          container: tapped.container,
           child: MaterialApp(
             theme: MixtapeTheme.light(),
-            home: const Scaffold(body: SizedBox()),
-          ),
-        ),
-      );
-      await tester.tap(find.byKey(keys.sendToMusic));
-      await tester.pumpAndSettle();
-      expect(tester.takeException(), isNull);
-      expect(played.destinations, isEmpty);
-    });
-
-    testWidgets('no Apple match leaves Play inert beside the reason', (
-      tester,
-    ) async {
-      final played = await _pumpSplit(tester, queue: [_track(0, appleId: null)]);
-      final keys = MixHandoffKeys.arrangement;
-      await tester.tap(find.byKey(keys.playNow));
-      await tester.tap(find.byKey(keys.playMenu));
-      await tester.pumpAndSettle();
-      expect(played.destinations, isEmpty);
-      expect(find.text('Play here'), findsNothing);
-
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: MixtapeTheme.light(),
-          home: Scaffold(
-            body: MixPlayReason(keys: keys, queue: [_track(0, appleId: null)]),
+            home: Scaffold(
+              body: MixPlayReason(keys: keys, queue: queue),
+            ),
           ),
         ),
       );
@@ -960,30 +845,58 @@ void main() {
       );
     });
 
-    testWidgets('a busy host makes it inert in place', (tester) async {
-      final played = await _pumpSplit(
+    testWidgets('a Spotify listener has no Apple reason to read', (
+      tester,
+    ) async {
+      final queue = [_track(0, appleId: null)];
+      final tapped = await _pumpActions(
+        tester,
+        queue: queue,
+        platform: MusicPlatform.spotify,
+      );
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: tapped.container,
+          child: MaterialApp(
+            theme: MixtapeTheme.light(),
+            home: Scaffold(
+              body: MixPlayReason(
+                keys: MixHandoffKeys.arrangement,
+                queue: queue,
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(find.byType(Text), findsNothing);
+    });
+
+    testWidgets('a busy host makes them inert in place', (tester) async {
+      final tapped = await _pumpActions(
         tester,
         queue: [_track(0), _track(1)],
         enabled: false,
       );
       await tester.tap(find.byKey(MixHandoffKeys.arrangement.playNow));
-      expect(played.destinations, isEmpty);
+      await tester.tap(find.byKey(MixHandoffKeys.arrangement.createPlaylist));
+      expect(tapped.plays, 0);
+      expect(tapped.playlists, 0);
     });
 
-    testWidgets('an inert segment absorbs its tap instead of passing it on', (
+    testWidgets('an inert action absorbs its tap instead of opening the tape', (
       tester,
     ) async {
-      // The tape strip opens the tape on any tap that reaches it.
       var opened = 0;
-      Future<void> pump(List<QueueTrack> queue, {bool enabled = true}) async {
+      Future<void> pump(MusicPlatform platform) async {
         final container = ProviderContainer(
           overrides: [
             playbackProvider.overrideWithValue(
               PlaybackController(playback.FakeApi(), playback.FakeBridge()),
             ),
-            playDestinationStoreProvider.overrideWithValue(
-              InMemoryPlayDestinationStore(),
+            musicPlatformStoreProvider.overrideWithValue(
+              InMemoryMusicPlatformStore(platform),
             ),
+            onboardingProvider.overrideWith(() => _Onboarding(null)),
           ],
         );
         addTearDown(container.dispose);
@@ -993,19 +906,21 @@ void main() {
             child: MaterialApp(
               theme: MixtapeTheme.light(),
               home: Scaffold(
-                body: Center(
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => opened++,
-                    child: MixSplitPlay(
-                      keys: MixHandoffKeys.conversation,
-                      queue: queue,
-                      enabled: enabled,
-                      isPlayingThisMix: () => false,
-                      onPlay: (_) {},
-                      onOpenNowPlaying: () {},
-                      onShare: (_) {},
-                    ),
+                body: TapeStrip(
+                  title: 'Mix',
+                  version: 1,
+                  songs: 1,
+                  caseColor: const Color(0xFF617F9C),
+                  onOpen: () => opened++,
+                  actions: MixActions(
+                    keys: MixHandoffKeys.conversation,
+                    queue: [_track(0, appleId: null)],
+                    enabled: false,
+                    isPlayingThisMix: () => false,
+                    onPlay: () {},
+                    onOpenNowPlaying: () {},
+                    onCreatePlaylist: () {},
+                    onCreateSpotifyPlaylist: () {},
                   ),
                 ),
               ),
@@ -1015,26 +930,82 @@ void main() {
         await tester.pumpAndSettle();
       }
 
-      final keys = MixHandoffKeys.conversation;
-      await pump([_track(0, appleId: null)]);
+      const keys = MixHandoffKeys.conversation;
+      await pump(MusicPlatform.apple);
       await tester.tap(find.byKey(keys.playNow));
-      await tester.tap(find.byKey(keys.playMenu));
-      await tester.pumpAndSettle();
-      expect(opened, 0);
-
-      await pump([_track(0, appleId: null, spotifyId: 'sp0')], enabled: false);
-      await tester.tap(find.byKey(keys.share));
-      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(keys.createPlaylist));
+      await pump(MusicPlatform.spotify);
+      await tester.tap(find.byKey(keys.spotifyPlaylist));
       expect(opened, 0);
     });
 
-    testWidgets('the conversation draws it under its own keys', (tester) async {
-      await _pumpSplit(
+    testWidgets('at accessibility sizes the pair stacks, each full width', (
+      tester,
+    ) async {
+      await _pumpActions(
+        tester,
+        queue: [_track(0)],
+        platform: MusicPlatform.apple,
+        textScale: 2,
+      );
+      const keys = MixHandoffKeys.arrangement;
+      final play = tester.getRect(find.byKey(keys.playNow));
+      final create = tester.getRect(find.byKey(keys.createPlaylist));
+      final row = tester.getRect(find.byType(MixActions));
+      expect(play.bottom, lessThanOrEqualTo(create.top));
+      expect(play.width, row.width);
+      expect(create.width, row.width);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+      'at accessibility sizes the strip title may wrap to two lines',
+      (tester) async {
+        await _pumpActions(
+          tester,
+          queue: [_track(0)],
+          textScale: 2,
+          width: 320,
+        );
+        final title = tester.widget<Text>(
+          find.text('Smooth Cruise Through Lagos'),
+        );
+        expect(title.maxLines, 2);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets(
+      'in the strip the actions sit on their own row under the title',
+      (tester) async {
+        await _pumpActions(tester, queue: [_track(0)]);
+        final title = tester.getRect(find.text('Smooth Cruise Through Lagos'));
+        final play = tester.getRect(
+          find.byKey(MixHandoffKeys.arrangement.playNow),
+        );
+        expect(play.top, greaterThan(title.bottom));
+        expect(
+          tester
+              .widget<Text>(find.text('Smooth Cruise Through Lagos'))
+              .maxLines,
+          1,
+        );
+      },
+    );
+
+    testWidgets('the conversation draws them under its own keys', (
+      tester,
+    ) async {
+      await _pumpActions(
         tester,
         queue: [_track(0)],
         keys: MixHandoffKeys.conversation,
       );
       expect(find.byKey(MixHandoffKeys.conversation.playNow), findsOneWidget);
+      expect(
+        find.byKey(MixHandoffKeys.conversation.createPlaylist),
+        findsOneWidget,
+      );
       expect(find.byKey(MixHandoffKeys.arrangement.playNow), findsNothing);
     });
   });
@@ -1101,6 +1072,168 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text(three), findsOneWidget);
+    });
+  });
+  group('Play here', () {
+    PlatformException native(String code) =>
+        PlatformException(code: code, message: 'native');
+
+    Future<
+      ({
+        _HostState host,
+        FakeBridge music,
+        playback.FakeBridge app,
+        PlaybackController player,
+      })
+    >
+    pumpPlay(WidgetTester tester, {List<Object> startErrors = const []}) async {
+      FlutterSecureStorage.setMockInitialValues({});
+      final app = playback.FakeBridge()..startErrors.addAll(startErrors);
+      final player = PlaybackController(playback.FakeApi(), app);
+      final music = FakeBridge();
+      final host = await _pumpHost(
+        tester,
+        _container(bridge: music, player: player),
+        queue: [_track(0), _track(1, appleId: null)],
+      );
+      return (host: host, music: music, app: app, player: player);
+    }
+
+    Future<void> tapPlay(WidgetTester tester) async {
+      await tester.tap(find.byKey(const Key('host-play-here')));
+      // Now Playing animates its meter, so a settle would never finish.
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+    }
+
+    testWidgets('a start that works opens Now Playing', (tester) async {
+      final t = await pumpPlay(tester);
+      await tapPlay(tester);
+      expect(find.byType(PlaybackScreen), findsOneWidget);
+      expect(t.player.sessionId, 's1');
+      expect(t.music.playCalls, isEmpty);
+      expect(t.host.snacks, isEmpty);
+    });
+
+    testWidgets('access never granted is asked for on the tap, then plays', (
+      tester,
+    ) async {
+      final t = await pumpPlay(
+        tester,
+        startErrors: [native('authorization_required')],
+      );
+      await tapPlay(tester);
+      expect(t.app.authorizes, 1);
+      expect(find.byType(PlaybackScreen), findsOneWidget);
+      expect(t.music.playCalls, isEmpty);
+    });
+
+    for (final code in [
+      'authorization_denied',
+      'playback_failed',
+      'song_unavailable',
+      'empty_queue',
+    ]) {
+      testWidgets('$code goes to the Music app with no error screen', (
+        tester,
+      ) async {
+        final t = await pumpPlay(
+          tester,
+          startErrors: [
+            code == 'authorization_denied'
+                ? native('authorization_required')
+                : native(code),
+          ],
+        );
+        t.app.allowAccess = code != 'authorization_denied';
+        await tapPlay(tester);
+        expect(find.byType(PlaybackScreen), findsNothing);
+        expect(t.music.playCalls, [
+          ['apple'],
+        ]);
+        expect(t.host.snacks, [
+          'Playing in Apple Music · 1 song skipped (not in Apple Music)',
+        ]);
+        // Nothing left on the app's player to show as a failure.
+        expect(t.player.sessionId, isNull);
+        expect(t.player.error, isEmpty);
+      });
+    }
+
+    testWidgets('leaving the screen mid-start still releases and plays in Music', (
+      tester,
+    ) async {
+      FlutterSecureStorage.setMockInitialValues({});
+      final app = _LateFailBridge();
+      final player = PlaybackController(playback.FakeApi(), app);
+      final music = FakeBridge();
+      final api = FakeDjApi();
+      final container = _container(api: api, bridge: music, player: player);
+      await _pumpHost(tester, container, queue: [_track(0), _track(1)]);
+
+      await tester.tap(find.byKey(const Key('host-play-here')));
+      await tester.pump();
+      // The listener leaves before Apple answers.
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: SizedBox()),
+        ),
+      );
+      app.gate.complete();
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+
+      expect(music.playCalls, [
+        ['apple', 'apple'],
+      ]);
+      expect(player.sessionId, isNull, reason: 'released');
+      expect(api.postedEvents.map((e) => e.type), ['played']);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('no subscription still tries the Music app', (tester) async {
+      final t = await pumpPlay(
+        tester,
+        startErrors: [native('subscription_required')],
+      );
+      await tapPlay(tester);
+      expect(find.byType(PlaybackScreen), findsNothing);
+      expect(t.music.playCalls, hasLength(1));
+      expect(t.host.snacks, [
+        'Playing in Apple Music · 1 song skipped (not in Apple Music)',
+      ]);
+    });
+
+    testWidgets('no subscription and no Music app says so plainly', (
+      tester,
+    ) async {
+      final t = await pumpPlay(
+        tester,
+        startErrors: [native('subscription_required')],
+      );
+      t.music.onPlayQueue = (_) async => throw MusicKitException('nope');
+      await tapPlay(tester);
+      expect(find.byType(PlaybackScreen), findsNothing);
+      expect(t.host.snacks, ['Playing needs an Apple Music subscription.']);
+    });
+
+    testWidgets('a failed fallback says so plainly, never the raw reason', (
+      tester,
+    ) async {
+      final t = await pumpPlay(
+        tester,
+        startErrors: [native('playback_failed')],
+      );
+      t.music.onPlayQueue = (_) async => throw MusicKitException(
+        "The operation couldn't be completed. (MPMusicPlayerControllerErrorDomain error 6.)",
+      );
+      await tapPlay(tester);
+      expect(find.byType(PlaybackScreen), findsNothing);
+      expect(t.host.snacks, [mixPlayFallbackFailedMessage]);
+      expect(t.host.snacks.single, isNot(contains('MPMusicPlayer')));
     });
   });
 }
