@@ -2,6 +2,7 @@ import { sql, type SQL } from 'drizzle-orm'
 import type { Db } from '../db/types'
 import { EMBEDDING_DIMENSIONS, type Embedder } from '../enrich/embedder'
 import type { Intent } from './contracts'
+import { artistKey, creditedKeys } from './artist-keys'
 import { playlistOriginSql } from '../playlists/origin'
 import { MAX_PROFILE_RECORDINGS, MAX_PROFILE_RECORDINGS_PER_ARTIST } from '../playlists/seed'
 
@@ -51,7 +52,10 @@ export type BuildPoolOptions = {
   // from the listener's own rows AND the shared catalogue in either mode;
   // a catalogue row need not be enriched, only playable. No outside pool:
   // the catalogue rows already ride in the main query.
-  onlyArtistKey?: string
+  // Several keys (a named-artist edit, spec 2026-11-09
+  // every-song-earns-its-place, decision 3) admit a row crediting ANY of
+  // them; one key behaves exactly as a single string.
+  onlyArtistKey?: string | string[]
 }
 
 // Outside picks (spec 2026-10-03 Part C): the share of a mix that may be
@@ -679,7 +683,67 @@ function hardFilters(intent: Intent, excludeTrackIds: string[] | undefined, excl
   if (excludeSeedRecordings) {
     filters.push(sql`COALESCE(t.isrc, t.id::text) NOT IN (SELECT key FROM seed_recordings)`)
   }
+  filters.push(albumGlueFilter(intent.namedSongs))
   return filters
+}
+
+// Album glue (spec 2026-11-09 every-song-earns-its-place, decision 6):
+// intros, interludes, skits and outros are written to sit between two
+// particular album tracks, and land as non-sequiturs mid-mix (a pressure
+// test put Cole's "Intro" at 6 and two Tems interludes near the end). The
+// word alone is not enough: Portuguese "outro" means "another" ("O Outro
+// Lado"), and "My Intro To You" is a song. A title is glue when it is
+//  - the word alone, optionally numbered or a part: "Intro", "Interlude 2",
+//    "Intro (Pt. 1)";
+//  - the word inside parentheses or brackets: "Free Mind (Interlude)",
+//    "(includes Chinese restaurant skit)";
+//  - the word leading, then ":" or " - ": "Intro: ...", "Intro - Live".
+// A song the listener names stays: its title starts with the named title,
+// case-folded (so "free mind" keeps "Free Mind (Interlude)"), and when they
+// gave an artist it must be credited too, so naming Cole's "Intro" does not
+// let every other intro in. Here in hardFilters so every pool (personal,
+// corpus, artist-only, outside) gets it. Named titles are bound parameters,
+// never interpolated into the regex. The Postgres pattern (\m and \M are
+// its word start and end) and the code one below say the same thing and
+// share their test list (test/dj/pool.test.ts).
+const GLUE_WORD = '(?:intro|interlude|skit|outro)'
+const GLUE_ALONE = `^\\s*${GLUE_WORD}(?:\\s*#?\\d+|\\s*\\(?\\s*(?:pt|part)\\.?\\s*\\d+\\s*\\)?)?\\s*$`
+const GLUE_LEADING = `^\\s*${GLUE_WORD}\\s*(?::|\\s-\\s)`
+const ALBUM_GLUE_PATTERN =
+  `${GLUE_ALONE}|${GLUE_LEADING}|[(\\[][^)\\]]*\\m${GLUE_WORD}\\M[^)\\]]*[)\\]]`
+
+// The same rule in code, for songs that never pass through buildPool (the
+// DJ's own proposals, dj/propose.ts). The lookarounds stand in for \m and
+// \M: a word is letters, digits and underscore.
+const ALBUM_GLUE_RULE = new RegExp(
+  `${GLUE_ALONE}|${GLUE_LEADING}|[(\\[][^)\\]]*(?<![\\p{L}\\p{N}_])${GLUE_WORD}(?![\\p{L}\\p{N}_])[^)\\]]*[)\\]]`,
+  'iu',
+)
+
+export function isAlbumGlue(title: string, artist: string, namedSongs: Intent['namedSongs'] = []): boolean {
+  if (!ALBUM_GLUE_RULE.test(title)) return false
+  const folded = title.trim().toLowerCase()
+  return !(namedSongs ?? []).some((s) => {
+    const named = s.title.trim().toLowerCase()
+    if (named === '' || !folded.startsWith(named)) return false
+    const key = s.artist ? artistKey(s.artist) : ''
+    return key === '' || creditedKeys(artist).includes(key)
+  })
+}
+
+function albumGlueFilter(namedSongs: Intent['namedSongs']): SQL {
+  const exemptions = (namedSongs ?? []).flatMap((s) => {
+    const title = s.title.trim().toLowerCase()
+    if (title === '') return []
+    const key = s.artist ? artistKey(s.artist) : ''
+    return [key === ''
+      ? sql`starts_with(lower(btrim(t.title)), ${title})`
+      : sql`(starts_with(lower(btrim(t.title)), ${title}) AND t.artist_keys @> ARRAY[${key}]::text[])`]
+  })
+  const glue = sql`t.title ~* ${ALBUM_GLUE_PATTERN}`
+  return exemptions.length === 0
+    ? sql`NOT (${glue})`
+    : sql`(NOT (${glue}) OR ${sql.join(exemptions, sql` OR `)})`
 }
 
 /**
@@ -801,7 +865,9 @@ export async function buildPool(
   //    Apple rows), so either id passes, as any enriched row does in corpus
   //    mode. A personal listener who asked for only their own music
   //    (allowOutside false) keeps to their own rows.
-  const onlyKey = options.onlyArtistKey
+  const onlyKeys = options.onlyArtistKey === undefined ? undefined
+    : (Array.isArray(options.onlyArtistKey) ? options.onlyArtistKey : [options.onlyArtistKey])
+  const onlyKey = onlyKeys && onlyKeys.length > 0 ? onlyKeys : undefined
   const ownOnly = mode === 'personal' && intent.allowOutside === false
   const candidateSource: SQL =
     mode === 'corpus' || onlyKey !== undefined
@@ -810,7 +876,9 @@ export async function buildPool(
   const filters: SQL[] =
     onlyKey !== undefined
       ? [
-          sql`t.artist_keys @> ARRAY[${onlyKey}]::text[]`,
+          onlyKey.length === 1
+            ? sql`t.artist_keys @> ARRAY[${onlyKey[0]}]::text[]`
+            : sql`t.artist_keys && ARRAY[${sql.join(onlyKey.map((k) => sql`${k}`), sql`, `)}]::text[]`,
           ownOnly
             ? sql`(ut.track_id IS NOT NULL AND ${PERSONAL_CANDIDATE_RULE})`
             : mode === 'personal'

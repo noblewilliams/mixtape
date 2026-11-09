@@ -60,7 +60,7 @@ function finalTurn(text: string): LlmTurn {
 function curateFromRequest(req: LlmRequest): LlmTurn {
   const blocks = req.messages[0].content as Array<{ text: string }>
   const ids = Array.from(blocks[0].text.matchAll(/^([0-9a-f-]{36}) \|/gm)).map(match => match[1])
-  const count = Number(blocks[1].text.match(/Pick exactly (\d+) tracks/)?.[1] ?? 0)
+  const count = Number(blocks[1].text.match(/Pick up to (\d+) tracks/)?.[1] ?? 0)
   return finalTurn(JSON.stringify(ids.slice(0, count).map(id => ({ id, reason: 'fits here' }))))
 }
 

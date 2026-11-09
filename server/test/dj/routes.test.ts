@@ -96,7 +96,7 @@ function curateFakeResponseFromRequest(req: LlmRequest): LlmTurn {
   const poolText = blocks[0]?.text ?? ''
   const intentText = blocks[1]?.text ?? ''
   const ids = Array.from(poolText.matchAll(/^([0-9a-f-]{36}) \|/gm)).map((m) => m[1])
-  const countMatch = intentText.match(/Pick exactly (\d+) tracks/)
+  const countMatch = intentText.match(/Pick up to (\d+) tracks/)
   const count = countMatch ? Number(countMatch[1]) : ids.length
   const picks = ids.slice(0, count).map((id) => ({ id, reason: 'fits the vibe' }))
   return {

@@ -726,6 +726,72 @@ describe('queue-store', () => {
   // replacementsProvider; and it may only name a track THIS session has
   // already held, so every case below starts from a queue with one track
   // swiped out.
+  // Spec 2026-11-09 every-song-earns-its-place, decision 7: the store is the
+  // one place every DJ write passes through, so it drops repeated notes.
+  describe('repeated notes', () => {
+    it('replaceQueue blanks a note that repeats an earlier one in the same mix', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const session = await seedSession(db, 'u1')
+      const [a, b, c] = await seedTracks(db, 3)
+
+      await replaceQueue(db, session.id, [
+        { trackId: a.id, reason: 'The comedown after that run.' },
+        { trackId: b.id, reason: 'the comedown after that run' },
+        { trackId: c.id, reason: 'Something else entirely.' },
+      ], 'dj')
+
+      const view = await getActiveQueue(db, session.id)
+      expect(view.map((v) => v.reason)).toEqual(['The comedown after that run.', '', 'Something else entirely.'])
+    })
+
+    it('applyOps blanks a new note that repeats one the surviving queue shows, or an earlier new one', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const session = await seedSession(db, 'u1')
+      const trackList = await seedTracks(db, 6)
+      await replaceQueue(db, session.id, [
+        { trackId: trackList[0].id, reason: 'Kept note.' },
+        { trackId: trackList[1].id, reason: 'Swapped-out note.' },
+      ], 'dj')
+      const { provider } = spyProvider((count) => count === 1
+        // The swap's pick may reuse the note of the row it replaces: that
+        // row leaves the queue, so the note is not shown twice.
+        ? [{ trackId: trackList[2].id, reason: 'swapped out note' }]
+        : [
+            { trackId: trackList[3].id, reason: 'KEPT NOTE' },
+            { trackId: trackList[4].id, reason: 'A fresh note.' },
+            { trackId: trackList[5].id, reason: 'a fresh note' },
+          ])
+
+      await applyOps(db, session.id, [{ op: 'swap', position: 1 }, { op: 'extend', count: 3 }], 'dj', provider)
+
+      const view = await getActiveQueue(db, session.id)
+      expect(view.map((v) => v.trackId)).toEqual([trackList[0].id, trackList[2].id, trackList[3].id, trackList[4].id, trackList[5].id])
+      expect(view.map((v) => v.reason)).toEqual(['Kept note.', 'swapped out note', '', 'A fresh note.', ''])
+    })
+
+    // Undo (a listener's remove, then their insert) restores the song with
+    // its own note; only DJ-authored rows are deduped, so it is never wiped.
+    it('a listener\'s insert keeps its restored note, even one another row shows', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const session = await seedSession(db, 'u1')
+      const [a, b] = await seedTracks(db, 2)
+      await replaceQueue(db, session.id, [
+        { trackId: a.id, reason: 'Same note.' },
+        { trackId: b.id, reason: 'Other note.' },
+      ], 'dj')
+      await db.update(queueTracks).set({ reason: 'Same note.' }).where(eq(queueTracks.trackId, b.id))
+
+      await applyOps(db, session.id, [{ op: 'remove', position: 0 }], 'user')
+      await applyOps(db, session.id, [{ op: 'insert', position: 0, trackId: a.id }], 'user')
+
+      const view = await getActiveQueue(db, session.id)
+      expect(view.map((v) => [v.trackId, v.reason])).toEqual([[a.id, 'Same note.'], [b.id, 'Same note.']])
+    })
+  })
+
   describe('applyOps — insert', () => {
     async function queueWithRemovedTrack(db: TestDb, keep = 3) {
       await seedUser(db, 'u1')

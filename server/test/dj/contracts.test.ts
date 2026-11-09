@@ -626,6 +626,19 @@ describe('generate_queue named artists and songs', () => {
     expect(opIntentSchema.parse({ themes: 'x', namedArtists: [' Kendrick Lamar '] }).namedArtists).toEqual(['Kendrick Lamar'])
     expect(opIntentSchema.parse({ themes: 'x', namedSongs: [{ title: 'a' }] })).not.toHaveProperty('namedSongs')
   })
+
+  // Spec 2026-11-09 every-song-earns-its-place, decision 3: on an edit, the
+  // named artists are where the replacements come from, so the description
+  // must tell the model to fill them for "swap in some Kendrick".
+  it('tells the model to name the artist on a swap or extend that asks for one', () => {
+    const ops = DJ_TOOLS.find((t) => t.name === 'edit_queue')!.input_schema.properties.ops as { items: { oneOf: Array<{ properties: { intent?: { properties: Record<string, { description: string }> } } }> } }
+    for (const variant of [ops.items.oneOf[2], ops.items.oneOf[3]]) {
+      const description = variant.properties.intent!.properties.namedArtists.description
+      expect(description).toContain('swap in some Kendrick')
+      expect(description).toContain('add a couple of SZA songs')
+      expect(description).toMatch(/only from/)
+    }
+  })
 })
 
 // Artist-only mixes (spec 2026-11-09 one-platform-play, decision 5).

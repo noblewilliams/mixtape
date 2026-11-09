@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { curate, CurationTruncated, CurationUnparseable } from '../../src/dj/curate'
+import { curate, sanitizeReason, CurationNothingFits, CurationTruncated, CurationUnparseable, MAX_REASON_LENGTH, NAMED_ARTISTS_RULE_PREFIX, REASON_RULE } from '../../src/dj/curate'
 import { outsideCap } from '../../src/dj/pool'
 import { OUTSIDE_LEGEND_LINE, OUTSIDE_SYSTEM_INTRO } from '../../src/dj/curate'
 import { intentSchema, type Intent } from '../../src/dj/contracts'
@@ -11,8 +11,7 @@ function intent(partial: Partial<Intent> & { themes: string }): Intent {
 }
 
 // Pool is already in score-DESC order (as buildPool returns it) — index 0 is
-// the highest-scoring candidate, used as the deterministic backfill/fallback
-// order throughout these tests.
+// the highest-scoring candidate.
 function makePool(n: number): PoolTrack[] {
   return Array.from({ length: n }, (_, i) => ({
     trackId: `t${i}`,
@@ -78,7 +77,7 @@ describe('curate', () => {
   it('returns an ordered 10-of-40 subset drawn only from the pool', async () => {
     const pool = makePool(40)
     const picks = [pool[3], pool[9], pool[0], pool[20], pool[15], pool[35], pool[1], pool[7], pool[12], pool[22]].map(
-      (t) => ({ id: t.trackId, reason: `fits ${t.title}` }),
+      (t) => ({ id: t.trackId, reason: `Fits ${t.title}` }),
     )
     const { llm } = scriptedLlm([textTurn(picks)])
 
@@ -87,45 +86,69 @@ describe('curate', () => {
     expect(result).toEqual(picks.map((p) => ({ trackId: p.id, reason: p.reason })))
   })
 
-  it('drops invalid ids and backfills from pool score order', async () => {
+  it('drops invalid ids and never pads with pool rows', async () => {
     const pool = makePool(20)
     const scripted = [
-      { id: pool[0].trackId, reason: 'a' },
-      { id: 'not-in-pool', reason: 'b' },
-      { id: pool[5].trackId, reason: 'c' },
+      { id: pool[0].trackId, reason: 'A' },
+      { id: 'not-in-pool', reason: 'B' },
+      { id: pool[5].trackId, reason: 'C' },
     ]
     const { llm } = scriptedLlm([textTurn(scripted)])
 
     const result = await curate(llm, pool, intent({ themes: 'x', targetCount: 5 }))
 
-    expect(result).toHaveLength(5)
-    expect(result[0]).toEqual({ trackId: pool[0].trackId, reason: 'a' })
-    expect(result[1]).toEqual({ trackId: pool[5].trackId, reason: 'c' })
-    // backfilled from pool score order, excluding already-picked tracks
-    const backfilledIds = result.slice(2).map((r) => r.trackId)
-    expect(backfilledIds).toEqual([pool[1].trackId, pool[2].trackId, pool[3].trackId])
+    expect(result).toEqual([
+      { trackId: pool[0].trackId, reason: 'A' },
+      { trackId: pool[5].trackId, reason: 'C' },
+    ])
   })
 
-  it('backfills to targetCount when the LLM under-returns', async () => {
+  // Spec 2026-11-09 every-song-earns-its-place, decision 1: the requested
+  // count is a ceiling. A short answer is the curator saying only these fit,
+  // and padding it with pool rows would put back the songs it left out.
+  it('accepts fewer picks than asked, unpadded', async () => {
     const pool = makePool(10)
-    const { llm } = scriptedLlm([textTurn([{ id: pool[4].trackId, reason: 'only one' }])])
+    const { llm } = scriptedLlm([textTurn([{ id: pool[4].trackId, reason: 'Only one' }])])
 
     const result = await curate(llm, pool, intent({ themes: 'x', targetCount: 6 }))
 
-    expect(result).toHaveLength(6)
-    expect(result[0]).toEqual({ trackId: pool[4].trackId, reason: 'only one' })
-    expect(result.slice(1).map((r) => r.trackId)).toEqual([
-      pool[0].trackId,
-      pool[1].trackId,
-      pool[2].trackId,
-      pool[3].trackId,
-      pool[5].trackId,
-    ])
+    expect(result).toEqual([{ trackId: pool[4].trackId, reason: 'Only one' }])
+  })
+
+  it('tells the curator to pick only what fits and that the count is a ceiling', async () => {
+    const { llm, requests } = scriptedLlm([textTurn([{ id: 't0' }])])
+
+    await curate(llm, makePool(5), intent({ themes: 'x', targetCount: 4 }))
+
+    const system = systemOf(requests[0])
+    expect(system).toMatch(/truly fit/)
+    expect(system).toMatch(/no vocals/)
+    expect(system).toMatch(/fewer/)
+    // A named genre or era binds like "no vocals": the 2026-11-09 rerun
+    // filled "soft jazz" with soft indie because mood words stood in.
+    expect(system).toMatch(/genre or era named in the brief is a hard constraint/)
+    expect(system).toMatch(/never stand in for the genre/)
+    expect(system).not.toMatch(/count exactly/)
+    expect(blocksOf(requests[0])[1].split('\n')).toContain('Pick up to 4 tracks.')
+  })
+
+  it('carries the note rule: sentences of 12 to 28 words, never lyrics, never the old fragment register', async () => {
+    const { llm, requests } = scriptedLlm([textTurn([{ id: 't0' }])])
+
+    await curate(llm, makePool(5), intent({ themes: 'x', targetCount: 4 }))
+
+    const system = systemOf(requests[0])
+    expect(system).toContain(REASON_RULE)
+    expect(REASON_RULE).toMatch(/12 to 28 words/)
+    expect(REASON_RULE).toMatch(/sentence case/i)
+    expect(REASON_RULE).toMatch(/lyric/)
+    expect(REASON_RULE).not.toMatch(/two to six words/)
+    expect(REASON_RULE).not.toMatch(/lowercase/)
   })
 
   it('truncates when the LLM over-returns', async () => {
     const pool = makePool(10)
-    const scripted = pool.map((t) => ({ id: t.trackId, reason: 'x' }))
+    const scripted = pool.map((t) => ({ id: t.trackId, reason: 'X' }))
     const { llm } = scriptedLlm([textTurn(scripted)])
 
     const result = await curate(llm, pool, intent({ themes: 'x', targetCount: 4 }))
@@ -140,29 +163,28 @@ describe('curate', () => {
 
     const result = await curate(llm, pool, intent({ themes: 'x', targetCount: 3 }))
 
-    expect(result[0]).toEqual({ trackId: pool[0].trackId, reason: '' })
-    // untouched picks (missing reason) and backfilled ones (no reason offered) both default the same way
-    expect(result.every((r) => r.reason === '')).toBe(true)
+    expect(result).toEqual([{ trackId: pool[0].trackId, reason: '' }])
   })
 
   it('strips em dashes from a reason', async () => {
     const pool = makePool(3)
-    const { llm } = scriptedLlm([textTurn([{ id: pool[0].trackId, reason: 'slow burn — the opener' }])])
+    const { llm } = scriptedLlm([textTurn([{ id: pool[0].trackId, reason: 'Slow burn — the opener' }])])
 
     const result = await curate(llm, pool, intent({ themes: 'x', targetCount: 3 }))
 
-    expect(result[0].reason).toBe('slow burn, the opener')
+    expect(result[0].reason).toBe('Slow burn, the opener')
   })
 
-  it('caps an overlong reason to 140 chars', async () => {
+  it('caps an overlong reason to 200 chars', async () => {
     const pool = makePool(3)
-    const longReason = 'x'.repeat(300)
+    const longReason = 'X' + 'x'.repeat(299)
     const { llm } = scriptedLlm([textTurn([{ id: pool[0].trackId, reason: longReason }])])
 
     const result = await curate(llm, pool, intent({ themes: 'x', targetCount: 3 }))
 
-    expect(result[0].reason).toHaveLength(140)
-    expect(result[0].reason).toBe(longReason.slice(0, 140))
+    expect(MAX_REASON_LENGTH).toBe(200)
+    expect(result[0].reason).toHaveLength(200)
+    expect(result[0].reason).toBe(longReason.slice(0, 200))
   })
 
   it('sends the pool as a cacheable text block and the intent as a separate block', async () => {
@@ -205,7 +227,7 @@ describe('curate', () => {
     await curate(llm, pool, intent({ themes: 'x', targetCount: 20 }))
 
     expect(requests[0].effort).toBe('medium')
-    expect(requests[0].maxTokens).toBe(6000 + 200 * 20)
+    expect(requests[0].maxTokens).toBe(6000 + 250 * 20)
   })
 
   it('caps maxTokens at 16000 even for a large targetCount', async () => {
@@ -224,7 +246,7 @@ describe('curate', () => {
 
   it('retries once with doubled maxTokens on max_tokens truncation, succeeding on the retry', async () => {
     const pool = makePool(10)
-    const picks = [pool[0], pool[1], pool[2]].map((t) => ({ id: t.trackId, reason: 'ok' }))
+    const picks = [pool[0], pool[1], pool[2]].map((t) => ({ id: t.trackId, reason: 'Ok' }))
     const { llm, requests } = scriptedLlm([textTurn(picks, 'max_tokens'), textTurn(picks, 'end_turn')])
 
     const result = await curate(llm, pool, intent({ themes: 'x', targetCount: 3 }))
@@ -236,7 +258,7 @@ describe('curate', () => {
 
   it('throws CurationTruncated when max_tokens truncation persists through the retry', async () => {
     const pool = makePool(10)
-    const picks = [pool[0], pool[1], pool[2]].map((t) => ({ id: t.trackId, reason: 'ok' }))
+    const picks = [pool[0], pool[1], pool[2]].map((t) => ({ id: t.trackId, reason: 'Ok' }))
     const { llm, requests } = scriptedLlm([textTurn(picks, 'max_tokens'), textTurn(picks, 'max_tokens')])
 
     await expect(curate(llm, pool, intent({ themes: 'x', targetCount: 3 }))).rejects.toThrow(CurationTruncated)
@@ -250,13 +272,47 @@ describe('curate', () => {
     await expect(curate(llm, pool, intent({ themes: 'x', targetCount: 4 }))).rejects.toThrow(CurationUnparseable)
   })
 
+  // Spec 2026-11-09 every-song-earns-its-place, decision 2: an empty array is
+  // the curator's answer that nothing in the pool fits, which the loop fills
+  // from outside the library; unparseable output stays a failure.
+  it('an empty array is CurationNothingFits, still a CurationUnparseable to callers that do not ask', async () => {
+    const pool = makePool(8)
+    const { llm } = scriptedLlm([{ text: '[]', stopReason: 'end_turn' }])
+
+    const err = await curate(llm, pool, intent({ themes: 'x', targetCount: 4 })).catch((e) => e)
+    expect(err).toBeInstanceOf(CurationNothingFits)
+    expect(err).toBeInstanceOf(CurationUnparseable)
+  })
+
+  it('prose with no array at all is not CurationNothingFits', async () => {
+    const pool = makePool(8)
+    const { llm } = scriptedLlm([{ text: 'sorry, nothing here.', stopReason: 'end_turn' }])
+
+    const err = await curate(llm, pool, intent({ themes: 'x', targetCount: 4 })).catch((e) => e)
+    expect(err).toBeInstanceOf(CurationUnparseable)
+    expect(err).not.toBeInstanceOf(CurationNothingFits)
+  })
+
+  it('named artists lift the spread rule in the intent block, never the cached system prompt', async () => {
+    const pool = makePool(4)
+    const picks = pool.map((t) => ({ id: t.trackId, reason: 'Ok' }))
+    const { llm, requests } = scriptedLlm([textTurn(picks)])
+
+    await curate(llm, pool, intent({ themes: 'x', targetCount: 3 }), undefined, { namedArtists: ['Kendrick Lamar', 'SZA'] })
+
+    const block = (requests[0].messages[0].content as Array<{ text: string }>)[1].text
+    expect(block).toContain(NAMED_ARTISTS_RULE_PREFIX)
+    expect(block).toContain('Kendrick Lamar, SZA')
+    expect(requests[0].system).not.toContain(NAMED_ARTISTS_RULE_PREFIX)
+  })
+
   it('caps the truncation retry at MAX_TOKENS_CAP instead of doubling past it', async () => {
     // targetCount 200 bypasses intentSchema's max (60) so the FIRST call is
     // already saturated at the 16000 cap — a naive doubling on retry would
     // ask for 32000, which is what this test guards against.
     const pool = makePool(10)
     const bigIntent: Intent = { ...intent({ themes: 'x' }), targetCount: 200 }
-    const picks = [{ id: pool[0].trackId, reason: 'ok' }]
+    const picks = [{ id: pool[0].trackId, reason: 'Ok' }]
     const { llm, requests } = scriptedLlm([textTurn(picks, 'max_tokens'), textTurn(picks, 'end_turn')])
 
     await curate(llm, pool, bigIntent)
@@ -315,35 +371,35 @@ describe('curate', () => {
   describe('parser probes', () => {
     it('parses picks from a fenced JSON response', async () => {
       const pool = makePool(3)
-      const picks = [{ id: pool[0].trackId, reason: 'ok' }]
+      const picks = [{ id: pool[0].trackId, reason: 'Ok' }]
       const text = '```json\n' + JSON.stringify(picks) + '\n```'
       const { llm } = scriptedLlm([{ text, stopReason: 'end_turn' }])
 
       const result = await curate(llm, pool, intent({ themes: 'x', targetCount: 3 }))
 
-      expect(result[0]).toEqual({ trackId: pool[0].trackId, reason: 'ok' })
+      expect(result[0]).toEqual({ trackId: pool[0].trackId, reason: 'Ok' })
     })
 
     it('skips a false-lead bracket in prose and still finds the real fenced JSON array', async () => {
       const pool = makePool(3)
-      const picks = [{ id: pool[0].trackId, reason: 'ok' }]
+      const picks = [{ id: pool[0].trackId, reason: 'Ok' }]
       const text = 'Per your request [1], here is the queue:\n```json\n' + JSON.stringify(picks) + '\n```'
       const { llm } = scriptedLlm([{ text, stopReason: 'end_turn' }])
 
       const result = await curate(llm, pool, intent({ themes: 'x', targetCount: 3 }))
 
-      expect(result[0]).toEqual({ trackId: pool[0].trackId, reason: 'ok' })
+      expect(result[0]).toEqual({ trackId: pool[0].trackId, reason: 'Ok' })
     })
 
     it('skips a leading [1]-shaped array and finds the real picks array later in the text', async () => {
       const pool = makePool(3)
-      const picks = [{ id: pool[0].trackId, reason: 'ok' }]
+      const picks = [{ id: pool[0].trackId, reason: 'Ok' }]
       const text = `Footnote [1] applies here. Actual picks: ${JSON.stringify(picks)}`
       const { llm } = scriptedLlm([{ text, stopReason: 'end_turn' }])
 
       const result = await curate(llm, pool, intent({ themes: 'x', targetCount: 3 }))
 
-      expect(result[0]).toEqual({ trackId: pool[0].trackId, reason: 'ok' })
+      expect(result[0]).toEqual({ trackId: pool[0].trackId, reason: 'Ok' })
     })
 
     it('throws CurationUnparseable when the only bracket in the text is a wrong-shaped one (no real picks array exists)', async () => {
@@ -400,29 +456,25 @@ describe('curate with outside picks', () => {
     expect(blocksOf(b.requests[0])[1].split('\n')).toContain('Pick at most 2 songs marked new.')
   })
 
-  it('keeps outside picks in play order up to the cap, drops the rest and backfills from personal rows only', async () => {
+  it('keeps outside picks in play order up to the cap and drops the rest, unpadded', async () => {
     const pool = mixedPool(6, 4)
-    const { llm } = scriptedLlm([textTurn([{ id: 'o2', reason: 'a' }, { id: 't3' }, { id: 'o0' }, { id: 'o1' }, { id: 'o3' }])])
+    const { llm } = scriptedLlm([textTurn([{ id: 'o2', reason: 'A' }, { id: 't3' }, { id: 'o0' }, { id: 'o1' }, { id: 'o3' }])])
     const result = await curate(llm, pool, intent({ themes: 'x', targetCount: 5 }), undefined, { outsideCap: 2 })
     const ids = result.map((p) => p.trackId)
-    expect(ids).toHaveLength(5)
-    expect(ids.filter((id) => id.startsWith('o'))).toEqual(['o2', 'o0'])
-    expect(ids.slice(0, 3)).toEqual(['o2', 't3', 'o0'])
-    expect(ids.slice(3).every((id) => id.startsWith('t'))).toBe(true)
+    expect(ids).toEqual(['o2', 't3', 'o0'])
   })
 
   it('a cap of 0 yields no outside picks whatever the model returns', async () => {
     const { llm } = scriptedLlm([textTurn([{ id: 'o0' }, { id: 'o1' }, { id: 't0' }])])
     const result = await curate(llm, mixedPool(4, 2), intent({ themes: 'x', targetCount: 3 }), undefined, { outsideCap: 0 })
-    expect(result.map((p) => p.trackId).filter((id) => id.startsWith('o'))).toEqual([])
-    expect(result).toHaveLength(3)
+    expect(result.map((p) => p.trackId)).toEqual(['t0'])
   })
 
-  it('an under-return is never backfilled with outside rows, even when they rank first', async () => {
+  it('an under-return is never padded, not even with outside rows that rank first', async () => {
     const pool = [...mixedPool(0, 3), ...makePool(2)]
     const { llm } = scriptedLlm([textTurn([{ id: 't1' }])])
     const result = await curate(llm, pool, intent({ themes: 'x', targetCount: 4 }), undefined, { outsideCap: 3 })
-    expect(result.map((p) => p.trackId)).toEqual(['t1', 't0'])
+    expect(result.map((p) => p.trackId)).toEqual(['t1'])
   })
 
   it('without an explicit cap, uses the intent cap', async () => {
@@ -430,5 +482,16 @@ describe('curate with outside picks', () => {
     const brief = intent({ themes: 'x', targetCount: 5, familiarity: 'adventurous' })
     const result = await curate(llm, mixedPool(5, 4), brief)
     expect(result.filter((p) => p.trackId.startsWith('o'))).toHaveLength(outsideCap(brief))
+  })
+})
+
+describe('sanitizeReason sentence case', () => {
+  // The prompt asks for sentence case, but proposals came back lowercase in
+  // the 2026-11-09 rerun; the note a listener reads starts with a capital.
+  it('capitalises the first letter and leaves the rest alone', () => {
+    expect(sanitizeReason('a sparse, sultry groove for quiet talk')).toBe('A sparse, sultry groove for quiet talk')
+    expect(sanitizeReason('  Already fine.  ')).toBe('Already fine.')
+    expect(sanitizeReason('')).toBe('')
+    expect(sanitizeReason('éclat of horns')).toBe('Éclat of horns')
   })
 })

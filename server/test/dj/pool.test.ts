@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import {
   buildPool,
+  isAlbumGlue,
   hasPersonalCandidates,
   resolvePoolMode,
   MIN_SEED_ARTISTS,
@@ -86,6 +87,7 @@ type SeedOpts = {
   spotifyId?: string | null
   isrc?: string | null
   seeded?: boolean
+  title?: string
 }
 
 let counter = 0
@@ -102,7 +104,7 @@ async function seedTrack(db: TestDb, userId: string, opts: SeedOpts = {}) {
       appleId: opts.appleId === undefined ? appleId : opts.appleId,
       spotifyId: opts.spotifyId ?? null,
       isrc: opts.isrc ?? null,
-      title: appleId,
+      title: opts.title ?? appleId,
       artist: opts.artist ?? 'Artist',
       durationMs: opts.durationMs ?? 200000,
       releaseYear: opts.releaseYear === undefined ? null : opts.releaseYear,
@@ -141,7 +143,7 @@ async function seedTrack(db: TestDb, userId: string, opts: SeedOpts = {}) {
 // `enriched: false`, since only enriched rows are corpus candidates.
 async function seedCorpusTrack(
   db: TestDb,
-  opts: { artist?: string; embedding?: number[]; tempo?: number; enriched?: boolean; isrc?: string | null; spotifyId?: string | null; appleId?: string | null } = {},
+  opts: { artist?: string; embedding?: number[]; tempo?: number; enriched?: boolean; isrc?: string | null; spotifyId?: string | null; appleId?: string | null; title?: string } = {},
 ) {
   counter += 1
   const appleId = `corpus-${counter}`
@@ -151,7 +153,7 @@ async function seedCorpusTrack(
       appleId: opts.appleId === undefined ? appleId : opts.appleId,
       spotifyId: opts.spotifyId ?? null,
       isrc: opts.isrc ?? null,
-      title: appleId,
+      title: opts.title ?? appleId,
       artist: opts.artist ?? 'CorpusArtist',
       durationMs: 200000,
     })
@@ -2070,5 +2072,116 @@ describe('buildPool outside picks: playlists the listener keeps', () => {
       .filter((p) => p.outside).map((p) => p.trackId)
 
     expect(ids).not.toContain(blank.id)
+  })
+})
+
+// Spec 2026-11-09 every-song-earns-its-place, decision 6: album glue
+// (intros, interludes, skits, outros) never lands mid-mix unless named.
+describe('buildPool album glue', () => {
+  const GLUE = ['Intro', 'Interlude', 'SKIT', 'Outro', 'Free Mind (Interlude)', 'Big Pimpin\' (includes Chinese restaurant skit)', 'Intro - Live',
+    'Interlude 2', 'Intro (Pt. 1)', 'Intro: The Beginning', 'Song [Outro]']
+  // Portuguese "outro" (another) and a glue word mid-title are songs.
+  const KEPT = ['Introduction', 'Outrospective', 'Skittles', 'Intros and Outros', 'O Outro Lado', 'Um Outro Amor', 'My Intro To You']
+
+  it('keeps intros, interludes, skits and outros out of a personal pool, by whole word only', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    for (const title of [...GLUE, ...KEPT]) await seedTrack(db, 'u1', { title, embedding: SAME_AS_QUERY })
+
+    const titles = (await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' }))).map((t) => t.title)
+
+    expect(titles.sort()).toEqual([...KEPT].sort())
+  })
+
+  it('keeps one the listener names, matched on its title (and artist when given)', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const named = await seedTrack(db, 'u1', { title: 'Free Mind (Interlude)', artist: 'Tems', embedding: SAME_AS_QUERY })
+    const intro = await seedTrack(db, 'u1', { title: 'Intro', artist: 'J. Cole', embedding: SAME_AS_QUERY })
+    await seedTrack(db, 'u1', { title: 'Intro', artist: 'Asake', embedding: SAME_AS_QUERY })
+    await seedTrack(db, 'u1', { title: 'Outro', artist: 'Tems', embedding: SAME_AS_QUERY })
+
+    const ids = (await buildPool(db, fakeEmbed, 'u1', intent({
+      themes: 'x',
+      namedSongs: [{ title: 'free mind' }, { title: 'Intro', artist: 'J Cole' }],
+    }))).map((t) => t.trackId)
+
+    expect(ids.sort()).toEqual([named.id, intro.id].sort())
+  })
+
+  it('applies in corpus mode', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const song = await seedCorpusTrack(db, { title: 'A Song', embedding: SAME_AS_QUERY })
+    await seedCorpusTrack(db, { title: 'Skit', embedding: SAME_AS_QUERY })
+
+    const ids = (await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' }), undefined, { mode: 'corpus' })).map((t) => t.trackId)
+
+    expect(ids).toEqual([song.id])
+  })
+
+  it('applies to an artist-only pool', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const song = await seedCorpusTrack(db, { title: 'Essence', artist: 'Wizkid', embedding: SAME_AS_QUERY })
+    await seedCorpusTrack(db, { title: 'Intro', artist: 'Wizkid', embedding: SAME_AS_QUERY })
+
+    const ids = (await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' }), undefined,
+      { mode: 'corpus', onlyArtistKey: 'wizkid' })).map((t) => t.trackId)
+
+    expect(ids).toEqual([song.id])
+  })
+
+  it('applies to outside rows', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedSource(db, 'u1', 'apple_live', new Date())
+    await seedTrack(db, 'u1', { embedding: SAME_AS_QUERY })
+    const song = await seedCorpusTrack(db, { title: 'A Song', embedding: SAME_AS_QUERY })
+    await seedCorpusTrack(db, { title: 'Interlude', embedding: SAME_AS_QUERY })
+
+    const outside = (await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x', familiarity: 'mix', targetCount: 15 }), undefined, { outsideCap: 3 }))
+      .filter((p) => p.outside).map((p) => p.trackId)
+
+    expect(outside).toEqual([song.id])
+  })
+})
+
+// The same rule in code, for songs that never pass through buildPool: the
+// DJ's own proposals (dj/propose.ts).
+describe('isAlbumGlue', () => {
+  it('matches the pool rule: whole words only', () => {
+    for (const title of ['Intro', 'Interlude', 'SKIT', 'Outro', 'Free Mind (Interlude)', 'Big Pimpin\' (includes Chinese restaurant skit)', 'Intro - Live']) {
+      expect(isAlbumGlue(title, 'Anyone')).toBe(true)
+    }
+    for (const title of ['Interlude 2', 'Intro (Pt. 1)', 'Intro: The Beginning', 'Song [Outro]']) {
+      expect(isAlbumGlue(title, 'Anyone')).toBe(true)
+    }
+    for (const title of ['Introduction', 'Outrospective', 'Skittles', 'Intros and Outros', 'Essence', 'O Outro Lado', 'Um Outro Amor', 'My Intro To You']) {
+      expect(isAlbumGlue(title, 'Anyone')).toBe(false)
+    }
+  })
+
+  it('a named song is not glue: title prefix, and artist when given', () => {
+    expect(isAlbumGlue('Free Mind (Interlude)', 'Tems', [{ title: 'free mind' }])).toBe(false)
+    expect(isAlbumGlue('Intro', 'J. Cole', [{ title: 'Intro', artist: 'J Cole' }])).toBe(false)
+    expect(isAlbumGlue('Intro', 'Asake', [{ title: 'Intro', artist: 'J Cole' }])).toBe(true)
+  })
+})
+
+// Named-artist edits (decision 3): several artists' songs in one pool.
+describe('buildPool onlyArtistKey with several keys', () => {
+  it('admits a row crediting any of the keys, and no other', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const kendrick = await seedCorpusTrack(db, { title: 'A', artist: 'Kendrick Lamar', embedding: SAME_AS_QUERY })
+    const sza = await seedCorpusTrack(db, { title: 'B', artist: 'SZA', embedding: SAME_AS_QUERY })
+    const both = await seedCorpusTrack(db, { title: 'C', artist: 'Kendrick Lamar & SZA', embedding: SAME_AS_QUERY })
+    await seedCorpusTrack(db, { title: 'D', artist: 'Drake', embedding: SAME_AS_QUERY })
+
+    const ids = (await buildPool(db, fakeEmbed, 'u1', intent({ themes: 'x' }), undefined,
+      { mode: 'corpus', onlyArtistKey: ['kendricklamar', 'sza'] })).map((t) => t.trackId)
+
+    expect(ids.sort()).toEqual([kendrick.id, sza.id, both.id].sort())
   })
 })

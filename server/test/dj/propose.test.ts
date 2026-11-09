@@ -8,6 +8,7 @@ import {
   MIN_VERIFIED,
   PROPOSE_EXTRA,
   PROPOSE_SYSTEM_PROMPT,
+  PROPOSE_SYSTEM_PROMPT_PERSONAL,
   proposalCount,
   proposeSongs,
   titleKey,
@@ -16,7 +17,7 @@ import {
   VERIFY_MAX,
   type Proposal,
 } from '../../src/dj/propose'
-import { CurationTruncated, MAX_TOKENS_CAP, scaledMaxTokens } from '../../src/dj/curate'
+import { CurationTruncated, MAX_TOKENS_CAP, REASON_RULE, scaledMaxTokens } from '../../src/dj/curate'
 import { FILL_QUEUE_BOOST } from '../../src/dj/catalogue-fill'
 import { intentSchema } from '../../src/dj/contracts'
 import { AppleCatalogError, type AppleCatalogSearchClient, type CatalogSong } from '../../src/musickit/catalog'
@@ -80,7 +81,7 @@ describe('proposeSongs', () => {
     expect(req.tools).toEqual([])
     expect(req.maxTokens).toBe(scaledMaxTokens(5 + PROPOSE_EXTRA))
     const block = userBlock(req)
-    expect(block).toContain(`Propose exactly ${5 + PROPOSE_EXTRA} songs.`)
+    expect(block).toContain(`Propose up to ${5 + PROPOSE_EXTRA} songs.`)
     expect(block).toContain('Storefront: ng')
     expect(block).toContain('Request: something for a slow sunday')
     expect(block).toContain('Artists the listener named or loves: Asa, Bez')
@@ -100,8 +101,20 @@ describe('proposeSongs', () => {
     expect(PROPOSE_SYSTEM_PROMPT).toMatch(/Never two songs by the same artist in a row, and at most three/)
     expect(PROPOSE_SYSTEM_PROMPT).toMatch(/STRICT JSON ONLY/)
     expect(PROPOSE_SYSTEM_PROMPT).toMatch(/Never name the track or the artist/)
+    expect(PROPOSE_SYSTEM_PROMPT).toContain(REASON_RULE)
     expect(PROPOSE_SYSTEM_PROMPT).toMatch(/em dash/i)
     expect(PROPOSE_SYSTEM_PROMPT).not.toContain(EM)
+  })
+
+  // Spec 2026-11-09 every-song-earns-its-place, decisions 1 and 2: a
+  // proposal for "no vocals" must be an instrumental, and the count is a
+  // ceiling, not a quota.
+  it('the system prompt carries the fit rule: only songs that truly fit, fewer rather than one that contradicts', () => {
+    expect(PROPOSE_SYSTEM_PROMPT).toMatch(/truly fit/)
+    expect(PROPOSE_SYSTEM_PROMPT).toMatch(/no vocals \(instrumentals only\)/)
+    expect(PROPOSE_SYSTEM_PROMPT).toMatch(/ceiling/)
+    expect(PROPOSE_SYSTEM_PROMPT).not.toMatch(/Propose exactly/)
+    expect(PROPOSE_SYSTEM_PROMPT).toMatch(/genre or era named in the request is a hard constraint/)
   })
 
   it('parses past prose, drops malformed, duplicate and excluded items', async () => {
@@ -121,11 +134,46 @@ describe('proposeSongs', () => {
     expect(out.map((s) => s.title)).toEqual(['Essence', 'Joro', 'Ojuelegba', 'Free Mind'])
   })
 
+  // Decision 6 (spec 2026-11-09 every-song-earns-its-place) on the
+  // proposal path: album glue never lands unless the listener named it.
+  it('drops intros, interludes, skits and outros unless the listener named that song', async () => {
+    const items = [
+      { title: 'Intro', artist: 'J. Cole', reason: 'a' },
+      { title: 'Free Mind (Interlude)', artist: 'Tems', reason: 'b' },
+      { title: 'Essence', artist: 'Wizkid', reason: 'c' },
+      { title: 'Introduction', artist: 'Someone', reason: 'd' },
+      { title: 'Outro', artist: 'Tems', reason: 'e' },
+    ]
+    const { llm } = scripted(turn(JSON.stringify(items)))
+    const out = await proposeSongs(llm, { brief: '', intent: intent({ namedSongs: [{ title: 'Free Mind' }] }), seeds: [], storefront: 'ng' })
+    expect(out.map((s) => s.title)).toEqual(['Free Mind (Interlude)', 'Essence', 'Introduction'])
+  })
+
+  // A personal listener's shortfall (spec 2026-11-09 every-song-earns-its-
+  // place, decision 2): the songs join a library mix, so the prompt must not
+  // say they have no music, nor lean mainstream, and it carries their taste.
+  it('a personal listener gets the personal intro, their taste and no mainstream lean', async () => {
+    const { llm, requests } = scripted(turn('[]'))
+    await proposeSongs(llm, { brief: '', intent: intent(), seeds: [], storefront: 'ng', listener: 'personal', topArtists: ['Sade', 'Lauryn Hill'] })
+    expect(requests[0].system).toBe(PROPOSE_SYSTEM_PROMPT_PERSONAL)
+    expect(PROPOSE_SYSTEM_PROMPT_PERSONAL).not.toContain('no music of their own')
+    expect(PROPOSE_SYSTEM_PROMPT_PERSONAL).not.toContain('Lean mainstream')
+    expect(PROPOSE_SYSTEM_PROMPT_PERSONAL).toContain(REASON_RULE)
+    expect(userBlock(requests[0])).toContain('Artists this listener plays most: Sade, Lauryn Hill')
+  })
+
+  it('a listener with no library keeps today\'s prompt', async () => {
+    const { llm, requests } = scripted(turn('[]'))
+    await proposeSongs(llm, { brief: '', intent: intent(), seeds: [], storefront: 'ng' })
+    expect(requests[0].system).toBe(PROPOSE_SYSTEM_PROMPT)
+    expect(userBlock(requests[0])).not.toContain('plays most')
+  })
+
   it('lists the excluded songs back to the model', async () => {
     const { llm, requests } = scripted(turn('[]'))
     await proposeSongs(llm, { brief: '', intent: intent(), seeds: [], storefront: 'gb', exclude: [{ title: 'Ye', artist: 'Burna Boy' }], count: 4 })
     const block = userBlock(requests[0])
-    expect(block).toContain('Propose exactly 4 songs.')
+    expect(block).toContain('Propose up to 4 songs.')
     expect(block).toContain('Already tried, never propose these again:\n- Ye by Burna Boy')
   })
 
@@ -136,17 +184,17 @@ describe('proposeSongs', () => {
     expect(out).toHaveLength(5 + PROPOSE_EXTRA)
   })
 
-  it('sanitises reasons: em dashes out, then 140 characters', async () => {
-    const long = 'x'.repeat(200)
+  it('sanitises reasons: em dashes out, then 200 characters', async () => {
+    const long = 'x'.repeat(300)
     const items = [
-      { title: 'A', artist: 'One', reason: `  slow burn ${EM} then the drop ` },
+      { title: 'A', artist: 'One', reason: `  Slow burn ${EM} then the drop ` },
       { title: 'B', artist: 'Two', reason: long },
       { title: 'C', artist: 'Three', reason: 42 },
     ]
     const { llm } = scripted(turn(JSON.stringify(items)))
     const out = await proposeSongs(llm, { brief: '', intent: intent(), seeds: [], storefront: 'ng' })
-    expect(out[0].reason).toBe('slow burn, then the drop')
-    expect(out[1].reason).toHaveLength(140)
+    expect(out[0].reason).toBe('Slow burn, then the drop')
+    expect(out[1].reason).toHaveLength(200)
     expect(out[2].reason).toBe('')
   })
 
@@ -247,6 +295,22 @@ describe('verifyProposals', () => {
     expect(out.searches).toBe(3)
     expect(out.verified.map((v) => [v.title, v.reason])).toEqual([['Essence (feat. Tems)', 'opens soft'], ['Free Mind', 'the lift']])
     expect(out.misses.map((m) => m.title)).toEqual(['Made Up Song'])
+  })
+
+  it('a hit Apple titles as an interlude is a miss unless the listener named it', async () => {
+    const db = await createTestDb()
+    const { catalog } = fakeSearch({
+      'Free Mind Tems': [song('a1', 'Free Mind (Interlude)', 'Tems')],
+      'Essence Wizkid': [song('a2', 'Essence', 'Wizkid')],
+    })
+    const proposals = [p('Free Mind', 'Tems'), p('Essence', 'Wizkid')]
+    const out = await verifyProposals(db, catalog, { proposals, storefront: 'ng', budget: VERIFY_MAX, deadlineMs: VERIFY_DEADLINE_MS })
+    expect(out.verified.map((v) => v.title)).toEqual(['Essence'])
+    expect(out.misses.map((m) => m.title)).toEqual(['Free Mind'])
+
+    const named = await verifyProposals(db, catalog, { proposals, storefront: 'ng', budget: VERIFY_MAX, deadlineMs: VERIFY_DEADLINE_MS,
+      namedSongs: [{ title: 'Free Mind', artist: 'Tems' }] })
+    expect(named.verified.map((v) => v.title)).toEqual(['Free Mind (Interlude)', 'Essence'])
   })
 
   it('rejects a title-only match and a cover, live or explicit version, taking the first hit that matches', async () => {

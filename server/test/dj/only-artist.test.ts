@@ -13,7 +13,7 @@ import {
 import { PROPOSE_SYSTEM_PROMPT } from '../../src/dj/propose'
 import { fillForArtist, FILL_BUDGET, FILL_PER_ARTIST, ONLY_ARTIST_FILL, type FillDeps } from '../../src/dj/catalogue-fill'
 import { creditedKeys } from '../../src/dj/artist-keys'
-import { curate, ONLY_ARTIST_RULE_PREFIX } from '../../src/dj/curate'
+import { curate, NAMED_ARTISTS_RULE_PREFIX, ONLY_ARTIST_RULE_PREFIX } from '../../src/dj/curate'
 import type { CatalogSong } from '../../src/musickit/catalog'
 import type { LlmClient, LlmRequest, LlmTurn } from '../../src/dj/llm'
 import type { PoolTrack } from '../../src/dj/pool'
@@ -52,7 +52,7 @@ async function seedTracks(db: TestDb, artist: string, n: number, opts: { owner?:
 function curateFake(req: LlmRequest): LlmTurn {
   const blocks = req.messages[0].content as Array<{ text?: string }>
   const ids = Array.from((blocks[0]?.text ?? '').matchAll(/^([0-9a-f-]{36}) \|/gm)).map((m) => m[1])
-  const count = Number((blocks[1]?.text ?? '').match(/Pick exactly (\d+) tracks/)?.[1] ?? ids.length)
+  const count = Number((blocks[1]?.text ?? '').match(/Pick up to (\d+) tracks/)?.[1] ?? ids.length)
   const text = JSON.stringify(ids.slice(0, count).map((id) => ({ id, reason: 'fits' })))
   return { text, toolCalls: [], raw: [{ type: 'text', text }], stopReason: 'end_turn', usage: null }
 }
@@ -199,7 +199,7 @@ describe('artist-only mixes through runDjTurn', () => {
     expect(result.queue).toHaveLength(7)
     for (const t of result.queue) expect(credits(t.artist, 'jcole')).toBe(true)
     const [curation] = curationRequests(requests)
-    expect(intentBlock(curation)).toContain('Pick exactly 7 tracks.')
+    expect(intentBlock(curation)).toContain('Pick up to 7 tracks.')
     expect(intentBlock(curation)).toContain(ONLY_ARTIST_RULE_PREFIX)
     const [text] = toolResults(requests)
     expect(text).toContain(onlyArtistShortNotice('J. Cole', 7, 15))
@@ -408,13 +408,18 @@ describe('edits keep an artist-only session\'s scope', () => {
     expect(intentBlock(curationRequests(requests)[0])).toContain(ONLY_ARTIST_RULE_PREFIX)
   })
 
-  it('"add some Kendrick": an op intent naming a different artist steps outside the scope', async () => {
+  // Spec 2026-11-09 every-song-earns-its-place, decision 3: stepping out of
+  // the scope lands in the named artist's own songs, not the whole library.
+  it('"add some Kendrick": an op intent naming a different artist steps outside the scope, into Kendrick\'s', async () => {
     const { db, session } = await coleMix(12)
     const { llm, requests } = scriptedLlm('edit_queue', { ops: [{ op: 'extend', count: 4, intent: { themes: 'kendrick lamar', namedArtists: ['Kendrick Lamar'] } }] })
 
-    await runDjTurn(db, { llm, embed: embedFake }, { id: session.id, userId: 'u1' }, 'add some Kendrick')
+    const result = await runDjTurn(db, { llm, embed: embedFake }, { id: session.id, userId: 'u1' }, 'add some Kendrick')
 
     expect(intentBlock(curationRequests(requests)[0])).not.toContain(ONLY_ARTIST_RULE_PREFIX)
+    expect(intentBlock(curationRequests(requests)[0])).toContain(NAMED_ARTISTS_RULE_PREFIX)
+    expect(result.queue.slice(5)).toHaveLength(4)
+    for (const t of result.queue.slice(5)) expect(credits(t.artist, 'kendricklamar')).toBe(true)
   })
 
   it('an op intent with its own onlyArtist uses that artist', async () => {

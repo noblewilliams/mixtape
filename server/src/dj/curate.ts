@@ -5,17 +5,23 @@ import { sanitizeForPrompt, stripEmDashes } from './sanitize'
 
 export type CuratedTrack = { trackId: string; reason: string }
 
-// A short display string, never a fact about the track — cap it hard so one
-// verbose LLM turn can't blow up a queue-list UI.
-export const MAX_REASON_LENGTH = 140
+// A display string, never a fact about the track — cap it hard so one
+// verbose LLM turn can't blow up a queue-list UI. 200, not 140, since notes
+// became one or two sentences of 12 to 28 words (spec 2026-11-09
+// every-song-earns-its-place, decision 7): 28 words run to about 170
+// characters, and the cap should cut only a runaway note, never a good one.
+export const MAX_REASON_LENGTH = 200
 
 // Sonnet 5 runs adaptive thinking by default and its thinking tokens count
 // against max_tokens. A 300-line corpus pool drew 2,400 and then 4,800
 // tokens of truncated output on 2026-10-21 (both calls hit the cap), so the
-// budget leaves room for the reasoning as well as the JSON: 15 tracks get
-// 9,000 and the retry doubles to the cap.
+// budget leaves room for the reasoning as well as the JSON. The per-track
+// share rose from 200 to 250 when notes grew from a two-to-six-word fragment
+// (under 10 tokens) to a sentence or two of up to 200 characters (about 45
+// tokens): the extra keeps the thinking room each pick had before. 15 tracks
+// get 9,750 and the retry doubles to the cap.
 const BASE_MAX_TOKENS = 6000
-const PER_TRACK_TOKENS = 200
+const PER_TRACK_TOKENS = 250
 export const MAX_TOKENS_CAP = 16000
 
 // Thrown when the LLM's curation output is STILL truncated (stopReason
@@ -34,7 +40,7 @@ export class CurationTruncated extends Error {
 
 // Thrown when NO valid picks could be recovered from the LLM's response at
 // all (no parseable JSON array containing a real pool id). This is distinct
-// from an under-return, which backfills quietly — zero picks means the
+// from an under-return, which stands as returned — zero picks means the
 // parse itself failed, and silently handing back a pure-pool-order queue
 // would look like a considered curation when nothing was actually curated.
 // Message is deliberately content-free (never echoes the LLM's raw text).
@@ -42,6 +48,20 @@ export class CurationUnparseable extends Error {
   constructor() {
     super('curation: no valid picks could be parsed from the LLM response')
     this.name = 'CurationUnparseable'
+  }
+}
+
+// The curator's own answer that nothing in the pool fits the brief: a bare
+// empty array, which the fit rule (SYSTEM_RULES) makes a legitimate reply
+// rather than a parse failure. A subclass, so a caller that has no use for
+// the difference (an edit's artist path, the route's error mapping) still
+// treats it as CurationUnparseable; generateFromBrief (dj/loop.ts) catches
+// it to fill the whole mix from outside the library (spec 2026-11-09
+// every-song-earns-its-place, decision 2).
+export class CurationNothingFits extends CurationUnparseable {
+  constructor() {
+    super()
+    this.name = 'CurationNothingFits'
   }
 }
 
@@ -124,21 +144,39 @@ export const OUTSIDE_SYSTEM_INTRO =
   'belongs, never more than the intent allows, and never as filler.'
 
 // The reason rules, shared with the proposal call (dj/propose.ts) so both
-// paths write reasons in one register.
+// paths write reasons in one register. Spec 2026-11-09
+// every-song-earns-its-place, decision 7, reversing the two-to-six-word
+// fragment: that register produced arc narration ("tempo climbs toward the
+// peak") and, after an edit, the same line four songs running. A note now
+// makes the case for one song. Lyrics are described, never quoted: the
+// project never stores or displays lyric text (docs/decisions.md). The
+// examples are invented for the register, not drawn from any real song.
 export const REASON_RULE =
-  'Reasons: each pick carries one short line shown to the listener under the track title. ' +
-    'Write it the way a DJ leans over and says why this one, now: lowercase, two to six words, ' +
-    'a fragment, no closing punctuation, no em dashes. Vary what each reason is about across the ' +
-    'queue: the sound, the mood a lyric carries, why it follows the track before it, where it ' +
-    'sits in the arc. Never repeat a reason. Never name the track or the artist; the listener ' +
-    'can already see those. Never restate the request back at them: "matches your vibe", "fits ' +
-    'the mood", "great choice" are failures. "slow burn opener", "keeps the pulse up", "the ' +
-    'comedown", "lands after that chorus" are the register.'
+  'Reasons: each pick carries a note shown to the listener under the track title, making the case for that ' +
+    'song at that point in the mix. Write one or two sentences, 12 to 28 words in all, in sentence case, with no ' +
+    'em dashes. Say one concrete thing about the song itself (its sound, its production, the feeling or theme of ' +
+    "its lyric, the artist's delivery) and why it sits where it does. Never quote a lyric; describe its feeling " +
+    'or theme instead. Never name the track or the artist; the listener can already see those. Never restate the ' +
+    'request back at them: "matches your vibe", "fits the mood", "great choice" are failures, and so is a bare ' +
+    'arc label such as "the peak hits" or "the comedown". Every note is different; never repeat one. The ' +
+    'register: "Brushed drums and a muted trumpet keep the room low, so it opens the evening without asking for ' +
+    'attention." "Her voice stays close to the mic over a sparse guitar, a warm turn after the busier song ' +
+    'before it." "A song about leaving home that never sounds sad, and its bright horns lift the energy into the ' +
+    'second half."'
 
 const SYSTEM_RULES = [
   'Selection:\n' +
     '- Choose tracks ONLY by the ids listed in the pool. Never invent a track, an artist, or an id.\n' +
-    '- Honour the requested count exactly, and list the picks in the order they should play.\n' +
+    '- Pick only tracks that truly fit the brief: its genre, its era, its mood, and any hard constraint such as ' +
+    'no vocals (instrumentals only) or clean. Never use a track that contradicts the brief to make up the ' +
+    'number.\n' +
+    '- A genre or era named in the brief is a hard constraint, as binding as no vocals: a track must actually ' +
+    'be that genre or from that era. Mood words (soft, rainy, chill, dark) choose which tracks of that genre ' +
+    'to pick; they never stand in for the genre. A soft indie song is not soft jazz, and a 70s song is not a ' +
+    '90s one.\n' +
+    '- The requested count is a ceiling, not a quota. Fill it when the pool holds that many tracks that fit; ' +
+    'when it does not, return fewer. A shorter queue that fits beats a full one that does not.\n' +
+    '- List the picks in the order they should play.\n' +
     '- Sequence is half the job: mind the handoff between consecutive tracks and follow the ' +
     'requested energy arc.\n' +
     '- Spread the artists — at most two tracks by any one artist, unless the request is about ' +
@@ -163,10 +201,23 @@ function onlyArtistLine(name: string): string {
     'The spread-the-artists rule does not apply; pick only from the pool.'
 }
 
+// Named-artist edits (spec 2026-11-09 every-song-earns-its-place, decision
+// 3): "swap in some Kendrick" draws its pool from only the named artists'
+// songs, so the spread rule is lifted the same way, in the intent block.
+export const NAMED_ARTISTS_RULE_PREFIX = 'Named-artist pick: every pool track is by one of'
+
+function namedArtistsLine(names: string[]): string {
+  return `${NAMED_ARTISTS_RULE_PREFIX} ${names.map((n) => sanitizeForPrompt(n)).join(', ')} or features them, as the ` +
+    'listener asked. The spread-the-artists rule does not apply; pick only from the pool.'
+}
+
 // `cap` is null when the pool holds no outside row, and the line is absent.
-function buildIntentBlock(intent: Intent, sessionContext: string | undefined, cap: number | null, onlyArtist?: string): string {
-  const lines = [`Pick exactly ${intent.targetCount} tracks.`]
-  if (onlyArtist) lines.push(onlyArtistLine(onlyArtist))
+function buildIntentBlock(intent: Intent, sessionContext: string | undefined, cap: number | null, scope: ArtistScopeOptions = {}): string {
+  // "up to": the count is a ceiling (SYSTEM_RULES), so the intent block
+  // must not contradict it with a quota.
+  const lines = [`Pick up to ${intent.targetCount} tracks.`]
+  if (scope.onlyArtist) lines.push(onlyArtistLine(scope.onlyArtist))
+  else if (scope.namedArtists && scope.namedArtists.length > 0) lines.push(namedArtistsLine(scope.namedArtists))
   if (cap !== null) lines.push(`Pick at most ${cap} ${cap === 1 ? 'song' : 'songs'} marked new.`)
   lines.push(arcInstruction(intent.energyArc), `Themes: ${intent.themes}`)
   if (intent.tempoMin !== undefined || intent.tempoMax !== undefined) {
@@ -187,14 +238,14 @@ function buildRequest(
   sessionContext: string | undefined,
   maxTokens: number,
   cap: number | null,
-  onlyArtist?: string,
+  scope: ArtistScopeOptions = {},
 ): LlmRequest {
   const poolBlock = (cap === null ? POOL_LEGEND : POOL_LEGEND_WITH_OUTSIDE) + pool.map(poolLine).join('\n')
   const message: LlmMessage = {
     role: 'user',
     content: [
       { type: 'text', text: poolBlock, cache_control: { type: 'ephemeral' } },
-      { type: 'text', text: buildIntentBlock(intent, sessionContext, cap, onlyArtist) },
+      { type: 'text', text: buildIntentBlock(intent, sessionContext, cap, scope) },
     ],
   }
   return {
@@ -280,7 +331,12 @@ function extractJsonArray(text: string): unknown[] | null {
 // rare scripts) and hand back a malformed half-character to the UI. Em
 // dashes go before the cap, so the cap measures what the listener sees.
 export function sanitizeReason(raw: unknown): string {
-  return typeof raw === 'string' ? Array.from(stripEmDashes(raw.trim())).slice(0, MAX_REASON_LENGTH).join('') : ''
+  if (typeof raw !== 'string') return ''
+  const chars = Array.from(stripEmDashes(raw.trim())).slice(0, MAX_REASON_LENGTH)
+  // Sentence case (REASON_RULE): the model sometimes starts a note lowercase,
+  // proposals especially, and the listener reads it as a sentence.
+  if (chars.length > 0) chars[0] = chars[0].toLocaleUpperCase()
+  return chars.join('')
 }
 
 function normalizePicks(raw: unknown[], poolIds: Set<string>): CuratedTrack[] {
@@ -298,8 +354,8 @@ function normalizePicks(raw: unknown[], poolIds: Set<string>): CuratedTrack[] {
 }
 
 // The outside cap, enforced in code rather than trusted to the model: the
-// first `cap` outside picks in play order stay, later ones are dropped (the
-// backfill below then fills from personal rows only).
+// first `cap` outside picks in play order stay, later ones are dropped and
+// nothing takes their place.
 function capOutside(picks: CuratedTrack[], outsideIds: Set<string>, cap: number): CuratedTrack[] {
   let kept = 0
   return picks.filter((p) => {
@@ -309,22 +365,8 @@ function capOutside(picks: CuratedTrack[], outsideIds: Set<string>, cap: number)
   })
 }
 
-// Fills out `picks` to `targetCount` using the pool's own score order
-// (already sorted DESC by buildPool), skipping tracks already picked. Only
-// reached for a genuine partial under-return — zero picks is handled
-// upstream as CurationUnparseable, not silently backfilled.
-function backfill(picks: CuratedTrack[], pool: PoolTrack[], targetCount: number): CuratedTrack[] {
-  if (picks.length >= targetCount) return picks.slice(0, targetCount)
-  const result = picks.slice()
-  const already = new Set(result.map((p) => p.trackId))
-  for (const t of pool) {
-    if (result.length >= targetCount) break
-    if (already.has(t.trackId)) continue
-    already.add(t.trackId)
-    result.push({ trackId: t.trackId, reason: '' })
-  }
-  return result
-}
+
+type ArtistScopeOptions = { onlyArtist?: string; namedArtists?: string[] }
 
 export type CurateOptions = {
   // Most outside picks this curation may keep (an edit passes what is left
@@ -333,6 +375,9 @@ export type CurateOptions = {
   outsideCap?: number
   // The artist an artist-only pool is made of; lifts the spread rule.
   onlyArtist?: string
+  // The artists a named-artist edit's pool is made of; lifts the spread
+  // rule too. Ignored when onlyArtist is set.
+  namedArtists?: string[]
 }
 
 export async function curate(
@@ -346,7 +391,7 @@ export async function curate(
   const outsideIds = new Set(pool.filter((t) => t.outside).map((t) => t.trackId))
   const cap = outsideIds.size > 0 ? Math.max(0, options.outsideCap ?? outsideCap(intent)) : null
   const maxTokens = scaledMaxTokens(intent.targetCount)
-  const request = buildRequest(pool, intent, sessionContext, maxTokens, cap, options.onlyArtist)
+  const request = buildRequest(pool, intent, sessionContext, maxTokens, cap, options)
 
   let turn = await llm(request)
   if (turn.stopReason === 'max_tokens') {
@@ -362,11 +407,21 @@ export async function curate(
     }
   }
 
-  const rawPicks = extractJsonArray(turn.text) ?? []
-  const picks = normalizePicks(rawPicks, poolIds)
+  const rawPicks = extractJsonArray(turn.text)
+  const picks = normalizePicks(rawPicks ?? [], poolIds)
   if (picks.length === 0 && pool.length > 0) {
+    // No picks array at all, but an empty one: the model said nothing fits.
+    if (rawPicks === null && extractJsonArrayWhere(turn.text, (arr) => arr.length === 0) !== null) {
+      throw new CurationNothingFits()
+    }
     throw new CurationUnparseable()
   }
-  if (cap === null) return backfill(picks, pool, intent.targetCount)
-  return backfill(capOutside(picks, outsideIds, cap), pool.filter((t) => !t.outside), intent.targetCount)
+  // Cut to the count, never padded up to it. The count is a ceiling (spec
+  // 2026-11-09 every-song-earns-its-place, decision 1): fewer picks than
+  // asked means the curator found only that many that fit, and topping the
+  // list up from pool score order (as this once did) put back exactly the
+  // off-brief library tracks the rule leaves out. A shortfall is the
+  // caller's to fill or explain (dj/loop.ts).
+  const kept = cap === null ? picks : capOutside(picks, outsideIds, cap)
+  return kept.slice(0, intent.targetCount)
 }

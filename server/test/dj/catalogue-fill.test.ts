@@ -617,7 +617,7 @@ describe('fillForSeeds: golden pool', () => {
 function curateFake(req: LlmRequest): LlmTurn {
   const blocks = req.messages[0].content as Array<{ text?: string }>
   const ids = Array.from((blocks[0]?.text ?? '').matchAll(/^([0-9a-f-]{36}) \|/gm)).map((m) => m[1])
-  const count = Number((blocks[1]?.text ?? '').match(/Pick exactly (\d+) tracks/)?.[1] ?? ids.length)
+  const count = Number((blocks[1]?.text ?? '').match(/Pick up to (\d+) tracks/)?.[1] ?? ids.length)
   const text = JSON.stringify(ids.slice(0, count).map((id) => ({ id, reason: 'fits' })))
   return { text, toolCalls: [], raw: [{ type: 'text', text }], stopReason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1, cacheReadInputTokens: null } }
 }

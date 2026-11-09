@@ -11,6 +11,7 @@ import {
   INSUFFICIENT_SEEDS_TEXT,
   SHORT_VERIFIED_TEXT,
   partialVerifiedNotice,
+  TURN_APPLE_BUDGET,
   type DjDeps,
 } from '../../src/dj/loop'
 import { PROPOSED_NOTICE, PROPOSE_SYSTEM_PROMPT, ROUND_TWO_CUTOFF_MS, VERIFY_MAX } from '../../src/dj/propose'
@@ -95,7 +96,7 @@ function fakeFill(confirmed: Proposed[]) {
 function curateFake(req: LlmRequest): LlmTurn {
   const blocks = req.messages[0].content as Array<{ text?: string }>
   const ids = Array.from((blocks[0]?.text ?? '').matchAll(/^([0-9a-f-]{36}) \|/gm)).map((m) => m[1])
-  const count = Number((blocks[1]?.text ?? '').match(/Pick exactly (\d+) tracks/)?.[1] ?? ids.length)
+  const count = Number((blocks[1]?.text ?? '').match(/Pick up to (\d+) tracks/)?.[1] ?? ids.length)
   const text = JSON.stringify(ids.slice(0, count).map((id) => ({ id, reason: 'fits' })))
   return { text, toolCalls: [], raw: [{ type: 'text', text }], stopReason: 'end_turn', usage: null }
 }
@@ -230,9 +231,9 @@ describe('never refuse: proposed songs verified on Apple', () => {
     const db = await createTestDb()
     await seedUser(db)
     const session = await seedSession(db)
-    const first = proposals('First', 16)
+    const first = proposals('First', 10)
     const second = proposals('Second', 6)
-    const { fill, searches } = fakeFill([first[2], first[9], first[15], ...second])
+    const { fill, searches } = fakeFill([first[2], first[5], first[9], ...second])
     const { llm, requests } = scriptedLlm([brief(8)], [first, second])
 
     const { logged } = await withLog(() =>
@@ -244,12 +245,15 @@ describe('never refuse: proposed songs verified on Apple', () => {
     expect(replacement).toContain('Already tried, never propose these again:')
     expect(replacement).toContain(`- ${first[0].title} by ${first[0].artist}`)
     expect(replacement).toContain(`- ${first[2].title} by ${first[2].artist}`)
-    // What the budget leaves: 22 searches less the 16 spent.
-    expect(replacement).toContain(`Propose exactly ${VERIFY_MAX - 16} songs.`)
+    // What the turn's one Apple ledger (TURN_APPLE_BUDGET) leaves: 22 less
+    // the seed fill's 6 (an artist search and a top-songs call for each of
+    // the three named artists) and round one's 10 searches.
+    expect(logged.fill).toMatchObject({ subrequests: 6 })
+    expect(replacement).toContain(`Propose up to ${TURN_APPLE_BUDGET - 6 - 10} songs.`)
     // Round two stops once the mix is full: 5 of its 6.
-    expect(searches).toHaveLength(16 + 5)
-    expect((await queueTitles(db, session.id)).map((r) => r.title)).toEqual([first[2], first[9], first[15], ...second.slice(0, 5)].map((s) => s.title))
-    expect(logged.propose).toEqual({ proposed: 22, verified: 8, searches: 21, rounds: 2 })
+    expect(searches).toHaveLength(10 + 5)
+    expect((await queueTitles(db, session.id)).map((r) => r.title)).toEqual([first[2], first[5], first[9], ...second.slice(0, 5)].map((s) => s.title))
+    expect(logged.propose).toEqual({ proposed: 16, verified: 8, searches: 15, rounds: 2 })
   })
 
   it('still short after the replacement: the queue holds what verified and the DJ offers to loosen', async () => {
@@ -283,7 +287,9 @@ describe('never refuse: proposed songs verified on Apple', () => {
     expect(result.queue).toHaveLength(0)
     expect(toolResults(requests)).toEqual([INSUFFICIENT_SEEDS_TEXT])
     expect(proposalRequests(requests)).toHaveLength(2)
-    expect(logged.propose).toEqual({ proposed: 22, verified: 0, searches: 22, rounds: 2 })
+    // Fill (6) and searches (13 + 3) share TURN_APPLE_BUDGET: round two
+    // gets the 3 left.
+    expect(logged.propose).toEqual({ proposed: 16, verified: 0, searches: 16, rounds: 2 })
     const types = (await db.select().from(funnelEvents)).map((f) => f.type)
     expect(types).not.toContain('proposed_mix')
     expect(await notPersonal(db, session.id)).toBe(false)
@@ -542,7 +548,7 @@ describe('never refuse: edits on a proposed mix', () => {
     expect(text).not.toBe(INSUFFICIENT_SEEDS_TEXT)
     expect(text.split('\n')[0]).toBe(PROPOSED_NOTICE)
     const ask = proposalRequests(requests)[0].messages[0].content as string
-    expect(ask).toContain('Propose exactly 1 songs.')
+    expect(ask).toContain('Propose up to 1 songs.')
     // The queue and the swapped-out song are never proposed again.
     expect(ask).toContain(`- ${round[0].title} by ${round[0].artist}`)
     expect(ask).toContain(`- ${round[2].title} by ${round[2].artist}`)

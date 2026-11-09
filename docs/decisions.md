@@ -1,5 +1,24 @@
 # Decision Log
 
+## 2026-11-09 — Every song earns its place; notes make the case (founder)
+
+Spec `superpowers/specs/2026-11-09-every-song-earns-its-place-design.md`.
+Prompted by a production pressure test: genre prompts padded with library
+songs that did not fit ("soft jazz" with no jazz, "no vocals" with fifteen
+vocal tracks), "swap in some Kendrick" added no Kendrick, and notes read as
+energy-arc labels that repeated.
+
+- The requested count is a ceiling. The curator returns only songs that fit
+  the brief; a shortfall is proposed and verified from Apple when outside
+  music is allowed, otherwise the mix is shorter and the DJ says why.
+- A swap or extend that names artists draws only from them.
+- A turn that changed the queue never fails without a DJ message.
+- The reply never claims an artist the listing does not hold.
+- Intros, interludes, skits and outros stay out unless named.
+- Notes become one or two sentences (12 to 28 words, 200-character cap) that
+  say something concrete about the song and why it sits there. This reverses
+  the "two to six words" register. Repeats against the queue are dropped.
+
 ## 2026-11-09 — One platform per device; fixed mix actions (founder)
 
 Decisions 1–4 of `superpowers/specs/2026-11-09-one-platform-play-design.md`;

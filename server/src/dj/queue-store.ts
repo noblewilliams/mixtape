@@ -5,6 +5,7 @@ import { captureMixVersion } from './mix-history'
 import { djSessions, queueTracks, sessionPlaylistSeeds, tracks, userPlaylists } from '../db/schema'
 import type { OpIntent, QueueOp } from './contracts'
 import { holdsRecordingSql } from './pool'
+import { dropRepeatedNotes } from './notes'
 
 export type QueueTrackView = {
   position: number
@@ -147,7 +148,8 @@ export async function replaceQueue(
   guard?: QueueMutationGuard & { queueVersion: number },
   energyArc?: EnergyArc | null,
 ): Promise<number> {
-  const deduped = dedupeByTrackId(picks)
+  // A whole new queue: the only notes to compare against are its own.
+  const deduped = dropRepeatedNotes(dedupeByTrackId(picks))
   return db.transaction(async (tx) => {
     const [session] = await tx.select().from(djSessions).where(eq(djSessions.id, sessionId)).for('update')
     if (!session) throw new Error('queue-store: session not found')
@@ -584,12 +586,23 @@ export async function applyOps(
     // so there's nothing to fail fast for, and the existence check is only
     // meaningful against the state this transaction will actually write to.
     const insertReasons = await resolveInsertTracks(tx, sessionId, ops)
-    const { finalRemovedIds, toInsert, positionUpdates, added } = materialize(
+    const { finalRemovedIds, toInsert: materialized, positionUpdates, added } = materialize(
       working,
       removedIds,
       picksByOpIndex,
       insertReasons,
     )
+    // A new row's note may not repeat one the queue will still show (the
+    // rows this batch keeps) or an earlier new row's (dj/notes.ts). A
+    // removed or swapped-out row's note is free to reuse: it leaves the
+    // queue in this same write. toInsert is already in position order.
+    // DJ-authored writes only: a listener's insert is an Undo restoring a
+    // song with its own note, and wiping that note would be a loss, not a
+    // repeat the DJ wrote.
+    const removedSet = new Set(finalRemovedIds)
+    const toInsert = actor === 'dj'
+      ? dropRepeatedNotes(materialized, currentRows.filter((r) => !removedSet.has(r.id)).map((r) => r.reason))
+      : materialized
 
     if (finalRemovedIds.length > 0) {
       await tx

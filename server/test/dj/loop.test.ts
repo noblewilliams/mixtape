@@ -145,7 +145,7 @@ function curateFakeResponseFromRequest(req: LlmRequest): LlmTurn {
   const poolText = blocks[0]?.text ?? ''
   const intentText = blocks[1]?.text ?? ''
   const ids = Array.from(poolText.matchAll(/^([0-9a-f-]{36}) \|/gm)).map((m) => m[1])
-  const countMatch = intentText.match(/Pick exactly (\d+) tracks/)
+  const countMatch = intentText.match(/Pick up to (\d+) tracks/)
   const count = countMatch ? Number(countMatch[1]) : ids.length
   const picks = ids.slice(0, count).map((id) => ({ id, reason: 'fits the vibe' }))
   return {
@@ -968,7 +968,11 @@ describe('runDjTurn', () => {
   })
 
   describe('committed-mutation state on a later failure', () => {
-    it('a mid-turn failure after an earlier tool call already committed attaches the post-mutation queue/version to the DjError', async () => {
+    // Spec 2026-11-09 every-song-earns-its-place, decision 4: a turn whose
+    // own write moved the queue never fails silently. It answers with what
+    // the write did and succeeds with the post-mutation queue, where it once
+    // threw with that queue attached and no DJ message.
+    it('a mid-turn failure after an earlier tool call already committed succeeds with the post-mutation queue and a factual message', async () => {
       const db = await createTestDb()
       await seedUser(db, 'u1')
       const session = await seedSession(db, 'u1')
@@ -992,24 +996,14 @@ describe('runDjTurn', () => {
       }
       const deps: DjDeps = { embed: fakeEmbed, llm }
 
-      let error: unknown
-      try {
-        await runDjTurn(db, deps, sessionRef, 'play something then keep talking')
-        throw new Error('expected runDjTurn to reject')
-      } catch (e) {
-        error = e
-      }
+      const result = await runDjTurn(db, deps, sessionRef, 'play something then keep talking')
 
-      expect(error).toBeInstanceOf(DjError)
-      const djError = error as DjError
-      expect(djError.kind).toBe('llm')
-      expect(djError.queue).toBeDefined()
-      expect(djError.queue).toHaveLength(3)
-      expect(djError.queueVersion).toBe(1) // replaceQueue's first bump on a fresh session
-
-      // And the failure itself still left no dj message persisted.
+      expect(result.queue).toHaveLength(3)
+      expect(result.queueVersion).toBe(1) // replaceQueue's first bump on a fresh session
+      expect(result.djMessage.content).toBe('Made a new mix of 3 songs.')
+      expect(result.djMessage.queueVersion).toBe(1)
       const messages = await readMessages(db, session.id)
-      expect(messages.filter((m) => m.role === 'dj')).toHaveLength(0)
+      expect(messages.filter((m) => m.role === 'dj')).toHaveLength(1)
     })
   })
 
@@ -1984,8 +1978,12 @@ function greedyOutsideLlm(conversationScript: ScriptedTurn[]): { llm: LlmClient;
     const [poolText, intentText] = (req.messages[0].content as Array<{ text: string }>).map((b) => b.text)
     const lines = poolText.split('\n').filter((l) => /^[0-9a-f-]{36} \|/.test(l))
     const ordered = [...lines.filter((l) => l.endsWith(' | new')), ...lines.filter((l) => !l.endsWith(' | new'))]
-    const count = Number(intentText.match(/Pick exactly (\d+) tracks/)![1])
-    const picks = ordered.slice(0, count).map((l) => ({ id: l.slice(0, 36), reason: 'fits' }))
+    // Greedy and over-long: every new row first, then the rest of the pool.
+    // curate() keeps the first `cap` new picks and cuts to the count, and it
+    // never pads (the count is a ceiling), so the rest of the mix comes from
+    // the model's own later picks, not from code.
+    expect(intentText).toMatch(/Pick up to \d+ tracks/)
+    const picks = ordered.map((l, i) => ({ id: l.slice(0, 36), reason: `Note ${i}` }))
     return { text: JSON.stringify(picks), toolCalls: [], raw: [], stopReason: 'end_turn', usage: null }
   }
   return { llm, requests: inner.requests }
@@ -2043,7 +2041,7 @@ describe('outside picks', () => {
     ['mix', 10, 2],
     ['adventurous', 10, 4],
     ['adventurous', 15, 6],
-  ] as const)('generate holds the cap for %s at %i tracks: at most %i new, backfilled from their own music', async (familiarity, targetCount, cap) => {
+  ] as const)('generate holds the cap for %s at %i tracks: at most %i new, the rest from their own music', async (familiarity, targetCount, cap) => {
     const db = await createTestDb()
     const { sessionRef, catalogue } = await seedOutsideWorld(db, 20, 10)
     const { llm, requests } = greedyOutsideLlm([

@@ -3,7 +3,8 @@ import type { Db } from '../db/types'
 import { AppleCatalogError, type AppleCatalogSearchClient, type CatalogSong } from '../musickit/catalog'
 import { addCatalogueSongs } from './catalogue-fill'
 import { artistKey, creditedArtists, creditedKeys } from './artist-keys'
-import type { Intent } from './contracts'
+import type { Intent, NamedSong } from './contracts'
+import { isAlbumGlue } from './pool'
 import {
   arcInstruction,
   CurationTruncated,
@@ -55,19 +56,28 @@ const MAX_EXCLUDE_LINES = 60
 export type ProposedSong = { title: string; artist: string }
 export type Proposal = ProposedSong & { reason: string }
 
-export const PROPOSE_SYSTEM_PROMPT = [
-  "You are the DJ: warm, music-literate, with a long memory for recorded music. This listener has no music of " +
-    'their own here yet, so you build their queue from what you know, and every song you name is checked against ' +
-    'Apple Music before they hear it.',
+// The two listeners the proposal call serves differ in two places only:
+// who they are (the intro) and where to lean. Everything else is one rule
+// set, so the variants cannot drift. Both are static strings.
+function proposePrompt(intro: string, lean: string): string {
+  return [
+  intro,
   'Selection:\n' +
     "- Propose only real, released songs that are on Apple Music in the listener's storefront, under their " +
     'released title and the primary artist Apple Music credits. Never invent a song, a title or an artist.\n' +
     '- Propose the original studio recording: never a cover, live version, remix or karaoke version unless the ' +
     'request asks for one.\n' +
-    '- Propose exactly the number of songs asked for, listed in the order they should play. Sequence is half the ' +
-    'job: mind the handoff between consecutive songs and follow the requested energy arc.\n' +
-    '- Lean mainstream: the well-known songs of the named artists and their close peers, unless the request asks ' +
-    'for deep cuts or something new.\n' +
+    '- Propose only songs that truly fit the request: its genre, its era, its mood, and any hard constraint such ' +
+    'as no vocals (instrumentals only) or clean. Never add a song that contradicts it to make up the number.\n' +
+    '- A genre or era named in the request is a hard constraint, as binding as no vocals: a song must actually ' +
+    'be that genre or from that era. Mood words choose which songs of that genre to propose; they never stand ' +
+    'in for the genre. A soft indie song is not soft jazz, and a 70s song is not a 90s one.\n' +
+    '- The number asked for is a ceiling, not a quota. Give that many when that many truly fit, as they will for ' +
+    'most requests; otherwise give fewer.\n' +
+    '- List the songs in the order they should play. Sequence is half the job: mind the handoff between ' +
+    'consecutive songs and follow the requested energy arc.\n' +
+    lean +
+
     '- Never two songs by the same artist in a row, and at most three by any one artist unless the request is ' +
     'about that artist.\n' +
     '- Never propose a song from the already-tried list.\n' +
@@ -79,6 +89,27 @@ export const PROPOSE_SYSTEM_PROMPT = [
     'reason>"}, ...], in play order. Begin your response with [ and end it with ]. No prose, no markdown, no code ' +
     'fences, nothing before or after the array.',
 ].join('\n\n')
+}
+
+// A listener with no music here yet: the queue is all proposals.
+export const PROPOSE_SYSTEM_PROMPT = proposePrompt(
+  "You are the DJ: warm, music-literate, with a long memory for recorded music. This listener has no music of " +
+    'their own here yet, so you build their queue from what you know, and every song you name is checked against ' +
+    'Apple Music before they hear it.',
+  '- Lean mainstream: the well-known songs of the named artists and their close peers, unless the request asks ' +
+    'for deep cuts or something new.\n',
+)
+
+// A listener whose own library could not fill this mix (spec 2026-11-09
+// every-song-earns-its-place, decision 2): the proposals join songs they
+// own, so they lean to that listener's taste, not to the mainstream.
+export const PROPOSE_SYSTEM_PROMPT_PERSONAL = proposePrompt(
+  "You are the DJ: warm, music-literate, with a long memory for recorded music. This listener's own library " +
+    'holds too few songs that fit this request, so you complete the mix from what you know, among songs they ' +
+    'already own, and every song you name is checked against Apple Music before they hear it.',
+  "- Lean to this listener's taste: the artists they play most, the artists they named, and their close peers, " +
+    'over whatever is most popular, unless the request asks for something new.\n',
+)
 
 /** How many songs the first proposal asks for: the mix plus PROPOSE_EXTRA, never more than can be verified. */
 export function proposalCount(intent: Pick<Intent, 'targetCount'>): number {
@@ -99,13 +130,20 @@ export type ProposeInput = {
   // The loop's session context (queue, removals, saved preferences), as
   // curation receives it.
   sessionContext?: string
+  // 'personal': the listener has a library this round completes a mix
+  // from (PROPOSE_SYSTEM_PROMPT_PERSONAL). Absent: they have none.
+  listener?: 'personal'
+  // The artists the listener's library holds most of, most first: taste
+  // input for a personal listener's round. Bounded by the caller.
+  topArtists?: string[]
 }
 
 const proposalKey = (s: ProposedSong): string => `${titleKey(s.title)}\u0000${artistKey(s.artist)}`
 
 function buildUserBlock(input: ProposeInput, count: number): string {
   const { intent } = input
-  const lines = [`Propose exactly ${count} songs.`, `Storefront: ${input.storefront}`]
+  // "up to": the count is a ceiling (the fit rule in PROPOSE_SYSTEM_PROMPT).
+  const lines = [`Propose up to ${count} songs.`, `Storefront: ${input.storefront}`]
   const brief = sanitizeForPrompt(input.brief, 500)
   if (brief) lines.push(`Request: ${brief}`)
   lines.push(arcInstruction(intent.energyArc), `Themes: ${sanitizeForPrompt(intent.themes, 500)}`)
@@ -118,6 +156,8 @@ function buildUserBlock(input: ProposeInput, count: number): string {
   lines.push(`Familiarity: ${intent.familiarity}`, `Allow explicit: ${intent.allowExplicit}`)
   const seeds = input.seeds.map((s) => sanitizeForPrompt(s)).filter((s) => s !== '')
   if (seeds.length > 0) lines.push(`Artists the listener named or loves: ${seeds.join(', ')}`)
+  const top = (input.topArtists ?? []).map((s) => sanitizeForPrompt(s)).filter((s) => s !== '')
+  if (top.length > 0) lines.push(`Artists this listener plays most: ${top.join(', ')}`)
   const named = (intent.namedSongs ?? []).map((s) =>
     s.artist ? `${sanitizeForPrompt(s.title)} by ${sanitizeForPrompt(s.artist)}` : sanitizeForPrompt(s.title))
   if (named.length > 0) lines.push(`Songs the listener named: ${named.join('; ')}`)
@@ -141,8 +181,10 @@ function field(raw: unknown): string {
 
 // Valid items only, first of each song kept, never an excluded one, cut to
 // `count`. The artist spread is the model's to keep (the system prompt): a
-// brief about one artist may rightly hold more than three of theirs.
-function normalizeProposals(raw: unknown[], exclude: ProposedSong[], count: number): Proposal[] {
+// brief about one artist may rightly hold more than three of theirs. Album
+// glue (an intro, interlude, skit or outro) goes before it costs a search,
+// unless the listener named it, as in every pool (dj/pool.ts isAlbumGlue).
+function normalizeProposals(raw: unknown[], exclude: ProposedSong[], count: number, namedSongs?: NamedSong[]): Proposal[] {
   const seen = new Set(exclude.map(proposalKey))
   const out: Proposal[] = []
   for (const item of raw) {
@@ -152,6 +194,7 @@ function normalizeProposals(raw: unknown[], exclude: ProposedSong[], count: numb
     const title = field(rec.title)
     const artist = field(rec.artist)
     if (titleKey(title) === '' || artistKey(artist) === '') continue
+    if (isAlbumGlue(title, artist, namedSongs)) continue
     const key = proposalKey({ title, artist })
     if (seen.has(key)) continue
     seen.add(key)
@@ -171,7 +214,7 @@ export async function proposeSongs(llm: LlmClient, input: ProposeInput): Promise
   const count = Math.max(1, input.count ?? proposalCount(input.intent))
   const maxTokens = scaledMaxTokens(count)
   const request: LlmRequest = {
-    system: PROPOSE_SYSTEM_PROMPT,
+    system: input.listener === 'personal' ? PROPOSE_SYSTEM_PROMPT_PERSONAL : PROPOSE_SYSTEM_PROMPT,
     messages: [{ role: 'user', content: buildUserBlock(input, count) }],
     tools: [],
     maxTokens,
@@ -183,7 +226,7 @@ export async function proposeSongs(llm: LlmClient, input: ProposeInput): Promise
     if (turn.stopReason === 'max_tokens') throw new CurationTruncated()
   }
   const raw = extractJsonArrayWhere(turn.text, looksLikeProposals) ?? []
-  return normalizeProposals(raw, input.exclude ?? [], count)
+  return normalizeProposals(raw, input.exclude ?? [], count, input.intent.namedSongs)
 }
 
 // Bracketed segments ("(feat. X)", "[Remastered]") and a trailing " - ..."
@@ -268,6 +311,9 @@ export type VerifyOptions = {
   want?: number
   // false rejects a hit Apple marks explicit.
   allowExplicit?: boolean
+  // Songs the listener named: the only album glue a hit may be. Apple's
+  // title can carry "(Interlude)" where the proposal's did not.
+  namedSongs?: NamedSong[]
 }
 
 export type VerifyResult = {
@@ -320,7 +366,8 @@ export async function verifyProposals(db: Db, catalog: AppleCatalogSearchClient,
       if (e instanceof AppleCatalogError && (e.category === 'rate_limit' || e.status === 429)) break
       continue
     }
-    const song = pickHit(found, proposal, options.allowExplicit !== false)
+    const hit = pickHit(found, proposal, options.allowExplicit !== false)
+    const song = hit && !isAlbumGlue(hit.title, hit.artist, options.namedSongs) ? hit : undefined
     if (!song) {
       result.misses.push(proposal)
       continue

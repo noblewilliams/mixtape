@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { and, count, desc, eq, gt, isNotNull, isNull, lt, inArray, ne, or } from 'drizzle-orm'
 import type { Db } from '../db/types'
 import type { Embedder } from '../enrich/embedder'
-import { djMemories, djMessages, djSessions, funnelEvents, queueTracks, tracks, trackFeatures, mixVersions, userArtistSeeds } from '../db/schema'
+import { djMemories, djMessages, djSessions, funnelEvents, queueTracks, tracks, trackFeatures, mixVersions, userArtistSeeds, userTracks } from '../db/schema'
 import type { Surface } from '../seeds/contracts'
 import { fillForArtist, fillForSeeds, FILL_BUDGET, type FillDeps, type FillResult } from './catalogue-fill'
 import { artistKey } from './artist-keys'
@@ -21,9 +21,10 @@ import {
   type Intent,
   type NamedSong,
   type OpIntent,
+  type QueueOp,
 } from './contracts'
 import { buildPool, hasPersonalCandidates, outsideCap, resolvePoolMode, type PoolMode, type PoolTrack } from './pool'
-import { curate, CurationTruncated, CurationUnparseable } from './curate'
+import { curate, CurationNothingFits, CurationTruncated, CurationUnparseable, type CuratedTrack } from './curate'
 import {
   MIN_VERIFIED,
   PROPOSE_EXTRA,
@@ -53,6 +54,7 @@ import {
   replaceQueue,
   QueueOpError,
   QueueVersionConflict,
+  type ApplyOpsResult,
   type QueueTrackView,
   type ReplacementsProvider,
 } from './queue-store'
@@ -150,6 +152,40 @@ export const SHORT_VERIFIED_TEXT =
   'plainly how many you could confirm, and offer to loosen the request (a broader mood, more artists, another era) ' +
   'for a fuller mix.'
 
+// A generate whose curation came up short (spec 2026-11-09
+// every-song-earns-its-place, decisions 1 and 2): the curator now returns
+// only songs that fit, so a library that does not cover the brief gives a
+// shorter mix, filled from outside it when it may be. What is still short
+// after that is said plainly, with why. Goes to the MODEL.
+export type ShortMix = {
+  count: number
+  asked: number
+  // Where the curated songs came from: the listener's own music or, for a
+  // corpus listener, the shared catalog.
+  source: 'library' | 'catalog'
+  // Why outside songs did not make up the rest: the brief asked for only
+  // their own music, too few verified on Apple, or the proposal path is off
+  // (NEVER_REFUSE off, or no Apple fill wired).
+  outside: 'own-only' | 'unconfirmed' | 'unavailable'
+}
+
+export function shortMixNotice(m: ShortMix): string {
+  const where = m.source === 'library' ? "this listener's own music" : 'the shared catalog'
+  const why = m.outside === 'own-only'
+    ? 'the brief asked for their own music (their favourites, or only their own), so nothing from outside it was added'
+    : m.outside === 'unconfirmed'
+      ? 'too few songs from outside it that fit could be confirmed on Apple Music'
+      : 'outside music was off for this mix, so nothing from outside it was added'
+  return `note: this mix is ${m.count} of the ${m.asked} songs asked for, because ${where} had too few songs that ` +
+    `fit the brief, and ${why}. Tell them plainly why it is shorter (for example "your library has little jazz"), ` +
+    `and offer to loosen the brief${m.outside === 'own-only' ? ' or to bring in songs they do not own yet' : ''}.`
+}
+
+// The curator found nothing that fits (CurationNothingFits) and nothing
+// came from outside to stand in: the queue stands. Goes to the MODEL,
+// followed by shortMixNotice for the why.
+export const NOTHING_FITS_TEXT = 'nothing to play: no song that fits this brief could be found. The queue is unchanged.'
+
 // Artist-only mixes (spec 2026-11-09 one-platform-play, decision 5). A brief
 // about one artist's own music (generate_queue's onlyArtist) is made only of
 // songs crediting that artist, features included, from the listener's own
@@ -176,6 +212,23 @@ function namesOtherArtist(names: string[] | undefined, key: string): boolean {
     const k = artistKey(n)
     return k !== '' && k !== key
   })
+}
+
+// The artists an edit's swap or extend draws from: an artist-only scope
+// (one artist, inherited from the session or set on the op) or the artists
+// the op's intent names. Names and keys are parallel, first spelling of
+// each artist key kept.
+type EditScope = { kind: 'only' | 'named'; names: string[]; keys: string[] }
+
+function namedScope(names: string[] | undefined): EditScope | undefined {
+  const scope: EditScope = { kind: 'named', names: [], keys: [] }
+  for (const name of names ?? []) {
+    const key = artistKey(name)
+    if (key === '' || scope.keys.includes(key)) continue
+    scope.names.push(name)
+    scope.keys.push(key)
+  }
+  return scope.keys.length > 0 ? scope : undefined
 }
 
 // Records which artist-only mix the session holds (dj_sessions.only_artist),
@@ -205,6 +258,38 @@ export function onlyArtistNotFoundNotice(name: string): string {
   const artist = sanitizeForPrompt(name)
   return `note: no songs credited to ${artist} could be found, so this mix follows the rest of the request without ` +
     `them. Tell them plainly that you couldn't find ${artist}'s songs, and check you have the right artist.`
+}
+
+// Named-artist edits (spec 2026-11-09 every-song-earns-its-place, decision
+// 3). Go to the MODEL.
+export function namedArtistsNotFoundNotice(names: string[]): string {
+  const artists = names.map((n) => sanitizeForPrompt(n)).join(' or ')
+  return `note: no songs by ${artists} could be found, so the songs they were asked to replace or join are ` +
+    `unchanged. Tell them plainly that you couldn't find ${artists}, and check you have the right artist.`
+}
+
+// The artist's songs are there but the curator found fewer that fit the
+// brief (decision 1's fit rule applied to an artist scope): saying "only N
+// could be found" would then be false. Go to the MODEL.
+export function onlyArtistFitNotice(name: string, count: number, asked: number): string {
+  const artist = sanitizeForPrompt(name)
+  return `note: only ${count} of ${artist}'s songs fit the brief, so this mix is ${count} long instead of the ` +
+    `${asked} asked for, all of it ${artist}. Tell them plainly. Do not offer to fill it with other artists unless ` +
+    'they ask.'
+}
+
+// None of the scope's songs fit: a generate leaves the queue as it was, an
+// edit leaves the songs it was to replace or join.
+export function artistNoneFitNotice(name: string, where: 'mix' | 'edit'): string {
+  const artist = sanitizeForPrompt(name)
+  const unchanged = where === 'mix' ? 'the queue is unchanged' : 'the songs they were asked to replace or join are unchanged'
+  return `note: ${artist}'s songs were found, but none of them fit the brief, so ${unchanged}. Tell them plainly, ` +
+    'and offer to loosen the brief.'
+}
+
+export function artistFewerFitNotice(name: string): string {
+  return `note: fewer of ${sanitizeForPrompt(name)}'s songs fit the brief than were asked for, so fewer were added. ` +
+    'Tell them plainly. Do not add other artists unless they ask.'
 }
 
 export function onlyArtistExhaustedNotice(name: string): string {
@@ -340,10 +425,21 @@ class CurationBudget {
 // from the listener's own library — and user-controlled text must never sit
 // at system-prompt altitude, where a crafted title could carry more
 // authority than the model gives ordinary conversation.
+// Spec 2026-11-09 every-song-earns-its-place, decision 5: a pressure test
+// described a mix as anchored by Frank Ocean when it held no song of his.
+// The tool result's updated listing is the only truth about the mix, so the
+// reply is held to it. Part of the static persona (cached with it): it
+// changes the cached system prefix once, then caches like the rest.
+export const HONEST_LISTING_PERSONA_LINE =
+  'Describe only what the updated queue listing in the tool result shows. Never say an artist anchors, leads or ' +
+  'features in the mix unless a song by them is in that listing. When the listing differs from what they asked ' +
+  'for (an artist missing, fewer songs, songs from outside their library), say how, plainly.'
+
 const PERSONA_LINES = [
   'You are the DJ: warm, brief, music-literate. You talk WITH the listener about their queue, not at them.',
   'Queues come ONLY from your tools (generate_queue, edit_queue). Never claim a track is queued, or describe ' +
     "one, unless a tool call actually put it there. Don't invent tracks or artists.",
+  HONEST_LISTING_PERSONA_LINE,
   'When the listener names a duration ("an hour", "half an hour") instead of a count, convert it to a track ' +
     'count yourself at ~3.5 minutes per track before calling a tool.',
   'A standing queue is PRECIOUS: the listener has been shaping it. When they ask to remove, swap, or adjust ' +
@@ -379,6 +475,27 @@ export const OUTSIDE_PERSONA_LINE =
   'allowOutside: false when the listener, or a saved preference, asks for only their own music. Choose ' +
   'familiarity "adventurous" when they ask for new things. Always say which picks are new to them.'
 export const PERSONA_PROMPT_WITH_OUTSIDE = [...PERSONA_LINES.slice(0, -2), OUTSIDE_PERSONA_LINE, ...PERSONA_LINES.slice(-2)].join('\n')
+
+// NEVER_REFUSE on with the Apple fill wired, OUTSIDE_PICKS off: a mix the
+// listener's own music cannot fill is filled from outside it (spec
+// 2026-11-09 every-song-earns-its-place, decision 2), so the model must be
+// able to say no to that ("only my own music", or a saved preference
+// saying so). This variant and DJ_TOOLS_WITH_OUTSIDE carry allowOutside.
+// Static, chosen whole per request, so it caches on its own like the others.
+export const FILL_PERSONA_LINE =
+  "When the listener's own music cannot fill a mix, the rest may be songs they do not own yet, each checked on " +
+  'Apple Music. Pass allowOutside: false when the listener, or a saved preference, asks for only their own ' +
+  'music. Always say which picks are new to them.'
+export const PERSONA_PROMPT_WITH_FILL = [...PERSONA_LINES.slice(0, -2), FILL_PERSONA_LINE, ...PERSONA_LINES.slice(-2)].join('\n')
+
+// The tools and persona a turn sends: OUTSIDE_PICKS's variant when on (it
+// already carries allowOutside), the fill variant when only the shortfall
+// fill can run, today's otherwise.
+function conversationVariant(deps: DjDeps): { system: string; tools: typeof DJ_TOOLS } {
+  if (deps.outsidePicks) return { system: PERSONA_PROMPT_WITH_OUTSIDE, tools: DJ_TOOLS_WITH_OUTSIDE }
+  if (deps.neverRefuse === true && deps.fill) return { system: PERSONA_PROMPT_WITH_FILL, tools: DJ_TOOLS_WITH_OUTSIDE }
+  return { system: PERSONA_PROMPT, tools: DJ_TOOLS }
+}
 
 // Formats the failure of a zod safeParse into tool_result text: issue paths
 // and CODES only, never `issue.message` and never the offending input value
@@ -609,6 +726,34 @@ type GenerateOutcome = {
   queueChanged: boolean
   newVersion?: number
   intent?: Intent
+  // What a queue write did, in the listener's terms, for the reply a turn
+  // that later fails still owes them (see TurnChanges). Set with queueChanged.
+  changeSummary?: string
+}
+
+// "Made a new mix of 15 songs." Stated, not styled: it stands in for the
+// DJ's reply only when the turn failed after the write.
+export function mixSummary(count: number): string {
+  return `Made a new mix of ${count} ${count === 1 ? 'song' : 'songs'}.`
+}
+
+// What an edit batch did, from its ops and applyOps's counts: a swap that
+// landed is one removal and one addition, so removals beyond the batch's
+// remove ops are swaps, and additions beyond those are extends or inserts.
+export function editSummary(ops: QueueOp[], result: Pick<ApplyOpsResult, 'added' | 'removed'>): string {
+  const n = (count: number) => `${count} ${count === 1 ? 'song' : 'songs'}`
+  const removes = ops.filter((op) => op.op === 'remove').length
+  const moves = ops.filter((op) => op.op === 'move').length
+  const swapped = Math.max(0, result.removed - removes)
+  const added = Math.max(0, result.added - swapped)
+  const removed = result.removed - swapped
+  const parts = [
+    ...(swapped > 0 ? [`Swapped ${n(swapped)}.`] : []),
+    ...(added > 0 ? [`Added ${n(added)}.`] : []),
+    ...(removed > 0 ? [`Removed ${n(removed)}.`] : []),
+    ...(moves > 0 ? [`Moved ${n(moves)}.`] : []),
+  ]
+  return parts.length > 0 ? parts.join(' ') : 'Updated the mix.'
 }
 
 // Flags a session whose queue now holds picks drawn from the shared corpus
@@ -647,7 +792,7 @@ type FillLog = { inserted: number; enriched: number; subrequests: number; appleE
 // The never-refuse path's part of the turn log: counts only. `rounds` counts
 // proposal calls (a generate's two rounds and any edit's); `error` marks a
 // replacement round that failed and was let go.
-type ProposeLog = { proposed: number; verified: number; searches: number; rounds: number; error?: 'replacement' | 'blend' }
+type ProposeLog = { proposed: number; verified: number; searches: number; rounds: number; error?: 'replacement' | 'blend' | 'shortfall' }
 
 // What one turn's proposals verified, kept so a conflict retry or a second
 // generate_queue reuses them instead of spending the searches again.
@@ -666,18 +811,56 @@ type ProposeSpend = { log: ProposeLog; verifyMs: number }
 // fill and the artist fill can both run in one turn (an artist not found
 // falls back to today; a second generate names one), and they share one
 // FILL_BUDGET between them.
+// `blendRest` is the corpus blend round's proposals it never searched, kept
+// with the context they were proposed in: a corpus mix that curates short
+// verifies more of them instead of asking the model again. `shortfall` is
+// a personal mix's shortfall round (generateFromBrief), kept like `blend`
+// so a conflict retry reuses it. `artistKeysFilled` is every artist the
+// artist fill ran for this turn (a named-artist edit may name several).
 type FillTracker = {
   ran: boolean
   artistRan?: boolean
+  artistKeysFilled?: Set<string>
   fillSpent?: number
   log?: FillLog
   propose?: ProposeState
   blend?: VerifiedProposal[]
+  blendRest?: { proposals: Proposal[]; ctx: ProposeContext }
+  shortfall?: { key: string; verified: VerifiedProposal[] }
   spend?: ProposeSpend
   turnStartedAt: number
 }
 
 type TurnFill = { tracker: FillTracker; surface: Surface }
+
+// One ledger for every Apple-facing subrequest a turn makes: the catalogue
+// fills' (fillSpent: artist search, top songs, in-request enrichment) and
+// the proposal verification's searches (spend.log.searches), combined.
+// Each path had its own cap (FILL_BUDGET 20, VERIFY_MAX 22), but one turn
+// can now run both: a short personal generate proposes its shortfall, and
+// a named-artist edit in the same turn fills that artist ("90s R&B for a
+// dinner date, and swap in some Kendrick"). Workers' free plan stops a
+// request at 50 subrequests. A turn with two curation calls and database
+// reconnects reached 50 with 24 fill subrequests (catalogue-fill.ts
+// FILL_BUDGET), so everything that is not Apple took about 26: LLM calls
+// (conversation rounds, curation, the proposal call, the title) and the
+// database. Capping Apple at 22 for the whole turn keeps that margin with
+// two to spare, where the two caps side by side allowed 42. Each path's own
+// cap still applies inside it.
+export const TURN_APPLE_BUDGET = 22
+
+function appleLeft(tracker: FillTracker): number {
+  return Math.max(0, TURN_APPLE_BUDGET - (tracker.fillSpent ?? 0) - (tracker.spend?.log.searches ?? 0))
+}
+
+// Once proposal searches have run this turn, a fill keeps its insertion
+// and skips in-request enrichment: what is left of the ledger is better
+// spent on searches than on enriching rows the cron will reach anyway.
+// (The reverse is the ledger itself: whatever a fill enriched is no longer
+// there for searches.)
+function enrichAllowed(tracker: FillTracker, enrich: boolean): boolean {
+  return enrich && (tracker.spend?.log.searches ?? 0) === 0
+}
 
 // An insufficient_seeds listener's named artists may simply be missing from
 // the catalogue: fill them from Apple (spec 2026-10-21 everyone-gets-a-mix,
@@ -685,8 +868,9 @@ type TurnFill = { tracker: FillTracker; surface: Surface }
 // refuse as it would have.
 // `enrich` false keeps the insertion and skips the in-request enrichment
 // (the never-refuse path spends those subrequests on Apple searches).
-async function fillCatalogue(db: Db, fill: FillDeps, session: DjSessionRef, intent: Intent, turn: TurnFill, enrich: boolean): Promise<void> {
+async function fillCatalogue(db: Db, fill: FillDeps, session: DjSessionRef, intent: Intent, turn: TurnFill, enrichWanted: boolean): Promise<void> {
   turn.tracker.ran = true
+  const enrich = enrichAllowed(turn.tracker, enrichWanted)
   await recordFill(db, session, turn, (budget) => fillForSeeds(db, fill, {
     userId: session.userId,
     namedSongs: intent.namedSongs,
@@ -697,8 +881,10 @@ async function fillCatalogue(db: Db, fill: FillDeps, session: DjSessionRef, inte
 
 // The artist-only fill, once per turn, for a generate or an edit. Never
 // throws, like fillCatalogue.
-async function fillArtistCatalogue(db: Db, fill: FillDeps, session: DjSessionRef, name: string, turn: TurnFill, enrich: boolean): Promise<void> {
+async function fillArtistCatalogue(db: Db, fill: FillDeps, session: DjSessionRef, name: string, turn: TurnFill, enrichWanted: boolean): Promise<void> {
   turn.tracker.artistRan = true
+  const enrich = enrichAllowed(turn.tracker, enrichWanted)
+  ;(turn.tracker.artistKeysFilled ??= new Set()).add(artistKey(name))
   await recordFill(db, session, turn, (budget) =>
     fillForArtist(db, fill, { userId: session.userId, name, budget, ...(enrich ? {} : { enrich: false }) }))
 }
@@ -709,7 +895,7 @@ async function fillArtistCatalogue(db: Db, fill: FillDeps, session: DjSessionRef
 // before it did, so it is charged all of it.
 async function recordFill(db: Db, session: DjSessionRef, turn: TurnFill, run: (budget: number) => Promise<FillResult>): Promise<void> {
   const prev = turn.tracker.log && 'inserted' in turn.tracker.log ? turn.tracker.log : undefined
-  const budget = Math.max(0, FILL_BUDGET - (turn.tracker.fillSpent ?? 0))
+  const budget = Math.min(Math.max(0, FILL_BUDGET - (turn.tracker.fillSpent ?? 0)), appleLeft(turn.tracker))
   let filled = false
   try {
     let result: FillResult
@@ -772,6 +958,24 @@ async function loadSeedNames(db: Db, userId: string): Promise<string[]> {
   return rows.map((r) => r.name)
 }
 
+// The artists a personal listener's library holds the most songs by, most
+// first: the taste a shortfall round leans to (PROPOSE_SYSTEM_PROMPT_
+// PERSONAL). A small bounded list, one grouped query on the listener's own
+// rows.
+const TOP_LIBRARY_ARTISTS = 10
+
+async function topLibraryArtists(db: Db, userId: string): Promise<string[]> {
+  const rows = await db
+    .select({ artist: tracks.artist, n: count() })
+    .from(userTracks)
+    .innerJoin(tracks, eq(tracks.id, userTracks.trackId))
+    .where(and(eq(userTracks.userId, userId), eq(userTracks.inLibrary, true)))
+    .groupBy(tracks.artist)
+    .orderBy(desc(count()), tracks.artist)
+    .limit(TOP_LIBRARY_ARTISTS)
+  return rows.map((r) => r.artist)
+}
+
 function proposeSpend(tracker: FillTracker): ProposeSpend {
   tracker.spend ??= { log: { proposed: 0, verified: 0, searches: 0, rounds: 0 }, verifyMs: 0 }
   return tracker.spend
@@ -795,11 +999,12 @@ async function proposeRound(
   deps: DjDeps,
   fill: FillDeps,
   ctx: ProposeContext,
-  round: { intent: Intent; count?: number; exclude?: ProposedSong[]; want: number },
+  round: { intent: Intent; count?: number; exclude?: ProposedSong[]; want: number; listener?: 'personal'; topArtists?: string[] },
   budget: CurationBudget,
-  spend: ProposeSpend,
+  tracker: FillTracker,
 ): Promise<{ proposals: Proposal[]; result: VerifyResult } | null> {
-  const searchesLeft = VERIFY_MAX - spend.log.searches
+  const spend = proposeSpend(tracker)
+  const searchesLeft = Math.min(VERIFY_MAX - spend.log.searches, appleLeft(tracker))
   const timeLeft = VERIFY_DEADLINE_MS - spend.verifyMs
   if (searchesLeft <= 0 || timeLeft <= 0) return null
   spend.log.rounds += 1
@@ -807,13 +1012,15 @@ async function proposeRound(
   const proposals = await proposeSongs(deps.llm, {
     brief: ctx.userText, intent: round.intent, seeds: ctx.seeds, storefront: ctx.storefront, sessionContext: ctx.sessionContext,
     ...(round.exclude && round.exclude.length > 0 ? { exclude: round.exclude } : {}),
+    ...(round.listener ? { listener: round.listener } : {}),
+    ...(round.topArtists && round.topArtists.length > 0 ? { topArtists: round.topArtists } : {}),
     count: Math.min(round.count ?? proposalCount(round.intent), searchesLeft),
   })
   spend.log.proposed += proposals.length
   const began = ctx.now()
   const result = await verifyProposals(db, fill.catalog, {
     proposals, storefront: ctx.storefront, budget: searchesLeft, deadlineMs: timeLeft, now: ctx.now,
-    want: round.want, allowExplicit: round.intent.allowExplicit,
+    want: round.want, allowExplicit: round.intent.allowExplicit, namedSongs: round.intent.namedSongs,
   })
   spend.verifyMs += ctx.now() - began
   spend.log.searches += result.searches
@@ -840,7 +1047,7 @@ async function runProposals(
   const want = intent.targetCount
   const enough = Math.min(MIN_VERIFIED, want)
 
-  const one = await proposeRound(db, deps, fill, ctx, { intent, want }, budget, spend)
+  const one = await proposeRound(db, deps, fill, ctx, { intent, want }, budget, tracker)
   if (!one) return { verified: [], funnelWritten: false }
   const verified = [...one.result.verified]
   spend.log.verified += verified.length
@@ -853,7 +1060,7 @@ async function runProposals(
       const exclude = one.proposals.slice(0, one.result.searches).map(({ title, artist }) => ({ title, artist }))
       const two = await proposeRound(db, deps, fill, ctx, {
         intent, exclude, count: want + PROPOSE_EXTRA - verified.length, want: want - verified.length,
-      }, budget, spend)
+      }, budget, tracker)
       if (two) {
         const held = new Set(verified.map((v) => v.trackId))
         const added = two.result.verified.filter((v) => !held.has(v.trackId))
@@ -888,10 +1095,11 @@ async function blendProposals(
   const spend = proposeSpend(tracker)
   try {
     const ctx = await proposeContext(db, fill, session, userText, sessionContext)
-    const round = await proposeRound(db, deps, fill, ctx, { intent, want, count: want + PROPOSE_EXTRA }, budget, spend)
+    const round = await proposeRound(db, deps, fill, ctx, { intent, want, count: want + PROPOSE_EXTRA }, budget, tracker)
     const verified = round?.result.verified ?? []
     spend.log.verified += verified.length
     tracker.blend = verified
+    if (round) tracker.blendRest = { proposals: round.proposals.slice(round.result.searches), ctx }
     return verified
   } catch (e) {
     // The turn's own budget tripping is the turn's failure, not the blend's.
@@ -899,6 +1107,100 @@ async function blendProposals(
     spend.log.error = 'blend'
     tracker.blend = []
     return []
+  }
+}
+
+// A corpus mix that curated short (decision 2 of spec 2026-11-09
+// every-song-earns-its-place): the blend is a minimum, and the proposed
+// share grows to the shortfall by verifying more of the blend round's own
+// proposals, those it stopped short of searching. No second proposal call,
+// so a corpus mix still spends one. Never throws, as blendProposals.
+async function topUpFromBlend(
+  db: Db,
+  fill: FillDeps,
+  intent: Intent,
+  tracker: FillTracker,
+  want: number,
+  held: Set<string>,
+): Promise<VerifiedProposal[]> {
+  const rest = tracker.blendRest
+  if (!rest || rest.proposals.length === 0 || want <= 0) return []
+  const spend = proposeSpend(tracker)
+  const searchesLeft = Math.min(VERIFY_MAX - spend.log.searches, appleLeft(tracker))
+  const timeLeft = VERIFY_DEADLINE_MS - spend.verifyMs
+  if (searchesLeft <= 0 || timeLeft <= 0) return []
+  try {
+    const began = rest.ctx.now()
+    const result = await verifyProposals(db, fill.catalog, {
+      proposals: rest.proposals, storefront: rest.ctx.storefront, budget: searchesLeft, deadlineMs: timeLeft, now: rest.ctx.now,
+      want, allowExplicit: intent.allowExplicit, namedSongs: intent.namedSongs,
+    })
+    spend.verifyMs += rest.ctx.now() - began
+    spend.log.searches += result.searches
+    // Searched now, so a conflict retry does not search them again.
+    rest.proposals = rest.proposals.slice(result.searches)
+    const fresh = result.verified.filter((v) => !held.has(v.trackId)).slice(0, want)
+    spend.log.verified += fresh.length
+    tracker.blend = [...(tracker.blend ?? []), ...fresh]
+    return fresh
+  } catch {
+    spend.log.error = 'blend'
+    return []
+  }
+}
+
+// A personal mix that curated short (decision 2): one proposal round for
+// the shortfall, verified on Apple like the corpus blend, never naming the
+// songs the library already gave. Never throws but for the turn's own
+// budget. Kept on the tracker, so a conflict retry or a second
+// generate_queue this turn reuses it.
+async function shortfallProposals(
+  db: Db,
+  deps: DjDeps,
+  fill: FillDeps,
+  session: DjSessionRef,
+  intent: Intent,
+  userText: string,
+  sessionContext: string,
+  budget: CurationBudget,
+  tracker: FillTracker,
+  want: number,
+  exclude: ProposedSong[],
+  held: Set<string>,
+): Promise<VerifiedProposal[]> {
+  if (want <= 0) return []
+  // Keyed by the brief: a conflict retry of the same generate reuses the
+  // round, a second generate_queue with another brief proposes afresh.
+  const key = JSON.stringify(intent)
+  if (tracker.shortfall?.key !== key) {
+    const spend = proposeSpend(tracker)
+    let verified: VerifiedProposal[]
+    try {
+      const ctx = await proposeContext(db, fill, session, userText, sessionContext)
+      const topArtists = await topLibraryArtists(db, session.userId)
+      const round = await proposeRound(db, deps, fill, ctx,
+        { intent, want, count: want + PROPOSE_EXTRA, exclude, listener: 'personal', topArtists }, budget, tracker)
+      verified = round?.result.verified ?? []
+    } catch (e) {
+      if (e instanceof DjError) throw e
+      spend.log.error = 'shortfall'
+      verified = []
+    }
+    tracker.shortfall = { key, verified }
+    spend.log.verified += verified.length
+  }
+  return tracker.shortfall.verified.filter((v) => !held.has(v.trackId)).slice(0, want)
+}
+
+// curate(), with the curator's own "nothing fits" (an empty array) read as
+// no picks rather than a failed turn: the shortfall path may still fill the
+// mix, and if not, the DJ says why (decision 2).
+async function curateFitting(...args: Parameters<typeof curate>): Promise<CuratedTrack[]> {
+  try {
+    return await curate(...args)
+  } catch (e) {
+    if (e instanceof CurationNothingFits) return []
+    throw e
   }
 }
 
@@ -981,6 +1283,7 @@ async function executeProposedQueue(
     queueChanged: true,
     newVersion: version,
     intent,
+    changeSummary: mixSummary(updatedQueue.length),
   }
 }
 
@@ -1064,8 +1367,13 @@ async function executeOnlyArtistQueue(
   if (pool.length === 0) return null
   const asked = intent.targetCount
   budget.consume()
-  const picks = await curate(deps.llm, pool, { ...intent, targetCount: Math.min(asked, pool.length) },
+  const picks = await curateFitting(deps.llm, pool, { ...intent, targetCount: Math.min(asked, pool.length) },
     withPlaylistSeedContext(sessionContext, seed), { onlyArtist: only.name })
+  // The artist was found but nothing of theirs fits the brief: the queue
+  // stands and the DJ says so, never the fallback mix of other artists.
+  if (picks.length === 0) {
+    return { resultText: artistNoneFitNotice(only.name, 'mix'), queueChanged: false, intent }
+  }
   const version = await replaceQueue(
     db,
     session.id,
@@ -1085,7 +1393,11 @@ async function executeOnlyArtistQueue(
   return {
     resultText: [
       ...(mode === 'corpus' ? [CORPUS_NOTICE] : []),
-      ...(picks.length < asked ? [onlyArtistShortNotice(only.name, picks.length, asked)] : []),
+      // Fewer that fit than exist is a fit shortfall; otherwise the artist
+      // simply has fewer songs than asked.
+      ...(picks.length < Math.min(asked, pool.length)
+        ? [onlyArtistFitNotice(only.name, picks.length, asked)]
+        : picks.length < asked ? [onlyArtistShortNotice(only.name, picks.length, asked)] : []),
       ...(newAt.length > 0 ? [outsidePicksNotice(newAt)] : []),
       `queue generated: ${picks.length} tracks (now version ${version})`,
       'Updated queue (positions are 0-based):',
@@ -1094,6 +1406,7 @@ async function executeOnlyArtistQueue(
     queueChanged: true,
     newVersion: version,
     intent,
+    changeSummary: mixSummary(updatedQueue.length),
   }
 }
 
@@ -1150,14 +1463,53 @@ async function generateFromBrief(
     return { resultText: 'no tracks in the library match those constraints', queueChanged: false, intent }
   }
   const blending = poolMode.mode === 'corpus' && neverRefuse && deps.fill !== undefined
+  // A short curation is filled from outside the library (decision 2 of spec
+  // 2026-11-09 every-song-earns-its-place) on the same gates as the blend,
+  // and never when the brief asked for only the listener's own music.
+  // Gated as outside picks are (outsideCap): never for a comfort brief
+  // (their favourites) or one that asked for only their own music. Asked
+  // of a 100-song mix so the gate is the familiarity and allowOutside alone:
+  // outsideCap rounds a 3 or 4 song mix's share down to 0, which would
+  // leave a short small mix unfilled. A gate only: the shortfall is not
+  // capped at the outside share.
+  const outsideAllowed = outsideCap({ ...intent, targetCount: 100 }) > 0
+  const fillShort = outsideAllowed && neverRefuse && deps.fill !== undefined
   budget.consume()
   const [curated, proposedRaw] = await Promise.all([
-    curate(deps.llm, pool, intent, withPlaylistSeedContext(sessionContext, seed), { outsideCap: cap }),
+    curateFitting(deps.llm, pool, intent, withPlaylistSeedContext(sessionContext, seed), { outsideCap: cap }),
     blending ? blendProposals(db, deps, deps.fill!, session, intent, userText, sessionContext, budget, turn.tracker) : Promise.resolve([]),
   ])
   // A proposal the catalogue curation also picked is one song, queued once.
   const curatedIds = new Set(curated.map((p) => p.trackId))
   const proposed = proposedRaw.filter((p) => !curatedIds.has(p.trackId))
+  // The shortfall: the corpus blend's share is a minimum, so the proposed
+  // count is the larger of it and what the curation left unfilled.
+  const shortfall = intent.targetCount - curated.length
+  if (fillShort && proposed.length < shortfall) {
+    const held = new Set([...curatedIds, ...proposed.map((p) => p.trackId)])
+    const want = shortfall - proposed.length
+    if (blending) {
+      proposed.push(...await topUpFromBlend(db, deps.fill!, intent, turn.tracker, want, held))
+    } else {
+      const byId = new Map(pool.map((t) => [t.trackId, t]))
+      const exclude = curated.flatMap((p) => {
+        const t = byId.get(p.trackId)
+        return t ? [{ title: t.title, artist: t.artist }] : []
+      })
+      proposed.push(...await shortfallProposals(db, deps, deps.fill!, session, intent, userText, sessionContext, budget,
+        turn.tracker, want, exclude, held))
+    }
+  }
+  const source = poolMode.mode === 'corpus' ? 'catalog' as const : 'library' as const
+  const outsideReason = !outsideAllowed ? 'own-only' as const : fillShort ? 'unconfirmed' as const : 'unavailable' as const
+  if (curated.length === 0 && proposed.length === 0) {
+    // The curator said nothing fits and nothing from outside stood in.
+    return {
+      resultText: `${NOTHING_FITS_TEXT}\n${shortMixNotice({ count: 0, asked: intent.targetCount, source, outside: outsideReason })}`,
+      queueChanged: false,
+      intent,
+    }
+  }
   const proposedIds = new Set(proposed.map((p) => p.trackId))
   const picks = proposed.length > 0
     ? interleaveBlend<{ trackId: string; reason: string }>(curated, proposed, intent.targetCount)
@@ -1180,12 +1532,21 @@ async function generateFromBrief(
   // assumption — accounting numbers alone ("3 added") don't tell it what
   // actually landed where, or in what order.
   const updatedQueue = await getActiveQueue(db, session.id)
-  const outsideAt = outsidePositions(updatedQueue, new Set(outsideIdsIn(pool, picks)))
+  // A proposed song a personal listener does not own is an outside pick:
+  // the DJ says which are new to them, as for buildOutsidePool's. (A corpus
+  // listener owns nothing, and CORPUS_NOTICE already says so.)
+  const proposedNew = poolMode.mode === 'personal'
+    ? updatedQueue.filter((t) => t.newToYou && proposedIds.has(t.trackId)).map((t) => t.trackId)
+    : []
+  const outsideAt = outsidePositions(updatedQueue, new Set([...outsideIdsIn(pool, picks), ...proposedNew]))
   return {
     resultText: [
       ...(poolMode.mode === 'corpus' ? [CORPUS_NOTICE] : []),
       ...(blendedCount > 0 ? [blendedNotice(blendedCount)] : []),
       ...(outsideAt.length > 0 ? [outsidePicksNotice(outsideAt)] : []),
+      ...(picks.length < intent.targetCount
+        ? [shortMixNotice({ count: picks.length, asked: intent.targetCount, source, outside: outsideReason })]
+        : []),
       `queue generated: ${picks.length} tracks (now version ${version})`,
       'Updated queue (positions are 0-based):',
       formatQueueListing(updatedQueue, deps.outsidePicks === true),
@@ -1193,6 +1554,7 @@ async function generateFromBrief(
     queueChanged: true,
     newVersion: version,
     intent,
+    changeSummary: mixSummary(updatedQueue.length),
   }
 }
 
@@ -1200,6 +1562,7 @@ type EditOutcome = {
   resultText: string
   queueChanged: boolean
   newVersion?: number
+  changeSummary?: string
 }
 
 async function executeEditQueue(
@@ -1246,20 +1609,36 @@ async function executeEditQueue(
   // own ("swap 3 for something darker" stays that artist), unless:
   //  - its intent sets onlyArtist itself: that artist instead; or
   //  - its intent names a different artist ("add some Kendrick", by artist
-  //    key): that op steps outside the scope and is today's edit.
+  //    key): that op steps outside the scope, into the named artists' own
+  //    (below).
   // The session's record is unchanged by an edit either way. Rejected:
   // inferring the scope from a queue that is all one artist, which also
   // caught a small one-artist library and changed today's behaviour for it.
+  //
+  // Named artists are a scope of their own (spec 2026-11-09
+  // every-song-earns-its-place, decision 3): an op whose intent names
+  // artists, outside an artist-only scope it stays in, draws replacements
+  // only from those artists' songs, the way an artist-only edit does.
+  // "Swap in some Kendrick" lands Kendrick or says it could not, where it
+  // once drew from the whole library and often landed no Kendrick at all.
   const inherited = needsPool ? await sessionOnlyArtist(db, session.id) : undefined
-  const scopeFor = (opIntent: OpIntent | undefined): OnlyArtist | undefined => {
-    if (opIntent?.onlyArtist) return resolveOnlyArtist(opIntent)
-    if (!inherited || namesOtherArtist(opIntent?.namedArtists, inherited.key)) return undefined
-    return inherited
+  const scopeFor = (opIntent: OpIntent | undefined): EditScope | undefined => {
+    if (opIntent?.onlyArtist) {
+      const only = resolveOnlyArtist(opIntent)
+      return only ? { kind: 'only', names: [only.name], keys: [only.key] } : undefined
+    }
+    if (inherited && !namesOtherArtist(opIntent?.namedArtists, inherited.key)) {
+      return { kind: 'only', names: [inherited.name], keys: [inherited.key] }
+    }
+    return namedScope(opIntent?.namedArtists)
   }
   const anyScoped = ops.some((op) => (op.op === 'swap' || op.op === 'extend') && scopeFor(op.intent) !== undefined)
   // Scored as executeOnlyArtistQueue scores: personal or corpus.
   let artistMode: PoolMode = 'personal'
   const artistShort = new Set<string>()
+  const namedMissing = new Set<string>()
+  const artistNoneFit = new Set<string>()
+  const artistFewerFit = new Set<string>()
   const artistLanded: string[] = []
   const seed = await readPlaylistSeed(db, session.id, session.userId)
   if (needsPool && seed.status !== 'none' && seed.status !== 'ready') {
@@ -1355,19 +1734,44 @@ async function executeEditQueue(
     const activeQueue = await getActiveQueue(db, session.id)
     const scope = scopeFor(opIntent)
     if (scope) {
-      // Only that artist's songs; fewer than asked adds fewer (a swap with
-      // none left keeps its track), never another artist's.
-      if (deps.fill && !turn.tracker.artistRan) {
-        await fillArtistCatalogue(db, deps.fill, session, scope.name, turn, proposedFill === undefined)
+      // Only that artist's songs (or the named artists'); fewer than asked
+      // adds fewer (a swap with none left keeps its track), never another
+      // artist's. An artist-only scope fills once per turn, as before; a
+      // named scope fills each named artist not yet filled this turn, all
+      // inside the one FILL_BUDGET (fillForArtist skips Apple for an artist
+      // the catalogue already holds enough of).
+      if (deps.fill) {
+        const enrich = proposedFill === undefined
+        if (scope.kind === 'only') {
+          if (!turn.tracker.artistRan) await fillArtistCatalogue(db, deps.fill, session, scope.names[0], turn, enrich)
+        } else {
+          for (const [i, name] of scope.names.entries()) {
+            if (!turn.tracker.artistKeysFilled?.has(scope.keys[i])) await fillArtistCatalogue(db, deps.fill, session, name, turn, enrich)
+          }
+        }
       }
       const pool = (await buildPool(db, deps.embed, session.userId, fullIntent, activeQueue.map((t) => t.trackId),
-        { mode: artistMode, playlistSeed: selectedSeed, onlyArtistKey: scope.key }))
+        { mode: artistMode, playlistSeed: selectedSeed, onlyArtistKey: scope.keys }))
         .filter((t) => !returnedThisBatch.has(t.trackId))
-      if (pool.length < count) artistShort.add(scope.name)
-      if (pool.length === 0) return []
+      const label = scope.names.join(' or ')
+      if (pool.length === 0 && scope.kind === 'named') {
+        namedMissing.add(label)
+        return []
+      }
+      if (pool.length === 0) {
+        artistShort.add(label)
+        return []
+      }
       budget.consume()
-      const picks = await curate(deps.llm, pool, { ...fullIntent, targetCount: Math.min(count, pool.length) },
-        withPlaylistSeedContext(sessionContext, seed), { onlyArtist: scope.name })
+      // Nothing that fits (the curator's []) keeps the original track(s).
+      const picks = await curateFitting(deps.llm, pool, { ...fullIntent, targetCount: Math.min(count, pool.length) },
+        withPlaylistSeedContext(sessionContext, seed),
+        scope.kind === 'only' ? { onlyArtist: scope.names[0] } : { namedArtists: scope.names })
+      // Why fewer landed than asked: none fit, fewer fit than the artist
+      // has, or the artist has no more.
+      if (picks.length === 0) artistNoneFit.add(label)
+      else if (picks.length < Math.min(count, pool.length)) artistFewerFit.add(label)
+      else if (pool.length < count) artistShort.add(label)
       if (artistMode === 'corpus' && picks.length > 0) corpusPicksLanded = true
       for (const p of picks) returnedThisBatch.add(p.trackId)
       artistLanded.push(...picks.map((p) => p.trackId))
@@ -1378,7 +1782,7 @@ async function executeEditQueue(
       proposeCtx ??= await proposeContext(db, proposedFill, session, userText, sessionContext)
       const exclude = [...activeQueue.map((t) => ({ title: t.title, artist: t.artist })), ...(await removedSongs(db, session.id))]
       const round = await proposeRound(db, deps, proposedFill, proposeCtx, { intent: fullIntent, count, exclude, want: count },
-        budget, proposeSpend(turn.tracker))
+        budget, turn.tracker)
       if (!round) return [] // nothing left to verify with: the original track(s) stay
       const inQueue = new Set(activeQueue.map((t) => t.trackId))
       const fresh = round.result.verified.filter((v) => !inQueue.has(v.trackId) && !returnedThisBatch.has(v.trackId)).slice(0, count)
@@ -1414,7 +1818,8 @@ async function executeEditQueue(
       { mode: poolMode, playlistSeed: selectedSeed, outsideCap: cap })
     if (pool.length === 0) return [] // shortfall — queue-store leaves the original track(s) in place
     budget.consume()
-    const picks = await curate(deps.llm, pool, fullIntent, withPlaylistSeedContext(sessionContext, seed), { outsideCap: cap })
+    // Nothing that fits (the curator's []) keeps the original track(s).
+    const picks = await curateFitting(deps.llm, pool, fullIntent, withPlaylistSeedContext(sessionContext, seed), { outsideCap: cap })
     if (poolMode === 'corpus' && picks.length > 0) corpusPicksLanded = true
     // A repeat of an earlier pick in this batch is dropped by the store, so
     // it neither lands as an outside pick nor replaces a swapped song.
@@ -1449,6 +1854,9 @@ async function executeEditQueue(
       resultText: [
         ...(proposedPicksLanded ? [PROPOSED_NOTICE] : []),
         ...(corpusPicksLanded ? [CORPUS_NOTICE] : []),
+        ...(namedMissing.size > 0 ? [namedArtistsNotFoundNotice([...namedMissing])] : []),
+        ...[...artistNoneFit].map((name) => artistNoneFitNotice(name, 'edit')),
+        ...[...artistFewerFit].map(artistFewerFitNotice),
         ...[...artistShort].map(onlyArtistExhaustedNotice),
         ...(outsideAt.length > 0 ? [outsidePicksNotice(outsideAt)] : []),
         `queue edited — requested ${result.requested}, added ${result.added}, removed ${result.removed} (now version ${result.version})`,
@@ -1457,6 +1865,7 @@ async function executeEditQueue(
       ].join('\n'),
       queueChanged: true,
       newVersion: result.version,
+      changeSummary: editSummary(ops, result),
     }
   } catch (e) {
     // QueueOpError (an out-of-range position/from/to against the CURRENT
@@ -1592,6 +2001,20 @@ function addNamedSongs(into: NamedSong[], songs: NamedSong[] | undefined): void 
 // renames more than once.
 type RenameTracker = { title?: string }
 
+// What this turn's queue writes did, in the listener's words, hoisted and
+// shared across a conflict retry exactly like RenameTracker: a write lands
+// the moment its tool call does, before the turn's outcome is known. When
+// the turn then fails, runDjTurn turns these into the DJ's reply (spec
+// 2026-11-09 every-song-earns-its-place, decision 4). A generate replaces
+// the whole queue, so it replaces every summary before it.
+type TurnChanges = { summaries: string[] }
+
+function recordChange(changes: TurnChanges, outcome: { queueChanged: boolean; changeSummary?: string }, replacesQueue: boolean): void {
+  if (!outcome.queueChanged || !outcome.changeSummary) return
+  if (replacesQueue) changes.summaries = []
+  changes.summaries.push(outcome.changeSummary)
+}
+
 // Thrown out of attemptTurn on ANY failure, wrapping whatever actually broke
 // (LlmError, CurationTruncated/Unparseable, QueueVersionConflict, or
 // anything else) alongside the usage/call stats accumulated before the
@@ -1629,6 +2052,7 @@ async function attemptTurn(
   renameState: RenameTracker,
   fillTracker: FillTracker,
   options: DjTurnOptions,
+  changes: TurnChanges,
 ): Promise<AttemptResult> {
   const stats: AttemptStats = { llmCalls: 0, toolCalls: 0, inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0 }
   try {
@@ -1682,9 +2106,8 @@ async function attemptTurn(
 
     for (let round = 0; round < MAX_TURNS && finalText === null; round++) {
       const turn = await counted({
-        system: deps.outsidePicks ? PERSONA_PROMPT_WITH_OUTSIDE : PERSONA_PROMPT,
+        ...conversationVariant(deps),
         messages: [...baseMessages, ...liveMessages],
-        tools: deps.outsidePicks ? DJ_TOOLS_WITH_OUTSIDE : DJ_TOOLS,
       })
       stats.llmCalls += 1
       liveMessages.push({ role: 'assistant', content: turn.raw })
@@ -1720,10 +2143,12 @@ async function attemptTurn(
           if (outcome.intent) lastGenerateIntent = outcome.intent
           addNamedSongs(namedSongs, outcome.intent?.namedSongs)
           if (outcome.queueChanged) currentVersion = outcome.newVersion!
+          recordChange(changes, outcome, true)
         } else if (call.name === 'edit_queue') {
           const outcome = await executeEditQueue(db, countedDeps, session, call.input, userText, lastGenerateIntent, sessionContext, budget, { tracker: fillTracker, surface: options.surface ?? 'web' })
           resultText = outcome.resultText
           if (outcome.queueChanged) currentVersion = outcome.newVersion!
+          recordChange(changes, outcome, false)
         } else if (call.name === 'find_playlists') {
           const parsed = findPlaylistInputSchema.safeParse(call.input)
           resultText = parsed.success ? JSON.stringify(await findPlaylistSeeds(db, session.userId, parsed.data.query))
@@ -1777,9 +2202,10 @@ async function attemptWithConflictRetry(
   renameState: RenameTracker,
   fillTracker: FillTracker,
   options: DjTurnOptions,
+  changes: TurnChanges,
 ): Promise<AttemptResult> {
   try {
-    return await attemptTurn(db, deps, session, userText, userRowSeq, renameState, fillTracker, options)
+    return await attemptTurn(db, deps, session, userText, userRowSeq, renameState, fillTracker, options, changes)
   } catch (e) {
     if (e instanceof AttemptTurnFailure && e.originalError instanceof QueueVersionConflict) {
       // Exactly one retry, from a fresh snapshot (attemptTurn re-reads
@@ -1793,19 +2219,20 @@ async function attemptWithConflictRetry(
       // `renameState` is the SAME box passed to the first attempt — a rename
       // that landed there before the conflict surfaced survives into this
       // retry untouched, and a rename this retry itself makes overwrites it.
-      return attemptTurn(db, deps, session, userText, userRowSeq, renameState, fillTracker, options)
+      return attemptTurn(db, deps, session, userText, userRowSeq, renameState, fillTracker, options, changes)
     }
     throw e
   }
 }
 
-function logTurn(sessionId: string, stats: AttemptStats | null, errorKind: DjError['kind'] | null, detail?: string, fill?: FillLog, propose?: ProposeLog): void {
+function logTurn(sessionId: string, stats: AttemptStats | null, errorKind: DjError['kind'] | null, detail?: string, fill?: FillLog, propose?: ProposeLog, recovered?: true): void {
   // Counts and codes only — no message content, no track/tool payloads.
   // `detail` (when present) is already content-free by construction — see
   // DjError.detail's comment — so it's safe alongside the rest of this line.
   // `fill` is present only on a turn that ran the catalogue fill, `propose`
-  // only on one that proposed songs (NEVER_REFUSE).
-  console.log('dj turn', JSON.stringify({ sessionId, ...(stats ?? {}), error: errorKind, detail, ...(fill ? { fill } : {}), ...(propose ? { propose } : {}) }))
+  // only on one that proposed songs (NEVER_REFUSE). `recovered` marks a
+  // failed turn answered with its change summary (decision 4) instead.
+  console.log('dj turn', JSON.stringify({ sessionId, ...(stats ?? {}), error: errorKind, detail, ...(fill ? { fill } : {}), ...(propose ? { propose } : {}), ...(recovered ? { recovered } : {}) }))
 }
 
 // Per-turn settings the listener chose in the composer UI rather than typed.
@@ -1840,13 +2267,44 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
   // rename wins" contract across attempts.
   const renameState: RenameTracker = {}
   const fillTracker: FillTracker = { ran: false, turnStartedAt: (deps.fill?.now ?? Date.now)() }
+  const changes: TurnChanges = { summaries: [] }
 
   let attempt: AttemptResult
   try {
-    attempt = await attemptWithConflictRetry(db, deps, session, userText, userRow.seq, renameState, fillTracker, options)
+    attempt = await attemptWithConflictRetry(db, deps, session, userText, userRow.seq, renameState, fillTracker, options, changes)
   } catch (e) {
     const failure = e instanceof AttemptTurnFailure ? e : null
     const djError = normalizeError(failure ? failure.originalError : e)
+
+    // No silent failure (spec 2026-11-09 every-song-earns-its-place,
+    // decision 4): a pressure test saw an edit's swaps saved and then a 502
+    // with no DJ message, so the listener's queue changed under a bare
+    // error. When this turn's own writes moved the queue, the turn answers
+    // with what they did ("Swapped 3 songs.") and succeeds with the new
+    // queue. Only this turn's recorded writes count: a version some other
+    // writer moved (the conflict a retry could not get past) is not ours to
+    // describe, and fails as before. Best-effort, like the attachment below:
+    // a failed recovery rethrows the original error.
+    if (changes.summaries.length > 0) {
+      try {
+        const currentVersion = await getSessionQueueVersion(db, session.id)
+        if (currentVersion !== startingVersion) {
+          // The queue first: a read that fails here rethrows the original
+          // error with nothing persisted, never a saved message whose turn
+          // still reports failure.
+          const queue = await getActiveQueue(db, session.id)
+          const [djMessageRow] = await db
+            .insert(djMessages)
+            .values({ sessionId: session.id, role: 'dj', content: changes.summaries.join(' '), queueVersion: currentVersion })
+            .returning()
+          logTurn(session.id, failure?.stats ?? null, djError.kind, djError.detail, fillTracker.log, fillTracker.spend?.log, true)
+          return { djMessage: djMessageRow, queue, queueVersion: currentVersion, sessionTitle: renameState.title }
+        }
+      } catch {
+        // fall through to the error below
+      }
+    }
+
     logTurn(session.id, failure?.stats ?? null, djError.kind, djError.detail, fillTracker.log, fillTracker.spend?.log)
 
     // Same rationale as the queue/queueVersion attachment below: a rename

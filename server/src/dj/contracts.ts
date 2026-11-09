@@ -275,6 +275,21 @@ const namedProperties = {
   },
 }
 
+// namedArtists on a swap or extend's intent (spec 2026-11-09
+// every-song-earns-its-place, decision 3): there it is a scope, and the
+// replacements come only from those artists' songs (dj/loop.ts
+// executeEditQueue), so the model is told to fill it whenever an edit asks
+// for an artist.
+const opNamedArtistsProperty = {
+  ...namedProperties.namedArtists,
+  description:
+    'Artists whose songs this swap or extend should bring in (at most 5): "swap in some Kendrick", "add a couple ' +
+    'of SZA songs", "replace that one with some Burna Boy". The replacements then come only from these artists\' ' +
+    'songs, features included, so set it whenever the listener asks for an artist here, with the full name as ' +
+    'credited. Leave out any artist they want less of or to avoid. Never invent any, never add similar artists, ' +
+    'and leave this out when they name none.',
+}
+
 const targetCountProperty = {
   type: 'integer' as const,
   minimum: 3,
@@ -307,7 +322,7 @@ function intentJsonSchemas(properties: Record<string, unknown>): IntentJsonSchem
     // opIntentSchema: named artists, no named songs.
     op: Object.freeze({
       type: 'object' as const,
-      properties: { ...properties, namedArtists: namedProperties.namedArtists },
+      properties: { ...properties, namedArtists: opNamedArtistsProperty },
       required: ['themes'],
     }),
   }
