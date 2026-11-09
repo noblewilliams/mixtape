@@ -112,8 +112,8 @@ String mixSaveFailureMessage(String reason) =>
     "Couldn't save the playlist — $reason";
 
 String mixSpotifyCopiedMessage(int count) => count == 1
-    ? 'Copied 1 song · paste it into TuneMyMusic'
-    : 'Copied $count songs · paste them into TuneMyMusic';
+    ? 'Copied 1 song · paste it in, then rename “My Playlist”'
+    : 'Copied $count songs · paste them in, then rename “My Playlist”';
 
 const mixSpotifyFailureMessage = "couldn't copy the songs";
 

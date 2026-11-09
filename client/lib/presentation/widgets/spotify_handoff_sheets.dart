@@ -89,12 +89,19 @@ abstract final class SpotifyHandoffSheet {
   static const Key goKey = Key('spotify-handoff-go');
   static const Key cancelKey = Key('spotify-handoff-cancel');
 
+  /// TuneMyMusic names every pasted list "My Playlist" and writes its own
+  /// description; the name is an editable field on its review step, styled
+  /// as plain text, so we point at it. No link or paste format presets it.
+  static const String _nameStep =
+      'tap “My Playlist” to give it this mix’s name, then connect Spotify. '
+      'TuneMyMusic adds its own note to the description; you can edit it '
+      'in Spotify.';
+
   /// What is about to happen, with the real count.
   static String lineFor(int count) => count == 1
-      ? 'We’ll copy the song and open TuneMyMusic. Paste it in, connect '
-            'Spotify, and it makes the playlist for you.'
-      : 'We’ll copy your $count songs and open TuneMyMusic. Paste them '
-            'in, connect Spotify, and it makes the playlist for you.';
+      ? 'We’ll copy the song and open TuneMyMusic. Paste it in, $_nameStep'
+      : 'We’ll copy your $count songs and open TuneMyMusic. Paste them in, '
+            '$_nameStep';
 }
 
 /// The explainer before the first Spotify playlist handoff on a device. True to go ahead; false

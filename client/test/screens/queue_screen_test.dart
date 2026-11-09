@@ -1593,7 +1593,7 @@ void main() {
           Uri.parse('https://www.tunemymusic.com/transfer/freetext-to-spotify'),
         ]);
         expect(
-          find.text('Copied 3 songs · paste them into TuneMyMusic'),
+          find.text('Copied 3 songs · paste them in, then rename “My Playlist”'),
           findsOneWidget,
         );
         expect(await store.spotifyIntroSeen(), isTrue);

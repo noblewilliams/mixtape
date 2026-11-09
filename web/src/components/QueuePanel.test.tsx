@@ -390,12 +390,12 @@ describe('Spotify mix outputs', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Play on Spotify' }))
     const dialog = screen.getByRole('dialog', { name: 'Make it a Spotify playlist' })
-    expect(within(dialog).getByText('We’ll copy your 3 songs and open TuneMyMusic. Paste them in, connect Spotify, and it makes the playlist for you.')).toBeInTheDocument()
+    expect(within(dialog).getByText('We’ll copy your 3 songs and open TuneMyMusic. Paste them in, tap “My Playlist” to give it this mix’s name, then connect Spotify. TuneMyMusic adds its own note to the description; you can edit it in Spotify.')).toBeInTheDocument()
     expect(writeText).not.toHaveBeenCalled()
     expect(open).not.toHaveBeenCalled()
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Copy songs and open TuneMyMusic' }))
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Copied 3 songs · paste them into TuneMyMusic'))
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Copied 3 songs · paste them in, then rename “My Playlist”'))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(writeText).toHaveBeenCalledWith(TRANSFER_LINES)
     expect(open).toHaveBeenCalledWith('https://www.tunemymusic.com/transfer/freetext-to-spotify', '_blank', 'noopener')
@@ -533,7 +533,7 @@ describe('a Spotify-only listener', () => {
     expect(screen.getByRole('button', { name: 'Play on Spotify' })).toHaveClass('primary')
     // No Spotify ids means nothing for Copy for Spotify to copy.
     expect(screen.queryByRole('button', { name: 'Copy for Spotify' })).not.toBeInTheDocument()
-    expect(screen.getByText('Copies your songs and opens TuneMyMusic, which builds the playlist in Spotify for you.')).toBeInTheDocument()
+    expect(screen.getByText('Copies your songs and opens TuneMyMusic, which builds the playlist in Spotify. Tap “My Playlist” there to name it.')).toBeInTheDocument()
   })
 
   it('links each track without a Spotify id to a Spotify search for it', () => {

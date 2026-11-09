@@ -90,19 +90,24 @@ const TRANSFER_TOOL_URL = 'https://www.tunemymusic.com/transfer/freetext-to-spot
 const ASK_TITLE = 'Where do you listen?'
 const INTRO_TITLE = 'Make it a Spotify playlist'
 const INTRO_GO = 'Copy songs and open TuneMyMusic'
+// TuneMyMusic names every pasted list "My Playlist" and writes its own
+// description; the name is an editable field on its review step, styled as
+// plain text, so we point at it. No link or paste format can preset either.
+const NAME_STEP =
+  'tap “My Playlist” to give it this mix’s name, then connect Spotify. TuneMyMusic adds its own note to the description; you can edit it in Spotify.'
 
 function introLine(count: number) {
   return count === 1
-    ? 'We’ll copy the song and open TuneMyMusic. Paste it in, connect Spotify, and it makes the playlist for you.'
-    : `We’ll copy your ${count} songs and open TuneMyMusic. Paste them in, connect Spotify, and it makes the playlist for you.`
+    ? `We’ll copy the song and open TuneMyMusic. Paste it in, ${NAME_STEP}`
+    : `We’ll copy your ${count} songs and open TuneMyMusic. Paste them in, ${NAME_STEP}`
 }
 
 function copiedSongs(count: number) {
-  return count === 1 ? 'Copied 1 song · paste it into TuneMyMusic' : `Copied ${count} songs · paste them into TuneMyMusic`
+  return count === 1 ? 'Copied 1 song · paste it in, then rename “My Playlist”' : `Copied ${count} songs · paste them in, then rename “My Playlist”`
 }
 const COPY_HINT = 'Paste the links into a new playlist in Spotify on your computer.'
 const COPY_FAILED = 'Couldn’t copy on this browser.'
-const PLAY_HINT = 'Copies your songs and opens TuneMyMusic, which builds the playlist in Spotify for you.'
+const PLAY_HINT = 'Copies your songs and opens TuneMyMusic, which builds the playlist in Spotify. Tap “My Playlist” there to name it.'
 const COPY_AND_PLAY_HINT =
   'Copy for Spotify gives you links to paste into a Spotify playlist on your computer. Play on Spotify builds the playlist for you on any device.'
 

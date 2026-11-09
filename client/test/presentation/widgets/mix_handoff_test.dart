@@ -29,6 +29,8 @@ import 'package:mixtape/presentation/widgets/foundation/label_chip.dart';
 import 'package:mixtape/presentation/widgets/foundation/service_marks.dart';
 import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
 import 'package:mixtape/presentation/widgets/mix_handoff.dart';
+import 'package:mixtape/presentation/widgets/spotify_handoff_sheets.dart'
+    show SpotifyHandoffSheet;
 import 'package:mixtape/presentation/widgets/tape_header.dart' show TapeBar;
 import 'package:mixtape/presentation/widgets/tape_strip.dart';
 import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
@@ -306,11 +308,28 @@ void main() {
     test('a copy counts the songs and says where to paste them', () {
       expect(
         mixSpotifyCopiedMessage(1),
-        'Copied 1 song · paste it into TuneMyMusic',
+        'Copied 1 song · paste it in, then rename “My Playlist”',
       );
       expect(
         mixSpotifyCopiedMessage(9),
-        'Copied 9 songs · paste them into TuneMyMusic',
+        'Copied 9 songs · paste them in, then rename “My Playlist”',
+      );
+    });
+
+    test('the Spotify explainer says how to name the playlist in TuneMyMusic', () {
+      expect(
+        SpotifyHandoffSheet.lineFor(1),
+        'We’ll copy the song and open TuneMyMusic. Paste it in, tap '
+        '“My Playlist” to give it this mix’s name, then connect Spotify. '
+        'TuneMyMusic adds its own note to the description; you can edit it '
+        'in Spotify.',
+      );
+      expect(
+        SpotifyHandoffSheet.lineFor(3),
+        'We’ll copy your 3 songs and open TuneMyMusic. Paste them in, tap '
+        '“My Playlist” to give it this mix’s name, then connect Spotify. '
+        'TuneMyMusic adds its own note to the description; you can edit it '
+        'in Spotify.',
       );
     });
 
