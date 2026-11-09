@@ -4,6 +4,19 @@ import type { LlmToolDef } from './llm'
 // Named artist and song spellings (see namedArtists below) share one bound.
 export const NAMED_NAME_MAX = 200
 
+// Genres the brief names (spec 2026-11-09 every-song-earns-its-place,
+// decision 8): each song headed for the queue is checked against them by
+// how it sounds (dj/genre-check.ts). On swap/extend intents too. Trimmed,
+// blanks dropped, deduped case-insensitively; more than GENRES_MAX is a
+// schema error the model can correct. Optional rather than defaulted, like
+// allowOutside, so a parsed intent carries no new key unless sent.
+export const GENRES_MAX = 3
+const GENRE_NAME_MAX = 60
+const genresSchema = z
+  .array(z.string().min(1).max(GENRE_NAME_MAX))
+  .max(GENRES_MAX)
+  .transform((names) => firstOfEach(names.map((n) => n.trim()), (n) => n.toLowerCase()))
+
 const intentBase = z.object({
   themes: z.string().min(1),
   tempoMin: z.number().int().min(40).max(260).optional(),
@@ -28,6 +41,7 @@ const intentBase = z.object({
   // counts is the loop's call (dj/loop.ts resolveOnlyArtist), not the
   // schema's.
   onlyArtist: z.string().min(1).max(NAMED_NAME_MAX).transform((s) => s.trim() || undefined).optional(),
+  genres: genresSchema.optional(),
 })
 
 // Shared by intentSchema and opIntentSchema: an inverted tempo/era window
@@ -242,6 +256,19 @@ const intentPropertiesBase: Record<string, unknown> = {
       '"X and similar". Do NOT set it when two or more artists are named. In a follow-up ("more", "make it ' +
       'longer", "another one") keep it while the mix is still that one artist; when the listener asks for other ' +
       'artists, leave it out and name them in namedArtists. Never invent one; leave it out whenever in doubt.',
+  },
+  // The model's whole instruction for named genres (decision 8), with the
+  // spec's examples on both sides of the line.
+  genres: {
+    type: 'array',
+    maxItems: GENRES_MAX,
+    items: { type: 'string', minLength: 1, maxLength: GENRE_NAME_MAX },
+    description:
+      'Genres the listener names (at most 3), as plain genre names: "soft jazz" is ["jazz"], "90s r&b slow ' +
+      'jams" is ["r&b"], "afrobeats and amapiano" is ["afrobeats", "amapiano"]. Every song is then checked ' +
+      'against how it sounds, so set it only when they name a genre. Moods, eras and activities are not genres: ' +
+      'leave it out for "chill", "rainy sunday", "90s", "for the gym" or "study music" on their own. Never infer ' +
+      'a genre from an artist; leave it out whenever in doubt.',
   },
 }
 

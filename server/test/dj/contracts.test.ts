@@ -393,6 +393,9 @@ const generateQueueRows: Row[] = [
   { label: 'invalid familiarity enum value', sample: { themes: 'x', familiarity: 'chaotic' } },
   { label: 'named artists and songs are valid', sample: { themes: 'x', namedArtists: ['Jay-Z'], namedSongs: [{ title: 'Reborn', artist: 'Kids See Ghosts' }, { title: 'Runaway' }] } },
   { label: 'five named artists is valid', sample: { themes: 'x', namedArtists: ['a', 'b', 'c', 'd', 'e'] } },
+  { label: 'three named genres is valid', sample: { themes: 'x', genres: ['afrobeats', 'amapiano', 'r&b'] } },
+  { label: 'four named genres is invalid', sample: { themes: 'x', genres: ['a', 'b', 'c', 'd'] } },
+  { label: 'an empty genre is invalid', sample: { themes: 'x', genres: [''] } },
   { label: 'six named artists is invalid', sample: { themes: 'x', namedArtists: ['a', 'b', 'c', 'd', 'e', 'f'] } },
   { label: 'an empty named artist is invalid', sample: { themes: 'x', namedArtists: [''] } },
   { label: 'a named artist over 200 chars is invalid', sample: { themes: 'x', namedArtists: ['a'.repeat(201)] } },
@@ -458,6 +461,14 @@ const editQueueRows: OpsRow[] = [
   {
     label: 'extend intent naming an artist is valid',
     sample: { ops: [{ op: 'extend', count: 3, intent: { themes: 'x', namedArtists: ['Kendrick Lamar'] } }] },
+  },
+  {
+    label: 'swap intent naming a genre is valid',
+    sample: { ops: [{ op: 'swap', position: 0, intent: { themes: 'x', genres: ['jazz'] } }] },
+  },
+  {
+    label: 'extend intent with four genres is invalid',
+    sample: { ops: [{ op: 'extend', count: 2, intent: { themes: 'x', genres: ['a', 'b', 'c', 'd'] } }] },
   },
   {
     label: 'swap intent with six named artists is invalid',
@@ -691,5 +702,28 @@ describe('onlyArtist', () => {
   it.each(rows)('generate_queue agrees with zod: $label', ({ sample }) => {
     const schema = DJ_TOOLS.find((t) => t.name === 'generate_queue')!.input_schema
     expect(matchesJsonSchema(schema, sample)).toBe(intentSchema.safeParse(sample).success)
+  })
+})
+
+// Spec 2026-11-09 every-song-earns-its-place, decision 8: the genres the
+// brief names, checked against how each song sounds (dj/genre-check.ts).
+describe('genres', () => {
+  it('are trimmed and deduped, on the generate and the swap/extend intent, and absent when unsent', () => {
+    expect(intentSchema.parse({ themes: 'x', genres: [' Jazz ', 'jazz', 'R&B'] }).genres).toEqual(['Jazz', 'R&B'])
+    expect(opIntentSchema.parse({ themes: 'x', genres: ['  amapiano'] }).genres).toEqual(['amapiano'])
+    expect(intentSchema.parse({ themes: 'x' })).not.toHaveProperty('genres')
+  })
+
+  it('are advertised on every intent, with the spec\'s examples and what is not a genre', () => {
+    const generate = DJ_TOOLS.find((t) => t.name === 'generate_queue')!.input_schema.properties as Record<string, { description: string }>
+    const ops = DJ_TOOLS.find((t) => t.name === 'edit_queue')!.input_schema.properties.ops as { items: { oneOf: Array<{ properties: { intent?: { properties: Record<string, unknown> } } }> } }
+    expect(ops.items.oneOf[2].properties.intent!.properties).toHaveProperty('genres')
+    expect(ops.items.oneOf[3].properties.intent!.properties).toHaveProperty('genres')
+    const description = generate.genres.description
+    expect(description).toContain('"soft jazz"')
+    expect(description).toContain('"90s r&b slow jams"')
+    expect(description).toContain('"afrobeats and amapiano"')
+    expect(description).toMatch(/[Mm]oods, eras and activities are not genres/)
+    expect(DJ_TOOLS_WITH_OUTSIDE.find((t) => t.name === 'generate_queue')!.input_schema.properties).toHaveProperty('genres')
   })
 })

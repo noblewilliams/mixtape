@@ -56,6 +56,10 @@ energy-arc labels that repeated.
 - Notes become one or two sentences (12 to 28 words, 200-character cap) that
   say something concrete about the song and why it sits there. This reverses
   the "two to six words" register. Repeats against the queue are dropped.
+- A named genre is checked by how each song sounds: songs Apple labels as
+  that genre pass, every other song goes to one fast listening check, and
+  songs that fail leave the mix (the check fails closed). Added after the
+  live "soft jazz" mix held 2 jazz songs among 14 soul and indie ones.
 
 ## 2026-11-09 — One platform per device; fixed mix actions (founder)
 

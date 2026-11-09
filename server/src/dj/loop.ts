@@ -25,6 +25,7 @@ import {
 } from './contracts'
 import { buildPool, hasPersonalCandidates, outsideCap, resolvePoolMode, type PoolMode, type PoolTrack } from './pool'
 import { curate, CurationNothingFits, CurationTruncated, CurationUnparseable, type CuratedTrack } from './curate'
+import { checkGenres, type GenreCandidate } from './genre-check'
 import {
   MIN_VERIFIED,
   PROPOSE_EXTRA,
@@ -828,6 +829,9 @@ type FillTracker = {
   blendRest?: { proposals: Proposal[]; ctx: ProposeContext }
   shortfall?: { key: string; verified: VerifiedProposal[] }
   spend?: ProposeSpend
+  // Named-genre sound checks made this turn (dj/genre-check.ts), one model
+  // call each, counted in the ledger below.
+  genreChecks?: number
   turnStartedAt: number
 }
 
@@ -847,10 +851,88 @@ type TurnFill = { tracker: FillTracker; surface: Surface }
 // database. Capping Apple at 22 for the whole turn keeps that margin with
 // two to spare, where the two caps side by side allowed 42. Each path's own
 // cap still applies inside it.
+//
+// The named-genre sound checks (decision 8, dj/genre-check.ts) are model
+// calls the measured turn did not make, so they draw on this same ledger
+// rather than on the 26: one unit per call. The worst case is unchanged,
+// 22 here plus the measured 26, 48 under 50: a genre turn trades searches
+// for checks. A generate whose brief names a genre keeps one unit back from
+// its proposal searches (searchRoom) so the proposals can still be checked;
+// with no unit left a check fails closed (only labelled songs stay), never
+// over the cap.
 export const TURN_APPLE_BUDGET = 22
 
 function appleLeft(tracker: FillTracker): number {
-  return Math.max(0, TURN_APPLE_BUDGET - (tracker.fillSpent ?? 0) - (tracker.spend?.log.searches ?? 0))
+  return Math.max(0, TURN_APPLE_BUDGET - (tracker.fillSpent ?? 0) - (tracker.spend?.log.searches ?? 0) - (tracker.genreChecks ?? 0))
+}
+
+// Searches a proposal round may make: the ledger, less one unit kept for
+// the sound check of its own proposals when the brief names a genre.
+function searchRoom(tracker: FillTracker, intent: { genres?: string[] }): number {
+  return Math.max(0, appleLeft(tracker) - ((intent.genres ?? []).length > 0 ? 1 : 0))
+}
+
+// The named-genre sound check (decision 8) over songs headed for the queue:
+// those Apple labels as a named genre stay, the rest go to one check call
+// on the fast model, and a check that cannot run keeps only the labelled
+// ones. No named genre is no check. The call is charged to the ledger.
+type GenreFiltered<T> = { kept: T[]; dropped: number; failed: boolean }
+
+// `prepaid`: the call's unit was charged up front (holdGenreUnit), so it
+// may run whatever the ledger holds now, and a check that needed no call
+// hands its unit back.
+async function genreFilter<T extends { trackId: string }>(
+  deps: DjDeps,
+  tracker: FillTracker,
+  genres: string[] | undefined,
+  picks: T[],
+  describe: (p: T) => GenreCandidate,
+  prepaid = false,
+): Promise<GenreFiltered<T>> {
+  const refund = () => { if (prepaid) tracker.genreChecks = Math.max(0, (tracker.genreChecks ?? 0) - 1) }
+  if (!genres || genres.length === 0 || picks.length === 0) {
+    refund()
+    return { kept: picks, dropped: 0, failed: false }
+  }
+  const result = await checkGenres(deps.titleComplete, genres, picks.map(describe), { allowed: prepaid || appleLeft(tracker) > 0 })
+  if (prepaid) {
+    if (result.calls === 0) refund()
+  } else {
+    tracker.genreChecks = (tracker.genreChecks ?? 0) + result.calls
+  }
+  return { kept: picks.filter((p) => result.kept.has(p.trackId)), dropped: result.dropped, failed: result.failed }
+}
+
+// Charges the curated songs' check before anything runs beside it. The
+// corpus blend's proposal round runs alongside the curation and keeps one
+// unit back for its own proposals' check (searchRoom); without this, a
+// curated check landing after the blend's searches took that unit and the
+// proposals check then closed for want of room. True when a unit was held.
+function holdGenreUnit(tracker: FillTracker, genres: string[] | undefined): boolean {
+  if (!genres || genres.length === 0 || appleLeft(tracker) <= 0) return false
+  tracker.genreChecks = (tracker.genreChecks ?? 0) + 1
+  return true
+}
+
+function poolCandidate(byId: Map<string, PoolTrack>): (p: { trackId: string }) => GenreCandidate {
+  return (p) => {
+    const t = byId.get(p.trackId)
+    return { id: p.trackId, title: t?.title ?? '', artist: t?.artist ?? '', genre: t?.genre ?? null, year: t?.releaseYear ?? null }
+  }
+}
+
+const proposalCandidate = (v: VerifiedProposal): GenreCandidate =>
+  ({ id: v.trackId, title: v.title, artist: v.artist, genre: v.genre ?? null, year: v.year ?? null })
+
+// Said to the model when the sound check took songs out. Goes to the MODEL.
+export function genreCheckNotice(g: { dropped: number; genres: string[]; failed: boolean }): string {
+  const genre = g.genres.map((n) => sanitizeForPrompt(n)).join(' or ')
+  const songs = `${g.dropped} ${g.dropped === 1 ? 'song' : 'songs'}`
+  return g.failed
+    ? `note: the check of how songs sound could not run, so ${songs} not labelled ${genre} by Apple Music were left ` +
+      'out. If the mix is shorter, tell them plainly why.'
+    : `note: ${songs} failed the ${genre} check (they do not sound like ${genre}) and were left out. If the mix is ` +
+      'shorter, tell them plainly why.'
 }
 
 // Once proposal searches have run this turn, a fill keeps its insertion
@@ -1004,7 +1086,7 @@ async function proposeRound(
   tracker: FillTracker,
 ): Promise<{ proposals: Proposal[]; result: VerifyResult } | null> {
   const spend = proposeSpend(tracker)
-  const searchesLeft = Math.min(VERIFY_MAX - spend.log.searches, appleLeft(tracker))
+  const searchesLeft = Math.min(VERIFY_MAX - spend.log.searches, searchRoom(tracker, round.intent))
   const timeLeft = VERIFY_DEADLINE_MS - spend.verifyMs
   if (searchesLeft <= 0 || timeLeft <= 0) return null
   spend.log.rounds += 1
@@ -1126,7 +1208,7 @@ async function topUpFromBlend(
   const rest = tracker.blendRest
   if (!rest || rest.proposals.length === 0 || want <= 0) return []
   const spend = proposeSpend(tracker)
-  const searchesLeft = Math.min(VERIFY_MAX - spend.log.searches, appleLeft(tracker))
+  const searchesLeft = Math.min(VERIFY_MAX - spend.log.searches, searchRoom(tracker, intent))
   const timeLeft = VERIFY_DEADLINE_MS - spend.verifyMs
   if (searchesLeft <= 0 || timeLeft <= 0) return []
   try {
@@ -1249,7 +1331,17 @@ async function executeProposedQueue(
   turn.tracker.propose = state
   if (state.verified.length === 0) return { resultText: INSUFFICIENT_SEEDS_TEXT, queueChanged: false, intent }
 
-  const picks = state.verified.slice(0, intent.targetCount)
+  // A named genre's sound check (decision 8) on the verified proposals,
+  // before the cut. The tracker keeps the raw list, so a conflict retry
+  // checks it again rather than trusting an earlier attempt's answer.
+  const genreCheck = await genreFilter(deps, turn.tracker, intent.genres, state.verified, proposalCandidate)
+  const genreLines = genreCheck.dropped > 0
+    ? [genreCheckNotice({ dropped: genreCheck.dropped, genres: intent.genres ?? [], failed: genreCheck.failed })]
+    : []
+  if (genreCheck.kept.length === 0) {
+    return { resultText: [NOTHING_FITS_TEXT, ...genreLines].join('\n'), queueChanged: false, intent }
+  }
+  const picks = genreCheck.kept.slice(0, intent.targetCount)
   const version = await replaceQueue(
     db,
     session.id,
@@ -1274,6 +1366,7 @@ async function executeProposedQueue(
   return {
     resultText: [
       PROPOSED_NOTICE,
+      ...genreLines,
       ...(short ? [SHORT_VERIFIED_TEXT] : []),
       ...(!short && picks.length < intent.targetCount ? [partialVerifiedNotice(picks.length, intent.targetCount)] : []),
       `queue generated: ${picks.length} tracks (now version ${version})`,
@@ -1367,12 +1460,19 @@ async function executeOnlyArtistQueue(
   if (pool.length === 0) return null
   const asked = intent.targetCount
   budget.consume()
-  const picks = await curateFitting(deps.llm, pool, { ...intent, targetCount: Math.min(asked, pool.length) },
+  const curated = await curateFitting(deps.llm, pool, { ...intent, targetCount: Math.min(asked, pool.length) },
     withPlaylistSeedContext(sessionContext, seed), { onlyArtist: only.name })
+  // An artist-only mix is checked for genre only when the brief names one
+  // too ("SZA, r&b only"): the artist alone is the scope (decision 8).
+  const genreCheck = await genreFilter(deps, turn.tracker, intent.genres, curated, poolCandidate(new Map(pool.map((t) => [t.trackId, t]))))
+  const picks = genreCheck.kept
+  const genreLines = genreCheck.dropped > 0
+    ? [genreCheckNotice({ dropped: genreCheck.dropped, genres: intent.genres ?? [], failed: genreCheck.failed })]
+    : []
   // The artist was found but nothing of theirs fits the brief: the queue
   // stands and the DJ says so, never the fallback mix of other artists.
   if (picks.length === 0) {
-    return { resultText: artistNoneFitNotice(only.name, 'mix'), queueChanged: false, intent }
+    return { resultText: [artistNoneFitNotice(only.name, 'mix'), ...genreLines].join('\n'), queueChanged: false, intent }
   }
   const version = await replaceQueue(
     db,
@@ -1398,6 +1498,7 @@ async function executeOnlyArtistQueue(
       ...(picks.length < Math.min(asked, pool.length)
         ? [onlyArtistFitNotice(only.name, picks.length, asked)]
         : picks.length < asked ? [onlyArtistShortNotice(only.name, picks.length, asked)] : []),
+      ...genreLines,
       ...(newAt.length > 0 ? [outsidePicksNotice(newAt)] : []),
       `queue generated: ${picks.length} tracks (now version ${version})`,
       'Updated queue (positions are 0-based):',
@@ -1475,13 +1576,21 @@ async function generateFromBrief(
   const outsideAllowed = outsideCap({ ...intent, targetCount: 100 }) > 0
   const fillShort = outsideAllowed && neverRefuse && deps.fill !== undefined
   budget.consume()
-  const [curated, proposedRaw] = await Promise.all([
-    curateFitting(deps.llm, pool, intent, withPlaylistSeedContext(sessionContext, seed), { outsideCap: cap }),
+  const byId = new Map(pool.map((t) => [t.trackId, t]))
+  // A named genre's sound check on the curated songs (decision 8) chains
+  // onto the curation, so it runs while the corpus blend's proposals are
+  // still in flight rather than after them: no added wait on a corpus mix.
+  // What it drops widens the shortfall below, which the fill replaces.
+  const curatedHeld = holdGenreUnit(turn.tracker, intent.genres)
+  const [curatedCheck, proposedRaw] = await Promise.all([
+    curateFitting(deps.llm, pool, intent, withPlaylistSeedContext(sessionContext, seed), { outsideCap: cap })
+      .then((c) => genreFilter(deps, turn.tracker, intent.genres, c, poolCandidate(byId), curatedHeld)),
     blending ? blendProposals(db, deps, deps.fill!, session, intent, userText, sessionContext, budget, turn.tracker) : Promise.resolve([]),
   ])
+  const curated = curatedCheck.kept
   // A proposal the catalogue curation also picked is one song, queued once.
   const curatedIds = new Set(curated.map((p) => p.trackId))
-  const proposed = proposedRaw.filter((p) => !curatedIds.has(p.trackId))
+  let proposed = proposedRaw.filter((p) => !curatedIds.has(p.trackId))
   // The shortfall: the corpus blend's share is a minimum, so the proposed
   // count is the larger of it and what the curation left unfilled.
   const shortfall = intent.targetCount - curated.length
@@ -1491,7 +1600,6 @@ async function generateFromBrief(
     if (blending) {
       proposed.push(...await topUpFromBlend(db, deps.fill!, intent, turn.tracker, want, held))
     } else {
-      const byId = new Map(pool.map((t) => [t.trackId, t]))
       const exclude = curated.flatMap((p) => {
         const t = byId.get(p.trackId)
         return t ? [{ title: t.title, artist: t.artist }] : []
@@ -1500,12 +1608,21 @@ async function generateFromBrief(
         turn.tracker, want, exclude, held))
     }
   }
+  // The proposals, blend and shortfall alike, pass the same check: at most
+  // one more call, for those Apple labels otherwise. What fails here is
+  // not replaced; the mix is shorter and says why.
+  const proposedCheck = await genreFilter(deps, turn.tracker, intent.genres, proposed, proposalCandidate)
+  proposed = proposedCheck.kept
+  const genreDropped = curatedCheck.dropped + proposedCheck.dropped
+  const genreLines = genreDropped > 0
+    ? [genreCheckNotice({ dropped: genreDropped, genres: intent.genres ?? [], failed: curatedCheck.failed || proposedCheck.failed })]
+    : []
   const source = poolMode.mode === 'corpus' ? 'catalog' as const : 'library' as const
   const outsideReason = !outsideAllowed ? 'own-only' as const : fillShort ? 'unconfirmed' as const : 'unavailable' as const
   if (curated.length === 0 && proposed.length === 0) {
     // The curator said nothing fits and nothing from outside stood in.
     return {
-      resultText: `${NOTHING_FITS_TEXT}\n${shortMixNotice({ count: 0, asked: intent.targetCount, source, outside: outsideReason })}`,
+      resultText: [NOTHING_FITS_TEXT, ...genreLines, shortMixNotice({ count: 0, asked: intent.targetCount, source, outside: outsideReason })].join('\n'),
       queueChanged: false,
       intent,
     }
@@ -1544,6 +1661,7 @@ async function generateFromBrief(
       ...(poolMode.mode === 'corpus' ? [CORPUS_NOTICE] : []),
       ...(blendedCount > 0 ? [blendedNotice(blendedCount)] : []),
       ...(outsideAt.length > 0 ? [outsidePicksNotice(outsideAt)] : []),
+      ...genreLines,
       ...(picks.length < intent.targetCount
         ? [shortMixNotice({ count: picks.length, asked: intent.targetCount, source, outside: outsideReason })]
         : []),
@@ -1706,9 +1824,28 @@ async function executeEditQueue(
   // opIntentSchema requires a non-empty `themes` string, and `.trim()`ing an
   // empty message down to '' would otherwise throw INSIDE the provider,
   // turning a harmless "edit with no real prompt" into an internal error.
+  // A swap or extend whose intent in force names a genre is checked by how
+  // its replacements sound (decision 8), one call per such request; one that
+  // fails leaves the original track(s), and the result says how many.
+  let genreDropped = 0
+  let genreFailed = false
+  const editGenres = new Set<string>()
   const provider: ReplacementsProvider = async (count, opIntent) => {
     const callIndex = providerCalls
     providerCalls += 1
+    const checkEditGenres = async <T extends { trackId: string }>(picks: T[], describe: (p: T) => GenreCandidate): Promise<T[]> => {
+      // The intent in force: the op's own, or this turn's generate's when
+      // the op has none (toOpIntent keeps its genres). The weak fallback
+      // from the listener's words carries none, so it is never checked.
+      const genres = fullIntent.genres
+      const checked = await genreFilter(deps, turn.tracker, genres, picks, describe)
+      genreDropped += checked.dropped
+      if (checked.dropped > 0) {
+        genreFailed ||= checked.failed
+        for (const g of genres ?? []) editGenres.add(g)
+      }
+      return checked.kept
+    }
     // The weak fallback below is the listener's raw words, not an intent the
     // model chose, so it never carries outside picks: a later turn's "add 5
     // more" must not undo an earlier allowOutside false or comfort brief.
@@ -1764,9 +1901,10 @@ async function executeEditQueue(
       }
       budget.consume()
       // Nothing that fits (the curator's []) keeps the original track(s).
-      const picks = await curateFitting(deps.llm, pool, { ...fullIntent, targetCount: Math.min(count, pool.length) },
+      const curated = await curateFitting(deps.llm, pool, { ...fullIntent, targetCount: Math.min(count, pool.length) },
         withPlaylistSeedContext(sessionContext, seed),
         scope.kind === 'only' ? { onlyArtist: scope.names[0] } : { namedArtists: scope.names })
+      const picks = await checkEditGenres(curated, poolCandidate(new Map(pool.map((t) => [t.trackId, t]))))
       // Why fewer landed than asked: none fit, fewer fit than the artist
       // has, or the artist has no more.
       if (picks.length === 0) artistNoneFit.add(label)
@@ -1785,7 +1923,9 @@ async function executeEditQueue(
         budget, turn.tracker)
       if (!round) return [] // nothing left to verify with: the original track(s) stay
       const inQueue = new Set(activeQueue.map((t) => t.trackId))
-      const fresh = round.result.verified.filter((v) => !inQueue.has(v.trackId) && !returnedThisBatch.has(v.trackId)).slice(0, count)
+      const fresh = await checkEditGenres(
+        round.result.verified.filter((v) => !inQueue.has(v.trackId) && !returnedThisBatch.has(v.trackId)).slice(0, count),
+        proposalCandidate)
       turn.tracker.spend!.log.verified += fresh.length
       for (const v of fresh) returnedThisBatch.add(v.trackId)
       if (fresh.length > 0) proposedPicksLanded = true
@@ -1819,7 +1959,8 @@ async function executeEditQueue(
     if (pool.length === 0) return [] // shortfall — queue-store leaves the original track(s) in place
     budget.consume()
     // Nothing that fits (the curator's []) keeps the original track(s).
-    const picks = await curateFitting(deps.llm, pool, fullIntent, withPlaylistSeedContext(sessionContext, seed), { outsideCap: cap })
+    const curated = await curateFitting(deps.llm, pool, fullIntent, withPlaylistSeedContext(sessionContext, seed), { outsideCap: cap })
+    const picks = await checkEditGenres(curated, poolCandidate(new Map(pool.map((t) => [t.trackId, t]))))
     if (poolMode === 'corpus' && picks.length > 0) corpusPicksLanded = true
     // A repeat of an earlier pick in this batch is dropped by the store, so
     // it neither lands as an outside pick nor replaces a swapped song.
@@ -1855,6 +1996,7 @@ async function executeEditQueue(
         ...(proposedPicksLanded ? [PROPOSED_NOTICE] : []),
         ...(corpusPicksLanded ? [CORPUS_NOTICE] : []),
         ...(namedMissing.size > 0 ? [namedArtistsNotFoundNotice([...namedMissing])] : []),
+        ...(genreDropped > 0 ? [genreCheckNotice({ dropped: genreDropped, genres: [...editGenres], failed: genreFailed })] : []),
         ...[...artistNoneFit].map((name) => artistNoneFitNotice(name, 'edit')),
         ...[...artistFewerFit].map(artistFewerFitNotice),
         ...[...artistShort].map(onlyArtistExhaustedNotice),

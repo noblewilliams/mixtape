@@ -296,7 +296,9 @@ function creditAndVersionMatch(hit: Pick<CatalogSong, 'title' | 'artist'>, propo
   return true
 }
 
-export type VerifiedProposal = { trackId: string; title: string; artist: string; reason: string }
+// genre and year are Apple's (the hit's first genreNames entry and release
+// year), for the named-genre sound check (dj/genre-check.ts).
+export type VerifiedProposal = { trackId: string; title: string; artist: string; reason: string; genre?: string | null; year?: number | null }
 
 export type VerifyOptions = {
   proposals: Proposal[]
@@ -397,7 +399,7 @@ export async function verifyProposals(db: Db, catalog: AppleCatalogSearchClient,
     const trackId = byApple.get(song.appleId) ?? (isrc ? byIsrc.get(isrc) : undefined)
     if (!trackId || seenTrack.has(trackId)) continue
     seenTrack.add(trackId)
-    result.verified.push({ trackId, title: song.title, artist: song.artist, reason: proposal.reason })
+    result.verified.push({ trackId, title: song.title, artist: song.artist, reason: proposal.reason, genre: song.genre ?? null, year: song.releaseYear ?? null })
   }
   return result
 }

@@ -83,6 +83,32 @@ Worker `1b56ec3a`) found songs that do not belong in their mix:
    twice. The proposal path uses the same rule. This reverses the "two to six
    words" register.
 
+8. **A named genre is checked by how a song sounds** (founder, 2026-11-09:
+   "it doesn't have to be a hard genre filter but we need to be sure that the
+   songs added sound like jazz"). After the prompt rule above, the live
+   "soft jazz" mix still held 2 jazz songs among 14 soul and indie ones.
+   - The intent gains `genres` (up to 3), set only when the brief names a
+     genre ("soft jazz" → jazz; "90s r&b slow jams" → r&b; "afrobeats and
+     amapiano" → both). Moods, eras and activities are not genres.
+   - Every song headed for the queue, curated or proposed, whose Apple genre
+     label matches a named genre passes without a check. Matching is by
+     normalised words plus a small alias table (r&b ↔ R&B/Soul; hip hop ↔
+     Hip-Hop/Rap, Rap, Hip-Hop; afrobeats ↔ Afrobeats, African, Afro-Pop).
+   - Every other song goes to one sound check: a fast model call
+     (`TITLE_MODEL`, already used for mix titles) asked, per song, whether a
+     listener who asked for that genre would hear it as that genre, judged
+     on instrumentation, harmony, rhythm and vocal style. "Influenced by" or
+     "adjacent to" does not pass. One call for the curated songs and at most
+     one for unmatched proposals.
+   - Songs that fail leave the mix. The shortfall is filled as in decision 2,
+     and those proposals pass the same check, or the mix is shorter and the
+     DJ says why.
+   - If the check itself fails (error or timeout), only label-matched songs
+     stay: the mix may be shorter, but never holds an unchecked song.
+   - The same check applies to swaps and extends whose intent names a genre.
+     Artist-only mixes skip it unless a genre is also named.
+   - The check's model calls count toward the turn's subrequest margin.
+
 ## Out of scope
 
 - Client changes. Notes already open on tap in a wrapping band; the web rail

@@ -89,6 +89,11 @@ export type LlmComplete = (opts: {
   // maxRetries 1, see buildAnthropic) — a caller racing this against other
   // work (see dj/title.ts, sessions.ts) needs a bound tighter than that.
   timeoutMs?: number
+  // Forwarded as the SDK's per-request maxRetries. The client retries once
+  // by default (buildAnthropic), so a stalled call costs twice timeoutMs
+  // and makes two fetches; a caller whose deadline must be the whole cost
+  // (dj/genre-check.ts) passes 0.
+  maxRetries?: number
 }) => Promise<string>
 
 // Final shape both SDK paths resolve to — a non-streaming create's response, or
@@ -105,7 +110,7 @@ type AnthropicMessage = {
 // needed in either direction.
 type AnthropicClient = {
   messages: {
-    create(body: Anthropic.MessageCreateParamsNonStreaming, options?: { timeout?: number }): Promise<AnthropicMessage>
+    create(body: Anthropic.MessageCreateParamsNonStreaming, options?: { timeout?: number; maxRetries?: number }): Promise<AnthropicMessage>
   }
 }
 type AnthropicStreamingClient = {
@@ -204,7 +209,12 @@ export function anthropicComplete(client: AnthropicClient): LlmComplete {
         // Actually cancels the upstream call at opts.timeoutMs rather than
         // letting it ride buildAnthropic's client-level default (60s ×
         // maxRetries 1) — see the LlmComplete type comment above.
-        opts.timeoutMs !== undefined ? { timeout: opts.timeoutMs } : undefined,
+        opts.timeoutMs !== undefined || opts.maxRetries !== undefined
+          ? {
+              ...(opts.timeoutMs !== undefined ? { timeout: opts.timeoutMs } : {}),
+              ...(opts.maxRetries !== undefined ? { maxRetries: opts.maxRetries } : {}),
+            }
+          : undefined,
       )
     } catch (e) {
       throw toLlmError(e)

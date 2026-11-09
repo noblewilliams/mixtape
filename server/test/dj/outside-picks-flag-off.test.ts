@@ -52,12 +52,14 @@ function personalPool(n: number): PoolTrack[] {
 }
 
 describe('flag off is byte-for-byte today', () => {
-  // generate_queue's namedArtists/namedSongs (2026-10-21 everyone gets a mix)
-  // and every intent's onlyArtist (2026-11-09 artist-only mixes) are
-  // deliberate changes to what the model sees, flag on or off; with them
-  // stripped, the flag-off tools are still the pre-outside ones.
-  it('sends the same tool definitions, bar the named artists and songs and the artist-only scope', () => {
-    const added = new Set(['namedArtists', 'namedSongs', 'onlyArtist'])
+  // generate_queue's namedArtists/namedSongs (2026-10-21 everyone gets a mix),
+  // every intent's onlyArtist (2026-11-09 artist-only mixes) and every
+  // intent's genres (2026-11-09 every-song-earns-its-place, decision 8: the
+  // named genre each song is checked against) are deliberate changes to what
+  // the model sees, flag on or off; with them stripped, the flag-off tools
+  // are still the pre-outside ones.
+  it('sends the same tool definitions, bar the named artists and songs, the artist-only scope and the genres', () => {
+    const added = new Set(['namedArtists', 'namedSongs', 'onlyArtist', 'genres'])
     const stripped = JSON.stringify(
       JSON.parse(JSON.stringify(DJ_TOOLS), (k, v) => (added.has(k) ? undefined : v)),
     )

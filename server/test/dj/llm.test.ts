@@ -416,6 +416,25 @@ describe('anthropicComplete', () => {
     expect(capturedOptions).toEqual({ timeout: 5000 })
   })
 
+  // The genre check (dj/genre-check.ts) needs its 5 s to be the whole cost:
+  // the client's own retry would double a stall and make a second fetch.
+  it('forwards maxRetries beside the timeout, so a caller can turn the SDK retry off', async () => {
+    let capturedOptions: { timeout?: number; maxRetries?: number } | undefined
+    const fakeCreate = async (_body: Anthropic.MessageCreateParamsNonStreaming, options?: { timeout?: number; maxRetries?: number }) => {
+      capturedOptions = options
+      return {
+        content: [{ type: 'text', text: 'ok' }] as Anthropic.ContentBlock[],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }
+    }
+    const complete = anthropicComplete({ messages: { create: fakeCreate } })
+    await complete({ system: 's', prompt: 'p', model: 'm', timeoutMs: 5000, maxRetries: 0 })
+    expect(capturedOptions).toEqual({ timeout: 5000, maxRetries: 0 })
+    await complete({ system: 's', prompt: 'p', model: 'm', maxRetries: 0 })
+    expect(capturedOptions).toEqual({ maxRetries: 0 })
+  })
+
   it('omits the timeout option entirely when timeoutMs is not passed', async () => {
     let capturedOptions: { timeout?: number } | undefined
     const fakeCreate = async (_body: Anthropic.MessageCreateParamsNonStreaming, options?: { timeout?: number }) => {
