@@ -4,6 +4,7 @@
 // destination is the add flow over the mix, so each one returns to it.
 import type { OnboardingResponse } from '../api/client'
 import type { AddMethod } from '../components/first-run/ChooseMethod'
+import { spotifyExportWaiting } from './onboarding'
 import type { PlaysOn } from './plays-on'
 
 /**
@@ -18,6 +19,8 @@ export type AddMusicFacts = {
   platform: AddMusicPlatform
   /** The listener marked their Spotify data export as requested. */
   spotifyRequested: boolean
+  /** Requested, and nothing has landed yet: the door's Choose files. */
+  spotifyWaiting: boolean
 }
 
 /** `flow`: the add flow, at Step 3 for `startAt`, else Step 1. `none`: nothing to open. */
@@ -32,6 +35,9 @@ export function addMusicRoute(target: AddMusicTarget, facts: AddMusicFacts): Add
     if (facts.platform !== 'spotify') return { kind: 'none' }
     return { kind: 'flow', startAt: facts.spotifyRequested ? 'exportify' : 'spotify-export' }
   }
+  // The door's Choose files: the export's files go where Exportify's do,
+  // whatever this browser plays on (a Spotify listener may play on Apple).
+  if (facts.spotifyWaiting) return { kind: 'flow', startAt: 'exportify' }
   switch (facts.platform) {
     // With or without a live library: a first sync, or a re-sync.
     case 'apple':
@@ -54,5 +60,6 @@ export function addMusicFacts(playsOn: PlaysOn | null, onboarding: OnboardingRes
   return {
     platform: playsOn ?? onboarding?.chosenService ?? (appleLibrary ? 'apple' : null),
     spotifyRequested: Boolean(onboarding?.markedRequestedAt),
+    spotifyWaiting: spotifyExportWaiting(onboarding),
   }
 }

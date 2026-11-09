@@ -8,6 +8,8 @@ import {
   AnonymousCapError,
   ApiError,
   isAiConsentRequired,
+  REMAKE_TEXT,
+  type AddMusicOffer,
   type AlbumPickResponse,
   type ApiQueueTrack,
   type ApiPlaylistSeed,
@@ -22,6 +24,7 @@ import {
   type OnboardingResponse,
   type QueueOp,
   type QueueOpsResponse,
+  type SendMessageOptions,
   type SessionDetailResponse,
 } from './api/client'
 import { toAlbumPickState, toDjMessage, toDjSession, toListenLaterEntry, toQueueTrack } from './api/mappers'
@@ -39,6 +42,7 @@ import type { MusicService } from './components/first-run/ChooseService'
 import type { AddMethod } from './components/first-run/ChooseMethod'
 import { MixHistory } from './components/MixHistory'
 import { Conversation } from './components/Conversation'
+import type { MusicDoorInput } from './components/MusicDoor'
 import { HomeDashboard } from './components/HomeDashboard'
 import { AppSettings } from './components/AppSettings'
 import { Home, type MixesTab } from './components/Home'
@@ -279,6 +283,12 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   const [albumsBySession, setAlbumsBySession] = useRestorableState<Record<string, AlbumPickState>>('albumsBySession', {})
   // Honest-failure refinements from the last turn; gone with the next one, so never restored.
   const [suggestionsBySession, setSuggestionsBySession] = useState<Record<string, string[]>>({})
+  // The history pill the last turn offered; gone with the next turn, as the suggestions are.
+  const [addMusicBySession, setAddMusicBySession] = useState<Record<string, AddMusicOffer | undefined>>({})
+  // A remake from the tap until its post-turn reads land: the door steps aside meanwhile.
+  const [remakingSessionId, setRemakingSessionId] = useState<string | null>(null)
+  // The latest post-turn read per session: an earlier, slower one must not land over it.
+  const turnReads = useRef<Record<string, number>>({})
   const [albumBusy, setAlbumBusy] = useState<string | null>(null)
   const savingAlbums = useRef(new Set<string>())
   // The shell drops its third column at this width; the album panel then folds into the conversation.
@@ -297,6 +307,9 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   const [playlistBusy, setPlaylistBusy] = useState(false)
   const [playlistError, setPlaylistError] = useState('')
   const [musicConnection, setMusicConnection] = useState<MusicConnectionState>('disconnected')
+  // A published sync's onboarding read in flight: until it lands, the music
+  // door still reads the sync as running rather than flashing its first state.
+  const [syncLanding, setSyncLanding] = useState(false)
   const syncRun = useMemo(() => createMusicSyncRun({
     gate: uploadGate,
     service: createMusicSyncService({ api, musicKit: { ...musicKit,
@@ -312,7 +325,10 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
         }
       },
     } }),
-    onPublished: () => refreshRef.current(),
+    onPublished: async () => {
+      setSyncLanding(true)
+      try { await refreshRef.current() } finally { setSyncLanding(false) }
+    },
   }), [api, musicKit, uploadGate])
   useEffect(() => () => syncRun.dispose(), [syncRun])
   const [error, setError] = useState('')
@@ -839,7 +855,27 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     if (run.queueWasOpen) setQueueOpen(true)
     musicWatch.settle(run.watch)
     // After the shell stops being inert and the panel is visible again.
-    requestAnimationFrame(() => addMusicOpener.current?.focus())
+    requestAnimationFrame(() => refocusMix(run.queueWasOpen))
+  }
+
+  /**
+   * Back on the mix after the add flow: the control that opened it, else (the
+   * door changed state and that control is gone) the door's current action,
+   * else the composer.
+   */
+  function refocusMix(inPanel: boolean) {
+    const opener = addMusicOpener.current
+    if (opener?.isConnected && !opener.matches(':disabled')) return opener.focus()
+    const doors = inPanel ? '.queue-panel .banner--door' : '.conversation-panel .music-door'
+    const action = document.querySelector<HTMLElement>(`${doors} button:not(:disabled)`)
+    const composer = document.querySelector<HTMLElement>('.conversation-panel .composer-area textarea')
+    ;(action ?? composer)?.focus()
+  }
+
+  /** A transcript line, by its message id (the listener's lines take focus). */
+  function focusTurn(messageId: string) {
+    const line = [...document.querySelectorAll<HTMLElement>('.conversation-panel [data-turn-id]')].find((element) => element.dataset.turnId === messageId)
+    line?.focus()
   }
 
   function openMusic() {
@@ -880,10 +916,13 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   // the queue and its version, and a queue op may have moved on since.
   async function refreshSessionAfterTurn(sessionId: string) {
     const signal = controlLife.current.signal
+    const read = (turnReads.current[sessionId] ?? 0) + 1
+    turnReads.current[sessionId] = read
+    const stale = () => turnReads.current[sessionId] !== read
     try {
       const revision = seedRevision.current[sessionId] ?? 0
       const detail = await api.getSession(sessionId)
-      if (signal.aborted) return
+      if (signal.aborted || stale()) return
       if ((seedRevision.current[sessionId] ?? 0) === revision) setPlaylistSeeds(current => ({ ...current, [sessionId]: detail.playlistSeed }))
       setSessions((current) =>
         current.map((session) =>
@@ -903,7 +942,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       }
       notePersonalMix(detail.session, detail.queue?.length ?? 0)
     } catch (requestError) {
-      if (signal.aborted) return
+      if (signal.aborted || stale()) return
       if (requestError instanceof ApiError && requestError.status === 401) signOut()
     }
   }
@@ -1085,6 +1124,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     setQueuesBySession((current) => ({ ...current, [mapped.session.id]: mapped.queue }))
     if (mapped.albums) setAlbumsBySession((current) => ({ ...current, [mapped.session.id]: mapped.albums! }))
     setSuggestionsBySession((current) => ({ ...current, [mapped.session.id]: response.suggestions ?? [] }))
+    setAddMusicBySession((current) => ({ ...current, [mapped.session.id]: response.addMusic }))
     setActiveSessionId(mapped.session.id)
     setActiveView('session')
     setDialog(null)
@@ -1141,8 +1181,12 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     }
   }
 
-  /** `keepPrompt`: a consent 403 rejects with PromptKept so the composer puts the text back. */
-  async function sendMessage(text: string, shape?: EnergyArc, keepPrompt = false) {
+  /**
+   * `keepPrompt`: a consent 403 rejects with PromptKept so the composer puts the text back.
+   * `turn.remake`: the door's Remake with my music rides the same turn; `turn.onSent`
+   * hears the listener's line once it is drawn, only when the send goes out.
+   */
+  async function sendMessage(text: string, shape?: EnergyArc, keepPrompt = false, turn: { remake?: boolean; onSent?: (messageId: string) => void } = {}) {
     const signal = controlLife.current.signal
     if (!activeSession || seedWrites.current.has(activeSession.id)) return
     if (!consentReady()) return
@@ -1163,11 +1207,21 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     setThinkingSessionId(sessionId)
     setError('')
     setSuggestionsBySession((current) => ({ ...current, [sessionId]: [] }))
+    setAddMusicBySession((current) => ({ ...current, [sessionId]: undefined }))
+    turn.onSent?.(userMessage.id)
 
     const isAlbum = activeSession.kind === 'album'
     const hadMix = (queuesBySession[sessionId]?.length ?? 0) > 0
+    const remaking = turn.remake === true && !isAlbum
+    const remakeSettled = () => setRemakingSessionId((current) => (current === sessionId ? null : current))
+    const options: SendMessageOptions | undefined = remaking ? { remake: true } : undefined
+    if (remaking) {
+      // Counted only now, past the consent and seed checks: this remake is going out.
+      setRemakingSessionId(sessionId)
+      void api.postFunnelEvent({ type: 'remake_tapped', surface: 'web' }).catch(() => undefined)
+    }
     try {
-      const response = await api.sendMessage(sessionId, text, shape)
+      const response = options ? await api.sendMessage(sessionId, text, shape, options) : await api.sendMessage(sessionId, text, shape)
       if (signal.aborted) return
       const queue = (response.queue ?? []).map(toQueueTrack)
       const albums = isAlbum ? albumStateOf(response) : null
@@ -1180,6 +1234,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       setQueuesBySession((current) => ({ ...current, [sessionId]: queue }))
       if (albums) setAlbumsBySession((current) => ({ ...current, [sessionId]: albums }))
       if (response.suggestions?.length) setSuggestionsBySession((current) => ({ ...current, [sessionId]: response.suggestions! }))
+      if (response.addMusic) setAddMusicBySession((current) => ({ ...current, [sessionId]: response.addMusic }))
       setSessions((current) =>
         current.map((session) => {
           if (session.id !== sessionId) return session
@@ -1196,9 +1251,14 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
           return albums ? { ...next, pick: albums.pick && albumSummary(albums.pick) } : next
         }),
       )
-      void refreshSessionAfterTurn(sessionId)
+      const reread = refreshSessionAfterTurn(sessionId)
+      // A remake waits for both reads: whether the mix is personal now, and
+      // whether the music is ready at all (if not, the door's first state).
+      if (remaking) void Promise.all([reread, refreshOnboarding()]).finally(remakeSettled)
     } catch (requestError) {
       if (signal.aborted) return
+      // Nothing to wait for: the door comes back with Remake, under the error line.
+      if (remaking) remakeSettled()
       if (isAiConsentRequired(requestError)) {
         // Nothing reached the DJ: the pending turn goes, no error turn is added.
         setMessagesBySession((current) => ({
@@ -1551,6 +1611,23 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     else void sendMessage(text)
   }
 
+  /**
+   * The door's Remake with my music: the listener's own line through the
+   * usual send path, flagged as a remake. The post-turn read then learns
+   * whether the mix is personal now, and the door and banner go if it is.
+   */
+  function remake() {
+    if (!activeSession || activeSession.kind === 'album' || thinkingSessionId === activeSession.id || remakingSessionId === activeSession.id) return
+    // The phone shell's panel covers the conversation; the remake shows there,
+    // and focus leaves the closing panel for the listener's new line.
+    const fromPanel = narrow && queueOpen
+    setQueueOpen(false)
+    void sendMessage(REMAKE_TEXT, undefined, false, {
+      remake: true,
+      onSent: fromPanel ? (messageId) => requestAnimationFrame(() => focusTurn(messageId)) : undefined,
+    })
+  }
+
   async function savePlaylist(name: string) {
     if (!activeSession) return
     const sessionId = activeSession.id
@@ -1586,6 +1663,24 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       inline={inline}
     />
   ) : null
+
+  // A catalog mix's door: the line under the last DJ turn and, in the phone
+  // shell, the panel's banner. Same listener facts as the add-music router.
+  const addMusicListener = addMusicFacts(playsOn, effectiveOnboarding)
+  const musicDoor: MusicDoorInput | undefined = activeSession && !activeIsAlbum ? {
+    onboarding: effectiveOnboarding,
+    syncRun,
+    syncLanding,
+    platform: addMusicListener.platform,
+    onAddMusic: openAddMusicFor,
+    onRemake: remake,
+    busy: thinkingSessionId === activeSession.id || loadingSessionId === activeSession.id || seedBusy === activeSession.id,
+    pending: remakingSessionId === activeSession.id,
+  } : undefined
+  // The history pill shows only where the router has a page for it (Spotify, on the web).
+  const historyPill = activeSession && addMusicBySession[activeSession.id] === 'history' && addMusicRoute('history', addMusicListener).kind !== 'none'
+    ? () => openAddMusicFor('history')
+    : undefined
 
   return (
     <AiConsentGate.Provider value={consentReady}>
@@ -1681,6 +1776,9 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
             onGoBack={(version) => void choosePick({ version })}
             suggestions={suggestionsBySession[activeSession.id]}
             onSuggestion={takeSuggestion}
+            musicDoor={musicDoor}
+            musicDoorCovered={narrow && queueOpen}
+            onAddHistory={historyPill}
             inlinePanel={activeIsAlbum && narrow && activeAlbums ? albumPanel(true) : undefined}
             inlinePanelVersion={activeAlbums?.version}
             onBack={() => { setMixesTab('active'); setActiveView('mixes') }}
@@ -1705,6 +1803,8 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
             spotifyOnly={spotifyLed}
             askService={askService}
             onChooseService={writePlaysOn}
+            narrow={narrow}
+            musicDoor={musicDoor}
           />}
         </>
       )}

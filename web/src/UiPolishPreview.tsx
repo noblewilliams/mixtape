@@ -21,8 +21,10 @@ import { Conversation } from './components/Conversation'
 import { PlaylistAttachment } from './components/PlaylistAttachment'
 import { QueuePanel } from './components/QueuePanel'
 import { tapeColors } from './data/tape-colors'
-import type { AlbumPickState, CollectionView, DjSession, ListenLaterEntry } from './domain'
-import type { ApiPlaylistSummary, MixtapeApi } from './api/client'
+import type { AlbumPickState, CollectionView, DjMessage, DjSession, ListenLaterEntry } from './domain'
+import type { ApiPlaylistSummary, MixtapeApi, OnboardingResponse } from './api/client'
+import type { MusicDoorInput } from './components/MusicDoor'
+import type { MusicSyncRunState } from './sync/music-sync-run'
 import { PlaylistBrowser } from './components/PlaylistBrowser'
 import { Tabs } from './components/Tabs'
 import './components/web-controls.css'
@@ -137,6 +139,50 @@ function NamePagePreview({ state, onDone }: { state: NamePreviewState; onDone: (
   return <div className="first-run fr-root fr-root--over"><div className="fr-stage fr-stage--fade"><NamePage saveName={saveName} onSaved={onDone} onSkip={onDone} initial={previewNamePages[state]} /></div></div>
 }
 
+// Add your music board section 5 (W1 to W3) and the door's states on a catalog mix. Remake goes
+// to the working state for a beat, then the mix is personal and the door and banner go.
+type CatalogPreviewState = 'catalog' | 'catalog-spotify' | 'catalog-unknown' | 'catalog-syncing' | 'catalog-sync-failed' | 'catalog-spotify-waiting' | 'catalog-music-in' | 'catalog-history'
+const previewBlankOnboarding: OnboardingResponse = { userId: 'ui-preview', sources: [], hasLibrary: false, chosenService: null, markedRequestedAt: null, interviewCompletedAt: null, importCompletedAt: null, interview: null, musicReady: false }
+const previewCatalogMessages: DjMessage[] = [
+  { id: 'catalog-1', role: 'user', content: 'Rainy commute over the bridge, Tems and Asake energy, nothing too loud', createdAt: '2026-11-09T08:00:00.000Z' },
+  { id: 'catalog-2', role: 'dj', content: 'Fifteen for the bridge in the rain: Tems while it’s slow, Asake once the traffic moves. I don’t know your music yet, so these come from Mixtape’s catalog.', queueVersion: 1, createdAt: '2026-11-09T08:00:08.000Z' },
+]
+const previewCatalog: Record<CatalogPreviewState, { platform: MusicDoorInput['platform']; onboarding: OnboardingResponse; sync: MusicSyncRunState }> = {
+  catalog: { platform: 'apple', onboarding: previewBlankOnboarding, sync: { kind: 'idle' } },
+  'catalog-spotify': { platform: 'spotify', onboarding: previewBlankOnboarding, sync: { kind: 'idle' } },
+  'catalog-unknown': { platform: null, onboarding: previewBlankOnboarding, sync: { kind: 'idle' } },
+  'catalog-syncing': { platform: 'apple', onboarding: previewBlankOnboarding, sync: { kind: 'running', progress: { stage: 'uploading_library', completed: 42, total: 100 } } },
+  'catalog-sync-failed': { platform: 'apple', onboarding: previewBlankOnboarding, sync: { kind: 'error', failure: 'connection' } },
+  'catalog-spotify-waiting': { platform: 'spotify', onboarding: { ...previewBlankOnboarding, chosenService: 'spotify', markedRequestedAt: '2026-11-08T09:00:00.000Z' }, sync: { kind: 'idle' } },
+  'catalog-music-in': { platform: 'spotify', onboarding: { ...previewBlankOnboarding, chosenService: 'spotify', musicReady: true }, sync: { kind: 'idle' } },
+  'catalog-history': { platform: 'spotify', onboarding: { ...previewBlankOnboarding, chosenService: 'spotify', hasLibrary: true }, sync: { kind: 'idle' } },
+}
+function CatalogPreview({ state, session, onBack }: { state: CatalogPreviewState; session: DjSession; onBack: () => void }) {
+  const preset = previewCatalog[state]
+  const syncRun = useMemo(() => ({ getState: () => preset.sync, subscribe: () => () => {} }), [preset])
+  const narrow = useMediaQuery('(max-width: 1020px)')
+  const [open, setOpen] = useState(false)
+  const [thinking, setThinking] = useState(false)
+  const [messages, setMessages] = useState(previewCatalogMessages)
+  const [notPersonal, setNotPersonal] = useState(state !== 'catalog-history')
+  const remake = () => {
+    setOpen(false)
+    setThinking(true)
+    setMessages((current) => [...current, { id: `remake-${current.length}`, role: 'user', content: 'Remake this with my music', createdAt: new Date().toISOString() }])
+    setTimeout(() => {
+      setMessages((current) => [...current, { id: `remade-${current.length}`, role: 'dj', content: 'Remade from your music: twelve of the fifteen are yours now.', queueVersion: 2, createdAt: new Date().toISOString() }])
+      setThinking(false)
+      setNotPersonal(false)
+    }, 1600)
+  }
+  const catalogSession = { ...session, title: 'Rain on Third Mainland', notPersonal, queueVersion: notPersonal ? 1 : 2 }
+  const musicDoor: MusicDoorInput = { onboarding: preset.onboarding, syncRun, platform: preset.platform, onAddMusic: () => {}, onRemake: remake, busy: thinking, pending: thinking }
+  return <>
+    <Conversation session={catalogSession} messages={messages} thinking={thinking} onSend={() => {}} onOpenQueue={() => setOpen(true)} onBack={onBack} musicDoor={musicDoor} musicDoorCovered={narrow && open} onAddHistory={state === 'catalog-history' ? () => {} : undefined} attachment={<PlaylistAttachment api={previewLibraryApis.library} value={null} onSelect={async () => {}} onSessionExpired={() => {}} />} />
+    <QueuePanel session={catalogSession} tracks={previewQueue} playing={false} playbackBusy={false} musicConnection={preset.platform === 'spotify' ? 'disconnected' : 'connected'} spotifyOnly={preset.platform === 'spotify'} open={open} onConnect={() => {}} onTogglePlay={() => {}} onSave={() => {}} onClose={() => setOpen(false)} onPreviewTracks={() => {}} onCommitQueueOp={async () => {}} narrow={narrow} musicDoor={musicDoor} />
+  </>
+}
+
 function previewConsent() {
   let tries = 0
   return () => new Promise<void>((resolve, reject) => setTimeout(() => (tries++ === 0 ? reject(new Error('preview')) : resolve()), 1000))
@@ -151,17 +197,18 @@ export default function UiPolishPreview() {
   const openTab = (tab: MixesTab) => setState(tab === 'archived' ? 'archived' : tab === 'listen-later' ? 'listen-later' : 'populated')
   async function color(id: string, caseColor: string) { setSessions(current => current.map(s => s.id === id ? { ...s, caseColor } : s)) }
   const close = () => setState('populated')
-  const options = ['home', 'home-loading', 'home-empty', 'home-error', 'populated', 'loading', 'empty', 'archived', 'load-error', 'refresh-error', 'settings', 'success', 'error', 'info', 'playlist', 'preference', 'memory', 'sources', 'library', 'library-loading', 'conversation', 'conversation-blank', 'conversation-spotify', 'conversation-ask', 'album', 'album-refined', 'listen-later', 'listen-later-empty', 'first-run', 'keep-sheet', 'sign-in-keep', 'sign-in-cap', 'merge-notice', 'delete-account', 'settings-named', 'settings-unnamed', 'settings-editing', 'settings-failed', 'name-page', 'name-page-typing', 'name-page-saving', 'name-page-failed', 'first-run-consent', 'ai-consent']
+  const options = ['home', 'home-loading', 'home-empty', 'home-error', 'populated', 'loading', 'empty', 'archived', 'load-error', 'refresh-error', 'settings', 'success', 'error', 'info', 'playlist', 'preference', 'memory', 'sources', 'library', 'library-loading', 'conversation', 'conversation-blank', 'conversation-spotify', 'conversation-ask', 'catalog', 'catalog-spotify', 'catalog-unknown', 'catalog-syncing', 'catalog-sync-failed', 'catalog-spotify-waiting', 'catalog-music-in', 'catalog-history', 'album', 'album-refined', 'listen-later', 'listen-later-empty', 'first-run', 'keep-sheet', 'sign-in-keep', 'sign-in-cap', 'merge-notice', 'delete-account', 'settings-named', 'settings-unnamed', 'settings-editing', 'settings-failed', 'name-page', 'name-page-typing', 'name-page-saving', 'name-page-failed', 'first-run-consent', 'ai-consent']
   return <>
     <div style={{ position: 'fixed', right: 12, top: 8, zIndex: 200, display: 'flex', gap: 8, alignItems: 'center', background: '#f7f4f8', color: '#1c1a1e', padding: 8, borderRadius: 8, fontSize: 12 }}>
       <label htmlFor="ui-preview-state">UI preview · synthetic data</label><select id="ui-preview-state" value={state} onChange={e => setState(e.target.value)}>{options.map(option => <option key={option}>{option}</option>)}</select>
     </div>
-    <div className={state.startsWith('conversation') || state.startsWith('album') ? 'app-shell' : 'app-shell app-shell--home'}>
+    <div className={state.startsWith('conversation') || state.startsWith('album') || state.startsWith('catalog') ? 'app-shell' : 'app-shell app-shell--home'}>
       <Sidebar activeView={state.startsWith('home') ? 'home' : state === 'sources' ? 'music' : state.startsWith('settings-') ? 'settings' : 'mixes'} onOpenHome={() => setState('home')} onOpenMusic={() => setState('sources')} onOpenMixes={close} onOpenSettings={() => setState('preference')} />
       {state.startsWith('conversation') ? <>
         <Conversation session={sessions[0]} messages={state === 'conversation-blank' ? [] : demoMessages} thinking={false} onSend={() => {}} onOpenQueue={() => {}} onBack={close} attachment={<PlaylistAttachment api={previewLibraryApis.library} value={null} onSelect={async () => {}} onSessionExpired={() => {}} />} />
         <QueuePanel key={state} session={sessions[0]} tracks={state === 'conversation-blank' ? [] : state === 'conversation-spotify' ? previewQueue.map((track) => ({ ...track, spotifyId: null })) : previewQueue} playing={false} playbackBusy={false} musicConnection={state === 'conversation-spotify' || state === 'conversation-ask' ? 'disconnected' : 'connected'} spotifyOnly={state === 'conversation-spotify'} askService={state === 'conversation-ask'} open={false} onConnect={() => {}} onTogglePlay={() => {}} onSave={() => {}} onClose={() => {}} onPreviewTracks={() => {}} onCommitQueueOp={async () => {}} />
       </>
+      : state.startsWith('catalog') ? <CatalogPreview key={state} state={state as CatalogPreviewState} session={sessions[0]} onBack={close} />
       : state.startsWith('settings-') ? <SettingsPreview key={state} state={state as SettingsPreviewState} onMemories={() => setState('memory')} />
       : state === 'album' || state === 'album-refined' ? <AlbumPreview key={state} state={state} session={sessions[0]} />
       : state === 'listen-later' || state === 'listen-later-empty' ? <ListenLaterPreview key={state} empty={state === 'listen-later-empty'} sessions={sessions} onTab={openTab} onFindAlbum={() => { setModeSeed({ kind: 'album', id: Date.now() }); setState('home') }} />

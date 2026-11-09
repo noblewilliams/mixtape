@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { QueueOp } from '../api/client'
 import type { DjSession, QueueTrack } from '../domain'
 import { QueuePanel, type MusicConnectionState } from './QueuePanel'
+import type { MusicDoorInput } from './MusicDoor'
 
 const session: DjSession = {
   id: 'session-1',
@@ -67,6 +68,9 @@ function renderQueue(overrides: {
   onConnect?: () => void
   askService?: boolean
   onChooseService?: (choice: 'spotify' | 'apple') => void
+  narrow?: boolean
+  musicDoor?: MusicDoorInput
+  open?: boolean
 } = {}) {
   const onPreviewTracks = overrides.onPreviewTracks ?? vi.fn()
   const onCommitQueueOp = overrides.onCommitQueueOp ?? vi.fn(async () => undefined)
@@ -78,7 +82,7 @@ function renderQueue(overrides: {
       playing={false}
       playbackBusy={false}
       musicConnection={overrides.musicConnection ?? 'disconnected'}
-      open
+      open={overrides.open ?? true}
       onConnect={overrides.onConnect ?? vi.fn()}
       onTogglePlay={vi.fn()}
       onSave={vi.fn()}
@@ -89,6 +93,8 @@ function renderQueue(overrides: {
       spotifyOnly={overrides.spotifyOnly}
       askService={overrides.askService}
       onChooseService={overrides.onChooseService}
+      narrow={overrides.narrow}
+      musicDoor={overrides.musicDoor}
     />,
   )
   return { ...view, onPreviewTracks, onCommitQueueOp, onOutput }
@@ -457,10 +463,72 @@ describe('Spotify mix outputs', () => {
     const banner = screen.getByRole('status')
     expect(banner).toHaveClass('banner')
     expect(within(banner).getByText('Not personal yet')).toBeInTheDocument()
-    expect(banner).toHaveTextContent(
-      'Built from Mixtape’s catalog and your interview, not your listening. Import your Spotify data for the real thing.',
-    )
     expect(banner.compareDocumentPosition(screen.getByRole('list'))).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+  })
+
+  describe('the catalog banner, wide and narrow (add your music)', () => {
+    const catalog = { ...session, notPersonal: true }
+    const idle = { kind: 'idle' as const }
+    const idleRun = { getState: () => idle, subscribe: () => () => undefined }
+    const door = (over: Partial<MusicDoorInput> = {}): MusicDoorInput => ({
+      onboarding: null,
+      syncRun: idleRun,
+      platform: 'spotify',
+      onAddMusic: vi.fn(),
+      onRemake: vi.fn(),
+      ...over,
+    })
+    const FULL = 'From Mixtape’s catalog for now. With your music, the DJ picks from what you actually play.'
+
+    it('wide: the label and the short line, with no action, since the conversation carries it', () => {
+      renderQueue({ session: catalog, tracks: spotifyTracks, musicDoor: door() })
+      const banner = screen.getByRole('status')
+      expect(banner).toHaveClass('banner')
+      expect(banner).toHaveTextContent(/^◐Not personal yetFrom Mixtape’s catalog for now\.$/)
+      expect(within(banner).queryByRole('button')).toBeNull()
+    })
+
+    it('wide: stays the label even when the music is in', () => {
+      const ready = { userId: 'u', sources: [], hasLibrary: true, chosenService: 'spotify' as const, markedRequestedAt: null, interviewCompletedAt: null, importCompletedAt: null, interview: null, musicReady: true }
+      renderQueue({ session: catalog, tracks: spotifyTracks, musicDoor: door({ onboarding: ready }) })
+      expect(screen.getByRole('status')).toHaveTextContent(/^◐Not personal yetFrom Mixtape’s catalog for now\.$/)
+      expect(screen.queryByRole('button', { name: 'Remake with my music' })).toBeNull()
+    })
+
+    it('narrow: the full line and the door’s action, above the tracks', () => {
+      const musicDoor = door()
+      renderQueue({ session: catalog, tracks: spotifyTracks, narrow: true, musicDoor })
+      const banner = screen.getByRole('status')
+      expect(banner).toHaveClass('banner')
+      expect(within(banner).getByText('Not personal yet')).toBeInTheDocument()
+      expect(within(banner).getByText(FULL)).toBeInTheDocument()
+      expect(banner.compareDocumentPosition(screen.getByRole('list'))).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+      fireEvent.click(within(banner).getByRole('button', { name: 'Add Spotify music' }))
+      expect(musicDoor.onAddMusic).toHaveBeenCalledWith('door')
+    })
+
+    it('narrow: follows the door’s states, Remake included', () => {
+      const ready = { userId: 'u', sources: [], hasLibrary: true, chosenService: 'spotify' as const, markedRequestedAt: null, interviewCompletedAt: null, importCompletedAt: null, interview: null, musicReady: true }
+      const musicDoor = door({ onboarding: ready })
+      renderQueue({ session: catalog, tracks: spotifyTracks, narrow: true, musicDoor })
+      const banner = screen.getByRole('status')
+      expect(banner).toHaveTextContent('Your music is in. This mix was made before it.')
+      fireEvent.click(within(banner).getByRole('button', { name: 'Remake with my music' }))
+      expect(musicDoor.onRemake).toHaveBeenCalledTimes(1)
+    })
+
+    it('narrow: draws the banner’s door only while the panel is open, so the closed panel adds no second door', () => {
+      renderQueue({ session: catalog, tracks: spotifyTracks, narrow: true, musicDoor: door(), open: false })
+      expect(screen.queryByText('Not personal yet')).toBeNull()
+      expect(screen.queryByRole('status')).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Add Spotify music' })).toBeNull()
+    })
+
+    it('narrow: no banner once the mix is personal', () => {
+      renderQueue({ tracks: spotifyTracks, narrow: true, musicDoor: door() })
+      expect(screen.queryByText('Not personal yet')).toBeNull()
+      expect(screen.queryByRole('status')).toBeNull()
+    })
   })
 
   it('shows no banner for a personal mix', () => {

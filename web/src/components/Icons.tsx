@@ -125,6 +125,16 @@ export function PlayIcon({ paused = false, ...props }: IconProps & { paused?: bo
   )
 }
 
+/** A page with its corner folded: choosing files. */
+export function FileIcon(props: IconProps) {
+  return (
+    <svg {...iconDefaults} {...props}>
+      <path d="M14 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8z" />
+      <path d="M14 3.5V8h4.5" />
+    </svg>
+  )
+}
+
 export function MusicIcon(props: IconProps) {
   return (
     <svg {...iconDefaults} {...props}>

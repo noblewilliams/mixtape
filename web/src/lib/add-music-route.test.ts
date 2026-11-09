@@ -5,6 +5,7 @@ import { addMusicFacts, addMusicRoute, type AddMusicFacts } from './add-music-ro
 const facts = (over: Partial<AddMusicFacts>): AddMusicFacts => ({
   platform: null,
   spotifyRequested: false,
+  spotifyWaiting: false,
   ...over,
 })
 
@@ -22,6 +23,15 @@ describe('addMusicRoute', () => {
   it('door, Spotify, data export requested or not: Step 3 Exportify, whose Choose files takes either file', () => {
     expect(addMusicRoute('door', facts({ platform: 'spotify' }))).toStrictEqual({ kind: 'flow', startAt: 'exportify' })
     expect(addMusicRoute('door', facts({ platform: 'spotify', spotifyRequested: true }))).toStrictEqual({ kind: 'flow', startAt: 'exportify' })
+  })
+
+  it('door, Spotify data export waiting: Step 3 Exportify to choose the files, whatever the platform', () => {
+    const waiting = { spotifyRequested: true, spotifyWaiting: true }
+    expect(addMusicRoute('door', facts({ platform: 'apple', ...waiting }))).toStrictEqual({ kind: 'flow', startAt: 'exportify' })
+    expect(addMusicRoute('door', facts({ platform: null, ...waiting }))).toStrictEqual({ kind: 'flow', startAt: 'exportify' })
+    expect(addMusicRoute('door', facts({ platform: 'spotify', ...waiting }))).toStrictEqual({ kind: 'flow', startAt: 'exportify' })
+    // A retry is still the Apple sync.
+    expect(addMusicRoute('retrySync', facts({ platform: 'apple', ...waiting }))).toStrictEqual({ kind: 'flow', startAt: 'apple-sync' })
   })
 
   it('door, platform unknown: Step 1', () => {
@@ -94,7 +104,14 @@ describe('addMusicFacts', () => {
     expect(addMusicFacts(null, null).spotifyRequested).toBe(false)
   })
 
+  it('reads the data export as waiting until a package lands', () => {
+    const requested = { ...blank, chosenService: 'spotify' as const, markedRequestedAt: '2026-11-03T09:00:00.000Z' }
+    expect(addMusicFacts('apple', requested).spotifyWaiting).toBe(true)
+    expect(addMusicFacts('apple', { ...requested, sources: [source({ packages: ['spotify_account'] })] }).spotifyWaiting).toBe(false)
+    expect(addMusicFacts(null, blank).spotifyWaiting).toBe(false)
+  })
+
   it('carries nothing the router does not read', () => {
-    expect(addMusicFacts('spotify', { ...blank, sources: [appleLive] })).toStrictEqual({ platform: 'spotify', spotifyRequested: false })
+    expect(addMusicFacts('spotify', { ...blank, sources: [appleLive] })).toStrictEqual({ platform: 'spotify', spotifyRequested: false, spotifyWaiting: false })
   })
 })

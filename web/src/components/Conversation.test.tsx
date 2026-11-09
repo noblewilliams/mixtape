@@ -1,9 +1,11 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import doorCss from './music-door.css?raw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { toAlbumPick } from '../api/mappers'
 import { demoAlbumMessages, demoAlbumPick } from '../data/demo'
 import type { DjMessage, DjSession } from '../domain'
 import { Conversation } from './Conversation'
+import type { MusicDoorInput } from './MusicDoor'
 
 const session: DjSession = {
   id: 'blue-hour',
@@ -219,5 +221,123 @@ describe('Conversation for a mix session', () => {
     expect(screen.getByText('Current tape')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Tape options' }))
     expect(screen.getByRole('button', { name: 'Version history' })).toBeInTheDocument()
+  })
+})
+
+describe('Conversation on a catalog mix (add your music)', () => {
+  afterEach(cleanup)
+  const catalog: DjSession = { ...session, notPersonal: true }
+  const turns: DjMessage[] = [
+    { id: 'u1', role: 'user', content: 'Rainy commute over the bridge.', createdAt: '2026-11-09T08:00:00.000Z' },
+    { id: 'd1', role: 'dj', content: 'Fifteen for the bridge in the rain.', queueVersion: 1, createdAt: '2026-11-09T08:00:08.000Z' },
+    { id: 'u2', role: 'user', content: 'Brighter.', createdAt: '2026-11-09T08:01:00.000Z' },
+    { id: 'd2', role: 'dj', content: 'Brighter now, still from the catalog.', queueVersion: 2, createdAt: '2026-11-09T08:01:08.000Z' },
+  ]
+  const idle = { kind: 'idle' as const }
+  const idleRun = { getState: () => idle, subscribe: () => () => undefined }
+  const door = (over: Partial<MusicDoorInput> = {}): MusicDoorInput => ({
+    onboarding: null,
+    syncRun: idleRun,
+    platform: 'apple',
+    onAddMusic: vi.fn(),
+    onRemake: vi.fn(),
+    ...over,
+  })
+  const LINE = 'From Mixtape’s catalog for now. With your music, the DJ picks from what you actually play.'
+
+  it('puts the door under the last DJ turn of a catalog mix', () => {
+    const musicDoor = door()
+    render(<Conversation session={catalog} messages={turns} thinking={false} onSend={vi.fn()} onOpenQueue={vi.fn()} musicDoor={musicDoor} />)
+    const line = screen.getByText(LINE)
+    const region = line.closest('[role="status"]') as HTMLElement
+    expect(region).toHaveClass('music-door')
+    const last = screen.getByText('Brighter now, still from the catalog.')
+    expect(last.compareDocumentPosition(region) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getAllByText(LINE)).toHaveLength(1)
+    fireEvent.click(within(region).getByRole('button', { name: 'Sync Apple Music' }))
+    expect(musicDoor.onAddMusic).toHaveBeenCalledWith('door')
+  })
+
+  it('keeps one door, mounted once, while the next line waits and after the reply lands', () => {
+    const ready = { userId: 'u', sources: [], hasLibrary: true, chosenService: 'apple' as const, markedRequestedAt: null, interviewCompletedAt: null, importCompletedAt: null, interview: null, musicReady: true }
+    const musicDoor = door({ onboarding: ready })
+    const view = render(<Conversation session={catalog} messages={turns} thinking={false} onSend={vi.fn()} onOpenQueue={vi.fn()} musicDoor={musicDoor} />)
+    const mounted = document.querySelector('.music-door')
+    const pending: DjMessage = { id: 'u3', role: 'user', content: 'Again, brighter', createdAt: '2026-11-09T08:02:00.000Z' }
+    view.rerender(<Conversation session={catalog} messages={[...turns, pending]} thinking onSend={vi.fn()} onOpenQueue={vi.fn()} musicDoor={musicDoor} />)
+    // Not re-added under the polite transcript, so the reply does not re-read it.
+    expect(document.querySelector('.music-door')).toBe(mounted)
+    expect(document.querySelectorAll('.music-door')).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Remake with my music' })).toBeDisabled()
+    // The reply's version row comes before the door.
+    const revised = screen.getByRole('button', { name: /Tape revised · version 2/ })
+    expect(revised.compareDocumentPosition(mounted!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const reply: DjMessage = { id: 'd3', role: 'dj', content: 'Brighter again.', queueVersion: 3, createdAt: '2026-11-09T08:02:08.000Z' }
+    view.rerender(<Conversation session={catalog} messages={[...turns, pending, reply]} thinking={false} onSend={vi.fn()} onOpenQueue={vi.fn()} musicDoor={musicDoor} />)
+    expect(document.querySelector('.music-door')).toBe(mounted)
+    expect(screen.getByText('Brighter again.').compareDocumentPosition(mounted!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Remake with my music' })).toBeEnabled()
+  })
+
+  it('hides its door from assistive tech while the phone shell’s panel covers it', () => {
+    render(<Conversation session={catalog} messages={turns} thinking={false} onSend={vi.fn()} onOpenQueue={vi.fn()} musicDoor={door()} musicDoorCovered />)
+    const region = document.querySelector('.music-door') as HTMLElement
+    const slot = region.parentElement as HTMLElement
+    expect(slot).toHaveAttribute('aria-hidden', 'true')
+    expect(slot).toHaveAttribute('inert')
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Sync Apple Music' })).toBeNull()
+  })
+
+  it('lets the listener’s lines take focus, for focus coming back to the transcript', () => {
+    render(<Conversation session={catalog} messages={turns} thinking={false} onSend={vi.fn()} onOpenQueue={vi.fn()} />)
+    const mine = screen.getByText('Brighter.')
+    expect(mine).toHaveAttribute('tabindex', '-1')
+    expect(mine).toHaveAttribute('data-turn-id', 'u2')
+  })
+
+  it('draws no door on a personal mix', () => {
+    render(<Conversation session={session} messages={turns} thinking={false} onSend={vi.fn()} onOpenQueue={vi.fn()} musicDoor={door()} />)
+    expect(screen.queryByText(LINE)).toBeNull()
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('never draws the door on an album session', () => {
+    const album: DjSession = { ...catalog, kind: 'album', trackCount: 0 }
+    render(<Conversation kind="album" session={album} messages={demoAlbumMessages} thinking={false} onSend={vi.fn()} musicDoor={door()} />)
+    expect(screen.queryByText(LINE)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Sync Apple Music' })).toBeNull()
+  })
+
+  it('offers Add my listening history in the suggestions row when the turn carried it', () => {
+    const onAddHistory = vi.fn()
+    render(<Conversation session={session} messages={turns} thinking={false} onSend={vi.fn()} onOpenQueue={vi.fn()} onAddHistory={onAddHistory} />)
+    const pill = screen.getByRole('button', { name: 'Add my listening history' })
+    expect(pill.closest('.conversation-pills')).not.toBeNull()
+    expect(pill).toHaveClass('conversation-history-pill')
+    const last = screen.getByText('Brighter now, still from the catalog.')
+    expect(last.compareDocumentPosition(pill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    fireEvent.click(pill)
+    expect(onAddHistory).toHaveBeenCalledTimes(1)
+  })
+
+  it('puts the history pill beside other suggestions, in one row', () => {
+    render(<Conversation session={session} messages={turns} thinking={false} onSend={vi.fn()} onOpenQueue={vi.fn()} suggestions={['Something older']} onSuggestion={vi.fn()} onAddHistory={vi.fn()} />)
+    const rows = document.querySelectorAll('.conversation-pills')
+    expect(rows).toHaveLength(1)
+    expect(within(rows[0] as HTMLElement).getAllByRole('button').map((button) => button.textContent)).toEqual(['Something older', 'Add my listening history'])
+  })
+
+  it('gives the history pill a 44px coarse-pointer target, and only that pill', () => {
+    const coarse = doorCss.match(/@media \(pointer: coarse\)\s*{([\s\S]*?)\n}/)?.[1] ?? ''
+    expect(coarse).toMatch(/\.conversation-history-pill::before\s*{[^}]*inset:\s*-7px 0;/)
+    expect(doorCss).toMatch(/\.conversation-history-pill\s*{[^}]*position:\s*relative;/)
+    expect(doorCss).not.toMatch(/\.home-starters button[^{]*{/)
+  })
+
+  it('shows no history pill without the offer', () => {
+    render(<Conversation session={session} messages={turns} thinking={false} onSend={vi.fn()} onOpenQueue={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: 'Add my listening history' })).toBeNull()
+    expect(document.querySelector('.conversation-pills')).toBeNull()
   })
 })

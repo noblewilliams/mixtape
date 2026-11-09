@@ -13,6 +13,7 @@ import type { DjSession, QueueTrack } from '../domain'
 import { CloseIcon, ErrorCircleIcon, SuccessCircleIcon, UndoIcon } from './Icons'
 import { ConnectMusicButton, LabelButton, PlayButton } from './TapeActions'
 import { ControlModal } from './ControlModal'
+import { CatalogBanner, MusicDoor, type MusicDoorInput } from './MusicDoor'
 import { markSpotifyIntroSeen, spotifyIntroSeen, type PlaysOn } from '../lib/plays-on'
 
 export type MusicConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
@@ -45,6 +46,14 @@ type QueuePanelProps = {
   askService?: boolean
   /** The listener answered where they listen, from the ask or "Use Apple Music instead". */
   onChooseService?: (choice: PlaysOn) => void
+  /**
+   * Below the shell's third column the panel covers the conversation, so a
+   * catalog mix's banner carries the door's full line and action while it is
+   * open; wider, the conversation carries them and the banner keeps the label.
+   */
+  narrow?: boolean
+  /** The catalog mix's door, as the conversation draws it. */
+  musicDoor?: MusicDoorInput
 }
 
 type SwipeState = {
@@ -174,6 +183,8 @@ export function QueuePanel({
   spotifyOnly = false,
   askService = false,
   onChooseService,
+  narrow = false,
+  musicDoor,
 }: QueuePanelProps) {
   const [introOpen, setIntroOpen] = useState(false)
   const [displayTracks, setDisplayTracks] = useState(() => withPositions(tracks))
@@ -571,14 +582,10 @@ export function QueuePanel({
         <span>{displayTracks.length === 0 ? 'waiting for a prompt' : `about ${Math.round(totalDuration / 60_000)} min`}</span>
       </div>
 
+      {/* Narrow, the banner is the door, drawn only while the panel is open and covering the
+          conversation; closed, it adds nothing, so there is one door at a time. */}
       {session.notPersonal ? (
-        <div className="banner" role="status">
-          <span aria-hidden="true">◐</span>
-          <span>
-            <b>Not personal yet</b>
-            <span>Built from Mixtape’s catalog and your interview, not your listening. Import your Spotify data for the real thing.</span>
-          </span>
-        </div>
+        narrow && musicDoor ? (open ? <MusicDoor {...musicDoor} notPersonal layout="banner" /> : null) : <CatalogBanner />
       ) : null}
 
       {displayTracks.length === 0 ? (

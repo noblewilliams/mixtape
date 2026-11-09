@@ -8,6 +8,7 @@ import { InlineMixName } from './SessionControls'
 import { Cassette } from './Cassette'
 import { AlbumCover } from './AlbumPanel'
 import { MoreIcon, QueueIcon } from './Icons'
+import { MusicDoor, type MusicDoorInput } from './MusicDoor'
 
 type ConversationProps = {
   currentShape?: EnergyArc | null
@@ -40,6 +41,12 @@ type ConversationProps = {
   inlinePanelVersion?: number
   /** Phones: the tab bar hides inside a mix, so the header carries the way back. */
   onBack?: () => void
+  /** A catalog mix's door (the session's `notPersonal`): its line and action under the last DJ turn. Mix sessions only. */
+  musicDoor?: MusicDoorInput
+  /** The phone shell's mix panel covers the conversation (and carries the door): this one is hidden from assistive tech. */
+  musicDoorCovered?: boolean
+  /** The last turn offered "Add my listening history" and it has somewhere to go: one more pill in the suggestions row. */
+  onAddHistory?: () => void
 }
 
 /**
@@ -75,7 +82,7 @@ function PassedRow({ album, onGoBack }: { album: AlbumPick; onGoBack?: (version:
 
 const unavailableTranscription = async () => { throw new Error('Transcription unavailable') }
 
-export function Conversation({ currentShape, transcribe = unavailableTranscription, selectionBusy = false, attachment, energySummary, player, onColor, onRename, onArchive, session, messages, loading = false, thinking, onSend, onOpenQueue, onOpenHistory, kind = 'mix', passed = [], onGoBack, suggestions = [], onSuggestion, inlinePanel, inlinePanelVersion, onBack }: ConversationProps) {
+export function Conversation({ currentShape, transcribe = unavailableTranscription, selectionBusy = false, attachment, energySummary, player, onColor, onRename, onArchive, session, messages, loading = false, thinking, onSend, onOpenQueue, onOpenHistory, kind = 'mix', passed = [], onGoBack, suggestions = [], onSuggestion, inlinePanel, inlinePanelVersion, onBack, musicDoor, musicDoorCovered = false, onAddHistory }: ConversationProps) {
   const album = kind === 'album'
   const [settings, setSettings] = useState(false)
   const [options, setOptions] = useState(false)
@@ -143,13 +150,15 @@ export function Conversation({ currentShape, transcribe = unavailableTranscripti
           messages.map((message, index) => (
             <div className="conversation-turn-wrap" key={message.id}>
               {placement.get(index)?.map((item) => <PassedRow key={`passed-${item.id}`} album={item} onGoBack={onGoBack} />)}
-              <p className={`conversation-turn conversation-turn--${message.role}`}>{message.content}</p>
+              {/* The listener's lines can take focus when it comes back to the transcript (a remake from the panel). */}
+              <p className={`conversation-turn conversation-turn--${message.role}`} data-turn-id={message.id} tabIndex={message.role === 'user' ? -1 : undefined}>{message.content}</p>
               {index === panelAnchor ? inlinePanel : null}
-              {index === lastDjIndex && suggestions.length > 0 ? (
+              {index === lastDjIndex && (suggestions.length > 0 || onAddHistory) ? (
                 <div className="home-starters conversation-pills">
                   {suggestions.map((text) => (
                     <button key={text} type="button" disabled={thinking || loading} onClick={() => onSuggestion?.(text)}>{text}</button>
                   ))}
+                  {onAddHistory ? <button type="button" className="conversation-history-pill" disabled={thinking || loading} onClick={onAddHistory}>Add my listening history</button> : null}
                 </div>
               ) : null}
               {!album && message.role === 'dj' && message.queueVersion && index < messages.length - 1 ? (
@@ -162,6 +171,13 @@ export function Conversation({ currentShape, transcribe = unavailableTranscripti
           ))
         )}
 
+        {/* The catalog mix's door: after the last turn, in one place that never moves, so a new
+            reply is inserted above it rather than the door being re-added (and re-read) below it. */}
+        {!loading && !album && musicDoor && lastDjIndex >= 0 ? (
+          <div className="music-door-slot" inert={musicDoorCovered} aria-hidden={musicDoorCovered || undefined}>
+            <MusicDoor {...musicDoor} notPersonal={session.notPersonal} busy={Boolean(musicDoor.busy) || thinking || loading || selectionBusy} />
+          </div>
+        ) : null}
         {loading ? null : placement.get(-1)?.map((item) => <PassedRow key={`passed-${item.id}`} album={item} onGoBack={onGoBack} />)}
         {!loading && panelAnchor === -1 ? inlinePanel : null}
         {album ? null : energySummary}
