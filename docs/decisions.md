@@ -1,5 +1,43 @@
 # Decision Log
 
+## 2026-11-09 — Add your music: label, link, remake (founder)
+
+Spec `superpowers/specs/2026-11-09-add-your-music-loop-design.md`; board
+approval `mockups/approved/2026-11-09-add-your-music-loop.md`. Listeners who
+skip adding music (most take Welcome's prompt) never saw why it matters. The
+"Not personal yet" text gave no link, and its Spotify wording was wrong for
+Apple Music listeners.
+
+- **The line becomes a link.** Every catalog mix's explanation is one line
+  plus one action named for the device platform: "Sync Apple Music", "Add
+  Spotify music" or "Add your music".
+  - It has no dismiss, because it is the label, not a pitch.
+  - It never blocks a mix.
+- **One router per client.** It opens the exact step:
+  - the Sync Apple Music alert on iOS (Step 3's sync page on web);
+  - Exportify;
+  - Choose files while a Spotify export is pending;
+  - Step 1 only when the platform is unknown.
+
+  Every route returns to the mix.
+- **Remake with my music.** It shows when the session is `notPersonal` and
+  the new `GET /onboarding` `musicReady` is true. It is a normal turn with
+  `remake: true` and makes a new version. The DJ states a server-counted
+  "N of M are yours".
+- **The label rule changes.** A whole-mix generate sets `notPersonal` from
+  its own pool mode. Edits still only set it. Reverses the set-only
+  behaviour of `markNotPersonal`.
+- **Own-music briefs.** A catalog listener who asks for their favourites
+  hears "I don't know your favourites yet". A listener with music but no
+  plays gets one "Add my listening history" pill per conversation
+  (`addMusic: 'history'`, `dj_sessions.music_chip_at`).
+- **Funnel.** Migration `0048` adds `music_door_tapped`,
+  `music_chip_offered`, `music_chip_tapped`, `music_added_from_mix`,
+  `remake_tapped` and `remake_made`.
+- **Reopens if** remake usage is low once catalog listeners add music.
+  Then the remake moves into the music-in moment itself (the sync alert's
+  done state or the import result), not only the mix.
+
 ## 2026-11-09 — Every song earns its place; notes make the case (founder)
 
 Spec `superpowers/specs/2026-11-09-every-song-earns-its-place-design.md`.
