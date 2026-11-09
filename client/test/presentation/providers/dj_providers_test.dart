@@ -22,7 +22,8 @@ import '../../helpers/fake_listening_api.dart';
 /// stand in as an interface). Each method delegates to a settable callback so
 /// individual tests only wire up what they need; unset callbacks throw so a
 /// test exercising an unexpected call fails loudly rather than hanging.
-class FakeDjApi implements DjApi {
+/// [DjRemakeSender] lets it answer [DjApiRemake.sendRemake] too.
+class FakeDjApi implements DjApi, DjRemakeSender {
   @override
   Future<void> recordPlaylistCreation(String sessionId, String appleLibraryId) async {}
 
@@ -54,6 +55,10 @@ class FakeDjApi implements DjApi {
   String? lastDeletedMemoryId;
   int getSessionCallCount = 0;
   int sendMessageCallCount = 0;
+  Future<TurnResult> Function(String id)? onSendRemake;
+
+  /// The session id of every [sendRemake], in call order.
+  final List<String> remadeSessions = [];
   List<QueueOp>? lastOps;
   int? lastExpectedVersion;
   ({String id, String status})? lastStatusCall;
@@ -97,6 +102,14 @@ class FakeDjApi implements DjApi {
     final impl = onSendMessage;
     if (impl == null) throw UnimplementedError('onSendMessage not wired');
     return impl(id, text);
+  }
+
+  @override
+  Future<TurnResult> sendRemake(String id) {
+    remadeSessions.add(id);
+    final impl = onSendRemake;
+    if (impl == null) throw UnimplementedError('onSendRemake not wired');
+    return impl(id);
   }
 
   @override
@@ -1465,6 +1478,212 @@ void main() {
       await container.read(chatProvider('s1').notifier).send('play jazz');
       await _flush();
       expect(listening.funnelEvents, [FunnelEventType.firstPersonalMix]);
+    });
+  });
+
+  group('add your music in the chat', () {
+    TurnResult turn(String id, int version, {AddMusicOffer? addMusic}) => TurnResult(
+          djMessage: _msg(id, 'dj', 'here you go'),
+          queue: [_track(0)],
+          queueVersion: version,
+          addMusic: addMusic,
+        );
+
+    test('remake() posts through sendRemake; a plain send still posts through sendMessage', () async {
+      final api = FakeDjApi()
+        ..onGetSession = ((_) async => SessionDetail(session: _session(), messages: [], queue: []))
+        ..onSendRemake = ((id) async => turn('d1', 2))
+        ..onSendMessage = ((id, text) async => turn('d2', 3));
+      final container = _makeContainer(api);
+      await container.read(chatProvider('s1').future);
+      final notifier = container.read(chatProvider('s1').notifier);
+
+      await notifier.remake();
+      expect(api.remadeSessions, ['s1']);
+      expect(api.sendMessageCallCount, 0);
+
+      await notifier.send('a bit slower');
+      expect(api.remadeSessions, ['s1']);
+      expect(api.sendMessageCallCount, 1);
+
+      final state = container.read(chatProvider('s1')).value!;
+      expect(state.messages.map((m) => m.message.content), [
+        'Remake this with my music',
+        'here you go',
+        'a bit slower',
+        'here you go',
+      ]);
+      expect(state.queueVersion, 3);
+    });
+
+    test('remake() shows remakeText as the listener line and clears addMusic as it starts', () async {
+      final api = FakeDjApi()
+        ..onGetSession = ((_) async => SessionDetail(session: _session(), messages: [], queue: []))
+        ..onSendMessage = ((id, text) async => turn('d1', 2, addMusic: AddMusicOffer.history));
+      final remade = Completer<TurnResult>();
+      api.onSendRemake = (_) => remade.future;
+      final container = _makeContainer(api);
+      await container.read(chatProvider('s1').future);
+      final notifier = container.read(chatProvider('s1').notifier);
+      await notifier.send('play my favourites');
+      expect(container.read(chatProvider('s1')).value!.addMusic, AddMusicOffer.history);
+
+      final pending = notifier.remake();
+      final during = container.read(chatProvider('s1')).value!;
+      expect(during.addMusic, isNull);
+      expect(during.sending, isTrue);
+      expect(during.messages.last.message.role, 'user');
+      expect(during.messages.last.message.content, remakeText);
+
+      remade.complete(turn('d2', 3));
+      await pending;
+      final after = container.read(chatProvider('s1')).value!;
+      expect(after.sending, isFalse);
+      expect(after.addMusic, isNull);
+      expect(after.queueVersion, 3);
+    });
+
+    test('a failed remake is handled as a failed send: the error turn, then the composer back', () async {
+      // What DjApi makes of the server's `{error: 'wrong_session_kind'}` 409.
+      final api = FakeDjApi()
+        ..onGetSession = ((_) async => SessionDetail(session: _session(), messages: [], queue: []))
+        ..onSendRemake = ((_) async => throw DjApiException(
+              kind: 'wrong_session_kind',
+              message: 'The DJ ran into a problem — please try again.',
+            ));
+      final container = _makeContainer(api);
+      await container.read(chatProvider('s1').future);
+
+      await container.read(chatProvider('s1').notifier).remake();
+
+      final state = container.read(chatProvider('s1')).value!;
+      expect(state.sending, isFalse);
+      expect(state.messages, hasLength(2));
+      expect(state.messages.first.message.content, remakeText);
+      expect(state.messages.last.isError, isTrue);
+      expect(state.messages.last.message.content, 'The DJ ran into a problem — please try again.');
+    });
+
+    test('a failed remake\'s listener line keeps the remake marker; a failed plain send\'s does not',
+        () async {
+      final api = FakeDjApi()
+        ..onGetSession = ((_) async => SessionDetail(session: _session(), messages: [], queue: []))
+        ..onSendRemake = ((_) async => throw DjApiException(kind: 'conflict', message: 'try that again'))
+        ..onSendMessage = ((_, _) async => throw DjApiException(kind: 'conflict', message: 'try that again'));
+      final container = _makeContainer(api);
+      await container.read(chatProvider('s1').future);
+      final notifier = container.read(chatProvider('s1').notifier);
+
+      await notifier.remake();
+      await notifier.send(remakeText);
+
+      final messages = container.read(chatProvider('s1')).value!.messages;
+      expect(messages.map((m) => (m.message.role, m.isError, m.remake)), [
+        ('user', false, true),
+        ('dj', true, false),
+        ('user', false, false),
+        ('dj', true, false),
+      ]);
+    });
+
+    test('a remake whose refetch says the mix is personal now adopts notPersonal false', () async {
+      final api = FakeDjApi();
+      var loads = 0;
+      // Not personal on the first load; the post-turn refetch reads the
+      // flag the remake cleared.
+      api.onGetSession = (_) async => SessionDetail(
+            session: _session(notPersonal: ++loads == 1),
+            messages: [],
+            queue: [],
+          );
+      api.onSendRemake = (_) async => turn('d1', 2);
+      final container = _makeContainer(api);
+      await container.read(chatProvider('s1').future);
+      expect(container.read(chatProvider('s1')).value!.session.notPersonal, isTrue);
+
+      await container.read(chatProvider('s1').notifier).remake();
+
+      expect(loads, 2);
+      final state = container.read(chatProvider('s1')).value!;
+      expect(state.session.notPersonal, isFalse);
+      expect(state.queueVersion, 2);
+    });
+
+    test('remake() is a no-op while a send is still in flight', () async {
+      final api = FakeDjApi()
+        ..onGetSession = ((_) async => SessionDetail(session: _session(), messages: [], queue: []))
+        ..onSendRemake = ((_) async => turn('d9', 9));
+      final first = Completer<TurnResult>();
+      api.onSendMessage = (_, _) => first.future;
+      final container = _makeContainer(api);
+      await container.read(chatProvider('s1').future);
+      final notifier = container.read(chatProvider('s1').notifier);
+
+      final pending = notifier.send('play jazz');
+      await notifier.remake();
+
+      expect(api.remadeSessions, isEmpty);
+      expect(
+        container.read(chatProvider('s1')).value!.messages.map((m) => m.message.content),
+        ['play jazz'],
+      );
+
+      first.complete(turn('d1', 2));
+      await pending;
+      expect(api.remadeSessions, isEmpty);
+      expect(container.read(chatProvider('s1')).value!.messages, hasLength(2));
+    });
+
+    test('the session load carries addMusic, as it carries suggestions', () async {
+      final api = FakeDjApi()
+        ..onGetSession = ((_) async => SessionDetail(
+              session: _session(),
+              messages: [],
+              queue: [],
+              addMusic: AddMusicOffer.history,
+            ));
+      final container = _makeContainer(api);
+
+      final state = await container.read(chatProvider('s1').future);
+
+      expect(state.addMusic, AddMusicOffer.history);
+    });
+
+    test('addMusic lands after a turn, survives the flag refetch, and clears when the next send starts',
+        () async {
+      // The post-turn refetch answers without the key, as GET /sessions/:id does.
+      final api = FakeDjApi()
+        ..onGetSession = ((_) async => SessionDetail(session: _session(), messages: [], queue: []));
+      final second = Completer<TurnResult>();
+      var call = 0;
+      api.onSendMessage = (id, text) =>
+          ++call == 1 ? Future.value(turn('d1', 2, addMusic: AddMusicOffer.history)) : second.future;
+      final container = _makeContainer(api);
+      await container.read(chatProvider('s1').future);
+      final notifier = container.read(chatProvider('s1').notifier);
+      expect(container.read(chatProvider('s1')).value!.addMusic, isNull);
+
+      await notifier.send('play my favourites');
+      expect(api.getSessionCallCount, 2, reason: 'the notPersonal refetch ran');
+      expect(container.read(chatProvider('s1')).value!.addMusic, AddMusicOffer.history);
+
+      final pending = notifier.send('something else');
+      expect(container.read(chatProvider('s1')).value!.addMusic, isNull);
+      second.complete(turn('d2', 3));
+      await pending;
+      expect(container.read(chatProvider('s1')).value!.addMusic, isNull);
+    });
+
+    test('copyWith keeps addMusic unless told to clear it', () {
+      final state = ChatState(
+        session: _session(),
+        messages: const [],
+        queue: const [],
+        addMusic: AddMusicOffer.history,
+      );
+
+      expect(state.copyWith(sending: true).addMusic, AddMusicOffer.history);
+      expect(state.copyWith(clearAddMusic: true).addMusic, isNull);
     });
   });
 

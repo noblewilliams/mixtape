@@ -280,6 +280,22 @@ bool _hasPickState(Map<String, dynamic> json) =>
 List<String>? _suggestionsFromJson(Object? json) =>
     json == null ? null : (json as List).cast<String>().toList();
 
+/// What a turn offers to add to the listener's music (server `addMusic`).
+/// The server sends the key only when it offers something; a missing key or
+/// a value this client does not know reads as no offer.
+enum AddMusicOffer {
+  /// The "Add my listening history" pill: an own-music brief answered from
+  /// a library or likes, for a listener with no plays yet.
+  history;
+
+  static AddMusicOffer? fromWire(Object? value) =>
+      value == 'history' ? AddMusicOffer.history : null;
+}
+
+/// The transcript line both clients send with `remake: true` (web:
+/// `REMAKE_TEXT`). The server reads the flag, never meaning from this text.
+const String remakeText = 'Remake this with my music';
+
 /// One album on the listener's Listen later shelf (`GET /me/listen-later`).
 class ListenLaterEntry {
   const ListenLaterEntry({
@@ -446,6 +462,7 @@ class SessionDetail {
     this.supportsInsert = false,
     this.pickState,
     this.suggestions,
+    this.addMusic,
   });
 
   SessionKind get kind => session.kind;
@@ -455,6 +472,9 @@ class SessionDetail {
 
   /// An album create whose first turn failed honestly: refinement pills.
   final List<String>? suggestions;
+
+  /// A mix create whose first turn offered to add music, else null.
+  final AddMusicOffer? addMusic;
 
   /// Missing legacy field is unknown rather than a synthetic empty seed.
   final PlaylistSeedState? playlistSeed;
@@ -487,6 +507,7 @@ class SessionDetail {
           ? AlbumPickState.fromJson(json)
           : null,
       suggestions: _suggestionsFromJson(json['suggestions']),
+      addMusic: AddMusicOffer.fromWire(json['addMusic']),
       sessionTitle: json['sessionTitle'] as String?,
       supportsInsert: json['supportsInsert'] as bool? ?? false,
       playlistSeed: json.containsKey('playlistSeed')
@@ -506,6 +527,7 @@ class TurnResult {
     this.sessionTitle,
     this.pickState,
     this.suggestions,
+    this.addMusic,
   });
 
   /// Album turns only: the shortlist after this turn. [queueVersion] is its
@@ -514,6 +536,9 @@ class TurnResult {
 
   /// An album turn that failed honestly: refinement pills, else null.
   final List<String>? suggestions;
+
+  /// A mix turn that offered to add music (the history pill), else null.
+  final AddMusicOffer? addMusic;
 
   final DjMessage djMessage;
   final List<QueueTrack> queue;
@@ -531,6 +556,7 @@ class TurnResult {
     sessionTitle: json['sessionTitle'] as String?,
     pickState: _hasPickState(json) ? AlbumPickState.fromJson(json) : null,
     suggestions: _suggestionsFromJson(json['suggestions']),
+    addMusic: AddMusicOffer.fromWire(json['addMusic']),
   );
 }
 

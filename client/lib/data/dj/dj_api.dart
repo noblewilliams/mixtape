@@ -162,6 +162,16 @@ class DjApi {
     TurnResult.fromJson,
   );
 
+  /// The wire half of [DjApiRemake.sendRemake]: the same endpoint and error
+  /// translation as [sendMessage], with the remake flag.
+  Future<TurnResult> _sendRemake(String id) => _call(
+    () => _client.postJson('/sessions/$id/messages', {
+      'text': remakeText,
+      'remake': true,
+    }),
+    TurnResult.fromJson,
+  );
+
   /// [ops] are remove/move only (0-based positions) — swap/extend need the
   /// DJ and come back as a 400 `dj_required`. [expectedVersion] is the
   /// caller's last-known queueVersion; omit it only when there is none yet.
@@ -514,4 +524,25 @@ class DjApi {
       return null;
     }
   }
+}
+
+/// What a [DjApi] stand-in implements to answer [DjApiRemake.sendRemake]
+/// itself (the real [DjApi] does not need to).
+abstract interface class DjRemakeSender {
+  Future<TurnResult> sendRemake(String id);
+}
+
+/// The remake turn: posts [remakeText] with `remake: true` (mix sessions
+/// only; an album session answers 409 `wrong_session_kind`).
+///
+/// An extension rather than a [DjApi] member on purpose: every test fake
+/// `implements DjApi`, so a new member is a compile error in each one,
+/// including fakes in files this change must not touch. A fake that
+/// implements [DjRemakeSender] answers the call; the real [DjApi] posts.
+/// Fold it into [DjApi] when the fakes can be updated together.
+extension DjApiRemake on DjApi {
+  Future<TurnResult> sendRemake(String id) => switch (this) {
+    final DjRemakeSender sender => sender.sendRemake(id),
+    _ => _sendRemake(id),
+  };
 }

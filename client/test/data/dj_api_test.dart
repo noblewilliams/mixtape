@@ -327,6 +327,57 @@ void main() {
       expect(result.queueVersion, 2);
     });
 
+    test('sendRemake POSTs the remake line and flag to the same endpoint and parses TurnResult', () async {
+      Uri? seenUrl;
+      Map<String, dynamic>? seenBody;
+      final inner = MockClient((req) async {
+        seenUrl = req.url;
+        seenBody = jsonDecode(req.body) as Map<String, dynamic>;
+        return http.Response(
+          jsonEncode({'djMessage': _djMessage(), 'queue': [_track()], 'queueVersion': 3}),
+          200,
+        );
+      });
+
+      final result = await _api(inner: inner).sendRemake('s1');
+
+      expect(seenUrl.toString(), 'http://x/sessions/s1/messages');
+      expect(seenBody, {'text': 'Remake this with my music', 'remake': true});
+      expect(result.queueVersion, 3);
+    });
+
+    test('sendRemake translates errors as sendMessage does (the album 409)', () async {
+      // The server's body as routes/sessions.ts sends it: no message.
+      final inner = MockClient((_) async => http.Response(
+            jsonEncode({'error': 'wrong_session_kind'}),
+            409,
+          ));
+
+      await expectLater(
+        _api(inner: inner).sendRemake('s1'),
+        throwsA(isA<DjApiException>()
+            .having((e) => e.kind, 'kind', 'wrong_session_kind')
+            .having((e) => e.message, 'message', 'The DJ ran into a problem — please try again.')
+            .having((e) => e.queue, 'queue', isNull)),
+      );
+    });
+
+    test('a turn offering the history pill parses addMusic', () async {
+      final inner = MockClient((_) async => http.Response(
+            jsonEncode({
+              'djMessage': _djMessage(),
+              'queue': [_track()],
+              'queueVersion': 2,
+              'addMusic': 'history',
+            }),
+            200,
+          ));
+
+      final result = await _api(inner: inner).sendMessage('s1', 'play my favourites');
+
+      expect(result.addMusic, AddMusicOffer.history);
+    });
+
     test('409 conflict with message -> DjApiException(kind: conflict)', () async {
       final inner = MockClient((_) async => http.Response(
             jsonEncode({'error': 'conflict', 'message': 'try that again'}),

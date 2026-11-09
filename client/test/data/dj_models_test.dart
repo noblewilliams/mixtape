@@ -348,6 +348,55 @@ void main() {
     });
   });
 
+  group('addMusic (the history pill)', () {
+    Map<String, dynamic> turn({Object? addMusic = 'x'}) => {
+          'djMessage': {
+            'id': 'm',
+            'role': 'dj',
+            'content': 'these are from your library',
+            'queueVersion': 2,
+            'createdAt': '2026-11-09T12:00:00.000Z',
+          },
+          'queue': [_track()],
+          'queueVersion': 2,
+          if (addMusic != 'x') 'addMusic': addMusic,
+        };
+
+    Map<String, dynamic> detail({Object? addMusic = 'x'}) => {
+          ..._detail(),
+          if (addMusic != 'x') 'addMusic': addMusic,
+        };
+
+    test('a turn offering the pill parses history', () {
+      expect(TurnResult.fromJson(turn(addMusic: 'history')).addMusic, AddMusicOffer.history);
+    });
+
+    test('a turn without the key, or with an unknown value, has no offer', () {
+      expect(TurnResult.fromJson(turn()).addMusic, isNull);
+      expect(TurnResult.fromJson(turn(addMusic: 'library')).addMusic, isNull);
+      expect(TurnResult.fromJson(turn(addMusic: null)).addMusic, isNull);
+    });
+
+    test('a create response offering the pill parses history', () {
+      expect(SessionDetail.fromJson(detail(addMusic: 'history')).addMusic, AddMusicOffer.history);
+    });
+
+    test('a session read without the key, or with an unknown value, has no offer', () {
+      expect(SessionDetail.fromJson(detail()).addMusic, isNull);
+      expect(SessionDetail.fromJson(detail(addMusic: 'library')).addMusic, isNull);
+      expect(SessionDetail.fromJson(detail(addMusic: null)).addMusic, isNull);
+    });
+
+    test('defaults to no offer in the constructors', () {
+      final session = DjSession.fromJson(_session());
+      expect(SessionDetail(session: session, messages: const [], queue: const []).addMusic, isNull);
+    });
+  });
+
+  test('remakeText is the transcript line both clients send for a remake', () {
+    expect(remakeText, 'Remake this with my music');
+  });
+
   group('ListenLaterEntry', () {
     test('parses an entry; listened follows listenedAt', () {
       final entry = ListenLaterEntry.fromJson(_entry(listenedAt: '2026-10-21T09:00:00.000Z'));

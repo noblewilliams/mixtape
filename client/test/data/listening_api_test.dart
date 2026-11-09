@@ -331,6 +331,24 @@ void main() {
       }
     });
 
+    test('getOnboarding reads musicReady, false when an older server omits it', () async {
+      const base =
+          '"userId":"user-1","sources":[],"hasLibrary":false,"chosenService":null,"markedRequestedAt":null,'
+          '"interviewCompletedAt":null,"importCompletedAt":null';
+      for (final (fragment, expected) in [
+        (',"musicReady":true', true),
+        (',"musicReady":false', false),
+        ('', false),
+      ]) {
+        final recorder = _Recorder({
+          'GET /me/onboarding': http.Response('{$base$fragment}', 200),
+        });
+        final state = await (await _api(recorder)).getOnboarding();
+        expect(state.musicReady, expected, reason: fragment);
+        expect(state.withChosenService('apple').musicReady, expected, reason: fragment);
+      }
+    });
+
     test('getOnboarding rejects an answer without the listener id', () async {
       final recorder = _Recorder({
         'GET /me/onboarding': http.Response(
@@ -401,6 +419,10 @@ void main() {
         'keep_sheet_signed_in',
         'keep_sheet_dismissed',
         'cap_reached',
+        'music_door_tapped',
+        'music_chip_tapped',
+        'music_added_from_mix',
+        'remake_tapped',
       ]);
     });
 

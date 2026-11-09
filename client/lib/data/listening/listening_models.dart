@@ -274,6 +274,7 @@ class OnboardingState {
     required this.interviewCompletedAt,
     required this.importCompletedAt,
     this.interview,
+    this.musicReady = false,
   });
 
   /// The signed-in listener, so device-local state (the "service chosen"
@@ -291,6 +292,11 @@ class OnboardingState {
 
   /// Null until the interview has been completed at all.
   final InterviewCounts? interview;
+
+  /// Whether the listener's own music can make a personal mix: a source or
+  /// library the pool reads, with candidates it accepts (server
+  /// `musicReady`). False when an older server omits the key.
+  final bool musicReady;
 
   /// Whether an EXPORT import has landed for this listener on any device:
   /// the funnel's `first_personal_mix` only counts after one. A live Apple
@@ -318,6 +324,9 @@ class OnboardingState {
         interview: json['interview'] == null
             ? null
             : InterviewCounts.fromJson(asObject(json['interview'])),
+        musicReady: json['musicReady'] == null
+            ? false
+            : readBool(json, 'musicReady'),
       );
 
   /// This state with the device-local service choice overlaid.
@@ -330,6 +339,7 @@ class OnboardingState {
     interviewCompletedAt: interviewCompletedAt,
     importCompletedAt: importCompletedAt,
     interview: interview,
+    musicReady: musicReady,
   );
 }
 
@@ -361,7 +371,14 @@ enum FunnelEventType {
   keepSheetShown('keep_sheet_shown'),
   keepSheetSignedIn('keep_sheet_signed_in'),
   keepSheetDismissed('keep_sheet_dismissed'),
-  capReached('cap_reached');
+  capReached('cap_reached'),
+
+  // Add your music (spec 2026-11-09). `music_chip_offered` and
+  // `remake_made` are written by the server and never posted from here.
+  musicDoorTapped('music_door_tapped'),
+  musicChipTapped('music_chip_tapped'),
+  musicAddedFromMix('music_added_from_mix'),
+  remakeTapped('remake_tapped');
 
   const FunnelEventType(this.wire);
 

@@ -204,10 +204,16 @@ final sessionsProvider =
 /// rendered in the same list as real messages without polluting [DjMessage]
 /// itself with a UI-only flag.
 class ChatMessage {
-  const ChatMessage(this.message, {this.isError = false});
+  const ChatMessage(this.message, {this.isError = false, this.remake = false});
 
   final DjMessage message;
   final bool isError;
+
+  /// Client-side only, never parsed from or sent to the server: this
+  /// optimistic listener line came from [ChatNotifier.remake], so a resend
+  /// after a failed turn must go back through [ChatNotifier.remake] (the
+  /// text alone would post a plain turn).
+  final bool remake;
 }
 
 /// `session.queueVersion` is the single source of truth for the current
@@ -223,6 +229,7 @@ class ChatState {
     this.supportsInsert = false,
     this.pickState,
     this.suggestions,
+    this.addMusic,
   });
 
   final DjSession session;
@@ -238,6 +245,10 @@ class ChatState {
   /// The latest failed album turn's refinement pills; cleared when the next
   /// send starts.
   final List<String>? suggestions;
+
+  /// What the latest mix turn offered to add (the history pill); cleared
+  /// when the next send starts, as [suggestions] are.
+  final AddMusicOffer? addMusic;
   final List<ChatMessage> messages;
   final List<QueueTrack> queue;
   final bool sending;
@@ -274,6 +285,8 @@ class ChatState {
     AlbumPickState? pickState,
     List<String>? suggestions,
     bool clearSuggestions = false,
+    AddMusicOffer? addMusic,
+    bool clearAddMusic = false,
   }) {
     assert(
       session == null || queueVersion == null,
@@ -296,6 +309,7 @@ class ChatState {
       supportsInsert: supportsInsert ?? this.supportsInsert,
       pickState: pickState ?? this.pickState,
       suggestions: clearSuggestions ? null : (suggestions ?? this.suggestions),
+      addMusic: clearAddMusic ? null : (addMusic ?? this.addMusic),
     );
   }
 }
@@ -409,6 +423,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     supportsInsert: detail.supportsInsert,
     pickState: detail.pickState,
     suggestions: detail.suggestions,
+    addMusic: detail.addMusic,
   );
 
   DjMessage _localMessage(String role, String content) => DjMessage(
@@ -438,7 +453,22 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// the send button. `sending` is restored in a `finally` so it can NEVER
   /// stick at true — not even for an [ApiException] or an entirely
   /// unforeseen exception — which would otherwise brick the composer.
-  Future<void> send(String text) async {
+  Future<void> send(String text) =>
+      _turn(text, (api) => api.sendMessage(sessionId, text));
+
+  /// Asks for a new version of this mix from the listener's own music: the
+  /// same turn as [send], with [remakeText] as the listener's line (marked
+  /// [ChatMessage.remake]), posted through [DjApiRemake.sendRemake].
+  Future<void> remake() =>
+      _turn(remakeText, (api) => api.sendRemake(sessionId), remake: true);
+
+  /// The turn pipeline [send] and [remake] share; [post] and the listener
+  /// line's [remake] marker are the only differences between them.
+  Future<void> _turn(
+    String text,
+    Future<TurnResult> Function(DjApi api) post, {
+    bool remake = false,
+  }) async {
     final nameRevision = _nameRevision;
     final base = state.value;
     if (base == null || base.sending) return;
@@ -448,17 +478,21 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         .acquire(MixOperation.sending);
     if (release == null) return;
 
-    final userMessage = ChatMessage(_localMessage('user', text));
+    final userMessage = ChatMessage(
+      _localMessage('user', text),
+      remake: remake,
+    );
     state = AsyncData(
       base.copyWith(
         messages: [...base.messages, userMessage],
         sending: true,
         clearSuggestions: true,
+        clearAddMusic: true,
       ),
     );
 
     try {
-      final result = await ref.read(djApiProvider).sendMessage(sessionId, text);
+      final result = await post(ref.read(djApiProvider));
       if (!_current(generation)) return;
       // A refused mix (an empty queue) that this turn filled is the
       // listener's mix landing, as a new mix with content is.
@@ -477,6 +511,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           queueVersion: result.queueVersion,
           pickState: result.pickState,
           suggestions: result.suggestions,
+          addMusic: result.addMusic,
         );
         if (newTitle == null || nameRevision != _nameRevision) return withQueue;
         // A same-turn rename (rename_session): a SECOND copyWith call, this
