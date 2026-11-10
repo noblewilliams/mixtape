@@ -1,5 +1,18 @@
 # Decision Log
 
+## 2026-11-10 — Proposed mixes no longer pitch adding music (founder)
+
+Every catalogue or proposed mix now shows the add-your-music line under it
+(decision 2026-11-09), with a working action. `PROPOSED_NOTICE` still had the
+DJ say that "adding their music from Library will sharpen the next mix", so
+the same pitch appeared twice, the DJ's version without a link.
+
+- `PROPOSED_NOTICE` keeps "naming more artists they love will sharpen the
+  next mix" and now tells the DJ not to suggest adding music, because the app
+  shows it under the mix. Matches the own-music rule (decision 2026-11-09:
+  the DJ does not repeat the pitch).
+- Amends step 4 ("Say so") of `superpowers/specs/2026-10-21-everyone-gets-a-mix-design.md`.
+
 ## 2026-11-10 — Catalogue curation without thinking; blend dedupes by song (founder)
 
 A no-library listener's first mix waited on catalogue curation, which under

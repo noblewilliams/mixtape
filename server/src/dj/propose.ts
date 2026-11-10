@@ -47,8 +47,8 @@ export const ROUND_TWO_CUTOFF_MS = 50_000
 // result whenever the queue came from proposals.
 export const PROPOSED_NOTICE =
   "note: these picks come from the DJ's own knowledge of music, each one checked against Apple Music, not from this " +
-  "listener's own listening. Say so plainly, and tell them that naming more artists they love or adding their music " +
-  'from Library will sharpen the next mix.'
+  "listener's own listening. Say so plainly, and tell them that naming more artists they love will sharpen the next " +
+  "mix. Don't suggest adding their music; the app shows that under the mix."
 
 // Apple's search takes a term of at most 120 characters (musickit/catalog.ts).
 const MAX_TERM_LENGTH = 120

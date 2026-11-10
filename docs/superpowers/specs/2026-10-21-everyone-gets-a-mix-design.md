@@ -234,6 +234,8 @@ When step 1's floor fails for a listener with no personal data, and
    picks are from the DJ's own knowledge, checked against Apple Music, not
    from the listener's listening, and naming more artists or adding their
    music sharpens them.
+   (Amended 2026-11-10: the DJ no longer suggests adding music, because the
+   add-your-music line under the mix does; see decisions.md.)
 
 Budget per turn: the proposal call (1 to 2 fetches), up to 25 Apple
 searches, the final reply round, the title, and the database over one
