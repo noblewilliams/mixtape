@@ -37,6 +37,18 @@ Apple Music listeners.
 - **Reopens if** remake usage is low once catalog listeners add music.
   Then the remake moves into the music-in moment itself (the sync alert's
   done state or the import result), not only the mix.
+- **As built (2026-11-10), from the task reviews:**
+  - Migration `0049` stores `not_personal` on each mix version, and
+    restore puts it back, so restoring a catalog version brings its label
+    back.
+  - A remake on a mix that is already personal gets a fixed "This mix is
+    already built from your music."
+  - A remake with nothing usable gets a fixed reply with no model call.
+  - The history pill is skipped when the mix landed songs new to the
+    listener, and on the web for listeners not on Spotify (the web has no
+    Apple history import).
+  - On the web, Spotify-waiting opens the Exportify page, whose Choose
+    files takes the data ZIP.
 
 ## 2026-11-09 — Every song earns its place; notes make the case (founder)
 

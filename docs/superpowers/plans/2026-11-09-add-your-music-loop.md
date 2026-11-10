@@ -321,14 +321,33 @@ S3, in the same file.
 
 ## Gates (founder, at action time)
 
-- **G1.** Apply migration `0048` from a clean worktree of committed HEAD,
-  with `DATABASE_URL` from `server/.dev.vars` (production Neon). Then deploy
-  the Worker from the same worktree. Smoke-test with a throwaway anonymous
-  user:
+- **G1.** Apply migrations `0048` and `0049` (S3 added `0049`) from a clean
+  worktree of committed HEAD, with `DATABASE_URL` from `server/.dev.vars`
+  (production Neon). Then deploy the Worker from the same worktree.
+  Smoke-test with a throwaway anonymous user:
   - `GET /onboarding` has `musicReady: false`;
   - a mix is catalog;
   - `remake: true` with no music writes no version;
   - then delete the user.
+
+**Code-complete 2026-11-10.**
+
+| Task | Commit |
+|---|---|
+| C1 | `37b90f6` |
+| W1 | `5b44534` |
+| S1 | `db9c7e0` |
+| S2 | `9edec35` |
+| C2 | `9bdcd67` |
+| W2 | `d827533` |
+| C3 | `3486087` |
+| S3 | `1886478` |
+| S4 | `f1c117b` |
+
+Each task was reviewed with one fix round. Last full runs: server 2602,
+web 1057, iOS 2158, each passing. Two iOS tests already failed at HEAD
+and are unrelated: the `welcome_screen` reduced-motion case and
+`lyric_turn` "version markers…".
 - **G2.** Netlify publishes `main`. Run one private-window pass: a catalog
   mix shows the door, and Sync Apple Music opens Step 3.
 - **G3.** TestFlight build, then a device run: catalog mix → Sync Apple
