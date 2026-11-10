@@ -10,3 +10,6 @@ coverage/
 
 # App Store screenshots: large, kept locally only
 docs/releases/*-app-store-screenshots/
+
+# TypeScript incremental build caches
+*.tsbuildinfo
