@@ -8,8 +8,9 @@ node_modules/
 dist/
 coverage/
 
-# App Store screenshots: large, kept locally only
+# App Store screenshots and creative-asset renders: large, kept locally only
 docs/releases/*-app-store-screenshots/
+docs/releases/*-app-store-creative-assets/*.png
 
 # TypeScript incremental build caches
 *.tsbuildinfo

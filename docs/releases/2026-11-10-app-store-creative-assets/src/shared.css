@@ -1,0 +1,8 @@
+html, body { margin: 0; padding: 0; }
+body { overflow: hidden; background: #120e1b; -webkit-font-smoothing: antialiased; }
+.stage { position: relative; overflow: hidden; }
+.stage > svg { position: absolute; inset: 0; }
+.grain { position: absolute; inset: 0; opacity: .10; mix-blend-mode: overlay; pointer-events: none; }
+/* Apple's measured safe rectangle; render with #debug to see it. */
+.safe { display: none; position: absolute; outline: 2px dashed #0ff; z-index: 9; }
+body.debug .safe { display: block; }

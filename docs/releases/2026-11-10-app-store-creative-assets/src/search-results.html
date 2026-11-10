@@ -1,0 +1,164 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!-- App Store search results asset, 3:2. Rendered at 1920x1280 CSS px, 2x => 3840x2560.
+     Apple safe area (focal content): 2168x1030 centred => CSS 1084x515 at (418, 382.5).
+     Everything a shopper must read sits inside it; ribbons outside are decoration for larger crops. -->
+<link rel="stylesheet" href="shared.css">
+<style>
+  body { width: 1920px; height: 1280px; }
+  .stage { width: 1920px; height: 1280px;
+    font-family: -apple-system, 'SF Pro Display', system-ui, sans-serif;
+    background:
+      radial-gradient(1000px 760px at 8% 10%, rgba(190, 82, 124, .85), transparent 70%),
+      radial-gradient(900px 640px at 48% -10%, rgba(126, 70, 168, .55), transparent 70%),
+      radial-gradient(1000px 760px at 100% 100%, rgba(58, 86, 190, .80), transparent 70%),
+      radial-gradient(800px 640px at 92% 6%, rgba(96, 66, 170, .62), transparent 70%),
+      radial-gradient(900px 640px at 0% 108%, rgba(84, 100, 176, .62), transparent 70%),
+      radial-gradient(760px 520px at 50% 108%, rgba(168, 76, 120, .45), transparent 72%),
+      radial-gradient(700px 460px at 70% 52%, rgba(214, 140, 102, .30), transparent 72%),
+      linear-gradient(180deg, #1d1428 0%, #140f1e 55%, #18142a 100%);
+  }
+  .safe { left: 418px; top: 382.5px; width: 1084px; height: 515px; }
+
+  .copy { position: absolute; left: 450px; top: 382.5px; height: 515px; width: 530px;
+    display: flex; flex-direction: column; justify-content: center; }
+  h1 { margin: 0; color: #f6f1ea; font-weight: 800; font-size: 71px; line-height: .98; letter-spacing: -2px; }
+  .bar { width: 120px; height: 9px; border-radius: 5px; margin-top: 30px;
+    background: linear-gradient(90deg, #c9687f 0 20%, #d18a65 20% 40%, #d2c76f 40% 60%, #709778 60% 80%, #688fa8 80%); }
+  .sub { margin-top: 26px; color: rgba(246, 241, 234, .74); font-size: 32px; font-weight: 500; letter-spacing: -.3px; line-height: 1.2; }
+
+  .ui { position: absolute; left: 1004px; top: 382.5px; height: 515px; width: 470px;
+    display: flex; flex-direction: column; justify-content: center; gap: 26px; }
+  .glass { background: #f7f4f0; box-shadow: 0 24px 60px rgba(8, 4, 16, .45), inset 0 1px 0 rgba(255,255,255,.9); }
+  .composer { height: 96px; border-radius: 48px; display: flex; align-items: center; padding: 0 30px 0 32px; gap: 20px; }
+  .caret { width: 9px; height: 46px; border-radius: 5px;
+    background: linear-gradient(180deg, #c9687f 0 20%, #d18a65 20% 40%, #d2c76f 40% 60%, #709778 60% 80%, #688fa8 80%); }
+  .composer .text { flex: 1; font-size: 36px; font-weight: 600; color: #231c22; letter-spacing: -.2px; white-space: nowrap; }
+  .mic { width: 30px; height: 40px; }
+
+  .mix { border-radius: 34px; padding: 26px 26px 26px; }
+  .row { display: flex; align-items: center; gap: 22px; }
+  .tile { width: 128px; height: 82px; flex: none; filter: drop-shadow(0 6px 10px rgba(30, 20, 30, .28)); transform: rotate(-3deg); }
+  .title { font-size: 33px; font-weight: 700; color: #231c22; letter-spacing: -.4px; line-height: 1.12; }
+  .meta { margin-top: 6px; font-size: 25px; font-weight: 500; color: #7b7178; }
+  .play { margin-top: 24px; height: 84px; border-radius: 22px; background: #4a3c47; color: #fff; position: relative; overflow: hidden;
+    display: flex; align-items: center; font-size: 32px; font-weight: 700; box-shadow: 0 10px 24px rgba(40, 24, 40, .3); }
+  .play .main { flex: 1; display: flex; align-items: center; justify-content: center; gap: 16px; }
+  .play .tri { width: 0; height: 0; border-left: 22px solid #fff; border-top: 13px solid transparent; border-bottom: 13px solid transparent; }
+  .play .more { width: 100px; height: 100%; display: flex; align-items: center; justify-content: center; border-left: 2px solid rgba(255,255,255,.16); }
+  .play::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 7px;
+    background: linear-gradient(90deg, #c9687f 0 20%, #d18a65 20% 40%, #d2c76f 40% 60%, #709778 60% 80%, #688fa8 80%); }
+</style>
+</head>
+<body>
+<div class="stage">
+  <svg id="art" width="1920" height="1280" viewBox="0 0 1920 1280" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <filter id="glow" x="-20%" y="-60%" width="140%" height="220%"><feGaussianBlur stdDeviation="26"/></filter>
+      <filter id="ribbonShadow" x="-20%" y="-40%" width="140%" height="180%">
+        <feGaussianBlur in="SourceAlpha" stdDeviation="12"/>
+        <feOffset dy="16"/>
+        <feComponentTransfer><feFuncA type="linear" slope=".42"/></feComponentTransfer>
+        <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <!-- words enter top left, read left to right, and dive into the composer -->
+      <path id="wordsPath" d="M -160 200 C 260 120, 640 330, 1000 285 C 1180 262, 1270 330, 1290 500"/>
+      <!-- the mix leaves the result card as rainbow tape, loops once, and runs off the bottom right -->
+      <path id="mixPath" d="M 1420 760
+        C 1560 760, 1540 1090, 1700 1090
+        C 1772 1090, 1830 1032, 1830 960
+        C 1830 888, 1772 830, 1700 830
+        C 1628 830, 1570 888, 1570 960
+        C 1570 1100, 1700 1200, 1860 1220
+        C 1960 1232, 2000 1240, 2080 1250"/>
+    </defs>
+
+    <!-- words strand -->
+    <g filter="url(#ribbonShadow)">
+      <use href="#wordsPath" fill="none" stroke="#f5f0e6" stroke-width="58"/>
+      <text font-family="-apple-system, 'SF Pro Display', system-ui" font-size="28" font-weight="700"
+            fill="#3d2a3a" letter-spacing=".2" dy="10">
+        <textPath id="t1" href="#wordsPath" text-anchor="end">Sunday reset, slow and warm  ·  4 a.m. and still coding  ·  first dance  ·  a rainy drive home</textPath>
+      </text>
+    </g>
+
+    <!-- rainbow mix -->
+    <g id="rainbowGlow" filter="url(#glow)" opacity=".9"></g>
+    <g id="rainbowA"></g>
+    <g id="rainbowShade" filter="url(#glow)" opacity=".55"></g>
+    <g id="rainbowB"></g>
+  </svg>
+
+  <div class="copy">
+    <h1>Say the moment.<br>Get the mix.</h1>
+    <div class="bar"></div>
+    <div class="sub">Your personal DJ builds the queue.</div>
+  </div>
+
+  <div class="ui">
+    <div class="composer glass">
+      <div class="caret"></div>
+      <div class="text">A rainy drive home</div>
+      <svg class="mic" viewBox="0 0 30 40" fill="none" stroke="#3a3138" stroke-width="3" stroke-linecap="round">
+        <rect x="9" y="2" width="12" height="22" rx="6"/>
+        <path d="M3 18a12 12 0 0 0 24 0M15 30v8"/>
+      </svg>
+    </div>
+    <div class="mix glass">
+      <div class="row">
+        <svg class="tile" viewBox="0 0 200 128" xmlns="http://www.w3.org/2000/svg">
+          <rect x="1" y="1" width="198" height="126" rx="9" fill="#5f7a49" stroke="#252328" stroke-width="2"/>
+          <rect x="3" y="3" width="194" height="122" rx="7" fill="none" stroke="#fff" stroke-opacity=".25" stroke-width="2"/>
+          <rect x="14" y="12" width="172" height="73" rx="5" fill="#f2ede2"/>
+          <path d="M22 31h156" stroke="#4b4247" stroke-opacity=".34"/>
+          <text x="22" y="28" font-family="Noteworthy" font-weight="700" font-size="13" fill="#3b3138">Wet Pages &amp; Whispers</text>
+          <path fill="#c9687f" d="M14 39h172v5H14z"/><path fill="#d18a65" d="M14 44h172v5H14z"/>
+          <path fill="#d2c76f" d="M14 49h172v5H14z"/><path fill="#709778" d="M14 54h172v5H14z"/>
+          <path fill="#688fa8" d="M14 59h172v5H14z"/>
+          <rect x="42" y="42" width="116" height="39" rx="7" fill="#17161a" stroke="#28262a" stroke-width="2"/>
+          <rect x="72" y="55" width="56" height="12" rx="2" fill="#493638"/>
+          <g fill="#dedbd6" stroke="#28262a" stroke-width="4"><circle cx="61" cy="61" r="15"/><circle cx="139" cy="61" r="15"/></g>
+          <g fill="#f4f1ec"><circle cx="61" cy="61" r="5"/><circle cx="139" cy="61" r="5"/></g>
+          <path d="M48 89h104l12 30H36z" fill="#17161a" stroke="#28262a" stroke-width="2"/>
+          <g fill="#f2f0eb" stroke="#544e52" stroke-width="2"><circle cx="58" cy="105" r="6"/><circle cx="142" cy="105" r="6"/></g>
+          <g fill="#9a9590" stroke="#4f4a4d" stroke-width="1.5">
+            <rect x="75" y="100" width="8" height="13" rx="2"/><rect x="117" y="100" width="8" height="13" rx="2"/>
+            <circle cx="100" cy="108" r="4"/>
+          </g>
+        </svg>
+        <div>
+          <div class="title">Wet Pages &amp; Whispers</div>
+          <div class="meta">15 songs · 1 h 09</div>
+        </div>
+      </div>
+      <div class="play">
+        <div class="main"><span class="tri"></span>Play</div>
+        <div class="more"><svg width="26" height="16" viewBox="0 0 26 16" fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l10 10 10-10"/></svg></div>
+      </div>
+    </div>
+  </div>
+
+  <svg class="grain" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+    <filter id="n"><feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter>
+    <rect width="100%" height="100%" filter="url(#n)"/>
+  </svg>
+  <div class="safe"></div>
+</div>
+<script src="ribbon.js"></script>
+<script>
+  const mix = document.getElementById('mixPath');
+  const loopBottom = lengthWhere(mix, p => p.y >= 1089);
+  const loopTop = lengthWhere(mix, p => p.y <= 831, 1, loopBottom);
+  const loopLeft = lengthWhere(mix, p => p.x <= 1571, 1, loopTop);
+  const loopBelow = lengthWhere(mix, p => p.x >= 1820, 1, loopLeft); // past where the exit overlaps the loop
+  drawRainbow(mix, { width: 96, glow: '#rainbowGlow',
+    parts: [['#rainbowA', 0, loopTop + 2], ['#rainbowB', loopTop, Infinity]],
+    shade: ['#rainbowShade', loopLeft, loopBelow] });
+  // Words end just before the tape turns down into the composer.
+  const words = document.getElementById('wordsPath');
+  document.getElementById('t1').setAttribute('startOffset', lengthWhere(words, p => p.x >= 1150) );
+</script>
+</body>
+</html>

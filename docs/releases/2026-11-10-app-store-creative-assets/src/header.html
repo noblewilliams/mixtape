@@ -1,0 +1,151 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!-- App Store product page header. Rendered at 1920x823 CSS px, 2x => 3840x1646.
+     Apple safe area (focal content): 1646x661 centred => CSS 823x330.5 at (548.5, 246).
+     Story, left to right: your words (paper tape) -> the DJ (cassette) -> your mix (rainbow tape). -->
+<link rel="stylesheet" href="shared.css">
+<style>
+  body { width: 1920px; height: 823px; }
+  .stage { width: 1920px; height: 823px;
+    background:
+      radial-gradient(900px 620px at 10% 6%, rgba(190, 82, 124, .85), transparent 70%),
+      radial-gradient(760px 520px at 44% -8%, rgba(126, 70, 168, .60), transparent 70%),
+      radial-gradient(900px 600px at 98% 96%, rgba(58, 86, 190, .80), transparent 70%),
+      radial-gradient(760px 560px at 82% 4%, rgba(96, 66, 170, .62), transparent 70%),
+      radial-gradient(820px 520px at 4% 112%, rgba(84, 100, 176, .62), transparent 70%),
+      radial-gradient(700px 420px at 52% 112%, rgba(168, 76, 120, .45), transparent 72%),
+      radial-gradient(560px 380px at 50% 50%, rgba(214, 140, 102, .40), transparent 72%),
+      linear-gradient(180deg, #1d1428 0%, #140f1e 55%, #18142a 100%);
+  }
+  .safe { left: 548.5px; top: 246px; width: 823px; height: 330.5px; }
+</style>
+</head>
+<body>
+<div class="stage">
+  <svg id="art" width="1920" height="823" viewBox="0 0 1920 823" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <filter id="glow" x="-20%" y="-60%" width="140%" height="220%"><feGaussianBlur stdDeviation="24"/></filter>
+      <filter id="shadow" x="-30%" y="-30%" width="160%" height="180%">
+        <feGaussianBlur in="SourceAlpha" stdDeviation="18"/>
+        <feOffset dy="22"/>
+        <feComponentTransfer><feFuncA type="linear" slope=".6"/></feComponentTransfer>
+        <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <filter id="ribbonShadow" x="-20%" y="-40%" width="140%" height="180%">
+        <feGaussianBlur in="SourceAlpha" stdDeviation="12"/>
+        <feOffset dy="16"/>
+        <feComponentTransfer><feFuncA type="linear" slope=".42"/></feComponentTransfer>
+        <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <linearGradient id="sheen" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#fff" stop-opacity=".16"/>
+        <stop offset=".45" stop-color="#fff" stop-opacity="0"/>
+      </linearGradient>
+      <!-- incoming words: paper tape -->
+      <path id="wordsPath" d="M -140 712 C 170 772, 300 430, 520 392 S 740 420, 880 404"/>
+      <path id="wordsPath2" d="M -140 128 C 170 70, 330 236, 530 292 S 760 350, 880 372"/>
+      <!-- outgoing mix: rainbow tape with one loop -->
+      <path id="mixPath" d="M 1120 392
+        C 1300 392, 1380 548, 1560 548
+        C 1651 548, 1724 475, 1724 384
+        C 1724 293, 1651 220, 1560 220
+        C 1469 220, 1396 293, 1396 384
+        C 1396 540, 1520 668, 1700 662
+        C 1830 658, 1900 560, 2060 520"/>
+    </defs>
+
+    <!-- second, quieter strand: more moments -->
+    <g filter="url(#ribbonShadow)">
+      <use href="#wordsPath2" fill="none" stroke="#e3d9cd" stroke-width="42"/>
+      <text font-family="-apple-system, 'SF Pro Display', system-ui" font-size="21" font-weight="700"
+            fill="#5b4458" letter-spacing=".3" dy="7.5">
+        <textPath id="t2" href="#wordsPath2" text-anchor="end">first dance  ·  4 a.m. and still coding  ·  Sunday reset, slow and warm</textPath>
+      </text>
+    </g>
+
+    <!-- rainbow out (built in script: glow, entry half, loop half on top) -->
+    <g id="rainbowGlow" filter="url(#glow)" opacity=".9"></g>
+    <g id="rainbowA"></g>
+    <g id="rainbowShade" filter="url(#glow)" opacity=".55"></g>
+    <g id="rainbowB"></g>
+
+    <!-- main strand: your words -->
+    <g filter="url(#ribbonShadow)">
+      <use href="#wordsPath" fill="none" stroke="#f5f0e6" stroke-width="64"/>
+      <text font-family="-apple-system, 'SF Pro Display', system-ui" font-size="31" font-weight="700"
+            fill="#3d2a3a" letter-spacing=".2" dy="11">
+        <textPath id="t1" href="#wordsPath" text-anchor="end">windows down, summer  ·  a rainy drive home, nothing too sad</textPath>
+      </text>
+    </g>
+
+    <!-- the DJ: cassette (440 x 281.6, centred in the safe area) -->
+    <g id="cassette" transform="translate(960 411) rotate(-4) translate(-220 -140.8) scale(2.2)" filter="url(#shadow)">
+      <rect id="body" x="1" y="1" width="198" height="126" rx="9" fill="#6a4d65" stroke="#252328" stroke-width="2"/>
+      <rect x="1" y="1" width="198" height="126" rx="9" fill="url(#sheen)"/>
+      <rect x="3" y="3" width="194" height="122" rx="7" fill="none" stroke="#fff" stroke-opacity=".28" stroke-width="2"/>
+      <rect x="14" y="12" width="172" height="73" rx="5" fill="#f2ede2"/>
+      <path d="M22 31h156" stroke="#4b4247" stroke-opacity=".30"/>
+      <text x="24" y="28.5" font-family="Noteworthy" font-weight="700" font-size="13" fill="#3b3138">rainy drive home</text>
+      <path fill="#c9687f" d="M14 39h172v5H14z"/>
+      <path fill="#d18a65" d="M14 44h172v5H14z"/>
+      <path fill="#d2c76f" d="M14 49h172v5H14z"/>
+      <path fill="#709778" d="M14 54h172v5H14z"/>
+      <path fill="#688fa8" d="M14 59h172v5H14z"/>
+      <rect x="42" y="42" width="116" height="39" rx="7" fill="#17161a" stroke="#28262a" stroke-width="2"/>
+      <rect x="72" y="55" width="56" height="12" rx="2" fill="#493638"/>
+      <defs><g id="reel">
+        <circle r="16" fill="#dedbd6" stroke="#28262a" stroke-width="4"/>
+        <g fill="#28262a">
+          <rect x="-3" y="-15" width="6" height="6" rx="1"/>
+          <rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(45)"/>
+          <rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(90)"/>
+          <rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(135)"/>
+          <rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(180)"/>
+          <rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(225)"/>
+          <rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(270)"/>
+          <rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(315)"/>
+        </g>
+        <circle r="5" fill="#f4f1ec"/>
+      </g></defs>
+      <use href="#reel" transform="translate(61 61)"/>
+      <use href="#reel" transform="translate(139 61) rotate(20)"/>
+      <path d="M48 89h104l12 30H36z" fill="#17161a" stroke="#28262a" stroke-width="2"/>
+      <g fill="#f2f0eb" stroke="#544e52" stroke-width="2">
+        <circle cx="58" cy="105" r="6"/>
+        <circle cx="142" cy="105" r="6"/>
+      </g>
+      <g fill="#9a9590" stroke="#4f4a4d" stroke-width="1.5">
+        <rect x="75" y="100" width="8" height="13" rx="2"/>
+        <rect x="117" y="100" width="8" height="13" rx="2"/>
+        <circle cx="100" cy="108" r="4"/>
+        <circle cx="9" cy="9" r="3"/>
+        <circle cx="191" cy="9" r="3"/>
+        <circle cx="9" cy="119" r="3"/>
+        <circle cx="191" cy="119" r="3"/>
+      </g>
+    </g>
+  </svg>
+  <svg class="grain" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+    <filter id="n"><feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter>
+    <rect width="100%" height="100%" filter="url(#n)"/>
+  </svg>
+  <div class="safe"></div>
+</div>
+<script src="ribbon.js"></script>
+<script>
+  // Rainbow: entry half first, then the loop half drawn over it so the tape crosses itself.
+  const mix = document.getElementById('mixPath');
+  const loopTop = lengthWhere(mix, p => p.y <= 221);            // top of the loop: the seam hides here
+  const loopLeft = lengthWhere(mix, p => p.x <= 1397, 1, loopTop);   // left side, about to cross the entry
+  const loopBelow = lengthWhere(mix, p => p.x >= 1740, 1, loopLeft); // past where the exit overlaps the loop
+  drawRainbow(mix, { width: 112, glow: '#rainbowGlow',
+    parts: [['#rainbowA', 0, loopTop + 2], ['#rainbowB', loopTop, Infinity]],
+    shade: ['#rainbowShade', loopLeft, loopBelow] });
+  // Each strand of words ends just before it slips behind the cassette.
+  endWordsAtCassette('wordsPath', 't1', 'body', 16);
+  endWordsAtCassette('wordsPath2', 't2', 'body', 14);
+</script>
+</body>
+</html>
