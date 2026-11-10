@@ -5,8 +5,12 @@ import { EnrichSourceError } from './types'
 // candidate query, its skip_* flags, its remaining/cooling counts, the status
 // endpoint and analyze-previews all agree on what "exhausted" means.
 //
-// A permanent failure (no match, no lyrics, a 4xx, a malformed response, an
-// unknown internal error) is retried at once and gives up at MAX_ATTEMPTS.
+// A miss (NO_MATCH, NO_LYRICS) is the provider's answer, not an error, and
+// gives up after MAX_MISS_ATTEMPTS: retried, at once or weeks later, it came
+// back the same for 48 of 48 sampled songs, and an immediate retry kept the
+// song at the head of the queue for two more cron runs (decisions 2026-11-10).
+// Another permanent failure (a 4xx, a malformed response, an unknown internal
+// error) is retried at once and gives up at MAX_ATTEMPTS.
 // A transient one (429, 5xx, timeout, abort, network failure, AI binding
 // failure) says nothing about the track, so it waits out an exponential
 // backoff before the next try and gives up only at MAX_TRANSIENT_ATTEMPTS.
@@ -14,9 +18,12 @@ import { EnrichSourceError } from './types'
 // error text, and rows written before this policy have no prefix and keep
 // the permanent rule.
 export const MAX_ATTEMPTS = 3
+export const MAX_MISS_ATTEMPTS = 1
 export const MAX_TRANSIENT_ATTEMPTS = 8
 export const TRANSIENT_BACKOFF_CAP_HOURS = 24
 export const TRANSIENT_PREFIX = 'transient: '
+export const NO_MATCH = 'no acceptable match'
+export const NO_LYRICS = 'no lyrics found'
 
 export function isTransientFailure(e: unknown): boolean {
   if (e instanceof EnrichSourceError) return e.transient
@@ -30,6 +37,8 @@ export function isTransientFailure(e: unknown): boolean {
 // would be typed text, and these are fixed numbers, never user input.
 const PREFIX = sql.raw(`'${TRANSIENT_PREFIX}'`)
 const PERMANENT_LIMIT = sql.raw(String(MAX_ATTEMPTS))
+const MISS_LIMIT = sql.raw(String(MAX_MISS_ATTEMPTS))
+const MISSES = sql.raw(`'${NO_MATCH}', '${NO_LYRICS}'`)
 const TRANSIENT_LIMIT = sql.raw(String(MAX_TRANSIENT_ATTEMPTS))
 const CAP_HOURS = sql.raw(String(TRANSIENT_BACKOFF_CAP_HOURS))
 // Smallest exponent whose power of two reaches the cap, so the power below is
@@ -46,7 +55,10 @@ function transient(ef: SQLChunk): SQL {
 // Given up on: no further attempt, ever (until the row is cleared).
 export function failureExhausted(alias: string): SQL {
   const ef = sql.identifier(alias)
-  return sql`(${ef}.track_id IS NOT NULL AND ${ef}.attempts >= CASE WHEN ${transient(ef)} THEN ${TRANSIENT_LIMIT} ELSE ${PERMANENT_LIMIT} END)`
+  return sql`(${ef}.track_id IS NOT NULL AND ${ef}.attempts >= CASE
+    WHEN ${transient(ef)} THEN ${TRANSIENT_LIMIT}
+    WHEN ${ef}.error IN (${MISSES}) THEN ${MISS_LIMIT}
+    ELSE ${PERMANENT_LIMIT} END)`
 }
 
 // Waiting out its backoff: last_at + 1h x least(24, 2^(attempts - 1)), so

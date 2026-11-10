@@ -5,7 +5,10 @@ import { okDeps, OK_FEATURES } from '../helpers/enrich-fixtures'
 import { enrichTrack, type EnrichDeps } from '../../src/enrich/pipeline'
 import { runEnrichmentBatch, enrichmentStatus, MAX_ATTEMPTS } from '../../src/enrich/runner'
 import {
+  MAX_MISS_ATTEMPTS,
   MAX_TRANSIENT_ATTEMPTS,
+  NO_LYRICS,
+  NO_MATCH,
   TRANSIENT_BACKOFF_CAP_HOURS,
   TRANSIENT_PREFIX,
 } from '../../src/enrich/failures'
@@ -151,6 +154,9 @@ describe('failure classification', () => {
 describe('transient backoff selection', () => {
   it('exports the policy constants', () => {
     expect(MAX_ATTEMPTS).toBe(3)
+    expect(MAX_MISS_ATTEMPTS).toBe(1)
+    expect(NO_MATCH).toBe('no acceptable match')
+    expect(NO_LYRICS).toBe('no lyrics found')
     expect(MAX_TRANSIENT_ATTEMPTS).toBe(8)
     expect(TRANSIENT_BACKOFF_CAP_HOURS).toBe(24)
     expect(TRANSIENT_PREFIX).toBe('transient: ')
@@ -194,14 +200,61 @@ describe('transient backoff selection', () => {
     expect((await enrichmentStatus(db)).exhausted).toBe(1)
   })
 
-  it('exhausts a permanent stage at 3 attempts with no backoff before that', async () => {
+  it('exhausts a permanent error at 3 attempts with no backoff before that', async () => {
     const db = await createTestDb()
     const t = await seedFeaturesOnly(db)
-    await seedFailure(db, t.id, { error: 'no acceptable match', attempts: MAX_ATTEMPTS - 1, ageHours: 0 })
-    expect(await runEnrichmentBatch(db, { ...okDeps, features: async () => null }, 5))
-      .toMatchObject({ processed: 1, remaining: 0, cooling: 0 })
+    await seedFailure(db, t.id, { error: 'EnrichSourceError: reccobeats: search HTTP 400', attempts: MAX_ATTEMPTS - 2, ageHours: 0 })
+    const notFound = { ...okDeps, ...throwing(new EnrichSourceError('reccobeats', 'search HTTP 400', 400)) }
+    expect(await runEnrichmentBatch(db, notFound, 5)).toMatchObject({ processed: 1, remaining: 1, cooling: 0 })
+    expect(await runEnrichmentBatch(db, notFound, 5)).toMatchObject({ processed: 1, remaining: 0, cooling: 0 })
     expect(await runEnrichmentBatch(db, okDeps, 5)).toMatchObject({ processed: 0, remaining: 0, cooling: 0 })
     expect((await enrichmentStatus(db)).exhausted).toBe(1)
+  })
+
+  // A miss is the provider's answer, not an error: retried at once or weeks
+  // later it came back the same for 48 of 48 sampled songs (2026-11-10).
+  it('gives up on a no-match after one attempt', async () => {
+    const db = await createTestDb()
+    await seedFeaturesOnly(db)
+    const features = vi.fn(async () => null)
+    expect(await runEnrichmentBatch(db, { ...okDeps, features }, 5))
+      .toEqual({ processed: 1, features: 0, meaning: 0, remaining: 0, cooling: 0 })
+    expect(await runEnrichmentBatch(db, { ...okDeps, features }, 5)).toMatchObject({ processed: 0 })
+    expect(features).toHaveBeenCalledTimes(1)
+    expect((await enrichmentStatus(db)).exhausted).toBe(1)
+  })
+
+  it('gives up on a no-lyrics miss after one attempt', async () => {
+    const db = await createTestDb()
+    const t = await seedTrack(db)
+    await db.insert(trackFeatures).values({ trackId: t.id, ...OK_FEATURES, source: 'reccobeats' })
+    const lyrics = vi.fn(async () => null)
+    expect(await runEnrichmentBatch(db, { ...okDeps, lyrics }, 5))
+      .toEqual({ processed: 1, features: 0, meaning: 0, remaining: 0, cooling: 0 })
+    expect(await runEnrichmentBatch(db, { ...okDeps, lyrics }, 5)).toMatchObject({ processed: 0 })
+    expect(lyrics).toHaveBeenCalledTimes(1)
+    expect((await enrichmentStatus(db)).exhausted).toBe(1)
+  })
+
+  it('treats a stored miss below 3 attempts as given up, so rows written before the rule are not retried', async () => {
+    const db = await createTestDb()
+    const a = await seedFeaturesOnly(db, 'no-match')
+    await seedFailure(db, a.id, { error: NO_MATCH, attempts: 1, ageHours: 0 })
+    const b = await seedTrack(db, 'no-lyrics')
+    await db.insert(trackFeatures).values({ trackId: b.id, ...OK_FEATURES, source: 'reccobeats' })
+    await seedFailure(db, b.id, { stage: 'meaning', error: NO_LYRICS, attempts: 2, ageHours: 0 })
+    expect(await runEnrichmentBatch(db, okDeps, 5)).toEqual({ processed: 0, features: 0, meaning: 0, remaining: 0, cooling: 0 })
+    expect((await enrichmentStatus(db)).exhausted).toBe(2)
+  })
+
+  it('a miss on one stage leaves the other stage due', async () => {
+    const db = await createTestDb()
+    const t = await seedTrack(db)
+    await seedFailure(db, t.id, { error: NO_MATCH, attempts: 1, ageHours: 0 })
+    const features = vi.fn(async () => OK_FEATURES)
+    expect(await runEnrichmentBatch(db, { ...okDeps, features }, 5))
+      .toEqual({ processed: 1, features: 0, meaning: 1, remaining: 0, cooling: 0 })
+    expect(features).not.toHaveBeenCalled()
   })
 
   it('a permanent failure after transient ones exhausts the stage once attempts reach 3', async () => {
@@ -219,7 +272,7 @@ describe('transient backoff selection', () => {
   it('allows a permanent failure followed by transient ones up to 8 attempts in total', async () => {
     const db = await createTestDb()
     const t = await seedFeaturesOnly(db)
-    await seedFailure(db, t.id, { error: 'no acceptable match', attempts: 2, ageHours: 0 })
+    await seedFailure(db, t.id, { error: 'EnrichSourceError: reccobeats: search HTTP 400', attempts: 2, ageHours: 0 })
     const failing = { ...okDeps, ...throwing(new EnrichSourceError('reccobeats', 'search HTTP 503', 503)) }
     for (let attempts = 3; attempts <= MAX_TRANSIENT_ATTEMPTS; attempts++) {
       await db.update(enrichmentFailures).set({ lastAt: new Date(Date.now() - 48 * HOUR) })

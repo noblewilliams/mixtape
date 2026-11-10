@@ -7,7 +7,7 @@ import type { AudioFeatures, TrackKey } from './reccobeats'
 import type { LyricsResult, LyricsKey } from './lrclib'
 import type { Embedder } from './embedder'
 import type { SpotifyEnrichSource } from './reccobeats-by-id'
-import { isTransientFailure, TRANSIENT_PREFIX } from './failures'
+import { isTransientFailure, NO_LYRICS, NO_MATCH, TRANSIENT_PREFIX } from './failures'
 
 export type EnrichDeps = {
   storefront: string
@@ -148,7 +148,7 @@ export async function enrichTrack(
         await clearFailure(db, track.id, 'features')
         featuresOutcome = 'ok'
       } else {
-        await recordFailure(db, track.id, 'features', 'no acceptable match')
+        await recordFailure(db, track.id, 'features', NO_MATCH)
         featuresOutcome = 'miss'
       }
     } catch (e) {
@@ -170,7 +170,7 @@ export async function enrichTrack(
         // Either nothing was found, or what came back has no usable signal
         // (not instrumental, no text) — a silent "ok" here would leave a
         // permanent embedding-less row masquerading as complete.
-        await recordFailure(db, track.id, 'meaning', 'no lyrics found')
+        await recordFailure(db, track.id, 'meaning', NO_LYRICS)
         meaningOutcome = 'miss'
       } else {
         const embedding = lyr.instrumental || !lyr.lyrics ? null : await deps.embed(lyr.lyrics)

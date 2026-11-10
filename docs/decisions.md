@@ -1537,3 +1537,32 @@ the panels must look like ours), Archived as a third segment, and a drawn glass
 thumb (no lens; not the system's). **Reopens if:** the full swipe archives by
 accident in use (turn `fullSwipe` off), or the native control drifts from the
 dock's look in a later iOS.
+
+## 2026-11-10 — A provider's miss gives up after one attempt
+
+The enrichment cron reached about 35 songs an hour, against the 60 its slots
+allow (10 songs a run, six runs an hour; decisions 2026-11-06). A song whose
+features or lyrics came back "no acceptable match" or "no lyrics found" was
+retried at once, and since the queue is ordered by priority and then age it
+stayed at the head and took a slot in each of the next two runs: about 600 of
+1,440 slots a day went to asking a question that had already been answered.
+On 2026-11-10, 48 songs given up on with a miss (half within two days, half
+more than two weeks earlier) were looked up again against ReccoBeats and
+LRCLIB, and none came back.
+
+- A miss (`NO_MATCH`, `NO_LYRICS` in `enrich/failures.ts`) is given up after
+  one attempt (`MAX_MISS_ATTEMPTS`). This amends the 2026-10-04 rule that a
+  real miss keeps three attempts.
+- Other permanent failures (a 4xx, a malformed response, an internal error)
+  keep three attempts at once; transient ones keep the 2026-10-04 backoff.
+- No migration: rows already stored with a miss and fewer than three
+  attempts count as given up. The prompt-time fill (`dj/catalogue-fill.ts`)
+  stops counting such a row as live at once instead of after half an hour.
+- A song whose duration arrives after its lyrics miss is not looked up again;
+  clearing its failure row retries it.
+
+Expected effect: about 1,400 songs a day reach the cron, so the 5,600 songs
+due on 2026-11-10 clear in about four days instead of about seven.
+**Reopens if:** misses start resolving on a later lookup (then retry a miss
+once after 30 days, as Apple linking does), or a day of cron runs after the
+deploy still reaches well under 60 distinct songs an hour.
