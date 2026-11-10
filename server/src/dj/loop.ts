@@ -23,7 +23,7 @@ import {
   type OpIntent,
   type QueueOp,
 } from './contracts'
-import { buildPool, hasPersonalCandidates, outsideCap, resolvePoolMode, type PoolMode, type PoolTrack } from './pool'
+import { buildPool, hasPersonalCandidates, musicReady, outsideCap, resolvePoolMode, type PoolMode, type PoolTrack } from './pool'
 import { curate, CurationNothingFits, CurationTruncated, CurationUnparseable, type CuratedTrack } from './curate'
 import { checkGenres, type GenreCandidate } from './genre-check'
 import {
@@ -129,8 +129,8 @@ export const INSUFFICIENT_SEEDS_TEXT =
 // Prepended, as its own first line, to a generate/edit tool result whenever
 // the picks came from the shared corpus rather than the listener's own
 // history (corpus mode, see resolvePoolMode) — the model must say so, and
-// the session is flagged not_personal (markNotPersonal) in the same breath
-// so the client's banner agrees with what the DJ said.
+// the session is flagged not_personal (setNotPersonal, markNotPersonal) in
+// the same breath so the client's banner agrees with what the DJ said.
 export const CORPUS_NOTICE =
   "note: these picks come from the shared catalog and this listener's seeds, not their own listening history. Say so plainly."
 
@@ -306,6 +306,44 @@ export function outsidePicksNotice(positions: number[]): string {
   const one = positions.length === 1
   return `note: ${positions.length} of these picks ${one ? 'is a song' : 'are songs'} this listener does not have yet, ` +
     `at position${one ? '' : 's'} ${positions.join(', ')} (0-based). Tell them plainly which ${one ? 'one is' : 'ones are'} new to them.`
+}
+
+// Remake with my music (spec 2026-11-09 add-your-music-loop, decision 4): a
+// turn the listener started with the remake button (DjTurnOptions.remake).
+// The flag is the request; the words that ride it are never read.
+//
+// REMAKE_NOTE follows the listener's own line in the current user turn, as
+// the model sees it this request only: never persisted, so a later turn's
+// history does not carry it, and never in sessionContext, so curation does
+// not see it. Not the leading context message: the persona makes that
+// bookkeeping, never an instruction. It holds the brief's own familiarity
+// and allowOutside against the button's words ("with my music"), which
+// would otherwise read as only their own music. Goes to the MODEL.
+export const REMAKE_NOTE =
+  '(App note: they tapped "Remake with my music", and their own music is in now. Call generate_queue with the brief ' +
+  'this mix was made from: the same themes and energy shape, familiarity and allowOutside exactly as that brief had ' +
+  "them, and the song count it asked for, or the current queue's length if it never said one.)"
+
+// The remake's reply when the listener's music cannot make a mix yet
+// (musicReady false: no source or library, or one with nothing the candidate
+// rule admits). Persisted as the DJ's own line, with no model call and no new
+// version: the catalogue mix stands.
+export const REMAKE_NOT_READY_TEXT =
+  "Your library came in, but I couldn't use any of it for this yet, so the mix stays as it was."
+
+// The remake's reply on a session already built from their music (a double
+// tap, or a second device that had not caught up): nothing to remake, so no
+// model call, no version and no funnel row.
+export const REMAKE_ALREADY_TEXT = 'This mix is already built from your music.'
+
+// Appended to a remake's generate_queue result once a personal mix landed.
+// `yours` counts the landed songs not marked new to the listener (the queue
+// view's newToYou, which the clients show), `total` every landed song. Goes
+// to the MODEL.
+export function remakeCountNotice(yours: number, total: number): string {
+  if (yours === total) return `note: all ${total} of these songs are the listener's own. Say so in one line.`
+  if (yours === 0) return `note: none of these ${total} songs are the listener's own yet, all of them are new to them. Say so plainly.`
+  return `note: ${yours} of these ${total} songs are the listener's own, the rest are new to them. Say so in one line.`
 }
 
 export const CURATION_APOLOGY = 'lost my train of thought on that one. try again?'
@@ -730,6 +768,11 @@ type GenerateOutcome = {
   // What a queue write did, in the listener's terms, for the reply a turn
   // that later fails still owes them (see TurnChanges). Set with queueChanged.
   changeSummary?: string
+  // The queue this generate landed, read after the label was set (so its
+  // newToYou marks are the ones the clients see), and whether it came from
+  // the listener's own pool. Set with queueChanged; a remake turn counts its
+  // songs from it (remakeCountNotice).
+  landed?: { personal: boolean; queue: QueueTrackView[] }
 }
 
 // "Made a new mix of 15 songs." Stated, not styled: it stands in for the
@@ -757,17 +800,46 @@ export function editSummary(ops: QueueOp[], result: Pick<ApplyOpsResult, 'added'
   return parts.length > 0 ? parts.join(' ') : 'Updated the mix.'
 }
 
-// Flags a session whose queue now holds picks drawn from the shared corpus
-// (dj_sessions.not_personal — the client renders its "not personal yet"
-// banner off this). Set here, never cleared here: a session that has mixed
-// corpus picks stays flagged. Idempotent — the WHERE skips an already-
-// flagged row outright, so a second corpus generate in the same session
-// neither rewrites the flag nor rides $onUpdate into a spurious updatedAt.
-async function markNotPersonal(db: Db, sessionId: string): Promise<void> {
-  await db
-    .update(djSessions)
-    .set({ notPersonal: true })
-    .where(and(eq(djSessions.id, sessionId), eq(djSessions.notPersonal, false)))
+// dj_sessions.not_personal: the client renders its "not personal yet" label
+// off this. Idempotent: the WHERE skips a row that already holds `value`, so
+// a repeat write neither rewrites the flag nor rides $onUpdate into a
+// spurious updatedAt.
+//
+// The label rule (spec 2026-11-09 add-your-music-loop, decision 4): every
+// whole-mix generate that lands a queue calls this with its own pool. True
+// for a mix from the shared catalogue (corpus curation, corpus proposals),
+// false for one from the listener's own pool, outside picks and shortfall
+// proposals included: a few songs new to them are still their mix. This is
+// what clears the label after a remake, or any fresh mix once their music is
+// in. Called only after the queue landed: a session is "not personal"
+// because of what its queue holds, not what was attempted.
+//
+// `version` is the one that write landed. Its mix_versions row was captured
+// inside the write, with the flag as it stood then, so it takes the new
+// value in the same transaction as the session: restoring it brings this
+// label back (dj/mix-history.ts).
+async function setNotPersonal(db: Db, sessionId: string, value: boolean, version: number): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx
+      .update(djSessions)
+      .set({ notPersonal: value })
+      .where(and(eq(djSessions.id, sessionId), eq(djSessions.notPersonal, !value)))
+    await tx
+      .update(mixVersions)
+      .set({ notPersonal: value })
+      .where(and(
+        eq(mixVersions.sessionId, sessionId),
+        eq(mixVersions.version, version),
+        or(isNull(mixVersions.notPersonal), ne(mixVersions.notPersonal, value)),
+      ))
+  })
+}
+
+// Edits (swap, extend) only ever set the flag: an edit replaces part of the
+// mix, so corpus picks it lands make the session not personal, and personal
+// picks beside a catalogue mix's songs never clear it.
+async function markNotPersonal(db: Db, sessionId: string, version: number): Promise<void> {
+  await setNotPersonal(db, sessionId, true, version)
 }
 
 // Prompt seeds a listener may hold. Prompts are cheap to send and every seed
@@ -1312,7 +1384,9 @@ export function partialVerifiedNotice(confirmed: number, asked: number): string 
 
 // The never-refuse path: the queue is the verified proposals in the model's
 // order, cut to targetCount, with the model's reasons, written exactly as
-// curated picks are (replaceQueue, markNotPersonal, the updated listing).
+// curated picks are (replaceQueue, setNotPersonal, the updated listing).
+// Only an insufficient_seeds listener reaches it, so the mix is never
+// personal.
 async function executeProposedQueue(
   db: Db,
   deps: DjDeps,
@@ -1351,7 +1425,7 @@ async function executeProposedQueue(
       fingerprint: seed.status === 'ready' ? seed.fingerprint : null },
     intent.energyArc ?? null,
   )
-  await markNotPersonal(db, session.id)
+  await setNotPersonal(db, session.id, true, version)
   if (!state.funnelWritten) {
     state.funnelWritten = true
     try {
@@ -1377,6 +1451,7 @@ async function executeProposedQueue(
     newVersion: version,
     intent,
     changeSummary: mixSummary(updatedQueue.length),
+    landed: { personal: false, queue: updatedQueue },
   }
 }
 
@@ -1483,7 +1558,9 @@ async function executeOnlyArtistQueue(
       fingerprint: seed.status === 'ready' ? seed.fingerprint : null },
     intent.energyArc ?? null,
   )
-  if (mode === 'corpus') await markNotPersonal(db, session.id)
+  // The label follows the pool mode: a personal listener's artist mix holds
+  // catalogue songs they do not own, and is still their mix.
+  await setNotPersonal(db, session.id, mode === 'corpus', version)
   await setSessionOnlyArtist(db, session.id, only.name)
   const updatedQueue = await getActiveQueue(db, session.id)
   // Catalogue songs a personal listener does not own are new to them, and
@@ -1508,6 +1585,7 @@ async function executeOnlyArtistQueue(
     newVersion: version,
     intent,
     changeSummary: mixSummary(updatedQueue.length),
+    landed: { personal: mode === 'personal', queue: updatedQueue },
   }
 }
 
@@ -1641,10 +1719,12 @@ async function generateFromBrief(
       fingerprint: seed.status === 'ready' ? seed.fingerprint : null },
     intent.energyArc ?? null,
   )
-  // Flagged only once the corpus picks have actually landed in the queue —
-  // a session is "not personal" because of what its queue holds, not
-  // because of what was attempted.
-  if (poolMode.mode === 'corpus') await markNotPersonal(db, session.id)
+  // Set only once the picks have actually landed in the queue, from the
+  // pool they came from: a corpus mix (its proposed blend included) is not
+  // personal, and a personal one is, whatever outside picks or shortfall
+  // proposals it holds. Before the listing is read, so its newToYou marks
+  // follow the new label.
+  await setNotPersonal(db, session.id, poolMode.mode === 'corpus', version)
   // The model must describe results from THIS listing, never from
   // assumption — accounting numbers alone ("3 added") don't tell it what
   // actually landed where, or in what order.
@@ -1673,6 +1753,7 @@ async function generateFromBrief(
     newVersion: version,
     intent,
     changeSummary: mixSummary(updatedQueue.length),
+    landed: { personal: poolMode.mode === 'personal', queue: updatedQueue },
   }
 }
 
@@ -1977,10 +2058,13 @@ async function executeEditQueue(
     const result = await applyOps(db, session.id, ops, 'dj', provider, undefined,
       needsPool ? { seedRevision: seed.revision, playlistId: seed.status === 'ready' ? seed.playlistId : null,
         fingerprint: seed.status === 'ready' ? seed.fingerprint : null } : undefined, parsed.data.energyArc)
-    // Same rule as executeGenerateQueue: flagged after the picks landed
-    // (applyOps is atomic — a throw above means nothing landed and we never
-    // get here), and the model is told in the same result.
-    if (corpusPicksLanded || proposedPicksLanded) await markNotPersonal(db, session.id)
+    // Flagged after the picks landed, as a generate is (applyOps is atomic —
+    // a throw above means nothing landed and we never get here), and the
+    // model is told in the same result. Set only, never cleared: an edit
+    // keeps the rest of the mix it changed (see markNotPersonal). Both
+    // flags are corpus picks: proposedFill runs only for an
+    // insufficient_seeds listener, never a personal one.
+    if (corpusPicksLanded || proposedPicksLanded) await markNotPersonal(db, session.id, result.version)
     // Same rationale as executeGenerateQueue: the accounting line alone
     // can't tell the model which position actually moved/dropped/swapped —
     // the model must describe results from this listing, never assumption.
@@ -2149,12 +2233,27 @@ type RenameTracker = { title?: string }
 // the turn then fails, runDjTurn turns these into the DJ's reply (spec
 // 2026-11-09 every-song-earns-its-place, decision 4). A generate replaces
 // the whole queue, so it replaces every summary before it.
-type TurnChanges = { summaries: string[] }
+// `remakeMade` marks the remake_made funnel row written, so a second
+// generate or a conflict retry in the same remake turn writes no other.
+type TurnChanges = { summaries: string[]; remakeMade?: true }
 
 function recordChange(changes: TurnChanges, outcome: { queueChanged: boolean; changeSummary?: string }, replacesQueue: boolean): void {
   if (!outcome.queueChanged || !outcome.changeSummary) return
   if (replacesQueue) changes.summaries = []
   changes.summaries.push(outcome.changeSummary)
+}
+
+// The server's remake_made funnel row (spec 2026-11-09 add-your-music-loop,
+// decision 7): a remake landed a personal version. Once per turn, user and
+// surface only, like proposed_mix.
+async function recordRemakeMade(db: Db, session: DjSessionRef, surface: Surface, changes: TurnChanges): Promise<void> {
+  if (changes.remakeMade) return
+  changes.remakeMade = true
+  try {
+    await db.insert(funnelEvents).values({ userId: session.userId, type: 'remake_made', surface })
+  } catch {
+    // A missing funnel row never fails the turn.
+  }
 }
 
 // Thrown out of attemptTurn on ANY failure, wrapping whatever actually broke
@@ -2238,7 +2337,10 @@ async function attemptTurn(
     // so the queue listing still opens the block.
     const nameLine = formatFirstNameLine(listenerFirstName)
     const contextMessage: LlmMessage = { role: 'user', content: nameLine ? `${sessionContext}\n${nameLine}` : sessionContext }
-    const baseMessages: LlmMessage[] = [contextMessage, ...history, { role: 'user', content: userText }]
+    // A remake turn's note follows the listener's line in this request only
+    // (see REMAKE_NOTE); the persisted row stays their words alone.
+    const currentTurn = options.remake ? `${userText}\n\n${REMAKE_NOTE}` : userText
+    const baseMessages: LlmMessage[] = [contextMessage, ...history, { role: 'user', content: currentTurn }]
     const liveMessages: LlmMessage[] = []
 
     let lastGenerateIntent: Intent | undefined
@@ -2282,6 +2384,13 @@ async function attemptTurn(
         if (call.name === 'generate_queue') {
           const outcome = await executeGenerateQueue(db, countedDeps, session, call.input, userText, sessionContext, budget, currentVersion, { tracker: fillTracker, surface: options.surface ?? 'web' }, options.energyArc)
           resultText = outcome.resultText
+          // A remake that landed a personal mix: the DJ says how many of
+          // its songs are theirs, counted from the marks the clients show.
+          if (options.remake && outcome.landed?.personal) {
+            const { queue } = outcome.landed
+            resultText = `${resultText}\n${remakeCountNotice(queue.filter((t) => !t.newToYou).length, queue.length)}`
+            await recordRemakeMade(db, session, options.surface ?? 'web', changes)
+          }
           if (outcome.intent) lastGenerateIntent = outcome.intent
           addNamedSongs(namedSongs, outcome.intent?.namedSongs)
           if (outcome.queueChanged) currentVersion = outcome.newVersion!
@@ -2380,7 +2489,18 @@ function logTurn(sessionId: string, stats: AttemptStats | null, errorKind: DjErr
 // Per-turn settings the listener chose in the composer UI rather than typed.
 // surface is where the request came from (routes/sessions.ts), for the
 // catalogue fill's funnel row; absent means 'web'.
-export type DjTurnOptions = { energyArc?: Intent['energyArc']; surface?: Surface }
+// remake is the "Remake with my music" button (REMAKE_NOTE); absent or false
+// is an ordinary turn, whatever the words.
+export type DjTurnOptions = { energyArc?: Intent['energyArc']; surface?: Surface; remake?: boolean }
+
+// Why a remake turn has nothing to do, or null when it should run: the
+// session's flag first (one row), then musicReady.
+async function remakeRefusalText(db: Db, session: DjSessionRef): Promise<string | null> {
+  const [row] = await db.select({ notPersonal: djSessions.notPersonal }).from(djSessions).where(eq(djSessions.id, session.id))
+  if (row && !row.notPersonal) return REMAKE_ALREADY_TEXT
+  if (!(await musicReady(db, session.userId))) return REMAKE_NOT_READY_TEXT
+  return null
+}
 
 export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, userText: string, options: DjTurnOptions = {}): Promise<DjTurnResult> {
   // Read before anything else: (a) fails fast on a missing session before any
@@ -2398,6 +2518,23 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
     .insert(djMessages)
     .values({ sessionId: session.id, role: 'user', content: userText })
     .returning({ seq: djMessages.seq })
+
+  // A remake with nothing to do, answered with a fixed reply before any
+  // model call; the mix stands as it was (no version, no label change, no
+  // funnel row). Either the session is already personal (a double tap, a
+  // second device that had not caught up), or the listener's music cannot
+  // make a mix yet (the clients offer it only once musicReady is true, but
+  // a library can change under them).
+  const remakeRefusal = options.remake ? await remakeRefusalText(db, session) : null
+  if (remakeRefusal) {
+    const [djMessageRow] = await db
+      .insert(djMessages)
+      .values({ sessionId: session.id, role: 'dj', content: remakeRefusal, queueVersion: null })
+      .returning()
+    const queue = await getActiveQueue(db, session.id)
+    logTurn(session.id, null, null)
+    return { djMessage: djMessageRow, queue, queueVersion: startingVersion }
+  }
 
   // Hoisted OUT of attemptTurn (and shared across a QueueVersionConflict
   // retry) for exactly one reason: executeRenameSession's DB write lands

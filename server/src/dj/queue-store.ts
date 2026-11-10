@@ -28,7 +28,8 @@ export type QueueTrackView = {
   // user_tracks row and no playlist they keep shares its ISRC, else its
   // row id): an outside pick (dj/pool.ts buildOutsidePool). Always false in
   // a not-personal session (founder decision 2026-10-03: those mixes come
-  // from the shared catalogue and carry no mark; the flag is sticky).
+  // from the shared catalogue and carry no mark; a whole-mix generate sets
+  // the flag from its pool, an edit only ever sets it, dj/loop.ts).
   // Computed at read time, never stored, so it clears by itself once the
   // listener adds the song.
   newToYou: boolean

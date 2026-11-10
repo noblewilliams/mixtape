@@ -1610,6 +1610,11 @@ export const mixVersions = pgTable('mix_versions', {
   entries: jsonb('entries').$type<MixVersionEntry[]>().notNull(),
   energyArc: text('energy_arc').$type<EnergyArc>(),
   energyJourney: jsonb('energy_journey').$type<EnergyJourney>(),
+  // dj_sessions.not_personal as it stood with this version (spec 2026-11-09
+  // add-your-music-loop, decision 4), so a restore brings the label back
+  // with the songs. Null for versions written before migration 0049: a
+  // restore of one leaves the session's flag as it is.
+  notPersonal: boolean('not_personal'),
   restoredFrom: integer('restored_from'),
   requestId: text('request_id'),
   expectedVersion: integer('expected_version'),

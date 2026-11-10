@@ -81,10 +81,11 @@ describe('migration 0048 music nudges', () => {
     }
   })
 
-  it('is journalled as the latest entry after 0047, with a chained snapshot', async () => {
+  it('is journalled right after 0047, with a chained snapshot', async () => {
     const journal = JSON.parse(await readFile(JOURNAL, 'utf8')) as { entries: { idx: number; tag: string }[] }
-    expect(journal.entries.find((e) => e.idx === 48)?.tag).toBe('0048_music_nudges')
-    expect(journal.entries.at(-1)?.idx).toBe(48)
+    const at = journal.entries.findIndex((e) => e.idx === 48)
+    expect(journal.entries[at]?.tag).toBe('0048_music_nudges')
+    expect(journal.entries[at - 1]?.idx).toBe(47)
     const prev = JSON.parse(await readFile(SNAPSHOT('0047'), 'utf8')) as { id: string }
     const next = JSON.parse(await readFile(SNAPSHOT('0048'), 'utf8')) as {
       prevId: string

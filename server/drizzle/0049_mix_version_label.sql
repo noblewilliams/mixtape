@@ -1,0 +1,1 @@
+ALTER TABLE "mix_versions" ADD COLUMN "not_personal" boolean;

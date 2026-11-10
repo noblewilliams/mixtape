@@ -2,7 +2,7 @@ import { TAPE_CASE_COLORS } from '../../src/dj/tape-colors'
 import { describe, it, expect } from 'vitest'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { createApp, type AuthLike } from '../../src/app'
-import type { DjDeps } from '../../src/dj/loop'
+import { REMAKE_NOTE, REMAKE_NOT_READY_TEXT, type DjDeps } from '../../src/dj/loop'
 import type { LlmClient, LlmComplete, LlmRequest, LlmTurn, LlmAssistantBlock, LlmToolCall } from '../../src/dj/llm'
 import { LlmError } from '../../src/dj/llm'
 import type { Embedder } from '../../src/enrich/embedder'
@@ -691,6 +691,104 @@ describe('session routes', () => {
 
       const [row] = await db.select().from(djSessions).where(eq(djSessions.id, sessionId))
       expect(row.title).toBe('Lagos Nights')
+    })
+
+    // Spec 2026-11-09 add-your-music-loop, decision 4. The clients send this
+    // text with the flag; the server reads only the flag.
+    describe('remake', () => {
+      const REMAKE_TEXT = 'Remake this with my music'
+
+      async function catalogueSession(db: TestDb) {
+        await seedUser(db, 'u1')
+        await seedCorpusListener(db, 'u1')
+        const { llm } = makeFakeLlm([
+          { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'late night', targetCount: 4 })] },
+          { text: 'a first guess.' },
+        ])
+        const app = buildApp(db, { embed: fakeEmbed, llm }, authedAs('u1'))
+        const res = await postJson(app, '/sessions', { prompt: 'something for late night' })
+        const body = (await res.json()) as { session: { id: string; notPersonal: boolean } }
+        expect(body.session.notPersonal).toBe(true)
+        return body.session.id
+      }
+
+      it('remake: true reaches the loop: the note goes to the model and a personal mix clears the label', async () => {
+        const db = await createTestDb()
+        const sessionId = await catalogueSession(db)
+        await seedLibrary(db, 'u1', 6)
+        const fake = makeFakeLlm([
+          { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'late night', targetCount: 4 })] },
+          { text: 'remade from your music.' },
+        ])
+        const app = buildApp(db, { embed: fakeEmbed, llm: fake.llm }, authedAs('u1'))
+
+        const res = await postJson(app, `/sessions/${sessionId}/messages`, { text: REMAKE_TEXT, remake: true })
+
+        expect(res.status).toBe(200)
+        const body = (await res.json()) as { djMessage: { content: string }; queue: unknown[]; queueVersion: number }
+        expect(body.queueVersion).toBe(2)
+        expect(body.queue).toHaveLength(4)
+        expect(fake.requests[0].messages.at(-1)).toEqual({ role: 'user', content: `${REMAKE_TEXT}\n\n${REMAKE_NOTE}` })
+        const detail = (await (await getJson(app, `/sessions/${sessionId}`)).json()) as { session: { notPersonal: boolean } }
+        expect(detail.session.notPersonal).toBe(false)
+      })
+
+      it('remake: true with no usable music answers the fixed line without calling the model', async () => {
+        const db = await createTestDb()
+        const sessionId = await catalogueSession(db)
+        const fake = makeFakeLlm([{ text: 'never asked.' }])
+        const app = buildApp(db, { embed: fakeEmbed, llm: fake.llm }, authedAs('u1'))
+        const stale = new Date(Date.now() - 60_000)
+        await db.update(djSessions).set({ updatedAt: stale }).where(eq(djSessions.id, sessionId))
+
+        const res = await postJson(app, `/sessions/${sessionId}/messages`, { text: REMAKE_TEXT, remake: true })
+
+        expect(res.status).toBe(200)
+        const body = (await res.json()) as { djMessage: { content: string }; queue: unknown[]; queueVersion: number }
+        expect(body.djMessage.content).toBe(REMAKE_NOT_READY_TEXT)
+        expect(body.queueVersion).toBe(1)
+        expect(body.queue).toHaveLength(4)
+        expect(fake.calls).toBe(0)
+        // A turn like any other: the session moves to the top of the list.
+        const [row] = await db.select({ updatedAt: djSessions.updatedAt, notPersonal: djSessions.notPersonal })
+          .from(djSessions).where(eq(djSessions.id, sessionId))
+        expect(row.updatedAt.getTime()).toBeGreaterThan(stale.getTime())
+        expect(row.notPersonal).toBe(true)
+      })
+
+      it('a body without remake behaves as before: the same words are an ordinary turn', async () => {
+        const db = await createTestDb()
+        const sessionId = await catalogueSession(db)
+        const fake = makeFakeLlm([{ text: 'say more?' }])
+        const app = buildApp(db, { embed: fakeEmbed, llm: fake.llm }, authedAs('u1'))
+
+        for (const body of [{ text: REMAKE_TEXT }, { text: REMAKE_TEXT, remake: false }]) {
+          const res = await postJson(app, `/sessions/${sessionId}/messages`, body)
+          expect(res.status).toBe(200)
+          const json = (await res.json()) as { djMessage: { content: string }; queueVersion: number }
+          expect(json.djMessage.content).toBe('say more?')
+          expect(json.queueVersion).toBe(1)
+          expect(Object.keys(json).sort()).toEqual(['djMessage', 'queue', 'queueVersion'])
+        }
+        expect(fake.calls).toBe(2)
+        for (const req of fake.requests) {
+          for (const m of req.messages) if (typeof m.content === 'string') expect(m.content).not.toContain(REMAKE_NOTE)
+        }
+      })
+
+      it('rejects a non-boolean remake with 400 and writes nothing', async () => {
+        const db = await createTestDb()
+        const sessionId = await catalogueSession(db)
+        const fake = makeFakeLlm([{ text: 'never asked.' }])
+        const app = buildApp(db, { embed: fakeEmbed, llm: fake.llm }, authedAs('u1'))
+        const before = await db.select().from(djMessages).where(eq(djMessages.sessionId, sessionId))
+
+        const res = await postJson(app, `/sessions/${sessionId}/messages`, { text: REMAKE_TEXT, remake: 'yes' })
+
+        expect(res.status).toBe(400)
+        expect(fake.calls).toBe(0)
+        expect(await db.select().from(djMessages).where(eq(djMessages.sessionId, sessionId))).toHaveLength(before.length)
+      })
     })
   })
 

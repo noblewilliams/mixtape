@@ -131,9 +131,26 @@ plus an "Add my music" pill that both clients turn into a link
      from its own pool mode (true for corpus or proposed picks, false for a
      personal pool). Edits still only ever set it. This is what clears the
      label after a remake, and after any fresh mix made once music is in.
-   - If the pool is still corpus (the synced library had nothing usable),
-     no version is written and the DJ says their music isn't usable yet. The
-     door then shows "No music" again, because `musicReady` is false.
+   - **Versions keep their label.** Each mix version records `notPersonal`
+     as it stood after its write (`mix_versions.not_personal`, migration
+     `0049`). A restore sets the session's flag from the restored version, so
+     the catalog version restored after a remake shows the door again.
+     Versions from before `0049` hold no label, and restoring one leaves the
+     flag as it is.
+   - The note follows the listener's line in the current turn, for that
+     request only. It never enters the transcript, so later turns' history
+     doesn't carry it, and it never reaches curation. It keeps the brief's
+     familiarity and `allowOutside` as they were, and the song count the
+     brief asked for, against the button's words.
+   - A remake with nothing to do is answered before any model call, with no
+     version, no label change and no funnel row:
+     - On a session already built from their music (a double tap, or a
+       second device), the reply is "This mix is already built from your
+       music."
+     - If their music is still not ready (`musicReady` false: the synced
+       library had nothing usable), the reply is "Your library came in, but
+       I couldn't use any of it for this yet, so the mix stays as it was."
+       The door then shows "No music" again, because `musicReady` is false.
    - A remake is a turn, not a new mix, so it does not count against the
      anonymous three-mix cap.
 
@@ -209,6 +226,8 @@ plus an "Add my music" pill that both clients turn into a link
   - `dj/loop.ts`: the remake note and count note, the own-music notes, the
     label rule, the chip condition and `music_chip_at`.
   - Migration `0048`.
+  - Migration `0049`: `mix_versions.not_personal`, written on every
+    version and read by restore (`dj/mix-history.ts`).
 
 ## Accessibility
 

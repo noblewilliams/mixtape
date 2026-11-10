@@ -223,6 +223,26 @@ describe('artist-only mixes through runDjTurn', () => {
     expect(toolResults(requests)[0]).not.toContain('could be found')
   })
 
+  it('a personal listener\'s artist-only mix clears a catalogue session\'s label, catalogue songs and all', async () => {
+    // Spec 2026-11-09 add-your-music-loop, decision 4: the label follows the
+    // pool mode, not whether every song is owned.
+    const db = await createTestDb()
+    await seedUser(db)
+    await seedTracks(db, 'J. Cole', 3, { owner: 'u1' })
+    await seedTracks(db, 'J. Cole', 4)
+    const session = await seedSession(db)
+    await db.update(djSessions).set({ notPersonal: true }).where(eq(djSessions.id, session.id))
+    const { llm, requests } = scriptedLlm('generate_queue', { themes: 'cole', targetCount: 6, onlyArtist: 'J. Cole' })
+
+    const result = await runDjTurn(db, { llm, embed: embedFake }, { id: session.id, userId: 'u1' }, 'just J. Cole')
+
+    const [row] = await db.select({ notPersonal: djSessions.notPersonal }).from(djSessions).where(eq(djSessions.id, session.id))
+    expect(row.notPersonal).toBe(false)
+    expect(result.queue).toHaveLength(6)
+    expect(result.queue.some((t) => t.newToYou)).toBe(true)
+    expect(toolResults(requests)[0]).not.toContain(CORPUS_NOTICE)
+  })
+
   it('allowOutside false keeps an artist-only mix to their own copies', async () => {
     const db = await createTestDb()
     await seedUser(db)

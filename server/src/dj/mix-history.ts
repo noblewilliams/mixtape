@@ -27,6 +27,11 @@ const activeEntries = (db: Db, sessionId: string) =>
     .orderBy(asc(queueTracks.position))
 
 // Caller holds the session lock. Both the snapshot and mutation share its transaction.
+// The version keeps the session's label (dj_sessions.not_personal) as it
+// stands at capture, read under that lock: a restore brings it back with the
+// songs. A DJ write that changes the label after the queue landed stamps the
+// version too (dj/loop.ts setNotPersonal), so a version always holds the
+// flag as it stood after its write.
 export async function captureMixVersion(
   db: Db,
   sessionId: string,
@@ -55,7 +60,8 @@ export async function captureMixVersion(
     .from(trackFeatures).where(inArray(trackFeatures.trackId, entries.map(e => e.trackId))) : []
   const byId = new Map(features.map(f => [f.id, f.energy]))
   const energyJourney = energyArc ? evaluateEnergyJourney(energyArc, entries.map(e => byId.get(e.trackId) ?? null)) : null
-  await db.insert(mixVersions).values({ sessionId, version, entries, energyArc, energyJourney })
+  const [label] = await db.select({ notPersonal: djSessions.notPersonal }).from(djSessions).where(eq(djSessions.id, sessionId))
+  await db.insert(mixVersions).values({ sessionId, version, entries, energyArc, energyJourney, notPersonal: label?.notPersonal ?? null })
 }
 async function owned(db: Db, sessionId: string, userId: string) {
   const [session] = await db
@@ -89,6 +95,8 @@ async function snapshot(
     entries: await activeEntries(db, session.id),
     energyArc: null,
     energyJourney: null,
+    // The live version: its label is the session's own.
+    notPersonal: session.notPersonal,
     restoredFrom: null,
     requestId: null,
     expectedVersion: null,
@@ -216,9 +224,14 @@ export async function restoreMixVersion(
         .insert(queueTracks)
         .values(source.entries.map((e) => ({ ...e, sessionId })))
     const version = session.queueVersion + 1
+    // The label comes back with the songs: a catalogue version restored
+    // after a remake is "not personal" again, and the remake restored after
+    // it is not. A version from before migration 0049 holds no label, so the
+    // session's stays as it is.
+    const notPersonal = source.notPersonal ?? session.notPersonal
     await tx
       .update(djSessions)
-      .set({ queueVersion: version })
+      .set({ queueVersion: version, notPersonal })
       .where(eq(djSessions.id, sessionId))
     await tx
       .insert(mixVersions)
@@ -228,6 +241,7 @@ export async function restoreMixVersion(
         entries: source.entries,
         energyArc: source.energyArc,
         energyJourney: source.energyJourney,
+        notPersonal,
         restoredFrom: input.version,
         expectedVersion: input.expectedVersion,
         requestId: input.requestId,

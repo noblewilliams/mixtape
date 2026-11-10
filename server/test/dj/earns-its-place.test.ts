@@ -195,6 +195,22 @@ describe('decision 2: a short curation is filled from outside the library, then 
     expect(result.queue.filter((t) => t.newToYou)).toHaveLength(3)
   })
 
+  it('a personal mix filled from outside its library is still personal: a catalogue session it replaces loses the label', async () => {
+    // Spec 2026-11-09 add-your-music-loop, decision 4: the label follows the
+    // pool, and shortfall proposals are outside picks, not a corpus mix.
+    const { db, session } = await personalListener(3)
+    await db.update(djSessions).set({ notPersonal: true }).where(eq(djSessions.id, session.id))
+    const round = proposals(11)
+    const { fill } = fakeApple(round)
+    const { llm } = scriptedLlm([generate({ targetCount: 6 })], { proposed: round })
+
+    const result = await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true }, { id: session.id, userId: 'u1' }, 'soft jazz')
+
+    expect(await notPersonal(db, session.id)).toBe(false)
+    expect(result.queue).toHaveLength(6)
+    expect(result.queue.filter((t) => t.newToYou)).toHaveLength(3)
+  })
+
   it('a second generate_queue with a different brief in the same turn proposes afresh; the same brief reuses', async () => {
     const { db, session } = await personalListener(3)
     const round = proposals(11)

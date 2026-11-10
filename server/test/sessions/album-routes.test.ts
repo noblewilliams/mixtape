@@ -7,7 +7,7 @@ import type { AlbumDeps } from '../../src/albums/loop'
 import { LlmError, type LlmClient, type LlmComplete, type LlmToolCall, type LlmTurn } from '../../src/dj/llm'
 import { AppleCatalogError, type AppleCatalogAlbumClient, type CatalogAlbum } from '../../src/musickit/catalog'
 import type { Embedder } from '../../src/enrich/embedder'
-import { albums, djSessions, sessionEvents, user, userMusicProfiles } from '../../src/db/schema'
+import { albums, djMessages, djSessions, sessionEvents, user, userMusicProfiles } from '../../src/db/schema'
 import { upsertAlbums, writePickVersion } from '../../src/albums/store'
 
 const fakeEmbed: Embedder = async () => {
@@ -239,6 +239,18 @@ describe('album session routes', () => {
     expect(res.status).toBe(404)
     expect(await res.json()).toEqual({ error: 'album_picks_off' })
     expect(state.calls).toBe(0)
+  })
+
+  it('a remake on an album session is 409 wrong_session_kind and writes nothing', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const { id } = await seedAlbumSession(db)
+    const { app, state } = build(db)
+    const res = await send(app, 'POST', `/sessions/${id}/messages`, { text: 'Remake this with my music', remake: true })
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'wrong_session_kind' })
+    expect(state.calls).toBe(0)
+    expect(await db.select().from(djMessages).where(eq(djMessages.sessionId, id))).toHaveLength(0)
   })
 
   it('queue-ops on an album session is 409 wrong_session_kind', async () => {

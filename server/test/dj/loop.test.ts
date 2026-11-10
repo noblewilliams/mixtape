@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { asc, eq } from 'drizzle-orm'
+import { and, asc, eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import {
   runDjTurn,
@@ -8,6 +8,7 @@ import {
   FALLBACK_UNCHANGED_TEXT,
   EMPTY_LIBRARY_TEXT,
   INSUFFICIENT_SEEDS_TEXT,
+  NOTHING_FITS_TEXT,
   CORPUS_NOTICE,
   OUTSIDE_PERSONA_LINE,
   NEW_MARKER_LEGEND,
@@ -15,16 +16,22 @@ import {
   PERSONA_PROMPT_WITH_OUTSIDE,
   outsidePicksNotice,
   PROMPT_SEEDS_MAX,
+  REMAKE_ALREADY_TEXT,
+  REMAKE_NOTE,
+  REMAKE_NOT_READY_TEXT,
+  remakeCountNotice,
   type DjDeps,
   type DjSessionRef,
 } from '../../src/dj/loop'
-import { LlmError, type LlmClient, type LlmRequest, type LlmTurn, type LlmAssistantBlock, type LlmToolCall } from '../../src/dj/llm'
+import { LlmError, type LlmClient, type LlmMessage, type LlmRequest, type LlmTurn, type LlmAssistantBlock, type LlmToolCall } from '../../src/dj/llm'
 import { replaceQueue, applyOps, getActiveQueue } from '../../src/dj/queue-store'
+import { restoreMixVersion } from '../../src/dj/mix-history'
 import { DJ_TOOLS, DJ_TOOLS_WITH_OUTSIDE } from '../../src/dj/contracts'
 import {
   djMemories,
   djMessages,
   djSessions,
+  funnelEvents,
   mixVersions,
   tracks,
   trackFeatures,
@@ -118,6 +125,13 @@ function curateRequests(requests: LlmRequest[]): LlmRequest[] {
 async function readNotPersonal(db: TestDb, sessionId: string) {
   const [row] = await db.select({ notPersonal: djSessions.notPersonal }).from(djSessions).where(eq(djSessions.id, sessionId))
   return row.notPersonal
+}
+
+// The label a mix version recorded (mix_versions.not_personal).
+async function versionLabel(db: TestDb, sessionId: string, version: number) {
+  const [row] = await db.select({ notPersonal: mixVersions.notPersonal }).from(mixVersions)
+    .where(and(eq(mixVersions.sessionId, sessionId), eq(mixVersions.version, version)))
+  return row?.notPersonal
 }
 
 async function readMessages(db: TestDb, sessionId: string) {
@@ -2503,5 +2517,390 @@ describe("listener's first name", () => {
     const intentTexts = curateIntentBlocks(requests)
     expect(intentTexts).toHaveLength(1)
     expect(intentTexts[0]).not.toContain('first name')
+  })
+})
+
+// --- Spec 2026-11-09 add-your-music-loop, decision 4: remake and the label --
+
+describe('remake with my music', () => {
+  const REMAKE_TEXT = 'Remake this with my music'
+
+  // A catalogue session: a corpus listener's first mix, flagged not
+  // personal. The caller then lands music of their own (or not).
+  async function catalogueSession(db: TestDb) {
+    await seedUser(db, 'u1')
+    await seedCorpusListener(db, 'u1')
+    const session = await seedSession(db, 'u1')
+    const sessionRef: DjSessionRef = { id: session.id, userId: 'u1' }
+    const { llm } = makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'late night', targetCount: 5 })] },
+      { text: 'a first guess.' },
+    ])
+    const made = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'something for late night')
+    expect(await readNotPersonal(db, session.id)).toBe(true)
+    return { session, sessionRef, made }
+  }
+
+  // Every text the model was sent, raw (JSON.stringify would escape the
+  // note's quotes and let a negative check pass vacuously).
+  function modelInput(requests: LlmRequest[]): string {
+    return requests.flatMap((r) => r.messages.flatMap((m) => typeof m.content === 'string'
+      ? [m.content]
+      : (m.content as Array<{ text?: string; content?: unknown }>).flatMap((b) =>
+        typeof b.text === 'string' ? [b.text] : typeof b.content === 'string' ? [b.content] : []))).join('\n')
+  }
+
+  async function remakeRows(db: TestDb) {
+    return db.select().from(funnelEvents).where(eq(funnelEvents.type, 'remake_made'))
+  }
+
+  const liveAssistant = (m: LlmMessage) => m.role === 'assistant' && Array.isArray(m.content)
+
+  // How many times the note reaches one request.
+  function noteCount(req: LlmRequest): number {
+    return modelInput([req]).split(REMAKE_NOTE).length - 1
+  }
+
+  // The remake itself, once the caller has landed their library.
+  async function remake(db: TestDb, sessionRef: DjSessionRef) {
+    const { llm } = makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'late night', targetCount: 5 })] },
+      { text: 'remade from your own music.' },
+    ])
+    return runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, REMAKE_TEXT, { remake: true })
+  }
+
+  it('golden: a remake once the library is in generates once, writes version n+1 and clears the label', async () => {
+    const db = await createTestDb()
+    const { session, sessionRef, made } = await catalogueSession(db)
+    const library = new Set((await seedLibrary(db, 'u1', 8)).map((t) => t.id))
+    const { llm, requests } = makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'late night', targetCount: 5 })] },
+      { text: 'remade from your own music.' },
+    ])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, REMAKE_TEXT, { remake: true, surface: 'ios' })
+
+    expect(curateRequests(requests)).toHaveLength(1)
+    expect(result.queueVersion).toBe(made.queueVersion + 1)
+    expect(result.djMessage.queueVersion).toBe(made.queueVersion + 1)
+    expect(result.queue).toHaveLength(5)
+    expect(result.queue.every((t) => library.has(t.trackId))).toBe(true)
+    // A new version: the catalogue one stays in Versions to restore.
+    const versions = await db.select({ version: mixVersions.version }).from(mixVersions).where(eq(mixVersions.sessionId, session.id))
+    expect(versions.map((v) => v.version)).toEqual(expect.arrayContaining([made.queueVersion, made.queueVersion + 1]))
+    expect(await readNotPersonal(db, session.id)).toBe(false)
+    // The note follows the listener's line in this request, once per round:
+    // never the leading context message, curation or the transcript.
+    const round0 = conversationRequests(requests)[0].messages
+    expect(round0.at(-1)).toEqual({ role: 'user', content: `${REMAKE_TEXT}\n\n${REMAKE_NOTE}` })
+    expect(round0[0].content as string).not.toContain(REMAKE_NOTE)
+    for (const req of conversationRequests(requests)) expect(noteCount(req)).toBe(1)
+    expect(curateIntentBlocks(requests).some((b) => b.includes('App note'))).toBe(false)
+    // Each version holds the label it stood with.
+    expect(await versionLabel(db, session.id, made.queueVersion)).toBe(true)
+    expect(await versionLabel(db, session.id, result.queueVersion)).toBe(false)
+    const transcript = await readMessages(db, session.id)
+    expect(transcript.at(-2)?.content).toBe(REMAKE_TEXT)
+    expect(transcript.some((m) => m.content.includes(REMAKE_NOTE))).toBe(false)
+    // All five are theirs: the count says so.
+    expect(toolResultTextFrom(conversationRequests(requests)[1])).toContain(remakeCountNotice(5, 5))
+    const rows = await remakeRows(db)
+    expect(rows.map((r) => [r.userId, r.surface])).toEqual([['u1', 'ios']])
+
+    // A later turn's history carries the listener's line, not the note.
+    const later = makeFakeLlm([{ text: 'glad it fits.' }])
+    await runDjTurn(db, { embed: fakeEmbed, llm: later.llm }, sessionRef, 'nice')
+    const laterInput = modelInput(conversationRequests(later.requests))
+    expect(laterInput).toContain(REMAKE_TEXT)
+    expect(laterInput).not.toContain(REMAKE_NOTE)
+    expect(await remakeRows(db)).toHaveLength(1)
+  })
+
+  it('the count notice counts the landed picks that are not new to the listener', async () => {
+    const db = await createTestDb()
+    const { session, sessionRef, catalogue } = await seedOutsideWorld(db, 12, 8)
+    // The catalogue mix this session held before the library landed.
+    const before = await replaceQueue(db, session.id, catalogue.slice(0, 5).map((t) => ({ trackId: t.id, reason: '' })), 'dj')
+    await db.update(djSessions).set({ notPersonal: true }).where(eq(djSessions.id, session.id))
+    const { llm, requests } = greedyOutsideLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'drive', targetCount: 10, familiarity: 'adventurous' })] },
+      { text: 'remade.' },
+    ])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm, outsidePicks: true }, sessionRef, REMAKE_TEXT, { remake: true })
+
+    expect(result.queueVersion).toBe(before + 1)
+    expect(await readNotPersonal(db, session.id)).toBe(false)
+    const yours = result.queue.filter((t) => !t.newToYou).length
+    expect(yours).toBeGreaterThan(0)
+    expect(yours).toBeLessThan(result.queue.length)
+    const text = toolResultTextFrom(conversationRequests(requests)[1])
+    expect(text).toContain(remakeCountNotice(yours, result.queue.length))
+    expect(text.split('\n').filter((l) => l.startsWith('note: ') && l.includes("are the listener's own"))).toHaveLength(1)
+    expect((await remakeRows(db)).map((r) => r.surface)).toEqual(['web'])
+  })
+
+  it('remakeCountNotice states the split, an all-own mix without a "rest", and none plainly', () => {
+    expect(remakeCountNotice(12, 15)).toBe(
+      "note: 12 of these 15 songs are the listener's own, the rest are new to them. Say so in one line.")
+    expect(remakeCountNotice(5, 5)).not.toMatch(/the rest/)
+    expect(remakeCountNotice(5, 5)).toMatch(/5/)
+    expect(remakeCountNotice(0, 7)).toBe(
+      "note: none of these 7 songs are the listener's own yet, all of them are new to them. Say so plainly.")
+    expect(remakeCountNotice(0, 7)).not.toMatch(/\b0 of/)
+    for (const text of [remakeCountNotice(12, 15), remakeCountNotice(5, 5), remakeCountNotice(0, 7), REMAKE_NOTE,
+      REMAKE_NOT_READY_TEXT, REMAKE_ALREADY_TEXT]) {
+      expect(text).not.toContain('—')
+    }
+  })
+
+  it('music not ready: no model call, no new version, the label stays and the DJ says so in a fixed line', async () => {
+    const db = await createTestDb()
+    const { session, sessionRef, made } = await catalogueSession(db)
+    // An import that landed with nothing usable: musicReady is false.
+    await seedLandedButEmpty(db, 'u1')
+    const { llm, requests } = makeFakeLlm([{ text: 'never asked.' }])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, REMAKE_TEXT, { remake: true, surface: 'ios' })
+
+    expect(requests).toHaveLength(0)
+    expect(result.djMessage.content).toBe(REMAKE_NOT_READY_TEXT)
+    expect(REMAKE_NOT_READY_TEXT).toBe(
+      "Your library came in, but I couldn't use any of it for this yet, so the mix stays as it was.")
+    expect(result.djMessage.queueVersion).toBeNull()
+    expect(result.queueVersion).toBe(made.queueVersion)
+    expect(result.queue.map((t) => t.trackId)).toEqual(made.queue.map((t) => t.trackId))
+    expect(await readNotPersonal(db, session.id)).toBe(true)
+    const transcript = await readMessages(db, session.id)
+    expect(transcript.slice(-2).map((m) => [m.role, m.content])).toEqual([['user', REMAKE_TEXT], ['dj', REMAKE_NOT_READY_TEXT]])
+    const versions = await db.select({ version: mixVersions.version }).from(mixVersions).where(eq(mixVersions.sessionId, session.id))
+    expect(Math.max(...versions.map((v) => v.version))).toBe(made.queueVersion)
+    expect(await remakeRows(db)).toHaveLength(0)
+  })
+
+  it('a remake turn that generates twice records remake_made once', async () => {
+    const db = await createTestDb()
+    const { sessionRef } = await catalogueSession(db)
+    await seedLibrary(db, 'u1', 8)
+    const { llm, requests } = makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'late night', targetCount: 5 })] },
+      { toolCalls: [toolCall('c2', 'generate_queue', { themes: 'late night, darker', targetCount: 4 })] },
+      { text: 'there, from your own music.' },
+    ])
+
+    await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, REMAKE_TEXT, { remake: true, surface: 'web' })
+
+    expect(curateRequests(requests)).toHaveLength(2)
+    expect(await remakeRows(db)).toHaveLength(1)
+  })
+
+  it('a remake on a session already built from their music: the fixed line, no model call, no version, no funnel row', async () => {
+    const db = await createTestDb()
+    const { session, sessionRef } = await catalogueSession(db)
+    await seedLibrary(db, 'u1', 8)
+    const first = await remake(db, sessionRef)
+    expect(await readNotPersonal(db, session.id)).toBe(false)
+    const { llm, requests } = makeFakeLlm([{ text: 'never asked.' }])
+
+    // The double tap, or a second device that had not caught up.
+    const again = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, REMAKE_TEXT, { remake: true, surface: 'ios' })
+
+    expect(requests).toHaveLength(0)
+    expect(REMAKE_ALREADY_TEXT).toBe('This mix is already built from your music.')
+    expect(again.djMessage.content).toBe(REMAKE_ALREADY_TEXT)
+    expect(again.djMessage.queueVersion).toBeNull()
+    expect(again.queueVersion).toBe(first.queueVersion)
+    expect(again.queue.map((t) => t.trackId)).toEqual(first.queue.map((t) => t.trackId))
+    expect(await readNotPersonal(db, session.id)).toBe(false)
+    const transcript = await readMessages(db, session.id)
+    expect(transcript.slice(-2).map((m) => [m.role, m.content])).toEqual([['user', REMAKE_TEXT], ['dj', REMAKE_ALREADY_TEXT]])
+    expect(await remakeRows(db)).toHaveLength(1)
+  })
+
+  it('a remake whose generate lands nothing: no count, no funnel row, the label kept', async () => {
+    const db = await createTestDb()
+    const { session, sessionRef, made } = await catalogueSession(db)
+    await seedLibrary(db, 'u1', 8)
+    const inner = makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'late night', targetCount: 5 })] },
+      { text: 'nothing of yours fits that yet.' },
+    ])
+    // The curator finds nothing that fits.
+    const llm: LlmClient = async (req) => req.tools.length > 0
+      ? inner.llm(req)
+      : { text: '[]', toolCalls: [], raw: [{ type: 'text', text: '[]' }], stopReason: 'end_turn', usage: null }
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, REMAKE_TEXT, { remake: true, surface: 'ios' })
+
+    expect(result.queueVersion).toBe(made.queueVersion)
+    expect(result.djMessage.content).toBe('nothing of yours fits that yet.')
+    const text = toolResultTextFrom(conversationRequests(inner.requests)[1])
+    expect(text).toContain(NOTHING_FITS_TEXT)
+    expect(text).not.toMatch(/are the listener's own/)
+    expect(await readNotPersonal(db, session.id)).toBe(true)
+    expect(await remakeRows(db)).toHaveLength(0)
+  })
+
+  it('a remake under a conflict retry: the note once in each attempt\'s requests, one remake_made row', async () => {
+    const db = await createTestDb()
+    const { session, sessionRef } = await catalogueSession(db)
+    await seedLibrary(db, 'u1', 8)
+    const convo: LlmRequest[] = []
+    let curations = 0
+    const llm: LlmClient = async (req) => {
+      if (req.tools.length === 0) {
+        curations += 1
+        // The second curation is the first attempt's extend, after its
+        // generate landed: a concurrent write ends that attempt.
+        if (curations === 2) await applyOps(db, session.id, [{ op: 'move', from: 0, to: 1 }], 'user')
+        return curateFakeResponseFromRequest(req)
+      }
+      convo.push(req)
+      // This attempt's own rounds: replayed raw blocks, never history's
+      // plain-text replies.
+      const rounds = req.messages.filter(liveAssistant).length
+      const call = rounds === 0 ? toolCall('c1', 'generate_queue', { themes: 'late night', targetCount: 5 })
+        : rounds === 1 ? toolCall('c2', 'edit_queue', { ops: [{ op: 'extend', count: 1 }] })
+          : undefined
+      if (call) return { text: '', toolCalls: [call], raw: [{ type: 'tool_use', ...call }], stopReason: 'tool_use', usage: null }
+      return { text: 'remade, and one more.', toolCalls: [], raw: [{ type: 'text', text: 'remade, and one more.' }], stopReason: 'end_turn', usage: null }
+    }
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, REMAKE_TEXT, { remake: true, surface: 'ios' })
+
+    expect(result.djMessage.content).toBe('remade, and one more.')
+    // Two attempts, each opening with a fresh round, and the note once in
+    // every request either made.
+    expect(convo.filter((r) => !r.messages.some(liveAssistant))).toHaveLength(2)
+    for (const req of convo) expect(noteCount(req)).toBe(1)
+    expect(await remakeRows(db)).toHaveLength(1)
+    expect(await readNotPersonal(db, session.id)).toBe(false)
+    expect(result.queue).toHaveLength(6)
+  })
+
+  it('a restore brings the label back with the songs: catalogue v1, remake v2, restore v1, then v2 again', async () => {
+    const db = await createTestDb()
+    const { session, sessionRef, made } = await catalogueSession(db)
+    await seedLibrary(db, 'u1', 8)
+    const remade = await remake(db, sessionRef)
+    expect(await readNotPersonal(db, session.id)).toBe(false)
+
+    const back = await restoreMixVersion(db, session.id, 'u1',
+      { version: made.queueVersion, expectedVersion: remade.queueVersion, requestId: 'restore-catalogue' })
+
+    expect((await getActiveQueue(db, session.id)).map((t) => t.trackId)).toEqual(made.queue.map((t) => t.trackId))
+    expect(await readNotPersonal(db, session.id)).toBe(true)
+    expect(await versionLabel(db, session.id, back.version)).toBe(true)
+
+    const again = await restoreMixVersion(db, session.id, 'u1',
+      { version: remade.queueVersion, expectedVersion: back.version, requestId: 'restore-remake' })
+
+    expect((await getActiveQueue(db, session.id)).map((t) => t.trackId)).toEqual(remade.queue.map((t) => t.trackId))
+    expect(await readNotPersonal(db, session.id)).toBe(false)
+    expect(await versionLabel(db, session.id, again.version)).toBe(false)
+  })
+
+  it('restoring a version from before the label was recorded leaves the flag as it is', async () => {
+    const db = await createTestDb()
+    const { session, sessionRef, made } = await catalogueSession(db)
+    await seedLibrary(db, 'u1', 8)
+    const remade = await remake(db, sessionRef)
+    // Both versions as migration 0049 found them: no label.
+    await db.update(mixVersions).set({ notPersonal: null }).where(eq(mixVersions.sessionId, session.id))
+
+    const back = await restoreMixVersion(db, session.id, 'u1',
+      { version: made.queueVersion, expectedVersion: remade.queueVersion, requestId: 'legacy-1' })
+    expect(await readNotPersonal(db, session.id)).toBe(false)
+    expect(await versionLabel(db, session.id, back.version)).toBe(false)
+
+    await db.update(djSessions).set({ notPersonal: true }).where(eq(djSessions.id, session.id))
+    await restoreMixVersion(db, session.id, 'u1',
+      { version: remade.queueVersion, expectedVersion: back.version, requestId: 'legacy-2' })
+    expect(await readNotPersonal(db, session.id)).toBe(true)
+  })
+
+  it('without the flag the same words are an ordinary turn: no note, no count, no remake_made', async () => {
+    const db = await createTestDb()
+    const { session, sessionRef } = await catalogueSession(db)
+    const { llm, requests } = makeFakeLlm([{ text: 'tell me more.' }])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, REMAKE_TEXT)
+
+    // musicReady is false here, and only the flag would have read it.
+    expect(conversationRequests(requests)).toHaveLength(1)
+    expect(result.djMessage.content).toBe('tell me more.')
+    expect(modelInput(requests)).not.toContain(REMAKE_NOTE)
+    expect(await readNotPersonal(db, session.id)).toBe(true)
+    expect(await remakeRows(db)).toHaveLength(0)
+  })
+})
+
+describe('the label rule: whole-mix generates set notPersonal from their pool', () => {
+  it('a corpus generate sets it; once the library is in, a plain generate clears it', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedCorpusListener(db, 'u1')
+    const session = await seedSession(db, 'u1')
+    const sessionRef: DjSessionRef = { id: session.id, userId: 'u1' }
+    const generate = (themes: string) => makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes, targetCount: 5 })] },
+      { text: 'done.' },
+    ])
+
+    const catalogue = await runDjTurn(db, { embed: fakeEmbed, llm: generate('late night').llm }, sessionRef, 'something for late night')
+    expect(await readNotPersonal(db, session.id)).toBe(true)
+    expect(await versionLabel(db, session.id, catalogue.queueVersion)).toBe(true)
+
+    await seedLibrary(db, 'u1', 6)
+    const fresh = generate('morning run')
+    const personal = await runDjTurn(db, { embed: fakeEmbed, llm: fresh.llm }, sessionRef, 'now something for a morning run')
+
+    expect(await readNotPersonal(db, session.id)).toBe(false)
+    expect(await versionLabel(db, session.id, personal.queueVersion)).toBe(false)
+    const text = toolResultTextFrom(conversationRequests(fresh.requests)[1])
+    expect(text).not.toContain(CORPUS_NOTICE)
+    expect(text).not.toMatch(/are the listener's own/)
+  })
+
+  it('an edit on a personal session after a catalogue mix never clears it', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedCorpusListener(db, 'u1')
+    const session = await seedSession(db, 'u1')
+    const sessionRef: DjSessionRef = { id: session.id, userId: 'u1' }
+    const first = makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'late night', targetCount: 5 })] },
+      { text: 'done.' },
+    ])
+    const made = await runDjTurn(db, { embed: fakeEmbed, llm: first.llm }, sessionRef, 'something for late night')
+    const library = new Set((await seedLibrary(db, 'u1', 6)).map((t) => t.id))
+    const { llm, requests } = makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'edit_queue', { ops: [{ op: 'swap', position: 0 }, { op: 'extend', count: 2 }] })] },
+      { text: 'swapped one and added two.' },
+    ])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'swap the first and add two more')
+
+    expect(curateRequests(requests).length).toBeGreaterThan(0)
+    expect(result.queueVersion).toBe(made.queueVersion + 1)
+    expect(result.queue.filter((t) => library.has(t.trackId)).length).toBeGreaterThan(0)
+    expect(await readNotPersonal(db, session.id)).toBe(true)
+    expect(await versionLabel(db, session.id, result.queueVersion)).toBe(true)
+  })
+
+  it('a personal generate with outside picks clears it: a few new songs are still a personal mix', async () => {
+    const db = await createTestDb()
+    const { session, sessionRef } = await seedOutsideWorld(db, 12, 8)
+    await db.update(djSessions).set({ notPersonal: true }).where(eq(djSessions.id, session.id))
+    const { llm } = greedyOutsideLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'drive', targetCount: 10, familiarity: 'adventurous' })] },
+      { text: 'done.' },
+    ])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm, outsidePicks: true }, sessionRef, 'surprise me')
+
+    expect(await readNotPersonal(db, session.id)).toBe(false)
+    expect(result.queue.some((t) => t.newToYou)).toBe(true)
   })
 })

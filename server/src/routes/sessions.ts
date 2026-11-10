@@ -142,7 +142,14 @@ const pickSchema = z
   .refine((b) => (b.albumId === undefined) !== (b.version === undefined), {
     message: 'exactly one of albumId or version is required',
   })
-const messageSchema = z.object({ text: z.string().min(1).max(2000), energyArc: intentSchema.shape.energyArc })
+// remake: the "Remake with my music" tap (spec 2026-11-09
+// add-your-music-loop, decision 4). Mix sessions only. The clients send fixed
+// text with it, but only this flag means anything: the text is never read.
+const messageSchema = z.object({
+  text: z.string().min(1).max(2000),
+  energyArc: intentSchema.shape.energyArc,
+  remake: z.boolean().optional(),
+})
 const queueOpsBodySchema = z.object({
   ops: queueOpsSchema,
   expectedVersion: z.number().int().min(0).optional(),
@@ -177,10 +184,11 @@ const sessionListColumns = {
   caseColor: djSessions.caseColor,
   status: djSessions.status,
   queueVersion: djSessions.queueVersion,
-  // True once a corpus-mode generate/swap has put shared-catalog picks in
-  // this session's queue (dj/loop.ts markNotPersonal) — the client's "not
-  // personal yet" banner reads this off every summary, so a listener sees
-  // it in the collection list, not only inside the open session.
+  // True while this session's mix came from the shared catalog: each
+  // whole-mix generate sets it from its own pool, and a corpus swap or
+  // extend sets it (dj/loop.ts setNotPersonal, markNotPersonal) — the
+  // client's "not personal yet" banner reads this off every summary, so a
+  // listener sees it in the collection list, not only inside the open session.
   notPersonal: djSessions.notPersonal,
   // 'mix' | 'album': which loop, read shape and routes the session takes.
   kind: djSessions.kind,
@@ -524,9 +532,11 @@ export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps) {
     const session = await loadOwnedSession(db, c.req.param('id'), userId)
     if (!session) return c.json({ error: 'not_found' }, 404)
 
-    const { text, energyArc } = c.req.valid('json')
+    const { text, energyArc, remake } = c.req.valid('json')
     const sessionRef: DjSessionRef = { id: session.id, userId }
     if (session.kind === 'album') {
+      // An album has no mix to remake: refused before any write or model call.
+      if (remake === true) return c.json(WRONG_SESSION_KIND, 409)
       if (!albumDeps) return c.json(ALBUM_PICKS_OFF, 404)
       try {
         const result = await runAlbumTurn(db, albumDeps, sessionRef, text)
@@ -538,7 +548,11 @@ export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps) {
       }
     }
     try {
-      const result = await runDjTurn(db, deps, sessionRef, text, { energyArc, surface: requestSurface(c.req.header('User-Agent')) })
+      const result = await runDjTurn(db, deps, sessionRef, text, {
+        energyArc,
+        surface: requestSurface(c.req.header('User-Agent')),
+        ...(remake === true ? { remake: true } : {}),
+      })
       // A text-only reply never touches dj_sessions itself (no queue write
       // to ride $onUpdate's automatic bump), so list ordering (newest first
       // by updatedAt) would otherwise never reflect a chat-only turn.

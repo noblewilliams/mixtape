@@ -112,6 +112,17 @@ server track. S3 and S4 must not run at the same time: both edit
   - **Nothing usable.** A remake whose pool resolves corpus or
     insufficient: no generate and no version. The tool result says their
     music isn't usable yet.
+    - As built (2026-11-10): `runDjTurn` checks `musicReady` right after
+      persisting the listener's line. When it's false, it persists the
+      fixed `REMAKE_NOT_READY_TEXT`, makes no model call and writes no
+      version.
+    - The note follows the listener's line in the current user turn, for
+      that request only. The leading context message is bookkeeping the
+      persona never follows.
+    - A remake on a session that is already personal gets the fixed
+      `REMAKE_ALREADY_TEXT`.
+    - Migration `0049` stores `not_personal` on each `mix_versions` row,
+      and restore puts it back (S3 review).
   - **The label rule.** A new `setNotPersonal(db, sessionId, value)` sets
     the flag on every whole-mix generate (proposed, generate, only-artist,
     curated): true when corpus picks or proposed picks landed, false for a
