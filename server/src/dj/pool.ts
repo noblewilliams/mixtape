@@ -453,6 +453,41 @@ export async function musicReady(db: Db, userId: string): Promise<boolean> {
   return hasPersonalCandidates(db, userId)
 }
 
+/**
+ * True when the app can see anything this listener actually played: a
+ * listening-ledger row (an export import), or a library row whose play count
+ * was observed and is above zero (an iOS Apple Music sync). False for a
+ * listener with only likes and playlists (Exportify) or a web Apple sync,
+ * where MusicKit JS cannot see play counts (play_count_observed false). A
+ * boolean SQL expression, for the history pill's claim (dj/loop.ts
+ * offerHistoryPill; spec 2026-11-09 add-your-music-loop, decision 5).
+ */
+export function listenerPlaysSql(userId: string): SQL {
+  return sql`(
+    EXISTS (SELECT 1 FROM listening_days ld WHERE ld.user_id = ${userId})
+    OR EXISTS (
+      SELECT 1 FROM user_tracks ut
+      WHERE ut.user_id = ${userId} AND ut.play_count_observed = true AND ut.play_count > 0
+    )
+  )`
+}
+
+/**
+ * True when the listener is on Spotify: they chose it (a chose_spotify
+ * funnel row) or a Spotify export source exists. Either one wins outright,
+ * since the "chose" event is fire-and-forget and a listener who already
+ * holds the ZIP never walks the request flow. GET /me/onboarding's
+ * chosenService reads 'spotify' from this, and the history pill's claim
+ * reads it for a web request (dj/loop.ts offerHistoryPill). A boolean SQL
+ * expression.
+ */
+export function onSpotifySql(userId: string): SQL {
+  return sql`(
+    EXISTS (SELECT 1 FROM funnel_events fe WHERE fe.user_id = ${userId} AND fe.type = 'chose_spotify')
+    OR EXISTS (SELECT 1 FROM user_music_sources ums WHERE ums.user_id = ${userId} AND ums.source = 'spotify_export')
+  )`
+}
+
 // The CTEs every scored query reads, whatever its candidate source: the
 // selected playlist's profile (seed_*; empty when none is selected), the
 // learned per-artist taste (see the TASTE_* comments above) and the playback

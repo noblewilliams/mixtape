@@ -396,6 +396,10 @@ export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps) {
       // dj_providers.dart's ChatNotifier). Omitted entirely on a no-rename
       // turn, never sent as null.
       ...(renamedTitle ? { sessionTitle: renamedTitle } : {}),
+      // The "Add my listening history" pill (spec 2026-11-09
+      // add-your-music-loop, decision 5): present ONLY on the turn that
+      // offered it, never sent as null.
+      ...(turnResult.value.addMusic ? { addMusic: turnResult.value.addMusic } : {}),
     })
   })
 
@@ -562,8 +566,10 @@ export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps) {
         queue: result.queue,
         queueVersion: result.queueVersion,
         // Same contract as POST /sessions above: present ONLY when
-        // rename_session fired this turn.
+        // rename_session fired this turn. addMusic likewise: only on the
+        // turn that offered the pill.
         ...(result.sessionTitle ? { sessionTitle: result.sessionTitle } : {}),
+        ...(result.addMusic ? { addMusic: result.addMusic } : {}),
       })
     } catch (e) {
       if (e instanceof DjError) {

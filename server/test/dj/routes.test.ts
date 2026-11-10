@@ -17,6 +17,8 @@ import {
   djMessages,
   sessionEvents,
   djMemories,
+  funnelEvents,
+  userMusicSources,
 } from '../../src/db/schema'
 import { eq } from 'drizzle-orm'
 import { replaceQueue, applyOps, MAX_ACTIVE_QUEUE_LENGTH } from '../../src/dj/queue-store'
@@ -1690,6 +1692,99 @@ describe('notPersonal on session routes', () => {
     const listRes = await getJson(app, '/sessions')
     const list = (await listRes.json()) as { sessions: Array<{ id: string; notPersonal: boolean }> }
     expect(list.sessions.find((s) => s.id === body.session.id)?.notPersonal).toBe(true)
+  })
+})
+
+// Spec 2026-11-09 add-your-music-loop, decision 5: the history pill rides
+// the mix turn responses as addMusic, only when this turn offered it.
+describe('addMusic on mix turn responses', () => {
+  const COMFORT = { themes: 'my favourites', targetCount: 4, familiarity: 'comfort' }
+
+  function generating(input: Record<string, unknown>) {
+    return makeFakeLlm([{ toolCalls: [toolCall('c1', 'generate_queue', input)] }, { text: 'here you go.' }])
+  }
+
+  function postAs(app: ReturnType<typeof buildApp>, path: string, body: unknown, userAgent: string) {
+    return app.request(`http://x${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'user-agent': userAgent },
+      body: JSON.stringify(body),
+    })
+  }
+
+  async function chipRows(db: TestDb) {
+    return db.select().from(funnelEvents).where(eq(funnelEvents.type, 'music_chip_offered'))
+  }
+
+  it('POST /sessions carries addMusic: history when its turn offers the pill; the follow-up never repeats it', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedLibrary(db, 'u1', 6) // music in, no plays
+    const app = buildApp(db, { embed: fakeEmbed, llm: generating(COMFORT).llm }, authedAs('u1'))
+
+    const res = await postAs(app, '/sessions', { prompt: 'play my favourites' }, 'Dart/3.5 (dart:io)')
+
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { session: { id: string }; queue: unknown[]; addMusic?: string }
+    expect(body.queue).toHaveLength(4)
+    expect(body.addMusic).toBe('history')
+    expect(body.session).not.toHaveProperty('musicChipAt')
+    expect((await chipRows(db)).map((r) => r.surface)).toEqual(['ios'])
+
+    const again = buildApp(db, { embed: fakeEmbed, llm: generating({ ...COMFORT, allowOutside: false }).llm }, authedAs('u1'))
+    const next = await postJson(again, `/sessions/${body.session.id}/messages`, { text: 'only songs I love' })
+
+    expect(next.status).toBe(200)
+    const json = (await next.json()) as Record<string, unknown>
+    expect(Object.keys(json).sort()).toEqual(['djMessage', 'queue', 'queueVersion'])
+    expect(await chipRows(db)).toHaveLength(1)
+  })
+
+  it('the follow-up carries addMusic when its own turn offers the pill (web, a Spotify listener)', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedLibrary(db, 'u1', 6)
+    await db.insert(userMusicSources).values({ userId: 'u1', source: 'spotify_export', lastImportedAt: new Date() })
+    const app = buildApp(db, { embed: fakeEmbed, llm: generating({ themes: 'late night', targetCount: 4 }).llm }, authedAs('u1'))
+    const created = await postJson(app, '/sessions', { prompt: 'something for late night' })
+    const createdBody = (await created.json()) as { session: { id: string } }
+    expect(createdBody).not.toHaveProperty('addMusic')
+
+    const next = buildApp(db, { embed: fakeEmbed, llm: generating(COMFORT).llm }, authedAs('u1'))
+    const res = await postAs(next, `/sessions/${createdBody.session.id}/messages`, { text: 'now my favourites' }, 'Mozilla/5.0')
+
+    expect(res.status).toBe(200)
+    const json = (await res.json()) as Record<string, unknown>
+    expect(json.addMusic).toBe('history')
+    expect(Object.keys(json).sort()).toEqual(['addMusic', 'djMessage', 'queue', 'queueVersion'])
+    expect((await chipRows(db)).map((r) => r.surface)).toEqual(['web'])
+  })
+
+  it('absent, never null, when the pill is not offered: a catalog listener, one with plays, or a web Apple listener', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedCorpusListener(db, 'u1')
+    await seedUser(db, 'u2')
+    await seedLibrary(db, 'u2', 6)
+    await db.update(userTracks).set({ playCount: 3 }).where(eq(userTracks.userId, 'u2'))
+    await seedUser(db, 'u3')
+    await seedLibrary(db, 'u3', 6) // no plays, but on Apple Music and on the web
+
+    const cases = [['u1', 'Dart/3.5 (dart:io)'], ['u2', 'Dart/3.5 (dart:io)'], ['u3', 'Mozilla/5.0']] as const
+    for (const [userId, userAgent] of cases) {
+      const app = buildApp(db, { embed: fakeEmbed, llm: generating(COMFORT).llm }, authedAs(userId))
+      const res = await postAs(app, '/sessions', { prompt: 'play my favourites' }, userAgent)
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { session: { id: string }; queue: unknown[] }
+      expect(body.queue).toHaveLength(4)
+      expect(body).not.toHaveProperty('addMusic')
+
+      const follow = buildApp(db, { embed: fakeEmbed, llm: generating(COMFORT).llm }, authedAs(userId))
+      const next = await postAs(follow, `/sessions/${body.session.id}/messages`, { text: 'more favourites' }, userAgent)
+      expect(next.status).toBe(200)
+      expect(await next.json()).not.toHaveProperty('addMusic')
+    }
+    expect(await chipRows(db)).toHaveLength(0)
   })
 })
 

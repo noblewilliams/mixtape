@@ -9,6 +9,8 @@ import {
   CORPUS_PROPOSE_SHARE,
   blendedNotice,
   INSUFFICIENT_SEEDS_TEXT,
+  HISTORY_NOTICE,
+  OWN_MUSIC_CATALOG_NOTICE,
   SHORT_VERIFIED_TEXT,
   partialVerifiedNotice,
   TURN_APPLE_BUDGET,
@@ -225,6 +227,28 @@ describe('never refuse: proposed songs verified on Apple', () => {
     expect(logged.propose).toMatchObject({ verified: 5, rounds: 1 })
     const block = proposalRequests(requests)[0].messages[0].content as string
     expect(block).toContain('Request: something for a rainy commute, no talking')
+  })
+
+  it('a proposed mix for a comfort brief: no own-music note and no history pill (the proposed notice already says where they come from)', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    const session = await seedSession(db)
+    const round = proposals('Fav', 13)
+    const { fill } = fakeFill(round)
+    const { llm, requests } = scriptedLlm([{ ...brief(5), familiarity: 'comfort' }], [round])
+
+    const { value: result } = await withLog(() => runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true },
+      { id: session.id, userId: 'u1' }, 'my favourites', { surface: 'ios' }))
+
+    expect(result.queue).toHaveLength(5)
+    const [text] = toolResults(requests)
+    expect(text.split('\n')[0]).toBe(PROPOSED_NOTICE)
+    expect(text).not.toContain(OWN_MUSIC_CATALOG_NOTICE)
+    expect(text).not.toContain(HISTORY_NOTICE)
+    expect(result).not.toHaveProperty('addMusic')
+    expect(await db.select().from(funnelEvents).where(eq(funnelEvents.type, 'music_chip_offered'))).toHaveLength(0)
+    const [row] = await db.select({ at: djSessions.musicChipAt }).from(djSessions).where(eq(djSessions.id, session.id))
+    expect(row.at).toBeNull()
   })
 
   it('a short first round asks once for replacements, naming what was tried, and merges in order', async () => {

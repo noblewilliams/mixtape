@@ -4,7 +4,7 @@ import type { AppVars } from '../app'
 import type { Db } from '../db/types'
 import { djMemories, funnelEvents, userArtistSeeds, userTracks } from '../db/schema'
 import type { FunnelEventType } from '../seeds/contracts'
-import { musicReady } from '../dj/pool'
+import { musicReady, onSpotifySql } from '../dj/pool'
 import { listMusicSources } from './music-sources'
 
 // Mounted at /me/onboarding, behind requireSession like every other /me*
@@ -37,7 +37,7 @@ export function onboardingRoutes(db: Db) {
       db
         .select({
           hasLibrary: sql<boolean>`${hasLibrary}`,
-          choseSpotifyAt: firstAt('chose_spotify'),
+          onSpotify: sql<boolean>`${onSpotifySql(userId)}`,
           markedRequestedAt: firstAt('marked_requested'),
           interviewCompletedAt: firstAt('interview_completed'),
           importCompletedAt: firstAt('import_completed'),
@@ -47,16 +47,14 @@ export function onboardingRoutes(db: Db) {
       musicReady(db, userId),
     ])
 
-    // Choosing Spotify is an explicit act and wins outright, and so does a
-    // completed Spotify import (the "chose" event is fire-and-forget, and a
-    // listener who already holds the ZIP never walks the request flow).
+    // Choosing Spotify, or a Spotify export source, wins outright
+    // (dj/pool.ts onSpotifySql, which the DJ's history pill reads too).
     // Apple is inferred from evidence (a synced or exported library, or any
     // Apple source), since the Apple path never posts a "chose" event.
     // hasLibrary alone cannot mean Apple: a Spotify account package marks
-    // liked tracks in_library too, which is why the Spotify checks come first.
-    const hasSpotifySource = sources.some((s) => s.source === 'spotify_export')
+    // liked tracks in_library too, which is why the Spotify check comes first.
     const hasAppleSource = sources.some((s) => s.source === 'apple_live' || s.source === 'apple_export')
-    const chosenService = state.choseSpotifyAt || hasSpotifySource
+    const chosenService = state.onSpotify
       ? 'spotify'
       : state.hasLibrary || hasAppleSource
         ? 'apple'

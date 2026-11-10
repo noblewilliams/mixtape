@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { and, count, desc, eq, gt, isNotNull, isNull, lt, inArray, ne, or } from 'drizzle-orm'
+import { and, count, desc, eq, gt, isNotNull, isNull, lt, inArray, ne, or, sql } from 'drizzle-orm'
 import type { Db } from '../db/types'
 import type { Embedder } from '../enrich/embedder'
 import { djMemories, djMessages, djSessions, funnelEvents, queueTracks, tracks, trackFeatures, mixVersions, userArtistSeeds, userTracks } from '../db/schema'
@@ -23,7 +23,7 @@ import {
   type OpIntent,
   type QueueOp,
 } from './contracts'
-import { buildPool, hasPersonalCandidates, musicReady, outsideCap, resolvePoolMode, type PoolMode, type PoolTrack } from './pool'
+import { buildPool, hasPersonalCandidates, listenerPlaysSql, musicReady, onSpotifySql, outsideCap, resolvePoolMode, type PoolMode, type PoolTrack } from './pool'
 import { curate, CurationNothingFits, CurationTruncated, CurationUnparseable, type CuratedTrack } from './curate'
 import { checkGenres, type GenreCandidate } from './genre-check'
 import {
@@ -96,6 +96,10 @@ export type DjTurnResult = {
   // Not stored and not sent to the client: the Apple fill (spec 2026-10-21
   // everyone-gets-a-mix, step 2) reads them here.
   namedSongs?: NamedSong[]
+  // Present ONLY when this turn offered the "Add my listening history" pill
+  // (HISTORY_NOTICE, offerHistoryPill). routes/sessions.ts spreads it onto
+  // the mix turn responses only when set, never as null.
+  addMusic?: 'history'
 }
 
 // Bounds the number of tool-use round trips in a single turn. A round is one
@@ -177,9 +181,12 @@ export function shortMixNotice(m: ShortMix): string {
     : m.outside === 'unconfirmed'
       ? 'too few songs from outside it that fit could be confirmed on Apple Music'
       : 'outside music was off for this mix, so nothing from outside it was added'
+  // Bringing in songs they do not own is an offer only a library mix can
+  // make: every song in a catalog mix is one they do not own.
+  const bringIn = m.outside === 'own-only' && m.source === 'library'
   return `note: this mix is ${m.count} of the ${m.asked} songs asked for, because ${where} had too few songs that ` +
     `fit the brief, and ${why}. Tell them plainly why it is shorter (for example "your library has little jazz"), ` +
-    `and offer to loosen the brief${m.outside === 'own-only' ? ' or to bring in songs they do not own yet' : ''}.`
+    `and offer to loosen the brief${bringIn ? ' or to bring in songs they do not own yet' : ''}.`
 }
 
 // The curator found nothing that fits (CurationNothingFits) and nothing
@@ -345,6 +352,37 @@ export function remakeCountNotice(yours: number, total: number): string {
   if (yours === 0) return `note: none of these ${total} songs are the listener's own yet, all of them are new to them. Say so plainly.`
   return `note: ${yours} of these ${total} songs are the listener's own, the rest are new to them. Say so in one line.`
 }
+
+// Own-music honesty (spec 2026-11-09 add-your-music-loop, decision 5). An
+// own-music brief leaves no room for songs from outside (familiarity
+// comfort, or allowOutside false): their favourites, or only their music.
+// The gate the shortfall fill uses, asked of a 100-song mix so it is the
+// familiarity and allowOutside alone: outsideCap rounds a 3 or 4 song mix's
+// share down to 0.
+export function ownMusicBrief(intent: Pick<Intent, 'familiarity'> & { allowOutside?: boolean }): boolean {
+  return outsideCap({ ...intent, targetCount: 100 }) === 0
+}
+
+// Appended to a whole-mix generate's result when a listener with no music
+// of their own (corpus mode) asked for their own. It stands alone, after the
+// listing, and fits a favourites brief and an "only my songs" one alike. It
+// says where the songs do not come from, not where they do: part of a corpus
+// mix may be the DJ's own picks (blendedNotice). The door under the reply
+// says what their music would change, so the DJ does not pitch it. Goes to
+// the MODEL.
+export const OWN_MUSIC_CATALOG_NOTICE =
+  "note: they asked for their own music, but they haven't added any music yet, so none of these songs come from " +
+  "their own music. Tell them plainly you don't know their music yet. Don't suggest adding music; the app shows that."
+
+// Appended to a whole-mix generate's result when a listener whose music is
+// in but who has no plays the app can see (hasPlays false) asked for their
+// own, the first time in a conversation (offerHistoryPill). The turn then
+// carries addMusic: 'history', which the clients show as one pill under the
+// reply, so the DJ does not explain how to export it. Goes to the MODEL.
+export const HISTORY_NOTICE =
+  "note: these come from their library and likes; you can't see what they actually play yet. Say in one short " +
+  'line that their listening history would show their real favourites. The app shows a button for adding it, so ' +
+  "don't explain how to get it."
 
 export const CURATION_APOLOGY = 'lost my train of thought on that one. try again?'
 export const CONFLICT_APOLOGY = 'the queue shifted while I was working on it. try that again?'
@@ -769,10 +807,13 @@ type GenerateOutcome = {
   // that later fails still owes them (see TurnChanges). Set with queueChanged.
   changeSummary?: string
   // The queue this generate landed, read after the label was set (so its
-  // newToYou marks are the ones the clients see), and whether it came from
-  // the listener's own pool. Set with queueChanged; a remake turn counts its
-  // songs from it (remakeCountNotice).
-  landed?: { personal: boolean; queue: QueueTrackView[] }
+  // newToYou marks are the ones the clients see), and where it came from:
+  // the listener's own pool, the shared catalogue (corpus mode), or songs
+  // the DJ proposed for a listener with neither (executeProposedQueue). Set
+  // with queueChanged; a remake turn counts its songs from it
+  // (remakeCountNotice), and an own-music brief reads its source
+  // (ownMusicNotice).
+  landed?: { from: 'personal' | 'corpus' | 'proposed'; queue: QueueTrackView[] }
 }
 
 // "Made a new mix of 15 songs." Stated, not styled: it stands in for the
@@ -1451,7 +1492,7 @@ async function executeProposedQueue(
     newVersion: version,
     intent,
     changeSummary: mixSummary(updatedQueue.length),
-    landed: { personal: false, queue: updatedQueue },
+    landed: { from: 'proposed', queue: updatedQueue },
   }
 }
 
@@ -1585,7 +1626,7 @@ async function executeOnlyArtistQueue(
     newVersion: version,
     intent,
     changeSummary: mixSummary(updatedQueue.length),
-    landed: { personal: mode === 'personal', queue: updatedQueue },
+    landed: { from: mode, queue: updatedQueue },
   }
 }
 
@@ -1645,13 +1686,13 @@ async function generateFromBrief(
   // A short curation is filled from outside the library (decision 2 of spec
   // 2026-11-09 every-song-earns-its-place) on the same gates as the blend,
   // and never when the brief asked for only the listener's own music.
-  // Gated as outside picks are (outsideCap): never for a comfort brief
-  // (their favourites) or one that asked for only their own music. Asked
-  // of a 100-song mix so the gate is the familiarity and allowOutside alone:
+  // Gated as outside picks are (outsideCap): never for an own-music brief
+  // (ownMusicBrief: their favourites, or only their own music). Asked of a
+  // 100-song mix so the gate is the familiarity and allowOutside alone:
   // outsideCap rounds a 3 or 4 song mix's share down to 0, which would
   // leave a short small mix unfilled. A gate only: the shortfall is not
   // capped at the outside share.
-  const outsideAllowed = outsideCap({ ...intent, targetCount: 100 }) > 0
+  const outsideAllowed = !ownMusicBrief(intent)
   const fillShort = outsideAllowed && neverRefuse && deps.fill !== undefined
   budget.consume()
   const byId = new Map(pool.map((t) => [t.trackId, t]))
@@ -1753,7 +1794,7 @@ async function generateFromBrief(
     newVersion: version,
     intent,
     changeSummary: mixSummary(updatedQueue.length),
-    landed: { personal: poolMode.mode === 'personal', queue: updatedQueue },
+    landed: { from: poolMode.mode, queue: updatedQueue },
   }
 }
 
@@ -2235,7 +2276,10 @@ type RenameTracker = { title?: string }
 // the whole queue, so it replaces every summary before it.
 // `remakeMade` marks the remake_made funnel row written, so a second
 // generate or a conflict retry in the same remake turn writes no other.
-type TurnChanges = { summaries: string[]; remakeMade?: true }
+// `historyOffered` marks the history pill claimed this turn
+// (offerHistoryPill): the turn result carries addMusic, and a conflict
+// retry's generate tells the model again without a second claim or row.
+type TurnChanges = { summaries: string[]; remakeMade?: true; historyOffered?: true }
 
 function recordChange(changes: TurnChanges, outcome: { queueChanged: boolean; changeSummary?: string }, replacesQueue: boolean): void {
   if (!outcome.queueChanged || !outcome.changeSummary) return
@@ -2254,6 +2298,66 @@ async function recordRemakeMade(db: Db, session: DjSessionRef, surface: Surface,
   } catch {
     // A missing funnel row never fails the turn.
   }
+}
+
+// The history pill (spec 2026-11-09 add-your-music-loop, decision 5): at
+// most once per conversation, for a listener the app sees no plays for
+// (listenerPlaysSql), and on the web only for a Spotify listener
+// (onSpotifySql): the web has no Apple export import, so a web listener on
+// Apple Music would get a pill with nowhere to go. One conditional write is
+// the whole check, so two racing turns offer it once: music_chip_at goes
+// from null to now() for exactly one of them, and that one records
+// music_chip_offered (user and surface only, like remake_made). True when
+// this turn holds the offer, including a claim an earlier attempt of the
+// same turn made (a conflict retry).
+async function offerHistoryPill(db: Db, session: DjSessionRef, surface: Surface, changes: TurnChanges): Promise<boolean> {
+  if (changes.historyOffered) return true
+  const claimed = await db
+    .update(djSessions)
+    .set({ musicChipAt: sql`now()` })
+    .where(and(
+      eq(djSessions.id, session.id),
+      isNull(djSessions.musicChipAt),
+      sql`NOT ${listenerPlaysSql(session.userId)}`,
+      surface === 'web' ? onSpotifySql(session.userId) : undefined,
+    ))
+    .returning({ id: djSessions.id })
+  if (claimed.length === 0) return false
+  changes.historyOffered = true
+  try {
+    await db.insert(funnelEvents).values({ userId: session.userId, type: 'music_chip_offered', surface })
+  } catch {
+    // A missing funnel row never fails the turn.
+  }
+  return true
+}
+
+// What a whole-mix generate owes an own-music brief (ownMusicBrief), or
+// null: OWN_MUSIC_CATALOG_NOTICE when the mix came from the shared catalogue,
+// HISTORY_NOTICE (and the pill) when it came from a listener's own music the
+// app sees no plays for. Only a generate that landed a queue, and never on a
+// remake turn: the remake's brief keeps the old mix's familiarity, and its
+// count notice is the line that turn owes. Not for proposed mixes either:
+// PROPOSED_NOTICE already says where those come from. Not for a personal
+// mix holding songs new to them (an artist-only favourites mix filled from
+// the catalogue): "from their library and likes" would be false, and the
+// listing's new marks already say which. `attempt` holds the pill to one
+// notice per attempt when a turn generates twice.
+async function ownMusicNotice(
+  db: Db,
+  session: DjSessionRef,
+  outcome: GenerateOutcome,
+  options: DjTurnOptions,
+  changes: TurnChanges,
+  attempt: { historyNoticed?: true },
+): Promise<string | null> {
+  if (options.remake || !outcome.landed || !outcome.intent || !ownMusicBrief(outcome.intent)) return null
+  const { from, queue } = outcome.landed
+  if (from === 'corpus') return OWN_MUSIC_CATALOG_NOTICE
+  if (from !== 'personal' || attempt.historyNoticed || queue.some((t) => t.newToYou)) return null
+  if (!(await offerHistoryPill(db, session, options.surface ?? 'web', changes))) return null
+  attempt.historyNoticed = true
+  return HISTORY_NOTICE
 }
 
 // Thrown out of attemptTurn on ANY failure, wrapping whatever actually broke
@@ -2347,6 +2451,9 @@ async function attemptTurn(
     const namedSongs: NamedSong[] = []
     let currentVersion = startVersion
     let finalText: string | null = null
+    // Fresh per attempt: a retry's model sees none of the first attempt's
+    // tool results, so it is told again (see ownMusicNotice).
+    const ownMusic: { historyNoticed?: true } = {}
 
     for (let round = 0; round < MAX_TURNS && finalText === null; round++) {
       const turn = await counted({
@@ -2384,17 +2491,28 @@ async function attemptTurn(
         if (call.name === 'generate_queue') {
           const outcome = await executeGenerateQueue(db, countedDeps, session, call.input, userText, sessionContext, budget, currentVersion, { tracker: fillTracker, surface: options.surface ?? 'web' }, options.energyArc)
           resultText = outcome.resultText
-          // A remake that landed a personal mix: the DJ says how many of
-          // its songs are theirs, counted from the marks the clients show.
-          if (options.remake && outcome.landed?.personal) {
-            const { queue } = outcome.landed
-            resultText = `${resultText}\n${remakeCountNotice(queue.filter((t) => !t.newToYou).length, queue.length)}`
-            await recordRemakeMade(db, session, options.surface ?? 'web', changes)
-          }
+          // Bookkeeping first: the queue write has landed, so a note below
+          // that fails must still leave the turn able to describe it.
           if (outcome.intent) lastGenerateIntent = outcome.intent
           addNamedSongs(namedSongs, outcome.intent?.namedSongs)
           if (outcome.queueChanged) currentVersion = outcome.newVersion!
           recordChange(changes, outcome, true)
+          // A remake that landed a personal mix: the DJ says how many of
+          // its songs are theirs, counted from the marks the clients show.
+          if (options.remake && outcome.landed?.from === 'personal') {
+            const { queue } = outcome.landed
+            resultText = `${resultText}\n${remakeCountNotice(queue.filter((t) => !t.newToYou).length, queue.length)}`
+            await recordRemakeMade(db, session, options.surface ?? 'web', changes)
+          }
+          // An own-music brief the pool cannot honour as asked: the DJ says
+          // so (spec 2026-11-09 add-your-music-loop, decision 5). A note is
+          // never worth the turn: a failed claim is no note and no pill.
+          try {
+            const ownMusicLine = await ownMusicNotice(db, session, outcome, options, changes, ownMusic)
+            if (ownMusicLine) resultText = `${resultText}\n${ownMusicLine}`
+          } catch {
+            // The mix stands; the turn goes on without the note.
+          }
         } else if (call.name === 'edit_queue') {
           const outcome = await executeEditQueue(db, countedDeps, session, call.input, userText, lastGenerateIntent, sessionContext, budget, { tracker: fillTracker, surface: options.surface ?? 'web' })
           resultText = outcome.resultText
@@ -2577,7 +2695,15 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
             .values({ sessionId: session.id, role: 'dj', content: changes.summaries.join(' '), queueVersion: currentVersion })
             .returning()
           logTurn(session.id, failure?.stats ?? null, djError.kind, djError.detail, fillTracker.log, fillTracker.spend?.log, true)
-          return { djMessage: djMessageRow, queue, queueVersion: currentVersion, sessionTitle: renameState.title }
+          // A pill this turn claimed rides the recovered reply too: its
+          // music_chip_at and funnel row are already written.
+          return {
+            djMessage: djMessageRow,
+            queue,
+            queueVersion: currentVersion,
+            sessionTitle: renameState.title,
+            ...(changes.historyOffered ? { addMusic: 'history' as const } : {}),
+          }
         }
       } catch {
         // fall through to the error below
@@ -2651,5 +2777,8 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
     queueVersion: attempt.queueVersion,
     sessionTitle: renameState.title,
     ...(attempt.namedSongs.length > 0 ? { namedSongs: attempt.namedSongs } : {}),
+    // From the turn's shared box, not the attempt, like sessionTitle: the
+    // claim may have come from an attempt a conflict retried.
+    ...(changes.historyOffered ? { addMusic: 'history' as const } : {}),
   }
 }

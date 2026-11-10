@@ -253,6 +253,40 @@ describe('decision 2: a short curation is filled from outside the library, then 
     expect(toolResults(requests)[0]).toContain(shortMixNotice({ count: 3, asked: 6, source: 'library', outside: 'own-only' }))
   })
 
+  it('own-only: a library mix may offer songs they do not own yet; a catalog mix, all of whose songs they do not own, never does', () => {
+    const library = shortMixNotice({ count: 3, asked: 6, source: 'library', outside: 'own-only' })
+    expect(library).toContain('offer to loosen the brief or to bring in songs they do not own yet.')
+    const catalog = shortMixNotice({ count: 3, asked: 6, source: 'catalog', outside: 'own-only' })
+    expect(catalog).toContain('offer to loosen the brief.')
+    expect(catalog).not.toMatch(/do not own/)
+    for (const outside of ['unconfirmed', 'unavailable'] as const) {
+      for (const source of ['library', 'catalog'] as const) {
+        expect(shortMixNotice({ count: 3, asked: 6, source, outside })).not.toMatch(/do not own/)
+      }
+    }
+  })
+
+  it('a corpus listener\'s comfort brief the catalog cannot fill says why, with no offer of songs they do not own', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    for (const artist of ['SeedA', 'SeedB', 'SeedC']) {
+      await db.insert(userArtistSeeds).values({ userId: 'u1', name: artist, source: 'interview' })
+      await seedTracks(db, artist, 9)
+    }
+    const session = await seedSession(db)
+    // The catalogue holds three songs that fit.
+    const { llm, requests } = scriptedLlm([generate({ targetCount: 6, familiarity: 'comfort' })], {
+      curateAnswer: (ids) => JSON.stringify(ids.slice(0, 3).map((id) => ({ id, reason: 'fits' }))),
+    })
+
+    const result = await runDjTurn(db, { llm, embed: embedFake }, { id: session.id, userId: 'u1' }, 'my favourites')
+
+    expect(result.queue).toHaveLength(3)
+    const [text] = toolResults(requests)
+    expect(text).toContain(shortMixNotice({ count: 3, asked: 6, source: 'catalog', outside: 'own-only' }))
+    expect(text).not.toMatch(/do not own yet/)
+  })
+
   // The model must be able to turn the fill off ("only my own music", or a
   // saved preference saying so) whenever the fill can run, so allowOutside
   // is advertised then, as a whole static variant (cached on its own).

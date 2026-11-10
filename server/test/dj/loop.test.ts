@@ -20,6 +20,8 @@ import {
   REMAKE_NOTE,
   REMAKE_NOT_READY_TEXT,
   remakeCountNotice,
+  OWN_MUSIC_CATALOG_NOTICE,
+  HISTORY_NOTICE,
   type DjDeps,
   type DjSessionRef,
 } from '../../src/dj/loop'
@@ -32,6 +34,7 @@ import {
   djMessages,
   djSessions,
   funnelEvents,
+  listeningDays,
   mixVersions,
   tracks,
   trackFeatures,
@@ -2902,5 +2905,462 @@ describe('the label rule: whole-mix generates set notPersonal from their pool', 
 
     expect(await readNotPersonal(db, session.id)).toBe(false)
     expect(result.queue.some((t) => t.newToYou)).toBe(true)
+  })
+})
+
+// Spec 2026-11-09 add-your-music-loop, decision 5. An own-music brief is one
+// with no room for songs from outside (familiarity comfort, or allowOutside
+// false): their favourites, or only their music.
+describe('own-music honesty and the history pill', () => {
+  const COMFORT = { themes: 'my favourites', targetCount: 5, familiarity: 'comfort' }
+  const OWN_ONLY = { themes: 'songs I love', targetCount: 5, allowOutside: false }
+  // The pill's own gates, unless a test is about the surface: an iOS
+  // request has a destination for it whichever service the listener is on.
+  const IOS = { surface: 'ios' } as const
+
+  function generating(...inputs: Array<Record<string, unknown>>) {
+    return makeFakeLlm([
+      ...inputs.map((input, i) => ({ toolCalls: [toolCall(`c${i + 1}`, 'generate_queue', input)] })),
+      { text: 'here you go.' },
+    ])
+  }
+
+  // Every generate/edit tool result the model was sent this turn, in order.
+  function toolResults(requests: LlmRequest[]): string[] {
+    const last = conversationRequests(requests).at(-1)!
+    return last.messages.flatMap((m) => m.role === 'user' && Array.isArray(m.content)
+      ? (m.content as Array<{ type?: string; content?: string }>).flatMap((b) => b.type === 'tool_result' ? [b.content!] : [])
+      : [])
+  }
+
+  const count = (texts: string[], needle: string) => texts.join('\n').split(needle).length - 1
+
+  async function chipRows(db: TestDb) {
+    return db.select().from(funnelEvents).where(eq(funnelEvents.type, 'music_chip_offered'))
+  }
+
+  async function chipAt(db: TestDb, sessionId: string) {
+    const [row] = await db.select({ at: djSessions.musicChipAt }).from(djSessions).where(eq(djSessions.id, sessionId))
+    return row.at
+  }
+
+  // A listener whose library is in, with no plays the app can see: no
+  // ledger, and play counts of zero. No source row, so on the web they read
+  // as an Apple listener (chosenService from the library alone).
+  async function noPlaysListener(db: TestDb, n = 8) {
+    await seedUser(db, 'u1')
+    const library = await seedLibrary(db, 'u1', n)
+    const session = await seedSession(db, 'u1')
+    return { session, sessionRef: { id: session.id, userId: 'u1' } as DjSessionRef, library }
+  }
+
+  async function expectNoPill(db: TestDb, sessionId: string, result: object, texts: string[]) {
+    expect(result).not.toHaveProperty('addMusic')
+    expect(count(texts, HISTORY_NOTICE)).toBe(0)
+    expect(await chipRows(db)).toHaveLength(0)
+    expect(await chipAt(db, sessionId)).toBeNull()
+  }
+
+  it('the notices fix facts, not sentences, and carry no em dashes', () => {
+    expect(OWN_MUSIC_CATALOG_NOTICE).toMatch(/^note: /)
+    expect(OWN_MUSIC_CATALOG_NOTICE).toMatch(/don't know their music yet/)
+    expect(OWN_MUSIC_CATALOG_NOTICE).toMatch(/Don't suggest adding music/)
+    // It stands alone after the listing, and makes no claim a blended mix
+    // would break.
+    expect(OWN_MUSIC_CATALOG_NOTICE).not.toMatch(/when you say so/i)
+    expect(OWN_MUSIC_CATALOG_NOTICE).not.toMatch(/shared catalog/)
+    expect(HISTORY_NOTICE).toMatch(/^note: /)
+    expect(HISTORY_NOTICE).toMatch(/listening history/)
+    expect(HISTORY_NOTICE).toMatch(/button/)
+    for (const text of [OWN_MUSIC_CATALOG_NOTICE, HISTORY_NOTICE]) expect(text).not.toContain('—')
+  })
+
+  it('a catalog listener with an own-music brief: the catalog notice beside the corpus notice, and no pill', async () => {
+    for (const brief of [COMFORT, OWN_ONLY]) {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      await seedCorpusListener(db, 'u1')
+      const session = await seedSession(db, 'u1')
+      const { llm, requests } = generating(brief)
+
+      const result = await runDjTurn(db, { embed: fakeEmbed, llm }, { id: session.id, userId: 'u1' }, 'play my favourites', IOS)
+
+      expect(result.queue.length).toBeGreaterThan(0)
+      const [text] = toolResults(requests)
+      expect(text.split('\n')[0]).toBe(CORPUS_NOTICE)
+      expect(count([text], OWN_MUSIC_CATALOG_NOTICE)).toBe(1)
+      await expectNoPill(db, session.id, result, [text])
+    }
+  })
+
+  it('a catalog listener with a mix brief gets no own-music notice', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedCorpusListener(db, 'u1')
+    const session = await seedSession(db, 'u1')
+    const { llm, requests } = generating({ themes: 'late night', targetCount: 5, familiarity: 'mix' })
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, { id: session.id, userId: 'u1' }, 'something for late night', IOS)
+
+    const texts = toolResults(requests)
+    expect(texts[0].split('\n')[0]).toBe(CORPUS_NOTICE)
+    expect(count(texts, OWN_MUSIC_CATALOG_NOTICE)).toBe(0)
+    await expectNoPill(db, session.id, result, texts)
+  })
+
+  it('golden: music but no plays, an own-music brief: the history notice, addMusic, music_chip_at and one funnel row; a second own-music turn gets none', async () => {
+    const db = await createTestDb()
+    const { session, sessionRef, library } = await noPlaysListener(db)
+    const owned = new Set(library.map((t) => t.id))
+    const first = generating(COMFORT)
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm: first.llm }, sessionRef, 'play my favourites', IOS)
+
+    expect(result.queue.length).toBeGreaterThan(0)
+    expect(result.queue.every((t) => owned.has(t.trackId))).toBe(true)
+    expect(result.addMusic).toBe('history')
+    const texts = toolResults(first.requests)
+    expect(count(texts, HISTORY_NOTICE)).toBe(1)
+    expect(count(texts, OWN_MUSIC_CATALOG_NOTICE)).toBe(0)
+    expect(count(texts, CORPUS_NOTICE)).toBe(0)
+    const offeredAt = await chipAt(db, session.id)
+    expect(offeredAt).toBeInstanceOf(Date)
+    expect((await chipRows(db)).map((r) => [r.userId, r.surface])).toEqual([['u1', 'ios']])
+    // Never persisted: the transcript holds the listener's line and the reply.
+    expect((await readMessages(db, session.id)).some((m) => m.content.includes(HISTORY_NOTICE))).toBe(false)
+
+    // Once per conversation.
+    const second = generating(OWN_ONLY)
+    const again = await runDjTurn(db, { embed: fakeEmbed, llm: second.llm }, sessionRef, 'only songs I love', IOS)
+
+    expect(again.queue.length).toBeGreaterThan(0)
+    expect(again).not.toHaveProperty('addMusic')
+    expect(count(toolResults(second.requests), HISTORY_NOTICE)).toBe(0)
+    expect(await chipRows(db)).toHaveLength(1)
+    expect((await chipAt(db, session.id))?.getTime()).toBe(offeredAt!.getTime())
+  })
+
+  it('a new session offers it again: the guard is per conversation', async () => {
+    const db = await createTestDb()
+    const { sessionRef } = await noPlaysListener(db)
+    await runDjTurn(db, { embed: fakeEmbed, llm: generating(COMFORT).llm }, sessionRef, 'play my favourites', IOS)
+    const other = await seedSession(db, 'u1', 'another')
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm: generating(COMFORT).llm }, { id: other.id, userId: 'u1' }, 'play my favourites', IOS)
+
+    expect(result.addMusic).toBe('history')
+    expect(await chipRows(db)).toHaveLength(2)
+  })
+
+  it('a session whose pill was already offered gets no notice and no pill', async () => {
+    const db = await createTestDb()
+    const { session, sessionRef } = await noPlaysListener(db)
+    const earlier = new Date(Date.now() - 60_000)
+    await db.update(djSessions).set({ musicChipAt: earlier }).where(eq(djSessions.id, session.id))
+    const { llm, requests } = generating(COMFORT)
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'play my favourites', IOS)
+
+    expect(result).not.toHaveProperty('addMusic')
+    expect(count(toolResults(requests), HISTORY_NOTICE)).toBe(0)
+    expect(await chipRows(db)).toHaveLength(0)
+    expect((await chipAt(db, session.id))?.getTime()).toBe(earlier.getTime())
+  })
+
+  it('observed play counts are plays: no pill', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedLibrary(db, 'u1', 6)
+    await seedLibraryTrack(db, 'u1', { embedding: MATCHING_DIRECTION, playCount: 4 })
+    const session = await seedSession(db, 'u1')
+    const { llm, requests } = generating(COMFORT)
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, { id: session.id, userId: 'u1' }, 'play my favourites', IOS)
+
+    expect(result.queue.length).toBeGreaterThan(0)
+    await expectNoPill(db, session.id, result, toolResults(requests))
+  })
+
+  it('listening ledger rows are plays: no pill', async () => {
+    const db = await createTestDb()
+    const { session, sessionRef, library } = await noPlaysListener(db)
+    await db.insert(listeningDays).values({ userId: 'u1', source: 'spotify_export', trackId: library[0].id, day: '2026-10-01', plays: 1, msPlayed: 180_000 })
+    const { llm, requests } = generating(COMFORT)
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'play my favourites', IOS)
+
+    expect(result.queue.length).toBeGreaterThan(0)
+    await expectNoPill(db, session.id, result, toolResults(requests))
+  })
+
+  it('what counts as a play: an unobserved count is not one, and another listener\'s plays are not theirs', async () => {
+    const db = await createTestDb()
+    const { library } = await noPlaysListener(db)
+    // A fresh conversation each time, so the per-session guard never answers.
+    const offered = async () => {
+      const s = await seedSession(db, 'u1', 'probe')
+      const r = await runDjTurn(db, { embed: fakeEmbed, llm: generating(COMFORT).llm }, { id: s.id, userId: 'u1' }, 'play my favourites', IOS)
+      return r.addMusic === 'history'
+    }
+
+    // Web MusicKit cannot see play counts: a count it did not observe proves nothing.
+    await db.update(userTracks).set({ playCount: 9, playCountObserved: false }).where(eq(userTracks.trackId, library[0].id))
+    await seedUser(db, 'u2')
+    await db.insert(userTracks).values({ userId: 'u2', trackId: library[1].id, playCount: 5 })
+    await db.insert(listeningDays).values({ userId: 'u2', source: 'apple_export', trackId: library[1].id, day: '2026-10-01', plays: 2, msPlayed: 300_000 })
+    expect(await offered()).toBe(true)
+
+    await db.update(userTracks).set({ playCountObserved: true }).where(eq(userTracks.trackId, library[0].id))
+    expect(await offered()).toBe(false)
+  })
+
+  it('a mix brief from a listener with no plays gets no pill', async () => {
+    const db = await createTestDb()
+    const { session, sessionRef } = await noPlaysListener(db)
+    const { llm, requests } = generating({ themes: 'late night', targetCount: 5, familiarity: 'mix' })
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'something for late night', IOS)
+
+    expect(result.queue.length).toBeGreaterThan(0)
+    await expectNoPill(db, session.id, result, toolResults(requests))
+  })
+
+  describe('the surface: the web has a destination only for a Spotify listener', () => {
+    it('web, an Apple listener: no notice, no claim, no funnel row, no addMusic', async () => {
+      const db = await createTestDb()
+      const { session, sessionRef } = await noPlaysListener(db)
+      await db.insert(userMusicSources).values({ userId: 'u1', source: 'apple_live', lastImportedAt: new Date() })
+      const { llm, requests } = generating(COMFORT)
+
+      const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'play my favourites', { surface: 'web' })
+
+      expect(result.queue.length).toBeGreaterThan(0)
+      await expectNoPill(db, session.id, result, toolResults(requests))
+    })
+
+    it('a request with no surface is a web one', async () => {
+      const db = await createTestDb()
+      const { session, sessionRef } = await noPlaysListener(db)
+      const { llm, requests } = generating(COMFORT)
+
+      const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'play my favourites')
+
+      await expectNoPill(db, session.id, result, toolResults(requests))
+    })
+
+    it('web, a Spotify listener (an export source, or the chose-Spotify row): offered', async () => {
+      for (const onSpotify of ['source', 'chose'] as const) {
+        const db = await createTestDb()
+        const { session, sessionRef } = await noPlaysListener(db)
+        if (onSpotify === 'source') {
+          await db.insert(userMusicSources).values({ userId: 'u1', source: 'spotify_export', lastImportedAt: new Date() })
+        } else {
+          await db.insert(funnelEvents).values({ userId: 'u1', type: 'chose_spotify', surface: 'web' })
+        }
+        const { llm, requests } = generating(COMFORT)
+
+        const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'play my favourites', { surface: 'web' })
+
+        expect(result.addMusic).toBe('history')
+        expect(count(toolResults(requests), HISTORY_NOTICE)).toBe(1)
+        expect(await chipAt(db, session.id)).toBeInstanceOf(Date)
+        expect((await chipRows(db)).map((r) => r.surface)).toEqual(['web'])
+      }
+    })
+
+    it('iOS, an Apple listener: offered', async () => {
+      const db = await createTestDb()
+      const { session, sessionRef } = await noPlaysListener(db)
+      await db.insert(userMusicSources).values({ userId: 'u1', source: 'apple_live', lastImportedAt: new Date() })
+      const { llm, requests } = generating(COMFORT)
+
+      const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'play my favourites', IOS)
+
+      expect(result.addMusic).toBe('history')
+      expect(count(toolResults(requests), HISTORY_NOTICE)).toBe(1)
+      expect(await chipAt(db, session.id)).toBeInstanceOf(Date)
+      expect((await chipRows(db)).map((r) => r.surface)).toEqual(['ios'])
+    })
+  })
+
+  it('an artist-only favourites mix holding catalogue songs new to them: no history note, no claim', async () => {
+    const db = await createTestDb()
+    const { session, sessionRef } = await noPlaysListener(db)
+    for (let i = 0; i < 6; i++) await seedCorpusTrack(db, { artist: 'Drake' })
+    const { llm, requests } = generating({ themes: 'my favourite Drake songs', targetCount: 5, familiarity: 'comfort', onlyArtist: 'Drake' })
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'my favourite Drake songs', IOS)
+
+    expect(result.queue.length).toBeGreaterThan(0)
+    expect(result.queue.some((t) => t.newToYou)).toBe(true)
+    const texts = toolResults(requests)
+    expect(count(texts, OWN_MUSIC_CATALOG_NOTICE)).toBe(0)
+    await expectNoPill(db, session.id, result, texts)
+  })
+
+  it('an artist-only favourites mix from their own songs alone: offered', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    for (let i = 0; i < 6; i++) {
+      const t = await seedCorpusTrack(db, { artist: 'Drake' })
+      await db.insert(userTracks).values({ userId: 'u1', trackId: t.id, inLibrary: true })
+    }
+    const session = await seedSession(db, 'u1')
+    const { llm } = generating({ themes: 'my favourite Drake songs', targetCount: 5, familiarity: 'comfort', onlyArtist: 'Drake' })
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, { id: session.id, userId: 'u1' }, 'my favourite Drake songs', IOS)
+
+    expect(result.queue.length).toBeGreaterThan(0)
+    expect(result.queue.some((t) => t.newToYou)).toBe(false)
+    expect(result.addMusic).toBe('history')
+  })
+
+  it('an own-music generate that lands nothing claims nothing', async () => {
+    const db = await createTestDb()
+    const { session, sessionRef } = await noPlaysListener(db)
+    const inner = generating(COMFORT)
+    // The curator finds nothing that fits.
+    const llm: LlmClient = async (req) => req.tools.length > 0
+      ? inner.llm(req)
+      : { text: '[]', toolCalls: [], raw: [{ type: 'text', text: '[]' }], stopReason: 'end_turn', usage: null }
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'play my favourites', IOS)
+
+    expect(result.queue).toHaveLength(0)
+    const texts = toolResults(inner.requests)
+    expect(texts[0]).toContain(NOTHING_FITS_TEXT)
+    await expectNoPill(db, session.id, result, texts)
+  })
+
+  it('a remake turn never offers it, even with a comfort brief', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    await seedCorpusListener(db, 'u1')
+    const session = await seedSession(db, 'u1')
+    const sessionRef: DjSessionRef = { id: session.id, userId: 'u1' }
+    await runDjTurn(db, { embed: fakeEmbed, llm: generating({ themes: 'late night', targetCount: 5 }).llm }, sessionRef, 'something for late night', IOS)
+    await seedLibrary(db, 'u1', 8)
+    const { llm, requests } = generating({ ...COMFORT, themes: 'late night' })
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'Remake this with my music', { remake: true, surface: 'ios' })
+
+    expect(await readNotPersonal(db, session.id)).toBe(false)
+    const texts = toolResults(requests)
+    expect(texts.join('\n')).toMatch(/are the listener's own/)
+    expect(count(texts, OWN_MUSIC_CATALOG_NOTICE)).toBe(0)
+    await expectNoPill(db, session.id, result, texts)
+  })
+
+  it('a swap or an extend never offers it, whatever its intent', async () => {
+    const db = await createTestDb()
+    const { session, sessionRef, library } = await noPlaysListener(db, 10)
+    await replaceQueue(db, session.id, library.slice(0, 4).map((t) => ({ trackId: t.id, reason: '' })), 'dj')
+    const intent = { themes: 'my favourites', familiarity: 'comfort', allowOutside: false }
+    const { llm, requests } = makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'edit_queue', { ops: [{ op: 'swap', position: 0, intent }] })] },
+      { toolCalls: [toolCall('c2', 'edit_queue', { ops: [{ op: 'extend', count: 2, intent }] })] },
+      { text: 'swapped one, added two.' },
+    ])
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'swap the first for a favourite and add two more', IOS)
+
+    expect(curateRequests(requests)).toHaveLength(2)
+    expect(result.queue).toHaveLength(6)
+    const texts = toolResults(requests)
+    expect(texts).toHaveLength(2)
+    expect(count(texts, OWN_MUSIC_CATALOG_NOTICE)).toBe(0)
+    await expectNoPill(db, session.id, result, texts)
+  })
+
+  it('two own-music generates in one turn: one notice, one funnel row', async () => {
+    const db = await createTestDb()
+    const { session, sessionRef } = await noPlaysListener(db)
+    const { llm, requests } = generating(COMFORT, { ...OWN_ONLY, targetCount: 4 })
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'my favourites, then only mine', IOS)
+
+    expect(curateRequests(requests)).toHaveLength(2)
+    expect(result.addMusic).toBe('history')
+    const texts = toolResults(requests)
+    expect(texts).toHaveLength(2)
+    expect(count(texts, HISTORY_NOTICE)).toBe(1)
+    expect(await chipRows(db)).toHaveLength(1)
+    expect(await chipAt(db, session.id)).toBeInstanceOf(Date)
+  })
+
+  it('under a conflict retry: the notice in each attempt, one funnel row, and the pill still offered', async () => {
+    const db = await createTestDb()
+    const { session, sessionRef } = await noPlaysListener(db)
+    const convo: LlmRequest[] = []
+    let curations = 0
+    const liveAssistant = (m: LlmMessage) => m.role === 'assistant' && Array.isArray(m.content)
+    const llm: LlmClient = async (req) => {
+      if (req.tools.length === 0) {
+        curations += 1
+        // The first attempt's extend, after its generate landed: a
+        // concurrent write ends that attempt.
+        if (curations === 2) await applyOps(db, session.id, [{ op: 'move', from: 0, to: 1 }], 'user')
+        return curateFakeResponseFromRequest(req)
+      }
+      convo.push(req)
+      const rounds = req.messages.filter(liveAssistant).length
+      const call = rounds === 0 ? toolCall('c1', 'generate_queue', COMFORT)
+        : rounds === 1 ? toolCall('c2', 'edit_queue', { ops: [{ op: 'extend', count: 1 }] })
+          : undefined
+      if (call) return { text: '', toolCalls: [call], raw: [{ type: 'tool_use', ...call }], stopReason: 'tool_use', usage: null }
+      return { text: 'your favourites, and one more.', toolCalls: [], raw: [{ type: 'text', text: 'your favourites, and one more.' }], stopReason: 'end_turn', usage: null }
+    }
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'play my favourites', IOS)
+
+    expect(result.djMessage.content).toBe('your favourites, and one more.')
+    // Two attempts, each opening with a fresh round; the second attempt's
+    // generate result tells the model again.
+    const openings = convo.filter((r) => !r.messages.some(liveAssistant))
+    expect(openings).toHaveLength(2)
+    expect(count(toolResults([convo.at(-1)!]), HISTORY_NOTICE)).toBe(1)
+    expect(result.addMusic).toBe('history')
+    expect(await chipRows(db)).toHaveLength(1)
+  })
+
+  it('a turn that fails after the pill was claimed answers with what it made, and still carries the pill', async () => {
+    const db = await createTestDb()
+    const { sessionRef } = await noPlaysListener(db)
+    const inner = generating(COMFORT)
+    let conv = 0
+    // The round after the generate fails: the turn recovers with its summary.
+    const llm: LlmClient = async (req) => {
+      if (req.tools.length > 0 && ++conv === 2) throw new LlmError('boom', 500)
+      return inner.llm(req)
+    }
+
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'play my favourites', IOS)
+    log.mockRestore()
+
+    expect(result.djMessage.content).toBe('Made a new mix of 5 songs.')
+    expect(result.queue).toHaveLength(5)
+    expect(result.addMusic).toBe('history')
+    expect(await chipRows(db)).toHaveLength(1)
+  })
+
+  it('a claim that fails after the generate landed: the mix stands, the turn succeeds, no note and no pill', async () => {
+    const db = await createTestDb()
+    const { session, sessionRef } = await noPlaysListener(db)
+    // The claim is the only write that sets music_chip_at: it fails, nothing else does.
+    await db.execute(`CREATE FUNCTION fail_chip_claim() RETURNS trigger AS $$
+      BEGIN RAISE EXCEPTION 'claim failed'; END $$ LANGUAGE plpgsql`)
+    await db.execute(`CREATE TRIGGER fail_chip_claim BEFORE UPDATE OF music_chip_at ON dj_sessions
+      FOR EACH ROW EXECUTE FUNCTION fail_chip_claim()`)
+    const { llm, requests } = generating(COMFORT)
+
+    const result = await runDjTurn(db, { embed: fakeEmbed, llm }, sessionRef, 'play my favourites', IOS)
+
+    expect(result.djMessage.content).toBe('here you go.')
+    expect(result.queue).toHaveLength(5)
+    expect(result.queueVersion).toBe(1)
+    const texts = toolResults(requests)
+    expect(texts[0]).toContain('queue generated: 5 tracks')
+    await expectNoPill(db, session.id, result, texts)
   })
 })

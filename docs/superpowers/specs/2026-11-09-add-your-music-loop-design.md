@@ -176,6 +176,12 @@ plus an "Add my music" pill that both clients turn into a link
        history". The router opens the data-export page for their platform:
        Spotify's, or "Upload an Apple export" for Apple.
      - At most once per conversation (`dj_sessions.music_chip_at`).
+     - Not when the mix landed songs new to them, for example an
+       artist-only favourites brief drawn from the catalog. The note
+       would be false there.
+     - Not on the web for a listener who isn't on Spotify. The web has no
+       Apple export import, so there would be nothing to tap; no note, no
+       claim, no funnel row (S4 review, 2026-11-10).
    - DJ wording is the model's. The notes fix the facts it must say, not
      the sentences.
 

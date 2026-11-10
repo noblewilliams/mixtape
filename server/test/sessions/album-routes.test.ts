@@ -165,6 +165,8 @@ describe('album session routes', () => {
     expect(body.passed).toEqual([])
     expect(body.version).toBe(1)
     expect(body.queue).toBeUndefined()
+    // The history pill is a mix turn's (spec 2026-11-09 add-your-music-loop).
+    expect(body).not.toHaveProperty('addMusic')
     expect(body.messages.map((m: { role: string }) => m.role)).toEqual(['user', 'dj'])
     const [row] = await db.select().from(djSessions)
     expect(row.kind).toBe('album')
@@ -221,6 +223,7 @@ describe('album session routes', () => {
     expect(body.djMessage.content).toBe('Blue, start to finish.')
     expect(body.version).toBe(1)
     expect(body.queue).toBeUndefined()
+    expect(body).not.toHaveProperty('addMusic')
 
     const { app: mixApp } = build(db, { script: [{ text: 'mix reply' }] })
     const mixRes = await send(mixApp, 'POST', `/sessions/${mixSession.id}/messages`, { text: 'more' })

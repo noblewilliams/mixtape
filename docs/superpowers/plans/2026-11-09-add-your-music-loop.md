@@ -163,9 +163,9 @@ S3, in the same file.
   when set.
 - Tests:
   - the notice for catalog own-music briefs, and none for a mix brief;
-  - the pill only for a no-plays listener, once per session (a second
-    own-music turn in the same session gets the notice text but no
-    `addMusic`);
+  - the pill only for a no-plays listener, once per session. A second
+    own-music turn in the same session gets no notice, no `addMusic` and
+    no funnel row, so the DJ doesn't repeat itself (amended 2026-11-10);
   - never for a listener with observed plays or ledger rows;
   - absent from the response otherwise.
 
