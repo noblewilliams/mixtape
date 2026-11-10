@@ -528,3 +528,98 @@ describe('sanitizeReason sentence case', () => {
     expect(sanitizeReason('éclat of horns')).toBe('Éclat of horns')
   })
 })
+
+// Live 2026-11-10 (docs/backlog.md, first-mix latency): a catalogue curation
+// spent about 9,000 thinking tokens and its picks ended mid-array at "},\n{"
+// with stopReason end_turn, so the turn failed with CurationUnparseable. An
+// end_turn answer cut off like that keeps its complete picks; a max_tokens one
+// still retries and then throws CurationTruncated.
+describe('curate with a cut-off picks array', () => {
+  function cutAfter(complete: Array<{ id: string; reason: string }>, tail: string): string {
+    return '[\n' + complete.map((p) => JSON.stringify(p)).join(',\n') + ',\n' + tail
+  }
+
+  it('an end_turn answer cut after three complete objects returns those three picks, unpadded', async () => {
+    const pool = makePool(20)
+    const complete = [pool[4], pool[0], pool[9]].map((t) => ({ id: t.trackId, reason: `Fits ${t.title}.` }))
+    const { llm, requests } = scriptedLlm([{ text: cutAfter(complete, '{'), stopReason: 'end_turn' }])
+
+    const result = await curate(llm, pool, intent({ themes: 'x', targetCount: 15 }))
+
+    expect(requests).toHaveLength(1)
+    expect(result).toEqual(complete.map((p) => ({ trackId: p.id, reason: p.reason })))
+  })
+
+  it('a cut inside a reason string still yields the complete objects before it', async () => {
+    const pool = makePool(20)
+    // Brackets inside the complete reasons must not move the cut point.
+    const complete = [
+      { id: pool[2].trackId, reason: 'Opens soft} then lifts] into the room.' },
+      { id: pool[7].trackId, reason: 'A [live] take with {room} noise.' },
+    ]
+    const text = cutAfter(complete, `{"id":"${pool[11].trackId}","reason":"Brushed drums {and a [muted`)
+    const { llm } = scriptedLlm([{ text, stopReason: 'end_turn' }])
+
+    const result = await curate(llm, pool, intent({ themes: 'x', targetCount: 15 }))
+
+    expect(result.map((p) => p.trackId)).toEqual(complete.map((p) => p.id))
+    expect(result.map((p) => p.reason)).toEqual(complete.map((p) => p.reason))
+  })
+
+  it('a salvaged answer is cut to the count and held to the outside cap like any other', async () => {
+    const pool = mixedPool(6, 3)
+    const complete = ['o0', 't0', 'o1', 't1', 't2'].map((id) => ({ id, reason: 'Fits the room.' }))
+    const { llm } = scriptedLlm([{ text: cutAfter(complete, '{"id":"t3"'), stopReason: 'end_turn' }])
+
+    const result = await curate(llm, pool, intent({ themes: 'x', targetCount: 3 }), undefined, { outsideCap: 1 })
+
+    expect(result.map((p) => p.trackId)).toEqual(['o0', 't0', 't1'])
+  })
+
+  it('a max_tokens answer cut off mid-array still retries with a doubled budget, then throws CurationTruncated', async () => {
+    const pool = makePool(10)
+    const complete = [pool[0], pool[1], pool[2]].map((t) => ({ id: t.trackId, reason: 'Ok.' }))
+    const turn = { text: cutAfter(complete, '{'), stopReason: 'max_tokens' }
+    const { llm, requests } = scriptedLlm([turn, turn])
+
+    await expect(curate(llm, pool, intent({ themes: 'x', targetCount: 3 }))).rejects.toThrow(CurationTruncated)
+    expect(requests).toHaveLength(2)
+    expect(requests[1].maxTokens).toBe((requests[0].maxTokens ?? 0) * 2)
+  })
+
+  it('no array, incidental brackets, or a cut with no complete pick still throws CurationUnparseable', async () => {
+    const pool = makePool(8)
+    const answers = [
+      'sorry, nothing here.',
+      'Footnote [1] is the only bracket here, sorry.',
+      'see [note one, which never closes',
+      '[\n{"id":"t0","reason":"Brushed',
+      '[{"note":"thinking"},\n{',
+      '[{"id":"not-in-pool","reason":"Ok."},\n{',
+    ]
+    for (const text of answers) {
+      const { llm } = scriptedLlm([{ text, stopReason: 'end_turn' }])
+      const err = await curate(llm, pool, intent({ themes: 'x', targetCount: 4 })).catch((e) => e)
+      expect(err, text).toBeInstanceOf(CurationUnparseable)
+      expect(err, text).not.toBeInstanceOf(CurationNothingFits)
+    }
+  })
+
+  it('a bare empty array still throws CurationNothingFits', async () => {
+    const { llm } = scriptedLlm([{ text: '[]', stopReason: 'end_turn' }])
+
+    const err = await curate(llm, makePool(8), intent({ themes: 'x', targetCount: 4 })).catch((e) => e)
+
+    expect(err).toBeInstanceOf(CurationNothingFits)
+  })
+
+  it('a well-formed array is unchanged, even with brackets in its reasons and an unclosed bracket after it', async () => {
+    const pool = makePool(10)
+    const picks = [pool[1], pool[3], pool[5], pool[6]].map((t, i) => ({ id: t.trackId, reason: `Take ${i} [live] {room}.` }))
+    const { llm } = scriptedLlm([{ text: `${JSON.stringify(picks)}\n(see [1`, stopReason: 'end_turn' }])
+
+    const result = await curate(llm, pool, intent({ themes: 'x', targetCount: 10 }))
+
+    expect(result).toEqual(picks.map((p) => ({ trackId: p.id, reason: p.reason })))
+  })
+})

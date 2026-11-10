@@ -331,6 +331,61 @@ function extractJsonArray(text: string): unknown[] | null {
   return extractJsonArrayWhere(text, looksLikePicks)
 }
 
+// The candidate at `start` cut back to its last complete top-level object and
+// closed with `]`: scanned string-aware as scanBalancedArray does, keeping the
+// prefix up to the last `}` that brings depth back to 1. Null when the
+// candidate balances (it is not cut off; extractJsonArrayWhere judges those)
+// or holds no complete object.
+function cutArrayPrefix(text: string, start: number): string | null {
+  let depth = 0
+  let inString = false
+  let escaped = false
+  let lastObjectEnd = -1
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]
+    if (inString) {
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') {
+      inString = true
+      continue
+    }
+    if (ch === '[' || ch === '{') depth++
+    else if (ch === ']' || ch === '}') {
+      depth--
+      if (depth === 0) return null
+      if (depth === 1 && ch === '}') lastObjectEnd = i
+    }
+  }
+  return lastObjectEnd === -1 ? null : `${text.slice(start, lastObjectEnd + 1)}]`
+}
+
+// An end_turn answer can still stop mid-array: on 2026-11-10 a catalogue
+// curation spent about 9,000 thinking tokens and its picks ended at "},\n{",
+// which extractJsonArray cannot balance, so the whole turn failed. This keeps
+// the complete picks before the cut, walking every `[` candidate in order as
+// extractJsonArrayWhere does and accepting only a cut-off one that parses and
+// looks like picks. Only reached when no balanced picks array exists, so a
+// well-formed array, `[]` and prose brackets get exactly their old answers.
+// Never used on a max_tokens stop: that path retries, then throws
+// CurationTruncated (see curate).
+function salvageCutPicks(text: string): unknown[] | null {
+  let searchFrom = 0
+  for (;;) {
+    const start = text.indexOf('[', searchFrom)
+    if (start === -1) return null
+    const candidate = cutArrayPrefix(text, start)
+    if (candidate !== null) {
+      const parsed = tryParseArray(candidate)
+      if (parsed && looksLikePicks(parsed)) return parsed
+    }
+    searchFrom = start + 1
+  }
+}
+
 // A reason as the listener sees it: trimmed, em dashes out, then capped at
 // MAX_REASON_LENGTH. Array.from(...).slice(...).join('') caps by CODE POINT,
 // not UTF-16 code unit: a plain .slice could bisect a surrogate pair (emoji,
@@ -415,7 +470,7 @@ export async function curate(
     }
   }
 
-  const rawPicks = extractJsonArray(turn.text)
+  const rawPicks = extractJsonArray(turn.text) ?? (turn.stopReason === 'max_tokens' ? null : salvageCutPicks(turn.text))
   const picks = normalizePicks(rawPicks ?? [], poolIds)
   if (picks.length === 0 && pool.length > 0) {
     // No picks array at all, but an empty one: the model said nothing fits.
