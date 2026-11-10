@@ -20,9 +20,9 @@ import {
   TURN_APPLE_BUDGET,
   type DjDeps,
 } from '../../src/dj/loop'
-import { PROPOSE_EXTRA, PROPOSE_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT_PERSONAL } from '../../src/dj/propose'
+import { PROPOSE_EXTRA, PROPOSE_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT_PERSONAL, titleKey } from '../../src/dj/propose'
 import { NAMED_ARTISTS_RULE_PREFIX } from '../../src/dj/curate'
-import { creditedKeys } from '../../src/dj/artist-keys'
+import { artistKey, creditedKeys } from '../../src/dj/artist-keys'
 import { DJ_TOOLS, DJ_TOOLS_WITH_OUTSIDE } from '../../src/dj/contracts'
 import { getActiveQueue, replaceQueue } from '../../src/dj/queue-store'
 import type { FillDeps } from '../../src/dj/catalogue-fill'
@@ -404,6 +404,90 @@ describe('decision 2: a short curation is filled from outside the library, then 
     expect(text.split('\n')[0]).toBe(CORPUS_NOTICE)
     expect(text).toContain(blendedNotice(5))
     expect(await notPersonal(db, session.id)).toBe(true)
+  })
+})
+
+// The same song as two track rows (another release: same title and artist,
+// a featured credit in the title) plays once (backlog 2026-11-10: "Anybody"
+// and "Gbona" landed twice each in a cleaning mix).
+describe('a mix holds a song once, whatever track row it arrives as', () => {
+  async function corpusListener() {
+    const db = await createTestDb()
+    await seedUser(db)
+    const seeded: Array<typeof tracks.$inferSelect> = []
+    for (const artist of ['SeedA', 'SeedB', 'SeedC']) {
+      await db.insert(userArtistSeeds).values({ userId: 'u1', name: artist, source: 'interview' })
+      seeded.push(...(await seedTracks(db, artist, 9)))
+    }
+    return { db, session: await seedSession(db), target: seeded[0] }
+  }
+
+  // Apple answers `term` with another release of `target`: a new Apple id,
+  // so a new track row, and a featured credit in the title.
+  function anotherRelease(fill: FillDeps, term: string, target: { title: string; artist: string }) {
+    const search = fill.catalog.searchSongs.bind(fill.catalog)
+    fill.catalog.searchSongs = async (sf, t, limit) =>
+      t === term ? [song('v-another-release', `${target.title} (feat. Guest)`, target.artist)] : search(sf, t, limit)
+  }
+
+  const sameSong = (queue: Array<{ title: string; artist: string }>, target: { title: string; artist: string }) =>
+    queue.filter((t) => titleKey(t.title) === titleKey(target.title) && artistKey(t.artist) === artistKey(target.artist))
+
+  it('a blend proposal that is a catalogue pick under another track id lands once', async () => {
+    const { db, session, target } = await corpusListener()
+    const round = [{ title: target.title, artist: target.artist, reason: 'again' }, ...proposals(10)]
+    const { fill } = fakeApple(round)
+    anotherRelease(fill, `${target.title} ${target.artist}`, target)
+    const { llm, requests } = scriptedLlm([generate({ targetCount: 6 })], {
+      proposed: round,
+      curateAnswer: (ids, count) =>
+        JSON.stringify([target.id, ...ids.filter((id) => id !== target.id)].slice(0, count).map((id) => ({ id, reason: 'fits' }))),
+    })
+
+    const result = await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true }, { id: session.id, userId: 'u1' }, 'soft jazz')
+
+    expect(poolIds(curationRequests(requests)[0])).toContain(target.id)
+    expect(result.queue).toHaveLength(6)
+    expect(sameSong(result.queue, target)).toHaveLength(1)
+    expect(result.queue.filter((t) => t.title.startsWith('Song ')).length).toBeGreaterThan(0)
+  })
+
+  it('a corpus top-up cannot bring a catalogue pick back as another release', async () => {
+    const { db, session, target } = await corpusListener()
+    // The blend verifies its share (Song 0 to 2); the top-up reaches the
+    // other release next, proposed under a credit only Apple's answer folds
+    // back to the catalogue pick's.
+    const again = { title: target.title, artist: `${target.artist} feat. Guest`, reason: 'again' }
+    const round = [...proposals(3), again, ...proposals(10).slice(3)]
+    const { fill } = fakeApple(round)
+    anotherRelease(fill, `${again.title} ${again.artist}`, target)
+    // The catalogue holds one song that fits: the target.
+    const { llm } = scriptedLlm([generate({ targetCount: 6 })], {
+      proposed: round,
+      curateAnswer: () => JSON.stringify([{ id: target.id, reason: 'fits' }]),
+    })
+
+    const result = await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true }, { id: session.id, userId: 'u1' }, 'soft jazz')
+
+    expect(sameSong(result.queue, target)).toHaveLength(1)
+    expect(result.queue.filter((t) => t.title.startsWith('Song ')).length).toBeGreaterThan(3)
+  })
+
+  it('a personal shortfall cannot bring a library pick back as another release', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    const [target] = await seedTracks(db, 'Mine', 3, 'u1')
+    const session = await seedSession(db)
+    const again = { title: target.title, artist: `${target.artist} feat. Guest`, reason: 'again' }
+    const round = [again, ...proposals(10)]
+    const { fill } = fakeApple(round)
+    anotherRelease(fill, `${again.title} ${again.artist}`, target)
+    const { llm } = scriptedLlm([generate({ targetCount: 6 })], { proposed: round })
+
+    const result = await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true }, { id: session.id, userId: 'u1' }, 'soft jazz')
+
+    expect(sameSong(result.queue, target)).toHaveLength(1)
+    expect(result.queue.filter((t) => t.title.startsWith('Song ')).length).toBeGreaterThan(0)
   })
 })
 

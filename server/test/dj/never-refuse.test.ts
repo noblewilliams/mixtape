@@ -452,6 +452,54 @@ describe('never refuse: proposed songs verified on Apple', () => {
     expect(await notPersonal(db, session.id)).toBe(false)
   })
 
+  // Thinking off for catalogue curation only (backlog 2026-11-10, first-mix
+  // latency): adaptive thinking spent 44 to 95 s there.
+  const curationRequests = (requests: LlmRequest[]) => requests.filter((r) => r.tools.length === 0 && r.system !== PROPOSE_SYSTEM_PROMPT)
+
+  it('a corpus mix curates the catalogue with thinking off at effort low; the proposal call is unchanged', async () => {
+    const db = await createTestDb()
+    const session = await seedCorpusListener(db)
+    const round = proposals('Song', 11)
+    const { fill } = fakeFill(round)
+    const { llm, requests } = scriptedLlm([{ themes: 'x', targetCount: 6 }], [round])
+
+    await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true }, { id: session.id, userId: 'u1' }, 'play')
+
+    const curations = curationRequests(requests)
+    expect(curations).toHaveLength(1)
+    expect(curations[0]).toMatchObject({ effort: 'low', thinking: 'off' })
+    expect(proposalRequests(requests)).toHaveLength(1)
+    expect(proposalRequests(requests)[0]).not.toHaveProperty('thinking')
+  })
+
+  it('a corpus mix with the flag off curates with thinking off too', async () => {
+    const db = await createTestDb()
+    const session = await seedCorpusListener(db)
+    const { llm, requests } = scriptedLlm([{ themes: 'x', targetCount: 5 }], [])
+
+    await runDjTurn(db, { llm, embed: embedFake, neverRefuse: false }, { id: session.id, userId: 'u1' }, 'play')
+
+    const curations = curationRequests(requests)
+    expect(curations).toHaveLength(1)
+    expect(curations[0]).toMatchObject({ effort: 'low', thinking: 'off' })
+  })
+
+  it('a personal mix curates as today: effort medium, adaptive thinking', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    await seedEnriched(db, 'Mine', 6, 'u1')
+    const session = await seedSession(db)
+    const { fill } = fakeFill([])
+    const { llm, requests } = scriptedLlm([{ themes: 'x', targetCount: 5 }], [])
+
+    await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true }, { id: session.id, userId: 'u1' }, 'play')
+
+    const curations = curationRequests(requests)
+    expect(curations).toHaveLength(1)
+    expect(curations[0].effort).toBe('medium')
+    expect(curations[0]).not.toHaveProperty('thinking')
+  })
+
   it('without the Apple fill wired, the flag on still refuses as before', async () => {
     const db = await createTestDb()
     await seedUser(db)

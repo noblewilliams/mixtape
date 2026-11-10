@@ -28,6 +28,12 @@ export type LlmRequest = {
   tools: LlmToolDef[]
   maxTokens?: number
   effort?: 'low' | 'medium' | 'high'
+  // 'off' sends thinking disabled beside the effort. Sonnet 5's adaptive
+  // thinking made catalogue curation think for up to its whole budget (44 to
+  // 95 s on 2026-11-10; thinking off took 13 to 18 s and stayed on brief, see
+  // docs/backlog.md). Absent, the request carries no thinking field and the
+  // model's adaptive default stands.
+  thinking?: 'off'
 }
 export type LlmToolCall = { id: string; name: string; input: unknown }
 export type LlmTurn = {
@@ -154,6 +160,7 @@ export function anthropicLlm(
             messages: req.messages as Anthropic.MessageParam[],
             tools: req.tools,
             ...(req.effort ? { output_config: { effort: req.effort } } : {}),
+            ...(req.thinking === 'off' ? { thinking: { type: 'disabled' as const } } : {}),
           },
           { signal },
         )

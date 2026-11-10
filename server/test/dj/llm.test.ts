@@ -156,6 +156,23 @@ describe('anthropicLlm', () => {
     await llm({ ...baseReq, maxTokens: 500, effort: 'low' })
     expect(captured?.max_tokens).toBe(500)
     expect(captured?.output_config).toEqual({ effort: 'low' })
+    expect(captured).not.toHaveProperty('thinking')
+  })
+
+  it("maps thinking 'off' to thinking disabled, beside the effort", async () => {
+    let captured: Anthropic.MessageStreamParams | undefined
+    const fakeCreate = async (body: Anthropic.MessageStreamParams) => {
+      captured = body
+      return {
+        content: [{ type: 'text', text: 'ok' }] as Anthropic.ContentBlock[],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }
+    }
+    const llm = anthropicLlm({ messages: { stream: streamOf(fakeCreate) } })
+    await llm({ ...baseReq, maxTokens: 500, effort: 'low', thinking: 'off' })
+    expect(captured?.thinking).toEqual({ type: 'disabled' })
+    expect(captured?.output_config).toEqual({ effort: 'low' })
   })
 
   it('passes a user message built from cacheable text content blocks straight through to the SDK', async () => {

@@ -246,6 +246,40 @@ describe('curate', () => {
     expect(requests[0].maxTokens).toBe(6000 + 250 * 20)
   })
 
+  it('without thinking off: effort medium and no thinking field (adaptive thinking, as today)', async () => {
+    const pool = makePool(10)
+    const { llm, requests } = scriptedLlm([textTurn(pool.slice(0, 3).map((t) => ({ id: t.trackId })))])
+
+    await curate(llm, pool, intent({ themes: 'x', targetCount: 3 }), undefined, { outsideCap: 0 })
+
+    expect(requests[0].effort).toBe('medium')
+    expect(requests[0]).not.toHaveProperty('thinking')
+  })
+
+  it('thinking off: effort low and thinking off, the budget and the max_tokens retry unchanged', async () => {
+    const pool = makePool(10)
+    const picks = [pool[0], pool[1], pool[2]].map((t) => ({ id: t.trackId, reason: 'Ok' }))
+    const { llm, requests } = scriptedLlm([textTurn(picks, 'max_tokens'), textTurn(picks, 'end_turn')])
+
+    await curate(llm, pool, intent({ themes: 'x', targetCount: 3 }), undefined, { thinking: 'off' })
+
+    expect(requests).toHaveLength(2)
+    for (const req of requests) {
+      expect(req.effort).toBe('low')
+      expect(req.thinking).toBe('off')
+    }
+    expect(requests[0].maxTokens).toBe(6000 + 250 * 3)
+    expect(requests[1].maxTokens).toBe((requests[0].maxTokens ?? 0) * 2)
+  })
+
+  it('thinking off still throws CurationTruncated when the retry is cut off too', async () => {
+    const pool = makePool(10)
+    const picks = [pool[0]].map((t) => ({ id: t.trackId, reason: 'Ok' }))
+    const { llm } = scriptedLlm([textTurn(picks, 'max_tokens'), textTurn(picks, 'max_tokens')])
+
+    await expect(curate(llm, pool, intent({ themes: 'x', targetCount: 3 }), undefined, { thinking: 'off' })).rejects.toThrow(CurationTruncated)
+  })
+
   it('caps maxTokens at 16000 even for a large targetCount', async () => {
     // targetCount 200 is beyond intentSchema's max (60) — curate's own scaling
     // formula has no ceiling of its own, so this constructs an Intent value

@@ -1375,6 +1375,8 @@ async function blendProposals(
 // share grows to the shortfall by verifying more of the blend round's own
 // proposals, those it stopped short of searching. No second proposal call,
 // so a corpus mix still spends one. Never throws, as blendProposals.
+// `heldSongs` is the held songs' songKeys: another row of a held song (another
+// release, same title and artist) is the same song and stays out.
 async function topUpFromBlend(
   db: Db,
   fill: FillDeps,
@@ -1382,6 +1384,7 @@ async function topUpFromBlend(
   tracker: FillTracker,
   want: number,
   held: Set<string>,
+  heldSongs: Set<string>,
 ): Promise<VerifiedProposal[]> {
   const rest = tracker.blendRest
   if (!rest || rest.proposals.length === 0 || want <= 0) return []
@@ -1399,7 +1402,7 @@ async function topUpFromBlend(
     spend.log.searches += result.searches
     // Searched now, so a conflict retry does not search them again.
     rest.proposals = rest.proposals.slice(result.searches)
-    const fresh = result.verified.filter((v) => !held.has(v.trackId)).slice(0, want)
+    const fresh = result.verified.filter((v) => !held.has(v.trackId) && !heldSongs.has(songKey(v))).slice(0, want)
     spend.log.verified += fresh.length
     tracker.blend = [...(tracker.blend ?? []), ...fresh]
     return fresh
@@ -1461,7 +1464,8 @@ const songKey = (s: { title: string; artist: string }) => `${titleKey(s.title)}\
 // the shortfall, verified on Apple like the corpus blend, never naming the
 // songs the library already gave. Never throws but for the turn's own
 // budget. Kept on the tracker, so a conflict retry or a second
-// generate_queue this turn reuses it.
+// generate_queue this turn reuses it. `heldSongs` keeps out another row of
+// a held song, as in topUpFromBlend.
 async function shortfallProposals(
   db: Db,
   deps: DjDeps,
@@ -1475,6 +1479,7 @@ async function shortfallProposals(
   want: number,
   exclude: ProposedSong[],
   held: Set<string>,
+  heldSongs: Set<string>,
   early?: Promise<EarlyShortfall>,
 ): Promise<VerifiedProposal[]> {
   if (want <= 0) return []
@@ -1519,7 +1524,9 @@ async function shortfallProposals(
     tracker.shortfall = { key, verified }
     spend.log.verified += verified.length
   }
-  return tracker.shortfall.verified.filter((v) => !held.has(v.trackId)).slice(0, want + genreSpares(intent, want))
+  return tracker.shortfall.verified
+    .filter((v) => !held.has(v.trackId) && !heldSongs.has(songKey(v)))
+    .slice(0, want + genreSpares(intent, want))
 }
 
 // A curation call that failed on its own terms (cut off, unreadable, the
@@ -1856,8 +1863,11 @@ async function generateFromBrief(
   // the proposals fill the mix (backlog 2026-11-10, first-mix 502s on the
   // catalogue blend). Only when nothing at all lands does its error stand.
   let curationError: unknown = null
+  // Catalogue curation runs with thinking off (backlog 2026-11-10: adaptive
+  // thinking there took 44 to 95 s); a personal pool's request is as before.
+  const thinking = poolMode.mode === 'corpus' ? { thinking: 'off' as const } : {}
   const [curatedCheck, proposedRaw] = await Promise.all([
-    curateFitting(deps.llm, pool, intent, withPlaylistSeedContext(sessionContext, seed), { outsideCap: cap })
+    curateFitting(deps.llm, pool, intent, withPlaylistSeedContext(sessionContext, seed), { outsideCap: cap, ...thinking })
       .catch((e: unknown): CuratedTrack[] => {
         if ((blending || early) && isCurationFailure(e)) {
           curationError = e
@@ -1869,9 +1879,15 @@ async function generateFromBrief(
     blending ? blendProposals(db, deps, deps.fill!, session, intent, userText, sessionContext, budget, turn.tracker) : Promise.resolve([]),
   ])
   const curated = curatedCheck.kept
-  // A proposal the catalogue curation also picked is one song, queued once.
+  // A proposal the catalogue curation also picked is one song, queued once:
+  // the same track row, or another row of the same song by songKey (another
+  // release, same title and artist; backlog 2026-11-10, "Gbona" twice).
   const curatedIds = new Set(curated.map((p) => p.trackId))
-  let proposed = proposedRaw.filter((p) => !curatedIds.has(p.trackId))
+  const curatedSongs = new Set(curated.flatMap((p) => {
+    const t = byId.get(p.trackId)
+    return t ? [songKey(t)] : []
+  }))
+  let proposed = proposedRaw.filter((p) => !curatedIds.has(p.trackId) && !curatedSongs.has(songKey(p)))
   // The shortfall: the corpus blend's share is a minimum, so the proposed
   // count is the larger of it and what the curation left unfilled.
   const shortfall = intent.targetCount - curated.length
@@ -1880,16 +1896,17 @@ async function generateFromBrief(
   const proposedRoom = fillShort ? Math.max(shortfall, proposed.length) : proposed.length
   if (fillShort && proposed.length < shortfall) {
     const held = new Set([...curatedIds, ...proposed.map((p) => p.trackId)])
+    const heldSongs = new Set([...curatedSongs, ...proposed.map(songKey)])
     const want = shortfall - proposed.length
     if (blending) {
-      proposed.push(...await topUpFromBlend(db, deps.fill!, intent, turn.tracker, want + genreSpares(intent, want), held))
+      proposed.push(...await topUpFromBlend(db, deps.fill!, intent, turn.tracker, want + genreSpares(intent, want), held, heldSongs))
     } else {
       const exclude = curated.flatMap((p) => {
         const t = byId.get(p.trackId)
         return t ? [{ title: t.title, artist: t.artist }] : []
       })
       proposed.push(...await shortfallProposals(db, deps, deps.fill!, session, intent, userText, sessionContext, budget,
-        turn.tracker, want, exclude, held, early))
+        turn.tracker, want, exclude, held, heldSongs, early))
     }
   }
   // The proposals, blend and shortfall alike, pass the same check: at most

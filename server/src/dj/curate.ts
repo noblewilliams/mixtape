@@ -245,6 +245,7 @@ function buildRequest(
   maxTokens: number,
   cap: number | null,
   scope: ArtistScopeOptions = {},
+  thinking?: 'off',
 ): LlmRequest {
   const poolBlock = (cap === null ? POOL_LEGEND : POOL_LEGEND_WITH_OUTSIDE) + pool.map(poolLine).join('\n')
   const message: LlmMessage = {
@@ -259,7 +260,10 @@ function buildRequest(
     messages: [message],
     tools: [],
     maxTokens,
-    effort: 'medium',
+    // Thinking off goes with effort low (CurateOptions.thinking); without
+    // it, effort medium under adaptive thinking, as before.
+    effort: thinking === 'off' ? 'low' : 'medium',
+    ...(thinking === 'off' ? { thinking } : {}),
   }
 }
 
@@ -441,6 +445,11 @@ export type CurateOptions = {
   // The artists a named-artist edit's pool is made of; lifts the spread
   // rule too. Ignored when onlyArtist is set.
   namedArtists?: string[]
+  // 'off' runs this curation with thinking off at effort low. Catalogue
+  // (corpus) curation only (dj/loop.ts generateFromBrief): adaptive thinking
+  // there spent 44 to 95 s per mix (docs/backlog.md, 2026-11-10). The budget,
+  // the max_tokens retry and CurationTruncated are the same either way.
+  thinking?: 'off'
 }
 
 export async function curate(
@@ -454,7 +463,7 @@ export async function curate(
   const outsideIds = new Set(pool.filter((t) => t.outside).map((t) => t.trackId))
   const cap = outsideIds.size > 0 ? Math.max(0, options.outsideCap ?? outsideCap(intent)) : null
   const maxTokens = scaledMaxTokens(intent.targetCount)
-  const request = buildRequest(pool, intent, sessionContext, maxTokens, cap, options)
+  const request = buildRequest(pool, intent, sessionContext, maxTokens, cap, options, options.thinking)
 
   let turn = await llm(request)
   if (turn.stopReason === 'max_tokens') {
