@@ -1344,6 +1344,17 @@ async function topUpFromBlend(
   }
 }
 
+// Spares for a named genre's check (decision 8): the shortfall verifies up
+// to this many songs beyond what it needs, so a proposal that then fails the
+// sound check is replaced from the same round rather than left as a gap
+// (live 2026-11-10: a "90s r&b slow jams" mix came back 5 songs, a rerun 15).
+// As many again as the shortfall, never more than the round's own extras;
+// the searches stay inside VERIFY_MAX and the turn's Apple budget. None
+// without a named genre: nothing would drop them.
+function genreSpares(intent: { genres?: string[] }, want: number): number {
+  return (intent.genres ?? []).length > 0 ? Math.min(PROPOSE_EXTRA, want) : 0
+}
+
 // A personal mix that curated short (decision 2): one proposal round for
 // the shortfall, verified on Apple like the corpus blend, never naming the
 // songs the library already gave. Never throws but for the turn's own
@@ -1374,7 +1385,7 @@ async function shortfallProposals(
       const ctx = await proposeContext(db, fill, session, userText, sessionContext)
       const topArtists = await topLibraryArtists(db, session.userId)
       const round = await proposeRound(db, deps, fill, ctx,
-        { intent, want, count: want + PROPOSE_EXTRA, exclude, listener: 'personal', topArtists }, budget, tracker)
+        { intent, want: want + genreSpares(intent, want), count: want + PROPOSE_EXTRA, exclude, listener: 'personal', topArtists }, budget, tracker)
       verified = round?.result.verified ?? []
     } catch (e) {
       if (e instanceof DjError) throw e
@@ -1384,7 +1395,7 @@ async function shortfallProposals(
     tracker.shortfall = { key, verified }
     spend.log.verified += verified.length
   }
-  return tracker.shortfall.verified.filter((v) => !held.has(v.trackId)).slice(0, want)
+  return tracker.shortfall.verified.filter((v) => !held.has(v.trackId)).slice(0, want + genreSpares(intent, want))
 }
 
 // curate(), with the curator's own "nothing fits" (an empty array) read as
@@ -1713,11 +1724,14 @@ async function generateFromBrief(
   // The shortfall: the corpus blend's share is a minimum, so the proposed
   // count is the larger of it and what the curation left unfilled.
   const shortfall = intent.targetCount - curated.length
+  // How many proposals the mix takes: the blend's share, or the shortfall
+  // when that is larger. Any beyond it are a named genre's spares.
+  const proposedRoom = fillShort ? Math.max(shortfall, proposed.length) : proposed.length
   if (fillShort && proposed.length < shortfall) {
     const held = new Set([...curatedIds, ...proposed.map((p) => p.trackId)])
     const want = shortfall - proposed.length
     if (blending) {
-      proposed.push(...await topUpFromBlend(db, deps.fill!, intent, turn.tracker, want, held))
+      proposed.push(...await topUpFromBlend(db, deps.fill!, intent, turn.tracker, want + genreSpares(intent, want), held))
     } else {
       const exclude = curated.flatMap((p) => {
         const t = byId.get(p.trackId)
@@ -1728,11 +1742,14 @@ async function generateFromBrief(
     }
   }
   // The proposals, blend and shortfall alike, pass the same check: at most
-  // one more call, for those Apple labels otherwise. What fails here is
-  // not replaced; the mix is shorter and says why.
+  // one more call, for those Apple labels otherwise. A spare stands in for
+  // one that fails; past the spares the mix is shorter and says why.
   const proposedCheck = await genreFilter(deps, turn.tracker, intent.genres, proposed, proposalCandidate)
-  proposed = proposedCheck.kept
-  const genreDropped = curatedCheck.dropped + proposedCheck.dropped
+  const proposedAimed = Math.min(proposed.length, proposedRoom)
+  proposed = proposedCheck.kept.slice(0, proposedRoom)
+  // Dropped as the listener would count it: the places left empty, not
+  // spares that failed with another in their place.
+  const genreDropped = curatedCheck.dropped + Math.max(0, proposedAimed - proposed.length)
   const genreLines = genreDropped > 0
     ? [genreCheckNotice({ dropped: genreDropped, genres: intent.genres ?? [], failed: curatedCheck.failed || proposedCheck.failed })]
     : []

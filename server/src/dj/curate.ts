@@ -2,6 +2,7 @@ import type { LlmClient, LlmMessage, LlmRequest } from './llm'
 import { outsideCap, type PoolTrack } from './pool'
 import type { Intent } from './contracts'
 import { sanitizeForPrompt, stripEmDashes } from './sanitize'
+import { isScratchNote } from './notes'
 
 export type CuratedTrack = { trackId: string; reason: string }
 
@@ -353,6 +354,8 @@ function normalizePicks(raw: unknown[], poolIds: Set<string>): CuratedTrack[] {
     if (typeof id !== 'string' || !poolIds.has(id) || seen.has(id)) continue
     seen.add(id)
     const reason = sanitizeReason((item as Record<string, unknown>).reason)
+    // The model's own aside in place of a note: it doubted the pick.
+    if (isScratchNote(reason)) continue
     picks.push({ trackId: id, reason })
   }
   return picks

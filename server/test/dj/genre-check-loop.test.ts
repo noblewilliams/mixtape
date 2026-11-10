@@ -57,9 +57,10 @@ const proposals = (n: number): Proposed[] =>
   Array.from({ length: n }, (_, i) => ({ title: `Song ${i}`, artist: ['Miles Davis', 'Bill Evans', 'Chet Baker'][i % 3], reason: `reason ${i}` }))
 
 // Apple confirms every proposal, labelled `genre`.
-function fakeApple(confirmed: Proposed[], genre: string) {
+function fakeApple(confirmed: Proposed[], genre: string | ((i: number) => string)) {
+  const label = typeof genre === 'string' ? () => genre : genre
   const songs = new Map(confirmed.map((s, i): [string, CatalogSong] => [`${s.title} ${s.artist}`,
-    { appleId: `v-${i}`, isrc: null, title: s.title, artist: s.artist, album: 'A', artwork: null, durationMs: 200_000, genre, releaseYear: 1959, explicit: false }]))
+    { appleId: `v-${i}`, isrc: null, title: s.title, artist: s.artist, album: 'A', artwork: null, durationMs: 200_000, genre: label(i), releaseYear: 1959, explicit: false }]))
   let calls = 0
   const catalog: FillDeps['catalog'] = {
     async searchArtists() { calls += 1; return [] },
@@ -160,6 +161,45 @@ describe('decision 8: a named genre is checked by how a song sounds', () => {
     expect(calls).toHaveLength(1)
     expect(result.queue).toHaveLength(4)
     expect(toolResults(requests)[0]).toContain(genreCheckNotice({ dropped: 2, genres: ['jazz'], failed: false }))
+  })
+
+  // Live 2026-11-10: a "90s r&b slow jams" mix came back 5 songs where a
+  // rerun gave 15. The shortfall round verified only as many songs as it
+  // needed, so each that then failed the check left a gap. With a genre
+  // named, it verifies spares, and the queue still takes only the shortfall.
+  it('outside songs that fail the check are replaced by verified spares', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    await seedTracks(db, 'Jazz Player', 3, 'Jazz')
+    const session = await seedSession(db)
+    // The first three proposals Apple labels Pop and the check fails; the rest are Jazz.
+    const { fill } = fakeApple(proposals(11), (i) => (i < 3 ? 'Pop' : 'Jazz'))
+    const { titleComplete, calls } = fakeCheck(['[]'])
+    const { llm, requests } = scriptedLlm([generate({ targetCount: 6, genres: ['jazz'] })], proposals(11))
+
+    const result = await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true, titleComplete }, { id: session.id, userId: 'u1' }, 'soft jazz')
+
+    expect(result.queue).toHaveLength(6)
+    expect(result.queue.filter((t) => t.title.startsWith('Song '))).toHaveLength(3)
+    expect(result.queue.some((t) => ['Song 0', 'Song 1', 'Song 2'].includes(t.title))).toBe(false)
+    expect(calls).toHaveLength(1)
+    // Nothing is missing, so nothing is reported as dropped from the mix.
+    expect(toolResults(requests)[0]).not.toContain(genreCheckNotice({ dropped: 3, genres: ['jazz'], failed: false }))
+  })
+
+  it('without a named genre the shortfall verifies no spares', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    await seedTracks(db, 'Jazz Player', 3, 'Jazz')
+    const session = await seedSession(db)
+    const { fill, appleCalls } = fakeApple(proposals(11), 'Jazz')
+    const { titleComplete } = fakeCheck(['[]'])
+    const { llm } = scriptedLlm([generate({ targetCount: 6 })], proposals(11))
+
+    const result = await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true, titleComplete }, { id: session.id, userId: 'u1' }, 'rainy sunday')
+
+    expect(result.queue).toHaveLength(6)
+    expect(appleCalls()).toBe(3)
   })
 
   it('a check that fails keeps only labelled songs, says so, and the turn still succeeds', async () => {

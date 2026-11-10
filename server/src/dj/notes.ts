@@ -48,3 +48,20 @@ export function dropRepeatedNotes<T extends { reason: string | null }>(
     return row
   })
 }
+
+// The model's own working notes, written where a listener's note goes (live,
+// 2026-11-10: a proposed D'Angelo song's note read "Wait, remove if era
+// wrong"). Such a note is not for the listener, and it says the model
+// doubted the song, so the song goes with it (curate.ts normalizePicks,
+// propose.ts normalizeProposals): every song earns its place. Narrow on
+// purpose: an aside that opens the note, or a phrase no note about a song
+// would use.
+const SCRATCH_OPENERS = /^(wait|hmm+|actually|oops|todo|tbd|note to self|placeholder|remove|replace|drop this|swap this|not sure|unsure|double[- ]check)\b/iu
+const SCRATCH_PHRASES = /\b((remove|replace|drop|swap|cut)( (this|it|the track|the song))? if|not sure (if|it|this|whether)|double[- ]check|(doesn'?t|does not|may not|might not) (really |quite )?fit|placeholder|verify (the|its|era|year|genre))\b/iu
+
+/** True when a note reads as the model's working aside, not a note for the listener. */
+export function isScratchNote(note: string | null | undefined): boolean {
+  if (!note) return false
+  const text = note.normalize('NFKC').trim()
+  return SCRATCH_OPENERS.test(text) || SCRATCH_PHRASES.test(text)
+}

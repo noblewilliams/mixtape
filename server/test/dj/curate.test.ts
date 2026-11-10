@@ -86,6 +86,22 @@ describe('curate', () => {
     expect(result).toEqual(picks.map((p) => ({ trackId: p.id, reason: p.reason })))
   })
 
+  // Live 2026-11-10 (notes.ts isScratchNote): a note that is the model's
+  // own aside means it doubted the pick; the pick goes, nothing pads it.
+  it('drops a pick whose note is the model talking to itself', async () => {
+    const pool = makePool(20)
+    const scripted = [
+      { id: pool[0].trackId, reason: 'A hushed groove to open on.' },
+      { id: pool[1].trackId, reason: 'Wait, remove if era wrong' },
+      { id: pool[2].trackId, reason: 'Close harmonies, unhurried.' },
+    ]
+    const { llm } = scriptedLlm([textTurn(scripted)])
+
+    const result = await curate(llm, pool, intent({ themes: 'x', targetCount: 5 }))
+
+    expect(result.map((p) => p.trackId)).toEqual([pool[0].trackId, pool[2].trackId])
+  })
+
   it('drops invalid ids and never pads with pool rows', async () => {
     const pool = makePool(20)
     const scripted = [

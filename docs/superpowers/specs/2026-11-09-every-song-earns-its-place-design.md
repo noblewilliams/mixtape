@@ -82,6 +82,9 @@ Worker `1b56ec3a`) found songs that do not belong in their mix:
    (case- and punctuation-insensitive) is dropped to no note, never shown
    twice. The proposal path uses the same rule. This reverses the "two to six
    words" register.
+   - A note that is the model's own aside ("Wait, remove if era wrong", live
+     2026-11-10) is never shown, and the song goes with it: the model doubted
+     it (`notes.ts` `isScratchNote`, on curated picks and proposals alike).
 
 8. **A named genre is checked by how a song sounds** (founder, 2026-11-09:
    "it doesn't have to be a hard genre filter but we need to be sure that the
@@ -103,6 +106,11 @@ Worker `1b56ec3a`) found songs that do not belong in their mix:
    - Songs that fail leave the mix. The shortfall is filled as in decision 2,
      and those proposals pass the same check, or the mix is shorter and the
      DJ says why.
+   - With a genre named, the shortfall verifies spares (as many again as it
+     needs, at most `PROPOSE_EXTRA`, inside the search budget), so a proposal
+     that fails the check is replaced from the same round. Live 2026-11-10,
+     "90s r&b slow jams" came back 5 songs on one run and 15 on the next.
+     The notice counts only places left empty.
    - If the check itself fails (error or timeout), only label-matched songs
      stay: the mix may be shorter, but never holds an unchecked song.
    - The same check applies to swaps and extends whose intent names a genre.

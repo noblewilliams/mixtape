@@ -72,6 +72,10 @@ energy-arc labels that repeated.
   that genre pass, every other song goes to one fast listening check, and
   songs that fail leave the mix (the check fails closed). Added after the
   live "soft jazz" mix held 2 jazz songs among 14 soul and indie ones.
+- 2026-11-10: a note that is the model's own aside ("Wait, remove if era
+  wrong") drops the song with it, and a genre mix's shortfall verifies
+  spares so a song that fails the check is replaced rather than left as a
+  gap (one live "90s r&b" run gave 5 songs, the next 15).
 
 ## 2026-11-09 — One platform per device; fixed mix actions (founder)
 

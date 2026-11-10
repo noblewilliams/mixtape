@@ -5,6 +5,7 @@ import { addCatalogueSongs } from './catalogue-fill'
 import { artistKey, creditedArtists, creditedKeys } from './artist-keys'
 import type { Intent, NamedSong } from './contracts'
 import { isAlbumGlue } from './pool'
+import { isScratchNote } from './notes'
 import {
   arcInstruction,
   CurationTruncated,
@@ -198,7 +199,10 @@ function normalizeProposals(raw: unknown[], exclude: ProposedSong[], count: numb
     const key = proposalKey({ title, artist })
     if (seen.has(key)) continue
     seen.add(key)
-    out.push({ title, artist, reason: sanitizeReason(rec.reason) })
+    const reason = sanitizeReason(rec.reason)
+    // The model's own aside in place of a note: it doubted the song.
+    if (isScratchNote(reason)) continue
+    out.push({ title, artist, reason })
   }
   return out
 }

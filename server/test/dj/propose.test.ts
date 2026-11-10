@@ -134,6 +134,19 @@ describe('proposeSongs', () => {
     expect(out.map((s) => s.title)).toEqual(['Essence', 'Joro', 'Ojuelegba', 'Free Mind'])
   })
 
+  // Live 2026-11-10: a proposal noted "Wait, remove if era wrong". The
+  // model doubted the song, so it goes, note and all (notes.ts isScratchNote).
+  it('drops a proposal whose note is the model talking to itself', async () => {
+    const items = [
+      { title: 'Essence', artist: 'Wizkid', reason: 'A slow, sunlit groove.' },
+      { title: 'Untitled', artist: "D'Angelo", reason: 'Wait, remove if era wrong' },
+      { title: 'Joro', artist: 'Wizkid', reason: 'Warm, patient and close.' },
+    ]
+    const { llm } = scripted(turn(JSON.stringify(items)))
+    const out = await proposeSongs(llm, { brief: '', intent: intent(), seeds: [], storefront: 'ng' })
+    expect(out.map((s) => s.title)).toEqual(['Essence', 'Joro'])
+  })
+
   // Decision 6 (spec 2026-11-09 every-song-earns-its-place) on the
   // proposal path: album glue never lands unless the listener named it.
   it('drops intros, interludes, skits and outros unless the listener named that song', async () => {
