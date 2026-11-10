@@ -27,6 +27,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/api/api_client.dart';
 import '../../data/dj/dj_models.dart';
 import '../../data/playlists/playlist_context_models.dart';
+import '../add_music/add_music_router.dart';
 import '../providers/dj_providers.dart';
 import '../providers/keep_mixes_provider.dart';
 import '../providers/auth_provider.dart';
@@ -65,10 +66,57 @@ String inspirationChangedMessage(String? name) =>
     '${name ?? 'The inspiration'} changed elsewhere. '
     'Showing the current selection.';
 
+/// Starts the remake of [sessionId] where the listener sees it happen: in its
+/// conversation, the line and then the working cassette (approval
+/// `docs/mockups/approved/2026-11-09-add-your-music-loop.md`, "The remake").
+///
+/// From a screen over that conversation (the tape, or Version history on the
+/// way to it) it goes back to the conversation; with none below in this
+/// navigator, it opens one over the caller. Either way the conversation runs
+/// the turn, so the AI-consent ask, Resend and the `remake_tapped` count
+/// behave as for its own Remake.
+void remakeInConversation(BuildContext context, String sessionId) {
+  final navigator = Navigator.of(context);
+  for (final open in _ChatScreenState._open.reversed) {
+    if (!open.mounted || open.widget.sessionId != sessionId) continue;
+    final route = ModalRoute.of(open.context);
+    if (route == null ||
+        !route.isActive ||
+        route.isCurrent ||
+        !identical(route.navigator, navigator)) {
+      continue;
+    }
+    navigator.popUntil((candidate) => identical(candidate, route));
+    unawaited(open._remake(countTap: true));
+    return;
+  }
+  unawaited(
+    navigator.push(
+      MaterialPageRoute<void>(
+        builder: (_) => ChatScreen(sessionId: sessionId, startRemake: true),
+      ),
+    ),
+  );
+}
+
 class ChatScreen extends ConsumerStatefulWidget {
-  const ChatScreen({super.key, required this.sessionId, this.initialError});
+  const ChatScreen({
+    super.key,
+    required this.sessionId,
+    this.initialError,
+    this.startRemake = false,
+  });
 
   final String sessionId;
+
+  /// Set when the tape's Remake opens this conversation (see
+  /// [remakeInConversation]): the remake starts once the transcript is on
+  /// screen.
+  final bool startRemake;
+
+  /// The mix's one DJ pill (approval "The history pill", board 4B).
+  static const String historyPillLabel = 'Add my listening history';
+  static const Key historyPillKey = Key('chat-history-pill');
 
   /// Set only when Home navigates here after a create-session failure that
   /// still persisted a session row (see `dj_providers.dart`'s
@@ -93,10 +141,21 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   bool _seededInitialError = false;
   bool _keepSheetChecked = false;
+  bool _startedRemake = false;
 
   /// A send waiting on the AI-consent sheet.
   bool _askingConsent = false;
   bool _changingStatus = false;
+
+  /// Every conversation on screen or under another route, oldest first: the
+  /// tape's Remake finds its own below it ([remakeInConversation]).
+  static final List<_ChatScreenState> _open = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _open.add(this);
+  }
 
   @override
   String get mixSessionId => widget.sessionId;
@@ -113,6 +172,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   @override
   void dispose() {
+    _open.remove(this);
     _scrollController.dispose();
     _textController.dispose();
     _promptFocus.dispose();
@@ -153,7 +213,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   /// for a resend (which resends a DIFFERENT, already-sent turn's text —
   /// clearing the controller here would silently wipe whatever new draft the
   /// user has since started typing).
-  Future<void> _send(String text, {bool fromComposer = false}) async {
+  ///
+  /// [remake] posts the turn through [ChatNotifier.remake] ([text] is then
+  /// [remakeText]): the door's Remake, the tape's, a Resend of a failed
+  /// remake, and the consent retry of a refused one all go that way, since
+  /// the text alone would post a plain turn. [countTap] is a Remake tap's:
+  /// the notifier counts it as the remake goes out, so Not now, a guard or a
+  /// second tap counts nothing, and the retry after a refusal (the same tap,
+  /// already counted) drops it.
+  Future<void> _send(
+    String text, {
+    bool fromComposer = false,
+    bool remake = false,
+    bool countTap = false,
+  }) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty ||
         ref.read(mixOperationProvider(widget.sessionId)) != null ||
@@ -170,7 +243,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     if (!agreed || !mounted) return;
     if (fromComposer) _textController.clear();
     try {
-      await ref.read(chatProvider(widget.sessionId).notifier).send(trimmed);
+      final notifier = ref.read(chatProvider(widget.sessionId).notifier);
+      await (remake
+          ? notifier.remake(countTap: countTap)
+          : notifier.send(trimmed));
     } on AiConsentRequiredException {
       // Enforcement is on and `/me` was out of date: the turn was taken
       // back. The text goes back in the composer, the sheet asks, and
@@ -186,12 +262,22 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       await _send(
         fromComposer ? _textController.text : trimmed,
         fromComposer: fromComposer,
+        remake: remake,
       );
     } catch (_) {
       if (!mounted) return;
       _snack('something unexpected happened', kind: FeedbackKind.error);
     }
   }
+
+  /// The remake turn (see [_send]'s `remake` and `countTap`).
+  Future<void> _remake({bool countTap = false}) =>
+      _send(remakeText, remake: true, countTap: countTap);
+
+  /// The door's "Remake with my music". A second tap is refused by
+  /// [_send]'s guards, which are checked before its first await: the consent
+  /// check in progress, then the turn itself sending.
+  void _onRemake() => unawaited(_remake(countTap: true));
 
   /// Floating, 16 pt in: there is no dock on this route for a toast to clear,
   /// and the app-level [ScaffoldMessenger] builds the bar against the app's
@@ -519,6 +605,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       });
     }
 
+    // Opened by the tape's Remake: the remake starts once, over the loaded
+    // transcript, for the same reasons as the seed above.
+    if (!_startedRemake && widget.startRemake && chatAsync.hasValue) {
+      _startedRemake = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_remake(countTap: true));
+      });
+    }
+
     // The Keep this mix sheet (board A6), once the new mix it was offered
     // for is on screen: an anonymous listener's first mix with content this
     // app session (see [KeepSheetNotifier]). Checked once per screen, from
@@ -678,12 +773,34 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         MixEnergySummary(sessionId: widget.sessionId, version: currentVersion),
     ];
 
+    // The one DJ pill a mix can carry, directly under the DJ line that
+    // offered it and above that turn's version (board 4B). Gone once the
+    // next send starts, which clears the offer.
+    final historyPill = state.addMusic == AddMusicOffer.history
+        ? _pillRow(
+            key: const Key('chat-turn-pills'),
+            pills: [
+              IdeaPill(
+                key: ChatScreen.historyPillKey,
+                label: ChatScreen.historyPillLabel,
+                onPressed: busy
+                    ? null
+                    : () => unawaited(
+                        openAddMusicFor(context, ref, AddMusicTarget.history),
+                      ),
+              ),
+            ],
+          )
+        : null;
+    final lastDj = _lastDjIndex(state);
+
     final lastUser = _lastUserIndex(state);
     int? pinnedFrom;
     final items = <Widget>[];
     for (var i = 0; i < state.messages.length; i++) {
       if (i == lastUser) pinnedFrom = items.length;
       items.add(_turn(state, i, busy: busy));
+      if (i == lastDj && historyPill != null) items.add(historyPill);
       final version = state.messages[i].message.queueVersion;
       if (version == null) continue;
       if (i == liveIndex) {
@@ -701,6 +818,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         );
       }
     }
+    if (lastDj == null && historyPill != null) items.add(historyPill);
     // A current version no message carries (a restore writes none).
     if (liveIndex == null && state.queue.isNotEmpty && currentVersion > 0) {
       items.addAll(current());
@@ -708,12 +826,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     // The music door under the last turn of a catalog mix: the line that
     // says why, and the way to add their music. The title carries "Not
     // personal yet"; this is the explanation and the action that go with it.
-    if (state.session.notPersonal) {
+    // Remake waits while a turn is out. A remake takes the door away while
+    // the DJ works (board 3C); the re-reads after it decide what comes back:
+    // nothing once the mix is personal (the subtitle goes too), the first
+    // state when nothing usable came in, and the same door if they failed.
+    if (state.session.notPersonal && !state.remaking) {
       items.add(
-        const MusicDoor(
+        MusicDoor(
           key: _musicDoorKey,
           notPersonal: true,
           layout: MusicDoorLayout.transcript,
+          onRemake: busy ? null : _onRemake,
         ),
       );
     }
@@ -732,6 +855,23 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     }
     return null;
   }
+
+  /// The last DJ line that is not an error turn: where a turn's pills go.
+  static int? _lastDjIndex(ChatState state) {
+    for (var i = state.messages.length - 1; i >= 0; i--) {
+      final message = state.messages[i];
+      if (!message.isError && message.message.role != 'user') return i;
+    }
+    return null;
+  }
+
+  /// The pill row under the last DJ line: an album's refinement pills, or a
+  /// mix's "Add my listening history".
+  static Widget _pillRow({required Key key, required List<IdeaPill> pills}) =>
+      Padding(
+        padding: const EdgeInsets.only(top: 2, bottom: 4),
+        child: Wrap(key: key, spacing: 8, children: pills),
+      );
 
   /// The transcript list: no repaint boundary per turn, so each one repaints
   /// as it scrolls and [LyricFade] can fade it; the top fades out under the
@@ -792,9 +932,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   Widget _turn(ChatState state, int i, {required bool busy}) {
     final message = state.messages[i];
-    final precedingText = message.isError
-        ? _precedingUserText(state.messages, i)
-        : '';
+    final preceding = message.isError
+        ? _precedingUserMessage(state.messages, i)
+        : null;
+    final precedingText = preceding?.message.content ?? '';
     return LyricTurn(
       text: message.message.content,
       kind: message.isError
@@ -802,8 +943,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           : (message.message.role == 'user'
                 ? ConversationTurnKind.user
                 : ConversationTurnKind.dj),
+      // A failed remake is resent as a remake, flag and all.
       onResend: message.isError && precedingText.isNotEmpty
-          ? () => _send(precedingText)
+          ? () => preceding!.remake ? _remake() : _send(precedingText)
           : null,
       resendEnabled: !busy,
     );
@@ -820,18 +962,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     final notifier = ref.read(chatProvider(widget.sessionId).notifier);
 
     int? cardIndex;
-    int? lastDjIndex;
     for (var i = state.messages.length - 1; i >= 0; i--) {
-      final message = state.messages[i];
-      if (cardIndex == null && message.message.queueVersion == currentVersion) {
+      if (state.messages[i].message.queueVersion == currentVersion) {
         cardIndex = i;
-      }
-      if (lastDjIndex == null &&
-          !message.isError &&
-          message.message.role != 'user') {
-        lastDjIndex = i;
+        break;
       }
     }
+    final lastDjIndex = _lastDjIndex(state);
 
     // Passed picks by the version they were the pick in; those whose reply
     // is not in the transcript (a "Pick this" swap writes no message) go
@@ -866,19 +1003,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     ];
 
     final suggestions = state.suggestions;
-    Widget pills() => Padding(
-      padding: const EdgeInsets.only(top: 2, bottom: 4),
-      child: Wrap(
-        key: const Key('album-suggestions'),
-        spacing: 8,
-        children: [
-          for (final suggestion in suggestions!)
-            IdeaPill(
-              label: suggestion,
-              onPressed: busy ? null : () => _takeSuggestion(suggestion),
-            ),
-        ],
-      ),
+    Widget pills() => _pillRow(
+      key: const Key('album-suggestions'),
+      pills: [
+        for (final suggestion in suggestions!)
+          IdeaPill(
+            label: suggestion,
+            onPressed: busy ? null : () => _takeSuggestion(suggestion),
+          ),
+      ],
     );
 
     final seenVersions = <int>{};
@@ -1218,15 +1351,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     return (title == null || title.isEmpty) ? null : title;
   }
 
-  /// The text of the nearest USER message before [index] — that's the turn an
-  /// error turn at [index] answers, and what "resend" means.
-  String _precedingUserText(List<ChatMessage> messages, int index) {
+  /// The nearest USER message before [index] — that's the turn an error turn
+  /// at [index] answers, and what "resend" means.
+  ChatMessage? _precedingUserMessage(List<ChatMessage> messages, int index) {
     for (var i = index - 1; i >= 0; i--) {
-      if (messages[i].message.role == 'user') {
-        return messages[i].message.content;
-      }
+      if (messages[i].message.role == 'user') return messages[i];
     }
-    return '';
+    return null;
   }
 }
 

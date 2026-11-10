@@ -1685,6 +1685,96 @@ void main() {
       expect(state.copyWith(sending: true).addMusic, AddMusicOffer.history);
       expect(state.copyWith(clearAddMusic: true).addMusic, isNull);
     });
+
+    // GET /sessions/:id never carries a turn's addMusic, so the create
+    // response's has to be handed to the chat it opens (plan C3).
+    SessionDetail opened(String id, {AddMusicOffer? addMusic}) => SessionDetail(
+          session: _session(id: id),
+          messages: [_msg('m1', 'user', 'play my favourites')],
+          queue: [_track(0)],
+          addMusic: addMusic,
+        );
+
+    test("a create's first-turn addMusic reaches the chat it opens, once", () async {
+      final api = FakeDjApi()
+        ..onCreateSession = ((_) async => opened('new-1', addMusic: AddMusicOffer.history))
+        ..onGetSession = ((id) async => opened(id));
+      final container = _makeContainer(api);
+
+      final id = await container.read(sessionStarterProvider)('play my favourites');
+      final sub = container.listen(chatProvider(id), (_, _) {});
+      addTearDown(sub.close);
+
+      expect((await container.read(chatProvider(id).future)).addMusic, AddMusicOffer.history);
+
+      // Taken by that first load: a later one has only what the read says.
+      container.invalidate(chatProvider(id));
+      expect((await container.read(chatProvider(id).future)).addMusic, isNull);
+    });
+
+    test("another session's load never takes the new mix's offer", () async {
+      final api = FakeDjApi()
+        ..onCreateSession = ((_) async => opened('new-1', addMusic: AddMusicOffer.history))
+        ..onGetSession = ((id) async => opened(id));
+      final container = _makeContainer(api);
+
+      final id = await container.read(sessionStarterProvider)('play my favourites');
+
+      expect((await container.read(chatProvider('older').future)).addMusic, isNull);
+      expect((await container.read(chatProvider(id).future)).addMusic, AddMusicOffer.history);
+    });
+
+    test('a failed create leaves nothing for the mix before it', () async {
+      var creates = 0;
+      final api = FakeDjApi()
+        ..onCreateSession = ((_) async {
+          if (++creates == 1) return opened('new-1', addMusic: AddMusicOffer.history);
+          throw DjApiException(kind: 'unknown', message: 'the DJ is out sick', sessionId: 'new-2');
+        })
+        ..onGetSession = ((id) async => opened(id));
+      final container = _makeContainer(api);
+
+      final id = await container.read(sessionStarterProvider)('play my favourites');
+      await expectLater(
+        () => container.read(sessionStarterProvider)('another'),
+        throwsA(isA<DjApiException>()),
+      );
+
+      expect((await container.read(chatProvider(id).future)).addMusic, isNull);
+    });
+
+    test('a newer create replaces the offer, even with none of its own', () async {
+      var creates = 0;
+      final api = FakeDjApi()
+        ..onCreateSession = ((_) async =>
+            ++creates == 1 ? opened('new-1', addMusic: AddMusicOffer.history) : opened('new-2'))
+        ..onGetSession = ((id) async => opened(id));
+      final container = _makeContainer(api);
+
+      final first = await container.read(sessionStarterProvider)('play my favourites');
+      final second = await container.read(sessionStarterProvider)('another');
+
+      expect((await container.read(chatProvider(second).future)).addMusic, isNull);
+      expect((await container.read(chatProvider(first).future)).addMusic, isNull);
+    });
+
+    test("an album create's refinement pills reach the chat it opens", () async {
+      SessionDetail album({List<String>? suggestions}) => SessionDetail(
+            session: _session(id: 'al').copyWith(kind: SessionKind.album),
+            messages: [_msg('m2', 'dj', 'None of them are in Apple Music.')],
+            queue: const [],
+            pickState: const AlbumPickState(version: 0),
+            suggestions: suggestions,
+          );
+      final api = FakeDjApi()
+        ..onCreateSession = ((_) async => album(suggestions: ['Any year']))
+        ..onGetSession = ((_) async => album());
+      final container = _makeContainer(api);
+
+      final id = await container.read(sessionStarterProvider)('a record', kind: SessionKind.album);
+
+      expect((await container.read(chatProvider(id).future)).suggestions, ['Any year']);
+    });
   });
 
   group('album sessions in the chat', () {

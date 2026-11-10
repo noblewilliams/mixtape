@@ -540,6 +540,42 @@ void main() {
       expect(find.byType(IdeaPill), findsNothing);
     });
 
+    testWidgets("an album create's pills reach the opened chat through the "
+        'handoff, never the mix history pill', (tester) async {
+      SessionDetail album({
+        List<String>? suggestions,
+        AddMusicOffer? addMusic,
+      }) => SessionDetail(
+        session: _session(version: 0),
+        messages: [
+          _msg('m1', 'user', 'a dishwasher arguing with a choir'),
+          _msg('m2', 'dj', 'None of them are in Apple Music.'),
+        ],
+        queue: const [],
+        pickState: const AlbumPickState(version: 0),
+        suggestions: suggestions,
+        addMusic: addMusic,
+      );
+      final api = _AlbumApi()
+        ..onCreateSession = ((_) async =>
+            album(suggestions: ['Any year'], addMusic: AddMusicOffer.history))
+        // The read the conversation opens with carries no suggestions.
+        ..onGetSession = ((_) async => album());
+      final container = _container(api);
+
+      final id = await container.read(sessionStarterProvider)(
+        'a dishwasher arguing with a choir',
+        kind: SessionKind.album,
+      );
+      expect(id, 's1');
+      await _pump(tester, container);
+
+      expect(find.byKey(const Key('album-suggestions')), findsOneWidget);
+      expect(find.byType(IdeaPill), findsOneWidget);
+      expect(find.widgetWithText(IdeaPill, 'Any year'), findsOneWidget);
+      expect(find.text('Add my listening history'), findsNothing);
+    });
+
     testWidgets('Add my music goes to the Library tab', (tester) async {
       final api = _AlbumApi()
         ..onGetSession = (_) async => _detail(

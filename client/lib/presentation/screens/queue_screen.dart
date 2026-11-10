@@ -39,6 +39,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/dj/dj_models.dart';
 import '../providers/dj_providers.dart';
 import '../providers/library_sync_provider.dart';
+import '../providers/mix_operation_gate.dart';
 import '../providers/music_platform_provider.dart';
 import '../providers/onboarding_provider.dart';
 import '../theme/mixtape_theme.dart';
@@ -52,6 +53,7 @@ import '../widgets/mix_tape_colour.dart';
 import '../widgets/music_door.dart';
 import '../widgets/tape_header.dart';
 import '../widgets/track_row.dart';
+import 'chat_screen.dart' show remakeInConversation;
 import 'mix_history_screen.dart';
 import '../widgets/foundation/mixtape_menu.dart';
 
@@ -435,6 +437,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
   @override
   Widget build(BuildContext context) {
     final chatAsync = ref.watch(chatProvider(widget.sessionId));
+    final operation = ref.watch(mixOperationProvider(widget.sessionId));
     // Kick off the /me fetch as soon as the screen opens so the account
     // name is (usually) resolved by the time the save dialog reads it
     // non-blocking — see _openSaveDialog.
@@ -549,12 +552,18 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
               ),
             ),
           if (state.session.notPersonal)
-            const SliverToBoxAdapter(
+            SliverToBoxAdapter(
               child: Padding(
-                padding: EdgeInsets.symmetric(
+                padding: const EdgeInsets.symmetric(
                   horizontal: MixtapeMetrics.screenSidePadding,
                 ),
-                child: _NotPersonalBlock(),
+                // Remake runs in the conversation, where the listener sees
+                // it happen; it waits while this mix has a turn out.
+                child: _NotPersonalBlock(
+                  onRemake: state.sending || operation != null
+                      ? null
+                      : () => remakeInConversation(context, widget.sessionId),
+                ),
               ),
             ),
           if (visibleQueue.isEmpty)
@@ -961,12 +970,16 @@ class _EmptyState extends StatelessWidget {
 /// tape is its own screen, so the action can show here and in the
 /// conversation without showing twice at once.
 class _NotPersonalBlock extends StatelessWidget {
-  const _NotPersonalBlock();
+  const _NotPersonalBlock({required this.onRemake});
+
+  /// "Remake with my music"; null draws it disabled.
+  final VoidCallback? onRemake;
 
   @override
-  Widget build(BuildContext context) => const MusicDoor(
-    key: Key('not-personal-banner'),
+  Widget build(BuildContext context) => MusicDoor(
+    key: const Key('not-personal-banner'),
     notPersonal: true,
     layout: MusicDoorLayout.tape,
+    onRemake: onRemake,
   );
 }

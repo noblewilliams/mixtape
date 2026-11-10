@@ -30,6 +30,7 @@ import 'package:mixtape/presentation/providers/playback_provider.dart';
 import 'package:mixtape/presentation/screens/mix_history_screen.dart';
 import 'package:mixtape/presentation/screens/playback_screen.dart';
 import 'package:mixtape/presentation/screens/queue_screen.dart';
+import 'package:mixtape/presentation/widgets/lyric_turn.dart';
 import 'package:mixtape/presentation/widgets/mix_handoff.dart';
 import 'package:mixtape/presentation/widgets/music_door.dart';
 import 'package:mixtape/presentation/widgets/spotify_handoff_sheets.dart';
@@ -50,8 +51,9 @@ import '../helpers/onboarding_harness.dart' show FakeLinkOpener;
 /// Mirrors chat_screen_test.dart's FakeDjApi: implements DjApi's public
 /// surface (not `extends`, since DjApi's constructor builds a real
 /// ApiClient), each method delegating to a settable callback that throws
-/// loudly when unset rather than hanging.
-class FakeDjApi implements DjApi {
+/// loudly when unset rather than hanging. [DjRemakeSender] answers the
+/// tape's Remake.
+class FakeDjApi implements DjApi, DjRemakeSender {
   final creationReceipts = <({String sessionId, String libraryId})>[];
   @override
   Future<void> recordPlaylistCreation(
@@ -134,6 +136,19 @@ class FakeDjApi implements DjApi {
     final impl = onSendMessage;
     if (impl == null) throw UnimplementedError('onSendMessage not wired');
     return impl(id, text);
+  }
+
+  Future<TurnResult> Function(String id)? onSendRemake;
+
+  /// The session id of every [sendRemake], in call order.
+  final List<String> remakes = [];
+
+  @override
+  Future<TurnResult> sendRemake(String id) {
+    remakes.add(id);
+    final impl = onSendRemake;
+    if (impl == null) throw UnimplementedError('onSendRemake not wired');
+    return impl(id);
   }
 
   @override
@@ -2269,6 +2284,196 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.text('Title 0'), findsOneWidget);
       expect(find.byKey(const Key('play-here-button')), findsOneWidget);
+    });
+  });
+
+  // Plan 2026-11-09 C3: the tape's Remake shows the remake happening in the
+  // conversation, its line and then the working cassette.
+  group('Remake on the tape', () {
+    const line = 'Remake this with my music';
+
+    SessionDetail catalogMix() => SessionDetail(
+      session: _session(notPersonal: true),
+      messages: [
+        DjMessage(
+          id: 'm1',
+          role: 'dj',
+          content: 'A steady catalog run.',
+          queueVersion: 1,
+          createdAt: DateTime(2026, 1, 1),
+        ),
+      ],
+      queue: [_track(0)],
+    );
+
+    TurnResult remade() => TurnResult(
+      djMessage: DjMessage(
+        id: 'm4',
+        role: 'dj',
+        content: 'Twelve of these are yours now.',
+        createdAt: DateTime(2026, 1, 1),
+      ),
+      queue: [_track(0), _track(1)],
+      queueVersion: 2,
+    );
+
+    ({FakeDjApi api, FakeListeningApi listening, ProviderContainer container})
+    musicIn({Future<TurnResult> Function(String id)? onSendRemake}) {
+      final api = FakeDjApi()
+        ..onGetSession = ((_) async => catalogMix())
+        ..onSendRemake = onSendRemake;
+      final listening = FakeListeningApi(
+        onboarding: onboardingState(musicReady: true),
+      );
+      final container = _makeContainer(
+        api,
+        listening: listening,
+        destinations: InMemoryMusicPlatformStore(MusicPlatform.apple),
+      );
+      return (api: api, listening: listening, container: container);
+    }
+
+    Finder tapeRemake() => find.descendant(
+      of: find.byType(QueueScreen),
+      matching: find.byKey(MusicDoor.remakeKey),
+    );
+
+    int remakeTaps(FakeListeningApi listening) => listening.funnelEvents
+        .where((type) => type == FunnelEventType.remakeTapped)
+        .length;
+
+    /// The route transition, without settling: the working cassette moves.
+    Future<void> transition(WidgetTester tester) async {
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump(const Duration(milliseconds: 500));
+    }
+
+    testWidgets('from a tape opened from its conversation: back to it, '
+        'then the remake', (tester) async {
+      final turn = Completer<TurnResult>();
+      final (:api, :listening, :container) = musicIn(
+        onSendRemake: (_) => turn.future,
+      );
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            theme: MixtapeTheme.light(),
+            home: const ChatScreen(sessionId: 's1'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      tester
+          .state<NavigatorState>(find.byType(Navigator))
+          .push(
+            MaterialPageRoute<void>(
+              builder: (_) => const QueueScreen(sessionId: 's1'),
+            ),
+          );
+      await tester.pumpAndSettle();
+
+      expect(tester.widget<TapeButton>(tapeRemake()).onPressed, isNotNull);
+      await tester.tap(tapeRemake());
+      await transition(tester);
+
+      expect(find.byType(QueueScreen, skipOffstage: false), findsNothing);
+      expect(find.byType(ChatScreen), findsOneWidget);
+      expect(api.remakes, ['s1']);
+      expect(find.text(line), findsOneWidget);
+      expect(find.byKey(WorkingCassette.indicatorKey), findsOneWidget);
+      expect(remakeTaps(listening), 1);
+
+      turn.complete(remade());
+      await tester.pumpAndSettle();
+      expect(find.text('Twelve of these are yours now.'), findsOneWidget);
+      expect(api.remakes, ['s1']);
+      expect(remakeTaps(listening), 1);
+    });
+
+    testWidgets('with no conversation below: opens it over the tape, then '
+        'the remake', (tester) async {
+      final turn = Completer<TurnResult>();
+      final (:api, :listening, :container) = musicIn(
+        onSendRemake: (_) => turn.future,
+      );
+      await _pump(tester, container);
+      expect(find.byType(ChatScreen), findsNothing);
+
+      await tester.tap(tapeRemake());
+      await transition(tester);
+
+      expect(find.byType(ChatScreen), findsOneWidget);
+      expect(
+        find.byType(QueueScreen, skipOffstage: false),
+        findsOneWidget,
+        reason: 'the tape stays under the conversation',
+      );
+      expect(api.remakes, ['s1']);
+      expect(find.text(line), findsOneWidget);
+      expect(find.byKey(WorkingCassette.indicatorKey), findsOneWidget);
+      expect(remakeTaps(listening), 1);
+
+      turn.complete(remade());
+      await tester.pumpAndSettle();
+      expect(find.text('Twelve of these are yours now.'), findsOneWidget);
+      expect(api.remakes, ['s1']);
+      expect(remakeTaps(listening), 1);
+    });
+
+    testWidgets('a double tap opens one conversation and remakes once', (
+      tester,
+    ) async {
+      final turn = Completer<TurnResult>();
+      final (:api, :listening, :container) = musicIn(
+        onSendRemake: (_) => turn.future,
+      );
+      await _pump(tester, container);
+
+      await tester.tap(tapeRemake());
+      await tester.tap(tapeRemake(), warnIfMissed: false);
+      await transition(tester);
+
+      expect(find.byType(ChatScreen, skipOffstage: false), findsOneWidget);
+      expect(api.remakes, ['s1']);
+      expect(remakeTaps(listening), 1);
+
+      turn.complete(remade());
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('disabled while the session is sending', (tester) async {
+      final turn = Completer<TurnResult>();
+      final (:api, :listening, :container) = musicIn();
+      api.onSendMessage = (_, _) => turn.future;
+      await _pump(tester, container);
+      expect(tester.widget<TapeButton>(tapeRemake()).onPressed, isNotNull);
+
+      final sending = container.read(chatProvider('s1').notifier).send('more');
+      await tester.pump();
+      expect(tester.widget<TapeButton>(tapeRemake()).onPressed, isNull);
+      await tester.tap(tapeRemake(), warnIfMissed: false);
+      await tester.pump();
+      expect(find.byType(ChatScreen), findsNothing);
+      expect(api.remakes, isEmpty);
+      expect(remakeTaps(listening), 0);
+
+      turn.complete(
+        TurnResult(
+          djMessage: DjMessage(
+            id: 'm3',
+            role: 'dj',
+            content: 'More.',
+            createdAt: DateTime(2026, 1, 1),
+          ),
+          queue: [_track(0)],
+          queueVersion: 1,
+        ),
+      );
+      await sending;
+      await tester.pumpAndSettle();
+      expect(tester.widget<TapeButton>(tapeRemake()).onPressed, isNotNull);
     });
   });
 }

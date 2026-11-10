@@ -15,6 +15,7 @@ import 'package:mixtape/data/api/api_client.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/dj/dj_api.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
+import 'package:mixtape/data/listening/listening_models.dart';
 import 'package:mixtape/data/musickit/musickit_bridge.dart';
 import 'package:mixtape/data/playback/playback_controller.dart';
 import 'package:mixtape/data/settings/author_store.dart';
@@ -34,6 +35,7 @@ import 'package:mixtape/presentation/widgets/lyric_turn.dart';
 import 'package:mixtape/presentation/widgets/music_door.dart';
 import 'package:mixtape/presentation/widgets/energy_journey.dart';
 import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
+import 'package:mixtape/presentation/widgets/foundation/idea_pill.dart';
 import 'package:mixtape/presentation/widgets/playlist_inspiration.dart';
 import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
 import 'package:mixtape/presentation/widgets/tape_strip.dart';
@@ -62,8 +64,10 @@ import '../presentation/providers/playlist_context_provider_test.dart'
 /// builds a real ApiClient, which a fake has no use for). Mirrors the
 /// pattern in dj_providers_test.dart: each method delegates to a settable
 /// callback, and an unset callback throws so an unexpected call fails
-/// loudly rather than hanging.
-class FakeDjApi implements DjApi {
+/// loudly rather than hanging. [DjRemakeSender] answers
+/// [DjApiRemake.sendRemake]: without it a remake reaches the real DjApi's
+/// private wire call and dies as a NoSuchMethodError the screen swallows.
+class FakeDjApi implements DjApi, DjRemakeSender {
   @override
   Future<void> recordPlaylistCreation(String sessionId, String appleLibraryId) async {}
 
@@ -71,6 +75,10 @@ class FakeDjApi implements DjApi {
   Future<List<DjSession>> Function()? onListSessions;
   Future<SessionDetail> Function(String id)? onGetSession;
   Future<TurnResult> Function(String id, String text)? onSendMessage;
+  Future<TurnResult> Function(String id)? onSendRemake;
+
+  /// The session id of every [sendRemake], in call order.
+  final List<String> remakes = [];
   Future<QueueOpsResult> Function(String id, List<QueueOp> ops, int? expectedVersion)?
   onApplyQueueOps;
   Future<DjSession> Function(String id, String status)? onSetStatus;
@@ -128,6 +136,14 @@ class FakeDjApi implements DjApi {
     final impl = onSendMessage;
     if (impl == null) throw UnimplementedError('onSendMessage not wired');
     return impl(id, text);
+  }
+
+  @override
+  Future<TurnResult> sendRemake(String id) {
+    remakes.add(id);
+    final impl = onSendRemake;
+    if (impl == null) throw UnimplementedError('onSendRemake not wired');
+    return impl(id);
   }
 
   @override
@@ -1854,6 +1870,555 @@ void main() {
       expect(account.grants, 1);
       expect(sent, ['more jazz', 'more jazz']);
       expect(find.text('here you go'), findsOneWidget);
+    });
+  });
+
+  // Plan 2026-11-09 C3; approval
+  // `docs/mockups/approved/2026-11-09-add-your-music-loop.md`, "The remake".
+  group('the remake', () {
+    const line = 'Remake this with my music';
+
+    SessionDetail catalogMix({bool notPersonal = true}) => SessionDetail(
+      session: _session(notPersonal: notPersonal),
+      messages: [
+        _msg('m1', 'user', 'a long run'),
+        _msg('m2', 'dj', 'A steady catalog run.', queueVersion: 1),
+      ],
+      queue: [_track(0)],
+    );
+
+    TurnResult remade() => TurnResult(
+      djMessage: _msg('m4', 'dj', 'Twelve of these are yours now.'),
+      queue: [_track(0), _track(1)],
+      queueVersion: 2,
+    );
+
+    ProviderContainer musicIn(
+      FakeDjApi api, {
+      FakeListeningApi? listening,
+      AccountApi? account,
+    }) => _makeContainer(
+      api,
+      destinations: InMemoryMusicPlatformStore(MusicPlatform.apple),
+      listening:
+          listening ??
+          FakeListeningApi(onboarding: onboardingState(musicReady: true)),
+      account: account,
+    );
+
+    TapeButton remakeButton(WidgetTester tester) =>
+        tester.widget<TapeButton>(find.byKey(MusicDoor.remakeKey));
+
+    int remakeTaps(FakeListeningApi listening) => listening.funnelEvents
+        .where((type) => type == FunnelEventType.remakeTapped)
+        .length;
+
+    testWidgets('Remake sends the remake turn: its line, then the working '
+        'cassette', (tester) async {
+      final turn = Completer<TurnResult>();
+      final sent = <String>[];
+      final api = FakeDjApi()
+        ..onGetSession = ((_) async => catalogMix())
+        ..onSendRemake = ((_) => turn.future)
+        ..onSendMessage = ((_, text) async {
+          sent.add(text);
+          throw StateError('a plain send');
+        });
+      await _pump(tester, musicIn(api));
+
+      expect(remakeButton(tester).onPressed, isNotNull);
+      await tester.tap(find.byKey(MusicDoor.remakeKey));
+      // The consent check settles after the tap's frame; the turn starts
+      // in the next.
+      await tester.pump();
+      await tester.pump();
+
+      expect(api.remakes, ['s1']);
+      expect(sent, isEmpty);
+      expect(find.text(line), findsOneWidget);
+      expect(find.byKey(WorkingCassette.indicatorKey), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.byKey(WorkingCassette.indicatorKey)).dy,
+        greaterThan(tester.getTopLeft(find.text(line)).dy),
+      );
+      // Board 3C: the line goes while the DJ works.
+      expect(find.byType(MusicDoor), findsNothing);
+      expect(find.byKey(MusicDoor.lineKey), findsNothing);
+
+      turn.complete(remade());
+      await tester.pumpAndSettle();
+      expect(find.byKey(WorkingCassette.indicatorKey), findsNothing);
+      expect(find.text('Twelve of these are yours now.'), findsOneWidget);
+      // Still a catalog mix by the re-reads: the door is back, Remake live.
+      expect(find.byType(MusicDoor), findsOneWidget);
+      expect(remakeButton(tester).onPressed, isNotNull);
+    });
+
+    testWidgets('a remake that made nothing: the door returns to its first '
+        'state', (tester) async {
+      final listening = FakeListeningApi(
+        onboarding: onboardingState(musicReady: true),
+      );
+      final api = FakeDjApi()
+        ..onGetSession = ((_) async => catalogMix())
+        ..onSendRemake = ((_) async {
+          // Nothing usable came in: no version, and the music is not ready.
+          listening.onboarding = onboardingState(musicReady: false);
+          return TurnResult(
+            djMessage: _msg('m4', 'dj', 'Nothing in there I could use yet.'),
+            queue: [_track(0)],
+            queueVersion: 1,
+          );
+        });
+      await _pump(tester, musicIn(api, listening: listening));
+      expect(find.byKey(MusicDoor.remakeKey), findsOneWidget);
+
+      await tester.tap(find.byKey(MusicDoor.remakeKey));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Nothing in there I could use yet.'), findsOneWidget);
+      expect(find.byKey(MusicDoor.remakeKey), findsNothing);
+      expect(find.text(MusicDoor.catalogLine), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(MusicDoor),
+          matching: find.text(MusicDoor.syncAppleLabel),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('re-reads that fail bring the door back, Remake enabled', (
+      tester,
+    ) async {
+      var reads = 0;
+      final listening = FakeListeningApi(
+        onboarding: onboardingState(musicReady: true),
+      );
+      final api = FakeDjApi()
+        ..onGetSession = ((_) async {
+          if (++reads > 1) throw NetworkException('offline');
+          return catalogMix();
+        })
+        ..onSendRemake = ((_) async {
+          listening.onGetOnboarding = () async =>
+              throw NetworkException('offline');
+          return remade();
+        });
+      await _pump(tester, musicIn(api, listening: listening));
+
+      await tester.tap(find.byKey(MusicDoor.remakeKey));
+      await tester.pumpAndSettle();
+
+      expect(reads, 2);
+      expect(find.text('Twelve of these are yours now.'), findsOneWidget);
+      expect(find.byType(MusicDoor), findsOneWidget);
+      expect(remakeButton(tester).onPressed, isNotNull);
+    });
+
+    testWidgets('Remake records remake_tapped once', (tester) async {
+      final listening = FakeListeningApi(
+        onboarding: onboardingState(musicReady: true),
+      );
+      final api = FakeDjApi()
+        ..onGetSession = ((_) async => catalogMix())
+        ..onSendRemake = ((_) async => remade());
+      await _pump(tester, musicIn(api, listening: listening));
+
+      await tester.tap(find.byKey(MusicDoor.remakeKey));
+      await tester.pumpAndSettle();
+
+      expect(api.remakes, hasLength(1));
+      expect(remakeTaps(listening), 1);
+    });
+
+    testWidgets('Remake is disabled while a turn is sending', (tester) async {
+      final turn = Completer<TurnResult>();
+      final api = FakeDjApi()
+        ..onGetSession = ((_) async => catalogMix())
+        ..onSendMessage = ((_, _) => turn.future);
+      await _pump(tester, musicIn(api));
+
+      await tester.enterText(find.byKey(const Key('prompt-field')), 'softer');
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('start-session')));
+      await tester.pump();
+
+      expect(find.byKey(WorkingCassette.indicatorKey), findsOneWidget);
+      expect(remakeButton(tester).onPressed, isNull);
+      await tester.tap(find.byKey(MusicDoor.remakeKey), warnIfMissed: false);
+      await tester.pump();
+      expect(api.remakes, isEmpty);
+
+      turn.complete(
+        TurnResult(
+          djMessage: _msg('m3', 'dj', 'Softer.'),
+          queue: [_track(0)],
+          queueVersion: 1,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(remakeButton(tester).onPressed, isNotNull);
+    });
+
+    testWidgets('the refetch after the remake, personal now, takes away the '
+        'door and the header label', (tester) async {
+      var reads = 0;
+      final api = FakeDjApi()
+        ..onGetSession = ((_) async => catalogMix(notPersonal: ++reads == 1))
+        ..onSendRemake = ((_) async => remade());
+      await _pump(tester, musicIn(api));
+
+      expect(find.byType(MusicDoor), findsOneWidget);
+      expect(find.byKey(const Key('chat-not-personal')), findsOneWidget);
+
+      await tester.tap(find.byKey(MusicDoor.remakeKey));
+      await tester.pumpAndSettle();
+
+      expect(reads, 2, reason: 'the post-turn read of notPersonal');
+      expect(find.text('Twelve of these are yours now.'), findsOneWidget);
+      expect(find.byType(MusicDoor), findsNothing);
+      expect(find.byKey(MusicDoor.lineKey), findsNothing);
+      expect(find.byKey(const Key('chat-not-personal')), findsNothing);
+      expect(find.text('Not personal yet'), findsNothing);
+    });
+
+    testWidgets('a failed remake: Resend remakes again, never a plain send', (
+      tester,
+    ) async {
+      var calls = 0;
+      final sent = <String>[];
+      final listening = FakeListeningApi(
+        onboarding: onboardingState(musicReady: true),
+      );
+      final api = FakeDjApi()
+        ..onGetSession = ((_) async => catalogMix())
+        ..onSendMessage = ((_, text) async {
+          sent.add(text);
+          return remade();
+        })
+        ..onSendRemake = ((_) async {
+          if (++calls == 1) {
+            throw DjApiException(
+              kind: 'conflict',
+              message: 'the DJ is stuck, try again',
+            );
+          }
+          return remade();
+        });
+      // Tall enough for both remake lines to be built in the reversed list.
+      tester.view.physicalSize = const Size(1170, 4200);
+      tester.view.devicePixelRatio = 3;
+      addTearDown(tester.view.reset);
+      await _pump(tester, musicIn(api, listening: listening));
+
+      await tester.tap(find.byKey(MusicDoor.remakeKey));
+      await tester.pumpAndSettle();
+      expect(find.byKey(LyricTurn.errorKey), findsOneWidget);
+      // The failed turn brings the door back, Remake live.
+      expect(remakeButton(tester).onPressed, isNotNull);
+
+      await tester.tap(find.byKey(LyricTurn.resendKey));
+      await tester.pumpAndSettle();
+
+      expect(api.remakes, ['s1', 's1']);
+      expect(sent, isEmpty);
+      expect(find.text(line), findsNWidgets(2));
+      expect(find.text('Twelve of these are yours now.'), findsOneWidget);
+      expect(remakeTaps(listening), 1, reason: 'Resend is not a tap on Remake');
+    });
+
+    testWidgets('a refused remake goes again as a remake after Agree', (
+      tester,
+    ) async {
+      var refuse = true;
+      final sent = <String>[];
+      final api = FakeDjApi()
+        ..onGetSession = ((_) async => catalogMix())
+        ..onSendMessage = ((_, text) async {
+          sent.add(text);
+          return remade();
+        })
+        ..onSendRemake = ((_) async {
+          if (refuse) throw const AiConsentRequiredException();
+          return remade();
+        });
+      final account = FakeConsentAccountApi(aiConsent: true);
+      final listening = FakeListeningApi(
+        onboarding: onboardingState(musicReady: true),
+      );
+      await _pump(tester, musicIn(api, account: account, listening: listening));
+
+      await tester.tap(find.byKey(MusicDoor.remakeKey));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(AiConsentCopy.titleKey), findsOneWidget);
+      expect(find.text(line), findsNothing, reason: 'the turn was taken back');
+      expect(remakeTaps(listening), 1, reason: 'the refused remake went out');
+
+      refuse = false;
+      await tester.tap(find.byKey(AiConsentCopy.agreeKey));
+      await tester.pumpAndSettle();
+
+      expect(account.grants, 1);
+      expect(api.remakes, ['s1', 's1']);
+      expect(sent, isEmpty);
+      expect(remakeTaps(listening), 1, reason: 'the retry is the same tap');
+      expect(find.text(line), findsOneWidget);
+      expect(find.text('Twelve of these are yours now.'), findsOneWidget);
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('prompt-field')))
+            .controller!
+            .text,
+        isEmpty,
+        reason: 'a remake never lands in the composer',
+      );
+    });
+
+    testWidgets('Not now at the consent sheet: nothing sent, nothing counted', (
+      tester,
+    ) async {
+      final listening = FakeListeningApi(
+        onboarding: onboardingState(musicReady: true),
+      );
+      final api = FakeDjApi()
+        ..onGetSession = ((_) async => catalogMix())
+        ..onSendRemake = ((_) async => remade());
+      await _pump(
+        tester,
+        musicIn(api, account: FakeConsentAccountApi(), listening: listening),
+      );
+
+      await tester.tap(find.byKey(MusicDoor.remakeKey));
+      await tester.pumpAndSettle();
+      expect(find.byKey(AiConsentCopy.titleKey), findsOneWidget);
+      await tester.tap(find.byKey(AiConsentCopy.notNowKey));
+      await tester.pumpAndSettle();
+
+      expect(api.remakes, isEmpty);
+      expect(remakeTaps(listening), 0);
+      expect(find.text(line), findsNothing);
+      expect(remakeButton(tester).onPressed, isNotNull);
+    });
+
+    testWidgets('a double tap: one remake, counted once', (tester) async {
+      final turn = Completer<TurnResult>();
+      final listening = FakeListeningApi(
+        onboarding: onboardingState(musicReady: true),
+      );
+      final api = FakeDjApi()
+        ..onGetSession = ((_) async => catalogMix())
+        ..onSendRemake = ((_) => turn.future);
+      await _pump(tester, musicIn(api, listening: listening));
+
+      await tester.tap(find.byKey(MusicDoor.remakeKey));
+      await tester.tap(find.byKey(MusicDoor.remakeKey), warnIfMissed: false);
+      await tester.pump();
+      await tester.pump();
+
+      expect(api.remakes, ['s1']);
+      expect(remakeTaps(listening), 1);
+      expect(find.text(line), findsOneWidget);
+
+      turn.complete(remade());
+      await tester.pumpAndSettle();
+      expect(api.remakes, ['s1']);
+      expect(remakeTaps(listening), 1);
+    });
+  });
+
+  // Approval "The history pill": an IdeaPill under that DJ line, where album
+  // pills go (board 4B).
+  group('the history pill', () {
+    const label = 'Add my listening history';
+
+    TurnResult offering({AddMusicOffer? addMusic = AddMusicOffer.history}) =>
+        TurnResult(
+          djMessage: _msg(
+            'm2',
+            'dj',
+            'Sixteen loud ones from your likes.',
+            queueVersion: 1,
+          ),
+          queue: [_track(0)],
+          queueVersion: 1,
+          addMusic: addMusic,
+        );
+
+    Future<void> ask(WidgetTester tester, String text) async {
+      await tester.enterText(find.byKey(const Key('prompt-field')), text);
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('start-session')));
+    }
+
+    testWidgets('a turn that offers it: one pill under its DJ line, above '
+        'the version, opening the router for history', (tester) async {
+      final picker = FakeArchivePicker();
+      final listening = FakeListeningApi(
+        onboarding: onboardingState(
+          chosenService: 'spotify',
+          markedRequestedAt: DateTime.utc(2026, 11, 2),
+        ),
+      );
+      final api = FakeDjApi()
+        ..onGetSession = ((_) async => SessionDetail(
+          session: _session(queueVersion: 0),
+          messages: [],
+          queue: [],
+        ))
+        ..onSendMessage = ((_, _) async => offering());
+      await _pump(
+        tester,
+        _makeContainer(
+          api,
+          destinations: InMemoryMusicPlatformStore(MusicPlatform.spotify),
+          listening: listening,
+          picker: picker,
+        ),
+      );
+
+      await ask(tester, 'my favourites, loud');
+      await tester.pumpAndSettle();
+
+      final pill = find.widgetWithText(IdeaPill, label);
+      expect(pill, findsOneWidget);
+      expect(
+        tester.getTopLeft(pill).dy,
+        greaterThan(
+          tester.getTopLeft(find.text('Sixteen loud ones from your likes.')).dy,
+        ),
+      );
+      expect(
+        tester.getTopLeft(find.byKey(VersionMarker.keyFor(1))).dy,
+        greaterThan(tester.getTopLeft(pill).dy),
+      );
+
+      await tester.tap(pill);
+      await tester.pumpAndSettle();
+      // History, with the Spotify export requested: the import flow's picker.
+      expect(picker.picks, 1);
+      expect(listening.funnelEvents, [FunnelEventType.musicChipTapped]);
+    });
+
+    testWidgets('gone once the next send starts; a turn without it brings '
+        'none', (tester) async {
+      final second = Completer<TurnResult>();
+      var call = 0;
+      final api = FakeDjApi()
+        ..onGetSession = ((_) async => SessionDetail(
+          session: _session(queueVersion: 0),
+          messages: [],
+          queue: [],
+        ))
+        ..onSendMessage = ((_, _) =>
+            ++call == 1 ? Future.value(offering()) : second.future);
+      await _pump(tester, _makeContainer(api));
+
+      await ask(tester, 'my favourites, loud');
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(IdeaPill, label), findsOneWidget);
+
+      await ask(tester, 'louder');
+      await tester.pump();
+      expect(find.widgetWithText(IdeaPill, label), findsNothing);
+
+      second.complete(offering(addMusic: null));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(IdeaPill, label), findsNothing);
+    });
+
+    testWidgets('the first turn offered it: the pill is there when the new '
+        'mix opens', (tester) async {
+      final messages = [
+        _msg('m1', 'user', 'my favourites, loud'),
+        _msg('m2', 'dj', 'Sixteen loud ones from your likes.', queueVersion: 1),
+      ];
+      final api = FakeDjApi()
+        ..onCreateSession = ((_) async => SessionDetail(
+          session: _session(),
+          messages: messages,
+          queue: [_track(0)],
+          addMusic: AddMusicOffer.history,
+        ))
+        // The read the conversation opens with never carries the offer.
+        ..onGetSession = ((_) async => SessionDetail(
+          session: _session(),
+          messages: messages,
+          queue: [_track(0)],
+        ));
+      final container = _makeContainer(api, listening: FakeListeningApi());
+
+      final id = await container.read(sessionStarterProvider)(
+        'my favourites, loud',
+      );
+      await _pump(tester, container, sessionId: id);
+
+      expect(find.widgetWithText(IdeaPill, label), findsOneWidget);
+    });
+
+    testWidgets('backed out of before it loaded: reopened later, no pill', (
+      tester,
+    ) async {
+      final firstLoad = Completer<SessionDetail>();
+      var loads = 0;
+      SessionDetail read({AddMusicOffer? addMusic}) => SessionDetail(
+        session: _session(),
+        messages: [
+          _msg('m1', 'user', 'my favourites, loud'),
+          _msg(
+            'm2',
+            'dj',
+            'Sixteen loud ones from your likes.',
+            queueVersion: 1,
+          ),
+        ],
+        queue: [_track(0)],
+        addMusic: addMusic,
+      );
+      final api = FakeDjApi()
+        ..onCreateSession = ((_) async => read(addMusic: AddMusicOffer.history))
+        ..onGetSession = ((_) =>
+            ++loads == 1 ? firstLoad.future : Future.value(read()));
+      final container = _makeContainer(api, listening: FakeListeningApi());
+
+      final id = await container.read(sessionStarterProvider)(
+        'my favourites, loud',
+      );
+      // The app stays up while the conversation comes and goes, as the tab
+      // navigator does.
+      final navigator = GlobalKey<NavigatorState>();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            navigatorKey: navigator,
+            theme: MixtapeTheme.light(),
+            home: const Scaffold(body: Text('Home')),
+          ),
+        ),
+      );
+      void open() => navigator.currentState!.push(
+        MaterialPageRoute<void>(builder: (_) => ChatScreen(sessionId: id)),
+      );
+
+      open();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(loads, 1);
+
+      // Back before the transcript arrives; it lands with nothing watching.
+      navigator.currentState!.pop();
+      await tester.pumpAndSettle();
+      expect(container.exists(chatProvider(id)), isFalse);
+      firstLoad.complete(read());
+      await tester.pump();
+
+      open();
+      await tester.pumpAndSettle();
+      expect(loads, 2, reason: 'a fresh load, not the first one resumed');
+      expect(find.text('Sixteen loud ones from your likes.'), findsOneWidget);
+      expect(find.widgetWithText(IdeaPill, label), findsNothing);
     });
   });
 }

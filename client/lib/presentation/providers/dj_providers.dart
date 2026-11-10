@@ -14,9 +14,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/api/api_client.dart';
 import '../../data/dj/dj_api.dart';
 import '../../data/dj/dj_models.dart';
+import '../../data/listening/listening_models.dart' show FunnelEventType;
 import '../../data/playlists/playlist_context_models.dart';
 import 'auth_provider.dart';
 import 'mix_operation_gate.dart';
+import 'onboarding_provider.dart';
 import 'playlist_context_provider.dart';
 import 'first_run_funnel_provider.dart';
 import 'funnel_provider.dart';
@@ -225,6 +227,7 @@ class ChatState {
     required this.messages,
     required this.queue,
     this.sending = false,
+    this.remaking = false,
     this.transientError,
     this.supportsInsert = false,
     this.pickState,
@@ -253,6 +256,12 @@ class ChatState {
   final List<QueueTrack> queue;
   final bool sending;
 
+  /// A [ChatNotifier.remake] is out: from its start until the re-reads after
+  /// it (the session's `notPersonal`, the listener's `musicReady`) resolve,
+  /// or until it fails. The conversation hides the music door meanwhile
+  /// (board 3C: the line goes while the DJ works).
+  final bool remaking;
+
   /// Whether the server understands the `insert` queue op (see
   /// [SessionDetail.supportsInsert]) — the arrangement screen offers Undo on
   /// a removal only when it does. A capability of the deploy, so it rides the
@@ -279,6 +288,7 @@ class ChatState {
     List<QueueTrack>? queue,
     int? queueVersion,
     bool? sending,
+    bool? remaking,
     String? transientError,
     bool clearTransientError = false,
     bool? supportsInsert,
@@ -303,6 +313,7 @@ class ChatState {
       messages: messages ?? this.messages,
       queue: queue ?? this.queue,
       sending: sending ?? this.sending,
+      remaking: remaking ?? this.remaking,
       transientError: clearTransientError
           ? null
           : (transientError ?? this.transientError),
@@ -393,9 +404,20 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     ref.onDispose(() => _generation++);
     final api = ref.watch(djApiProvider);
     final seedRead = _captureSeedRead();
+    // A new session's first turn: what its create response offered, which
+    // the read below never carries. Taken before the read, so it expires
+    // with this session's first build even if that build never lands (the
+    // listener backed out, or a rebuild superseded it).
+    final firstTurn = ref.read(firstTurnOffersProvider).take(sessionId);
     final detail = await api.getSession(sessionId);
-    if (_current(generation)) seedRead?.adopt(detail.playlistSeed);
-    return _fromDetail(detail);
+    if (!_current(generation)) return _fromDetail(detail);
+    seedRead?.adopt(detail.playlistSeed);
+    final loaded = _fromDetail(detail);
+    if (firstTurn == null) return loaded;
+    return loaded.copyWith(
+      addMusic: loaded.addMusic ?? firstTurn.addMusic,
+      suggestions: loaded.suggestions ?? firstTurn.suggestions,
+    );
   }
 
   ({void Function(PlaylistSeedState?) adopt})? _captureSeedRead() {
@@ -459,8 +481,21 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// Asks for a new version of this mix from the listener's own music: the
   /// same turn as [send], with [remakeText] as the listener's line (marked
   /// [ChatMessage.remake]), posted through [DjApiRemake.sendRemake].
-  Future<void> remake() =>
-      _turn(remakeText, (api) => api.sendRemake(sessionId), remake: true);
+  ///
+  /// [countTap] records `remake_tapped` as the remake goes out (past the
+  /// in-flight guards), so a tap that sends nothing counts nothing. The
+  /// screen passes it for a Remake tap only, never for a Resend or the retry
+  /// of a refused one.
+  ///
+  /// [ChatState.remaking] holds until the session and onboarding re-reads
+  /// after the turn resolve: a remake that made nothing leaves the mix a
+  /// catalog one and the music not ready, and the door must say so.
+  Future<void> remake({bool countTap = false}) => _turn(
+    remakeText,
+    (api) => api.sendRemake(sessionId),
+    remake: true,
+    countTap: countTap,
+  );
 
   /// The turn pipeline [send] and [remake] share; [post] and the listener
   /// line's [remake] marker are the only differences between them.
@@ -468,6 +503,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     String text,
     Future<TurnResult> Function(DjApi api) post, {
     bool remake = false,
+    bool countTap = false,
   }) async {
     final nameRevision = _nameRevision;
     final base = state.value;
@@ -486,10 +522,14 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       base.copyWith(
         messages: [...base.messages, userMessage],
         sending: true,
+        remaking: remake,
         clearSuggestions: true,
         clearAddMusic: true,
       ),
     );
+    if (countTap) {
+      ref.read(funnelMilestonesProvider).record(FunnelEventType.remakeTapped);
+    }
 
     try {
       final result = await post(ref.read(djApiProvider));
@@ -547,7 +587,13 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       // concerns: an album turn needs no refetch.
       if (base.kind == SessionKind.album) return;
       if (filled) _noteFilledMix(result.queue.length);
-      await _adoptSessionFlags(generation);
+      // A remake also re-reads musicReady: when the synced music held
+      // nothing usable, the server made no version and says the music is not
+      // ready, so the door goes back to its first state (board 3E).
+      await Future.wait([
+        _adoptSessionFlags(generation),
+        if (remake) _refreshOnboarding(generation),
+      ]);
       if (_current(generation)) _notePersonalMix();
     } on AiConsentRequiredException {
       // Not a failed turn: the server wants consent first. The turn is
@@ -631,8 +677,23 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       // if some other path (e.g. the stale refetch) already cleared it.
       release();
       if (_current(generation)) {
-        _mergeCurrent((c) => c.sending ? c.copyWith(sending: false) : c);
+        _mergeCurrent(
+          (c) => c.sending || c.remaking
+              ? c.copyWith(sending: false, remaking: false)
+              : c,
+        );
       }
+    }
+  }
+
+  /// Never throws: a failed read keeps the last onboarding showing (see
+  /// [OnboardingNotifier.refresh]), and the door shows again on it.
+  Future<void> _refreshOnboarding(int generation) async {
+    if (!_current(generation)) return;
+    try {
+      await ref.read(onboardingProvider.notifier).refresh();
+    } catch (_) {
+      // Silent by design, as the session re-read is.
     }
   }
 
@@ -892,6 +953,53 @@ final chatProvider = AsyncNotifierProvider.autoDispose
 // New-session flow
 // ---------------------------------------------------------------------------
 
+/// What a new session's first turn offered, handed from its create response
+/// to the conversation that opens on it. [sessionStarterProvider] returns
+/// only the id and the conversation loads through `GET /sessions/:id`, which
+/// carries neither a turn's `addMusic` nor an album's refinement
+/// `suggestions`: without this, a history pill offered on the very first
+/// turn ("play my favourites") never shows.
+///
+/// One slot: emptied as every create starts, filled when one succeeds with
+/// an offer, and taken as that session's first [ChatNotifier] build starts,
+/// so an offer is read at most once, never by another session, and never by
+/// a mix reopened later.
+class FirstTurnOffers {
+  ({String sessionId, AddMusicOffer? addMusic, List<String>? suggestions})?
+  _pending;
+
+  void clear() => _pending = null;
+
+  void put(SessionDetail created) {
+    final suggestions = created.suggestions;
+    final offers =
+        created.addMusic != null ||
+        (suggestions != null && suggestions.isNotEmpty);
+    _pending = offers
+        ? (
+            sessionId: created.session.id,
+            addMusic: created.addMusic,
+            suggestions: suggestions,
+          )
+        : null;
+  }
+
+  ({AddMusicOffer? addMusic, List<String>? suggestions})? take(
+    String sessionId,
+  ) {
+    final pending = _pending;
+    if (pending == null || pending.sessionId != sessionId) return null;
+    _pending = null;
+    return (addMusic: pending.addMusic, suggestions: pending.suggestions);
+  }
+}
+
+/// User-scoped: an offer belongs to the listener whose create made it.
+final firstTurnOffersProvider = Provider<FirstTurnOffers>((ref) {
+  ref.watch(authProvider);
+  return FirstTurnOffers();
+});
+
 /// A plain callable (not a stateful notifier) that starts a new session and
 /// returns its id. Invalidates [sessionsProvider] on both outcomes, since a
 /// failed create can still have persisted a session row (the server echoes
@@ -918,11 +1026,15 @@ final sessionStarterProvider =
         InitialPlaylistSeed? playlistSeed,
         SessionKind kind = SessionKind.mix,
       }) async {
+        // A newer create replaces the last one's offer, and a failed one
+        // leaves none.
+        final offers = ref.read(firstTurnOffersProvider)..clear();
         try {
           final detail = await ref
               .read(djApiProvider)
               .createSession(prompt, playlistSeed: playlistSeed, kind: kind);
           ref.invalidate(sessionsProvider);
+          offers.put(detail);
           // The milestone, funnel and Keep sheet notes are mix-only.
           if (kind == SessionKind.album) return detail.session.id;
           // The create response's session row is read after the first turn,
