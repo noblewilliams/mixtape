@@ -7,6 +7,7 @@ import 'presentation/providers/first_run_provider.dart';
 import 'presentation/providers/name_page_provider.dart';
 import 'presentation/theme/mixtape_theme.dart';
 import 'presentation/screens/debug/foundation_gallery_screen.dart';
+import 'presentation/screens/debug/mixes_preview.dart';
 import 'presentation/screens/first_run/first_run_flow.dart';
 import 'presentation/screens/first_run/name_screen.dart';
 import 'presentation/screens/shell/shell_screen.dart';
@@ -20,6 +21,10 @@ const bool showFoundationGallery = bool.fromEnvironment('MIXTAPE_GALLERY');
 /// `--dart-define=MIXTAPE_STORE_SHOTS=true` drops the debug banner so a
 /// simulator debug build can take App Store screenshots.
 const bool storeScreenshots = bool.fromEnvironment('MIXTAPE_STORE_SHOTS');
+
+/// `--dart-define=MIXTAPE_PREVIEW=mixes` opens the Mixes tab on made-up
+/// mixes in a debug build, for checking it in the simulator signed out.
+const String debugPreview = String.fromEnvironment('MIXTAPE_PREVIEW');
 
 void main() {
   // Fail fast: a store build missing its production define must not ship.
@@ -89,6 +94,8 @@ class MixtapeApp extends ConsumerWidget {
       ),
       home: showFoundationGallery && kDebugMode
           ? const FoundationGalleryScreen()
+          : debugPreview == 'mixes' && kDebugMode
+          ? const MixesPreview()
           : switch (root) {
               _Root.unknown => const Scaffold(
                 body: Center(child: CircularProgressIndicator()),

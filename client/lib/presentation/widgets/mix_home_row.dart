@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'mix_name_editor.dart';
 
@@ -8,6 +9,7 @@ import '../theme/mixtape_theme.dart';
 import 'foundation/cassette_tile.dart';
 import 'foundation/flush_row.dart';
 import 'foundation/mixtape_menu.dart';
+import 'foundation/swipe_actions.dart';
 import 'tape_palette.dart';
 import 'tape_settings_dialog.dart';
 
@@ -49,8 +51,17 @@ class MixHomeRow extends StatefulWidget {
   /// version history somewhere else).
   final VoidCallback? onVersionHistory;
 
-  /// The board's art box; the cassette sits inside it (`.row .art .cs`).
-  static const double artSize = 80;
+  /// The cassette's width. 68, down from the board's 80, with more air above
+  /// and below it: at 80 the tapes crowded the hairlines and the list read
+  /// tight (founder, 2026-11-09).
+  static const double artSize = 68;
+
+  /// The row's padding above and below the tape.
+  static const double verticalPadding = 16;
+
+  /// The swipe panels, for tests.
+  static Key moreActionKey(String id) => ValueKey('mix-swipe-more-$id');
+  static Key archiveActionKey(String id) => ValueKey('mix-swipe-archive-$id');
 
   /// The row's actions, in menu order.
   static const String renameAction = 'rename';
@@ -127,7 +138,7 @@ class _MixHomeRowState extends State<MixHomeRow> {
       ),
     MixtapeMenuAction(
       value: MixHomeRow.statusAction,
-      label: archived ? 'Restore' : 'Archive',
+      label: archived ? 'Unarchive' : 'Archive',
       isDestructive: !archived,
       separatorBefore: true,
       icon: MixMenuIcons.archive,
@@ -144,6 +155,8 @@ class _MixHomeRowState extends State<MixHomeRow> {
         child: FlushRow(
           leading: _tile,
           leadingSize: MixHomeRow.artSize,
+          verticalPadding: MixHomeRow.verticalPadding,
+          showChevron: false,
           title: widget.session.title,
           subtitle: _subtitle,
           isFirst: true,
@@ -186,37 +199,58 @@ class _MixHomeRowState extends State<MixHomeRow> {
   @override
   Widget build(BuildContext context) {
     final archived = widget.session.status == 'archived';
-    final colors = Theme.of(context).colorScheme;
-    return Dismissible(
-      key: ValueKey('mix-swipe-${widget.session.id}'),
-      direction: archived || _editing || _busy
-          ? DismissDirection.none
-          : DismissDirection.endToStart,
-      confirmDismiss: (_) async {
-        await _changeStatus();
-        // The parent removes the row only after accepting the server response.
-        // Returning false also permits an unchanged row after a failed request.
-        return false;
-      },
-      background: ColoredBox(
-        color: colors.surfaceContainerHighest,
-        child: const Align(
-          alignment: Alignment.centerRight,
-          child: Padding(
-            padding: EdgeInsets.all(16),
-            child: Icon(Icons.archive_outlined),
-          ),
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final id = widget.session.id;
+    return _TokenScope(
+      child: Builder(
+        builder: (context) => SwipeActions(
+          key: ValueKey('mix-swipe-$id'),
+          enabled: !_editing && !_busy,
+          // The list sits inside the screen's side padding; the row still
+          // slides out to the screen edge, as WhatsApp's does.
+          bleed: MixtapeMetrics.screenSidePadding,
+          actions: [
+            SwipeAction(
+              key: MixHomeRow.moreActionKey(id),
+              label: 'More',
+              icon: CupertinoIcons.ellipsis,
+              color: dark ? _moreFillDark : _moreFillLight,
+              // The swipe's own box, which stays put while the row slides: the
+              // menu anchors to the row at rest and lifts a copy of it, as a
+              // long-press does.
+              onPressed: () => _openActionsMenu(context, archived),
+            ),
+            SwipeAction(
+              key: MixHomeRow.archiveActionKey(id),
+              label: archived ? 'Unarchive' : 'Archive',
+              icon: MixMenuIcons.archive,
+              color: dark ? _archiveFillDark : _archiveFillLight,
+              commits: true,
+              onPressed: _changeStatus,
+            ),
+          ],
+          child: Builder(builder: _buildRow),
         ),
       ),
-      child: _TokenScope(child: Builder(builder: _buildRow)),
     );
   }
+
+  /// The swipe panels: a neutral grey More beside a violet Archive, as
+  /// WhatsApp's grey sits beside its green. The violet is the app's own glow
+  /// (the background's violet tint, the prism's last stripe), so the one
+  /// coloured panel is still the brand's colour.
+  static const Color _moreFillLight = Color(0xFF8E8A93);
+  static const Color _moreFillDark = Color(0xFF48464E);
+  static const Color _archiveFillLight = Color(0xFF6E5C8F);
+  static const Color _archiveFillDark = Color(0xFF604EAA);
 
   Widget _buildRow(BuildContext context) {
     final archived = widget.session.status == 'archived';
     if (_editing) {
       return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10),
+        padding: const EdgeInsets.symmetric(
+          vertical: MixHomeRow.verticalPadding,
+        ),
         child: Row(
           children: [
             _tile,
@@ -235,11 +269,14 @@ class _MixHomeRowState extends State<MixHomeRow> {
     }
 
     return GestureDetector(
-      // The row keeps FlushRow's chevron; the actions live on long-press.
+      // No chevron (founder, 2026-11-09); the actions live on long-press and
+      // the swipe.
       onLongPress: _busy ? null : () => _openActionsMenu(context, archived),
       child: FlushRow(
         leading: _tile,
         leadingSize: MixHomeRow.artSize,
+        verticalPadding: MixHomeRow.verticalPadding,
+        showChevron: false,
         title: widget.session.title,
         subtitle: _subtitle,
         isFirst: widget.isFirst,

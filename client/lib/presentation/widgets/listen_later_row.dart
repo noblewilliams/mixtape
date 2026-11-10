@@ -226,7 +226,7 @@ class _ListenLaterRowState extends State<ListenLaterRow> {
           Padding(
             padding: const EdgeInsets.only(
               left: ListenLaterRow.coverSize + FlushRow.gap,
-              bottom: FlushRow.verticalPadding,
+              bottom: FlushRow.defaultVerticalPadding,
             ),
             child: Wrap(
               crossAxisAlignment: WrapCrossAlignment.center,

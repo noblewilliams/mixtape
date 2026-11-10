@@ -85,6 +85,13 @@ import UIKit
         withId: "mixtape/native_switch"
       )
     }
+    // Native segmented controls, for the Liquid Glass thumb only UIKit draws.
+    if let segmentedRegistrar = registrar(forPlugin: "mixtape.native_segmented") {
+      segmentedRegistrar.register(
+        NativeSegmentedViewFactory(messenger: segmentedRegistrar.messenger()),
+        withId: "mixtape/native_segmented"
+      )
+    }
     GeneratedPluginRegistrant.register(with: self)
     // A launch that exists only to open a file delivers it through the open
     // hook below, which runs straight after this returns. Copying the launch

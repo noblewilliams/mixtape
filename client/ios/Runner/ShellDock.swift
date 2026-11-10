@@ -750,3 +750,154 @@ final class NativeSwitchPlatformView: NSObject, FlutterPlatformView {
     channel.invokeMethod("valueChanged", arguments: ["value": toggle.isOn])
   }
 }
+
+// MARK: - Native segmented control platform view
+
+/// A real `UISegmentedControl` for Flutter (viewType `mixtape/native_segmented`),
+/// so the Mixes toggle gets iOS 26's Liquid Glass thumb — the lens that swells
+/// and slides under a finger — which no Flutter-drawn toggle has.
+///
+/// Each view talks over its own channel, `mixtape/native_segmented_<id>`:
+/// Flutter sends `setSelected`, the control sends `valueChanged`. The control
+/// is inset inside its view, because the glass thumb grows past the track
+/// while it is held and a platform view clips to its frame.
+final class NativeSegmentedViewFactory: NSObject, FlutterPlatformViewFactory {
+  private let messenger: FlutterBinaryMessenger
+
+  init(messenger: FlutterBinaryMessenger) {
+    self.messenger = messenger
+    super.init()
+  }
+
+  func create(
+    withFrame frame: CGRect,
+    viewIdentifier viewId: Int64,
+    arguments args: Any?
+  ) -> FlutterPlatformView {
+    let params = args as? [String: Any]
+    return NativeSegmentedPlatformView(
+      frame: frame,
+      channel: FlutterMethodChannel(
+        name: "mixtape/native_segmented_\(viewId)",
+        binaryMessenger: messenger
+      ),
+      labels: params?["labels"] as? [String] ?? [],
+      selected: (params?["selected"] as? NSNumber)?.intValue ?? 0,
+      isDark: params?["isDark"] as? Bool,
+      fontSize: (params?["fontSize"] as? NSNumber)?.doubleValue ?? 13,
+      insetX: (params?["insetX"] as? NSNumber)?.doubleValue ?? 0,
+      insetY: (params?["insetY"] as? NSNumber)?.doubleValue ?? 0,
+      glass: params?["glass"] as? Bool ?? false,
+      cornerRadius: (params?["cornerRadius"] as? NSNumber)?.doubleValue ?? 0
+    )
+  }
+
+  func createArgsCodec() -> FlutterMessageCodec & NSObjectProtocol {
+    return FlutterStandardMessageCodec.sharedInstance()
+  }
+}
+
+final class NativeSegmentedPlatformView: NSObject, FlutterPlatformView {
+  private let container: UIView
+  private let control: UISegmentedControl
+  private let channel: FlutterMethodChannel
+
+  init(
+    frame: CGRect,
+    channel: FlutterMethodChannel,
+    labels: [String],
+    selected: Int,
+    isDark: Bool?,
+    fontSize: Double,
+    insetX: Double,
+    insetY: Double,
+    glass: Bool,
+    cornerRadius: Double
+  ) {
+    container = UIView(frame: frame)
+    control = UISegmentedControl(items: labels)
+    self.channel = channel
+    super.init()
+
+    container.backgroundColor = .clear
+    switch isDark {
+    case .some(true): container.overrideUserInterfaceStyle = .dark
+    case .some(false): container.overrideUserInterfaceStyle = .light
+    case .none: container.overrideUserInterfaceStyle = .unspecified
+    }
+
+    control.selectedSegmentIndex = selected
+    control.apportionsSegmentWidthsByContent = false
+    let size = CGFloat(fontSize)
+    control.setTitleTextAttributes(
+      [.font: UIFont.systemFont(ofSize: size, weight: .medium)], for: .normal)
+    control.setTitleTextAttributes(
+      [.font: UIFont.systemFont(ofSize: size, weight: .semibold)], for: .selected)
+    control.translatesAutoresizingMaskIntoConstraints = false
+    control.addTarget(self, action: #selector(changed), for: .valueChanged)
+
+    // On a glass capsule, as the dock is: the glass sits behind the control,
+    // the same shape, so the control's translucent track reads as glass. The
+    // control is a sibling, not inside the glass, so its thumb can still swell
+    // past the capsule while it is held.
+    let inset = (x: CGFloat(insetX), y: CGFloat(insetY))
+    if glass, #available(iOS 26, *) {
+      let glassView = UIVisualEffectView(effect: UIGlassEffect())
+      glassView.translatesAutoresizingMaskIntoConstraints = false
+      glassView.layer.cornerRadius = CGFloat(cornerRadius)
+      glassView.layer.cornerCurve = .continuous
+      glassView.clipsToBounds = true
+      container.addSubview(glassView)
+      NSLayoutConstraint.activate([
+        glassView.leadingAnchor.constraint(
+          equalTo: container.leadingAnchor, constant: inset.x),
+        glassView.trailingAnchor.constraint(
+          equalTo: container.trailingAnchor, constant: -inset.x),
+        glassView.topAnchor.constraint(
+          equalTo: container.topAnchor, constant: inset.y),
+        glassView.bottomAnchor.constraint(
+          equalTo: container.bottomAnchor, constant: -inset.y),
+      ])
+      control.backgroundColor = .clear
+    }
+    container.addSubview(control)
+    NSLayoutConstraint.activate([
+      control.leadingAnchor.constraint(
+        equalTo: container.leadingAnchor, constant: inset.x),
+      control.trailingAnchor.constraint(
+        equalTo: container.trailingAnchor, constant: -inset.x),
+      control.topAnchor.constraint(
+        equalTo: container.topAnchor, constant: inset.y),
+      control.bottomAnchor.constraint(
+        equalTo: container.bottomAnchor, constant: -inset.y),
+    ])
+
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self else { return result(nil) }
+      let args = call.arguments as? [String: Any]
+      switch call.method {
+      case "setSelected":
+        let index = (args?["index"] as? NSNumber)?.intValue ?? 0
+        if index >= 0 && index < self.control.numberOfSegments {
+          self.control.selectedSegmentIndex = index
+        }
+        result(nil)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+  }
+
+  deinit {
+    channel.setMethodCallHandler(nil)
+  }
+
+  func view() -> UIView {
+    return container
+  }
+
+  @objc private func changed() {
+    channel.invokeMethod(
+      "valueChanged", arguments: ["index": control.selectedSegmentIndex])
+  }
+}

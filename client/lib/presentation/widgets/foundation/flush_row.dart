@@ -57,6 +57,8 @@ class FlushRow extends StatelessWidget {
     this.inset = true,
     this.isFirst,
     this.titleColor,
+    this.verticalPadding = FlushRow.defaultVerticalPadding,
+    this.showChevron = true,
   });
 
   final Widget leading;
@@ -77,6 +79,10 @@ class FlushRow extends StatelessWidget {
   /// Replaces the default chevron.
   final Widget? trailing;
 
+  /// Whether a tappable row with no [trailing] draws the chevron. Mixes rows
+  /// do without it: the whole row reads as tappable (founder, 2026-11-09).
+  final bool showChevron;
+
   final VoidCallback? onTap;
 
   /// The leading column's width; also the hairline's inset.
@@ -92,14 +98,18 @@ class FlushRow extends StatelessWidget {
   /// hairline unless the builder passes `isFirst: index == 0`.
   final bool? isFirst;
 
+  /// The row's own vertical padding; [defaultVerticalPadding] unless a list
+  /// with a taller leading column wants more air around it (Mixes' tapes).
+  final double verticalPadding;
+
   /// The 1 px rule drawn at the top of every row but the first.
   static const Key hairlineKey = Key('flush-row-hairline');
 
   /// The gap between the leading column and the text.
   static const double gap = 14;
 
-  /// The row's own vertical padding.
-  static const double verticalPadding = 12;
+  /// The row's own vertical padding by default.
+  static const double defaultVerticalPadding = 12;
 
   /// Titles wrap rather than ellipsise from this text scale up.
   static const double wrapScale = 1.5;
@@ -124,7 +134,7 @@ class FlushRow extends StatelessWidget {
               ));
     final end =
         trailing ??
-        (onTap == null
+        (onTap == null || !showChevron
             ? null
             : Icon(
                 Icons.chevron_right,
@@ -135,7 +145,7 @@ class FlushRow extends StatelessWidget {
     final content = Padding(
       // 12, not 10: looser rows to go with the smaller type (smoke round
       // three, note 4).
-      padding: const EdgeInsets.symmetric(vertical: FlushRow.verticalPadding),
+      padding: EdgeInsets.symmetric(vertical: verticalPadding),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [

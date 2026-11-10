@@ -21,6 +21,7 @@ import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/capabilities_provider.dart';
 import 'package:mixtape/presentation/providers/home_mode_provider.dart';
 import 'package:mixtape/presentation/providers/dj_providers.dart';
+import 'package:mixtape/presentation/screens/archived_mixes_screen.dart';
 import 'package:mixtape/presentation/screens/chat_screen.dart';
 import 'package:mixtape/presentation/screens/mixes_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
@@ -29,6 +30,7 @@ import 'package:mixtape/presentation/screens/queue_screen.dart'
     show QueueScreen;
 import 'package:mixtape/presentation/widgets/foundation/large_title_scaffold.dart';
 import 'package:mixtape/presentation/widgets/foundation/segmented_toggle.dart';
+import 'package:mixtape/presentation/widgets/foundation/swipe_actions.dart';
 import 'package:mixtape/presentation/widgets/foundation/status_word.dart';
 import 'package:mixtape/presentation/widgets/listen_later_row.dart';
 import 'package:mixtape/presentation/widgets/mix_home_row.dart';
@@ -131,8 +133,11 @@ class FakeDjApi implements DjApi {
   }) => throw UnimplementedError();
 
   @override
-  Future<TurnResult> sendMessage(String id, String text) =>
-      throw UnimplementedError();
+  Future<TurnResult> sendMessage(
+    String id,
+    String text, {
+    bool remake = false,
+  }) => throw UnimplementedError();
 
   @override
   Future<QueueOpsResult> applyQueueOps(
@@ -220,6 +225,13 @@ ProviderContainer _makeContainer(FakeDjApi api, {bool albums = false}) {
   return container;
 }
 
+/// A short pull down past the top: enough to bring the Archived row out,
+/// short of the refresh control's trigger.
+Future<void> _revealArchived(WidgetTester tester) async {
+  await tester.drag(find.byType(CustomScrollView), const Offset(0, 140));
+  await tester.pumpAndSettle();
+}
+
 Future<void> _pump(
   WidgetTester tester,
   ProviderContainer container, {
@@ -261,14 +273,18 @@ void main() {
         'over three skeleton rows', (tester) async {
       final handle = tester.ensureSemantics();
       final gate = Completer<List<DjSession>>();
-      final api = FakeDjApi()..onListSessions = () => gate.future;
-      await _pump(tester, _makeContainer(api), settle: false);
+      final api = FakeDjApi()
+        ..onListSessions = (() => gate.future)
+        ..onListListenLater = (() async => const []);
+      await _pump(tester, _makeContainer(api, albums: true), settle: false);
       await tester.pump();
 
       expect(find.text('Mixes'), findsOneWidget);
       expect(find.byType(SegmentedToggle<MixesSegment>), findsOneWidget);
       expect(find.byKey(const Key('active-mixes')), findsOneWidget);
-      expect(find.byKey(const Key('archived-mixes')), findsOneWidget);
+      expect(find.byKey(const Key('listen-later-mixes')), findsOneWidget);
+      // Archived is a row now, not a segment.
+      expect(find.byKey(const Key('archived-mixes')), findsNothing);
       for (var index = 0; index < MixesScreen.skeletonRows; index++) {
         expect(find.byKey(MixesScreen.skeletonRowKey(index)), findsOneWidget);
       }
@@ -284,19 +300,30 @@ void main() {
     testWidgets('the segments carry their selected state', (tester) async {
       final handle = tester.ensureSemantics();
       final api = FakeDjApi()
-        ..onListSessions = () async => [_session(title: 'Active One')];
-      await _pump(tester, _makeContainer(api));
+        ..onListSessions = (() async => [_session(title: 'Active One')])
+        ..onListListenLater = (() async => const []);
+      await _pump(tester, _makeContainer(api, albums: true));
 
       SemanticsData data(String key) =>
           tester.getSemantics(find.byKey(Key(key))).getSemanticsData();
       expect(data('active-mixes').flagsCollection.isSelected, isTrue);
-      expect(data('archived-mixes').flagsCollection.isSelected, isFalse);
+      expect(data('listen-later-mixes').flagsCollection.isSelected, isFalse);
 
-      await tester.tap(find.byKey(const Key('archived-mixes')));
+      await tester.tap(find.byKey(const Key('listen-later-mixes')));
       await tester.pumpAndSettle();
       expect(data('active-mixes').flagsCollection.isSelected, isFalse);
-      expect(data('archived-mixes').flagsCollection.isSelected, isTrue);
+      expect(data('listen-later-mixes').flagsCollection.isSelected, isTrue);
       handle.dispose();
+    });
+
+    testWidgets('without album picks there is nothing to toggle', (
+      tester,
+    ) async {
+      final api = FakeDjApi()
+        ..onListSessions = () async => [_session(title: 'Active One')];
+      await _pump(tester, _makeContainer(api));
+      expect(find.byType(SegmentedToggle<MixesSegment>), findsNothing);
+      expect(find.text('Active One'), findsOneWidget);
     });
 
     testWidgets('dark theme renders the list', (tester) async {
@@ -335,12 +362,15 @@ void main() {
   });
 
   group('list', () {
-    testWidgets('active rows carry a cassette; the control switches to '
-        'archived and back', (tester) async {
+    testWidgets('active rows carry a cassette; archived mixes wait behind '
+        'the Archived row at the top, which opens their own screen', (
+      tester,
+    ) async {
       final api = FakeDjApi()
         ..onListSessions = () async => [
           _session(title: 'Active One'),
           _session(id: 's2', title: 'Old One', status: 'archived'),
+          _session(id: 's3', title: 'Older One', status: 'archived'),
         ];
       await _pump(tester, _makeContainer(api));
 
@@ -354,15 +384,130 @@ void main() {
         findsOneWidget,
       );
 
-      await tester.tap(find.byKey(const Key('archived-mixes')));
-      await tester.pumpAndSettle();
-      expect(find.text('Active One'), findsNothing);
-      expect(find.text('Old One'), findsOneWidget);
+      // Out of sight until a pull down; then it leads the list, with the
+      // count, and the first mix draws its hairline under it.
+      final archivedRow = find.byKey(MixesScreen.archivedRowKey);
+      expect(archivedRow, findsNothing);
+      await _revealArchived(tester);
+      expect(archivedRow, findsOneWidget);
+      expect(
+        tester.getSize(archivedRow).height,
+        lessThan(MixHomeRow.artSize),
+        reason: 'a slim line, much shorter than a mix row',
+      );
+      expect(
+        tester.getRect(archivedRow).bottom,
+        lessThanOrEqualTo(tester.getRect(find.text('Active One')).top),
+      );
+      expect(
+        find.descendant(of: archivedRow, matching: find.text('2')),
+        findsOneWidget,
+      );
 
-      await tester.tap(find.byKey(const Key('active-mixes')));
+      await tester.tap(archivedRow);
+      await tester.pumpAndSettle();
+      expect(find.byType(ArchivedMixesScreen), findsOneWidget);
+      expect(find.text('Old One'), findsOneWidget);
+      expect(find.text('Older One'), findsOneWidget);
+      expect(find.text('Active One'), findsNothing);
+
+      await tester.tap(find.byKey(ArchivedMixesScreen.backKey));
       await tester.pumpAndSettle();
       expect(find.text('Active One'), findsOneWidget);
       expect(find.text('Old One'), findsNothing);
+    });
+
+    testWidgets('a row keeps its state when the rows above it move', (
+      tester,
+    ) async {
+      var sessions = [
+        _session(title: 'First'),
+        _session(id: 's2', title: 'Second'),
+      ];
+      final api = FakeDjApi()..onListSessions = () async => sessions;
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+      final before = tester.state(find.byType(SwipeActions).last);
+
+      // A mix lands above both, so the second moves down a place.
+      sessions = [_session(id: 's0', title: 'Newest'), ...sessions];
+      await container.read(sessionsProvider.notifier).refresh();
+      await tester.pumpAndSettle();
+      expect(
+        tester.state(
+          find.descendant(
+            of: find.byKey(const Key('session-s2')),
+            matching: find.byType(SwipeActions),
+          ),
+        ),
+        same(before),
+      );
+    });
+
+    testWidgets('the revealed row hides again once scrolled out of sight, '
+        'without moving the list', (tester) async {
+      final api = FakeDjApi()
+        ..onListSessions = () async => [
+          for (var i = 0; i < 14; i++) _session(id: 'a$i', title: 'Mix $i'),
+          _session(id: 'z', title: 'Old One', status: 'archived'),
+        ];
+      await _pump(tester, _makeContainer(api));
+      await _revealArchived(tester);
+      expect(find.byKey(MixesScreen.archivedRowKey), findsOneWidget);
+
+      await tester.drag(find.byType(CustomScrollView), const Offset(0, -500));
+      await tester.pumpAndSettle();
+      final before = tester.getTopLeft(find.text('Mix 6'));
+      await tester.pump();
+      await tester.pumpAndSettle();
+      expect(find.byKey(MixesScreen.archivedRowKey), findsNothing);
+      expect(tester.getTopLeft(find.text('Mix 6')), before);
+
+      // Back near the top it stays hidden; only a pull past the top brings
+      // it out again.
+      await tester.drag(find.byType(CustomScrollView), const Offset(0, 440));
+      await tester.pumpAndSettle();
+      expect(find.text('Mix 0'), findsOneWidget);
+      expect(find.byKey(MixesScreen.archivedRowKey), findsNothing);
+      await _revealArchived(tester);
+      expect(find.byKey(MixesScreen.archivedRowKey), findsOneWidget);
+    });
+
+    testWidgets('with VoiceOver on the row is there without a pull', (
+      tester,
+    ) async {
+      final api = FakeDjApi()
+        ..onListSessions = () async => [
+          _session(title: 'Active One'),
+          _session(id: 's2', title: 'Old One', status: 'archived'),
+        ];
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(accessibleNavigation: true);
+      addTearDown(
+        tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+      );
+      await _pump(tester, _makeContainer(api));
+      expect(find.byKey(MixesScreen.archivedRowKey), findsOneWidget);
+    });
+
+    testWidgets('mix rows carry no chevron', (tester) async {
+      final api = FakeDjApi()
+        ..onListSessions = () async => [_session(title: 'Active One')];
+      await _pump(tester, _makeContainer(api));
+      expect(
+        find.descendant(
+          of: find.byType(MixHomeRow),
+          matching: find.byIcon(Icons.chevron_right),
+        ),
+        findsNothing,
+      );
+    });
+
+    testWidgets('no Archived row while nothing is archived', (tester) async {
+      final api = FakeDjApi()
+        ..onListSessions = () async => [_session(title: 'Active One')];
+      await _pump(tester, _makeContainer(api));
+      expect(find.byKey(MixesScreen.archivedRowKey), findsNothing);
     });
 
     testWidgets('tapping a row pushes its conversation', (tester) async {
@@ -383,9 +528,8 @@ void main() {
       );
     });
 
-    testWidgets('swipe left archives with Undo, and Undo restores the row', (
-      tester,
-    ) async {
+    testWidgets('swipe left, tap Archive: archived with Undo, and Undo '
+        'restores the row', (tester) async {
       var status = 'active';
       final writes = <String>[];
       final api = FakeDjApi();
@@ -400,7 +544,11 @@ void main() {
       };
       await _pump(tester, _makeContainer(api));
 
-      await tester.drag(find.byType(Dismissible), const Offset(-700, 0));
+      // The swipe opens the row and waits; Archive is a tap.
+      await tester.drag(find.text('Sunset Drive'), const Offset(-140, 0));
+      await tester.pumpAndSettle();
+      expect(writes, isEmpty);
+      await tester.tap(find.byKey(MixHomeRow.archiveActionKey('s1')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('session-s1')), findsNothing);
       expect(find.text('Mix archived'), findsOneWidget);
@@ -435,30 +583,66 @@ void main() {
       };
       await _pump(tester, _makeContainer(api));
 
-      await tester.drag(find.byType(Dismissible), const Offset(-700, 0));
+      // A full swipe archives on its own.
+      await tester.drag(find.byType(SwipeActions), const Offset(-700, 0));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('session-s1')), findsOneWidget);
       expect(find.text("couldn't archive — try again"), findsOneWidget);
       expect(writes, 1);
+      // The row came back to rest, its title where it was.
+      expect(
+        tester.getTopLeft(find.text('Sunset Drive')).dx,
+        greaterThan(MixHomeRow.artSize),
+      );
     });
 
-    testWidgets('restore failure keeps the row in archived', (tester) async {
+    testWidgets('unarchive failure keeps the row in Archived', (tester) async {
       final api = FakeDjApi();
       api.onListSessions = () async => [
         _session(title: 'Old One', status: 'archived'),
       ];
       api.onSetStatus = (id, status) async => throw ApiException(500, 'boom');
       await _pump(tester, _makeContainer(api));
-      await tester.tap(find.byKey(const Key('archived-mixes')));
+      await tester.tap(find.byKey(MixesScreen.archivedRowKey));
       await tester.pumpAndSettle();
 
-      // Archived rows do not swipe; the long-press menu restores them.
       await tester.longPress(find.text('Old One'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Restore'));
+      await tester.tap(find.text('Unarchive'));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('session-s1')), findsOneWidget);
       expect(find.text("couldn't unarchive — try again"), findsOneWidget);
+    });
+
+    testWidgets('in Archived a swipe unarchives, with Undo', (tester) async {
+      var status = 'archived';
+      final writes = <String>[];
+      final api = FakeDjApi();
+      api.onListSessions = () async => [
+        _session(title: 'Old One', status: status),
+      ];
+      api.onSetStatus = (id, next) async {
+        writes.add(next);
+        status = next;
+        return _session(title: 'Old One', status: status);
+      };
+      await _pump(tester, _makeContainer(api));
+      await tester.tap(find.byKey(MixesScreen.archivedRowKey));
+      await tester.pumpAndSettle();
+
+      await tester.drag(find.text('Old One'), const Offset(-140, 0));
+      await tester.pumpAndSettle();
+      expect(find.text('Unarchive'), findsOneWidget);
+      await tester.tap(find.byKey(MixHomeRow.archiveActionKey('s1')));
+      await tester.pumpAndSettle();
+      expect(writes, ['active']);
+      expect(find.text('Mix unarchived'), findsOneWidget);
+      expect(find.byKey(ArchivedMixesScreen.emptyKey), findsOneWidget);
+
+      await tester.tap(find.text('Undo'));
+      await tester.pumpAndSettle();
+      expect(writes, ['active', 'archived']);
+      expect(find.text('Old One'), findsOneWidget);
     });
 
     testWidgets('the long-press menu offers Rename and Version history', (
@@ -593,12 +777,21 @@ void main() {
       await tester.tap(find.text('Start a mix'));
       await tester.pumpAndSettle();
       expect(starts, 1);
+      expect(find.byKey(MixesScreen.archivedRowKey), findsNothing);
+    });
 
-      await tester.tap(find.byKey(const Key('archived-mixes')));
-      await tester.pumpAndSettle();
-      expect(find.text('Nothing archived'), findsOneWidget);
-      expect(find.text('Swipe a mix left to archive it.'), findsOneWidget);
-      expect(find.text('Start a mix'), findsNothing);
+    testWidgets('nothing active but some archived: the Archived row over '
+        'an empty state that says where they went', (tester) async {
+      final api = FakeDjApi()
+        ..onListSessions = () async => [
+          _session(title: 'Old One', status: 'archived'),
+        ];
+      await _pump(tester, _makeContainer(api), onStartMix: () {});
+
+      expect(find.byKey(MixesScreen.archivedRowKey), findsOneWidget);
+      expect(find.text('Nothing active'), findsOneWidget);
+      expect(find.text('Start a mix'), findsOneWidget);
+      expect(find.text('Old One'), findsNothing);
     });
   });
 
@@ -639,30 +832,32 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    testWidgets('three segments with album picks on, two otherwise', (
-      tester,
-    ) async {
+    testWidgets('Active and Listen later with album picks on', (tester) async {
       await _pump(tester, _makeContainer(albumApi(), albums: true));
+      expect(find.byKey(const Key('active-mixes')), findsOneWidget);
       expect(find.byKey(const Key('listen-later-mixes')), findsOneWidget);
       expect(find.text('Listen later'), findsOneWidget);
     });
 
-    testWidgets('albums off shows Active and Archived only', (tester) async {
+    testWidgets('albums off draws no toggle', (tester) async {
       await _pump(tester, _makeContainer(albumApi()));
-      expect(find.byKey(const Key('active-mixes')), findsOneWidget);
-      expect(find.byKey(const Key('archived-mixes')), findsOneWidget);
+      expect(find.byKey(const Key('active-mixes')), findsNothing);
       expect(find.byKey(const Key('listen-later-mixes')), findsNothing);
     });
 
     // The test font draws every glyph a full em wide, about twice SF's
     // width for these words, so a 0.45 text scale stands in for 1x on a
-    // device: three segments then need about 302 pt and the title about 63.
-    Future<(Rect, Rect)> layoutAt(WidgetTester tester, double width) async {
+    // device.
+    Future<(Rect, Rect)> layoutAt(
+      WidgetTester tester,
+      double width, {
+      double textScale = 0.45,
+    }) async {
       await _pump(
         tester,
         _makeContainer(albumApi(), albums: true),
         size: Size(width, 800),
-        textScale: 0.45,
+        textScale: textScale,
       );
       expect(tester.takeException(), isNull);
       return (
@@ -671,13 +866,27 @@ void main() {
       );
     }
 
-    testWidgets('at 390 pt the three segments drop below the title, leading', (
+    testWidgets('at 390 pt the two segments sit beside the title', (
       tester,
     ) async {
       final (title, control) = await layoutAt(tester, 390);
+      expect(title.right, lessThanOrEqualTo(control.left));
+      expect(control.right, closeTo(370, 0.5));
+      expect(control.bottom, closeTo(title.bottom, 12));
+      expect(
+        tester
+            .widget<LargeTitleScaffold>(find.byType(LargeTitleScaffold))
+            .accessoriesBelowTitle,
+        isFalse,
+      );
+    });
+
+    testWidgets('where they would squeeze the title they drop below it, '
+        'leading', (tester) async {
+      final (title, control) = await layoutAt(tester, 320, textScale: 1);
       expect(control.top, greaterThanOrEqualTo(title.bottom));
       expect(control.left, 20);
-      expect(control.right, lessThanOrEqualTo(370));
+      expect(control.right, lessThanOrEqualTo(300));
       expect(
         tester
             .widget<LargeTitleScaffold>(find.byType(LargeTitleScaffold))
@@ -686,18 +895,7 @@ void main() {
       );
     });
 
-    testWidgets('at 430 pt the three segments sit beside the title', (
-      tester,
-    ) async {
-      final (title, control) = await layoutAt(tester, 430);
-      expect(title.right, lessThanOrEqualTo(control.left));
-      expect(control.right, closeTo(410, 0.5));
-      expect(control.bottom, closeTo(title.bottom, 12));
-    });
-
-    testWidgets('below the title, the control may take the content width', (
-      tester,
-    ) async {
+    testWidgets('the control may take the content width', (tester) async {
       await _pump(
         tester,
         _makeContainer(albumApi(), albums: true),
@@ -714,31 +912,7 @@ void main() {
       expect(box.constraints.maxWidth, 350);
     });
 
-    testWidgets('two segments keep the title row as it was', (tester) async {
-      await _pump(tester, _makeContainer(albumApi()));
-      expect(
-        tester
-            .widget<LargeTitleScaffold>(find.byType(LargeTitleScaffold))
-            .accessoriesBelowTitle,
-        isFalse,
-      );
-      final title = tester.getRect(find.text('Mixes'));
-      final control = tester.getRect(
-        find.byType(SegmentedToggle<MixesSegment>),
-      );
-      expect(title.right, lessThanOrEqualTo(control.left));
-      final box = tester.widget<ConstrainedBox>(
-        find
-            .ancestor(
-              of: find.byType(SegmentedToggle<MixesSegment>),
-              matching: find.byType(ConstrainedBox),
-            )
-            .first,
-      );
-      expect(box.constraints.maxWidth, 240);
-    });
-
-    testWidgets('the three segments fit a 320 pt screen at 200% text', (
+    testWidgets('the segments fit a 320 pt screen at 200% text', (
       tester,
     ) async {
       await _pump(

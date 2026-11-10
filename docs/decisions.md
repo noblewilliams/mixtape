@@ -1494,3 +1494,38 @@ column at 560 pt on wide windows; the background image stays full-bleed.
 Rejected: a left rail (founder wants it on the right), a width cap on tab
 content (sheet backdrops then read as a box). **Reopens if:** Apple ships a
 foldable with its own idiom or size class we should key on instead of width.
+
+## 2026-11-09 — Mixes follows WhatsApp's chat list: a swipe opens and waits, Archived is a row, the toggle is native glass
+
+A swipe left on a mix row now opens two panels, a grey More and a violet
+Archive (the background's own violet glow, so the one coloured panel is still
+the brand's), and the row stays open until a tap: the founder wanted to
+"slide… pick my finger up… and then decide". A swipe past 62% of the row still
+fires Archive on its own (iOS's rule), with the same Undo toast. One row is
+open at a time; a scroll or a touch elsewhere closes it, and the row slides out
+under the screen edge as a full-width table row does. This is
+`SwipeActions` (`client/lib/presentation/widgets/foundation/swipe_actions.dart`),
+replacing the `Dismissible` that archived the moment a swipe ended. Archived
+leaves the segmented control, which is now Active | Listen later (and not
+drawn at all without album picks). Archived mixes sit behind an "Archived" row
+at the top of Active: one slim 40 pt line (small glyph, the word, a count), no
+chevron, shown only while something is archived and hidden above the list
+until a pull down of 44 pt brings it out (short of the refresh control's
+100 pt); once scrolled out of sight it hides again, the list moving up by its
+height so nothing on screen shifts. It stays out without a pull when nothing
+is active (the empty state points at it) and under VoiceOver, which cannot
+pull. It pushes `ArchivedMixesScreen`, where the same swipe offers More and
+Unarchive, and unarchiving gets its own toast with Undo. Mix rows lose their
+chevron (`FlushRow.showChevron`). The menu says "Unarchive", not
+"Restore". The toggle is a native `UISegmentedControl` on a `UIGlassEffect`
+capsule on iOS 26 (`GlassSegmentedControl`, `NativeSegmentedViewFactory` in
+`ShellDock.swift`), hosted like the native switch, and the drawn
+`SegmentedToggle` everywhere else and whenever a menu or sheet covers it. This
+narrows "One segmented control, app-wide" (2026-09-18): the house control stays
+the fallback and the other screens' control. The cassette shrinks from 80 to
+68 pt with 16 pt above and below (was 12), because at 80 the tapes crowded the
+hairlines. Rejected: `flutter_slidable` (a dependency for about 300 lines, and
+the panels must look like ours), Archived as a third segment, and a drawn glass
+thumb (no lens; not the system's). **Reopens if:** the full swipe archives by
+accident in use (turn `fullSwipe` off), or the native control drifts from the
+dock's look in a later iOS.

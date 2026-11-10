@@ -26,7 +26,10 @@ Rejected alternatives and why:
 - Mixes: native segmented control for Active/Archived; flush rows with a
   60 pt square cassette tile, title, meta, chevron; swipe left archives with
   Undo; long-press offers Rename and Version history. Every row is a
-  conversation.
+  conversation. (2026-11-09: the control is Active | Listen later, Archived is
+  a slim row hidden above Active until a pull down, mix rows have no chevron,
+  and a swipe opens More and Archive and waits for a tap; see
+  `docs/decisions.md`, 2026-11-09.)
 - Library: glass button cluster at the title; Sources and Playlists as flush
   lists with bold section words; status is a coloured word inside the subtitle.
 - You: native inset-grouped lists; identity block with a square prism avatar;

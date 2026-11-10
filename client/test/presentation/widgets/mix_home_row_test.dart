@@ -94,9 +94,7 @@ void main() {
     expect(writes, 0);
     expect(find.text('Sunday'), findsOneWidget);
   });
-  testWidgets('long-press opens the actions menu on a chevron row', (
-    tester,
-  ) async {
+  testWidgets('long-press opens the actions menu on a row', (tester) async {
     var history = 0;
     var archives = 0;
     await tester.pumpWidget(
@@ -118,14 +116,14 @@ void main() {
       ),
     );
 
-    // The approved row: a chevron, no visible more button.
+    // No chevron (founder, 2026-11-09) and no visible more button.
     expect(find.byKey(const ValueKey('mix-actions-one')), findsNothing);
     expect(
       find.descendant(
         of: find.byType(FlushRow),
         matching: find.byIcon(Icons.chevron_right),
       ),
-      findsOneWidget,
+      findsNothing,
     );
 
     await tester.longPress(find.text('Sunday'));
@@ -191,32 +189,101 @@ void main() {
     expect(screen.sessionId, 'one');
   });
 
-  testWidgets(
-    'successful swipe can leave row mounted without dismissal assertion',
-    (tester) async {
-      var archives = 0;
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: MixHomeRow(
-              session: session,
-              onOpen: () {},
-              onRename: (_) async => true,
-              onArchive: () async {
-                archives++;
-                return true;
-              },
-              onRestore: () async => true,
-            ),
+  group('swipe', () {
+    Future<void> pumpSwipeRow(
+      WidgetTester tester, {
+      required Future<bool> Function() onArchive,
+      Future<bool> Function()? onRestore,
+      DjSession? row,
+    }) => tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MixHomeRow(
+            session: row ?? session,
+            onOpen: () {},
+            onRename: (_) async => true,
+            onArchive: onArchive,
+            onRestore: onRestore ?? () async => true,
           ),
         ),
+      ),
+    );
+
+    testWidgets('a swipe opens More and Archive and waits; nothing is '
+        'archived until Archive is tapped', (tester) async {
+      var archives = 0;
+      await pumpSwipeRow(
+        tester,
+        onArchive: () async {
+          archives++;
+          return true;
+        },
       );
-      await tester.drag(find.byType(Dismissible), const Offset(-700, 0));
+      await tester.drag(find.text('Sunday'), const Offset(-140, 0));
+      await tester.pumpAndSettle();
+      expect(find.byKey(MixHomeRow.moreActionKey('one')), findsOneWidget);
+      expect(find.byKey(MixHomeRow.archiveActionKey('one')), findsOneWidget);
+      expect(archives, 0);
+
+      await tester.tap(find.byKey(MixHomeRow.archiveActionKey('one')));
       await tester.pumpAndSettle();
       expect(archives, 1);
       expect(tester.takeException(), isNull);
-    },
-  );
+    });
+
+    testWidgets('More opens the row menu', (tester) async {
+      await pumpSwipeRow(tester, onArchive: () async => true);
+      await tester.drag(find.text('Sunday'), const Offset(-140, 0));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(MixHomeRow.moreActionKey('one')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(mixtapeMenuKey), findsOneWidget);
+      expect(find.text('Rename'), findsOneWidget);
+      expect(find.text('Archive'), findsWidgets);
+    });
+
+    testWidgets('a full swipe archives on its own', (tester) async {
+      var archives = 0;
+      await pumpSwipeRow(
+        tester,
+        onArchive: () async {
+          archives++;
+          return true;
+        },
+      );
+      await tester.drag(find.text('Sunday'), const Offset(-700, 0));
+      await tester.pumpAndSettle();
+      expect(archives, 1);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('an archived row swipes to Unarchive', (tester) async {
+      var restores = 0;
+      await pumpSwipeRow(
+        tester,
+        row: DjSession(
+          id: 'one',
+          title: 'Sunday',
+          status: 'archived',
+          queueVersion: 1,
+          updatedAt: DateTime(2026),
+        ),
+        onArchive: () async => true,
+        onRestore: () async {
+          restores++;
+          return true;
+        },
+      );
+      await tester.drag(find.text('Sunday'), const Offset(-140, 0));
+      await tester.pumpAndSettle();
+      expect(find.text('Unarchive'), findsOneWidget);
+
+      await tester.tap(find.byKey(MixHomeRow.archiveActionKey('one')));
+      await tester.pumpAndSettle();
+      expect(restores, 1);
+    });
+  });
 
   group('album session', () {
     final album = DjSession(

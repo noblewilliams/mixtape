@@ -442,7 +442,7 @@ void main() {
     );
 
     testWidgets('a flush row pads 12 pt above and below', (tester) async {
-      expect(FlushRow.verticalPadding, 12);
+      expect(FlushRow.defaultVerticalPadding, 12);
       await _pump(
         tester,
         const FlushList(
