@@ -26,6 +26,7 @@ import '../../providers/dj_providers.dart';
 import '../../providers/first_run_provider.dart';
 import '../../providers/playback_provider.dart';
 import '../../providers/shell_providers.dart';
+import '../../theme/mixtape_theme.dart';
 import '../../widgets/ai_consent_sheet.dart';
 import '../../widgets/foundation/frosted_dock.dart';
 import '../../widgets/foundation/frosted_surface.dart';
@@ -54,6 +55,19 @@ class ShellScreen extends ConsumerStatefulWidget {
   /// Room the Mixes tab leaves under its list on top of the dock's own
   /// height, which the shell contributes through [MediaQuery.padding].
   static const EdgeInsets tabListInset = EdgeInsets.only(bottom: 16);
+
+  /// How far above the bottom safe area a toast floats while the bottom dock
+  /// is up: clear of the tab bar, and of the mini-player when something is
+  /// playing, with 8 pt between. Unlike a list, a toast does not hold the
+  /// mini-player's band empty — it is gone in seconds, so it sits just above
+  /// whatever is actually there.
+  static double toastClearance({required bool miniVisible}) =>
+      (miniVisible
+          ? kFrostedDockHeight
+          : kFrostedDockHeight -
+                MixtapeMetrics.miniPlayerHeight -
+                MixtapeMetrics.dockGap) +
+      8;
 
   @override
   ConsumerState<ShellScreen> createState() => _ShellScreenState();
@@ -455,41 +469,49 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                Scaffold(
-                  backgroundColor: Colors.transparent,
-                  resizeToAvoidBottomInset: false,
-                  body: NotificationListener<ScrollNotification>(
-                    onNotification: _handleScroll,
-                    child: _wideLayout(
-                      wide: wide,
-                      currentIndex: currentIndex,
-                      mini: mini,
-                      child: NavigatorPopHandler(
-                        // Android back and the iOS swipe pop the tab's own
-                        // history before they leave the shell.
-                        onPopWithResult: (result) =>
-                            _navigatorOf(currentIndex)?.maybePop(),
-                        child: IndexedStack(
-                          key: ShellScreen.tabStackKey,
-                          index: currentIndex,
-                          children: [
-                            for (final tab in AppTab.values)
-                              KeyedSubtree(
-                                key: ShellScreen.tabKey(tab),
-                                child: Navigator(
-                                  key: _navigators[tab.index],
-                                  observers: [
-                                    _observers[tab.index],
-                                    _glassObservers[tab.index],
-                                  ],
-                                  onGenerateRoute: (settings) =>
-                                      MaterialPageRoute<void>(
-                                        settings: settings,
-                                        builder: (_) => _rootFor(tab),
-                                      ),
+                _ToastsClearDock(
+                  // Every toast in the app renders in this Scaffold — it is
+                  // the app-level messenger's root, whatever tab asked — so
+                  // only here can a toast learn where the dock is.
+                  clearance: resolved && !wide && _bottomDockWanted
+                      ? ShellScreen.toastClearance(miniVisible: mini.visible)
+                      : null,
+                  child: Scaffold(
+                    backgroundColor: Colors.transparent,
+                    resizeToAvoidBottomInset: false,
+                    body: NotificationListener<ScrollNotification>(
+                      onNotification: _handleScroll,
+                      child: _wideLayout(
+                        wide: wide,
+                        currentIndex: currentIndex,
+                        mini: mini,
+                        child: NavigatorPopHandler(
+                          // Android back and the iOS swipe pop the tab's own
+                          // history before they leave the shell.
+                          onPopWithResult: (result) =>
+                              _navigatorOf(currentIndex)?.maybePop(),
+                          child: IndexedStack(
+                            key: ShellScreen.tabStackKey,
+                            index: currentIndex,
+                            children: [
+                              for (final tab in AppTab.values)
+                                KeyedSubtree(
+                                  key: ShellScreen.tabKey(tab),
+                                  child: Navigator(
+                                    key: _navigators[tab.index],
+                                    observers: [
+                                      _observers[tab.index],
+                                      _glassObservers[tab.index],
+                                    ],
+                                    onGenerateRoute: (settings) =>
+                                        MaterialPageRoute<void>(
+                                          settings: settings,
+                                          builder: (_) => _rootFor(tab),
+                                        ),
+                                  ),
                                 ),
-                              ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                     ),
@@ -519,6 +541,35 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Lifts the floating toasts [child] — the shell's Scaffold — shows to
+/// [clearance] above the bottom safe area; null leaves the app's own inset,
+/// for when no bottom dock is on screen.
+///
+/// A toast that passes its own margin (Home's, which also clears the panel)
+/// keeps it.
+class _ToastsClearDock extends StatelessWidget {
+  const _ToastsClearDock({required this.clearance, required this.child});
+
+  final double? clearance;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final clearance = this.clearance;
+    return Theme(
+      data: clearance == null
+          ? theme
+          : theme.copyWith(
+              snackBarTheme: theme.snackBarTheme.copyWith(
+                insetPadding: EdgeInsets.fromLTRB(16, 5, 16, clearance),
+              ),
+            ),
+      child: child,
     );
   }
 }

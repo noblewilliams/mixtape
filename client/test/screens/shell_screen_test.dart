@@ -36,6 +36,7 @@ import 'package:mixtape/presentation/screens/shell/shell_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/frosted_dock.dart';
 import 'package:mixtape/presentation/widgets/foundation/frosted_surface.dart';
+import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 import 'package:mixtape/presentation/widgets/foundation/side_rail.dart';
 import 'package:mixtape/presentation/widgets/spotify_handoff_sheets.dart';
 
@@ -583,6 +584,89 @@ void main() {
       await pumpShell(tester, shellContainer());
       final media = MediaQuery.of(tester.element(find.byType(HomeScreen)));
       expect(media.padding.bottom, greaterThanOrEqualTo(kFrostedDockHeight));
+    });
+  });
+
+  // Every toast renders in the shell's own Scaffold — the app-level messenger's
+  // root — whatever tab asked for it, so the shell is what keeps it clear of
+  // the dock. A tab's local SnackBar theme never reaches the bar.
+  group('toasts and the dock', () {
+    /// Shows an Undo toast from Mixes' root, as archiving a mix does, and
+    /// returns the painted bar (the SnackBar's own rect includes its margin).
+    Future<Rect> toastFromMixes(WidgetTester tester) async {
+      ScaffoldMessenger.of(
+        tabNavigator(tester, AppTab.mixes).context,
+      ).showSnackBar(
+        mixtapeSnackBar(
+          message: 'Mix archived',
+          kind: FeedbackKind.success,
+          actionLabel: 'Undo',
+          onAction: () {},
+        ),
+      );
+      await tester.pumpAndSettle();
+      return tester.getRect(
+        find
+            .descendant(
+              of: find.byType(SnackBar),
+              matching: find.byType(Material),
+            )
+            .first,
+      );
+    }
+
+    iosWidgets('a toast on a tab sits above the tab bar', (tester) async {
+      final container = shellContainer();
+      await pumpShell(tester, container);
+      container.read(selectedTabProvider.notifier).selectTab(AppTab.mixes);
+      await tester.pumpAndSettle();
+
+      final bar = await toastFromMixes(tester);
+      final tabBar = tester.getRect(find.byKey(FrostedDock.tabBarKey));
+      expect(bar.bottom, lessThan(tabBar.top));
+    });
+
+    iosWidgets('with something playing it sits above the mini-player too', (
+      tester,
+    ) async {
+      final container = shellContainer(fakeMiniPlayer: true);
+      await pumpShell(tester, container);
+      (container.read(miniPlayerStateProvider.notifier) as FakeMiniPlayer).emit(
+        const MiniPlayerState(visible: true, title: 'Song', artist: 'Artist'),
+      );
+      container.read(selectedTabProvider.notifier).selectTab(AppTab.mixes);
+      await tester.pumpAndSettle();
+
+      final bar = await toastFromMixes(tester);
+      final mini = tester.getRect(find.byKey(FrostedDock.miniPlayerKey));
+      expect(bar.bottom, lessThan(mini.top));
+    });
+
+    iosWidgets('the native dock gets the same clearance', (tester) async {
+      // iOS 26: the real UITabBar shares the Flutter dock's geometry, and
+      // Flutter draws nothing there to measure against.
+      final container = shellContainer(nativeDock: true);
+      await pumpShell(tester, container);
+      container.read(selectedTabProvider.notifier).selectTab(AppTab.mixes);
+      await tester.pumpAndSettle();
+
+      final bar = await toastFromMixes(tester);
+      const tabBarTop = 874 - 8 - MixtapeMetrics.tabBarHeight;
+      expect(bar.bottom, lessThan(tabBarTop));
+    });
+
+    iosWidgets('with the dock hidden by a route, the toast drops back down', (
+      tester,
+    ) async {
+      final container = shellContainer();
+      await pumpShell(tester, container);
+      container.read(selectedTabProvider.notifier).selectTab(AppTab.mixes);
+      await tester.pumpAndSettle();
+      await pushInsideTab(tester, 'a mix in Mixes', tab: AppTab.mixes);
+      expect(find.byType(FrostedDock), findsNothing);
+
+      final bar = await toastFromMixes(tester);
+      expect(bar.bottom, greaterThan(874 - 8 - MixtapeMetrics.tabBarHeight));
     });
   });
 

@@ -275,9 +275,10 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
     return NotificationListener<ScrollNotification>(
       onNotification: _onScroll,
       child: GradientBackground(
-        // A transparent Scaffold, no app bar: the large title is the chrome, and
-        // the Scaffold is only here to host this tab's own SnackBars. They float
-        // clear of the dock, so Undo and the failure lines stay reachable.
+        // A transparent Scaffold, no app bar: the large title is the chrome.
+        // Inside the shell, toasts render in the shell's own Scaffold, which
+        // lifts them clear of the dock (`ShellScreen.toastClearance`); this
+        // theme only places them when Mixes stands alone, as in its tests.
         child: Theme(
           data: Theme.of(context).copyWith(
             snackBarTheme: Theme.of(context).snackBarTheme.copyWith(
