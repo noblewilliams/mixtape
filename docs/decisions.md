@@ -1,5 +1,25 @@
 # Decision Log
 
+## 2026-11-10 — Catalogue curation without thinking; blend dedupes by song (founder)
+
+A no-library listener's first mix waited on catalogue curation, which under
+Sonnet 5 adaptive thinking (effort medium) spent 44 to 95 s and once its
+whole budget with no answer. Tested on three catalogue briefs (comparison
+page linked from `backlog.md`), thinking off kept the picks on the brief.
+
+- Catalogue (corpus) curation in `generateFromBrief` runs with
+  `thinking: {type: "disabled"}` at effort low (`CurateOptions.thinking`).
+  Measured: curation 13 to 18 s, first mixes 35 to 42 s. Personal-pool
+  curation is unchanged (effort medium, adaptive thinking); the pinned
+  personal request hash guards it.
+- The corpus blend, the top-up and the shortfall drop a proposal that is
+  the same song as one already held (`songKey`: title and artist key), not
+  only the same track row. Two releases of one song no longer both play.
+- Rejected: effort low with thinking on (39 to 51 s and drifted off the
+  brief). Not changed: edits, artist-only mixes, personal curation.
+- **Reopens if** catalogue mixes read off-brief in use, or personal curation
+  shows the same latency (test it the same way before changing it).
+
 ## 2026-11-09 — Add your music: label, link, remake (founder)
 
 Spec `superpowers/specs/2026-11-09-add-your-music-loop-design.md`; board
