@@ -6,7 +6,7 @@ import { djMemories, djMessages, djSessions, funnelEvents, queueTracks, tracks, 
 import type { Surface } from '../seeds/contracts'
 import { fillForArtist, fillForSeeds, FILL_BUDGET, type FillDeps, type FillResult } from './catalogue-fill'
 import { artistKey } from './artist-keys'
-import type { LlmClient, LlmComplete, LlmMessage } from './llm'
+import type { LlmClient, LlmComplete, LlmMessage, LlmRequest } from './llm'
 import { LlmError } from './llm'
 import {
   intentSchema,
@@ -25,14 +25,17 @@ import {
 } from './contracts'
 import { buildPool, hasPersonalCandidates, listenerPlaysSql, musicReady, onSpotifySql, outsideCap, resolvePoolMode, type PoolMode, type PoolTrack } from './pool'
 import { curate, CurationNothingFits, CurationTruncated, CurationUnparseable, type CuratedTrack } from './curate'
-import { checkGenres, type GenreCandidate } from './genre-check'
+import { checkGenres, GENRE_CHECK_SYSTEM, type GenreCandidate } from './genre-check'
 import {
   MIN_VERIFIED,
   PROPOSE_EXTRA,
   PROPOSED_NOTICE,
+  PROPOSE_SYSTEM_PROMPT,
+  PROPOSE_SYSTEM_PROMPT_PERSONAL,
   proposalCount,
   proposeSongs,
   ROUND_TWO_CUTOFF_MS,
+  titleKey,
   verifyProposals,
   VERIFY_DEADLINE_MS,
   VERIFY_MAX,
@@ -75,6 +78,36 @@ import {
 // DJ proposes, verified on Apple (dj/propose.ts), instead of the refusal.
 // Absent or false is today's behaviour exactly.
 export type DjDeps = { llm: LlmClient; embed: Embedder; titleComplete?: LlmComplete; outsidePicks?: boolean; fill?: FillDeps; neverRefuse?: boolean }
+
+// Where a turn's time goes, for the turn log: each model call as
+// "<kind>@<start>+<duration>" in tenths of a second from the turn's start
+// ("curate@41+228" began at 4.1s and took 22.8s). Kinds only, never content.
+// Overlapping entries ran side by side.
+type TurnTiming = string[]
+
+function llmKind(req: LlmRequest): string {
+  if (req.tools.length > 0) return 'chat'
+  if (req.system === PROPOSE_SYSTEM_PROMPT || req.system === PROPOSE_SYSTEM_PROMPT_PERSONAL) return 'propose'
+  return 'curate'
+}
+
+function timedDeps(deps: DjDeps, timing: TurnTiming, now: () => number): DjDeps {
+  const began = now()
+  const tenths = (ms: number) => Math.round(ms / 100)
+  async function time<T>(kind: string, run: () => Promise<T>): Promise<T> {
+    const start = now()
+    try {
+      return await run()
+    } finally {
+      timing.push(`${kind}@${tenths(start - began)}+${tenths(now() - start)}`)
+    }
+  }
+  const llm: LlmClient = (req) => time(llmKind(req), () => deps.llm(req))
+  const titleComplete: LlmComplete | undefined = deps.titleComplete
+    ? (opts) => time(opts.system === GENRE_CHECK_SYSTEM ? 'genre' : 'title', () => deps.titleComplete!(opts))
+    : undefined
+  return { ...deps, llm, ...(titleComplete ? { titleComplete } : {}) }
+}
 
 // The only session fields the loop actually needs — callers (the session
 // routes, Task 8) already have the full dj_sessions row and can pass it
@@ -906,7 +939,8 @@ type FillLog = { inserted: number; enriched: number; subrequests: number; appleE
 // The never-refuse path's part of the turn log: counts only. `rounds` counts
 // proposal calls (a generate's two rounds and any edit's); `error` marks a
 // replacement round that failed and was let go.
-type ProposeLog = { proposed: number; verified: number; searches: number; rounds: number; error?: 'replacement' | 'blend' | 'shortfall' }
+// `curationFailed`: the curation failed and the proposals filled the mix.
+type ProposeLog = { proposed: number; verified: number; searches: number; rounds: number; error?: 'replacement' | 'blend' | 'shortfall'; curationFailed?: true }
 
 // What one turn's proposals verified, kept so a conflict retry or a second
 // generate_queue reuses them instead of spending the searches again.
@@ -1198,6 +1232,20 @@ async function proposeRound(
   budget: CurationBudget,
   tracker: FillTracker,
 ): Promise<{ proposals: Proposal[]; result: VerifyResult } | null> {
+  const proposals = await proposeOnly(deps, ctx, round, budget, tracker)
+  if (!proposals) return null
+  return { proposals, result: await verifyRound(db, fill, ctx, round, proposals, tracker) }
+}
+
+// The proposal call alone: null when no search is left to verify what it
+// would name. One curation against the turn's budget.
+async function proposeOnly(
+  deps: DjDeps,
+  ctx: ProposeContext,
+  round: { intent: Intent; count?: number; exclude?: ProposedSong[]; listener?: 'personal'; topArtists?: string[] },
+  budget: CurationBudget,
+  tracker: FillTracker,
+): Promise<Proposal[] | null> {
   const spend = proposeSpend(tracker)
   const searchesLeft = Math.min(VERIFY_MAX - spend.log.searches, searchRoom(tracker, round.intent))
   const timeLeft = VERIFY_DEADLINE_MS - spend.verifyMs
@@ -1212,6 +1260,23 @@ async function proposeRound(
     count: Math.min(round.count ?? proposalCount(round.intent), searchesLeft),
   })
   spend.log.proposed += proposals.length
+  return proposals
+}
+
+// Apple verification of proposals, inside what is left of the turn's
+// VERIFY_MAX searches and VERIFY_DEADLINE_MS.
+async function verifyRound(
+  db: Db,
+  fill: FillDeps,
+  ctx: ProposeContext,
+  round: { intent: Intent; want: number },
+  proposals: Proposal[],
+  tracker: FillTracker,
+): Promise<VerifyResult> {
+  const spend = proposeSpend(tracker)
+  const searchesLeft = Math.min(VERIFY_MAX - spend.log.searches, searchRoom(tracker, round.intent))
+  const timeLeft = VERIFY_DEADLINE_MS - spend.verifyMs
+  if (searchesLeft <= 0 || timeLeft <= 0 || proposals.length === 0) return { verified: [], misses: [], searches: 0 }
   const began = ctx.now()
   const result = await verifyProposals(db, fill.catalog, {
     proposals, storefront: ctx.storefront, budget: searchesLeft, deadlineMs: timeLeft, now: ctx.now,
@@ -1219,7 +1284,7 @@ async function proposeRound(
   })
   spend.verifyMs += ctx.now() - began
   spend.log.searches += result.searches
-  return { proposals, result }
+  return result
 }
 
 // Propose and verify; when fewer than the mix's floor verify, one
@@ -1355,6 +1420,43 @@ function genreSpares(intent: { genres?: string[] }, want: number): number {
   return (intent.genres ?? []).length > 0 ? Math.min(PROPOSE_EXTRA, want) : 0
 }
 
+// A personal genre mix's shortfall proposals, asked for while the library
+// curation is still running rather than after it (latency, 2026-11-10: a
+// local "90s r&b" turn spent 23s curating and then 30s proposing, one after
+// the other). The shortfall is not known yet, so it asks for the whole mix
+// and later verifies only what the curation left unfilled, dropping songs
+// the curation already chose. A genre brief only: those are the briefs a
+// library most often falls short of, so the call is rarely wasted. Null
+// when no search is left, or the call failed (the mix falls back to the
+// curation alone, as a failed shortfall round does).
+type EarlyShortfall = { proposals: Proposal[]; ctx: ProposeContext } | null
+
+async function earlyShortfall(
+  db: Db,
+  deps: DjDeps,
+  fill: FillDeps,
+  session: DjSessionRef,
+  intent: Intent,
+  userText: string,
+  sessionContext: string,
+  budget: CurationBudget,
+  tracker: FillTracker,
+): Promise<EarlyShortfall> {
+  try {
+    const ctx = await proposeContext(db, fill, session, userText, sessionContext)
+    const topArtists = await topLibraryArtists(db, session.userId)
+    const proposals = await proposeOnly(deps, ctx,
+      { intent, count: intent.targetCount + PROPOSE_EXTRA, listener: 'personal', topArtists }, budget, tracker)
+    return proposals ? { proposals, ctx } : null
+  } catch (e) {
+    if (e instanceof DjError) throw e
+    proposeSpend(tracker).log.error = 'shortfall'
+    return null
+  }
+}
+
+const songKey = (s: { title: string; artist: string }) => `${titleKey(s.title)}\u0000${artistKey(s.artist)}`
+
 // A personal mix that curated short (decision 2): one proposal round for
 // the shortfall, verified on Apple like the corpus blend, never naming the
 // songs the library already gave. Never throws but for the turn's own
@@ -1373,6 +1475,7 @@ async function shortfallProposals(
   want: number,
   exclude: ProposedSong[],
   held: Set<string>,
+  early?: Promise<EarlyShortfall>,
 ): Promise<VerifiedProposal[]> {
   if (want <= 0) return []
   // Keyed by the brief: a conflict retry of the same generate reuses the
@@ -1382,11 +1485,32 @@ async function shortfallProposals(
     const spend = proposeSpend(tracker)
     let verified: VerifiedProposal[]
     try {
-      const ctx = await proposeContext(db, fill, session, userText, sessionContext)
-      const topArtists = await topLibraryArtists(db, session.userId)
-      const round = await proposeRound(db, deps, fill, ctx,
-        { intent, want: want + genreSpares(intent, want), count: want + PROPOSE_EXTRA, exclude, listener: 'personal', topArtists }, budget, tracker)
-      verified = round?.result.verified ?? []
+      const asked = early ? await early : null
+      if (asked) {
+        // Asked before the curation was known: the library's own picks go.
+        const chosen = new Set(exclude.map(songKey))
+        const proposals = asked.proposals.filter((p) => !chosen.has(songKey(p)))
+        verified = (await verifyRound(db, fill, asked.ctx, { intent, want: want + genreSpares(intent, want) }, proposals, tracker)).verified
+        // The early call can come back thin (live 2026-11-10: one song for a
+        // 15-song mix, which left it at 5). While the turn is young enough,
+        // one round as before, naming everything already tried or chosen.
+        const late = asked.ctx.now() - tracker.turnStartedAt > ROUND_TWO_CUTOFF_MS
+        if (verified.length < want && !late) {
+          const topArtists = await topLibraryArtists(db, session.userId)
+          const tried = [...exclude, ...asked.proposals.map(({ title, artist }) => ({ title, artist }))]
+          const still = want - verified.length
+          const round = await proposeRound(db, deps, fill, asked.ctx,
+            { intent, want: still + genreSpares(intent, still), count: still + PROPOSE_EXTRA, exclude: tried, listener: 'personal', topArtists }, budget, tracker)
+          const have = new Set(verified.map((v) => v.trackId))
+          verified.push(...(round?.result.verified ?? []).filter((v) => !have.has(v.trackId)))
+        }
+      } else {
+        const ctx = await proposeContext(db, fill, session, userText, sessionContext)
+        const topArtists = await topLibraryArtists(db, session.userId)
+        const round = await proposeRound(db, deps, fill, ctx,
+          { intent, want: want + genreSpares(intent, want), count: want + PROPOSE_EXTRA, exclude, listener: 'personal', topArtists }, budget, tracker)
+        verified = round?.result.verified ?? []
+      }
     } catch (e) {
       if (e instanceof DjError) throw e
       spend.log.error = 'shortfall'
@@ -1396,6 +1520,12 @@ async function shortfallProposals(
     spend.log.verified += verified.length
   }
   return tracker.shortfall.verified.filter((v) => !held.has(v.trackId)).slice(0, want + genreSpares(intent, want))
+}
+
+// A curation call that failed on its own terms (cut off, unreadable, the
+// model call itself), as opposed to the turn's budget or a queue conflict.
+function isCurationFailure(e: unknown): boolean {
+  return e instanceof CurationTruncated || e instanceof CurationUnparseable || e instanceof LlmError
 }
 
 // curate(), with the curator's own "nothing fits" (an empty array) read as
@@ -1712,8 +1842,29 @@ async function generateFromBrief(
   // still in flight rather than after them: no added wait on a corpus mix.
   // What it drops widens the shortfall below, which the fill replaces.
   const curatedHeld = holdGenreUnit(turn.tracker, intent.genres)
+  // A personal genre mix asks for its shortfall alongside the curation
+  // (earlyShortfall); a conflict retry with the round already verified
+  // reuses that instead.
+  const early = !blending && fillShort && (intent.genres ?? []).length > 0 && turn.tracker.shortfall?.key !== JSON.stringify(intent)
+    ? earlyShortfall(db, deps, deps.fill!, session, intent, userText, sessionContext, budget, turn.tracker)
+    : undefined
+  // Never awaited when the curation fills the mix: its rejection (only the
+  // turn's own budget) must not go unhandled.
+  early?.catch(() => {})
+  // With proposals coming either way (the corpus blend, or the early
+  // shortfall), a curation that fails is no picks rather than a failed turn:
+  // the proposals fill the mix (backlog 2026-11-10, first-mix 502s on the
+  // catalogue blend). Only when nothing at all lands does its error stand.
+  let curationError: unknown = null
   const [curatedCheck, proposedRaw] = await Promise.all([
     curateFitting(deps.llm, pool, intent, withPlaylistSeedContext(sessionContext, seed), { outsideCap: cap })
+      .catch((e: unknown): CuratedTrack[] => {
+        if ((blending || early) && isCurationFailure(e)) {
+          curationError = e
+          return []
+        }
+        throw e
+      })
       .then((c) => genreFilter(deps, turn.tracker, intent.genres, c, poolCandidate(byId), curatedHeld)),
     blending ? blendProposals(db, deps, deps.fill!, session, intent, userText, sessionContext, budget, turn.tracker) : Promise.resolve([]),
   ])
@@ -1738,7 +1889,7 @@ async function generateFromBrief(
         return t ? [{ title: t.title, artist: t.artist }] : []
       })
       proposed.push(...await shortfallProposals(db, deps, deps.fill!, session, intent, userText, sessionContext, budget,
-        turn.tracker, want, exclude, held))
+        turn.tracker, want, exclude, held, early))
     }
   }
   // The proposals, blend and shortfall alike, pass the same check: at most
@@ -1756,6 +1907,7 @@ async function generateFromBrief(
   const source = poolMode.mode === 'corpus' ? 'catalog' as const : 'library' as const
   const outsideReason = !outsideAllowed ? 'own-only' as const : fillShort ? 'unconfirmed' as const : 'unavailable' as const
   if (curated.length === 0 && proposed.length === 0) {
+    if (curationError) throw curationError
     // The curator said nothing fits and nothing from outside stood in.
     return {
       resultText: [NOTHING_FITS_TEXT, ...genreLines, shortMixNotice({ count: 0, asked: intent.targetCount, source, outside: outsideReason })].join('\n'),
@@ -1763,6 +1915,7 @@ async function generateFromBrief(
       intent,
     }
   }
+  if (curationError) proposeSpend(turn.tracker).log.curationFailed = true
   const proposedIds = new Set(proposed.map((p) => p.trackId))
   const picks = proposed.length > 0
     ? interleaveBlend<{ trackId: string; reason: string }>(curated, proposed, intent.targetCount)
@@ -2611,14 +2764,15 @@ async function attemptWithConflictRetry(
   }
 }
 
-function logTurn(sessionId: string, stats: AttemptStats | null, errorKind: DjError['kind'] | null, detail?: string, fill?: FillLog, propose?: ProposeLog, recovered?: true): void {
+function logTurn(sessionId: string, stats: AttemptStats | null, errorKind: DjError['kind'] | null, detail?: string, fill?: FillLog, propose?: ProposeLog, recovered?: true, timing?: TurnTiming, verifyMs?: number): void {
   // Counts and codes only — no message content, no track/tool payloads.
   // `detail` (when present) is already content-free by construction — see
   // DjError.detail's comment — so it's safe alongside the rest of this line.
   // `fill` is present only on a turn that ran the catalogue fill, `propose`
   // only on one that proposed songs (NEVER_REFUSE). `recovered` marks a
   // failed turn answered with its change summary (decision 4) instead.
-  console.log('dj turn', JSON.stringify({ sessionId, ...(stats ?? {}), error: errorKind, detail, ...(fill ? { fill } : {}), ...(propose ? { propose } : {}), ...(recovered ? { recovered } : {}) }))
+  console.log('dj turn', JSON.stringify({ sessionId, ...(stats ?? {}), error: errorKind, detail, ...(fill ? { fill } : {}), ...(propose ? { propose } : {}), ...(recovered ? { recovered } : {}),
+    ...(timing && timing.length > 0 ? { timing, ...(verifyMs ? { verifyMs } : {}) } : {}) }))
 }
 
 // Per-turn settings the listener chose in the composer UI rather than typed.
@@ -2682,6 +2836,8 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
   const renameState: RenameTracker = {}
   const fillTracker: FillTracker = { ran: false, turnStartedAt: (deps.fill?.now ?? Date.now)() }
   const changes: TurnChanges = { summaries: [] }
+  const timing: TurnTiming = []
+  deps = timedDeps(deps, timing, Date.now)
 
   let attempt: AttemptResult
   try {
@@ -2711,7 +2867,7 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
             .insert(djMessages)
             .values({ sessionId: session.id, role: 'dj', content: changes.summaries.join(' '), queueVersion: currentVersion })
             .returning()
-          logTurn(session.id, failure?.stats ?? null, djError.kind, djError.detail, fillTracker.log, fillTracker.spend?.log, true)
+          logTurn(session.id, failure?.stats ?? null, djError.kind, djError.detail, fillTracker.log, fillTracker.spend?.log, true, timing, fillTracker.spend?.verifyMs)
           // A pill this turn claimed rides the recovered reply too: its
           // music_chip_at and funnel row are already written.
           return {
@@ -2727,7 +2883,7 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
       }
     }
 
-    logTurn(session.id, failure?.stats ?? null, djError.kind, djError.detail, fillTracker.log, fillTracker.spend?.log)
+    logTurn(session.id, failure?.stats ?? null, djError.kind, djError.detail, fillTracker.log, fillTracker.spend?.log, undefined, timing, fillTracker.spend?.verifyMs)
 
     // Same rationale as the queue/queueVersion attachment below: a rename
     // that already landed in the DB this turn must ride the error out to the
@@ -2782,7 +2938,7 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
     .returning()
 
   const queue = await getActiveQueue(db, session.id)
-  logTurn(session.id, attempt.stats, null, undefined, fillTracker.log, fillTracker.spend?.log)
+  logTurn(session.id, attempt.stats, null, undefined, fillTracker.log, fillTracker.spend?.log, undefined, timing, fillTracker.spend?.verifyMs)
   // sessionTitle comes from the hoisted renameState, NOT from `attempt`
   // itself — the attempt that finally succeeds may not be the one that
   // called rename_session (e.g. it renamed on a first try that then hit a

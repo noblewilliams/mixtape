@@ -35,6 +35,10 @@ export const VERIFY_MAX = 22
 // Verification wall time per turn, across both rounds and any edits,
 // checked before each search. Proposal calls do not count against it.
 export const VERIFY_DEADLINE_MS = 10_000
+// Apple searches in flight at once. One at a time, a 15-song shortfall spent
+// 12s verifying (local "90s r&b", 2026-11-10). Small, to stay well clear of
+// Apple's rate limit; a batch never asks for more than could still verify.
+export const VERIFY_CONCURRENCY = 4
 // No replacement round once the turn has run this long: the reply round and
 // the title still have to fit inside the iOS client's 120 s.
 export const ROUND_TWO_CUTOFF_MS = 50_000
@@ -309,7 +313,7 @@ export type VerifyOptions = {
   storefront: string
   // Most searches this call may make.
   budget: number
-  // Wall time this call may spend, checked before each search.
+  // Wall time this call may spend, checked before each batch of searches.
   deadlineMs: number
   // Milliseconds; Date.now when absent.
   now?: () => number
@@ -341,8 +345,8 @@ function rowsOf(res: unknown): Record<string, unknown>[] {
 const upperIsrc = (isrc: string | null | undefined): string | null => (isrc ? isrc.trim().toUpperCase() || null : null)
 
 /**
- * One Apple search per proposal, in order, until the budget, the deadline or
- * `want` stops it. Confirmed songs are inserted as catalogue rows in one
+ * One Apple search per proposal, VERIFY_CONCURRENCY at a time in proposal
+ * order, until the budget, the deadline or `want` stops it. Confirmed songs are inserted as catalogue rows in one
  * addCatalogueSongs call (ISRC then Apple id dedupe, FILL_QUEUE_BOOST, never
  * enriched here) and returned with their track ids and the model's reasons.
  */
@@ -353,36 +357,52 @@ export async function verifyProposals(db: Db, catalog: AppleCatalogSearchClient,
   const hits: { song: CatalogSong; proposal: Proposal }[] = []
   const seenApple = new Set<string>()
 
-  for (const proposal of options.proposals) {
-    if (options.want !== undefined && hits.length >= options.want) break
-    if (result.searches >= options.budget) break
+  // In batches of up to VERIFY_CONCURRENCY, each no larger than the songs
+  // still wanted or the searches left, read back in proposal order. The
+  // deadline is checked before each batch; a 429 stops every later batch.
+  let next = 0
+  let rateLimited = false
+  while (next < options.proposals.length && !rateLimited) {
+    const wanted = options.want === undefined ? Infinity : options.want - hits.length
+    const room = Math.min(VERIFY_CONCURRENCY, wanted, options.budget - result.searches)
+    if (room <= 0) break
     if (now() - started >= options.deadlineMs) {
       result.timedOut = true
       break
     }
-    result.searches += 1
-    const term = `${proposal.title} ${proposal.artist}`.slice(0, MAX_TERM_LENGTH).trim()
-    let found: CatalogSong[]
-    try {
-      found = await catalog.searchSongs(options.storefront, term, SEARCH_LIMIT)
-    } catch (e) {
-      result.appleError = e instanceof AppleCatalogError ? e.category : 'internal'
-      result.misses.push(proposal)
-      // A 429 stops every further search this turn.
-      if (e instanceof AppleCatalogError && (e.category === 'rate_limit' || e.status === 429)) break
-      continue
+    const batch = options.proposals.slice(next, next + room)
+    next += batch.length
+    result.searches += batch.length
+    const answers = await Promise.all(batch.map(async (proposal) => {
+      const term = `${proposal.title} ${proposal.artist}`.slice(0, MAX_TERM_LENGTH).trim()
+      try {
+        return { proposal, found: await catalog.searchSongs(options.storefront, term, SEARCH_LIMIT) }
+      } catch (error) {
+        return { proposal, error }
+      }
+    }))
+    for (const { proposal, found, error } of answers as Array<{ proposal: Proposal; found?: CatalogSong[]; error?: unknown }>) {
+      if (error !== undefined || !found) {
+        result.appleError = error instanceof AppleCatalogError ? error.category : 'internal'
+        result.misses.push(proposal)
+        if (error instanceof AppleCatalogError && (error.category === 'rate_limit' || error.status === 429)) rateLimited = true
+        continue
+      }
+      const hit = pickHit(found, proposal, options.allowExplicit !== false)
+      const song = hit && !isAlbumGlue(hit.title, hit.artist, options.namedSongs) ? hit : undefined
+      if (!song) {
+        result.misses.push(proposal)
+        continue
+      }
+      // The same recording proposed twice is not a miss: it is one song.
+      if (seenApple.has(song.appleId)) continue
+      seenApple.add(song.appleId)
+      hits.push({ song, proposal })
     }
-    const hit = pickHit(found, proposal, options.allowExplicit !== false)
-    const song = hit && !isAlbumGlue(hit.title, hit.artist, options.namedSongs) ? hit : undefined
-    if (!song) {
-      result.misses.push(proposal)
-      continue
-    }
-    // The same recording proposed twice is not a miss: it is one song.
-    if (seenApple.has(song.appleId)) continue
-    seenApple.add(song.appleId)
-    hits.push({ song, proposal })
   }
+  // A batch can confirm more than was still wanted when a song repeats or
+  // misses; never more than `want` leave here.
+  if (options.want !== undefined) hits.splice(options.want)
   if (hits.length === 0) return result
 
   await addCatalogueSongs(db, hits.map((h) => h.song), options.storefront)

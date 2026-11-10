@@ -16,7 +16,7 @@ import {
   TURN_APPLE_BUDGET,
   type DjDeps,
 } from '../../src/dj/loop'
-import { PROPOSED_NOTICE, PROPOSE_SYSTEM_PROMPT, ROUND_TWO_CUTOFF_MS, VERIFY_MAX } from '../../src/dj/propose'
+import { PROPOSED_NOTICE, PROPOSE_SYSTEM_PROMPT, ROUND_TWO_CUTOFF_MS, VERIFY_CONCURRENCY, VERIFY_MAX } from '../../src/dj/propose'
 import { FILL_QUEUE_BOOST, type FillDeps } from '../../src/dj/catalogue-fill'
 import { neverRefuseEnabled } from '../../src/index'
 import { AppleCatalogError, type CatalogSong } from '../../src/musickit/catalog'
@@ -640,10 +640,13 @@ describe('never refuse: failures, limits and recordings through runDjTurn', () =
     const { logged } = await withLog(() =>
       runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true }, { id: session.id, userId: 'u1' }, 'party'))
 
+    // Searches go in batches of VERIFY_CONCURRENCY (2026-11-10): the 429
+    // lands in the first batch, whose other songs still verify, and no
+    // round two starts.
     expect(proposalRequests(requests)).toHaveLength(1)
-    expect(searches).toHaveLength(2)
-    expect(await queueTitles(db, session.id)).toHaveLength(1)
-    expect(logged.propose).toMatchObject({ rounds: 1, searches: 2, verified: 1 })
+    expect(searches).toHaveLength(VERIFY_CONCURRENCY)
+    expect(await queueTitles(db, session.id)).toHaveLength(VERIFY_CONCURRENCY - 1)
+    expect(logged.propose).toMatchObject({ rounds: 1, searches: VERIFY_CONCURRENCY, verified: VERIFY_CONCURRENCY - 1 })
   })
 
   it('the verification deadline carries across rounds on an injected clock', async () => {
@@ -656,9 +659,10 @@ describe('never refuse: failures, limits and recordings through runDjTurn', () =
 
     await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true }, { id: session.id, userId: 'u1' }, 'party')
 
-    // Round one spends 8 s on 4 searches; round two has 2 s, one search.
+    // Round one spends 8 s on one batch of 4 searches; round two starts with
+    // 2 s left, so one more batch, and none after it.
     expect(proposalRequests(requests)).toHaveLength(2)
-    expect(searches).toHaveLength(5)
+    expect(searches).toHaveLength(8)
   })
 
   it(`skips round two once the turn has run past ${ROUND_TWO_CUTOFF_MS / 1000} s`, async () => {

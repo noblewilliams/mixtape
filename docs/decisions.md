@@ -76,6 +76,10 @@ energy-arc labels that repeated.
   wrong") drops the song with it, and a genre mix's shortfall verifies
   spares so a song that fails the check is replaced rather than left as a
   gap (one live "90s r&b" run gave 5 songs, the next 15).
+- 2026-11-10: genre mixes run their outside-song proposal alongside the
+  library curation and verify on Apple four searches at a time, so they fit
+  the app's 120 s (a production run took 130 s). A failed curation with
+  proposals coming is no picks, not a 502.
 
 ## 2026-11-09 — One platform per device; fixed mix actions (founder)
 

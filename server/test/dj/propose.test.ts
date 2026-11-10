@@ -14,6 +14,7 @@ import {
   titleKey,
   verifyProposals,
   VERIFY_DEADLINE_MS,
+  VERIFY_CONCURRENCY,
   VERIFY_MAX,
   type Proposal,
 } from '../../src/dj/propose'
@@ -348,16 +349,36 @@ describe('verifyProposals', () => {
     expect(out.searches).toBe(2)
   })
 
-  it('stops at the deadline, on an injected clock', async () => {
+  it('stops at the deadline, checked before each batch, on an injected clock', async () => {
     const db = await createTestDb()
     let clock = 0
-    const { catalog, terms } = fakeSearch({}, () => { clock += 4_000 })
-    const out = await verifyProposals(db, catalog, {
-      proposals: [p('A', 'One'), p('B', 'Two'), p('C', 'Three'), p('D', 'Four')], storefront: 'ng', budget: VERIFY_MAX, deadlineMs: VERIFY_DEADLINE_MS, now: () => clock,
-    })
-    // 0, 4 s and 8 s start a search; at 12 s the deadline has passed.
-    expect(terms).toHaveLength(3)
+    const { catalog, terms } = fakeSearch({}, () => { clock += 3_000 })
+    const proposals = Array.from({ length: 9 }, (_, i) => p(`S${i}`, 'One'))
+    const out = await verifyProposals(db, catalog, { proposals, storefront: 'ng', budget: VERIFY_MAX, deadlineMs: VERIFY_DEADLINE_MS, now: () => clock })
+    // The first batch of four starts at 0; by its end the clock reads 12 s.
+    expect(terms).toHaveLength(VERIFY_CONCURRENCY)
     expect(out.timedOut).toBe(true)
+  })
+
+  // Latency, 2026-11-10: one search at a time spent 12s on a 15-song shortfall.
+  it('runs up to VERIFY_CONCURRENCY searches at once, and keeps proposal order', async () => {
+    const db = await createTestDb()
+    let inFlight = 0
+    let most = 0
+    const songs = Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`S${i} One`, [song(`k${i}`, `S${i}`, 'One')]]))
+    const base = fakeSearch(songs).catalog
+    const catalog = { ...base, async searchSongs(sf: string, term: string, limit?: number) {
+      inFlight += 1
+      most = Math.max(most, inFlight)
+      // Later proposals answer first.
+      await new Promise((r) => setTimeout(r, 20 - Number(term.slice(1, 2)) * 2))
+      inFlight -= 1
+      return base.searchSongs(sf, term, limit ?? 5)
+    } }
+    const proposals = Array.from({ length: 8 }, (_, i) => p(`S${i}`, 'One'))
+    const out = await verifyProposals(db, catalog, { proposals, storefront: 'ng', budget: VERIFY_MAX, deadlineMs: VERIFY_DEADLINE_MS })
+    expect(most).toBe(VERIFY_CONCURRENCY)
+    expect(out.verified.map((v) => v.title)).toEqual(proposals.map((x) => x.title))
   })
 
   it('stops once `want` songs have verified', async () => {
@@ -374,9 +395,11 @@ describe('verifyProposals', () => {
       'A One': new AppleCatalogError('response', 500),
       'B Two': new AppleCatalogError('rate_limit', 429),
     })
-    const out = await verifyProposals(db, catalog, { proposals: [p('A', 'One'), p('B', 'Two'), p('C', 'Three')], storefront: 'ng', budget: VERIFY_MAX, deadlineMs: VERIFY_DEADLINE_MS })
-    expect(terms).toEqual(['A One', 'B Two'])
-    expect(out.misses).toHaveLength(2)
+    const proposals = [p('A', 'One'), p('B', 'Two'), p('C', 'Three'), p('D', 'Four'), p('E', 'Five'), p('F', 'Six')]
+    const out = await verifyProposals(db, catalog, { proposals, storefront: 'ng', budget: VERIFY_MAX, deadlineMs: VERIFY_DEADLINE_MS })
+    // The 429 lands in the first batch; no later batch starts.
+    expect(terms).toEqual(['A One', 'B Two', 'C Three', 'D Four'])
+    expect(out.misses).toHaveLength(4)
     expect(out.appleError).toBe('rate_limit')
   })
 

@@ -117,6 +117,23 @@ Worker `1b56ec3a`) found songs that do not belong in their mix:
      Artist-only mixes skip it unless a genre is also named.
    - The check's model calls count toward the turn's subrequest margin.
 
+9. **A genre mix stays inside the app's 120 s** (2026-11-10). A local
+   "90s r&b" turn took 87 s: 23 s curating, then 30 s proposing, then 12 s
+   verifying one Apple search at a time. Production runs reached 130 s.
+   - A personal listener's genre brief asks for its outside songs while the
+     library curation runs (the whole mix's worth, since the shortfall is
+     not known yet), then verifies only what the curation left unfilled,
+     dropping songs it already chose. If that call comes back thin and the
+     turn is under `ROUND_TWO_CUTOFF_MS`, one round runs as before.
+   - Apple verification runs `VERIFY_CONCURRENCY` (4) searches at a time,
+     in proposal order, never more than could still verify.
+   - With proposals coming (the corpus blend or the early shortfall), a
+     curation that fails (cut off, unreadable, the call failing) is no
+     picks: the proposals fill the mix, and its error stands only when
+     nothing lands. The turn log marks it `curationFailed`.
+   - The turn log gains `timing`: each model call's start and duration.
+   - Measured locally after: 49 to 77 s for the same prompts.
+
 ## Out of scope
 
 - Client changes. Notes already open on tap in a wrapping band; the web rail

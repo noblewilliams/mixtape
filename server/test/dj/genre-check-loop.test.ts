@@ -363,3 +363,111 @@ describe('decision 8: a named genre is checked by how a song sounds', () => {
     expect(toolResults(requests)[1]).toContain(genreCheckNotice({ dropped: 2, genres: ['jazz'], failed: false }))
   })
 })
+
+// Latency, 2026-11-10: a local "90s r&b" turn curated for 23s and then
+// proposed for 30s, one after the other. A personal genre mix now asks for
+// its shortfall while the curation runs.
+describe('a personal genre mix proposes alongside the curation', () => {
+  it('the proposal call is made before the curation answers, and fills the shortfall', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    const held = await seedTracks(db, 'Jazz Player', 3, 'Jazz')
+    const session = await seedSession(db)
+    // The model also proposes a song the library curation picks: it goes.
+    const list = [{ title: held[0].title, artist: 'Jazz Player', reason: 'A held one.' }, ...proposals(11)]
+    const { fill } = fakeApple(list, 'Jazz')
+    const { titleComplete } = fakeCheck(['[]'])
+    const { llm: inner } = scriptedLlm([generate({ targetCount: 6, genres: ['jazz'] })], list)
+    let proposedBeforeCuration: boolean | null = null
+    let proposeSeen = false
+    const llm: LlmClient = async (req) => {
+      if (isProposal(req)) proposeSeen = true
+      else if (req.tools.length === 0) {
+        // Give a concurrent proposal call the chance to start.
+        await new Promise((r) => setTimeout(r, 20))
+        proposedBeforeCuration = proposeSeen
+      }
+      return inner(req)
+    }
+
+    const result = await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true, titleComplete }, { id: session.id, userId: 'u1' }, 'soft jazz')
+
+    expect(proposedBeforeCuration).toBe(true)
+    expect(result.queue).toHaveLength(6)
+    expect(new Set(result.queue.map((t) => t.title)).size).toBe(6)
+    expect(result.queue.filter((t) => t.title.startsWith('Song '))).toHaveLength(3)
+  })
+
+  it('no named genre: no proposal call while the library fills the mix', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    await seedTracks(db, 'Jazz Player', 8, 'Jazz')
+    const session = await seedSession(db)
+    const { fill } = fakeApple(proposals(11), 'Jazz')
+    const { titleComplete } = fakeCheck(['[]'])
+    const { llm, requests } = scriptedLlm([generate({ targetCount: 6 })], proposals(11))
+
+    const result = await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true, titleComplete }, { id: session.id, userId: 'u1' }, 'rainy sunday')
+
+    expect(result.queue).toHaveLength(6)
+    expect(requests.some(isProposal)).toBe(false)
+  })
+
+  // Backlog 2026-11-10 (first-mix 502s on the catalogue blend): a curation
+  // that fails while proposals are coming is no picks, not a failed turn.
+  it('a curation that fails is no picks when proposals are coming: they fill the mix', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    await seedTracks(db, 'Jazz Player', 3, 'Jazz')
+    const session = await seedSession(db)
+    const { fill } = fakeApple(proposals(11), 'Jazz')
+    const { titleComplete } = fakeCheck(['[]'])
+    const { llm: inner } = scriptedLlm([generate({ targetCount: 6, genres: ['jazz'] })], proposals(11))
+    const llm: LlmClient = async (req) => (req.tools.length === 0 && !isProposal(req) ? textTurn('[{"id":"cut off') : inner(req))
+
+    const result = await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true, titleComplete }, { id: session.id, userId: 'u1' }, 'soft jazz')
+
+    expect(result.queue.length).toBeGreaterThan(0)
+    expect(result.queue.every((t) => t.title.startsWith('Song '))).toBe(true)
+  })
+
+  it('a corpus mix whose curation fails is filled by its blend', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    await seedCorpus(db, 'Jazz')
+    const session = await seedSession(db)
+    const { fill } = fakeApple(proposals(20), 'Jazz')
+    const { titleComplete } = fakeCheck(['[]'])
+    const { llm: inner } = scriptedLlm([generate({ targetCount: 10 })], proposals(20))
+    const llm: LlmClient = async (req) => (req.tools.length === 0 && !isProposal(req) ? textTurn('[{"id":"cut off') : inner(req))
+
+    const result = await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true, titleComplete }, { id: session.id, userId: 'u1' }, 'rainy sunday')
+
+    expect(result.queue.length).toBeGreaterThan(0)
+  })
+})
+
+describe('an early shortfall that comes back thin', () => {
+  it('runs one more round, naming what was tried, and fills the mix', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    await seedTracks(db, 'Jazz Player', 3, 'Jazz')
+    const session = await seedSession(db)
+    const all = proposals(12)
+    const { fill } = fakeApple(all, 'Jazz')
+    const { titleComplete } = fakeCheck(['[]'])
+    const { llm: inner } = scriptedLlm([generate({ targetCount: 8, genres: ['jazz'] })], all)
+    let proposeCalls = 0
+    // The early call names one song; the next names the rest.
+    const llm: LlmClient = async (req) => {
+      if (!isProposal(req)) return inner(req)
+      proposeCalls += 1
+      return textTurn(JSON.stringify(proposeCalls === 1 ? all.slice(0, 1) : all.slice(1)))
+    }
+
+    const result = await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true, titleComplete }, { id: session.id, userId: 'u1' }, 'soft jazz')
+
+    expect(proposeCalls).toBe(2)
+    expect(result.queue).toHaveLength(8)
+  })
+})
