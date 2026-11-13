@@ -71,6 +71,41 @@ class AnonymousCapException implements Exception {
   String toString() => 'AnonymousCapException($limit)';
 }
 
+/// Why a shared mix can't be read or saved: an unknown token (404
+/// `not_found`) or a share its owner stopped (410 `revoked`).
+enum SharedMixGoneReason { notFound, revoked }
+
+/// A share link that no longer opens (spec 2026-11-13 shared-mixes). Both
+/// reasons read the same to the listener: [message].
+class SharedMixGoneException implements Exception {
+  const SharedMixGoneException(this.reason);
+
+  final SharedMixGoneReason reason;
+
+  /// The listener-facing copy, the same for both reasons.
+  static const String message = "This mix isn't shared anymore.";
+
+  @override
+  String toString() => 'SharedMixGoneException(${reason.name})';
+}
+
+/// `POST /sessions/:id/share` answered 409 `name_required`: the recipient
+/// sees the sharer's first name, so the caller opens the name page first.
+class ShareNameRequiredException implements Exception {
+  const ShareNameRequiredException();
+
+  @override
+  String toString() => 'ShareNameRequiredException';
+}
+
+/// `POST /sessions/:id/share` answered 422 `empty_mix`: nothing to share.
+class EmptyMixException implements Exception {
+  const EmptyMixException();
+
+  @override
+  String toString() => 'EmptyMixException';
+}
+
 /// The server's ANONYMOUS_MIX_CAP, used when a cap body omits `limit`.
 const _defaultAnonymousCap = 3;
 
@@ -120,6 +155,14 @@ class DjApi {
          timeout: timeout,
          onUnauthorized: onUnauthorized,
        ),
+       // The public shared-mix read: it carries the session when there is
+       // one (the owner check) but never signs anyone out on a 401.
+       _publicClient = ApiClient(
+         baseUrl: baseUrl,
+         tokenStore: tokenStore,
+         inner: inner,
+         timeout: timeout,
+       ),
        _streamIdleTimeout = streamIdleTimeout {
     _builtByDjApi[this] = true;
   }
@@ -145,6 +188,7 @@ class DjApi {
   );
 
   final ApiClient _client;
+  final ApiClient _publicClient;
   final Duration _streamIdleTimeout;
 
   Duration get timeout => _client.timeout;
@@ -340,7 +384,102 @@ class DjApi {
     (json) => ListenLaterEntry.fromJson(json['entry'] as Map<String, dynamic>),
   );
 
-  void close() => _client.close();
+  void close() {
+    _client.close();
+    _publicClient.close();
+  }
+
+  // Shared mixes (spec 2026-11-13 shared-mixes, API table). Reached through
+  // [DjApiSharedMixes].
+
+  Future<SharedMix> _getSharedMix(String token) => _shareCall(
+    () => _publicClient.getJson('/shared/${Uri.encodeComponent(token)}'),
+    SharedMix.fromJson,
+    _shareTokenError,
+  );
+
+  Future<void> _saveSharedMix(String token) => _shareCallVoid(
+    () => _client.postJson(
+      '/shared/${Uri.encodeComponent(token)}/save',
+      const <String, Object?>{},
+    ),
+    _shareTokenError,
+  );
+
+  Future<void> _removeSharedMix(String token) => _shareCallVoid(
+    () => _client.deleteJson('/shared/${Uri.encodeComponent(token)}/save'),
+    _shareTokenError,
+  );
+
+  Future<List<SharedMixRow>> _listSharedMixes() => _call(
+    () => _client.getJson('/me/shared-mixes'),
+    (json) => (json['mixes'] as List)
+        .map((m) => SharedMixRow.fromJson(m as Map<String, dynamic>))
+        .toList(),
+  );
+
+  Future<ShareLinkResult> _shareSession(String sessionId) => _shareCall(
+    () => _client.postJson(
+      '/sessions/$sessionId/share',
+      const <String, Object?>{},
+    ),
+    ShareLinkResult.fromJson,
+    _shareCreateError,
+  );
+
+  Future<void> _stopSharing(String sessionId) =>
+      _callVoid(() => _client.deleteJson('/sessions/$sessionId/share'));
+
+  Future<T> _shareCall<T>(
+    Future<http.Response> Function() request,
+    T Function(Map<String, dynamic> json) parse,
+    Exception Function(ApiException e) translate,
+  ) async {
+    final http.Response res;
+    try {
+      res = await request();
+    } on ApiException catch (e) {
+      throw translate(e);
+    }
+    return _parse(res.body, parse);
+  }
+
+  Future<void> _shareCallVoid(
+    Future<http.Response> Function() request,
+    Exception Function(ApiException e) translate,
+  ) async {
+    try {
+      await request();
+    } on ApiException catch (e) {
+      throw translate(e);
+    }
+  }
+
+  /// The token routes: 404 `not_found` and 410 are a link that no longer
+  /// opens; anything else (429 included) maps as every other call.
+  Exception _shareTokenError(ApiException e) {
+    if (e.statusCode == 410) {
+      return const SharedMixGoneException(SharedMixGoneReason.revoked);
+    }
+    if (e.statusCode == 404 && _tryDecode(e.body)?['error'] == 'not_found') {
+      return const SharedMixGoneException(SharedMixGoneReason.notFound);
+    }
+    return _translate(e);
+  }
+
+  /// `POST /sessions/:id/share`: 409 `name_required` and 422 `empty_mix`;
+  /// anything else (a 404 for an album or someone else's mix, a 429) maps as
+  /// every other call.
+  Exception _shareCreateError(ApiException e) {
+    final error = _tryDecode(e.body)?['error'];
+    if (e.statusCode == 409 && error == 'name_required') {
+      return const ShareNameRequiredException();
+    }
+    if (e.statusCode == 422 && error == 'empty_mix') {
+      return const EmptyMixException();
+    }
+    return _translate(e);
+  }
 
   /// A mix turn. Without [onProgress] it is exactly today's JSON request.
   Future<T> _turn<T>(
@@ -645,6 +784,63 @@ extension DjApiRemake on DjApi {
   Future<TurnResult> sendRemake(String id) => switch (this) {
     final DjRemakeSender sender => sender.sendRemake(id),
     _ => _sendRemake(id),
+  };
+}
+
+/// What a [DjApi] stand-in implements to answer [DjApiSharedMixes] itself
+/// (the real [DjApi] does not need to).
+abstract interface class DjSharedMixes {
+  Future<SharedMix> getSharedMix(String token);
+  Future<void> saveSharedMix(String token);
+  Future<void> removeSharedMix(String token);
+  Future<List<SharedMixRow>> listSharedMixes();
+  Future<ShareLinkResult> shareSession(String sessionId);
+  Future<void> stopSharing(String sessionId);
+}
+
+/// Shared mixes (spec 2026-11-13 shared-mixes, API table). An extension for
+/// the reason [DjApiRemake] gives; a stand-in implements [DjSharedMixes].
+///
+/// Exits, beyond [DjApi]'s usual ones: [SharedMixGoneException] (404
+/// `not_found` / 410 `revoked` on the token routes),
+/// [ShareNameRequiredException] (409) and [EmptyMixException] (422) on
+/// [shareSession]. A 429 is a plain [ApiException]. [getSharedMix] works with
+/// or without a session and never signs the listener out, whatever it gets.
+extension DjApiSharedMixes on DjApi {
+  /// `GET /shared/:token`.
+  Future<SharedMix> getSharedMix(String token) => switch (this) {
+    final DjSharedMixes s => s.getSharedMix(token),
+    _ => _getSharedMix(token),
+  };
+
+  /// `POST /shared/:token/save` (idempotent; the owner's own is a no-op).
+  Future<void> saveSharedMix(String token) => switch (this) {
+    final DjSharedMixes s => s.saveSharedMix(token),
+    _ => _saveSharedMix(token),
+  };
+
+  /// `DELETE /shared/:token/save`; works on a revoked share too.
+  Future<void> removeSharedMix(String token) => switch (this) {
+    final DjSharedMixes s => s.removeSharedMix(token),
+    _ => _removeSharedMix(token),
+  };
+
+  /// `GET /me/shared-mixes`, newest save first.
+  Future<List<SharedMixRow>> listSharedMixes() => switch (this) {
+    final DjSharedMixes s => s.listSharedMixes(),
+    _ => _listSharedMixes(),
+  };
+
+  /// `POST /sessions/:id/share`: the same token until the queue changes.
+  Future<ShareLinkResult> shareSession(String sessionId) => switch (this) {
+    final DjSharedMixes s => s.shareSession(sessionId),
+    _ => _shareSession(sessionId),
+  };
+
+  /// `DELETE /sessions/:id/share`: revokes every link to the mix.
+  Future<void> stopSharing(String sessionId) => switch (this) {
+    final DjSharedMixes s => s.stopSharing(sessionId),
+    _ => _stopSharing(sessionId),
   };
 }
 

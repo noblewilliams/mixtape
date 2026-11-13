@@ -37,5 +37,45 @@ void main() {
         isNull,
       );
     });
+
+    test('a release build with an odd share base is refused', () {
+      const api = 'https://mixtape-api.goalympics.workers.dev';
+      expect(
+        releaseConfigProblem(
+          api,
+          release: true,
+          shareBaseUrl: 'https://miixtape.netlify.app',
+        ),
+        isNull,
+      );
+      expect(
+        releaseConfigProblem(
+          api,
+          release: true,
+          shareBaseUrl: 'http://miixtape.netlify.app',
+        ),
+        contains('SHARE_BASE_URL'),
+      );
+      expect(
+        releaseConfigProblem(
+          api,
+          release: true,
+          shareBaseUrl: 'https://localhost:5173',
+        ),
+        contains('SHARE_BASE_URL'),
+      );
+      expect(
+        releaseConfigProblem(
+          api,
+          release: true,
+          shareBaseUrl: 'https://miixtape.netlify.app/app',
+        ),
+        contains('SHARE_BASE_URL'),
+      );
+    });
+
+    test('the default share base is the production site', () {
+      expect(AppConfig.shareBaseUrl, 'https://miixtape.netlify.app');
+    });
   });
 }

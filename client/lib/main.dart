@@ -31,6 +31,7 @@ void main() {
   final problem = releaseConfigProblem(
     AppConfig.apiBaseUrl,
     release: kReleaseMode,
+    shareBaseUrl: AppConfig.shareBaseUrl,
   );
   if (problem != null) throw StateError(problem);
   runApp(const ProviderScope(child: MixtapeApp()));

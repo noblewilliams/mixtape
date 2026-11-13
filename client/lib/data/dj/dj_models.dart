@@ -463,9 +463,14 @@ class SessionDetail {
     this.pickState,
     this.suggestions,
     this.addMusic,
+    this.shared = false,
   });
 
   SessionKind get kind => session.kind;
+
+  /// Whether an active share link exists, for the Stop sharing menu item
+  /// (spec 2026-11-13 shared-mixes). An older server omits it: false.
+  final bool shared;
 
   /// Album sessions only: the current shortlist. Their reads carry no queue.
   final AlbumPickState? pickState;
@@ -510,6 +515,7 @@ class SessionDetail {
       addMusic: AddMusicOffer.fromWire(json['addMusic']),
       sessionTitle: json['sessionTitle'] as String?,
       supportsInsert: json['supportsInsert'] as bool? ?? false,
+      shared: json['shared'] as bool? ?? false,
       playlistSeed: json.containsKey('playlistSeed')
           ? PlaylistSeedState.fromJson(
               playlistContextObject(json['playlistSeed']),
@@ -652,4 +658,156 @@ class _MoveOp extends QueueOp {
 
   @override
   Map<String, dynamic> toJson() => {'op': 'move', 'from': from, 'to': to};
+}
+
+// Shared mixes (spec 2026-11-13 shared-mixes, plan → Shared contract). Parsed
+// strictly: every contract key must be present, nullable ones may be null.
+
+Object? _key(Map<String, dynamic> json, String key) {
+  if (!json.containsKey(key)) {
+    throw FormatException('missing "$key"');
+  }
+  return json[key];
+}
+
+/// Share artwork: `{url, width, height, bgColor}` (the Mixes list's shape),
+/// or null.
+AlbumArtwork? _shareArtwork(Object? json) {
+  if (json == null) return null;
+  final map = json as Map<String, dynamic>;
+  return AlbumArtwork(
+    url: _key(map, 'url') as String,
+    width: _key(map, 'width') as int?,
+    height: _key(map, 'height') as int?,
+    bgColor: _key(map, 'bgColor') as String?,
+  );
+}
+
+/// One song of a shared mix (`GET /shared/:token` → `tracks`).
+class SharedMixTrack {
+  const SharedMixTrack({
+    required this.title,
+    required this.artist,
+    this.album,
+    this.durationMs,
+    this.artwork,
+    this.appleId,
+    this.isrc,
+  });
+
+  final String title;
+  final String artist;
+  final String? album;
+  final int? durationMs;
+  final AlbumArtwork? artwork;
+  final String? appleId;
+  final String? isrc;
+
+  factory SharedMixTrack.fromJson(Map<String, dynamic> json) => SharedMixTrack(
+    title: _key(json, 'title') as String,
+    artist: _key(json, 'artist') as String,
+    album: _key(json, 'album') as String?,
+    durationMs: _key(json, 'durationMs') as int?,
+    artwork: _shareArtwork(_key(json, 'artwork')),
+    appleId: _key(json, 'appleId') as String?,
+    isrc: _key(json, 'isrc') as String?,
+  );
+}
+
+/// The public read of a shared mix (`GET /shared/:token`).
+class SharedMix {
+  const SharedMix({
+    required this.token,
+    required this.title,
+    required this.caseColor,
+    required this.sharedAt,
+    required this.isOwner,
+    required this.tracks,
+    this.sharerName,
+    this.sessionId,
+  });
+
+  final String token;
+  final String title;
+  final String caseColor;
+
+  /// The sharer's first name; null when they cleared it (show "a friend").
+  final String? sharerName;
+  final DateTime sharedAt;
+
+  /// The caller shared this mix themselves.
+  final bool isOwner;
+
+  /// The shared session, for the owner only (their link opens their chat).
+  final String? sessionId;
+  final List<SharedMixTrack> tracks;
+
+  factory SharedMix.fromJson(Map<String, dynamic> json) {
+    final isOwner = _key(json, 'isOwner') as bool;
+    return SharedMix(
+      token: _key(json, 'token') as String,
+      title: _key(json, 'title') as String,
+      caseColor: _key(json, 'caseColor') as String,
+      sharerName: _key(json, 'sharerName') as String?,
+      sharedAt: DateTime.parse(_key(json, 'sharedAt') as String),
+      isOwner: isOwner,
+      sessionId: isOwner ? _key(json, 'sessionId') as String : null,
+      tracks: (_key(json, 'tracks') as List)
+          .map((t) => SharedMixTrack.fromJson(t as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+}
+
+/// A shared mix the listener saved (`GET /me/shared-mixes` → `mixes`).
+class SharedMixRow {
+  const SharedMixRow({
+    required this.token,
+    required this.title,
+    required this.caseColor,
+    required this.savedAt,
+    required this.trackCount,
+    required this.durationMs,
+    this.sharerName,
+    this.artwork,
+  });
+
+  final String token;
+  final String title;
+  final String caseColor;
+
+  /// The sharer's first name; null when they cleared it (show "a friend").
+  final String? sharerName;
+  final DateTime savedAt;
+  final int trackCount;
+  final int durationMs;
+
+  /// The first song's artwork, or null.
+  final AlbumArtwork? artwork;
+
+  factory SharedMixRow.fromJson(Map<String, dynamic> json) => SharedMixRow(
+    token: _key(json, 'token') as String,
+    title: _key(json, 'title') as String,
+    caseColor: _key(json, 'caseColor') as String,
+    sharerName: _key(json, 'sharerName') as String?,
+    savedAt: DateTime.parse(_key(json, 'savedAt') as String),
+    trackCount: _key(json, 'trackCount') as int,
+    durationMs: _key(json, 'durationMs') as int,
+    artwork: _shareArtwork(_key(json, 'artwork')),
+  );
+}
+
+/// `POST /sessions/:id/share`: the mix's link. [url] is built server-side
+/// from its SHARE_BASE_URL.
+class ShareLinkResult {
+  const ShareLinkResult({required this.token, required this.url});
+
+  final String token;
+  final String url;
+
+  factory ShareLinkResult.fromJson(Map<String, dynamic> json) =>
+      ShareLinkResult(
+        token: _key(json, 'token') as String,
+        url: _key(json, 'url') as String,
+      );
 }
