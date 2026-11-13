@@ -7,7 +7,8 @@ import { and, asc, desc, eq, sql } from 'drizzle-orm'
 import type { AppVars } from '../app'
 import type { Db } from '../db/types'
 import { djSessions, djMessages, queueTracks, sessionEvents, tracks } from '../db/schema'
-import { runDjTurn, DjError, type DjDeps, type DjSessionRef } from '../dj/loop'
+import { runDjTurn, DjError, type DjDeps, type DjSessionRef, type DjTurnOptions } from '../dj/loop'
+import { streamTurn, wantsTurnStream, type TurnReply } from './turn-stream'
 import { runAlbumTurn, AlbumTurnError, type AlbumDeps, type AlbumTurnResult } from '../albums/loop'
 import { AlbumStoreError, choosePick, goBack, readPickState, type AlbumPickState } from '../albums/store'
 import { applyOps, getActiveQueue, QueueOpError, QueueVersionConflict } from '../dj/queue-store'
@@ -195,6 +196,16 @@ const sessionListColumns = {
   updatedAt: djSessions.updatedAt,
 }
 
+type SessionListKey = keyof typeof sessionListColumns
+
+// The list-row shape of a row already in hand (the streamed create's first
+// event, sent before the closing UPDATE re-reads it with sessionListColumns),
+// in the same key order.
+function sessionListRow(row: typeof djSessions.$inferSelect): Pick<typeof djSessions.$inferSelect, SessionListKey> {
+  const keys = Object.keys(sessionListColumns) as SessionListKey[]
+  return Object.fromEntries(keys.map((key) => [key, row[key]])) as Pick<typeof djSessions.$inferSelect, SessionListKey>
+}
+
 // Where a turn's request came from, for the catalogue fill's funnel row. The
 // native app talks to the API through Dart's HTTP client, whose default
 // User-Agent is "Dart/<version> (dart:io)"; anything else is the web.
@@ -274,6 +285,139 @@ export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps) {
     return c.json({ session: sessionRow, messages, ...albumTurnBody(turnResult.value) })
   }
 
+  // The mix creation turn once its persist-first row exists: the DJ turn and
+  // the title job side by side, the closing UPDATE, the messages read, and
+  // the body. The JSON path and the stream (turn-stream.ts) both answer with
+  // what this returns, so `result` and `error` cannot drift from the JSON
+  // contract. A DjError is an answer; anything else is thrown, a 500 either
+  // way.
+  async function createMixTurn(
+    session: { id: string },
+    userId: string,
+    prompt: string,
+    fallbackTitle: string,
+    options: DjTurnOptions,
+  ): Promise<TurnReply> {
+    const sessionRef: DjSessionRef = { id: session.id, userId }
+
+    // A naming call, not curation (see dj/title.ts) — run CONCURRENTLY with
+    // the DJ turn, bounded to a 5s worst case via generateSessionTitle's
+    // timeoutMs (dj/title.ts), so it adds at most that much to session
+    // creation rather than the turn's own latency. generateSessionTitle
+    // never throws and always resolves to at least fallbackTitle, so this
+    // can never fail the turn below; no deps.titleComplete wired (e.g. a
+    // caller that only set up the tool-loop LlmClient) degrades the same
+    // way, via the same fallback.
+    const titlePromise = deps.titleComplete
+      ? generateSessionTitle(deps.titleComplete, prompt, fallbackTitle)
+      : Promise.resolve(fallbackTitle)
+
+    // allSettled, not all: the title must land on the row even when the DJ
+    // turn itself fails — that's exactly when the listener will reopen the
+    // session and retry, and the row must not still be showing the
+    // truncated fallback. titlePromise itself never rejects (see above), but
+    // allSettled keeps that guarantee explicit rather than relying on it.
+    const [turnResult, titleResult] = await Promise.allSettled([runDjTurn(db, deps, sessionRef, prompt, options), titlePromise])
+
+    // A rename_session call within this very first turn (unusual, but the
+    // listener COULD open with "call this tape Lagos Nights") wins over the
+    // concurrently-generated Haiku title — an explicit rename is a stronger
+    // signal than the auto-naming pass, and the auto-generated title must
+    // never clobber it on the write below. Checked on the REJECTED branch
+    // too (DjError.sessionTitle, dj/loop.ts) — the rename's DB write already
+    // landed before whatever later failed this turn (a conflict that
+    // persisted through the retry, a curation error, ...), so a failed turn
+    // must never overwrite that persisted rename with the Haiku title here.
+    const renamedTitle =
+      turnResult.status === 'fulfilled'
+        ? turnResult.value.sessionTitle
+        : turnResult.reason instanceof DjError
+          ? turnResult.reason.sessionTitle
+          : undefined
+    const title = renamedTitle ?? (titleResult.status === 'fulfilled' ? titleResult.value : fallbackTitle)
+
+    // A text-only first turn never touches dj_sessions itself (no queue
+    // write to ride $onUpdate's automatic bump) — bumped explicitly, same as
+    // the message-turn route below, so list ordering (newest first by
+    // updatedAt) reflects even a chat-only first turn. The generated (or
+    // renamed) title rides this same UPDATE (one write, not two), written
+    // UNCONDITIONALLY — both promises have already settled by this point, so
+    // whatever queue writes runDjTurn made (or didn't, on failure) are done:
+    // this UPDATE (touching only updatedAt/title) can't race
+    // dj/queue-store.ts's queueVersion write either way.
+    const [sessionRow] = await db
+      .update(djSessions)
+      .set({ updatedAt: new Date(), title })
+      .where(eq(djSessions.id, session.id))
+      .returning(sessionListColumns)
+
+    if (turnResult.status === 'rejected') {
+      const e = turnResult.reason
+      if (e instanceof DjError) {
+        return { status: djErrorStatus(e.kind), body: djErrorBody(e, { sessionId: session.id }) }
+      }
+      throw e
+    }
+
+    const messages = await db
+      .select()
+      .from(djMessages)
+      .where(eq(djMessages.sessionId, session.id))
+      .orderBy(asc(djMessages.seq))
+    return {
+      status: 200,
+      body: {
+        session: sessionRow,
+        messages,
+        queue: turnResult.value.queue,
+        // Same capability flag GET /:id carries (see its comment): a mix
+        // opened straight from creation must be able to offer Undo without a
+        // refetch, so both session-detail shapes advertise it.
+        supportsInsert: true,
+        playlistSeed: await readPlaylistSeed(db, session.id, userId),
+        // Present ONLY when rename_session actually fired this turn — lets the
+        // client adopt the new title without a refetch (see
+        // dj_providers.dart's ChatNotifier). Omitted entirely on a no-rename
+        // turn, never sent as null.
+        ...(renamedTitle ? { sessionTitle: renamedTitle } : {}),
+        // The "Add my listening history" pill (spec 2026-11-09
+        // add-your-music-loop, decision 5): present ONLY on the turn that
+        // offered it, never sent as null.
+        ...(turnResult.value.addMusic ? { addMusic: turnResult.value.addMusic } : {}),
+      },
+    }
+  }
+
+  // A mix message turn and its body, shared by the JSON path and the stream
+  // the same way as createMixTurn.
+  async function mixMessageTurn(sessionRef: DjSessionRef, text: string, options: DjTurnOptions): Promise<TurnReply> {
+    try {
+      const result = await runDjTurn(db, deps, sessionRef, text, options)
+      // A text-only reply never touches dj_sessions itself (no queue write
+      // to ride $onUpdate's automatic bump), so list ordering (newest first
+      // by updatedAt) would otherwise never reflect a chat-only turn.
+      await db.update(djSessions).set({ updatedAt: new Date() }).where(eq(djSessions.id, sessionRef.id))
+      return {
+        status: 200,
+        body: {
+          djMessage: result.djMessage,
+          queue: result.queue,
+          queueVersion: result.queueVersion,
+          // Same contract as POST /sessions above: present ONLY when
+          // rename_session fired this turn. addMusic likewise: only on the
+          // turn that offered the pill.
+          ...(result.sessionTitle ? { sessionTitle: result.sessionTitle } : {}),
+          ...(result.addMusic ? { addMusic: result.addMusic } : {}),
+        },
+      }
+    } catch (e) {
+      if (e instanceof DjError) {
+        return { status: djErrorStatus(e.kind), body: djErrorBody(e) }
+      }
+      throw e
+    }
+  }
+
   app.put('/:id/playlist-seed', bodyLimit({ maxSize: 2048 }), zValidator('json', seedSelectionSchema), async c => {
     const id = c.req.param('id')
     if (!isUuid(id)) return c.json({ error: 'not_found' }, 404)
@@ -316,91 +460,18 @@ export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps) {
       if (e instanceof PlaylistSeedError) return c.json({ error: e.kind }, e.kind === 'not_found' ? 404 : 409)
       throw e
     }
-    const sessionRef: DjSessionRef = { id: session.id, userId }
+    const options: DjTurnOptions = { energyArc, surface: requestSurface(c.req.header('User-Agent')) }
 
-    // A naming call, not curation (see dj/title.ts) — run CONCURRENTLY with
-    // the DJ turn, bounded to a 5s worst case via generateSessionTitle's
-    // timeoutMs (dj/title.ts), so it adds at most that much to session
-    // creation rather than the turn's own latency. generateSessionTitle
-    // never throws and always resolves to at least fallbackTitle, so this
-    // can never fail the turn below; no deps.titleComplete wired (e.g. a
-    // caller that only set up the tool-loop LlmClient) degrades the same
-    // way, via the same fallback.
-    const titlePromise = deps.titleComplete
-      ? generateSessionTitle(deps.titleComplete, prompt, fallbackTitle)
-      : Promise.resolve(fallbackTitle)
-
-    // allSettled, not all: the title must land on the row even when the DJ
-    // turn itself fails — that's exactly when the listener will reopen the
-    // session and retry, and the row must not still be showing the
-    // truncated fallback. titlePromise itself never rejects (see above), but
-    // allSettled keeps that guarantee explicit rather than relying on it.
-    const [turnResult, titleResult] = await Promise.allSettled([runDjTurn(db, deps, sessionRef, prompt, { energyArc, surface: requestSurface(c.req.header('User-Agent')) }), titlePromise])
-
-    // A rename_session call within this very first turn (unusual, but the
-    // listener COULD open with "call this tape Lagos Nights") wins over the
-    // concurrently-generated Haiku title — an explicit rename is a stronger
-    // signal than the auto-naming pass, and the auto-generated title must
-    // never clobber it on the write below. Checked on the REJECTED branch
-    // too (DjError.sessionTitle, dj/loop.ts) — the rename's DB write already
-    // landed before whatever later failed this turn (a conflict that
-    // persisted through the retry, a curation error, ...), so a failed turn
-    // must never overwrite that persisted rename with the Haiku title here.
-    const renamedTitle =
-      turnResult.status === 'fulfilled'
-        ? turnResult.value.sessionTitle
-        : turnResult.reason instanceof DjError
-          ? turnResult.reason.sessionTitle
-          : undefined
-    const title = renamedTitle ?? (titleResult.status === 'fulfilled' ? titleResult.value : fallbackTitle)
-
-    // A text-only first turn never touches dj_sessions itself (no queue
-    // write to ride $onUpdate's automatic bump) — bumped explicitly, same as
-    // the message-turn route below, so list ordering (newest first by
-    // updatedAt) reflects even a chat-only first turn. The generated (or
-    // renamed) title rides this same UPDATE (one write, not two), written
-    // UNCONDITIONALLY — both promises have already settled by this point, so
-    // whatever queue writes runDjTurn made (or didn't, on failure) are done:
-    // this UPDATE (touching only updatedAt/title) can't race
-    // dj/queue-store.ts's queueVersion write either way.
-    const [sessionRow] = await db
-      .update(djSessions)
-      .set({ updatedAt: new Date(), title })
-      .where(eq(djSessions.id, session.id))
-      .returning(sessionListColumns)
-
-    if (turnResult.status === 'rejected') {
-      const e = turnResult.reason
-      if (e instanceof DjError) {
-        return c.json(djErrorBody(e, { sessionId: session.id }), djErrorStatus(e.kind))
-      }
-      throw e
+    // Every refusal above answered JSON; the stream starts only now, with
+    // the row in hand, so its first event can name the session.
+    if (wantsTurnStream(c)) {
+      const row = session
+      return streamTurn(c, (onStep) => createMixTurn(row, userId, prompt, fallbackTitle, { ...options, onStep }), {
+        session: sessionListRow(row),
+      })
     }
-
-    const messages = await db
-      .select()
-      .from(djMessages)
-      .where(eq(djMessages.sessionId, session.id))
-      .orderBy(asc(djMessages.seq))
-    return c.json({
-      session: sessionRow,
-      messages,
-      queue: turnResult.value.queue,
-      // Same capability flag GET /:id carries (see its comment): a mix
-      // opened straight from creation must be able to offer Undo without a
-      // refetch, so both session-detail shapes advertise it.
-      supportsInsert: true,
-      playlistSeed: await readPlaylistSeed(db, session.id, userId),
-      // Present ONLY when rename_session actually fired this turn — lets the
-      // client adopt the new title without a refetch (see
-      // dj_providers.dart's ChatNotifier). Omitted entirely on a no-rename
-      // turn, never sent as null.
-      ...(renamedTitle ? { sessionTitle: renamedTitle } : {}),
-      // The "Add my listening history" pill (spec 2026-11-09
-      // add-your-music-loop, decision 5): present ONLY on the turn that
-      // offered it, never sent as null.
-      ...(turnResult.value.addMusic ? { addMusic: turnResult.value.addMusic } : {}),
-    })
+    const reply = await createMixTurn(session, userId, prompt, fallbackTitle, options)
+    return c.json(reply.body, reply.status)
   })
 
   app.get('/', async (c) => {
@@ -551,32 +622,15 @@ export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps) {
         throw e
       }
     }
-    try {
-      const result = await runDjTurn(db, deps, sessionRef, text, {
-        energyArc,
-        surface: requestSurface(c.req.header('User-Agent')),
-        ...(remake === true ? { remake: true } : {}),
-      })
-      // A text-only reply never touches dj_sessions itself (no queue write
-      // to ride $onUpdate's automatic bump), so list ordering (newest first
-      // by updatedAt) would otherwise never reflect a chat-only turn.
-      await db.update(djSessions).set({ updatedAt: new Date() }).where(eq(djSessions.id, session.id))
-      return c.json({
-        djMessage: result.djMessage,
-        queue: result.queue,
-        queueVersion: result.queueVersion,
-        // Same contract as POST /sessions above: present ONLY when
-        // rename_session fired this turn. addMusic likewise: only on the
-        // turn that offered the pill.
-        ...(result.sessionTitle ? { sessionTitle: result.sessionTitle } : {}),
-        ...(result.addMusic ? { addMusic: result.addMusic } : {}),
-      })
-    } catch (e) {
-      if (e instanceof DjError) {
-        return c.json(djErrorBody(e), djErrorStatus(e.kind))
-      }
-      throw e
+    const options: DjTurnOptions = {
+      energyArc,
+      surface: requestSurface(c.req.header('User-Agent')),
+      ...(remake === true ? { remake: true } : {}),
     }
+    // A mix turn only: an album session answered JSON above.
+    if (wantsTurnStream(c)) return streamTurn(c, (onStep) => mixMessageTurn(sessionRef, text, { ...options, onStep }))
+    const reply = await mixMessageTurn(sessionRef, text, options)
+    return c.json(reply.body, reply.status)
   })
 
   app.post('/:id/queue-ops', zValidator('json', queueOpsBodySchema), async (c) => {

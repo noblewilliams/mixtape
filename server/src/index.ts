@@ -293,41 +293,97 @@ function buildAppleRevoke(env: Bindings): AppleRevokeDeps {
   }
 }
 
+// The request's ExecutionContext with every waitUntil promise recorded in
+// `recorded` and forwarded to the platform. Everything else is the
+// platform's own member, methods bound to it (the runtime's methods refuse
+// another `this`), so passThroughOnException, props and whatever the runtime
+// adds keep working.
+function recordingContext(ctx: ExecutionContext, recorded: Promise<unknown>[]): ExecutionContext {
+  return new Proxy(ctx, {
+    get(target, prop) {
+      if (prop === 'waitUntil') {
+        return (promise: Promise<unknown>) => {
+          recorded.push(promise)
+          target.waitUntil(promise)
+        }
+      }
+      const value: unknown = Reflect.get(target, prop, target)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  })
+}
+
+/**
+ * Runs one request with its Neon pool, and ends the pool once the request
+ * is done with it (spec 2026-11-13 dj-turn-steps, "Pool lifetime"). A
+ * streamed turn returns its Response at once and hands the turn to
+ * waitUntil (routes/turn-stream.ts), so ending the pool when `handle`
+ * returns would close it under the running turn: the pool ends only after
+ * every promise the request handed to waitUntil has settled. A request that
+ * recorded none ends it at once, as before. A promise handed to waitUntil
+ * after `handle` returned is not waited for: nothing does that today.
+ */
+export async function withRequestPool<T>(
+  ctx: ExecutionContext,
+  pool: { end(): Promise<void> },
+  handle: (ctx: ExecutionContext) => Promise<T>,
+): Promise<T> {
+  const recorded: Promise<unknown>[] = []
+  // try/finally rather than a bare sequential call: buildDeps/createAuth/
+  // createApp or app.fetch itself throwing must still close the pool —
+  // otherwise a bad request (or a misconfigured binding) leaks a socket on
+  // every failure instead of just the happy path.
+  try {
+    return await handle(recordingContext(ctx, recorded))
+  } finally {
+    // Closes the pool's socket(s) after the response is built rather than
+    // blocking on it — waitUntil keeps the isolate alive just long enough to
+    // flush the close, without holding up the response itself.
+    ctx.waitUntil(recorded.length === 0 ? pool.end() : Promise.allSettled(recorded).then(() => pool.end()))
+  }
+}
+
+// What one request is wired from: its database with the pool to end, and
+// the app over that database. Production passes buildDb and buildRequestApp;
+// tests pass their own, so the wiring below is the code under test.
+export type FetchWiring<E> = {
+  openDb: (env: E) => { db: Db; pool: { end(): Promise<void> } }
+  buildApp: (db: Db, env: E) => { fetch: (req: Request, env: E, ctx: ExecutionContext) => Response | Promise<Response> }
+}
+
+// The fetch handler. The app gets the recording context, never the
+// platform's own: that is what keeps the pool open under a streamed turn.
+export function serveFetch<E>(req: Request, env: E, ctx: ExecutionContext, wiring: FetchWiring<E>): Promise<Response> {
+  const { db, pool } = wiring.openDb(env)
+  return withRequestPool(ctx, pool, async (requestCtx) => wiring.buildApp(db, env).fetch(req, env, requestCtx))
+}
+
+function buildRequestApp(db: Db, env: Bindings) {
+  const auth = createAuth(db, env)
+  const allowedOrigins = parseWebOrigins(env.WEB_ORIGINS)
+  const deps = buildDeps(env)
+  const musicKit = buildMusicKit(env, allowedOrigins)
+  const baseDjDeps = buildDjDeps(env)
+  const fill = buildFillDeps(env, musicKit)
+  const djDeps = baseDjDeps && fill ? { ...baseDjDeps, fill } : baseDjDeps
+  const dj = djDeps ? { deps: djDeps } : undefined
+  const playlistEditingDeps = buildPlaylistEditingDeps(djDeps, musicKit)
+  const playlistEditing = playlistEditingDeps ? { deps: playlistEditingDeps } : undefined
+  const albumDeps = buildAlbumDeps(djDeps, musicKit, env)
+  const albums = albumDeps ? { deps: albumDeps } : undefined
+  const artwork = buildArtworkDeps(env, musicKit)
+  const seed = musicKit ? { catalog: musicKit.catalog } : undefined
+  const enrich = env.ENRICH_ADMIN_TOKEN && (deps || artwork || seed)
+    ? { adminToken: env.ENRICH_ADMIN_TOKEN, deps, artwork, seed }
+    : undefined
+  const transcribe = buildTranscribe(env)
+  const accountDeletion = { apple: buildAppleRevoke(env) }
+  return createApp({ auth, db, enrich, dj, albums, playlistEditing, musicKit, transcribe, accountDeletion, aiConsent: aiConsentMode(env), allowedOrigins })
+}
+
 export default {
   async fetch(req: Request, env: Bindings, ctx: ExecutionContext) {
-    const { db, pool } = buildDb(env)
-    // try/finally rather than a bare sequential call: buildDeps/createAuth/
-    // createApp or app.fetch itself throwing must still close the pool —
-    // otherwise a bad request (or a misconfigured binding) leaks a socket on
-    // every failure instead of just the happy path.
-    try {
-      const auth = createAuth(db, env)
-      const allowedOrigins = parseWebOrigins(env.WEB_ORIGINS)
-      const deps = buildDeps(env)
-      const musicKit = buildMusicKit(env, allowedOrigins)
-      const baseDjDeps = buildDjDeps(env)
-      const fill = buildFillDeps(env, musicKit)
-      const djDeps = baseDjDeps && fill ? { ...baseDjDeps, fill } : baseDjDeps
-      const dj = djDeps ? { deps: djDeps } : undefined
-      const playlistEditingDeps = buildPlaylistEditingDeps(djDeps, musicKit)
-      const playlistEditing = playlistEditingDeps ? { deps: playlistEditingDeps } : undefined
-      const albumDeps = buildAlbumDeps(djDeps, musicKit, env)
-      const albums = albumDeps ? { deps: albumDeps } : undefined
-      const artwork = buildArtworkDeps(env, musicKit)
-      const seed = musicKit ? { catalog: musicKit.catalog } : undefined
-      const enrich = env.ENRICH_ADMIN_TOKEN && (deps || artwork || seed)
-        ? { adminToken: env.ENRICH_ADMIN_TOKEN, deps, artwork, seed }
-        : undefined
-      const transcribe = buildTranscribe(env)
-      const accountDeletion = { apple: buildAppleRevoke(env) }
-      const app = createApp({ auth, db, enrich, dj, albums, playlistEditing, musicKit, transcribe, accountDeletion, aiConsent: aiConsentMode(env), allowedOrigins })
-      return await app.fetch(req, env, ctx)
-    } finally {
-      // Closes the pool's socket(s) after the response is built rather than
-      // blocking on it — waitUntil keeps the isolate alive just long enough to
-      // flush the close, without holding up the response itself.
-      ctx.waitUntil(pool.end())
-    }
+    return serveFetch(req, env, ctx, { openDb: buildDb, buildApp: buildRequestApp })
   },
   async scheduled(event: ScheduledController, env: Bindings, ctx: ExecutionContext) {
     // Dispatch before any wiring so an unrecognised trigger opens no pool.

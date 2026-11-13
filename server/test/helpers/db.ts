@@ -23,3 +23,13 @@ export async function createTestDb() {
   onTestFinished(() => client.close())
   return drizzle(client, { schema })
 }
+
+// An independent copy of `db` as it stands, ids and sequences included: two
+// forks of one seeded database run the same turn to the same result, so two
+// response paths can be compared on it.
+export async function forkTestDb(db: TestDb): Promise<TestDb> {
+  const dump = await db.$client.dumpDataDir('none')
+  const client = await PGlite.create({ loadDataDir: dump, extensions: { vector } })
+  onTestFinished(() => client.close())
+  return drizzle(client, { schema })
+}
