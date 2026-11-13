@@ -11,6 +11,7 @@
 /// pushes go to the nearest [Navigator] and there is no app bar of its own.
 library;
 
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -22,6 +23,7 @@ import '../providers/capabilities_provider.dart';
 import '../providers/dj_providers.dart';
 import '../providers/home_mode_provider.dart';
 import '../providers/listen_later_provider.dart';
+import '../providers/mix_activity_provider.dart';
 import '../theme/mixtape_theme.dart';
 import '../widgets/foundation/empty_state.dart';
 import '../widgets/foundation/flush_row.dart';
@@ -92,6 +94,10 @@ class MixesScreen extends ConsumerStatefulWidget {
 
   /// The "Archived" row at the top of Active.
   static const Key archivedRowKey = Key('archived-mixes-row');
+
+  /// The row for a new mix being made on Home, before the server has named
+  /// it (device smoke, 2026-11-13).
+  static const Key pendingKey = Key('mix-pending');
 
   /// How far past the top a pull has to go to bring the Archived row out.
   /// Short of the refresh control's 100 pt, so a small pull reveals it and a
@@ -268,6 +274,15 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
   Widget build(BuildContext context) {
     final sessionsAsync = ref.watch(sessionsProvider);
     final albumsOn = ref.watch(albumPicksEnabledProvider);
+    // A turn landing changes its mix's time, and with it the order: read the
+    // list again so the row moves up with its dot. A new mix landing needs
+    // nothing here; its create already marks the list stale.
+    ref.listen<MixActivity>(mixActivityProvider, (previous, next) {
+      final ended =
+          previous != null &&
+          previous.working.keys.any((id) => !next.working.containsKey(id));
+      if (ended) unawaited(ref.read(sessionsProvider.notifier).refresh());
+    });
     // The shelf's segment left (signed out of albums, the server turned them
     // off): fall back to Active rather than show a segment that isn't there.
     if (!albumsOn && _onShelf) _segment = MixesSegment.active;
@@ -364,6 +379,13 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
 
     final sessions = sessionsAsync.requireValue;
     final active = nonArchivedSessions(sessions);
+    // The DJ's work in flight: a turn out on a mix turns its row, and a new
+    // mix being made on Home has a row of its own on top until the list
+    // lists it (the server writes the row before the first turn runs).
+    final activity = ref.watch(mixActivityProvider);
+    final pending = activity.pending;
+    final adopted = pending?.adopt(active);
+    final pendingRow = pending != null && adopted == null;
     final archivedCount = archivedSessions(sessions).length;
     // WhatsApp's rules: the row exists only while something is archived, and
     // waits above the list for a pull down. It stays out when there is no
@@ -395,6 +417,21 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
       ),
     );
 
+    Widget pendingSliver() => SliverPadding(
+      padding: widget.bottomInset.copyWith(bottom: 0),
+      sliver: SliverToBoxAdapter(
+        child: _PendingMixRow(
+          prompt: pending!.prompt,
+          isFirst: !showArchived,
+          onOpen: widget.onStartMix,
+        ),
+      ),
+    );
+
+    if (active.isEmpty && pendingRow) {
+      return [archivedSliver, pendingSliver()];
+    }
+
     if (active.isEmpty) {
       return [
         archivedSliver,
@@ -407,8 +444,11 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
 
     return [
       archivedSliver,
+      if (pendingRow) pendingSliver(),
       SliverPadding(
-        padding: widget.bottomInset,
+        padding: pendingRow
+            ? widget.bottomInset.copyWith(top: 0)
+            : widget.bottomInset,
         sliver: SliverList.builder(
           key: const Key('sessions-list'),
           itemCount: active.length,
@@ -428,9 +468,12 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
               // Lazily built rows have no FlushList above them, so the first
               // row has to be told it opens the list or it draws a hairline
               // there. Under the Archived row it draws one.
-              isFirst: index == 0 && !showArchived,
+              isFirst: index == 0 && !showArchived && !pendingRow,
               // No visible actions button: long-press and the swipe.
               showActionsButton: false,
+              working:
+                  activity.isWorking(session.id) || session.id == adopted,
+              ready: activity.isReady(session.id),
               onOpen: () => _openConversation(session.id),
               onRename: (title) =>
                   ref.read(sessionsProvider.notifier).rename(session.id, title),
@@ -619,6 +662,40 @@ class _MixesSegmentedControl extends StatelessWidget {
 /// archive glyph in the tape column, the word level with the mix titles, and
 /// how many mixes wait behind it. Much shorter and quieter than a mix row
 /// (founder, 2026-11-09), and out of sight until a pull down.
+/// A new mix being made on Home: the default tape with its hubs turning,
+/// the prompt as the title (the server's own first title is the prompt,
+/// shortened), and the line that says the DJ is on it. Tapping goes to Home,
+/// where it is being made. No swipe and no menu: there is nothing to rename
+/// or archive yet.
+class _PendingMixRow extends StatelessWidget {
+  const _PendingMixRow({
+    required this.prompt,
+    required this.isFirst,
+    required this.onOpen,
+  });
+
+  final String prompt;
+  final bool isFirst;
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) => FlushRow(
+    key: MixesScreen.pendingKey,
+    leading: const CassetteTile(
+      width: MixHomeRow.artSize,
+      shadow: true,
+      spinning: true,
+    ),
+    leadingSize: MixHomeRow.artSize,
+    verticalPadding: MixHomeRow.verticalPadding,
+    showChevron: false,
+    title: prompt.trim(),
+    subtitle: MixHomeRow.workingSubtitle,
+    isFirst: isFirst,
+    onTap: onOpen ?? () {},
+  );
+}
+
 class _ArchivedRow extends StatelessWidget {
   const _ArchivedRow({super.key, required this.count, required this.onOpen});
 

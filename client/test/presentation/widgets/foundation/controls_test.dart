@@ -663,7 +663,11 @@ void main() {
     expect(find.byIcon(Icons.mic_none), findsNothing);
     double stripeOpacity() =>
         tester.widget<Opacity>(find.byKey(const Key('prompt-stripe'))).opacity;
-    expect(stripeOpacity(), 1, reason: 'the stripe shows while unfocused');
+    expect(
+      stripeOpacity(),
+      greaterThan(0),
+      reason: 'the stripe shows while unfocused',
+    );
 
     Color? surfaceColor() {
       final box = tester.widget<DecoratedBox>(
@@ -711,9 +715,12 @@ void main() {
       tester.getSemantics(find.byKey(const Key('voice-input'))).label,
       'Speak your idea',
     );
+    // The compact composer's keys (device smoke 2026-11-13): 36 pt wide and
+    // the surface's full inner height, under the 44 pt target the rest of
+    // the app keeps, for a field that is mostly draft.
     final mic = tester.getSize(find.byKey(const Key('voice-input')));
-    expect(mic.height, greaterThanOrEqualTo(MixtapeMetrics.minTarget));
-    expect(mic.width, greaterThanOrEqualTo(MixtapeMetrics.minTarget));
+    expect(mic.height, greaterThanOrEqualTo(MixPromptInput.minHeight - 4));
+    expect(mic.width, greaterThanOrEqualTo(MixPromptInput.keyWidth));
     await tester.pumpWidget(const SizedBox());
     semantics.dispose();
   });

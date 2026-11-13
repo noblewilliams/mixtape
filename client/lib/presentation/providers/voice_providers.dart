@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/voice/live_dictation.dart';
 import '../../data/voice/speech_channel.dart';
 import '../../data/voice/transcription_api.dart';
 import '../../data/voice/voice_capture_service.dart';
@@ -45,22 +46,32 @@ class VoiceInputException implements Exception {
 
 /// Speak an idea, get text back.
 ///
-/// The server transcriber is the good one and goes first. Apple's on-device
-/// recogniser is tried only where the server could not answer at all — the
-/// route is off, upstream failed, it timed out, or the clip never left the
-/// device — and never where the server looked at the clip and refused it.
+/// Where it can, the listener sees their words as they speak: Apple's
+/// recogniser runs live on the device ([live]) while the same audio is kept
+/// as a clip, and when they stop the server (the better transcriber) makes a
+/// second pass over that clip whose text replaces the live words. If the
+/// server cannot give one, the live words stand (device smoke, 2026-11-13).
+///
+/// Where live words are not possible — speech recognition refused, no
+/// recogniser, off iOS — the clip is recorded as before: the server goes
+/// first and Apple's recogniser reads the file only where the server could
+/// not answer at all (the route is off, upstream failed, it timed out, or the
+/// clip never left the device), never where it looked at the clip and
+/// refused it.
 ///
 /// The clip is deleted on every path out, including every failure.
 class TranscribeRecording {
-  const TranscribeRecording({
+  TranscribeRecording({
     required VoiceCaptureService capture,
     required Future<String> Function(File clip) server,
     required Future<String> Function(String path) onDevice,
     Future<void> Function()? onSessionExpired,
+    LiveTranscriber? live,
   }) : _capture = capture,
        _server = server,
        _onDevice = onDevice,
-       _onSessionExpired = onSessionExpired;
+       _onSessionExpired = onSessionExpired,
+       _live = live;
 
   static const String permissionDeniedCopy =
       'Allow the microphone in Settings to speak your idea.';
@@ -82,9 +93,40 @@ class TranscribeRecording {
   final Future<String> Function(File clip) _server;
   final Future<String> Function(String path) _onDevice;
   final Future<void> Function()? _onSessionExpired;
+  final LiveTranscriber? _live;
+
+  /// Whether the dictation under way is the live one.
+  bool _liveActive = false;
+
+  /// The words the live recogniser has heard so far, for the field.
+  Stream<String> get partials => _live?.partials ?? const Stream.empty();
+
+  /// The live recogniser's input level, for the meter.
+  Stream<double> get liveLevels => _live?.levels ?? const Stream.empty();
 
   /// Start listening. Throws [VoiceInputException] if the mic never opens.
   Future<void> begin() async {
+    _liveActive = false;
+    final live = _live;
+    if (live != null) {
+      try {
+        await live.start();
+        _liveActive = true;
+        return;
+      } on DictationException catch (error) {
+        switch (error.failure) {
+          case DictationFailure.micDenied:
+            throw _from(VoiceCaptureFailure.permissionDenied);
+          case DictationFailure.playbackActive:
+            throw _from(VoiceCaptureFailure.playbackActive);
+          case DictationFailure.speechDenied:
+          case DictationFailure.unavailable:
+          case DictationFailure.failed:
+            // No words as they are spoken, but the recorded path still works.
+            break;
+        }
+      }
+    }
     try {
       await _capture.start();
     } on VoiceCaptureException catch (error) {
@@ -94,6 +136,10 @@ class TranscribeRecording {
 
   /// Stop listening and return the transcript.
   Future<String> finish() async {
+    if (_liveActive) {
+      _liveActive = false;
+      return _finishLive(_live!);
+    }
     final File clip;
     try {
       clip = await _capture.stop();
@@ -131,8 +177,61 @@ class TranscribeRecording {
     }
   }
 
+  /// The live path's end: the server's pass over the clip, or the words
+  /// heard live where it has none to give.
+  Future<String> _finishLive(LiveTranscriber live) async {
+    final DictationResult heard;
+    try {
+      heard = await live.stop();
+    } catch (_) {
+      throw const VoiceInputException(VoiceInputFailure.failed, failedCopy);
+    }
+    final words = heard.text.trim();
+    final path = heard.path;
+    try {
+      if (path == null) {
+        if (words.isEmpty) throw _noAudio;
+        return words;
+      }
+      try {
+        final polished = (await _server(File(path))).trim();
+        if (polished.isNotEmpty) return polished;
+      } on TranscriptionException catch (error) {
+        // These are about the listener, not the clip: the words heard live do
+        // not answer them.
+        if (error.failure == TranscriptionFailure.unauthorized) {
+          await _onSessionExpired?.call();
+          throw _fromServer(error.failure);
+        }
+        if (error.failure == TranscriptionFailure.consentRequired) {
+          throw _fromServer(error.failure);
+        }
+        if (words.isEmpty) throw _fromServer(error.failure);
+      } catch (error) {
+        if (error is VoiceInputException) rethrow;
+        // Any other failure is a server that did not answer.
+      }
+      if (words.isEmpty) throw _noAudio;
+      return words;
+    } finally {
+      await live.discard(path);
+    }
+  }
+
+  static const VoiceInputException _noAudio = VoiceInputException(
+    VoiceInputFailure.noAudio,
+    noAudioCopy,
+  );
+
   /// Stop listening and throw the clip away without transcribing it.
-  Future<void> abandon() => _capture.cancel();
+  Future<void> abandon() async {
+    if (_liveActive) {
+      _liveActive = false;
+      await _live!.cancel();
+      return;
+    }
+    await _capture.cancel();
+  }
 
   static bool _worthRetryingOnDevice(TranscriptionFailure failure) =>
       switch (failure) {
@@ -220,10 +319,18 @@ final transcriptionApiProvider = Provider<TranscriptionApi>((ref) {
 });
 
 /// Speak an idea into the composer.
+/// Words as they are spoken, on iOS. One per app, as the recorder is.
+final liveDictationProvider = Provider<LiveTranscriber>((ref) {
+  final dictation = LiveDictation();
+  ref.onDispose(dictation.dispose);
+  return dictation;
+});
+
 final transcribeRecordingProvider = Provider<TranscribeRecording>((ref) {
   final api = ref.watch(transcriptionApiProvider);
   final speech = ref.watch(speechChannelProvider);
   return TranscribeRecording(
+    live: ref.watch(liveDictationProvider),
     capture: ref.watch(voiceCaptureServiceProvider),
     server: api.transcribe,
     onDevice: speech.transcribeFile,
@@ -265,12 +372,14 @@ class VoiceComposerController extends ChangeNotifier {
     required Future<String> Function() onStop,
     required Future<void> Function() onCancel,
     Stream<double>? amplitude,
+    Stream<String>? partials,
     Future<bool> Function()? probeSettings,
     Future<void> Function()? onOpenSettings,
   }) : _onStart = onStart,
        _onStop = onStop,
        _onCancel = onCancel,
        _amplitude = amplitude,
+       _partials = partials,
        _probeSettings = probeSettings,
        _onOpenSettings = onOpenSettings;
 
@@ -297,6 +406,7 @@ class VoiceComposerController extends ChangeNotifier {
       onStop: recorder.finish,
       onCancel: recorder.abandon,
       amplitude: amplitude,
+      partials: recorder.partials,
       probeSettings: () => settings(probe, false),
       onOpenSettings: () async {
         await settings(open, false);
@@ -311,12 +421,20 @@ class VoiceComposerController extends ChangeNotifier {
   final Future<String> Function() _onStop;
   final Future<void> Function() _onCancel;
   final Stream<double>? _amplitude;
+  final Stream<String>? _partials;
   final Future<bool> Function()? _probeSettings;
   final Future<void> Function()? _onOpenSettings;
 
   StreamSubscription<double>? _levels;
+  StreamSubscription<String>? _words;
   VoiceComposerState _state = VoiceComposerState.idle;
   double _level = 0;
+  String _partial = '';
+
+  /// The words heard so far, while the microphone is open and while the
+  /// better pass over them is on its way; empty otherwise. The composer draws
+  /// them in the field as they arrive (device smoke, 2026-11-13).
+  String get partial => _partial;
   VoiceInputException? _failure;
   bool _settingsAvailable = false;
   bool _disposed = false;
@@ -359,9 +477,15 @@ class VoiceComposerController extends ChangeNotifier {
       return;
     }
     _state = VoiceComposerState.listening;
+    _partial = '';
     _levels = _amplitude?.listen((level) {
       if (_state != VoiceComposerState.listening) return;
       _level = level.clamp(0.0, 1.0);
+      _notify();
+    });
+    _words = _partials?.listen((words) {
+      if (_state != VoiceComposerState.listening) return;
+      _partial = words;
       _notify();
     });
     _notify();
@@ -394,6 +518,7 @@ class VoiceComposerController extends ChangeNotifier {
     _stopLevels();
     _state = VoiceComposerState.idle;
     _level = 0;
+    _partial = '';
     _notify();
     return text;
   }
@@ -403,6 +528,7 @@ class VoiceComposerController extends ChangeNotifier {
     if (!busy) return;
     _state = VoiceComposerState.idle;
     _level = 0;
+    _partial = '';
     _stopLevels();
     _notify();
     await _onCancel();
@@ -440,6 +566,7 @@ class VoiceComposerController extends ChangeNotifier {
     _failure = error;
     _state = VoiceComposerState.failed;
     _level = 0;
+    _partial = '';
     _settingsAvailable = false;
     _stopLevels();
     _notify();
@@ -456,8 +583,11 @@ class VoiceComposerController extends ChangeNotifier {
   /// cancelled subscription is not worth holding a transition behind.
   void _stopLevels() {
     final levels = _levels;
+    final words = _words;
     _levels = null;
+    _words = null;
     unawaited(levels?.cancel() ?? Future<void>.value());
+    unawaited(words?.cancel() ?? Future<void>.value());
   }
 
   void _notify() {
@@ -470,12 +600,38 @@ class VoiceComposerController extends ChangeNotifier {
 final voiceComposerControllerProvider = Provider<VoiceComposerController>((
   ref,
 ) {
+  final recorder = ref.watch(transcribeRecordingProvider);
   final controller = VoiceComposerController.of(
-    ref.watch(transcribeRecordingProvider),
-    amplitude: ref.watch(voiceCaptureServiceProvider).amplitude,
+    recorder,
+    // Whichever path is listening: the recorder's level, or the live
+    // recogniser's.
+    amplitude: _merge(
+      ref.watch(voiceCaptureServiceProvider).amplitude,
+      recorder.liveLevels,
+    ),
     probe: ref.watch(linkProbeProvider),
     open: ref.watch(linkOpenerProvider),
   );
   ref.onDispose(controller.dispose);
   return controller;
 });
+
+/// Two level streams as one: only one path listens at a time.
+Stream<double> _merge(Stream<double> a, Stream<double> b) {
+  late final StreamController<double> out;
+  final subscriptions = <StreamSubscription<double>>[];
+  out = StreamController<double>.broadcast(
+    onListen: () {
+      subscriptions
+        ..add(a.listen(out.add))
+        ..add(b.listen(out.add));
+    },
+    onCancel: () async {
+      for (final subscription in subscriptions) {
+        await subscription.cancel();
+      }
+      subscriptions.clear();
+    },
+  );
+  return out.stream;
+}

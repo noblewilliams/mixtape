@@ -89,11 +89,33 @@ class MixPromptInput extends StatefulWidget {
   static String get initialPlaceholder => examples.first;
 
   /// The field's own vertical padding, tightened with its type (smoke round
-  /// two, note 9).
-  static const double fieldVerticalPadding = 9;
+  /// two, note 9) and again when the field still read as mostly padding
+  /// (device smoke, 2026-11-13).
+  static const double fieldVerticalPadding = 6;
 
   /// How the field's type sits below body text — one step down.
   static const double fieldFontStepDown = 1;
+
+  /// The surface's height with one line of draft (device smoke, 2026-11-13:
+  /// down from the shared 48 pt composer height).
+  static const double minHeight = 40;
+
+  /// How many lines the draft grows to before it scrolls inside the field.
+  static const int maxLines = 5;
+
+  /// The mic and send keys: 36 pt wide, the surface's full height to touch.
+  static const double keyWidth = 36;
+
+  /// Where the draft starts, from the surface's leading edge.
+  static const double textInset = 14;
+
+  /// The prism underline: how far in from each side it stops (clear of the
+  /// 16 pt bottom corners) and how thick it is.
+  static const double stripeInset = 16;
+  static const double stripeHeight = 2;
+
+  /// The surface itself, for tests.
+  static const Key surfaceKey = Key('prompt-surface');
 
   @override
   State<MixPromptInput> createState() => _MixPromptInputState();
@@ -231,10 +253,23 @@ class _MixPromptInputState extends State<MixPromptInput>
 
   void _attachVoice(VoiceComposerController? next, {required bool fromScope}) {
     if (next == _voice) return;
-    _voice?.removeListener(_changed);
+    _voice?.removeListener(_voiceChanged);
     _voice = next;
     _voiceFromScope = fromScope && next != null;
-    _voice?.addListener(_changed);
+    _voice?.addListener(_voiceChanged);
+  }
+
+  /// The words heard so far go into the field as they arrive (device smoke,
+  /// 2026-11-13), until the dictation lands or is given up.
+  void _voiceChanged() {
+    final voice = _voice;
+    if (_dictating &&
+        voice != null &&
+        voice.busy &&
+        voice.partial != _shownWords) {
+      _showWords(voice.partial);
+    }
+    if (mounted) setState(() {});
   }
 
   bool get _listening =>
@@ -249,6 +284,8 @@ class _MixPromptInputState extends State<MixPromptInput>
     if (voice.state == VoiceComposerState.listening) {
       final transcript = await voice.stop();
       if (!mounted) return;
+      // Nothing to land: the draft goes back to what it was before speaking.
+      if (transcript == null) _endDictation(restore: true);
       if (transcript == null &&
           voice.failure?.failure == VoiceInputFailure.consentRequired) {
         // `/transcribe` wants AI consent: the sheet, not a failure line. The
@@ -258,7 +295,7 @@ class _MixPromptInputState extends State<MixPromptInput>
         return;
       }
       if (transcript == null) return;
-      _insert(transcript);
+      _land(transcript);
       return;
     }
     if (voice.busy) return;
@@ -270,33 +307,104 @@ class _MixPromptInputState extends State<MixPromptInput>
     // controller: record on the one bound now.
     final current = _voice;
     if (current == null || current.busy || widget.busy) return;
+    _beginDictation();
     await current.start();
+    if (!mounted) return;
+    if (current.state != VoiceComposerState.listening) {
+      _endDictation(restore: true);
+    }
   }
 
-  /// Land a transcript where the cursor is, and hand the field back with the
-  /// cursor after it. Nothing sends: it is a draft like any other.
-  void _insert(String transcript) {
+  /// A dictation under way: what the field held before and after the cursor
+  /// when it began, and the words last drawn between them.
+  bool _dictating = false;
+  String _before = '';
+  String _after = '';
+  String _shownWords = '';
+
+  /// The field's own scroll, so a dictation can keep its latest line in view
+  /// while the field is not focused.
+  final ScrollController _fieldScroll = ScrollController();
+
+  /// The words will go where the cursor is. The keyboard goes while the
+  /// listener speaks; the field is the microphone's until it lands.
+  void _beginDictation() {
     final text = widget.controller.text;
     final selection = widget.controller.selection;
     final at = selection.isValid
         ? selection.end.clamp(0, text.length)
         : text.length;
-    final before = text.substring(0, at);
-    final after = text.substring(at);
-    final opened = before.isNotEmpty && !before.endsWith(' ')
-        ? ' $transcript'
-        : transcript;
-    // The cursor stays at the end of what was said, in front of the space
-    // that keeps it apart from whatever the field already held.
-    final cursor = before.length + opened.length;
-    final closed = after.isNotEmpty && !after.startsWith(' ')
+    _before = text.substring(0, at);
+    _after = text.substring(at);
+    _shownWords = '';
+    _dictating = true;
+    _focus.unfocus();
+  }
+
+  /// The draft with [words] where the cursor was, a space either side where
+  /// the field's own text would otherwise run into them, and the cursor
+  /// after them (in front of the space that keeps them apart from what
+  /// followed).
+  TextEditingValue _compose(String words) {
+    if (words.isEmpty) {
+      return TextEditingValue(
+        text: '$_before$_after',
+        selection: TextSelection.collapsed(offset: _before.length),
+      );
+    }
+    final opened = _before.isNotEmpty && !_before.endsWith(' ')
+        ? ' $words'
+        : words;
+    final cursor = _before.length + opened.length;
+    final closed = _after.isNotEmpty && !_after.startsWith(' ')
         ? '$opened '
         : opened;
-    widget.controller.value = TextEditingValue(
-      text: '$before$closed$after',
+    return TextEditingValue(
+      text: '$_before$closed$_after',
       selection: TextSelection.collapsed(offset: cursor),
     );
+  }
+
+  void _showWords(String words) {
+    _shownWords = words;
+    widget.controller.value = _compose(words);
+    _followLatest();
+  }
+
+  /// Land a transcript where the cursor was, and hand the field back with the
+  /// cursor after it. Nothing sends: it is a draft like any other.
+  void _land(String transcript) {
+    widget.controller.value = _compose(transcript);
+    _dictating = false;
+    _shownWords = '';
     _focus.requestFocus();
+    _followLatest();
+  }
+
+  /// The dictation is over without a transcript. With [restore], words it
+  /// drew are taken back out; a field it never wrote into is left alone.
+  void _endDictation({required bool restore}) {
+    if (!_dictating) return;
+    if (restore && _shownWords.isNotEmpty) {
+      widget.controller.value = _compose('');
+    }
+    _dictating = false;
+    _shownWords = '';
+  }
+
+  /// Keep the latest line in view as words arrive (device smoke, 2026-11-13:
+  /// a long dictation sat on its first line with the rest out of sight).
+  /// Only when the words end the draft: words dropped mid-text leave the
+  /// view where the cursor is.
+  void _followLatest() {
+    if (_after.isNotEmpty) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_fieldScroll.hasClients) return;
+      final position = _fieldScroll.position;
+      if (position.pixels != position.maxScrollExtent) {
+        _fieldScroll.jumpTo(position.maxScrollExtent);
+      }
+    });
   }
 
   @override
@@ -319,7 +427,10 @@ class _MixPromptInputState extends State<MixPromptInput>
     // The composer locked while someone was talking — a mix is starting, or
     // the owner took the field away. The clip goes rather than the mic
     // staying open behind a field nobody can reach.
-    if (widget.busy && !oldWidget.busy) unawaited(_voice?.cancel() ?? _idle);
+    if (widget.busy && !oldWidget.busy) {
+      unawaited(_voice?.cancel() ?? _idle);
+      _endDictation(restore: true);
+    }
   }
 
   static final Future<void> _idle = Future<void>.value();
@@ -335,8 +446,9 @@ class _MixPromptInputState extends State<MixPromptInput>
     // is thrown away rather than transcribed into a field that is gone.
     final voice = _voice;
     _voice = null;
-    voice?.removeListener(_changed);
+    voice?.removeListener(_voiceChanged);
     unawaited(voice?.cancel() ?? Future<void>.value());
+    _fieldScroll.dispose();
     WidgetsBinding.instance.removeObserver(this);
     widget.controller.removeListener(_changed);
     _focus.removeListener(_changed);
@@ -378,7 +490,7 @@ class _MixPromptInputState extends State<MixPromptInput>
     final listening = _listening;
     final transcribing = voice?.state == VoiceComposerState.transcribing;
     // The board shows the composer lit while the mic is open, even though the
-    // field itself is out of the tree and holds no focus.
+    // field gives up its focus (and the keyboard) while the listener speaks.
     final focused = _focus.hasFocus || listening;
     final failure = voice?.failure;
 
@@ -390,17 +502,30 @@ class _MixPromptInputState extends State<MixPromptInput>
       key: const Key('prompt-field'),
       controller: widget.controller,
       focusNode: _focus,
-      readOnly: widget.busy,
+      // Read-only while the microphone is writing into it.
+      readOnly: widget.busy || listening,
+      scrollController: _fieldScroll,
       minLines: 1,
-      maxLines: 3,
+      maxLines: MixPromptInput.maxLines,
       maxLength: 2000,
       textInputAction: TextInputAction.send,
       onSubmitted: (_) => _submit(),
+      // A tap anywhere else puts the keyboard away: iOS text fields do not
+      // do it on their own (device smoke, 2026-11-13). The composer's own
+      // keys and anything an owner wraps in a [TextFieldTapRegion] (Home's
+      // pills) count as the field, so they keep it.
+      onTapOutside: (_) => _focus.unfocus(),
       cursorColor: tokens.plum,
-      style: fieldStyle,
+      // The words heard live wait in muted ink while the better pass over
+      // them is on its way, then land at full ink.
+      style: transcribing
+          ? fieldStyle.copyWith(color: tokens.muted)
+          : fieldStyle,
       decoration: InputDecoration(
         hint: Text(
-          widget.placeholder ?? _rotation[_example % _rotation.length],
+          listening
+              ? (transcribing ? 'Transcribing…' : 'Listening…')
+              : widget.placeholder ?? _rotation[_example % _rotation.length],
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           softWrap: false,
@@ -417,69 +542,90 @@ class _MixPromptInputState extends State<MixPromptInput>
       ),
     );
 
+    // The row's own height inside the 1 pt border: the keys fill it, and a
+    // single line of draft is centred in it.
+    const rowHeight = MixPromptInput.minHeight - 4;
+
     final surface = ClipRRect(
       borderRadius: _fieldRadius,
       child: Stack(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 2, 4, 2),
+            padding: const EdgeInsets.fromLTRB(
+              MixPromptInput.textInset - 1,
+              1,
+              1,
+              1,
+            ),
+            // The keys sit at the foot of a long draft, as Messages' do.
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(left: 8),
-                    child: listening
-                        ? _listeningLine(tokens, transcribing: transcribing)
-                        : field,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minHeight: rowHeight),
+                    // The field stays while the microphone is open: the words
+                    // stream into it (device smoke, 2026-11-13).
+                    child: Align(alignment: Alignment.centerLeft, child: field),
                   ),
                 ),
-                if (widget.showVoiceInput)
-                  _iconKey(
-                    key: const Key('voice-input'),
-                    tooltip: listening ? 'Stop listening' : 'Speak your idea',
-                    onPressed: widget.busy || transcribing
-                        ? null
-                        : () => unawaited(_toggleVoice()),
-                    child: Icon(
-                      listening ? Icons.pause : Icons.mic_none,
-                      size: 18,
-                      color: listening ? tokens.errInk : tokens.plum,
-                    ),
-                  ),
-                // Nothing to send, nothing drawn: the key arrives beside the
-                // mic with the first character (smoke round two, note 9).
-                if (hasText || widget.busy)
-                  _iconKey(
-                    key: const Key('start-session'),
-                    tooltip: widget.sendLabel,
-                    onPressed: widget.busy || listening || !hasText
-                        ? null
-                        : _submit,
-                    child: widget.busy
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : DecoratedBox(
-                            key: const Key('send-surface'),
-                            decoration: BoxDecoration(
-                              color: isDark
-                                  ? Colors.white.withValues(alpha: 0.12)
-                                  : tokens.plum.withValues(alpha: 0.10),
-                              borderRadius: _sendRadius,
+                // While the DJ works the composer is a plain field: the
+                // working cassette in the transcript (or Home's starting
+                // state) already says so, and a second spinner in the send
+                // key said it twice (device smoke, 2026-11-13).
+                if (!widget.busy)
+                  TextFieldTapRegion(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (widget.showVoiceInput && listening)
+                          _meter(transcribing: transcribing),
+                        if (widget.showVoiceInput)
+                          _iconKey(
+                            key: const Key('voice-input'),
+                            tooltip: listening
+                                ? 'Stop listening'
+                                : 'Speak your idea',
+                            onPressed: transcribing
+                                ? null
+                                : () => unawaited(_toggleVoice()),
+                            child: Icon(
+                              listening ? Icons.pause : Icons.mic_none,
+                              size: 18,
+                              color: listening ? tokens.errInk : tokens.plum,
                             ),
-                            child: SizedBox.square(
-                              dimension: 30,
-                              child: Center(
-                                child: Icon(
-                                  Icons.arrow_upward,
-                                  size: 18,
-                                  color: tokens.plum,
+                          ),
+                        // Nothing to send, nothing drawn: the key arrives
+                        // beside the mic with the first character (smoke
+                        // round two, note 9).
+                        // No send while the microphone is writing either.
+                        if (hasText && !listening)
+                          _iconKey(
+                            key: const Key('start-session'),
+                            tooltip: widget.sendLabel,
+                            onPressed: _submit,
+                            child: DecoratedBox(
+                              key: const Key('send-surface'),
+                              decoration: BoxDecoration(
+                                color: isDark
+                                    ? Colors.white.withValues(alpha: 0.12)
+                                    : tokens.plum.withValues(alpha: 0.10),
+                                borderRadius: _sendRadius,
+                              ),
+                              child: SizedBox.square(
+                                dimension: 28,
+                                child: Center(
+                                  child: Icon(
+                                    Icons.arrow_upward,
+                                    size: 18,
+                                    color: tokens.plum,
+                                  ),
                                 ),
                               ),
                             ),
                           ),
+                      ],
+                    ),
                   ),
               ],
             ),
@@ -494,18 +640,24 @@ class _MixPromptInputState extends State<MixPromptInput>
               color: Colors.white.withValues(alpha: isDark ? 0.06 : 0.7),
             ),
           ),
-          // The stripe fades out under focus rather than leaving the tree:
-          // changing the composer's structure would reparent the field and
-          // cost it the keyboard.
+          // The prism along the bottom edge, as the tape buttons wear it,
+          // clear of the rounded corners (device smoke, 2026-11-13: the
+          // upright stripe sat cramped against the draft once the padding
+          // went). Focus hands it to the full prism ring. It fades rather
+          // than leaving the tree: changing the composer's structure would
+          // reparent the field and cost it the keyboard.
           Positioned(
-            left: 8,
-            top: 0,
+            left: MixPromptInput.stripeInset,
+            right: MixPromptInput.stripeInset,
             bottom: 0,
-            child: Center(
-              child: Opacity(
-                key: const Key('prompt-stripe'),
-                opacity: focused ? 0 : 1,
-                child: const PrismStripe(),
+            child: Opacity(
+              key: const Key('prompt-stripe'),
+              opacity: focused ? 0 : 0.85,
+              child: const PrismStripe(
+                horizontal: true,
+                width: double.infinity,
+                height: MixPromptInput.stripeHeight,
+                borderRadius: BorderRadius.all(Radius.circular(1)),
               ),
             ),
           ),
@@ -519,7 +671,12 @@ class _MixPromptInputState extends State<MixPromptInput>
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (widget.attachment != null) widget.attachment!,
+          // In line with the field's edge, inside its 2 pt focus ring.
+          if (widget.attachment != null)
+            Padding(
+              padding: const EdgeInsets.only(left: 2),
+              child: widget.attachment,
+            ),
           Container(
             padding: const EdgeInsets.all(2),
             decoration: BoxDecoration(
@@ -527,8 +684,9 @@ class _MixPromptInputState extends State<MixPromptInput>
               borderRadius: _ringRadius,
             ),
             child: Container(
+              key: MixPromptInput.surfaceKey,
               constraints: const BoxConstraints(
-                minHeight: MixtapeMetrics.composerHeight,
+                minHeight: MixPromptInput.minHeight,
               ),
               decoration: BoxDecoration(
                 color: tokens.field,
@@ -554,31 +712,18 @@ class _MixPromptInputState extends State<MixPromptInput>
     );
   }
 
-  /// What the field says while the mic is open: the board's prism meter and
-  /// one word of state, in plum.
-  Widget _listeningLine(MixtapeTokens tokens, {required bool transcribing}) =>
-      Semantics(
-        container: true,
-        label: transcribing ? 'Transcribing' : 'Listening',
-        excludeSemantics: true,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              VoiceLevelMeter(level: _voice?.level ?? 0),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  transcribing ? 'Transcribing…' : 'Listening…',
-                  style: tokens.body.copyWith(color: tokens.plum),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
+  /// The board's prism meter, beside the key that stops the microphone, and
+  /// the word VoiceOver hears for where the dictation is.
+  Widget _meter({required bool transcribing}) => Semantics(
+    container: true,
+    liveRegion: true,
+    label: transcribing ? 'Transcribing' : 'Listening',
+    excludeSemantics: true,
+    child: Padding(
+      padding: const EdgeInsets.only(left: 6, right: 2),
+      child: VoiceLevelMeter(level: _voice?.level ?? 0),
+    ),
+  );
 
   /// The one sentence a failed attempt leaves under the field, and — for a
   /// microphone only Settings can give back — the way there.
@@ -617,7 +762,9 @@ class _MixPromptInputState extends State<MixPromptInput>
     ),
   );
 
-  /// A 40 pt key inside a 44 pt target, per the board's composer grid.
+  /// A key [MixPromptInput.keyWidth] wide and the row's full height, at the
+  /// surface's trailing edge (device smoke, 2026-11-13: down from 44 pt
+  /// squares, which left the draft little room).
   ///
   /// [tooltip] is also the spoken label: Flutter's own tooltip semantics are a
   /// hint, not a name, so the key would otherwise be announced as "button".
@@ -626,16 +773,17 @@ class _MixPromptInputState extends State<MixPromptInput>
     required String tooltip,
     required VoidCallback? onPressed,
     required Widget child,
-  }) => SizedBox.square(
-    dimension: MixtapeMetrics.minTarget,
+  }) => SizedBox(
+    width: MixPromptInput.keyWidth,
+    height: MixPromptInput.minHeight - 4,
     child: IconButton(
       key: key,
       tooltip: tooltip,
       onPressed: onPressed,
       padding: EdgeInsets.zero,
       constraints: const BoxConstraints(
-        minWidth: MixtapeMetrics.minTarget,
-        minHeight: MixtapeMetrics.minTarget,
+        minWidth: MixPromptInput.keyWidth,
+        minHeight: MixPromptInput.minHeight - 4,
       ),
       // Inside the button, so the label merges into its node instead of
       // sitting beside it.

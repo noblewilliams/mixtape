@@ -497,17 +497,20 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
                               for (final tab in AppTab.values)
                                 KeyedSubtree(
                                   key: ShellScreen.tabKey(tab),
-                                  child: Navigator(
-                                    key: _navigators[tab.index],
-                                    observers: [
-                                      _observers[tab.index],
-                                      _glassObservers[tab.index],
-                                    ],
-                                    onGenerateRoute: (settings) =>
-                                        MaterialPageRoute<void>(
-                                          settings: settings,
-                                          builder: (_) => _rootFor(tab),
-                                        ),
+                                  child: ShellTabScope(
+                                    index: tab.index,
+                                    child: Navigator(
+                                      key: _navigators[tab.index],
+                                      observers: [
+                                        _observers[tab.index],
+                                        _glassObservers[tab.index],
+                                      ],
+                                      onGenerateRoute: (settings) =>
+                                          MaterialPageRoute<void>(
+                                            settings: settings,
+                                            builder: (_) => _rootFor(tab),
+                                          ),
+                                    ),
                                   ),
                                 ),
                             ],

@@ -5,6 +5,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixtape/data/voice/live_dictation.dart';
 import 'package:mixtape/data/voice/speech_channel.dart';
 import 'package:mixtape/data/voice/voice_capture_service.dart';
 
@@ -123,5 +124,42 @@ void main() {
       isTrue,
       reason: 'the same phase the dock is compiled in',
     );
+  });
+
+  group('live dictation (device smoke 2026-11-13)', () {
+    test('the channels Dart calls are the ones the host opens, and kept alive', () {
+      expect(LiveDictation.channelName, 'mixtape/dictation');
+      expect(LiveDictation.eventsName, 'mixtape/dictation/events');
+      expect(transcriber, contains('"${LiveDictation.channelName}"'));
+      expect(transcriber, contains('"${LiveDictation.eventsName}"'));
+      for (final method in const ['start', 'stop', 'cancel']) {
+        expect(transcriber, contains('case "$method"'), reason: method);
+      }
+      expect(appDelegate, contains('LiveDictation(binaryMessenger:'));
+      expect(appDelegate, contains('private var liveDictation'));
+    });
+
+    test('words stream as they are heard, on the device where it can', () {
+      expect(transcriber, contains('SFSpeechAudioBufferRecognitionRequest'));
+      expect(transcriber, contains('shouldReportPartialResults = true'));
+      expect(transcriber, contains('requiresOnDeviceRecognition = true'));
+      expect(transcriber, contains('contextualStrings'));
+      expect(transcriber, contains('"type": "partial"'));
+      expect(transcriber, contains('"type": "level"'));
+    });
+
+    test('the same audio is kept as a clip for the server', () {
+      expect(transcriber, contains('installTap'));
+      expect(transcriber, contains('AVAudioFile('));
+      expect(transcriber, contains('kAudioFormatMPEG4AAC'));
+      expect(transcriber, contains('"path"'));
+      expect(transcriber, contains('"text"'));
+    });
+
+    test('it answers with the codes Dart maps', () {
+      for (final code in const ['SPEECH_DENIED', 'MIC_DENIED', 'UNAVAILABLE']) {
+        expect(transcriber, contains('code: "$code"'), reason: code);
+      }
+    });
   });
 }

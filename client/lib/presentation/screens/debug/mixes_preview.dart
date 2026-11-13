@@ -4,6 +4,12 @@
 /// Debug only — `main.dart` reaches it behind `kDebugMode` and
 /// `--dart-define=MIXTAPE_PREVIEW=mixes`, so it never ships in a release
 /// build. Archive, Unarchive and Rename change the made-up list in memory.
+///
+/// It also opens on the DJ's work in flight (device smoke, 2026-11-13): a
+/// new mix being made, one mix with a turn out and one with a reply waiting.
+/// Any mix opens a short made-up conversation with a playlist attached, and
+/// a message sent there takes the DJ 40 seconds, so the working caption and
+/// the Mixes rows can be watched.
 library;
 
 import 'package:flutter/material.dart';
@@ -11,9 +17,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../data/dj/dj_api.dart';
 import '../../../data/dj/dj_models.dart';
+import '../../../data/playlists/playlist_context_api.dart';
+import '../../../data/playlists/playlist_context_models.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/capabilities_provider.dart';
 import '../../providers/dj_providers.dart';
+import '../../providers/mix_activity_provider.dart';
+import '../../providers/playlist_context_provider.dart';
 import '../mixes_screen.dart';
 
 class MixesPreview extends StatefulWidget {
@@ -33,8 +43,23 @@ class _MixesPreviewState extends State<MixesPreview> {
       authProvider.overrideWith(_SignedIn.new),
       isAnonymousProvider.overrideWithValue(false),
       albumPicksEnabledProvider.overrideWithValue(true),
+      playlistContextApiProvider.overrideWithValue(_PreviewContextApi()),
     ],
   );
+
+  @override
+  void initState() {
+    super.initState();
+    // After the first frame: a provider must not change while the tree is
+    // being built.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final activity = _container.read(mixActivityProvider.notifier);
+      activity.beginNewMix('Sunrise run, steady 170 bpm');
+      activity.beginTurn('a1');
+      activity.beginTurn('a2')(ready: true);
+    });
+  }
 
   @override
   void dispose() {
@@ -198,6 +223,89 @@ class _PreviewApi implements DjApi {
       ),
     ];
   }
+
+  @override
+  Future<SessionDetail> getSession(String id) async {
+    await _latency;
+    final session = _sessions.firstWhere((s) => s.id == id);
+    final at = DateTime.now().subtract(const Duration(minutes: 5));
+    return SessionDetail(
+      session: _copyAt(session, queueVersion: 0),
+      messages: [
+        DjMessage(
+          id: '$id-1',
+          role: 'user',
+          content:
+              'i want to extend my running playlist, songs that match the '
+              'same bpm',
+          createdAt: at,
+        ),
+        DjMessage(
+          id: '$id-2',
+          role: 'dj',
+          content:
+              'Found it, "running beats for the streets". Want me to build '
+              'an extension from it, matching its BPM and vibe?',
+          createdAt: at,
+        ),
+      ],
+      queue: const [],
+    );
+  }
+
+  @override
+  Future<TurnResult> sendMessage(String id, String text) async {
+    await Future<void>.delayed(const Duration(seconds: 40));
+    return TurnResult(
+      djMessage: DjMessage(
+        id: '$id-${DateTime.now().millisecondsSinceEpoch}',
+        role: 'dj',
+        content: 'Here is a made-up reply: the preview has no DJ.',
+        createdAt: DateTime.now(),
+      ),
+      queue: const [],
+      queueVersion: 0,
+    );
+  }
+
+  @override
+  Future<void> postSessionEvent(String sessionId, String type) async {}
+
+  DjSession _copyAt(DjSession s, {required int queueVersion}) => DjSession(
+    id: s.id,
+    title: s.title,
+    status: s.status,
+    queueVersion: queueVersion,
+    updatedAt: s.updatedAt,
+    caseColor: s.caseColor,
+    kind: s.kind,
+    pick: s.pick,
+  );
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError('not wired in the Mixes preview');
+}
+
+/// Every made-up mix wears the same attached playlist.
+class _PreviewContextApi implements PlaylistContextApi {
+  static const _seed = PlaylistSeedState(
+    playlistId: 'p1',
+    revision: 1,
+    excludeSourceTracks: false,
+    status: PlaylistSeedStatus.ready,
+    name: 'running beats for the streets',
+    source: null,
+    fingerprint: null,
+    updatedAt: null,
+    entries: 24,
+    resolvedEntries: 24,
+    recordings: 24,
+    profile: null,
+  );
+
+  @override
+  Future<PlaylistSeedState?> getSessionSeed(String sessionId) async => _seed;
 
   @override
   dynamic noSuchMethod(Invocation invocation) =>

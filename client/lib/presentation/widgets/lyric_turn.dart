@@ -14,6 +14,9 @@
 /// key on either surface.
 library;
 
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
@@ -207,73 +210,230 @@ class _FailedLine extends StatelessWidget {
   }
 }
 
-/// `.loadtape`: a 56 pt cassette in the tape colour, hubs turning, then "The
-/// DJ is listening…", where the DJ's next line will land. Under reduced
-/// motion the hubs stand still; the status region always announces that the
-/// DJ is working.
-class WorkingCassette extends StatelessWidget {
+/// One step of the DJ's job, as the working caption tells it: from [from]
+/// into the turn, one of [lines].
+class DjWorkingPhase {
+  const DjWorkingPhase(this.from, this.lines);
+
+  final Duration from;
+  final List<String> lines;
+}
+
+/// What the working caption says as a turn goes on (device smoke,
+/// 2026-11-13: "The DJ is listening…" alone undersold everything the DJ
+/// does).
+///
+/// The phases follow the order a turn's work actually runs in — the ask is
+/// read, the library searched, records pulled, the order set, the tape
+/// written — on a clock, since a turn reports nothing until it is done. The
+/// first line is always the same; each later phase picks one of its lines
+/// by seed, so a turn reads differently from the last one but never changes
+/// its mind about a phase it is in.
+class DjWorkingPhrases {
+  const DjWorkingPhrases(this.phases);
+
+  final List<DjWorkingPhase> phases;
+
+  static const DjWorkingPhrases mix = DjWorkingPhrases([
+    DjWorkingPhase(Duration.zero, ['The DJ is listening…']),
+    DjWorkingPhase(Duration(seconds: 4), [
+      'Digging through the crates…',
+      'Flipping through your records…',
+      'Thumbing through the stacks…',
+    ]),
+    DjWorkingPhase(Duration(seconds: 11), [
+      'Pulling records that fit…',
+      'Checking the tempos…',
+      'Cueing up contenders…',
+    ]),
+    DjWorkingPhase(Duration(seconds: 20), [
+      'Sequencing the tracklist…',
+      'Working the crossfader…',
+      'Lining up the transitions…',
+    ]),
+    DjWorkingPhase(Duration(seconds: 32), [
+      'Pressing the tape…',
+      'Labelling the cassette…',
+      'Spooling it up…',
+    ]),
+    DjWorkingPhase(Duration(seconds: 50), [
+      'Still at the decks. Worth the wait…',
+    ]),
+  ]);
+
+  /// An album session's (board A1's line first: it says the catalogue check
+  /// too).
+  static const DjWorkingPhrases album = DjWorkingPhrases([
+    DjWorkingPhase(Duration.zero, [WorkingIndicator.albumCaption]),
+    DjWorkingPhase(Duration(seconds: 6), [
+      'Flipping through the record bins…',
+      'Pulling sleeves off the shelf…',
+    ]),
+    DjWorkingPhase(Duration(seconds: 16), [
+      'Reading the liner notes…',
+      'Checking the pressing…',
+    ]),
+    DjWorkingPhase(Duration(seconds: 30), ['Dropping the needle…']),
+  ]);
+
+  int _phaseAt(Duration elapsed) {
+    var index = 0;
+    for (var i = 0; i < phases.length; i++) {
+      if (elapsed >= phases[i].from) index = i;
+    }
+    return index;
+  }
+
+  /// The line [elapsed] into a turn.
+  String lineAt(Duration elapsed, {required int seed}) {
+    final index = _phaseAt(elapsed);
+    final lines = phases[index].lines;
+    return lines[(seed + index) % lines.length];
+  }
+
+  /// How long after [elapsed] the line next changes; null once it holds.
+  Duration? untilNext(Duration elapsed) {
+    final index = _phaseAt(elapsed);
+    if (index + 1 >= phases.length) return null;
+    return phases[index + 1].from - elapsed;
+  }
+}
+
+/// `.loadtape`: a small cassette in the tape colour, hubs turning, then a
+/// line of what the DJ is doing ([DjWorkingPhrases]), where the DJ's next
+/// line will land. Under reduced motion the hubs stand still and the line
+/// changes without a fade; the status region always announces one steady
+/// line, so VoiceOver is not read every step.
+class WorkingCassette extends StatefulWidget {
   const WorkingCassette({
     super.key,
     this.caseColor,
-    this.captionText,
+    this.phrases = DjWorkingPhrases.mix,
     this.announcementText,
+    this.startedAt,
+    this.seed,
   });
 
   /// The mix's tape colour; the default case before the first mix.
   final Color? caseColor;
 
-  /// What the line beside the cassette says; [caption] when null.
-  final String? captionText;
+  /// What the line beside the cassette says as the turn goes on.
+  final DjWorkingPhrases phrases;
 
   /// What VoiceOver hears; [announcement] when null.
   final String? announcementText;
+
+  /// When the turn went out. A conversation reopened mid-turn passes it so
+  /// the line picks up where it had got to; null starts from the first.
+  final DateTime? startedAt;
+
+  /// Which line each phase picks. Null takes one from [startedAt], or at
+  /// random; tests pass their own.
+  final int? seed;
 
   static const Key indicatorKey = WorkingIndicator.indicatorKey;
   static const Key cassetteKey = Key('working-cassette');
   static const Key captionKey = WorkingIndicator.captionKey;
 
-  /// `.loadtape .cs { width: 56px }`.
-  static const double cassetteWidth = 56;
+  /// Down from the board's 56, which read too large beside one line of
+  /// caption (device smoke, 2026-11-13).
+  static const double cassetteWidth = 44;
 
   static const String announcement = WorkingIndicator.announcement;
   static const String caption = 'The DJ is listening…';
 
-  /// An album session's line (board A1): says the catalogue check too.
+  /// An album session's first line (board A1): says the catalogue check too.
   static const String albumCaption = WorkingIndicator.albumCaption;
   static const String albumAnnouncement = WorkingIndicator.albumAnnouncement;
 
   @override
+  State<WorkingCassette> createState() => _WorkingCassetteState();
+}
+
+class _WorkingCassetteState extends State<WorkingCassette> {
+  late final int _seed =
+      widget.seed ??
+      widget.startedAt?.millisecondsSinceEpoch ??
+      math.Random().nextInt(1 << 16);
+
+  /// How far into the turn this widget came in, and the clock since.
+  late final Duration _offset = widget.startedAt == null
+      ? Duration.zero
+      : DateTime.now().difference(widget.startedAt!);
+  Duration _sinceMount = Duration.zero;
+  Timer? _timer;
+
+  Duration get _elapsed => _offset + _sinceMount;
+
+  @override
+  void initState() {
+    super.initState();
+    _schedule();
+  }
+
+  /// One timer per change of line, rather than a tick: nothing runs while
+  /// the line holds.
+  void _schedule() {
+    final wait = widget.phrases.untilNext(_elapsed);
+    if (wait == null) return;
+    _timer = Timer(wait, () {
+      if (!mounted) return;
+      setState(() => _sinceMount += wait);
+      _schedule();
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
+    final line = widget.phrases.lineAt(_elapsed, seed: _seed);
     return Semantics(
-      key: indicatorKey,
+      key: WorkingCassette.indicatorKey,
       container: true,
       liveRegion: true,
-      label: announcementText ?? announcement,
+      label: widget.announcementText ?? WorkingCassette.announcement,
       child: ExcludeSemantics(
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.symmetric(vertical: 2),
           child: Row(
             children: [
               Transform.rotate(
                 angle: -0.07,
                 child: CassetteTile(
-                  key: cassetteKey,
-                  width: cassetteWidth,
-                  caseColor: caseColor ?? CassetteTile.caseColors.first,
+                  key: WorkingCassette.cassetteKey,
+                  width: WorkingCassette.cassetteWidth,
+                  caseColor: widget.caseColor ?? CassetteTile.caseColors.first,
                   spinning: true,
                   shadow: true,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Flexible(
-                child: Text(
-                  captionText ?? caption,
-                  key: captionKey,
-                  style: tokens.meta.copyWith(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                    color: tokens.muted,
+                child: KeyedSubtree(
+                  key: WorkingCassette.captionKey,
+                  child: AnimatedSwitcher(
+                    duration: MediaQuery.disableAnimationsOf(context)
+                        ? Duration.zero
+                        : const Duration(milliseconds: 280),
+                    layoutBuilder: (current, previous) => Stack(
+                      alignment: Alignment.centerLeft,
+                      children: [...previous, ?current],
+                    ),
+                    child: Text(
+                      line,
+                      key: ValueKey(line),
+                      style: tokens.meta.copyWith(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: tokens.muted,
+                      ),
+                    ),
                   ),
                 ),
               ),

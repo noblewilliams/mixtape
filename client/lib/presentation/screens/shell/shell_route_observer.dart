@@ -38,3 +38,22 @@ class ShellRouteObserverScope extends InheritedWidget {
   bool updateShouldNotify(ShellRouteObserverScope oldWidget) =>
       oldWidget.observer != observer;
 }
+
+/// Which tab a route lives in, for everything pushed onto that tab's
+/// navigator (the observer scope above wraps only the tab's root). A
+/// conversation asks it whether it is actually on screen: the shell keeps
+/// every tab's stack alive in an [IndexedStack], and a conversation pushed in
+/// a tab the listener has left is built but not seen.
+class ShellTabScope extends InheritedWidget {
+  const ShellTabScope({super.key, required this.index, required super.child});
+
+  /// The tab's index in the shell's tab order.
+  final int index;
+
+  /// The nearest tab, or null outside the shell.
+  static int? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<ShellTabScope>()?.index;
+
+  @override
+  bool updateShouldNotify(ShellTabScope oldWidget) => oldWidget.index != index;
+}

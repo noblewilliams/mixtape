@@ -11,6 +11,7 @@ import 'package:flutter/semantics.dart'
     show CustomSemanticsAction, SemanticsData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixtape/presentation/providers/mix_activity_provider.dart';
 import 'package:mixtape/presentation/widgets/foundation/tape_button.dart';
 import 'package:mixtape/data/api/api_client.dart';
 import 'package:mixtape/data/auth/token_store.dart';
@@ -268,6 +269,120 @@ Future<void> _pump(
 }
 
 void main() {
+  group('the DJ at work (device smoke 2026-11-13)', () {
+    CassetteTile tileOf(WidgetTester tester, String id) => tester.widget<CassetteTile>(
+      find.descendant(
+        of: find.byKey(Key('session-$id')),
+        matching: find.byType(CassetteTile),
+      ),
+    );
+
+    testWidgets('a mix with a turn out turns, then wears a dot when it lands', (
+      tester,
+    ) async {
+      final api = FakeDjApi()
+        ..onListSessions = () async => [
+          _session(id: 'a', title: 'Run club'),
+          _session(id: 'b', title: 'Sunday'),
+        ];
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+
+      final end = container.read(mixActivityProvider.notifier).beginTurn('a');
+      await tester.pump();
+      expect(tileOf(tester, 'a').spinning, isTrue);
+      expect(tileOf(tester, 'b').spinning, isFalse);
+      expect(find.text(MixHomeRow.workingSubtitle), findsOneWidget);
+
+      end(ready: true);
+      await tester.pumpAndSettle();
+      expect(tileOf(tester, 'a').spinning, isFalse);
+      expect(find.byKey(MixHomeRow.readyKey('a')), findsOneWidget);
+      expect(find.byKey(MixHomeRow.readyKey('b')), findsNothing);
+    });
+
+    testWidgets('a turn landing re-reads the list, so its row moves up', (
+      tester,
+    ) async {
+      var reads = 0;
+      final api = FakeDjApi()
+        ..onListSessions = () async {
+          reads++;
+          return [_session(id: 'a')];
+        };
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+      expect(reads, 1);
+
+      final end = container.read(mixActivityProvider.notifier).beginTurn('a');
+      await tester.pump();
+      end(ready: true);
+      await tester.pumpAndSettle();
+      expect(reads, 2);
+    });
+
+    testWidgets('a new mix being made sits at the top until it is named', (
+      tester,
+    ) async {
+      final api = FakeDjApi()
+        ..onListSessions = () async => [_session(id: 'a', title: 'Run club')];
+      final container = _makeContainer(api);
+      var startMix = 0;
+      await _pump(tester, container, onStartMix: () => startMix++);
+
+      final end = container
+          .read(mixActivityProvider.notifier)
+          .beginNewMix('a rainy drive home', knownIds: {'a'});
+      await tester.pump();
+      expect(find.byKey(MixesScreen.pendingKey), findsOneWidget);
+      expect(find.text('a rainy drive home'), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.byKey(MixesScreen.pendingKey)).dy,
+        lessThan(tester.getTopLeft(find.byKey(const Key('session-a'))).dy),
+      );
+      expect(
+        tester
+            .widget<CassetteTile>(
+              find.descendant(
+                of: find.byKey(MixesScreen.pendingKey),
+                matching: find.byType(CassetteTile),
+              ),
+            )
+            .spinning,
+        isTrue,
+      );
+      // It is being made on Home: that is where a tap goes.
+      await tester.tap(find.byKey(MixesScreen.pendingKey));
+      expect(startMix, 1);
+
+      end();
+      await tester.pumpAndSettle();
+      expect(find.byKey(MixesScreen.pendingKey), findsNothing);
+    });
+
+    testWidgets('once the list lists it, the new mix turns in its own row', (
+      tester,
+    ) async {
+      final api = FakeDjApi()
+        ..onListSessions = () async => [
+          _session(id: 'new', title: 'A rainy drive home'),
+          _session(id: 'a', title: 'Run club'),
+        ];
+      final container = _makeContainer(api);
+      container
+          .read(mixActivityProvider.notifier)
+          .beginNewMix('a rainy drive home', knownIds: {'a'});
+      // Not settled: a turning tape never settles.
+      await _pump(tester, container, settle: false);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(find.byKey(MixesScreen.pendingKey), findsNothing);
+      expect(tileOf(tester, 'new').spinning, isTrue);
+      expect(tileOf(tester, 'a').spinning, isFalse);
+    });
+  });
+
   group('chrome', () {
     testWidgets('title and segmented control are up while sessions load, '
         'over three skeleton rows', (tester) async {

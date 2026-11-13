@@ -127,10 +127,8 @@ void main() {
         .read(sessionPlaylistContextProvider('mix').notifier)
         .select(playlistId: null);
     await tester.pump();
-    expect(
-      tester.widget<IconButton>(find.byKey(const Key('start-session'))).onPressed,
-      isNull,
-    );
+    // Busy, the composer is a plain field: no send key at all.
+    expect(find.byKey(const Key('start-session')), findsNothing);
     expect(find.text('keep my draft'), findsOneWidget);
     pending.complete(seed(2));
     await write;

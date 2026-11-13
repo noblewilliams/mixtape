@@ -23,6 +23,8 @@ import '../widgets/foundation/large_title_scaffold.dart';
 import '../widgets/foundation/square_art.dart';
 import '../widgets/foundation/status_word.dart';
 import '../widgets/energy_journey.dart';
+import '../widgets/composer_plus_button.dart';
+import '../widgets/foundation/mixtape_menu.dart';
 import '../widgets/home_panel.dart';
 import '../widgets/mix_prompt_input.dart';
 import '../widgets/keep_sheet.dart';
@@ -118,6 +120,11 @@ class HomeScreen extends ConsumerStatefulWidget {
       _albumWord.hasMatch(draft) || _formatWord.hasMatch(draft);
   static final RegExp _albumWord = RegExp(r'\balbums?\b', caseSensitive: false);
   static final RegExp _formatWord = RegExp(r'\b(?:LP|EP)s?\b');
+
+  /// The + beside the composer, and its one item (device smoke,
+  /// 2026-11-13).
+  static const Key plusKey = Key('home-plus');
+  static const Key plusPlaylistKey = Key('home-plus-playlist');
 
   static const Key hintKey = Key('home-hint');
   static const Key startingKey = Key('home-starting');
@@ -335,6 +342,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
           choice.playlist,
           excludeSourceTracks: choice.excludeSourceTracks,
         );
+  }
+
+  /// The + menu: whatever can be added to the prompt before it is sent.
+  /// For now that is a playlist; the shape keeps its chip in the row above.
+  Future<void> _plusMenu(BuildContext anchor) async {
+    if (_starting) return;
+    final choice = await showMixtapeMenu<String>(
+      anchor,
+      actions: const [
+        MixtapeMenuAction(
+          key: HomeScreen.plusPlaylistKey,
+          value: 'playlist',
+          label: 'Start from a playlist',
+          icon: MixMenuIcons.startFromPlaylist,
+        ),
+      ],
+    );
+    if (!mounted || choice != 'playlist') return;
+    await _pickInspiration();
   }
 
   List<HomeRefinement> _refinements() => [
@@ -709,62 +735,80 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
               left: 0,
               right: 0,
               bottom: 0,
-              child: KeyedSubtree(
-                key: _panelKey,
-                child: HomePanel(
-                  composerKey: _composerKey,
-                  obscured: _obscured,
-                  controller: _promptController,
-                  focusNode: _promptFocus,
-                  busy: _starting,
-                  error: _error,
-                  onSubmit: _submit,
-                  modeControl: albumsOffered ? _modeControl() : null,
-                  // Absent under Album, not hidden: no shape is sent there.
-                  shapeControl: album
-                      ? null
-                      : EnergyControl(
-                          compact: true,
-                          controller: _promptController,
-                          enabled: !_starting,
-                          selectedArc: _arc,
-                          onArcChanged: (arc) => setState(() {
-                            _arc = arc;
-                            // A shape the listener just changed clears a
-                            // stale "too long" line from an earlier attempt.
-                            if (_error == energySheetTooLong) _error = null;
-                          }),
-                        ),
-                  switched: _switched && album,
-                  onKeepMix: _keepMix,
-                  sendLabel: album
-                      ? HomeScreen.albumSendLabel
-                      : MixPromptInput.defaultSendLabel,
-                  starterPrompts: album
-                      ? HomeScreen.albumStarters
-                      : MixPromptInput.examples,
-                  routineSuggestion: !album,
-                  // Under Album the record placeholder holds even with a
-                  // playlist attached; the attachment chip says which one.
-                  placeholder: album
-                      ? HomeScreen.albumPlaceholder
-                      : _inspiration == null
-                      ? null
-                      : 'Something like ${_inspiration!.name}, but…',
-                  refinements: _inspiration == null ? null : _refinements(),
-                  attachment: _inspiration == null
-                      ? null
-                      : InspirationChip(
-                          name: _inspiration!.name,
-                          excludeSourceTracks: _excludeSourceTracks,
-                          onPick: _starting ? null : _pickInspiration,
-                          onToggleExclude: _starting ? null : _toggleExclude,
-                          onDetach: _starting
-                              ? null
-                              : () => ref
-                                    .read(newMixInspirationProvider.notifier)
-                                    .clear(),
-                        ),
+              // Measured again whenever it changes size on its own (a draft
+              // growing a line), not only when Home builds.
+              child: NotificationListener<SizeChangedLayoutNotification>(
+                onNotification: (_) {
+                  _measurePanel();
+                  return true;
+                },
+                child: SizeChangedLayoutNotifier(
+                  child: KeyedSubtree(
+                    key: _panelKey,
+                    child: HomePanel(
+                      composerKey: _composerKey,
+                      obscured: _obscured,
+                      controller: _promptController,
+                      focusNode: _promptFocus,
+                      busy: _starting,
+                      error: _error,
+                      onSubmit: _submit,
+                      leading: ComposerPlusButton(
+                        key: HomeScreen.plusKey,
+                        onPressed: _starting ? null : _plusMenu,
+                      ),
+                      modeControl: albumsOffered ? _modeControl() : null,
+                      // Absent under Album, not hidden: no shape is sent there.
+                      shapeControl: album
+                          ? null
+                          : EnergyControl(
+                              compact: true,
+                              controller: _promptController,
+                              enabled: !_starting,
+                              selectedArc: _arc,
+                              onArcChanged: (arc) => setState(() {
+                                _arc = arc;
+                                // A shape the listener just changed clears a
+                                // stale "too long" line from an earlier attempt.
+                                if (_error == energySheetTooLong) _error = null;
+                              }),
+                            ),
+                      switched: _switched && album,
+                      onKeepMix: _keepMix,
+                      sendLabel: album
+                          ? HomeScreen.albumSendLabel
+                          : MixPromptInput.defaultSendLabel,
+                      starterPrompts: album
+                          ? HomeScreen.albumStarters
+                          : MixPromptInput.examples,
+                      routineSuggestion: !album,
+                      // Under Album the record placeholder holds even with a
+                      // playlist attached; the attachment chip says which one.
+                      placeholder: album
+                          ? HomeScreen.albumPlaceholder
+                          : _inspiration == null
+                          ? null
+                          : 'Something like ${_inspiration!.name}, but…',
+                      refinements: _inspiration == null ? null : _refinements(),
+                      attachment: _inspiration == null
+                          ? null
+                          : InspirationChip(
+                              name: _inspiration!.name,
+                              excludeSourceTracks: _excludeSourceTracks,
+                              onPick: _starting ? null : _pickInspiration,
+                              onToggleExclude: _starting
+                                  ? null
+                                  : _toggleExclude,
+                              onDetach: _starting
+                                  ? null
+                                  : () => ref
+                                        .read(
+                                          newMixInspirationProvider.notifier,
+                                        )
+                                        .clear(),
+                            ),
+                    ),
+                  ),
                 ),
               ),
             ),

@@ -491,20 +491,17 @@ void main() {
         await tester.tap(find.byKey(const Key('start-session')));
         await tester.pump();
 
-        final button = tester.widget<IconButton>(
-          find.byKey(const Key('start-session')),
-        );
-        expect(button.onPressed, isNull);
+        // While it starts, the composer is a plain field: no send key, no
+        // spinner (the open space says the mix is being made).
+        expect(find.byKey(const Key('start-session')), findsNothing);
+        expect(find.byType(CircularProgressIndicator), findsNothing);
         final field = tester.widget<TextField>(
           find.byKey(const Key('prompt-field')),
         );
         expect(field.readOnly, isTrue);
 
-        // Tapping the (structurally disabled) button again is a no-op.
-        await tester.tap(
-          find.byKey(const Key('start-session')),
-          warnIfMissed: false,
-        );
+        // The keyboard's send while it starts is a no-op.
+        field.onSubmitted!('a prompt');
         await tester.pump();
         expect(createCalls, 1);
 
@@ -759,8 +756,14 @@ void main() {
           chipRect.center.dy,
           moreOrLessEquals(track.center.dy, epsilon: 1),
         );
-        // Control leading, chip trailing.
-        expect(track.left, moreOrLessEquals(composer.left, epsilon: 4));
+        // Control leading (over the + beside the composer), chip trailing.
+        expect(
+          track.left,
+          moreOrLessEquals(
+            tester.getRect(find.byKey(HomeScreen.plusKey)).left,
+            epsilon: 4,
+          ),
+        );
         expect(chipRect.right, moreOrLessEquals(composer.right, epsilon: 4));
         // 26 pt drawn, 44 pt to touch.
         expect(track.height, moreOrLessEquals(26, epsilon: 0.5));

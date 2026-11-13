@@ -9,6 +9,7 @@ import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/voice_providers.dart';
 import 'package:mixtape/presentation/widgets/ai_consent_sheet.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
+import 'package:mixtape/presentation/widgets/foundation/prism_stripe.dart';
 import 'package:mixtape/presentation/widgets/mix_prompt_input.dart';
 import 'package:mixtape/presentation/widgets/voice_level_meter.dart';
 
@@ -195,9 +196,161 @@ void main() {
       field.decoration?.contentPadding,
       const EdgeInsets.symmetric(vertical: MixPromptInput.fieldVerticalPadding),
     );
-    expect(MixPromptInput.fieldVerticalPadding, 9);
+    // Device smoke 2026-11-13: the field read as mostly padding.
+    expect(MixPromptInput.fieldVerticalPadding, 6);
 
     await tester.pumpWidget(const SizedBox());
+  });
+
+  group('compact composer (device smoke 2026-11-13)', () {
+    Future<void> pump(
+      WidgetTester tester,
+      TextEditingController controller, {
+      bool busy = false,
+      FocusNode? focusNode,
+      VoidCallback? onSubmit,
+    }) => tester.pumpWidget(
+      MaterialApp(
+        theme: MixtapeTheme.light(),
+        home: Scaffold(
+          body: Column(
+            children: [
+              const Expanded(
+                child: SizedBox.expand(key: Key('outside')),
+              ),
+              MixPromptInput(
+                controller: controller,
+                focusNode: focusNode,
+                busy: busy,
+                showVoiceInput: true,
+                onSubmit: onSubmit ?? () {},
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    testWidgets('one line of draft sits in a 40 pt surface', (tester) async {
+      final controller = TextEditingController(text: 'warm');
+      addTearDown(controller.dispose);
+      await pump(tester, controller);
+      await tester.pumpAndSettle();
+
+      expect(MixPromptInput.minHeight, 40);
+      expect(
+        tester.getSize(find.byKey(MixPromptInput.surfaceKey)).height,
+        moreOrLessEquals(MixPromptInput.minHeight, epsilon: 0.5),
+      );
+      // The text starts 16 pt in, not 22.
+      final surface = tester.getRect(find.byKey(MixPromptInput.surfaceKey));
+      final field = tester.getRect(find.byKey(const Key('prompt-field')));
+      expect(field.left - surface.left, lessThanOrEqualTo(17));
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the prism runs along the foot of the field, clear of the text', (
+      tester,
+    ) async {
+      final controller = TextEditingController(text: 'warm');
+      addTearDown(controller.dispose);
+      await pump(tester, controller);
+      await tester.pumpAndSettle();
+
+      final surface = tester.getRect(find.byKey(MixPromptInput.surfaceKey));
+      final stripe = tester.getRect(find.byType(PrismStripe));
+      final field = tester.getRect(find.byKey(const Key('prompt-field')));
+      expect(stripe.height, MixPromptInput.stripeHeight);
+      // Along the bottom edge, inside the 1 pt border, clear of the corners.
+      expect(surface.bottom - stripe.bottom, lessThanOrEqualTo(1.5));
+      expect(
+        stripe.left - surface.left,
+        greaterThanOrEqualTo(MixPromptInput.stripeInset),
+      );
+      expect(stripe.width, greaterThan(surface.width / 2));
+      // The draft's own room is untouched: nothing upright sits beside it.
+      expect(field.left - surface.left, lessThanOrEqualTo(15));
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a long draft grows to five lines with the keys at its foot', (
+      tester,
+    ) async {
+      final controller = TextEditingController(
+        text: 'one\ntwo\nthree\nfour\nfive\nsix',
+      );
+      addTearDown(controller.dispose);
+      await pump(tester, controller);
+      await tester.pumpAndSettle();
+
+      final field = tester.widget<TextField>(
+        find.byKey(const Key('prompt-field')),
+      );
+      expect(field.maxLines, 5);
+      final surface = tester.getRect(find.byKey(MixPromptInput.surfaceKey));
+      final send = tester.getRect(find.byKey(const Key('start-session')));
+      final mic = tester.getRect(find.byKey(const Key('voice-input')));
+      expect(surface.bottom - send.bottom, lessThanOrEqualTo(3));
+      expect(surface.bottom - mic.bottom, lessThanOrEqualTo(3));
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a busy composer is a plain field: no mic, no send, no spinner', (
+      tester,
+    ) async {
+      final controller = TextEditingController(text: 'something warm');
+      addTearDown(controller.dispose);
+      await pump(tester, controller, busy: true);
+      await tester.pump();
+
+      expect(find.byKey(const Key('prompt-field')), findsOneWidget);
+      expect(find.byKey(const Key('voice-input')), findsNothing);
+      expect(find.byKey(const Key('start-session')), findsNothing);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a tap outside the field puts the keyboard away', (
+      tester,
+    ) async {
+      final controller = TextEditingController();
+      final focus = FocusNode();
+      addTearDown(controller.dispose);
+      addTearDown(focus.dispose);
+      await pump(tester, controller, focusNode: focus);
+      await tester.tap(find.byKey(const Key('prompt-field')));
+      await tester.pump();
+      expect(focus.hasFocus, isTrue);
+
+      await tester.tapAt(tester.getCenter(find.byKey(const Key('outside'))));
+      await tester.pump();
+      expect(focus.hasFocus, isFalse);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the send key is part of the field, not a tap outside it', (
+      tester,
+    ) async {
+      final controller = TextEditingController();
+      final focus = FocusNode();
+      addTearDown(controller.dispose);
+      addTearDown(focus.dispose);
+      bool? focusedAtSend;
+      await pump(
+        tester,
+        controller,
+        focusNode: focus,
+        onSubmit: () => focusedAtSend = focus.hasFocus,
+      );
+      await tester.tap(find.byKey(const Key('prompt-field')));
+      await tester.enterText(find.byKey(const Key('prompt-field')), 'warm');
+      await tester.pump();
+
+      await tester.tap(find.byKey(const Key('start-session')));
+      await tester.pump();
+      expect(focusedAtSend, isTrue);
+      await tester.pumpWidget(const SizedBox());
+    });
   });
 
   testWidgets('a given placeholder replaces the rotating hints and stays put', (
@@ -442,13 +595,10 @@ void main() {
       await tester.tap(find.byKey(const Key('voice-input')));
       await tester.pumpAndSettle();
       expect(calls, ['start']);
+      // The field stays, saying it is listening; the meter sits by the key.
+      expect(find.byKey(const Key('prompt-field')), findsOneWidget);
       expect(find.text('Listening…'), findsOneWidget);
       expect(find.byType(VoiceLevelMeter), findsOneWidget);
-      expect(
-        find.byKey(const Key('prompt-field')),
-        findsNothing,
-        reason: 'the meter replaces the field while listening',
-      );
       expect(find.bySemanticsLabel('Listening'), findsOneWidget);
       expect(
         tester.getSemantics(find.byKey(const Key('voice-input'))).label,
@@ -456,11 +606,20 @@ void main() {
       );
       expect(find.byIcon(Icons.pause), findsOneWidget);
       expect(find.byIcon(Icons.mic_none), findsNothing);
+      expect(
+        tester.widget<TextField>(find.byKey(const Key('prompt-field'))).readOnly,
+        isTrue,
+        reason: 'the words are the microphone\'s while it is open',
+      );
+      expect(focus.hasFocus, isFalse, reason: 'the keyboard goes while speaking');
 
       controller.text = 'typed while listening';
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('start-session')));
-      expect(submits, 0, reason: 'send is off while the mic is open');
+      expect(
+        find.byKey(const Key('start-session')),
+        findsNothing,
+        reason: 'no send while the mic is open',
+      );
       controller.text = '';
 
       amplitude.add(0.8);
@@ -498,6 +657,118 @@ void main() {
       focus.dispose();
       controller.dispose();
       semantics.dispose();
+    });
+
+    testWidgets('words stream into the field as they are heard', (
+      tester,
+    ) async {
+      final controller = TextEditingController(text: 'Something for');
+      final focus = FocusNode();
+      addTearDown(controller.dispose);
+      addTearDown(focus.dispose);
+      final words = StreamController<String>.broadcast();
+      addTearDown(words.close);
+      final ready = Completer<String>();
+      final v = VoiceComposerController(
+        onStart: () async {},
+        onStop: () => ready.future,
+        onCancel: () async {},
+        partials: words.stream,
+      );
+      addTearDown(v.dispose);
+      await render(
+        tester,
+        controller: controller,
+        voiceController: v,
+        focusNode: focus,
+      );
+
+      await tester.tap(find.byKey(const Key('voice-input')));
+      await tester.pumpAndSettle();
+      words.add('a rainy');
+      await tester.pump();
+      expect(controller.text, 'Something for a rainy');
+      words.add('a rainy drive home');
+      await tester.pump();
+      expect(controller.text, 'Something for a rainy drive home');
+
+      // Stopped: the words stay while the better pass is on its way, then
+      // that pass replaces them.
+      await tester.tap(find.byKey(const Key('voice-input')));
+      await tester.pump();
+      expect(controller.text, 'Something for a rainy drive home');
+      ready.complete('a rainy drive home.');
+      await tester.pumpAndSettle();
+      expect(controller.text, 'Something for a rainy drive home.');
+      expect(controller.selection.baseOffset, controller.text.length);
+      expect(focus.hasFocus, isTrue);
+    });
+
+    testWidgets('a long dictation keeps its latest line in view', (
+      tester,
+    ) async {
+      final controller = TextEditingController();
+      addTearDown(controller.dispose);
+      final words = StreamController<String>.broadcast();
+      addTearDown(words.close);
+      final v = VoiceComposerController(
+        onStart: () async {},
+        onStop: () => Completer<String>().future,
+        onCancel: () async {},
+        partials: words.stream,
+      );
+      addTearDown(v.dispose);
+      await render(tester, controller: controller, voiceController: v);
+
+      await tester.tap(find.byKey(const Key('voice-input')));
+      await tester.pumpAndSettle();
+      final long = List.generate(
+        40,
+        (i) => 'word$i',
+      ).join(' ');
+      words.add(long);
+      await tester.pump();
+      await tester.pump();
+
+      final scrollable = tester.state<ScrollableState>(
+        find.descendant(
+          of: find.byKey(const Key('prompt-field')),
+          matching: find.byType(Scrollable),
+        ),
+      );
+      final position = scrollable.position;
+      expect(position.maxScrollExtent, greaterThan(0));
+      expect(position.pixels, position.maxScrollExtent);
+    });
+
+    testWidgets('a dictation that fails puts the draft back as it was', (
+      tester,
+    ) async {
+      final controller = TextEditingController(text: 'Something for');
+      addTearDown(controller.dispose);
+      final words = StreamController<String>.broadcast();
+      addTearDown(words.close);
+      final ready = Completer<String>();
+      final v = VoiceComposerController(
+        onStart: () async {},
+        onStop: () => ready.future,
+        onCancel: () async {},
+        partials: words.stream,
+      );
+      addTearDown(v.dispose);
+      await render(tester, controller: controller, voiceController: v);
+
+      await tester.tap(find.byKey(const Key('voice-input')));
+      await tester.pumpAndSettle();
+      words.add('mumble');
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('voice-input')));
+      await tester.pump();
+      ready.completeError(
+        const VoiceInputException(VoiceInputFailure.failed, 'nope'),
+      );
+      await tester.pumpAndSettle();
+      expect(controller.text, 'Something for');
     });
 
     testWidgets('a transcript joins existing text with a space', (
@@ -843,8 +1114,7 @@ void main() {
         voiceController: v,
         busy: true,
       );
-      // Not `pumpAndSettle`: a locked composer spins its progress key.
-      await tester.pump();
+      await tester.pumpAndSettle();
       expect(calls, ['start', 'cancel']);
       expect(v.state, VoiceComposerState.idle);
       expect(find.text('Listening…'), findsNothing);
@@ -874,12 +1144,8 @@ void main() {
         voiceController: v,
         busy: true,
       );
-      expect(
-        tester
-            .widget<IconButton>(find.byKey(const Key('voice-input')))
-            .onPressed,
-        isNull,
-      );
+      // Busy, the composer is a plain field: the mic is not drawn at all.
+      expect(find.byKey(const Key('voice-input')), findsNothing);
       expect(calls, isEmpty);
 
       await tester.pumpWidget(const SizedBox());

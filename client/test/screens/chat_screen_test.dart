@@ -25,7 +25,10 @@ import 'package:mixtape/presentation/providers/library_sync_provider.dart';
 import 'package:mixtape/presentation/providers/music_platform_provider.dart';
 import 'package:mixtape/presentation/providers/playback_provider.dart';
 import 'package:mixtape/presentation/providers/playlist_context_provider.dart';
+import 'package:mixtape/presentation/providers/mix_activity_provider.dart';
 import 'package:mixtape/presentation/screens/chat_screen.dart';
+import 'package:mixtape/presentation/widgets/mix_prompt_input.dart';
+import 'package:mixtape/presentation/widgets/composer_plus_button.dart';
 import 'package:mixtape/presentation/screens/mix_history_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/screens/queue_screen.dart';
@@ -830,6 +833,94 @@ void main() {
     });
   });
 
+  group('the Mixes list\'s view (device smoke 2026-11-13)', () {
+    testWidgets('a conversation on screen takes its dot away', (tester) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(), messages: [], queue: []);
+      final container = _makeContainer(api);
+      container.read(mixActivityProvider.notifier).beginTurn('s1')(ready: true);
+      expect(container.read(mixActivityProvider).isReady('s1'), isTrue);
+
+      await _pump(tester, container);
+      expect(container.read(mixActivityProvider).isReady('s1'), isFalse);
+    });
+
+    testWidgets('a conversation under another route keeps its dot until shown', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(), messages: [], queue: []);
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+      final navigator = Navigator.of(tester.element(find.byType(ChatScreen)));
+      unawaited(
+        navigator.push(
+          MaterialPageRoute<void>(builder: (_) => const SizedBox()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      container.read(mixActivityProvider.notifier).beginTurn('s1')(ready: true);
+      await tester.pumpAndSettle();
+      expect(container.read(mixActivityProvider).isReady('s1'), isTrue);
+
+      navigator.pop();
+      await tester.pumpAndSettle();
+      expect(container.read(mixActivityProvider).isReady('s1'), isFalse);
+    });
+
+    testWidgets('a draft that grows a line lifts the transcript with the panel', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(),
+        messages: [_msg('m1', 'dj', 'The last line the DJ said')],
+        queue: [],
+      );
+      await _pump(tester, _makeContainer(api));
+      final line = find.text('The last line the DJ said');
+      final before = tester.getRect(line).bottom;
+
+      await tester.enterText(
+        find.byKey(const Key('prompt-field')),
+        'one\ntwo\nthree\nfour',
+      );
+      await tester.pumpAndSettle();
+      final panelTop = tester
+          .getRect(find.byKey(MixPromptInput.surfaceKey))
+          .top;
+      expect(tester.getRect(line).bottom, lessThan(before));
+      expect(tester.getRect(line).bottom, lessThan(panelTop));
+    });
+
+    testWidgets('reopened while an earlier turn is still out, the tape turns', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(),
+        messages: [_msg('m1', 'user', 'more like this')],
+        queue: [],
+      );
+      final container = _makeContainer(api);
+      final end = container
+          .read(mixActivityProvider.notifier)
+          .beginTurn('s1');
+
+      await _pump(tester, container, settle: false);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.byKey(WorkingCassette.indicatorKey), findsOneWidget);
+
+      end(ready: true);
+      await tester.pumpAndSettle();
+      expect(find.byKey(WorkingCassette.indicatorKey), findsNothing);
+    });
+  });
+
   group('a failed turn', () {
     testWidgets('renders an error turn keeping the user turn; Resend sends it again', (
       tester,
@@ -1144,7 +1235,18 @@ void main() {
       expect(find.byKey(const Key('chat-shape-chip')), findsNothing);
       expect(find.byType(InspirationChip), findsNothing);
       final plus = find.byKey(const Key('chat-plus'));
-      expect(tester.getSize(plus), const Size(44, 44));
+      // As tall as the compact composer's surface, and level with it.
+      expect(
+        tester.getSize(plus),
+        const Size.square(ComposerPlusButton.size),
+      );
+      expect(
+        tester.getRect(plus).bottom,
+        moreOrLessEquals(
+          tester.getRect(find.byKey(MixPromptInput.surfaceKey)).bottom,
+          epsilon: 1,
+        ),
+      );
 
       // The + menu holds a playlist to start from and, before the first
       // mix, Shape.
@@ -1289,7 +1391,10 @@ void main() {
 
       final chip = tester.widget<InspirationChip>(find.byType(InspirationChip));
       expect(chip.tone, InspirationChipTone.unavailable);
-      expect(find.text('Late nights · unavailable'), findsOneWidget);
+      expect(
+        tester.widget<InspirationChip>(find.byType(InspirationChip)).label,
+        'Late nights · unavailable',
+      );
       expect(find.byKey(InspirationChip.detachKey), findsOneWidget);
       expect(chip.onPick, isNotNull); // Replace stays available
     });

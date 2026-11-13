@@ -17,6 +17,7 @@ import '../../data/dj/dj_models.dart';
 import '../../data/listening/listening_models.dart' show FunnelEventType;
 import '../../data/playlists/playlist_context_models.dart';
 import 'auth_provider.dart';
+import 'mix_activity_provider.dart';
 import 'mix_operation_gate.dart';
 import 'onboarding_provider.dart';
 import 'playlist_context_provider.dart';
@@ -409,6 +410,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     // with this session's first build even if that build never lands (the
     // listener backed out, or a rebuild superseded it).
     final firstTurn = ref.read(firstTurnOffersProvider).take(sessionId);
+    _followInheritedTurn();
     final detail = await api.getSession(sessionId);
     if (!_current(generation)) return _fromDetail(detail);
     seedRead?.adopt(detail.playlistSeed);
@@ -417,6 +419,24 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     return loaded.copyWith(
       addMusic: loaded.addMusic ?? firstTurn.addMusic,
       suggestions: loaded.suggestions ?? firstTurn.suggestions,
+    );
+  }
+
+  /// A turn an earlier build sent is still out — the conversation was left
+  /// mid-turn and its transcript let go, and the request carried on. Its
+  /// reply lands in no state, so this build reads the session again once
+  /// that turn ends (device smoke, 2026-11-13). Once: a turn this build
+  /// sends lands in its own state.
+  void _followInheritedTurn() {
+    if (!ref.read(mixActivityProvider).isWorking(sessionId)) return;
+    var followed = false;
+    ref.listen<bool>(
+      mixActivityProvider.select((activity) => activity.isWorking(sessionId)),
+      (previous, working) {
+        if (followed || working || previous != true) return;
+        followed = true;
+        ref.invalidateSelf();
+      },
     );
   }
 
@@ -513,6 +533,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         .read(mixOperationProvider(sessionId).notifier)
         .acquire(MixOperation.sending);
     if (release == null) return;
+    // The Mixes list's view of it: working while out, ready once it lands
+    // (even after this conversation is gone), nothing if it is taken back.
+    final endActivity = ref
+        .read(mixActivityProvider.notifier)
+        .beginTurn(sessionId);
+    var landed = true;
 
     final userMessage = ChatMessage(
       _localMessage('user', text),
@@ -598,6 +624,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     } on AiConsentRequiredException {
       // Not a failed turn: the server wants consent first. The turn is
       // taken back and the screen asks, keeping the text.
+      landed = false;
       if (_current(generation)) {
         _mergeCurrent(
           (c) => c.copyWith(
@@ -676,6 +703,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       // point (including anything the branches above just wrote) — a no-op
       // if some other path (e.g. the stale refetch) already cleared it.
       release();
+      endActivity(ready: landed);
       if (_current(generation)) {
         _mergeCurrent(
           (c) => c.sending || c.remaking
@@ -1029,11 +1057,23 @@ final sessionStarterProvider =
         // A newer create replaces the last one's offer, and a failed one
         // leaves none.
         final offers = ref.read(firstTurnOffersProvider)..clear();
+        // The Mixes list shows it being made until the server names it.
+        final listed = ref.exists(sessionsProvider)
+            ? ref.read(sessionsProvider).value
+            : null;
+        final endActivity = ref
+            .read(mixActivityProvider.notifier)
+            .beginNewMix(
+              prompt,
+              knownIds: listed?.map((session) => session.id).toSet(),
+            );
+        String? made;
         try {
           final detail = await ref
               .read(djApiProvider)
               .createSession(prompt, playlistSeed: playlistSeed, kind: kind);
           ref.invalidate(sessionsProvider);
+          made = detail.session.id;
           offers.put(detail);
           // The milestone, funnel and Keep sheet notes are mix-only.
           if (kind == SessionKind.album) return detail.session.id;
@@ -1052,9 +1092,13 @@ final sessionStarterProvider =
                 .noteMix(detail.session.id, detail.queue.length);
           }
           return detail.session.id;
-        } on DjApiException {
+        } on DjApiException catch (e) {
           ref.invalidate(sessionsProvider);
+          // A failure after the row was written still leaves a mix to open.
+          made = e.sessionId;
           rethrow;
+        } finally {
+          endActivity(sessionId: made);
         }
       };
     });

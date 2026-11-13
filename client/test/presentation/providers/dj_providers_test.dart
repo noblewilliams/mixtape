@@ -13,6 +13,7 @@ import 'package:mixtape/data/onboarding/service_preference_store.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/device_providers.dart';
 import 'package:mixtape/presentation/providers/dj_providers.dart';
+import 'package:mixtape/presentation/providers/mix_activity_provider.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
 
 import '../../helpers/fake_listening_api.dart';
@@ -888,6 +889,133 @@ void main() {
         expect(state.queueVersion, 2); // untouched by the clear
       },
     );
+  });
+
+  group('what the Mixes list sees (device smoke 2026-11-13)', () {
+    test('a turn is working while out and ready once it lands', () async {
+      final completer = Completer<TurnResult>();
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(), messages: [], queue: []);
+      api.onSendMessage = (id, text) => completer.future;
+      final container = _makeContainer(api);
+      await container.read(chatProvider('s1').future);
+
+      final sent = container.read(chatProvider('s1').notifier).send('more');
+      expect(container.read(mixActivityProvider).isWorking('s1'), isTrue);
+      completer.complete(
+        TurnResult(djMessage: _msg('m2', 'dj', 'ok'), queue: [], queueVersion: 1),
+      );
+      await sent;
+      final activity = container.read(mixActivityProvider);
+      expect(activity.isWorking('s1'), isFalse);
+      expect(activity.isReady('s1'), isTrue);
+    });
+
+    test('a turn whose screen went away still lands as ready', () async {
+      final completer = Completer<TurnResult>();
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(), messages: [], queue: []);
+      api.onSendMessage = (id, text) => completer.future;
+      final container = _makeContainer(api);
+      final sub = container.listen(chatProvider('s1'), (_, _) {});
+      await container.read(chatProvider('s1').future);
+      final sent = container.read(chatProvider('s1').notifier).send('more');
+
+      // The conversation is left mid-turn: its transcript is let go.
+      sub.close();
+      await Future<void>.delayed(Duration.zero);
+      expect(container.read(mixActivityProvider).isWorking('s1'), isTrue);
+
+      completer.complete(
+        TurnResult(djMessage: _msg('m2', 'dj', 'ok'), queue: [], queueVersion: 1),
+      );
+      await sent;
+      expect(container.read(mixActivityProvider).isWorking('s1'), isFalse);
+      expect(container.read(mixActivityProvider).isReady('s1'), isTrue);
+    });
+
+    test('a conversation reopened mid-turn re-reads once the turn lands', () async {
+      final completer = Completer<TurnResult>();
+      var reads = 0;
+      final api = FakeDjApi();
+      api.onGetSession = (_) async {
+        reads++;
+        return SessionDetail(
+          session: _session(),
+          messages: [
+            _msg('m1', 'user', 'more'),
+            if (completer.isCompleted) _msg('m2', 'dj', 'ok'),
+          ],
+          queue: [],
+        );
+      };
+      api.onSendMessage = (id, text) => completer.future;
+      final container = _makeContainer(api);
+      var sub = container.listen(chatProvider('s1'), (_, _) {});
+      await container.read(chatProvider('s1').future);
+      final sent = container.read(chatProvider('s1').notifier).send('more');
+      sub.close();
+      await Future<void>.delayed(Duration.zero);
+
+      sub = container.listen(chatProvider('s1'), (_, _) {});
+      addTearDown(sub.close);
+      await container.read(chatProvider('s1').future);
+      expect(reads, 2);
+      expect(container.read(chatProvider('s1')).value!.messages, hasLength(1));
+
+      completer.complete(
+        TurnResult(djMessage: _msg('m2', 'dj', 'ok'), queue: [], queueVersion: 1),
+      );
+      await sent;
+      await container.read(chatProvider('s1').future);
+      await Future<void>.delayed(Duration.zero);
+      await container.read(chatProvider('s1').future);
+      expect(reads, 3);
+      expect(container.read(chatProvider('s1')).value!.messages, hasLength(2));
+    });
+
+    test('a new mix is pending while it is made, then ready', () async {
+      final completer = Completer<SessionDetail>();
+      final api = FakeDjApi();
+      api.onCreateSession = (_) => completer.future;
+      final container = _makeContainer(api);
+
+      final started = container.read(sessionStarterProvider)('rainy drive');
+      expect(container.read(mixActivityProvider).pending?.prompt, 'rainy drive');
+      completer.complete(
+        SessionDetail(session: _session(id: 'new-1'), messages: [], queue: []),
+      );
+      expect(await started, 'new-1');
+      final activity = container.read(mixActivityProvider);
+      expect(activity.pending, isNull);
+      expect(activity.isReady('new-1'), isTrue);
+    });
+
+    test('a new mix that failed with a row is ready; without one, nothing', () async {
+      final api = FakeDjApi();
+      api.onCreateSession = (_) async => throw DjApiException(
+        kind: 'upstream',
+        message: 'the DJ dropped the needle',
+        sessionId: 'kept',
+      );
+      final container = _makeContainer(api);
+      await expectLater(
+        container.read(sessionStarterProvider)('rainy drive'),
+        throwsA(isA<DjApiException>()),
+      );
+      expect(container.read(mixActivityProvider).pending, isNull);
+      expect(container.read(mixActivityProvider).isReady('kept'), isTrue);
+
+      api.onCreateSession = (_) async => throw ApiException(503, '');
+      await expectLater(
+        container.read(sessionStarterProvider)('again'),
+        throwsA(isA<ApiException>()),
+      );
+      expect(container.read(mixActivityProvider).pending, isNull);
+      expect(container.read(mixActivityProvider).ready, {'kept'});
+    });
   });
 
   group('sessionStarterProvider', () {

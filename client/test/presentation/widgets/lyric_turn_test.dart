@@ -106,7 +106,111 @@ void main() {
     expect(find.text('Resend'), findsOneWidget);
   });
 
-  testWidgets('working: a 56 pt cassette in the tape colour, announced', (
+  group('what the DJ is doing (device smoke 2026-11-13)', () {
+    testWidgets('the caption walks the DJ through the job, then holds', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await _pump(tester, const WorkingCassette(seed: 0));
+      final phases = DjWorkingPhrases.mix.phases;
+      expect(phases.first.lines.single, WorkingCassette.caption);
+      expect(find.text('The DJ is listening…'), findsOneWidget);
+
+      var elapsed = Duration.zero;
+      for (final phase in phases.skip(1)) {
+        final line = DjWorkingPhrases.mix.lineAt(phase.from, seed: 0);
+        expect(phase.lines, contains(line));
+        await tester.pump(
+          phase.from - const Duration(milliseconds: 1) - elapsed,
+        );
+        expect(find.text(line), findsNothing);
+        await tester.pump(const Duration(milliseconds: 1));
+        await tester.pump(const Duration(milliseconds: 400));
+        elapsed = phase.from + const Duration(milliseconds: 400);
+        expect(find.text(line), findsOneWidget);
+        // Whatever it says, VoiceOver hears one steady line.
+        expect(
+          tester.getSemantics(find.byKey(WorkingCassette.indicatorKey)).label,
+          'The DJ is working',
+        );
+      }
+      // The last line stays however long the turn takes.
+      await tester.pump(const Duration(minutes: 3));
+      expect(find.text(phases.last.lines.single), findsOneWidget);
+      handle.dispose();
+    });
+
+    test('every phase is a short line of its own, in order', () {
+      for (final phrases in [DjWorkingPhrases.mix, DjWorkingPhrases.album]) {
+        final seen = <String>{};
+        var last = const Duration(seconds: -1);
+        for (final phase in phrases.phases) {
+          expect(phase.from, greaterThan(last));
+          last = phase.from;
+          expect(phase.lines, isNotEmpty);
+          for (final line in phase.lines) {
+            expect(seen.add(line), isTrue, reason: 'repeated: $line');
+            expect(line.length, lessThanOrEqualTo(44), reason: line);
+          }
+        }
+        expect(phrases.phases.first.from, Duration.zero);
+      }
+    });
+
+    test('a seed picks one line per phase and keeps it', () {
+      const phrases = DjWorkingPhrases.mix;
+      final at = phrases.phases[2].from;
+      expect(phrases.lineAt(at, seed: 1), phrases.lineAt(at, seed: 1));
+      final lines = {
+        for (var seed = 0; seed < 12; seed++) phrases.lineAt(at, seed: seed),
+      };
+      expect(lines.length, phrases.phases[2].lines.length);
+    });
+
+    testWidgets('a turn already under way picks up where it had got to', (
+      tester,
+    ) async {
+      final phase = DjWorkingPhrases.mix.phases[3];
+      await _pump(
+        tester,
+        WorkingCassette(
+          seed: 0,
+          startedAt: DateTime.now().subtract(
+            phase.from + const Duration(seconds: 1),
+          ),
+        ),
+      );
+      expect(
+        find.text(DjWorkingPhrases.mix.lineAt(phase.from, seed: 0)),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('an album turn has its own lines', (tester) async {
+      await _pump(
+        tester,
+        const WorkingCassette(
+          seed: 0,
+          phrases: DjWorkingPhrases.album,
+          announcementText: WorkingCassette.albumAnnouncement,
+        ),
+      );
+      expect(find.text(WorkingCassette.albumCaption), findsOneWidget);
+      await tester.pump(DjWorkingPhrases.album.phases[1].from);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(
+        find.text(
+          DjWorkingPhrases.album.lineAt(
+            DjWorkingPhrases.album.phases[1].from,
+            seed: 0,
+          ),
+        ),
+        findsOneWidget,
+      );
+    });
+  });
+
+  testWidgets('working: a 44 pt cassette in the tape colour, announced', (
     tester,
   ) async {
     final handle = tester.ensureSemantics();
@@ -115,7 +219,8 @@ void main() {
     final cassette = tester.widget<CassetteTile>(
       find.byKey(WorkingCassette.cassetteKey),
     );
-    expect(cassette.width, 56);
+    // Device smoke 2026-11-13: down from 56, which read too large.
+    expect(cassette.width, 44);
     expect(cassette.caseColor, denim);
     expect(cassette.spinning, isTrue);
     expect(

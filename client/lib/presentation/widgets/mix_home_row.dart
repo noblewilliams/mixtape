@@ -26,7 +26,25 @@ class MixHomeRow extends StatefulWidget {
     this.showActionsButton = false,
     this.onVersionHistory,
     this.onCaseColor,
+    this.working = false,
+    this.ready = false,
   });
+
+  /// The DJ has a turn out on this mix: the tape's hubs turn and the line
+  /// under the title says so (device smoke, 2026-11-13).
+  final bool working;
+
+  /// A reply landed that the listener has not looked at: a dot at the
+  /// trailing edge until the conversation is opened.
+  final bool ready;
+
+  static const String workingSubtitle = 'The DJ is on it…';
+
+  /// The dot, for tests.
+  static Key readyKey(String id) => ValueKey('mix-ready-$id');
+
+  /// The dot's size.
+  static const double readyDotSize = 10;
 
   final DjSession session;
   final Future<bool> Function(String)? onCaseColor;
@@ -182,7 +200,9 @@ class _MixHomeRowState extends State<MixHomeRow> {
   }
 
   /// An album session names its current pick; everything else says when.
+  /// While the DJ works, it says that instead.
   String get _subtitle {
+    if (widget.working) return MixHomeRow.workingSubtitle;
     final pick = widget.session.pick;
     if (_isAlbum && pick != null) return '${pick.title} · ${pick.artist}';
     return relativeTime(widget.session.updatedAt);
@@ -194,6 +214,24 @@ class _MixHomeRowState extends State<MixHomeRow> {
     title: widget.session.title,
     caseColor: tapeColor(widget.session.caseColor),
     shadow: true,
+    spinning: widget.working,
+  );
+
+  /// The unread dot: plum, the app's own ink, and named for VoiceOver.
+  Widget _readyDot(BuildContext context) => Semantics(
+    key: MixHomeRow.readyKey(widget.session.id),
+    label: 'Ready',
+    child: Padding(
+      padding: const EdgeInsets.only(left: 8),
+      child: Container(
+        width: MixHomeRow.readyDotSize,
+        height: MixHomeRow.readyDotSize,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: context.tokens.plum,
+        ),
+      ),
+    ),
   );
 
   @override
@@ -281,7 +319,9 @@ class _MixHomeRowState extends State<MixHomeRow> {
         subtitle: _subtitle,
         isFirst: widget.isFirst,
         onTap: _busy ? null : widget.onOpen,
-        trailing: widget.showActionsButton
+        trailing: widget.ready && !widget.working
+            ? _readyDot(context)
+            : widget.showActionsButton
             ? IconButton(
                 key: ValueKey('mix-actions-${widget.session.id}'),
                 tooltip: 'Mix actions',

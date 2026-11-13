@@ -10,6 +10,7 @@ library;
 
 import 'dart:async';
 import 'dart:math' as math;
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -127,15 +128,16 @@ enum InspirationChipTone {
 
 enum _ChipAction { replace, exclude, detach }
 
-/// The attachment chip Home and the conversation share
+/// The attachment Home and the conversation share
 /// (`docs/mockups/approved/2026-09-17-mobile-home-states.md` → Playlist
 /// attached; frame W2).
 ///
-/// A tape label with the reel hole naming the exact playlist. Given
-/// [onToggleExclude] it carries the board's menu — Replace, Exclude its songs
-/// (checked when the flag is on), Detach — and tapping it opens that menu;
-/// without one it stays the plain chip the conversation has today, tapping
-/// through to [onPick] with a detach cross of its own.
+/// A compact pill: the playlist icon, the playlist's name and a cross, at the
+/// panel's leading edge over the + (device smoke, 2026-11-13: "Inspired by:"
+/// took a row of padding and text; an icon alone did not say which
+/// playlist). The cross detaches at once. Tapping the name opens the menu,
+/// headed by "Inspired by" and the full name: Replace, Exclude its songs
+/// (given [onToggleExclude]; checked when the flag is on), Detach.
 class InspirationChip extends StatelessWidget {
   const InspirationChip({
     super.key,
@@ -170,6 +172,13 @@ class InspirationChip extends StatelessWidget {
   static const Key excludeItemKey = Key('inspiration-exclude');
   static const Key detachItemKey = Key('inspiration-detach-item');
   static const Key menuNoteKey = Key('inspiration-menu-note');
+  static const Key nameItemKey = Key('inspiration-menu-name');
+
+  /// The pill's height: compact, under the 36 pt chips elsewhere.
+  static const double height = 32;
+
+  /// The cross's touch area, as tall as the pill.
+  static const double crossTarget = 32;
 
   static const String replaceLabel = 'Replace';
   static const String excludeLabel = 'Exclude its songs';
@@ -197,6 +206,15 @@ class InspirationChip extends StatelessWidget {
     (final n?, InspirationChipTone.insufficient) => '$n · too few songs',
   };
 
+  /// What the pill itself says: the playlist's name, and what is wrong with
+  /// it if anything. "Inspired by" is for the menu and VoiceOver; the icon
+  /// says it on screen.
+  String get shortLabel => switch ((name, tone)) {
+    (null, _) => '+ Playlist',
+    (final n?, InspirationChipTone.ready) => n,
+    _ => label,
+  };
+
   Color ink(BuildContext context) => switch (tone) {
     InspirationChipTone.ready => context.tokens.plum,
     InspirationChipTone.unavailable => context.tokens.warnInk,
@@ -204,15 +222,19 @@ class InspirationChip extends StatelessWidget {
   };
 
   /// The menu only exists for a selection that can be replaced or let go.
-  bool get _hasMenu =>
-      name != null &&
-      onToggleExclude != null &&
-      (onPick != null || onDetach != null);
+  bool get _hasMenu => name != null && (onPick != null || onDetach != null);
 
   Future<void> _openMenu(BuildContext context) async {
     final action = await showMixtapeMenu<_ChipAction>(
       context,
       actions: [
+        // The tile carries no words, so the menu says which playlist it is.
+        MixtapeMenuAction(
+          key: nameItemKey,
+          enabled: false,
+          label: label,
+          icon: CupertinoIcons.music_note_list,
+        ),
         // Not an action but a word of explanation, which the menu can only
         // carry as a disabled entry; kept keyed as the menu item was.
         if (tone == InspirationChipTone.insufficient)
@@ -227,10 +249,11 @@ class InspirationChip extends StatelessWidget {
             key: replaceItemKey,
             value: _ChipAction.replace,
             label: replaceLabel,
+            separatorBefore: true,
           ),
         // Excluding the source only means anything while the playlist can
         // still be read.
-        if (tone == InspirationChipTone.ready)
+        if (tone == InspirationChipTone.ready && onToggleExclude != null)
           MixtapeMenuAction(
             key: excludeItemKey,
             value: _ChipAction.exclude,
@@ -238,10 +261,12 @@ class InspirationChip extends StatelessWidget {
             label: excludeLabel,
           ),
         if (onDetach != null)
-          const MixtapeMenuAction(
+          MixtapeMenuAction(
             key: detachItemKey,
             value: _ChipAction.detach,
             label: detachLabel,
+            // Under the name when it is the only action.
+            separatorBefore: onPick == null,
           ),
       ],
     );
@@ -263,140 +288,98 @@ class InspirationChip extends StatelessWidget {
     final tint = ink(context);
     final menu = _hasMenu;
     final enabled = menu || onPick != null;
-    final cross = !menu && onDetach != null;
+    final cross = onDetach != null;
+    final open = enabled ? (menu ? () => _openMenu(context) : onPick) : null;
 
-    final chip = Container(
-      constraints: const BoxConstraints(minHeight: MixtapeMetrics.chipHeight),
-      padding: EdgeInsets.only(left: 11, right: cross ? 2 : 11),
-      decoration: BoxDecoration(
-        color: isDark ? Colors.white.withValues(alpha: 0.08) : _lightFill,
-        borderRadius: _radius,
-        border: Border.all(color: tint.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (tone == InspirationChipTone.insufficient)
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: Icon(Icons.error_outline, size: 14, color: tint),
-            )
-          else
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: SizedBox.square(
-                dimension: 11,
-                child: CustomPaint(painter: _ReelHole(tint)),
-              ),
-            ),
-          Flexible(
-            child: ExcludeSemantics(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: tint,
-                ),
-              ),
-            ),
-          ),
-          // The board's `.attach .chip .x`: the more glyph, because the chip
-          // opens a menu rather than detaching on the spot.
-          if (menu)
-            Padding(
-              padding: const EdgeInsets.only(left: 4),
-              child: Icon(Icons.more_horiz, size: 16, color: tint),
-            ),
-          if (cross)
-            Semantics(
-              button: true,
-              label: 'Detach playlist inspiration',
-              // `excludeSemantics` drops the detector's own tap action, and a
-              // node with no action cannot be activated by VoiceOver. Declare
-              // it here.
-              onTap: onDetach,
-              excludeSemantics: true,
-              child: GestureDetector(
-                key: detachKey,
-                behavior: HitTestBehavior.opaque,
-                onTap: onDetach,
-                child: SizedBox.square(
-                  dimension: MixtapeMetrics.chipHeight,
-                  child: Center(
-                    child: Icon(Icons.close, size: 16, color: tint),
+    return Opacity(
+      opacity: enabled || cross ? 1 : 0.5,
+      child: Container(
+        constraints: const BoxConstraints(minHeight: height),
+        decoration: BoxDecoration(
+          color: isDark ? Colors.white.withValues(alpha: 0.08) : _lightFill,
+          borderRadius: _radius,
+          border: Border.all(color: tint.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Semantics(
+                button: true,
+                enabled: enabled,
+                label: label,
+                onTap: open,
+                excludeSemantics: true,
+                child: GestureDetector(
+                  key: chipKey,
+                  behavior: HitTestBehavior.opaque,
+                  onTap: open,
+                  child: Padding(
+                    padding: EdgeInsets.only(left: 9, right: cross ? 2 : 11),
+                    child: ConstrainedBox(
+                      // Inside the 1 pt border.
+                      constraints: const BoxConstraints(minHeight: height - 2),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            tone == InspirationChipTone.insufficient
+                                ? Icons.error_outline
+                                : CupertinoIcons.music_note_list,
+                            size: 15,
+                            color: tint,
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              shortLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: tint,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ),
             ),
-        ],
-      ),
-    );
-
-    return Semantics(
-      button: true,
-      enabled: enabled,
-      label: label,
-      child: GestureDetector(
-        key: chipKey,
-        behavior: HitTestBehavior.opaque,
-        onTap: enabled ? (menu ? () => _openMenu(context) : onPick) : null,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(
-            minHeight: MixtapeMetrics.minTarget,
-          ),
-          child: Center(
-            widthFactor: 1,
-            child: Opacity(opacity: enabled ? 1 : 0.5, child: chip),
-          ),
+            if (cross)
+              Semantics(
+                button: true,
+                label: 'Detach playlist inspiration',
+                // `excludeSemantics` drops the detector's own tap action, and
+                // a node with no action cannot be activated by VoiceOver.
+                // Declare it here.
+                onTap: onDetach,
+                excludeSemantics: true,
+                child: GestureDetector(
+                  key: detachKey,
+                  behavior: HitTestBehavior.opaque,
+                  onTap: onDetach,
+                  child: SizedBox(
+                    width: crossTarget,
+                    height: height - 2,
+                    child: Center(
+                      child: Icon(
+                        Icons.close_rounded,
+                        size: 15,
+                        color: tint.withValues(alpha: 0.75),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );
   }
-}
-
-/// The tape reel's hole, as `LabelChip` draws it, in the chip's own ink.
-class _ReelHole extends CustomPainter {
-  const _ReelHole(this.ink);
-
-  final Color ink;
-
-  static const Color _edge = Color.fromRGBO(73, 64, 72, 0.35);
-  static const int _spokes = 8;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = size.center(Offset.zero);
-    final radius = size.shortestSide / 2;
-    final wedge = Rect.fromCircle(center: center, radius: radius - 1);
-    final paint = Paint()..color = ink;
-    const sweep = 18 * math.pi / 180;
-    const step = 2 * math.pi / _spokes;
-    for (var i = 0; i < _spokes; i++) {
-      canvas.drawArc(wedge, i * step, sweep, true, paint);
-    }
-    canvas.drawCircle(
-      center,
-      radius * 0.35,
-      Paint()
-        ..color = ink
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = radius * 0.2,
-    );
-    canvas.drawCircle(
-      center,
-      radius - 0.5,
-      Paint()
-        ..color = _edge
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1,
-    );
-  }
-
-  @override
-  bool shouldRepaint(_ReelHole oldDelegate) => oldDelegate.ink != ink;
 }
 
 /// The picker, as the board's sheet: search, the playlists as flush rows with

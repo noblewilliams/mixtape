@@ -17,6 +17,53 @@ void main() {
     queueVersion: 1,
     updatedAt: DateTime(2026),
   );
+  group('the DJ at work and a reply waiting (device smoke 2026-11-13)', () {
+    Future<void> pump(
+      WidgetTester tester, {
+      bool working = false,
+      bool ready = false,
+    }) => tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MixHomeRow(
+            session: session,
+            working: working,
+            ready: ready,
+            onOpen: () {},
+            onRename: (_) async => true,
+            onArchive: () async => true,
+            onRestore: () async => true,
+          ),
+        ),
+      ),
+    );
+
+    testWidgets('a mix with a turn out turns its hubs and says so', (
+      tester,
+    ) async {
+      await pump(tester, working: true);
+      expect(tester.widget<CassetteTile>(find.byType(CassetteTile)).spinning, isTrue);
+      expect(find.text(MixHomeRow.workingSubtitle), findsOneWidget);
+      expect(find.byKey(MixHomeRow.readyKey('one')), findsNothing);
+    });
+
+    testWidgets('a reply not yet looked at leaves a dot', (tester) async {
+      final handle = tester.ensureSemantics();
+      await pump(tester, ready: true);
+      expect(find.byKey(MixHomeRow.readyKey('one')), findsOneWidget);
+      expect(tester.widget<CassetteTile>(find.byType(CassetteTile)).spinning, isFalse);
+      expect(find.bySemanticsLabel(RegExp('Ready')), findsWidgets);
+      handle.dispose();
+    });
+
+    testWidgets('a quiet mix shows neither', (tester) async {
+      await pump(tester);
+      expect(tester.widget<CassetteTile>(find.byType(CassetteTile)).spinning, isFalse);
+      expect(find.byKey(MixHomeRow.readyKey('one')), findsNothing);
+      expect(find.text(MixHomeRow.workingSubtitle), findsNothing);
+    });
+  });
+
   testWidgets('row opens; menu renames without opening, retains failed draft', (
     tester,
   ) async {

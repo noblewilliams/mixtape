@@ -34,9 +34,11 @@ import '../providers/auth_provider.dart';
 import '../providers/library_sync_provider.dart';
 import '../providers/playlist_context_provider.dart';
 import '../providers/shell_providers.dart';
+import '../providers/mix_activity_provider.dart';
 import '../providers/mix_operation_gate.dart';
 import '../theme/mixtape_theme.dart';
 import '../widgets/album_card.dart';
+import '../widgets/composer_plus_button.dart';
 import '../widgets/lyric_turn.dart';
 import '../widgets/energy_journey.dart';
 import '../widgets/foundation/glass_cluster.dart';
@@ -57,6 +59,7 @@ import '../widgets/tape_strip.dart';
 import '../widgets/version_marker.dart';
 import 'mix_history_screen.dart';
 import 'queue_screen.dart';
+import 'shell/shell_route_observer.dart';
 import '../widgets/foundation/mixtape_menu.dart';
 
 /// The toast a selection changed somewhere else earns: the canonical seed is
@@ -116,6 +119,9 @@ class ChatScreen extends ConsumerStatefulWidget {
 
   /// The mix's one DJ pill (approval "The history pill", board 4B).
   static const String historyPillLabel = 'Add my listening history';
+
+  /// The + beside the composer.
+  static const Key plusKey = Key('chat-plus');
   static const Key historyPillKey = Key('chat-history-pill');
 
   /// Set only when Home navigates here after a create-session failure that
@@ -673,7 +679,26 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     }
 
     final state = chatAsync.value!;
-    final busy = state.sending || operation != null || inspiration.writing;
+    // A turn sent before this conversation was reopened holds the mix's
+    // operation gate too; the activity check keeps the composer plain for it
+    // whatever holds the gate.
+    final busy =
+        state.sending ||
+        operation != null ||
+        inspiration.writing ||
+        _workingSince() != null;
+
+    // The Mixes list's dot goes once this conversation is actually on
+    // screen: the top route, in the tab the listener is in.
+    final ready = ref.watch(
+      mixActivityProvider.select((a) => a.isReady(widget.sessionId)),
+    );
+    if (ready && _onScreen()) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref.read(mixActivityProvider.notifier).seen(widget.sessionId);
+      });
+    }
 
     return _frame(
       title: state.session.title,
@@ -722,7 +747,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                   left: 0,
                   right: 0,
                   bottom: 0,
-                  child: KeyedSubtree(key: _panelKey, child: panel),
+                  // Measured again whenever it changes size on its own (a
+                  // draft growing a line), not only when this screen builds.
+                  child: NotificationListener<SizeChangedLayoutNotification>(
+                    onNotification: (_) {
+                      _measurePanel();
+                      return true;
+                    },
+                    child: SizeChangedLayoutNotifier(
+                      child: KeyedSubtree(key: _panelKey, child: panel),
+                    ),
+                  ),
                 ),
             ],
           ),
@@ -730,6 +765,22 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       ),
     );
   }
+
+  /// Whether this conversation is what the listener is looking at: the top
+  /// route of its navigator, in the selected tab (every tab's stack stays
+  /// built behind the others).
+  bool _onScreen() {
+    if (!(ModalRoute.of(context)?.isCurrent ?? true)) return false;
+    final tab = ShellTabScope.maybeOf(context);
+    return tab == null || ref.watch(selectedTabProvider) == tab;
+  }
+
+  /// When the turn out on this mix went, if one is: this conversation's own,
+  /// or one sent before it was left and reopened, whose reply it re-reads
+  /// when it lands (see `ChatNotifier`).
+  DateTime? _workingSince() => ref.watch(
+    mixActivityProvider.select((a) => a.workingSince(widget.sessionId)),
+  );
 
   /// Whether this mix has a tape yet: before the first one, the working
   /// cassette wears the default case.
@@ -840,8 +891,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         ),
       );
     }
-    if (state.sending) {
-      items.add(WorkingCassette(caseColor: _hasTape(state) ? colour : null));
+    final since = _workingSince();
+    if (state.sending || since != null) {
+      items.add(
+        WorkingCassette(
+          caseColor: _hasTape(state) ? colour : null,
+          startedAt: since,
+        ),
+      );
     }
 
     return _list(items, pinnedFrom: pinnedFrom);
@@ -1035,11 +1092,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     if (lastDjIndex == null && suggestions != null && suggestions.isNotEmpty) {
       items.add(pills());
     }
-    if (state.sending) {
+    final since = _workingSince();
+    if (state.sending || since != null) {
       items.add(
-        const WorkingCassette(
-          captionText: WorkingCassette.albumCaption,
+        WorkingCassette(
+          phrases: DjWorkingPhrases.album,
           announcementText: WorkingCassette.albumAnnouncement,
+          startedAt: since,
         ),
       );
     }
@@ -1117,57 +1176,25 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                 children: [
                   if (state != null && !album && state.queue.isNotEmpty)
                     _strip(state),
-                  if (state != null && attached)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: _inspirationChip(inspiration, enabled: enabled),
-                      ),
-                    ),
-                  if (showStatus)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 2, bottom: 6),
-                      // A Wrap, not a Row: at 200% text the message and the
-                      // action do not fit on one line, and each needs the
-                      // whole width to wrap into.
-                      child: Wrap(
-                        spacing: 8,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          Text(
-                            status,
-                            key: const Key('inspiration-status'),
-                            style: tokens.meta.copyWith(color: tokens.muted),
-                          ),
-                          // A selection that cannot be read is a READ
-                          // failure: the way out is another read, never a
-                          // write against a revision we do not have.
-                          if (_canReloadInspiration(inspiration))
-                            TextAction(
-                              key: const Key('inspiration-reload'),
-                              label: 'Reload inspiration',
-                              quiet: true,
-                              onPressed:
-                                  inspiration.loading || inspiration.writing
-                                  ? null
-                                  : () => ref
-                                        .read(
-                                          sessionPlaylistContextProvider(
-                                            widget.sessionId,
-                                          ).notifier,
-                                        )
-                                        .refresh(),
-                            ),
-                        ],
-                      ),
+                  // The attached playlist at the panel's leading edge, over
+                  // the +, with the line that says what is wrong with it, if
+                  // anything, beside it.
+                  if (state != null && (attached || showStatus))
+                    _attachmentRow(
+                      inspiration,
+                      enabled: enabled,
+                      attached: attached,
+                      status: showStatus ? status : null,
                     ),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
+                      // Level with the composer's surface, inside its 2 pt
+                      // focus ring.
                       Padding(
                         padding: const EdgeInsets.only(bottom: 2),
-                        child: _PlusButton(
+                        child: ComposerPlusButton(
+                          key: ChatScreen.plusKey,
                           onPressed: enabled
                               ? (anchor) => _plusMenu(anchor, state)
                               : null,
@@ -1321,6 +1348,65 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     return null;
   }
 
+  /// What rides over the field: the attached playlist's tile, and beside it
+  /// the line (and the Reload) for a selection that cannot be used as is.
+  Widget _attachmentRow(
+    SessionPlaylistContextState inspiration, {
+    required bool enabled,
+    required bool attached,
+    required String? status,
+  }) {
+    final tokens = context.tokens;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          if (attached)
+            Flexible(child: _inspirationChip(inspiration, enabled: enabled)),
+          if (status != null)
+            Expanded(
+              child: Padding(
+                padding: EdgeInsets.only(left: attached ? 6 : 2, bottom: 2),
+                // A Wrap, not a Row: at 200% text the message and the
+                // action do not fit on one line, and each needs the whole
+                // width to wrap into.
+                child: Wrap(
+                  spacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      status,
+                      key: const Key('inspiration-status'),
+                      style: tokens.meta.copyWith(color: tokens.muted),
+                    ),
+                    // A selection that cannot be read is a READ failure: the
+                    // way out is another read, never a write against a
+                    // revision we do not have.
+                    if (_canReloadInspiration(inspiration))
+                      TextAction(
+                        key: const Key('inspiration-reload'),
+                        label: 'Reload inspiration',
+                        quiet: true,
+                        onPressed: inspiration.loading || inspiration.writing
+                            ? null
+                            : () => ref
+                                  .read(
+                                    sessionPlaylistContextProvider(
+                                      widget.sessionId,
+                                    ).notifier,
+                                  )
+                                  .refresh(),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   /// The attached playlist's chip, with Replace and Detach as locked.
   Widget _inspirationChip(
     SessionPlaylistContextState inspiration, {
@@ -1436,49 +1522,6 @@ class _TopBar extends StatelessWidget {
             ],
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// `.plus`: the 44 pt round button beside the composer that opens the +
-/// menu, anchored to itself.
-class _PlusButton extends StatelessWidget {
-  const _PlusButton({required this.onPressed});
-
-  final void Function(BuildContext anchor)? onPressed;
-
-  static const Key buttonKey = Key('chat-plus');
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    final enabled = onPressed != null;
-    return Builder(
-      builder: (anchor) => Semantics(
-        button: true,
-        enabled: enabled,
-        label: 'Add',
-        onTap: enabled ? () => onPressed!(anchor) : null,
-        excludeSemantics: true,
-        child: GestureDetector(
-          key: buttonKey,
-          behavior: HitTestBehavior.opaque,
-          onTap: enabled ? () => onPressed!(anchor) : null,
-          child: Opacity(
-            opacity: enabled ? 1 : 0.5,
-            child: Container(
-              width: MixtapeMetrics.minTarget,
-              height: MixtapeMetrics.minTarget,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: tokens.field,
-                border: Border.all(color: tokens.hairline),
-              ),
-              child: Icon(Icons.add_rounded, size: 22, color: tokens.plum),
-            ),
-          ),
-        ),
       ),
     );
   }

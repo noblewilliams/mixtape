@@ -145,4 +145,59 @@ void main() {
 
     voice.dispose();
   });
+
+  test('the words heard so far follow while listening, then make way', () async {
+    final words = StreamController<String>.broadcast();
+    addTearDown(words.close);
+    final voice = VoiceComposerController(
+      onStart: () async => calls.add('start'),
+      onStop: () => transcript.future,
+      onCancel: () async => calls.add('cancel'),
+      amplitude: amplitude.stream,
+      partials: words.stream,
+    );
+    addTearDown(voice.dispose);
+
+    words.add('ignored before the mic opens');
+    await Future<void>.delayed(Duration.zero);
+    expect(voice.partial, '');
+
+    await voice.start();
+    words.add('a rainy');
+    await Future<void>.delayed(Duration.zero);
+    expect(voice.partial, 'a rainy');
+    words.add('a rainy drive home');
+    await Future<void>.delayed(Duration.zero);
+    expect(voice.partial, 'a rainy drive home');
+
+    final stopping = voice.stop();
+    words.add('a rainy drive home tonight');
+    await Future<void>.delayed(Duration.zero);
+    expect(
+      voice.partial,
+      'a rainy drive home',
+      reason: 'held while the better pass is on its way',
+    );
+
+    transcript.complete('A rainy drive home.');
+    expect(await stopping, 'A rainy drive home.');
+    expect(voice.partial, '');
+  });
+
+  test('a cancelled dictation leaves no words behind', () async {
+    final words = StreamController<String>.broadcast();
+    addTearDown(words.close);
+    final voice = VoiceComposerController(
+      onStart: () async {},
+      onStop: () => transcript.future,
+      onCancel: () async {},
+      partials: words.stream,
+    );
+    addTearDown(voice.dispose);
+    await voice.start();
+    words.add('half a thought');
+    await Future<void>.delayed(Duration.zero);
+    await voice.cancel();
+    expect(voice.partial, '');
+  });
 }

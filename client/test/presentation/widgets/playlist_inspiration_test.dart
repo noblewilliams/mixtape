@@ -168,10 +168,6 @@ void main() {
         ),
       );
 
-      expect(find.text('Inspired by: Late nights'), findsOneWidget);
-      // The chip itself never detaches: the cross is gone, the menu owns it.
-      expect(find.byKey(InspirationChip.detachKey), findsNothing);
-
       await tester.tap(find.byKey(InspirationChip.chipKey));
       await tester.pumpAndSettle();
       expect(find.byKey(InspirationChip.replaceItemKey), findsOneWidget);
@@ -230,9 +226,14 @@ void main() {
         ),
       );
 
-      expect(find.text('Late nights · unavailable'), findsOneWidget);
+      expect(
+        tester.widget<InspirationChip>(find.byType(InspirationChip)).label,
+        'Late nights · unavailable',
+      );
       await tester.tap(find.byKey(InspirationChip.chipKey));
       await tester.pumpAndSettle();
+      // On the pill and at the head of the menu.
+      expect(find.text('Late nights · unavailable'), findsNWidgets(2));
       expect(find.byKey(InspirationChip.replaceItemKey), findsOneWidget);
       expect(find.byKey(InspirationChip.detachItemKey), findsOneWidget);
       expect(find.byKey(InspirationChip.excludeItemKey), findsNothing);
@@ -251,9 +252,9 @@ void main() {
         ),
       );
 
-      expect(find.text('Late nights · too few songs'), findsOneWidget);
       await tester.tap(find.byKey(InspirationChip.chipKey));
       await tester.pumpAndSettle();
+      expect(find.text('Late nights · too few songs'), findsNWidgets(2));
       expect(find.byKey(InspirationChip.menuNoteKey), findsOneWidget);
       expect(find.text(InspirationChip.insufficientNote), findsOneWidget);
       expect(find.byKey(InspirationChip.excludeItemKey), findsNothing);
@@ -271,7 +272,7 @@ void main() {
       );
     });
 
-    testWidgets('without a menu the chip still picks and detaches directly', (
+    testWidgets('without Exclude the menu still replaces and detaches', (
       tester,
     ) async {
       var picks = 0;
@@ -282,8 +283,14 @@ void main() {
 
       await tester.tap(find.byKey(InspirationChip.chipKey));
       await tester.pumpAndSettle();
+      expect(find.byKey(InspirationChip.excludeItemKey), findsNothing);
+      await tester.tap(find.byKey(InspirationChip.replaceItemKey));
+      await tester.pumpAndSettle();
       expect(picks, 1);
-      await tester.tap(find.byKey(InspirationChip.detachKey));
+
+      await tester.tap(find.byKey(InspirationChip.chipKey));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(InspirationChip.detachItemKey));
       await tester.pumpAndSettle();
       expect(detaches, 1);
     });
@@ -303,6 +310,95 @@ void main() {
       expect(data.flagsCollection.isButton, isTrue);
 
       handle.dispose();
+    });
+  });
+
+  group('compact attachment (device smoke 2026-11-13)', () {
+    testWidgets('a compact pill: the icon and the name, no "Inspired by"', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(
+        chipHost(onPick: () {}, onDetach: () {}, onToggleExclude: () {}),
+      );
+
+      expect(find.textContaining('Inspired by'), findsNothing);
+      expect(find.text('Late nights'), findsOneWidget);
+      expect(
+        tester.getSize(find.byType(InspirationChip)).height,
+        lessThanOrEqualTo(InspirationChip.height + 0.5),
+      );
+      // VoiceOver hears what the icon says.
+      expect(find.bySemanticsLabel('Inspired by: Late nights'), findsOneWidget);
+      handle.dispose();
+    });
+
+    testWidgets('a long name ellipsises inside the width it is given', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: MixtapeTheme.light(),
+          home: Scaffold(
+            body: Center(
+              child: SizedBox(
+                width: 200,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: InspirationChip(
+                    name: 'running beats for the streets, the long version',
+                    onPick: () {},
+                    onDetach: () {},
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(tester.takeException(), isNull);
+      expect(
+        tester.getSize(find.byType(InspirationChip)).width,
+        lessThanOrEqualTo(200),
+      );
+      expect(find.byKey(InspirationChip.detachKey), findsOneWidget);
+    });
+
+    testWidgets('the cross detaches at once, beside a menu or not', (
+      tester,
+    ) async {
+      var detaches = 0;
+      var toggles = 0;
+      await tester.pumpWidget(
+        chipHost(
+          onPick: () {},
+          onDetach: () => detaches++,
+          onToggleExclude: () => toggles++,
+        ),
+      );
+      await tester.tap(find.byKey(InspirationChip.detachKey));
+      await tester.pumpAndSettle();
+      expect(detaches, 1);
+      expect(find.byKey(InspirationChip.replaceItemKey), findsNothing);
+    });
+
+    testWidgets('no detach, no cross', (tester) async {
+      await tester.pumpWidget(chipHost(onPick: () {}));
+      expect(find.byKey(InspirationChip.detachKey), findsNothing);
+    });
+
+    testWidgets('the menu opens on the playlist name', (tester) async {
+      await tester.pumpWidget(
+        chipHost(onPick: () {}, onDetach: () {}, onToggleExclude: () {}),
+      );
+      await tester.tap(find.byKey(InspirationChip.chipKey));
+      await tester.pumpAndSettle();
+
+      final header = tester.widget<MixtapeMenuItem<Object?>>(
+        find.byKey(InspirationChip.nameItemKey),
+      );
+      expect(header.action.label, 'Inspired by: Late nights');
+      expect(header.action.enabled, isFalse);
     });
   });
 

@@ -21,6 +21,7 @@ import 'package:mixtape/presentation/screens/playlist_detail_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/home_panel.dart';
 import 'package:mixtape/presentation/widgets/playlist_inspiration.dart';
+import 'package:mixtape/presentation/widgets/mix_prompt_input.dart';
 import 'package:mixtape/presentation/widgets/foundation/mixtape_menu.dart';
 import '../helpers/auth_ui_snapshot.dart';
 import '../helpers/fake_listening_api.dart';
@@ -150,7 +151,10 @@ void main() {
             .text,
         '  A softer night drive  ',
       );
-      expect(find.text('Inspired by: Night Bus Notes'), findsOneWidget);
+      expect(
+        tester.widget<InspirationChip>(find.byType(InspirationChip)).label,
+        'Inspired by: Night Bus Notes',
+      );
       expect(dj.creates, 0);
 
       // Replace, from the chip's menu, opens the picker sheet.
@@ -170,7 +174,10 @@ void main() {
       expect(dj.prompt, 'A softer night drive');
       expect(dj.seed!.playlistId, 'exact-playlist');
       expect(dj.seed!.excludeSourceTracks, true);
-      expect(find.text('Inspired by: Night Bus Notes'), findsOneWidget);
+      expect(
+        tester.widget<InspirationChip>(find.byType(InspirationChip)).label,
+        'Inspired by: Night Bus Notes',
+      );
       expect(
         tester
             .widget<TextField>(find.byKey(const Key('prompt-field')))
@@ -316,6 +323,64 @@ void main() {
     },
   );
 
+  group('the + beside Home\'s composer (device smoke 2026-11-13)', () {
+    testWidgets('attaches a playlist from Home, as + does in a mix', (
+      tester,
+    ) async {
+      final dj = RecordingDj()..onListSessions = () async => [];
+      final container = makeContainer(dj);
+      addTearDown(container.dispose);
+      await pumpHome(tester, container);
+      expect(find.byType(InspirationChip), findsNothing);
+
+      await tester.tap(find.byKey(HomeScreen.plusKey));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(HomeScreen.plusPlaylistKey));
+      await tester.pumpAndSettle();
+      expect(find.byKey(PlaylistPicker.sheetKey), findsOneWidget);
+
+      await tester.tap(find.byKey(PlaylistPicker.rowKey(chosen.id)));
+      await tester.pumpAndSettle();
+      expect(container.read(newMixInspirationProvider)!.playlist.id, chosen.id);
+      expect(
+        tester.widget<InspirationChip>(find.byType(InspirationChip)).label,
+        'Inspired by: Night Bus Notes',
+      );
+      expect(dj.creates, 0);
+    });
+
+    testWidgets('sits left of the field, level with its foot', (tester) async {
+      final dj = RecordingDj()..onListSessions = () async => [];
+      final container = makeContainer(dj);
+      addTearDown(container.dispose);
+      await pumpHome(tester, container);
+
+      final plus = tester.getRect(find.byKey(HomeScreen.plusKey));
+      final surface = tester.getRect(find.byKey(MixPromptInput.surfaceKey));
+      expect(plus.right, lessThan(surface.left));
+      expect((plus.bottom - surface.bottom).abs(), lessThanOrEqualTo(1));
+    });
+
+    testWidgets('the attachment sits at the panel edge, over the +', (
+      tester,
+    ) async {
+      final dj = RecordingDj()..onListSessions = () async => [];
+      final container = makeContainer(dj);
+      addTearDown(container.dispose);
+      await pumpHome(tester, container);
+      container.read(newMixInspirationProvider.notifier).select(chosen);
+      await tester.pumpAndSettle();
+
+      final chip = tester.getRect(find.byType(InspirationChip));
+      final plus = tester.getRect(find.byKey(HomeScreen.plusKey));
+      final surface = tester.getRect(find.byKey(MixPromptInput.surfaceKey));
+      expect(chip.left, moreOrLessEquals(plus.left, epsilon: 0.5));
+      expect(chip.bottom, lessThanOrEqualTo(surface.top));
+      // The name is on the pill.
+      expect(find.text('Night Bus Notes'), findsOneWidget);
+    });
+  });
+
   testWidgets('dismissing the picker leaves the attachment alone', (
     tester,
   ) async {
@@ -341,7 +406,10 @@ void main() {
       container.read(newMixInspirationProvider)!.excludeSourceTracks,
       true,
     );
-    expect(find.text('Inspired by: Night Bus Notes'), findsOneWidget);
+    expect(
+        tester.widget<InspirationChip>(find.byType(InspirationChip)).label,
+        'Inspired by: Night Bus Notes',
+      );
   });
 
   for (final brightness in Brightness.values) {

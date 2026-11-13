@@ -6,6 +6,7 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixtape/data/voice/live_dictation.dart';
 import 'package:mixtape/data/voice/speech_channel.dart';
 import 'package:mixtape/data/voice/transcription_api.dart';
 import 'package:mixtape/data/voice/voice_capture_service.dart';
@@ -36,6 +37,43 @@ class _FakeRecorder implements VoiceRecorder {
 
   @override
   Future<void> dispose() => _amplitudes.close();
+}
+
+class _FakeLive implements LiveTranscriber {
+  _FakeLive(this.clip);
+
+  final File? clip;
+  DictationException? startError;
+  String heard = 'a rainy drive';
+  final calls = <String>[];
+  final discarded = <String?>[];
+
+  @override
+  Stream<String> get partials => const Stream.empty();
+
+  @override
+  Stream<double> get levels => const Stream.empty();
+
+  @override
+  Future<void> start({List<String> vocabulary = const []}) async {
+    calls.add('start');
+    if (startError != null) throw startError!;
+  }
+
+  @override
+  Future<DictationResult> stop() async {
+    calls.add('stop');
+    return DictationResult(path: clip?.path, text: heard);
+  }
+
+  @override
+  Future<void> cancel() async => calls.add('cancel');
+
+  @override
+  Future<void> discard(String? path) async {
+    discarded.add(path);
+    if (path != null && File(path).existsSync()) File(path).deleteSync();
+  }
 }
 
 void main() {
@@ -313,5 +351,157 @@ void main() {
     expect(attempts, isEmpty);
     expect(File(path).existsSync(), isFalse);
     expect(capture.state, VoiceCaptureState.idle);
+  });
+
+  group('live words, then the server\'s pass (device smoke 2026-11-13)', () {
+    late _FakeLive live;
+    late File clip;
+
+    setUp(() {
+      clip = File('${clips.path}/live.m4a')
+        ..writeAsBytesSync(List<int>.filled(4096, 1));
+      live = _FakeLive(clip);
+    });
+
+    TranscribeRecording buildLive({
+      Future<String> Function(File clip)? server,
+    }) => TranscribeRecording(
+      capture: capture,
+      live: live,
+      server: (clip) {
+        attempts.add('server');
+        return server?.call(clip) ?? Future.value('A rainy drive, home.');
+      },
+      onDevice: (path) {
+        attempts.add('on-device');
+        return Future.value('from the device');
+      },
+      onSessionExpired: () async => expiries++,
+    );
+
+    test('the server polishes what was heard and the clip goes', () async {
+      final use = buildLive();
+      await use.begin();
+      expect(live.calls, ['start']);
+      expect(recorder.startedAt, isNull, reason: 'the recorder stays shut');
+
+      expect(await use.finish(), 'A rainy drive, home.');
+      expect(attempts, ['server']);
+      expect(live.discarded, [clip.path]);
+      expect(clip.existsSync(), isFalse);
+    });
+
+    test('a server that cannot answer keeps the live words', () async {
+      final use = buildLive(
+        server: (_) =>
+            throw const TranscriptionException(TranscriptionFailure.upstream),
+      );
+      await use.begin();
+      expect(await use.finish(), 'a rainy drive');
+      expect(attempts, ['server'], reason: 'no second on-device pass');
+      expect(clip.existsSync(), isFalse);
+    });
+
+    test('a clip the server calls too short keeps the live words', () async {
+      final use = buildLive(
+        server: (_) =>
+            throw const TranscriptionException(TranscriptionFailure.tooShort),
+      );
+      await use.begin();
+      expect(await use.finish(), 'a rainy drive');
+    });
+
+    test('nothing heard and nothing from the server is no audio', () async {
+      live.heard = '';
+      final use = buildLive(
+        server: (_) =>
+            throw const TranscriptionException(TranscriptionFailure.tooShort),
+      );
+      await use.begin();
+      await expectLater(
+        use.finish(),
+        throwsA(
+          isA<VoiceInputException>().having(
+            (e) => e.failure,
+            'failure',
+            VoiceInputFailure.noAudio,
+          ),
+        ),
+      );
+    });
+
+    test('consent and an expired session still speak for themselves', () async {
+      final consent = buildLive(
+        server: (_) => throw const TranscriptionException(
+          TranscriptionFailure.consentRequired,
+        ),
+      );
+      await consent.begin();
+      await expectLater(
+        consent.finish(),
+        throwsA(
+          isA<VoiceInputException>().having(
+            (e) => e.failure,
+            'failure',
+            VoiceInputFailure.consentRequired,
+          ),
+        ),
+      );
+
+      clip.writeAsBytesSync(List<int>.filled(4096, 1));
+      final expired = buildLive(
+        server: (_) => throw const TranscriptionException(
+          TranscriptionFailure.unauthorized,
+        ),
+      );
+      await expired.begin();
+      await expectLater(expired.finish(), throwsA(isA<VoiceInputException>()));
+      expect(expiries, 1);
+    });
+
+    test('speech recognition refused falls back to the recorder', () async {
+      live.startError = const DictationException(DictationFailure.speechDenied);
+      final use = buildLive();
+      await use.begin();
+      expect(recorder.startedAt, isNotNull);
+      expect(await use.finish(), 'A rainy drive, home.');
+      expect(live.calls, ['start'], reason: 'never stopped: it never ran');
+    });
+
+    test('a refused microphone and playing music fail as they always did', () async {
+      live.startError = const DictationException(DictationFailure.micDenied);
+      await expectLater(
+        buildLive().begin(),
+        throwsA(
+          isA<VoiceInputException>().having(
+            (e) => e.failure,
+            'failure',
+            VoiceInputFailure.permissionDenied,
+          ),
+        ),
+      );
+      live.startError = const DictationException(
+        DictationFailure.playbackActive,
+      );
+      await expectLater(
+        buildLive().begin(),
+        throwsA(
+          isA<VoiceInputException>().having(
+            (e) => e.failure,
+            'failure',
+            VoiceInputFailure.playbackActive,
+          ),
+        ),
+      );
+      expect(recorder.startedAt, isNull);
+    });
+
+    test('abandon stops the live recogniser, not the recorder', () async {
+      final use = buildLive();
+      await use.begin();
+      await use.abandon();
+      expect(live.calls, ['start', 'cancel']);
+      expect(attempts, isEmpty);
+    });
   });
 }

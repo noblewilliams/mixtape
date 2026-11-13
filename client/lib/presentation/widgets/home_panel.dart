@@ -55,7 +55,12 @@ class HomePanel extends StatefulWidget {
     this.routineSuggestion = true,
     this.switched = false,
     this.onKeepMix,
+    this.leading,
   });
+
+  /// Beside the composer, level with its foot: Home's + (device smoke,
+  /// 2026-11-13), as a mix's conversation has one.
+  final Widget? leading;
 
   /// The row above the composer (album picks board H1): the Mix | Album
   /// control at the leading edge and the compact Shape chip trailing. Either
@@ -95,7 +100,8 @@ class HomePanel extends StatefulWidget {
   /// The start-failure message, shown as the board's alert line.
   final String? error;
 
-  /// The playlist attachment chip, drawn above the field by the composer.
+  /// The playlist attachment, drawn at the panel's leading edge above the
+  /// composer row.
   final Widget? attachment;
 
   /// Where the starter pills come from — the composer's own placeholders, so
@@ -320,70 +326,92 @@ class _HomePanelState extends State<HomePanel> {
                           ),
                         ),
                         if (hasRow) _modeRow(),
-                        MixPromptInput(
-                          key: widget.composerKey,
-                          controller: widget.controller,
-                          focusNode: widget.focusNode,
-                          busy: widget.busy,
-                          onSubmit: widget.onSubmit,
-                          attachment: widget.attachment,
-                          placeholder: widget.placeholder,
-                          sendLabel: widget.sendLabel,
-                          // The pills hold these; the rotating hint skips them so
-                          // the field never repeats a pill below it. Refinements
-                          // are not prompts, so they reserve nothing.
-                          reservedExamples: widget.refinements == null
-                              ? starters
-                              : const [],
+                        // The attached playlist at the panel's leading edge,
+                        // over the +, not over the field.
+                        if (widget.attachment != null)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: widget.attachment,
+                            ),
+                          ),
+                        _composerRow(
+                          MixPromptInput(
+                            key: widget.composerKey,
+                            controller: widget.controller,
+                            focusNode: widget.focusNode,
+                            busy: widget.busy,
+                            onSubmit: widget.onSubmit,
+                            placeholder: widget.placeholder,
+                            sendLabel: widget.sendLabel,
+                            // The pills hold these; the rotating hint skips
+                            // them so the field never repeats a pill below
+                            // it. Refinements are not prompts, so they reserve
+                            // nothing.
+                            reservedExamples: widget.refinements == null
+                                ? starters
+                                : const [],
+                          ),
                         ),
                         if (error != null) _errorLine(tokens, error),
                         if (widget.switched)
                           _switchedLine(tokens)
                         else
-                          Padding(
-                            padding: const EdgeInsets.only(
-                              top: HomePanel.pillsTopGap,
+                          // A pill fills the field and focuses it: part of
+                          // the field, so a tap on one does not first put
+                          // the keyboard away.
+                          TextFieldTapRegion(
+                            child: Padding(
+                              padding: const EdgeInsets.only(
+                                top: HomePanel.pillsTopGap,
+                              ),
+                              // With a playlist attached the three pills are refinements
+                              // of it, and no routine suggestion competes with them.
+                              child: widget.refinements != null
+                                  ? _refinementPills(dimmed: dimmed)
+                                  : !widget.routineSuggestion
+                                  ? Wrap(
+                                      key: HomePanel.pillsKey,
+                                      spacing: HomePanel.pillGap,
+                                      runSpacing: HomePanel.pillRunGap,
+                                      children: [
+                                        for (
+                                          var i = 0;
+                                          i < starters.length;
+                                          i++
+                                        )
+                                          _starterPill(
+                                            i,
+                                            starters[i],
+                                            dimmed: dimmed,
+                                          ),
+                                      ],
+                                    )
+                                  : Wrap(
+                                      key: HomePanel.pillsKey,
+                                      spacing: HomePanel.pillGap,
+                                      runSpacing: HomePanel.pillRunGap,
+                                      children: [
+                                        if (pill != null) pill,
+                                        for (
+                                          var i = 0;
+                                          i <
+                                                  (pill == null
+                                                      ? HomePanel.maxPills
+                                                      : HomePanel.maxPills -
+                                                            1) &&
+                                              i < starters.length;
+                                          i++
+                                        )
+                                          _starterPill(
+                                            i,
+                                            starters[i],
+                                            dimmed: dimmed,
+                                          ),
+                                      ],
+                                    ),
                             ),
-                            // With a playlist attached the three pills are refinements
-                            // of it, and no routine suggestion competes with them.
-                            child: widget.refinements != null
-                                ? _refinementPills(dimmed: dimmed)
-                                : !widget.routineSuggestion
-                                ? Wrap(
-                                    key: HomePanel.pillsKey,
-                                    spacing: HomePanel.pillGap,
-                                    runSpacing: HomePanel.pillRunGap,
-                                    children: [
-                                      for (var i = 0; i < starters.length; i++)
-                                        _starterPill(
-                                          i,
-                                          starters[i],
-                                          dimmed: dimmed,
-                                        ),
-                                    ],
-                                  )
-                                : Wrap(
-                                    key: HomePanel.pillsKey,
-                                    spacing: HomePanel.pillGap,
-                                    runSpacing: HomePanel.pillRunGap,
-                                    children: [
-                                      if (pill != null) pill,
-                                      for (
-                                        var i = 0;
-                                        i <
-                                                (pill == null
-                                                    ? HomePanel.maxPills
-                                                    : HomePanel.maxPills - 1) &&
-                                            i < starters.length;
-                                        i++
-                                      )
-                                        _starterPill(
-                                          i,
-                                          starters[i],
-                                          dimmed: dimmed,
-                                        ),
-                                    ],
-                                  ),
                           ),
                       ],
                     ),
@@ -394,6 +422,21 @@ class _HomePanelState extends State<HomePanel> {
           ),
         ),
       ),
+    );
+  }
+
+  /// The composer, with [HomePanel.leading] beside it when there is one.
+  /// The + sits level with the field's surface, inside its 2 pt focus ring.
+  Widget _composerRow(Widget composer) {
+    final leading = widget.leading;
+    if (leading == null) return composer;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Padding(padding: const EdgeInsets.only(bottom: 2), child: leading),
+        const SizedBox(width: 8),
+        Expanded(child: composer),
+      ],
     );
   }
 

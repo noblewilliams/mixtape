@@ -19,6 +19,10 @@ import UIKit
   /// Dart falls back to — stays alive for the life of the app.
   private var speechTranscriber: SpeechTranscriber?
 
+  /// Retained the same way: `mixtape/dictation`, the live recogniser that
+  /// writes the listener's words into the composer as they speak.
+  private var liveDictation: LiveDictation?
+
   /// Retained for the same reason: `mixtape/audio_session`, which Dart calls
   /// before recording so the session is ours, or so recording is refused
   /// while our own MusicKit queue is playing.
@@ -119,6 +123,7 @@ import UIKit
   /// the listener's own words, like an export's file name above.
   private func registerVoiceChannels(with messenger: FlutterBinaryMessenger) {
     speechTranscriber = SpeechTranscriber(binaryMessenger: messenger)
+    liveDictation = LiveDictation(binaryMessenger: messenger)
     let channel = FlutterMethodChannel(
       name: "mixtape/audio_session",
       binaryMessenger: messenger

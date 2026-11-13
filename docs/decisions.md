@@ -1599,3 +1599,122 @@ due on 2026-11-10 clear in about four days instead of about seven.
 **Reopens if:** misses start resolving on a later lookup (then retry a miss
 once after 30 days, as Apple linking does), or a day of cron runs after the
 deploy still reaches well under 60 distinct songs an hour.
+
+## 2026-11-13 — Device smoke: a compact composer, the DJ's working lines, Mixes shows work in flight
+
+From the founder's TestFlight run of build 1.0.2 (6). iOS only; the server and
+web are unchanged.
+
+- **Composer.** The surface is 40 pt tall with one line of draft (was the
+  shared 48), the field's vertical padding is 6 (was 9), the draft starts
+  14 pt in (was 22) and grows to five lines (was three) with the keys at its
+  foot. The prism moves from the upright stripe beside the draft (cramped
+  once the padding went) to a 2 pt underline along the field's foot, clear
+  of the corners, as the tape buttons wear it; focus still hands it to the
+  full prism ring. The field keeps its latest line in view as it grows. The mic and send keys are 36 pt wide and the surface's inner height:
+  under the 44 pt target the rest of the app keeps, accepted for a field that
+  is mostly draft. A tap outside the field puts the keyboard away (iOS text
+  fields do not); the composer's keys and Home's pills count as the field.
+  While the DJ works the composer is a plain field, with no mic and no send
+  key: the spinner that replaced send said a second time what the working
+  cassette already says.
+- **Working cassette.** 44 pt (was 56). Its line follows the order a turn's
+  work runs in (the ask read, the crates searched, records pulled, the order
+  set, the tape written), on a clock: the first line is always "The DJ is
+  listening…", later phases each pick one of a few lines per turn
+  (`DjWorkingPhrases`). VoiceOver hears one steady line. A turn reports
+  nothing until it is done, so the lines are the usual sequence, not the
+  turn's own steps. Rejected for now: streaming the loop's tool calls
+  (`find_playlists`, `generate_queue`, …) to the client, which needs a
+  streamed or polled turn on the server, the web and iOS.
+- **Playlist attachment.** A 32 pt pill at the panel's leading edge, over
+  the +: the playlist icon, the playlist's name and a cross; "Inspired by:"
+  is gone from the screen (it took a row of padding and text). A first pass
+  drew an icon-only tile over the field; the founder found it said too
+  little and left the space over the + empty. The cross detaches at once;
+  the name opens the menu, headed by "Inspired by" and the full name, on
+  both screens (a mix's chip used to open the picker directly).
+- **Voice: words as they are spoken.** Founder's choice of two: live
+  on-device words plus the server's pass, over live words alone. Apple's
+  recogniser runs on the microphone as the listener speaks
+  (`mixtape/dictation`, `SFSpeechAudioBufferRecognitionRequest`, partial
+  results) and the words stream into the field, which follows the latest
+  line. The same audio is written to a clip; on stop it goes to `/transcribe`
+  (Groq Whisper) as before, and that text replaces the live words, which wait
+  in muted ink meanwhile. If the server cannot answer, the live words stand.
+  Live words are on-device only: a device that cannot recognise on its own,
+  or a listener who refuses speech recognition, gets the recorded path
+  (server first, Apple's file recogniser as fallback), so no new processor
+  hears the listener's voice. The field stays visible and read-only while
+  the mic is open; the meter sits by the stop key. The recogniser can take a
+  word list (`contextualStrings`); none is passed yet, since the client holds
+  no list of the listener's artists.
+- **Home's +.** Beside the composer as in a mix, with one item, Start from a
+  playlist. Shape keeps its chip in the row above.
+- **Mixes shows work in flight.** A mix with a turn out turns its tape's hubs
+  and reads "The DJ is on it…"; a reply the listener has not looked at leaves
+  a plum dot until the conversation is on screen (top route, selected tab). A
+  new mix being made on Home has a row of its own at the top until the list
+  lists it (the server writes the row before the first turn, so a list read
+  mid-create adopts the one row it did not have). Kept in memory on the
+  device (`mixActivityProvider`): a reply that lands while the app is closed
+  leaves no dot. A conversation reopened while its earlier turn is still out
+  shows the working cassette and reads the session again when that turn
+  lands; before, the reply only appeared on the next open.
+
+**Reopens if:** the 36 pt keys draw mis-taps on device (go back to 44 pt
+keys at about 16 pt of draft width), the timed lines read as wrong for short
+replies or long ones (then stream the loop's steps), or a mix's dot is wanted
+across launches or on the web (then the server keeps a last-seen time per
+mix), or the Whisper pass visibly rewrites what the listener watched appear
+often enough to annoy (then keep the live words and drop the second pass, or
+bias the recogniser with the listener's artists).
+
+## 2026-11-13 — The DJ's working line follows the turn's real steps
+
+Approved by the founder 2026-11-13, with the step line on the first-run
+Making screens and names in the caption. Spec
+`superpowers/specs/2026-11-13-dj-turn-steps-design.md`, plan
+`superpowers/plans/2026-11-13-dj-turn-steps.md`. Answers the reopen clause of
+the entry above (the timed lines read wrong for short replies and long ones).
+
+- **A mix turn streams its steps.** `POST /sessions` and
+  `POST /sessions/:id/messages` stream when the client sends
+  `Accept: text/event-stream`. The events are `session` (create only),
+  `step`, then `result` (today's JSON body) or `error` (today's status and
+  body), with a keepalive every 15 s. Without the header, nothing changes,
+  so older builds keep their JSON. Refusals before the turn keep their
+  status codes. Album turns stay JSON and keep their timed lines.
+- **Steps.** `playlists`, `digging` (scope `library` or `catalogue`),
+  `picking`, `checking`, `editing`, `pressing`, `labelling`, `noting` and
+  `writing`. They are sent from the loop through an optional reporter on
+  `DjDeps`. Clients ignore steps they do not know.
+- **Names in the caption.** A step may carry the names the listener already
+  said or sees: the brief's artists (`digging`, `picking`), its genres (the
+  sound check), the chosen playlist, the new title, and the song count
+  (`pressing`). Each is cleaned to at most 40 characters. A line with names
+  that runs past 44 characters falls back to the nameless line. Lyrics,
+  track lists, memory notes and search queries are never sent, steps are
+  never logged, and VoiceOver hears one steady line without names.
+- **Making screens.** The first-run Making screens (iOS and web) keep their
+  headline and add the step line under it.
+- **Clients.** iOS and web map steps to lines (spec copy table). The timed
+  walk stays as the fallback when no stream opens. Each line holds at least
+  1.5 s, and a long step moves through its own lines on a 12 s clock. On a
+  stream, iOS replaces its 120 s total timeout with a 45 s idle timeout.
+- **Server plumbing.** The streamed turn runs under `ctx.waitUntil`, and
+  `index.ts` closes the Neon pool only after recorded work settles.
+- **Why streaming and not polling.** On Workers a turn cannot outlive its
+  request by more than 30 s (`waitUntil`), so the request is held open for
+  the whole turn either way, and the steps ride it for free. Polling would
+  need a migration, a Worker request and a Neon connection every 1.5 to
+  2 s, and a client-made id on create. It would also miss the short steps.
+  KV is ruled out: its edge cache is 30 to 60 s stale.
+
+Rejected: polling a per-session marker (its one advantage, steps visible
+across devices, is server-side turn state, a separate feature); running the
+turn in a Durable Object or Queue (the durability fix, not needed for a
+caption); song names on edits; token-by-token reply streaming. **Reopens if:**
+steps or the Mixes dot are wanted across devices or launches (then stamp the
+step on the session row), or mixes are lost to a closed app (then move the
+turn off the request).
