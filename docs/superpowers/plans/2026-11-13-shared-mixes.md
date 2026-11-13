@@ -327,3 +327,25 @@ About 2 hours.
     deferred deep links, custom-domain migration) and for anything left
     open;
   - note in the spec any way the shipped copy differs from the board.
+
+## Progress
+
+**Server and web code-complete 2026-11-13** on branch `shared-mixes` (worktree
+`../mixtape-share`), not merged or pushed.
+
+| Task | Commit |
+|---|---|
+| B0 | `29393be` |
+| S1 | `ff0235b` |
+| S2 | `4109563` |
+| S3 | `5a61d3e` |
+| W1 | `e69bf79` |
+| S4 | `0eabb3c` |
+| W2 | `bc70b8e` |
+| W3 | `76959e2` (+ `5ec4095`, name kept across sign-up) |
+
+Each task had a review and one fix round (S1 and S3 reviewed directly). Last
+full runs: server 2706, web 1174, scripts 25, all passing. Deviations landed
+in review: the first Apple Music play on the shared page takes a second tap
+(decisions 2026-11-13); shared plays never record listening evidence; the
+Share name page has Back but no Skip. iOS C1–C4 and gates G1–G4 remain.
