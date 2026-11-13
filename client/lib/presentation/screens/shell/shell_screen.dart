@@ -34,6 +34,7 @@ import '../../widgets/foundation/glass_occlusion.dart';
 import '../../widgets/foundation/gradient_background.dart';
 import '../../widgets/foundation/side_rail.dart';
 import '../../widgets/listen_on_prompt.dart';
+import '../../widgets/shared_mix_link_listener.dart';
 import '../chat_screen.dart';
 import '../home_screen.dart';
 import '../mixes_screen.dart';
@@ -456,90 +457,93 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
     // steps aside for it as for any other sheet. The one-time "Where do you
     // listen?" goes on the root navigator, over the side rail, and the dock
     // steps aside through [_setListenSheetUp]. The shell only exists after
-    // first run, so neither interrupts it.
-    return ListenOnPrompt(
-      onShowingChanged: _setListenSheetUp,
-      child: AiConsentPrompt(
-        sheetContext: () => _navigatorOf(_currentIndex)?.context,
-        child: GradientBackground(
-          child: FrostedSurfaceMode(
-            reduceTransparency: reduceTransparency,
-            // The dock floats: it sits outside the Scaffold that resizes, so the
-            // keyboard comes up over it instead of carrying it.
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                _ToastsClearDock(
-                  // Every toast in the app renders in this Scaffold — it is
-                  // the app-level messenger's root, whatever tab asked — so
-                  // only here can a toast learn where the dock is.
-                  clearance: resolved && !wide && _bottomDockWanted
-                      ? ShellScreen.toastClearance(miniVisible: mini.visible)
-                      : null,
-                  child: Scaffold(
-                    backgroundColor: Colors.transparent,
-                    resizeToAvoidBottomInset: false,
-                    body: NotificationListener<ScrollNotification>(
-                      onNotification: _handleScroll,
-                      child: _wideLayout(
-                        wide: wide,
-                        currentIndex: currentIndex,
-                        mini: mini,
-                        child: NavigatorPopHandler(
-                          // Android back and the iOS swipe pop the tab's own
-                          // history before they leave the shell.
-                          onPopWithResult: (result) =>
-                              _navigatorOf(currentIndex)?.maybePop(),
-                          child: IndexedStack(
-                            key: ShellScreen.tabStackKey,
-                            index: currentIndex,
-                            children: [
-                              for (final tab in AppTab.values)
-                                KeyedSubtree(
-                                  key: ShellScreen.tabKey(tab),
-                                  child: ShellTabScope(
-                                    index: tab.index,
-                                    child: Navigator(
-                                      key: _navigators[tab.index],
-                                      observers: [
-                                        _observers[tab.index],
-                                        _glassObservers[tab.index],
-                                      ],
-                                      onGenerateRoute: (settings) =>
-                                          MaterialPageRoute<void>(
-                                            settings: settings,
-                                            builder: (_) => _rootFor(tab),
-                                          ),
+    // first run, so neither interrupts it. A shared mix's link opens over
+    // all of it, on the root navigator.
+    return SharedMixLinkListener(
+      child: ListenOnPrompt(
+        onShowingChanged: _setListenSheetUp,
+        child: AiConsentPrompt(
+          sheetContext: () => _navigatorOf(_currentIndex)?.context,
+          child: GradientBackground(
+            child: FrostedSurfaceMode(
+              reduceTransparency: reduceTransparency,
+              // The dock floats: it sits outside the Scaffold that resizes, so the
+              // keyboard comes up over it instead of carrying it.
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  _ToastsClearDock(
+                    // Every toast in the app renders in this Scaffold — it is
+                    // the app-level messenger's root, whatever tab asked — so
+                    // only here can a toast learn where the dock is.
+                    clearance: resolved && !wide && _bottomDockWanted
+                        ? ShellScreen.toastClearance(miniVisible: mini.visible)
+                        : null,
+                    child: Scaffold(
+                      backgroundColor: Colors.transparent,
+                      resizeToAvoidBottomInset: false,
+                      body: NotificationListener<ScrollNotification>(
+                        onNotification: _handleScroll,
+                        child: _wideLayout(
+                          wide: wide,
+                          currentIndex: currentIndex,
+                          mini: mini,
+                          child: NavigatorPopHandler(
+                            // Android back and the iOS swipe pop the tab's own
+                            // history before they leave the shell.
+                            onPopWithResult: (result) =>
+                                _navigatorOf(currentIndex)?.maybePop(),
+                            child: IndexedStack(
+                              key: ShellScreen.tabStackKey,
+                              index: currentIndex,
+                              children: [
+                                for (final tab in AppTab.values)
+                                  KeyedSubtree(
+                                    key: ShellScreen.tabKey(tab),
+                                    child: ShellTabScope(
+                                      index: tab.index,
+                                      child: Navigator(
+                                        key: _navigators[tab.index],
+                                        observers: [
+                                          _observers[tab.index],
+                                          _glassObservers[tab.index],
+                                        ],
+                                        onGenerateRoute: (settings) =>
+                                            MaterialPageRoute<void>(
+                                              settings: settings,
+                                              builder: (_) => _rootFor(tab),
+                                            ),
+                                      ),
                                     ),
                                   ),
-                                ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ),
-                ),
-                if (resolved &&
-                    !nativeDock &&
-                    !_routeAbove &&
-                    !_listenSheetUp &&
-                    !wide)
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: FrostedDock(
-                      currentIndex: currentIndex,
-                      onTap: _onTabTapped,
-                      mini: mini,
-                      minimized: _minimized,
-                      onMiniTap: _openNowPlaying,
-                      onMiniPlayPause: _playPause,
-                      onMiniNext: _next,
+                  if (resolved &&
+                      !nativeDock &&
+                      !_routeAbove &&
+                      !_listenSheetUp &&
+                      !wide)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: FrostedDock(
+                        currentIndex: currentIndex,
+                        onTap: _onTabTapped,
+                        mini: mini,
+                        minimized: _minimized,
+                        onMiniTap: _openNowPlaying,
+                        onMiniPlayPause: _playPause,
+                        onMiniNext: _next,
+                      ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

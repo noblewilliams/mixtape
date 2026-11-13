@@ -28,17 +28,21 @@ import '../../providers/first_run_funnel_provider.dart';
 import '../../providers/first_run_provider.dart';
 import '../../providers/onboarding_provider.dart';
 import '../../widgets/ai_consent_sheet.dart';
+import '../../widgets/shared_mix_link_listener.dart';
 import 'artists_screen.dart';
 import 'choose_service_screen.dart';
 import 'making_screen.dart';
 import 'welcome_screen.dart';
 
-/// The root of the first-run flow: Welcome.
+/// The root of the first-run flow: Welcome. It stays mounted under every
+/// page the flow pushes, so a shared mix's link opens from here at any point
+/// of the flow (a fresh install has no shell yet).
 class FirstRunFlow extends StatelessWidget {
   const FirstRunFlow({super.key});
 
   @override
-  Widget build(BuildContext context) => const WelcomeScreen();
+  Widget build(BuildContext context) =>
+      const SharedMixLinkListener(child: WelcomeScreen());
 }
 
 /// Where path B's pages were opened from.

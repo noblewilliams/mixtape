@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/config.dart';
 import 'presentation/providers/auth_provider.dart';
 import 'presentation/providers/first_run_provider.dart';
+import 'presentation/providers/incoming_link_provider.dart';
 import 'presentation/providers/name_page_provider.dart';
 import 'presentation/theme/mixtape_theme.dart';
 import 'presentation/screens/debug/foundation_gallery_screen.dart';
@@ -59,6 +60,9 @@ class MixtapeApp extends ConsumerWidget {
     // The name page's device flag loads from launch, beside the token, so
     // the account root rarely has to wait for it (2026-11-02 profile name).
     ref.listen(namePageSettledProvider, (_, _) {});
+    // Universal links are listened for from launch, whatever the root, so a
+    // share link waits here until the shell or the first-run flow opens it.
+    ref.listen(pendingSharedMixProvider, (_, _) {});
     final root = switch (auth) {
       AuthStatus.unknown => _Root.unknown,
       AuthStatus.noSession => _Root.firstRun,

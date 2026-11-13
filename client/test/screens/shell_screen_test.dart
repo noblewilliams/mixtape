@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/auth/token_store.dart';
@@ -207,6 +208,7 @@ ProviderContainer shellContainer({
   bool isPad = false,
   String? chosenService = 'apple',
   MusicPlatformStore? platformStore,
+  List<Override> extra = const [],
 }) {
   final container = ProviderContainer(
     overrides: [
@@ -226,6 +228,7 @@ ProviderContainer shellContainer({
       if (player != null) playbackProvider.overrideWithValue(player),
       if (fakeMiniPlayer)
         miniPlayerStateProvider.overrideWith(FakeMiniPlayer.new),
+      ...extra,
     ],
   );
   addTearDown(container.dispose);

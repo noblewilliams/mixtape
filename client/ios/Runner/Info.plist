@@ -87,5 +87,7 @@
 	<array>
 		<string>spotify</string>
 	</array>
+	<key>FlutterDeepLinkingEnabled</key>
+	<false/>
 </dict>
 </plist>
