@@ -18,6 +18,7 @@ import { enrichRoutes } from './routes/enrich'
 import { enrichSeedRoutes, type EnrichSeedDeps } from './routes/enrich-seed'
 import { sessionRoutes } from './routes/sessions'
 import { sharedRoutes } from './routes/shared'
+import { sharedMixesRoutes } from './routes/shared-mixes'
 import { listenLaterRoutes } from './routes/listen-later'
 import { memoriesRoutes } from './routes/memories'
 import { musicSourcesRoutes } from './routes/music-sources'
@@ -251,6 +252,8 @@ export function createApp({
     if (shares) {
       app.use('/shared/*', optionalSession(auth))
       app.route('/shared', sharedRoutes(db, shares.limiter))
+      app.use('/me/shared-mixes', requireSession(auth))
+      app.route('/me/shared-mixes', sharedMixesRoutes(db))
     }
 
     // Exists only with the flag on: off, every Listen later path is 404 by

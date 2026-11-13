@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import type { Db } from '../db/types'
 import { djSessions, mixShares, mixShareSaves, queueTracks, tracks, user, type MixShareEntry } from '../db/schema'
 
@@ -120,6 +120,14 @@ export async function findShare(db: Db, token: string): Promise<ShareRef | null>
 // Same shape as the session list's artwork (routes/sessions.ts GET /).
 export type ShareArtwork = { url: string; width: number | null; height: number | null; bgColor: string | null }
 
+type ArtworkColumns = { artworkUrl: string | null; artworkWidth: number | null; artworkHeight: number | null; artworkBgColor: string | null }
+
+function artworkOf(t: ArtworkColumns): ShareArtwork | null {
+  return t.artworkUrl === null
+    ? null
+    : { url: t.artworkUrl, width: t.artworkWidth, height: t.artworkHeight, bgColor: t.artworkBgColor }
+}
+
 export type SharedTrack = {
   title: string
   artist: string
@@ -192,9 +200,7 @@ export async function readShare(db: Db, token: string): Promise<ShareRead> {
       artist: t.artist,
       album: t.album,
       durationMs: t.durationMs,
-      artwork: t.artworkUrl === null
-        ? null
-        : { url: t.artworkUrl, width: t.artworkWidth, height: t.artworkHeight, bgColor: t.artworkBgColor },
+      artwork: artworkOf(t),
       appleId: t.appleId,
       isrc: t.isrc,
     })
@@ -231,4 +237,73 @@ export async function unsaveShare(db: Db, token: string, userId: string): Promis
       eq(mixShareSaves.userId, userId),
       inArray(mixShareSaves.shareId, db.select({ id: mixShares.id }).from(mixShares).where(eq(mixShares.token, token))),
     ))
+}
+
+// A listener's saved shares (GET /me/shared-mixes): active shares only, newest
+// save first. Counts, duration and artwork come from the snapshot's songs that
+// still resolve, as readShare drops the rest. Two queries whatever the count.
+export type SavedShareRow = {
+  token: string
+  title: string
+  caseColor: string
+  sharerName: string | null
+  savedAt: Date
+  trackCount: number
+  durationMs: number
+  artwork: ShareArtwork | null
+}
+
+export async function listSavedShares(db: Db, userId: string): Promise<SavedShareRow[]> {
+  const rows = await db
+    .select({
+      token: mixShares.token,
+      title: mixShares.title,
+      caseColor: mixShares.caseColor,
+      entries: mixShares.entries,
+      sharerName: user.name,
+      savedAt: mixShareSaves.savedAt,
+    })
+    .from(mixShareSaves)
+    .innerJoin(mixShares, eq(mixShares.id, mixShareSaves.shareId))
+    .innerJoin(user, eq(user.id, mixShares.sharerId))
+    .where(and(eq(mixShareSaves.userId, userId), isNull(mixShares.revokedAt)))
+    .orderBy(desc(mixShareSaves.savedAt), asc(mixShares.id))
+  if (rows.length === 0) return []
+
+  const ids = [...new Set(rows.flatMap((r) => r.entries.map((e) => e.trackId)))]
+  const found = await db
+    .select({
+      id: tracks.id,
+      durationMs: tracks.durationMs,
+      artworkUrl: tracks.artworkUrlTemplate,
+      artworkWidth: tracks.artworkWidth,
+      artworkHeight: tracks.artworkHeight,
+      artworkBgColor: tracks.artworkBgColor,
+    })
+    .from(tracks)
+    .where(inArray(tracks.id, ids))
+  const byId = new Map(found.map((t) => [t.id, t]))
+
+  return rows.map((row) => {
+    let trackCount = 0
+    let durationMs = 0
+    let artwork: ShareArtwork | null = null
+    for (const entry of [...row.entries].sort((a, b) => a.position - b.position)) {
+      const t = byId.get(entry.trackId)
+      if (!t) continue
+      if (trackCount === 0) artwork = artworkOf(t)
+      trackCount += 1
+      durationMs += t.durationMs ?? 0
+    }
+    return {
+      token: row.token,
+      title: row.title,
+      caseColor: row.caseColor,
+      sharerName: firstName(row.sharerName),
+      savedAt: row.savedAt,
+      trackCount,
+      durationMs,
+      artwork,
+    }
+  })
 }

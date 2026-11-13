@@ -78,6 +78,38 @@ const LIBRARY_MOVES: Move[] = [
   { table: 'suggestion_settings', unique: [] },
 ]
 
+// Shared mixes (spec 2026-11-13 shared-mixes → Merging and deletion).
+//
+// Saves move on every link, outside the merge probe like AI consent: a saved
+// share is not data worth a merge notice or a funnel event, and a listener
+// whose only data is a save still keeps it. The account's own save of a share
+// wins (its saved_at stands); a save of a share the account itself made is
+// dropped, since an owner never holds a save of their own share. Whatever is
+// left on the anonymous id is deleted here rather than left to the cascade.
+async function moveShareSaves(tx: Pick<Db, 'execute'>, anonymousUserId: string, newUserId: string) {
+  await tx.execute(sql`
+    INSERT INTO mix_share_saves (user_id, share_id, saved_at)
+    SELECT ${newUserId}, s.share_id, s.saved_at
+    FROM mix_share_saves s JOIN mix_shares m ON m.id = s.share_id
+    WHERE s.user_id = ${anonymousUserId} AND m.sharer_id <> ${newUserId}
+    ON CONFLICT DO NOTHING`)
+  await tx.execute(sql`DELETE FROM mix_share_saves WHERE user_id = ${anonymousUserId}`)
+}
+
+// Shares follow their sessions: run right after dj_sessions moves, so a share
+// whose session is now the account's is the account's too, and the anonymous
+// user's deletion (mix_shares.sharer_id cascades) cannot take it. An account
+// save of a share that just became its own goes, as above.
+async function moveShares(tx: Pick<Db, 'execute'>, anonymousUserId: string, newUserId: string) {
+  await tx.execute(sql`
+    UPDATE mix_shares m SET sharer_id = ${newUserId}
+    FROM dj_sessions d
+    WHERE m.session_id = d.id AND m.sharer_id = ${anonymousUserId} AND d.user_id = ${newUserId}`)
+  await tx.execute(sql`
+    DELETE FROM mix_share_saves s USING mix_shares m
+    WHERE s.share_id = m.id AND s.user_id = ${newUserId} AND m.sharer_id = ${newUserId}`)
+}
+
 // Table, column and predicate text is constant in this file, never input.
 function moveStatement({ table, unique, partial }: Move, anonymousUserId: string, newUserId: string): SQL {
   const update = sql`UPDATE ${sql.raw(`"${table}"`)} t SET user_id = ${newUserId} WHERE t.user_id = ${anonymousUserId}`
@@ -141,6 +173,7 @@ export async function linkAnonymousRows(db: Db, input: LinkAnonymousRowsInput): 
     const mode: MergeMode = probe.next_has_data ? 'mixes_only' : 'all'
 
     for (const move of ANSWER_MOVES) await tx.execute(moveStatement(move, anon, next))
+    await moveShareSaves(tx, anon, next)
 
     // Nothing to move (a retried callback after the rows already moved, or an
     // anonymous user with nothing the mode would carry): write nothing.
@@ -151,6 +184,7 @@ export async function linkAnonymousRows(db: Db, input: LinkAnonymousRowsInput): 
     for (const move of MIX_MOVES) {
       if (move.table === 'dj_sessions') {
         movedMixes = rowsOf(await tx.execute(sql`${moveStatement(move, anon, next)} RETURNING 1`)).length
+        await moveShares(tx, anon, next)
       } else {
         await tx.execute(moveStatement(move, anon, next))
       }
