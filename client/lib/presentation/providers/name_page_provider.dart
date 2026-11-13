@@ -111,6 +111,25 @@ class NamePageNotifier extends Notifier<bool> {
     _close();
   }
 
+  /// Continue on the page Share opens (spec 2026-11-13 shared-mixes, rule
+  /// 3): the name and the asked flag, then `/me` again so the name shows
+  /// where the app reads it. Anonymous listeners may save one too. It
+  /// answers the question for this account, so the first-run ask does not
+  /// follow. Throws when the write fails; the page stays open with the text.
+  Future<void> saveForShare(String name) async {
+    final api = ref.read(accountApiProvider);
+    await api.updateUser(name: name);
+    if (!ref.mounted) return;
+    ref.invalidate(meProvider);
+    try {
+      await ref.read(meProvider.future);
+    } catch (_) {
+      // The write landed; a failed reread only leaves the name stale.
+    }
+    if (!ref.mounted) return;
+    _close();
+  }
+
   /// Skip: moves on at once and records that it was asked. The device is
   /// settled only once that write lands; if it fails, the next launch waits
   /// for `/me` again and the page may show once more, as on web.

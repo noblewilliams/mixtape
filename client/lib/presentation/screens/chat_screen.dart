@@ -63,6 +63,7 @@ import 'mix_history_screen.dart';
 import 'queue_screen.dart';
 import 'shell/shell_route_observer.dart';
 import '../widgets/foundation/mixtape_menu.dart';
+import '../widgets/mix_share.dart';
 
 /// The toast a selection changed somewhere else earns: the canonical seed is
 /// adopted, the arrangement and the unsent draft are left alone, and the
@@ -364,22 +365,28 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     );
   }
 
-  /// The More menu (board section 2, the same on the tape): Version history,
-  /// Tape settings, Rename, then Archive or Restore behind a separator. An
-  /// album session keeps Rename and Archive only: it has no versions to
-  /// browse and no tape to dress.
+  /// The More menu (board section 2, the same on the tape): Share and Stop
+  /// sharing as their own group ([MixShare]), Version history, Tape
+  /// settings, Rename, then Archive or Restore behind a separator. An album
+  /// session keeps Rename and Archive only: it has no versions to browse, no
+  /// tape to dress and nothing to share.
   Future<void> _actions(BuildContext anchor) async {
-    final session = ref.read(chatProvider(widget.sessionId)).value?.session;
+    final chat = ref.read(chatProvider(widget.sessionId)).value;
+    final session = chat?.session;
     final archived = session?.status == 'archived';
     final album = session?.kind == SessionKind.album;
+    final sharing = MixShare.menuActions(chat);
+    final origin = MixShare.originOf(anchor);
     final action = await showMixtapeMenu<String>(
       anchor,
       actions: [
+        ...sharing,
         if (!album)
-          const MixtapeMenuAction(
+          MixtapeMenuAction(
             value: 'history',
             label: 'Version history',
             icon: MixMenuIcons.history,
+            separatorBefore: sharing.isNotEmpty,
           ),
         if (!album)
           const MixtapeMenuAction(
@@ -402,6 +409,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       ],
     );
     if (!mounted || action == null) return;
+    final shared = await MixShare.handle(
+      context,
+      ref,
+      widget.sessionId,
+      action,
+      origin: origin,
+      onError: (message) => _snack(message, kind: FeedbackKind.error),
+    );
+    if (shared || !mounted) return;
     if (action == 'history') return _openHistory();
     if (action == 'rename') return _rename();
     if (action == 'tape-settings') {

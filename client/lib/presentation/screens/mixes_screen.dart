@@ -7,6 +7,12 @@
 /// behind an "Archived" row at the top of Active, and a swipe left opens a
 /// row's More and Archive actions and waits for a tap.
 ///
+/// Shared mixes the listener saved sit among their own mixes by the time
+/// they were saved, as "From Ada" rows (spec 2026-11-13 shared-mixes; board
+/// M1–M3). They are read again whenever Mixes is shown or pulled, so a share
+/// its sender stopped is gone on the next read, and a failed read leaves the
+/// listener's own mixes as they are.
+///
 /// It lives inside a tab `Navigator`, so it never assumes it is the root route:
 /// pushes go to the nearest [Navigator] and there is no app bar of its own.
 library;
@@ -24,6 +30,8 @@ import '../providers/dj_providers.dart';
 import '../providers/home_mode_provider.dart';
 import '../providers/listen_later_provider.dart';
 import '../providers/mix_activity_provider.dart';
+import '../providers/shared_mixes_provider.dart';
+import '../providers/shell_providers.dart';
 import '../theme/mixtape_theme.dart';
 import '../widgets/foundation/empty_state.dart';
 import '../widgets/foundation/flush_row.dart';
@@ -42,9 +50,11 @@ import '../widgets/foundation/tape_button.dart';
 import 'queue_screen.dart' show QueueScreen;
 import '../widgets/listen_later_row.dart';
 import '../widgets/mix_home_row.dart';
+import '../widgets/shared_mix_row.dart';
 import 'archived_mixes_screen.dart';
 import 'chat_screen.dart';
 import 'mix_archive_feedback.dart';
+import 'shared_mix_screen.dart';
 
 const _removeFailedMessage = 'Couldn’t remove it from Listen later. Try again.';
 const _restoreFailedMessage =
@@ -175,8 +185,34 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
       if (mounted) setState(() => _shelfRefreshFailed = !ok);
       return;
     }
+    // The shared rows ride along; their failure keeps the last ones quietly.
+    final shared = ref.read(sharedMixesProvider.notifier).refresh();
     final ok = await ref.read(sessionsProvider.notifier).refresh();
+    await shared;
     if (mounted) setState(() => _refreshFailed = !ok);
+  }
+
+  /// A saved share opens read-only; back from it (a Remove there pops) the
+  /// shared rows are read again.
+  void _openShared(String token) {
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute<void>(
+            builder: (_) => SharedMixScreen(token: token, fromMixes: true),
+          ),
+        )
+        .then((_) {
+          if (!mounted) return;
+          unawaited(ref.read(sharedMixesProvider.notifier).refresh());
+        });
+  }
+
+  /// Remove drops the save (not the sender's link): the row goes at once
+  /// and comes back if the server says no.
+  Future<void> _removeShared(String token) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await ref.read(sharedMixesProvider.notifier).remove(token);
+    if (!ok) _showError(messenger, SharedMixScreen.removeFailedMessage);
   }
 
   /// Opens the album session an entry was saved from; the shelf and the
@@ -286,6 +322,13 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
         if (ended) unawaited(ref.read(sessionsProvider.notifier).refresh());
       },
     );
+    // Shown again (the tab came up): read the shared rows again, so a share
+    // its sender stopped goes and a newly saved one arrives.
+    ref.listen<int>(selectedTabProvider, (previous, next) {
+      if (previous != next && next == AppTab.mixes.index) {
+        unawaited(ref.read(sharedMixesProvider.notifier).refresh());
+      }
+    });
     // The shelf's segment left (signed out of albums, the server turned them
     // off): fall back to Active rather than show a segment that isn't there.
     if (!albumsOn && _onShelf) _segment = MixesSegment.active;
@@ -382,6 +425,9 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
 
     final sessions = sessionsAsync.requireValue;
     final active = nonArchivedSessions(sessions);
+    // A failed read of the shared rows draws none; the own list stands.
+    final shared = ref.watch(sharedMixesProvider).value ?? const [];
+    final entries = mergeMixesEntries(active, shared);
     // The DJ's work in flight: a turn out on a mix turns its row, and a new
     // mix being made on Home has a row of its own on top until the list
     // lists it (the server writes the row before the first turn runs).
@@ -403,7 +449,7 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
     final showArchived =
         archivedCount > 0 &&
         (_archivedRevealed ||
-            active.isEmpty ||
+            entries.isEmpty ||
             MediaQuery.accessibleNavigationOf(context));
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final archivedSliver = SliverToBoxAdapter(
@@ -437,11 +483,11 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
       ),
     );
 
-    if (active.isEmpty && pendingRow) {
+    if (entries.isEmpty && pendingRow) {
       return [archivedSliver, pendingSliver()];
     }
 
-    if (active.isEmpty) {
+    if (entries.isEmpty) {
       return [
         archivedSliver,
         _SessionsEmptyState(
@@ -460,24 +506,34 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
             : widget.bottomInset,
         sliver: SliverList.builder(
           key: const Key('sessions-list'),
-          itemCount: active.length,
+          itemCount: entries.length,
           // By key, not position: a row keeps its state (open, mid-archive,
           // mid-rename) when a row above it is archived or put back.
           findChildIndexCallback: (key) {
-            final index = active.indexWhere(
-              (s) => Key('session-${s.id}') == key,
-            );
+            final index = entries.indexWhere((e) => _entryKey(e) == key);
             return index < 0 ? null : index;
           },
           itemBuilder: (context, index) {
-            final session = active[index];
+            // Lazily built rows have no FlushList above them, so the first
+            // row has to be told it opens the list or it draws a hairline
+            // there. Under the Archived row it draws one.
+            final first = index == 0 && !showArchived && !pendingRow;
+            final entry = entries[index];
+            if (entry is SharedMixEntry) {
+              final mix = entry.mix;
+              return SharedMixHomeRow(
+                key: _entryKey(entry),
+                mix: mix,
+                isFirst: first,
+                onOpen: () => _openShared(mix.token),
+                onRemove: () => _removeShared(mix.token),
+              );
+            }
+            final session = (entry as OwnMixEntry).session;
             return MixHomeRow(
-              key: Key('session-${session.id}'),
+              key: _entryKey(entry),
               session: session,
-              // Lazily built rows have no FlushList above them, so the first
-              // row has to be told it opens the list or it draws a hairline
-              // there. Under the Archived row it draws one.
-              isFirst: index == 0 && !showArchived && !pendingRow,
+              isFirst: first,
               // No visible actions button: long-press and the swipe.
               showActionsButton: false,
               working:
@@ -498,6 +554,11 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
       ),
     ];
   }
+
+  static Key _entryKey(MixesEntry entry) => switch (entry) {
+    OwnMixEntry(:final session) => Key('session-${session.id}'),
+    SharedMixEntry(:final mix) => SharedMixHomeRow.rowKey(mix.token),
+  };
 
   /// The Listen later shelf: unlistened rows, then a "Listened" heading and
   /// the listened rows, in the provider's order.

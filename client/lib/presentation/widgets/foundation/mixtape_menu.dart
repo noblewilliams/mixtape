@@ -83,6 +83,13 @@ abstract final class MixMenuIcons {
 
   /// One curve: the shape the energy takes.
   static const IconData shape = Icons.show_chart_rounded;
+
+  /// Share and its kin follow the transport rule (shared-mixes board):
+  /// Share is next-track (pass it on), Stop sharing is stop, and a shared
+  /// row's Remove is eject.
+  static const IconData share = CupertinoIcons.forward_end_fill;
+  static const IconData stopSharing = CupertinoIcons.stop_fill;
+  static const IconData eject = CupertinoIcons.eject_fill;
 }
 
 /// The popover itself, for tests.

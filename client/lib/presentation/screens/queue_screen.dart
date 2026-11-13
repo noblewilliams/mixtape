@@ -35,6 +35,7 @@ import 'package:flutter/cupertino.dart'
 import 'package:flutter/material.dart';
 import '../widgets/foundation/alert_field_box.dart';
 import '../widgets/open_tape_settings.dart';
+import '../widgets/mix_share.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/dj/dj_models.dart';
@@ -347,19 +348,23 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
     );
   }
 
-  /// The More menu, the same as the conversation's: Version history, Tape
-  /// settings, Rename, then Archive or Restore behind a separator.
+  /// The More menu, the same as the conversation's: Share and Stop sharing
+  /// ([MixShare]), Version history, Tape settings, Rename, then Archive or
+  /// Restore behind a separator.
   Future<void> _openMore(BuildContext anchor) async {
-    final archived =
-        ref.read(chatProvider(widget.sessionId)).value?.session.status ==
-        'archived';
+    final chat = ref.read(chatProvider(widget.sessionId)).value;
+    final archived = chat?.session.status == 'archived';
+    final sharing = MixShare.menuActions(chat);
+    final origin = MixShare.originOf(anchor);
     final action = await showMixtapeMenu<String>(
       anchor,
       actions: [
-        const MixtapeMenuAction(
+        ...sharing,
+        MixtapeMenuAction(
           value: 'history',
           label: 'Version history',
           icon: MixMenuIcons.history,
+          separatorBefore: sharing.isNotEmpty,
         ),
         const MixtapeMenuAction(
           value: 'tape-settings',
@@ -381,6 +386,16 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
       ],
     );
     if (!mounted || action == null) return;
+    final shared = await MixShare.handle(
+      context,
+      ref,
+      widget.sessionId,
+      action,
+      origin: origin,
+      onError: (message) =>
+          _showSnack(context, message, kind: FeedbackKind.error),
+    );
+    if (shared || !mounted) return;
     if (action == 'history') return _openHistory();
     if (action == 'rename') return _openRenameDialog();
     if (action == 'tape-settings') {

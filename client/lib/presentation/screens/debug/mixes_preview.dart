@@ -18,7 +18,10 @@
 /// The made-up API answers the shared-mix calls too (spec 2026-11-13
 /// shared-mixes), so `SharedMixScreen` opens on made-up data from here:
 /// [MixesPreview.sharedToken] loads, [MixesPreview.goneToken] reads as a
-/// stopped share.
+/// stopped share. Both sit in the list as saved shares: "From Ada" two hours
+/// ago, and one "From a friend" (a sender who cleared their name) whose
+/// share was stopped, so its screen offers Remove. Remove takes either out
+/// of the made-up list.
 library;
 
 import 'package:flutter/material.dart';
@@ -336,7 +339,7 @@ class _PreviewApi implements DjApi, DjTurnProgressSender, DjSharedMixes {
     pick: s.pick,
   );
 
-  final Set<String> _savedShares = {};
+  final Set<String> _removedShares = {};
 
   @override
   Future<SharedMix> getSharedMix(String token) async {
@@ -378,28 +381,55 @@ class _PreviewApi implements DjApi, DjTurnProgressSender, DjSharedMixes {
   @override
   Future<void> saveSharedMix(String token) async {
     await _latency;
-    _savedShares.add(token);
+    _removedShares.remove(token);
   }
 
   @override
   Future<void> removeSharedMix(String token) async {
     await _latency;
-    _savedShares.remove(token);
+    _removedShares.add(token);
   }
 
   @override
   Future<List<SharedMixRow>> listSharedMixes() async {
     await _latency;
-    return const [];
+    final now = DateTime.now();
+    final rows = [
+      SharedMixRow(
+        token: MixesPreview.sharedToken,
+        title: 'Late drive, windows down',
+        caseColor: '#bc5734',
+        sharerName: 'Ada',
+        savedAt: now.subtract(const Duration(hours: 2)),
+        trackCount: 10,
+        durationMs: 2460000,
+      ),
+      SharedMixRow(
+        token: MixesPreview.goneToken,
+        title: 'Saturday Kitchen',
+        caseColor: '#5fb3a8',
+        savedAt: now.subtract(const Duration(days: 2)),
+        trackCount: 14,
+        durationMs: 3120000,
+      ),
+    ];
+    return [
+      for (final row in rows)
+        if (!_removedShares.contains(row.token)) row,
+    ];
   }
 
   @override
-  Future<ShareLinkResult> shareSession(String sessionId) =>
-      throw UnimplementedError('not wired in the Mixes preview');
+  Future<ShareLinkResult> shareSession(String sessionId) async {
+    await _latency;
+    return const ShareLinkResult(
+      token: MixesPreview.sharedToken,
+      url: 'https://miixtape.netlify.app/m/${MixesPreview.sharedToken}',
+    );
+  }
 
   @override
-  Future<void> stopSharing(String sessionId) =>
-      throw UnimplementedError('not wired in the Mixes preview');
+  Future<void> stopSharing(String sessionId) => _latency;
 
   @override
   dynamic noSuchMethod(Invocation invocation) =>

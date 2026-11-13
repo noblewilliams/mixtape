@@ -35,11 +35,45 @@ import 'package:mixtape/presentation/widgets/foundation/swipe_actions.dart';
 import 'package:mixtape/presentation/widgets/foundation/status_word.dart';
 import 'package:mixtape/presentation/widgets/listen_later_row.dart';
 import 'package:mixtape/presentation/widgets/mix_home_row.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:mixtape/presentation/screens/shared_mix_screen.dart';
+import 'package:mixtape/presentation/providers/shell_providers.dart';
+import 'package:mixtape/presentation/widgets/foundation/mixtape_menu.dart'
+    show MixMenuIcons, mixtapeMenuKey;
+import 'package:mixtape/presentation/widgets/shared_mix_row.dart';
 
 /// Implements DjApi's public surface (not `extends`, since DjApi's constructor
 /// builds a real ApiClient); only the session-list calls are wired.
-class FakeDjApi implements DjApi {
+class FakeDjApi implements DjApi, DjSharedMixes {
   Future<List<DjSession>> Function()? onListSessions;
+
+  /// The listener's saved shares; none unless a test says otherwise.
+  Future<List<SharedMixRow>> Function() onListSharedMixes = () async =>
+      const [];
+  Future<void> Function(String token) onRemoveSharedMix = (_) async {};
+  final removedShares = <String>[];
+
+  @override
+  Future<List<SharedMixRow>> listSharedMixes() => onListSharedMixes();
+
+  @override
+  Future<void> removeSharedMix(String token) {
+    removedShares.add(token);
+    return onRemoveSharedMix(token);
+  }
+
+  @override
+  Future<SharedMix> getSharedMix(String token) => Completer<SharedMix>().future;
+
+  @override
+  Future<void> saveSharedMix(String token) async {}
+
+  @override
+  Future<ShareLinkResult> shareSession(String sessionId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> stopSharing(String sessionId) => throw UnimplementedError();
   Future<DjSession> Function(String id, String status)? onSetStatus;
   Future<DjSession> Function(String id, String title)? onRenameSession;
   Future<SessionDetail> Function(String id)? onGetSession;
@@ -1387,6 +1421,245 @@ void main() {
       await openShelf(tester);
       expect(find.text('Nightshift Radio'), findsOneWidget);
       expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('shared mixes in Mixes (spec 2026-11-13 shared-mixes)', () {
+    SharedMixRow share({
+      String token = 'AbCdEfGhIjKlMnOpQrStUv',
+      String title = 'Late drive, windows down',
+      String? name = 'Ada',
+      required DateTime savedAt,
+    }) => SharedMixRow(
+      token: token,
+      title: title,
+      caseColor: '#bc5734',
+      sharerName: name,
+      savedAt: savedAt,
+      trackCount: 10,
+      durationMs: 2460000,
+    );
+
+    double top(WidgetTester tester, String text) =>
+        tester.getTopLeft(find.text(text)).dy;
+
+    testWidgets('a shared row sits among own mixes by its saved time, '
+        '"From Ada · <time>", in its tape colour', (tester) async {
+      final now = DateTime.now();
+      final api = FakeDjApi();
+      api.onListSessions = () async => [
+          _session(id: 'a', title: 'Sunday Reset', updatedAt: now),
+          _session(
+            id: 'b',
+            title: 'Smooth Cruise',
+            updatedAt: now.subtract(const Duration(days: 1)),
+          ),
+        ];
+      api.onListSharedMixes = () async => [
+          share(savedAt: now.subtract(const Duration(hours: 2))),
+        ];
+      await _pump(tester, _makeContainer(api));
+
+      expect(top(tester, 'Sunday Reset'), lessThan(top(tester, 'Late drive, windows down')));
+      expect(
+        top(tester, 'Late drive, windows down'),
+        lessThan(top(tester, 'Smooth Cruise')),
+      );
+      final row = find.byKey(SharedMixHomeRow.rowKey('AbCdEfGhIjKlMnOpQrStUv'));
+      expect(row, findsOneWidget);
+      expect(
+        find.descendant(of: row, matching: find.textContaining('From Ada · 2h ago', findRichText: true)),
+        findsOneWidget,
+      );
+      final tile = tester.widget<CassetteTile>(
+        find.descendant(of: row, matching: find.byType(CassetteTile)),
+      );
+      expect(tile.caseColor, const Color(0xFFBC5734));
+    });
+
+    testWidgets('a sender who cleared their name reads "From a friend"', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onListSessions = () async => [_session(title: 'Mine')];
+      api.onListSharedMixes = () async => [
+          share(name: null, savedAt: DateTime.now()),
+        ];
+      await _pump(tester, _makeContainer(api));
+      expect(
+        find.textContaining('From a friend', findRichText: true),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('shared rows show with no mixes of their own', (tester) async {
+      final api = FakeDjApi();
+      api.onListSessions = () async => [];
+      api.onListSharedMixes = () async => [share(savedAt: DateTime.now())];
+      await _pump(tester, _makeContainer(api));
+      expect(find.byKey(const Key('sessions-empty')), findsNothing);
+      expect(find.text('Late drive, windows down'), findsOneWidget);
+    });
+
+    testWidgets('the swipe reveals only Remove, which removes the save', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onListSessions = () async => [_session(title: 'Mine')];
+      api.onListSharedMixes = () async => [share(savedAt: DateTime.now())];
+      await _pump(tester, _makeContainer(api));
+
+      await tester.drag(
+        find.text('Late drive, windows down'),
+        const Offset(-140, 0),
+      );
+      await tester.pumpAndSettle();
+      const token = 'AbCdEfGhIjKlMnOpQrStUv';
+      expect(find.byKey(SharedMixHomeRow.removeActionKey(token)), findsOneWidget);
+      expect(find.text('Remove'), findsOneWidget);
+      expect(find.text('Archive'), findsNothing);
+      expect(find.text('More'), findsNothing);
+      expect(api.removedShares, isEmpty);
+
+      await tester.tap(find.byKey(SharedMixHomeRow.removeActionKey(token)));
+      await tester.pumpAndSettle();
+      expect(api.removedShares, [token]);
+      expect(find.text('Late drive, windows down'), findsNothing);
+      expect(find.text('Mine'), findsOneWidget);
+    });
+
+    testWidgets('a failed Remove puts the row back and says so', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onListSessions = () async => [_session(title: 'Mine')];
+      api.onListSharedMixes = () async => [share(savedAt: DateTime.now())];
+      api.onRemoveSharedMix = (_) async => throw ApiException(500, 'boom');
+      await _pump(tester, _makeContainer(api));
+
+      await tester.drag(
+        find.text('Late drive, windows down'),
+        const Offset(-140, 0),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(SharedMixHomeRow.removeActionKey('AbCdEfGhIjKlMnOpQrStUv')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Late drive, windows down'), findsOneWidget);
+      expect(find.text(SharedMixScreen.removeFailedMessage), findsOneWidget);
+    });
+
+    testWidgets('long-press offers the same single Remove', (tester) async {
+      final api = FakeDjApi();
+      api.onListSessions = () async => [_session(title: 'Mine')];
+      api.onListSharedMixes = () async => [share(savedAt: DateTime.now())];
+      await _pump(tester, _makeContainer(api));
+
+      await tester.longPress(find.text('Late drive, windows down'));
+      await tester.pumpAndSettle();
+      final menu = find.byKey(mixtapeMenuKey);
+      expect(find.descendant(of: menu, matching: find.text('Remove')), findsOneWidget);
+      expect(
+        find.descendant(of: menu, matching: find.byIcon(MixMenuIcons.eject)),
+        findsOneWidget,
+      );
+      expect(find.descendant(of: menu, matching: find.text('Rename')), findsNothing);
+      expect(find.descendant(of: menu, matching: find.text('Archive')), findsNothing);
+      await tester.tap(find.descendant(of: menu, matching: find.text('Remove')));
+      await tester.pumpAndSettle();
+      expect(api.removedShares, ['AbCdEfGhIjKlMnOpQrStUv']);
+    });
+
+    testWidgets('tapping a shared row opens SharedMixScreen from Mixes', (
+      tester,
+    ) async {
+      FlutterSecureStorage.setMockInitialValues({});
+      final api = FakeDjApi();
+      api.onListSessions = () async => [_session(title: 'Mine')];
+      api.onListSharedMixes = () async => [share(savedAt: DateTime.now())];
+      await _pump(tester, _makeContainer(api));
+
+      await tester.tap(find.text('Late drive, windows down'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      final screen = tester.widget<SharedMixScreen>(
+        find.byType(SharedMixScreen),
+      );
+      expect(screen.token, 'AbCdEfGhIjKlMnOpQrStUv');
+      expect(screen.fromMixes, isTrue);
+    });
+
+    testWidgets('a failed shared read keeps the listener\'s own mixes', (
+      tester,
+    ) async {
+      final api = FakeDjApi();
+      api.onListSessions = () async => [_session(title: 'Mine')];
+      api.onListSharedMixes = () async => throw ApiException(500, 'boom');
+      await _pump(tester, _makeContainer(api));
+      expect(find.text('Mine'), findsOneWidget);
+      expect(find.byKey(const Key('sessions-retry')), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('pull-to-refresh reads the shares again; a stopped one goes', (
+      tester,
+    ) async {
+      var rows = [share(savedAt: DateTime.now())];
+      final api = FakeDjApi();
+      api.onListSessions = () async => [_session(title: 'Mine')];
+      api.onListSharedMixes = () async => rows;
+      await _pump(tester, _makeContainer(api));
+      expect(find.text('Late drive, windows down'), findsOneWidget);
+
+      rows = [];
+      await tester.drag(find.byType(CustomScrollView), const Offset(0, 300));
+      await tester.pumpAndSettle();
+      expect(find.text('Late drive, windows down'), findsNothing);
+      expect(find.text('Mine'), findsOneWidget);
+    });
+
+    testWidgets('showing the Mixes tab reads the shares again', (
+      tester,
+    ) async {
+      var reads = 0;
+      final api = FakeDjApi();
+      api.onListSessions = () async => [_session(title: 'Mine')];
+      api.onListSharedMixes = () async {
+        reads++;
+        return const [];
+      };
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+      expect(reads, 1);
+
+      container.read(selectedTabProvider.notifier).select(AppTab.mixes.index);
+      await tester.pumpAndSettle();
+      expect(reads, 2);
+      container.read(selectedTabProvider.notifier).select(AppTab.home.index);
+      await tester.pumpAndSettle();
+      expect(reads, 2);
+    });
+
+    testWidgets('shared rows are not in Archived', (tester) async {
+      final api = FakeDjApi();
+      api.onListSessions = () async => [
+          _session(id: 'a', title: 'Mine'),
+          _session(id: 'z', title: 'Old', status: 'archived'),
+        ];
+      api.onListSharedMixes = () async => [share(savedAt: DateTime.now())];
+      await _pump(tester, _makeContainer(api));
+      await _revealArchived(tester);
+      await tester.tap(find.byKey(MixesScreen.archivedRowKey));
+      await tester.pumpAndSettle();
+      expect(find.byType(ArchivedMixesScreen), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(ArchivedMixesScreen),
+          matching: find.text('Late drive, windows down'),
+        ),
+        findsNothing,
+      );
     });
   });
 }

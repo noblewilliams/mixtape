@@ -8,6 +8,7 @@ import '../../data/onboarding/funnel_once_store.dart';
 import '../../data/onboarding/service_preference_store.dart';
 import '../../data/reminders/reminder_scheduler.dart';
 import '../../data/share/clipboard_writer.dart';
+import '../../data/share/share_sheet.dart';
 
 /// The one local reminder this app sends (the Spotify request nudge).
 final reminderSchedulerProvider =
@@ -25,6 +26,10 @@ final funnelOnceStoreProvider = Provider<FunnelOnceStore>((ref) => SecureFunnelO
 /// TuneMyMusic takes).
 final clipboardWriterProvider =
     Provider<ClipboardWriter>((ref) => const SystemClipboardWriter());
+
+/// The system share sheet behind a mix's Share.
+final shareSheetProvider =
+    Provider<ShareSheet>((ref) => const SystemShareSheet());
 
 /// The ZIP picker behind "Choose a ZIP" (the document picker).
 final archivePickerProvider = Provider<ArchivePicker>((ref) => const FilePickerArchivePicker());

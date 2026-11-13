@@ -120,11 +120,23 @@ class NamePageHold extends StatelessWidget {
 }
 
 class NameScreen extends ConsumerStatefulWidget {
-  const NameScreen({super.key});
+  const NameScreen({super.key, this.forShare = false});
+
+  /// Pushed by a mix's Share when the server needs a name first (spec
+  /// 2026-11-13 shared-mixes, board S4/S5): Back in place of Skip, the line
+  /// says who sees the name, and a saved name pops the page with true so
+  /// the share goes on. Back pops with nothing and nothing is shared.
+  final bool forShare;
+
+  /// The route Share pushes; it completes with true once a name is saved.
+  static Route<bool> shareRoute() =>
+      MaterialPageRoute<bool>(builder: (_) => const NameScreen(forShare: true));
 
   static const String headline = 'What should we call you?';
   static const String line =
       'It shows in Account, and the DJ may use it now and then.';
+  static const String shareLine =
+      'Whoever opens your link will see your first name.';
   static const String placeholder = 'Your name';
   static const String typeName = 'Type a name.';
   static const String saving = 'Saving';
@@ -199,7 +211,8 @@ class _NameScreenState extends ConsumerState<NameScreen> {
     });
     _announce(NameScreen.saving);
     try {
-      await ref.read(namePageProvider.notifier).save(name);
+      final page = ref.read(namePageProvider.notifier);
+      await (widget.forShare ? page.saveForShare(name) : page.save(name));
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -210,6 +223,7 @@ class _NameScreenState extends ConsumerState<NameScreen> {
       return;
     }
     // Success closes the page; the next screen announces itself.
+    if (widget.forShare && mounted) Navigator.of(context).pop(true);
   }
 
   /// Moves on at once; the asked flag is written behind it.
@@ -246,12 +260,16 @@ class _NameScreenState extends ConsumerState<NameScreen> {
     return StepScaffold(
       background: FirstRunBackground.signIn,
       headline: NameScreen.headline,
-      line: NameScreen.line,
-      showBack: false,
+      line: widget.forShare ? NameScreen.shareLine : NameScreen.line,
+      // From Share, Back returns to the mix and nothing is shared; Skip is
+      // not offered, since the share needs the name.
+      showBack: widget.forShare,
       body: [const SizedBox(height: 24), _input(context), _status(context)],
       actions: [pill],
       // Off while a save is in flight, so its failure is never hidden.
-      foot: FootLink(label: 'Skip', onPressed: _saving ? null : _skip),
+      foot: widget.forShare
+          ? null
+          : FootLink(label: 'Skip', onPressed: _saving ? null : _skip),
     );
   }
 

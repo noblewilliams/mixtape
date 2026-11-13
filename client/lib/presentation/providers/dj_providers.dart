@@ -237,9 +237,15 @@ class ChatState {
     this.suggestions,
     this.addMusic,
     this.workingStep,
+    this.shared = false,
   });
 
   final DjSession session;
+
+  /// The mix has an active share link (spec 2026-11-13 shared-mixes), so its
+  /// ⋯ menus offer Stop sharing. Read with the session, then kept in step
+  /// locally by [ChatNotifier.setShared] after a Share or a Stop sharing.
+  final bool shared;
 
   /// Mix or album, read off the session (one source of truth, as
   /// [queueVersion] is).
@@ -309,6 +315,7 @@ class ChatState {
     bool clearAddMusic = false,
     WorkingStep? workingStep,
     bool clearWorkingStep = false,
+    bool? shared,
   }) {
     assert(
       session == null || queueVersion == null,
@@ -334,6 +341,7 @@ class ChatState {
       suggestions: clearSuggestions ? null : (suggestions ?? this.suggestions),
       addMusic: clearAddMusic ? null : (addMusic ?? this.addMusic),
       workingStep: clearWorkingStep ? null : (workingStep ?? this.workingStep),
+      shared: shared ?? this.shared,
     );
   }
 }
@@ -411,6 +419,10 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     );
     return true;
   }
+
+  /// A Share or Stop sharing landed: the menus follow without a re-read.
+  void setShared(bool shared) =>
+      _mergeCurrent((current) => current.copyWith(shared: shared));
 
   bool _current(int generation) => ref.mounted && generation == _generation;
 
@@ -494,6 +506,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     pickState: detail.pickState,
     suggestions: detail.suggestions,
     addMusic: detail.addMusic,
+    shared: detail.shared,
   );
 
   DjMessage _localMessage(String role, String content) => DjMessage(
