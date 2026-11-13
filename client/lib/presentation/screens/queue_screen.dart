@@ -33,6 +33,7 @@ import 'package:flutter/cupertino.dart'
         CupertinoTextField,
         showCupertinoDialog;
 import 'package:flutter/material.dart';
+import '../widgets/foundation/alert_field_box.dart';
 import '../widgets/open_tape_settings.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -408,11 +409,13 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
         title: const Text('Rename mix'),
         content: Padding(
           padding: const EdgeInsets.only(top: 14),
-          child: CupertinoTextField(
-            key: const Key('rename-field'),
-            controller: controller,
-            autofocus: true,
-            placeholder: 'Mix name',
+          child: AlertFieldBox(
+            child: CupertinoTextField(
+              key: const Key('rename-field'),
+              controller: controller,
+              autofocus: true,
+              placeholder: 'Mix name',
+            ),
           ),
         ),
         actions: [

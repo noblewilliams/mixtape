@@ -56,6 +56,7 @@ import '../providers/onboarding_provider.dart';
 import '../providers/playback_provider.dart';
 import '../screens/playback_screen.dart';
 import '../theme/mixtape_theme.dart';
+import 'foundation/alert_field_box.dart';
 import 'foundation/label_chip.dart';
 import 'foundation/mixtape_feedback.dart';
 import 'foundation/service_marks.dart';
@@ -808,20 +809,24 @@ class _MixSaveDialogState extends State<MixSaveDialog> {
         mainAxisSize: MainAxisSize.min,
         children: [
           const SizedBox(height: 10),
-          CupertinoTextField(
-            key: widget.keys.nameField,
-            controller: _name,
-            onChanged: (_) => setState(() {}),
-            autofocus: true,
-            enabled: !_submitting,
-            placeholder: 'Playlist name',
+          AlertFieldBox(
+            child: CupertinoTextField(
+              key: widget.keys.nameField,
+              controller: _name,
+              onChanged: (_) => setState(() {}),
+              autofocus: true,
+              enabled: !_submitting,
+              placeholder: 'Playlist name',
+            ),
           ),
           const SizedBox(height: 10),
-          CupertinoTextField(
-            key: widget.keys.authorField,
-            controller: _author,
-            enabled: !_submitting,
-            placeholder: 'Your name',
+          AlertFieldBox(
+            child: CupertinoTextField(
+              key: widget.keys.authorField,
+              controller: _author,
+              enabled: !_submitting,
+              placeholder: 'Your name',
+            ),
           ),
           const SizedBox(height: 6),
           if (_error != null)

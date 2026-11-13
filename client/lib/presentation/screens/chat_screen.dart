@@ -41,6 +41,7 @@ import '../widgets/album_card.dart';
 import '../widgets/composer_plus_button.dart';
 import '../widgets/lyric_turn.dart';
 import '../widgets/energy_journey.dart';
+import '../widgets/foundation/alert_field_box.dart';
 import '../widgets/foundation/glass_cluster.dart';
 import '../widgets/foundation/idea_pill.dart';
 import '../widgets/foundation/gradient_background.dart';
@@ -1657,12 +1658,14 @@ class _RenameDialogState extends State<_RenameDialog> {
     title: Text(widget.heading),
     content: Padding(
       padding: const EdgeInsets.only(top: 14),
-      child: CupertinoTextField(
-        key: const Key('chat-rename-field'),
-        controller: _controller,
-        autofocus: true,
-        onSubmitted: (value) => Navigator.of(context).pop(value),
-        placeholder: 'Mix name',
+      child: AlertFieldBox(
+        child: CupertinoTextField(
+          key: const Key('chat-rename-field'),
+          controller: _controller,
+          autofocus: true,
+          onSubmitted: (value) => Navigator.of(context).pop(value),
+          placeholder: 'Mix name',
+        ),
       ),
     ),
     actions: [

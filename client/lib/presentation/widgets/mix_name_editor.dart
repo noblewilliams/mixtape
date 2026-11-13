@@ -109,6 +109,10 @@ class _MixNameEditorState extends State<MixNameEditor> {
           maxLength: 60,
           textInputAction: TextInputAction.done,
           onSubmitted: (_) => _save(),
+          // A tap anywhere else ends the rename (device smoke, 2026-11-13):
+          // iOS text fields keep their focus otherwise, and losing it is what
+          // saves a changed name or puts an unchanged one back.
+          onTapOutside: (_) => _focus.unfocus(),
           decoration: InputDecoration(
             labelText: 'Mix name',
             counterText: '',

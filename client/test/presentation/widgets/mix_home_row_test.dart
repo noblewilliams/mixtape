@@ -17,6 +17,83 @@ void main() {
     queueVersion: 1,
     updatedAt: DateTime(2026),
   );
+  testWidgets('a tap outside ends an unchanged rename (device smoke 2026-11-13)', (
+    tester,
+  ) async {
+    final names = <String>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Column(
+            children: [
+              MixHomeRow(
+                session: session,
+                showActionsButton: true,
+                onOpen: () {},
+                onRename: (name) async {
+                  names.add(name);
+                  return true;
+                },
+                onArchive: () async => true,
+                onRestore: () async => true,
+              ),
+              const Expanded(child: SizedBox.expand(key: Key('outside'))),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byTooltip('Mix actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rename'));
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsOneWidget);
+
+    await tester.tapAt(tester.getCenter(find.byKey(const Key('outside'))));
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsNothing);
+    expect(find.text('Sunday'), findsOneWidget);
+    expect(names, isEmpty, reason: 'nothing changed, nothing saved');
+  });
+
+  testWidgets('a tap outside keeps a changed name, as renaming in Files does', (
+    tester,
+  ) async {
+    final names = <String>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Column(
+            children: [
+              MixHomeRow(
+                session: session,
+                showActionsButton: true,
+                onOpen: () {},
+                onRename: (name) async {
+                  names.add(name);
+                  return true;
+                },
+                onArchive: () async => true,
+                onRestore: () async => true,
+              ),
+              const Expanded(child: SizedBox.expand(key: Key('outside'))),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byTooltip('Mix actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rename'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Monday');
+
+    await tester.tapAt(tester.getCenter(find.byKey(const Key('outside'))));
+    await tester.pumpAndSettle();
+    expect(names, ['Monday']);
+    expect(find.byType(TextField), findsNothing);
+  });
+
   group('the DJ at work and a reply waiting (device smoke 2026-11-13)', () {
     Future<void> pump(
       WidgetTester tester, {
