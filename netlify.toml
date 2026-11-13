@@ -1,8 +1,21 @@
 [build]
   base = "web"
   command = "npm ci --prefix ../landing --include=dev && node ../scripts/build-site.mjs"
+  # Directories here resolve from base ("web"); header and edge function paths are URL paths.
   publish = "../dist"
+  edge_functions = "../netlify/edge-functions"
 
 [build.environment]
   NODE_VERSION = "24"
   VITE_API_URL = "https://mixtape-api.goalympics.workers.dev"
+
+# Universal links: Apple fetches this with no redirect and expects JSON.
+[[headers]]
+  for = "/.well-known/apple-app-site-association"
+  [headers.values]
+    Content-Type = "application/json"
+
+# Link previews for shared mixes (runs before the /m/* rewrite to /app/index.html).
+[[edge_functions]]
+  path = "/m/*"
+  function = "shared-mix-og"

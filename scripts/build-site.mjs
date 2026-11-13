@@ -1,7 +1,8 @@
 import { execFileSync } from 'node:child_process'
-import { cp, mkdir, rm, writeFile, readFile } from 'node:fs/promises'
+import { cp, mkdir, rm, readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
+import { verifyRouting, writeRoutingFiles } from './site-routing.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const output = join(root, 'dist')
@@ -14,12 +15,9 @@ await cp(join(root, 'landing/dist'), output, { recursive: true })
 await cp(join(root, 'web/dist'), join(output, 'app'), { recursive: true })
 // Only the root routing file is used by Netlify. Keep auth on its existing origin.
 await rm(join(output, 'app/_redirects'), { force: true })
-await writeFile(join(output, '_redirects'), [
-  '/api/auth/* https://mixtape-api.goalympics.workers.dev/api/auth/:splat 200!',
-  '/app/* /app/index.html 200',
-  '/* /index.html 200',
-  '',
-].join('\n'))
+// Association file (universal links) and _redirects; see site-routing.mjs for ordering.
+await writeRoutingFiles(output)
+await verifyRouting(output)
 const app = await readFile(join(output, 'app/index.html'), 'utf8')
 if (!app.includes('/app/assets/')) throw new Error('Application assets must use the /app/ base')
 console.log('Built landing at / and application at /app/')

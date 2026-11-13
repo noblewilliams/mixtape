@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { strict as assert } from 'node:assert'
+import { REDIRECTS, verifyRouting } from './site-routing.mjs'
 const root = fileURLToPath(new URL('../dist/', import.meta.url))
 const landing = readFileSync(`${root}index.html`, 'utf8')
 const app = readFileSync(`${root}app/index.html`, 'utf8')
@@ -19,5 +20,6 @@ for (const html of [landing, app, privacy]) {
     assert.ok(existsSync(`${root}${path.slice(1)}`), `Missing built asset: ${path}`)
   }
 }
-assert.equal(readFileSync(`${root}_redirects`, 'utf8'), '/api/auth/* https://mixtape-api.goalympics.workers.dev/api/auth/:splat 200!\n/app/* /app/index.html 200\n/* /index.html 200\n')
-console.log('Verified landing, privacy page, application, asset paths and auth routing')
+assert.equal(readFileSync(`${root}_redirects`, 'utf8'), [...REDIRECTS, ''].join('\n'))
+await verifyRouting(root)
+console.log('Verified landing, privacy page, application, asset paths, auth routing and shared links')
