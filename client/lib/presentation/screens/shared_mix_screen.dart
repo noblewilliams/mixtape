@@ -42,6 +42,7 @@ import '../widgets/foundation/glass_cluster.dart';
 import '../widgets/foundation/gradient_background.dart';
 import '../widgets/foundation/label_chip.dart';
 import '../widgets/foundation/mixtape_feedback.dart';
+import '../widgets/foundation/mixtape_menu.dart';
 import '../widgets/mix_handoff.dart';
 import '../widgets/spotify_handoff_sheets.dart';
 import '../widgets/tape_header.dart';
@@ -619,6 +620,12 @@ class _Gone extends StatelessWidget {
               LabelChip(
                 key: SharedMixScreen.removeKey,
                 label: SharedMixScreen.removeLabel,
+                // Remove is eject everywhere a shared mix offers it (board).
+                leading: Icon(
+                  MixMenuIcons.eject,
+                  size: 15,
+                  color: tokens.plum,
+                ),
                 onPressed: onRemove,
               ),
             ],
