@@ -5,22 +5,56 @@
 import { useEffect, useRef, useState } from 'react'
 import { SharedMixGoneError, type MixtapeApi } from '../api/client'
 import { durationLabel } from '../api/mappers'
-import type { SharedMix, SharedMixTrack } from '../domain'
+import type { QueueTrack, SharedMix, SharedMixTrack } from '../domain'
 import { albumArtworkSource } from '../lib/album-format'
+import { readPlaysOn, writePlaysOn, type PlaysOn } from '../lib/plays-on'
 import { openMixOnNextLoad } from '../lib/workspace-restore'
+import type { MusicKitClient } from '../musickit/client'
+import type { PlaybackController } from '../playback/controller'
 import { Cassette } from './Cassette'
 import { PlayIcon } from './Icons'
+import { Toast } from './Overlays'
+import { SharedPlayModal, type SharedPlayStep } from './SharedPlayModal'
+import { useSpotifyHandoff } from './SpotifyHandoff'
 import './shared-mix-page.css'
 
 /** The browser's session as far as this page needs it: a user id only when requests carry a session. */
 export type SharedMixSession = { isPending: boolean; userId: string | null }
 
+/**
+ * What Play on Apple Music needs (task W2). `ensureSession` comes first: the
+ * MusicKit developer token is served only to a session.
+ *
+ * Safari opens Apple's sign-in window only while the tap's user activation
+ * lasts, so `connect()` must be the first thing a tap does. A browser that
+ * already has a session prepares MusicKit on load and plays in one tap; a
+ * first-time visitor gets ready in the dialog, then taps Connect Apple Music
+ * (decisions 2026-11-13, "a first Apple Music play takes a second tap").
+ * Visiting never makes a session.
+ */
+export type SharedMixPlayer = {
+  ensureSession: () => Promise<void>
+  /** Starts loading the MusicKit script, which needs no session. */
+  preload?: () => void
+  musicKit: Pick<MusicKitClient, 'connect' | 'prepare'>
+  playback: Pick<PlaybackController, 'start'>
+}
+
+type Notice = { message: string; tone: 'info' | 'error' }
+
+const NOTICE_MS = 4000
+// The app's own copy for these failures (App.togglePlayback, QueuePanel's
+// connect error); never the raw error.
+const PLAY_FAILED = 'Apple Music couldn’t play this mix. Try again in a moment.'
+const CONNECT_FAILED = 'Apple Music didn’t connect. Try again.'
+const NO_APPLE_SONGS = 'Apple Music couldn’t play this mix.'
+
 type SharedMixPageProps = {
   token: string
   api: Pick<MixtapeApi, 'getSharedMix' | 'saveSharedMix'>
   session: SharedMixSession
-  /** Play (task W2 fills this with the "Where do you listen?" flow). */
-  onPlay?: (mix: SharedMix) => void
+  /** Play on Apple Music; without it the Apple path does nothing (previews). */
+  player?: SharedMixPlayer
   /** The sharer opened their own link: open their mix in the app. */
   onOwner?: (userId: string, sessionId: string) => void
   /** The app, which opens into first run for a browser with no session. */
@@ -53,9 +87,35 @@ function metaLine(tracks: SharedMixTrack[]) {
   return known > 0 ? `${songs} · ${durationLabel(known)}` : songs
 }
 
-export function SharedMixPage({ token, api, session, onPlay = () => {}, onOwner, appUrl = import.meta.env.BASE_URL, downloadUrl = '/' }: SharedMixPageProps) {
+/** The share as the playback controller's queue: it skips songs without an Apple id. */
+function queueTracks(mix: SharedMix): QueueTrack[] {
+  return mix.tracks.map((track, index) => ({
+    position: index,
+    trackId: `${mix.token}:${index}`,
+    appleId: track.appleId ?? null,
+    spotifyId: null,
+    title: track.title,
+    artist: track.artist,
+    durationMs: track.durationMs,
+  }))
+}
+
+export function SharedMixPage({ token, api, session, player, onOwner, appUrl = import.meta.env.BASE_URL, downloadUrl = '/' }: SharedMixPageProps) {
   const [state, setState] = useState<PageState>({ kind: 'loading' })
   const [attempt, setAttempt] = useState(0)
+  // The dialog: null is closed.
+  const [step, setStep] = useState<SharedPlayStep | null>(null)
+  const [starting, setStarting] = useState(false)
+  // MusicKit is configured, so connect() reaches authorize() with no await.
+  const [appleReady, setAppleReady] = useState(false)
+  // Play made a session (useSession catches up later).
+  const sessionMade = useRef(false)
+  // Each getting-ready run; closing the dialog abandons the one in flight.
+  const readyRun = useRef(0)
+  // The read that loaded this page: a later session change doesn't read again.
+  const loadedKey = useRef<string | null>(null)
+  const [notice, setNotice] = useState<Notice | null>(null)
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   // One read per token, session and attempt, even when React runs effects twice:
   // the public read is rate-limited per IP.
   const reading = useRef<{ key: string; result: Promise<SharedMix> } | null>(null)
@@ -66,6 +126,16 @@ export function SharedMixPage({ token, api, session, onPlay = () => {}, onOwner,
   useEffect(() => {
     // Wait for the session check, so a session (and so isOwner) rides along.
     if (isPending) return
+    // Loaded already: the session Play just made changes nothing on screen,
+    // and a failed re-read must never replace a mix mid-playback.
+    if (loadedKey.current === `${token}|${attempt}`) {
+      // A session arrived after a read without one: the share joins its Mixes.
+      if (userId && state.kind === 'loaded' && !state.mix.isOwner && saved.current !== token) {
+        saved.current = token
+        api.saveSharedMix(token).catch(() => undefined)
+      }
+      return
+    }
     const key = `${token}|${userId ?? ''}|${attempt}`
     if (reading.current?.key !== key) reading.current = { key, result: api.getSharedMix(token) }
     const { result } = reading.current
@@ -81,6 +151,7 @@ export function SharedMixPage({ token, api, session, onPlay = () => {}, onOwner,
           }
           return
         }
+        loadedKey.current = `${token}|${attempt}`
         setState({ kind: 'loaded', mix })
         if (userId && saved.current !== token) {
           saved.current = token
@@ -93,6 +164,7 @@ export function SharedMixPage({ token, api, session, onPlay = () => {}, onOwner,
       },
     )
     return () => { live = false }
+    // `state` is read only once loaded, to save; it never starts a read.
   }, [api, token, isPending, userId, attempt, onOwner, appUrl])
 
   useEffect(() => {
@@ -101,6 +173,128 @@ export function SharedMixPage({ token, api, session, onPlay = () => {}, onOwner,
     document.title = `${state.mix.title} · Mixtape`
     return () => { document.title = previous }
   }, [state])
+
+  useEffect(() => () => { if (noticeTimer.current) clearTimeout(noticeTimer.current) }, [])
+
+  // MusicKit ahead of the tap. The script needs no session, so it loads on any
+  // visit; configuring needs the developer token, so only a browser that
+  // already has a session prepares. Never for a Spotify listener.
+  const preloaded = useRef(false)
+  useEffect(() => {
+    if (!player || preloaded.current || readPlaysOn() === 'spotify') return
+    preloaded.current = true
+    player.preload?.()
+  }, [player])
+  const preparing = useRef(false)
+  useEffect(() => {
+    if (!player || isPending || !userId || preparing.current || readPlaysOn() === 'spotify') return
+    preparing.current = true
+    void (player.musicKit.prepare?.() ?? Promise.resolve()).then(() => setAppleReady(true), () => undefined)
+  }, [player, isPending, userId])
+
+  function announce(message: string, tone: Notice['tone']) {
+    setNotice({ message, tone })
+    if (noticeTimer.current) clearTimeout(noticeTimer.current)
+    noticeTimer.current = setTimeout(() => setNotice(null), NOTICE_MS)
+  }
+
+  const spotify = useSpotifyHandoff({
+    songs: () => (state.kind === 'loaded' ? state.mix.tracks : []),
+    onResult: (message) => announce(message, 'info'),
+  })
+
+  function saveOnce(mix: SharedMix) {
+    // A session now exists, so the share joins its Mixes, once (the read
+    // effect saves too when the session reaches it; the ref keeps it to one).
+    if (!mix.isOwner && saved.current !== token) {
+      saved.current = token
+      api.saveSharedMix(token).catch(() => undefined)
+    }
+  }
+
+  /** Synchronous up to authorize(): call it straight from a click. */
+  function connectAndPlay(mix: SharedMix) {
+    if (!player) return
+    const connecting = player.musicKit.connect()
+    readyRun.current += 1
+    setStep(null)
+    setStarting(true)
+    void (async () => {
+      try {
+        try {
+          await connecting
+        } catch {
+          announce(CONNECT_FAILED, 'error')
+          return
+        }
+        const started = await player.playback.start(`shared:${mix.token}`, 0, mix.title, queueTracks(mix))
+        if (!started) announce(PLAY_FAILED, 'error')
+      } finally {
+        setStarting(false)
+      }
+    })()
+  }
+
+  /** A first play: a session, then MusicKit, then Connect Apple Music in the dialog. */
+  async function getAppleReady(mix: SharedMix) {
+    if (!player) return
+    const run = ++readyRun.current
+    setStep('readying')
+    try {
+      if (!userId && !sessionMade.current) {
+        // No session (the anonymous limit, or offline): no token, so no Apple Music.
+        await player.ensureSession()
+        sessionMade.current = true
+      }
+      if (readyRun.current !== run) return
+      saveOnce(mix)
+      await player.musicKit.prepare?.()
+    } catch {
+      if (readyRun.current === run) setStep('failed')
+      return
+    }
+    if (readyRun.current !== run) return
+    setAppleReady(true)
+    setStep('connect')
+  }
+
+  function playOnApple(mix: SharedMix) {
+    if (!player || starting) return
+    if (!mix.tracks.some((track) => track.appleId)) {
+      setStep(null)
+      announce(NO_APPLE_SONGS, 'error')
+      return
+    }
+    if ((userId || sessionMade.current) && appleReady) {
+      saveOnce(mix)
+      connectAndPlay(mix)
+      return
+    }
+    void getAppleReady(mix)
+  }
+
+  function playWith(choice: PlaysOn, mix: SharedMix) {
+    if (choice === 'spotify') spotify.start()
+    else playOnApple(mix)
+  }
+
+  function play(mix: SharedMix) {
+    if (starting) return
+    const choice = readPlaysOn()
+    if (choice) playWith(choice, mix)
+    else setStep('choose')
+  }
+
+  function choose(choice: PlaysOn, mix: SharedMix) {
+    writePlaysOn(choice)
+    setStep(null)
+    playWith(choice, mix)
+  }
+
+  function closeDialog() {
+    readyRun.current += 1
+    setStep(null)
+  }
 
   function retry() {
     setState({ kind: 'loading' })
@@ -146,7 +340,7 @@ export function SharedMixPage({ token, api, session, onPlay = () => {}, onOwner,
             <p className="shared-by">Shared by {state.mix.sharerName ?? 'a friend'}</p>
             <p className="shared-meta">{metaLine(state.mix.tracks)}</p>
             <div className="shared-actions">
-              <button className="transport-button shared-play" type="button" disabled={state.mix.tracks.length === 0} onClick={() => onPlay(state.mix)}>
+              <button className="transport-button shared-play" type="button" disabled={state.mix.tracks.length === 0} aria-disabled={starting || undefined} aria-busy={starting || undefined} onClick={() => play(state.mix)}>
                 <span className="transport-reel" aria-hidden="true"><PlayIcon /></span>
                 <span>Play</span>
                 <span className="transport-meter" aria-hidden="true" />
@@ -170,6 +364,16 @@ export function SharedMixPage({ token, api, session, onPlay = () => {}, onOwner,
               )
             })}
           </ol>
+          {step && (
+            <SharedPlayModal
+              step={step}
+              failure={PLAY_FAILED}
+              onChoose={(choice) => choose(choice, state.mix)}
+              onConnect={() => connectAndPlay(state.mix)}
+              onRetry={() => void getAppleReady(state.mix)}
+              onClose={closeDialog}
+            />
+          )}
         </main>
       )}
       {(state.kind === 'gone' || state.kind === 'failed') && (
@@ -185,6 +389,8 @@ export function SharedMixPage({ token, api, session, onPlay = () => {}, onOwner,
           </div>
         </main>
       )}
+      {spotify.explainer}
+      {notice && <Toast message={notice.message} tone={notice.tone} />}
     </div>
   )
 }

@@ -12,9 +12,10 @@ import { ApiError, type QueueOp } from '../api/client'
 import type { DjSession, QueueTrack } from '../domain'
 import { CloseIcon, ErrorCircleIcon, SuccessCircleIcon, UndoIcon } from './Icons'
 import { ConnectMusicButton, LabelButton, PlayButton } from './TapeActions'
-import { ControlModal } from './ControlModal'
 import { CatalogBanner, MusicDoor, type MusicDoorInput } from './MusicDoor'
-import { markSpotifyIntroSeen, spotifyIntroSeen, type PlaysOn } from '../lib/plays-on'
+import type { PlaysOn } from '../lib/plays-on'
+import { ServiceChoice } from './ServiceChoice'
+import { COPY_FAILED, copyText, useSpotifyHandoff } from './SpotifyHandoff'
 
 export type MusicConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
 
@@ -90,32 +91,11 @@ const WHEEL_RELEASE_MS = 120
 
 // Spotify outputs (docs/mockups/approved/2026-09-04-web-spotify-import.md,
 // "The mix rail for a Spotify listener", amended in docs/decisions.md
-// 2026-11-03 and 2026-11-06). Play on Spotify copies "Artist - Title" lines
-// and opens TuneMyMusic's free-text-to-Spotify page, which builds the
-// playlist: Spotify's own API is closed to apps our size.
+// 2026-11-03 and 2026-11-06). Play on Spotify is the TuneMyMusic handoff
+// (SpotifyHandoff.tsx); Spotify's own API is closed to apps our size.
 const SPOTIFY_TRACK_URL = 'https://open.spotify.com/track/'
 const SPOTIFY_SEARCH_URL = 'https://open.spotify.com/search/'
-const TRANSFER_TOOL_URL = 'https://www.tunemymusic.com/transfer/freetext-to-spotify'
-const ASK_TITLE = 'Where do you listen?'
-const INTRO_TITLE = 'Make it a Spotify playlist'
-const INTRO_GO = 'Copy songs and open TuneMyMusic'
-// TuneMyMusic names every pasted list "My Playlist" and writes its own
-// description; the name is an editable field on its review step, styled as
-// plain text, so we point at it. No link or paste format can preset either.
-const NAME_STEP =
-  'tap “My Playlist” to give it this mix’s name, then connect Spotify. TuneMyMusic adds its own note to the description; you can edit it in Spotify.'
-
-function introLine(count: number) {
-  return count === 1
-    ? `We’ll copy the song and open TuneMyMusic. Paste it in, ${NAME_STEP}`
-    : `We’ll copy your ${count} songs and open TuneMyMusic. Paste them in, ${NAME_STEP}`
-}
-
-function copiedSongs(count: number) {
-  return count === 1 ? 'Copied 1 song · paste it in, then rename “My Playlist”' : `Copied ${count} songs · paste them in, then rename “My Playlist”`
-}
 const COPY_HINT = 'Paste the links into a new playlist in Spotify on your computer.'
-const COPY_FAILED = 'Couldn’t copy on this browser.'
 const PLAY_HINT = 'Copies your songs and opens TuneMyMusic, which builds the playlist in Spotify. Tap “My Playlist” there to name it.'
 const COPY_AND_PLAY_HINT =
   'Copy for Spotify gives you links to paste into a Spotify playlist on your computer. Play on Spotify builds the playlist for you on any device.'
@@ -128,17 +108,6 @@ function spotifyTrackUrl(spotifyId: string) {
 function spotifyOpenUrl(track: QueueTrack, spotifyOnly: boolean) {
   if (track.spotifyId) return spotifyTrackUrl(track.spotifyId)
   return spotifyOnly ? `${SPOTIFY_SEARCH_URL}${encodeURIComponent(`${track.artist} ${track.title}`)}` : null
-}
-
-async function copyText(text: string) {
-  const clipboard = navigator.clipboard
-  if (!clipboard || typeof clipboard.writeText !== 'function') return false
-  try {
-    await clipboard.writeText(text)
-    return true
-  } catch {
-    return false
-  }
 }
 
 function formatDuration(milliseconds: number) {
@@ -186,7 +155,6 @@ export function QueuePanel({
   narrow = false,
   musicDoor,
 }: QueuePanelProps) {
-  const [introOpen, setIntroOpen] = useState(false)
   const [displayTracks, setDisplayTracks] = useState(() => withPositions(tracks))
   const [swipe, setSwipeState] = useState<SwipeState | null>(null)
   const [draggedTrackId, setDraggedTrackId] = useState<string | null>(null)
@@ -346,6 +314,13 @@ export function QueuePanel({
     statusTimerRef.current = setTimeout(() => setToast(null), OUTPUT_TOAST_MS)
   }
 
+  const spotifyHandoff = useSpotifyHandoff({
+    songs: () => displayTracksRef.current,
+    onOutput,
+    onResult: (message) => showOutputToast(message),
+  })
+  const playOnSpotify = spotifyHandoff.start
+
   async function copyForSpotify() {
     const links = displayTracksRef.current.flatMap((track) => (track.spotifyId ? [spotifyTrackUrl(track.spotifyId)] : []))
     const copied = await copyText(links.join('\n'))
@@ -357,26 +332,6 @@ export function QueuePanel({
     onOutput?.()
   }
 
-  function playOnSpotify() {
-    if (!spotifyIntroSeen()) {
-      setIntroOpen(true)
-      return
-    }
-    void handOffToSpotify()
-  }
-
-  async function handOffToSpotify() {
-    const lines = displayTracksRef.current.map((track) => `${track.artist} - ${track.title}`)
-    // Start the clipboard write and open the tool in the same gesture frame:
-    // the write needs this document still focused, the new tab needs the
-    // user activation that an await would spend.
-    const write = copyText(lines.join('\n'))
-    window.open(TRANSFER_TOOL_URL, '_blank', 'noopener')
-    onOutput?.()
-    const copied = await write
-    showOutputToast(copied ? copiedSongs(lines.length) : COPY_FAILED)
-  }
-
   function chooseSpotify() {
     onChooseService?.('spotify')
     playOnSpotify()
@@ -385,6 +340,11 @@ export function QueuePanel({
   function chooseApple() {
     onChooseService?.('apple')
     onConnect()
+  }
+
+  function chooseService(choice: PlaysOn) {
+    if (choice === 'spotify') chooseSpotify()
+    else chooseApple()
   }
 
   function moveTrack(from: number, to: number) {
@@ -732,14 +692,7 @@ export function QueuePanel({
       ) : null}
 
       {displayTracks.length > 0 && asking ? (
-        <div className="rail-actions rail-ask" role="group" aria-label={ASK_TITLE}>
-          <p className="rail-ask-title">{ASK_TITLE}</p>
-          <button className="btn primary" type="button" onClick={chooseSpotify}>
-            Play on Spotify
-          </button>
-          <ConnectMusicButton state="disconnected" onClick={chooseApple} />
-          <p className="rail-hint">We’ll remember it. You can change it in Settings.</p>
-        </div>
+        <ServiceChoice variant="rail" onChoose={chooseService} />
       ) : null}
 
       {displayTracks.length > 0 && showSpotify ? (
@@ -781,26 +734,7 @@ export function QueuePanel({
         </div>
       ) : null}
 
-      {introOpen ? (
-        <ControlModal title={INTRO_TITLE} onClose={() => setIntroOpen(false)}>
-          <p>{introLine(displayTracks.length)}</p>
-          <div className="wc-actions">
-            <button type="button" className="wc-text" onClick={() => setIntroOpen(false)}>Cancel</button>
-            <button
-              type="button"
-              className="wc-text"
-              data-autofocus
-              onClick={() => {
-                markSpotifyIntroSeen()
-                setIntroOpen(false)
-                void handOffToSpotify()
-              }}
-            >
-              {INTRO_GO}
-            </button>
-          </div>
-        </ControlModal>
-      ) : null}
+      {spotifyHandoff.explainer}
     </aside>
   )
 }

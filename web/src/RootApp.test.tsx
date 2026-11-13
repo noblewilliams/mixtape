@@ -23,7 +23,7 @@ vi.mock('./lib/auth-client', () => ({
 vi.mock('./App', () => ({
   App: ({ user }: { user: AuthUser }) => <p>Signed in as {user.id}, anonymous {String(user.isAnonymous)}</p>,
 }))
-vi.mock('./musickit/client', () => ({ createMusicKitClient: () => ({}) }))
+vi.mock('./musickit/client', () => ({ createMusicKitClient: () => ({}), loadMusicKitScript: () => Promise.resolve() }))
 
 const { RootApp } = await import('./RootApp')
 

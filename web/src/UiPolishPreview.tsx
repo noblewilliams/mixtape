@@ -41,6 +41,7 @@ import { Making } from './components/first-run/Making'
 import { nextWorkingStep, type TurnWork, type WorkingStep } from './components/djWorkingLines'
 import type { TurnProgress } from './api/client'
 import { SharedMixPage } from './components/SharedMixPage'
+import { SharedPlayModal } from './components/SharedPlayModal'
 import { SharedMixGoneError } from './api/client'
 import type { SharedMix } from './domain'
 
@@ -244,8 +245,10 @@ function previewConsent() {
   return () => new Promise<void>((resolve, reject) => setTimeout(() => (tries++ === 0 ? reject(new Error('preview')) : resolve()), 1000))
 }
 
-// The public /m/<token> page on synthetic data: loaded, loading and revoked (board W1–W7).
-type SharedPreviewState = 'shared' | 'shared-loading' | 'shared-revoked'
+// The public /m/<token> page on synthetic data: loaded, loading, revoked and
+// Play's "Where do you listen?" modal and a first Apple Music play's Connect
+// step (board W1–W7).
+type SharedPreviewState = 'shared' | 'shared-loading' | 'shared-revoked' | 'shared-play-modal' | 'shared-play-connect'
 const previewSharedMix: SharedMix = {
   token: '4fQ9xK2mZr7TbW1nLpY8sA', title: 'Late drive, windows down', caseColor: '#bc5734', sharerName: 'Ada',
   sharedAt: '2026-11-13T09:00:00.000Z', isOwner: false,
@@ -256,7 +259,12 @@ function SharedMixPreview({ state }: { state: SharedPreviewState }) {
     getSharedMix: () => state === 'shared-loading' ? new Promise<never>(() => {}) : state === 'shared-revoked' ? Promise.reject(new SharedMixGoneError(410, { error: 'revoked' })) : Promise.resolve(previewSharedMix),
     saveSharedMix: async () => {},
   }), [state])
-  return <SharedMixPage token={previewSharedMix.token} api={api} session={{ isPending: false, userId: null }} />
+  const [asking, setAsking] = useState(state === 'shared-play-modal' || state === 'shared-play-connect')
+  return <>
+    <SharedMixPage token={previewSharedMix.token} api={api} session={{ isPending: false, userId: null }} />
+    {/* Drawn over the page directly, so the preview never clears this browser's plays-on answer. */}
+    {asking && <SharedPlayModal step={state === 'shared-play-connect' ? 'connect' : 'choose'} onChoose={() => setAsking(false)} onConnect={() => setAsking(false)} onClose={() => setAsking(false)} />}
+  </>
 }
 
 export default function UiPolishPreview() {
@@ -268,7 +276,7 @@ export default function UiPolishPreview() {
   const openTab = (tab: MixesTab) => setState(tab === 'archived' ? 'archived' : tab === 'listen-later' ? 'listen-later' : 'populated')
   async function color(id: string, caseColor: string) { setSessions(current => current.map(s => s.id === id ? { ...s, caseColor } : s)) }
   const close = () => setState('populated')
-  const options = ['home', 'home-loading', 'home-empty', 'home-error', 'populated', 'loading', 'empty', 'archived', 'load-error', 'refresh-error', 'settings', 'success', 'error', 'info', 'playlist', 'preference', 'memory', 'sources', 'library', 'library-loading', 'conversation', 'conversation-working', 'making-working', 'conversation-blank', 'conversation-spotify', 'conversation-ask', 'catalog', 'catalog-spotify', 'catalog-unknown', 'catalog-syncing', 'catalog-sync-failed', 'catalog-spotify-waiting', 'catalog-music-in', 'catalog-history', 'album', 'album-refined', 'listen-later', 'listen-later-empty', 'first-run', 'keep-sheet', 'sign-in-keep', 'sign-in-cap', 'merge-notice', 'delete-account', 'settings-named', 'settings-unnamed', 'settings-editing', 'settings-failed', 'name-page', 'name-page-typing', 'name-page-saving', 'name-page-failed', 'first-run-consent', 'ai-consent', 'shared', 'shared-loading', 'shared-revoked']
+  const options = ['home', 'home-loading', 'home-empty', 'home-error', 'populated', 'loading', 'empty', 'archived', 'load-error', 'refresh-error', 'settings', 'success', 'error', 'info', 'playlist', 'preference', 'memory', 'sources', 'library', 'library-loading', 'conversation', 'conversation-working', 'making-working', 'conversation-blank', 'conversation-spotify', 'conversation-ask', 'catalog', 'catalog-spotify', 'catalog-unknown', 'catalog-syncing', 'catalog-sync-failed', 'catalog-spotify-waiting', 'catalog-music-in', 'catalog-history', 'album', 'album-refined', 'listen-later', 'listen-later-empty', 'first-run', 'keep-sheet', 'sign-in-keep', 'sign-in-cap', 'merge-notice', 'delete-account', 'settings-named', 'settings-unnamed', 'settings-editing', 'settings-failed', 'name-page', 'name-page-typing', 'name-page-saving', 'name-page-failed', 'first-run-consent', 'ai-consent', 'shared', 'shared-loading', 'shared-revoked', 'shared-play-modal', 'shared-play-connect']
   return <>
     <div style={{ position: 'fixed', right: 12, top: 8, zIndex: 200, display: 'flex', gap: 8, alignItems: 'center', background: '#f7f4f8', color: '#1c1a1e', padding: 8, borderRadius: 8, fontSize: 12 }}>
       <label htmlFor="ui-preview-state">UI preview · synthetic data</label><select id="ui-preview-state" value={state} onChange={e => setState(e.target.value)}>{options.map(option => <option key={option}>{option}</option>)}</select>

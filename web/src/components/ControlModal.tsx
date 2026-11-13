@@ -8,6 +8,7 @@ export function ControlModal({
   alert = false,
   className = '',
   describedBy,
+  focusTitle = false,
 }: {
   title: string
   children: ReactNode
@@ -15,6 +16,8 @@ export function ControlModal({
   alert?: boolean
   className?: string
   describedBy?: string
+  /** Start focus on the heading instead of the first control. */
+  focusTitle?: boolean
 }) {
   const id = useId()
   const ref = useRef<HTMLElement>(null)
@@ -80,7 +83,7 @@ export function ControlModal({
         aria-labelledby={id}
         aria-describedby={describedBy}
       >
-        <h2 id={id}>{title}</h2>
+        {focusTitle ? <h2 id={id} tabIndex={-1} data-autofocus="">{title}</h2> : <h2 id={id}>{title}</h2>}
         {children}
       </section>
     </div>,

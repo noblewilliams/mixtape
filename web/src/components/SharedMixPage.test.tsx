@@ -27,12 +27,11 @@ function setup(options: {
   strict?: boolean
 } = {}) {
   const api = createFakeApi({}, { sharedMixes: options.shares ?? { [token]: share } })
-  const onPlay = vi.fn()
   const onOwner = vi.fn()
-  const page = (session: SharedMixSession) => <SharedMixPage token={token} api={api} session={session} onPlay={onPlay} onOwner={onOwner} appUrl="/app/" downloadUrl="https://apps.test/mixtape" />
+  const page = (session: SharedMixSession) => <SharedMixPage token={token} api={api} session={session} onOwner={onOwner} appUrl="/app/" downloadUrl="https://apps.test/mixtape" />
   const view = render(options.strict ? <StrictMode>{page(options.session ?? noSession)}</StrictMode> : page(options.session ?? noSession))
   const rerender = (session: SharedMixSession) => view.rerender(options.strict ? <StrictMode>{page(session)}</StrictMode> : page(session))
-  return { api, onPlay, onOwner, rerender }
+  return { api, onOwner, rerender }
 }
 const methods = (api: ReturnType<typeof createFakeApi>) => api.calls.map((call) => call.method)
 
@@ -40,7 +39,7 @@ describe('SharedMixPage', () => {
   afterEach(cleanup)
 
   it('shows the mix with no session: cassette, title, sharer, count, songs and the three actions', async () => {
-    const { onPlay } = setup()
+    setup()
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Late drive, windows down' })).toBeInTheDocument()
     expect(screen.getByText('Shared by Ada')).toBeInTheDocument()
@@ -56,8 +55,7 @@ describe('SharedMixPage', () => {
     expect(screen.getByRole('link', { name: 'Get the app' })).toHaveAttribute('href', 'https://apps.test/mixtape')
     expect(screen.getByRole('link', { name: 'Make your own mix' })).toHaveAttribute('href', '/app/')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Play' }))
-    expect(onPlay).toHaveBeenCalledWith(expect.objectContaining({ token, title: 'Late drive, windows down' }))
+    expect(screen.getByRole('button', { name: 'Play' })).toBeEnabled()
   })
 
   it('shows a loading state until the share arrives', async () => {

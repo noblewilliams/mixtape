@@ -1738,3 +1738,20 @@ deep links, view counts, remixing. Spec
 `superpowers/plans/2026-11-13-shared-mixes.md`. **Reopens if:** senders want
 links that follow their edits, recipients want to remix, or the site moves off
 `miixtape.netlify.app` (old links must keep resolving).
+
+## 2026-11-13 — Shared mix page: a first Apple Music play takes a second tap
+
+Safari opens Apple's sign-in window only while a tap's user activation lasts.
+On the shared mix page a first-time visitor has no session, and the MusicKit
+developer token is served only to one, so Play would await the anonymous
+sign-in, the script and `MusicKit.configure` before `authorize()`; by then the
+activation has expired and Safari blocks the window. So: visiting never makes a
+session (the MusicKit script, which needs none, still starts loading). A
+browser that already has a session prepares MusicKit on load and keeps one tap:
+Play calls `connect()` before any await. A first-time visitor who picks Apple
+Music sees "Getting Apple Music ready…" in the dialog while the session and
+MusicKit are made, then a Connect Apple Music button whose click reaches
+`authorize()` first; a failure stays in the dialog with Try again. A mix with
+no Apple Music songs says "Apple Music couldn’t play this mix." without making
+a session. **Reopens if:** MusicKit can be configured without a session (a
+public developer token), making one tap possible.

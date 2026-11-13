@@ -8,10 +8,11 @@ import { browserAuth } from './lib/auth-client'
 import { WorkspaceRestoreProvider, clearWorkspaceRestore } from './lib/workspace-restore'
 import { createSessionRequestGate } from './lib/session-request-gate'
 import { sessionTokenStore } from './lib/session-token'
-import { createMusicKitClient } from './musickit/client'
+import { createMusicKitClient, loadMusicKitScript } from './musickit/client'
 import { ensureSession } from './lib/anonymous-session'
 import { createFirstRunServices } from './components/first-run/services'
-import { SharedMixPage } from './components/SharedMixPage'
+import { SharedMixPage, type SharedMixPlayer } from './components/SharedMixPage'
+import { PlaybackController } from './playback/controller'
 import { sharedMixToken } from './lib/shared-route'
 
 const api = createMixtapeApi(API_URL, sessionTokenStore.read)
@@ -62,10 +63,21 @@ function SignedInApp({ user, lastSignInProvider, restoring, initialSession, refe
   </>
 }
 
+// Play on Apple Music for the shared page. Only Play creates a session
+// (ensureSession), and the developer token is asked for after it; the script
+// itself needs none, so it can load on the visit. The controller is never
+// initialized: a shared play collects no listening evidence.
+function sharedMixPlayer(): SharedMixPlayer {
+  const musicKit = createMusicKitClient({ getDeveloperToken: api.getMusicKitToken })
+  const preload = () => { loadMusicKitScript().catch(() => undefined) }
+  return { ensureSession, preload, musicKit, playback: new PlaybackController(api, musicKit, 'shared-mix') }
+}
+
 function SharedMixRoute({ token }: { token: string }) {
   // Reads the browser's session (if any) so its token rides on the share read;
-  // never creates one.
+  // never creates one on load.
   const session = browserAuth.useSession()
   const userId = session.data?.user && sessionTokenStore.read() ? session.data.user.id : null
-  return <SharedMixPage token={token} api={api} session={{ isPending: session.isPending, userId }} downloadUrl={DOWNLOAD_URL} />
+  const player = useMemo(sharedMixPlayer, [])
+  return <SharedMixPage token={token} api={api} session={{ isPending: session.isPending, userId }} player={player} downloadUrl={DOWNLOAD_URL} />
 }
