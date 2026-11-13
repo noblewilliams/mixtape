@@ -1718,3 +1718,23 @@ caption); song names on edits; token-by-token reply streaming. **Reopens if:**
 steps or the Mixes dot are wanted across devices or launches (then stamp the
 step on the session row), or mixes are lost to a closed app (then move the
 turn off the request).
+
+## 2026-11-13 — Shared mixes: a read-only snapshot behind a random link (founder)
+
+A user asked to send a mix to a friend. Share gives a mix a link
+(`miixtape.netlify.app/m/<token>`, 22-character random token, never the session
+id). The link is a snapshot of title, tape colour and songs at share time;
+sharing again after an edit gives a new link. Recipients see title, artwork,
+songs and the sender's first name only, never the conversation, prompt or the
+DJ's reasons. With the app, a universal link opens a read-only view and saves
+it to Mixes as "From <name>" (a reference, never a copy, so it can't be
+edited). Without the app, a public web page plays it after "Where do you
+listen?" (Apple Music via MusicKit JS on an anonymous session, Spotify via
+TuneMyMusic). Sharing needs a usable name (the name page, no Skip); Stop
+sharing revokes; deleting the mix or account removes its shares. Link previews
+come from a Netlify edge function. Mixes only, no albums. Out of v1: deferred
+deep links, view counts, remixing. Spec
+`superpowers/specs/2026-11-13-shared-mixes-design.md`, plan
+`superpowers/plans/2026-11-13-shared-mixes.md`. **Reopens if:** senders want
+links that follow their edits, recipients want to remix, or the site moves off
+`miixtape.netlify.app` (old links must keep resolving).
