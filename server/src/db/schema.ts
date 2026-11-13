@@ -1667,3 +1667,39 @@ export const aiConsents = pgTable('ai_consents', {
   version: text('version').notNull(),
   grantedAt: timestamp('granted_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+// Shared mixes (spec 2026-11-13 shared-mixes, "Data"). A share is a snapshot
+// of a mix's active songs at one queue_version, read by anyone holding the
+// token. Title and case colour are copied at share time; the sender's name and
+// song metadata are read live. Revoking sets revoked_at rather than deleting,
+// so a revoked link answers 410 instead of 404.
+export type MixShareEntry = { position: number; trackId: string }
+
+export const mixShares = pgTable('mix_shares', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  // 22-char base62 from crypto.getRandomValues.
+  token: text('token').notNull().unique(),
+  sessionId: uuid('session_id').notNull().references(() => djSessions.id, { onDelete: 'cascade' }),
+  sharerId: text('sharer_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  queueVersion: integer('queue_version').notNull(),
+  title: text('title').notNull(),
+  caseColor: text('case_color').notNull(),
+  entries: jsonb('entries').$type<MixShareEntry[]>().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+}, t => [
+  // Reuse lookup: the active share of a session at its current version.
+  index('mix_shares_session_version_active_idx')
+    .on(t.sessionId, t.queueVersion)
+    .where(sql`${t.revokedAt} IS NULL`),
+  check('mix_shares_entries_array', sql`jsonb_typeof(${t.entries}) = 'array'`),
+])
+
+// A listener's "Shared with you" shelf (spec 2026-11-13 shared-mixes).
+export const mixShareSaves = pgTable('mix_share_saves', {
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  shareId: uuid('share_id').notNull().references(() => mixShares.id, { onDelete: 'cascade' }),
+  savedAt: timestamp('saved_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  primaryKey({ columns: [t.userId, t.shareId] }),
+])

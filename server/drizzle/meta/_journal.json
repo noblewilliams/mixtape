@@ -351,6 +351,13 @@
       "when": 1794270060424,
       "tag": "0049_mix_version_label",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1794562074775,
+      "tag": "0050_mix_shares",
+      "breakpoints": true
     }
   ]
 }
