@@ -3,7 +3,11 @@ import 'package:http/http.dart' as http;
 import '../api/api_client.dart';
 import '../auth/token_store.dart';
 import 'dj_models.dart';
+import 'turn_stream.dart';
 import '../playlists/playlist_context_models.dart';
+
+export 'turn_stream.dart'
+    show TurnProgress, TurnSessionStarted, TurnStep, TurnStreamOpened;
 
 /// Thrown for DJ-domain errors the server distinguishes with a `kind` (its
 /// `error` field): 502 (upstream LLM/curation hiccup) and 409 'conflict'
@@ -95,12 +99,19 @@ const _genericMalformedResponseMessage =
 /// doesn't specially interpret — 401/404/500/..., and any 403 other than
 /// the cap — passed through unchanged), and [NetworkException] (transport-level failure, from
 /// [ApiClient] itself). Nothing else escapes a call.
+///
+/// The mix turns can also stream their progress ([DjApiTurnProgress]): the
+/// same requests with `Accept: text/event-stream`, ending in the same five
+/// exit types. On a stream, `streamIdleTimeout` (45s by default, reset by
+/// every byte including the server's 15s keepalives) replaces the total
+/// timeout once the response headers are in.
 class DjApi {
   DjApi({
     required String baseUrl,
     required TokenStore tokenStore,
     http.Client? inner,
     Duration timeout = const Duration(seconds: 120),
+    Duration streamIdleTimeout = const Duration(seconds: 45),
     Future<void> Function(String token)? onUnauthorized,
   }) : _client = ApiClient(
          baseUrl: baseUrl,
@@ -108,7 +119,10 @@ class DjApi {
          inner: inner,
          timeout: timeout,
          onUnauthorized: onUnauthorized,
-       );
+       ),
+       _streamIdleTimeout = streamIdleTimeout {
+    _builtByDjApi[this] = true;
+  }
 
   /// Builds a [DjApi] over the SAME baseUrl/tokenStore as an existing
   /// [ApiClient] (typically the app's shared one) — structural sharing so
@@ -120,15 +134,18 @@ class DjApi {
     ApiClient base, {
     http.Client? inner,
     Duration timeout = const Duration(seconds: 120),
+    Duration streamIdleTimeout = const Duration(seconds: 45),
   }) => DjApi(
     baseUrl: base.baseUrl,
     tokenStore: base.tokenStore,
     inner: inner,
     timeout: timeout,
+    streamIdleTimeout: streamIdleTimeout,
     onUnauthorized: base.onUnauthorized,
   );
 
   final ApiClient _client;
+  final Duration _streamIdleTimeout;
 
   Duration get timeout => _client.timeout;
 
@@ -138,13 +155,24 @@ class DjApi {
     String prompt, {
     InitialPlaylistSeed? playlistSeed,
     SessionKind kind = SessionKind.mix,
-  }) => _call(
-    () => _client.postJson('/sessions', {
+  }) => _createSession(prompt, playlistSeed: playlistSeed, kind: kind);
+
+  /// An album session answers JSON whatever it is asked, so an album create
+  /// never asks for a stream: its request stays exactly today's.
+  Future<SessionDetail> _createSession(
+    String prompt, {
+    InitialPlaylistSeed? playlistSeed,
+    SessionKind kind = SessionKind.mix,
+    void Function(TurnProgress progress)? onProgress,
+  }) => _turn(
+    '/sessions',
+    {
       'prompt': prompt,
       if (playlistSeed != null) 'playlistSeed': playlistSeed.toJson(),
       if (kind == SessionKind.album) 'kind': 'album',
-    }),
+    },
     SessionDetail.fromJson,
+    kind == SessionKind.album ? null : onProgress,
   );
 
   Future<List<DjSession>> listSessions() => _call(
@@ -157,19 +185,30 @@ class DjApi {
   Future<SessionDetail> getSession(String id) =>
       _call(() => _client.getJson('/sessions/$id'), SessionDetail.fromJson);
 
-  Future<TurnResult> sendMessage(String id, String text) => _call(
-    () => _client.postJson('/sessions/$id/messages', {'text': text}),
+  Future<TurnResult> sendMessage(String id, String text) =>
+      _sendMessage(id, text);
+
+  Future<TurnResult> _sendMessage(
+    String id,
+    String text, {
+    void Function(TurnProgress progress)? onProgress,
+  }) => _turn(
+    '/sessions/$id/messages',
+    {'text': text},
     TurnResult.fromJson,
+    onProgress,
   );
 
   /// The wire half of [DjApiRemake.sendRemake]: the same endpoint and error
   /// translation as [sendMessage], with the remake flag.
-  Future<TurnResult> _sendRemake(String id) => _call(
-    () => _client.postJson('/sessions/$id/messages', {
-      'text': remakeText,
-      'remake': true,
-    }),
+  Future<TurnResult> _sendRemake(
+    String id, {
+    void Function(TurnProgress progress)? onProgress,
+  }) => _turn(
+    '/sessions/$id/messages',
+    {'text': remakeText, 'remake': true},
     TurnResult.fromJson,
+    onProgress,
   );
 
   /// [ops] are remove/move only (0-based positions) — swap/extend need the
@@ -303,6 +342,64 @@ class DjApi {
 
   void close() => _client.close();
 
+  /// A mix turn. Without [onProgress] it is exactly today's JSON request.
+  Future<T> _turn<T>(
+    String path,
+    Map<String, Object?> body,
+    T Function(Map<String, dynamic> json) parse,
+    void Function(TurnProgress progress)? onProgress,
+  ) => onProgress == null
+      ? _call(() => _client.postJson(path, body), parse)
+      : _streamedTurn(path, body, parse, onProgress);
+
+  /// The turn asking for a stream. Every way out is one of today's: a JSON
+  /// answer (an older server, a refusal before the turn) goes through
+  /// today's mapping; a `result` goes through today's parse; an `error`
+  /// throws what today's status and body would have; a dropped or quiet
+  /// stream is a [NetworkException], as a timeout is today.
+  Future<T> _streamedTurn<T>(
+    String path,
+    Map<String, Object?> body,
+    T Function(Map<String, dynamic> json) parse,
+    void Function(TurnProgress progress) onProgress,
+  ) async {
+    void report(TurnProgress progress) {
+      try {
+        onProgress(progress);
+      } catch (_) {
+        // A caption must never break the turn.
+      }
+    }
+
+    final StreamingReply reply;
+    try {
+      reply = await _client.postEventStream(
+        path,
+        body,
+        idleTimeout: _streamIdleTimeout,
+      );
+    } on ApiException catch (e) {
+      throw _translate(e);
+    }
+    switch (reply) {
+      case WholeReply(:final response):
+        return _parse(response.body, parse);
+      case final EventStreamReply stream:
+        report(const TurnStreamOpened());
+        return switch (await readTurnStream(stream.bytes, report)) {
+          TurnStreamResult(:final body) => _parse(body, parse),
+          // Through the client, so an in-band 401 still signs out.
+          TurnStreamError(:final status, :final body) => throw _translate(
+            stream.failure(status, body),
+          ),
+          TurnStreamMalformed() => throw DjApiException(
+            kind: 'malformed_response',
+            message: _genericMalformedResponseMessage,
+          ),
+        };
+    }
+  }
+
   Future<T> _call<T>(
     Future<http.Response> Function() request,
     T Function(Map<String, dynamic> json) parse,
@@ -313,12 +410,16 @@ class DjApi {
     } on ApiException catch (e) {
       throw _translate(e);
     }
-    // A 200 body that isn't valid JSON, isn't a JSON object, or is missing a
-    // key `parse` needs is a server/client drift bug, not a DJ-domain
-    // error — surfaced as its own typed exit rather than an uncaught
-    // FormatException or type-cast error reaching the UI layer.
+    return _parse(res.body, parse);
+  }
+
+  /// A 200 body that isn't valid JSON, isn't a JSON object, or is missing a
+  /// key [parse] needs is a server/client drift bug, not a DJ-domain
+  /// error — surfaced as its own typed exit rather than an uncaught
+  /// FormatException or type-cast error reaching the UI layer.
+  T _parse<T>(String body, T Function(Map<String, dynamic> json) parse) {
     try {
-      final decoded = jsonDecode(res.body);
+      final decoded = jsonDecode(body);
       if (decoded is Map<String, dynamic>) return parse(decoded);
     } catch (_) {
       // fall through to the typed exit below
@@ -544,5 +645,104 @@ extension DjApiRemake on DjApi {
   Future<TurnResult> sendRemake(String id) => switch (this) {
     final DjRemakeSender sender => sender.sendRemake(id),
     _ => _sendRemake(id),
+  };
+}
+
+/// The [DjApi] instances its own constructor built, so [DjApiTurnProgress]
+/// can tell the real client from a stand-in that `implements DjApi` (one
+/// never runs the constructor).
+final Expando<bool> _builtByDjApi = Expando('DjApi');
+
+/// What a [DjApi] stand-in implements to answer [DjApiTurnProgress] itself,
+/// for instance to report made-up steps.
+abstract interface class DjTurnProgressSender {
+  Future<SessionDetail> createSessionWithProgress(
+    String prompt, {
+    InitialPlaylistSeed? playlistSeed,
+    SessionKind kind = SessionKind.mix,
+    void Function(TurnProgress progress)? onProgress,
+  });
+
+  Future<TurnResult> sendMessageWithProgress(
+    String id,
+    String text, {
+    void Function(TurnProgress progress)? onProgress,
+  });
+
+  Future<TurnResult> sendRemakeWithProgress(
+    String id, {
+    void Function(TurnProgress progress)? onProgress,
+  });
+}
+
+/// The mix turns, reporting their progress while they run (spec:
+/// 2026-11-13-dj-turn-steps-design.md). With [onProgress] given they ask
+/// for `text/event-stream`; [onProgress] then hears [TurnStreamOpened] when
+/// the server answered with a stream, [TurnSessionStarted] (create only)
+/// and each [TurnStep]. Its exceptions are swallowed. A server that answers
+/// JSON (an older one, a refusal before the turn, an album) reports
+/// nothing. Results and exceptions are exactly those of [DjApi.createSession],
+/// [DjApi.sendMessage] and [DjApiRemake.sendRemake]; without [onProgress]
+/// each call is that one.
+///
+/// An extension rather than an optional parameter on those members for the
+/// reason [DjApiRemake] gives: every test fake `implements DjApi`, so a new
+/// parameter is a compile error in each one. A stand-in that implements
+/// [DjTurnProgressSender] answers these calls; any other stand-in answers
+/// through its plain calls, so it reports no progress, like an older
+/// server. Fold these into [DjApi] when the fakes can be updated together.
+extension DjApiTurnProgress on DjApi {
+  Future<SessionDetail> createSessionWithProgress(
+    String prompt, {
+    InitialPlaylistSeed? playlistSeed,
+    SessionKind kind = SessionKind.mix,
+    void Function(TurnProgress progress)? onProgress,
+  }) => switch (this) {
+    final DjTurnProgressSender sender => sender.createSessionWithProgress(
+      prompt,
+      playlistSeed: playlistSeed,
+      kind: kind,
+      onProgress: onProgress,
+    ),
+    _ when _builtByDjApi[this] == true => _createSession(
+      prompt,
+      playlistSeed: playlistSeed,
+      kind: kind,
+      onProgress: onProgress,
+    ),
+    _ => createSession(prompt, playlistSeed: playlistSeed, kind: kind),
+  };
+
+  Future<TurnResult> sendMessageWithProgress(
+    String id,
+    String text, {
+    void Function(TurnProgress progress)? onProgress,
+  }) => switch (this) {
+    final DjTurnProgressSender sender => sender.sendMessageWithProgress(
+      id,
+      text,
+      onProgress: onProgress,
+    ),
+    _ when _builtByDjApi[this] == true => _sendMessage(
+      id,
+      text,
+      onProgress: onProgress,
+    ),
+    _ => sendMessage(id, text),
+  };
+
+  Future<TurnResult> sendRemakeWithProgress(
+    String id, {
+    void Function(TurnProgress progress)? onProgress,
+  }) => switch (this) {
+    final DjTurnProgressSender sender => sender.sendRemakeWithProgress(
+      id,
+      onProgress: onProgress,
+    ),
+    _ when _builtByDjApi[this] == true => _sendRemake(
+      id,
+      onProgress: onProgress,
+    ),
+    _ => sendRemake(id),
   };
 }
