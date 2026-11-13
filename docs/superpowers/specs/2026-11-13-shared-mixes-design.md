@@ -1,6 +1,6 @@
 # Shared mixes
 
-Date: 2026-11-13. Status: approved direction (founder, 2026-11-13), board pending.
+Date: 2026-11-13. Status: approved (founder, 2026-11-13). Board `docs/mockups/2026-11-13-shared-mixes.html`, record `docs/mockups/approved/2026-11-13-shared-mixes.md`.
 
 ## Why
 
@@ -49,7 +49,8 @@ the recipient cannot prompt, edit, reorder or remix it.
 6. **Link previews are in scope.** iMessage, WhatsApp and the rest read Open
    Graph tags, which the single-page app cannot set per mix. A Netlify edge
    function on `/m/*` reads the public share endpoint and writes `og:title`
-   ("Ada shared a mix"), `og:description` (the mix title and song count) and
+   (the mix title, since iMessage often shows only the title and domain),
+   `og:description` ("Ada shared a mix · 10 songs") and
    `og:image` (the first song's artwork at 600×600, or the tape-colour card
    when no song has artwork) into the app's HTML. If the API fails, the
    function returns the HTML unchanged.
@@ -68,7 +69,8 @@ the recipient cannot prompt, edit, reorder or remix it.
 ### Sender
 
 - **Share** appears on a mix that has at least one active song: on iOS in the
-  conversation strip's menu and the arrangement bar's menu; on web in the
+  header ⋯ menus of the conversation and the tape (the strip has fixed buttons
+  and no menu since one-platform-play); on web in the
   mix's tape actions. It is not a third bar button (the bar's actions are fixed
   per decision 3 of 2026-11-09 one-platform-play).
 - Tap Share → (name page if needed) → `POST /sessions/:id/share` → system
@@ -76,8 +78,8 @@ the recipient cannot prompt, edit, reorder or remix it.
   Mixtape". On web, `navigator.share` when available, otherwise copy the link
   and show the toast "Link copied".
 - **Stop sharing** appears in the same menu only while the mix has an active
-  share. It confirms with "People with the link won't be able to open it."
-  and calls `DELETE /sessions/:id/share`.
+  share. It confirms with the alert "Stop sharing?" / "People with the link
+  won't be able to open it." and calls `DELETE /sessions/:id/share`.
 - The sender opening their own link goes to their own mix, as normal.
 
 ### Recipient in the app (iOS)
@@ -89,21 +91,24 @@ the recipient cannot prompt, edit, reorder or remix it.
   "From Ada", the song rows and the mix actions for the listener's platform
   exactly as on their own mixes: Apple Music → **Play** / **Create
   playlist**; Spotify → **Create playlist** (TuneMyMusic handoff). If the
-  platform is unknown, the existing "Where do you listen?" sheet opens on the
-  first action. There is no composer, no swipe-to-remove on rows, no rename
-  and no history.
+  platform is unknown, the Apple Music buttons show and the existing "Where do
+  you listen?" sheet opens on the first action. The header is Back only (no ⋯).
+  There is no composer, no swipe-to-remove on rows, no rename and no
+  history.
 - If the listener has a session (account or anonymous), the share is saved to
   their Mixes (`POST /shared/:token/save`, idempotent). A listener with no
   session yet sees the mix and can play it. The save happens once a session
   exists (after first run creates one), from a pending token kept on the
   device.
-- In Mixes, the shared mix is a normal row with the subtitle "From Ada" in
-  place of the song-count line's first part. Tapping it opens
+- In Mixes, the shared mix is a normal row whose subtitle reads
+  "From Ada · Today" on iOS (rows carry only the relative time) and
+  "From Ada · 10 songs · today" on web. Tapping it opens
   `SharedMixScreen`. The swipe action is **Remove** (deletes the save, not the
   share). Shared rows sort with the listener's own mixes by the time they
   were saved. They are not counted against the anonymous three-mix cap.
 - A revoked share disappears from Mixes on the next list read. If it is open,
-  the screen shows "This mix isn't shared anymore." with a Remove button.
+  the screen shows "This mix isn't shared anymore." with Remove when a save
+  exists, otherwise Back only (an old link never saved).
 
 ### Recipient on the web
 
