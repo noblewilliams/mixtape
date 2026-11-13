@@ -14,6 +14,8 @@ import { AlbumStoreError, choosePick, goBack, readPickState, type AlbumPickState
 import { applyOps, getActiveQueue, QueueOpError, QueueVersionConflict } from '../dj/queue-store'
 import { intentSchema, queueOpsSchema } from '../dj/contracts'
 import { generateSessionTitle } from '../dj/title'
+import { isUsableName } from '../auth/profile-name'
+import { createOrReuseShare, hasActiveShare, revokeShares } from '../shares/store'
 import { sanitizeTitleText } from '../dj/sanitize'
 import { bodyLimit } from 'hono/body-limit'
 import { ANONYMOUS_MIX_CAP, countUserSessions, createSessionWithPlaylistSeed, initialSeedSchema, PlaylistSeedError, readPlaylistSeed, selectPlaylistSeed, seedSelectionSchema } from '../playlists/seed'
@@ -215,7 +217,8 @@ export function requestSurface(userAgent: string | undefined): 'ios' | 'web' {
 
 // albumDeps is present only with ALBUM_PICKS on (src/index.ts); absent, album
 // sessions are refused with album_picks_off and mixes are untouched.
-export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps) {
+// share carries SHARE_BASE_URL; absent, the share routes are not mounted.
+export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps, share?: { baseUrl: string }) {
   const app = new Hono<{ Variables: AppVars }>()
   app.route('/', mixHistoryRoutes(db))
 
@@ -529,7 +532,8 @@ export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps) {
         readPickState(db, session.id, userId),
         readPlaylistSeed(db, session.id, userId),
       ])
-      return c.json({ session, messages: newestFirst.reverse(), ...pickStateBody(state), playlistSeed })
+      // Albums have no Share in v1, so never shared.
+      return c.json({ session, messages: newestFirst.reverse(), ...pickStateBody(state), playlistSeed, shared: false })
     }
 
     const [newestFirst, queue] = await Promise.all([
@@ -546,14 +550,44 @@ export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps) {
     // QueueOpsResult's shape is a settled contract the client parses
     // strictly. A client talking to an older deploy simply never sees the
     // key and keeps Undo hidden.
+    // shared: an active share exists, for the Stop sharing menu item.
+    const [playlistSeed, shared] = await Promise.all([
+      readPlaylistSeed(db, session.id, userId),
+      hasActiveShare(db, session.id),
+    ])
     return c.json({
       session,
       messages,
       queue,
       supportsInsert: true,
-      playlistSeed: await readPlaylistSeed(db, session.id, userId),
+      playlistSeed,
+      shared,
     })
   })
+
+  // Shared mixes (spec 2026-11-13). Mixes only: an album session is 404 as a
+  // non-owner's is. No model call, so no AI consent gate (app.ts).
+  if (share) {
+    app.post('/:id/share', async (c) => {
+      const user = c.get('user')
+      const session = await loadOwnedSession(db, c.req.param('id'), user.id)
+      if (!session || session.kind !== 'mix') return c.json({ error: 'not_found' }, 404)
+      // The recipient sees the sharer's first name, so a share needs one
+      // (decision 3). Anonymous listeners carry "Listener", which is not usable.
+      if (!isUsableName(user.name)) return c.json({ error: 'name_required' }, 409)
+      const result = await createOrReuseShare(db, { sessionId: session.id, userId: user.id })
+      if (result.kind === 'not_found') return c.json({ error: 'not_found' }, 404)
+      if (result.kind === 'empty_mix') return c.json({ error: 'empty_mix' }, 422)
+      return c.json({ token: result.token, url: `${share.baseUrl}/m/${result.token}` })
+    })
+
+    app.delete('/:id/share', async (c) => {
+      const session = await loadOwnedSession(db, c.req.param('id'), c.get('user').id)
+      if (!session || session.kind !== 'mix') return c.json({ error: 'not_found' }, 404)
+      await revokeShares(db, session.id)
+      return c.body(null, 204)
+    })
+  }
 
   // Archiving is client-side-only bookkeeping — no queue/message side
   // effects, no LLM call, just the `status` column. GET /sessions still

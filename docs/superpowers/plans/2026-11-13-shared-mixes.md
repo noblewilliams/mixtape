@@ -51,8 +51,10 @@ in flight.
     sessionId?,            // only when isOwner
     tracks: [{ title, artist, album, durationMs, artwork, appleId, isrc }] }
   ```
-  `artwork` has the same shape as the queue's track artwork. `appleId` and
-  `isrc` may be null.
+  `artwork` is `{ url, width, height, bgColor }` (the Mixes list's shape) or
+  null. `appleId` and `isrc` may be null. `sharerName` is the profile's first
+  name or null (the sender cleared it later); clients then show "a friend"
+  ("From a friend", "Shared by a friend").
 - **Errors:**
   - `404 not_found` and `410 revoked` both read "This mix isn't shared
     anymore."

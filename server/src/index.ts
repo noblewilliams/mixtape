@@ -27,7 +27,7 @@ import {
   type AppleIsrcCatalogClient,
   type FetchLike,
 } from './musickit/catalog'
-import type { MusicKitWiring, TranscribeWiring } from './app'
+import type { MusicKitWiring, ShareRateLimiter, SharesWiring, TranscribeWiring } from './app'
 import type { ArtworkDeps } from './artwork/runner'
 import { createSpotifyOEmbedArtworkClient } from './artwork/spotify-oembed'
 import { createDeezerArtworkClient } from './artwork/deezer'
@@ -64,6 +64,8 @@ type Bindings = {
   ALBUM_PICKS?: string
   NEVER_REFUSE?: string
   AI_CONSENT?: string
+  SHARE_BASE_URL?: string
+  SHARE_READ_LIMITER?: ShareRateLimiter
 }
 
 // This cache holds signed server tokens only. The key is the non-secret Apple
@@ -277,6 +279,26 @@ export function buildSpotifyArtworkDeps(fetchLike: FetchLike = fetch): SpotifyAr
   }
 }
 
+// Shared mixes (spec 2026-11-13). Both are required: Workers has no NODE_ENV,
+// so a missing limiter must not quietly mean an unlimited public read, and a
+// missing base URL must not mint links to nowhere. Thrown here, every request
+// fails until wrangler.jsonc is fixed, rather than running without them.
+export function buildShares(env: { SHARE_BASE_URL?: string; SHARE_READ_LIMITER?: ShareRateLimiter }): SharesWiring {
+  const raw = env.SHARE_BASE_URL?.trim()
+  if (!raw) throw new Error('SHARE_BASE_URL is required')
+  let parsed: URL
+  try {
+    parsed = new URL(raw)
+  } catch {
+    throw new Error('SHARE_BASE_URL must be an absolute URL')
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') throw new Error('SHARE_BASE_URL must be an http(s) URL')
+  if (!env.SHARE_READ_LIMITER || typeof env.SHARE_READ_LIMITER.limit !== 'function') {
+    throw new Error('SHARE_READ_LIMITER rate-limit binding is required')
+  }
+  return { baseUrl: raw.replace(/\/+$/, ''), limiter: env.SHARE_READ_LIMITER }
+}
+
 // Plan 2026-11-02 account deletion: the same Sign in with Apple key that signs
 // the web client secret signs one for whichever client a token belongs to.
 // createAuth has already failed fast on a missing Apple binding.
@@ -378,7 +400,8 @@ function buildRequestApp(db: Db, env: Bindings) {
     : undefined
   const transcribe = buildTranscribe(env)
   const accountDeletion = { apple: buildAppleRevoke(env) }
-  return createApp({ auth, db, enrich, dj, albums, playlistEditing, musicKit, transcribe, accountDeletion, aiConsent: aiConsentMode(env), allowedOrigins })
+  const shares = buildShares(env)
+  return createApp({ auth, db, enrich, dj, albums, playlistEditing, musicKit, transcribe, accountDeletion, shares, aiConsent: aiConsentMode(env), allowedOrigins })
 }
 
 export default {

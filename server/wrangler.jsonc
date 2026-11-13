@@ -10,6 +10,16 @@
   "ai": {
     "binding": "AI"
   },
+  // Shared mixes (spec 2026-11-13): GET /shared/:token, 60 a minute per IP
+  // (CF-Connecting-IP). src/index.ts buildShares refuses to start without it.
+  // namespace_id is an arbitrary account-unique integer string.
+  "ratelimits": [
+    {
+      "name": "SHARE_READ_LIMITER",
+      "namespace_id": "1001",
+      "simple": { "limit": 60, "period": 60 }
+    }
+  ],
   // Maintenance on the hour, then enrichment two minutes later while Postgres
   // is still awake. 22 and 42 are enrichment-only runs (no maintenance).
   // Dispatched on event.cron (src/enrich/scheduled.ts); keep the two in step.
@@ -36,7 +46,10 @@
     "NEVER_REFUSE": "on",
     // AI consent (plan 2026-11-02): "enforce" refuses mixes, turns and voice
     // to listeners who have not agreed. Off until clients that ask are live.
-    "AI_CONSENT": "off"
+    "AI_CONSENT": "off",
+    // Shared mixes (spec 2026-11-13): share links are <SHARE_BASE_URL>/m/<token>.
+    // Required; src/index.ts buildShares fails fast without it.
+    "SHARE_BASE_URL": "https://miixtape.netlify.app"
   }
   // Secrets required at runtime (set via `wrangler secret put` / .dev.vars locally) —
   // createAuth fails fast if any is missing:

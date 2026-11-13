@@ -4,6 +4,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { HTTPException } from 'hono/http-exception'
 import { requireSession } from './middleware/require-session'
+import { optionalSession } from './middleware/optional-session'
 import { requireAdmin } from './middleware/require-admin'
 import { takeMergedMode } from './auth/link-anonymous'
 import { isUsableName } from './auth/profile-name'
@@ -16,6 +17,7 @@ import { playlistEditDraftRoutes } from './routes/playlist-edit-drafts'
 import { enrichRoutes } from './routes/enrich'
 import { enrichSeedRoutes, type EnrichSeedDeps } from './routes/enrich-seed'
 import { sessionRoutes } from './routes/sessions'
+import { sharedRoutes } from './routes/shared'
 import { listenLaterRoutes } from './routes/listen-later'
 import { memoriesRoutes } from './routes/memories'
 import { musicSourcesRoutes } from './routes/music-sources'
@@ -71,6 +73,10 @@ export type PlaylistEditingWiring = { deps: PlaylistEditDjDeps }
 // Injectable fetch so tests can stub Groq; production leaves it unset and the
 // route uses the platform fetch.
 export type TranscribeWiring = { apiKey?: string; fetchLike?: FetchLike }
+// Shared mixes (spec 2026-11-13). The limiter is the Workers Rate Limiting
+// binding (SHARE_READ_LIMITER in wrangler.jsonc); tests pass a fake.
+export type ShareRateLimiter = { limit: (options: { key: string }) => Promise<{ success: boolean }> }
+export type SharesWiring = { baseUrl: string; limiter: ShareRateLimiter }
 export type MusicKitWiring = {
   allowedOrigins: string[]
   issueDeveloperToken: (origin: string) => Promise<{ developerToken: string; expiresAt: number }>
@@ -87,6 +93,7 @@ export function createApp({
   seeds,
   transcribe,
   accountDeletion,
+  shares,
   aiConsent = 'off',
   allowedOrigins = [],
 }: {
@@ -100,6 +107,8 @@ export function createApp({
   seeds?: SeedsWiring
   transcribe?: TranscribeWiring
   accountDeletion?: AccountDeletionWiring
+  // Absent, /shared/* and the share routes on /sessions are not mounted.
+  shares?: SharesWiring
   // AI_CONSENT in wrangler.jsonc: 'enforce' refuses AI routes without consent.
   aiConsent?: AiConsentMode
   allowedOrigins?: string[]
@@ -230,10 +239,18 @@ export function createApp({
 
     if (dj) {
       app.use('/sessions/*', requireSession(auth))
-      // Starting a mix or album and every later turn reach the model.
+      // Starting a mix or album and every later turn reach the model. Exact
+      // paths only: /sessions/:id/share calls no model and stays outside.
       app.use('/sessions', requireAiConsent(db, aiConsent))
       app.use('/sessions/:id/messages', requireAiConsent(db, aiConsent))
-      app.route('/sessions', sessionRoutes(db, dj.deps, albums?.deps))
+      app.route('/sessions', sessionRoutes(db, dj.deps, albums?.deps, shares ? { baseUrl: shares.baseUrl } : undefined))
+    }
+
+    // Public: anyone with the link reads it; a session, when present, only
+    // adds isOwner and enables saves. Outside requireAiConsent (no model).
+    if (shares) {
+      app.use('/shared/*', optionalSession(auth))
+      app.route('/shared', sharedRoutes(db, shares.limiter))
     }
 
     // Exists only with the flag on: off, every Listen later path is 404 by
