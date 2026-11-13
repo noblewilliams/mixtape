@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { ApiError } from '../api/client'
+import { describe, expect, it, vi } from 'vitest'
+import { ApiError, type TurnProgress } from '../api/client'
 import {
   demoAlbumPick,
   demoAlbumRefinedPick,
@@ -193,5 +193,46 @@ describe('fake API add your music', () => {
     const refused = api.sendMessage(album.session.id, 'Remake this with my music', undefined, { remake: true })
     await expect(refused).rejects.toBeInstanceOf(ApiError)
     await expect(refused).rejects.toMatchObject({ status: 409, code: 'wrong_session_kind' })
+  })
+
+  it('reports the configured progress on streamed mix turns only, before the turn answers', async () => {
+    const steps: TurnProgress[] = [{ type: 'opened' }, { type: 'step', step: 'digging', scope: 'catalogue', artists: ['Tems'] }]
+    const api = createFakeApi({}, { turnProgress: steps })
+    const seen: TurnProgress[] = []
+    const onProgress = (progress: TurnProgress) => seen.push(progress)
+
+    const mix = await api.createSession('A night drive', undefined, undefined, undefined, { onProgress })
+    expect(seen).toEqual(steps)
+    await api.sendMessage(mix.session.id, 'Slower', undefined, { onProgress })
+    expect(seen).toEqual([...steps, ...steps])
+
+    await api.createSession('A night drive')
+    await api.sendMessage(mix.session.id, 'Slower')
+    const album = await api.createSession('An album', undefined, undefined, 'album', { onProgress })
+    await api.sendMessage(album.session.id, 'Older', undefined, { onProgress })
+    expect(seen).toHaveLength(4)
+  })
+
+  it('lets a test drive the progress itself, and ignores a listener that throws', async () => {
+    let release!: () => void
+    const held = new Promise<void>((resolve) => { release = resolve })
+    const api = createFakeApi({}, {
+      turnProgress: async (report, turn) => {
+        report({ type: 'opened' })
+        report({ type: 'step', step: turn.method === 'createSession' ? 'digging' : 'editing' })
+        await held
+      },
+    })
+    const onProgress = vi.fn((progress: TurnProgress) => {
+      if (progress.type === 'opened') throw new Error('the caption broke')
+    })
+    let settled = false
+    const sent = api.sendMessage('demo-other-session', 'Slower', undefined, { onProgress }).then(() => { settled = true })
+    await Promise.resolve()
+    expect(onProgress.mock.calls.map(([progress]) => progress)).toEqual([{ type: 'opened' }, { type: 'step', step: 'editing' }])
+    expect(settled).toBe(false)
+    release()
+    await sent
+    expect(settled).toBe(true)
   })
 })

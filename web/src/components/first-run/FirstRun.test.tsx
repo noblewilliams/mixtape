@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AuthPreferenceStore } from '../../lib/auth-provider'
-import { AnonymousCapError, ApiError } from '../../api/client'
+import { AnonymousCapError, ApiError, type TurnRequestOptions } from '../../api/client'
 import { createdSession, fakeServices, syncResult } from '../../test/first-run-fakes'
 import { FirstRun, SKIP_CONFIG_WAIT_MS, type FirstRunProps } from './FirstRun'
 
@@ -227,7 +227,14 @@ function deferred<T>() {
 }
 
 const MAKING = 'Making your mix.'
-const MAKING_LINE = 'The DJ is listening. This takes about a minute.'
+const MAKING_LINE = 'This takes about a minute.'
+const MAKING_ANNOUNCEMENT = 'The DJ is listening. This takes about a minute.'
+const stepLine = () => document.querySelector('.fr-making .fr-step')
+/** The progress listener the flow handed the first mix's createSession. */
+const progressOf = (api: ReturnType<typeof fakeServices>['api']) => {
+  const options = (api.createSession.mock.calls[0] as unknown[])[4] as TurnRequestOptions | undefined
+  return options!.onProgress!
+}
 
 describe('making your mix', () => {
   async function toContinue() {
@@ -247,7 +254,8 @@ describe('making your mix', () => {
     expect(await heading(MAKING)).toHaveFocus()
     await waitFor(() => expect(api.createSession).toHaveBeenCalledOnce())
     expect(screen.getByText(MAKING_LINE, { selector: 'p.fr-line' })).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent(MAKING_LINE)
+    expect(screen.getByRole('status')).toHaveTextContent(MAKING_ANNOUNCEMENT)
+    expect(stepLine()).toHaveTextContent('The DJ is listening…')
     expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
     expect(screen.queryByTestId('fr-progress')).not.toBeInTheDocument()
@@ -374,6 +382,75 @@ describe('making your mix', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t make your mix. Try again.')
     expect(screen.getByRole('textbox', { name: 'Describe your mix' })).toHaveValue('late night drive')
     expect(onDone).not.toHaveBeenCalled()
+  })
+
+  it('asks for the first mix’s steps, and the step line under the headline follows them', async () => {
+    const { api, pending, onDone } = await toContinue()
+    await heading(MAKING)
+    await waitFor(() => expect(api.createSession).toHaveBeenCalledOnce())
+    expect((api.createSession.mock.calls[0] as unknown[]).slice(0, 4)).toEqual(['late night drive', undefined, undefined, undefined])
+    const report = progressOf(api)
+    act(() => report({ type: 'opened' }))
+    act(() => report({ type: 'session', sessionId: 'session-new' }))
+    act(() => report({ type: 'step', step: 'digging', scope: 'catalogue', artists: ['Burna Boy', 'Tems'] }))
+    // The listening line holds its dwell first.
+    await waitFor(() => expect(stepLine()?.textContent).toMatch(/^(Digging for|Crate-digging for) Burna Boy and Tems…$/), { timeout: 4_000 })
+    expect(screen.getByRole('status')).toHaveTextContent(MAKING_ANNOUNCEMENT)
+
+    await act(async () => pending.resolve(createdSession('session-new')))
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith(madeMix))
+  })
+
+  it('keeps the step when the listener goes back and returns to the running mix', async () => {
+    const { api, pending } = await toContinue()
+    await heading(MAKING)
+    await waitFor(() => expect(api.createSession).toHaveBeenCalledOnce())
+    const report = progressOf(api)
+    act(() => report({ type: 'opened' }))
+    act(() => report({ type: 'step', step: 'pressing', count: 12 }))
+    await waitFor(() => expect(stepLine()).toHaveTextContent('Pressing 12 songs to tape…'), { timeout: 4_000 })
+
+    act(() => window.history.back())
+    await heading('Who do you love?')
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    await heading(MAKING)
+    expect(stepLine()).toHaveTextContent('Pressing 12 songs to tape…')
+    await act(async () => pending.resolve(createdSession('session-new')))
+  })
+
+  it('keeps the step on the making page while a failed mix pops it', async () => {
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => {})
+    try {
+      const { api, pending } = await toContinue()
+      await heading(MAKING)
+      await waitFor(() => expect(api.createSession).toHaveBeenCalledOnce())
+      act(() => progressOf(api)({ type: 'opened' }))
+      act(() => progressOf(api)({ type: 'step', step: 'writing' }))
+      await waitFor(() => expect(stepLine()).toHaveTextContent('Writing the liner notes…'), { timeout: 4_000 })
+      await act(async () => pending.reject(new TypeError('network error')))
+      expect(back).toHaveBeenCalled()
+      // The pop has not landed: the page still says what the DJ was doing, not the timed walk.
+      await new Promise((resolve) => setTimeout(resolve, 1_600))
+      expect(stepLine()).toHaveTextContent('Writing the liner notes…')
+    } finally {
+      back.mockRestore()
+    }
+  })
+
+  it('starts the next try from the timed lines after a failed mix', async () => {
+    const { api, pending } = await toContinue()
+    await heading(MAKING)
+    await waitFor(() => expect(api.createSession).toHaveBeenCalledOnce())
+    act(() => progressOf(api)({ type: 'opened' }))
+    act(() => progressOf(api)({ type: 'step', step: 'writing' }))
+    await waitFor(() => expect(stepLine()).toHaveTextContent('Writing the liner notes…'), { timeout: 4_000 })
+    await act(async () => pending.reject(new TypeError('network error')))
+    await heading('Who do you love?')
+
+    api.createSession.mockImplementationOnce(() => new Promise(() => {}))
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    await heading(MAKING)
+    expect(stepLine()).toHaveTextContent('The DJ is listening…')
   })
 
   it('returns to the making page for the running request instead of sending again', async () => {

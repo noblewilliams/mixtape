@@ -120,6 +120,8 @@
   overflow-wrap: anywhere;
 }
 .fr-line { margin: 12px 0 0; color: var(--fr-cream); }
+/* The Making page's working line: the line's type, a step quieter, one line. */
+.fr-step { margin: 6px 0 0; min-height: 1.4em; color: var(--fr-cream); opacity: 0.78; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fr-status { margin: 12px 0 0; min-height: 1.4em; color: var(--fr-cream); }
 .fr-status--err { display: flex; align-items: center; gap: 8px; color: var(--fr-err); }
 .fr-status-icon { width: 18px; height: 18px; flex: none; }

@@ -25,8 +25,11 @@ import {
   type QueueOp,
   type QueueOpsResponse,
   type SendMessageOptions,
+  type SendMessageResponse,
   type SessionDetailResponse,
+  type TurnProgress,
 } from './api/client'
+import { nextWorkingStep, type TurnWork, type WorkingStep } from './components/djWorkingLines'
 import { toAlbumPickState, toDjMessage, toDjSession, toListenLaterEntry, toQueueTrack } from './api/mappers'
 import { AlbumPanel } from './components/AlbumPanel'
 import { AiConsentDialog, AiConsentGate } from './components/AiConsent'
@@ -109,9 +112,18 @@ type AppProps = {
   refetchSession?: () => void | Promise<void>
   /** A sign-in from the cap or the Keep pill that came back failed (anonymous listeners only). */
   signInError?: string
+  /**
+   * After a turn's stream dropped and the immediate read found no reply: how
+   * long before the one more read. Inside the server's 30 s waitUntil grace;
+   * tests shorten it.
+   */
+  landedReplyRereadMs?: number
 }
 
 type SignInPageState = Exclude<SignInVariant, 'welcome'>
+
+/** The second read after a dropped turn stream: inside the 30 s the server gives a turn whose client left. */
+const LANDED_REPLY_REREAD_MS = 25_000
 
 /** How long a nameless account waits behind the sign-in image for GET /me before the workspace opens. */
 const NAME_HOLD_MS = 3500
@@ -231,7 +243,7 @@ function conflictSnapshot(error: unknown): { queue: ApiQueueTrack[]; queueVersio
 
 export function App(props: AppProps) { return <SignedInWorkspace key={props.user.id} {...props} /> }
 
-function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, user, onSignOut, onAccountDeleted, importParser, initialSession, initialSessionId, signInAuth = NO_SIGN_IN, signInPreferences = browserAuthPreferences, refetchSession, signInError = '' }: AppProps) {
+function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, user, onSignOut, onAccountDeleted, importParser, initialSession, initialSessionId, signInAuth = NO_SIGN_IN, signInPreferences = browserAuthPreferences, refetchSession, signInError = '', landedReplyRereadMs = LANDED_REPLY_REREAD_MS }: AppProps) {
   const anonymous = user.isAnonymous === true
   const restoring = useWorkspaceRestoring()
   const refreshedSessions = useRef(new Set<string>())
@@ -296,6 +308,22 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   const [loadingCollection, setLoadingCollection] = useState(true)
   const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null)
   const [thinkingSessionId, setThinkingSessionId] = useState<string | null>(null)
+  // The mix turn in flight per session, for the DJ's working line: when it went
+  // out and its step once its stream opened. Lives here, not in the
+  // conversation, so leaving the mix and coming back keeps the step; gone when
+  // the turn ends, so never restored. `turn` keeps a late turn from clearing a newer one.
+  const [turnWork, setTurnWork] = useState<Record<string, TurnWork & { turn: number }>>({})
+  const turnCount = useRef(0)
+  // Sessions with a turn out right now, read synchronously by work that outlives a render.
+  const turnsOut = useRef(new Set<string>())
+  // The one later read per session after a dropped turn stream; cleared on unmount.
+  const landedRereads = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  useEffect(() => () => {
+    landedRereads.current.forEach(clearTimeout)
+    landedRereads.current.clear()
+  }, [])
+  /** A turn is out for this session: the single album marker, or a mix turn's own entry. */
+  const turnOut = (sessionId: string) => thinkingSessionId === sessionId || turnWork[sessionId] !== undefined
   const [creatingTape, setCreatingTape] = useState(false)
   const [dialog, setDialog] = useState<DialogState>(callback.dialog ? 'account' : null)
   const [queueOpen, setQueueOpen] = useState(false)
@@ -914,14 +942,15 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   // afterwards to learn whether the DJ went corpus-mode (`notPersonal`). Only
   // that flag is taken from the read: the turn's own response already carries
   // the queue and its version, and a queue op may have moved on since.
-  async function refreshSessionAfterTurn(sessionId: string) {
+  // `known`: a read already made (a reply adopted after a dropped stream), used instead of a new one.
+  async function refreshSessionAfterTurn(sessionId: string, known?: SessionDetailResponse) {
     const signal = controlLife.current.signal
     const read = (turnReads.current[sessionId] ?? 0) + 1
     turnReads.current[sessionId] = read
     const stale = () => turnReads.current[sessionId] !== read
     try {
       const revision = seedRevision.current[sessionId] ?? 0
-      const detail = await api.getSession(sessionId)
+      const detail = known ?? await api.getSession(sessionId)
       if (signal.aborted || stale()) return
       if ((seedRevision.current[sessionId] ?? 0) === revision) setPlaylistSeeds(current => ({ ...current, [sessionId]: detail.playlistSeed }))
       setSessions((current) =>
@@ -1214,7 +1243,24 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     const hadMix = (queuesBySession[sessionId]?.length ?? 0) > 0
     const remaking = turn.remake === true && !isAlbum
     const remakeSettled = () => setRemakingSessionId((current) => (current === sessionId ? null : current))
-    const options: SendMessageOptions | undefined = remaking ? { remake: true } : undefined
+    // A mix turn asks for its steps (spec 2026-11-13 dj-turn-steps); an album turn keeps its static line.
+    const turnId = (turnCount.current += 1)
+    const stream: { step: WorkingStep | null } = { step: null }
+    const onProgress = (progress: TurnProgress) => {
+      const next = nextWorkingStep(stream.step, progress, Date.now())
+      if (next === stream.step || signal.aborted) return
+      stream.step = next
+      setTurnWork((current) => (current[sessionId]?.turn === turnId ? { ...current, [sessionId]: { ...current[sessionId], step: next } } : current))
+    }
+    if (!isAlbum) setTurnWork((current) => ({ ...current, [sessionId]: { turn: turnId, startedAt: Date.now(), step: null } }))
+    turnsOut.current.add(sessionId)
+    clearTimeout(landedRereads.current.get(sessionId))
+    landedRereads.current.delete(sessionId)
+    const options: SendMessageOptions | undefined = isAlbum ? undefined : { ...(remaking ? { remake: true } : {}), onProgress }
+    // What the transcript held before this turn, to tell a reply that landed after a dropped stream.
+    const knownMessages = new Set((messagesBySession[sessionId] ?? []).map((message) => message.id))
+    const turnRevision = contentRevision.current[sessionId]
+    let recover: (() => void) | undefined
     if (remaking) {
       // Counted only now, past the consent and seed checks: this remake is going out.
       setRemakingSessionId(sessionId)
@@ -1223,34 +1269,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     try {
       const response = options ? await api.sendMessage(sessionId, text, shape, options) : await api.sendMessage(sessionId, text, shape)
       if (signal.aborted) return
-      const queue = (response.queue ?? []).map(toQueueTrack)
-      const albums = isAlbum ? albumStateOf(response) : null
-      // A refusal answered with more artists: the first mix lands on this turn.
-      if (!hadMix && !isAlbum) noteMixReply(queue.length)
-      setMessagesBySession((current) => ({
-        ...current,
-        [sessionId]: [...(current[sessionId] ?? []), toDjMessage(response.djMessage)],
-      }))
-      setQueuesBySession((current) => ({ ...current, [sessionId]: queue }))
-      if (albums) setAlbumsBySession((current) => ({ ...current, [sessionId]: albums }))
-      if (response.suggestions?.length) setSuggestionsBySession((current) => ({ ...current, [sessionId]: response.suggestions! }))
-      if (response.addMusic) setAddMusicBySession((current) => ({ ...current, [sessionId]: response.addMusic }))
-      setSessions((current) =>
-        current.map((session) => {
-          if (session.id !== sessionId) return session
-          const { pick: _pick, ...rest } = session
-          const next = toDjSession(
-            {
-              ...rest,
-              title: (metadataRevision.current[sessionId] ?? 0) === metadataAtStart ? response.sessionTitle ?? session.title : session.title,
-              queueVersion: albums?.version ?? response.queueVersion ?? session.queueVersion,
-              updatedAt: new Date().toISOString(),
-            },
-            response.queue,
-          )
-          return albums ? { ...next, pick: albums.pick && albumSummary(albums.pick) } : next
-        }),
-      )
+      landReply(sessionId, response, { isAlbum, hadMix, metadataAtStart })
       const reread = refreshSessionAfterTurn(sessionId)
       // A remake waits for both reads: whether the mix is personal now, and
       // whether the music is ready at all (if not, the door's first state).
@@ -1269,15 +1288,21 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
         if (keepPrompt) throw new PromptKept()
         return
       }
-      const message = errorCopy(requestError)
+      // The stream opened and then dropped: the server has this turn and is
+      // likely still running it, so it fails as a server-side turn does (the
+      // same line), and the session is read for a reply that lands meanwhile.
+      const dropped = stream.step !== null && requestError instanceof TypeError
+      const errorId = `${sessionId}-error-${Date.now()}`
       setMessagesBySession((current) => ({
         ...current,
         [sessionId]: [
           ...(current[sessionId] ?? []),
-          { id: `${sessionId}-error-${Date.now()}`, role: 'dj', content: message, createdAt: new Date().toISOString() },
+          { id: errorId, role: 'dj', content: errorCopy(requestError), createdAt: new Date().toISOString() },
         ],
       }))
-      if (requestError instanceof ApiError && requestError.status === 401) signOut()
+      // Once this turn is no longer out (the finally below).
+      if (dropped) recover = () => recoverDroppedTurn(sessionId, { known: knownMessages, revision: turnRevision, metadataAtStart, hadMix, remaking, errorId })
+      else if (requestError instanceof ApiError && requestError.status === 401) signOut()
       else if (isAlbum) {
         // A version can land before an album turn fails; the error then carries the new pick state.
         const payload = requestError instanceof ApiError && typeof requestError.payload === 'object' && requestError.payload
@@ -1288,8 +1313,97 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
         else void refreshSessionAfterTurn(sessionId)
       }
     } finally {
-      if (!signal.aborted) setThinkingSessionId(null)
+      turnsOut.current.delete(sessionId)
+      recover?.()
+      if (!signal.aborted) {
+        // Only this session's marker: a turn in another mix may have taken it since.
+        setThinkingSessionId((current) => (current === sessionId ? null : current))
+        setTurnWork((current) => {
+          if (current[sessionId]?.turn !== turnId) return current
+          const { [sessionId]: _ended, ...rest } = current
+          return rest
+        })
+      }
     }
+  }
+
+  /** What a turn's reply sets, from the turn's own answer or from a reply adopted after a dropped stream. */
+  function landReply(sessionId: string, response: SendMessageResponse, { isAlbum, hadMix, metadataAtStart }: { isAlbum: boolean; hadMix: boolean; metadataAtStart: number }) {
+    const queue = (response.queue ?? []).map(toQueueTrack)
+    const albums = isAlbum ? albumStateOf(response) : null
+    // A refusal answered with more artists: the first mix lands on this turn.
+    if (!hadMix && !isAlbum) noteMixReply(queue.length)
+    setMessagesBySession((current) => ({
+      ...current,
+      [sessionId]: [...(current[sessionId] ?? []), toDjMessage(response.djMessage)],
+    }))
+    setQueuesBySession((current) => ({ ...current, [sessionId]: queue }))
+    if (albums) setAlbumsBySession((current) => ({ ...current, [sessionId]: albums }))
+    if (response.suggestions?.length) setSuggestionsBySession((current) => ({ ...current, [sessionId]: response.suggestions! }))
+    if (response.addMusic) setAddMusicBySession((current) => ({ ...current, [sessionId]: response.addMusic }))
+    setSessions((current) =>
+      current.map((session) => {
+        if (session.id !== sessionId) return session
+        const { pick: _pick, ...rest } = session
+        const next = toDjSession(
+          {
+            ...rest,
+            title: (metadataRevision.current[sessionId] ?? 0) === metadataAtStart ? response.sessionTitle ?? session.title : session.title,
+            queueVersion: albums?.version ?? response.queueVersion ?? session.queueVersion,
+            updatedAt: new Date().toISOString(),
+          },
+          response.queue,
+        )
+        return albums ? { ...next, pick: albums.pick && albumSummary(albums.pick) } : next
+      }),
+    )
+  }
+
+  /**
+   * After a mix turn's stream dropped once it had opened: the server has the
+   * turn, persists the listener's line at its start, and gets up to 30 s more
+   * to finish. So the session is read at once and, if no reply is there yet,
+   * once more `landedReplyRereadMs` later. A read is adopted only when it ends
+   * in a DJ reply this transcript has not seen, and only while nothing else
+   * changed the mix, no turn is out for it and the workspace still holds it.
+   * Adopting takes the reply as a turn's own answer would (the GET carries no
+   * suggestions or history pill) and drops the failure line.
+   */
+  function recoverDroppedTurn(sessionId: string, turn: { known: Set<string>; revision: number | undefined; metadataAtStart: number; hadMix: boolean; remaking: boolean; errorId: string }) {
+    const signal = controlLife.current.signal
+    const current = () => !signal.aborted
+      && contentRevision.current[sessionId] === turn.revision
+      && !turnsOut.current.has(sessionId)
+      && sessionsRef.current.some((session) => session.id === sessionId)
+    const later = () => {
+      landedRereads.current.set(sessionId, setTimeout(() => {
+        landedRereads.current.delete(sessionId)
+        void read(false)
+      }, landedReplyRereadMs))
+    }
+    async function read(first: boolean) {
+      if (!current()) return
+      let detail: SessionDetailResponse
+      try {
+        detail = await api.getSession(sessionId)
+      } catch (requestError) {
+        if (signal.aborted) return
+        if (requestError instanceof ApiError && requestError.status === 401) signOut()
+        else if (first && current()) later()
+        return
+      }
+      if (!current()) return
+      const last = detail.messages.at(-1)
+      if (!last || last.role !== 'dj' || turn.known.has(last.id)) {
+        if (first) later()
+        return
+      }
+      setMessagesBySession((messages) => ({ ...messages, [sessionId]: (messages[sessionId] ?? []).filter((message) => message.id !== turn.errorId) }))
+      landReply(sessionId, { djMessage: last, queue: detail.queue ?? [], queueVersion: detail.session.queueVersion, sessionTitle: detail.session.title }, { isAlbum: false, hadMix: turn.hadMix, metadataAtStart: turn.metadataAtStart })
+      void refreshSessionAfterTurn(sessionId, detail)
+      if (turn.remaking) void refreshOnboarding()
+    }
+    void read(true)
   }
 
   function previewQueue(sessionId: string, nextTracks: QueueTrack[]) {
@@ -1387,6 +1501,9 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   // The latest pick state for async work that outlives a render (a refresh landing after a pick).
   const albumsBySessionRef = useRef(albumsBySession)
   albumsBySessionRef.current = albumsBySession
+  // The latest sessions, for a read after a dropped turn stream that lands after renders.
+  const sessionsRef = useRef(sessions)
+  sessionsRef.current = sessions
 
   function applyAlbumState(sessionId: string, state: AlbumPickState) {
     contentRevision.current[sessionId] = (contentRevision.current[sessionId] ?? 0) + 1
@@ -1617,7 +1734,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
    * whether the mix is personal now, and the door and banner go if it is.
    */
   function remake() {
-    if (!activeSession || activeSession.kind === 'album' || thinkingSessionId === activeSession.id || remakingSessionId === activeSession.id) return
+    if (!activeSession || activeSession.kind === 'album' || turnOut(activeSession.id) || remakingSessionId === activeSession.id) return
     // The phone shell's panel covers the conversation; the remake shows there,
     // and focus leaves the closing panel for the listener's new line.
     const fromPanel = narrow && queueOpen
@@ -1674,7 +1791,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     platform: addMusicListener.platform,
     onAddMusic: openAddMusicFor,
     onRemake: remake,
-    busy: thinkingSessionId === activeSession.id || loadingSessionId === activeSession.id || seedBusy === activeSession.id,
+    busy: turnOut(activeSession.id) || loadingSessionId === activeSession.id || seedBusy === activeSession.id,
     pending: remakingSessionId === activeSession.id,
   } : undefined
   // The history pill shows only where the router has a page for it (Spotify, on the web).
@@ -1758,14 +1875,15 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
             currentShape={mixShapes[`${activeSession.id}:${activeSession.queueVersion}`]}
             transcribe={transcribe}
             selectionBusy={seedBusy === activeSession.id}
-            attachment={<PlaylistAttachment api={api} onReload={!playlistSeeds[activeSession.id] ? () => reloadInspiration(activeSession.id) : undefined} value={attachmentValue(playlistSeeds[activeSession.id])} disabled={!playlistSeeds[activeSession.id] || thinkingSessionId === activeSession.id} onSelect={(value) => selectInspiration(activeSession.id, value)} onSessionExpired={signOut} />}
+            attachment={<PlaylistAttachment api={api} onReload={!playlistSeeds[activeSession.id] ? () => reloadInspiration(activeSession.id) : undefined} value={attachmentValue(playlistSeeds[activeSession.id])} disabled={!playlistSeeds[activeSession.id] || turnOut(activeSession.id)} onSelect={(value) => selectInspiration(activeSession.id, value)} onSessionExpired={signOut} />}
             onColor={color => updateMix(activeSession.id, { caseColor: color })}
             onRename={(title) => updateMix(activeSession.id, { title })}
             onArchive={() => updateMix(activeSession.id, { status: 'archived' }).catch((e) => { announce('Couldn’t archive this mix. Try again.', 'error'); throw e })}
             session={activeSession}
             messages={activeMessages}
             loading={loadingSessionId === activeSession.id}
-            thinking={thinkingSessionId === activeSession.id}
+            thinking={turnOut(activeSession.id)}
+            working={turnWork[activeSession.id]}
             player={<PlaybackPanel controller={playback} />}
             energySummary={activeIsAlbum ? undefined : <MixEnergySummary onShape={shape => setMixShapes(current => ({ ...current, [`${activeSession.id}:${activeSession.queueVersion}`]: shape }))} key={`${activeSession.id}:${activeSession.queueVersion}`} api={api} sessionId={activeSession.id} version={activeSession.queueVersion} />}
             onSend={(text, shape) => sendMessage(text, shape, true)}

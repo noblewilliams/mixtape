@@ -17,6 +17,8 @@ import type {
   ListeningImportStart,
   MixtapeApi,
   SessionDetailResponse,
+  TurnProgress,
+  TurnProgressListener,
 } from '../api/client'
 import {
   demoAlbumPick,
@@ -97,9 +99,34 @@ export type FakeApiOptions = {
   listenLater?: ApiListenLaterEntry[]
   /** Offer the history pill (`addMusic: 'history'`) on a mix session's first turn, once per session. */
   historyPill?: boolean
+  /**
+   * A streamed mix turn's progress (createSession and sendMessage on a mix,
+   * when the caller passes onProgress), reported before the turn answers: a
+   * fixed list, or a function that reports as it likes and may hold the turn
+   * until it resolves. Nothing is reported without it, as from an older server.
+   */
+  turnProgress?: TurnProgress[] | ((report: TurnProgressListener, turn: { method: 'createSession' | 'sendMessage'; sessionId?: string }) => void | Promise<void>)
 }
 
 const notFound = () => new ApiError(404, { error: 'not_found' })
+
+/** Reports `progress` as a stream would: a listener that throws never breaks the turn. */
+async function reportProgress(
+  progress: FakeApiOptions['turnProgress'],
+  onProgress: TurnProgressListener | undefined,
+  turn: { method: 'createSession' | 'sendMessage'; sessionId?: string },
+) {
+  if (!progress || !onProgress) return
+  const report: TurnProgressListener = (event) => {
+    try {
+      onProgress(event)
+    } catch {
+      // As the client: a caption never breaks the turn.
+    }
+  }
+  if (typeof progress === 'function') await progress(report, turn)
+  else progress.forEach(report)
+}
 const atVersion = (album: ApiAlbum, version: number): ApiAlbum => ({ ...album, version })
 
 export function createFakeApi(overrides: Partial<MixtapeApi> = {}, options: FakeApiOptions = {}): FakeApi {
@@ -242,7 +269,8 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}, options: Fake
       const session = summaries.find((item) => item.id === sessionId) ?? summaries[0]
       return { session: { ...session }, messages: messagesFor(sessionId), queue: currentQueue(sessionId) }
     },
-    createSession: async (prompt, _seed, _arc, kind): Promise<CreateSessionResponse> => {
+    createSession: async (prompt, _seed, _arc, kind, turnOptions): Promise<CreateSessionResponse> => {
+      if (kind !== 'album') await reportProgress(options.turnProgress, turnOptions?.onProgress, { method: 'createSession' })
       if (kind === 'album') {
         const createdAt = tick()
         const id = albumSessions.size === 0 ? 'created-album-session' : `created-album-session-${albumSessions.size + 1}`
@@ -288,6 +316,7 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}, options: Fake
         if (sendOptions?.remake) throw new ApiError(409, { error: 'wrong_session_kind' })
         return albumTurn(sessionId, text)
       }
+      await reportProgress(options.turnProgress, sendOptions?.onProgress, { method: 'sendMessage', sessionId })
       return {
         djMessage: {
           id: 'reply-message',

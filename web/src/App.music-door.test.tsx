@@ -396,7 +396,7 @@ describe('Remake with my music', () => {
     fireEvent.click(within(musicIn).getByRole('button', { name: 'Remake with my music' }))
 
     expect(turns.sendMessage).toHaveBeenCalledOnce()
-    expect(turns.sendMessage).toHaveBeenCalledWith('created-session', REMAKE_TEXT, undefined, { remake: true })
+    expect(turns.sendMessage).toHaveBeenCalledWith('created-session', REMAKE_TEXT, undefined, { remake: true, onProgress: expect.any(Function) })
     expect(funnel(api).filter((type) => type === 'remake_tapped')).toHaveLength(1)
     expect([...document.querySelectorAll('.conversation-turn--user')].at(-1)).toHaveTextContent(/^Remake this with my music$/)
     expect(screen.getByText('The DJ is listening…')).toBeInTheDocument()
@@ -521,7 +521,7 @@ describe('Remake with my music', () => {
     fireEvent.click(remake)
     expect(mixPanel()).not.toHaveClass('is-open')
     await waitFor(() => expect(api.calls.filter((call) => call.method === 'sendMessage')).toHaveLength(1))
-    expect(api.calls.find((call) => call.method === 'sendMessage')!.args).toEqual(['created-session', REMAKE_TEXT, undefined, { remake: true }])
+    expect(api.calls.find((call) => call.method === 'sendMessage')!.args).toEqual(['created-session', REMAKE_TEXT, undefined, { remake: true, onProgress: expect.any(Function) }])
     expect(funnel(api)).toContain('remake_tapped')
     await waitFor(() => expect(document.activeElement).toHaveClass('conversation-turn--user'))
     expect(document.activeElement).toHaveTextContent(/^Remake this with my music$/)

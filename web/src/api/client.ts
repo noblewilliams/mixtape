@@ -3,6 +3,9 @@ import type {
   PlaylistEntrySnapshot,
   PlaylistSnapshot,
 } from '../musickit/library'
+import { readTurnStream, type TurnProgressListener } from './sse'
+
+export type { TurnProgress, TurnProgressListener, TurnStepProgress } from './sse'
 
 export type InitialPlaylistSeed = { playlistId: string; excludeSourceTracks?: boolean }
 
@@ -155,7 +158,17 @@ export type SendMessageResponse = {
 /** The listener's line for a remake; the server reads `remake`, never meaning from the text. */
 export const REMAKE_TEXT = 'Remake this with my music'
 
-export type SendMessageOptions = {
+/**
+ * A mix turn's progress (spec 2026-11-13 dj-turn-steps): with `onProgress`
+ * the request asks for the turn as an event stream and reports `opened`, the
+ * create's `session` and each `step` as they arrive. Without it the request is
+ * exactly the plain JSON one. Results and errors are the same either way.
+ */
+export type TurnRequestOptions = {
+  onProgress?: TurnProgressListener
+}
+
+export type SendMessageOptions = TurnRequestOptions & {
   /** Remake the mix from the listener's own music (mix sessions only; an album answers 409). */
   remake?: boolean
 }
@@ -471,11 +484,13 @@ export type MixtapeApi = {
 
   listSessions: () => Promise<{ sessions: ApiSessionSummary[] }>
   getSession: (sessionId: string) => Promise<SessionDetailResponse>
+  /** `options.onProgress` streams a mix turn; an album create always takes the plain path. */
   createSession: (
     prompt: string,
     playlistSeed?: InitialPlaylistSeed,
     energyArc?: EnergyArc,
     kind?: 'mix' | 'album',
+    options?: TurnRequestOptions,
   ) => Promise<CreateSessionResponse>
   sendMessage: (sessionId: string, text: string, energyArc?: EnergyArc, options?: SendMessageOptions) => Promise<SendMessageResponse>
   applyQueueOps: (sessionId: string, ops: QueueOp[], expectedVersion?: number) => Promise<QueueOpsResponse>
@@ -625,24 +640,60 @@ async function readPayload(response: Response): Promise<unknown> {
 
 type AccessTokenProvider = () => string | null
 
-export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenProvider = () => null): MixtapeApi {
+export type MixtapeApiOptions = {
+  /** How long a turn stream may go without a byte before it counts as dropped (default 45 s; tests shorten it). */
+  streamIdleTimeoutMs?: number
+}
+
+export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenProvider = () => null, { streamIdleTimeoutMs }: MixtapeApiOptions = {}): MixtapeApi {
   const root = normalizeBaseUrl(baseUrl)
 
-  async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  function send(path: string, init: RequestInit, accept: string): Promise<Response> {
     const headers = new Headers(init.headers)
-    headers.set('accept', 'application/json')
+    headers.set('accept', accept)
     if (init.body !== undefined && !(init.body instanceof FormData)) headers.set('content-type', 'application/json')
     const accessToken = getAccessToken()
     if (accessToken) headers.set('authorization', `Bearer ${accessToken}`)
 
-    const response = await fetch(`${root}${path}`, {
+    return fetch(`${root}${path}`, {
       ...init,
       credentials: 'include',
       headers,
     })
+  }
+
+  async function settle<T>(response: Response): Promise<T> {
     const payload = await readPayload(response)
     if (!response.ok) throw new ApiError(response.status, payload)
     return payload as T
+  }
+
+  async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+    return settle<T>(await send(path, init, 'application/json'))
+  }
+
+  /**
+   * A mix turn. With `onProgress` it asks for the turn as an event stream; an
+   * answer that is JSON (an older server, a refusal before the turn) or not
+   * 2xx is read exactly as `request` reads it. On a stream, `result` is the
+   * body and `error` the ApiError the JSON path would give, and a stream that
+   * drops before either is the TypeError a failed fetch is.
+   */
+  async function turn<T>(path: string, init: RequestInit, onProgress?: TurnProgressListener): Promise<T> {
+    if (!onProgress) return request<T>(path, init)
+    const response = await send(path, init, 'text/event-stream')
+    const streamed = response.ok && (response.headers.get('content-type') ?? '').includes('text/event-stream')
+    if (!streamed) return settle<T>(response)
+    if (!response.body) throw new TypeError('The turn stream had no body.')
+    try {
+      onProgress({ type: 'opened' })
+    } catch {
+      // A caption never breaks the turn.
+    }
+    const end = await readTurnStream(response.body, onProgress, { idleTimeoutMs: streamIdleTimeoutMs })
+    if (end.kind === 'result') return end.body as T
+    if (end.kind === 'error') throw new ApiError(end.status, end.body)
+    throw new ApiError(502, { error: 'malformed_response' })
   }
 
   return {
@@ -693,8 +744,8 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
       const body = await request<{ neverRefuse?: boolean }>('/health', { signal })
       return { neverRefuse: body.neverRefuse === true }
     },
-    createSession: (prompt, playlistSeed, energyArc, kind) =>
-      request<CreateSessionResponse>('/sessions', {
+    createSession: (prompt, playlistSeed, energyArc, kind, options) =>
+      turn<CreateSessionResponse>('/sessions', {
         method: 'POST',
         // The server ignores energyArc on an album, but it is never sent: albums have no shape.
         body: JSON.stringify({
@@ -702,15 +753,17 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
           ...(playlistSeed ? { playlistSeed } : {}),
           ...(kind === 'album' ? { kind } : energyArc ? { energyArc } : {}),
         }),
-      }).then(withAddMusicOffer, (error: unknown) => {
+        // Album turns stay on the clock: their steps are a later change.
+      }, kind === 'album' ? undefined : options?.onProgress).then(withAddMusicOffer, (error: unknown) => {
         if (error instanceof ApiError && error.status === 403 && error.code === 'anonymous_cap') throw new AnonymousCapError(error.payload)
         throw error
       }),
+    // The server answers an album session's turn with JSON even when asked for a stream.
     sendMessage: (sessionId, text, energyArc, options) =>
-      request<SendMessageResponse>(`/sessions/${encodeURIComponent(sessionId)}/messages`, {
+      turn<SendMessageResponse>(`/sessions/${encodeURIComponent(sessionId)}/messages`, {
         method: 'POST',
         body: JSON.stringify({ text, ...(energyArc ? { energyArc } : {}), ...(options?.remake ? { remake: true } : {}) }),
-      }).then(withAddMusicOffer),
+      }, options?.onProgress).then(withAddMusicOffer),
     applyQueueOps: (sessionId, ops, expectedVersion) =>
       request(`/sessions/${encodeURIComponent(sessionId)}/queue-ops`, {
         method: 'POST',

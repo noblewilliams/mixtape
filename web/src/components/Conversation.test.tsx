@@ -1,10 +1,11 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import doorCss from './music-door.css?raw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { toAlbumPick } from '../api/mappers'
 import { demoAlbumMessages, demoAlbumPick } from '../data/demo'
 import type { DjMessage, DjSession } from '../domain'
 import { Conversation } from './Conversation'
+import type { TurnWork } from './djWorkingLines'
 import type { MusicDoorInput } from './MusicDoor'
 
 const session: DjSession = {
@@ -221,6 +222,53 @@ describe('Conversation for a mix session', () => {
     expect(screen.getByText('Current tape')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Tape options' }))
     expect(screen.getByRole('button', { name: 'Version history' })).toBeInTheDocument()
+  })
+})
+
+describe('Conversation while the DJ works on a mix', () => {
+  afterEach(() => {
+    cleanup()
+    vi.useRealTimers()
+  })
+  const T0 = Date.UTC(2026, 10, 13, 8, 0, 0)
+  const asked: DjMessage[] = [{ id: 'u', role: 'user', content: 'Slower in the middle', createdAt: '2026-11-13T08:00:00.000Z' }]
+  const visible = () => document.querySelector('.dj-thinking .dj-working-line')
+
+  it('says what the DJ is doing under the cassette, and keeps one steady line for assistive tech', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(T0)
+    const work = (step: TurnWork['step']): TurnWork => ({ startedAt: T0 - 1_000, step })
+    const { rerender } = render(<Conversation session={session} messages={asked} thinking working={work(null)} onSend={vi.fn()} />)
+    const indicator = document.querySelector('.dj-thinking') as HTMLElement
+    expect(indicator).toHaveAttribute('aria-label', 'The DJ is listening')
+    expect(visible()).toHaveTextContent('The DJ is listening…')
+    expect(visible()!.closest('[aria-hidden="true"]')).not.toBeNull()
+    expect(within(indicator).getByText('The DJ is listening')).toHaveClass('sr-only')
+
+    act(() => { vi.advanceTimersByTime(2_000) })
+    rerender(<Conversation session={session} messages={asked} thinking working={work({ step: { type: 'step', step: 'labelling', title: 'Slow bridge' }, at: T0 + 2_000 })} onSend={vi.fn()} />)
+    expect(visible()).toHaveTextContent('Labelling it “Slow bridge”…')
+    expect(indicator).toHaveAttribute('aria-label', 'The DJ is listening')
+    expect(within(indicator).getByText('The DJ is listening')).toHaveClass('sr-only')
+  })
+
+  it('walks the timed lines when the turn reports nothing', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(T0)
+    render(<Conversation session={session} messages={asked} thinking working={{ startedAt: T0 - 5_000, step: null }} onSend={vi.fn()} />)
+    expect(visible()?.textContent).toMatch(/^(Digging through the crates|Flipping through your records|Thumbing through the stacks)…$/)
+  })
+
+  it('draws no working line once the DJ answers', () => {
+    render(<Conversation session={session} messages={asked} thinking={false} working={{ startedAt: Date.now(), step: null }} onSend={vi.fn()} />)
+    expect(document.querySelector('.dj-thinking')).toBeNull()
+  })
+
+  it('keeps an album turn on its own static line', () => {
+    const album = { ...session, kind: 'album' as const }
+    render(<Conversation kind="album" session={album} messages={asked} thinking working={{ startedAt: Date.now(), step: { step: { type: 'step', step: 'picking' }, at: Date.now() } }} onSend={vi.fn()} />)
+    expect(screen.getByText('Finding your album · checking Apple Music')).toBeInTheDocument()
+    expect(visible()).toBeNull()
   })
 })
 

@@ -9,6 +9,8 @@ import { Cassette } from './Cassette'
 import { AlbumCover } from './AlbumPanel'
 import { MoreIcon, QueueIcon } from './Icons'
 import { MusicDoor, type MusicDoorInput } from './MusicDoor'
+import { DjWorkingLine } from './DjWorkingLine'
+import type { TurnWork } from './djWorkingLines'
 
 type ConversationProps = {
   currentShape?: EnergyArc | null
@@ -24,6 +26,12 @@ type ConversationProps = {
   messages: DjMessage[]
   loading?: boolean
   thinking: boolean
+  /**
+   * The mix turn in flight: when it went out, and its step once its stream
+   * opened. Held by the shell, so the line picks up where the turn has got to
+   * when the conversation is opened again. Absent: the clock starts here.
+   */
+  working?: TurnWork
   onSend: (text: string, shape?: EnergyArc) => void | Promise<void>
   onOpenHistory?: (version?: number) => void
   /** Mix sessions only: opens the queue slide-over below the three-column width. */
@@ -82,7 +90,7 @@ function PassedRow({ album, onGoBack }: { album: AlbumPick; onGoBack?: (version:
 
 const unavailableTranscription = async () => { throw new Error('Transcription unavailable') }
 
-export function Conversation({ currentShape, transcribe = unavailableTranscription, selectionBusy = false, attachment, energySummary, player, onColor, onRename, onArchive, session, messages, loading = false, thinking, onSend, onOpenQueue, onOpenHistory, kind = 'mix', passed = [], onGoBack, suggestions = [], onSuggestion, inlinePanel, inlinePanelVersion, onBack, musicDoor, musicDoorCovered = false, onAddHistory }: ConversationProps) {
+export function Conversation({ currentShape, transcribe = unavailableTranscription, selectionBusy = false, attachment, energySummary, player, onColor, onRename, onArchive, session, messages, loading = false, thinking, working, onSend, onOpenQueue, onOpenHistory, kind = 'mix', passed = [], onGoBack, suggestions = [], onSuggestion, inlinePanel, inlinePanelVersion, onBack, musicDoor, musicDoorCovered = false, onAddHistory }: ConversationProps) {
   const album = kind === 'album'
   const [settings, setSettings] = useState(false)
   const [options, setOptions] = useState(false)
@@ -186,7 +194,15 @@ export function Conversation({ currentShape, transcribe = unavailableTranscripti
             <span aria-hidden="true" />
             <span aria-hidden="true" />
             <span aria-hidden="true" />
-            <small>{album ? 'Finding your album · checking Apple Music' : 'The DJ is listening…'}</small>
+            {album ? (
+              <small>Finding your album · checking Apple Music</small>
+            ) : (
+              // The transcript is a live region: the line changes too often to be read, so it says one steady line.
+              <small>
+                <span aria-hidden="true"><DjWorkingLine work={working} /></span>
+                <span className="sr-only">The DJ is listening</span>
+              </small>
+            )}
           </div>
         ) : null}
       </div>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ApiError, type CreateSessionResponse, type FunnelEventType } from '../../api/client'
+import { ApiError, type CreateSessionResponse, type FunnelEventType, type TurnProgress } from '../../api/client'
+import { nextWorkingStep, type TurnWork, type WorkingStep } from '../djWorkingLines'
 import { createDeferredFunnel } from '../../lib/funnel-once'
 import type { AuthPreferenceStore, AuthProvider } from '../../lib/auth-provider'
 import { AiConsentDialog, AiConsentGate } from '../AiConsent'
@@ -127,6 +128,10 @@ export function FirstRun({ mode = 'first-run', startAt, services: provided, sign
   // The first mix in flight (a DJ turn of up to a minute), and the error the
   // pop off the making page should show on the page it lands on.
   const mixing = useRef(false)
+  // The first mix's turn for the making page's step line: held here, so a back
+  // and a return to the running mix keep its step. One per try.
+  const [making, setMaking] = useState<TurnWork | null>(null)
+  const makingTry = useRef(0)
   const popError = useRef('')
   const navigated = useRef(false)
   const finished = useRef(false)
@@ -292,10 +297,19 @@ export function FirstRun({ mode = 'first-run', startAt, services: provided, sign
     // The page stays as it is behind the dialog; Not now leaves it there, unsent.
     if (!consented.current) return setAsking({ text, ensured })
     mixing.current = true
+    const attempt = (makingTry.current += 1)
+    const stream: { step: WorkingStep | null } = { step: null }
+    const onProgress = (progress: TurnProgress) => {
+      const next = nextWorkingStep(stream.step, progress, Date.now())
+      if (next === stream.step || makingTry.current !== attempt) return
+      stream.step = next
+      setMaking((current) => (current ? { ...current, step: next } : current))
+    }
+    setMaking({ startedAt: Date.now(), step: null })
     push({ id: 'making' })
     try {
       if (!ensured) await ensure()
-      const response = await services.api.createSession(text)
+      const response = await services.api.createSession(text, undefined, undefined, undefined, { onProgress })
       mixing.current = false
       finish({ session: response })
     } catch {
@@ -487,7 +501,7 @@ export function FirstRun({ mode = 'first-run', startAt, services: provided, sign
       ) : null
       break
     case 'making':
-      content = <Making key={key} focusHeading={focusHeading} />
+      content = <Making key={key} focusHeading={focusHeading} working={making ?? undefined} />
       break
     case 'sign-in':
       content = signIn ? (

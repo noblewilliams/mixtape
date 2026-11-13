@@ -37,6 +37,9 @@ import { createFirstRunServices } from './components/first-run/services'
 import type { MusicKitClient } from './musickit/client'
 import { NamePage, type NamePageInitial } from './components/first-run/NamePage'
 import { publicAsset } from './lib/public-asset'
+import { Making } from './components/first-run/Making'
+import { nextWorkingStep, type TurnWork, type WorkingStep } from './components/djWorkingLines'
+import type { TurnProgress } from './api/client'
 
 const previewPlaylist: ApiPlaylistSummary = { id: 'preview', name: '“just a girl”', source: 'spotify_export', kind: 'user', origin: 'unknown', curatorName: null, artworkUrlTemplate: null, artworkBgColor: null, artworkWidth: null, artworkHeight: null, entryCount: 14, knownDurationMs: null, durationComplete: false, lastModifiedAt: null, syncedAt: '2026-09-18T12:00:00Z', inLibrary: true, capability: 'copy_only' }
 const previewEntries = ['Present Tense', 'If You Say the Word', 'The Girl Is Mine', 'Let My Baby Stay', 'Do What You Gotta Do', 'Home recording'].map((title, position) => ({ id: String(position), position, trackId: null, appleCatalogId: null, spotifyId: position === 5 ? null : '4uLU6hMCjMI75M1A2tKUQC', title, artist: 'Synthetic artist', album: null, durationMs: null, artworkUrlTemplate: null, artworkWidth: null, artworkHeight: null, artworkBgColor: null, resolved: false }))
@@ -183,6 +186,56 @@ function CatalogPreview({ state, session, onBack }: { state: CatalogPreviewState
   </>
 }
 
+// Turn steps (spec 2026-11-13): a first mix from the catalogue as its stream would report it, with
+// names. The stream opens after a beat (the timed line first); picking runs long enough for its
+// 12 s line; noting comes inside the label's dwell and writing 50 ms after it, so noting never
+// shows. Loops.
+const previewWalk: Array<[number, TurnProgress]> = [
+  [700, { type: 'opened' }],
+  [2_500, { type: 'step', step: 'digging', scope: 'catalogue', artists: ['Tems', 'Asake'] }],
+  [9_000, { type: 'step', step: 'picking', artists: ['Tems', 'Asake'] }],
+  [23_000, { type: 'step', step: 'checking', genres: ['Afrobeats', 'Alté', 'Soul'] }],
+  [26_000, { type: 'step', step: 'pressing', count: 15 }],
+  [29_000, { type: 'step', step: 'labelling', title: 'Rain on Third Mainland' }],
+  [30_000, { type: 'step', step: 'noting' }],
+  [30_050, { type: 'step', step: 'writing' }],
+]
+const PREVIEW_WALK_MS = 35_000
+
+/** The walk above as a turn's working state, restarted every PREVIEW_WALK_MS or on `restart`. */
+function usePreviewTurn(): [TurnWork, () => void] {
+  const [run, setRun] = useState(0)
+  const [work, setWork] = useState<TurnWork>(() => ({ startedAt: Date.now(), step: null }))
+  useEffect(() => {
+    const startedAt = Date.now()
+    let step: WorkingStep | null = null
+    setWork({ startedAt, step: null })
+    const timers = previewWalk.map(([at, progress]) => setTimeout(() => {
+      const next = nextWorkingStep(step, progress, Date.now())
+      if (next === step) return
+      step = next
+      setWork({ startedAt, step: next })
+    }, at))
+    timers.push(setTimeout(() => setRun((count) => count + 1), PREVIEW_WALK_MS))
+    return () => timers.forEach(clearTimeout)
+  }, [run])
+  return [work, () => setRun((count) => count + 1)]
+}
+
+const previewAsk: DjMessage = { id: 'working-ask', role: 'user', content: 'Rainy commute over the bridge, Tems and Asake energy, nothing too loud', createdAt: '2026-11-13T08:00:00.000Z' }
+function WorkingConversationPreview({ session, onBack }: { session: DjSession; onBack: () => void }) {
+  const [work, restart] = usePreviewTurn()
+  return <>
+    {/* Keyed by the run, as a new turn mounts a new line in the app. */}
+    <Conversation key={work.startedAt} session={{ ...session, title: 'Rain on Third Mainland' }} messages={[previewAsk]} thinking working={work} onSend={restart} onOpenQueue={() => {}} onBack={onBack} attachment={<PlaylistAttachment api={previewLibraryApis.library} value={null} onSelect={async () => {}} onSessionExpired={() => {}} />} />
+    <QueuePanel session={session} tracks={[]} playing={false} playbackBusy={false} musicConnection="connected" open={false} onConnect={() => {}} onTogglePlay={() => {}} onSave={() => {}} onClose={() => {}} onPreviewTracks={() => {}} onCommitQueueOp={async () => {}} />
+  </>
+}
+function WorkingMakingPreview() {
+  const [work] = usePreviewTurn()
+  return <div className="first-run fr-root fr-root--over"><div className="fr-stage"><Making key={work.startedAt} working={work} /></div></div>
+}
+
 function previewConsent() {
   let tries = 0
   return () => new Promise<void>((resolve, reject) => setTimeout(() => (tries++ === 0 ? reject(new Error('preview')) : resolve()), 1000))
@@ -197,14 +250,15 @@ export default function UiPolishPreview() {
   const openTab = (tab: MixesTab) => setState(tab === 'archived' ? 'archived' : tab === 'listen-later' ? 'listen-later' : 'populated')
   async function color(id: string, caseColor: string) { setSessions(current => current.map(s => s.id === id ? { ...s, caseColor } : s)) }
   const close = () => setState('populated')
-  const options = ['home', 'home-loading', 'home-empty', 'home-error', 'populated', 'loading', 'empty', 'archived', 'load-error', 'refresh-error', 'settings', 'success', 'error', 'info', 'playlist', 'preference', 'memory', 'sources', 'library', 'library-loading', 'conversation', 'conversation-blank', 'conversation-spotify', 'conversation-ask', 'catalog', 'catalog-spotify', 'catalog-unknown', 'catalog-syncing', 'catalog-sync-failed', 'catalog-spotify-waiting', 'catalog-music-in', 'catalog-history', 'album', 'album-refined', 'listen-later', 'listen-later-empty', 'first-run', 'keep-sheet', 'sign-in-keep', 'sign-in-cap', 'merge-notice', 'delete-account', 'settings-named', 'settings-unnamed', 'settings-editing', 'settings-failed', 'name-page', 'name-page-typing', 'name-page-saving', 'name-page-failed', 'first-run-consent', 'ai-consent']
+  const options = ['home', 'home-loading', 'home-empty', 'home-error', 'populated', 'loading', 'empty', 'archived', 'load-error', 'refresh-error', 'settings', 'success', 'error', 'info', 'playlist', 'preference', 'memory', 'sources', 'library', 'library-loading', 'conversation', 'conversation-working', 'making-working', 'conversation-blank', 'conversation-spotify', 'conversation-ask', 'catalog', 'catalog-spotify', 'catalog-unknown', 'catalog-syncing', 'catalog-sync-failed', 'catalog-spotify-waiting', 'catalog-music-in', 'catalog-history', 'album', 'album-refined', 'listen-later', 'listen-later-empty', 'first-run', 'keep-sheet', 'sign-in-keep', 'sign-in-cap', 'merge-notice', 'delete-account', 'settings-named', 'settings-unnamed', 'settings-editing', 'settings-failed', 'name-page', 'name-page-typing', 'name-page-saving', 'name-page-failed', 'first-run-consent', 'ai-consent']
   return <>
     <div style={{ position: 'fixed', right: 12, top: 8, zIndex: 200, display: 'flex', gap: 8, alignItems: 'center', background: '#f7f4f8', color: '#1c1a1e', padding: 8, borderRadius: 8, fontSize: 12 }}>
       <label htmlFor="ui-preview-state">UI preview · synthetic data</label><select id="ui-preview-state" value={state} onChange={e => setState(e.target.value)}>{options.map(option => <option key={option}>{option}</option>)}</select>
     </div>
     <div className={state.startsWith('conversation') || state.startsWith('album') || state.startsWith('catalog') ? 'app-shell' : 'app-shell app-shell--home'}>
       <Sidebar activeView={state.startsWith('home') ? 'home' : state === 'sources' ? 'music' : state.startsWith('settings-') ? 'settings' : 'mixes'} onOpenHome={() => setState('home')} onOpenMusic={() => setState('sources')} onOpenMixes={close} onOpenSettings={() => setState('preference')} />
-      {state.startsWith('conversation') ? <>
+      {state === 'conversation-working' ? <WorkingConversationPreview session={sessions[0]} onBack={close} />
+      : state.startsWith('conversation') ? <>
         <Conversation session={sessions[0]} messages={state === 'conversation-blank' ? [] : demoMessages} thinking={false} onSend={() => {}} onOpenQueue={() => {}} onBack={close} attachment={<PlaylistAttachment api={previewLibraryApis.library} value={null} onSelect={async () => {}} onSessionExpired={() => {}} />} />
         <QueuePanel key={state} session={sessions[0]} tracks={state === 'conversation-blank' ? [] : state === 'conversation-spotify' ? previewQueue.map((track) => ({ ...track, spotifyId: null })) : previewQueue} playing={false} playbackBusy={false} musicConnection={state === 'conversation-spotify' || state === 'conversation-ask' ? 'disconnected' : 'connected'} spotifyOnly={state === 'conversation-spotify'} askService={state === 'conversation-ask'} open={false} onConnect={() => {}} onTogglePlay={() => {}} onSave={() => {}} onClose={() => {}} onPreviewTracks={() => {}} onCommitQueueOp={async () => {}} />
       </>
@@ -223,6 +277,7 @@ export default function UiPolishPreview() {
     {(state === 'sign-in-keep' || state === 'sign-in-cap') && <div className="first-run fr-root fr-root--over"><div className="fr-sign-in"><BackButton onBack={close} className="fr-back--over" /><SignInPage variant={state === 'sign-in-cap' ? 'cap' : 'keep'} auth={{ signIn: async () => ({}) }} preferences={{ lastUsed: () => 'apple', begin: () => {}, promotePending: () => null, clearPending: () => {}, forget: () => {} }} lastUsed="apple" error="" onSkip={state === 'sign-in-keep' ? close : undefined} /></div></div>}
     {state === 'merge-notice' && <Toast tone="success" message="Your mixes are in. This account already had a library, so we kept that one." />}
     {state.startsWith('name-page') && <NamePagePreview key={state} state={state as NamePreviewState} onDone={close} />}
+    {state === 'making-working' && <WorkingMakingPreview />}
     {/* The consent dialog: over the first run's prompt page, and over the app. The first Agree fails after a beat (busy, then the inline error); the next one goes through. */}
     {state === 'first-run-consent' && <><FirstRun services={previewFirstRunServices} onDone={close} /><AiConsentDialog onAgree={async () => { await consentAgree(); setState('first-run') }} onNotNow={() => setState('first-run')} /></>}
     {state === 'ai-consent' && <AiConsentDialog onAgree={async () => { await consentAgree(); close() }} onNotNow={close} />}

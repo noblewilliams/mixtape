@@ -584,8 +584,29 @@ html[data-focus="pointer"] .import-pick-pill .fr-pill:focus-within {
 }
 
 .dj-thinking small {
+  min-width: 0;
   margin-left: 5px;
+  overflow: hidden;
   font-size: var(--type-meta-size);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The mix turn's working line: one line, a short fade as it changes. */
+.dj-working-line {
+  animation: dj-working-line-in 280ms ease-out;
+}
+
+@keyframes dj-working-line-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dj-working-line {
+    animation: none;
+  }
 }
 
 @keyframes thinking-pulse {
