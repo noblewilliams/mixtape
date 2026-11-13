@@ -72,10 +72,11 @@ clean), then S2 beside W1, then W2, and C2 once the iOS tree is committed.
   - The pool closes only after recorded work, and at once without any.
 
 **C1. iOS stream client** (`client/lib/data/dj/`, a new
-`sse_lines.dart` parser, tests).
+`turn_stream.dart` parser, tests).
 - Add the SSE parser.
-- `createSession`, `sendMessage` and `sendRemake` take `onStep` and send
-  the Accept header for mixes. A JSON answer falls back to today's parse.
+- `createSessionWithProgress`, `sendMessageWithProgress` and
+  `sendRemakeWithProgress` (an extension on `DjApi`) take `onProgress` and
+  send the Accept header for mixes. A JSON answer falls back to today's parse.
   `error` maps to the existing five exit types. On a stream, a 45 s idle
   timeout replaces the 120 s total one.
 - Tests: chunk splits at every byte, CRLF, comment lines, an early end as a

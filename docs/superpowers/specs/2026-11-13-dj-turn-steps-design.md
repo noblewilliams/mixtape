@@ -219,7 +219,9 @@ type as a stream.
 | `error` | `{ "status": <today's status>, "body": <today's error body> }` | Last, on failure: 409 conflict, 502 curation or LLM, 400, or 500 `{ "error": "internal" }` for anything unforeseen. |
 | `: keepalive` (comment) | none | Every 15 s while nothing else was sent. |
 
-The stream ends after `result` or `error`. A stream that ends without
+The stream ends after `result` or `error`. Every event, the last one
+included, ends with a blank line (`\n\n`): a client counts an event only
+once its blank line arrives. A stream that ends without
 either is a dropped connection, and the client treats it as a network
 failure, as a timeout is treated today.
 
@@ -303,9 +305,15 @@ conflict retry re-runs the attempt, and a replacement round goes back to
 
 ### iOS client
 
-- **`DjApi`** `createSession`, `sendMessage` and `sendRemake` take an
-  optional `onStep`. For a mix they send `Accept: text/event-stream`
-  through `http.Client.send` and read the body as lines.
+- **`DjApi`** gains `createSessionWithProgress`, `sendMessageWithProgress`
+  and `sendRemakeWithProgress` (an extension, with a
+  `DjTurnProgressSender` interface for fakes, because many test fakes
+  `implements DjApi`), each taking an optional `onProgress` that receives
+  `TurnStreamOpened`, `TurnSessionStarted` and `TurnStep`
+  (`data/dj/turn_stream.dart`). With a callback they send
+  `Accept: text/event-stream` through `http.Client.send`; without one, or
+  for an album create, the request is today's. A fake without the
+  interface falls back to the plain methods and reports no progress.
   - If the answer is JSON (an old server, a refusal before the turn, an
     album), it is parsed exactly as today.
   - `result` goes through today's parse. `error` maps through today's
@@ -334,7 +342,8 @@ conflict retry re-runs the attempt, and a replacement round goes back to
 ### Web client
 
 - **`createSession` and `sendMessage`** (`web/src/api/client.ts`) take an
-  optional `onStep`, send `accept: text/event-stream` for mix turns, read
+  optional `onProgress` (same events as iOS), send
+  `accept: text/event-stream` for mix turns, read
   `response.body`, and fall back to JSON on a JSON content type. `error`
   becomes the same `ApiError(status, body)` it throws today.
 - **The working line.** The web has had one static line. It gains the same
