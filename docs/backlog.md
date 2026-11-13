@@ -104,6 +104,7 @@ Client:
 - Auth-lifecycle cluster: sign-out token revocation, stale keychain on reinstall, in-memory token cache.
 - Queue-intent FIFO could be hoisted into a provider so pop-mid-drain doesn't drop trailing intents (rare).
 - Listen later rows and the arrangement screen still swipe-to-remove with `Dismissible` (fires on release); move them to `SwipeActions` if the founder wants the Mixes reveal-and-wait swipe everywhere (2026-11-09).
+- **Shared mixes (2026-11-13):** live on server (Worker `07ebc300`, migration 0050) and web (Netlify `d5035df`); iOS **1.1.0 (7)** uploaded to TestFlight. Owed (founder): iMessage preview card, private-window play, device run of universal links on 1.1.0 (7), a link on a phone without the app. Plan `superpowers/plans/2026-11-13-shared-mixes.md` (Progress). Known limits: Apple song ids are per storefront; no deferred deep link after install; link-preview fetches share the API's per-IP limit; `miixtape.netlify.app` must keep serving `/m/*` if the site moves domain.
 - Shared mixes (iOS, accepted for v1, 2026-11-13): the first-run hand-off closes an open `SharedMixScreen` (the share is already saved, so nothing is lost), and a mix started from a shared link before first run stops when the first session appears (`playbackProvider` resets on auth).
 
 Server / DJ:

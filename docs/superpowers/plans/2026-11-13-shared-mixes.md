@@ -387,5 +387,15 @@ as a JPEG) and `summary_large_image`; an unknown or stopped token gets the
 generic tags ("A mix on Mixtape") once the 60-second cache passes; the
 tape-colour cards serve as PNGs. The throwaway user was deleted.
 
-Remaining: G2's founder half (the iMessage preview card, a private-window
-play on Apple Music and on Spotify), G3, G4.
+**G3, build uploaded 2026-11-13:** iOS **1.1.0 (7)** (`f2d84da`, archived
+from a clean worktree and uploaded by the founder from Xcode's Organizer).
+Two blockers on the way: the provisioning profile lacked Associated Domains
+(founder enabled it on `com.noble.mixtape` and signed Xcode in; command-line
+builds still saw no Xcode account), and Xcode 27 rejects pod targets below
+iOS 15 (the Podfile now lifts every pod to 16.0, `11a406c`).
+
+Remaining (founder): G2's iMessage preview card and a private-window play
+(Apple Music and Spotify); G3's device run on 1.1.0 (7) once it finishes
+processing (a link in Messages opens the app on the mix, it shows in Mixes
+as "From ...", Play works, Stop sharing from the sender removes it on the
+next refresh); G4, a link on a phone without the app opens the web page.
