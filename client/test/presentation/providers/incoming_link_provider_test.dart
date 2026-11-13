@@ -143,10 +143,4 @@ void main() {
     expect(source.listening, isFalse);
     expect(source.cancels, 1);
   });
-
-  test('the presenter defaults to a no-op', () {
-    final container = ProviderContainer();
-    addTearDown(container.dispose);
-    expect(container.read(sharedMixPresenterProvider), isNotNull);
-  });
 }

@@ -17,6 +17,7 @@ import 'package:mixtape/presentation/screens/queue_screen.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/mix_energy_summary.dart';
 import 'package:mixtape/presentation/widgets/now_playing_scrubber.dart';
+import 'package:mixtape/presentation/widgets/tape_palette.dart';
 import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
 
 import '../data/playback/playback_controller_test.dart' show FakeApi;
@@ -78,6 +79,7 @@ final _queue = [for (var i = 0; i < 12; i++) _track(i)];
 PlaybackController _player(
   RecordingBridge bridge, {
   String? sessionId = 'mix-1',
+  String? caseColor,
   List<QueueTrack>? tracks,
   int? unavailableIndex,
   String error = '',
@@ -85,6 +87,7 @@ PlaybackController _player(
 }) {
   final player = PlaybackController(FakeApi(), bridge)
     ..sessionId = sessionId
+    ..caseColor = caseColor
     ..version = 4
     ..title = 'A slow way into Sunday'
     ..tracks = tracks ?? _queue
@@ -181,6 +184,20 @@ void main() {
     // Opening Now Playing looks at the player; it never touches it.
     expect(bridge.actions, isEmpty);
     await captureAuthSnapshot(tester, 'player-native-dark');
+  });
+
+  testWidgets('a shared mix\'s cassette is the share\'s own colour', (
+    tester,
+  ) async {
+    final bridge = RecordingBridge();
+    await _pump(
+      tester,
+      _player(bridge, sessionId: 'shared:tok', caseColor: '#bc5734'),
+    );
+    expect(
+      tester.widget<CassetteTile>(find.byType(CassetteTile)).caseColor,
+      tapeColor('#bc5734'),
+    );
   });
 
   testWidgets('the sheet keeps its dark ground under a light system theme', (

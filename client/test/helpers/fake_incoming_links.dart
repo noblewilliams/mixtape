@@ -33,10 +33,10 @@ class FakeIncomingLinkSource implements IncomingLinkSource {
 /// Records every presentation, and the navigator it would push on.
 class RecordingSharedMixPresenter {
   final List<String> tokens = [];
-  final List<NavigatorState?> rootNavigators = [];
+  final List<NavigatorState> navigators = [];
 
-  void call(BuildContext context, String token) {
+  void call(NavigatorState navigator, String token) {
     tokens.add(token);
-    rootNavigators.add(Navigator.maybeOf(context, rootNavigator: true));
+    navigators.add(navigator);
   }
 }

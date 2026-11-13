@@ -8,6 +8,12 @@
 /// or on a later launch. A save that fails for any reason but the share
 /// being gone stays waiting for the next auth change or launch.
 ///
+/// A token kept while a session existed belongs to that session: signing
+/// out drops it, and so does a launch that finds no session (a reinstall,
+/// where the keychain outlives the app). One opened before any session — a
+/// fresh install following a link — waits through launches with no session
+/// until first run makes one.
+///
 /// The provider must be listened from the app's root for the whole launch:
 /// a provider nobody listens to is paused, and would miss the session
 /// appearing.
@@ -33,23 +39,41 @@ final pendingShareStoreProvider = Provider<PendingShareStore>(
 class PendingShareSaveNotifier extends Notifier<String?> {
   final Set<String> _saving = {};
 
+  /// A session was up earlier in this launch, so a no-session status now is
+  /// a sign-out.
+  bool _hadSession = false;
+
   @override
   String? build() {
     final status = ref.watch(authProvider);
-    unawaited(_resume(status));
+    final signedOut = status == AuthStatus.noSession && _hadSession;
+    if (status == AuthStatus.session) _hadSession = true;
+    if (status == AuthStatus.noSession) _hadSession = false;
+    unawaited(_resume(status, signedOut: signedOut));
     return null;
   }
 
-  Future<void> _resume(AuthStatus status) async {
-    String? token;
+  Future<void> _resume(AuthStatus status, {required bool signedOut}) async {
+    final store = ref.read(pendingShareStoreProvider);
+    PendingShare? share;
     try {
-      token = await ref.read(pendingShareStoreProvider).read();
+      share = await store.read();
     } catch (_) {
       // A device that cannot remember saves only what this launch holds.
     }
-    if (!ref.mounted || token == null) return;
-    state = token;
-    if (status == AuthStatus.session) await _save(token);
+    if (!ref.mounted || share == null) return;
+    if (status == AuthStatus.noSession &&
+        (signedOut || share.heldWithSession)) {
+      // That session's, not the next one's.
+      try {
+        await store.clear();
+      } catch (_) {
+        // At worst the next session saves one share it did not open.
+      }
+      return;
+    }
+    state = share.token;
+    if (status == AuthStatus.session) await _save(share.token);
   }
 
   /// Saves [token] now if there is a session, else keeps it until one
@@ -60,12 +84,14 @@ class PendingShareSaveNotifier extends Notifier<String?> {
       await _save(token);
       return;
     }
-    await _remember(token);
+    await _remember(token, heldWithSession: false);
   }
 
-  Future<void> _remember(String token) async {
+  Future<void> _remember(String token, {required bool heldWithSession}) async {
     try {
-      await ref.read(pendingShareStoreProvider).write(token);
+      await ref
+          .read(pendingShareStoreProvider)
+          .write(PendingShare(token, heldWithSession: heldWithSession));
     } catch (_) {
       // Remembering is a nicety; this launch still saves it.
     }
@@ -82,8 +108,9 @@ class PendingShareSaveNotifier extends Notifier<String?> {
       // Stopped or unknown: nothing to save, now or later.
       await _forget(store, token);
     } catch (_) {
-      // Offline, a 429: it waits for the next auth change or launch.
-      await _remember(token);
+      // Offline, a 429: it waits for the next auth change or launch, while
+      // this session lasts.
+      await _remember(token, heldWithSession: true);
     } finally {
       _saving.remove(token);
     }
@@ -91,7 +118,7 @@ class PendingShareSaveNotifier extends Notifier<String?> {
 
   Future<void> _forget(PendingShareStore store, String token) async {
     try {
-      if (await store.read() == token) await store.clear();
+      if ((await store.read())?.token == token) await store.clear();
     } catch (_) {
       // A stale token only means one more idempotent save later.
     }

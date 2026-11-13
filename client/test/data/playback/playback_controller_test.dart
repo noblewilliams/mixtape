@@ -184,6 +184,31 @@ void main() {
       await bridge.events.close();
     });
 
+    test('carries the share\'s tape colour through a retry; release forgets '
+        'it', () async {
+      final api = FakeApi(), bridge = FakeBridge()..failStart = true;
+      final player = PlaybackController(api, bridge);
+      await player.start(
+        'shared:tok',
+        0,
+        'Shared',
+        [song],
+        record: false,
+        caseColor: '#bc5734',
+      );
+      expect(player.caseColor, '#bc5734');
+      bridge.failStart = false;
+      await player.command('resume');
+      expect(player.caseColor, '#bc5734');
+      await player.start('mix', 1, 'Mix', [song]);
+      expect(player.caseColor, isNull);
+      await player.start('shared:tok', 0, 'S', [song], caseColor: '#bc5734');
+      player.release();
+      expect(player.caseColor, isNull);
+      player.dispose();
+      await bridge.events.close();
+    });
+
     test('a retried start stays unrecorded', () async {
       final api = FakeApi(), bridge = FakeBridge()..failStart = true;
       final player = PlaybackController(api, bridge);

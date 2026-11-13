@@ -316,6 +316,7 @@ void main() {
         ['a1', 'a3'],
       ]);
       expect(h.player.sessionId, 'shared:$_token');
+      expect(h.player.caseColor, '#bc5734');
       expect(h.player.recording, isFalse);
       expect(h.api.events, isEmpty);
       await tester.pumpWidget(const SizedBox());
@@ -428,7 +429,7 @@ void main() {
       final h = _Harness(auth: AuthStatus.noSession);
       await h.pump(tester);
       expect(h.api.saved, isEmpty);
-      expect(await h.pending.read(), _token);
+      expect((await h.pending.read())?.token, _token);
     });
 
     testWidgets('the waiting token saves once a session appears', (

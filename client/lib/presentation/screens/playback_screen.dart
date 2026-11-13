@@ -522,7 +522,11 @@ class _NowPlaying extends StatelessWidget {
       children: [
         CassetteTile(
           width: PlaybackScreen.mixLineCassetteWidth,
-          caseColor: watchMixTapeColour(ref, player.sessionId!),
+          caseColor: watchMixTapeColour(
+            ref,
+            player.sessionId!,
+            saved: player.caseColor,
+          ),
         ),
         const SizedBox(width: 8),
         Expanded(

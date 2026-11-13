@@ -104,6 +104,7 @@ Client:
 - Auth-lifecycle cluster: sign-out token revocation, stale keychain on reinstall, in-memory token cache.
 - Queue-intent FIFO could be hoisted into a provider so pop-mid-drain doesn't drop trailing intents (rare).
 - Listen later rows and the arrangement screen still swipe-to-remove with `Dismissible` (fires on release); move them to `SwipeActions` if the founder wants the Mixes reveal-and-wait swipe everywhere (2026-11-09).
+- Shared mixes (iOS, accepted for v1, 2026-11-13): the first-run hand-off closes an open `SharedMixScreen` (the share is already saved, so nothing is lost), and a mix started from a shared link before first run stops when the first session appears (`playbackProvider` resets on auth).
 
 Server / DJ:
 - Memory-note paraphrase bloat: dupes are exact-match only ("No jazz" ≠ "no jazz"); watch the 50-cap, revisit similarity dedupe if it bites.

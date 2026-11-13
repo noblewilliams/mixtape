@@ -132,6 +132,13 @@ class _SharedMixScreenState extends ConsumerState<SharedMixScreen>
   @override
   bool get mixRecordsEvidence => false;
 
+  /// The header's colour, the default included, so Now Playing matches it.
+  @override
+  String? get mixCaseColor => tapeHex(_caseColor(_mix?.caseColor));
+
+  static Color _caseColor(String? hex) =>
+      tapeColor(hex) ?? CassetteTile.caseColors.first;
+
   @override
   void showMixSnack(String message, {FeedbackKind kind = FeedbackKind.info}) =>
       ScaffoldMessenger.of(
@@ -307,8 +314,7 @@ class _SharedMixScreenState extends ConsumerState<SharedMixScreen>
             child: KeyedSubtree(
               key: _headerKey,
               child: TapeHeader(
-                caseColor:
-                    tapeColor(mix.caseColor) ?? CassetteTile.caseColors.first,
+                caseColor: _caseColor(mix.caseColor),
                 title: mix.title,
                 byline: sharedMixByline(mix.sharerName),
                 meta: sharedMixMetaLine(_queue),

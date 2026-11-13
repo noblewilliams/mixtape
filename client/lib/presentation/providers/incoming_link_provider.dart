@@ -126,16 +126,19 @@ final pendingSharedMixProvider =
       PendingSharedMixNotifier.new,
     );
 
-/// Opens the shared mix [token]. Called with a context under the root
-/// navigator; push with `Navigator.of(context, rootNavigator: true)`.
-typedef SharedMixPresenter = void Function(BuildContext context, String token);
+/// Opens the shared mix [token] on [navigator], which its host chose
+/// ([SharedMixLinkListener.navigator]).
+typedef SharedMixPresenter =
+    void Function(NavigatorState navigator, String token);
 
-/// Pushes the read-only [SharedMixScreen] on the root navigator, over the
-/// shell or the first-run flow (spec 2026-11-13 shared-mixes). Tests override
-/// it to observe the call.
+/// Pushes the read-only [SharedMixScreen] (spec 2026-11-13 shared-mixes): in
+/// the shell on the selected tab's navigator, so the dock steps aside as for
+/// any route inside a tab and the screen's own pushes (the owner's
+/// conversation, Now Playing) stay in that tab; in first run on the root
+/// navigator. Tests override it to observe the call.
 final sharedMixPresenterProvider = Provider<SharedMixPresenter>(
-  (ref) => (context, token) {
-    Navigator.of(context, rootNavigator: true).push(
+  (ref) => (navigator, token) {
+    navigator.push(
       MaterialPageRoute<void>(builder: (_) => SharedMixScreen(token: token)),
     );
   },

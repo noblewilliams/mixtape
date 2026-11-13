@@ -77,6 +77,12 @@ class PlaybackController extends ChangeNotifier {
   String? sessionId, owner;
   String title = '', playbackId = '', error = '';
 
+  /// The tape colour (hex) the starter knew the mix by, for a mix the
+  /// listener's own list does not carry: a shared mix's, which would
+  /// otherwise fall back to a colour hashed from its id. Null for the
+  /// listener's own mixes, whose colour comes from their list.
+  String? caseColor;
+
   /// The native `PlatformException.code` of the last failed start, intact
   /// (`authorization_denied` when the access prompt was refused); null after
   /// a start that worked.
@@ -272,12 +278,15 @@ class PlaybackController extends ChangeNotifier {
   ///
   /// [record] false plays without collecting listening evidence (a shared
   /// mix); the mix it replaces still records the listen it was on.
+  /// [caseColor] is the mix's tape colour when only the starter knows it
+  /// (a shared mix); see [PlaybackController.caseColor].
   Future<PlaybackStart> start(
     String id,
     int mixVersion,
     String mixTitle,
     List<QueueTrack> queue, {
     bool record = true,
+    String? caseColor,
   }) async {
     if (busy) return PlaybackStart.superseded;
     busy = true;
@@ -291,6 +300,7 @@ class PlaybackController extends ChangeNotifier {
     if (_disposed || generation != _generation) return PlaybackStart.superseded;
     meter.finish('listen');
     _recording = record;
+    this.caseColor = caseColor;
     sessionId = id;
     version = mixVersion;
     title = mixTitle;
@@ -353,6 +363,7 @@ class PlaybackController extends ChangeNotifier {
     ++_generation;
     meter.reset();
     sessionId = null;
+    caseColor = null;
     tracks = [];
     title = '';
     error = '';
@@ -377,6 +388,7 @@ class PlaybackController extends ChangeNotifier {
                     .toList()
               : tracks,
           record: _recording,
+          caseColor: caseColor,
         );
       }
       return;
@@ -419,7 +431,14 @@ class PlaybackController extends ChangeNotifier {
         return;
       }
       busy = false;
-      await start(sessionId!, version, title, tracks, record: _recording);
+      await start(
+        sessionId!,
+        version,
+        title,
+        tracks,
+        record: _recording,
+        caseColor: caseColor,
+      );
     } catch (_) {
       if (generation == _generation) {
         error = 'Apple Music access was not granted. Your mix is unchanged.';

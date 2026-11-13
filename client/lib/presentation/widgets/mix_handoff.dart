@@ -229,6 +229,10 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
   /// and has no session of the listener's to bind them to.
   bool get mixRecordsEvidence => true;
 
+  /// The mix's tape colour (hex) for Now Playing, when the listener's own
+  /// list does not carry it: a shared mix's. Null for the listener's mixes.
+  String? get mixCaseColor => null;
+
   bool _sendingToMusic = false;
   bool _savingPlaylist = false;
   bool _sharingMix = false;
@@ -321,6 +325,7 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
       title,
       queue,
       record: mixRecordsEvidence,
+      caseColor: mixCaseColor,
     );
     switch (outcome) {
       case PlaybackStart.superseded:

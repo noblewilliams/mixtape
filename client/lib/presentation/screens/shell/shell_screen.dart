@@ -457,9 +457,11 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
     // steps aside for it as for any other sheet. The one-time "Where do you
     // listen?" goes on the root navigator, over the side rail, and the dock
     // steps aside through [_setListenSheetUp]. The shell only exists after
-    // first run, so neither interrupts it. A shared mix's link opens over
-    // all of it, on the root navigator.
+    // first run, so neither interrupts it. A shared mix's link opens on the
+    // selected tab's navigator, so the dock steps aside as for a
+    // conversation, and Now Playing from it stays in that tab too.
     return SharedMixLinkListener(
+      navigator: () => _navigatorOf(_currentIndex),
       child: ListenOnPrompt(
         onShowingChanged: _setListenSheetUp,
         child: AiConsentPrompt(
