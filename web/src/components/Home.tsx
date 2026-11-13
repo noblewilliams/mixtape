@@ -1,9 +1,11 @@
 import { EmptyState, MixSkeletons } from './UiStates'
-import { SessionRow } from './SessionControls'
+import { SessionRow, SharedRow } from './SessionControls'
 import { TapeRack } from './TapeRack'
 import { Tabs } from './Tabs'
 import { ViewSwitch } from './ViewSwitch'
-import type { CollectionView, DjSession, ListenLaterEntry } from '../domain'
+import type { CollectionView, DjSession, ListenLaterEntry, SharedMixRow } from '../domain'
+import { durationLabel } from '../api/mappers'
+import { mergeSharedRows, type MixesItem } from '../lib/mixes-list'
 import type { ReactNode } from 'react'
 import { NewTapeCompactButton } from './TapeActions'
 import { ListenLaterList, type ListenLaterActions } from './ListenLaterList'
@@ -37,6 +39,10 @@ type HomeProps = {
   onArchive?: (id: string) => Promise<void>
   onRestore?: (id: string) => Promise<void>
   sessions: DjSession[]
+  /** Shares this listener saved (GET /me/shared-mixes): rows among the active mixes, by time. */
+  sharedRows?: SharedMixRow[]
+  onOpenShared?: (token: string) => void
+  onRemoveShared?: (token: string) => Promise<void>
   collectionView: CollectionView
   onChangeCollectionView: (view: CollectionView) => void
   onOpenSession: (id: string) => void
@@ -55,7 +61,7 @@ function shelfCountLine(entries: ListenLaterEntry[]) {
 }
 
 export function Home({
-  loading = false, error, onRetry, onColor, player, suggestions, sessions, tab: requestedTab = 'active', onTab, albumPicks = false, shelf, onRename, onArchive, onRestore,
+  loading = false, error, onRetry, onColor, player, suggestions, sessions, sharedRows = [], onOpenShared, onRemoveShared, tab: requestedTab = 'active', onTab, albumPicks = false, shelf, onRename, onArchive, onRestore,
   collectionView,
   onChangeCollectionView,
   onOpenSession,
@@ -69,6 +75,19 @@ export function Home({
   const onShelf = tab === 'listen-later' && shelf
   const tabs: { id: MixesTab; label: string }[] = [{ id: 'active', label: 'Active' }, { id: 'archived', label: 'Archived' }]
   if (albumPicks) tabs.push({ id: 'listen-later', label: 'Listen later' })
+  // Shared rows belong with the active mixes only: they are never archived.
+  const items: MixesItem[] = tab === 'active' ? mergeSharedRows(sessions, sharedRows) : sessions.map((session) => ({ kind: 'session', session }))
+  const count = items.length
+  const item = (entry: MixesItem, layout: 'row' | 'tile') => entry.kind === 'session' ? row(entry.session, layout) : (
+    <SharedRow key={`shared:${entry.row.token}`} layout={layout} row={entry.row} onOpen={() => onOpenShared?.(entry.row.token)}
+      onRemove={() => onRemoveShared?.(entry.row.token) ?? Promise.resolve()} />
+  )
+  // The closet draws a shared mix as a tape like any other.
+  const closetTapes: DjSession[] = items.map((entry) => entry.kind === 'session' ? entry.session : {
+    id: `shared:${entry.row.token}`, title: entry.row.title, caseColor: entry.row.caseColor, durationLabel: durationLabel(entry.row.durationMs),
+    status: 'active', queueVersion: 0, notPersonal: false, updatedAt: entry.row.savedAt, ageLabel: '', trackCount: entry.row.trackCount, kind: 'mix',
+  })
+  const openTape = (id: string) => id.startsWith('shared:') ? onOpenShared?.(id.slice('shared:'.length)) : onOpenSession(id)
   const row = (session: DjSession, layout: 'row' | 'tile') => (
     <SessionRow showTape layout={layout} key={session.id} session={session} onOpen={() => onOpenSession(session.id)}
       onColor={onColor ? (color) => onColor(session.id, color) : undefined}
@@ -84,7 +103,7 @@ export function Home({
           <h1>Mixes</h1>
           <p>{onShelf
             ? onShelf.entries === null && !onShelf.error ? 'Loading your shelf…' : shelfCountLine(onShelf.entries ?? [])
-            : loading && sessions.length === 0 ? 'Loading mixes…' : countLine(sessions.length, archived)}</p>
+            : loading && count === 0 ? 'Loading mixes…' : countLine(count, archived)}</p>
         </div>
         <NewTapeCompactButton onClick={onNewTape} />
       </header>
@@ -97,11 +116,11 @@ export function Home({
       </div>
 
       {onShelf ? <div className="mixes-content"><Shelf {...onShelf} /></div> : <div className="mixes-content">
-        {error && sessions.length > 0 && <div className="mix-refresh" role="alert"><span>Couldn’t refresh your mixes. Your mixes are still here.</span><button className="minimal-retry" onClick={onRetry}>Retry</button></div>}
-        {loading && sessions.length === 0 ? <MixSkeletons view={view} /> : sessions.length === 0 ? <EmptyState kind={error ? 'error' : 'tape'} title={error ? 'Couldn’t load your mixes' : archived ? 'No archived mixes' : 'Your next moment starts here'} description={error ? 'Try again in a moment.' : archived ? 'Mixes you archive will appear here.' : 'Tell the DJ what you’re in the mood for.'} action={error ? { label: 'Try again', onClick: onRetry! } : archived ? undefined : { label: 'Make a mix', onClick: onNewTape }} />
-          : view === 'list' ? <section className="tape-grid" aria-label="Tape list">{sessions.map((session) => row(session, 'row'))}</section>
-          : view === 'grid' ? <section className="mix-grid" aria-label="Mix grid">{sessions.map((session) => row(session, 'tile'))}</section>
-          : <TapeRack sessions={sessions} onOpenSession={onOpenSession} />}
+        {error && count > 0 && <div className="mix-refresh" role="alert"><span>Couldn’t refresh your mixes. Your mixes are still here.</span><button className="minimal-retry" onClick={onRetry}>Retry</button></div>}
+        {loading && count === 0 ? <MixSkeletons view={view} /> : count === 0 ? <EmptyState kind={error ? 'error' : 'tape'} title={error ? 'Couldn’t load your mixes' : archived ? 'No archived mixes' : 'Your next moment starts here'} description={error ? 'Try again in a moment.' : archived ? 'Mixes you archive will appear here.' : 'Tell the DJ what you’re in the mood for.'} action={error ? { label: 'Try again', onClick: onRetry! } : archived ? undefined : { label: 'Make a mix', onClick: onNewTape }} />
+          : view === 'list' ? <section className="tape-grid" aria-label="Tape list">{items.map((entry) => item(entry, 'row'))}</section>
+          : view === 'grid' ? <section className="mix-grid" aria-label="Mix grid">{items.map((entry) => item(entry, 'tile'))}</section>
+          : <TapeRack sessions={closetTapes} onOpenSession={openTape} />}
       </div>}
     </main>
   )

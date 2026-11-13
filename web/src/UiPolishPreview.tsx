@@ -43,7 +43,7 @@ import type { TurnProgress } from './api/client'
 import { SharedMixPage } from './components/SharedMixPage'
 import { SharedPlayModal } from './components/SharedPlayModal'
 import { SharedMixGoneError } from './api/client'
-import type { SharedMix } from './domain'
+import type { SharedMix, SharedMixRow } from './domain'
 
 const previewPlaylist: ApiPlaylistSummary = { id: 'preview', name: '“just a girl”', source: 'spotify_export', kind: 'user', origin: 'unknown', curatorName: null, artworkUrlTemplate: null, artworkBgColor: null, artworkWidth: null, artworkHeight: null, entryCount: 14, knownDurationMs: null, durationComplete: false, lastModifiedAt: null, syncedAt: '2026-09-18T12:00:00Z', inLibrary: true, capability: 'copy_only' }
 const previewEntries = ['Present Tense', 'If You Say the Word', 'The Girl Is Mine', 'Let My Baby Stay', 'Do What You Gotta Do', 'Home recording'].map((title, position) => ({ id: String(position), position, trackId: null, appleCatalogId: null, spotifyId: position === 5 ? null : '4uLU6hMCjMI75M1A2tKUQC', title, artist: 'Synthetic artist', album: null, durationMs: null, artworkUrlTemplate: null, artworkWidth: null, artworkHeight: null, artworkBgColor: null, resolved: false }))
@@ -267,6 +267,29 @@ function SharedMixPreview({ state }: { state: SharedPreviewState }) {
   </>
 }
 
+// Shared mixes inside the app (plan task W3; board WM1): a saved share among
+// the mixes, opened read-only with Back and Remove, and gone since.
+type InAppSharedState = 'mixes-shared' | 'mixes-shared-open' | 'mixes-shared-gone'
+const previewSharedRow: SharedMixRow = {
+  token: previewSharedMix.token, title: previewSharedMix.title, caseColor: previewSharedMix.caseColor, sharerName: 'Ada',
+  savedAt: new Date(Date.now() - 2 * 3_600_000).toISOString(), trackCount: previewSharedMix.tracks.length, durationMs: 2_400_000,
+}
+function InAppSharedPreview({ state, sessions, collectionView, onChangeCollectionView }: { state: InAppSharedState; sessions: DjSession[]; collectionView: CollectionView; onChangeCollectionView: (view: CollectionView) => void }) {
+  const [open, setOpen] = useState(state !== 'mixes-shared')
+  const [rows, setRows] = useState([previewSharedRow])
+  const api = useMemo(() => ({
+    getSharedMix: () => state === 'mixes-shared-gone' ? Promise.reject(new SharedMixGoneError(410, { error: 'revoked' })) : Promise.resolve(previewSharedMix),
+    saveSharedMix: async () => {},
+  }), [state])
+  const remove = async () => { setRows([]); setOpen(false) }
+  if (open) return <section className="home-panel shared-in-app" aria-label="Shared mix">
+    <SharedMixPage token={previewSharedMix.token} api={api} session={{ isPending: false, userId: 'ui-preview' }} embedded={{ onBack: () => setOpen(false), onRemove: remove }} />
+  </section>
+  // The shared row sits second: newer than every mix but the first.
+  const mixes = sessions.map((session, index) => ({ ...session, updatedAt: new Date(Date.now() - (index === 0 ? 1 : 24 + index * 30) * 3_600_000).toISOString() }))
+  return <Home sessions={mixes} sharedRows={rows} onOpenShared={() => setOpen(true)} onRemoveShared={async () => setRows([])} collectionView={collectionView} onChangeCollectionView={onChangeCollectionView} onOpenSession={() => {}} onNewTape={() => {}} onRename={async () => {}} onArchive={async () => {}} />
+}
+
 export default function UiPolishPreview() {
   const [state, setState] = useState('populated')
   const [sessions, setSessions] = useState(demoSessions.slice(0, 4).map((session, index) => ({ ...session, caseColor: tapeColors[index * 9][1] as string })))
@@ -276,7 +299,7 @@ export default function UiPolishPreview() {
   const openTab = (tab: MixesTab) => setState(tab === 'archived' ? 'archived' : tab === 'listen-later' ? 'listen-later' : 'populated')
   async function color(id: string, caseColor: string) { setSessions(current => current.map(s => s.id === id ? { ...s, caseColor } : s)) }
   const close = () => setState('populated')
-  const options = ['home', 'home-loading', 'home-empty', 'home-error', 'populated', 'loading', 'empty', 'archived', 'load-error', 'refresh-error', 'settings', 'success', 'error', 'info', 'playlist', 'preference', 'memory', 'sources', 'library', 'library-loading', 'conversation', 'conversation-working', 'making-working', 'conversation-blank', 'conversation-spotify', 'conversation-ask', 'catalog', 'catalog-spotify', 'catalog-unknown', 'catalog-syncing', 'catalog-sync-failed', 'catalog-spotify-waiting', 'catalog-music-in', 'catalog-history', 'album', 'album-refined', 'listen-later', 'listen-later-empty', 'first-run', 'keep-sheet', 'sign-in-keep', 'sign-in-cap', 'merge-notice', 'delete-account', 'settings-named', 'settings-unnamed', 'settings-editing', 'settings-failed', 'name-page', 'name-page-typing', 'name-page-saving', 'name-page-failed', 'first-run-consent', 'ai-consent', 'shared', 'shared-loading', 'shared-revoked', 'shared-play-modal', 'shared-play-connect']
+  const options = ['home', 'home-loading', 'home-empty', 'home-error', 'populated', 'loading', 'empty', 'archived', 'load-error', 'refresh-error', 'settings', 'success', 'error', 'info', 'playlist', 'preference', 'memory', 'sources', 'library', 'library-loading', 'conversation', 'conversation-working', 'making-working', 'conversation-blank', 'conversation-spotify', 'conversation-ask', 'catalog', 'catalog-spotify', 'catalog-unknown', 'catalog-syncing', 'catalog-sync-failed', 'catalog-spotify-waiting', 'catalog-music-in', 'catalog-history', 'album', 'album-refined', 'listen-later', 'listen-later-empty', 'first-run', 'keep-sheet', 'sign-in-keep', 'sign-in-cap', 'merge-notice', 'delete-account', 'settings-named', 'settings-unnamed', 'settings-editing', 'settings-failed', 'name-page', 'name-page-typing', 'name-page-saving', 'name-page-failed', 'first-run-consent', 'ai-consent', 'shared', 'shared-loading', 'shared-revoked', 'shared-play-modal', 'shared-play-connect', 'mixes-shared', 'mixes-shared-open', 'mixes-shared-gone', 'conversation-shared', 'share-name-page', 'link-copied']
   return <>
     <div style={{ position: 'fixed', right: 12, top: 8, zIndex: 200, display: 'flex', gap: 8, alignItems: 'center', background: '#f7f4f8', color: '#1c1a1e', padding: 8, borderRadius: 8, fontSize: 12 }}>
       <label htmlFor="ui-preview-state">UI preview · synthetic data</label><select id="ui-preview-state" value={state} onChange={e => setState(e.target.value)}>{options.map(option => <option key={option}>{option}</option>)}</select>
@@ -285,11 +308,12 @@ export default function UiPolishPreview() {
       <Sidebar activeView={state.startsWith('home') ? 'home' : state === 'sources' ? 'music' : state.startsWith('settings-') ? 'settings' : 'mixes'} onOpenHome={() => setState('home')} onOpenMusic={() => setState('sources')} onOpenMixes={close} onOpenSettings={() => setState('preference')} />
       {state === 'conversation-working' ? <WorkingConversationPreview session={sessions[0]} onBack={close} />
       : state.startsWith('conversation') ? <>
-        <Conversation session={sessions[0]} messages={state === 'conversation-blank' ? [] : demoMessages} thinking={false} onSend={() => {}} onOpenQueue={() => {}} onBack={close} attachment={<PlaylistAttachment api={previewLibraryApis.library} value={null} onSelect={async () => {}} onSessionExpired={() => {}} />} />
+        <Conversation session={sessions[0]} messages={state === 'conversation-blank' ? [] : demoMessages} thinking={false} onSend={() => {}} onShare={state === 'conversation-shared' ? () => setState('link-copied') : undefined} onStopSharing={state === 'conversation-shared' ? async () => {} : undefined} onOpenQueue={() => {}} onBack={close} attachment={<PlaylistAttachment api={previewLibraryApis.library} value={null} onSelect={async () => {}} onSessionExpired={() => {}} />} />
         <QueuePanel key={state} session={sessions[0]} tracks={state === 'conversation-blank' ? [] : state === 'conversation-spotify' ? previewQueue.map((track) => ({ ...track, spotifyId: null })) : previewQueue} playing={false} playbackBusy={false} musicConnection={state === 'conversation-spotify' || state === 'conversation-ask' ? 'disconnected' : 'connected'} spotifyOnly={state === 'conversation-spotify'} askService={state === 'conversation-ask'} open={false} onConnect={() => {}} onTogglePlay={() => {}} onSave={() => {}} onClose={() => {}} onPreviewTracks={() => {}} onCommitQueueOp={async () => {}} />
       </>
       : state.startsWith('catalog') ? <CatalogPreview key={state} state={state as CatalogPreviewState} session={sessions[0]} onBack={close} />
       : state.startsWith('settings-') ? <SettingsPreview key={state} state={state as SettingsPreviewState} onMemories={() => setState('memory')} />
+      : state.startsWith('mixes-shared') ? <InAppSharedPreview key={state} state={state as InAppSharedState} sessions={sessions} collectionView={collectionView} onChangeCollectionView={setCollectionView} />
       : state === 'album' || state === 'album-refined' ? <AlbumPreview key={state} state={state} session={sessions[0]} />
       : state === 'listen-later' || state === 'listen-later-empty' ? <ListenLaterPreview key={state} empty={state === 'listen-later-empty'} sessions={sessions} onTab={openTab} onFindAlbum={() => { setModeSeed({ kind: 'album', id: Date.now() }); setState('home') }} />
       : state.startsWith('home') ? <HomeDashboard sessions={state === 'home' ? sessions : []} loading={state === 'home-loading'} error={state === 'home-error' ? 'Unavailable' : ''} busy={false} player={null} suggestions={state === 'home' ? <section className="routine-suggestions"><h2>For this moment</h2><div className="routine-card"><img className="routine-tape" src={publicAsset('tape.svg')} alt=""/><div className="routine-copy"><h3>A softer evening</h3><p>You often slow things down around this time.</p></div><div className="routine-actions"><button className="routine-primary">Make this mix</button><button>Not today</button></div></div></section> : null} onRetry={() => setState('home')} onOpenSession={close} onOpenMixes={close} albumPicks anonymous={false} onSubmit={async()=>{setState('populated')}} transcribe={async()=>({text:'A softer evening'})} modeSeed={modeSeed} onRename={async()=>{}} onArchive={async()=>{}} onColor={color}/> : state === 'memory' ? <main className="wc-view"><h1>What the DJ knows</h1><EmptyState kind="memory" title="No saved preferences yet" description="Tell the DJ what you would like it to remember." /></main>
@@ -301,6 +325,8 @@ export default function UiPolishPreview() {
     {['success','error','info'].includes(state) && <Toast tone={state as 'success'|'error'|'info'} message={state === 'success' ? 'Playlist created' : state === 'error' ? 'Couldn’t save. Try again.' : 'Mix archived'} action={state === 'info' ? { label: 'Undo', onClick:close }:undefined} />}
     {state === 'keep-sheet' && <KeepSheet onKeep={() => setState('sign-in-keep')} onNotNow={close} />}
     {(state === 'sign-in-keep' || state === 'sign-in-cap') && <div className="first-run fr-root fr-root--over"><div className="fr-sign-in"><BackButton onBack={close} className="fr-back--over" /><SignInPage variant={state === 'sign-in-cap' ? 'cap' : 'keep'} auth={{ signIn: async () => ({}) }} preferences={{ lastUsed: () => 'apple', begin: () => {}, promotePending: () => null, clearPending: () => {}, forget: () => {} }} lastUsed="apple" error="" onSkip={state === 'sign-in-keep' ? close : undefined} /></div></div>}
+    {state === 'link-copied' && <Toast tone="success" message="Link copied" />}
+    {state === 'share-name-page' && <div className="first-run fr-root fr-root--over"><BackButton onBack={close} className="fr-back--over" /><div className="fr-stage fr-stage--fade"><NamePage saveName={async () => {}} onSaved={() => setState('link-copied')} line="Whoever opens your link will see your first name." /></div></div>}
     {state === 'merge-notice' && <Toast tone="success" message="Your mixes are in. This account already had a library, so we kept that one." />}
     {state.startsWith('name-page') && <NamePagePreview key={state} state={state as NamePreviewState} onDone={close} />}
     {state === 'making-working' && <WorkingMakingPreview />}

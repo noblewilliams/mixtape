@@ -133,6 +133,8 @@ export type SessionDetailResponse = {
   messages: ApiMessage[]
   /** Mix sessions only. */
   queue?: ApiQueueTrack[]
+  /** An active share exists (Stop sharing shows); absent on older servers, read as false. */
+  shared?: boolean
 } & Partial<AlbumPickResponse>
 
 /**

@@ -307,3 +307,35 @@
 /* A first Apple Music play: Connect Apple Music inside the dialog. */
 .shared-play-connect { margin-top: 12px; }
 .shared-play-connect .connect-music-button { width: 100%; }
+
+/* Inside the app shell (a shared row opened from Mixes; board WM1): the
+   page is the content column, not the viewport, and takes the shell's plane. */
+.shared-in-app { display: block; overflow: hidden; }
+.shared-page--app {
+  position: relative;
+  inset: auto;
+  height: 100%;
+  background: transparent;
+}
+:where(:root[data-theme="dark"]) .shared-page--app { background: transparent; }
+.shared-top--app {
+  justify-content: space-between;
+  padding: 0 20px;
+  height: 56px;
+}
+.shared-page--app .shared-main { padding-top: 8px; }
+.shared-back {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin-left: -8px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  color: var(--graphite);
+  background: transparent;
+  cursor: pointer;
+}
+.shared-back svg { width: 20px; height: 20px; }
+.shared-back:hover { background: color-mix(in srgb, var(--graphite) 7%, transparent); }

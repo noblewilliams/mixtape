@@ -277,10 +277,11 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}, options: Fake
           session: { ...created.session },
           messages: created.messages.map((message) => ({ ...message })),
           queue: currentQueue(sessionId),
+          shared: sessionShares.has(sessionId),
         }
       }
       const session = summaries.find((item) => item.id === sessionId) ?? summaries[0]
-      return { session: { ...session }, messages: messagesFor(sessionId), queue: currentQueue(sessionId) }
+      return { session: { ...session }, messages: messagesFor(sessionId), queue: currentQueue(sessionId), shared: sessionShares.has(sessionId) }
     },
     createSession: async (prompt, _seed, _arc, kind, turnOptions): Promise<CreateSessionResponse> => {
       if (kind !== 'album') await reportProgress(options.turnProgress, turnOptions?.onProgress, { method: 'createSession' })

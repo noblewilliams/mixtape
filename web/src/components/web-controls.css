@@ -638,3 +638,5 @@
 .wc-session-open { padding: 14px 0; cursor: default; }
 .wc-session-renaming { cursor: default; }
 .wc-session-renaming .wc-inline-name .wc-name { font: inherit; padding: 0; min-height: 0; }
+/* A shared row's "From Ada" leads the count line (board WM1). */
+.wc-shared-from { font-weight: 600; color: var(--plum); }

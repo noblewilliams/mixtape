@@ -12,7 +12,7 @@ import { openMixOnNextLoad } from '../lib/workspace-restore'
 import type { MusicKitClient } from '../musickit/client'
 import type { PlaybackController } from '../playback/controller'
 import { Cassette } from './Cassette'
-import { PlayIcon } from './Icons'
+import { MoreIcon, PlayIcon } from './Icons'
 import { Toast } from './Overlays'
 import { SharedPlayModal, type SharedPlayStep } from './SharedPlayModal'
 import { useSpotifyHandoff } from './SpotifyHandoff'
@@ -61,6 +61,18 @@ type SharedMixPageProps = {
   appUrl?: string
   /** The existing install/download destination. */
   downloadUrl?: string
+  /**
+   * Inside the app shell (a shared row opened from Mixes): Back and a menu
+   * holding only Remove replace the wordmark, and Get the app and Make your
+   * own mix go. The share is already saved, so the page never saves it.
+   */
+  embedded?: SharedMixEmbedding
+}
+
+export type SharedMixEmbedding = {
+  onBack: () => void
+  /** Deletes this listener's save (never the share). */
+  onRemove: () => Promise<void>
 }
 
 type PageState =
@@ -100,7 +112,48 @@ function queueTracks(mix: SharedMix): QueueTrack[] {
   }))
 }
 
-export function SharedMixPage({ token, api, session, player, onOwner, appUrl = import.meta.env.BASE_URL, downloadUrl = '/' }: SharedMixPageProps) {
+const REMOVE_FAILED = 'Couldn’t remove this mix. Try again.'
+
+/** `withMenu` false on the gone screen, whose own Remove button the menu would only repeat. */
+function EmbeddedHeader({ embedding, onFailed, withMenu }: { embedding: SharedMixEmbedding; onFailed: () => void; withMenu: boolean }) {
+  const [menu, setMenu] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const anchor = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!menu) return
+    const outside = (event: PointerEvent) => { if (!anchor.current?.contains(event.target as Node)) setMenu(false) }
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setMenu(false) }
+    document.addEventListener('pointerdown', outside)
+    document.addEventListener('keydown', escape)
+    return () => {
+      document.removeEventListener('pointerdown', outside)
+      document.removeEventListener('keydown', escape)
+    }
+  }, [menu])
+  return (
+    <header className="shared-top shared-top--app">
+      <button className="shared-back" type="button" onClick={embedding.onBack} aria-label="Back to mixes">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+      </button>
+      {withMenu && <div className="wc-anchor" ref={anchor}>
+        <button className="bare-icon-button" type="button" aria-label="Shared mix options" aria-expanded={menu} disabled={busy} onClick={() => setMenu((value) => !value)}>
+          <MoreIcon />
+        </button>
+        {menu && (
+          <div className="wc-popover wc-session-menu" role="group" aria-label="Shared mix options">
+            <button className="wc-text wc-danger" onClick={() => {
+              setMenu(false)
+              setBusy(true)
+              embedding.onRemove().catch(() => { setBusy(false); onFailed() })
+            }}>Remove</button>
+          </div>
+        )}
+      </div>}
+    </header>
+  )
+}
+
+export function SharedMixPage({ token, api, session, player, onOwner, appUrl = import.meta.env.BASE_URL, downloadUrl = '/', embedded }: SharedMixPageProps) {
   const [state, setState] = useState<PageState>({ kind: 'loading' })
   const [attempt, setAttempt] = useState(0)
   // The dialog: null is closed.
@@ -130,7 +183,7 @@ export function SharedMixPage({ token, api, session, player, onOwner, appUrl = i
     // and a failed re-read must never replace a mix mid-playback.
     if (loadedKey.current === `${token}|${attempt}`) {
       // A session arrived after a read without one: the share joins its Mixes.
-      if (userId && state.kind === 'loaded' && !state.mix.isOwner && saved.current !== token) {
+      if (userId && !embedded && state.kind === 'loaded' && !state.mix.isOwner && saved.current !== token) {
         saved.current = token
         api.saveSharedMix(token).catch(() => undefined)
       }
@@ -153,7 +206,7 @@ export function SharedMixPage({ token, api, session, player, onOwner, appUrl = i
         }
         loadedKey.current = `${token}|${attempt}`
         setState({ kind: 'loaded', mix })
-        if (userId && saved.current !== token) {
+        if (userId && !embedded && saved.current !== token) {
           saved.current = token
           // Saving is a convenience for the listener's Mixes; the page works without it.
           api.saveSharedMix(token).catch(() => undefined)
@@ -165,7 +218,7 @@ export function SharedMixPage({ token, api, session, player, onOwner, appUrl = i
     )
     return () => { live = false }
     // `state` is read only once loaded, to save; it never starts a read.
-  }, [api, token, isPending, userId, attempt, onOwner, appUrl])
+  }, [api, token, isPending, userId, attempt, onOwner, appUrl, embedded])
 
   useEffect(() => {
     if (state.kind !== 'loaded') return
@@ -206,7 +259,7 @@ export function SharedMixPage({ token, api, session, player, onOwner, appUrl = i
   function saveOnce(mix: SharedMix) {
     // A session now exists, so the share joins its Mixes, once (the read
     // effect saves too when the session reaches it; the ref keeps it to one).
-    if (!mix.isOwner && saved.current !== token) {
+    if (!embedded && !mix.isOwner && saved.current !== token) {
       saved.current = token
       api.saveSharedMix(token).catch(() => undefined)
     }
@@ -227,7 +280,7 @@ export function SharedMixPage({ token, api, session, player, onOwner, appUrl = i
           announce(CONNECT_FAILED, 'error')
           return
         }
-        const started = await player.playback.start(`shared:${mix.token}`, 0, mix.title, queueTracks(mix))
+        const started = await player.playback.start(`shared:${mix.token}`, 0, mix.title, queueTracks(mix), { record: false })
         if (!started) announce(PLAY_FAILED, 'error')
       } finally {
         setStarting(false)
@@ -309,8 +362,10 @@ export function SharedMixPage({ token, api, session, player, onOwner, appUrl = i
   )
 
   return (
-    <div className="shared-page">
-      <header className="shared-top"><span className="shared-wordmark">mixtape</span></header>
+    <div className={`shared-page${embedded ? ' shared-page--app' : ''}`}>
+      {embedded
+        ? <EmbeddedHeader embedding={embedded} withMenu={state.kind !== 'gone'} onFailed={() => announce(REMOVE_FAILED, 'error')} />
+        : <header className="shared-top"><span className="shared-wordmark">mixtape</span></header>}
       {state.kind === 'loading' && (
         <main className="shared-main" aria-busy="true">
           {/* The one announcement; the cassette and skeletons are decoration. */}
@@ -345,8 +400,10 @@ export function SharedMixPage({ token, api, session, player, onOwner, appUrl = i
                 <span>Play</span>
                 <span className="transport-meter" aria-hidden="true" />
               </button>
-              {getTheApp}
-              <a className="shared-link" href={appUrl}>Make your own mix</a>
+              {embedded ? null : <>
+                {getTheApp}
+                <a className="shared-link" href={appUrl}>Make your own mix</a>
+              </>}
             </div>
           </section>
           <ol className="shared-songs" aria-label="Songs">
@@ -383,7 +440,9 @@ export function SharedMixPage({ token, api, session, player, onOwner, appUrl = i
             <h1>{state.kind === 'gone' ? 'This mix isn’t shared anymore.' : 'Couldn’t open this mix.'}</h1>
           </div>
           <div className="shared-gone-actions">
-            {state.kind === 'gone'
+            {state.kind === 'gone' && embedded
+              ? <button className="label-button shared-label" type="button" onClick={() => embedded.onRemove().catch(() => announce(REMOVE_FAILED, 'error'))}><span className="label-button-hole" aria-hidden="true" /><span>Remove</span></button>
+              : state.kind === 'gone'
               ? <><a className="label-button shared-label" href={appUrl}>Make your own mix</a>{getTheApp}</>
               : <button className="label-button shared-label" type="button" onClick={retry}>Try again</button>}
           </div>

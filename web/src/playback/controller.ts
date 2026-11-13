@@ -17,6 +17,14 @@ export type PlayerState = {
   error: string
   preferences: PlaybackPreferences | null
 }
+export type StartOptions = {
+  /**
+   * False for a play that is not one of the listener's own mixes (a shared
+   * mix): no listening evidence is queued for it, so nothing the server would
+   * refuse can flush away the evidence already queued.
+   */
+  record?: boolean
+}
 export class PlaybackController {
   private state: PlayerState = {
     sessionId: null,
@@ -31,6 +39,7 @@ export class PlaybackController {
   private listeners = new Set<() => void>()
   private meter = new ListeningMeter((e) => this.record(e))
   private startFailed = false
+  private recording = true
   private lifecycle = 0
   private playbackId = ''
   private sequence = 0
@@ -120,6 +129,7 @@ export class PlaybackController {
     )
       e = { ...e, kind: 'listen' }
     if (
+      !this.recording ||
       !this.state.preferences?.enabled ||
       !track ||
       !qualifies(e.kind, e.observedMs, track.durationMs ?? 0)
@@ -186,9 +196,11 @@ export class PlaybackController {
     version: number,
     title: string,
     tracks: QueueTrack[],
+    options: StartOptions = {},
   ) {
     if (this.state.busy) return false
     this.meter.finish('listen')
+    this.recording = options.record !== false
     this.startFailed = false
     const generation = ++this.generation
     this.playbackId = crypto.randomUUID()
@@ -234,6 +246,7 @@ export class PlaybackController {
         kind === 'next'
           ? this.state.tracks.slice((this.state.sample.index ?? 0) + 1)
           : this.state.tracks,
+        { record: this.recording },
       )
       return
     }
@@ -282,6 +295,7 @@ export class PlaybackController {
         this.state.version,
         this.state.title,
         this.state.tracks,
+        { record: this.recording },
       )
     } catch {
       if (generation === this.generation)

@@ -11,6 +11,7 @@ import { MoreIcon, QueueIcon } from './Icons'
 import { MusicDoor, type MusicDoorInput } from './MusicDoor'
 import { DjWorkingLine } from './DjWorkingLine'
 import type { TurnWork } from './djWorkingLines'
+import { ControlModal } from './ControlModal'
 
 type ConversationProps = {
   currentShape?: EnergyArc | null
@@ -22,6 +23,10 @@ type ConversationProps = {
   onColor?: (color: string) => Promise<void>
   onRename?: (title: string) => Promise<void>
   onArchive?: () => Promise<void>
+  /** A mix with at least one song (never an album): Share in the tape options. */
+  onShare?: () => void
+  /** Only while the mix has an active share: Stop sharing, behind a confirm. */
+  onStopSharing?: () => Promise<void>
   session: DjSession
   messages: DjMessage[]
   loading?: boolean
@@ -90,10 +95,13 @@ function PassedRow({ album, onGoBack }: { album: AlbumPick; onGoBack?: (version:
 
 const unavailableTranscription = async () => { throw new Error('Transcription unavailable') }
 
-export function Conversation({ currentShape, transcribe = unavailableTranscription, selectionBusy = false, attachment, energySummary, player, onColor, onRename, onArchive, session, messages, loading = false, thinking, working, onSend, onOpenQueue, onOpenHistory, kind = 'mix', passed = [], onGoBack, suggestions = [], onSuggestion, inlinePanel, inlinePanelVersion, onBack, musicDoor, musicDoorCovered = false, onAddHistory }: ConversationProps) {
+export function Conversation({ currentShape, transcribe = unavailableTranscription, selectionBusy = false, attachment, energySummary, player, onColor, onRename, onArchive, onShare, onStopSharing, session, messages, loading = false, thinking, working, onSend, onOpenQueue, onOpenHistory, kind = 'mix', passed = [], onGoBack, suggestions = [], onSuggestion, inlinePanel, inlinePanelVersion, onBack, musicDoor, musicDoorCovered = false, onAddHistory }: ConversationProps) {
   const album = kind === 'album'
   const [settings, setSettings] = useState(false)
   const [options, setOptions] = useState(false)
+  const [stopConfirm, setStopConfirm] = useState(false)
+  const [stopping, setStopping] = useState(false)
+  const [stopError, setStopError] = useState('')
   const menuRef = useRef<HTMLDivElement>(null)
   useEffect(() => { if (!options) return; const close = (event: PointerEvent) => { if (!menuRef.current?.contains(event.target as Node)) setOptions(false) }; const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOptions(false) }; document.addEventListener('pointerdown', close); document.addEventListener('keydown', escape); return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', escape) } }, [options])
   const [draft, setDraft] = useRestorableState(`conversation.${session.id}.draft`, '')
@@ -138,7 +146,30 @@ export function Conversation({ currentShape, transcribe = unavailableTranscripti
             <MoreIcon />
           </button>
           {settings && onColor && <TapeSettings session={session} onColor={onColor} onClose={() => { setSettings(false); menuRef.current?.querySelector<HTMLButtonElement>('.bare-icon-button')?.focus() }} />}
-          {options && <div className="wc-popover wc-session-menu">{onColor && <button className="wc-text" onClick={() => { setOptions(false); setSettings(true) }}>{album ? 'Album settings' : 'Tape settings'}</button>}{album ? null : <button className="wc-text" onClick={() => { setOptions(false); onOpenHistory?.() }}>Version history</button>}<button className="wc-text" onClick={() => { setOptions(false); void onArchive?.().catch(() => undefined) }}>Archive</button></div>}
+          {options && <div className="wc-popover wc-session-menu" role="group" aria-label={album ? 'Album options' : 'Tape options'}>
+            {onColor && <button className="wc-text" onClick={() => { setOptions(false); setSettings(true) }}>{album ? 'Album settings' : 'Tape settings'}</button>}
+            {album ? null : <button className="wc-text" onClick={() => { setOptions(false); onOpenHistory?.() }}>Version history</button>}
+            {!album && onShare ? <button className="wc-text" onClick={() => { setOptions(false); onShare() }}>Share</button> : null}
+            {!album && onStopSharing ? <button className="wc-text" onClick={() => { setOptions(false); setStopError(''); setStopConfirm(true) }}>Stop sharing</button> : null}
+            <button className="wc-text" onClick={() => { setOptions(false); void onArchive?.().catch(() => undefined) }}>Archive</button>
+          </div>}
+          {stopConfirm && onStopSharing && (
+            <ControlModal title="Stop sharing?" alert onClose={() => { if (!stopping) setStopConfirm(false) }}>
+              <p>People with the link won’t be able to open it.</p>
+              {stopError && <p className="wc-danger" role="alert">{stopError}</p>}
+              <div className="wc-actions">
+                <button className="wc-text" disabled={stopping} onClick={() => setStopConfirm(false)}>Cancel</button>
+                <button className="wc-text wc-danger" disabled={stopping} onClick={() => {
+                  setStopping(true)
+                  setStopError('')
+                  onStopSharing().then(
+                    () => { setStopping(false); setStopConfirm(false) },
+                    () => { setStopping(false); setStopError('Couldn’t stop sharing. Try again.') },
+                  )
+                }}>Stop sharing</button>
+              </div>
+            </ControlModal>
+          )}
         </div>
       </header>
 

@@ -28,6 +28,7 @@ import {
   type SendMessageResponse,
   type SessionDetailResponse,
   type TurnProgress,
+  ShareNameRequiredError,
 } from './api/client'
 import { nextWorkingStep, type TurnWork, type WorkingStep } from './components/djWorkingLines'
 import { toAlbumPickState, toDjMessage, toDjSession, toListenLaterEntry, toQueueTrack } from './api/mappers'
@@ -61,7 +62,9 @@ import { YourMusicView, type MusicSection } from './components/YourMusicView'
 import { createMusicSyncService } from './sync/music-sync-service'
 import { createMusicSyncRun } from './sync/music-sync-run'
 import { createUploadGate } from './sync/upload-gate'
-import type { AlbumPick, AlbumPickState, AppView, CollectionView, DjMessage, DjSession, ListenLaterEntry, QueueTrack, SessionKind } from './domain'
+import type { AlbumPick, AlbumPickState, AppView, CollectionView, DjMessage, DjSession, ListenLaterEntry, QueueTrack, SessionKind, SharedMixRow } from './domain'
+import { SharedMixPage, type SharedMixPlayer } from './components/SharedMixPage'
+import { ShareLinkCache, shareLink, sharePendingLink, type ShareOutcome } from './lib/share-link'
 import { createImportRun } from './import/import-run'
 import { createListeningImportService } from './import/import-service'
 import { createLazyParser, createPageParser, type PageParser } from './import/page-parser'
@@ -127,6 +130,9 @@ const LANDED_REPLY_REREAD_MS = 25_000
 
 /** How long a nameless account waits behind the sign-in image for GET /me before the workspace opens. */
 const NAME_HOLD_MS = 3500
+
+/** The name page reached from Share (approved board 2026-11-13 shared-mixes, copy locked). */
+const SHARE_NAME_LINE = 'Whoever opens your link will see your first name.'
 
 const NO_SIGN_IN: Pick<AuthBridge, 'signIn'> = { signIn: async () => ({ error: 'Sign-in is not available here.' }) }
 
@@ -290,6 +296,22 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   useEffect(() => { controlLife.current = new AbortController(); return () => controlLife.current.abort() }, [])
   useEffect(() => { if (!archiveUndo) return; const timer = setTimeout(() => setArchiveUndo(null), 3000); return () => clearTimeout(timer) }, [archiveUndo])
   const [collectionView, setCollectionView] = useRestorableState<CollectionView>('collectionView', 'list')
+  // Shared mixes (spec 2026-11-13 shared-mixes). Per account: the workspace is
+  // keyed by user id, so a sign-out or another account starts these empty.
+  const [sharedRows, setSharedRows] = useState<SharedMixRow[]>([])
+  const sharedReads = useRef(0)
+  // Bumped by each Remove: a list read that started before it is stale.
+  const sharedRemovals = useRef(0)
+  // Which of this listener's mixes have an active share (GET /sessions/:id `shared`).
+  const [sharedSessions, setSharedSessions] = useState<Record<string, boolean>>({})
+  // The saved share open read-only inside Mixes, by token.
+  const [openSharedToken, setOpenSharedToken] = useState<string | null>(null)
+  // The name page reached from Share (no Skip), with the mix to share once a name is saved.
+  const [shareNameFor, setShareNameFor] = useState<string | null>(null)
+  // Links made this page load, per mix and queue version: sharing one again
+  // opens the sheet straight from the tap.
+  const shareUrls = useRef(new ShareLinkCache())
+  const sharing = useRef(false)
   const [messagesBySession, setMessagesBySession] = useRestorableState<Record<string, DjMessage[]>>('messagesBySession', {})
   const [queuesBySession, setQueuesBySession] = useRestorableState<Record<string, QueueTrack[]>>('queuesBySession', {})
   const [albumsBySession, setAlbumsBySession] = useRestorableState<Record<string, AlbumPickState>>('albumsBySession', {})
@@ -478,6 +500,25 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       cancelled = true
     }
   }, [api, signOut])
+
+  // Saved shares, read alongside the mixes and again each time Mixes opens,
+  // so a share its sender stopped drops out on the next read.
+  const inMixes = activeView === 'mixes'
+  useEffect(() => {
+    if (restoring || (!inMixes && sharedReads.current > 0)) return
+    sharedReads.current += 1
+    let cancelled = false
+    const removalsAtStart = sharedRemovals.current
+    api.listSharedMixes().then(
+      // A read from before a Remove could bring the removed row back.
+      (rows) => { if (!cancelled && removalsAtStart === sharedRemovals.current) setSharedRows(rows) },
+      // The list works without them; a later read tries again.
+      () => undefined,
+    )
+    return () => { cancelled = true }
+  }, [api, inMixes, restoring])
+
+  useEffect(() => { if (activeView !== 'mixes') setOpenSharedToken(null) }, [activeView])
 
   useEffect(() => {
     let cancelled = false
@@ -998,6 +1039,9 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       const mapped = detailToState(detail)
       refreshedSessions.current.add(sessionId)
       setPlaylistSeeds(current => ({ ...current, [sessionId]: detail.playlistSeed }))
+      setSharedSessions((current) => ({ ...current, [sessionId]: detail.shared === true }))
+      // Stopped on another device: a link made here is revoked.
+      if (detail.shared !== true) shareUrls.current.forget(sessionId)
       setSessions((current) => current.map((session) => (session.id === sessionId ? { ...mapped.session, ...((metadataRevision.current[sessionId] ?? 0) !== metadataAtStart ? { title: session.title, status: session.status, caseColor: session.caseColor } : {}) } : session)))
       setMessagesBySession((current) => ({ ...current, [sessionId]: mapped.messages }))
       setQueuesBySession((current) => ({ ...current, [sessionId]: mapped.queue }))
@@ -1035,6 +1079,8 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       if (signal.aborted) return
       metadataRevision.current[id] = (metadataRevision.current[id] ?? 0) + 1
       setSessions((current) => current.map((session) => session.id === id ? { ...session, caseColor: result.session.caseColor ?? session.caseColor, title: result.session.title, status: result.session.status, updatedAt: result.session.updatedAt } : session))
+      // A share snapshots the title: a renamed mix needs a new link.
+      if (updates.title !== undefined) shareUrls.current.forget(id)
       if (updates.status === 'archived') {
         if (navigation.current.activeSessionId === id && navigation.current.activeView === 'session') { setActiveView('home'); setActiveSessionId(null) }
         setArchiveUndo(id)
@@ -1044,6 +1090,100 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       throw e
     } finally { sessionWrites.current.delete(id) }
   }
+
+  /**
+   * Share (spec Sender): POST /sessions/:id/share, then the share sheet or
+   * the clipboard. A 409 name_required opens the name page with no Skip;
+   * saving there shares again. Called straight from the tap: Safari spends
+   * the tap's activation on the first await, so a link not yet made goes
+   * through sharePendingLink, and a sheet refused after the wait offers its
+   * own Share button (a fresh tap).
+   */
+  async function shareMix(sessionId: string) {
+    if (sharing.current) return
+    const session = sessions.find((item) => item.id === sessionId)
+    const title = session?.title ?? 'Mix'
+    const version = session?.queueVersion ?? 0
+    sharing.current = true
+    try {
+      const cached = shareUrls.current.get(sessionId, version)
+      if (cached) {
+        const outcome = await shareLink(cached, title).catch(() => null)
+        reportShare(outcome, cached, title)
+        return
+      }
+      const pending = api.shareSession(sessionId).then((result) => result.url)
+      const delivered = sharePendingLink(pending, title)
+      let url: string
+      try {
+        url = await pending
+      } catch (cause) {
+        delivered.catch(() => undefined)
+        if (cause instanceof ShareNameRequiredError && saveName) { setShareNameFor(sessionId); return }
+        if (cause instanceof ApiError && cause.status === 401) { signOut(); return }
+        announce('Couldn’t share this mix. Try again.', 'error')
+        return
+      }
+      shareUrls.current.set(sessionId, version, url)
+      setSharedSessions((current) => ({ ...current, [sessionId]: true }))
+      reportShare(await delivered.catch(() => null), url, title)
+    } finally {
+      sharing.current = false
+    }
+  }
+
+  function reportShare(outcome: ShareOutcome | null, url: string, title: string) {
+    if (outcome === 'copied') announce('Link copied', 'success')
+    else if (outcome === 'blocked') {
+      announce('Link ready', 'info', 10_000, {
+        label: 'Share',
+        onClick: () => {
+          if (toastTimer.current) clearTimeout(toastTimer.current)
+          setToast(null)
+          void shareLink(url, title).then(
+            (next) => reportShare(next === 'blocked' ? null : next, url, title),
+            () => reportShare(null, url, title),
+          )
+        },
+      })
+    } else if (outcome === null) announce('Couldn’t share this mix. Try again.', 'error')
+  }
+
+  async function stopSharing(sessionId: string) {
+    try {
+      await api.stopSharing(sessionId)
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 401) signOut()
+      throw cause
+    }
+    shareUrls.current.forget(sessionId)
+    setSharedSessions((current) => ({ ...current, [sessionId]: false }))
+  }
+
+  function shareAfterName() {
+    const sessionId = shareNameFor
+    setShareNameFor(null)
+    markNamePageSettled(user.id)
+    if (sessionId) void shareMix(sessionId)
+  }
+
+  /** Remove (spec Recipient): deletes this listener's save, never the share. */
+  async function removeSharedMix(token: string) {
+    try {
+      await api.removeSharedMix(token)
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 401) signOut()
+      throw cause
+    }
+    sharedRemovals.current += 1
+    setSharedRows((rows) => rows.filter((row) => row.token !== token))
+    setOpenSharedToken((open) => (open === token ? null : open))
+  }
+
+  // The in-app view plays a share through the app's own MusicKit and controller;
+  // the listener already has a session, so there is none to make.
+  const sharedPlayer = useMemo<SharedMixPlayer>(() => ({ ensureSession: async () => undefined, musicKit, playback }), [musicKit, playback])
+  const sharedSession = useMemo(() => ({ isPending: false, userId: user.id }), [user.id])
 
   useEffect(() => {
     if (restoring || navigation.current.activeView !== 'session') return
@@ -1801,11 +1941,11 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
 
   return (
     <AiConsentGate.Provider value={consentReady}>
-    <div className={`app-shell ${activeView !== 'session' || !activeSession ? 'app-shell--home' : ''}`} style={shellStyle} inert={addingMusic !== null || keepSheet || signInPage !== null || nameGate !== 'off'}>
+    <div className={`app-shell ${activeView !== 'session' || !activeSession ? 'app-shell--home' : ''}`} style={shellStyle} inert={addingMusic !== null || keepSheet || signInPage !== null || nameGate !== 'off' || shareNameFor !== null}>
       <Sidebar activeView={activeView}
         onOpenHome={() => setActiveView('home')}
         onOpenMusic={openMusic}
-        onOpenMixes={() => { setMixesTab('active'); setActiveView('mixes') }}
+        onOpenMixes={() => { setMixesTab('active'); setOpenSharedToken(null); setActiveView('mixes') }}
         onOpenSettings={() => setActiveView('settings')}
       />
 
@@ -1835,6 +1975,18 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
           onRemoveSource={(source) => void removeSource(source)}
           onAddMusic={openAddMusic}
         />
+      ) : activeView === 'mixes' && openSharedToken ? (
+        <section className="home-panel shared-in-app" aria-label="Shared mix">
+          <SharedMixPage
+            key={openSharedToken}
+            token={openSharedToken}
+            api={api}
+            session={sharedSession}
+            player={sharedPlayer}
+            onOwner={(_userId, sessionId) => openSession(sessionId)}
+            embedded={{ onBack: () => setOpenSharedToken(null), onRemove: () => removeSharedMix(openSharedToken) }}
+          />
+        </section>
       ) : activeView !== 'session' || !activeSession ? (
         <Home
           loading={loadingCollection}
@@ -1842,6 +1994,9 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
           onRetry={() => void retryCollection()}
           player={<PlaybackPanel controller={playback} />}
           sessions={sessions.filter((session) => session.status === (mixesTab === 'archived' ? 'archived' : 'active'))}
+          sharedRows={sharedRows}
+          onOpenShared={setOpenSharedToken}
+          onRemoveShared={removeSharedMix}
           tab={mixesTab}
           onTab={setMixesTab}
           albumPicks={shelfOn}
@@ -1879,6 +2034,8 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
             onColor={color => updateMix(activeSession.id, { caseColor: color })}
             onRename={(title) => updateMix(activeSession.id, { title })}
             onArchive={() => updateMix(activeSession.id, { status: 'archived' }).catch((e) => { announce('Couldn’t archive this mix. Try again.', 'error'); throw e })}
+            onShare={!activeIsAlbum && activeQueue.length > 0 ? () => void shareMix(activeSession.id) : undefined}
+            onStopSharing={!activeIsAlbum && sharedSessions[activeSession.id] ? () => stopSharing(activeSession.id) : undefined}
             session={activeSession}
             messages={activeMessages}
             loading={loadingSessionId === activeSession.id}
@@ -1989,6 +2146,12 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     ) : nameGate === 'ask' && saveName ? (
       <div className="first-run fr-root fr-root--over" data-testid="name-page">
         <div className="fr-stage fr-stage--fade"><NamePage saveName={saveName} onSaved={saveFromNamePage} onSkip={skipNamePage} /></div>
+      </div>
+    ) : null}
+    {shareNameFor && saveName ? (
+      <div className="first-run fr-root fr-root--over" data-testid="share-name-page">
+        <BackButton onBack={() => setShareNameFor(null)} className="fr-back--over" />
+        <div className="fr-stage fr-stage--fade"><NamePage saveName={saveName} onSaved={shareAfterName} line={SHARE_NAME_LINE} /></div>
       </div>
     ) : null}
     {consentOpen ? <AiConsentDialog onAgree={grantConsent} onNotNow={() => setConsentOpen(false)} /> : null}

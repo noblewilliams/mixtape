@@ -15,8 +15,10 @@ type Props = {
   /** Writes the name and the asked flag; resolves once the session shows it. */
   saveName: (name: string) => Promise<void>
   onSaved: () => void
-  /** Moves on at once; the caller records the flag and lets any running save finish. */
-  onSkip: () => void
+  /** Moves on at once; the caller records the flag and lets any running save finish. Absent: no Skip (the page reached from Share). */
+  onSkip?: () => void
+  /** The line under the headline; the sign-in page's own by default. */
+  line?: string
   initial?: NamePageInitial
 }
 
@@ -26,7 +28,7 @@ type Props = {
  * No back (the listener is signed in; Skip is the way past) and no autofocus
  * (one tap raises the keyboard). Continue keeps focus while dimmed.
  */
-export function NamePage({ saveName, onSaved, onSkip, initial }: Props) {
+export function NamePage({ saveName, onSaved, onSkip, line = NAME_PAGE_LINE, initial }: Props) {
   const [draft, setDraft] = useState(initial?.draft ?? '')
   const [saving, setSaving] = useState(initial?.saving ?? false)
   const [failed, setFailed] = useState(initial?.failed ?? false)
@@ -102,7 +104,7 @@ export function NamePage({ saveName, onSaved, onSkip, initial }: Props) {
 
   return (
     <FirstRunPage background="sign-in" headline={NAME_PAGE_HEADLINE} focusHeading={!initial?.failed}>
-      <p className="fr-line">{NAME_PAGE_LINE}</p>
+      <p className="fr-line">{line}</p>
       <form
         className="fr-nform"
         noValidate
@@ -175,9 +177,11 @@ export function NamePage({ saveName, onSaved, onSkip, initial }: Props) {
         </div>
         <span className="sr-only" id={hintId}>Type a name.</span>
       </form>
-      <p className="fr-foot">
-        <button type="button" className="fr-link" onClick={onSkip}>Skip</button>
-      </p>
+      {onSkip ? (
+        <p className="fr-foot">
+          <button type="button" className="fr-link" onClick={onSkip}>Skip</button>
+        </p>
+      ) : null}
     </FirstRunPage>
   )
 }

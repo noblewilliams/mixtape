@@ -1,7 +1,8 @@
 import { useEffect, useId, useRef, useState, type CSSProperties } from 'react'
 import { Cassette } from './Cassette'
 import { TapeSettings } from './TapeSettings'
-import type { DjSession } from '../domain'
+import type { DjSession, SharedMixRow } from '../domain'
+import { sharedDetails, sharerLabel } from '../lib/mixes-list'
 
 export function InlineMixName({
   title,
@@ -364,6 +365,106 @@ export function SessionRow({
             Restore
           </button>
         )}
+        {menuButtonElement}
+      </div>
+      {extras}
+    </div>
+  )
+}
+
+/**
+ * A share this listener saved, in Mixes (board WM1): "From Ada" leads the
+ * count line, and the menu holds only Remove. No rename, no tape settings,
+ * no archive and no swipe.
+ */
+export function SharedRow({
+  row,
+  onOpen,
+  onRemove,
+  layout = 'row',
+}: {
+  row: SharedMixRow
+  layout?: 'row' | 'tile'
+  onOpen: () => void
+  onRemove: () => Promise<void>
+}) {
+  const [menu, setMenu] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const menuElement = useRef<HTMLDivElement>(null)
+  const menuButton = useRef<HTMLButtonElement>(null)
+  const mounted = useRef(true)
+  useEffect(() => () => { mounted.current = false }, [])
+  useEffect(() => {
+    if (!menu) return
+    const outside = (e: PointerEvent) => {
+      if (!menuElement.current?.contains(e.target as Node) && !menuButton.current?.contains(e.target as Node)) setMenu(false)
+    }
+    const escape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setMenu(false)
+        menuButton.current?.focus()
+      }
+    }
+    document.addEventListener('pointerdown', outside)
+    document.addEventListener('keydown', escape)
+    return () => {
+      document.removeEventListener('pointerdown', outside)
+      document.removeEventListener('keydown', escape)
+    }
+  }, [menu])
+  async function remove() {
+    if (busy) return
+    setMenu(false)
+    setBusy(true)
+    setError('')
+    try {
+      await onRemove()
+    } catch {
+      if (mounted.current) setError('Couldn’t remove this mix. Try again.')
+    } finally {
+      if (mounted.current) setBusy(false)
+    }
+  }
+  // Built in parts, never split on " · ": a name may hold one.
+  const subline = <small><b className="wc-shared-from">{sharerLabel(row.sharerName)}</b> · {sharedDetails(row)}</small>
+  const cassette = <Cassette title={row.title} caseColor={row.caseColor} />
+  const open = <button className="mix-tape-open" onClick={onOpen} aria-label={`Open ${row.title}`}>{cassette}</button>
+  const menuButtonElement = (
+    <button ref={menuButton} className="wc-text wc-more" disabled={busy} aria-label={`Mix actions for ${row.title}`} aria-expanded={menu} onClick={() => setMenu((value) => !value)}>
+      •••
+    </button>
+  )
+  const extras = (
+    <>
+      {menu && (
+        <div ref={menuElement} className="wc-popover wc-session-menu" role="group" aria-label="Mix actions">
+          <button className="wc-text wc-danger" onClick={() => void remove()}>Remove</button>
+        </div>
+      )}
+      {error && <p role="alert">{error}</p>}
+    </>
+  )
+  if (layout === 'tile') return (
+    <div className={`wc-session-tile wc-shared-row ${menu ? 'has-menu' : ''}`}>
+      {open}
+      <div className="wc-tile-foot">
+        <span className="wc-session-copy"><strong>{row.title}</strong>{subline}</span>
+        {menuButtonElement}
+      </div>
+      {extras}
+    </div>
+  )
+  return (
+    <div className={`wc-session-row wc-shared-row ${menu ? 'has-menu' : ''}`}>
+      <div className="wc-session-surface">
+        <div className="wc-session-open">
+          {open}
+          <span className="wc-session-copy">
+            <button className="wc-name wc-row-name" onClick={onOpen} tabIndex={-1} aria-hidden="true"><strong>{row.title}</strong></button>
+            {subline}
+          </span>
+        </div>
         {menuButtonElement}
       </div>
       {extras}

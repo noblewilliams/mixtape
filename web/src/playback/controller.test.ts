@@ -151,3 +151,27 @@ it('cancel during Apple authorization does not start playback when consent retur
   expect(f.music.play).toHaveBeenCalledTimes(1)
   expect(f.controller.getState().busy).toBe(false)
 })
+it('records nothing from a play started without recording, and leaves evidence already queued intact', async () => {
+  const f = fixture()
+  players.push(f.controller)
+  f.send.mockRejectedValue(new Error('offline'))
+  await f.controller.initialize()
+  await f.controller.start('s', 2, 'Mix', [song])
+  for (let t = 0; t <= 60000; t += 1000) f.sample(t, t)
+  await f.controller.stop()
+  await Promise.resolve()
+  const queued = () => JSON.parse(localStorage.getItem('mixtape.playback.test') ?? 'null')?.events ?? []
+  expect(queued()).toHaveLength(1)
+  f.send.mockClear()
+
+  await f.controller.start('shared:token', 0, 'Shared', [{ ...song, trackId: 'token:0' }], { record: false })
+  for (let t = 70000; t <= 140000; t += 1000) f.sample(t - 70000, t)
+  // A skip ends the shared play too, and still counts for nothing.
+  await f.controller.command('next')
+  await f.controller.stop()
+  await Promise.resolve()
+  expect(queued()).toHaveLength(1)
+  expect(queued()[0]).toMatchObject({ sessionId: 's', version: 2 })
+  for (const call of f.send.mock.calls as unknown as [{ events: { sessionId: string }[] }][])
+    expect(call[0].events.every((event) => event.sessionId === 's')).toBe(true)
+})
