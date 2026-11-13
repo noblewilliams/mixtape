@@ -367,8 +367,8 @@ curly quotes.
 |---|---|
 | `digging` `library` + artists | Flipping through your {artists} records… / Pulling your {artists} records… |
 | `digging` `catalogue` + artists | Digging for {artists}… / Crate-digging for {artists}… |
-| `picking` + artists | Pulling records that sit with {artists}… / Cueing up {artists} and friends… |
-| `checking` + genres | Giving it a {genres} sound check… |
+| `picking` + artists | Pulling records that sit with {artists}… / Finding company for {artists}… |
+| `checking` + genres | Running the {genres} sound check… |
 | `playlists` + playlist | Pulling “{playlist}” off the shelf… |
 | `labelling` + title | Labelling it “{title}”… |
 | `pressing` + count | Pressing {count} songs to tape… (1: Pressing one song to tape…) |
@@ -390,6 +390,12 @@ Without names, or when the line would run past 44 characters:
 | `writing` | Writing the liner notes… | |
 | any step past 30 s | Still at the decks. Worth the wait… | |
 
+A step with two later lines shows them in order, 12 s each (picking:
+"Sequencing…" at 12 s, "Lining up…" at 24 s, then the 30 s line). The 30 s
+line also covers listening, counted from when the stream opened. A
+`pressing` count below 1 and a `digging` step with no known scope take the
+nameless and catalogue lines.
+
 ### First-run Making screens
 
 The first mix is the longest wait (24 to 40 s on the catalogue path).
@@ -397,7 +403,8 @@ The first mix is the longest wait (24 to 40 s on the catalogue path).
 listening. This takes about a minute." **Decided (founder, 2026-11-13):**
 keep that headline and add the step line under it, from the same table. It
 starts on "The DJ is listening…" and follows the same rules, including the
-timed fallback. The stream and the parser are already there, so it is one
+timed fallback. The fixed line becomes "This takes about a minute.", so the
+screen does not say "The DJ is listening" twice. The stream and the parser are already there, so it is one
 widget on each platform.
 
 ## Rollout
