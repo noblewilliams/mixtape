@@ -191,6 +191,54 @@ void main() {
       await removing;
     });
 
+    test(
+      'a read that started before a remove finished does not bring it back',
+      () async {
+        final h = _make(() async => [_row('a', now), _row('b', now)]);
+        await h.container.read(sharedMixesProvider.future);
+        final notifier = h.container.read(sharedMixesProvider.notifier);
+        final removeDone = Completer<void>();
+        h.api.onRemove = (_) => removeDone.future;
+        final readDone = Completer<List<SharedMixRow>>();
+        h.api.onList = () => readDone.future;
+
+        final removing = notifier.remove('a');
+        // The read goes out while the DELETE is still out...
+        final reading = notifier.refresh();
+        // ...the DELETE lands first...
+        removeDone.complete();
+        expect(await removing, isTrue);
+        // ...then the read, from before the delete, still listing it.
+        readDone.complete([_row('a', now), _row('b', now)]);
+        await reading;
+        expect(
+          h.container.read(sharedMixesProvider).value!.map((r) => r.token),
+          ['b'],
+        );
+
+        // A read that starts after the remove sees what the server says.
+        h.api.onList = () async => [_row('a', now), _row('b', now)];
+        await notifier.refresh();
+        expect(
+          h.container.read(sharedMixesProvider).value!.map((r) => r.token),
+          ['a', 'b'],
+        );
+      },
+    );
+
+    test('remove deletes the save even when the row is not listed', () async {
+      final h = _make(() async => [_row('b', now)]);
+      await h.container.read(sharedMixesProvider.future);
+      expect(
+        await h.container.read(sharedMixesProvider.notifier).remove('a'),
+        isTrue,
+      );
+      expect(h.api.removed, ['a']);
+      expect(h.container.read(sharedMixesProvider).value!.map((r) => r.token), [
+        'b',
+      ]);
+    });
+
     test('an auth change reads the list again for whoever is next', () async {
       var account = 'first';
       final h = _make(() async => [_row(account, now)]);

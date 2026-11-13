@@ -83,9 +83,36 @@ abstract final class MixShare {
     return box.localToGlobal(Offset.zero) & box.size;
   }
 
+  /// Sessions with a Share or Stop sharing running: a second tap on either
+  /// for the same mix is ignored until it ends.
+  static final Set<String> _inFlight = {};
+
+  static Future<void> _once(
+    String sessionId,
+    Future<void> Function() run,
+  ) async {
+    if (!_inFlight.add(sessionId)) return;
+    try {
+      await run();
+    } finally {
+      _inFlight.remove(sessionId);
+    }
+  }
+
   /// Share: the link, then the system sheet. A `name_required` pushes the
   /// name page (no Skip); a saved name asks again at once.
   static Future<void> share(
+    BuildContext context,
+    WidgetRef ref,
+    String sessionId, {
+    required void Function(String message) onError,
+    Rect? origin,
+  }) => _once(
+    sessionId,
+    () => _share(context, ref, sessionId, onError: onError, origin: origin),
+  );
+
+  static Future<void> _share(
     BuildContext context,
     WidgetRef ref,
     String sessionId, {
@@ -126,6 +153,13 @@ abstract final class MixShare {
   /// Stop sharing: the alert, then the revoke. No toast on success; the
   /// menu loses Stop sharing.
   static Future<void> stop(
+    BuildContext context,
+    WidgetRef ref,
+    String sessionId, {
+    required void Function(String message) onError,
+  }) => _once(sessionId, () => _stop(context, ref, sessionId, onError: onError));
+
+  static Future<void> _stop(
     BuildContext context,
     WidgetRef ref,
     String sessionId, {

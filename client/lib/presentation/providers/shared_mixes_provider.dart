@@ -19,8 +19,16 @@ class SharedMixesNotifier extends AsyncNotifier<List<SharedMixRow>> {
   int _generation = 0;
   int _reads = 0;
 
+  /// Numbers every read as it goes out, the first one included.
+  int _readSeq = 0;
+
   /// Tokens with a Remove out: a read landing meanwhile leaves them out.
   final Set<String> _removing = {};
+
+  /// Each removed token, with the number of the last read that went out
+  /// before its Remove finished: such a read may still list it, so it is
+  /// left out of that read and every earlier one.
+  final Map<String, int> _removedBefore = {};
 
   @override
   Future<List<SharedMixRow>> build() async {
@@ -28,14 +36,18 @@ class SharedMixesNotifier extends AsyncNotifier<List<SharedMixRow>> {
     final api = ref.watch(djApiProvider);
     final generation = ++_generation;
     _removing.clear();
+    _removedBefore.clear();
     ref.onDispose(() => _generation++);
+    final seq = ++_readSeq;
     final rows = await api.listSharedMixes();
-    return generation == _generation ? _visible(rows) : rows;
+    return generation == _generation ? _visible(rows, seq) : rows;
   }
 
-  List<SharedMixRow> _visible(List<SharedMixRow> rows) => [
+  List<SharedMixRow> _visible(List<SharedMixRow> rows, int seq) => [
     for (final row in rows)
-      if (!_removing.contains(row.token)) row,
+      if (!_removing.contains(row.token) &&
+          (_removedBefore[row.token] ?? 0) < seq)
+        row,
   ];
 
   /// Reads the list again. A failure keeps the last list (and says false);
@@ -43,6 +55,7 @@ class SharedMixesNotifier extends AsyncNotifier<List<SharedMixRow>> {
   Future<bool> refresh() async {
     final generation = _generation;
     final read = ++_reads;
+    final seq = ++_readSeq;
     final next = await AsyncValue.guard(
       () => ref.read(djApiProvider).listSharedMixes(),
     );
@@ -53,38 +66,43 @@ class SharedMixesNotifier extends AsyncNotifier<List<SharedMixRow>> {
       if (!state.hasValue) state = next;
       return false;
     }
-    state = AsyncData(_visible(next.requireValue));
+    state = AsyncData(_visible(next.requireValue, seq));
     return true;
   }
 
   /// Remove (deletes the save, not the share): the row goes at once and
   /// comes back in its place if the server says no. A save already gone
-  /// counts as removed.
+  /// counts as removed. A token not listed (a share its sender stopped,
+  /// opened from Mixes before the list caught up) is still deleted.
   Future<bool> remove(String token) async {
     final current = state.value;
-    if (current == null) return false;
-    final index = current.indexWhere((row) => row.token == token);
-    if (index < 0) return false;
-    final row = current[index];
+    final index = current?.indexWhere((row) => row.token == token) ?? -1;
+    final row = index < 0 ? null : current![index];
     final generation = _generation;
     _removing.add(token);
-    state = AsyncData([...current]..removeAt(index));
+    if (row != null) state = AsyncData([...current!]..removeAt(index));
+    var removed = false;
     try {
       await ref.read(djApiProvider).removeSharedMix(token);
-      return true;
+      removed = true;
     } on SharedMixGoneException {
-      return true;
+      removed = true;
     } catch (_) {
-      if (!ref.mounted || generation != _generation) return false;
+      if (!ref.mounted || generation != _generation || row == null) {
+        return false;
+      }
       final now = state.value ?? const <SharedMixRow>[];
       if (!now.any((r) => r.token == token)) {
         final at = now.indexWhere((r) => r.savedAt.isBefore(row.savedAt));
         state = AsyncData([...now]..insert(at < 0 ? now.length : at, row));
       }
-      return false;
     } finally {
-      if (ref.mounted && generation == _generation) _removing.remove(token);
+      if (ref.mounted && generation == _generation) {
+        _removing.remove(token);
+        if (removed) _removedBefore[token] = _readSeq;
+      }
     }
+    return removed;
   }
 }
 

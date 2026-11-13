@@ -3,6 +3,8 @@
 // the name page when the server needs a name, the system share sheet, and
 // the Stop sharing alert.
 
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart' show CupertinoAlertDialog;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -82,6 +84,9 @@ class _Api implements DjApi, DjSharedMixes {
   ];
   Object? stopError;
 
+  /// Holds every share call until completed.
+  Completer<void>? shareGate;
+
   @override
   Future<SessionDetail> getSession(String id) async => SessionDetail(
     session: _session(kind: kind),
@@ -99,6 +104,7 @@ class _Api implements DjApi, DjSharedMixes {
   @override
   Future<ShareLinkResult> shareSession(String sessionId) async {
     shares.add(sessionId);
+    await shareGate?.future;
     final answer = shareAnswers.length >= shares.length
         ? shareAnswers[shares.length - 1]
         : shareAnswers.last;
@@ -374,6 +380,43 @@ void main() {
       },
     );
   }
+
+  testWidgets('a second Share or Stop while one runs is ignored', (
+    tester,
+  ) async {
+    final api = _Api(shared: true)
+      ..shareAnswers = [
+        const ShareNameRequiredException(),
+        const ShareLinkResult(token: 'AbCdEfGhIjKlMnOpQrStUv', url: _url),
+      ]
+      ..shareGate = Completer<void>();
+    final h = _Harness(api);
+    await h.pump(tester, const ChatScreen(sessionId: 's1'));
+    final element = tester.element(find.byType(ChatScreen));
+    final ref = element as WidgetRef;
+    final errors = <String>[];
+
+    unawaited(MixShare.share(element, ref, 's1', onError: errors.add));
+    unawaited(MixShare.share(element, ref, 's1', onError: errors.add));
+    unawaited(MixShare.stop(element, ref, 's1', onError: errors.add));
+    await tester.pump();
+    expect(api.shares, ['s1']);
+    expect(find.byType(CupertinoAlertDialog), findsNothing);
+
+    api.shareGate!.complete();
+    await tester.pumpAndSettle();
+    expect(find.byType(NameScreen), findsOneWidget);
+    expect(errors, isEmpty);
+    expect(api.shares, ['s1']);
+
+    // Back ends that Share; the next one goes out.
+    await tester.tap(find.byKey(TapeBackButton.defaultKey));
+    await tester.pumpAndSettle();
+    unawaited(MixShare.share(element, ref, 's1', onError: errors.add));
+    await tester.pumpAndSettle();
+    expect(api.shares, ['s1', 's1']);
+    expect(h.sheet.shared.single.url, _url);
+  });
 
   testWidgets('Back from the name page shares nothing', (tester) async {
     final api = _Api()..shareAnswers = [const ShareNameRequiredException()];

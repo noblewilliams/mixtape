@@ -38,6 +38,7 @@ import 'package:mixtape/presentation/widgets/mix_home_row.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:mixtape/presentation/screens/shared_mix_screen.dart';
 import 'package:mixtape/presentation/providers/shell_providers.dart';
+import 'package:mixtape/presentation/providers/pending_share_save_provider.dart';
 import 'package:mixtape/presentation/widgets/foundation/mixtape_menu.dart'
     show MixMenuIcons, mixtapeMenuKey;
 import 'package:mixtape/presentation/widgets/shared_mix_row.dart';
@@ -1639,6 +1640,27 @@ void main() {
       container.read(selectedTabProvider.notifier).select(AppTab.home.index);
       await tester.pumpAndSettle();
       expect(reads, 2);
+    });
+
+    testWidgets('a share saved from a link while on Mixes shows at once', (
+      tester,
+    ) async {
+      FlutterSecureStorage.setMockInitialValues({});
+      var rows = <SharedMixRow>[];
+      final api = FakeDjApi();
+      api.onListSessions = () async => [_session(title: 'Mine')];
+      api.onListSharedMixes = () async => rows;
+      final container = _makeContainer(api);
+      container.read(selectedTabProvider.notifier).select(AppTab.mixes.index);
+      await _pump(tester, container);
+      expect(find.text('Late drive, windows down'), findsNothing);
+
+      rows = [share(savedAt: DateTime.now())];
+      await container
+          .read(pendingShareSaveProvider.notifier)
+          .hold('AbCdEfGhIjKlMnOpQrStUv');
+      await tester.pumpAndSettle();
+      expect(find.text('Late drive, windows down'), findsOneWidget);
     });
 
     testWidgets('shared rows are not in Archived', (tester) async {

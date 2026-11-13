@@ -19,6 +19,7 @@ import 'package:mixtape/presentation/providers/library_sync_provider.dart';
 import 'package:mixtape/presentation/providers/music_platform_provider.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
 import 'package:mixtape/presentation/providers/pending_share_save_provider.dart';
+import 'package:mixtape/presentation/providers/shared_mixes_provider.dart';
 import 'package:mixtape/presentation/providers/playback_provider.dart';
 import 'package:mixtape/presentation/screens/chat_screen.dart';
 import 'package:mixtape/presentation/screens/shared_mix_screen.dart';
@@ -77,6 +78,11 @@ class _ShareApi implements DjApi, DjSharedMixes {
   final events = <String>[];
   final receipts = <String>[];
   Object? removeError;
+  Completer<void>? removeGate;
+  List<SharedMixRow> rows = const [];
+
+  @override
+  Future<List<SharedMixRow>> listSharedMixes() async => rows;
 
   @override
   Future<SharedMix> getSharedMix(String token) {
@@ -90,6 +96,7 @@ class _ShareApi implements DjApi, DjSharedMixes {
   @override
   Future<void> removeSharedMix(String token) async {
     removed.add(token);
+    await removeGate?.future;
     final error = removeError;
     if (error != null) throw error;
   }
@@ -489,6 +496,35 @@ void main() {
       await tester.pumpAndSettle();
       expect(h.api.removed, [_token]);
       expect(find.byType(SharedMixScreen), findsNothing);
+    });
+
+    testWidgets('Remove takes the row out of Mixes at once', (tester) async {
+      final h = _Harness();
+      h.api.rows = [
+        SharedMixRow(
+          token: _token,
+          title: 'Late drive, windows down',
+          caseColor: '#bc5734',
+          sharerName: 'Ada',
+          savedAt: DateTime(2026, 11, 13),
+          trackCount: 3,
+          durationMs: 600000,
+        ),
+      ];
+      h.container.listen(sharedMixesProvider, (_, _) {});
+      await h.container.read(sharedMixesProvider.future);
+      h.api.onGet = (_) async =>
+          throw const SharedMixGoneException(SharedMixGoneReason.revoked);
+      h.api.removeGate = Completer<void>();
+      await h.pump(tester, fromMixes: true);
+      await tester.tap(find.byKey(SharedMixScreen.removeKey));
+      await tester.pump();
+      expect(h.api.removed, [_token]);
+      expect(h.container.read(sharedMixesProvider).value, isEmpty);
+      h.api.removeGate!.complete();
+      await tester.pumpAndSettle();
+      expect(find.byType(SharedMixScreen), findsNothing);
+      expect(h.container.read(sharedMixesProvider).value, isEmpty);
     });
 
     testWidgets('a Remove that fails stays and says so', (tester) async {

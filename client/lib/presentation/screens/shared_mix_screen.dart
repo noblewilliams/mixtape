@@ -34,6 +34,7 @@ import '../providers/library_sync_provider.dart';
 import '../providers/music_platform_provider.dart';
 import '../providers/onboarding_provider.dart';
 import '../providers/pending_share_save_provider.dart';
+import '../providers/shared_mixes_provider.dart';
 import '../theme/mixtape_theme.dart';
 import '../widgets/foundation/cassette_tile.dart';
 import '../widgets/foundation/empty_state.dart';
@@ -244,15 +245,19 @@ class _SharedMixScreenState extends ConsumerState<SharedMixScreen>
     if (_removing) return;
     setState(() => _removing = true);
     try {
-      await ref.read(djApiProvider).removeSharedMix(widget.token);
+      // Through Mixes' list, so its row goes at once.
+      final removed = await ref
+          .read(sharedMixesProvider.notifier)
+          .remove(widget.token);
       if (!mounted) return;
-      Navigator.of(context).pop();
-    } catch (_) {
-      if (!mounted) return;
-      showMixSnack(
-        SharedMixScreen.removeFailedMessage,
-        kind: FeedbackKind.error,
-      );
+      if (removed) {
+        Navigator.of(context).pop();
+      } else {
+        showMixSnack(
+          SharedMixScreen.removeFailedMessage,
+          kind: FeedbackKind.error,
+        );
+      }
     } finally {
       if (mounted) setState(() => _removing = false);
     }

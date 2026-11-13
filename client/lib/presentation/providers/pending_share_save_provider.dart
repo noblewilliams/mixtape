@@ -27,6 +27,7 @@ import '../../data/dj/dj_api.dart';
 import '../../data/share/pending_share_store.dart';
 import 'auth_provider.dart';
 import 'dj_providers.dart';
+import 'shared_mixes_provider.dart';
 
 export '../../data/share/pending_share_store.dart';
 
@@ -103,6 +104,11 @@ class PendingShareSaveNotifier extends Notifier<String?> {
     final store = ref.read(pendingShareStoreProvider);
     try {
       await api.saveSharedMix(token);
+      // Mixes may already be showing: bring the new row in now. One nobody
+      // has read yet reads the list fresh when it is first shown.
+      if (ref.mounted && ref.exists(sharedMixesProvider)) {
+        unawaited(ref.read(sharedMixesProvider.notifier).refresh());
+      }
       await _forget(store, token);
     } on SharedMixGoneException {
       // Stopped or unknown: nothing to save, now or later.
