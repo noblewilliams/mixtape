@@ -330,22 +330,39 @@ About 2 hours.
 
 ## Progress
 
-**Server and web code-complete 2026-11-13** on branch `shared-mixes` (worktree
-`../mixtape-share`), not merged or pushed.
+**Code-complete on server, web and iOS 2026-11-13** on branch `shared-mixes`
+(worktree `../mixtape-share`), rebased onto `main` after the DJ turn-steps
+work landed. Not merged, pushed, migrated or deployed.
 
 | Task | Commit |
 |---|---|
-| B0 | `29393be` |
-| S1 | `ff0235b` |
-| S2 | `4109563` |
-| S3 | `5a61d3e` |
-| W1 | `e69bf79` |
-| S4 | `0eabb3c` |
-| W2 | `bc70b8e` |
-| W3 | `76959e2` (+ `5ec4095`, name kept across sign-up) |
+| Spec, plan | `5cde538` |
+| B0 | `eae49dd` |
+| S1 | `2346ac7` |
+| S2 | `d7cedd1` |
+| W1 | `896f377` |
+| S3 | `c9b8352` |
+| S4 | `0975ae1` |
+| W2 | `f02556d` |
+| W3 | `66f99f2` (+ `9b0c4fd`, name kept across sign-up) |
+| C1 | `c71d89c` |
+| C2 | `c299f4e` |
+| C3 | `0c5e80b` (+ `8407a0b`, opens inside the tab) |
+| C4 | `cd8412e` (+ `4602359`, `2cefa9e`) |
 
-Each task had a review and one fix round (S1 and S3 reviewed directly). Last
-full runs: server 2706, web 1174, scripts 25, all passing. Deviations landed
-in review: the first Apple Music play on the shared page takes a second tap
-(decisions 2026-11-13); shared plays never record listening evidence; the
-Share name page has Back but no Skip. iOS C1–C4 and gates G1–G4 remain.
+Each task had a review and one fix round (S1 and S3 reviewed directly).
+Last full runs: server 2777 (one load flake that passes alone), web 1174,
+scripts 25, iOS 2516 with the two failures already on `main`
+(welcome_screen reduced-motion, lyric_turn version markers). Simulator
+preview checked: Mixes rows, SharedMixScreen, Remove swipe, the stopped
+state.
+
+Deviations that landed in review:
+- the first Apple Music play on the shared web page takes a second tap
+  (decisions 2026-11-13);
+- shared plays never record listening evidence, on web or iOS;
+- the Share name page has Back but no Skip;
+- iOS sends the share text and link as one string (share_plus limit);
+- `FlutterDeepLinkingEnabled` is off so only `app_links` handles `/m/` links.
+
+Remaining: gates G1–G4.
