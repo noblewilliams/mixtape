@@ -6,6 +6,7 @@ import 'presentation/providers/auth_provider.dart';
 import 'presentation/providers/first_run_provider.dart';
 import 'presentation/providers/incoming_link_provider.dart';
 import 'presentation/providers/name_page_provider.dart';
+import 'presentation/providers/pending_share_save_provider.dart';
 import 'presentation/theme/mixtape_theme.dart';
 import 'presentation/screens/debug/foundation_gallery_screen.dart';
 import 'presentation/screens/debug/mixes_preview.dart';
@@ -63,6 +64,9 @@ class MixtapeApp extends ConsumerWidget {
     // Universal links are listened for from launch, whatever the root, so a
     // share link waits here until the shell or the first-run flow opens it.
     ref.listen(pendingSharedMixProvider, (_, _) {});
+    // A share opened before there was a session is saved once one appears,
+    // even after the first-run root swaps out the screen that held it.
+    ref.listen(pendingShareSaveProvider, (_, _) {});
     final root = switch (auth) {
       AuthStatus.unknown => _Root.unknown,
       AuthStatus.noSession => _Root.firstRun,

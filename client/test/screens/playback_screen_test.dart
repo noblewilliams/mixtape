@@ -388,6 +388,32 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('a shared mix has no tape or shape to open, but still sends', (
+    tester,
+  ) async {
+    final bridge = RecordingBridge();
+    final observer = _Observer();
+    final musicKit = FakeMusicKit();
+    await _pump(
+      tester,
+      _player(bridge, sessionId: 'shared:AbCdEfGhIjKlMnOpQrStUv'),
+      observer: observer,
+      musicKit: musicKit,
+      energy: const {
+        'energyArc': 'rise',
+        'energyJourney': {'status': 'follows'},
+      },
+    );
+    await tester.tap(_action('Up next'), warnIfMissed: false);
+    await tester.tap(_action('Shape'), warnIfMissed: false);
+    await tester.pumpAndSettle();
+    expect(observer.lastPushed, isNull);
+    expect(find.byType(BottomSheet), findsNothing);
+    await tester.tap(_action('Send to Music'));
+    await tester.pumpAndSettle();
+    expect(musicKit.played, hasLength(1));
+  });
+
   testWidgets('Shape opens the mix shape', (tester) async {
     final bridge = RecordingBridge();
     await _pump(

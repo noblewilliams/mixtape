@@ -10,10 +10,11 @@ import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:app_links/app_links.dart';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/share/share_link.dart';
+import '../screens/shared_mix_screen.dart';
 
 /// Where links that open the app come from. Tests use a fake, so no test
 /// touches the `app_links` channels.
@@ -129,9 +130,13 @@ final pendingSharedMixProvider =
 /// navigator; push with `Navigator.of(context, rootNavigator: true)`.
 typedef SharedMixPresenter = void Function(BuildContext context, String token);
 
-/// PLACEHOLDER (task C2): a no-op until SharedMixScreen lands (task C3). The
-/// orchestrator wires this to push `SharedMixScreen(token: token)` on the
-/// root navigator. Until then a share link is consumed and nothing opens.
+/// Pushes the read-only [SharedMixScreen] on the root navigator, over the
+/// shell or the first-run flow (spec 2026-11-13 shared-mixes). Tests override
+/// it to observe the call.
 final sharedMixPresenterProvider = Provider<SharedMixPresenter>(
-  (ref) => (context, token) {},
+  (ref) => (context, token) {
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(builder: (_) => SharedMixScreen(token: token)),
+    );
+  },
 );

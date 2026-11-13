@@ -604,12 +604,15 @@ class _NowPlaying extends StatelessWidget {
   Widget _actions(BuildContext context) {
     final sessionId = player.sessionId;
     final enabled = !_unavailable && sessionId != null;
+    // A shared mix is no session of the listener's: it has no shape to read
+    // and no tape to open (spec 2026-11-13 shared-mixes).
+    final ownMix = enabled && !isSharedPlayback(sessionId);
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         Consumer(
           builder: (context, ref, _) {
-            final energy = enabled
+            final energy = ownMix
                 ? ref.watch(
                     mixEnergyProvider((id: sessionId, version: player.version)),
                   )
@@ -636,7 +639,7 @@ class _NowPlaying extends StatelessWidget {
           // The board draws Up next as the one lit action: it is where this
           // mix lives.
           active: true,
-          onPressed: enabled
+          onPressed: ownMix
               ? () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     builder: (_) => QueueScreen(sessionId: sessionId),

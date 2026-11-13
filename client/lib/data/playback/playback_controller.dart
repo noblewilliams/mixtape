@@ -52,6 +52,16 @@ String playbackFailureLine(String code) => switch (code) {
   _ => 'Apple Music did not start playing. Try again.',
 };
 
+/// The player's session id for a shared mix (spec 2026-11-13 shared-mixes):
+/// `shared:<token>`. Not a session of the listener's, so nothing that reads
+/// a session (its shape, its tape) applies to it.
+const sharedPlaybackPrefix = 'shared:';
+
+/// Whether the player's [id] is a shared mix rather than one of the
+/// listener's own.
+bool isSharedPlayback(String? id) =>
+    id != null && id.startsWith(sharedPlaybackPrefix);
+
 final _playbackStorageWrites = <String, Future<void>>{};
 
 class PlaybackController extends ChangeNotifier {
@@ -83,6 +93,12 @@ class PlaybackController extends ChangeNotifier {
   String? _clearId;
   int? _clearRevision;
   bool _startFailed = false;
+  bool _recording = true;
+
+  /// Whether the mix on the player counts as listening evidence. A shared
+  /// mix does not: it is someone else's, and the listener did not ask for it
+  /// (as the web's `record: false`).
+  bool get recording => _recording;
   bool busy = false, _disposed = false, _sending = false;
   List<Map<String, dynamic>> _pending = [];
   StreamSubscription<PlayerSample>? _subscription;
@@ -179,6 +195,7 @@ class PlaybackController extends ChangeNotifier {
 
   void _record(int index, int ms, String kind) {
     if (_disposed ||
+        !_recording ||
         preferences?['enabled'] != true ||
         index >= tracks.length) {
       return;
@@ -252,12 +269,16 @@ class PlaybackController extends ChangeNotifier {
   /// never granted (the system prompt shows on the Play tap; once decided,
   /// `MusicAuthorization.request` answers without prompting), then tries
   /// once more. Every other native failure keeps its code in [failureCode].
+  ///
+  /// [record] false plays without collecting listening evidence (a shared
+  /// mix); the mix it replaces still records the listen it was on.
   Future<PlaybackStart> start(
     String id,
     int mixVersion,
     String mixTitle,
-    List<QueueTrack> queue,
-  ) async {
+    List<QueueTrack> queue, {
+    bool record = true,
+  }) async {
     if (busy) return PlaybackStart.superseded;
     busy = true;
     error = '';
@@ -269,6 +290,7 @@ class PlaybackController extends ChangeNotifier {
     await initialize();
     if (_disposed || generation != _generation) return PlaybackStart.superseded;
     meter.finish('listen');
+    _recording = record;
     sessionId = id;
     version = mixVersion;
     title = mixTitle;
@@ -354,6 +376,7 @@ class PlaybackController extends ChangeNotifier {
                     .skip((unavailableIndex ?? sample.index ?? 0) + 1)
                     .toList()
               : tracks,
+          record: _recording,
         );
       }
       return;
@@ -396,7 +419,7 @@ class PlaybackController extends ChangeNotifier {
         return;
       }
       busy = false;
-      await start(sessionId!, version, title, tracks);
+      await start(sessionId!, version, title, tracks, record: _recording);
     } catch (_) {
       if (generation == _generation) {
         error = 'Apple Music access was not granted. Your mix is unchanged.';

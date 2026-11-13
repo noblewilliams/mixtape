@@ -10,6 +10,7 @@ import 'package:mixtape/main.dart';
 import 'package:mixtape/presentation/providers/incoming_link_provider.dart';
 import 'package:mixtape/presentation/screens/first_run/artists_screen.dart';
 import 'package:mixtape/presentation/screens/first_run/welcome_screen.dart';
+import 'package:mixtape/presentation/screens/shared_mix_screen.dart';
 
 import '../helpers/fake_incoming_links.dart';
 import 'first_run/first_run_harness.dart';
@@ -24,6 +25,17 @@ NavigatorState rootNavigator(WidgetTester tester) =>
 
 void main() {
   group('shell', () {
+    testWidgets('the default presenter pushes SharedMixScreen', (tester) async {
+      final source = FakeIncomingLinkSource(initial: shareLink(token));
+      final container = shellContainer(
+        extra: [incomingLinkSourceProvider.overrideWithValue(source)],
+      );
+      await pumpShell(tester, container);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byType(SharedMixScreen), findsOneWidget);
+      expect(container.read(pendingSharedMixProvider), isNull);
+    });
+
     testWidgets('a cold-start link opens once on the root navigator', (
       tester,
     ) async {

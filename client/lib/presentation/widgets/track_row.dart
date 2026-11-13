@@ -32,6 +32,7 @@ class TrackRow extends StatelessWidget {
     this.onOpenInSpotify,
     this.onMoveUp,
     this.onMoveDown,
+    this.showGrip = true,
   });
 
   /// 1-based, as drawn. The screen numbers by the queue's own order, so the
@@ -59,6 +60,9 @@ class TrackRow extends StatelessWidget {
   /// The VoiceOver rotor's Move up / Move down, which stand in for dragging.
   final VoidCallback? onMoveUp;
   final VoidCallback? onMoveDown;
+
+  /// False on a read-only list (a shared mix): the grip's column stays, empty.
+  final bool showGrip;
 
   /// The board's fixed columns: a 22 pt number gutter, 48 pt art, a 36 × 44
   /// grip, and a hairline inset past both leading columns.
@@ -276,8 +280,10 @@ class TrackRow extends StatelessWidget {
                 ),
                 if (onOpenInSpotify != null)
                   _spotifyButton(tokens)
+                else if (showGrip)
+                  _grip(tokens)
                 else
-                  _grip(tokens),
+                  const SizedBox(width: gripWidth),
               ],
             ),
           ),

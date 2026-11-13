@@ -40,6 +40,7 @@ class TapeHeader extends StatelessWidget {
     required this.caseColor,
     required this.title,
     required this.meta,
+    this.byline,
     this.cassetteWidth = defaultCassetteWidth,
     this.titleStyle,
   });
@@ -47,6 +48,9 @@ class TapeHeader extends StatelessWidget {
   final Color caseColor;
   final String title;
   final String meta;
+
+  /// A plum line between the title and [meta]: "From Ada" on a shared mix.
+  final String? byline;
   final double cassetteWidth;
   final TextStyle? titleStyle;
 
@@ -56,6 +60,7 @@ class TapeHeader extends StatelessWidget {
   static const Key cassetteKey = Key('tape-header-cassette');
   static const Key titleKey = Key('tape-header-title');
   static const Key metaKey = Key('arrangement-meta');
+  static const Key bylineKey = Key('tape-header-byline');
 
   /// `.thead .cs { transform: rotate(-4deg) }`.
   static const double tilt = -4 * math.pi / 180;
@@ -94,6 +99,19 @@ class TapeHeader extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
+          if (byline != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 3),
+              child: Text(
+                byline!,
+                key: bylineKey,
+                textAlign: TextAlign.center,
+                style: tokens.secondary.copyWith(
+                  color: tokens.plum,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
           Text(
             meta,
             key: metaKey,

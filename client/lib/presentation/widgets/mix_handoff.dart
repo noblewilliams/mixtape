@@ -195,6 +195,18 @@ class MixHandoffKeys {
     saveConfirm: Key('chat-playlist-save'),
     saveDialogTitle: 'Create playlist',
   );
+
+  /// `screens/shared_mix_screen.dart`.
+  static const shared = MixHandoffKeys(
+    playNow: Key('shared-play'),
+    createPlaylist: Key('shared-create-playlist'),
+    spotifyPlaylist: Key('shared-spotify-playlist'),
+    reason: Key('shared-actions-reason'),
+    nameField: Key('shared-playlist-name'),
+    authorField: Key('shared-playlist-author'),
+    saveConfirm: Key('shared-playlist-save'),
+    saveDialogTitle: 'Create playlist',
+  );
 }
 
 /// The handoff actions, mixed into the screen that draws them so they
@@ -210,6 +222,12 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
   /// The host's toast. Deliberately the host's own: the arrangement and the
   /// conversation each place the floating bar differently.
   void showMixSnack(String message, {FeedbackKind kind = FeedbackKind.info});
+
+  /// Whether these actions count as the listener's own evidence: session
+  /// events, playlist receipts and listening on the app's player. False on
+  /// a shared mix (spec 2026-11-13 shared-mixes), which is someone else's
+  /// and has no session of the listener's to bind them to.
+  bool get mixRecordsEvidence => true;
 
   bool _sendingToMusic = false;
   bool _savingPlaylist = false;
@@ -235,6 +253,7 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
   /// zero tracks isn't evidence the user liked anything in this mix, and
   /// would be a false taste signal.
   void postMixEvent(String type) {
+    if (!mixRecordsEvidence) return;
     unawaited(() async {
       try {
         await ref.read(djApiProvider).postSessionEvent(mixSessionId, type);
@@ -277,7 +296,19 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
   /// `docs/superpowers/specs/2026-11-09-one-platform-play-design.md`). No
   /// subscription tries the Music app too, and only if that also fails says
   /// why.
-  Future<void> playHere(ChatState state, List<QueueTrack> queue) async {
+  Future<void> playHere(ChatState state, List<QueueTrack> queue) => playMix(
+    queue: queue,
+    version: state.queueVersion,
+    title: state.session.title,
+  );
+
+  /// [playHere] for a mix that is not a [ChatState] (a shared mix): the
+  /// version and title the player shows, and the songs in order.
+  Future<void> playMix({
+    required List<QueueTrack> queue,
+    required int version,
+    required String title,
+  }) async {
     final player = ref.read(playbackProvider);
     // Read up front: the listener may leave while Apple answers, and a
     // failed start must still be cleaned up and still reach the Music app.
@@ -286,9 +317,10 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
     final sessionId = mixSessionId;
     final outcome = await player.start(
       sessionId,
-      state.queueVersion,
-      state.session.title,
+      version,
+      title,
       queue,
+      record: mixRecordsEvidence,
     );
     switch (outcome) {
       case PlaybackStart.superseded:
@@ -307,6 +339,7 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
           music: music,
           api: api,
           sessionId: sessionId,
+          record: mixRecordsEvidence,
           failureMessage: outcome == PlaybackStart.subscriptionRequired
               ? mixPlaySubscriptionMessage
               : mixPlayFallbackFailedMessage,
@@ -334,6 +367,7 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
         music: ref.read(musicKitBridgeProvider),
         api: ref.read(djApiProvider),
         sessionId: mixSessionId,
+        record: mixRecordsEvidence,
         failureMessage: failureMessage,
       );
 
@@ -345,6 +379,7 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
     required MusicKitBridge music,
     required DjApi api,
     required String sessionId,
+    required bool record,
     String? failureMessage,
   }) async {
     if (_sendingToMusic) return;
@@ -358,9 +393,11 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
       final skipped = queue.length - ids.length;
       await music.playQueue(ids);
       // As [postMixEvent], fire-and-forget and silent.
-      unawaited(
-        api.postSessionEvent(sessionId, 'played').catchError((Object _) {}),
-      );
+      if (record) {
+        unawaited(
+          api.postSessionEvent(sessionId, 'played').catchError((Object _) {}),
+        );
+      }
       if (!mounted) return;
       showMixSnack(mixPlaySuccessMessage(skipped), kind: FeedbackKind.success);
     } on MusicKitException catch (e) {
@@ -462,6 +499,7 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
     ];
     final creationApi = ref.read(djApiProvider);
     final creationSessionId = mixSessionId;
+    final receipt = mixRecordsEvidence;
     try {
       final result = await ref
           .read(musicKitBridgeProvider)
@@ -471,6 +509,7 @@ mixin MixHandoff<T extends ConsumerStatefulWidget> on ConsumerState<T> {
             author: author,
             description: 'made by mixtape',
             onCreated: (libraryId) {
+              if (!receipt) return;
               // Bind to the originating mix, not a screen/account that may
               // have changed while Apple was creating the playlist.
               unawaited(

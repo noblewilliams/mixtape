@@ -14,6 +14,11 @@
 /// caption follows them: listening, the crates, picking past its 12 s
 /// line, the sound check, pressing, labelling, and a note overtaken by the
 /// liner notes before it can show.
+///
+/// The made-up API answers the shared-mix calls too (spec 2026-11-13
+/// shared-mixes), so `SharedMixScreen` opens on made-up data from here:
+/// [MixesPreview.sharedToken] loads, [MixesPreview.goneToken] reads as a
+/// stopped share.
 library;
 
 import 'package:flutter/material.dart';
@@ -32,6 +37,12 @@ import '../mixes_screen.dart';
 
 class MixesPreview extends StatefulWidget {
   const MixesPreview({super.key});
+
+  /// A made-up share from Ada, ten songs, two with no Apple Music match.
+  static const String sharedToken = 'PreviewShareAdaLateDrv';
+
+  /// A made-up share its sender stopped.
+  static const String goneToken = 'PreviewShareStoppedXyz';
 
   @override
   State<MixesPreview> createState() => _MixesPreviewState();
@@ -89,7 +100,7 @@ class _SignedIn extends AuthNotifier {
 }
 
 /// Answers the calls the Mixes tab makes; anything else is not wired.
-class _PreviewApi implements DjApi, DjTurnProgressSender {
+class _PreviewApi implements DjApi, DjTurnProgressSender, DjSharedMixes {
   _PreviewApi() {
     final now = DateTime.now();
     const active = [
@@ -324,6 +335,71 @@ class _PreviewApi implements DjApi, DjTurnProgressSender {
     kind: s.kind,
     pick: s.pick,
   );
+
+  final Set<String> _savedShares = {};
+
+  @override
+  Future<SharedMix> getSharedMix(String token) async {
+    await _latency;
+    if (token != MixesPreview.sharedToken) {
+      throw const SharedMixGoneException(SharedMixGoneReason.revoked);
+    }
+    const songs = [
+      ('Midnight City', 'M83', '1'),
+      ('Nightcall', 'Kavinsky', '2'),
+      ('Electric Feel', 'MGMT', null),
+      ('Feels Like We Only Go Backwards', 'Tame Impala', '4'),
+      ('Dreams', 'Fleetwood Mac', '5'),
+      ('Redbone', 'Childish Gambino', '6'),
+      ('Ivy', 'Frank Ocean', null),
+      ('Pink + White', 'Frank Ocean', '8'),
+      ('Kiss of Life', 'Sade', '9'),
+      ('Teardrop', 'Massive Attack', '10'),
+    ];
+    return SharedMix(
+      token: token,
+      title: 'Late drive, windows down',
+      caseColor: '#bc5734',
+      sharerName: 'Ada',
+      sharedAt: DateTime.now().subtract(const Duration(hours: 2)),
+      isOwner: false,
+      tracks: [
+        for (final (title, artist, id) in songs)
+          SharedMixTrack(
+            title: title,
+            artist: artist,
+            durationMs: 246000,
+            appleId: id,
+          ),
+      ],
+    );
+  }
+
+  @override
+  Future<void> saveSharedMix(String token) async {
+    await _latency;
+    _savedShares.add(token);
+  }
+
+  @override
+  Future<void> removeSharedMix(String token) async {
+    await _latency;
+    _savedShares.remove(token);
+  }
+
+  @override
+  Future<List<SharedMixRow>> listSharedMixes() async {
+    await _latency;
+    return const [];
+  }
+
+  @override
+  Future<ShareLinkResult> shareSession(String sessionId) =>
+      throw UnimplementedError('not wired in the Mixes preview');
+
+  @override
+  Future<void> stopSharing(String sessionId) =>
+      throw UnimplementedError('not wired in the Mixes preview');
 
   @override
   dynamic noSuchMethod(Invocation invocation) =>

@@ -148,6 +148,58 @@ void main() {
       await bridge.events.close();
     },
   );
+  group('a play started without recording (shared mixes)', () {
+    void listenThrough(PlaybackController player) {
+      for (var t = 0; t <= 60000; t += 1000) {
+        player.meter.sample(
+          PlayerSample(index: 0, positionMs: t.toDouble(), status: 'playing'),
+          t,
+        );
+      }
+    }
+
+    test('records nothing, and says so', () async {
+      final api = FakeApi(), bridge = FakeBridge();
+      final player = PlaybackController(api, bridge);
+      await player.start('shared:tok', 0, 'Shared', [song], record: false);
+      expect(player.recording, isFalse);
+      expect(isSharedPlayback(player.sessionId), isTrue);
+      listenThrough(player);
+      await player.stop();
+      await Future<void>.delayed(Duration.zero);
+      expect(api.batches, isEmpty);
+      player.dispose();
+      await bridge.events.close();
+    });
+
+    test('the mix playing before it still records its listen', () async {
+      final api = FakeApi(), bridge = FakeBridge();
+      final player = PlaybackController(api, bridge);
+      await player.start('mix', 2, 'Mix', [song]);
+      listenThrough(player);
+      await player.start('shared:tok', 0, 'Shared', [song], record: false);
+      await Future<void>.delayed(Duration.zero);
+      expect(api.batches.single.single, containsPair('sessionId', 'mix'));
+      player.dispose();
+      await bridge.events.close();
+    });
+
+    test('a retried start stays unrecorded', () async {
+      final api = FakeApi(), bridge = FakeBridge()..failStart = true;
+      final player = PlaybackController(api, bridge);
+      await player.start('shared:tok', 0, 'Shared', [song], record: false);
+      bridge.failStart = false;
+      await player.command('resume');
+      expect(bridge.starts, 2);
+      expect(player.recording, isFalse);
+      listenThrough(player);
+      await player.stop();
+      await Future<void>.delayed(Duration.zero);
+      expect(api.batches, isEmpty);
+      player.dispose();
+      await bridge.events.close();
+    });
+  });
   group('a start the native player refuses', () {
     PlatformException native(String code, [Object? details]) =>
         PlatformException(code: code, message: 'native', details: details);
