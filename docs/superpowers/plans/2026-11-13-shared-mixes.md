@@ -365,4 +365,15 @@ Deviations that landed in review:
 - iOS sends the share text and link as one string (share_plus limit);
 - `FlutterDeepLinkingEnabled` is off so only `app_links` handles `/m/` links.
 
-Remaining: gates G1–G4.
+**G1 done 2026-11-13** (founder's go in chat): migration 0050 applied to
+production Neon from a clean detached worktree of `b8f1991` (51 migrations,
+`mix_shares` and `mix_share_saves` present); Worker deployed from the same
+worktree as version `07ebc300-a959-4999-8bbb-95e402b0d1df` with
+`SHARE_READ_LIMITER` (60/60s) and `SHARE_BASE_URL`. Smoke test with a
+throwaway anonymous user: share gave a 22-character token and the same token
+again at the same version; the public read had only the contract keys and
+the first name; the owner read had `isOwner` and `sessionId`; the session
+detail said `shared: true`; stop gave 204, then the read 410; an unknown
+token 404; the user was deleted and its session and share went with it.
+
+Remaining: gates G2–G4.
