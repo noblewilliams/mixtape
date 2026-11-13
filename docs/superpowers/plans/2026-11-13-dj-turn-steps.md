@@ -1,7 +1,9 @@
 # The DJ's working line follows the turn's real steps: plan
 
 **Status:** approved 2026-11-13 (founder: streamed turn, the step line on
-the Making screens, names in the caption).
+the Making screens, names in the caption). S1 `02ecab4`, C1 `cf548a0`, S2
+`9b4415b`, C2 `2d1e68c`, W1+W2 `5d9e959` (one task), each reviewed with one
+fix round. G (ship) is the founder's.
 - Spec: `../specs/2026-11-13-dj-turn-steps-design.md`.
 - Decision: `../../decisions.md`, 2026-11-13 "The DJ's working line follows
   the turn's real steps".

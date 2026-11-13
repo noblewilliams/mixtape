@@ -221,7 +221,17 @@ type as a stream.
 
 The stream ends after `result` or `error`. Every event, the last one
 included, ends with a blank line (`\n\n`): a client counts an event only
-once its blank line arrives. A stream that ends without
+once its blank line arrives.
+
+**A dropped stream.** Before the stream opened, a drop is a network failure,
+as today. Once it opened, the server has the turn and is likely still
+running it (up to 30 s more under `waitUntil`). The client keeps the
+listener's line, reads the session at once and adopts a new DJ reply if one
+landed. If none had, it shows the failure as a server-side one and reads
+once more about 25 s later, adopting the reply then and dropping the
+failure line. A create whose stream named the mix before dropping opens
+that mix with the failure, instead of reporting offline, so a retry does
+not make a second mix. A stream that ends without
 either is a dropped connection, and the client treats it as a network
 failure, as a timeout is treated today.
 
