@@ -35,6 +35,16 @@ export function clearWorkspaceRestore(userId?: string) {
   } catch { /* Storage can be unavailable. */ }
 }
 
+/**
+ * Open this mix when the app next loads in this tab, through the same keys the
+ * shell restores from. Used when an owner opens their own shared link.
+ */
+export function openMixOnNextLoad(userId: string, sessionId: string) {
+  const scope = `${prefix}${encodeURIComponent(userId)}:`
+  write(`${scope}activeSessionId`, sessionId)
+  write(`${scope}activeView`, 'session')
+}
+
 export function WorkspaceRestoreProvider({ userId, restoring, children }: Scope & { children: ReactNode }) {
   return <RestoreContext.Provider value={{ userId, restoring }}>{children}</RestoreContext.Provider>
 }

@@ -1,4 +1,5 @@
-import { ApiError } from '../api/client'
+import { ApiError, EmptyMixError, SharedMixGoneError } from '../api/client'
+import { toSharedMix } from '../api/mappers'
 import type {
   AlbumPickResponse,
   ApiAlbum,
@@ -10,6 +11,7 @@ import type {
   ApiSeedTrack,
   ApiSession,
   ApiSessionSummary,
+  ApiSharedMix,
   CreateSessionResponse,
   FunnelEventInput,
   ListeningImportPackage,
@@ -106,6 +108,8 @@ export type FakeApiOptions = {
    * until it resolves. Nothing is reported without it, as from an older server.
    */
   turnProgress?: TurnProgress[] | ((report: TurnProgressListener, turn: { method: 'createSession' | 'sendMessage'; sessionId?: string }) => void | Promise<void>)
+  /** Shares GET /shared/:token can read, by token; 'revoked' answers 410, a missing token 404. */
+  sharedMixes?: Record<string, ApiSharedMix | 'revoked'>
 }
 
 const notFound = () => new ApiError(404, { error: 'not_found' })
@@ -199,6 +203,15 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}, options: Fake
     return { addMusic: 'history' }
   }
   const queueState = new Map<string, ApiQueueTrack[]>()
+  const sharedMixes = new Map<string, ApiSharedMix | 'revoked'>(Object.entries(options.sharedMixes ?? {}))
+  const sharedSaves = new Map<string, string>()
+  const sessionShares = new Map<string, string>()
+  const readShare = (token: string): ApiSharedMix => {
+    const share = sharedMixes.get(token)
+    if (share === undefined) throw new SharedMixGoneError(404, { error: 'not_found' })
+    if (share === 'revoked') throw new SharedMixGoneError(410, { error: 'revoked' })
+    return share
+  }
   const createdSessions = new Map<string, CreateSessionResponse>()
   const funnelEvents: FunnelEventInput[] = []
   const listeningImports = new Map<string, FakeListeningImport>()
@@ -585,6 +598,49 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}, options: Fake
       seedTracks = seedTracks.filter((track) => track.trackId !== trackId)
       if (seedTracks.length === before) throw new Error('fake seed track not found')
       return { removed: true, deleted: true }
+    },
+    getSharedMix: async (token) => toSharedMix(structuredClone(readShare(token))),
+    saveSharedMix: async (token) => {
+      const share = readShare(token)
+      // As the server: the owner's own save writes no row.
+      if (!share.isOwner && !sharedSaves.has(token)) sharedSaves.set(token, tick())
+    },
+    removeSharedMix: async (token) => { sharedSaves.delete(token) },
+    listSharedMixes: async () =>
+      [...sharedSaves.entries()]
+        .filter(([token]) => typeof sharedMixes.get(token) === 'object')
+        .sort(([, a], [, b]) => b.localeCompare(a))
+        .map(([token, savedAt]) => {
+          const share = sharedMixes.get(token) as ApiSharedMix
+          const first = share.tracks.find((track) => track.artwork)?.artwork
+          return {
+            token, title: share.title, caseColor: share.caseColor, sharerName: share.sharerName, savedAt,
+            trackCount: share.tracks.length,
+            durationMs: share.tracks.reduce((total, track) => total + (track.durationMs ?? 0), 0),
+            ...(first ? { artworkUrl: first.url, ...(first.bgColor ? { artworkBgColor: first.bgColor } : {}) } : {}),
+          }
+        }),
+    shareSession: async (sessionId) => {
+      const queue = currentQueue(sessionId)
+      if (queue.length === 0) throw new EmptyMixError({ error: 'empty_mix' })
+      const token = sessionShares.get(sessionId) ?? `fake${sessionId.replace(/[^A-Za-z0-9]/g, '')}`.padEnd(22, '0').slice(0, 22)
+      sessionShares.set(sessionId, token)
+      const session = demoSessions.find((item) => item.id === sessionId)
+      sharedMixes.set(token, {
+        token, title: session?.title ?? 'Mix', caseColor: session?.caseColor ?? '#3f4851', sharerName: 'Ada', sharedAt: tick(),
+        isOwner: true, sessionId,
+        tracks: queue.map((track) => ({
+          title: track.title, artist: track.artist, album: null, durationMs: track.durationMs ?? null,
+          artwork: track.artworkUrl ? { url: track.artworkUrl, width: track.artworkWidth, height: track.artworkHeight, bgColor: track.artworkBgColor } : null,
+          appleId: track.appleId, isrc: null,
+        })),
+      })
+      return { token, url: `https://miixtape.netlify.app/m/${token}` }
+    },
+    stopSharing: async (sessionId) => {
+      const token = sessionShares.get(sessionId)
+      if (token) sharedMixes.set(token, 'revoked')
+      sessionShares.delete(sessionId)
     },
   }
 

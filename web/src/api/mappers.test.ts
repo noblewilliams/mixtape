@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ApiAlbum, ApiListenLaterEntry, ApiQueueTrack, ApiSession, ApiSessionSummary } from './client'
-import { toAlbumPick, toAlbumPickState, toDjSession, toListenLaterEntry, toQueueTrack } from './mappers'
+import { MalformedResponseError, toAlbumPick, toAlbumPickState, toDjSession, toListenLaterEntry, toQueueTrack, toSharedMix, toSharedMixRow } from './mappers'
 
 function track(artwork: Pick<
   ApiQueueTrack,
@@ -196,5 +196,91 @@ describe('toDjSession kinds', () => {
   it('tolerates an album detail with no queue', () => {
     const session = toDjSession({ ...base, kind: 'album' }, undefined)
     expect(session).toMatchObject({ kind: 'album', trackCount: 0, durationLabel: '0 min' })
+  })
+})
+
+describe('shared mix mapper (strict)', () => {
+  const body = () => ({
+    token: '4fQ9xK2mZr7TbW1nLpY8sA',
+    title: 'Late drive, windows down',
+    caseColor: '#bc5734',
+    sharerName: 'Ada',
+    sharedAt: '2026-11-13T09:00:00.000Z',
+    isOwner: false,
+    tracks: [
+      {
+        title: 'Midnight City', artist: 'M83', album: 'Hurry Up, We’re Dreaming', durationMs: 243_000,
+        artwork: { url: 'https://is1-ssl.mzstatic.com/a/{w}x{h}.{f}', width: 3000, height: 3000, bgColor: '1a2b3c' },
+        appleId: '1440818588', isrc: 'FR6V81100060',
+      },
+      { title: 'Nightcall', artist: 'Kavinsky', album: null, durationMs: null, artwork: null, appleId: null, isrc: null },
+    ],
+  })
+
+  it('maps a complete body, flattening artwork and dropping nulls', () => {
+    const mix = toSharedMix(body())
+    expect(mix).toEqual({
+      token: '4fQ9xK2mZr7TbW1nLpY8sA',
+      title: 'Late drive, windows down',
+      caseColor: '#bc5734',
+      sharerName: 'Ada',
+      sharedAt: '2026-11-13T09:00:00.000Z',
+      isOwner: false,
+      tracks: [
+        {
+          title: 'Midnight City', artist: 'M83', album: 'Hurry Up, We’re Dreaming', durationMs: 243_000,
+          artworkUrl: 'https://is1-ssl.mzstatic.com/a/{w}x{h}.{f}', artworkBgColor: '1a2b3c',
+          appleId: '1440818588', isrc: 'FR6V81100060',
+        },
+        { title: 'Nightcall', artist: 'Kavinsky' },
+      ],
+    })
+  })
+
+  it('keeps sessionId only for the owner', () => {
+    expect(toSharedMix({ ...body(), isOwner: true, sessionId: 'session-1' }).sessionId).toBe('session-1')
+    expect(toSharedMix({ ...body(), isOwner: false, sessionId: 'session-1' })).not.toHaveProperty('sessionId')
+  })
+
+  it('rejects an owner body without a session id', () => {
+    expect(() => toSharedMix({ ...body(), isOwner: true })).toThrow(MalformedResponseError)
+  })
+
+  it('accepts a null sharer name (the client shows "a friend")', () => {
+    expect(toSharedMix({ ...body(), sharerName: null }).sharerName).toBeNull()
+  })
+
+  it.each([
+    ['not an object', null],
+    ['a missing sharerName key', (({ sharerName: _omit, ...rest }) => rest)(body())],
+    ['a numeric sharerName', { ...body(), sharerName: 7 }],
+    ['a missing title', { ...body(), title: undefined }],
+    ['a numeric token', { ...body(), token: 7 }],
+    ['a missing isOwner', { ...body(), isOwner: undefined }],
+    ['tracks that are not a list', { ...body(), tracks: {} }],
+    ['a track without an artist', { ...body(), tracks: [{ ...body().tracks[0], artist: undefined }] }],
+    ['a string duration', { ...body(), tracks: [{ ...body().tracks[0], durationMs: '243000' }] }],
+    ['artwork without a url', { ...body(), tracks: [{ ...body().tracks[0], artwork: { width: 1, height: 1, bgColor: null } }] }],
+    ['a missing appleId field', { ...body(), tracks: [{ title: 'A', artist: 'B', album: null, durationMs: null, artwork: null, isrc: null }] }],
+  ])('rejects %s', (_label, value) => {
+    expect(() => toSharedMix(value)).toThrow(MalformedResponseError)
+  })
+
+  it('maps a saved shared-mix row and rejects a malformed one', () => {
+    const row = {
+      token: '4fQ9xK2mZr7TbW1nLpY8sA', title: 'Late drive', caseColor: '#bc5734', sharerName: 'Ada',
+      savedAt: '2026-11-13T09:00:00.000Z', trackCount: 10, durationMs: 2_460_000,
+      artwork: { url: 'https://example.test/{w}x{h}.{f}', width: null, height: null, bgColor: null },
+    }
+    expect(toSharedMixRow(row)).toEqual({
+      token: row.token, title: row.title, caseColor: row.caseColor, sharerName: 'Ada', savedAt: row.savedAt,
+      trackCount: 10, durationMs: 2_460_000, artworkUrl: 'https://example.test/{w}x{h}.{f}',
+    })
+    expect(() => toSharedMixRow({ ...row, trackCount: '10' })).toThrow(MalformedResponseError)
+    expect(() => toSharedMixRow({ ...row, artwork: undefined })).toThrow(MalformedResponseError)
+    expect(toSharedMixRow({ ...row, sharerName: null }).sharerName).toBeNull()
+    const { sharerName: _omit, ...withoutSharer } = row
+    expect(() => toSharedMixRow(withoutSharer)).toThrow(MalformedResponseError)
+    expect(() => toSharedMixRow({ ...row, sharerName: 7 })).toThrow(MalformedResponseError)
   })
 })

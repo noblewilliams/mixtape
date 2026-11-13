@@ -1,3 +1,5 @@
+import type { SharedMix, SharedMixRow } from '../domain'
+import { MalformedResponseError, toSharedMix, toSharedMixRow } from './mappers'
 import type {
   LibrarySongSnapshot,
   PlaylistEntrySnapshot,
@@ -461,6 +463,40 @@ export type DeleteAccountResponse = {
   deleted: true
   apple: 'revoked' | 'failed' | 'not_linked' | 'no_token'
 }
+/** GET /shared/:token as the server sends it (shared contract, plan 2026-11-13 shared-mixes). */
+export type ApiSharedMixTrack = {
+  title: string
+  artist: string
+  album: string | null
+  durationMs: number | null
+  artwork: ApiAlbumArtwork | null
+  appleId: string | null
+  isrc: string | null
+}
+export type ApiSharedMix = {
+  token: string
+  title: string
+  caseColor: string
+  /** null when the sharer has no name on file; clients show "a friend". */
+  sharerName: string | null
+  sharedAt: string
+  isOwner: boolean
+  /** Only when isOwner. */
+  sessionId?: string
+  tracks: ApiSharedMixTrack[]
+}
+export type ApiSharedMixRow = {
+  token: string
+  title: string
+  caseColor: string
+  /** null when the sharer has no name on file; clients show "a friend". */
+  sharerName: string | null
+  savedAt: string
+  trackCount: number
+  durationMs: number
+  artwork: ApiAlbumArtwork | null
+}
+export type ShareSessionResponse = { token: string; url: string }
 export type MixtapeApi = {
   /** `merged` is reported once after an anonymous session joins an account; the server clears it on read. */
   getMe: (signal?: AbortSignal) => Promise<MeResponse>
@@ -581,6 +617,18 @@ export type MixtapeApi = {
   getSeedTracks: (signal?: AbortSignal) => Promise<{ tracks: ApiSeedTrack[] }>
   postSeedTracks: (spotifyIds: string[], signal?: AbortSignal) => Promise<PostSeedTracksResponse>
   deleteSeedTrack: (trackId: string, signal?: AbortSignal) => Promise<DeleteSeedTrackResponse>
+  /** GET /shared/:token: public, sends the session when there is one (the server then reports isOwner). */
+  getSharedMix: (token: string, signal?: AbortSignal) => Promise<SharedMix>
+  /** POST /shared/:token/save: idempotent; needs a session. */
+  saveSharedMix: (token: string, signal?: AbortSignal) => Promise<void>
+  /** DELETE /shared/:token/save: removes this listener's save, never the share. */
+  removeSharedMix: (token: string, signal?: AbortSignal) => Promise<void>
+  /** GET /me/shared-mixes: active shares this listener saved, newest save first. */
+  listSharedMixes: (signal?: AbortSignal) => Promise<SharedMixRow[]>
+  /** POST /sessions/:id/share: the link for the mix as it stands. */
+  shareSession: (sessionId: string, signal?: AbortSignal) => Promise<ShareSessionResponse>
+  /** DELETE /sessions/:id/share: revokes every active link of the mix. */
+  stopSharing: (sessionId: string, signal?: AbortSignal) => Promise<void>
 }
 
 export class ApiError extends Error {
@@ -614,6 +662,44 @@ export class AnonymousCapError extends ApiError {
     const limit = isRecord(payload) ? payload.limit : undefined
     this.limit = typeof limit === 'number' ? limit : 3
   }
+}
+
+/** 404 not_found or 410 revoked on a share: both read "This mix isn't shared anymore." */
+export class SharedMixGoneError extends ApiError {
+  readonly reason: 'not_found' | 'revoked'
+
+  constructor(status: 404 | 410, payload: unknown) {
+    super(status, payload)
+    this.name = 'SharedMixGoneError'
+    this.reason = status === 410 ? 'revoked' : 'not_found'
+  }
+}
+
+/** POST /sessions/:id/share 409: the sharer has no usable name yet (open the name page). */
+export class ShareNameRequiredError extends ApiError {
+  constructor(payload: unknown) {
+    super(409, payload)
+    this.name = 'ShareNameRequiredError'
+  }
+}
+
+/** POST /sessions/:id/share 422: the mix has no active songs. */
+export class EmptyMixError extends ApiError {
+  constructor(payload: unknown) {
+    super(422, payload)
+    this.name = 'EmptyMixError'
+  }
+}
+
+function shareGone(error: unknown): never {
+  if (error instanceof ApiError && (error.status === 404 || error.status === 410)) throw new SharedMixGoneError(error.status, error.payload)
+  throw error
+}
+
+function shareRefused(error: unknown): never {
+  if (error instanceof ApiError && error.status === 409 && error.code === 'name_required') throw new ShareNameRequiredError(error.payload)
+  if (error instanceof ApiError && error.status === 422 && error.code === 'empty_mix') throw new EmptyMixError(error.payload)
+  throw error
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -955,5 +1041,26 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
         method: 'DELETE',
         signal,
       }),
+    getSharedMix: async (token, signal) =>
+      toSharedMix(await request<unknown>(`/shared/${encodeURIComponent(token)}`, { signal }).catch(shareGone)),
+    saveSharedMix: async (token, signal) => {
+      await request(`/shared/${encodeURIComponent(token)}/save`, { method: 'POST', signal }).catch(shareGone)
+    },
+    removeSharedMix: async (token, signal) => {
+      await request(`/shared/${encodeURIComponent(token)}/save`, { method: 'DELETE', signal })
+    },
+    listSharedMixes: async (signal) => {
+      const body = await request<unknown>('/me/shared-mixes', { signal })
+      if (!isRecord(body) || !Array.isArray(body.mixes)) throw new MalformedResponseError('shared mixes')
+      return body.mixes.map(toSharedMixRow)
+    },
+    shareSession: async (sessionId, signal) => {
+      const body = await request<unknown>(`/sessions/${encodeURIComponent(sessionId)}/share`, { method: 'POST', signal }).catch(shareRefused)
+      if (!isRecord(body) || typeof body.token !== 'string' || typeof body.url !== 'string') throw new MalformedResponseError('share')
+      return { token: body.token, url: body.url }
+    },
+    stopSharing: async (sessionId, signal) => {
+      await request(`/sessions/${encodeURIComponent(sessionId)}/share`, { method: 'DELETE', signal })
+    },
   }
 }

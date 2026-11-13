@@ -3,7 +3,7 @@ import { App } from './App'
 import { useLayoutEffect, useMemo, useSyncExternalStore } from 'react'
 import { AuthGate, type AuthUser } from './components/AuthGate'
 import type { AuthProvider } from './lib/auth-provider'
-import { API_URL } from './config'
+import { API_URL, DOWNLOAD_URL } from './config'
 import { browserAuth } from './lib/auth-client'
 import { WorkspaceRestoreProvider, clearWorkspaceRestore } from './lib/workspace-restore'
 import { createSessionRequestGate } from './lib/session-request-gate'
@@ -11,6 +11,8 @@ import { sessionTokenStore } from './lib/session-token'
 import { createMusicKitClient } from './musickit/client'
 import { ensureSession } from './lib/anonymous-session'
 import { createFirstRunServices } from './components/first-run/services'
+import { SharedMixPage } from './components/SharedMixPage'
+import { sharedMixToken } from './lib/shared-route'
 
 const api = createMixtapeApi(API_URL, sessionTokenStore.read)
 
@@ -35,6 +37,9 @@ function accountDeleted() {
 }
 
 export function RootApp() {
+  // /m/<token> is public: it never enters AuthGate, so no sign-in and no first run.
+  const sharedToken = sharedMixToken(window.location)
+  if (sharedToken) return <SharedMixRoute token={sharedToken} />
   return (
     <AuthGate auth={browserAuth} firstRunServices={firstRunServices}>
       {(user, lastSignInProvider, restoring, initialSession, refetch, signInError) => (
@@ -55,4 +60,12 @@ function SignedInApp({ user, lastSignInProvider, restoring, initialSession, refe
     <App api={gate.api} initialSession={initialSession ?? undefined} accountAuth={browserAuth} signInAuth={browserAuth} refetchSession={refetch} signInError={signInError} lastSignInProvider={lastSignInProvider} musicKit={musicKit} user={user} onSignOut={signOut} onAccountDeleted={accountDeleted} />
     {!restoring && pendingReads > 0 && <div className="session-refresh-badge" role="status"><span className="session-refresh-spinner" aria-hidden="true" />Refreshing…</div>}
   </>
+}
+
+function SharedMixRoute({ token }: { token: string }) {
+  // Reads the browser's session (if any) so its token rides on the share read;
+  // never creates one.
+  const session = browserAuth.useSession()
+  const userId = session.data?.user && sessionTokenStore.read() ? session.data.user.id : null
+  return <SharedMixPage token={token} api={api} session={{ isPending: session.isPending, userId }} downloadUrl={DOWNLOAD_URL} />
 }

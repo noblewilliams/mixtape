@@ -38,3 +38,10 @@ const serviceUrls = resolveServiceUrls({
 
 export const API_URL = serviceUrls.apiUrl
 export const AUTH_URL = serviceUrls.authUrl
+
+/**
+ * Where "Get the app" goes: the landing page's download link when the build
+ * has one (VITE_DOWNLOAD_URL, shared with the landing build), else the landing
+ * page itself, which explains when the download is not available yet.
+ */
+export const DOWNLOAD_URL = import.meta.env.VITE_DOWNLOAD_URL?.trim() || '/'

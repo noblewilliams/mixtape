@@ -100,3 +100,43 @@ export type ListenLaterEntry = AlbumFields & {
 
 export type CollectionView = 'list' | 'grid' | 'closet'
 export type AppView = 'session' | 'home' | 'music' | 'memories' | 'mixes' | 'settings'
+
+/** One song of a shared mix (spec 2026-11-13 shared-mixes): what a recipient may see, nothing more. */
+export type SharedMixTrack = {
+  title: string
+  artist: string
+  album?: string
+  durationMs?: number
+  /** Apple artwork template ({w}x{h}.{f}). */
+  artworkUrl?: string
+  artworkBgColor?: string
+  appleId?: string
+  isrc?: string
+}
+
+/** GET /shared/:token, mapped. `sessionId` only when the caller owns the share. */
+export type SharedMix = {
+  token: string
+  title: string
+  caseColor: string
+  /** null when the sharer has no name on file; clients show "a friend". */
+  sharerName: string | null
+  sharedAt: string
+  isOwner: boolean
+  sessionId?: string
+  tracks: SharedMixTrack[]
+}
+
+/** A row of GET /me/shared-mixes: a share this listener saved. */
+export type SharedMixRow = {
+  token: string
+  title: string
+  caseColor: string
+  /** null when the sharer has no name on file; clients show "a friend". */
+  sharerName: string | null
+  savedAt: string
+  trackCount: number
+  durationMs: number
+  artworkUrl?: string
+  artworkBgColor?: string
+}

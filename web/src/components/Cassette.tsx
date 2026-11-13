@@ -6,6 +6,8 @@ type CassetteProps = {
   stockColor?: string
   className?: string
   loading?: boolean
+  /** What the turning hubs mean, read by assistive tech while loading. */
+  loadingTitle?: string
   labelled?: boolean
 }
 
@@ -44,6 +46,7 @@ export function Cassette({
   stockColor = '#f2ede2',
   className = '',
   loading = false,
+  loadingTitle = 'Cassette hubs turning while your library is prepared',
   labelled = true,
 }: CassetteProps) {
   const titleId = useId()
@@ -60,7 +63,7 @@ export function Cassette({
         aria-labelledby={loading ? titleId : undefined}
         aria-hidden={loading ? undefined : true}
       >
-        {loading ? <title id={titleId}>Cassette hubs turning while your library is prepared</title> : null}
+        {loading ? <title id={titleId}>{loadingTitle}</title> : null}
         <rect className="cassette-case" x="1" y="1" width="198" height="126" rx="9" />
         <rect className="cassette-edge" x="3" y="3" width="194" height="122" rx="7" />
         <rect className="cassette-stock" x="14" y="12" width="172" height="73" rx="5" />

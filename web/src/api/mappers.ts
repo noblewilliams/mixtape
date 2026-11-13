@@ -1,4 +1,4 @@
-import type { AlbumPick, AlbumPickState, AlbumSummary, DjMessage, DjSession, ListenLaterEntry, QueueTrack } from '../domain'
+import type { AlbumPick, AlbumPickState, AlbumSummary, DjMessage, DjSession, ListenLaterEntry, QueueTrack, SharedMix, SharedMixRow, SharedMixTrack } from '../domain'
 import type {
   AlbumPickResponse,
   ApiAlbum,
@@ -39,7 +39,7 @@ function ageLabel(isoDate: string): string {
   return `${months} month${months === 1 ? '' : 's'} ago`
 }
 
-function durationLabel(durationMs: number): string {
+export function durationLabel(durationMs: number): string {
   if (durationMs <= 0) return '0 min'
   const minutes = Math.max(1, Math.round(durationMs / 60_000))
   if (minutes < 60) return `${minutes} min`
@@ -123,4 +123,99 @@ export function toQueueTrack(track: ApiQueueTrack): QueueTrack {
     artworkBgColor: track.artworkBgColor ?? undefined,
     newToYou: track.newToYou ?? false,
   }
+}
+
+/** A response body that does not match the contract; the shared-mix reads refuse to guess. */
+export class MalformedResponseError extends Error {
+  constructor(what: string) {
+    super(`Malformed response: ${what}`)
+    this.name = 'MalformedResponseError'
+  }
+}
+
+type Fields = Record<string, unknown>
+
+function record(value: unknown, what: string): Fields {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new MalformedResponseError(what)
+  return value as Fields
+}
+function text(body: Fields, key: string, what: string): string {
+  const value = body[key]
+  if (typeof value !== 'string') throw new MalformedResponseError(`${what}.${key}`)
+  return value
+}
+function count(body: Fields, key: string, what: string): number {
+  const value = body[key]
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new MalformedResponseError(`${what}.${key}`)
+  return value
+}
+/** Present and either null or the type; a missing key is a contract miss, not a null. */
+function nullable<T extends 'string' | 'number'>(body: Fields, key: string, type: T, what: string): (T extends 'string' ? string : number) | undefined {
+  if (!(key in body)) throw new MalformedResponseError(`${what}.${key}`)
+  const value = body[key]
+  if (value === null) return undefined
+  if (typeof value !== type || (type === 'number' && !Number.isFinite(value))) throw new MalformedResponseError(`${what}.${key}`)
+  return value as T extends 'string' ? string : number
+}
+function artworkOf(body: Fields, what: string): { artworkUrl?: string; artworkBgColor?: string } {
+  if (!('artwork' in body)) throw new MalformedResponseError(`${what}.artwork`)
+  if (body.artwork === null) return {}
+  const artwork = record(body.artwork, `${what}.artwork`)
+  const url = text(artwork, 'url', `${what}.artwork`)
+  nullable(artwork, 'width', 'number', `${what}.artwork`)
+  nullable(artwork, 'height', 'number', `${what}.artwork`)
+  const bgColor = nullable(artwork, 'bgColor', 'string', `${what}.artwork`)
+  return { artworkUrl: url, ...(bgColor === undefined ? {} : { artworkBgColor: bgColor }) }
+}
+const defined = <T extends object>(value: T): T =>
+  Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as T
+
+function toSharedMixTrack(value: unknown, index: number): SharedMixTrack {
+  const what = `tracks[${index}]`
+  const body = record(value, what)
+  return defined({
+    title: text(body, 'title', what),
+    artist: text(body, 'artist', what),
+    album: nullable(body, 'album', 'string', what),
+    durationMs: nullable(body, 'durationMs', 'number', what),
+    ...artworkOf(body, what),
+    appleId: nullable(body, 'appleId', 'string', what),
+    isrc: nullable(body, 'isrc', 'string', what),
+  })
+}
+
+/** GET /shared/:token, checked field by field (shared contract: parsed strictly). */
+export function toSharedMix(value: unknown): SharedMix {
+  const body = record(value, 'shared mix')
+  const isOwner = body.isOwner
+  if (typeof isOwner !== 'boolean') throw new MalformedResponseError('shared mix.isOwner')
+  if (!Array.isArray(body.tracks)) throw new MalformedResponseError('shared mix.tracks')
+  const mix: SharedMix = {
+    token: text(body, 'token', 'shared mix'),
+    title: text(body, 'title', 'shared mix'),
+    caseColor: text(body, 'caseColor', 'shared mix'),
+    sharerName: nullable(body, 'sharerName', 'string', 'shared mix') ?? null,
+    sharedAt: text(body, 'sharedAt', 'shared mix'),
+    isOwner,
+    tracks: body.tracks.map(toSharedMixTrack),
+  }
+  // The server sends sessionId only to the owner; the client keeps it only there too.
+  if (isOwner) mix.sessionId = text(body, 'sessionId', 'shared mix')
+  return mix
+}
+
+/** A row of GET /me/shared-mixes, checked field by field. */
+export function toSharedMixRow(value: unknown): SharedMixRow {
+  const what = 'shared mix row'
+  const body = record(value, what)
+  return defined({
+    token: text(body, 'token', what),
+    title: text(body, 'title', what),
+    caseColor: text(body, 'caseColor', what),
+    sharerName: nullable(body, 'sharerName', 'string', what) ?? null,
+    savedAt: text(body, 'savedAt', what),
+    trackCount: count(body, 'trackCount', what),
+    durationMs: count(body, 'durationMs', what),
+    ...artworkOf(body, what),
+  })
 }

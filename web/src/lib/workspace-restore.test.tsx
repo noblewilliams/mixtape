@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it } from 'vitest'
-import { clearWorkspaceRestore, useRestorableState, WorkspaceRestoreProvider } from './workspace-restore'
+import { clearWorkspaceRestore, openMixOnNextLoad, useRestorableState, WorkspaceRestoreProvider } from './workspace-restore'
 
 afterEach(() => { cleanup(); clearWorkspaceRestore() })
 function Page() {
@@ -25,4 +25,17 @@ it('ignores unreadable cache entries', () => {
   sessionStorage.setItem('mixtape.workspace.v1:one:test.title', '{')
   render(<WorkspaceRestoreProvider userId="one" restoring={false}><Page /></WorkspaceRestoreProvider>)
   expect(screen.getByRole('button')).toHaveTextContent('Default')
+})
+it('opens a mix on the next load of the app, for that listener only', () => {
+  function Workspace() {
+    const [view] = useRestorableState('activeView', 'home')
+    const [id] = useRestorableState<string | null>('activeSessionId', null)
+    return <p>{view}:{String(id)}</p>
+  }
+  openMixOnNextLoad('one', 'session-9')
+  const own = render(<WorkspaceRestoreProvider userId="one" restoring={false}><Workspace /></WorkspaceRestoreProvider>)
+  expect(screen.getByText('session:session-9')).toBeInTheDocument()
+  own.unmount()
+  render(<WorkspaceRestoreProvider userId="two" restoring={false}><Workspace /></WorkspaceRestoreProvider>)
+  expect(screen.getByText('home:null')).toBeInTheDocument()
 })
