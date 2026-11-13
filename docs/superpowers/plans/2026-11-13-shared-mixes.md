@@ -376,4 +376,16 @@ the first name; the owner read had `isOwner` and `sessionId`; the session
 detail said `shared: true`; stop gave 204, then the read 410; an unknown
 token 404; the user was deleted and its session and share went with it.
 
-Remaining: gates G2–G4.
+**G2, the checks run from here, done 2026-11-13.** The first Netlify build of
+`9834f10` failed while bundling the edge function: it sat outside the `web`
+base, where the bundler cannot load it. It moved to
+`web/netlify/edge-functions/` (`d5035df`), which deployed. On the live site:
+the association file is `200 application/json` with no redirect and the right
+app id; `/m/<token>` serves the app and carries the mix title as `og:title`,
+"Gate shared a mix · 10 songs", the first song's artwork at 600x600 (fetches
+as a JPEG) and `summary_large_image`; an unknown or stopped token gets the
+generic tags ("A mix on Mixtape") once the 60-second cache passes; the
+tape-colour cards serve as PNGs. The throwaway user was deleted.
+
+Remaining: G2's founder half (the iMessage preview card, a private-window
+play on Apple Music and on Spotify), G3, G4.
