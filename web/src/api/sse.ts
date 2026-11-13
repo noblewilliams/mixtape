@@ -214,7 +214,9 @@ export async function readTurnStream(
   }
   try {
     for (;;) {
-      let chunk: ReadableStreamReadResult<Uint8Array>
+      // Inferred from the reader, not the DOM's ReadableStreamReadResult: the
+      // server's tests import this file under node types, which lack that name.
+      let chunk: Awaited<ReturnType<typeof reader.read>>
       let idle: ReturnType<typeof setTimeout> | undefined
       try {
         chunk = await Promise.race([
