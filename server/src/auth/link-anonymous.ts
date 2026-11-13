@@ -2,6 +2,7 @@ import type { Session, User } from 'better-auth'
 import { sql, type SQL } from 'drizzle-orm'
 import type { Db } from '../db/types'
 import type { Surface } from '../seeds/contracts'
+import { isUsableName } from './profile-name'
 
 // The anonymous-to-account merge (spec 2026-10-20-first-run-flow → The merge).
 // Better Auth's anonymous plugin calls linkAnonymousAccount after a social
@@ -96,6 +97,22 @@ async function moveShareSaves(tx: Pick<Db, 'execute'>, anonymousUserId: string, 
   await tx.execute(sql`DELETE FROM mix_share_saves WHERE user_id = ${anonymousUserId}`)
 }
 
+// The name the anonymous listener typed (the Share name page asks one before
+// sign-up, and shares made then already show it). Moved on every link, outside
+// the merge probe, like AI consent. A usable account name (a provider's) wins;
+// otherwise the account takes the anonymous name, and the name page counts as
+// answered so it is not asked again. The placeholder "Listener" never moves.
+async function moveName(tx: Pick<Db, 'execute'>, anonymousUserId: string, newUserId: string) {
+  const rows = rowsOf(await tx.execute(sql`
+    SELECT id, name FROM "user" WHERE id IN (${anonymousUserId}, ${newUserId})`))
+  const anonName = rows.find((row) => row.id === anonymousUserId)?.name
+  const accountName = rows.find((row) => row.id === newUserId)?.name
+  if (typeof anonName !== 'string' || !isUsableName(anonName) || isUsableName(accountName as string | null)) return
+  await tx.execute(sql`
+    UPDATE "user" SET name = ${anonName}, name_prompted_at = COALESCE(name_prompted_at, now()), updated_at = now()
+    WHERE id = ${newUserId}`)
+}
+
 // Shares follow their sessions: run right after dj_sessions moves, so a share
 // whose session is now the account's is the account's too, and the anonymous
 // user's deletion (mix_shares.sharer_id cascades) cannot take it. An account
@@ -174,6 +191,7 @@ export async function linkAnonymousRows(db: Db, input: LinkAnonymousRowsInput): 
 
     for (const move of ANSWER_MOVES) await tx.execute(moveStatement(move, anon, next))
     await moveShareSaves(tx, anon, next)
+    await moveName(tx, anon, next)
 
     // Nothing to move (a retried callback after the rows already moved, or an
     // anonymous user with nothing the mode would carry): write nothing.

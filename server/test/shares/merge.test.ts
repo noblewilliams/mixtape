@@ -135,3 +135,44 @@ describe('linkAnonymousRows and shared mixes', () => {
     expect(await db.select().from(mixShareSaves)).toEqual([])
   })
 })
+
+// The name an anonymous listener typed on the Share name page: shares made
+// before sign-up already show it, so the account keeps it unless the
+// provider gave a usable one.
+describe('linkAnonymousRows and the anonymous listener\'s name', () => {
+  async function names(db: TestDb, accountName: string, anonName: string) {
+    const anon = await makeUser(db, { anonymous: true })
+    const account = await makeUser(db, { anonymous: false })
+    await db.update(user).set({ name: anonName, namePromptedAt: new Date('2026-11-10T10:00:00Z') }).where(eq(user.id, anon))
+    await db.update(user).set({ name: accountName }).where(eq(user.id, account))
+    await linkAnonymousRows(db, { anonymousUserId: anon, newUserId: account })
+    const [row] = await db.select({ name: user.name, namePromptedAt: user.namePromptedAt }).from(user).where(eq(user.id, account))
+    return row!
+  }
+
+  it('copies the name to an account with none, and marks the name page answered', async () => {
+    const db = await createTestDb()
+    const row = await names(db, '', 'Ada')
+    expect(row.name).toBe('Ada')
+    expect(row.namePromptedAt).not.toBeNull()
+  })
+
+  it('copies it over an account named Listener', async () => {
+    const db = await createTestDb()
+    expect((await names(db, 'Listener', 'Ada')).name).toBe('Ada')
+  })
+
+  it('keeps a usable provider name', async () => {
+    const db = await createTestDb()
+    const row = await names(db, 'Tolu Ade', 'Ada')
+    expect(row.name).toBe('Tolu Ade')
+    expect(row.namePromptedAt).toBeNull()
+  })
+
+  it('never copies the anonymous placeholder', async () => {
+    const db = await createTestDb()
+    const row = await names(db, '', 'Listener')
+    expect(row.name).toBe('')
+    expect(row.namePromptedAt).toBeNull()
+  })
+})
