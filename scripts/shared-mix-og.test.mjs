@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
-import { createHandler } from '../netlify/edge-functions/shared-mix-og.ts'
+import { createHandler } from '../web/netlify/edge-functions/shared-mix-og.ts'
 
 const TOKEN = '4fQ9xK2mZr7TbW1nLpY8sA'
 const API = 'https://api.example.test'

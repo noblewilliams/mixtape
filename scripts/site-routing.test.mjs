@@ -64,8 +64,8 @@ test('netlify.toml serves the association file as JSON and runs the preview on /
   assert.match(toml, /\[\[headers\]\]\s*\n\s*for = "\/\.well-known\/apple-app-site-association"\s*\n\s*\[headers\.values\]\s*\n\s*Content-Type = "application\/json"/)
   assert.match(toml, /\[\[edge_functions\]\]\s*\n\s*path = "\/m\/\*"\s*\n\s*function = "shared-mix-og"/)
   // base = "web", so the edge functions directory is resolved from web/.
-  assert.match(toml, /edge_functions = "\.\.\/netlify\/edge-functions"/)
-  assert.ok(existsSync(join(root, 'netlify/edge-functions/shared-mix-og.ts')))
+  assert.match(toml, /edge_functions = "netlify\/edge-functions"/)
+  assert.ok(existsSync(join(root, 'web/netlify/edge-functions/shared-mix-og.ts')))
 })
 
 test('every tape colour has a preview card', () => {

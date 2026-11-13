@@ -3,7 +3,7 @@
   command = "npm ci --prefix ../landing --include=dev && node ../scripts/build-site.mjs"
   # Directories here resolve from base ("web"); header and edge function paths are URL paths.
   publish = "../dist"
-  edge_functions = "../netlify/edge-functions"
+  edge_functions = "netlify/edge-functions"
 
 [build.environment]
   NODE_VERSION = "24"

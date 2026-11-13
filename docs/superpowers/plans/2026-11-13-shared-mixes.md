@@ -167,7 +167,7 @@ About 2 hours.
   - `netlify.toml`:
     - a `Content-Type: application/json` header for the association file;
     - the edge function declaration for `/m/*`.
-  - `netlify/edge-functions/shared-mix-og.ts`: fetch `GET /shared/:token`
+  - `web/netlify/edge-functions/shared-mix-og.ts` (moved under the base after the first deploy failed): fetch `GET /shared/:token`
     from `VITE_API_URL`; inject the `og:`/`twitter:` tags and
     `<title>`; on any failure, pass the page through untouched.
 - Tests:

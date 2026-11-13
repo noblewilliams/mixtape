@@ -195,7 +195,7 @@ CORS allows the web origin as for the other routes.
   target), and the `app_links` package for the incoming-link stream
   (cold start and running). Universal links need a device check on a
   TestFlight build: the simulator does not prove them.
-- **Edge function:** `netlify/edge-functions/shared-mix-og.ts` on `/m/*`.
+- **Edge function:** `web/netlify/edge-functions/shared-mix-og.ts` on `/m/*` (inside the `web` base: the edge bundler cannot reach functions outside it).
 
 ## Known limits
 
