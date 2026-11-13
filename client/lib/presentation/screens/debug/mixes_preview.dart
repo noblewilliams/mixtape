@@ -9,7 +9,11 @@
 /// new mix being made, one mix with a turn out and one with a reply waiting.
 /// Any mix opens a short made-up conversation with a playlist attached, and
 /// a message sent there takes the DJ 40 seconds, so the working caption and
-/// the Mixes rows can be watched.
+/// the Mixes rows can be watched. The made-up turn streams its steps as a
+/// catalogue mix would (turn steps, 2026-11-13), names included, so the
+/// caption follows them: listening, the crates, picking past its 12 s
+/// line, the sound check, pressing, labelling, and a note overtaken by the
+/// liner notes before it can show.
 library;
 
 import 'package:flutter/material.dart';
@@ -85,7 +89,7 @@ class _SignedIn extends AuthNotifier {
 }
 
 /// Answers the calls the Mixes tab makes; anything else is not wired.
-class _PreviewApi implements DjApi {
+class _PreviewApi implements DjApi, DjTurnProgressSender {
   _PreviewApi() {
     final now = DateTime.now();
     const active = [
@@ -253,9 +257,48 @@ class _PreviewApi implements DjApi {
     );
   }
 
+  /// How long a made-up turn takes.
+  static const Duration _turnTime = Duration(seconds: 40);
+
+  /// A made-up turn's progress, and when each arrives after the send.
+  static const List<(Duration, TurnProgress)> _steps = [
+    (Duration(milliseconds: 400), TurnStreamOpened()),
+    (
+      Duration(seconds: 5),
+      TurnStep('digging', scope: 'catalogue', artists: ['Tems']),
+    ),
+    (Duration(seconds: 10), TurnStep('picking', artists: ['Tems'])),
+    (Duration(seconds: 29), TurnStep('checking', genres: ['Afrobeats'])),
+    (Duration(seconds: 32), TurnStep('pressing', count: 18)),
+    (Duration(seconds: 34), TurnStep('labelling', title: 'Sunrise Run')),
+    // Overtaken while the label's line holds: it never shows.
+    (Duration(milliseconds: 34200), TurnStep('noting')),
+    (Duration(seconds: 35), TurnStep('writing')),
+  ];
+
+  @override
+  Future<TurnResult> sendMessageWithProgress(
+    String id,
+    String text, {
+    void Function(TurnProgress progress)? onProgress,
+  }) async {
+    var at = Duration.zero;
+    for (final (after, progress) in _steps) {
+      await Future<void>.delayed(after - at);
+      at = after;
+      onProgress?.call(progress);
+    }
+    await Future<void>.delayed(_turnTime - at);
+    return _reply(id);
+  }
+
   @override
   Future<TurnResult> sendMessage(String id, String text) async {
-    await Future<void>.delayed(const Duration(seconds: 40));
+    await Future<void>.delayed(_turnTime);
+    return _reply(id);
+  }
+
+  TurnResult _reply(String id) {
     return TurnResult(
       djMessage: DjMessage(
         id: '$id-${DateTime.now().millisecondsSinceEpoch}',

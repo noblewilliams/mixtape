@@ -10,6 +10,7 @@
 // captured future can be left never completing.
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/api/api_client.dart';
 import '../../data/dj/dj_api.dart';
@@ -22,6 +23,7 @@ import 'mix_operation_gate.dart';
 import 'onboarding_provider.dart';
 import 'playlist_context_provider.dart';
 import 'first_run_funnel_provider.dart';
+import 'working_step.dart';
 import 'funnel_provider.dart';
 import 'keep_mixes_provider.dart';
 import 'listen_later_provider.dart';
@@ -234,6 +236,7 @@ class ChatState {
     this.pickState,
     this.suggestions,
     this.addMusic,
+    this.workingStep,
   });
 
   final DjSession session;
@@ -256,6 +259,12 @@ class ChatState {
   final List<ChatMessage> messages;
   final List<QueueTrack> queue;
   final bool sending;
+
+  /// Where the mix turn out has got to, once its stream opened (spec
+  /// 2026-11-13 turn steps): null before that, against an older server, for
+  /// an album turn, and once the turn ends. The Mixes activity's working
+  /// entry carries the same, for a conversation reopened mid-turn.
+  final WorkingStep? workingStep;
 
   /// A [ChatNotifier.remake] is out: from its start until the re-reads after
   /// it (the session's `notPersonal`, the listener's `musicReady`) resolve,
@@ -298,6 +307,8 @@ class ChatState {
     bool clearSuggestions = false,
     AddMusicOffer? addMusic,
     bool clearAddMusic = false,
+    WorkingStep? workingStep,
+    bool clearWorkingStep = false,
   }) {
     assert(
       session == null || queueVersion == null,
@@ -322,6 +333,7 @@ class ChatState {
       pickState: pickState ?? this.pickState,
       suggestions: clearSuggestions ? null : (suggestions ?? this.suggestions),
       addMusic: clearAddMusic ? null : (addMusic ?? this.addMusic),
+      workingStep: clearWorkingStep ? null : (workingStep ?? this.workingStep),
     );
   }
 }
@@ -338,6 +350,18 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   int _generation = 0;
   int _nameRevision = 0;
   bool _renaming = false;
+
+  /// Counts the turns this notifier sent, so a late read knows when another
+  /// has started since.
+  int _turns = 0;
+
+  /// The one later read after a dropped stream ([_afterDroppedStream]).
+  Timer? _lateRead;
+
+  /// How long after a dropped stream's first read the session is read once
+  /// more: inside the 30 s the server gets to finish the turn.
+  @visibleForTesting
+  static Duration lateReadDelay = const Duration(seconds: 25);
 
   Future<bool> rename(String title) async {
     if (!ref.mounted ||
@@ -402,7 +426,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     _renaming = false;
     _picking = false;
     _savingLater = false;
-    ref.onDispose(() => _generation++);
+    ref.onDispose(() {
+      _generation++;
+      _lateRead?.cancel();
+      _lateRead = null;
+    });
     final api = ref.watch(djApiProvider);
     final seedRead = _captureSeedRead();
     // A new session's first turn: what its create response offered, which
@@ -495,8 +523,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// the send button. `sending` is restored in a `finally` so it can NEVER
   /// stick at true — not even for an [ApiException] or an entirely
   /// unforeseen exception — which would otherwise brick the composer.
-  Future<void> send(String text) =>
-      _turn(text, (api) => api.sendMessage(sessionId, text));
+  Future<void> send(String text) => _turn(
+    text,
+    (api, onProgress) =>
+        api.sendMessageWithProgress(sessionId, text, onProgress: onProgress),
+  );
 
   /// Asks for a new version of this mix from the listener's own music: the
   /// same turn as [send], with [remakeText] as the listener's line (marked
@@ -512,16 +543,26 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// catalog one and the music not ready, and the door must say so.
   Future<void> remake({bool countTap = false}) => _turn(
     remakeText,
-    (api) => api.sendRemake(sessionId),
+    (api, onProgress) =>
+        api.sendRemakeWithProgress(sessionId, onProgress: onProgress),
     remake: true,
     countTap: countTap,
   );
 
   /// The turn pipeline [send] and [remake] share; [post] and the listener
   /// line's [remake] marker are the only differences between them.
+  ///
+  /// A mix turn hands [post] a progress callback, so a server that streams
+  /// says what the DJ is doing ([ChatState.workingStep], and the Mixes
+  /// activity's working entry); an album turn hands it none and keeps its
+  /// timed lines.
   Future<void> _turn(
     String text,
-    Future<TurnResult> Function(DjApi api) post, {
+    Future<TurnResult> Function(
+      DjApi api,
+      void Function(TurnProgress progress)? onProgress,
+    )
+    post, {
     bool remake = false,
     bool countTap = false,
   }) async {
@@ -533,12 +574,27 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         .read(mixOperationProvider(sessionId).notifier)
         .acquire(MixOperation.sending);
     if (release == null) return;
+    _turns++;
     // The Mixes list's view of it: working while out, ready once it lands
     // (even after this conversation is gone), nothing if it is taken back.
     final endActivity = ref
         .read(mixActivityProvider.notifier)
         .beginTurn(sessionId);
     var landed = true;
+    // Once the stream has opened the server has the turn, whatever happens
+    // to the connection after.
+    var streamed = false;
+    WorkingStep? step;
+    void onProgress(TurnProgress progress) {
+      streamed = true;
+      final next = WorkingStep.after(step, progress);
+      if (next == null || identical(next, step)) return;
+      step = next;
+      endActivity.step(next);
+      if (_current(generation)) {
+        _mergeCurrent((c) => c.copyWith(workingStep: next));
+      }
+    }
 
     final userMessage = ChatMessage(
       _localMessage('user', text),
@@ -558,69 +614,18 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     }
 
     try {
-      final result = await post(ref.read(djApiProvider));
+      final result = await post(
+        ref.read(djApiProvider),
+        base.kind == SessionKind.album ? null : onProgress,
+      );
       if (!_current(generation)) return;
-      // A refused mix (an empty queue) that this turn filled is the
-      // listener's mix landing, as a new mix with content is.
-      final filled = base.queue.isEmpty && result.queue.isNotEmpty;
-      final newTitle = result.sessionTitle;
-      _mergeCurrent((c) {
-        // First bump queue+version via the `queueVersion` param (never
-        // `session`, per copyWith's own session-XOR-queueVersion contract —
-        // see ChatState.copyWith's doc comment).
-        // An album turn carries its shortlist and, after an honest
-        // failure, refinement pills; its queue is empty and its version
-        // is the pick version.
-        final withQueue = c.copyWith(
-          messages: [...c.messages, ChatMessage(result.djMessage)],
-          queue: result.queue,
-          queueVersion: result.queueVersion,
-          pickState: result.pickState,
-          suggestions: result.suggestions,
-          addMusic: result.addMusic,
-        );
-        if (newTitle == null || nameRevision != _nameRevision) return withQueue;
-        // A same-turn rename (rename_session): a SECOND copyWith call, this
-        // time passing `session` (never `queueVersion`, same contract) —
-        // built from withQueue.session, whose queueVersion already reflects
-        // the bump above, so the resulting DjSession carries BOTH the new
-        // title and the turn's fresh queueVersion at once.
-        return withQueue.copyWith(
-          session: withQueue.session.copyWith(title: newTitle),
-        );
-      });
-      // Lazily invalidate (never an eager refresh) so Home's list picks up
-      // the new title next time it's read — same "invalidate, don't refetch
-      // now" discipline as sessionStarterProvider above; a turn's own
-      // 20-40s round trip shouldn't be held up by a second list fetch it
-      // doesn't need. Guarded by `ref.mounted`: this provider is
-      // autoDispose'd (chatProvider), and navigating away mid-turn can
-      // dispose it before this await returns — `ref.invalidate` on a
-      // disposed ref throws a StateError (unlike `_mergeCurrent`'s own
-      // internal guard above), which would otherwise silently swallow this
-      // invalidation instead of just skipping it.
-      if (newTitle != null && ref.mounted && nameRevision == _nameRevision) {
-        if (ref.exists(sessionsProvider) &&
-            ref.read(sessionsProvider.notifier).hasPendingMetadataWrites) {
-          // Invalidating would cancel metadata ownership while its PATCH is
-          // still in flight. Refresh merges safely with the eventual result.
-          unawaited(ref.read(sessionsProvider.notifier).refresh());
-        } else {
-          ref.invalidate(sessionsProvider);
-        }
-      }
-      // The notPersonal flag, the funnel and the Keep sheet are mix
-      // concerns: an album turn needs no refetch.
-      if (base.kind == SessionKind.album) return;
-      if (filled) _noteFilledMix(result.queue.length);
-      // A remake also re-reads musicReady: when the synced music held
-      // nothing usable, the server made no version and says the music is not
-      // ready, so the door goes back to its first state (board 3E).
-      await Future.wait([
-        _adoptSessionFlags(generation),
-        if (remake) _refreshOnboarding(generation),
-      ]);
-      if (_current(generation)) _notePersonalMix();
+      await _land(
+        result,
+        base: base,
+        generation: generation,
+        nameRevision: nameRevision,
+        remake: remake,
+      );
     } on AiConsentRequiredException {
       // Not a failed turn: the server wants consent first. The turn is
       // taken back and the screen asks, keeping the text.
@@ -682,6 +687,15 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       );
     } on NetworkException {
       if (!_current(generation)) return;
+      if (streamed) {
+        await _afterDroppedStream(
+          base: base,
+          generation: generation,
+          nameRevision: nameRevision,
+          remake: remake,
+        );
+        return;
+      }
       // Transport failure before any response — unlike the DjApiException
       // branch above, the server never saw this turn at all, so the user
       // bubble above is client-local only (no persisted duplicate risk, but
@@ -706,11 +720,165 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       endActivity(ready: landed);
       if (_current(generation)) {
         _mergeCurrent(
-          (c) => c.sending || c.remaking
-              ? c.copyWith(sending: false, remaking: false)
+          (c) => c.sending || c.remaking || c.workingStep != null
+              ? c.copyWith(
+                  sending: false,
+                  remaking: false,
+                  clearWorkingStep: true,
+                )
               : c,
         );
       }
+    }
+  }
+
+  /// A turn's reply landing in the conversation: the DJ's line after the
+  /// listener's, the queue and version it made, a same-turn rename, and the
+  /// re-reads and notes a mix reply brings. [replacing] is a failure line
+  /// the reply takes back (a reply found after a dropped stream).
+  Future<void> _land(
+    TurnResult result, {
+    required ChatState base,
+    required int generation,
+    required int nameRevision,
+    required bool remake,
+    ChatMessage? replacing,
+  }) async {
+    // A refused mix (an empty queue) that this turn filled is the
+    // listener's mix landing, as a new mix with content is.
+    final filled = base.queue.isEmpty && result.queue.isNotEmpty;
+    final newTitle = result.sessionTitle;
+    _mergeCurrent((c) {
+      // First bump queue+version via the `queueVersion` param (never
+      // `session`, per copyWith's own session-XOR-queueVersion contract —
+      // see ChatState.copyWith's doc comment).
+      // An album turn carries its shortlist and, after an honest
+      // failure, refinement pills; its queue is empty and its version
+      // is the pick version.
+      final withQueue = c.copyWith(
+        messages: [
+          for (final m in c.messages)
+            if (!identical(m, replacing)) m,
+          ChatMessage(result.djMessage),
+        ],
+        queue: result.queue,
+        queueVersion: result.queueVersion,
+        pickState: result.pickState,
+        suggestions: result.suggestions,
+        addMusic: result.addMusic,
+      );
+      if (newTitle == null || nameRevision != _nameRevision) return withQueue;
+      // A same-turn rename (rename_session): a SECOND copyWith call, this
+      // time passing `session` (never `queueVersion`, same contract) —
+      // built from withQueue.session, whose queueVersion already reflects
+      // the bump above, so the resulting DjSession carries BOTH the new
+      // title and the turn's fresh queueVersion at once.
+      return withQueue.copyWith(
+        session: withQueue.session.copyWith(title: newTitle),
+      );
+    });
+    // Lazily invalidate (never an eager refresh) so Home's list picks up
+    // the new title next time it's read — same "invalidate, don't refetch
+    // now" discipline as sessionStarterProvider above; a turn's own
+    // 20-40s round trip shouldn't be held up by a second list fetch it
+    // doesn't need. Guarded by `ref.mounted`: this provider is
+    // autoDispose'd (chatProvider), and navigating away mid-turn can
+    // dispose it before this await returns — `ref.invalidate` on a
+    // disposed ref throws a StateError (unlike `_mergeCurrent`'s own
+    // internal guard above), which would otherwise silently swallow this
+    // invalidation instead of just skipping it.
+    if (newTitle != null && ref.mounted && nameRevision == _nameRevision) {
+      if (ref.exists(sessionsProvider) &&
+          ref.read(sessionsProvider.notifier).hasPendingMetadataWrites) {
+        // Invalidating would cancel metadata ownership while its PATCH is
+        // still in flight. Refresh merges safely with the eventual result.
+        unawaited(ref.read(sessionsProvider.notifier).refresh());
+      } else {
+        ref.invalidate(sessionsProvider);
+      }
+    }
+    // The notPersonal flag, the funnel and the Keep sheet are mix
+    // concerns: an album turn needs no refetch.
+    if (base.kind == SessionKind.album) return;
+    if (filled) _noteFilledMix(result.queue.length);
+    // A remake also re-reads musicReady: when the synced music held
+    // nothing usable, the server made no version and says the music is not
+    // ready, so the door goes back to its first state (board 3E).
+    await Future.wait([
+      _adoptSessionFlags(generation),
+      if (remake) _refreshOnboarding(generation),
+    ]);
+    if (_current(generation)) _notePersonalMix();
+  }
+
+  /// The turn's stream opened and then dropped: the server has the turn and
+  /// is likely still running it (it gets up to 30 s more), so this is no
+  /// turn that never left. The session is read at once, with the cassette
+  /// still turning; a reply already there lands as any reply does.
+  /// Otherwise the turn's failure shows as a failure on the server's side
+  /// does, and one more read [lateReadDelay] later can still land the reply
+  /// in its place.
+  Future<void> _afterDroppedStream({
+    required ChatState base,
+    required int generation,
+    required int nameRevision,
+    required bool remake,
+  }) async {
+    final turn = _turns;
+    final known = {for (final m in base.messages) m.message.id};
+    Future<void> land(TurnResult reply, {ChatMessage? replacing}) => _land(
+      reply,
+      base: base,
+      generation: generation,
+      nameRevision: nameRevision,
+      remake: remake,
+      replacing: replacing,
+    );
+
+    final reply = await _readReply(known, base);
+    if (!_current(generation)) return;
+    if (reply != null) return land(reply);
+    final failure = ChatMessage(
+      _localMessage('dj', _genericApiErrorMessage),
+      isError: true,
+    );
+    _mergeCurrent((c) => c.copyWith(messages: [...c.messages, failure]));
+    // Only while nothing has moved on: this conversation still open, no
+    // rebuild, and no turn sent since.
+    bool still() =>
+        _current(generation) && turn == _turns && state.value?.sending == false;
+    _lateRead?.cancel();
+    _lateRead = Timer(lateReadDelay, () async {
+      _lateRead = null;
+      if (!still()) return;
+      final reply = await _readReply(known, base);
+      if (reply != null && still()) await land(reply, replacing: failure);
+    });
+  }
+
+  /// The reply a fresh read of the session holds that this conversation has
+  /// not seen: the session's last line, when it is the DJ's and none of
+  /// [known] (the lines before the listener's). Null when there is none, or
+  /// the read failed.
+  Future<TurnResult?> _readReply(Set<String> known, ChatState base) async {
+    try {
+      final detail = await ref.read(djApiProvider).getSession(sessionId);
+      final last = detail.messages.lastOrNull;
+      if (last == null || last.role != 'dj' || known.contains(last.id)) {
+        return null;
+      }
+      final title = detail.session.title;
+      return TurnResult(
+        djMessage: last,
+        queue: detail.queue,
+        queueVersion: detail.session.queueVersion,
+        sessionTitle: title == base.session.title ? null : title,
+        pickState: detail.pickState,
+        suggestions: detail.suggestions,
+        addMusic: detail.addMusic,
+      );
+    } catch (_) {
+      return null;
     }
   }
 
@@ -1068,10 +1236,30 @@ final sessionStarterProvider =
               knownIds: listed?.map((session) => session.id).toSet(),
             );
         String? made;
+        // A streamed create names the mix first, before its turn runs.
+        String? named;
+        WorkingStep? step;
+        void onProgress(TurnProgress progress) {
+          if (progress is TurnSessionStarted) {
+            named = progress.sessionId;
+            endActivity.named(progress.sessionId);
+          }
+          final next = WorkingStep.after(step, progress);
+          if (next == null || identical(next, step)) return;
+          step = next;
+          endActivity.step(next);
+        }
+
         try {
           final detail = await ref
               .read(djApiProvider)
-              .createSession(prompt, playlistSeed: playlistSeed, kind: kind);
+              .createSessionWithProgress(
+                prompt,
+                playlistSeed: playlistSeed,
+                kind: kind,
+                // An album keeps its timed lines.
+                onProgress: kind == SessionKind.album ? null : onProgress,
+              );
           ref.invalidate(sessionsProvider);
           made = detail.session.id;
           offers.put(detail);
@@ -1097,6 +1285,21 @@ final sessionStarterProvider =
           // A failure after the row was written still leaves a mix to open.
           made = e.sessionId;
           rethrow;
+        } on NetworkException {
+          final id = named;
+          if (id == null) rethrow;
+          // The stream named the mix before it dropped: the row is there
+          // and its turn may still land. A failure of a mix that exists, as
+          // a failed turn after the row was written is, so the callers open
+          // it rather than offer to make it again (a second model turn, and
+          // one of an anonymous listener's three mixes).
+          ref.invalidate(sessionsProvider);
+          made = id;
+          throw DjApiException(
+            kind: 'stream_dropped',
+            message: _genericApiErrorMessage,
+            sessionId: id,
+          );
         } finally {
           endActivity(sessionId: made);
         }

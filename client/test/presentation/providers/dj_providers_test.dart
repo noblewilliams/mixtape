@@ -15,6 +15,7 @@ import 'package:mixtape/presentation/providers/device_providers.dart';
 import 'package:mixtape/presentation/providers/dj_providers.dart';
 import 'package:mixtape/presentation/providers/mix_activity_provider.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
+import 'package:mixtape/presentation/providers/working_step.dart';
 
 import '../../helpers/fake_listening_api.dart';
 
@@ -205,6 +206,72 @@ class FakeDjApi implements DjApi, DjRemakeSender {
 
   @override
   void close() {}
+}
+
+/// [FakeDjApi] that answers the streamed turns itself ([DjTurnProgressSender]),
+/// so a test can play a turn's progress through the callback the provider
+/// passes, and see whether it passed one at all.
+class ProgressDjApi extends FakeDjApi implements DjTurnProgressSender {
+  Future<TurnResult> Function(
+    String id,
+    String text,
+    void Function(TurnProgress)? onProgress,
+  )?
+  onSendWithProgress;
+  Future<TurnResult> Function(
+    String id,
+    void Function(TurnProgress)? onProgress,
+  )?
+  onRemakeWithProgress;
+  Future<SessionDetail> Function(
+    String prompt,
+    SessionKind kind,
+    void Function(TurnProgress)? onProgress,
+  )?
+  onCreateWithProgress;
+
+  /// Whether each streamed call was given a progress callback, in order.
+  final List<bool> askedForSteps = [];
+
+  @override
+  Future<SessionDetail> createSessionWithProgress(
+    String prompt, {
+    InitialPlaylistSeed? playlistSeed,
+    SessionKind kind = SessionKind.mix,
+    void Function(TurnProgress progress)? onProgress,
+  }) {
+    askedForSteps.add(onProgress != null);
+    final impl = onCreateWithProgress;
+    if (impl == null) {
+      throw UnimplementedError('onCreateWithProgress not wired');
+    }
+    return impl(prompt, kind, onProgress);
+  }
+
+  @override
+  Future<TurnResult> sendMessageWithProgress(
+    String id,
+    String text, {
+    void Function(TurnProgress progress)? onProgress,
+  }) {
+    askedForSteps.add(onProgress != null);
+    final impl = onSendWithProgress;
+    if (impl == null) throw UnimplementedError('onSendWithProgress not wired');
+    return impl(id, text, onProgress);
+  }
+
+  @override
+  Future<TurnResult> sendRemakeWithProgress(
+    String id, {
+    void Function(TurnProgress progress)? onProgress,
+  }) {
+    askedForSteps.add(onProgress != null);
+    final impl = onRemakeWithProgress;
+    if (impl == null) {
+      throw UnimplementedError('onRemakeWithProgress not wired');
+    }
+    return impl(id, onProgress);
+  }
 }
 
 /// authProvider override for the one test that needs to flip auth status
@@ -1015,6 +1082,531 @@ void main() {
       );
       expect(container.read(mixActivityProvider).pending, isNull);
       expect(container.read(mixActivityProvider).ready, {'kept'});
+    });
+  });
+
+  group('the turn\'s own steps (turn steps 2026-11-13)', () {
+    const crates = TurnStep('digging', scope: 'catalogue', artists: ['Tems']);
+
+    ProgressDjApi api({SessionKind kind = SessionKind.mix}) {
+      final api = ProgressDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: DjSession(
+          id: 's1',
+          title: 'Test Session',
+          status: 'active',
+          queueVersion: 1,
+          updatedAt: DateTime(2026, 1, 1),
+          kind: kind,
+        ),
+        messages: [],
+        queue: [],
+      );
+      return api;
+    }
+
+    test('a mix send keeps the latest step on the chat and the working entry, '
+        'then lets it go', () async {
+      final fake = api();
+      final reply = Completer<TurnResult>();
+      late void Function(TurnProgress) report;
+      fake.onSendWithProgress = (id, text, onProgress) {
+        report = onProgress!;
+        return reply.future;
+      };
+      final container = _makeContainer(fake);
+      await container.read(chatProvider('s1').future);
+      ChatState chat() => container.read(chatProvider('s1')).value!;
+      WorkingStep? working() =>
+          container.read(mixActivityProvider).workingStep('s1');
+
+      final sent = container.read(chatProvider('s1').notifier).send('more');
+      expect(fake.askedForSteps, [true]);
+      expect(chat().workingStep, isNull);
+
+      report(const TurnStreamOpened());
+      expect(chat().workingStep?.step, isNull);
+      expect(chat().workingStep, isNotNull);
+      expect(working(), chat().workingStep);
+
+      report(crates);
+      expect(chat().workingStep?.step, crates);
+      expect(working(), chat().workingStep);
+
+      // A step this build does not know keeps the one it has.
+      final before = chat().workingStep;
+      report(const TurnStep('tuning'));
+      expect(chat().workingStep, same(before));
+      expect(working(), same(before));
+
+      reply.complete(
+        TurnResult(
+          djMessage: _msg('m2', 'dj', 'ok'),
+          queue: [],
+          queueVersion: 1,
+        ),
+      );
+      await sent;
+      expect(chat().workingStep, isNull);
+      expect(working(), isNull);
+      expect(chat().sending, isFalse);
+    });
+
+    test('a remake streams its steps too', () async {
+      final fake = api();
+      final reply = Completer<TurnResult>();
+      late void Function(TurnProgress) report;
+      fake.onRemakeWithProgress = (id, onProgress) {
+        report = onProgress!;
+        return reply.future;
+      };
+      final container = _makeContainer(fake);
+      await container.read(chatProvider('s1').future);
+
+      final remade = container.read(chatProvider('s1').notifier).remake();
+      report(const TurnStreamOpened());
+      report(crates);
+      expect(
+        container.read(chatProvider('s1')).value!.workingStep?.step,
+        crates,
+      );
+      reply.complete(
+        TurnResult(
+          djMessage: _msg('m2', 'dj', 'ok'),
+          queue: [],
+          queueVersion: 2,
+        ),
+      );
+      await remade;
+      expect(fake.askedForSteps, [true]);
+      expect(container.read(chatProvider('s1')).value!.workingStep, isNull);
+    });
+
+    test('an album message asks for no steps', () async {
+      final fake = api(kind: SessionKind.album);
+      fake.onSendWithProgress = (id, text, onProgress) async => TurnResult(
+        djMessage: _msg('m2', 'dj', 'ok'),
+        queue: [],
+        queueVersion: 1,
+      );
+      final container = _makeContainer(fake);
+      await container.read(chatProvider('s1').future);
+      await container.read(chatProvider('s1').notifier).send('something warm');
+      expect(fake.askedForSteps, [false]);
+    });
+
+    test(
+      'a conversation left mid-turn leaves its step for the next to resume',
+      () async {
+        final fake = api();
+        final reply = Completer<TurnResult>();
+        late void Function(TurnProgress) report;
+        fake.onSendWithProgress = (id, text, onProgress) {
+          report = onProgress!;
+          return reply.future;
+        };
+        final container = _makeContainer(fake);
+        var sub = container.listen(chatProvider('s1'), (_, _) {});
+        await container.read(chatProvider('s1').future);
+        final sent = container.read(chatProvider('s1').notifier).send('more');
+        report(const TurnStreamOpened());
+        sub.close();
+        await Future<void>.delayed(Duration.zero);
+
+        // The request carries on with no conversation to land in.
+        report(crates);
+        expect(
+          container.read(mixActivityProvider).workingStep('s1')?.step,
+          crates,
+        );
+        sub = container.listen(chatProvider('s1'), (_, _) {});
+        addTearDown(sub.close);
+        await container.read(chatProvider('s1').future);
+        expect(
+          container.read(mixActivityProvider).workingStep('s1')?.step,
+          crates,
+        );
+
+        reply.complete(
+          TurnResult(
+            djMessage: _msg('m2', 'dj', 'ok'),
+            queue: [],
+            queueVersion: 1,
+          ),
+        );
+        await sent;
+        expect(container.read(mixActivityProvider).workingStep('s1'), isNull);
+      },
+    );
+
+    test('a new mix keeps its step on the pending row, and its id names it; '
+        'an album asks for none', () async {
+      final fake = ProgressDjApi();
+      final made = Completer<SessionDetail>();
+      late void Function(TurnProgress) report;
+      fake.onCreateWithProgress = (prompt, kind, onProgress) {
+        if (kind == SessionKind.album) {
+          return Future.value(
+            SessionDetail(
+              session: _session(id: 'album-1'),
+              messages: [],
+              queue: [],
+            ),
+          );
+        }
+        report = onProgress!;
+        return made.future;
+      };
+      final container = _makeContainer(fake);
+
+      final started = container.read(sessionStarterProvider)('rainy drive');
+      report(const TurnStreamOpened());
+      report(const TurnSessionStarted('new-1'));
+      report(crates);
+      final pending = container.read(mixActivityProvider).pending!;
+      expect(pending.sessionId, 'new-1');
+      expect(container.read(mixActivityProvider).pendingStep?.step, crates);
+      expect(
+        pending.adopt([_session(id: 'other'), _session(id: 'new-1')]),
+        'new-1',
+      );
+
+      made.complete(
+        SessionDetail(
+          session: _session(id: 'new-1'),
+          messages: [],
+          queue: [],
+        ),
+      );
+      expect(await started, 'new-1');
+      expect(container.read(mixActivityProvider).pending, isNull);
+
+      await container.read(sessionStarterProvider)(
+        'a record',
+        kind: SessionKind.album,
+      );
+      expect(fake.askedForSteps, [true, false]);
+    });
+
+    test('a create stream that drops after naming the mix opens it with the '
+        'failure; before it named one, it is a network failure', () async {
+      final fake = ProgressDjApi();
+      fake.onCreateWithProgress = (prompt, kind, onProgress) async {
+        onProgress!(const TurnStreamOpened());
+        onProgress(const TurnSessionStarted('new-1'));
+        throw NetworkException('the turn stream ended early');
+      };
+      final container = _makeContainer(fake);
+
+      await expectLater(
+        container.read(sessionStarterProvider)('rainy drive'),
+        throwsA(
+          isA<DjApiException>()
+              .having((e) => e.sessionId, 'sessionId', 'new-1')
+              .having(
+                (e) => e.message,
+                'message',
+                'something went wrong on our end — try again',
+              ),
+        ),
+      );
+      expect(container.read(mixActivityProvider).pending, isNull);
+      expect(container.read(mixActivityProvider).isReady('new-1'), isTrue);
+
+      fake.onCreateWithProgress = (prompt, kind, onProgress) async {
+        onProgress!(const TurnStreamOpened());
+        throw NetworkException('the turn stream ended early');
+      };
+      await expectLater(
+        container.read(sessionStarterProvider)('again'),
+        throwsA(isA<NetworkException>()),
+      );
+      expect(container.read(mixActivityProvider).ready, {'new-1'});
+    });
+
+    test(
+      'a step that arrives after the conversation rebuilt is ignored',
+      () async {
+        final fake = api();
+        final reply = Completer<TurnResult>();
+        late void Function(TurnProgress) report;
+        fake.onSendWithProgress = (id, text, onProgress) {
+          report = onProgress!;
+          return reply.future;
+        };
+        final container = _makeContainer(fake);
+        final sub = container.listen(chatProvider('s1'), (_, _) {});
+        addTearDown(sub.close);
+        await container.read(chatProvider('s1').future);
+        final sent = container.read(chatProvider('s1').notifier).send('more');
+        report(const TurnStreamOpened());
+
+        // The listener changed: the conversation and the activity start over.
+        (container.read(authProvider.notifier) as TestAuthNotifier).set(
+          AuthStatus.noSession,
+        );
+        await container.read(chatProvider('s1').future);
+        report(crates);
+        expect(container.read(chatProvider('s1')).value!.workingStep, isNull);
+        expect(container.read(mixActivityProvider).workingStep('s1'), isNull);
+
+        reply.complete(
+          TurnResult(
+            djMessage: _msg('m2', 'dj', 'ok'),
+            queue: [],
+            queueVersion: 1,
+          ),
+        );
+        await sent;
+      },
+    );
+
+    test(
+      'a stream dropped before it opened is a turn that never left',
+      () async {
+        final fake = api();
+        fake.onSendWithProgress = (id, text, onProgress) async =>
+            throw NetworkException('no route to host');
+        final container = _makeContainer(fake);
+        await container.read(chatProvider('s1').future);
+
+        await container.read(chatProvider('s1').notifier).send('play jazz');
+
+        final state = container.read(chatProvider('s1')).value!;
+        expect(state.messages.map((m) => m.message.role), ['user', 'dj']);
+        expect(state.messages.last.isError, isTrue);
+        expect(
+          state.messages.last.message.content,
+          contains('check your connection'),
+        );
+        // No re-read: the server never had it.
+        expect(fake.getSessionCallCount, 1);
+        expect(state.workingStep, isNull);
+      },
+    );
+
+    test('a stream dropped after it opened: the server had the turn, and a '
+        'reply that landed is adopted', () async {
+      final fake = api();
+      fake.onSendWithProgress = (id, text, onProgress) async {
+        onProgress!(const TurnStreamOpened());
+        onProgress(crates);
+        throw NetworkException('the turn stream ended early');
+      };
+      final container = _makeContainer(fake);
+      await container.read(chatProvider('s1').future);
+      fake.onGetSession = (_) async => SessionDetail(
+        session: _session(queueVersion: 2),
+        messages: [
+          _msg('m1', 'user', 'play jazz'),
+          _msg('m2', 'dj', 'here is some jazz'),
+        ],
+        queue: [_track(0)],
+      );
+
+      await container.read(chatProvider('s1').notifier).send('play jazz');
+
+      final state = container.read(chatProvider('s1')).value!;
+      // The read that found it, then the flags read any reply brings.
+      expect(fake.getSessionCallCount, 3);
+      expect(state.messages.map((m) => m.message.content), [
+        'play jazz',
+        'here is some jazz',
+      ]);
+      expect(state.messages.any((m) => m.isError), isFalse);
+      expect(state.queueVersion, 2);
+      expect(state.queue, hasLength(1));
+      expect(state.sending, isFalse);
+      expect(state.workingStep, isNull);
+      expect(container.read(mixActivityProvider).isReady('s1'), isTrue);
+    });
+
+    test('a stream dropped after it opened with nothing landed yet keeps the '
+        'line and says the turn failed, not that it never left', () async {
+      final fake = api();
+      fake.onSendWithProgress = (id, text, onProgress) async {
+        onProgress!(const TurnStreamOpened());
+        throw NetworkException('the turn stream ended early');
+      };
+      final container = _makeContainer(fake);
+      await container.read(chatProvider('s1').future);
+      fake.onGetSession = (_) async => SessionDetail(
+        session: _session(),
+        messages: [_msg('m1', 'user', 'play jazz')],
+        queue: [],
+      );
+
+      await container.read(chatProvider('s1').notifier).send('play jazz');
+
+      final state = container.read(chatProvider('s1')).value!;
+      expect(fake.getSessionCallCount, 2);
+      expect(state.messages.map((m) => m.message.role), ['user', 'dj']);
+      expect(state.messages.first.message.content, 'play jazz');
+      expect(state.messages.last.isError, isTrue);
+      expect(
+        state.messages.last.message.content,
+        'something went wrong on our end — try again',
+      );
+      expect(state.sending, isFalse);
+    });
+
+    test(
+      'a session that still ends on a reply the client had is no reply',
+      () async {
+        final fake = api();
+        fake.onGetSession = (_) async => SessionDetail(
+          session: _session(),
+          messages: [_msg('m0', 'user', 'hi'), _msg('m1', 'dj', 'hello')],
+          queue: [],
+        );
+        fake.onSendWithProgress = (id, text, onProgress) async {
+          onProgress!(const TurnStreamOpened());
+          throw NetworkException('the turn stream ended early');
+        };
+        final container = _makeContainer(fake);
+        await container.read(chatProvider('s1').future);
+
+        await container.read(chatProvider('s1').notifier).send('play jazz');
+
+        final state = container.read(chatProvider('s1')).value!;
+        expect(fake.getSessionCallCount, 2);
+        expect(state.messages.map((m) => m.message.content), [
+          'hi',
+          'hello',
+          'play jazz',
+          'something went wrong on our end — try again',
+        ]);
+        expect(state.messages.last.isError, isTrue);
+      },
+    );
+
+    group('one later read, while the server may still finish', () {
+      setUp(() {
+        final saved = ChatNotifier.lateReadDelay;
+        ChatNotifier.lateReadDelay = const Duration(milliseconds: 20);
+        addTearDown(() => ChatNotifier.lateReadDelay = saved);
+      });
+
+      Future<void> later() async {
+        await Future<void>.delayed(const Duration(milliseconds: 60));
+        await _flush();
+      }
+
+      ProgressDjApi dropping() {
+        final fake = api();
+        fake.onSendWithProgress = (id, text, onProgress) async {
+          onProgress!(const TurnStreamOpened());
+          throw NetworkException('the turn stream ended early');
+        };
+        return fake;
+      }
+
+      SessionDetail read({required bool landed}) => SessionDetail(
+        session: DjSession(
+          id: 's1',
+          title: landed ? 'Late Night Jazz' : 'Test Session',
+          status: 'active',
+          queueVersion: landed ? 2 : 1,
+          updatedAt: DateTime(2026, 1, 1),
+        ),
+        messages: [
+          _msg('m1', 'user', 'play jazz'),
+          if (landed) _msg('m2', 'dj', 'here is some jazz'),
+        ],
+        queue: [if (landed) _track(0)],
+      );
+
+      test('adopts a reply that landed meanwhile, as a reply, and the failure '
+          'line goes', () async {
+        var landed = false;
+        final fake = dropping();
+        final container = _makeContainer(fake);
+        // The conversation stays on screen throughout.
+        container.listen(chatProvider('s1'), (_, _) {});
+        await container.read(chatProvider('s1').future);
+        fake.onGetSession = (_) async => read(landed: landed);
+        fake.onListSessions = () async => [_session()];
+        container.listen(sessionsProvider, (_, _) {});
+        await container.read(sessionsProvider.future);
+
+        await container.read(chatProvider('s1').notifier).send('play jazz');
+        expect(
+          container.read(chatProvider('s1')).value!.messages.last.isError,
+          isTrue,
+        );
+
+        landed = true;
+        await later();
+        final state = container.read(chatProvider('s1')).value!;
+        expect(state.messages.map((m) => m.message.content), [
+          'play jazz',
+          'here is some jazz',
+        ]);
+        expect(state.messages.any((m) => m.isError), isFalse);
+        expect(state.queueVersion, 2);
+        expect(state.queue, hasLength(1));
+        // The rename the reply carries lands, and the list hears of it.
+        expect(state.session.title, 'Late Night Jazz');
+        // Build, the first read, the later read, and the flags read.
+        expect(fake.getSessionCallCount, 4);
+        expect(fake.listSessionsCallCount, 2);
+      });
+
+      test('nothing landed: the failure line stays', () async {
+        final fake = dropping();
+        final container = _makeContainer(fake);
+        container.listen(chatProvider('s1'), (_, _) {});
+        await container.read(chatProvider('s1').future);
+        fake.onGetSession = (_) async => read(landed: false);
+
+        await container.read(chatProvider('s1').notifier).send('play jazz');
+        await later();
+        final state = container.read(chatProvider('s1')).value!;
+        expect(fake.getSessionCallCount, 3);
+        expect(state.messages.map((m) => m.message.role), ['user', 'dj']);
+        expect(state.messages.last.isError, isTrue);
+      });
+
+      test('another turn started meanwhile: no later read', () async {
+        final fake = dropping();
+        final container = _makeContainer(fake);
+        container.listen(chatProvider('s1'), (_, _) {});
+        await container.read(chatProvider('s1').future);
+        fake.onGetSession = (_) async => read(landed: false);
+        await container.read(chatProvider('s1').notifier).send('play jazz');
+        expect(fake.getSessionCallCount, 2);
+
+        final resend = Completer<TurnResult>();
+        fake.onSendWithProgress = (id, text, onProgress) => resend.future;
+        final again = container
+            .read(chatProvider('s1').notifier)
+            .send('play jazz');
+        await later();
+        expect(fake.getSessionCallCount, 2);
+
+        resend.complete(
+          TurnResult(
+            djMessage: _msg('m3', 'dj', 'jazz it is'),
+            queue: [],
+            queueVersion: 1,
+          ),
+        );
+        await again;
+      });
+
+      test('the conversation went away: no later read', () async {
+        final fake = dropping();
+        final container = _makeContainer(fake);
+        final sub = container.listen(chatProvider('s1'), (_, _) {});
+        await container.read(chatProvider('s1').future);
+        fake.onGetSession = (_) async => read(landed: false);
+        await container.read(chatProvider('s1').notifier).send('play jazz');
+        sub.close();
+        await Future<void>.delayed(Duration.zero);
+        final reads = fake.getSessionCallCount;
+        await later();
+        expect(fake.getSessionCallCount, reads);
+      });
     });
   });
 

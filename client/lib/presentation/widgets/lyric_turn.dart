@@ -20,6 +20,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
+import '../../data/dj/dj_api.dart' show TurnStep;
+import '../providers/working_step.dart';
 import '../theme/mixtape_theme.dart';
 import 'conversation_turn.dart' show ConversationTurn, ConversationTurnKind, WorkingIndicator;
 import 'foundation/cassette_tile.dart';
@@ -225,10 +227,14 @@ class DjWorkingPhase {
 ///
 /// The phases follow the order a turn's work actually runs in — the ask is
 /// read, the library searched, records pulled, the order set, the tape
-/// written — on a clock, since a turn reports nothing until it is done. The
-/// first line is always the same; each later phase picks one of its lines
-/// by seed, so a turn reads differently from the last one but never changes
-/// its mind about a phase it is in.
+/// written — on a clock, for a turn that reports nothing until it is done
+/// (an album turn, or a mix turn before its stream opens or from an older
+/// server). The first line is always the same; each later phase picks one
+/// of its lines by seed, so a turn reads differently from the last one but
+/// never changes its mind about a phase it is in.
+///
+/// A mix turn that streams its steps says them instead, from the step table
+/// below ([stepLineAt]; turn steps, 2026-11-13).
 class DjWorkingPhrases {
   const DjWorkingPhrases(this.phases);
 
@@ -297,14 +303,363 @@ class DjWorkingPhrases {
     if (index + 1 >= phases.length) return null;
     return phases[index + 1].from - elapsed;
   }
+
+  // The turn's own steps (spec `2026-11-13-dj-turn-steps-design.md`, "iOS
+  // client" and "Copy"): once a mix turn's stream opens, the line follows
+  // what the server says it is doing rather than the clock above.
+
+  /// How long each of a step's later lines holds.
+  static const Duration stepClock = Duration(seconds: 12);
+
+  /// A step this long says [stillLine], whatever it is.
+  static const Duration stillAfter = Duration(seconds: 30);
+  static const String stillLine = 'Still at the decks. Worth the wait…';
+
+  /// The least time a line shows before another takes over, so a 50 ms
+  /// step never flashes.
+  static const Duration dwell = Duration(milliseconds: 1500);
+
+  /// The longest a line with names may run; past it the step says its
+  /// nameless line.
+  static const int maxNamedLength = 44;
+
+  /// Whether the line has words for [step]. It keeps its current line
+  /// through any other (the server may add steps).
+  static bool knows(TurnStep step) => _linesFor(step) != null;
+
+  /// The line [inStep] into [step] (null: the stream opened and nothing has
+  /// come yet). [seed] picks one line per step, as it picks one per phase.
+  static String stepLineAt(
+    TurnStep? step,
+    Duration inStep, {
+    required int seed,
+  }) {
+    if (inStep >= stillAfter) return stillLine;
+    final (order, lines) = _linesFor(step) ?? _linesFor(null)!;
+    final later = inStep.inMicroseconds ~/ stepClock.inMicroseconds;
+    if (later > 0 && lines.later.isNotEmpty) {
+      return lines.later[math.min(later, lines.later.length) - 1];
+    }
+    final pick = seed + order;
+    final named = step == null ? null : _namedLine(step, pick);
+    if (named != null && named.length <= maxNamedLength) return named;
+    return lines.first[pick % lines.first.length];
+  }
+
+  /// How long after [inStep] the step's line next changes; null once it
+  /// holds.
+  static Duration? untilNextStepLine(TurnStep? step, Duration inStep) {
+    if (inStep >= stillAfter) return null;
+    final (_, lines) = _linesFor(step) ?? _linesFor(null)!;
+    for (var i = 1; i <= lines.later.length; i++) {
+      final at = stepClock * i;
+      if (at >= stillAfter) break;
+      if (at > inStep) return at - inStep;
+    }
+    return stillAfter - inStep;
+  }
+
+  /// Each step's nameless lines, with its place in the table (so a seed
+  /// picks differently from one step to the next).
+  static (int, DjStepLines)? _linesFor(TurnStep? step) => switch (step?.step) {
+    null || 'listening' => (0, const DjStepLines([WorkingCassette.caption])),
+    'playlists' => (
+      1,
+      const DjStepLines([
+        'Looking through your playlists…',
+        'Pulling that playlist off the shelf…',
+      ]),
+    ),
+    'digging' when step!.scope == 'library' => (
+      2,
+      const DjStepLines(
+        ['Flipping through your records…', 'Thumbing through your stacks…'],
+        ['Still flipping…'],
+      ),
+    ),
+    // The catalogue, and a scope this build does not know.
+    'digging' => (
+      3,
+      const DjStepLines(
+        ['Digging through the crates…', 'Crate-digging for you…'],
+        ['Deeper in the crates…'],
+      ),
+    ),
+    'picking' => (
+      4,
+      const DjStepLines(
+        ['Pulling records that fit…', 'Cueing up contenders…'],
+        ['Sequencing the tracklist…', 'Lining up the transitions…'],
+      ),
+    ),
+    'checking' => (
+      5,
+      const DjStepLines([
+        'Checking the pressings…',
+        'Giving it a sound check…',
+      ]),
+    ),
+    'editing' => (
+      6,
+      const DjStepLines(['Reworking the tracklist…', 'Swapping records…']),
+    ),
+    'pressing' => (
+      7,
+      const DjStepLines(['Pressing the tape…', 'Spooling it up…']),
+    ),
+    'labelling' => (8, const DjStepLines(['Labelling the cassette…'])),
+    'noting' => (9, const DjStepLines(['Jotting that on the sleeve…'])),
+    'writing' => (10, const DjStepLines(['Writing the liner notes…'])),
+    _ => null,
+  };
+
+  /// The step's line with the names it carries, or null when it carries
+  /// none. Names are only ever ones the listener said or sees (spec,
+  /// "Names"), and land in a plain [Text].
+  static String? _namedLine(TurnStep step, int pick) {
+    String one(List<String> lines) => lines[pick % lines.length];
+    switch (step.step) {
+      case 'digging':
+        final artists = _list(step.artists, most: 3);
+        if (artists == null) return null;
+        return step.scope == 'library'
+            ? one([
+                'Flipping through your $artists records…',
+                'Pulling your $artists records…',
+              ])
+            : one(['Digging for $artists…', 'Crate-digging for $artists…']);
+      case 'picking':
+        final artists = _list(step.artists, most: 3);
+        if (artists == null) return null;
+        return one([
+          'Pulling records that sit with $artists…',
+          'Finding company for $artists…',
+        ]);
+      case 'checking':
+        final genres = _list(step.genres, most: 2);
+        return genres == null ? null : 'Running the $genres sound check…';
+      case 'playlists':
+        final playlist = step.playlist;
+        return playlist == null ? null : 'Pulling “$playlist” off the shelf…';
+      case 'labelling':
+        final title = step.title;
+        return title == null ? null : 'Labelling it “$title”…';
+      case 'pressing':
+        final count = step.count;
+        if (count == null || count < 1) return null;
+        return count == 1
+            ? 'Pressing one song to tape…'
+            : 'Pressing $count songs to tape…';
+    }
+    return null;
+  }
+
+  /// "A", "A and B", or past two "A, B and more" (with [most] 2, the first
+  /// two only: "A and B").
+  static String? _list(List<String>? names, {required int most}) {
+    if (names == null || names.isEmpty) return null;
+    final kept = names.take(most).toList();
+    return switch (kept.length) {
+      1 => kept.single,
+      2 => '${kept[0]} and ${kept[1]}',
+      _ => '${kept[0]}, ${kept[1]} and more',
+    };
+  }
+}
+
+/// A step's nameless lines: one of [first] picked per turn, then each of
+/// [later] in turn, [DjWorkingPhrases.stepClock] apart.
+class DjStepLines {
+  const DjStepLines(this.first, [this.later = const []]);
+
+  final List<String> first;
+  final List<String> later;
+}
+
+/// The line of what the DJ is doing, as [WorkingCassette] and the first-run
+/// Making screen show it.
+///
+/// Until the turn's stream opens ([step] null: the headers are not back, or
+/// an older server answered JSON) it walks [phrases] on the clock. Once a
+/// [step] arrives the clock stops and the line follows the turn: listening
+/// until the first step, then each step's line, its later lines on a short
+/// clock, and the still line past 30 s. Every line holds at least
+/// [DjWorkingPhrases.dwell]; a step that comes sooner waits, and one
+/// overtaken while it waits never shows. A step it has no words for keeps
+/// the line it has. One line, cut with an ellipsis at worst.
+///
+/// Only timers move it on, never a tick, and only a mount reads the wall
+/// clock (to pick up a turn already under way from [startedAt] and the
+/// step's arrival).
+class DjWorkingLine extends StatefulWidget {
+  const DjWorkingLine({
+    super.key,
+    this.phrases = DjWorkingPhrases.mix,
+    this.startedAt,
+    this.seed,
+    this.step,
+    required this.style,
+  });
+
+  final DjWorkingPhrases phrases;
+
+  /// When the turn went out; null starts the clock at the mount.
+  final DateTime? startedAt;
+
+  /// Which line each phase and step picks. Null takes one from
+  /// [startedAt], or at random; tests pass their own.
+  final int? seed;
+
+  /// Where the turn's stream has got to; null until it opens.
+  final WorkingStep? step;
+
+  final TextStyle style;
+
+  @override
+  State<DjWorkingLine> createState() => _DjWorkingLineState();
+}
+
+class _DjWorkingLineState extends State<DjWorkingLine> {
+  late final int _seed =
+      widget.seed ??
+      widget.startedAt?.millisecondsSinceEpoch ??
+      math.Random().nextInt(1 << 16);
+
+  /// The clock: how far into the turn this widget came in, and since.
+  late final Duration _offset = widget.startedAt == null
+      ? Duration.zero
+      : DateTime.now().difference(widget.startedAt!);
+  Duration _sinceMount = Duration.zero;
+  Timer? _clockTimer;
+
+  /// The step the line follows (null: the clock), and how far into it.
+  WorkingStep? _step;
+  Duration _inStep = Duration.zero;
+  Timer? _stepTimer;
+
+  /// What the line says, and the dwell that holds it there.
+  late String _shown;
+  Timer? _holdTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _follow(widget.step);
+    if (_step == null) _scheduleClock();
+    _shown = _target();
+    _hold();
+  }
+
+  @override
+  void didUpdateWidget(DjWorkingLine oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final next = widget.step;
+    // Once a stream has opened there is no going back to the clock.
+    if (next == null || next == _step) return;
+    if (!_follow(next)) return;
+    _clockTimer?.cancel();
+    _clockTimer = null;
+    _show();
+  }
+
+  /// Follows [next] from its arrival; false when it is nothing to follow.
+  bool _follow(WorkingStep? next) {
+    if (next == null) return false;
+    final step = next.step;
+    if (step != null && !DjWorkingPhrases.knows(step)) return false;
+    _step = next;
+    final age = DateTime.now().difference(next.at);
+    _inStep = age.isNegative ? Duration.zero : age;
+    _stepTimer?.cancel();
+    _scheduleStep();
+    return true;
+  }
+
+  /// One timer per change of line, rather than a tick: nothing runs while
+  /// the line holds.
+  void _scheduleClock() {
+    final wait = widget.phrases.untilNext(_offset + _sinceMount);
+    if (wait == null) return;
+    _clockTimer = Timer(wait, () {
+      if (!mounted) return;
+      _sinceMount += wait;
+      _scheduleClock();
+      setState(_show);
+    });
+  }
+
+  void _scheduleStep() {
+    final wait = DjWorkingPhrases.untilNextStepLine(_step!.step, _inStep);
+    if (wait == null) return;
+    _stepTimer = Timer(wait, () {
+      if (!mounted) return;
+      _inStep += wait;
+      _scheduleStep();
+      setState(_show);
+    });
+  }
+
+  String _target() {
+    final step = _step;
+    return step == null
+        ? widget.phrases.lineAt(_offset + _sinceMount, seed: _seed)
+        : DjWorkingPhrases.stepLineAt(step.step, _inStep, seed: _seed);
+  }
+
+  /// Puts up the line the clock or the step calls for, unless the one
+  /// showing has not held its dwell yet; the dwell's end looks again.
+  void _show() {
+    if (_holdTimer != null) return;
+    final target = _target();
+    if (target == _shown) return;
+    _shown = target;
+    _hold();
+  }
+
+  void _hold() {
+    _holdTimer = Timer(DjWorkingPhrases.dwell, () {
+      _holdTimer = null;
+      if (!mounted) return;
+      final before = _shown;
+      _show();
+      if (_shown != before) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _clockTimer?.cancel();
+    _stepTimer?.cancel();
+    _holdTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedSwitcher(
+    duration: MediaQuery.disableAnimationsOf(context)
+        ? Duration.zero
+        : const Duration(milliseconds: 280),
+    layoutBuilder: (current, previous) => Stack(
+      alignment: Alignment.centerLeft,
+      children: [...previous, ?current],
+    ),
+    child: Text(
+      _shown,
+      key: ValueKey(_shown),
+      maxLines: 1,
+      softWrap: false,
+      overflow: TextOverflow.ellipsis,
+      style: widget.style,
+    ),
+  );
 }
 
 /// `.loadtape`: a small cassette in the tape colour, hubs turning, then a
-/// line of what the DJ is doing ([DjWorkingPhrases]), where the DJ's next
+/// line of what the DJ is doing ([DjWorkingLine]), where the DJ's next
 /// line will land. Under reduced motion the hubs stand still and the line
 /// changes without a fade; the status region always announces one steady
 /// line, so VoiceOver is not read every step.
-class WorkingCassette extends StatefulWidget {
+class WorkingCassette extends StatelessWidget {
   const WorkingCassette({
     super.key,
     this.caseColor,
@@ -312,6 +667,7 @@ class WorkingCassette extends StatefulWidget {
     this.announcementText,
     this.startedAt,
     this.seed,
+    this.step,
   });
 
   /// The mix's tape colour; the default case before the first mix.
@@ -327,9 +683,13 @@ class WorkingCassette extends StatefulWidget {
   /// the line picks up where it had got to; null starts from the first.
   final DateTime? startedAt;
 
-  /// Which line each phase picks. Null takes one from [startedAt], or at
-  /// random; tests pass their own.
+  /// Which line each phase and step picks. Null takes one from
+  /// [startedAt], or at random; tests pass their own.
   final int? seed;
+
+  /// Where a mix turn's stream has got to (null until it opens, and always
+  /// for an album turn): the line follows it rather than the clock.
+  final WorkingStep? step;
 
   static const Key indicatorKey = WorkingIndicator.indicatorKey;
   static const Key cassetteKey = Key('working-cassette');
@@ -347,57 +707,13 @@ class WorkingCassette extends StatefulWidget {
   static const String albumAnnouncement = WorkingIndicator.albumAnnouncement;
 
   @override
-  State<WorkingCassette> createState() => _WorkingCassetteState();
-}
-
-class _WorkingCassetteState extends State<WorkingCassette> {
-  late final int _seed =
-      widget.seed ??
-      widget.startedAt?.millisecondsSinceEpoch ??
-      math.Random().nextInt(1 << 16);
-
-  /// How far into the turn this widget came in, and the clock since.
-  late final Duration _offset = widget.startedAt == null
-      ? Duration.zero
-      : DateTime.now().difference(widget.startedAt!);
-  Duration _sinceMount = Duration.zero;
-  Timer? _timer;
-
-  Duration get _elapsed => _offset + _sinceMount;
-
-  @override
-  void initState() {
-    super.initState();
-    _schedule();
-  }
-
-  /// One timer per change of line, rather than a tick: nothing runs while
-  /// the line holds.
-  void _schedule() {
-    final wait = widget.phrases.untilNext(_elapsed);
-    if (wait == null) return;
-    _timer = Timer(wait, () {
-      if (!mounted) return;
-      setState(() => _sinceMount += wait);
-      _schedule();
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
-    final line = widget.phrases.lineAt(_elapsed, seed: _seed);
     return Semantics(
       key: WorkingCassette.indicatorKey,
       container: true,
       liveRegion: true,
-      label: widget.announcementText ?? WorkingCassette.announcement,
+      label: announcementText ?? WorkingCassette.announcement,
       child: ExcludeSemantics(
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 2),
@@ -408,7 +724,7 @@ class _WorkingCassetteState extends State<WorkingCassette> {
                 child: CassetteTile(
                   key: WorkingCassette.cassetteKey,
                   width: WorkingCassette.cassetteWidth,
-                  caseColor: widget.caseColor ?? CassetteTile.caseColors.first,
+                  caseColor: caseColor ?? CassetteTile.caseColors.first,
                   spinning: true,
                   shadow: true,
                 ),
@@ -417,22 +733,15 @@ class _WorkingCassetteState extends State<WorkingCassette> {
               Flexible(
                 child: KeyedSubtree(
                   key: WorkingCassette.captionKey,
-                  child: AnimatedSwitcher(
-                    duration: MediaQuery.disableAnimationsOf(context)
-                        ? Duration.zero
-                        : const Duration(milliseconds: 280),
-                    layoutBuilder: (current, previous) => Stack(
-                      alignment: Alignment.centerLeft,
-                      children: [...previous, ?current],
-                    ),
-                    child: Text(
-                      line,
-                      key: ValueKey(line),
-                      style: tokens.meta.copyWith(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: tokens.muted,
-                      ),
+                  child: DjWorkingLine(
+                    phrases: phrases,
+                    startedAt: startedAt,
+                    seed: seed,
+                    step: step,
+                    style: tokens.meta.copyWith(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: tokens.muted,
                     ),
                   ),
                 ),

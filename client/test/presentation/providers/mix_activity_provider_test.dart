@@ -2,9 +2,11 @@
 // (device smoke 2026-11-13).
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixtape/data/dj/dj_api.dart' show TurnStep;
 import 'package:mixtape/data/dj/dj_models.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/mix_activity_provider.dart';
+import 'package:mixtape/presentation/providers/working_step.dart';
 
 class _Auth extends AuthNotifier {
   @override
@@ -84,6 +86,78 @@ void main() {
     end();
     expect(activity().pending, isNull);
     expect(activity().ready, isEmpty);
+  });
+
+  group('where a turn has got to (turn steps 2026-11-13)', () {
+    final at = DateTime(2026, 11, 13, 21);
+    final crates = WorkingStep(
+      const TurnStep('digging', scope: 'catalogue'),
+      at,
+    );
+
+    test('a turn\'s step rides its working entry until the turn ends', () {
+      final turn = notifier().beginTurn('a');
+      expect(activity().workingStep('a'), isNull);
+      final working = activity().working;
+      turn.step(crates);
+      expect(activity().workingStep('a'), crates);
+      expect(activity().workingSince('a'), isNotNull);
+      // A step leaves the working map as it was, so the list does not
+      // rebuild for it.
+      expect(activity().working, same(working));
+
+      turn(ready: true);
+      expect(activity().workingStep('a'), isNull);
+      // A step after the end writes nothing.
+      turn.step(crates);
+      expect(activity().isWorking('a'), isFalse);
+    });
+
+    test('an earlier turn\'s step never lands on a later one', () async {
+      final first = notifier().beginTurn('a');
+      await Future<void>.delayed(const Duration(milliseconds: 2));
+      final second = notifier().beginTurn('a');
+      first.step(crates);
+      expect(activity().workingStep('a'), isNull);
+      second.step(crates);
+      expect(activity().workingStep('a'), crates);
+    });
+
+    test('a new mix carries its step, and the id the server gave it', () {
+      final made = notifier().beginNewMix('a rainy drive home');
+      final named = activity().pending;
+      made.step(crates);
+      expect(activity().pendingStep, crates);
+      // A step leaves the pending row as it was, so the list does not
+      // rebuild for it.
+      expect(activity().pending, same(named));
+      made.named('new');
+      expect(activity().pending?.sessionId, 'new');
+      expect(activity().pending?.prompt, 'a rainy drive home');
+      expect(activity().pendingStep, crates);
+
+      made(sessionId: 'new');
+      expect(activity().pending, isNull);
+      expect(activity().pendingStep, isNull);
+      made.step(crates);
+      expect(activity().pendingStep, isNull);
+    });
+
+    test('a new mix that knows its id adopts exactly that row', () {
+      final start = DateTime(2026, 11, 13, 22);
+      final pending = PendingMix(
+        prompt: 'p',
+        startedAt: start,
+        knownIds: const {'old'},
+        sessionId: 'mine',
+      );
+      // Another device's new mix is not this one.
+      expect(pending.adopt([_session('theirs', start)]), isNull);
+      expect(
+        pending.adopt([_session('theirs', start), _session('mine', start)]),
+        'mine',
+      );
+    });
   });
 
   group('a list read while a new mix is being made', () {

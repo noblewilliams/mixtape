@@ -26,6 +26,7 @@ import 'package:mixtape/presentation/providers/music_platform_provider.dart';
 import 'package:mixtape/presentation/providers/playback_provider.dart';
 import 'package:mixtape/presentation/providers/playlist_context_provider.dart';
 import 'package:mixtape/presentation/providers/mix_activity_provider.dart';
+import 'package:mixtape/presentation/providers/working_step.dart';
 import 'package:mixtape/presentation/screens/chat_screen.dart';
 import 'package:mixtape/presentation/widgets/mix_prompt_input.dart';
 import 'package:mixtape/presentation/widgets/composer_plus_button.dart';
@@ -196,6 +197,38 @@ class FakeDjApi implements DjApi, DjRemakeSender {
 
   @override
   void close() {}
+}
+
+/// [FakeDjApi] whose sends stream: each plays [steps] through the callback
+/// the conversation passes, then waits on [onSendMessage].
+class _StreamingDjApi extends FakeDjApi implements DjTurnProgressSender {
+  List<TurnProgress> steps = const [];
+
+  @override
+  Future<TurnResult> sendMessageWithProgress(
+    String id,
+    String text, {
+    void Function(TurnProgress progress)? onProgress,
+  }) {
+    for (final step in steps) {
+      onProgress?.call(step);
+    }
+    return sendMessage(id, text);
+  }
+
+  @override
+  Future<TurnResult> sendRemakeWithProgress(
+    String id, {
+    void Function(TurnProgress progress)? onProgress,
+  }) => sendRemake(id);
+
+  @override
+  Future<SessionDetail> createSessionWithProgress(
+    String prompt, {
+    InitialPlaylistSeed? playlistSeed,
+    SessionKind kind = SessionKind.mix,
+    void Function(TurnProgress progress)? onProgress,
+  }) => createSession(prompt, playlistSeed: playlistSeed, kind: kind);
 }
 
 /// The MusicKit channel, faked: every call this screen can make records its
@@ -916,6 +949,68 @@ void main() {
       expect(find.byKey(WorkingCassette.indicatorKey), findsOneWidget);
 
       end(ready: true);
+      await tester.pumpAndSettle();
+      expect(find.byKey(WorkingCassette.indicatorKey), findsNothing);
+    });
+
+    testWidgets('reopened while a streamed turn is out, the line picks up '
+        'its step', (tester) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(),
+        messages: [_msg('m1', 'user', 'more like this')],
+        queue: [],
+      );
+      final container = _makeContainer(api);
+      final turn = container.read(mixActivityProvider.notifier).beginTurn('s1');
+      turn.step(
+        WorkingStep(
+          const TurnStep('digging', scope: 'catalogue', artists: ['Tems']),
+          DateTime.now(),
+        ),
+      );
+
+      await _pump(tester, container, settle: false);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(
+        find.descendant(
+          of: find.byKey(WorkingCassette.captionKey),
+          matching: find.textContaining('for Tems…'),
+        ),
+        findsOneWidget,
+      );
+
+      turn(ready: true);
+      await tester.pumpAndSettle();
+      expect(find.byKey(WorkingCassette.indicatorKey), findsNothing);
+    });
+
+    testWidgets('a streamed send says what the DJ is doing', (tester) async {
+      final reply = Completer<TurnResult>();
+      final api = _StreamingDjApi()
+        ..steps = const [TurnStreamOpened(), TurnStep('pressing', count: 12)];
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(), messages: [], queue: []);
+      api.onSendMessage = (id, text) => reply.future;
+      await _pump(tester, _makeContainer(api));
+
+      await tester.enterText(find.byKey(const Key('prompt-field')), 'more');
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('start-session')));
+      await tester.pump();
+      // The opening line holds its 1.5 s, then the step's.
+      await tester.pump(const Duration(milliseconds: 1600));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('Pressing 12 songs to tape…'), findsOneWidget);
+
+      reply.complete(
+        TurnResult(
+          djMessage: _msg('m2', 'dj', 'twelve for you'),
+          queue: [],
+          queueVersion: 2,
+        ),
+      );
       await tester.pumpAndSettle();
       expect(find.byKey(WorkingCassette.indicatorKey), findsNothing);
     });

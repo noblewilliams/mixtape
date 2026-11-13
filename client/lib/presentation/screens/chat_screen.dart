@@ -36,6 +36,7 @@ import '../providers/playlist_context_provider.dart';
 import '../providers/shell_providers.dart';
 import '../providers/mix_activity_provider.dart';
 import '../providers/mix_operation_gate.dart';
+import '../providers/working_step.dart';
 import '../theme/mixtape_theme.dart';
 import '../widgets/album_card.dart';
 import '../widgets/composer_plus_button.dart';
@@ -783,6 +784,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     mixActivityProvider.select((a) => a.workingSince(widget.sessionId)),
   );
 
+  /// Where that turn has got to, once its stream opened: this
+  /// conversation's own turn says it on [ChatState.workingStep]; one sent
+  /// before it was reopened, on the Mixes activity's working entry.
+  WorkingStep? _workingStep(ChatState state) =>
+      state.workingStep ??
+      ref.watch(
+        mixActivityProvider.select((a) => a.workingStep(widget.sessionId)),
+      );
+
   /// Whether this mix has a tape yet: before the first one, the working
   /// cassette wears the default case.
   bool _hasTape(ChatState state) =>
@@ -898,6 +908,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         WorkingCassette(
           caseColor: _hasTape(state) ? colour : null,
           startedAt: since,
+          step: _workingStep(state),
         ),
       );
     }

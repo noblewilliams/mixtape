@@ -277,12 +277,15 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
     // A turn landing changes its mix's time, and with it the order: read the
     // list again so the row moves up with its dot. A new mix landing needs
     // nothing here; its create already marks the list stale.
-    ref.listen<MixActivity>(mixActivityProvider, (previous, next) {
-      final ended =
-          previous != null &&
-          previous.working.keys.any((id) => !next.working.containsKey(id));
-      if (ended) unawaited(ref.read(sessionsProvider.notifier).refresh());
-    });
+    ref.listen<Map<String, DateTime>>(
+      mixActivityProvider.select((activity) => activity.working),
+      (previous, next) {
+        final ended =
+            previous != null &&
+            previous.keys.any((id) => !next.containsKey(id));
+        if (ended) unawaited(ref.read(sessionsProvider.notifier).refresh());
+      },
+    );
     // The shelf's segment left (signed out of albums, the server turned them
     // off): fall back to Active rather than show a segment that isn't there.
     if (!albumsOn && _onShelf) _segment = MixesSegment.active;
@@ -382,7 +385,13 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
     // The DJ's work in flight: a turn out on a mix turns its row, and a new
     // mix being made on Home has a row of its own on top until the list
     // lists it (the server writes the row before the first turn runs).
-    final activity = ref.watch(mixActivityProvider);
+    // Only what the list draws, so a turn's steps (which change none of it)
+    // do not rebuild it.
+    final activity = ref.watch(
+      mixActivityProvider.select(
+        (a) => (working: a.working, ready: a.ready, pending: a.pending),
+      ),
+    );
     final pending = activity.pending;
     final adopted = pending?.adopt(active);
     final pendingRow = pending != null && adopted == null;
@@ -472,8 +481,9 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
               // No visible actions button: long-press and the swipe.
               showActionsButton: false,
               working:
-                  activity.isWorking(session.id) || session.id == adopted,
-              ready: activity.isReady(session.id),
+                  activity.working.containsKey(session.id) ||
+                  session.id == adopted,
+              ready: activity.ready.contains(session.id),
               onOpen: () => _openConversation(session.id),
               onRename: (title) =>
                   ref.read(sessionsProvider.notifier).rename(session.id, title),

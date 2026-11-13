@@ -3,6 +3,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixtape/data/dj/dj_api.dart' show TurnStep;
+import 'package:mixtape/presentation/providers/working_step.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
 import 'package:mixtape/presentation/widgets/lyric_turn.dart';
@@ -32,6 +34,19 @@ Future<void> _pump(
     ),
   ),
 );
+
+/// A working cassette whose step a test moves on, as a turn's stream does.
+class _Following extends StatelessWidget {
+  const _Following({required this.step});
+
+  final ValueNotifier<WorkingStep?> step;
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<WorkingStep?>(
+    valueListenable: step,
+    builder: (context, value, _) => WorkingCassette(seed: 0, step: value),
+  );
+}
 
 void main() {
   testWidgets('no bubbles: DJ lines are large ink, yours smaller smoke', (
@@ -207,6 +222,398 @@ void main() {
         ),
         findsOneWidget,
       );
+    });
+  });
+
+  group('the turn\'s own steps (turn steps 2026-11-13)', () {
+    const listening = 'The DJ is listening…';
+    const still = 'Still at the decks. Worth the wait…';
+    String line(TurnStep? step, {int seconds = 0, int seed = 0}) =>
+        DjWorkingPhrases.stepLineAt(
+          step,
+          Duration(seconds: seconds),
+          seed: seed,
+        );
+
+    test('every step the server may send has words, and only those', () {
+      for (final name in WorkingStep.known) {
+        expect(DjWorkingPhrases.knows(TurnStep(name)), isTrue, reason: name);
+      }
+      expect(DjWorkingPhrases.knows(const TurnStep('tuning')), isFalse);
+      expect(line(null), listening);
+      expect(line(const TurnStep('listening')), listening);
+    });
+
+    test('each step says its own line, one picked per turn', () {
+      final cases = {
+        const TurnStep('playlists'): [
+          'Looking through your playlists…',
+          'Pulling that playlist off the shelf…',
+        ],
+        const TurnStep('digging', scope: 'library'): [
+          'Flipping through your records…',
+          'Thumbing through your stacks…',
+        ],
+        const TurnStep('digging', scope: 'catalogue'): [
+          'Digging through the crates…',
+          'Crate-digging for you…',
+        ],
+        // A scope it does not know reads as the crates.
+        const TurnStep('digging'): [
+          'Digging through the crates…',
+          'Crate-digging for you…',
+        ],
+        const TurnStep('picking'): [
+          'Pulling records that fit…',
+          'Cueing up contenders…',
+        ],
+        const TurnStep('checking'): [
+          'Checking the pressings…',
+          'Giving it a sound check…',
+        ],
+        const TurnStep('editing'): [
+          'Reworking the tracklist…',
+          'Swapping records…',
+        ],
+        const TurnStep('pressing'): ['Pressing the tape…', 'Spooling it up…'],
+        const TurnStep('labelling'): ['Labelling the cassette…'],
+        const TurnStep('noting'): ['Jotting that on the sleeve…'],
+        const TurnStep('writing'): ['Writing the liner notes…'],
+      };
+      for (final MapEntry(key: step, value: lines) in cases.entries) {
+        final picked = {
+          for (var seed = 0; seed < 6; seed++) line(step, seed: seed),
+        };
+        expect(picked, lines.toSet(), reason: step.toString());
+        expect(line(step, seed: 3), line(step, seed: 3));
+      }
+    });
+
+    test('names: artists, genres, a playlist, a title, a count', () {
+      const tems = ['Tems'];
+      expect(
+        {
+          for (var seed = 0; seed < 4; seed++)
+            line(
+              const TurnStep('digging', scope: 'library', artists: tems),
+              seed: seed,
+            ),
+        },
+        {'Flipping through your Tems records…', 'Pulling your Tems records…'},
+      );
+      expect(
+        {
+          for (var seed = 0; seed < 4; seed++)
+            line(
+              const TurnStep('digging', scope: 'catalogue', artists: tems),
+              seed: seed,
+            ),
+        },
+        {'Digging for Tems…', 'Crate-digging for Tems…'},
+      );
+      expect(
+        {
+          for (var seed = 0; seed < 4; seed++)
+            line(const TurnStep('picking', artists: tems), seed: seed),
+        },
+        {'Pulling records that sit with Tems…', 'Finding company for Tems…'},
+      );
+      // Two artists, three read as "and more"; at most two genres.
+      expect(
+        line(
+          const TurnStep(
+            'digging',
+            scope: 'catalogue',
+            artists: ['Tems', 'Asake'],
+          ),
+          seed: 0,
+        ),
+        isIn([
+          'Digging for Tems and Asake…',
+          'Crate-digging for Tems and Asake…',
+        ]),
+      );
+      expect(
+        line(
+          const TurnStep(
+            'digging',
+            scope: 'catalogue',
+            artists: ['Tems', 'Asake', 'Wizkid'],
+          ),
+        ),
+        isIn([
+          'Digging for Tems, Asake and more…',
+          'Crate-digging for Tems, Asake and more…',
+        ]),
+      );
+      expect(
+        line(const TurnStep('checking', genres: ['Afrobeats'])),
+        'Running the Afrobeats sound check…',
+      );
+      expect(
+        line(const TurnStep('checking', genres: ['Jazz', 'Soul', 'Funk'])),
+        'Running the Jazz and Soul sound check…',
+      );
+      expect(
+        line(const TurnStep('playlists', playlist: 'Late nights')),
+        'Pulling “Late nights” off the shelf…',
+      );
+      expect(
+        line(const TurnStep('labelling', title: 'Rainy Commute')),
+        'Labelling it “Rainy Commute”…',
+      );
+      expect(
+        line(const TurnStep('pressing', count: 24)),
+        'Pressing 24 songs to tape…',
+      );
+      expect(
+        line(const TurnStep('pressing', count: 1)),
+        'Pressing one song to tape…',
+      );
+    });
+
+    test('a named line past 44 characters says the nameless one', () {
+      const nameless = ['Pulling records that fit…', 'Cueing up contenders…'];
+      const crowd = TurnStep(
+        'picking',
+        artists: ['Burna Boy', 'Asake', 'Tems'],
+      );
+      for (var seed = 0; seed < 4; seed++) {
+        expect(line(crowd, seed: seed), isIn(nameless));
+      }
+      expect(
+        line(
+          const TurnStep(
+            'labelling',
+            title: 'Slow Burn Sunday Morning Records',
+          ),
+        ),
+        'Labelling the cassette…',
+      );
+      for (var seed = 0; seed < 4; seed++) {
+        expect(
+          line(
+            const TurnStep('picking', artists: ['Tems', 'Asake', 'Burna Boy']),
+            seed: seed,
+          ).length,
+          lessThanOrEqualTo(44),
+        );
+      }
+    });
+
+    test('later lines take over every 12 s; any step past 30 s holds', () {
+      const picking = TurnStep('picking', artists: ['Tems']);
+      expect(line(picking, seconds: 11), isNot('Sequencing the tracklist…'));
+      expect(line(picking, seconds: 12), 'Sequencing the tracklist…');
+      expect(line(picking, seconds: 24), 'Lining up the transitions…');
+      expect(line(picking, seconds: 30), still);
+      expect(line(picking, seconds: 600), still);
+      const crates = TurnStep('digging', scope: 'catalogue');
+      expect(line(crates, seconds: 12), 'Deeper in the crates…');
+      expect(
+        line(const TurnStep('digging', scope: 'library'), seconds: 12),
+        'Still flipping…',
+      );
+      expect(
+        line(const TurnStep('labelling'), seconds: 12),
+        'Labelling the cassette…',
+      );
+      expect(line(const TurnStep('labelling'), seconds: 30), still);
+      expect(line(null, seconds: 29), listening);
+      expect(line(null, seconds: 30), still);
+      expect(
+        DjWorkingPhrases.untilNextStepLine(picking, const Duration(seconds: 5)),
+        const Duration(seconds: 7),
+      );
+      expect(
+        DjWorkingPhrases.untilNextStepLine(
+          picking,
+          const Duration(seconds: 25),
+        ),
+        const Duration(seconds: 5),
+      );
+      expect(
+        DjWorkingPhrases.untilNextStepLine(
+          picking,
+          const Duration(seconds: 30),
+        ),
+        isNull,
+      );
+    });
+
+    testWidgets('with no stream the clock walks on, however often it builds', (
+      tester,
+    ) async {
+      final step = ValueNotifier<WorkingStep?>(null);
+      await _pump(tester, _Following(step: step), reducedMotion: true);
+      await tester.pump(const Duration(seconds: 3));
+      step.value = null;
+      await tester.pump(const Duration(seconds: 2));
+      expect(
+        find.text(
+          DjWorkingPhrases.mix.lineAt(const Duration(seconds: 5), seed: 0),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('once the stream opens the clock stops: listening holds', (
+      tester,
+    ) async {
+      final step = ValueNotifier<WorkingStep?>(null);
+      await _pump(tester, _Following(step: step), reducedMotion: true);
+      await tester.pump(const Duration(milliseconds: 600));
+      step.value = WorkingStep.listening(DateTime.now());
+      await tester.pump();
+      // Well past the clock's 4 s: still listening.
+      await tester.pump(const Duration(seconds: 15));
+      expect(find.text(listening), findsOneWidget);
+      // A stream that sends nothing for 30 s still says it is working on it.
+      await tester.pump(const Duration(seconds: 15));
+      expect(find.text(still), findsOneWidget);
+    });
+
+    testWidgets(
+      'a stream opening after the clock moved goes back to listening',
+      (tester) async {
+        final step = ValueNotifier<WorkingStep?>(null);
+        await _pump(tester, _Following(step: step), reducedMotion: true);
+        // The clock's second line went up at 4 s and has held its 1.5 s.
+        await tester.pump(const Duration(seconds: 6));
+        expect(find.text(listening), findsNothing);
+        step.value = WorkingStep.listening(DateTime.now());
+        await tester.pump();
+        expect(find.text(listening), findsOneWidget);
+      },
+    );
+
+    testWidgets('each step shows its line; an unknown one keeps the line', (
+      tester,
+    ) async {
+      final step = ValueNotifier<WorkingStep?>(
+        WorkingStep.listening(DateTime.now()),
+      );
+      await _pump(tester, _Following(step: step), reducedMotion: true);
+      expect(find.text(listening), findsOneWidget);
+      await tester.pump(const Duration(seconds: 2));
+
+      const crates = TurnStep('digging', scope: 'catalogue', artists: ['Tems']);
+      step.value = WorkingStep(crates, DateTime.now());
+      await tester.pump();
+      expect(find.text(line(crates)), findsOneWidget);
+      expect(line(crates), contains('Tems'));
+
+      await tester.pump(const Duration(seconds: 2));
+      step.value = WorkingStep(const TurnStep('tuning'), DateTime.now());
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 2));
+      expect(find.text(line(crates)), findsOneWidget);
+      // The step's own clock keeps running through it.
+      await tester.pump(const Duration(seconds: 9));
+      expect(find.text('Deeper in the crates…'), findsOneWidget);
+    });
+
+    testWidgets('a line holds 1.5 s; a step superseded meanwhile is skipped', (
+      tester,
+    ) async {
+      final step = ValueNotifier<WorkingStep?>(
+        WorkingStep.listening(DateTime.now()),
+      );
+      await _pump(tester, _Following(step: step), reducedMotion: true);
+      // 0.5 s in: the listening line has not held its 1.5 s yet.
+      await tester.pump(const Duration(milliseconds: 500));
+      step.value = WorkingStep(const TurnStep('labelling'), DateTime.now());
+      await tester.pump();
+      expect(find.text(listening), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 999));
+      expect(find.text(listening), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(find.text('Labelling the cassette…'), findsOneWidget);
+
+      // 0.2 s later a note, then 0.1 s later the reply: the note never shows.
+      await tester.pump(const Duration(milliseconds: 200));
+      step.value = WorkingStep(const TurnStep('noting'), DateTime.now());
+      await tester.pump(const Duration(milliseconds: 100));
+      step.value = WorkingStep(const TurnStep('writing'), DateTime.now());
+      for (var i = 0; i < 20; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(find.text('Jotting that on the sleeve…'), findsNothing);
+      }
+      expect(find.text('Writing the liner notes…'), findsOneWidget);
+    });
+
+    testWidgets('within a step the line moves on at 12 s, and holds at 30 s', (
+      tester,
+    ) async {
+      const picking = TurnStep('picking');
+      final step = ValueNotifier<WorkingStep?>(
+        WorkingStep(picking, DateTime.now()),
+      );
+      await _pump(tester, _Following(step: step), reducedMotion: true);
+      expect(find.text(line(picking)), findsOneWidget);
+      await tester.pump(const Duration(seconds: 12));
+      expect(find.text('Sequencing the tracklist…'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 12));
+      expect(find.text('Lining up the transitions…'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 6));
+      expect(find.text(still), findsOneWidget);
+      // A step that arrives anew (a replacement round names the artists)
+      // starts a clock of its own.
+      const named = TurnStep('picking', artists: ['Tems']);
+      step.value = WorkingStep(named, DateTime.now());
+      await tester.pump(const Duration(seconds: 2));
+      expect(find.text(still), findsNothing);
+      expect(find.text(line(named)), findsOneWidget);
+    });
+
+    testWidgets('a step already under way picks up where it had got to', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        WorkingCassette(
+          seed: 0,
+          startedAt: DateTime.now().subtract(const Duration(seconds: 40)),
+          step: WorkingStep(
+            const TurnStep('picking'),
+            DateTime.now().subtract(const Duration(seconds: 13)),
+          ),
+        ),
+        reducedMotion: true,
+      );
+      expect(find.text('Sequencing the tracklist…'), findsOneWidget);
+    });
+
+    testWidgets('one line, cut with an ellipsis; VoiceOver hears no names', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await _pump(
+        tester,
+        WorkingCassette(
+          seed: 0,
+          step: WorkingStep(
+            const TurnStep('playlists', playlist: 'Late nights'),
+            DateTime.now(),
+          ),
+        ),
+        width: 160,
+      );
+      final caption = tester.widget<Text>(
+        find.descendant(
+          of: find.byKey(WorkingCassette.captionKey),
+          matching: find.byType(Text),
+        ),
+      );
+      expect(caption.data, 'Pulling “Late nights” off the shelf…');
+      expect(caption.maxLines, 1);
+      expect(caption.overflow, TextOverflow.ellipsis);
+      expect(caption.softWrap, isFalse);
+      expect(
+        tester.getSemantics(find.byKey(WorkingCassette.indicatorKey)).label,
+        'The DJ is working',
+      );
+      handle.dispose();
     });
   });
 
