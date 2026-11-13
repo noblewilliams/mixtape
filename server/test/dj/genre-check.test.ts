@@ -153,4 +153,32 @@ describe('checkGenres', () => {
     expect([...result.kept]).toEqual(['a'])
     expect(calls).toHaveLength(0)
   })
+
+  // The turn's checking step (spec 2026-11-13 dj-turn-steps) is sent from
+  // onCall, so it says "checking" only when a check actually goes out.
+  it('onCall runs once, just before the call goes out, and never when no call is made', async () => {
+    const order: string[] = []
+    const complete: LlmComplete = async () => {
+      order.push('call')
+      return '[1]'
+    }
+    await checkGenres(complete, ['jazz'], [song('a', 'Soul')], { onCall: () => order.push('onCall') })
+    expect(order).toEqual(['onCall', 'call'])
+
+    const onCall = vi.fn()
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    await checkGenres(complete, ['jazz'], [song('a', 'Jazz')], { onCall })
+    await checkGenres(complete, [], [song('a', 'Pop')], { onCall })
+    await checkGenres(undefined, ['jazz'], [song('a', 'Soul')], { onCall })
+    await checkGenres(complete, ['jazz'], [song('a', 'Soul')], { onCall, allowed: false })
+    log.mockRestore()
+    expect(onCall).not.toHaveBeenCalled()
+  })
+
+  it('an onCall that throws never fails the check', async () => {
+    const { complete, calls } = fakeComplete('[1]')
+    const result = await checkGenres(complete, ['jazz'], [song('a', 'Soul')], { onCall: () => { throw new Error('closed') } })
+    expect(calls).toHaveLength(1)
+    expect(result).toMatchObject({ dropped: 0, failed: false, calls: 1 })
+  })
 })

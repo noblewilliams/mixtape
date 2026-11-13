@@ -108,12 +108,14 @@ function logFailure(reason: string, songs: number): void {
  * matches stay without a call; the rest go to one sound check on the fast
  * model. Never throws: a check that fails keeps only label matches.
  * `allowed` false (the turn has no room for the call) fails closed too.
+ * `onCall` runs just before the call goes out, and never when none does
+ * (the turn's checking step, dj/turn-steps.ts); a throw from it is ignored.
  */
 export async function checkGenres(
   complete: LlmComplete | undefined,
   genres: string[],
   songs: GenreCandidate[],
-  options: { allowed?: boolean } = {},
+  options: { allowed?: boolean; onCall?: () => void } = {},
 ): Promise<GenreCheckResult> {
   const named = genres.filter((g) => normaliseGenre(g) !== '')
   if (named.length === 0) return { kept: new Set(songs.map((s) => s.id)), dropped: 0, failed: false, calls: 0 }
@@ -133,6 +135,11 @@ export async function checkGenres(
     'Songs (number | title — artist | Apple genre | year):',
     ...unmatched.map((s, i) => songLine(i + 1, s)),
   ].join('\n')
+  try {
+    options.onCall?.()
+  } catch {
+    // A caption never fails the check.
+  }
   let text: string
   try {
     text = await complete({

@@ -46,6 +46,7 @@ import {
 } from './propose'
 import { resolveMarket } from '../albums/verify'
 import { sanitizeForPrompt, sanitizeTitleText, stripEmDashes } from './sanitize'
+import { briefWithoutArtist, turnStepReporter, type BriefNames, type TurnStepEvent, type TurnStepReporter } from './turn-steps'
 import { insertMemoryNote, MAX_MEMORY_NOTES } from './memory-notes'
 import { FIRST_NAME_PERSONA_LINE, formatFirstNameLine, loadFirstName } from './listener-name'
 import { insertMissingArtistSeeds } from '../seeds/artist-seeds'
@@ -77,7 +78,10 @@ import {
 // with it on and fill wired, an insufficient_seeds listener gets songs the
 // DJ proposes, verified on Apple (dj/propose.ts), instead of the refusal.
 // Absent or false is today's behaviour exactly.
-export type DjDeps = { llm: LlmClient; embed: Embedder; titleComplete?: LlmComplete; outsidePicks?: boolean; fill?: FillDeps; neverRefuse?: boolean }
+// step is the turn's step reporter (dj/turn-steps.ts), set by runDjTurn from
+// DjTurnOptions.onStep, never by callers. Riding the deps, it reaches every
+// executor with no new parameter; absent, every report is a no-op.
+export type DjDeps = { llm: LlmClient; embed: Embedder; titleComplete?: LlmComplete; outsidePicks?: boolean; fill?: FillDeps; neverRefuse?: boolean; step?: TurnStepReporter }
 
 // Where a turn's time goes, for the turn log: each model call as
 // "<kind>@<start>+<duration>" in tenths of a second from the turn's start
@@ -107,6 +111,20 @@ function timedDeps(deps: DjDeps, timing: TurnTiming, now: () => number): DjDeps 
     ? (opts) => time(opts.system === GENRE_CHECK_SYSTEM ? 'genre' : 'title', () => deps.titleComplete!(opts))
     : undefined
   return { ...deps, llm, ...(titleComplete ? { titleComplete } : {}) }
+}
+
+// The picking step as each curate or propose call starts, sorted by the
+// kinds the turn log uses. The reporter names the current brief's artists,
+// and drops the repeat when a blend's two calls start side by side.
+function steppedDeps(deps: DjDeps): DjDeps {
+  const step = deps.step
+  if (!step) return deps
+  const llm: LlmClient = (req) => {
+    const kind = llmKind(req)
+    if (kind === 'curate' || kind === 'propose') step({ step: 'picking' })
+    return deps.llm(req)
+  }
+  return { ...deps, llm }
 }
 
 // The only session fields the loop actually needs — callers (the session
@@ -1041,7 +1059,10 @@ async function genreFilter<T extends { trackId: string }>(
     refund()
     return { kept: picks, dropped: 0, failed: false }
   }
-  const result = await checkGenres(deps.titleComplete, genres, picks.map(describe), { allowed: prepaid || appleLeft(tracker) > 0 })
+  // The checking step only when the check's model call actually goes out:
+  // label matches, no fast model or no room in the turn make none.
+  const onCall = deps.step ? () => deps.step?.({ step: 'checking', genres }) : undefined
+  const result = await checkGenres(deps.titleComplete, genres, picks.map(describe), { allowed: prepaid || appleLeft(tracker) > 0, onCall })
   if (prepaid) {
     if (result.calls === 0) refund()
   } else {
@@ -1234,7 +1255,7 @@ async function proposeRound(
 ): Promise<{ proposals: Proposal[]; result: VerifyResult } | null> {
   const proposals = await proposeOnly(deps, ctx, round, budget, tracker)
   if (!proposals) return null
-  return { proposals, result: await verifyRound(db, fill, ctx, round, proposals, tracker) }
+  return { proposals, result: await verifyRound(db, fill, ctx, round, proposals, tracker, deps.step) }
 }
 
 // The proposal call alone: null when no search is left to verify what it
@@ -1264,7 +1285,8 @@ async function proposeOnly(
 }
 
 // Apple verification of proposals, inside what is left of the turn's
-// VERIFY_MAX searches and VERIFY_DEADLINE_MS.
+// VERIFY_MAX searches and VERIFY_DEADLINE_MS. `step` is the turn's
+// reporter (DjDeps.step): checking, once a search will actually run.
 async function verifyRound(
   db: Db,
   fill: FillDeps,
@@ -1272,11 +1294,13 @@ async function verifyRound(
   round: { intent: Intent; want: number },
   proposals: Proposal[],
   tracker: FillTracker,
+  step: TurnStepReporter | undefined,
 ): Promise<VerifyResult> {
   const spend = proposeSpend(tracker)
   const searchesLeft = Math.min(VERIFY_MAX - spend.log.searches, searchRoom(tracker, round.intent))
   const timeLeft = VERIFY_DEADLINE_MS - spend.verifyMs
   if (searchesLeft <= 0 || timeLeft <= 0 || proposals.length === 0) return { verified: [], misses: [], searches: 0 }
+  step?.({ step: 'checking' })
   const began = ctx.now()
   const result = await verifyProposals(db, fill.catalog, {
     proposals, storefront: ctx.storefront, budget: searchesLeft, deadlineMs: timeLeft, now: ctx.now,
@@ -1385,6 +1409,7 @@ async function topUpFromBlend(
   want: number,
   held: Set<string>,
   heldSongs: Set<string>,
+  step: TurnStepReporter | undefined,
 ): Promise<VerifiedProposal[]> {
   const rest = tracker.blendRest
   if (!rest || rest.proposals.length === 0 || want <= 0) return []
@@ -1392,6 +1417,7 @@ async function topUpFromBlend(
   const searchesLeft = Math.min(VERIFY_MAX - spend.log.searches, searchRoom(tracker, intent))
   const timeLeft = VERIFY_DEADLINE_MS - spend.verifyMs
   if (searchesLeft <= 0 || timeLeft <= 0) return []
+  step?.({ step: 'checking' })
   try {
     const began = rest.ctx.now()
     const result = await verifyProposals(db, fill.catalog, {
@@ -1495,7 +1521,7 @@ async function shortfallProposals(
         // Asked before the curation was known: the library's own picks go.
         const chosen = new Set(exclude.map(songKey))
         const proposals = asked.proposals.filter((p) => !chosen.has(songKey(p)))
-        verified = (await verifyRound(db, fill, asked.ctx, { intent, want: want + genreSpares(intent, want) }, proposals, tracker)).verified
+        verified = (await verifyRound(db, fill, asked.ctx, { intent, want: want + genreSpares(intent, want) }, proposals, tracker, deps.step)).verified
         // The early call can come back thin (live 2026-11-10: one song for a
         // 15-song mix, which left it at 5). While the turn is young enough,
         // one round as before, naming everything already tried or chosen.
@@ -1625,6 +1651,7 @@ async function executeProposedQueue(
     }
   }
   const updatedQueue = await getActiveQueue(db, session.id)
+  deps.step?.({ step: 'pressing', count: updatedQueue.length })
   const short = state.verified.length < Math.min(MIN_VERIFIED, intent.targetCount)
   return {
     resultText: [
@@ -1680,8 +1707,12 @@ async function executeGenerateQueue(
     // Nothing credits the artist anywhere, even after the fill: today's mix
     // for the rest of the brief, and the DJ says it could not find them.
     // The scope goes with it, so this turn's edits are not artist-only.
+    // Its steps name the rest of the brief's artists, never the one the DJ
+    // is about to say it could not find (the model usually repeats it among
+    // namedArtists); the brief curated keeps them.
     const { onlyArtist: _only, ...rest } = intent
-    const fallback = await generateFromBrief(db, deps, session, rest, userText, sessionContext, budget, startVersion, turn)
+    const fallback = await generateFromBrief(db, deps, session, rest, userText, sessionContext, budget, startVersion, turn,
+      briefWithoutArtist(rest, only.name))
     if (fallback.queueChanged) await setSessionOnlyArtist(db, session.id, null)
     return { ...fallback, resultText: `${onlyArtistNotFoundNotice(only.name)}\n${fallback.resultText}` }
   }
@@ -1712,14 +1743,17 @@ async function executeOnlyArtistQueue(
   const resolved = await resolvePoolMode(db, session.userId)
   // A listener without their own music is scored as the corpus is.
   const mode: PoolMode = resolved.mode === 'personal' ? 'personal' : 'corpus'
+  deps.step?.brief({ onlyArtist: only.name })
   if (deps.fill && !turn.tracker.artistRan) {
     // As for the seed fill: with NEVER_REFUSE on, a listener with nothing
     // of their own keeps the in-request subrequests free in case the
     // artist is not found and the proposal path runs instead.
     const enrich = !(deps.neverRefuse === true && resolved.mode === 'insufficient_seeds')
+    deps.step?.({ step: 'digging', scope: 'catalogue' })
     await fillArtistCatalogue(db, deps.fill, session, only.name, turn, enrich)
   }
   const selected = seed.status === 'ready' ? { playlistId: seed.playlistId!, excludeSourceTracks: seed.excludeSourceTracks } : undefined
+  deps.step?.({ step: 'digging', scope: mode === 'personal' ? 'library' : 'catalogue' })
   const pool = await buildPool(db, deps.embed, session.userId, intent, undefined, { mode, playlistSeed: selected, onlyArtistKey: only.key })
   if (pool.length === 0) return null
   const asked = intent.targetCount
@@ -1752,6 +1786,7 @@ async function executeOnlyArtistQueue(
   await setNotPersonal(db, session.id, mode === 'corpus', version)
   await setSessionOnlyArtist(db, session.id, only.name)
   const updatedQueue = await getActiveQueue(db, session.id)
+  deps.step?.({ step: 'pressing', count: updatedQueue.length })
   // Catalogue songs a personal listener does not own are new to them, and
   // the DJ says which, as for outside picks (with no cap: the artist's
   // catalogue is the pool here).
@@ -1779,6 +1814,7 @@ async function executeOnlyArtistQueue(
 }
 
 // Today's generate: everything after the brief is parsed and its seeds saved.
+// `stepNames`: whose artists its steps name, the brief's own by default.
 async function generateFromBrief(
   db: Db,
   deps: DjDeps,
@@ -1789,6 +1825,7 @@ async function generateFromBrief(
   budget: CurationBudget,
   startVersion: number,
   turn: TurnFill,
+  stepNames: BriefNames = intent,
 ): Promise<GenerateOutcome> {
   // Resolved fresh before EVERY pool build (here and in executeEditQueue's
   // provider), never cached on the session: a listener's mode changes the
@@ -1797,6 +1834,11 @@ async function generateFromBrief(
   // insufficient text back as the tool result — no pool, no curate() call,
   // so nothing is consumed from the budget — and the model does the telling.
   let poolMode = await resolvePoolMode(db, session.userId)
+  // Whose artists this brief's digging and picking steps name. Set here,
+  // not at parse: an artist-only brief whose artist is nowhere falls back
+  // to this function without its scope, and without that artist's name
+  // (`stepNames`).
+  deps.step?.brief(stepNames)
   // Never for a personal listener (resolved above, and fillForSeeds checks
   // again); then the mode is resolved afresh over the filled rows.
   // With NEVER_REFUSE on, the fill keeps its insertion and skips its
@@ -1804,6 +1846,7 @@ async function generateFromBrief(
   // subrequests on Apple searches.
   const neverRefuse = deps.neverRefuse === true
   if (poolMode.mode === 'insufficient_seeds' && deps.fill && !turn.tracker.ran) {
+    deps.step?.({ step: 'digging', scope: 'catalogue' })
     await fillCatalogue(db, deps.fill, session, intent, turn, !neverRefuse)
     poolMode = await resolvePoolMode(db, session.userId)
   }
@@ -1819,6 +1862,7 @@ async function generateFromBrief(
   const selected = seed.status === 'ready' ? { playlistId: seed.playlistId!, excludeSourceTracks: seed.excludeSourceTracks } : undefined
   // Outside picks: 0 with the flag off, which skips the outside query.
   const cap = deps.outsidePicks ? outsideCap(intent) : 0
+  deps.step?.({ step: 'digging', scope: poolMode.mode === 'personal' ? 'library' : 'catalogue' })
   const pool = await buildPool(db, deps.embed, session.userId, intent, undefined, { mode: poolMode.mode, playlistSeed: selected, outsideCap: cap })
   if (pool.length === 0) {
     // Not an error — the model still gets to tell the listener, in its own
@@ -1899,7 +1943,7 @@ async function generateFromBrief(
     const heldSongs = new Set([...curatedSongs, ...proposed.map(songKey)])
     const want = shortfall - proposed.length
     if (blending) {
-      proposed.push(...await topUpFromBlend(db, deps.fill!, intent, turn.tracker, want + genreSpares(intent, want), held, heldSongs))
+      proposed.push(...await topUpFromBlend(db, deps.fill!, intent, turn.tracker, want + genreSpares(intent, want), held, heldSongs, deps.step))
     } else {
       const exclude = curated.flatMap((p) => {
         const t = byId.get(p.trackId)
@@ -1957,6 +2001,7 @@ async function generateFromBrief(
   // assumption — accounting numbers alone ("3 added") don't tell it what
   // actually landed where, or in what order.
   const updatedQueue = await getActiveQueue(db, session.id)
+  deps.step?.({ step: 'pressing', count: updatedQueue.length })
   // A proposed song a personal listener does not own is an outside pick:
   // the DJ says which are new to them, as for buildOutsidePool's. (A corpus
   // listener owns nothing, and CORPUS_NOTICE already says so.)
@@ -2142,6 +2187,9 @@ async function executeEditQueue(
   const provider: ReplacementsProvider = async (count, opIntent) => {
     const callIndex = providerCalls
     providerCalls += 1
+    // Each request's picking names the artists its own op names, never
+    // those of this turn's generate it may fall back to.
+    deps.step?.brief(opIntent && { onlyArtist: resolveOnlyArtist(opIntent)?.name, namedArtists: opIntent.namedArtists })
     const checkEditGenres = async <T extends { trackId: string }>(picks: T[], describe: (p: T) => GenreCandidate): Promise<T[]> => {
       // The intent in force: the op's own, or this turn's generate's when
       // the op has none (toOpIntent keeps its genres). The weak fallback
@@ -2297,6 +2345,7 @@ async function executeEditQueue(
     // can't tell the model which position actually moved/dropped/swapped —
     // the model must describe results from this listing, never assumption.
     const updatedQueue = await getActiveQueue(db, session.id)
+    deps.step?.({ step: 'pressing', count: updatedQueue.length })
     // Only picks that actually landed count (materialize may drop one).
     // An artist-only pick a personal listener does not own is new to them.
     const artistNew = artistMode === 'personal'
@@ -2643,6 +2692,8 @@ async function attemptTurn(
     const ownMusic: { historyNoticed?: true } = {}
 
     for (let round = 0; round < MAX_TURNS && finalText === null; round++) {
+      // A round after a tool round is the DJ answering what its tools did.
+      if (round > 0) deps.step?.({ step: 'writing' })
       const turn = await counted({
         ...conversationVariant(deps),
         messages: [...baseMessages, ...liveMessages],
@@ -2658,6 +2709,8 @@ async function attemptTurn(
       const toolResultBlocks: Array<{ type: 'tool_result'; tool_use_id: string; content: string }> = []
       for (const call of turn.toolCalls) {
         stats.toolCalls += 1
+        // Steps name only this call's own brief (set by the executors).
+        deps.step?.brief(undefined)
         let resultText: string
         // sessionContext (built once above by buildSessionContext, and already
         // including the memory block from formatMemoryBlock/loadMemoryNotes —
@@ -2701,25 +2754,33 @@ async function attemptTurn(
             // The mix stands; the turn goes on without the note.
           }
         } else if (call.name === 'edit_queue') {
+          deps.step?.({ step: 'editing' })
           const outcome = await executeEditQueue(db, countedDeps, session, call.input, userText, lastGenerateIntent, sessionContext, budget, { tracker: fillTracker, surface: options.surface ?? 'web' })
           resultText = outcome.resultText
           if (outcome.queueChanged) currentVersion = outcome.newVersion!
           recordChange(changes, outcome, false)
         } else if (call.name === 'find_playlists') {
+          // No name: the query is the DJ's search text, not the listener's.
+          deps.step?.({ step: 'playlists' })
           const parsed = findPlaylistInputSchema.safeParse(call.input)
           resultText = parsed.success ? JSON.stringify(await findPlaylistSeeds(db, session.userId, parsed.data.query))
             : formatZodIssues('invalid find_playlists input', parsed.error)
         } else if (call.name === 'set_playlist_inspiration') {
           const parsed = setPlaylistSeedInputSchema.safeParse(call.input)
+          let chosen: string | undefined
           if (!parsed.success) resultText = formatZodIssues('invalid set_playlist_inspiration input', parsed.error)
           else try {
             const next = await selectPlaylistSeed(db, session.id, session.userId, parsed.data)
+            chosen = next.name ?? undefined
             resultText = `${playlistSeedContext(next)}\nThe queue is unchanged.`
           } catch (e) {
             if (!(e instanceof PlaylistSeedError)) throw e
             resultText = `playlist inspiration could not be changed (${e.kind.replace('_', ' ')}); the queue is unchanged.`
           }
+          // Once it resolved, so the step names the playlist chosen, or none.
+          deps.step?.({ step: 'playlists', playlist: chosen })
         } else if (call.name === 'remember_preference') {
+          deps.step?.({ step: 'noting' })
           // No budget.consume() here — see executeRememberPreference's comment:
           // this never calls curate(), so it isn't part of what
           // MAX_CURATIONS_PER_TURN bounds.
@@ -2735,6 +2796,8 @@ async function attemptTurn(
           // tool call this same round (or a later round) throws and this
           // whole attempt gets discarded.
           if (outcome.newTitle) renameState.title = outcome.newTitle
+          // Once saved, so the step carries the title the mix now has.
+          deps.step?.({ step: 'labelling', title: outcome.newTitle })
         } else {
           resultText = `unknown tool: ${call.name}`
         }
@@ -2797,7 +2860,9 @@ function logTurn(sessionId: string, stats: AttemptStats | null, errorKind: DjErr
 // catalogue fill's funnel row; absent means 'web'.
 // remake is the "Remake with my music" button (REMAKE_NOTE); absent or false
 // is an ordinary turn, whatever the words.
-export type DjTurnOptions = { energyArc?: Intent['energyArc']; surface?: Surface; remake?: boolean }
+// onStep receives the turn's working steps as they start (dj/turn-steps.ts),
+// names already cleaned. Absent (the JSON route), nothing is reported.
+export type DjTurnOptions = { energyArc?: Intent['energyArc']; surface?: Surface; remake?: boolean; onStep?: (event: TurnStepEvent) => void }
 
 // Why a remake turn has nothing to do, or null when it should run: the
 // session's flag first (one row), then musicReady.
@@ -2854,7 +2919,9 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
   const fillTracker: FillTracker = { ran: false, turnStartedAt: (deps.fill?.now ?? Date.now)() }
   const changes: TurnChanges = { summaries: [] }
   const timing: TurnTiming = []
-  deps = timedDeps(deps, timing, Date.now)
+  // One reporter per turn, so its brief and its dedupe span a conflict retry.
+  const step = options.onStep ? turnStepReporter(options.onStep) : undefined
+  deps = steppedDeps(timedDeps({ ...deps, step }, timing, Date.now))
 
   let attempt: AttemptResult
   try {
@@ -2927,6 +2994,11 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
       // swallow — see comment above
     }
     throw djError
+  } finally {
+    // The turn is decided: whatever it left running (an early shortfall the
+    // curation made unnecessary, and its truncation retry) reports nothing
+    // after this, on the success, recovered and error paths alike.
+    step?.close()
   }
 
   // Compared against startingVersion (captured before ANY attempt ran), not
