@@ -50,7 +50,37 @@ import 'routine_suggestions_test.dart' show FakeSuggestions;
 /// surface (not `extends`, since DjApi's constructor builds a real
 /// ApiClient), each method delegating to a settable callback that throws
 /// loudly when unset rather than hanging.
-class FakeDjApi implements DjApi {
+class FakeDjApi implements DjApi, DjShapedTurnSender {
+  /// The shape each create carried, in call order.
+  final List<String?> arcs = [];
+
+  @override
+  Future<SessionDetail> createSessionShaped(
+    String prompt, {
+    InitialPlaylistSeed? playlistSeed,
+    SessionKind kind = SessionKind.mix,
+    String? energyArc,
+    void Function(TurnProgress progress)? onProgress,
+  }) {
+    arcs.add(energyArc);
+    return createSession(prompt, playlistSeed: playlistSeed, kind: kind);
+  }
+
+  @override
+  Future<TurnResult> sendMessageShaped(
+    String id,
+    String text, {
+    String? energyArc,
+    void Function(TurnProgress progress)? onProgress,
+  }) => sendMessage(id, text);
+
+  @override
+  Future<TurnResult> sendRemakeShaped(
+    String id, {
+    String? energyArc,
+    void Function(TurnProgress progress)? onProgress,
+  }) => throw UnimplementedError();
+
   @override
   Future<void> recordPlaylistCreation(
     String sessionId,
@@ -207,6 +237,23 @@ class StoppableHomeApi extends FakeDjApi
 
   /// The id each create is named with as it starts.
   String namedId = 'new-1';
+
+  @override
+  Future<SessionDetail> createSessionShaped(
+    String prompt, {
+    InitialPlaylistSeed? playlistSeed,
+    SessionKind kind = SessionKind.mix,
+    String? energyArc,
+    void Function(TurnProgress progress)? onProgress,
+  }) {
+    arcs.add(energyArc);
+    return createSessionWithProgress(
+      prompt,
+      playlistSeed: playlistSeed,
+      kind: kind,
+      onProgress: onProgress,
+    );
+  }
 
   @override
   Future<SessionDetail> createSessionWithProgress(
@@ -415,9 +462,10 @@ void main() {
 
         expect(
           capturedPrompt,
-          'chill sunset drive\nEnergy journey: ${EnergyArc.fall.label}.',
-          reason: 'the sentence is composed on the way out',
+          'chill sunset drive',
+          reason: 'the shape goes beside the prompt, never in it',
         );
+        expect(api.arcs, ['fall']);
       },
     );
 
@@ -474,37 +522,54 @@ void main() {
     });
 
     testWidgets(
-      'a composed message with no room says so under the composer and sends '
-      'nothing',
+      'Shape stays changeable while a mix starts; a new pick waits in the mix',
       (tester) async {
         final api = FakeDjApi();
         api.onListSessions = () async => [];
-        var creates = 0;
-        api.onCreateSession = (prompt) async {
-          creates += 1;
-          return SessionDetail(
-            session: _session(id: 'new-1'),
-            messages: [],
-            queue: [],
-          );
+        final create = Completer<SessionDetail>();
+        api.onCreateSession = (prompt) {
+          api.prompts.add(prompt);
+          return create.future;
         };
-        await _pump(tester, _makeContainer(api));
+        api.onGetSession = (id) async =>
+            SessionDetail(session: _session(id: id), messages: [], queue: []);
+        final container = _makeContainer(api);
+        await _pump(tester, container);
 
         await tester.tap(find.byKey(EnergyControl.chipKey));
         await tester.pumpAndSettle();
         await tester.tap(find.byKey(EnergyControl.presetKey(EnergyArc.rise)));
         await tester.pumpAndSettle();
-
         await tester.enterText(
           find.byKey(const Key('prompt-field')),
           'x' * 2000,
         );
         await tester.pump();
         await tester.tap(find.byKey(const Key('start-session')));
-        await tester.pumpAndSettle();
+        await tester.pump();
+        // A long brief no longer has to make room: the shape is its own field.
+        expect(api.arcs, ['rise']);
+        expect(api.prompts, ['x' * 2000]);
 
-        expect(creates, 0);
-        expect(find.text(energySheetTooLong), findsOneWidget);
+        // Starting, the chip still opens and takes a pick (the cassette
+        // turns, so nothing settles: pumped by hand).
+        await tester.tap(find.byKey(EnergyControl.chipKey));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        await tester.tap(find.byKey(EnergyControl.presetKey(EnergyArc.fall)));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(find.text(EnergyArc.fall.label), findsOneWidget);
+
+        create.complete(
+          SessionDetail(session: _session(id: 'new-1'), messages: [], queue: []),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byType(ChatScreen), findsOneWidget);
+        expect(
+          container.read(chatProvider('new-1')).value?.shape,
+          EnergyArc.fall,
+        );
       },
     );
 
@@ -1165,10 +1230,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(api.kinds, [SessionKind.mix]);
-      expect(
-        api.prompts.single,
-        'a slow walk\nEnergy journey: ${EnergyArc.fall.label}.',
-      );
+      expect(api.prompts.single, 'a slow walk');
+      expect(api.arcs, ['fall']);
       handle.dispose();
     });
 

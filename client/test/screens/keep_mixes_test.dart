@@ -108,7 +108,37 @@ QueueTrack _track(int position) => QueueTrack(
 
 /// Creates sessions with [queue] (empty is the DJ's honest refusal) and
 /// numbers them, so a second mix is a different conversation.
-class _Dj extends FirstRunDjApi {
+class _Dj extends FirstRunDjApi implements DjShapedTurnSender {
+  /// The shape each create carried, in call order.
+  final List<String?> arcs = [];
+
+  @override
+  Future<SessionDetail> createSessionShaped(
+    String prompt, {
+    InitialPlaylistSeed? playlistSeed,
+    SessionKind kind = SessionKind.mix,
+    String? energyArc,
+    void Function(TurnProgress progress)? onProgress,
+  }) {
+    arcs.add(energyArc);
+    return createSession(prompt, playlistSeed: playlistSeed, kind: kind);
+  }
+
+  @override
+  Future<TurnResult> sendMessageShaped(
+    String id,
+    String text, {
+    String? energyArc,
+    void Function(TurnProgress progress)? onProgress,
+  }) => sendMessage(id, text);
+
+  @override
+  Future<TurnResult> sendRemakeShaped(
+    String id, {
+    String? energyArc,
+    void Function(TurnProgress progress)? onProgress,
+  }) => throw UnimplementedError();
+
   List<QueueTrack> queue = [_track(1), _track(2)];
   int created = 0;
 
@@ -545,7 +575,7 @@ void main() {
     });
 
     testWidgets('the shape is kept apart from the draft: only the draft goes '
-        'back in the field, and the brief is composed at send', (tester) async {
+        'back in the field, and the shape goes beside it', (tester) async {
       final r = _Rig();
       r.dj.failWith = const AnonymousCapException(3);
       await r.pump(tester);
@@ -562,8 +592,8 @@ void main() {
         r.container.read(keptPromptProvider),
         const KeptPrompt('late', arc: EnergyArc.fall),
       );
-      final brief = 'late\nEnergy journey: ${EnergyArc.fall.label}.';
-      expect(r.dj.prompts, [brief]);
+      expect(r.dj.prompts, ['late']);
+      expect(r.dj.arcs, ['fall']);
 
       r.dj.failWith = null;
       final field = <String>[];
@@ -572,7 +602,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(field, ['late'], reason: 'the draft only, never the brief');
-      expect(r.dj.prompts, [brief, brief]);
+      expect(r.dj.prompts, ['late', 'late']);
+      expect(r.dj.arcs, ['fall', 'fall']);
       expect(find.byType(ChatScreen), findsOneWidget);
     });
 

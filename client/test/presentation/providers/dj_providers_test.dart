@@ -17,6 +17,7 @@ import 'package:mixtape/presentation/providers/mix_activity_provider.dart';
 import 'package:mixtape/presentation/providers/mix_operation_gate.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
 import 'package:mixtape/presentation/providers/working_step.dart';
+import 'package:mixtape/presentation/widgets/energy_journey.dart';
 
 import '../../helpers/fake_listening_api.dart';
 
@@ -289,6 +290,46 @@ class StoppableDjApi extends ProgressDjApi implements DjTurnStopper {
     final impl = onStopTurn;
     if (impl == null) throw UnimplementedError('onStopTurn not wired');
     return impl(sessionId);
+  }
+}
+
+/// [StoppableDjApi] that hears each mix turn's shape ([DjShapedTurnSender])
+/// and answers through the same callbacks.
+class ShapedDjApi extends StoppableDjApi implements DjShapedTurnSender {
+  /// The shape each turn carried, in call order.
+  final List<String?> arcs = [];
+
+  @override
+  Future<SessionDetail> createSessionShaped(
+    String prompt, {
+    InitialPlaylistSeed? playlistSeed,
+    SessionKind kind = SessionKind.mix,
+    String? energyArc,
+    void Function(TurnProgress progress)? onProgress,
+  }) {
+    arcs.add(energyArc);
+    return createSessionWithProgress(prompt, playlistSeed: playlistSeed, kind: kind, onProgress: onProgress);
+  }
+
+  @override
+  Future<TurnResult> sendMessageShaped(
+    String id,
+    String text, {
+    String? energyArc,
+    void Function(TurnProgress progress)? onProgress,
+  }) {
+    arcs.add(energyArc);
+    return sendMessageWithProgress(id, text, onProgress: onProgress);
+  }
+
+  @override
+  Future<TurnResult> sendRemakeShaped(
+    String id, {
+    String? energyArc,
+    void Function(TurnProgress progress)? onProgress,
+  }) {
+    arcs.add(energyArc);
+    return sendRemakeWithProgress(id, onProgress: onProgress);
   }
 }
 
@@ -3168,6 +3209,146 @@ void main() {
       expect(await container.read(sessionStarterProvider)('rainy drive', stop: stop), 'new-1');
       expect(await stop(), isFalse);
       expect(fake.stops, isEmpty);
+    });
+  });
+
+  group('the shape rides every mix turn (2026-11-15)', () {
+    TurnResult reply(String id, int version) =>
+        TurnResult(djMessage: _msg(id, 'dj', 'ok'), queue: [], queueVersion: version);
+
+    ShapedDjApi api({SessionKind kind = SessionKind.mix}) {
+      final fake = ShapedDjApi();
+      fake.onGetSession = (_) async => SessionDetail(
+        session: _session().copyWith(kind: kind),
+        messages: [],
+        queue: [],
+      );
+      return fake;
+    }
+
+    Future<(ProviderContainer, ChatNotifier)> open(ShapedDjApi fake) async {
+      final container = _makeContainer(fake);
+      final sub = container.listen(chatProvider('s1'), (_, _) {});
+      addTearDown(sub.close);
+      await container.read(chatProvider('s1').future);
+      return (container, container.read(chatProvider('s1').notifier));
+    }
+
+    test('a pick goes out with the message; without one, the mix\'s own', () async {
+      final fake = api();
+      var n = 1;
+      fake.onSendWithProgress = (id, text, _) async => reply('d${n++}', n);
+      final (container, notifier) = await open(fake);
+
+      await notifier.send('first', mixShape: EnergyArc.rise);
+      expect(fake.arcs, ['rise']);
+      notifier.setShape(EnergyArc.fall);
+      expect(container.read(chatProvider('s1')).value!.shape, EnergyArc.fall);
+      await notifier.send('second', mixShape: EnergyArc.rise);
+      expect(fake.arcs, ['rise', 'fall']);
+      await notifier.send('third');
+      expect(fake.arcs, ['rise', 'fall', null]);
+    });
+
+    test('a landed turn hands its pick to the mix, shown until the version reads', () async {
+      final fake = api();
+      fake.onSendWithProgress = (id, text, _) async => reply('d1', 2);
+      final (container, notifier) = await open(fake);
+
+      notifier.setShape(EnergyArc.steady);
+      await notifier.send('more');
+      final state = container.read(chatProvider('s1')).value!;
+      // The new version wears it now; nothing is held for the next send.
+      expect(state.shape, isNull);
+      expect(state.landedShape, EnergyArc.steady);
+    });
+
+    test('a pick made while a turn is out is held through its landing', () async {
+      final fake = api();
+      final first = Completer<TurnResult>();
+      var calls = 0;
+      fake.onSendWithProgress = (id, text, _) {
+        calls++;
+        return calls == 1 ? first.future : Future.value(reply('d2', 3));
+      };
+      final (container, notifier) = await open(fake);
+
+      notifier.setShape(EnergyArc.rise);
+      final out = notifier.send('more');
+      notifier.setShape(EnergyArc.fall);
+      first.complete(reply('d1', 2));
+      await out;
+      expect(container.read(chatProvider('s1')).value!.shape, EnergyArc.fall);
+
+      await notifier.send('again', mixShape: EnergyArc.rise);
+      expect(fake.arcs, ['rise', 'fall']);
+    });
+
+    test('a stopped turn leaves its shape in place', () async {
+      final fake = api();
+      fake.onSendWithProgress = (id, text, _) => Completer<TurnResult>().future;
+      fake.onStopTurn = (_) async => true;
+      final (container, notifier) = await open(fake);
+
+      notifier.setShape(EnergyArc.arc);
+      unawaited(notifier.send('more'));
+      notifier.stop();
+      await _flush();
+      expect(container.read(chatProvider('s1')).value!.shape, EnergyArc.arc);
+    });
+
+    test('a failed turn keeps the pick for the next send', () async {
+      final fake = api();
+      fake.onSendWithProgress = (id, text, _) async =>
+          throw DjApiException(kind: 'upstream', message: 'oops');
+      final (container, notifier) = await open(fake);
+
+      notifier.setShape(EnergyArc.arc);
+      await notifier.send('more');
+      expect(container.read(chatProvider('s1')).value!.shape, EnergyArc.arc);
+    });
+
+    test('a remake carries the shape too', () async {
+      final fake = api();
+      fake.onRemakeWithProgress = (id, _) async => reply('d1', 2);
+      final (_, notifier) = await open(fake);
+
+      await notifier.remake(mixShape: EnergyArc.fall);
+      expect(fake.arcs, ['fall']);
+    });
+
+    test('an album turn carries none, and takes no pick', () async {
+      final fake = api(kind: SessionKind.album);
+      fake.onSendWithProgress = (id, text, _) async => reply('d1', 2);
+      final (container, notifier) = await open(fake);
+
+      notifier.setShape(EnergyArc.fall);
+      expect(container.read(chatProvider('s1')).value!.shape, isNull);
+      await notifier.send('older', mixShape: EnergyArc.fall);
+      expect(fake.arcs, [null]);
+    });
+
+    test('a new mix sends its shape, and a pick made meanwhile waits in the mix', () async {
+      final fake = api();
+      final create = Completer<SessionDetail>();
+      fake.onCreateWithProgress = (prompt, kind, _) => create.future;
+      final container = _makeContainer(fake);
+
+      final started = container.read(sessionStarterProvider)(
+        'rainy drive',
+        energyArc: EnergyArc.rise,
+      );
+      expect(fake.arcs, ['rise']);
+      create.complete(SessionDetail(session: _session(), messages: [], queue: []));
+      expect(await started, 's1');
+
+      container.read(pendingShapesProvider).put('s1', EnergyArc.fall);
+      final sub = container.listen(chatProvider('s1'), (_, _) {});
+      addTearDown(sub.close);
+      final state = await container.read(chatProvider('s1').future);
+      expect(state.shape, EnergyArc.fall);
+      // Taken once.
+      expect(container.read(pendingShapesProvider).take('s1'), isNull);
     });
   });
 }

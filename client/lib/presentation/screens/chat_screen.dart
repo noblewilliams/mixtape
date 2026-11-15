@@ -125,6 +125,9 @@ class ChatScreen extends ConsumerStatefulWidget {
 
   /// The + beside the composer.
   static const Key plusKey = Key('chat-plus');
+
+  /// The Shape control over a mix's composer.
+  static const Key shapeKey = Key('chat-shape');
   static const Key historyPillKey = Key('chat-history-pill');
 
   /// Set only when Home navigates here after a create-session failure that
@@ -259,9 +262,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     if (fromComposer) _textController.clear();
     try {
       final notifier = ref.read(chatProvider(widget.sessionId).notifier);
+      // The shape the control shows goes with every mix message.
+      final mixShape = _mixShape(
+        ref.read(chatProvider(widget.sessionId)).value,
+        watch: false,
+      );
       await (remake
-          ? notifier.remake(countTap: countTap)
-          : notifier.send(trimmed));
+          ? notifier.remake(countTap: countTap, mixShape: mixShape)
+          : notifier.send(trimmed, mixShape: mixShape));
     } on AiConsentRequiredException {
       // Enforcement is on and `/me` was out of date: the turn was taken
       // back. The text goes back in the composer, the sheet asks, and
@@ -1185,13 +1193,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     // open for the next message, with stop in send's place (stop a turn,
     // 2026-11-15); a turn sent before this conversation was reopened shows
     // as working too, but this conversation cannot stop it.
-    final working =
-        state != null && (state.sending || _workingSince() != null);
+    final working = state != null && (state.sending || _workingSince() != null);
     final stopping = state?.stopping ?? false;
     final locked =
-        state == null ||
-        inspiration.writing ||
-        (busy && !working && !stopping);
+        state == null || inspiration.writing || (busy && !working && !stopping);
     final status = _inspirationStatus(inspiration);
     final album = state?.kind == SessionKind.album;
     final attached = inspiration.seed?.playlistId != null;
@@ -1238,13 +1243,28 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                     _strip(state),
                   // The attached playlist at the panel's leading edge, over
                   // the +, with the line that says what is wrong with it, if
-                  // anything, beside it.
-                  if (state != null && (attached || showStatus))
-                    _attachmentRow(
-                      inspiration,
-                      enabled: enabled,
-                      attached: attached,
-                      status: showStatus ? status : null,
+                  // anything, beside it; a mix's Shape at the trailing edge,
+                  // as Home's row has it.
+                  if (state != null && (attached || showStatus || !album))
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Expanded(
+                          child: attached || showStatus
+                              ? _attachmentRow(
+                                  inspiration,
+                                  enabled: enabled,
+                                  attached: attached,
+                                  status: showStatus ? status : null,
+                                )
+                              : const SizedBox.shrink(),
+                        ),
+                        if (!album)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 8, bottom: 4),
+                            child: _shapeControl(state),
+                          ),
+                      ],
                     ),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
@@ -1340,14 +1360,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     );
   }
 
-  /// The + menu: "Start from a playlist" always, and before the first mix
-  /// "Shape the energy" too (an album has no energy line to shape).
+  /// The + menu: "Start from a playlist". The shape has its own control over
+  /// the composer (2026-11-15), so it never goes into the draft.
   Future<void> _plusMenu(BuildContext anchor, ChatState? state) async {
-    final shapeable =
-        state != null &&
-        state.kind != SessionKind.album &&
-        state.queue.isEmpty &&
-        state.queueVersion == 0;
     final inspiration = ref.read(
       sessionPlaylistContextProvider(widget.sessionId),
     );
@@ -1361,58 +1376,41 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           enabled: inspiration.canSelect,
           icon: MixMenuIcons.startFromPlaylist,
         ),
-        if (shapeable)
-          const MixtapeMenuAction(
-            key: Key('chat-plus-shape'),
-            value: 'shape',
-            label: 'Shape the energy',
-            subtitle: 'Steady, build, wind down…',
-            icon: MixMenuIcons.shape,
-          ),
       ],
     );
     if (!mounted || choice == null) return;
     if (choice == 'playlist') return _pickInspiration();
-    if (choice == 'shape' && anchor.mounted) {
-      // The shape menu opens from + too, applying the pick at once: the
-      // sentence goes into the draft (nothing is sent) with the shipped
-      // toast, or comes out again on Clear.
-      final messenger = ScaffoldMessenger.of(context);
-      await showEnergyShapeMenu(
-        anchor,
-        controller: _textController,
-        selected: _shapeInDraft(),
-        onChanged: (arc) {
-          final next = arc == null
-              ? _textController.text.replaceAll(_shapeSentence, '').trim()
-              : energyBrief(_textController.text, arc);
-          if (next == null) return;
-          _textController.value = TextEditingValue(
-            text: next,
-            selection: TextSelection.collapsed(offset: next.length),
-          );
-          if (arc != null) {
-            messenger.showSnackBar(mixtapeSnackBar(message: energyShapeToast));
-          }
-        },
-      );
-    }
   }
 
-  /// The energy sentence [energyBrief] writes into a draft.
-  static final RegExp _shapeSentence = RegExp(
-    r'(?:^|\n)Energy journey: (?:Steady|Build gradually|Wind down|Build, then settle)\.(?=\n|$)',
+  /// A mix's Shape (2026-11-15): the same compact control Home has, always
+  /// there and always changeable, even while the DJ works. It shows the
+  /// listener's pick, else the mix's own shape; a pick goes out with the
+  /// next message, never into the draft.
+  Widget _shapeControl(ChatState state) => EnergyControl(
+    key: ChatScreen.shapeKey,
+    compact: true,
+    selectedArc: state.shape ?? _mixShape(state, watch: true),
+    clearable: state.shape != null,
+    onArcChanged: (arc) =>
+        ref.read(chatProvider(widget.sessionId).notifier).setShape(arc),
   );
 
-  /// The shape the draft already asks for, so the menu ticks it.
-  EnergyArc? _shapeInDraft() {
-    final match = _shapeSentence.firstMatch(_textController.text);
-    if (match == null) return null;
-    final said = match.group(0)!.trim();
-    for (final arc in EnergyArc.values) {
-      if (said == 'Energy journey: ${arc.label}.') return arc;
-    }
-    return null;
+  /// The shape the mix itself has: its current version's, once that detail
+  /// is read; until then (or if it cannot be), the one its last turn carried.
+  EnergyArc? _mixShape(ChatState? state, {required bool watch}) {
+    if (state == null || state.kind == SessionKind.album) return null;
+    final version = state.queueVersion;
+    if (version <= 0) return state.landedShape;
+    final provider = mixEnergyProvider((
+      id: widget.sessionId,
+      version: version,
+    ));
+    final detail = watch ? ref.watch(provider) : ref.read(provider);
+    final read = detail.value;
+    if (read == null) return state.landedShape;
+    return EnergyArc.values
+        .where((arc) => arc.name == read['energyArc'])
+        .firstOrNull;
   }
 
   /// What rides over the field: the attached playlist's tile, and beside it

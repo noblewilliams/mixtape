@@ -7,16 +7,15 @@
 /// applies it at once: there is no "Use this shape" step any more.
 ///
 /// The shape is state on the chip, not text in the field (smoke round three,
-/// note 5): the chip wears the chosen arc, the draft is never touched, and
-/// Home folds the sentence in only when the listener sends. Nothing generates
-/// until they do.
+/// note 5): the chip wears the chosen arc and the draft is never touched. It
+/// goes out as its own `energyArc` field with the next message or new mix
+/// (2026-11-15), never as a sentence. Nothing generates until they send.
 library;
 
 import 'package:flutter/material.dart';
 
 import '../theme/mixtape_theme.dart';
 import 'foundation/frosted_surface.dart';
-import 'foundation/mixtape_feedback.dart';
 import 'foundation/mixtape_menu.dart';
 import 'foundation/segmented_toggle.dart';
 
@@ -39,20 +38,6 @@ const List<EnergyArc> energyArcOrder = [
   EnergyArc.fall,
   EnergyArc.arc,
 ];
-
-String? energyBrief(String text, EnergyArc arc) {
-  final clean = text
-      .replaceAll(
-        RegExp(
-          r'(?:^|\n)Energy journey: (?:Steady|Build gradually|Wind down|Build, then settle)\.(?=\n|$)',
-        ),
-        '',
-      )
-      .trim();
-  final next =
-      '${clean.isEmpty ? '' : '$clean\n'}Energy journey: ${arc.label}.';
-  return next.length <= 2000 ? next : null;
-}
 
 String journeyMessage(String status) => switch (status) {
   'follows' => 'The opening, middle and ending broadly follow your shape.',
@@ -83,12 +68,6 @@ String? energyLine(Map<String, dynamic> detail) {
   return '${arc.label} · ${energyLineVerdict(status)}';
 }
 
-/// The toast when the brief has no room for the shape's sentence. Home also
-/// says it under the composer when a send would overflow.
-const String energySheetTooLong =
-    'Shorten your brief to make room for the shape.';
-const String energyShapeToast = 'Shape added to your brief. Send when ready.';
-
 /// The menu's last entry, offered only while a shape is set.
 const String energyClearShapeLabel = 'Clear shape';
 
@@ -102,11 +81,11 @@ const String energyClearShapeLabel = 'Clear shape';
 class EnergyControl extends StatelessWidget {
   const EnergyControl({
     super.key,
-    required this.controller,
     this.enabled = true,
     this.selectedArc,
     this.onArcChanged,
     this.compact = false,
+    this.clearable,
   });
 
   /// The Home panel's row size (album picks board H1, `.moderow .chip`):
@@ -115,10 +94,12 @@ class EnergyControl extends StatelessWidget {
   /// flow are the same either way.
   final bool compact;
 
-  /// The draft, which the menu reads to judge the composed message's length.
-  /// It is never written to.
-  final TextEditingController controller;
   final bool enabled;
+
+  /// Whether the menu offers Clear shape. Defaults to whenever a shape is
+  /// showing; a mix's conversation offers it only for the listener's own
+  /// pick, since the mix's own shape is not the listener's to clear there.
+  final bool? clearable;
 
   /// The shape the chip is wearing, or null for none.
   final EnergyArc? selectedArc;
@@ -165,8 +146,8 @@ class EnergyControl extends StatelessWidget {
   /// Anchored to the chip itself.
   Future<void> _open(BuildContext context) => showEnergyShapeMenu(
     context,
-    controller: controller,
     selected: selectedArc,
+    clearable: clearable ?? selectedArc != null,
     onChanged: (arc) => onArcChanged?.call(arc),
   );
 
@@ -257,17 +238,15 @@ const String _clearShape = 'clear';
 /// on [selected], and "Clear shape" behind a separator only when a shape is
 /// set.
 ///
-/// A pick applies at once: [onChanged] hears the arc, or null for Clear.
-/// When [controller]'s brief has no room for the shape's sentence, nothing
-/// changes and the listener gets [energySheetTooLong] as a toast. Tapping
-/// outside changes nothing.
+/// A pick applies at once: [onChanged] hears the arc, or null for Clear
+/// (offered only when [clearable], by default whenever [selected] is set).
+/// Tapping outside changes nothing.
 Future<void> showEnergyShapeMenu(
   BuildContext anchor, {
-  required TextEditingController controller,
   EnergyArc? selected,
+  bool? clearable,
   required ValueChanged<EnergyArc?> onChanged,
 }) async {
-  final messenger = ScaffoldMessenger.maybeOf(anchor);
   final picked = await showMixtapeMenu<String>(
     anchor,
     actions: [
@@ -280,7 +259,7 @@ Future<void> showEnergyShapeMenu(
           isSelected: arc == selected,
           leading: EnergyShapeGlyph(arc),
         ),
-      if (selected != null)
+      if (clearable ?? selected != null)
         const MixtapeMenuAction(
           key: EnergyControl.clearKey,
           value: _clearShape,
@@ -294,14 +273,7 @@ Future<void> showEnergyShapeMenu(
     onChanged(null);
     return;
   }
-  final arc = EnergyArc.values.byName(picked);
-  if (energyBrief(controller.text, arc) == null) {
-    messenger?.showSnackBar(
-      mixtapeSnackBar(message: energySheetTooLong, kind: FeedbackKind.error),
-    );
-    return;
-  }
-  onChanged(arc);
+  onChanged(EnergyArc.values.byName(picked));
 }
 
 /// One shape's curve, as the board draws it (`.sh`: a 34 × 20 viewBox,

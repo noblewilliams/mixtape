@@ -202,11 +202,14 @@ class DjApi {
   }) => _createSession(prompt, playlistSeed: playlistSeed, kind: kind);
 
   /// An album session answers JSON whatever it is asked, so an album create
-  /// never asks for a stream: its request stays exactly today's.
+  /// never asks for a stream: its request stays exactly today's. [energyArc]
+  /// is the Shape control's pick, sent apart from the prompt (never for an
+  /// album, which has no shape).
   Future<SessionDetail> _createSession(
     String prompt, {
     InitialPlaylistSeed? playlistSeed,
     SessionKind kind = SessionKind.mix,
+    String? energyArc,
     void Function(TurnProgress progress)? onProgress,
   }) => _turn(
     '/sessions',
@@ -214,6 +217,8 @@ class DjApi {
       'prompt': prompt,
       if (playlistSeed != null) 'playlistSeed': playlistSeed.toJson(),
       if (kind == SessionKind.album) 'kind': 'album',
+      if (kind != SessionKind.album && energyArc != null)
+        'energyArc': energyArc,
     },
     SessionDetail.fromJson,
     kind == SessionKind.album ? null : onProgress,
@@ -235,10 +240,11 @@ class DjApi {
   Future<TurnResult> _sendMessage(
     String id,
     String text, {
+    String? energyArc,
     void Function(TurnProgress progress)? onProgress,
   }) => _turn(
     '/sessions/$id/messages',
-    {'text': text},
+    {'text': text, 'energyArc': ?energyArc},
     TurnResult.fromJson,
     onProgress,
   );
@@ -247,10 +253,11 @@ class DjApi {
   /// translation as [sendMessage], with the remake flag.
   Future<TurnResult> _sendRemake(
     String id, {
+    String? energyArc,
     void Function(TurnProgress progress)? onProgress,
   }) => _turn(
     '/sessions/$id/messages',
-    {'text': remakeText, 'remake': true},
+    {'text': remakeText, 'remake': true, 'energyArc': ?energyArc},
     TurnResult.fromJson,
     onProgress,
   );
@@ -918,6 +925,33 @@ abstract interface class DjTurnProgressSender {
   });
 }
 
+/// What a [DjApi] stand-in implements to hear the mix turns' shape
+/// ([DjApiTurnProgress]'s `energyArc`) as well as their progress. One that
+/// implements only [DjTurnProgressSender] answers the same calls without
+/// the shape, as a server that ignores it would.
+abstract interface class DjShapedTurnSender {
+  Future<SessionDetail> createSessionShaped(
+    String prompt, {
+    InitialPlaylistSeed? playlistSeed,
+    SessionKind kind = SessionKind.mix,
+    String? energyArc,
+    void Function(TurnProgress progress)? onProgress,
+  });
+
+  Future<TurnResult> sendMessageShaped(
+    String id,
+    String text, {
+    String? energyArc,
+    void Function(TurnProgress progress)? onProgress,
+  });
+
+  Future<TurnResult> sendRemakeShaped(
+    String id, {
+    String? energyArc,
+    void Function(TurnProgress progress)? onProgress,
+  });
+}
+
 /// The mix turns, reporting their progress while they run (spec:
 /// 2026-11-13-dj-turn-steps-design.md). With [onProgress] given they ask
 /// for `text/event-stream`; [onProgress] then hears [TurnStreamOpened] when
@@ -928,19 +962,34 @@ abstract interface class DjTurnProgressSender {
 /// [DjApi.sendMessage] and [DjApiRemake.sendRemake]; without [onProgress]
 /// each call is that one.
 ///
+/// `energyArc` is the Shape control's pick (an energy arc name: `steady`,
+/// `rise`, `fall`, `arc`), sent as its own field so the DJ takes note of it
+/// whatever the message says; null sends none. An album create never sends
+/// it.
+///
 /// An extension rather than an optional parameter on those members for the
 /// reason [DjApiRemake] gives: every test fake `implements DjApi`, so a new
 /// parameter is a compile error in each one. A stand-in that implements
-/// [DjTurnProgressSender] answers these calls; any other stand-in answers
-/// through its plain calls, so it reports no progress, like an older
-/// server. Fold these into [DjApi] when the fakes can be updated together.
+/// [DjShapedTurnSender] hears the shape and the progress; one that
+/// implements [DjTurnProgressSender] hears the progress only; any other
+/// answers through its plain calls, so it reports no progress, like an
+/// older server. Fold these into [DjApi] when the fakes can be updated
+/// together.
 extension DjApiTurnProgress on DjApi {
   Future<SessionDetail> createSessionWithProgress(
     String prompt, {
     InitialPlaylistSeed? playlistSeed,
     SessionKind kind = SessionKind.mix,
+    String? energyArc,
     void Function(TurnProgress progress)? onProgress,
   }) => switch (this) {
+    final DjShapedTurnSender sender => sender.createSessionShaped(
+      prompt,
+      playlistSeed: playlistSeed,
+      kind: kind,
+      energyArc: energyArc,
+      onProgress: onProgress,
+    ),
     final DjTurnProgressSender sender => sender.createSessionWithProgress(
       prompt,
       playlistSeed: playlistSeed,
@@ -951,6 +1000,7 @@ extension DjApiTurnProgress on DjApi {
       prompt,
       playlistSeed: playlistSeed,
       kind: kind,
+      energyArc: energyArc,
       onProgress: onProgress,
     ),
     _ => createSession(prompt, playlistSeed: playlistSeed, kind: kind),
@@ -959,8 +1009,15 @@ extension DjApiTurnProgress on DjApi {
   Future<TurnResult> sendMessageWithProgress(
     String id,
     String text, {
+    String? energyArc,
     void Function(TurnProgress progress)? onProgress,
   }) => switch (this) {
+    final DjShapedTurnSender sender => sender.sendMessageShaped(
+      id,
+      text,
+      energyArc: energyArc,
+      onProgress: onProgress,
+    ),
     final DjTurnProgressSender sender => sender.sendMessageWithProgress(
       id,
       text,
@@ -969,6 +1026,7 @@ extension DjApiTurnProgress on DjApi {
     _ when _builtByDjApi[this] == true => _sendMessage(
       id,
       text,
+      energyArc: energyArc,
       onProgress: onProgress,
     ),
     _ => sendMessage(id, text),
@@ -976,14 +1034,21 @@ extension DjApiTurnProgress on DjApi {
 
   Future<TurnResult> sendRemakeWithProgress(
     String id, {
+    String? energyArc,
     void Function(TurnProgress progress)? onProgress,
   }) => switch (this) {
+    final DjShapedTurnSender sender => sender.sendRemakeShaped(
+      id,
+      energyArc: energyArc,
+      onProgress: onProgress,
+    ),
     final DjTurnProgressSender sender => sender.sendRemakeWithProgress(
       id,
       onProgress: onProgress,
     ),
     _ when _builtByDjApi[this] == true => _sendRemake(
       id,
+      energyArc: energyArc,
       onProgress: onProgress,
     ),
     _ => sendRemake(id),

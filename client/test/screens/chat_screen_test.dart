@@ -71,7 +71,68 @@ import '../presentation/providers/playlist_context_provider_test.dart'
 /// loudly rather than hanging. [DjRemakeSender] answers
 /// [DjApiRemake.sendRemake]: without it a remake reaches the real DjApi's
 /// private wire call and dies as a NoSuchMethodError the screen swallows.
-class FakeDjApi implements DjApi, DjRemakeSender, DjTurnStopper {
+class FakeDjApi
+    implements DjApi, DjRemakeSender, DjTurnStopper, DjShapedTurnSender {
+  /// The shape each mix turn carried, in call order.
+  final List<String?> arcs = [];
+
+  @override
+  Future<SessionDetail> createSessionShaped(
+    String prompt, {
+    InitialPlaylistSeed? playlistSeed,
+    SessionKind kind = SessionKind.mix,
+    String? energyArc,
+    void Function(TurnProgress progress)? onProgress,
+  }) {
+    arcs.add(energyArc);
+    // A stand-in that streams keeps doing so with the shape heard.
+    // Typed Object so the check promotes it: the interface's own member,
+    // not the extension that routes back here.
+    final Object self = this;
+    if (self is DjTurnProgressSender) {
+      return self.createSessionWithProgress(
+        prompt,
+        playlistSeed: playlistSeed,
+        kind: kind,
+        onProgress: onProgress,
+      );
+    }
+    return createSession(prompt, playlistSeed: playlistSeed, kind: kind);
+  }
+
+  @override
+  Future<TurnResult> sendMessageShaped(
+    String id,
+    String text, {
+    String? energyArc,
+    void Function(TurnProgress progress)? onProgress,
+  }) {
+    arcs.add(energyArc);
+    // Typed Object so the check promotes it: the interface's own member,
+    // not the extension that routes back here.
+    final Object self = this;
+    if (self is DjTurnProgressSender) {
+      return self.sendMessageWithProgress(id, text, onProgress: onProgress);
+    }
+    return sendMessage(id, text);
+  }
+
+  @override
+  Future<TurnResult> sendRemakeShaped(
+    String id, {
+    String? energyArc,
+    void Function(TurnProgress progress)? onProgress,
+  }) {
+    arcs.add(energyArc);
+    // Typed Object so the check promotes it: the interface's own member,
+    // not the extension that routes back here.
+    final Object self = this;
+    if (self is DjTurnProgressSender) {
+      return self.sendRemakeWithProgress(id, onProgress: onProgress);
+    }
+    return sendRemake(id);
+  }
+
   @override
   Future<void> recordPlaylistCreation(String sessionId, String appleLibraryId) async {}
 
@@ -364,6 +425,7 @@ ProviderContainer _makeContainer(
   MusicPlatformStore? destinations,
   FakeListeningApi? listening,
   ArchivePicker? picker,
+  Map<String, dynamic> energy = const {},
 }) {
   // The screen watches the Mixes summaries for the title it shows while the
   // transcript loads, and posts session events on an output.
@@ -378,7 +440,7 @@ ProviderContainer _makeContainer(
       ),
       accountNameProvider.overrideWith((ref) async => accountName),
       if (account != null) accountApiProvider.overrideWithValue(account),
-      mixEnergyProvider.overrideWith((ref, key) async => <String, dynamic>{}),
+      mixEnergyProvider.overrideWith((ref, key) async => energy),
       musicPlatformStoreProvider.overrideWithValue(
         destinations ?? InMemoryMusicPlatformStore(),
       ),
@@ -1430,12 +1492,12 @@ void main() {
         ),
       );
 
-      // The + menu holds a playlist to start from and, before the first
-      // mix, Shape.
+      // The + menu holds a playlist to start from; Shape has its own
+      // control over the composer.
       await tester.tap(plus);
       await tester.pumpAndSettle();
       expect(find.text('Start from a playlist'), findsOneWidget);
-      expect(find.text('Shape the energy'), findsOneWidget);
+      expect(find.text('Shape the energy'), findsNothing);
       await tester.tapAt(const Offset(10, 10));
       await tester.pumpAndSettle();
       expect(find.text('Start from a playlist'), findsNothing);
@@ -1509,47 +1571,94 @@ void main() {
       expect(player.version, 3);
     });
 
-    testWidgets('Shape from + writes the brief into the composer', (tester) async {
+    testWidgets('the shape sits over the composer, changeable while the DJ works', (
+      tester,
+    ) async {
+      final completer = Completer<TurnResult>();
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session(queueVersion: 2),
+        messages: [_msg('m1', 'dj', 'here you go', queueVersion: 2)],
+        queue: [_track(0)],
+      );
+      var sends = 0;
+      api.onSendMessage = (id, text) {
+        sends++;
+        return sends == 1
+            ? completer.future
+            : Future.value(
+                TurnResult(djMessage: _msg('m3', 'dj', 'softer'), queue: [_track(0)], queueVersion: 4),
+              );
+      };
+      await _pump(
+        tester,
+        _makeContainer(api, energy: {'energyArc': 'arc', 'energyJourney': {'status': 'follows'}}),
+      );
+
+      // The mix's own shape shows, and goes out with the message.
+      expect(find.byKey(ChatScreen.shapeKey), findsOneWidget);
+      expect(find.text(EnergyArc.arc.label), findsWidgets);
+      await tester.enterText(find.byKey(const Key('prompt-field')), 'more');
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('start-session')));
+      await tester.pump();
+      expect(api.arcs, ['arc']);
+
+      // While the DJ works the control still opens and takes a pick (the
+      // cassette turns, so nothing settles: pumped by hand).
+      await tester.tap(find.byKey(EnergyControl.chipKey));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(find.byKey(EnergyControl.presetKey(EnergyArc.fall)));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(
+        find.descendant(of: find.byKey(ChatScreen.shapeKey), matching: find.text(EnergyArc.fall.label)),
+        findsOneWidget,
+      );
+      // Nothing went into the draft.
+      expect(
+        tester.widget<TextField>(find.byKey(const Key('prompt-field'))).controller!.text,
+        isEmpty,
+      );
+
+      completer.complete(
+        TurnResult(djMessage: _msg('m2', 'dj', 'louder'), queue: [_track(0)], queueVersion: 3),
+      );
+      await tester.pumpAndSettle();
+      // The pick outlived the turn that landed, and rides the next message.
+      expect(
+        find.descendant(of: find.byKey(ChatScreen.shapeKey), matching: find.text(EnergyArc.fall.label)),
+        findsOneWidget,
+      );
+      await tester.enterText(find.byKey(const Key('prompt-field')), 'softer');
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('start-session')));
+      await tester.pumpAndSettle();
+      expect(api.arcs, ['arc', 'fall']);
+    });
+
+    testWidgets('+ no longer writes a shape sentence', (tester) async {
       final api = FakeDjApi();
       api.onGetSession = (_) async => SessionDetail(session: _session(queueVersion: 0), messages: [], queue: []);
       await _pump(tester, _makeContainer(api));
 
-      await tester.enterText(find.byKey(const Key('prompt-field')), 'Sunday morning');
-      await tester.pump();
+      expect(find.byKey(ChatScreen.shapeKey), findsOneWidget);
       await tester.tap(find.byKey(const Key('chat-plus')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Shape the energy'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(EnergyControl.presetKey(EnergyArc.fall)));
-      await tester.pumpAndSettle();
+      expect(find.text('Shape the energy'), findsNothing);
+    });
 
-      expect(
-        tester
-            .widget<TextField>(find.byKey(const Key('prompt-field')))
-            .controller!
-            .text,
-        'Sunday morning\nEnergy journey: Wind down.',
+    testWidgets('an album has no shape control', (tester) async {
+      final api = FakeDjApi();
+      api.onGetSession = (_) async => SessionDetail(
+        session: _session().copyWith(kind: SessionKind.album),
+        messages: [],
+        queue: [],
       );
-      expect(find.text('Shape added to your brief. Send when ready.'), findsOneWidget);
-      ScaffoldMessenger.of(
-        tester.element(find.byType(ChatScreen)),
-      ).removeCurrentSnackBar();
-      await tester.pumpAndSettle();
-
-      // The menu ticks the shape the brief asks for, and Clear takes it out.
-      await tester.tap(find.byKey(const Key('chat-plus')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Shape the energy'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(EnergyControl.clearKey));
-      await tester.pumpAndSettle();
-      expect(
-        tester
-            .widget<TextField>(find.byKey(const Key('prompt-field')))
-            .controller!
-            .text,
-        'Sunday morning',
-      );
+      await _pump(tester, _makeContainer(api));
+      expect(find.byKey(ChatScreen.shapeKey), findsNothing);
+      expect(find.byKey(EnergyControl.chipKey), findsNothing);
     });
 
     testWidgets('Start from a playlist opens the playlist picker', (tester) async {
@@ -1696,7 +1805,6 @@ void main() {
       await tester.pumpAndSettle();
       expect(icons(), {
         'Start from a playlist': Icons.playlist_add_rounded,
-        'Shape the energy': Icons.show_chart_rounded,
       });
     });
 

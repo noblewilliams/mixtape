@@ -6,7 +6,6 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/presentation/theme/mixtape_theme.dart';
 import 'package:mixtape/presentation/widgets/energy_journey.dart';
-import 'package:mixtape/presentation/widgets/foundation/mixtape_feedback.dart';
 import 'package:mixtape/presentation/widgets/foundation/mixtape_menu.dart';
 import 'package:mixtape/presentation/widgets/mix_prompt_input.dart';
 
@@ -38,7 +37,6 @@ class _ChipHostState extends State<_ChipHost> {
 
   @override
   Widget build(BuildContext context) => EnergyControl(
-    controller: widget.controller,
     selectedArc: arc,
     onArcChanged: (next) => setState(() => arc = next),
   );
@@ -212,7 +210,6 @@ void main() {
       );
       expect(chipGlyph.arc, EnergyArc.fall);
       expect(controller.text, 'Sunday morning');
-      expect(find.text(energyShapeToast), findsNothing);
 
       // Reopening ticks it; tapping outside changes nothing.
       await _openMenu(tester);
@@ -261,23 +258,20 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('a brief with no room for the shape toasts and changes nothing', (
-    tester,
-  ) async {
-    final controller = TextEditingController(text: 'x' * 2000);
-    await _pumpChip(tester, controller);
-    await _openMenu(tester);
-    await tester.tap(find.byKey(EnergyControl.presetKey(EnergyArc.rise)));
+  testWidgets('Clear is offered only when the owner says so', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: MixtapeTheme.light(),
+        home: const Scaffold(
+          body: EnergyControl(selectedArc: EnergyArc.rise, clearable: false),
+        ),
+      ),
+    );
+    await tester.tap(find.byKey(EnergyControl.chipKey));
     await tester.pumpAndSettle();
-
-    expect(find.byKey(mixtapeMenuKey), findsNothing);
-    expect(find.text(energySheetTooLong), findsOneWidget);
-    expect(find.byType(MixtapeFeedback), findsOneWidget);
-    expect(find.text(EnergyControl.unsetLabel), findsOneWidget);
-    expect(controller.text, 'x' * 2000);
-
+    expect(find.byKey(EnergyControl.presetKey(EnergyArc.rise)), findsOneWidget);
+    expect(find.byKey(EnergyControl.clearKey), findsNothing);
     await tester.pumpWidget(const SizedBox());
-    controller.dispose();
   });
 
   testWidgets('the menu fits a short phone with large text', (tester) async {
@@ -299,20 +293,16 @@ void main() {
   });
 
   testWidgets('a disabled chip cannot open the menu', (tester) async {
-    final controller = TextEditingController();
     await tester.pumpWidget(
       MaterialApp(
         theme: MixtapeTheme.light(),
-        home: Scaffold(
-          body: EnergyControl(controller: controller, enabled: false),
-        ),
+        home: const Scaffold(body: EnergyControl(enabled: false)),
       ),
     );
     await tester.tap(find.byKey(EnergyControl.chipKey));
     await tester.pumpAndSettle();
     expect(find.byKey(mixtapeMenuKey), findsNothing);
     await tester.pumpWidget(const SizedBox());
-    controller.dispose();
   });
 
   testWidgets('each glyph draws its own curve at the board size', (
@@ -355,13 +345,5 @@ void main() {
     expect(find.byKey(EnergyControl.chipKey), findsNothing);
     await tester.pumpWidget(const SizedBox());
     controller.dispose();
-  });
-
-  test('does not truncate the brief or keep stale preset lines', () {
-    expect(
-      energyBrief('Sunday\nEnergy journey: Steady.', EnergyArc.rise),
-      'Sunday\nEnergy journey: Build gradually.',
-    );
-    expect(energyBrief('x' * 2000, EnergyArc.arc), isNull);
   });
 }

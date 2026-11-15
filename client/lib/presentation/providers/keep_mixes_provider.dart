@@ -63,7 +63,8 @@ final keepSheetProvider = NotifierProvider<KeepSheetNotifier, KeepSheetState>(
 
 /// What a capped anonymous listener sent: the draft as typed and, apart from
 /// it, the Shape chip's arc. The shape is never written into the draft
-/// (house rule); Home composes the two at send, as its own send does.
+/// (house rule); Home sends it beside the draft as `energyArc`, as its own
+/// send does.
 class KeptPrompt {
   const KeptPrompt(this.draft, {this.arc});
 
@@ -105,5 +106,6 @@ class KeptPromptNotifier extends Notifier<KeptPrompt?> {
   }
 }
 
-final keptPromptProvider =
-    NotifierProvider<KeptPromptNotifier, KeptPrompt?>(KeptPromptNotifier.new);
+final keptPromptProvider = NotifierProvider<KeptPromptNotifier, KeptPrompt?>(
+  KeptPromptNotifier.new,
+);

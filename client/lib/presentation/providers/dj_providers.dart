@@ -24,6 +24,7 @@ import 'onboarding_provider.dart';
 import 'playlist_context_provider.dart';
 import 'first_run_funnel_provider.dart';
 import 'working_step.dart';
+import '../widgets/energy_journey.dart' show EnergyArc;
 import 'funnel_provider.dart';
 import 'keep_mixes_provider.dart';
 import 'listen_later_provider.dart';
@@ -239,7 +240,20 @@ class ChatState {
     this.workingStep,
     this.shared = false,
     this.stopping = false,
+    this.shape,
+    this.landedShape,
   });
+
+  /// The Shape control's pick for this mix, not yet taken by a turn that
+  /// landed (2026-11-15): every mix message carries it, and it holds through
+  /// a turn that lands while it was being picked, a stopped turn and a failed
+  /// one. Null when there is no pick; the control then shows the mix's own
+  /// shape. Always null for an album.
+  final EnergyArc? shape;
+
+  /// The shape the last landed turn carried: what the control shows while
+  /// the new version's own detail (its `energyArc`) is still being read.
+  final EnergyArc? landedShape;
 
   /// A [ChatNotifier.stop] is still out: the turn is gone from the screen,
   /// the server is undoing it. The listener may send meanwhile (the turn
@@ -323,6 +337,10 @@ class ChatState {
     bool clearWorkingStep = false,
     bool? shared,
     bool? stopping,
+    EnergyArc? shape,
+    bool clearShape = false,
+    EnergyArc? landedShape,
+    bool clearLandedShape = false,
   }) {
     assert(
       session == null || queueVersion == null,
@@ -350,6 +368,8 @@ class ChatState {
       workingStep: clearWorkingStep ? null : (workingStep ?? this.workingStep),
       shared: shared ?? this.shared,
       stopping: stopping ?? this.stopping,
+      shape: clearShape ? null : (shape ?? this.shape),
+      landedShape: clearLandedShape ? null : (landedShape ?? this.landedShape),
     );
   }
 }
@@ -415,6 +435,15 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// The listener's line of a turn waiting on [_stopping], kept through the
   /// re-read a too-late stop makes.
   ChatMessage? _waiting;
+
+  /// Counts the Shape control's picks, so a turn that lands knows whether
+  /// the pick it carried is still the one showing.
+  int _shapeRevision = 0;
+
+  /// [ChatState.shape], kept beside the state so a rebuild (a reopened
+  /// conversation re-reading once an inherited turn lands, a retry) hands it
+  /// on through [pendingShapesProvider] rather than dropping it.
+  EnergyArc? _pick;
 
   /// The one later read after a dropped stream ([_afterDroppedStream]).
   Timer? _lateRead;
@@ -494,11 +523,17 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     _out = null;
     _stopping = null;
     _waiting = null;
+    final shapes = ref.read(pendingShapesProvider);
     ref.onDispose(() {
       _generation++;
       _lateRead?.cancel();
       _lateRead = null;
+      final pick = _pick;
+      if (pick != null) shapes.put(sessionId, pick);
     });
+    // A pick waiting for this mix: Home's, made while the mix was being
+    // created, or this conversation's own from before a rebuild.
+    _pick = shapes.take(sessionId);
     final api = ref.watch(djApiProvider);
     final seedRead = _captureSeedRead();
     // A new session's first turn: what its create response offered, which
@@ -510,7 +545,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     final detail = await api.getSession(sessionId);
     if (!_current(generation)) return _fromDetail(detail);
     seedRead?.adopt(detail.playlistSeed);
-    final loaded = _fromDetail(detail);
+    if (detail.session.kind == SessionKind.album) _pick = null;
+    final loaded = _fromDetail(detail).copyWith(shape: _pick);
     if (firstTurn == null) return loaded;
     return loaded.copyWith(
       addMusic: loaded.addMusic ?? firstTurn.addMusic,
@@ -592,11 +628,35 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// the send button. `sending` is restored in a `finally` so it can NEVER
   /// stick at true — not even for an [ApiException] or an entirely
   /// unforeseen exception — which would otherwise brick the composer.
-  Future<void> send(String text) => _turn(
+  ///
+  /// [mixShape] is the shape the mix itself has (its current version's), sent
+  /// when there is no pick ([ChatState.shape]) so the DJ always takes note of
+  /// the shape the control shows.
+  Future<void> send(String text, {EnergyArc? mixShape}) => _turn(
     text,
-    (api, onProgress) =>
-        api.sendMessageWithProgress(sessionId, text, onProgress: onProgress),
+    (api, energyArc, onProgress) => api.sendMessageWithProgress(
+      sessionId,
+      text,
+      energyArc: energyArc,
+      onProgress: onProgress,
+    ),
+    mixShape: mixShape,
   );
+
+  /// The Shape control's pick for this mix (null clears it, and the control
+  /// goes back to the mix's own shape). Nothing is sent: the next message
+  /// carries it. Changeable while a turn is out; that turn keeps the shape
+  /// it went out with. Mix sessions only.
+  void setShape(EnergyArc? arc) {
+    final current = state.value;
+    if (current == null || current.kind == SessionKind.album) return;
+    _shapeRevision++;
+    _pick = arc;
+    _mergeCurrent(
+      (c) =>
+          arc == null ? c.copyWith(clearShape: true) : c.copyWith(shape: arc),
+    );
+  }
 
   /// Asks for a new version of this mix from the listener's own music: the
   /// same turn as [send], with [remakeText] as the listener's line (marked
@@ -610,12 +670,16 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// [ChatState.remaking] holds until the session and onboarding re-reads
   /// after the turn resolve: a remake that made nothing leaves the mix a
   /// catalog one and the music not ready, and the door must say so.
-  Future<void> remake({bool countTap = false}) => _turn(
+  Future<void> remake({bool countTap = false, EnergyArc? mixShape}) => _turn(
     remakeText,
-    (api, onProgress) =>
-        api.sendRemakeWithProgress(sessionId, onProgress: onProgress),
+    (api, energyArc, onProgress) => api.sendRemakeWithProgress(
+      sessionId,
+      energyArc: energyArc,
+      onProgress: onProgress,
+    ),
     remake: true,
     countTap: countTap,
+    mixShape: mixShape,
   );
 
   /// The turn pipeline [send] and [remake] share; [post] and the listener
@@ -633,16 +697,24 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     String text,
     Future<TurnResult> Function(
       DjApi api,
+      String? energyArc,
       void Function(TurnProgress progress)? onProgress,
     )
     post, {
     bool remake = false,
     bool countTap = false,
+    EnergyArc? mixShape,
   }) async {
     final nameRevision = _nameRevision;
     final first = state.value;
     if (first == null || first.sending) return;
     final generation = _generation;
+    // The shape showing goes out with the turn, so the DJ always takes note
+    // of it: the pick, else the mix's own. None for an album.
+    final carried = first.kind == SessionKind.album
+        ? null
+        : (first.shape ?? mixShape);
+    final shapeRevision = _shapeRevision;
     final gate = mixOperationProvider(sessionId);
     final pendingStop = _stopping;
     // Without a stop out the gate is taken now, as it always was; behind a
@@ -751,6 +823,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       try {
         result = await post(
           ref.read(djApiProvider),
+          carried?.name,
           base.kind == SessionKind.album ? null : onProgress,
         );
       } finally {
@@ -758,6 +831,17 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         if (identical(_out, out)) _out = null;
       }
       if (!live()) return;
+      // The new version wears the shape the turn carried. A pick made while
+      // the turn was out is newer than that one, and waits for the next.
+      final taken = shapeRevision == _shapeRevision;
+      if (taken) _pick = null;
+      _mergeCurrent(
+        (c) => c.copyWith(
+          clearShape: taken,
+          landedShape: carried,
+          clearLandedShape: carried == null,
+        ),
+      );
       await _land(
         result,
         base: base,
@@ -942,9 +1026,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         if (identical(_stopping, stopping)) {
           _stopping = null;
           if (_current(generation)) {
-            _mergeCurrent(
-              (c) => c.stopping ? c.copyWith(stopping: false) : c,
-            );
+            _mergeCurrent((c) => c.stopping ? c.copyWith(stopping: false) : c);
           }
         }
         done.complete();
@@ -970,6 +1052,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           remaking: c.remaking,
           stopping: c.stopping,
           workingStep: c.workingStep,
+          shape: c.shape,
+          landedShape: c.landedShape,
           clearSuggestions: waiting != null,
           clearAddMusic: waiting != null,
         );
@@ -1207,6 +1291,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
                 ? session.status
                 : current.session.status,
           ),
+          shape: current.shape,
+          landedShape: current.landedShape,
         );
       }
       state = AsyncData(recovered);
@@ -1467,6 +1553,7 @@ final sessionStarterProvider =
         InitialPlaylistSeed? playlistSeed,
         SessionKind kind,
         NewMixStop? stop,
+        EnergyArc? energyArc,
       })
     >((ref) {
       return (
@@ -1474,6 +1561,7 @@ final sessionStarterProvider =
         InitialPlaylistSeed? playlistSeed,
         SessionKind kind = SessionKind.mix,
         NewMixStop? stop,
+        EnergyArc? energyArc,
       }) async {
         // A newer create replaces the last one's offer, and a failed one
         // leaves none.
@@ -1514,6 +1602,7 @@ final sessionStarterProvider =
             prompt,
             playlistSeed: playlistSeed,
             kind: kind,
+            energyArc: energyArc?.name,
             // An album keeps its timed lines.
             onProgress: kind == SessionKind.album ? null : onProgress,
           );
@@ -1587,6 +1676,24 @@ final sessionStarterProvider =
         }
       };
     });
+
+/// Shape picks waiting for a mix's conversation to open (2026-11-15): one
+/// made on Home while that mix was being created, or a conversation's own
+/// pick handed from one build to the next. Taken once, by the mix's next
+/// [ChatNotifier] build.
+class PendingShapes {
+  final Map<String, EnergyArc> _picks = {};
+
+  void put(String sessionId, EnergyArc arc) => _picks[sessionId] = arc;
+
+  EnergyArc? take(String sessionId) => _picks.remove(sessionId);
+}
+
+/// User-scoped: a pick belongs to the listener who made it.
+final pendingShapesProvider = Provider<PendingShapes>((ref) {
+  ref.watch(authProvider);
+  return PendingShapes();
+});
 
 /// The new mix's first turn was stopped and the server deleted the mix
 /// (spec 2026-11-15 stop-a-turn). Not a failure: the caller goes back to

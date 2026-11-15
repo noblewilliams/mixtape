@@ -65,6 +65,54 @@ DjApi _api({required http.Client inner, Duration timeout = const Duration(second
     );
 
 void main() {
+  group('the shape rides the turn (2026-11-15)', () {
+    test('a message carries energyArc; none when there is no shape', () async {
+      final bodies = <Map<String, dynamic>>[];
+      final inner = MockClient((req) async {
+        bodies.add(jsonDecode(req.body) as Map<String, dynamic>);
+        return http.Response(
+          jsonEncode({'djMessage': _djMessage(), 'queue': [], 'queueVersion': 2}),
+          200,
+        );
+      });
+      final api = _api(inner: inner);
+      await api.sendMessageWithProgress('s1', 'softer', energyArc: 'fall');
+      await api.sendMessageWithProgress('s1', 'softer');
+      expect(bodies, [
+        {'text': 'softer', 'energyArc': 'fall'},
+        {'text': 'softer'},
+      ]);
+    });
+
+    test('a remake carries it too', () async {
+      Map<String, dynamic>? body;
+      final inner = MockClient((req) async {
+        body = jsonDecode(req.body) as Map<String, dynamic>;
+        return http.Response(
+          jsonEncode({'djMessage': _djMessage(), 'queue': [], 'queueVersion': 2}),
+          200,
+        );
+      });
+      await _api(inner: inner).sendRemakeWithProgress('s1', energyArc: 'rise');
+      expect(body, {'text': 'Remake this with my music', 'remake': true, 'energyArc': 'rise'});
+    });
+
+    test('a new mix carries it on create; an album never does', () async {
+      final bodies = <Map<String, dynamic>>[];
+      final inner = MockClient((req) async {
+        bodies.add(jsonDecode(req.body) as Map<String, dynamic>);
+        return http.Response(jsonEncode({'session': _session(), 'messages': [], 'queue': []}), 200);
+      });
+      final api = _api(inner: inner);
+      await api.createSessionWithProgress('night drive', energyArc: 'arc');
+      await api.createSessionWithProgress('a record', kind: SessionKind.album, energyArc: 'arc');
+      expect(bodies, [
+        {'prompt': 'night drive', 'energyArc': 'arc'},
+        {'prompt': 'a record', 'kind': 'album'},
+      ]);
+    });
+  });
+
   group('stopTurn (stop a turn, 2026-11-15)', () {
     test('POSTs /sessions/:id/turn/stop and reads stopped', () async {
       Uri? seenUrl;

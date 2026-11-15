@@ -270,16 +270,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
     if (kept == null || ref.read(authProvider) != AuthStatus.session) return;
     if (ref.read(isAnonymousProvider)) return;
     // Only the draft goes back in the field; the shape stays on the chip
-    // and is folded in at send, never written into the draft.
+    // and goes out as its own field, never written into the draft.
     _promptController.text = kept.draft;
     _arc = kept.arc;
-    final arc = kept.arc;
-    final prompt = arc == null ? kept.draft : energyBrief(kept.draft, arc);
-    if (prompt == null) {
-      setState(() => _error = energySheetTooLong);
-      return;
-    }
-    unawaited(_start(prompt, draft: kept.draft, arc: arc, kept: true));
+    unawaited(_start(kept.draft, draft: kept.draft, arc: kept.arc, kept: true));
   }
 
   /// The merge notice read but not yet shown: it waits while a route sits
@@ -461,21 +455,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
       return;
     }
 
-    // The shape rides out with the message, not in the field. The server has
-    // no `energyArc` on session start, so the sentence is composed here; the
-    // length guard is the sheet's own.
-    final arc = _arc;
-    final prompt = arc == null ? draft : energyBrief(draft, arc);
-    if (prompt == null) {
-      setState(() => _error = energySheetTooLong);
-      return;
-    }
-
-    await _start(prompt, draft: draft, arc: arc);
+    // The shape rides out beside the message as `energyArc`, never in the
+    // field or the prompt (2026-11-15).
+    await _start(draft, draft: draft, arc: _arc);
   }
 
-  /// Starts a mix (or, with [kind] album, an album session) from [prompt],
-  /// composed from [draft] and [arc] (kept apart for the cap). [kept] is the
+  /// Starts a mix (or, with [kind] album, an album session) from [prompt]
+  /// with the shape [arc] (a mix's only), kept apart for the cap. [kept] is the
   /// cap's prompt sent after sign-in: it carries no attachment (the anonymous
   /// listener's playlists may not have moved to the account). The playlist
   /// attachment rides with an album ask as with a mix.
@@ -511,9 +497,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
               ),
         kind: kind,
         stop: stop,
+        energyArc: kind == SessionKind.album ? null : arc,
       );
       if (!mounted) return;
       _clearSent(draft);
+      _carryShape(sessionId, sent: arc);
       _arc = null;
       ref.read(newMixInspirationProvider.notifier).clear();
       _navigateToChat(sessionId);
@@ -531,6 +519,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
         // (seeded from e.message via initialError, since the failed turn
         // never made it into the transcript itself).
         _clearSent(draft);
+        _carryShape(sessionId, sent: arc);
         _arc = null;
         ref.read(newMixInspirationProvider.notifier).clear();
         _navigateToChat(sessionId, initialError: e.message);
@@ -582,6 +571,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
   /// typed meanwhile rather than what went out: only what went out goes.
   void _clearSent(String draft) {
     if (_promptController.text.trim() == draft) _promptController.clear();
+  }
+
+  /// Shape stays changeable while a mix is made. A pick that differs from
+  /// the one the create carried goes on to the new mix's conversation as its
+  /// pick, for the next message there.
+  void _carryShape(String sessionId, {required EnergyArc? sent}) {
+    final now = _arc;
+    if (now == null || now == sent) return;
+    ref.read(pendingShapesProvider).put(sessionId, now);
   }
 
   /// The stop key while a mix is being made. Home stays in its starting
@@ -794,17 +792,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
                       // Absent under Album, not hidden: no shape is sent there.
                       shapeControl: album
                           ? null
+                          // Changeable while a mix is starting too: a pick
+                          // then goes on to the new mix (see _carryShape).
                           : EnergyControl(
                               compact: true,
-                              controller: _promptController,
-                              enabled: !_starting,
                               selectedArc: _arc,
-                              onArcChanged: (arc) => setState(() {
-                                _arc = arc;
-                                // A shape the listener just changed clears a
-                                // stale "too long" line from an earlier attempt.
-                                if (_error == energySheetTooLong) _error = null;
-                              }),
+                              onArcChanged: (arc) => setState(() => _arc = arc),
                             ),
                       switched: _switched && album,
                       onKeepMix: _keepMix,
