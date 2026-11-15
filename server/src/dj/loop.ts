@@ -2048,12 +2048,17 @@ async function executeEditQueue(
   sessionContext: string,
   budget: CurationBudget,
   turn: TurnFill,
+  listenerShape?: Intent['energyArc'],
 ): Promise<EditOutcome> {
   const parsed = editQueueInputSchema.safeParse(rawInput)
   if (!parsed.success) {
     return { resultText: formatZodIssues('invalid edit_queue input', parsed.error), queueChanged: false }
   }
   const ops = parsed.data.ops
+  // The listener's shape setting holds on an edit too, as on a generate,
+  // when the model leaves energyArc off (founder, 2026-11-15: the DJ always
+  // takes note of the shape).
+  const energyArc = parsed.data.energyArc ?? listenerShape
 
   // Only a swap or extend ever needs a pool (remove/move are pure
   // rearrangement — queue-store never calls the provider for them), so the
@@ -2218,7 +2223,7 @@ async function executeEditQueue(
     // toOpIntent/the userText fallback above) and `count` is already
     // validated by queueOpsSchema's own op-specific bounds, so this is a
     // plain object build, not a re-validation.
-    const fullIntent: Intent = { ...base, targetCount: count, ...(parsed.data.energyArc ? { energyArc: parsed.data.energyArc } : {}) }
+    const fullIntent: Intent = { ...base, targetCount: count, ...(energyArc ? { energyArc } : {}) }
     // Excludes the queue's OWN current tracks from the candidate pool — a
     // swap/extend replacement drawn from the active queue is a guaranteed
     // no-op (materialize's duplicate guard would just drop it), so without
@@ -2339,7 +2344,7 @@ async function executeEditQueue(
   try {
     const result = await applyOps(db, session.id, ops, 'dj', provider, undefined,
       needsPool ? { seedRevision: seed.revision, playlistId: seed.status === 'ready' ? seed.playlistId : null,
-        fingerprint: seed.status === 'ready' ? seed.fingerprint : null } : undefined, parsed.data.energyArc)
+        fingerprint: seed.status === 'ready' ? seed.fingerprint : null } : undefined, energyArc)
     // Flagged after the picks landed, as a generate is (applyOps is atomic —
     // a throw above means nothing landed and we never get here), and the
     // model is told in the same result. Set only, never cleared: an edit
@@ -2761,7 +2766,7 @@ async function attemptTurn(
           }
         } else if (call.name === 'edit_queue') {
           deps.step?.({ step: 'editing' })
-          const outcome = await executeEditQueue(db, countedDeps, session, call.input, userText, lastGenerateIntent, sessionContext, budget, { tracker: fillTracker, surface: options.surface ?? 'web' })
+          const outcome = await executeEditQueue(db, countedDeps, session, call.input, userText, lastGenerateIntent, sessionContext, budget, { tracker: fillTracker, surface: options.surface ?? 'web' }, options.energyArc)
           resultText = outcome.resultText
           if (outcome.queueChanged) currentVersion = outcome.newVersion!
           recordChange(changes, outcome, false)

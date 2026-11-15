@@ -526,6 +526,28 @@ describe('runDjTurn', () => {
     expect(saved.energyArc).toBe('fall')
   })
 
+  it('edit_queue falls back to the listener-selected shape when the model omits energyArc', async () => {
+    const db = await createTestDb()
+    await seedUser(db, 'u1')
+    const session = await seedSession(db, 'u1')
+    await seedLibrary(db, 'u1', 8)
+    const sessionRef: DjSessionRef = { id: session.id, userId: 'u1' }
+    const first = await runDjTurn(db, { embed: fakeEmbed, llm: makeFakeLlm([
+      { toolCalls: [toolCall('c1', 'generate_queue', { themes: 'x', targetCount: 3 })] },
+      { text: 'here.' },
+    ]).llm }, sessionRef, 'play something')
+
+    const second = await runDjTurn(db, { embed: fakeEmbed, llm: makeFakeLlm([
+      { toolCalls: [toolCall('c2', 'edit_queue', { ops: [{ op: 'extend', count: 2 }] })] },
+      { text: 'added two.' },
+    ]).llm }, sessionRef, 'two more', { energyArc: 'rise' })
+
+    expect(second.queueVersion).toBeGreaterThan(first.queueVersion)
+    const [saved] = await db.select({ energyArc: mixVersions.energyArc }).from(mixVersions)
+      .where(and(eq(mixVersions.sessionId, session.id), eq(mixVersions.version, second.queueVersion)))
+    expect(saved.energyArc).toBe('rise')
+  })
+
   it("includes an acknowledgment of the listener's own manual removal (since the dj's last message) in the next turn's context", async () => {
     const db = await createTestDb()
     await seedUser(db, 'u1')
