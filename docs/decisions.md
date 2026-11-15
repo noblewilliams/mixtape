@@ -1755,3 +1755,23 @@ MusicKit are made, then a Connect Apple Music button whose click reaches
 no Apple Music songs says "Apple Music couldn’t play this mix." without making
 a session. **Reopens if:** MusicKit can be configured without a session (a
 public developer token), making one tap possible.
+
+## 2026-11-15 — iOS adopts UIScene; Flutter moves to 3.50
+
+1.1.0 (7) crashed on open from TestFlight: it was the first build made with
+Xcode 27, and iOS traps at launch (`_UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption`)
+any app built with the iOS 27 SDK that still uses the app-delegate-only
+lifecycle. Rebuilding with Xcode 26.5 would only have postponed it until
+Apple requires the new SDK, so the app adopts scenes now. Info.plist declares
+one `FlutterSceneDelegate` window scene from `Main`; `AppDelegate` registers
+channels, platform views and plugins in `didInitializeImplicitFlutterEngine`
+(there is no window at `didFinishLaunching` under scenes); a `SceneHooks`
+scene delegate installs the native dock on the scene's window and takes
+"Open in Mixtape" ZIPs from the scene's URL contexts, ahead of app_links.
+Scene support needs Flutter 3.38+, so the client moves to Flutter 3.50.0
+(pubspec floor `flutter: ">=3.50.0"`), in its own SDK at
+`~/development/flutter-3.50` so goalympics keeps 3.35.6, and every direct
+dependency moves to its latest major (app_links 7, file_picker 13,
+share_plus 13 and google_sign_in_ios have scene support). **Reopens if:**
+a plugin we add depends on app-delegate URL or window callbacks that no
+longer arrive under scenes.

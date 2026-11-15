@@ -70,7 +70,7 @@ class ZoneClock {
     return LocalTime(_day(wall.year, wall.month, wall.day), wall.hour);
   }
 
-  int _offsetAt(int utcMs) => _location.timeZone(utcMs).offset;
+  int _offsetAt(int utcMs) => _location.timeZone(utcMs).offset.inMilliseconds;
 
   static String _day(int year, int month, int day) =>
       '${year.toString().padLeft(4, '0')}-${month.toString().padLeft(2, '0')}-${day.toString().padLeft(2, '0')}';

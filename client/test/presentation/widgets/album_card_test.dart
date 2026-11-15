@@ -319,7 +319,7 @@ void main() {
     expect(find.text('On your Listen later shelf.'), findsOneWidget);
     final node = tester.getSemantics(find.byKey(AlbumCard.laterKey));
     expect(node.label, 'Saved for later');
-    expect(node.flagsCollection.isToggled, isTrue);
+    expect(node.flagsCollection.isToggled.toBoolOrNull(), isTrue);
 
     await tester.tap(find.text('Undo'));
     await tester.pump();

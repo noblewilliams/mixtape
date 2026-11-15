@@ -407,7 +407,7 @@ void main() {
     expect(taps, 1);
     final semantics = tester.getSemantics(find.byType(TapeButton).last);
     expect(semantics.flagsCollection.isButton, isTrue);
-    expect(semantics.flagsCollection.isEnabled, isFalse);
+    expect(semantics.flagsCollection.isEnabled.toBoolOrNull(), isFalse);
   });
 
   testWidgets('every control is one VoiceOver can activate', (tester) async {

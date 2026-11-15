@@ -104,11 +104,13 @@ void main() {
   test('a ZIP handed to the app is copied out of its security scope and passed to Dart', () {
     final source = File('ios/Runner/AppDelegate.swift').readAsStringSync();
 
-    // The document-type open path. The launch options carry the same URL on
-    // a cold start and the open hook runs straight after, so copying there
-    // as well would leave a second copy of the export behind: one path only.
-    expect(source, contains('open url: URL'));
+    // The document-type open path, through the scene (UIScene lifecycle):
+    // its connection options on a cold start, its open-URL hook while
+    // running, both into the one copier. The app delegate's launch options
+    // and open hook are never called under scenes.
+    expect(source, contains('func receiveFiles('));
     expect(source, isNot(contains('launchOptions?[.url]')));
+    expect(source, isNot(contains('open url: URL')));
     // A document opened in place is only readable inside its scope, so the
     // file is copied into our own temporary directory under a fresh name
     // before the scope ends and the import reads it. The scope is balanced

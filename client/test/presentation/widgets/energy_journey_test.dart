@@ -181,7 +181,7 @@ void main() {
       expect(data.label, '${arc.label}. ${arc.description}');
       expect(data.hasAction(SemanticsAction.tap), isTrue);
       expect(data.flagsCollection.isButton, isTrue);
-      expect(data.flagsCollection.isSelected, arc == EnergyArc.fall);
+      expect(data.flagsCollection.isSelected.toBoolOrNull(), arc == EnergyArc.fall);
     }
 
     await tester.pumpWidget(const SizedBox());

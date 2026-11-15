@@ -1004,7 +1004,7 @@ void main() {
         .getSemantics(find.byKey(key))
         .getSemanticsData()
         .flagsCollection
-        .isSelected;
+        .isSelected.toBoolOrNull() == true;
 
     String sendLabel(WidgetTester tester) => tester
         .widget<IconButton>(find.byKey(const Key('start-session')))

@@ -128,8 +128,8 @@ void main() {
     SemanticsData data(Key key) =>
         tester.getSemantics(find.byKey(key)).getSemanticsData();
 
-    expect(data(const Key('seg-apple')).flagsCollection.isSelected, isTrue);
-    expect(data(const Key('seg-spotify')).flagsCollection.isSelected, isFalse);
+    expect(data(const Key('seg-apple')).flagsCollection.isSelected.toBoolOrNull(), isTrue);
+    expect(data(const Key('seg-spotify')).flagsCollection.isSelected.toBoolOrNull(), isFalse);
     for (final key in const [Key('seg-apple'), Key('seg-spotify')]) {
       expect(data(key).flagsCollection.isButton, isTrue);
       expect(
@@ -278,7 +278,7 @@ void main() {
       final apple = tester
           .getSemantics(find.byKey(const Key('seg-apple')))
           .getSemanticsData();
-      expect(apple.flagsCollection.isSelected, isTrue);
+      expect(apple.flagsCollection.isSelected.toBoolOrNull(), isTrue);
       expect(apple.label, 'Apple Music');
       handle.dispose();
     });

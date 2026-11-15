@@ -2,7 +2,7 @@ import Flutter
 import UIKit
 
 @main
-@objc class AppDelegate: FlutterAppDelegate {
+@objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   /// C5: a Spotify export ZIP the listener handed us from Files or Mail,
   /// already copied into our own temporary directory. Buffered here because
   /// a cold start opens the file before Dart's handler is registered; Dart
@@ -14,6 +14,10 @@ import UIKit
   /// Retained so the native dock and its `mixtape/shell` channel stay alive.
   /// Only ever built on iOS 26 — below that Flutter draws `FrostedDock`.
   private var shellDock: ShellDock?
+
+  /// Retained for the life of the app: the scene's half of launch, the dock
+  /// and handed-over ZIPs (see `SceneHooks`).
+  private var sceneHooks: SceneHooks?
 
   /// Retained so the `mixtape/speech` channel — the on-device transcriber
   /// Dart falls back to — stays alive for the life of the app.
@@ -45,77 +49,82 @@ import UIKit
     // Anything left from a previous launch is dead: the import that would
     // have read it went with the process.
     purgeOpenedArchives()
-    if let controller = window?.rootViewController as? FlutterViewController {
-      MusicKitBridge.register(with: controller.binaryMessenger)
-      registerOpenArchiveChannel(with: controller.binaryMessenger)
-      registerVoiceChannels(with: controller.binaryMessenger)
-      registerDeviceChannel(with: controller.binaryMessenger)
-      // The approved dock, in genuine Liquid Glass, on iOS 26 only.
-      //
-      // Hosted on the WINDOW, not on controller.view: that view is the
-      // FlutterView, and Flutter re-stacks the platform views it owns inside
-      // it on every composited frame — which would bury the dock under any
-      // platform view that scrolled into its band. `controller.view.window`
-      // is still nil this early, so the window is handed over directly.
-      //
-      // There is no second-best host: `controller.view` is exactly the view
-      // the compositor owns, so a dock parked there would be buried and eat
-      // taps. Without a window the dock is simply not installed, and Flutter
-      // falls back to `FrostedDock` because `isAvailable` never answers.
-      if #available(iOS 26, *) {
-        if let window {
-          shellDock = ShellDock(
-            hostView: window,
-            binaryMessenger: controller.binaryMessenger
-          )
-        }
-        // No window at launch means no dock; nothing is logged here because
-        // this file must stay free of logging (see the export privacy contract).
-      }
-    }
+    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  /// Everything the app registers with Flutter. Under the UIScene lifecycle
+  /// (required from the iOS 27 SDK, or iOS traps at launch) there is no
+  /// window or root view controller at didFinishLaunching: the storyboard's
+  /// FlutterViewController builds its engine when the scene connects, and
+  /// hands it here first.
+  func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
+    let messenger = engineBridge.applicationRegistrar.messenger()
+    let registry = engineBridge.pluginRegistry
+    MusicKitBridge.register(with: messenger)
+    registerOpenArchiveChannel(with: messenger)
+    registerVoiceChannels(with: messenger)
+    registerDeviceChannel(with: messenger)
     // Liquid Glass for surfaces that live inside Flutter (the collapsing
     // title bar, the Home panel). Flutter only inserts it when the dock is
     // available, and falls back to `FrostedSurface` otherwise.
-    if let glassRegistrar = registrar(forPlugin: "mixtape.liquid_glass") {
+    if let glassRegistrar = registry.registrar(forPlugin: "mixtape.liquid_glass") {
       glassRegistrar.register(
         LiquidGlassViewFactory(),
         withId: "mixtape/liquid_glass"
       )
     }
     // Native switches, for the Liquid Glass thumb only UIKit draws.
-    if let switchRegistrar = registrar(forPlugin: "mixtape.native_switch") {
+    if let switchRegistrar = registry.registrar(forPlugin: "mixtape.native_switch") {
       switchRegistrar.register(
         NativeSwitchViewFactory(messenger: switchRegistrar.messenger()),
         withId: "mixtape/native_switch"
       )
     }
     // Native segmented controls, for the Liquid Glass thumb only UIKit draws.
-    if let segmentedRegistrar = registrar(forPlugin: "mixtape.native_segmented") {
+    if let segmentedRegistrar = registry.registrar(forPlugin: "mixtape.native_segmented") {
       segmentedRegistrar.register(
         NativeSegmentedViewFactory(messenger: segmentedRegistrar.messenger()),
         withId: "mixtape/native_segmented"
       )
     }
-    GeneratedPluginRegistrant.register(with: self)
-    // A launch that exists only to open a file delivers it through the open
-    // hook below, which runs straight after this returns. Copying the launch
-    // URL here as well would leave a second copy of the export behind.
-    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    // Ahead of the plugins, so a handed-over ZIP is taken here before
+    // app_links ever sees its file URL.
+    if let sceneRegistrar = registry.registrar(forPlugin: "mixtape.scene") {
+      let hooks = SceneHooks(app: self, messenger: messenger)
+      sceneRegistrar.addSceneDelegate(hooks)
+      sceneHooks = hooks
+    }
+    GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+  }
+
+  /// The approved dock, in genuine Liquid Glass, on iOS 26 only.
+  ///
+  /// Hosted on the WINDOW, not on the FlutterViewController's view: that
+  /// view is the FlutterView, and Flutter re-stacks the platform views it
+  /// owns inside it on every composited frame — which would bury the dock
+  /// under any platform view that scrolled into its band.
+  ///
+  /// There is no second-best host: the FlutterView is exactly the view the
+  /// compositor owns, so a dock parked there would be buried and eat taps.
+  /// Without a window the dock is simply not installed, and Flutter falls
+  /// back to `FrostedDock` because `isAvailable` never answers. Nothing is
+  /// logged either way: this file must stay free of logging (see the export
+  /// privacy contract).
+  fileprivate func installDock(in window: UIWindow, messenger: FlutterBinaryMessenger) {
+    guard shellDock == nil else { return }
+    if #available(iOS 26, *) {
+      shellDock = ShellDock(hostView: window, binaryMessenger: messenger)
+    }
   }
 
   /// "Open in Mixtape" / "Copy to Mixtape" on a `public.zip-archive`
-  /// (declared in Info.plist's CFBundleDocumentTypes). Only file URLs are
-  /// ours; anything else stays with the plugins.
-  override func application(
-    _ app: UIApplication,
-    open url: URL,
-    options: [UIApplication.OpenURLOptionsKey: Any] = [:]
-  ) -> Bool {
-    guard url.isFileURL else {
-      return super.application(app, open: url, options: options)
-    }
-    receive(url)
-    return true
+  /// (declared in Info.plist's CFBundleDocumentTypes), from the scene: its
+  /// connection options on a cold start, its open-URL hook while running.
+  /// Only file URLs are ours; anything else stays with the plugins.
+  fileprivate func receiveFiles(_ contexts: Set<UIOpenURLContext>) -> Bool {
+    let files = contexts.map(\.url).filter(\.isFileURL)
+    files.forEach(receive)
+    return !files.isEmpty
   }
 
   /// Voice input: the on-device transcriber and the audio session it and the
@@ -170,7 +179,7 @@ import UIKit
     openArchiveChannel = channel
   }
 
-  private func receive(_ url: URL) {
+  fileprivate func receive(_ url: URL) {
     guard let archive = copyIntoTemporaryDirectory(url) else {
       // The listener chose a file we could not even copy. Saying so by name
       // is the whole of what we know about it.
@@ -255,5 +264,50 @@ import UIKit
   /// there is no copy.
   private func key(of payload: [String: Any]?) -> String? {
     (payload?["path"] as? String) ?? (payload?["name"] as? String)
+  }
+}
+
+/// The scene's half of launch, which the app delegate no longer sees under
+/// the UIScene lifecycle: installing the dock once the scene has its window,
+/// and taking a handed-over ZIP. Flutter's scene delegate forwards both here.
+/// Selectors are spelled out because every method is optional: a Swift name
+/// that drifted from the Objective-C one would compile and never be called.
+private final class SceneHooks: NSObject, FlutterSceneLifeCycleDelegate {
+  private weak var app: AppDelegate?
+  private let messenger: FlutterBinaryMessenger
+
+  init(app: AppDelegate, messenger: FlutterBinaryMessenger) {
+    self.app = app
+    self.messenger = messenger
+    super.init()
+  }
+
+  /// A launch that exists only to open a file carries it here. Answering
+  /// YES only when a ZIP was taken keeps a cold-start link with app_links.
+  @objc(scene:willConnectToSession:options:)
+  func scene(
+    _ scene: UIScene,
+    willConnectTo session: UISceneSession,
+    options connectionOptions: UIScene.ConnectionOptions?
+  ) -> Bool {
+    installDock(on: scene)
+    guard let contexts = connectionOptions?.urlContexts else { return false }
+    return app?.receiveFiles(contexts) ?? false
+  }
+
+  /// A second chance at the dock, should the window arrive after connecting.
+  @objc(sceneWillEnterForeground:)
+  func sceneWillEnterForeground(_ scene: UIScene) {
+    installDock(on: scene)
+  }
+
+  @objc(scene:openURLContexts:)
+  func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) -> Bool {
+    app?.receiveFiles(URLContexts) ?? false
+  }
+
+  private func installDock(on scene: UIScene) {
+    guard let window = (scene.delegate as? FlutterSceneDelegate)?.window else { return }
+    app?.installDock(in: window, messenger: messenger)
   }
 }

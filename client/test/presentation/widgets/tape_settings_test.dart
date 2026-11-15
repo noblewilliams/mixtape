@@ -60,7 +60,7 @@ Future<_Writes> _open(
 bool _selected(WidgetTester tester, String label) => tester
     .getSemantics(find.bySemanticsLabel(label))
     .flagsCollection
-    .isSelected;
+    .isSelected.toBoolOrNull() == true;
 
 void main() {
   testWidgets('families are the palette in order, six each', (tester) async {

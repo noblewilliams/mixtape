@@ -53,18 +53,18 @@ class FilePickerArchivePicker implements ArchivePicker {
 
   @override
   Future<PickedArchive?> pick() async {
-    final result = await FilePicker.pickFiles(
+    final files = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: const ['zip', 'csv'],
-      allowMultiple: true,
     );
-    final files = result?.files;
-    if (files != null && files.length > 1) {
+    if (files.length > 1) {
+      final sizes = [for (final f in files) f.lengthSync() ?? await f.length()];
       if (files.length > 2000 ||
           files.any(
             (f) => !f.name.toLowerCase().endsWith('.csv') || f.path == null,
           ) ||
-          files.fold<int>(0, (n, f) => n + f.size) > 64 * 1024 * 1024) {
+          sizes.any((n) => n == null) ||
+          sizes.fold<int>(0, (n, s) => n + s!) > 64 * 1024 * 1024) {
         throw const FormatException(
           'Choose one ZIP or several CSV files, up to 64 MB.',
         );
@@ -91,9 +91,10 @@ class FilePickerArchivePicker implements ArchivePicker {
         rethrow;
       }
     }
-    final file = result?.files.singleOrNull;
+    final file = files.singleOrNull;
     final path = file?.path;
     if (file == null || path == null) return null;
-    return PickedArchive(path: path, name: file.name, bytes: file.size);
+    final bytes = file.lengthSync() ?? await file.length() ?? 0;
+    return PickedArchive(path: path, name: file.name, bytes: bytes);
   }
 }

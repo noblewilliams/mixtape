@@ -456,13 +456,13 @@ void main() {
 
       SemanticsData data(String key) =>
           tester.getSemantics(find.byKey(Key(key))).getSemanticsData();
-      expect(data('active-mixes').flagsCollection.isSelected, isTrue);
-      expect(data('listen-later-mixes').flagsCollection.isSelected, isFalse);
+      expect(data('active-mixes').flagsCollection.isSelected.toBoolOrNull(), isTrue);
+      expect(data('listen-later-mixes').flagsCollection.isSelected.toBoolOrNull(), isFalse);
 
       await tester.tap(find.byKey(const Key('listen-later-mixes')));
       await tester.pumpAndSettle();
-      expect(data('active-mixes').flagsCollection.isSelected, isFalse);
-      expect(data('listen-later-mixes').flagsCollection.isSelected, isTrue);
+      expect(data('active-mixes').flagsCollection.isSelected.toBoolOrNull(), isFalse);
+      expect(data('listen-later-mixes').flagsCollection.isSelected.toBoolOrNull(), isTrue);
       handle.dispose();
     });
 
