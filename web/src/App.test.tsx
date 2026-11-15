@@ -260,7 +260,8 @@ describe('Mixtape web shell', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Describe your mix' }), { target: { value: 'Slow train' } })
     fireEvent.click(screen.getByRole('button', { name: 'Make a mix' }))
     await waitFor(() => expect(createSession).toHaveBeenCalledOnce())
-    expect(createSession.mock.calls[0]).toEqual(['Slow train', undefined, 'fall'])
+    // Home's create streams, so it can name its session for a stop.
+    expect(createSession.mock.calls[0]).toEqual(['Slow train', undefined, 'fall', undefined, { onProgress: expect.any(Function), signal: expect.any(AbortSignal) }])
   })
 
   it('hides the mode control when albums are off', async () => {

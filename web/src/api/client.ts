@@ -170,7 +170,21 @@ export const REMAKE_TEXT = 'Remake this with my music'
  */
 export type TurnRequestOptions = {
   onProgress?: TurnProgressListener
+  /**
+   * Abandons the request (spec 2026-11-15 stop-a-turn): the call rejects with
+   * the fetch's AbortError, or the stream's TypeError once it opened. The turn
+   * itself goes on on the server until `stopTurn` stops it.
+   */
+  signal?: AbortSignal
 }
+
+/**
+ * `POST /sessions/:id/turn/stop`. `stopped: true`: the running turn was undone
+ * (a first turn's session is gone). `stopped: false`: no turn was running, it
+ * finished first; re-read the session. A 404 (the session is gone, deleted by
+ * an earlier stop) also answers `stopped: true`: nothing of the turn is left.
+ */
+export type StopTurnResponse = { stopped: boolean }
 
 export type SendMessageOptions = TurnRequestOptions & {
   /** Remake the mix from the listener's own music (mix sessions only; an album answers 409). */
@@ -531,6 +545,8 @@ export type MixtapeApi = {
     options?: TurnRequestOptions,
   ) => Promise<CreateSessionResponse>
   sendMessage: (sessionId: string, text: string, energyArc?: EnergyArc, options?: SendMessageOptions) => Promise<SendMessageResponse>
+  /** Stops the session's running mix turn; may take a while (it answers once the turn is undone). */
+  stopTurn: (sessionId: string) => Promise<StopTurnResponse>
   applyQueueOps: (sessionId: string, ops: QueueOp[], expectedVersion?: number) => Promise<QueueOpsResponse>
   choosePick: (sessionId: string, input: ChoosePickInput, expectedVersion?: number) => Promise<AlbumPickResponse>
   listListenLater: (signal?: AbortSignal) => Promise<{ entries: ApiListenLaterEntry[] }>
@@ -841,6 +857,7 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
           ...(playlistSeed ? { playlistSeed } : {}),
           ...(kind === 'album' ? { kind } : energyArc ? { energyArc } : {}),
         }),
+        ...(options?.signal ? { signal: options.signal } : {}),
         // Album turns stay on the clock: their steps are a later change.
       }, kind === 'album' ? undefined : options?.onProgress).then(withAddMusicOffer, (error: unknown) => {
         if (error instanceof ApiError && error.status === 403 && error.code === 'anonymous_cap') throw new AnonymousCapError(error.payload)
@@ -851,7 +868,17 @@ export function createMixtapeApi(baseUrl: string, getAccessToken: AccessTokenPro
       turn<SendMessageResponse>(`/sessions/${encodeURIComponent(sessionId)}/messages`, {
         method: 'POST',
         body: JSON.stringify({ text, ...(energyArc ? { energyArc } : {}), ...(options?.remake ? { remake: true } : {}) }),
+        ...(options?.signal ? { signal: options.signal } : {}),
       }, options?.onProgress).then(withAddMusicOffer),
+    stopTurn: async (sessionId) => {
+      try {
+        const body = await request<{ stopped?: unknown }>(`/sessions/${encodeURIComponent(sessionId)}/turn/stop`, { method: 'POST' })
+        return { stopped: body.stopped === true }
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) return { stopped: true }
+        throw error
+      }
+    },
     applyQueueOps: (sessionId, ops, expectedVersion) =>
       request(`/sessions/${encodeURIComponent(sessionId)}/queue-ops`, {
         method: 'POST',

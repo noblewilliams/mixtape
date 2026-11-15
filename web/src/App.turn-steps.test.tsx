@@ -145,7 +145,9 @@ describe('a streamed mix turn', () => {
     // Mix A's turn ending leaves mix B's still working.
     await open('Sunday kitchen radio')
     expect(document.querySelector('.dj-thinking')).not.toBeNull()
-    expect(screen.getByRole('textbox', { name: 'Message your DJ' })).toBeDisabled()
+    // The field stays open while the DJ works; Stop holds the send key's place.
+    expect(screen.getByRole('textbox', { name: 'Message your DJ' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument()
     releases.get('sunday-kitchen')!()
     await waitFor(() => expect(document.querySelector('.dj-thinking')).toBeNull())
   })
@@ -159,12 +161,12 @@ describe('a streamed mix turn', () => {
     expect((calls(api, 'sendMessage')[0].args[3] as SendMessageOptions).onProgress).toEqual(expect.any(Function))
   })
 
-  it('adds only the progress listener to a mix message’s call', async () => {
+  it('adds only the progress listener and the stop signal to a mix message’s call', async () => {
     const api = renderApp()
     await openMix()
     await send('Slower')
     await screen.findByText(REPLY)
-    expect(calls(api, 'sendMessage')[0].args).toEqual(['blue-hour', 'Slower', undefined, { onProgress: expect.any(Function) }])
+    expect(calls(api, 'sendMessage')[0].args).toEqual(['blue-hour', 'Slower', undefined, { onProgress: expect.any(Function), signal: expect.any(AbortSignal) }])
   })
 })
 

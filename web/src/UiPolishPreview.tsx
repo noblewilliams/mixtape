@@ -231,7 +231,7 @@ function WorkingConversationPreview({ session, onBack }: { session: DjSession; o
   const [work, restart] = usePreviewTurn()
   return <>
     {/* Keyed by the run, as a new turn mounts a new line in the app. */}
-    <Conversation key={work.startedAt} session={{ ...session, title: 'Rain on Third Mainland' }} messages={[previewAsk]} thinking working={work} onSend={restart} onOpenQueue={() => {}} onBack={onBack} attachment={<PlaylistAttachment api={previewLibraryApis.library} value={null} onSelect={async () => {}} onSessionExpired={() => {}} />} />
+    <Conversation key={work.startedAt} session={{ ...session, title: 'Rain on Third Mainland' }} messages={[previewAsk]} thinking working={work} onSend={restart} onStop={() => { restart(); return undefined }} onOpenQueue={() => {}} onBack={onBack} attachment={<PlaylistAttachment api={previewLibraryApis.library} value={null} onSelect={async () => {}} onSessionExpired={() => {}} />} />
     <QueuePanel session={session} tracks={[]} playing={false} playbackBusy={false} musicConnection="connected" open={false} onConnect={() => {}} onTogglePlay={() => {}} onSave={() => {}} onClose={() => {}} onPreviewTracks={() => {}} onCommitQueueOp={async () => {}} />
   </>
 }

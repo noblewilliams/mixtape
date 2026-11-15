@@ -19,6 +19,8 @@
 .composer-area > .home-compose { width: min(100%, 610px); margin-inline: auto; padding-top: 0; }
 .home-composer--tools { display: grid; grid-template-columns: minmax(0, 1fr) 28px 28px; align-items: center; gap: 2px 4px; padding: 8px 8px 6px; }
 .home-composer--tools textarea, .home-composer--tools .home-voice-status { grid-column: 1 / -1; width: 100%; padding-inline: 8px; }
+/* Send (or Stop) keeps the last column while the mic steps aside for a turn. */
+.home-composer--tools .home-send-button { grid-column: -2 / -1; }
 .composer-tools { display: flex; flex-wrap: wrap; align-items: center; min-width: 0; gap: 0 2px; }
 .composer-tools .wc-attachment { width: auto; max-width: 100%; flex: 0 1 auto; }
 .composer-tools .energy-control { flex: 0 1 auto; gap: 0; }

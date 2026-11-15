@@ -38,6 +38,14 @@ export function SendIcon(props: IconProps) {
   )
 }
 
+export function StopIcon(props: IconProps) {
+  return (
+    <svg {...iconDefaults} {...props}>
+      <rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
 export function QueueIcon(props: IconProps) {
   return (
     <svg {...iconDefaults} {...props}>

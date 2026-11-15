@@ -276,3 +276,67 @@ describe('streamed mix turns', () => {
     expect(onProgress).toHaveBeenCalledTimes(2)
   })
 })
+
+describe('stopping a turn', () => {
+  afterEach(() => {
+    fetchMock.mockReset()
+    vi.unstubAllGlobals()
+  })
+
+  it('posts the stop for the session and reads its answer', async () => {
+    fetchMock.mockResolvedValueOnce(json({ stopped: true })).mockResolvedValueOnce(json({ stopped: false }))
+    vi.stubGlobal('fetch', fetchMock)
+    const api = createMixtapeApi(BASE, () => 'token-1')
+
+    expect(await api.stopTurn('session 9')).toEqual({ stopped: true })
+    expect(await api.stopTurn('session-9')).toEqual({ stopped: false })
+    expect(String(fetchMock.mock.calls[0][0])).toBe(`${BASE}/sessions/session%209/turn/stop`)
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('POST')
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('authorization')).toBe('Bearer token-1')
+  })
+
+  it('reads a 404 (the session went with an earlier stop) as stopped, and throws other failures', async () => {
+    fetchMock.mockResolvedValueOnce(json({ error: 'not_found' }, 404)).mockResolvedValueOnce(json({ error: 'internal' }, 500))
+    vi.stubGlobal('fetch', fetchMock)
+    const api = createMixtapeApi(BASE)
+
+    expect(await api.stopTurn('gone')).toEqual({ stopped: true })
+    await expect(api.stopTurn('session-9')).rejects.toMatchObject({ status: 500 })
+  })
+
+  it('hands the signal to the turn request, so an abort abandons a stream mid-read', async () => {
+    const controller = new AbortController()
+    fetchMock.mockImplementation(async (_url, init) => {
+      const signal = init?.signal
+      const body = new ReadableStream<Uint8Array>({
+        start(stream) {
+          stream.enqueue(new TextEncoder().encode(frame('session', { session: { id: 'session-9' } })))
+          signal?.addEventListener('abort', () => stream.error(new DOMException('aborted', 'AbortError')))
+        },
+      })
+      return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const seen: TurnProgress[] = []
+
+    const turn = createMixtapeApi(BASE).createSession('Rainy commute', undefined, undefined, undefined, { onProgress: (progress) => {
+      seen.push(progress)
+      if (progress.type === 'session') controller.abort()
+    }, signal: controller.signal })
+
+    await expect(turn).rejects.toBeInstanceOf(Error)
+    expect(fetchMock.mock.calls[0][1]?.signal).toBe(controller.signal)
+    expect(seen).toEqual([{ type: 'opened' }, { type: 'session', sessionId: 'session-9' }])
+  })
+
+  it('hands the signal to a message turn too', async () => {
+    const controller = new AbortController()
+    fetchMock.mockResolvedValueOnce(json(reply))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await createMixtapeApi(BASE).sendMessage('session-9', 'Slower', undefined, { onProgress: () => {}, signal: controller.signal })
+
+    expect(fetchMock.mock.calls[0][1]?.signal).toBe(controller.signal)
+    expect(sentBody()).toBe(JSON.stringify({ text: 'Slower' }))
+  })
+})

@@ -15,6 +15,8 @@ type Props = {
   onOpenSession: (id: string) => void
   onOpenMixes: () => void
   onSubmit: HomeSubmit
+  /** A new mix is starting and can be stopped. */
+  onStop?: () => void
   albumPicks: boolean
   anonymous: boolean
   transcribe: (audio: File, signal: AbortSignal) => Promise<{ text: string }>
@@ -75,7 +77,7 @@ export function HomeDashboard(p: Props) {
         </section>
       </div>
       {p.player}
-      <HomeComposer busy={p.busy} albumPicks={p.albumPicks} anonymous={p.anonymous} onSubmit={p.onSubmit} transcribe={p.transcribe} draftSeed={p.draftSeed} modeSeed={p.modeSeed} />
+      <HomeComposer busy={p.busy} onStop={p.onStop} albumPicks={p.albumPicks} anonymous={p.anonymous} onSubmit={p.onSubmit} transcribe={p.transcribe} draftSeed={p.draftSeed} modeSeed={p.modeSeed} />
     </main>
   )
 }

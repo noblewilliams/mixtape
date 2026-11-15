@@ -168,6 +168,45 @@ function albumStateOf(response: Partial<AlbumPickResponse>): AlbumPickState | nu
   return toAlbumPickState({ version: response.version, pick: response.pick ?? null, runnersUp: response.runnersUp ?? [], passed: response.passed ?? [] })
 }
 
+/** A mix message turn the listener can stop: what it drew, so a stop takes it back at once. */
+type StoppableTurn = {
+  turn: number
+  controller: AbortController
+  text: string
+  /** The composer's own line: a stop puts it back in an empty field. */
+  restorable: boolean
+  userMessageId: string
+  remaking: boolean
+  /** Whether the request went out (it may still be waiting for an earlier stop). */
+  sent: boolean
+  suggestions: string[] | undefined
+  addMusic: AddMusicOffer | undefined
+}
+
+/** A new mix from Home the listener can stop. `named` settles with its session id, or null when none was made. */
+type StoppableCreate = {
+  controller: AbortController
+  stopped: boolean
+  named: Promise<string | null>
+  name: (sessionId: string | null) => void
+  halted: Promise<never>
+  halt: () => void
+  response?: CreateSessionResponse
+}
+
+/** The turn was stopped: the call answers at once, and whatever it later gets is ignored. */
+const turnHalted = Symbol('turn halted')
+
+function newStoppableCreate(): StoppableCreate {
+  let name!: (sessionId: string | null) => void
+  let halt!: () => void
+  const named = new Promise<string | null>((resolve) => { name = resolve })
+  const halted = new Promise<never>((_, reject) => { halt = () => reject(turnHalted) })
+  // Raced only while the request is out; a stop before then is read from `stopped`.
+  halted.catch(() => undefined)
+  return { controller: new AbortController(), stopped: false, named, name, halted, halt }
+}
+
 function detailToState(detail: SessionDetailResponse) {
   const session = toDjSession(detail.session, detail.queue)
   const albums = session.kind === 'album' ? albumStateOf(detail) : null
@@ -344,6 +383,15 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     landedRereads.current.forEach(clearTimeout)
     landedRereads.current.clear()
   }, [])
+  // Stop a turn (spec 2026-11-15 stop-a-turn): the mix turn out per session, the
+  // way to abandon it, and the stop still settling per session, which the next
+  // send waits for so it never races the server's rollback.
+  const stoppableTurns = useRef(new Map<string, StoppableTurn>())
+  const pendingStops = useRef(new Map<string, Promise<void>>())
+  // The same for a new mix from Home, whose session is named by its stream's first event.
+  const stoppableCreate = useRef<StoppableCreate | null>(null)
+  const [createStoppable, setCreateStoppable] = useState(false)
+  const pendingCreateStop = useRef<Promise<void> | null>(null)
   /** A turn is out for this session: the single album marker, or a mix turn's own entry. */
   const turnOut = (sessionId: string) => thinkingSessionId === sessionId || turnWork[sessionId] !== undefined
   const [creatingTape, setCreatingTape] = useState(false)
@@ -1304,8 +1352,12 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     if (!album) noteMixReply(response.queue?.length ?? 0)
   }
 
-  /** `inspiration` overrides the dialog's seed (the kept mix re-sent after sign-in). */
-  async function createTape(prompt: string, useInspiration = true, propagateError = false, shape?: EnergyArc, inspiration?: InitialPlaylistSeed | null, kind: SessionKind = 'mix') {
+  /**
+   * `inspiration` overrides the dialog's seed (the kept mix re-sent after sign-in).
+   * `stoppable`: Home's composer shows Stop while this mix starts; a stop rejects
+   * with PromptKept at once, so the prompt stays in the field.
+   */
+  async function createTape(prompt: string, useInspiration = true, propagateError = false, shape?: EnergyArc, inspiration?: InitialPlaylistSeed | null, kind: SessionKind = 'mix', stoppable = false) {
     if (creatingTape) return
     // New mix, a routine suggestion, an album ask: the dialog answers and the prompt stays where it was.
     if (!consentReady()) {
@@ -1317,14 +1369,41 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     const seed = inspiration !== undefined
       ? inspiration ?? undefined
       : useInspiration && newSeed ? { playlistId: newSeed.playlistId, excludeSourceTracks: newSeed.excludeSourceTracks } : undefined
+    const create = stoppable && kind === 'mix' ? newStoppableCreate() : null
+    if (create) {
+      stoppableCreate.current = create
+      setCreateStoppable(true)
+    }
     try {
-      const response = kind === 'album' ? await api.createSession(prompt, seed, undefined, 'album') : await api.createSession(prompt, seed, shape)
+      // A new mix right after a stop waits for it: the stopped one is gone first.
+      if (kind === 'mix' && pendingCreateStop.current) await pendingCreateStop.current
       if (signal.aborted) return
+      if (create?.stopped) {
+        create.name(null)
+        throw turnHalted
+      }
+      let response: CreateSessionResponse
+      if (kind === 'album') response = await api.createSession(prompt, seed, undefined, 'album')
+      else if (create) {
+        const request = api.createSession(prompt, seed, shape, undefined, {
+          onProgress: (progress) => { if (progress.type === 'session') create.name(progress.sessionId) },
+          signal: create.controller.signal,
+        })
+        request.then((answer) => { create.response = answer; create.name(answer.session.id) }, () => create.name(null))
+        response = await Promise.race([request, create.halted])
+      } else response = await api.createSession(prompt, seed, shape)
+      if (signal.aborted) return
+      if (create?.stopped) throw turnHalted
       setNewSeed(null)
       adoptNewSession(response)
       if ((response.session.kind ?? 'mix') === 'mix') notePersonalMix(response.session, response.queue?.length ?? 0)
     } catch (requestError) {
       if (signal.aborted) return
+      // Stopped: Home is idle again at once, with the prompt still in the field.
+      if (requestError === turnHalted || create?.stopped) {
+        if (propagateError) throw new PromptKept()
+        return
+      }
       if (isAiConsentRequired(requestError)) {
         // The prompt stays where it was typed (the New mix dialog stays open).
         consentRequired()
@@ -1346,7 +1425,122 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       if (requestError instanceof ApiError && requestError.status === 401) signOut()
       if (propagateError) throw requestError
     } finally {
-      if (!signal.aborted) setCreatingTape(false)
+      if (create && stoppableCreate.current === create) stoppableCreate.current = null
+      if (!signal.aborted) {
+        setCreatingTape(false)
+        if (create) setCreateStoppable(false)
+      }
+    }
+  }
+
+  /** Home's Stop while a new mix starts. */
+  function stopCreate() {
+    const create = stoppableCreate.current
+    if (!create || create.stopped) return
+    create.stopped = true
+    stoppableCreate.current = null
+    setCreateStoppable(false)
+    create.halt()
+    const stopping = (pendingCreateStop.current ?? Promise.resolve()).then(() => settleCreateStop(create)).finally(() => {
+      if (pendingCreateStop.current === stopping) pendingCreateStop.current = null
+    })
+    pendingCreateStop.current = stopping
+  }
+
+  /**
+   * The stop itself, off screen: once the stream has named the session the
+   * request is abandoned and the turn stopped. Stopped, the session is gone;
+   * too late, the listener goes on into the mix that landed.
+   */
+  async function settleCreateStop(create: StoppableCreate) {
+    const signal = controlLife.current.signal
+    const sessionId = await create.named
+    create.controller.abort()
+    if (!sessionId || signal.aborted) return
+    let stopped = false
+    try {
+      stopped = (await api.stopTurn(sessionId)).stopped
+    } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 401) { if (!signal.aborted) signOut(); return }
+    }
+    if (signal.aborted) return
+    if (stopped) { forgetSession(sessionId); return }
+    try {
+      const detail = create.response ?? await api.getSession(sessionId)
+      if (!signal.aborted) adoptNewSession(detail)
+    } catch (requestError) {
+      if (signal.aborted) return
+      if (requestError instanceof ApiError && requestError.status === 404) forgetSession(sessionId)
+      else if (requestError instanceof ApiError && requestError.status === 401) signOut()
+    }
+  }
+
+  /** A session a stop deleted: no trace of it is left in the lists. */
+  function forgetSession(sessionId: string) {
+    setSessions((current) => current.filter((session) => session.id !== sessionId))
+    setMessagesBySession(({ [sessionId]: _messages, ...rest }) => rest)
+    setQueuesBySession(({ [sessionId]: _queue, ...rest }) => rest)
+  }
+
+  /**
+   * The mix turn's Stop. On screen at once: the listener's line and the
+   * working line go and the request is abandoned. Answers the stopped text
+   * when it came from the composer, for an empty field to take back.
+   */
+  function stopMixTurn(sessionId: string): string | undefined {
+    const turn = stoppableTurns.current.get(sessionId)
+    if (!turn) return undefined
+    stoppableTurns.current.delete(sessionId)
+    turn.controller.abort()
+    turnsOut.current.delete(sessionId)
+    setMessagesBySession((current) => ({
+      ...current,
+      [sessionId]: (current[sessionId] ?? []).filter((message) => message.id !== turn.userMessageId),
+    }))
+    setThinkingSessionId((current) => (current === sessionId ? null : current))
+    setTurnWork((current) => {
+      if (current[sessionId]?.turn !== turn.turn) return current
+      const { [sessionId]: _stopped, ...rest } = current
+      return rest
+    })
+    // The last reply's pills come back with it.
+    setSuggestionsBySession((current) => ({ ...current, [sessionId]: turn.suggestions ?? [] }))
+    setAddMusicBySession((current) => ({ ...current, [sessionId]: turn.addMusic }))
+    if (turn.remaking) setRemakingSessionId((current) => (current === sessionId ? null : current))
+    // A turn still waiting for an earlier stop never reached the server: nothing to stop.
+    if (turn.sent) {
+      const stopping = (pendingStops.current.get(sessionId) ?? Promise.resolve()).then(() => settleStop(sessionId)).finally(() => {
+        if (pendingStops.current.get(sessionId) === stopping) pendingStops.current.delete(sessionId)
+      })
+      pendingStops.current.set(sessionId, stopping)
+    }
+    return turn.restorable ? turn.text : undefined
+  }
+
+  /** The stop itself, off screen. Too late, or a stop that failed: the session is read again and what landed is shown. */
+  async function settleStop(sessionId: string) {
+    const signal = controlLife.current.signal
+    try {
+      if ((await api.stopTurn(sessionId)).stopped) return
+    } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 401) { if (!signal.aborted) signOut(); return }
+    }
+    if (signal.aborted) return
+    try {
+      const detail = await api.getSession(sessionId)
+      if (signal.aborted) return
+      const mapped = detailToState(detail)
+      setSessions((current) => current.map((session) => (session.id === sessionId ? { ...session, title: mapped.session.title, queueVersion: mapped.session.queueVersion, trackCount: mapped.session.trackCount } : session)))
+      // A line sent since the stop is still on its way: it stays under what landed.
+      const pending = `${sessionId}-pending-`
+      setMessagesBySession((current) => ({
+        ...current,
+        [sessionId]: [...mapped.messages, ...(current[sessionId] ?? []).filter((message) => message.id.startsWith(pending))],
+      }))
+      setQueuesBySession((current) => ({ ...current, [sessionId]: mapped.queue }))
+      void refreshSessionAfterTurn(sessionId, detail)
+    } catch (requestError) {
+      if (!signal.aborted && requestError instanceof ApiError && requestError.status === 401) signOut()
     }
   }
 
@@ -1375,6 +1569,8 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     }))
     setThinkingSessionId(sessionId)
     setError('')
+    const shownSuggestions = suggestionsBySession[sessionId]
+    const shownAddMusic = addMusicBySession[sessionId]
     setSuggestionsBySession((current) => ({ ...current, [sessionId]: [] }))
     setAddMusicBySession((current) => ({ ...current, [sessionId]: undefined }))
     turn.onSent?.(userMessage.id)
@@ -1396,7 +1592,14 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     turnsOut.current.add(sessionId)
     clearTimeout(landedRereads.current.get(sessionId))
     landedRereads.current.delete(sessionId)
-    const options: SendMessageOptions | undefined = isAlbum ? undefined : { ...(remaking ? { remake: true } : {}), onProgress }
+    // A mix turn can be stopped (album turns have no stop in v1).
+    const stoppable: StoppableTurn | null = isAlbum ? null : {
+      turn: turnId, controller: new AbortController(), text, restorable: keepPrompt, userMessageId: userMessage.id,
+      remaking, sent: false, suggestions: shownSuggestions, addMusic: shownAddMusic,
+    }
+    if (stoppable) stoppableTurns.current.set(sessionId, stoppable)
+    const stopped = () => stoppable?.controller.signal.aborted === true
+    const options: SendMessageOptions | undefined = stoppable ? { ...(remaking ? { remake: true } : {}), onProgress, signal: stoppable.controller.signal } : undefined
     // What the transcript held before this turn, to tell a reply that landed after a dropped stream.
     const knownMessages = new Set((messagesBySession[sessionId] ?? []).map((message) => message.id))
     const turnRevision = contentRevision.current[sessionId]
@@ -1407,8 +1610,16 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       void api.postFunnelEvent({ type: 'remake_tapped', surface: 'web' }).catch(() => undefined)
     }
     try {
+      // A send right after a stop waits for it, showing this turn's working line meanwhile.
+      const stopping = pendingStops.current.get(sessionId)
+      if (stopping) await stopping
+      if (signal.aborted) return
+      if (stopped()) throw turnHalted
+      if (stoppable) stoppable.sent = true
       const response = options ? await api.sendMessage(sessionId, text, shape, options) : await api.sendMessage(sessionId, text, shape)
       if (signal.aborted) return
+      // Stopped after it answered: the stop's own read shows what landed.
+      if (stopped()) throw turnHalted
       landReply(sessionId, response, { isAlbum, hadMix, metadataAtStart })
       const reread = refreshSessionAfterTurn(sessionId)
       // A remake waits for both reads: whether the mix is personal now, and
@@ -1416,6 +1627,11 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       if (remaking) void Promise.all([reread, refreshOnboarding()]).finally(remakeSettled)
     } catch (requestError) {
       if (signal.aborted) return
+      // Stopped: no error line; the stop already took the turn off screen.
+      if (stopped()) {
+        if (keepPrompt) throw new PromptKept()
+        return
+      }
       // Nothing to wait for: the door comes back with Remake, under the error line.
       if (remaking) remakeSettled()
       if (isAiConsentRequired(requestError)) {
@@ -1453,16 +1669,20 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
         else void refreshSessionAfterTurn(sessionId)
       }
     } finally {
-      turnsOut.current.delete(sessionId)
-      recover?.()
-      if (!signal.aborted) {
-        // Only this session's marker: a turn in another mix may have taken it since.
-        setThinkingSessionId((current) => (current === sessionId ? null : current))
-        setTurnWork((current) => {
-          if (current[sessionId]?.turn !== turnId) return current
-          const { [sessionId]: _ended, ...rest } = current
-          return rest
-        })
+      if (stoppable && stoppableTurns.current.get(sessionId) === stoppable) stoppableTurns.current.delete(sessionId)
+      // A stopped turn was cleared by its stop; a newer turn may hold the session's markers now.
+      if (!stopped()) {
+        turnsOut.current.delete(sessionId)
+        recover?.()
+        if (!signal.aborted) {
+          // Only this session's marker: a turn in another mix may have taken it since.
+          setThinkingSessionId((current) => (current === sessionId ? null : current))
+          setTurnWork((current) => {
+            if (current[sessionId]?.turn !== turnId) return current
+            const { [sessionId]: _ended, ...rest } = current
+            return rest
+          })
+        }
       }
     }
   }
@@ -1952,7 +2172,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       {activeView === 'settings' ? <AppSettings api={api} playback={playback} userName={user.name} signInMethod={lastSignInProvider} saveName={saveName} onAccount={() => setDialog('account')} onMemories={() => setActiveView('memories')} onSignOut={signOut} onAccountDeleted={accountDeleted} anonymous={anonymous} onSignIn={() => openSignIn('keep')}/> : activeView === 'home' ? <HomeDashboard
         sessions={sessions} loading={loadingCollection} error={collectionError} busy={creatingTape}
         onRetry={() => void retryCollection()} onOpenSession={openSession} onOpenMixes={() => { setMixesTab('active'); setActiveView('mixes') }}
-        albumPicks={albumPicks} anonymous={anonymous} onSubmit={(prompt, { kind, shape }) => createTape(prompt, false, true, shape, undefined, kind)} transcribe={transcribe} draftSeed={draftSeed} modeSeed={modeSeed}
+        albumPicks={albumPicks} anonymous={anonymous} onSubmit={(prompt, { kind, shape }) => createTape(prompt, false, true, shape, undefined, kind, true)} onStop={createStoppable ? stopCreate : undefined} transcribe={transcribe} draftSeed={draftSeed} modeSeed={modeSeed}
         suggestions={<RoutineSuggestions key={user.id} api={api} busy={creatingTape} onCreate={prompt => createTape(prompt, false, true).catch((cause) => { if (!(cause instanceof PromptKept)) throw cause })}/>}
         player={<PlaybackPanel controller={playback}/>}
         onColor={(id,color) => updateMix(id,{caseColor:color})} onRename={(id,title) => updateMix(id,{title})} onArchive={id => updateMix(id,{status:'archived'})}
@@ -2041,6 +2261,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
             loading={loadingSessionId === activeSession.id}
             thinking={turnOut(activeSession.id)}
             working={turnWork[activeSession.id]}
+            onStop={turnWork[activeSession.id] ? () => stopMixTurn(activeSession.id) : undefined}
             player={<PlaybackPanel controller={playback} />}
             energySummary={activeIsAlbum ? undefined : <MixEnergySummary onShape={shape => setMixShapes(current => ({ ...current, [`${activeSession.id}:${activeSession.queueVersion}`]: shape }))} key={`${activeSession.id}:${activeSession.queueVersion}`} api={api} sessionId={activeSession.id} version={activeSession.queueVersion} />}
             onSend={(text, shape) => sendMessage(text, shape, true)}

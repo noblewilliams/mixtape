@@ -11,7 +11,7 @@ export type DraftSeed = { text: string; id: number }
 export type ModeSeed = { kind: SessionKind; id: number }
 export type HomeSubmit = (prompt: string, options: { kind: SessionKind; shape?: EnergyArc }) => void | Promise<void>
 
-type Props = Pick<PromptComposerProps, 'busy' | 'transcribe'> & {
+type Props = Pick<PromptComposerProps, 'busy' | 'onStop' | 'transcribe'> & {
   albumPicks: boolean
   anonymous: boolean
   onSubmit: HomeSubmit
@@ -26,7 +26,7 @@ const starters: Record<SessionKind, string[]> = {
 }
 const asksForAlbum = /\balbums?\b/i
 
-export function HomeComposer({ draftSeed, modeSeed, albumPicks, anonymous, onSubmit, busy = false, transcribe }: Props) {
+export function HomeComposer({ draftSeed, modeSeed, albumPicks, anonymous, onSubmit, busy = false, onStop, transcribe }: Props) {
   const [draft, setDraft] = useRestorableState('home.draft', '')
   // A mode, not a setting: Mix again on every mount, never stored.
   const [mode, setMode] = useState<SessionKind>('mix')
@@ -62,7 +62,7 @@ export function HomeComposer({ draftSeed, modeSeed, albumPicks, anonymous, onSub
   }
 
   return <div className="home-compose-area" ref={root}>
-    <PromptComposer draft={draft} setDraft={setDraft} busy={busy} transcribe={transcribe}
+    <PromptComposer draft={draft} setDraft={setDraft} busy={busy} onStop={onStop} transcribe={transcribe}
       sendLabel={kind === 'album' ? 'Find an album' : 'Make a mix'}
       submitError={kind === 'album' ? 'Couldn’t find an album. Your prompt is still here, try again.' : undefined}
       inputPlaceholder={kind === 'album' ? 'What kind of record are you in the mood for…' : undefined}

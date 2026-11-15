@@ -38,6 +38,11 @@ type ConversationProps = {
    */
   working?: TurnWork
   onSend: (text: string, shape?: EnergyArc) => void | Promise<void>
+  /**
+   * A mix turn is out and can be stopped: Stop takes the send key's place.
+   * Answers the stopped line when it came from this composer, for an empty field to take back.
+   */
+  onStop?: () => string | undefined
   onOpenHistory?: (version?: number) => void
   /** Mix sessions only: opens the queue slide-over below the three-column width. */
   onOpenQueue?: () => void
@@ -95,7 +100,7 @@ function PassedRow({ album, onGoBack }: { album: AlbumPick; onGoBack?: (version:
 
 const unavailableTranscription = async () => { throw new Error('Transcription unavailable') }
 
-export function Conversation({ currentShape, transcribe = unavailableTranscription, selectionBusy = false, attachment, energySummary, player, onColor, onRename, onArchive, onShare, onStopSharing, session, messages, loading = false, thinking, working, onSend, onOpenQueue, onOpenHistory, kind = 'mix', passed = [], onGoBack, suggestions = [], onSuggestion, inlinePanel, inlinePanelVersion, onBack, musicDoor, musicDoorCovered = false, onAddHistory }: ConversationProps) {
+export function Conversation({ currentShape, transcribe = unavailableTranscription, selectionBusy = false, attachment, energySummary, player, onColor, onRename, onArchive, onShare, onStopSharing, session, messages, loading = false, thinking, working, onSend, onStop, onOpenQueue, onOpenHistory, kind = 'mix', passed = [], onGoBack, suggestions = [], onSuggestion, inlinePanel, inlinePanelVersion, onBack, musicDoor, musicDoorCovered = false, onAddHistory }: ConversationProps) {
   const album = kind === 'album'
   const [settings, setSettings] = useState(false)
   const [options, setOptions] = useState(false)
@@ -244,9 +249,14 @@ export function Conversation({ currentShape, transcribe = unavailableTranscripti
           onSubmit={async text => {
             const request = shape ? onSend(text, shape) : onSend(text)
             setDraft('')
-            // A kept prompt (the consent dialog answered instead) comes back to the field.
-            try { await request } catch (cause) { if (cause instanceof PromptKept) setDraft(text); throw cause }
+            // A kept prompt (the consent dialog answered, or a stop) comes back to an empty field;
+            // a draft typed meanwhile is kept.
+            try { await request } catch (cause) { if (cause instanceof PromptKept) setDraft(value => (value.trim() ? value : text)); throw cause }
           }} transcribe={transcribe}
+          onStop={onStop && (() => {
+            const text = onStop()
+            if (text) setDraft(value => (value.trim() ? value : text))
+          })}
           busy={thinking || loading || selectionBusy}
           inputLabel="Message your DJ" sendLabel="Send message"
           inputPlaceholder={album ? 'Another? Older? Something you do not know?' : 'Tell the DJ what to change…'}

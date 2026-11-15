@@ -131,6 +131,13 @@ async function reportProgress(
   if (typeof progress === 'function') await progress(report, turn)
   else progress.forEach(report)
 }
+/** Runs `work`, rejecting as an aborted fetch does once `signal` aborts (a held turn included). */
+async function abortable<T>(signal: AbortSignal | undefined, work: () => Promise<T>): Promise<T> {
+  const aborted = () => new DOMException('The operation was aborted.', 'AbortError')
+  if (signal?.aborted) throw aborted()
+  if (!signal) return work()
+  return Promise.race([work(), new Promise<never>((_, reject) => signal.addEventListener('abort', () => reject(aborted()), { once: true }))])
+}
 const atVersion = (album: ApiAlbum, version: number): ApiAlbum => ({ ...album, version })
 
 export function createFakeApi(overrides: Partial<MixtapeApi> = {}, options: FakeApiOptions = {}): FakeApi {
@@ -284,7 +291,7 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}, options: Fake
       return { session: { ...session }, messages: messagesFor(sessionId), queue: currentQueue(sessionId), shared: sessionShares.has(sessionId) }
     },
     createSession: async (prompt, _seed, _arc, kind, turnOptions): Promise<CreateSessionResponse> => {
-      if (kind !== 'album') await reportProgress(options.turnProgress, turnOptions?.onProgress, { method: 'createSession' })
+      if (kind !== 'album') await abortable(turnOptions?.signal, () => reportProgress(options.turnProgress, turnOptions?.onProgress, { method: 'createSession' }))
       if (kind === 'album') {
         const createdAt = tick()
         const id = albumSessions.size === 0 ? 'created-album-session' : `created-album-session-${albumSessions.size + 1}`
@@ -330,7 +337,7 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}, options: Fake
         if (sendOptions?.remake) throw new ApiError(409, { error: 'wrong_session_kind' })
         return albumTurn(sessionId, text)
       }
-      await reportProgress(options.turnProgress, sendOptions?.onProgress, { method: 'sendMessage', sessionId })
+      await abortable(sendOptions?.signal, () => reportProgress(options.turnProgress, sendOptions?.onProgress, { method: 'sendMessage', sessionId }))
       return {
         djMessage: {
           id: 'reply-message',
@@ -638,6 +645,8 @@ export function createFakeApi(overrides: Partial<MixtapeApi> = {}, options: Fake
       })
       return { token, url: `https://miixtape.netlify.app/m/${token}` }
     },
+    // As the server once a running turn is undone; tests override it for the too-late answer.
+    stopTurn: async () => ({ stopped: true }),
     stopSharing: async (sessionId) => {
       const token = sessionShares.get(sessionId)
       if (token) sharedMixes.set(token, 'revoked')
