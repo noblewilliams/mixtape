@@ -409,6 +409,7 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
         SliverPadding(
           padding: widget.bottomInset,
           sliver: _SessionsErrorState(
+            error: sessionsAsync.error,
             onRetry: () => ref.invalidate(sessionsProvider),
           ),
         ),
@@ -572,6 +573,7 @@ class _MixesScreenState extends ConsumerState<MixesScreen> {
         sliver: _SessionsErrorState(
           title: 'Couldn’t load your Listen later shelf',
           retryKey: const Key('listen-later-retry'),
+          error: shelfAsync.error,
           onRetry: () => ref.invalidate(listenLaterProvider),
         ),
       );
@@ -924,16 +926,23 @@ class _SessionsErrorState extends StatelessWidget {
     required this.onRetry,
     this.title = 'Couldn’t load your mixes',
     this.retryKey = const Key('sessions-retry'),
+    this.error,
   });
 
   final VoidCallback onRetry;
+  final Object? error;
   final String title;
   final Key retryKey;
 
   @override
   Widget build(BuildContext context) {
     return EmptyStateSliver(
-      child: LoadErrorState(title: title, retryKey: retryKey, onRetry: onRetry),
+      child: LoadErrorState(
+        title: title,
+        retryKey: retryKey,
+        error: error,
+        onRetry: onRetry,
+      ),
     );
   }
 }

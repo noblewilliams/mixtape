@@ -1824,3 +1824,21 @@ now holds on edit_queue swaps and extends too. Clearing a pick returns the
 chip to the mix's own shape; there is no "no shape" on the wire (an omitted
 `energyArc` keeps the current journey). **Reopens if:** sending the unchanged
 shape on every turn makes the DJ reshape mixes nobody asked it to.
+
+## 2026-11-15 — Load errors say which of three things went wrong
+
+A failed load now says why: "You're offline", "Mixtape isn't responding right
+now" (timeout, refused or reset connection, TLS failure, 502/503/504), or
+"Something went wrong" (`FailureKind`, `client/lib/data/api/failure_kind.dart`).
+A timeout or DNS failure cannot tell offline from a server outage on its own,
+and a phone on captive-portal or dead Wi-Fi still reports a network as up, so
+`ApiClient` settles those two cases by fetching Apple's connectivity page
+(`https://www.apple.com/library/test/success.html`, 3 s, nothing about the
+listener is sent) before it says "offline". The other failures need no probe.
+`connectivity_plus` was not adopted: it reports interfaces, not whether the
+internet answers. "Try again" shows a spinner for the retry, and for at least
+0.6 s, so a tap always gets a visible response (founder smoke, same day). The
+in-band streaming errors (the chat turn) and the first-run flow still map every
+network failure to "offline".
+**Reopens if:** Apple's page is blocked somewhere listeners are, or a probe
+on every ambiguous failure shows up as a delay people notice.

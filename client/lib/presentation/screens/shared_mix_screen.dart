@@ -118,6 +118,9 @@ enum _Phase { loading, loaded, gone, failed }
 class _SharedMixScreenState extends ConsumerState<SharedMixScreen>
     with MixHandoff<SharedMixScreen> {
   _Phase _phase = _Phase.loading;
+
+  /// Why the last load failed, for the error copy.
+  Object? _error;
   SharedMix? _mix;
   List<QueueTrack> _queue = const [];
   bool _saveRequested = false;
@@ -199,9 +202,12 @@ class _SharedMixScreenState extends ConsumerState<SharedMixScreen>
     } on SharedMixGoneException {
       if (!mounted || load != _load) return;
       setState(() => _phase = _Phase.gone);
-    } catch (_) {
+    } catch (error) {
       if (!mounted || load != _load) return;
-      setState(() => _phase = _Phase.failed);
+      setState(() {
+        _error = error;
+        _phase = _Phase.failed;
+      });
     }
   }
 
@@ -288,7 +294,7 @@ class _SharedMixScreenState extends ConsumerState<SharedMixScreen>
             padding: const EdgeInsets.all(24),
             child: LoadErrorState(
               title: "Couldn't load this mix",
-              body: 'Check your connection and try again.',
+              error: _error,
               retryKey: SharedMixScreen.retryKey,
               onRetry: () => unawaited(_fetch()),
             ),

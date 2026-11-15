@@ -247,6 +247,7 @@ class MusicSourcesScreen extends ConsumerWidget {
             child: LoadErrorState(
               title: kSourcesLoadFailedTitle,
               retryKey: const Key('sources-retry'),
+              error: onboarding.error,
               onRetry: () => ref.read(onboardingProvider.notifier).refresh(),
             ),
           )
