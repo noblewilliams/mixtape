@@ -1809,3 +1809,18 @@ failed. Funnel rows of a stopped turn stay. Album turns have no stop yet.
 Spec: `docs/superpowers/specs/2026-11-15-stop-a-turn-design.md`.
 **Reopens if:** the once-a-second poll during model calls shows up in Neon
 cost, or turns grow writes that a restore cannot undo.
+
+## 2026-11-15 — The shape is always visible, changeable and sent
+
+Founder: the shape must stay visible and changeable while a prompt is
+processing, and the DJ must always take note of it. Both clients now keep the
+Shape control enabled during a turn (iOS gains a visible chip above the chat
+composer; "Shape the energy" leaves +, and no sentence is written into the
+draft or the Home prompt any more). A pick waits until a message carries it,
+surviving a version that lands meanwhile, a stop, or a failure; every mix
+message, remake and new mix sends the pick, else the mix's own shape, as
+`energyArc`. The server's listener-shape fallback, already on generate_queue,
+now holds on edit_queue swaps and extends too. Clearing a pick returns the
+chip to the mix's own shape; there is no "no shape" on the wire (an omitted
+`energyArc` keeps the current journey). **Reopens if:** sending the unchanged
+shape on every turn makes the DJ reshape mixes nobody asked it to.
