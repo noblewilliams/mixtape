@@ -63,6 +63,7 @@ import {
   type QueueTrackView,
   type ReplacementsProvider,
 } from './queue-store'
+import { claimTurn, finishTurn, rollbackTurn, TurnGuard, TurnStopped, type TurnClaim, type TurnStopTiming, type TurnWrites } from './turn-stop'
 
 // titleComplete is optional: session titling (routes/sessions.ts) degrades to
 // its truncated-prompt fallback with no titleComplete wired, same as any
@@ -2867,7 +2868,16 @@ function logTurn(sessionId: string, stats: AttemptStats | null, errorKind: DjErr
 // is an ordinary turn, whatever the words.
 // onStep receives the turn's working steps as they start (dj/turn-steps.ts),
 // names already cleaned. Absent (the JSON route), nothing is reported.
-export type DjTurnOptions = { energyArc?: Intent['energyArc']; surface?: Surface; remake?: boolean; onStep?: (event: TurnStepEvent) => void }
+// firstTurn: the turn that created its session (POST /sessions); stopped,
+// it deletes the session rather than rolling it back. stopTiming is for tests.
+export type DjTurnOptions = {
+  energyArc?: Intent['energyArc']
+  surface?: Surface
+  remake?: boolean
+  onStep?: (event: TurnStepEvent) => void
+  firstTurn?: boolean
+  stopTiming?: TurnStopTiming
+}
 
 // Why a remake turn has nothing to do, or null when it should run: the
 // session's flag first (one row), then musicReady.
@@ -2878,13 +2888,64 @@ async function remakeRefusalText(db: Db, session: DjSessionRef): Promise<string 
   return null
 }
 
+// A mix turn the listener can stop (spec 2026-11-15 stop-a-turn): the turn
+// claims its session, every model call checks for a stop (and is abandoned
+// within a second of one), and a stopped turn is undone before TurnStopped
+// is thrown. Finished or stopped is decided once, by finishTurn.
 export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, userText: string, options: DjTurnOptions = {}): Promise<DjTurnResult> {
+  const startingVersion = await getSessionQueueVersion(db, session.id)
+  // Stopping is a nicety on top of the turn, never a way for it to fail: a
+  // claim that cannot be written leaves this one turn unstoppable.
+  let claim: TurnClaim | null = null
+  try {
+    claim = await claimTurn(db, session.id, options.stopTiming)
+  } catch {
+    claim = null
+  }
+  const writes: TurnWrites = { messageSeqs: [], renamed: false, historyOffered: false }
+  if (!claim) return runClaimedTurn(db, deps, session, userText, options, startingVersion, writes)
+  const guard = new TurnGuard(db, session.id, claim.turnId, options.stopTiming)
+  const guarded: DjDeps = { ...deps, llm: guard.wrap(deps.llm), embed: guard.wrap(deps.embed) }
+  let outcome: { ok: true; value: DjTurnResult } | { ok: false; error: unknown }
+  try {
+    outcome = { ok: true, value: await runClaimedTurn(db, guarded, session, userText, options, startingVersion, writes) }
+  } catch (error) {
+    outcome = { ok: false, error }
+  }
+  let finished = true
+  try {
+    finished = await finishTurn(db, session.id, claim.turnId)
+  } catch {
+    // Unknown, so the turn stands, as it would have before stops existed.
+  }
+  if (finished && !guard.stopped) {
+    if (outcome.ok) return outcome.value
+    throw outcome.error
+  }
+  await rollbackTurn(db, session, claim, startingVersion, writes, { firstTurn: options.firstTurn })
+  logTurnStopped(session.id)
+  throw new TurnStopped()
+}
+
+function logTurnStopped(sessionId: string): void {
+  console.log(JSON.stringify({ event: 'dj_turn_stopped', sessionId }))
+}
+
+async function runClaimedTurn(
+  db: Db,
+  deps: DjDeps,
+  session: DjSessionRef,
+  userText: string,
+  options: DjTurnOptions,
+  startingVersion: number,
+  writes: TurnWrites,
+): Promise<DjTurnResult> {
   // Read before anything else: (a) fails fast on a missing session before any
   // insert, and (b) is the "before this turn" baseline that both the success
   // path and the error path compare against to decide whether the queue
   // moved THIS TURN — across retries too (see below), not just within
-  // whichever attempt happens to be the one that finally returns.
-  const startingVersion = await getSessionQueueVersion(db, session.id)
+  // whichever attempt happens to be the one that finally returns. Read by
+  // runDjTurn, before its claim.
 
   // Persisted first and unconditionally — the listener's own words stay in
   // the transcript no matter what happens next in this turn. The returned
@@ -2894,6 +2955,7 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
     .insert(djMessages)
     .values({ sessionId: session.id, role: 'user', content: userText })
     .returning({ seq: djMessages.seq })
+  writes.messageSeqs.push(userRow.seq)
 
   // A remake with nothing to do, answered with a fixed reply before any
   // model call; the mix stands as it was (no version, no label change, no
@@ -2907,6 +2969,7 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
       .insert(djMessages)
       .values({ sessionId: session.id, role: 'dj', content: remakeRefusal, queueVersion: null })
       .returning()
+    writes.messageSeqs.push(djMessageRow.seq)
     const queue = await getActiveQueue(db, session.id)
     logTurn(session.id, null, null)
     return { djMessage: djMessageRow, queue, queueVersion: startingVersion }
@@ -2956,6 +3019,7 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
             .insert(djMessages)
             .values({ sessionId: session.id, role: 'dj', content: changes.summaries.join(' '), queueVersion: currentVersion })
             .returning()
+          writes.messageSeqs.push(djMessageRow.seq)
           logTurn(session.id, failure?.stats ?? null, djError.kind, djError.detail, fillTracker.log, fillTracker.spend?.log, true, timing, fillTracker.spend?.verifyMs)
           // A pill this turn claimed rides the recovered reply too: its
           // music_chip_at and funnel row are already written.
@@ -3000,6 +3064,9 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
     }
     throw djError
   } finally {
+    // What a rollback would have to take back, whichever way this ends.
+    writes.renamed = renameState.title !== undefined
+    writes.historyOffered = changes.historyOffered === true
     // The turn is decided: whatever it left running (an early shortfall the
     // curation made unnecessary, and its truncation retry) reports nothing
     // after this, on the success, recovered and error paths alike.
@@ -3030,6 +3097,7 @@ export async function runDjTurn(db: Db, deps: DjDeps, session: DjSessionRef, use
       queueVersion: queueVersionForMessage,
     })
     .returning()
+  writes.messageSeqs.push(djMessageRow.seq)
 
   const queue = await getActiveQueue(db, session.id)
   logTurn(session.id, attempt.stats, null, undefined, fillTracker.log, fillTracker.spend?.log, undefined, timing, fillTracker.spend?.verifyMs)

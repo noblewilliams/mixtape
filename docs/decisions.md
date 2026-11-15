@@ -1788,3 +1788,24 @@ in queue order, one curate() for all of them); picks go to the swaps in order,
 and a short return keeps the remaining originals. Swaps with different intents
 are still separate calls, so the budget still bounds a truly fan-out batch.
 **Reopens if:** a grouped batch reads less varied than per-swap picks did.
+
+## 2026-11-15 — A listener can stop a mix turn, and the stop is real
+
+The composer stays open while the DJ works (it went read-only for the whole
+turn), and a stop key replaces send while a mix turn is out, on iOS and web.
+Stop means the turn leaves nothing behind: `POST /sessions/:id/turn/stop`
+flags the turn's claim on its session (`dj_sessions.active_turn_id`,
+migration 0051); the turn checks before every model call and about once a
+second during one, then deletes its own messages, restores the mix to the
+version it started at (a restore, so versions only move forward and the
+stopped version stays in mix history), takes back a rename and a music pill
+offer, and a stopped first turn deletes its new session. Two conditional
+UPDATEs on the session row decide "finished" against "stopped", so a stop
+that lands too late answers `{ stopped: false }` and the app shows what
+landed. This changes the 2026-11-13 dropped-stream rule only for an explicit
+stop: a client that simply goes away still gets its turn run to the end. A
+claim that cannot be written leaves that turn unstoppable rather than
+failed. Funnel rows of a stopped turn stay. Album turns have no stop yet.
+Spec: `docs/superpowers/specs/2026-11-15-stop-a-turn-design.md`.
+**Reopens if:** the once-a-second poll during model calls shows up in Neon
+cost, or turns grow writes that a restore cannot undo.

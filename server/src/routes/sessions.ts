@@ -8,6 +8,7 @@ import type { AppVars } from '../app'
 import type { Db } from '../db/types'
 import { djSessions, djMessages, queueTracks, sessionEvents, tracks } from '../db/schema'
 import { runDjTurn, DjError, type DjDeps, type DjSessionRef, type DjTurnOptions } from '../dj/loop'
+import { requestStop, TurnStopped, type TurnStopTiming } from '../dj/turn-stop'
 import { streamTurn, wantsTurnStream, type TurnReply } from './turn-stream'
 import { runAlbumTurn, AlbumTurnError, type AlbumDeps, type AlbumTurnResult } from '../albums/loop'
 import { AlbumStoreError, choosePick, goBack, readPickState, type AlbumPickState } from '../albums/store'
@@ -218,7 +219,11 @@ export function requestSurface(userAgent: string | undefined): 'ios' | 'web' {
 // albumDeps is present only with ALBUM_PICKS on (src/index.ts); absent, album
 // sessions are refused with album_picks_off and mixes are untouched.
 // share carries SHARE_BASE_URL; absent, the share routes are not mounted.
-export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps, share?: { baseUrl: string }) {
+// The abandoned request of a stopped turn, for anyone still reading it.
+const TURN_STOPPED_BODY = { error: 'turn_stopped' }
+
+// stopTiming is for tests: how a stop request waits for the turn to let go.
+export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps, share?: { baseUrl: string }, stopTiming?: TurnStopTiming) {
   const app = new Hono<{ Variables: AppVars }>()
   app.route('/', mixHistoryRoutes(db))
 
@@ -320,7 +325,13 @@ export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps, share
     // session and retry, and the row must not still be showing the
     // truncated fallback. titlePromise itself never rejects (see above), but
     // allSettled keeps that guarantee explicit rather than relying on it.
-    const [turnResult, titleResult] = await Promise.allSettled([runDjTurn(db, deps, sessionRef, prompt, options), titlePromise])
+    const [turnResult, titleResult] = await Promise.allSettled([runDjTurn(db, deps, sessionRef, prompt, { ...options, firstTurn: true }), titlePromise])
+
+    // Stopped by the listener: the turn took its new session with it, so
+    // there is no row to title.
+    if (turnResult.status === 'rejected' && turnResult.reason instanceof TurnStopped) {
+      return { status: 409, body: TURN_STOPPED_BODY }
+    }
 
     // A rename_session call within this very first turn (unusual, but the
     // listener COULD open with "call this tape Lagos Nights") wins over the
@@ -417,9 +428,20 @@ export function sessionRoutes(db: Db, deps: DjDeps, albumDeps?: AlbumDeps, share
       if (e instanceof DjError) {
         return { status: djErrorStatus(e.kind), body: djErrorBody(e) }
       }
+      if (e instanceof TurnStopped) return { status: 409, body: TURN_STOPPED_BODY }
       throw e
     }
   }
+
+  // Stops the mix turn running on this session and answers once it has been
+  // undone (spec 2026-11-15 stop-a-turn). { stopped: false }: nothing was
+  // running, the turn finished first; the client re-reads the session. No
+  // model call, so no AI consent gate (app.ts gates /sessions itself only).
+  app.post('/:id/turn/stop', async (c) => {
+    const session = await loadOwnedSession(db, c.req.param('id'), c.get('user').id)
+    if (!session) return c.json({ error: 'not_found' }, 404)
+    return c.json({ stopped: await requestStop(db, session.id, stopTiming) })
+  })
 
   app.put('/:id/playlist-seed', bodyLimit({ maxSize: 2048 }), zValidator('json', seedSelectionSchema), async c => {
     const id = c.req.param('id')

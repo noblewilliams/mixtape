@@ -110,6 +110,7 @@ Client:
 - Shared mixes (iOS, accepted for v1, 2026-11-13): the first-run hand-off closes an open `SharedMixScreen` (the share is already saved, so nothing is lost), and a mix started from a shared link before first run stops when the first session appears (`playbackProvider` resets on auth).
 
 Server / DJ:
+- **Stop a turn (2026-11-15):** album turns have no stop yet (their composer stays open, no stop key); a stopped turn's restored version and the stopped version both stay in mix history; funnel rows of a stopped turn stay. Spec `superpowers/specs/2026-11-15-stop-a-turn-design.md`.
 - Memory-note paraphrase bloat: dupes are exact-match only ("No jazz" ≠ "no jazz"); watch the 50-cap, revisit similarity dedupe if it bites.
 - Taste artist matching is exact-string: 'Wizkid' vs 'Wizkid & Ayra Starr' are unrelated artists — fragments signal on collab-dense libraries; a real artist entity would fix it.
 - Keep-boost saturates around ~8 played sessions (documented in pool.ts); revisit normalization if fam+taste over-anchor comfort picks.

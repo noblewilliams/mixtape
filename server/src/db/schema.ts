@@ -384,6 +384,11 @@ export const djSessions = pgTable(
     // once-per-conversation guard (spec 2026-11-09 add-your-music-loop,
     // decision 5).
     musicChipAt: timestamp('music_chip_at', { withTimezone: true }),
+    // The mix turn running on this session, so the listener can stop it
+    // (spec 2026-11-15 stop-a-turn, dj/turn-stop.ts). Null when none is.
+    activeTurnId: uuid('active_turn_id'),
+    activeTurnAt: timestamp('active_turn_at', { withTimezone: true }),
+    turnStopRequested: boolean('turn_stop_requested').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .notNull()
