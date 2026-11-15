@@ -5,6 +5,7 @@ import { toAlbumPick } from '../api/mappers'
 import { demoAlbumMessages, demoAlbumPick } from '../data/demo'
 import type { DjMessage, DjSession } from '../domain'
 import { Conversation } from './Conversation'
+import { PromptKept } from './PromptComposer'
 import type { TurnWork } from './djWorkingLines'
 import type { MusicDoorInput } from './MusicDoor'
 
@@ -387,5 +388,96 @@ describe('Conversation on a catalog mix (add your music)', () => {
     render(<Conversation session={session} messages={turns} thinking={false} onSend={vi.fn()} onOpenQueue={vi.fn()} />)
     expect(screen.queryByRole('button', { name: 'Add my listening history' })).toBeNull()
     expect(document.querySelector('.conversation-pills')).toBeNull()
+  })
+})
+
+describe('the Shape while the DJ works', () => {
+  afterEach(() => { cleanup(); sessionStorage.clear(); localStorage.clear() })
+  const pick = (label: string) => {
+    fireEvent.click(screen.getByRole('button', { name: /^Energy journey/ }))
+    fireEvent.click(screen.getByRole('button', { name: label }))
+    fireEvent.click(screen.getByRole('button', { name: 'Use this shape' }))
+  }
+  const chip = () => screen.getByRole('button', { name: /^Energy journey/ })
+  const sendText = (text: string) => {
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message your DJ' }), { target: { value: text } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }))
+  }
+  const view = (props: Partial<Parameters<typeof Conversation>[0]> = {}) => <Conversation session={session} messages={[]} thinking={false} onSend={vi.fn()} onOpenQueue={vi.fn()} {...props} />
+
+  it('stays visible and changeable while a turn is out, but not while the mix loads', () => {
+    const { rerender } = render(view({ thinking: true, onStop: () => undefined }))
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument()
+    expect(chip()).toBeEnabled()
+    pick('Wind down')
+    expect(chip()).toHaveAccessibleName('Energy journey: Wind down')
+    rerender(view({ loading: true }))
+    expect(chip()).toBeDisabled()
+  })
+
+  it('keeps a pick made during a turn when that turn lands a new version, and sends it next', async () => {
+    const onSend = vi.fn()
+    const { rerender } = render(view({ thinking: true, onSend, currentShape: 'rise' }))
+    pick('Wind down')
+    rerender(view({ session: { ...session, queueVersion: 4 }, onSend, currentShape: 'steady' }))
+    expect(chip()).toHaveAccessibleName('Energy journey: Wind down')
+    sendText('Brighter at the end')
+    expect(onSend).toHaveBeenCalledWith('Brighter at the end', 'fall')
+  })
+
+  it('shows the landed version’s shape once a sent pick has landed', async () => {
+    const onSend = vi.fn(async () => undefined)
+    const { rerender } = render(view({ onSend, currentShape: 'rise' }))
+    pick('Wind down')
+    sendText('Slower')
+    expect(onSend).toHaveBeenCalledWith('Slower', 'fall')
+    rerender(view({ session: { ...session, queueVersion: 4 }, onSend, currentShape: 'fall' }))
+    await act(async () => {})
+    rerender(view({ session: { ...session, queueVersion: 5 }, onSend, currentShape: 'steady' }))
+    expect(chip()).toHaveAccessibleName('Energy journey: Steady')
+  })
+
+  it('keeps a pick made while the send was out pending after it lands', async () => {
+    let land!: () => void
+    const onSend = vi.fn(() => new Promise<void>((resolve) => { land = resolve }))
+    const { rerender } = render(view({ onSend }))
+    pick('Wind down')
+    sendText('Slower')
+    rerender(view({ onSend, thinking: true }))
+    pick('Steady')
+    rerender(view({ session: { ...session, queueVersion: 4 }, onSend, currentShape: 'fall' }))
+    await act(async () => { land() })
+    expect(chip()).toHaveAccessibleName('Energy journey: Steady')
+    sendText('Again')
+    expect(onSend).toHaveBeenLastCalledWith('Again', 'steady')
+  })
+
+  it('sends the current mix’s shape with every message when nothing was picked', () => {
+    const onSend = vi.fn()
+    render(view({ onSend, currentShape: 'rise' }))
+    sendText('More bass')
+    expect(onSend).toHaveBeenCalledWith('More bass', 'rise')
+  })
+
+  it('keeps the pick a stopped turn carried, as it was never applied', async () => {
+    const onSend = vi.fn(async () => { throw new PromptKept() })
+    const { rerender } = render(view({ onSend, currentShape: 'rise' }))
+    pick('Wind down')
+    sendText('Slower')
+    await act(async () => {})
+    // A version from elsewhere (a queue edit) does not take the unapplied pick away.
+    rerender(view({ session: { ...session, queueVersion: 4 }, onSend, currentShape: 'steady' }))
+    expect(chip()).toHaveAccessibleName('Energy journey: Wind down')
+  })
+
+  it('sends the showing shape with a suggestion pill', () => {
+    const onSuggestion = vi.fn()
+    const messages: DjMessage[] = [{ id: 'd', role: 'dj', content: 'Here it is.', createdAt: '2026-08-31T12:00:00.000Z', queueVersion: 3 }]
+    render(view({ messages, suggestions: ['Fewer ballads'], onSuggestion, currentShape: 'rise' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Fewer ballads' }))
+    expect(onSuggestion).toHaveBeenLastCalledWith('Fewer ballads', 'rise')
+    pick('Wind down')
+    fireEvent.click(screen.getByRole('button', { name: 'Fewer ballads' }))
+    expect(onSuggestion).toHaveBeenLastCalledWith('Fewer ballads', 'fall')
   })
 })

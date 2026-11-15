@@ -269,3 +269,38 @@ describe('HomeComposer mode', () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith('warm, for cooking', { kind: 'album' }))
   })
 })
+
+describe('HomeComposer Shape while a mix starts', () => {
+  afterEach(() => { cleanup(); sessionStorage.clear(); localStorage.clear() })
+  const pick = (label: string) => {
+    fireEvent.click(screen.getByRole('button', { name: /^Energy journey/ }))
+    fireEvent.click(screen.getByRole('button', { name: label }))
+    fireEvent.click(screen.getByRole('button', { name: 'Use this shape' }))
+  }
+
+  it('stays changeable while busy, and reports each pick', () => {
+    const onShape = vi.fn()
+    render(<HomeComposer albumPicks={false} anonymous={false} busy onStop={vi.fn()} onShape={onShape} onSubmit={vi.fn()} transcribe={vi.fn()} />)
+    expect(screen.getByRole('button', { name: 'Energy journey' })).toBeEnabled()
+    pick('Wind down')
+    expect(screen.getByRole('button', { name: 'Energy journey: Wind down' })).toBeInTheDocument()
+    expect(onShape).toHaveBeenLastCalledWith('fall')
+  })
+
+  it('keeps the latest pick on the chip for the prompt a stop put back', async () => {
+    const { PromptKept } = await import('./PromptComposer')
+    let stop!: () => void
+    const onSubmit = vi.fn(() => new Promise<void>((_, reject) => { stop = () => reject(new PromptKept()) }))
+    const { rerender } = render(<HomeComposer albumPicks={false} anonymous={false} onSubmit={onSubmit} transcribe={vi.fn()} />)
+    pick('Wind down')
+    fireEvent.change(screen.getByRole('textbox', { name: 'Describe your mix' }), { target: { value: 'slow train' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Make a mix' }))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith('slow train', { kind: 'mix', shape: 'fall' }))
+    rerender(<HomeComposer albumPicks={false} anonymous={false} busy onStop={vi.fn()} onSubmit={onSubmit} transcribe={vi.fn()} />)
+    pick('Steady')
+    await act(async () => { stop() })
+    rerender(<HomeComposer albumPicks={false} anonymous={false} onSubmit={onSubmit} transcribe={vi.fn()} />)
+    expect(screen.getByRole('button', { name: 'Energy journey: Steady' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Describe your mix' })).toHaveValue('slow train')
+  })
+})

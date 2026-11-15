@@ -17,6 +17,8 @@ type Props = Pick<PromptComposerProps, 'busy' | 'onStop' | 'transcribe'> & {
   onSubmit: HomeSubmit
   draftSeed?: DraftSeed | null
   modeSeed?: ModeSeed | null
+  /** Each Shape pick, as it is made: one made while the mix starts carries into the new mix. */
+  onShape?: (shape: EnergyArc) => void
 }
 
 // Starters are prompts, not settings: they fill the field and never send.
@@ -26,7 +28,7 @@ const starters: Record<SessionKind, string[]> = {
 }
 const asksForAlbum = /\balbums?\b/i
 
-export function HomeComposer({ draftSeed, modeSeed, albumPicks, anonymous, onSubmit, busy = false, onStop, transcribe }: Props) {
+export function HomeComposer({ draftSeed, modeSeed, albumPicks, anonymous, onSubmit, busy = false, onStop, onShape, transcribe }: Props) {
   const [draft, setDraft] = useRestorableState('home.draft', '')
   // A mode, not a setting: Mix again on every mount, never stored.
   const [mode, setMode] = useState<SessionKind>('mix')
@@ -72,7 +74,8 @@ export function HomeComposer({ draftSeed, modeSeed, albumPicks, anonymous, onSub
       }}
       tools={<>
         {control && <ModeControl value={mode} onChange={choose} disabled={busy} />}
-        {kind === 'mix' && <EnergyControl compact value={shape} onSelect={setShape} disabled={busy} />}
+        {/* Changeable while the mix starts: the pick carries into it, or stays for a stopped prompt. */}
+        {kind === 'mix' && <EnergyControl compact value={shape} onSelect={next => { setShape(next); onShape?.(next) }} />}
       </>}
     />
     {/* The live region stays mounted so the nudge is announced as it arrives. */}

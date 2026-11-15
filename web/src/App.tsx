@@ -392,6 +392,10 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
   const stoppableCreate = useRef<StoppableCreate | null>(null)
   const [createStoppable, setCreateStoppable] = useState(false)
   const pendingCreateStop = useRef<Promise<void> | null>(null)
+  // Home's latest Shape pick: one made while a new mix starts carries into it
+  // as the conversation's pending shape (its seed, taken once on mount).
+  const homeShape = useRef<EnergyArc | null>(null)
+  const [shapeSeeds, setShapeSeeds] = useState<Record<string, { shape: EnergyArc; id: number } | undefined>>({})
   /** A turn is out for this session: the single album marker, or a mix turn's own entry. */
   const turnOut = (sessionId: string) => thinkingSessionId === sessionId || turnWork[sessionId] !== undefined
   const [creatingTape, setCreatingTape] = useState(false)
@@ -1369,6 +1373,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     const seed = inspiration !== undefined
       ? inspiration ?? undefined
       : useInspiration && newSeed ? { playlistId: newSeed.playlistId, excludeSourceTracks: newSeed.excludeSourceTracks } : undefined
+    homeShape.current = shape ?? null
     const create = stoppable && kind === 'mix' ? newStoppableCreate() : null
     if (create) {
       stoppableCreate.current = create
@@ -1396,6 +1401,10 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       if (create?.stopped) throw turnHalted
       setNewSeed(null)
       adoptNewSession(response)
+      const late = homeShape.current
+      if (stoppable && kind === 'mix' && late && late !== (shape ?? null)) {
+        setShapeSeeds((current) => ({ ...current, [response.session.id]: { shape: late, id: Date.now() } }))
+      }
       if ((response.session.kind ?? 'mix') === 'mix') notePersonalMix(response.session, response.queue?.length ?? 0)
     } catch (requestError) {
       if (signal.aborted) return
@@ -2083,9 +2092,9 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     }
   }
 
-  function takeSuggestion(text: string) {
+  function takeSuggestion(text: string, shape?: EnergyArc) {
     if (text === 'Add my music') openAddMusic()
-    else void sendMessage(text)
+    else void sendMessage(text, shape)
   }
 
   /**
@@ -2099,7 +2108,8 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
     // and focus leaves the closing panel for the listener's new line.
     const fromPanel = narrow && queueOpen
     setQueueOpen(false)
-    void sendMessage(REMAKE_TEXT, undefined, false, {
+    // The current mix's shape rides the remake, as it does every message.
+    void sendMessage(REMAKE_TEXT, mixShapes[`${activeSession.id}:${activeSession.queueVersion}`] ?? undefined, false, {
       remake: true,
       onSent: fromPanel ? (messageId) => requestAnimationFrame(() => focusTurn(messageId)) : undefined,
     })
@@ -2172,7 +2182,7 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
       {activeView === 'settings' ? <AppSettings api={api} playback={playback} userName={user.name} signInMethod={lastSignInProvider} saveName={saveName} onAccount={() => setDialog('account')} onMemories={() => setActiveView('memories')} onSignOut={signOut} onAccountDeleted={accountDeleted} anonymous={anonymous} onSignIn={() => openSignIn('keep')}/> : activeView === 'home' ? <HomeDashboard
         sessions={sessions} loading={loadingCollection} error={collectionError} busy={creatingTape}
         onRetry={() => void retryCollection()} onOpenSession={openSession} onOpenMixes={() => { setMixesTab('active'); setActiveView('mixes') }}
-        albumPicks={albumPicks} anonymous={anonymous} onSubmit={(prompt, { kind, shape }) => createTape(prompt, false, true, shape, undefined, kind, true)} onStop={createStoppable ? stopCreate : undefined} transcribe={transcribe} draftSeed={draftSeed} modeSeed={modeSeed}
+        albumPicks={albumPicks} anonymous={anonymous} onSubmit={(prompt, { kind, shape }) => createTape(prompt, false, true, shape, undefined, kind, true)} onStop={createStoppable ? stopCreate : undefined} onShape={(next) => { homeShape.current = next }} transcribe={transcribe} draftSeed={draftSeed} modeSeed={modeSeed}
         suggestions={<RoutineSuggestions key={user.id} api={api} busy={creatingTape} onCreate={prompt => createTape(prompt, false, true).catch((cause) => { if (!(cause instanceof PromptKept)) throw cause })}/>}
         player={<PlaybackPanel controller={playback}/>}
         onColor={(id,color) => updateMix(id,{caseColor:color})} onRename={(id,title) => updateMix(id,{title})} onArchive={id => updateMix(id,{status:'archived'})}
@@ -2262,6 +2272,8 @@ function SignedInWorkspace({ api, accountAuth, lastSignInProvider, musicKit, use
             thinking={turnOut(activeSession.id)}
             working={turnWork[activeSession.id]}
             onStop={turnWork[activeSession.id] ? () => stopMixTurn(activeSession.id) : undefined}
+            shapeSeed={shapeSeeds[activeSession.id]}
+            onShapeSeedTaken={() => { const id = activeSession.id; setShapeSeeds(({ [id]: _taken, ...rest }) => rest) }}
             player={<PlaybackPanel controller={playback} />}
             energySummary={activeIsAlbum ? undefined : <MixEnergySummary onShape={shape => setMixShapes(current => ({ ...current, [`${activeSession.id}:${activeSession.queueVersion}`]: shape }))} key={`${activeSession.id}:${activeSession.queueVersion}`} api={api} sessionId={activeSession.id} version={activeSession.queueVersion} />}
             onSend={(text, shape) => sendMessage(text, shape, true)}

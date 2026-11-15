@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { DjSession } from '../domain'
 import { HomeComposer, type DraftSeed, type HomeSubmit, type ModeSeed } from './HomeComposer'
+import type { EnergyArc } from './EnergyJourney'
 import { SessionRow } from './SessionControls'
 import { MixSkeletons } from './UiStates'
 
@@ -17,6 +18,7 @@ type Props = {
   onSubmit: HomeSubmit
   /** A new mix is starting and can be stopped. */
   onStop?: () => void
+  onShape?: (shape: EnergyArc) => void
   albumPicks: boolean
   anonymous: boolean
   transcribe: (audio: File, signal: AbortSignal) => Promise<{ text: string }>
@@ -77,7 +79,7 @@ export function HomeDashboard(p: Props) {
         </section>
       </div>
       {p.player}
-      <HomeComposer busy={p.busy} onStop={p.onStop} albumPicks={p.albumPicks} anonymous={p.anonymous} onSubmit={p.onSubmit} transcribe={p.transcribe} draftSeed={p.draftSeed} modeSeed={p.modeSeed} />
+      <HomeComposer busy={p.busy} onStop={p.onStop} onShape={p.onShape} albumPicks={p.albumPicks} anonymous={p.anonymous} onSubmit={p.onSubmit} transcribe={p.transcribe} draftSeed={p.draftSeed} modeSeed={p.modeSeed} />
     </main>
   )
 }

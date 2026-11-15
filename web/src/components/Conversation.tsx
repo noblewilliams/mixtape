@@ -43,6 +43,9 @@ type ConversationProps = {
    * Answers the stopped line when it came from this composer, for an empty field to take back.
    */
   onStop?: () => string | undefined
+  /** A Shape picked on Home while this mix started: taken once as the pending pick. */
+  shapeSeed?: { shape: EnergyArc; id: number }
+  onShapeSeedTaken?: () => void
   onOpenHistory?: (version?: number) => void
   /** Mix sessions only: opens the queue slide-over below the three-column width. */
   onOpenQueue?: () => void
@@ -53,7 +56,8 @@ type ConversationProps = {
   onGoBack?: (version: number) => void
   /** Honest-failure refinements from the last turn, drawn as pills under the last DJ reply. */
   suggestions?: string[]
-  onSuggestion?: (text: string) => void
+  /** `shape`: the chip's shape, which rides the pill's message as it does a typed one. */
+  onSuggestion?: (text: string, shape?: EnergyArc) => void
   /** The album panel folded into the transcript (narrow widths), under the reply at this version. */
   inlinePanel?: ReactNode
   inlinePanelVersion?: number
@@ -100,7 +104,7 @@ function PassedRow({ album, onGoBack }: { album: AlbumPick; onGoBack?: (version:
 
 const unavailableTranscription = async () => { throw new Error('Transcription unavailable') }
 
-export function Conversation({ currentShape, transcribe = unavailableTranscription, selectionBusy = false, attachment, energySummary, player, onColor, onRename, onArchive, onShare, onStopSharing, session, messages, loading = false, thinking, working, onSend, onStop, onOpenQueue, onOpenHistory, kind = 'mix', passed = [], onGoBack, suggestions = [], onSuggestion, inlinePanel, inlinePanelVersion, onBack, musicDoor, musicDoorCovered = false, onAddHistory }: ConversationProps) {
+export function Conversation({ currentShape, transcribe = unavailableTranscription, selectionBusy = false, attachment, energySummary, player, onColor, onRename, onArchive, onShare, onStopSharing, session, messages, loading = false, thinking, working, onSend, onStop, shapeSeed, onShapeSeedTaken, onOpenQueue, onOpenHistory, kind = 'mix', passed = [], onGoBack, suggestions = [], onSuggestion, inlinePanel, inlinePanelVersion, onBack, musicDoor, musicDoorCovered = false, onAddHistory }: ConversationProps) {
   const album = kind === 'album'
   const [settings, setSettings] = useState(false)
   const [options, setOptions] = useState(false)
@@ -110,10 +114,34 @@ export function Conversation({ currentShape, transcribe = unavailableTranscripti
   const menuRef = useRef<HTMLDivElement>(null)
   useEffect(() => { if (!options) return; const close = (event: PointerEvent) => { if (!menuRef.current?.contains(event.target as Node)) setOptions(false) }; const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOptions(false) }; document.addEventListener('pointerdown', close); document.addEventListener('keydown', escape); return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', escape) } }, [options])
   const [draft, setDraft] = useRestorableState(`conversation.${session.id}.draft`, '')
-  // A shape picked here waits as a setting for the next message; once a new
-  // mix version lands, that version's own shape is the truth again.
-  const [pendingShape, setPendingShape] = useRestorableState<{ shape: EnergyArc; version: number } | null>(`conversation.${session.id}.shape`, null)
-  const shape = pendingShape?.version === session.queueVersion ? pendingShape.shape : undefined
+  // A shape picked here is the listener's until a message carries it, even
+  // across a version a turn lands meanwhile. Once a send that carried it lands
+  // a new version, that version's own shape is the truth again, unless the
+  // listener picked again while it was out.
+  const [pendingShape, setPendingShape] = useRestorableState<EnergyArc | null>(`conversation.${session.id}.shapePick`, null)
+  const picks = useRef(0)
+  const carried = useRef<{ pick: number; version: number } | null>(null)
+  useEffect(() => {
+    const sent = carried.current
+    if (!sent || session.queueVersion <= sent.version) return
+    carried.current = null
+    if (picks.current === sent.pick) setPendingShape(null)
+  }, [session.queueVersion])
+  function pickShape(next: EnergyArc) {
+    picks.current += 1
+    setPendingShape(next)
+  }
+  useEffect(() => {
+    if (!shapeSeed) return
+    pickShape(shapeSeed.shape)
+    onShapeSeedTaken?.()
+  }, [shapeSeed?.id])
+  // The shape on the chip rides every message: the DJ always takes note of it.
+  const shape = album ? undefined : pendingShape ?? currentShape ?? undefined
+  /** A message is going out with the chip's shape: a pending pick counts as carried. */
+  function carry() {
+    if (pendingShape) carried.current = { pick: picks.current, version: session.queueVersion }
+  }
   const conversationRef = useRef<HTMLDivElement>(null)
   // Oldest first, so rows sharing an anchor read forward in time (the server lists newest first).
   const placement = album ? passedPlacement(messages, [...passed].reverse()) : new Map<number, AlbumPick[]>()
@@ -200,7 +228,7 @@ export function Conversation({ currentShape, transcribe = unavailableTranscripti
               {index === lastDjIndex && (suggestions.length > 0 || onAddHistory) ? (
                 <div className="home-starters conversation-pills">
                   {suggestions.map((text) => (
-                    <button key={text} type="button" disabled={thinking || loading} onClick={() => onSuggestion?.(text)}>{text}</button>
+                    <button key={text} type="button" disabled={thinking || loading} onClick={() => { carry(); if (shape) onSuggestion?.(text, shape); else onSuggestion?.(text) }}>{text}</button>
                   ))}
                   {onAddHistory ? <button type="button" className="conversation-history-pill" disabled={thinking || loading} onClick={onAddHistory}>Add my listening history</button> : null}
                 </div>
@@ -247,11 +275,18 @@ export function Conversation({ currentShape, transcribe = unavailableTranscripti
         {player}
         <PromptComposer draft={draft} setDraft={setDraft}
           onSubmit={async text => {
+            carry()
             const request = shape ? onSend(text, shape) : onSend(text)
             setDraft('')
             // A kept prompt (the consent dialog answered, or a stop) comes back to an empty field;
-            // a draft typed meanwhile is kept.
-            try { await request } catch (cause) { if (cause instanceof PromptKept) setDraft(value => (value.trim() ? value : text)); throw cause }
+            // a draft typed meanwhile is kept. Its pick was never applied, so it stays pending.
+            try { await request } catch (cause) {
+              if (cause instanceof PromptKept) {
+                carried.current = null
+                setDraft(value => (value.trim() ? value : text))
+              }
+              throw cause
+            }
           }} transcribe={transcribe}
           onStop={onStop && (() => {
             const text = onStop()
@@ -261,7 +296,7 @@ export function Conversation({ currentShape, transcribe = unavailableTranscripti
           inputLabel="Message your DJ" sendLabel="Send message"
           inputPlaceholder={album ? 'Another? Older? Something you do not know?' : 'Tell the DJ what to change…'}
           submitError="Couldn’t send your message. Your text is still here—try again."
-          tools={album ? <>{attachment}</> : <>{attachment}<EnergyControl compact value={shape ?? currentShape} onSelect={next => setPendingShape({ shape: next, version: session.queueVersion })} disabled={thinking || loading || selectionBusy} /></>}
+          tools={album ? <>{attachment}</> : <>{attachment}<EnergyControl compact value={shape} onSelect={pickShape} disabled={loading || selectionBusy} /></>}
         />
       </div>
     </main>

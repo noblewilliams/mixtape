@@ -289,3 +289,56 @@ describe('stopping a new mix from Home', () => {
     hold.resolve()
   })
 })
+
+describe('the Shape while a turn is out', () => {
+  const pick = (label: string) => {
+    fireEvent.click(screen.getByRole('button', { name: /^Energy journey/ }))
+    fireEvent.click(screen.getByRole('button', { name: label }))
+    fireEvent.click(screen.getByRole('button', { name: 'Use this shape' }))
+  }
+
+  it('carries a pick made while a new mix started into its first message', async () => {
+    const release = deferred<void>()
+    const api = renderApp({}, {
+      turnProgress: async (report, turn) => {
+        if (turn.method !== 'createSession') return
+        report({ type: 'session', sessionId: 'created-session' })
+        await release.promise
+      },
+    })
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Describe your mix' }), { target: { value: 'Rainy commute' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Make a mix' }))
+    await screen.findByRole('button', { name: 'Stop' })
+    pick('Wind down')
+    release.resolve()
+
+    await screen.findByRole('textbox', { name: 'Message your DJ' })
+    expect(await screen.findByRole('button', { name: 'Energy journey: Wind down' })).toBeInTheDocument()
+    await send('Slower')
+    await waitFor(() => expect(calls(api, 'sendMessage')).toHaveLength(1))
+    expect(calls(api, 'sendMessage')[0].args.slice(0, 3)).toEqual(['created-session', 'Slower', 'fall'])
+  })
+
+  it('keeps the pick a stopped message turn carried, and sends it again', async () => {
+    let held = true
+    const api = renderApp({}, {
+      turnProgress: async (report, turn) => {
+        if (turn.method !== 'sendMessage' || !held) return
+        report({ type: 'opened' })
+        await new Promise<void>(() => undefined)
+      },
+    })
+    await openMix()
+    pick('Wind down')
+    await send('Slower')
+    const stop = await screen.findByRole('button', { name: 'Stop' })
+    expect(screen.getByRole('button', { name: 'Energy journey: Wind down' })).toBeEnabled()
+    held = false
+    fireEvent.click(stop)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send message' })).toBeEnabled())
+    expect(screen.getByRole('button', { name: 'Energy journey: Wind down' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(calls(api, 'sendMessage')).toHaveLength(2))
+    expect(calls(api, 'sendMessage')[1].args.slice(0, 3)).toEqual(['blue-hour', 'Slower', 'fall'])
+  })
+})
