@@ -346,6 +346,9 @@ class _MemoryScreenState extends ConsumerState<MemoryScreen> {
             : _uncertain
             ? MemoryScreen.uncertainBody
             : LoadErrorState.defaultBody,
+        // The expired and uncertain notices carry their own cause; only a
+        // plain load failure is told apart as offline or server-down.
+        error: sessionExpired || _uncertain ? null : memories.error,
         action: sessionExpired
             ? MemoryScreen.signInAgain
             : MemoryScreen.tryAgain,
@@ -391,10 +394,12 @@ class _MemoryNotice extends StatelessWidget {
     required this.body,
     required this.action,
     required this.onAction,
+    this.error,
   });
 
   final String title;
   final String body;
+  final Object? error;
   final String action;
   final VoidCallback onAction;
 
@@ -404,6 +409,7 @@ class _MemoryNotice extends StatelessWidget {
       title: title,
       body: body,
       actionLabel: action,
+      error: error,
       retryKey: MemoryScreen.retryKey,
       onRetry: onAction,
     ),

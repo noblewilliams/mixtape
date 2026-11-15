@@ -180,7 +180,8 @@ class _PlaylistEditScreenState extends ConsumerState<PlaylistEditScreen> {
       state: state,
       body: thread.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, __) => _Failure(
+        error: (error, _) => _Failure(
+          error: error,
           onRetry: () =>
               ref.invalidate(playlistEditThreadProvider(widget.draftId)),
         ),
@@ -766,9 +767,10 @@ class _ReviewRow extends StatelessWidget {
 }
 
 class _Failure extends StatelessWidget {
-  const _Failure({required this.onRetry});
+  const _Failure({required this.onRetry, this.error});
 
   final VoidCallback onRetry;
+  final Object? error;
 
   @override
   Widget build(BuildContext context) => Center(
@@ -776,6 +778,7 @@ class _Failure extends StatelessWidget {
       padding: const EdgeInsets.all(24),
       child: LoadErrorState(
         title: "Couldn't load this private draft",
+        error: error,
         onRetry: onRetry,
       ),
     ),

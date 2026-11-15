@@ -191,6 +191,7 @@ class _LibraryTabState extends ConsumerState<LibraryTab> {
                 child: LoadErrorState(
                   title: kSourcesLoadFailedTitle,
                   retryKey: LibraryTab.sourcesRetryKey,
+                  error: onboarding.error,
                   onRetry: () =>
                       ref.read(onboardingProvider.notifier).refresh(),
                 ),

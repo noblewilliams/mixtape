@@ -512,6 +512,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen>
       return _shell(
         title: '',
         body: _ErrorState(
+          error: chatAsync.error,
           onRetry: () => ref.invalidate(chatProvider(widget.sessionId)),
         ),
       );
@@ -929,9 +930,10 @@ class _TopBar extends StatelessWidget {
 /// E4: only when there is nothing on screen at all — a list already shown
 /// survives a failed refresh with a toast.
 class _ErrorState extends StatelessWidget {
-  const _ErrorState({required this.onRetry});
+  const _ErrorState({required this.onRetry, this.error});
 
   final VoidCallback onRetry;
+  final Object? error;
 
   @override
   Widget build(BuildContext context) => Center(
@@ -939,7 +941,10 @@ class _ErrorState extends StatelessWidget {
       padding: const EdgeInsets.all(24),
       child: LoadErrorState(
         title: "Couldn't load this tape",
-        body: 'Check your connection and try again. The mix itself is safe.',
+        // Shown only when the failure is neither offline nor the server
+        // not answering; those name their own cause.
+        body: 'Something went wrong. The mix itself is safe.',
+        error: error,
         retryKey: const Key('queue-retry'),
         onRetry: onRetry,
       ),

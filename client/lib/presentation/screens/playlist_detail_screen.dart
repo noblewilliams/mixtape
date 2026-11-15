@@ -243,9 +243,10 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
           ),
           slivers: detail.when(
             loading: () => const [_Skeleton()],
-            error: (_, __) => [
+            error: (error, _) => [
               EmptyStateSliver(
                 child: _Failure(
+                  error: error,
                   onRetry: () =>
                       ref.invalidate(playlistDetailProvider(widget.playlistId)),
                 ),
@@ -640,14 +641,16 @@ class _Bar extends StatelessWidget {
 }
 
 class _Failure extends StatelessWidget {
-  const _Failure({required this.onRetry});
+  const _Failure({required this.onRetry, this.error});
 
   final VoidCallback onRetry;
+  final Object? error;
 
   @override
   Widget build(BuildContext context) => LoadErrorState(
     title: "Couldn't load this playlist",
     retryKey: PlaylistDetailScreen.retryKey,
+    error: error,
     onRetry: onRetry,
   );
 }
