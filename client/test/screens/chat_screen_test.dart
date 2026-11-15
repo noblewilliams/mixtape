@@ -1104,7 +1104,7 @@ void main() {
 
       await tester.tap(find.byKey(LyricTurn.resendKey));
       await tester.pump();
-      expect(find.text('Resend'), findsOneWidget);
+      expect(find.byKey(LyricTurn.resendKey), findsOneWidget);
       expect(sendCall, 2);
 
       inFlight.complete(

@@ -1152,6 +1152,25 @@ describe('runDjTurn', () => {
   })
 
   describe('curation budget', () => {
+    it('a fresh batch: 7 swaps sharing an intent are one curation and the turn succeeds (prod 2026-11-15)', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const session = await seedSession(db, 'u1')
+      const queued = await seedLibrary(db, 'u1', 7)
+      await seedLibraryTrack(db, 'u1', { embedding: MATCHING_DIRECTION })
+      await replaceQueue(db, session.id, queued.map((t) => ({ trackId: t.id, reason: '' })), 'dj')
+      const ops = Array.from({ length: 7 }, (_, i) => ({ op: 'swap' as const, position: i }))
+      const { llm, requests } = makeFakeLlm([
+        { toolCalls: [toolCall('c1', 'edit_queue', { ops })] },
+        { text: 'fresh batch in.' },
+      ])
+
+      const result = await runDjTurn(db, { embed: fakeEmbed, llm }, { id: session.id, userId: 'u1' }, 'give me a fresh batch')
+
+      expect(result.djMessage.content).toBe('fresh batch in.')
+      expect(curateRequests(requests)).toHaveLength(1)
+    })
+
     it('an edit batch inducing more than MAX_CURATIONS_PER_TURN provider requests throws a DjError — prior committed state intact', async () => {
       const db = await createTestDb()
       await seedUser(db, 'u1')
@@ -1170,9 +1189,10 @@ describe('runDjTurn', () => {
       )
       const sessionRef: DjSessionRef = { id: session.id, userId: 'u1' }
 
-      // 7 swaps in one batch — planOps generates one provider (curate) call
-      // per swap position, one more than MAX_CURATIONS_PER_TURN (6).
-      const ops = Array.from({ length: 7 }, (_, i) => ({ op: 'swap' as const, position: i }))
+      // 7 swaps in one batch, each with its own intent — planOps generates
+      // one provider (curate) call per distinct intent, one more than
+      // MAX_CURATIONS_PER_TURN (6).
+      const ops = Array.from({ length: 7 }, (_, i) => ({ op: 'swap' as const, position: i, intent: { themes: `flavour ${i}` } }))
       const { llm } = makeFakeLlm([{ toolCalls: [toolCall('c1', 'edit_queue', { ops })] }])
       const deps: DjDeps = { embed: fakeEmbed, llm }
 

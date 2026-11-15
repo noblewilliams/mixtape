@@ -17,6 +17,7 @@ library;
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
@@ -132,7 +133,7 @@ class LyricTurn extends StatelessWidget {
 }
 
 /// `.l-err`: one line in error ink under the message it answers, with a
-/// Resend link on a 44 pt target.
+/// retry icon (labelled Resend) on a 44 pt target.
 class _FailedLine extends StatelessWidget {
   const _FailedLine({
     required this.text,
@@ -189,18 +190,12 @@ class _FailedLine extends StatelessWidget {
                   ),
                   child: Center(
                     widthFactor: 1,
-                    child: Text(
-                      'Resend',
-                      style: style.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: enabled
-                            ? tokens.plum
-                            : tokens.plum.withValues(alpha: 0.4),
-                        decoration: TextDecoration.underline,
-                        decorationColor: enabled
-                            ? tokens.plum
-                            : tokens.plum.withValues(alpha: 0.4),
-                      ),
+                    child: Icon(
+                      CupertinoIcons.arrow_clockwise,
+                      size: 18,
+                      color: enabled
+                          ? tokens.plum
+                          : tokens.plum.withValues(alpha: 0.4),
                     ),
                   ),
                 ),

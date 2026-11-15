@@ -244,6 +244,12 @@ type WorkingSlot =
 
 export type PlanRequest = {
   opIndex: number
+  // The ops this request answers, in queue order: one for an extend; every
+  // surviving swap that shares an intent for a swap, so a "fresh batch" of 7
+  // swaps is one curation, not 7 (each costs a curate() call against the
+  // turn's budget, and 7 tripped it in prod 2026-11-15). picks[i] goes to
+  // opIndexes[i]; a short return keeps the remaining swaps' originals.
+  opIndexes: number[]
   kind: 'swap' | 'extend'
   count: number
   intent?: OpIntent
@@ -263,23 +269,27 @@ export type Plan = {
 // the swap's placeholder never makes it into the final working list, so no
 // request is ever generated for it.
 function computeRequests(working: WorkingSlot[], ops: QueueOp[]): PlanRequest[] {
-  const seenSwapOpIndexes = new Set<number>()
+  const swapGroups = new Map<string, number[]>()
   const extendCounts = new Map<number, number>()
   for (const slot of working) {
     if (slot.kind === 'keep' && slot.pendingSwap) {
-      seenSwapOpIndexes.add(slot.pendingSwap.opIndex)
+      const op = ops[slot.pendingSwap.opIndex] as Extract<QueueOp, { op: 'swap' }>
+      const key = op.intent === undefined ? '' : JSON.stringify(op.intent)
+      const group = swapGroups.get(key) ?? []
+      if (!group.includes(slot.pendingSwap.opIndex)) group.push(slot.pendingSwap.opIndex)
+      swapGroups.set(key, group)
     } else if (slot.kind === 'pendingExtend') {
       extendCounts.set(slot.opIndex, (extendCounts.get(slot.opIndex) ?? 0) + 1)
     }
   }
   const requests: PlanRequest[] = []
-  for (const opIndex of seenSwapOpIndexes) {
-    const op = ops[opIndex] as Extract<QueueOp, { op: 'swap' }>
-    requests.push({ opIndex, kind: 'swap', count: 1, intent: op.intent })
+  for (const opIndexes of swapGroups.values()) {
+    const op = ops[opIndexes[0]] as Extract<QueueOp, { op: 'swap' }>
+    requests.push({ opIndex: opIndexes[0], opIndexes, kind: 'swap', count: opIndexes.length, intent: op.intent })
   }
   for (const [opIndex, count] of extendCounts) {
     const op = ops[opIndex] as Extract<QueueOp, { op: 'extend' }>
-    requests.push({ opIndex, kind: 'extend', count, intent: op.intent })
+    requests.push({ opIndex, opIndexes: [opIndex], kind: 'extend', count, intent: op.intent })
   }
   // Deterministic order (the order the ops themselves were issued in) —
   // matters for tests asserting call order / intent forwarding, and makes
@@ -570,7 +580,9 @@ export async function applyOps(
   // there's no lock held here to rush past.
   const picksByOpIndex = new Map<number, ReplacementPick[]>()
   for (const req of requests) {
-    picksByOpIndex.set(req.opIndex, await replacementsProvider!(req.count, req.intent))
+    const picks = await replacementsProvider!(req.count, req.intent)
+    if (req.kind === 'extend') picksByOpIndex.set(req.opIndex, picks)
+    else req.opIndexes.forEach((opIndex, i) => picksByOpIndex.set(opIndex, picks[i] ? [picks[i]] : []))
   }
   const requested = requests.reduce((sum, r) => sum + r.count, 0)
 

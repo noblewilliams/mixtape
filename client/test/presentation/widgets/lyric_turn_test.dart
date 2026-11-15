@@ -1,5 +1,6 @@
 // The lyric transcript's pieces (board section 1; locked record →
 // Transcript, Version markers, Working, Failed turn).
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -101,6 +102,11 @@ void main() {
     final resend = find.byKey(LyricTurn.resendKey);
     expect(tester.getSize(resend).height, greaterThanOrEqualTo(44));
     expect(tester.getSize(resend).width, greaterThanOrEqualTo(44));
+    expect(find.text('Resend'), findsNothing, reason: 'an icon, not a word');
+    expect(
+      find.descendant(of: resend, matching: find.byIcon(CupertinoIcons.arrow_clockwise)),
+      findsOneWidget,
+    );
     await tester.tap(resend);
     expect(resent, 1);
   });
@@ -118,7 +124,7 @@ void main() {
     );
     await tester.tap(find.byKey(LyricTurn.resendKey));
     expect(resent, 0);
-    expect(find.text('Resend'), findsOneWidget);
+    expect(find.bySemanticsLabel('Resend'), findsOneWidget);
   });
 
   group('what the DJ is doing (device smoke 2026-11-13)', () {

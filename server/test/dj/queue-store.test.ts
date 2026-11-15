@@ -284,10 +284,27 @@ describe('queue-store', () => {
       expect(requests).toHaveLength(1)
       expect(requests[0]).toEqual({
         opIndex: 1,
+        opIndexes: [1],
         kind: 'swap',
         count: 1,
         intent: second,
       })
+    })
+
+    it('groups swaps that share an intent into one request, in queue order', () => {
+      const rows = ['a', 'b', 'c', 'd'].map((x) => ({ id: `row-${x}`, trackId: `track-${x}`, reason: null }))
+      const other = opIntent({ themes: 'other' })
+      const { requests } = planOps(rows, [
+        { op: 'swap', position: 2 },
+        { op: 'swap', position: 0 },
+        { op: 'swap', position: 1, intent: other },
+        { op: 'swap', position: 3 },
+      ])
+
+      expect(requests).toEqual([
+        { opIndex: 1, opIndexes: [1, 0, 3], kind: 'swap', count: 3, intent: undefined },
+        { opIndex: 2, opIndexes: [2], kind: 'swap', count: 1, intent: other },
+      ])
     })
 
     it('throws QueueOpError on an out-of-range op without touching removedIds construction', () => {
@@ -441,6 +458,25 @@ describe('queue-store', () => {
 
       // Only ever called once, in phase 1 — never again while writing in phase 2.
       expect(calls).toHaveLength(1)
+    })
+
+    it('swaps sharing an intent cost one provider call; a short return keeps the rest', async () => {
+      const db = await createTestDb()
+      await seedUser(db, 'u1')
+      const session = await seedSession(db, 'u1')
+      const trackList = await seedTracks(db, 4)
+      const fresh = await seedTracks(db, 2)
+      await replaceQueue(db, session.id, picksFrom(trackList), 'dj')
+      const { provider, calls } = spyProvider(() => fresh.map((t) => ({ trackId: t.id, reason: 'r' })))
+
+      const result = await applyOps(db, session.id,
+        [{ op: 'swap', position: 0 }, { op: 'swap', position: 1 }, { op: 'swap', position: 3 }], 'dj', provider)
+
+      expect(calls).toEqual([{ count: 3, intent: undefined }])
+      expect(result.requested).toBe(3)
+      expect(result.added).toBe(2)
+      const view = await getActiveQueue(db, session.id)
+      expect(view.map((v) => v.trackId)).toEqual([fresh[0].id, fresh[1].id, trackList[2].id, trackList[3].id])
     })
 
     it('swap forwards op.intent to the provider', async () => {

@@ -1775,3 +1775,16 @@ dependency moves to its latest major (app_links 7, file_picker 13,
 share_plus 13 and google_sign_in_ios have scene support). **Reopens if:**
 a plugin we add depends on app-delegate URL or window callbacks that no
 longer arrive under scenes.
+
+## 2026-11-15 — Swaps that share an intent are one curation
+
+A prod turn ("none of these work, give me a fresh batch") failed with the
+internal apology every time: the DJ swapped all 7 songs it had just added,
+one `swap` op each, and every swap cost its own curate() call, so the 7th
+tripped `MAX_CURATIONS_PER_TURN` (6) and the whole batch was thrown away
+(logged `detail: "curation budget"`, six curations ~2 minutes in). The planner
+now groups surviving swaps with the same intent into one request (`opIndexes`
+in queue order, one curate() for all of them); picks go to the swaps in order,
+and a short return keeps the remaining originals. Swaps with different intents
+are still separate calls, so the budget still bounds a truly fan-out batch.
+**Reopens if:** a grouped batch reads less varied than per-swap picks did.

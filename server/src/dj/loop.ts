@@ -2307,7 +2307,8 @@ async function executeEditQueue(
         const total = outsideCap({ ...fullIntent, targetCount: outsideBudget.finalLength })
         // A swap of a new song may itself bring a new one: it lands only by
         // replacing that song, so the count cannot rise.
-        const ownSlot = request?.kind === 'swap' && outsideBudget.swapsOfNew.has(request.opIndex) ? 1 : 0
+        // A grouped swap request frees one slot per new song it replaces.
+        const ownSlot = request?.kind === 'swap' ? request.opIndexes.filter((i) => outsideBudget!.swapsOfNew.has(i)).length : 0
         cap = Math.max(0, total - outsideBudget.keptNew + freedBySwaps + ownSlot - outsideLanded.length)
       }
     }
@@ -2323,8 +2324,12 @@ async function executeEditQueue(
     // it neither lands as an outside pick nor replaces a swapped song.
     const fresh = picks.filter((p) => !returnedThisBatch.has(p.trackId))
     outsideLanded.push(...outsideIdsIn(pool, fresh))
-    if (request?.kind === 'swap' && outsideBudget?.swapsOfNew.has(request.opIndex) && picks[0] && fresh[0] === picks[0]) {
-      freedBySwaps += 1
+    if (request?.kind === 'swap' && outsideBudget) {
+      // picks[i] answers request.opIndexes[i] (queue-store applyOps).
+      const freshSet = new Set(fresh)
+      request.opIndexes.forEach((opIndex, i) => {
+        if (outsideBudget!.swapsOfNew.has(opIndex) && picks[i] && freshSet.has(picks[i])) freedBySwaps += 1
+      })
     }
     for (const p of picks) returnedThisBatch.add(p.trackId)
     return picks.map((p) => ({ trackId: p.trackId, reason: p.reason }))
