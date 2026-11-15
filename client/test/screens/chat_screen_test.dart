@@ -71,9 +71,21 @@ import '../presentation/providers/playlist_context_provider_test.dart'
 /// loudly rather than hanging. [DjRemakeSender] answers
 /// [DjApiRemake.sendRemake]: without it a remake reaches the real DjApi's
 /// private wire call and dies as a NoSuchMethodError the screen swallows.
-class FakeDjApi implements DjApi, DjRemakeSender {
+class FakeDjApi implements DjApi, DjRemakeSender, DjTurnStopper {
   @override
   Future<void> recordPlaylistCreation(String sessionId, String appleLibraryId) async {}
+
+  /// Unset, a stop stops.
+  Future<bool> Function(String id)? onStopTurn;
+
+  /// The session id of every stop, in call order.
+  final List<String> stops = [];
+
+  @override
+  Future<bool> stopTurn(String sessionId) {
+    stops.add(sessionId);
+    return onStopTurn?.call(sessionId) ?? Future.value(true);
+  }
 
   Future<SessionDetail> Function(String prompt)? onCreateSession;
   Future<List<DjSession>> Function()? onListSessions;
@@ -811,11 +823,14 @@ void main() {
         tester.getTopLeft(find.byKey(WorkingCassette.indicatorKey)).dy,
         greaterThan(tester.getTopLeft(find.text('play jazz')).dy),
       );
-      // The composer and + go inert in place, not away.
+      // The field stays open for the next message, with stop in send's
+      // place; + goes inert in place, not away.
       expect(
         tester.widget<TextField>(find.byKey(const Key('prompt-field'))).readOnly,
-        isTrue,
+        isFalse,
       );
+      expect(find.byKey(const Key('stop-turn')), findsOneWidget);
+      expect(find.byKey(const Key('start-session')), findsNothing);
       await tester.tap(find.byKey(const Key('chat-plus')));
       await tester.pump();
       expect(find.text('Start from a playlist'), findsNothing);
@@ -831,6 +846,78 @@ void main() {
         tester.widget<TextField>(find.byKey(const Key('prompt-field'))).readOnly,
         isFalse,
       );
+    });
+
+    testWidgets('stop takes the turn back and puts the line in the composer', (
+      tester,
+    ) async {
+      final completer = Completer<TurnResult>();
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(queueVersion: 0), messages: [], queue: []);
+      api.onSendMessage = (id, text) => completer.future;
+      await _pump(tester, _makeContainer(api));
+
+      await tester.enterText(find.byKey(const Key('prompt-field')), 'play jazz');
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('start-session')));
+      await tester.pump();
+      expect(find.byKey(WorkingCassette.indicatorKey), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('stop-turn')));
+      await tester.pump();
+      expect(api.stops, ['s1']);
+      expect(find.byKey(WorkingCassette.indicatorKey), findsNothing);
+      expect(
+        tester.widget<TextField>(find.byKey(const Key('prompt-field'))).controller!.text,
+        'play jazz',
+      );
+      expect(find.byKey(const Key('stop-turn')), findsNothing);
+      expect(find.byKey(const Key('start-session')), findsOneWidget);
+
+      // The abandoned request's answer never shows.
+      completer.complete(
+        TurnResult(djMessage: _msg('m2', 'dj', 'here you go'), queue: [], queueVersion: 1),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('here you go'), findsNothing);
+    });
+
+    testWidgets('a draft typed while the DJ works survives a stop and a submit', (
+      tester,
+    ) async {
+      final completer = Completer<TurnResult>();
+      final api = FakeDjApi();
+      api.onGetSession = (_) async =>
+          SessionDetail(session: _session(queueVersion: 0), messages: [], queue: []);
+      var sends = 0;
+      api.onSendMessage = (id, text) {
+        sends++;
+        return completer.future;
+      };
+      await _pump(tester, _makeContainer(api));
+
+      await tester.enterText(find.byKey(const Key('prompt-field')), 'play jazz');
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('start-session')));
+      await tester.pump();
+
+      await tester.enterText(find.byKey(const Key('prompt-field')), 'then softer');
+      await tester.testTextInput.receiveAction(TextInputAction.send);
+      await tester.pump();
+      expect(sends, 1, reason: 'no send while the DJ works');
+
+      await tester.tap(find.byKey(const Key('stop-turn')));
+      await tester.pump();
+      expect(
+        tester.widget<TextField>(find.byKey(const Key('prompt-field'))).controller!.text,
+        'then softer',
+      );
+      expect(find.text('play jazz'), findsNothing);
+      completer.complete(
+        TurnResult(djMessage: _msg('m2', 'dj', 'here you go'), queue: [], queueVersion: 1),
+      );
+      await tester.pumpAndSettle();
     });
 
     testWidgets('a mix being changed keeps its strip playable', (tester) async {

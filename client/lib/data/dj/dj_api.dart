@@ -389,6 +389,25 @@ class DjApi {
     _publicClient.close();
   }
 
+  /// The wire half of [DjApiStopTurn.stopTurn].
+  Future<bool> _stopTurn(String sessionId) async {
+    try {
+      return await _call(
+        () => _client.postJson(
+          '/sessions/$sessionId/turn/stop',
+          const <String, Object?>{},
+        ),
+        (json) => json['stopped'] as bool,
+      );
+    } on ApiException catch (e) {
+      // Not the caller's session, or one an earlier stop already deleted (a
+      // stopped first turn deletes its new session). Either way nothing of
+      // the turn is left to show, which is what a stop is for.
+      if (e.statusCode == 404) return true;
+      rethrow;
+    }
+  }
+
   // Shared mixes (spec 2026-11-13 shared-mixes, API table). Reached through
   // [DjApiSharedMixes].
 
@@ -784,6 +803,34 @@ extension DjApiRemake on DjApi {
   Future<TurnResult> sendRemake(String id) => switch (this) {
     final DjRemakeSender sender => sender.sendRemake(id),
     _ => _sendRemake(id),
+  };
+}
+
+/// What a [DjApi] stand-in implements to answer [DjApiStopTurn.stopTurn]
+/// itself (the real [DjApi] does not need to).
+abstract interface class DjTurnStopper {
+  Future<bool> stopTurn(String sessionId);
+}
+
+/// Stop a turn (spec 2026-11-15 stop-a-turn): `POST /sessions/:id/turn/stop`.
+/// True when the server stopped the mix turn that was running and undid it
+/// (for a first turn the session itself is gone); false when no turn was
+/// running, because it finished first or never started, so the caller reads
+/// the session again. It answers only once the rollback is done, which can
+/// take a while, so callers never hold the screen on it.
+///
+/// A 404 counts as stopped: the session is not there (an earlier stop
+/// deleted the new mix, or it was never the caller's), so there is nothing
+/// of the turn to show. Other failures are [DjApi]'s usual exits.
+///
+/// An extension for the reason [DjApiRemake] gives. A stand-in that
+/// implements [DjTurnStopper] answers; any other stand-in answers false, as
+/// a server with nothing running would.
+extension DjApiStopTurn on DjApi {
+  Future<bool> stopTurn(String sessionId) => switch (this) {
+    final DjTurnStopper stopper => stopper.stopTurn(sessionId),
+    _ when _builtByDjApi[this] == true => _stopTurn(sessionId),
+    _ => Future.value(false),
   };
 }
 

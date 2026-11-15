@@ -16,6 +16,8 @@ class MixPromptInput extends StatefulWidget {
     required this.controller,
     required this.busy,
     required this.onSubmit,
+    this.working = false,
+    this.onStop,
     this.attachment,
     this.focusNode,
     this.placeholder,
@@ -27,8 +29,23 @@ class MixPromptInput extends StatefulWidget {
     this.beforeVoice,
   });
   final TextEditingController controller;
+
+  /// The field is locked: read-only, with no keys. For owners that must
+  /// keep the draft as it is (a playlist edit whose result stands
+  /// unreconciled, the first run while its mix is made) or have nothing
+  /// loaded to send to yet. A turn being out is [working], not this.
   final bool busy;
   final VoidCallback onSubmit;
+
+  /// The DJ is working on a turn (stop a turn, 2026-11-15). The field stays
+  /// open, so the listener can tap in and write the next message, but a
+  /// submit does nothing and keeps the draft; the mic goes, and the stop
+  /// key takes send's place whether or not there is a draft.
+  final bool working;
+
+  /// What the stop key does while [working]. Null draws no stop key: a turn
+  /// that cannot be stopped (an album's).
+  final VoidCallback? onStop;
   final Widget? attachment;
 
   /// The field's focus, when the owner needs it — Home's idea pills fill the
@@ -117,6 +134,9 @@ class MixPromptInput extends StatefulWidget {
   /// The surface itself, for tests.
   static const Key surfaceKey = Key('prompt-surface');
 
+  /// The stop key drawn while [working].
+  static const Key stopKey = Key('stop-turn');
+
   @override
   State<MixPromptInput> createState() => _MixPromptInputState();
 }
@@ -172,6 +192,7 @@ class _MixPromptInputState extends State<MixPromptInput>
       if (!mounted ||
           !_resumed ||
           widget.busy ||
+          widget.working ||
           // A fixed placeholder is the caller's, and does not rotate.
           widget.placeholder != null ||
           // A hint that changed under the level meter would be a second
@@ -280,7 +301,7 @@ class _MixPromptInputState extends State<MixPromptInput>
   /// Open the microphone, or close it and land what was said.
   Future<void> _toggleVoice() async {
     final voice = _voice;
-    if (voice == null || widget.busy) return;
+    if (voice == null || widget.busy || widget.working) return;
     if (voice.state == VoiceComposerState.listening) {
       final transcript = await voice.stop();
       if (!mounted) return;
@@ -306,7 +327,12 @@ class _MixPromptInputState extends State<MixPromptInput>
     // The gate may have changed who is signed in, and with it the
     // controller: record on the one bound now.
     final current = _voice;
-    if (current == null || current.busy || widget.busy) return;
+    if (current == null ||
+        current.busy ||
+        widget.busy ||
+        widget.working) {
+      return;
+    }
     _beginDictation();
     await current.start();
     if (!mounted) return;
@@ -424,10 +450,11 @@ class _MixPromptInputState extends State<MixPromptInput>
       _bindVoice();
       if (dropped != null && dropped != _voice) unawaited(dropped.cancel());
     }
-    // The composer locked while someone was talking — a mix is starting, or
-    // the owner took the field away. The clip goes rather than the mic
-    // staying open behind a field nobody can reach.
-    if (widget.busy && !oldWidget.busy) {
+    // The composer locked while someone was talking — the owner took the
+    // field away — or a turn went out from somewhere else (a pill, Remake).
+    // The clip goes rather than the mic staying open with its key gone.
+    final quiet = widget.busy || widget.working;
+    if (quiet && !(oldWidget.busy || oldWidget.working)) {
       unawaited(_voice?.cancel() ?? _idle);
       _endDictation(restore: true);
     }
@@ -457,7 +484,11 @@ class _MixPromptInputState extends State<MixPromptInput>
   }
 
   void _submit() {
-    if (!widget.busy && widget.controller.text.trim().isNotEmpty) {
+    // While the DJ works a Return does nothing and the draft stays put: it
+    // is the next message, sent once this turn is over.
+    if (!widget.busy &&
+        !widget.working &&
+        widget.controller.text.trim().isNotEmpty) {
       widget.onSubmit();
     }
   }
@@ -569,11 +600,14 @@ class _MixPromptInputState extends State<MixPromptInput>
                     child: Align(alignment: Alignment.centerLeft, child: field),
                   ),
                 ),
-                // While the DJ works the composer is a plain field: the
-                // working cassette in the transcript (or Home's starting
-                // state) already says so, and a second spinner in the send
-                // key said it twice (device smoke, 2026-11-13).
-                if (!widget.busy)
+                // While the DJ works the field stays open and the only key
+                // is stop: the working cassette in the transcript (or Home's
+                // starting state) already says the DJ is busy, and a second
+                // spinner in the send key said it twice (device smoke,
+                // 2026-11-13).
+                if (!widget.busy && widget.working && widget.onStop != null)
+                  TextFieldTapRegion(child: _stopKey(isDark, tokens)),
+                if (!widget.busy && !widget.working)
                   TextFieldTapRegion(
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -759,6 +793,28 @@ class _MixPromptInputState extends State<MixPromptInput>
             onPressed: () => unawaited(voice.openSettings()),
           ),
       ],
+    ),
+  );
+
+  /// Stop, in send's place and send's shape: the same square surface, a
+  /// filled square where the arrow was.
+  Widget _stopKey(bool isDark, MixtapeTokens tokens) => _iconKey(
+    key: MixPromptInput.stopKey,
+    tooltip: 'Stop',
+    onPressed: widget.onStop,
+    child: DecoratedBox(
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.12)
+            : tokens.plum.withValues(alpha: 0.10),
+        borderRadius: _sendRadius,
+      ),
+      child: SizedBox.square(
+        dimension: 28,
+        child: Center(
+          child: Icon(Icons.stop_rounded, size: 18, color: tokens.plum),
+        ),
+      ),
     ),
   );
 

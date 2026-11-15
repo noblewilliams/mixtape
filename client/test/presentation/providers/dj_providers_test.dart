@@ -14,6 +14,7 @@ import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/device_providers.dart';
 import 'package:mixtape/presentation/providers/dj_providers.dart';
 import 'package:mixtape/presentation/providers/mix_activity_provider.dart';
+import 'package:mixtape/presentation/providers/mix_operation_gate.dart';
 import 'package:mixtape/presentation/providers/onboarding_provider.dart';
 import 'package:mixtape/presentation/providers/working_step.dart';
 
@@ -271,6 +272,23 @@ class ProgressDjApi extends FakeDjApi implements DjTurnProgressSender {
       throw UnimplementedError('onRemakeWithProgress not wired');
     }
     return impl(id, onProgress);
+  }
+}
+
+/// [ProgressDjApi] that answers [DjApiStopTurn.stopTurn] too, so a test can
+/// hold the stop open and pick its answer.
+class StoppableDjApi extends ProgressDjApi implements DjTurnStopper {
+  Future<bool> Function(String sessionId)? onStopTurn;
+
+  /// The session id of every stop, in call order.
+  final List<String> stops = [];
+
+  @override
+  Future<bool> stopTurn(String sessionId) {
+    stops.add(sessionId);
+    final impl = onStopTurn;
+    if (impl == null) throw UnimplementedError('onStopTurn not wired');
+    return impl(sessionId);
   }
 }
 
@@ -2827,6 +2845,329 @@ void main() {
       await container.read(sessionStarterProvider)('rainy');
 
       expect(api.lastCreateKind, SessionKind.mix);
+    });
+  });
+
+  group('stop a turn (2026-11-15)', () {
+    StoppableDjApi api({SessionKind kind = SessionKind.mix}) {
+      final fake = StoppableDjApi();
+      fake.onGetSession = (_) async => SessionDetail(
+        session: _session().copyWith(kind: kind),
+        messages: [_msg('m1', 'user', 'hello'), _msg('m2', 'dj', 'hi')],
+        queue: [_track(0)],
+        suggestions: const ['softer'],
+      );
+      return fake;
+    }
+
+    test('takes the turn back at once: bubble, sending, steps, activity', () async {
+      final fake = api();
+      final turn = Completer<TurnResult>();
+      void Function(TurnProgress)? progress;
+      fake.onSendWithProgress = (id, text, onProgress) {
+        progress = onProgress;
+        return turn.future;
+      };
+      final stop = Completer<bool>();
+      fake.onStopTurn = (_) => stop.future;
+      final container = _makeContainer(fake);
+      final sub = container.listen(chatProvider('s1'), (_, _) {});
+      addTearDown(sub.close);
+      await container.read(chatProvider('s1').future);
+      final notifier = container.read(chatProvider('s1').notifier);
+
+      final sent = notifier.send('make it louder');
+      progress!(const TurnStreamOpened());
+      progress!(const TurnStep('digging'));
+      expect(container.read(chatProvider('s1')).value!.messages, hasLength(3));
+
+      expect(notifier.stop(), 'make it louder');
+      final state = container.read(chatProvider('s1')).value!;
+      expect(state.messages.map((m) => m.message.id), ['m1', 'm2']);
+      expect(state.sending, isFalse);
+      expect(state.workingStep, isNull);
+      // What the turn cleared as it went out comes back with it.
+      expect(state.suggestions, ['softer']);
+      final activity = container.read(mixActivityProvider);
+      expect(activity.isWorking('s1'), isFalse);
+      expect(activity.isReady('s1'), isFalse);
+      expect(fake.stops, ['s1']);
+
+      // The abandoned request's answer lands nowhere.
+      turn.complete(
+        TurnResult(djMessage: _msg('m3', 'dj', 'LOUDER'), queue: [], queueVersion: 2),
+      );
+      await sent;
+      stop.complete(true);
+      await _flush();
+      final after = container.read(chatProvider('s1')).value!;
+      expect(after.messages.map((m) => m.message.id), ['m1', 'm2']);
+      expect(after.queue, hasLength(1));
+      expect(after.queueVersion, 1);
+      expect(container.read(mixActivityProvider).isReady('s1'), isFalse);
+      // Stopped for real: nothing to re-read.
+      expect(fake.getSessionCallCount, 1);
+    });
+
+    test('a late failure of the stopped turn shows nothing', () async {
+      final fake = api();
+      final turn = Completer<TurnResult>();
+      fake.onSendWithProgress = (id, text, onProgress) => turn.future;
+      fake.onStopTurn = (_) async => true;
+      final container = _makeContainer(fake);
+      final sub = container.listen(chatProvider('s1'), (_, _) {});
+      addTearDown(sub.close);
+      await container.read(chatProvider('s1').future);
+      final notifier = container.read(chatProvider('s1').notifier);
+
+      final sent = notifier.send('louder');
+      notifier.stop();
+      turn.completeError(DjApiException(kind: 'turn_stopped', message: 'stopped'));
+      await sent;
+      await _flush();
+      final state = container.read(chatProvider('s1')).value!;
+      expect(state.messages.where((m) => m.isError), isEmpty);
+      expect(state.messages, hasLength(2));
+    });
+
+    test('too late: stopped false re-reads the session and shows what landed', () async {
+      final fake = api();
+      final turn = Completer<TurnResult>();
+      fake.onSendWithProgress = (id, text, onProgress) => turn.future;
+      fake.onStopTurn = (_) async => false;
+      final container = _makeContainer(fake);
+      final sub = container.listen(chatProvider('s1'), (_, _) {});
+      addTearDown(sub.close);
+      await container.read(chatProvider('s1').future);
+      final notifier = container.read(chatProvider('s1').notifier);
+
+      final sent = notifier.send('louder');
+      fake.onGetSession = (_) async => SessionDetail(
+        session: _session(queueVersion: 2),
+        messages: [
+          _msg('m1', 'user', 'hello'),
+          _msg('m2', 'dj', 'hi'),
+          _msg('m3', 'user', 'louder'),
+          _msg('m4', 'dj', 'LOUDER'),
+        ],
+        queue: [_track(0), _track(1)],
+      );
+      notifier.stop();
+      await _flush();
+      final state = container.read(chatProvider('s1')).value!;
+      expect(state.messages.map((m) => m.message.id), ['m1', 'm2', 'm3', 'm4']);
+      expect(state.queueVersion, 2);
+      expect(state.sending, isFalse);
+      turn.complete(
+        TurnResult(djMessage: _msg('m4', 'dj', 'LOUDER'), queue: [], queueVersion: 2),
+      );
+      await sent;
+      await _flush();
+      // The abandoned answer does not land a second copy.
+      expect(container.read(chatProvider('s1')).value!.messages, hasLength(4));
+    });
+
+    test('a stop that fails re-reads the session too', () async {
+      final fake = api();
+      fake.onSendWithProgress = (id, text, onProgress) => Completer<TurnResult>().future;
+      fake.onStopTurn = (_) async => throw NetworkException('offline');
+      final container = _makeContainer(fake);
+      final sub = container.listen(chatProvider('s1'), (_, _) {});
+      addTearDown(sub.close);
+      await container.read(chatProvider('s1').future);
+      final notifier = container.read(chatProvider('s1').notifier);
+
+      unawaited(notifier.send('louder'));
+      notifier.stop();
+      await _flush();
+      expect(fake.getSessionCallCount, 2);
+      expect(container.read(chatProvider('s1')).value!.sending, isFalse);
+    });
+
+    test('a send while the stop is out waits for it, working meanwhile', () async {
+      final fake = api();
+      final first = Completer<TurnResult>();
+      final texts = <String>[];
+      fake.onSendWithProgress = (id, text, onProgress) {
+        texts.add(text);
+        return texts.length == 1
+            ? first.future
+            : Future.value(
+                TurnResult(djMessage: _msg('m4', 'dj', 'softer it is'), queue: [], queueVersion: 3),
+              );
+      };
+      final stop = Completer<bool>();
+      fake.onStopTurn = (_) => stop.future;
+      final container = _makeContainer(fake);
+      final sub = container.listen(chatProvider('s1'), (_, _) {});
+      addTearDown(sub.close);
+      await container.read(chatProvider('s1').future);
+      final notifier = container.read(chatProvider('s1').notifier);
+
+      unawaited(notifier.send('louder'));
+      notifier.stop();
+      // The rollback still holds the mix's gate, but the next message may go.
+      expect(container.read(chatProvider('s1')).value!.stopping, isTrue);
+      expect(container.read(mixOperationProvider('s1')), isNotNull);
+
+      final next = notifier.send('softer');
+      await _flush();
+      var state = container.read(chatProvider('s1')).value!;
+      expect(state.sending, isTrue);
+      expect(state.messages.last.message.content, 'softer');
+      expect(texts, ['louder'], reason: 'the next turn waits for the rollback');
+      expect(container.read(mixActivityProvider).isWorking('s1'), isTrue);
+
+      stop.complete(true);
+      await next;
+      state = container.read(chatProvider('s1')).value!;
+      expect(texts, ['louder', 'softer']);
+      expect(state.messages.map((m) => m.message.content), ['hello', 'hi', 'softer', 'softer it is']);
+      expect(state.sending, isFalse);
+      expect(state.stopping, isFalse);
+      expect(container.read(mixOperationProvider('s1')), isNull);
+    });
+
+    test('a send waiting on a too-late stop keeps its bubble through the re-read', () async {
+      final fake = api();
+      final texts = <String>[];
+      final second = Completer<TurnResult>();
+      fake.onSendWithProgress = (id, text, onProgress) {
+        texts.add(text);
+        return texts.length == 1 ? Completer<TurnResult>().future : second.future;
+      };
+      final stop = Completer<bool>();
+      fake.onStopTurn = (_) => stop.future;
+      final container = _makeContainer(fake);
+      final sub = container.listen(chatProvider('s1'), (_, _) {});
+      addTearDown(sub.close);
+      await container.read(chatProvider('s1').future);
+      final notifier = container.read(chatProvider('s1').notifier);
+
+      unawaited(notifier.send('louder'));
+      notifier.stop();
+      final next = notifier.send('softer');
+      fake.onGetSession = (_) async => SessionDetail(
+        session: _session(queueVersion: 2),
+        messages: [
+          _msg('m1', 'user', 'hello'),
+          _msg('m2', 'dj', 'hi'),
+          _msg('m3', 'user', 'louder'),
+          _msg('m4', 'dj', 'LOUDER'),
+        ],
+        queue: [],
+      );
+      stop.complete(false);
+      await _flush();
+      final state = container.read(chatProvider('s1')).value!;
+      expect(state.messages.map((m) => m.message.content), ['hello', 'hi', 'louder', 'LOUDER', 'softer']);
+      expect(state.sending, isTrue);
+      second.complete(
+        TurnResult(djMessage: _msg('m6', 'dj', 'softer it is'), queue: [], queueVersion: 3),
+      );
+      await next;
+      expect(container.read(chatProvider('s1')).value!.messages, hasLength(6));
+    });
+
+    test('a remake stops too, but hands no text back', () async {
+      final fake = api();
+      fake.onRemakeWithProgress = (id, onProgress) => Completer<TurnResult>().future;
+      fake.onStopTurn = (_) async => true;
+      final container = _makeContainer(fake);
+      final sub = container.listen(chatProvider('s1'), (_, _) {});
+      addTearDown(sub.close);
+      await container.read(chatProvider('s1').future);
+      final notifier = container.read(chatProvider('s1').notifier);
+
+      unawaited(notifier.remake());
+      expect(container.read(chatProvider('s1')).value!.remaking, isTrue);
+      expect(notifier.stop(), isNull);
+      final state = container.read(chatProvider('s1')).value!;
+      expect(state.remaking, isFalse);
+      expect(state.messages, hasLength(2));
+      expect(fake.stops, ['s1']);
+    });
+
+    test('nothing out, or an album turn: no stop', () async {
+      final fake = api(kind: SessionKind.album);
+      fake.onSendWithProgress = (id, text, onProgress) => Completer<TurnResult>().future;
+      fake.onStopTurn = (_) async => true;
+      final container = _makeContainer(fake);
+      final sub = container.listen(chatProvider('s1'), (_, _) {});
+      addTearDown(sub.close);
+      await container.read(chatProvider('s1').future);
+      final notifier = container.read(chatProvider('s1').notifier);
+
+      expect(notifier.stop(), isNull);
+      unawaited(notifier.send('older'));
+      expect(notifier.stop(), isNull);
+      expect(container.read(chatProvider('s1')).value!.sending, isTrue);
+      expect(fake.stops, isEmpty);
+    });
+  });
+
+  group('stop a new mix (2026-11-15)', () {
+    test('stopped before the mix is named: waits for its id, then stops', () async {
+      final fake = StoppableDjApi();
+      final create = Completer<SessionDetail>();
+      void Function(TurnProgress)? progress;
+      fake.onCreateWithProgress = (prompt, kind, onProgress) {
+        progress = onProgress;
+        return create.future;
+      };
+      fake.onStopTurn = (_) async => true;
+      final container = _makeContainer(fake);
+      final stop = NewMixStop();
+
+      final started = container.read(sessionStarterProvider)('rainy drive', stop: stop);
+      final stopped = stop();
+      await _flush();
+      expect(fake.stops, isEmpty, reason: 'no id yet');
+
+      progress!(const TurnStreamOpened());
+      progress!(const TurnSessionStarted('new-1'));
+      expect(await stopped, isTrue);
+      expect(fake.stops, ['new-1']);
+      // Home goes back at once, without waiting on the abandoned request.
+      await expectLater(started, throwsA(isA<NewMixStoppedException>()));
+      final activity = container.read(mixActivityProvider);
+      expect(activity.pending, isNull);
+      expect(activity.isReady('new-1'), isFalse);
+
+      create.completeError(DjApiException(kind: 'turn_stopped', message: 'x', sessionId: 'new-1'));
+      await _flush();
+      expect(container.read(mixActivityProvider).isReady('new-1'), isFalse);
+    });
+
+    test('too late: the new mix lands as usual', () async {
+      final fake = StoppableDjApi();
+      final create = Completer<SessionDetail>();
+      fake.onCreateWithProgress = (prompt, kind, onProgress) {
+        onProgress!(const TurnSessionStarted('new-1'));
+        return create.future;
+      };
+      fake.onStopTurn = (_) async => false;
+      final container = _makeContainer(fake);
+      final stop = NewMixStop();
+
+      final started = container.read(sessionStarterProvider)('rainy drive', stop: stop);
+      expect(await stop(), isFalse);
+      create.complete(SessionDetail(session: _session(id: 'new-1'), messages: [], queue: []));
+      expect(await started, 'new-1');
+      expect(container.read(mixActivityProvider).isReady('new-1'), isTrue);
+    });
+
+    test('a create that ended without naming its mix has nothing to stop', () async {
+      final fake = StoppableDjApi();
+      fake.onCreateWithProgress = (prompt, kind, onProgress) async =>
+          SessionDetail(session: _session(id: 'new-1'), messages: [], queue: []);
+      fake.onStopTurn = (_) async => true;
+      final container = _makeContainer(fake);
+      final stop = NewMixStop();
+
+      expect(await container.read(sessionStarterProvider)('rainy drive', stop: stop), 'new-1');
+      expect(await stop(), isFalse);
+      expect(fake.stops, isEmpty);
     });
   });
 }

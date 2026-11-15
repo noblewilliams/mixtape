@@ -1153,4 +1153,166 @@ void main() {
       controller.dispose();
     });
   });
+
+  group('while the DJ works (stop a turn, 2026-11-15)', () {
+    Future<void> pump(
+      WidgetTester tester,
+      TextEditingController controller, {
+      bool working = true,
+      VoidCallback? onStop,
+      VoidCallback? onSubmit,
+      FocusNode? focusNode,
+    }) => tester.pumpWidget(
+      MaterialApp(
+        theme: MixtapeTheme.light(),
+        home: Scaffold(
+          body: Column(
+            children: [
+              const Expanded(child: SizedBox.expand()),
+              MixPromptInput(
+                controller: controller,
+                focusNode: focusNode,
+                busy: false,
+                working: working,
+                onStop: onStop,
+                showVoiceInput: true,
+                onSubmit: onSubmit ?? () {},
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    testWidgets('the field stays open: it takes focus and typing', (
+      tester,
+    ) async {
+      final controller = TextEditingController();
+      final focus = FocusNode();
+      addTearDown(controller.dispose);
+      addTearDown(focus.dispose);
+      await pump(tester, controller, focusNode: focus, onStop: () {});
+
+      final field = tester.widget<TextField>(
+        find.byKey(const Key('prompt-field')),
+      );
+      expect(field.readOnly, isFalse);
+      await tester.tap(find.byKey(const Key('prompt-field')));
+      await tester.pump();
+      expect(focus.hasFocus, isTrue);
+      await tester.enterText(
+        find.byKey(const Key('prompt-field')),
+        'next one softer',
+      );
+      expect(controller.text, 'next one softer');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('stop replaces send, draft or not, and the mic goes', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      final controller = TextEditingController();
+      addTearDown(controller.dispose);
+      var stops = 0;
+      await pump(tester, controller, onStop: () => stops++);
+
+      expect(find.byKey(const Key('stop-turn')), findsOneWidget);
+      expect(find.byKey(const Key('start-session')), findsNothing);
+      expect(find.byKey(const Key('voice-input')), findsNothing);
+      expect(
+        tester.widget<IconButton>(find.byKey(const Key('stop-turn'))).tooltip,
+        'Stop',
+      );
+      expect(find.bySemanticsLabel('Stop'), findsOneWidget);
+
+      controller.text = 'a draft for later';
+      await tester.pump();
+      expect(find.byKey(const Key('stop-turn')), findsOneWidget);
+      expect(find.byKey(const Key('start-session')), findsNothing);
+
+      await tester.tap(find.byKey(const Key('stop-turn')));
+      expect(stops, 1);
+      handle.dispose();
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the stop key sits where send sits, the same size', (
+      tester,
+    ) async {
+      final controller = TextEditingController(text: 'warm');
+      addTearDown(controller.dispose);
+      await pump(tester, controller, working: false);
+      final send = tester.getRect(find.byKey(const Key('start-session')));
+      await pump(tester, controller, onStop: () {});
+      final stop = tester.getRect(find.byKey(const Key('stop-turn')));
+      expect(stop, send);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('submitting does nothing and keeps the draft', (tester) async {
+      final controller = TextEditingController();
+      addTearDown(controller.dispose);
+      var submits = 0;
+      await pump(
+        tester,
+        controller,
+        onStop: () {},
+        onSubmit: () => submits++,
+      );
+      await tester.enterText(
+        find.byKey(const Key('prompt-field')),
+        'A road trip',
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.send);
+      await tester.pump();
+      expect(submits, 0);
+      expect(controller.text, 'A road trip');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('no stop handler, no stop key (an album turn)', (
+      tester,
+    ) async {
+      final controller = TextEditingController(text: 'older');
+      addTearDown(controller.dispose);
+      await pump(tester, controller);
+      expect(find.byKey(const Key('stop-turn')), findsNothing);
+      expect(find.byKey(const Key('start-session')), findsNothing);
+      expect(find.byKey(const Key('voice-input')), findsNothing);
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('prompt-field')))
+            .readOnly,
+        isFalse,
+      );
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('once the turn ends, send and the mic come back', (
+      tester,
+    ) async {
+      final controller = TextEditingController(text: 'typed meanwhile');
+      addTearDown(controller.dispose);
+      var submits = 0;
+      await pump(
+        tester,
+        controller,
+        onStop: () {},
+        onSubmit: () => submits++,
+      );
+      await pump(
+        tester,
+        controller,
+        working: false,
+        onSubmit: () => submits++,
+      );
+      expect(find.byKey(const Key('stop-turn')), findsNothing);
+      expect(find.byKey(const Key('voice-input')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('start-session')));
+      expect(submits, 1);
+      expect(controller.text, 'typed meanwhile');
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
 }

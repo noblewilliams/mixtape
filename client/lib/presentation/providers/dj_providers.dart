@@ -238,7 +238,13 @@ class ChatState {
     this.addMusic,
     this.workingStep,
     this.shared = false,
+    this.stopping = false,
   });
+
+  /// A [ChatNotifier.stop] is still out: the turn is gone from the screen,
+  /// the server is undoing it. The listener may send meanwhile (the turn
+  /// waits for the stop); the mix's operation gate stays held until then.
+  final bool stopping;
 
   final DjSession session;
 
@@ -316,6 +322,7 @@ class ChatState {
     WorkingStep? workingStep,
     bool clearWorkingStep = false,
     bool? shared,
+    bool? stopping,
   }) {
     assert(
       session == null || queueVersion == null,
@@ -342,6 +349,7 @@ class ChatState {
       addMusic: clearAddMusic ? null : (addMusic ?? this.addMusic),
       workingStep: clearWorkingStep ? null : (workingStep ?? this.workingStep),
       shared: shared ?? this.shared,
+      stopping: stopping ?? this.stopping,
     );
   }
 }
@@ -349,6 +357,35 @@ class ChatState {
 // Bumping the version leaves [DjSession.updatedAt] (and the title) as the
 // last full load had them: an accepted v1 tradeoff, since the version itself
 // is always accurate and the next getSession replaces the display fields.
+
+/// A mix turn [ChatNotifier.stop] can still take back.
+class _OutTurn {
+  _OutTurn({
+    required this.number,
+    required this.text,
+    required this.remake,
+    required this.bubble,
+    required this.base,
+    required this.activity,
+    required this.release,
+  });
+
+  final int number;
+  final String text;
+  final bool remake;
+
+  /// The listener's line on screen.
+  final ChatMessage bubble;
+
+  /// The conversation the turn builds on.
+  ChatState base;
+
+  final TurnActivity activity;
+
+  /// The mix's operation gate; null while the turn waits on an earlier stop
+  /// that still holds it.
+  void Function()? release;
+}
 
 class ChatNotifier extends AsyncNotifier<ChatState> {
   ChatNotifier(this.sessionId);
@@ -362,6 +399,22 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// Counts the turns this notifier sent, so a late read knows when another
   /// has started since.
   int _turns = 0;
+
+  /// The mix turn out, while [stop] can still take it back: from the moment
+  /// it is sent until its request answers.
+  _OutTurn? _out;
+
+  /// Turns numbered at or below this were stopped: whatever they answer is
+  /// ignored.
+  int _stoppedThrough = 0;
+
+  /// The stop still out, until the server has answered it; the next turn
+  /// waits on it.
+  Future<void>? _stopping;
+
+  /// The listener's line of a turn waiting on [_stopping], kept through the
+  /// re-read a too-late stop makes.
+  ChatMessage? _waiting;
 
   /// The one later read after a dropped stream ([_afterDroppedStream]).
   Timer? _lateRead;
@@ -438,6 +491,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     _renaming = false;
     _picking = false;
     _savingLater = false;
+    _out = null;
+    _stopping = null;
+    _waiting = null;
     ref.onDispose(() {
       _generation++;
       _lateRead?.cancel();
@@ -569,6 +625,10 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// says what the DJ is doing ([ChatState.workingStep], and the Mixes
   /// activity's working entry); an album turn hands it none and keeps its
   /// timed lines.
+  ///
+  /// While a [stop] is still undoing the last turn, this one shows as
+  /// working at once but only goes out once the rollback is done, so the
+  /// two never race on the server.
   Future<void> _turn(
     String text,
     Future<TurnResult> Function(
@@ -580,14 +640,21 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     bool countTap = false,
   }) async {
     final nameRevision = _nameRevision;
-    final base = state.value;
-    if (base == null || base.sending) return;
+    final first = state.value;
+    if (first == null || first.sending) return;
     final generation = _generation;
-    final release = ref
-        .read(mixOperationProvider(sessionId).notifier)
-        .acquire(MixOperation.sending);
-    if (release == null) return;
-    _turns++;
+    final gate = mixOperationProvider(sessionId);
+    final pendingStop = _stopping;
+    // Without a stop out the gate is taken now, as it always was; behind a
+    // stop the stop still holds it, and hands it on once it answers.
+    final taken = pendingStop == null
+        ? ref.read(gate.notifier).acquire(MixOperation.sending)
+        : null;
+    if (pendingStop == null && taken == null) return;
+    final turn = ++_turns;
+    // Stopped turns answer into nothing: their result, their error, their
+    // clean-up all belong to a conversation that has moved on.
+    bool live() => _current(generation) && turn > _stoppedThrough;
     // The Mixes list's view of it: working while out, ready once it lands
     // (even after this conversation is gone), nothing if it is taken back.
     final endActivity = ref
@@ -603,10 +670,10 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       final next = WorkingStep.after(step, progress);
       if (next == null || identical(next, step)) return;
       step = next;
+      // A conversation left mid-turn still keeps the Mixes list's step (a
+      // stopped turn's activity has already ended, so it notes nothing).
       endActivity.step(next);
-      if (_current(generation)) {
-        _mergeCurrent((c) => c.copyWith(workingStep: next));
-      }
+      if (live()) _mergeCurrent((c) => c.copyWith(workingStep: next));
     }
 
     final userMessage = ChatMessage(
@@ -614,24 +681,83 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       remake: remake,
     );
     state = AsyncData(
-      base.copyWith(
-        messages: [...base.messages, userMessage],
+      first.copyWith(
+        messages: [...first.messages, userMessage],
         sending: true,
         remaking: remake,
         clearSuggestions: true,
         clearAddMusic: true,
       ),
     );
+    final out = _OutTurn(
+      number: turn,
+      text: text,
+      remake: remake,
+      bubble: userMessage,
+      base: first,
+      activity: endActivity,
+      release: taken,
+    );
+    _out = out;
     if (countTap) {
       ref.read(funnelMilestonesProvider).record(FunnelEventType.remakeTapped);
     }
 
-    try {
-      final result = await post(
-        ref.read(djApiProvider),
-        base.kind == SessionKind.album ? null : onProgress,
+    if (pendingStop != null) {
+      _waiting = userMessage;
+      await pendingStop;
+      if (identical(_waiting, userMessage)) _waiting = null;
+      // Stopped while it waited (nothing went out, so nothing to undo), or
+      // the conversation went: [stop] or the rebuild already tidied up.
+      if (!live()) {
+        if (!_current(generation)) endActivity(ready: false);
+        return;
+      }
+      final release = ref.read(gate.notifier).acquire(MixOperation.sending);
+      if (release == null) {
+        // Something else took the mix in between (an inspiration change):
+        // this turn is taken back rather than sent over it.
+        if (identical(_out, out)) _out = null;
+        endActivity(ready: false);
+        _mergeCurrent(
+          (c) => c.copyWith(
+            messages: [
+              for (final m in c.messages)
+                if (!identical(m, userMessage)) m,
+            ],
+            sending: false,
+            remaking: false,
+          ),
+        );
+        return;
+      }
+      out.release = release;
+      // What the turn builds on is the conversation as the stop left it.
+      final now = state.value!;
+      out.base = now.copyWith(
+        messages: [
+          for (final m in now.messages)
+            if (!identical(m, userMessage)) m,
+        ],
+        sending: false,
+        remaking: false,
       );
-      if (!_current(generation)) return;
+    }
+    final base = out.base;
+    final release = out.release!;
+
+    try {
+      final TurnResult result;
+      try {
+        result = await post(
+          ref.read(djApiProvider),
+          base.kind == SessionKind.album ? null : onProgress,
+        );
+      } finally {
+        // The request has answered: from here there is nothing to stop.
+        if (identical(_out, out)) _out = null;
+      }
+      if (!live()) return;
       await _land(
         result,
         base: base,
@@ -643,19 +769,18 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       // Not a failed turn: the server wants consent first. The turn is
       // taken back and the screen asks, keeping the text.
       landed = false;
-      if (_current(generation)) {
-        _mergeCurrent(
-          (c) => c.copyWith(
-            messages: [
-              for (final m in c.messages)
-                if (!identical(m, userMessage)) m,
-            ],
-          ),
-        );
-      }
+      if (!live()) return;
+      _mergeCurrent(
+        (c) => c.copyWith(
+          messages: [
+            for (final m in c.messages)
+              if (!identical(m, userMessage)) m,
+          ],
+        ),
+      );
       rethrow;
     } on DjApiException catch (e) {
-      if (!_current(generation)) return;
+      if (!live()) return;
       if (e.kind == 'stale') {
         // Degraded 409 fallback (see dj_api.dart's _translate409): a
         // malformed 'stale' body couldn't be parsed into a
@@ -683,7 +808,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         ),
       );
     } on ApiException {
-      if (!_current(generation)) return;
+      if (!live()) return;
       // 401/403/404/500/... — not part of the DJ error taxonomy, but still
       // has to resolve into SOMETHING visible rather than an unhandled
       // exception and a permanently-stuck composer.
@@ -699,7 +824,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         ),
       );
     } on NetworkException {
-      if (!_current(generation)) return;
+      if (!live()) return;
       if (streamed) {
         await _afterDroppedStream(
           base: base,
@@ -726,22 +851,131 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         ),
       );
     } finally {
-      // Always restored exactly once, on top of whatever is current at this
-      // point (including anything the branches above just wrote) — a no-op
-      // if some other path (e.g. the stale refetch) already cleared it.
-      release();
-      endActivity(ready: landed);
-      if (_current(generation)) {
-        _mergeCurrent(
-          (c) => c.sending || c.remaking || c.workingStep != null
-              ? c.copyWith(
-                  sending: false,
-                  remaking: false,
-                  clearWorkingStep: true,
-                )
-              : c,
-        );
+      // A stopped turn's gate and activity are the stop's, and its state is
+      // already put back: a newer turn may be out on top of it by now.
+      if (turn > _stoppedThrough) {
+        // Always restored exactly once, on top of whatever is current at
+        // this point (including anything the branches above just wrote) —
+        // a no-op if some other path (e.g. the stale refetch) already
+        // cleared it.
+        release();
+        endActivity(ready: landed);
+        if (_current(generation)) {
+          _mergeCurrent(
+            (c) => c.sending || c.remaking || c.workingStep != null
+                ? c.copyWith(
+                    sending: false,
+                    remaking: false,
+                    clearWorkingStep: true,
+                  )
+                : c,
+          );
+        }
       }
+    }
+  }
+
+  /// Stops the mix turn that is out (spec 2026-11-15 stop-a-turn): it goes
+  /// from the screen at once — the listener's line, the working line, the
+  /// Mixes list's working dot — and whatever its request answers later is
+  /// ignored. The server is asked to stop it and undo what it wrote; when it
+  /// says the turn had already finished (or the ask fails), the session is
+  /// read again so what landed shows.
+  ///
+  /// Returns the stopped line's text for the composer to take back (none for
+  /// a remake, whose line the listener never typed); null when there was
+  /// nothing to stop: no turn out, its request already answered, or an
+  /// album turn (no stop in v1).
+  ///
+  /// The mix's operation gate stays held until the server has answered, so
+  /// nothing else races the rollback; a [send] meanwhile waits for it.
+  String? stop() {
+    final out = _out;
+    final current = state.value;
+    if (out == null || current == null || current.kind == SessionKind.album) {
+      return null;
+    }
+    _out = null;
+    _stoppedThrough = out.number;
+    if (identical(_waiting, out.bubble)) _waiting = null;
+    out.activity(ready: false);
+    final base = out.base;
+    final release = out.release;
+    _mergeCurrent(
+      (c) => c.copyWith(
+        messages: [
+          for (final m in c.messages)
+            if (!identical(m, out.bubble)) m,
+        ],
+        sending: false,
+        remaking: false,
+        clearWorkingStep: true,
+        // What the turn cleared as it went out comes back with it.
+        suggestions: c.suggestions ?? base.suggestions,
+        addMusic: c.addMusic ?? base.addMusic,
+        stopping: release != null ? true : null,
+      ),
+    );
+    // A turn still waiting on an earlier stop never went out: nothing to
+    // ask the server.
+    if (release != null) _askToStop(release);
+    return out.remake ? null : out.text;
+  }
+
+  void _askToStop(void Function() release) {
+    final generation = _generation;
+    final api = ref.read(djApiProvider);
+    final done = Completer<void>();
+    final stopping = done.future;
+    _stopping = stopping;
+    unawaited(() async {
+      try {
+        var stopped = false;
+        try {
+          stopped = await api.stopTurn(sessionId);
+        } catch (_) {
+          // Unknown whether it stopped: the read below says what is there.
+        }
+        if (!stopped && _current(generation)) await _readAfterStop(generation);
+      } finally {
+        release();
+        if (identical(_stopping, stopping)) {
+          _stopping = null;
+          if (_current(generation)) {
+            _mergeCurrent(
+              (c) => c.stopping ? c.copyWith(stopping: false) : c,
+            );
+          }
+        }
+        done.complete();
+      }
+    }());
+  }
+
+  /// The turn finished before the stop landed (or the stop failed): the
+  /// session as the server has it, with a send already waiting on the stop
+  /// kept on top, still working.
+  Future<void> _readAfterStop(int generation) async {
+    final seedRead = _captureSeedRead();
+    try {
+      final detail = await ref.read(djApiProvider).getSession(sessionId);
+      if (!_current(generation)) return;
+      seedRead?.adopt(detail.playlistSeed);
+      final fresh = _fromDetail(detail);
+      _mergeCurrent((c) {
+        final waiting = _waiting;
+        return fresh.copyWith(
+          messages: [...fresh.messages, ?waiting],
+          sending: c.sending,
+          remaking: c.remaking,
+          stopping: c.stopping,
+          workingStep: c.workingStep,
+          clearSuggestions: waiting != null,
+          clearAddMusic: waiting != null,
+        );
+      });
+    } catch (_) {
+      // The last view stays; the next full load replaces it.
     }
   }
 
@@ -1222,18 +1456,24 @@ final firstTurnOffersProvider = Provider<FirstTurnOffers>((ref) {
 /// re-fetch to whenever something next reads [sessionsProvider] (e.g. the
 /// Home screen after navigating back), so returning the new id — and
 /// navigating to it — isn't held up by an extra round trip.
+///
+/// [stop] lets the caller stop the new mix's first turn (spec 2026-11-15
+/// stop-a-turn); a stop the server carried out ends the call at once with a
+/// [NewMixStoppedException], leaving no trace of the mix behind.
 final sessionStarterProvider =
     Provider<
       Future<String> Function(
         String prompt, {
         InitialPlaylistSeed? playlistSeed,
         SessionKind kind,
+        NewMixStop? stop,
       })
     >((ref) {
       return (
         String prompt, {
         InitialPlaylistSeed? playlistSeed,
         SessionKind kind = SessionKind.mix,
+        NewMixStop? stop,
       }) async {
         // A newer create replaces the last one's offer, and a failed one
         // leaves none.
@@ -1253,9 +1493,11 @@ final sessionStarterProvider =
         String? named;
         WorkingStep? step;
         void onProgress(TurnProgress progress) {
+          if (stop?.stopped ?? false) return;
           if (progress is TurnSessionStarted) {
             named = progress.sessionId;
             endActivity.named(progress.sessionId);
+            stop?._named(progress.sessionId);
           }
           final next = WorkingStep.after(step, progress);
           if (next == null || identical(next, step)) return;
@@ -1263,16 +1505,30 @@ final sessionStarterProvider =
           endActivity.step(next);
         }
 
+        final api = ref.read(djApiProvider);
+        // An album turn has no stop in v1.
+        if (kind == SessionKind.album) stop?._ended();
+        stop?._api = api;
         try {
-          final detail = await ref
-              .read(djApiProvider)
-              .createSessionWithProgress(
-                prompt,
-                playlistSeed: playlistSeed,
-                kind: kind,
-                // An album keeps its timed lines.
-                onProgress: kind == SessionKind.album ? null : onProgress,
-              );
+          final request = api.createSessionWithProgress(
+            prompt,
+            playlistSeed: playlistSeed,
+            kind: kind,
+            // An album keeps its timed lines.
+            onProgress: kind == SessionKind.album ? null : onProgress,
+          );
+          // A stop the server carried out ends this at once: the request
+          // itself may take a while yet to answer, and what it answers no
+          // longer matters.
+          final detail = stop == null
+              ? await request
+              : await Future.any([
+                  request,
+                  stop._stoppedSignal.future.then<SessionDetail>(
+                    (_) => throw const NewMixStoppedException(),
+                  ),
+                ]);
+          if (stop?.stopped ?? false) throw const NewMixStoppedException();
           ref.invalidate(sessionsProvider);
           made = detail.session.id;
           offers.put(detail);
@@ -1293,12 +1549,24 @@ final sessionStarterProvider =
                 .noteMix(detail.session.id, detail.queue.length);
           }
           return detail.session.id;
+        } on NewMixStoppedException {
+          // The server deleted the new mix: a list read mid-create may have
+          // listed it.
+          ref.invalidate(sessionsProvider);
+          made = null;
+          rethrow;
         } on DjApiException catch (e) {
           ref.invalidate(sessionsProvider);
+          if ((stop?.stopped ?? false) || e.kind == 'turn_stopped') {
+            // The request's own answer to the stop: the mix is gone.
+            made = null;
+            throw const NewMixStoppedException();
+          }
           // A failure after the row was written still leaves a mix to open.
           made = e.sessionId;
           rethrow;
         } on NetworkException {
+          if (stop?.stopped ?? false) throw const NewMixStoppedException();
           final id = named;
           if (id == null) rethrow;
           // The stream named the mix before it dropped: the row is there
@@ -1314,10 +1582,72 @@ final sessionStarterProvider =
             sessionId: id,
           );
         } finally {
+          stop?._ended();
           endActivity(sessionId: made);
         }
       };
     });
+
+/// The new mix's first turn was stopped and the server deleted the mix
+/// (spec 2026-11-15 stop-a-turn). Not a failure: the caller goes back to
+/// where it was, the prompt still in hand.
+class NewMixStoppedException implements Exception {
+  const NewMixStoppedException();
+
+  @override
+  String toString() => 'NewMixStoppedException';
+}
+
+/// The stop for one [sessionStarterProvider] call: hand it in, call it to
+/// stop. The server needs the new mix's id, which a streamed create names
+/// first ([TurnSessionStarted]); a stop asked for before then waits for it.
+/// A create that ends without ever naming its mix (an older server, a
+/// refusal, an album) has nothing to stop, and the stop answers false.
+class NewMixStop {
+  final Completer<String?> _id = Completer<String?>();
+  final Completer<void> _stoppedSignal = Completer<void>();
+  DjApi? _api;
+  Future<bool>? _asked;
+  bool _stopped = false;
+
+  /// The server stopped the turn and deleted the mix.
+  bool get stopped => _stopped;
+
+  /// A stop has been asked for (and may still be on its way).
+  bool get requested => _asked != null;
+
+  /// Stops the new mix. True once the server has stopped it, so the caller
+  /// goes back to where it was (the starter's call ends with
+  /// [NewMixStoppedException]); false when it was too late, or there was
+  /// nothing to stop, and the create carries on to land as usual. Asking
+  /// twice is asking once.
+  Future<bool> call() => _asked ??= _ask();
+
+  Future<bool> _ask() async {
+    final id = await _id.future;
+    final api = _api;
+    if (id == null || api == null) return false;
+    try {
+      if (!await api.stopTurn(id)) return false;
+    } catch (_) {
+      // Unknown: the create's own answer decides, as for a stop too late.
+      return false;
+    }
+    _stopped = true;
+    if (!_stoppedSignal.isCompleted) _stoppedSignal.complete();
+    return true;
+  }
+
+  void _named(String id) {
+    if (!_id.isCompleted) _id.complete(id);
+  }
+
+  /// The create has answered, or will never name a mix: a stop not yet
+  /// waiting on an id has nothing to stop.
+  void _ended() {
+    if (!_id.isCompleted) _id.complete(null);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // "What the DJ knows" memory notes (P4 Task 4)

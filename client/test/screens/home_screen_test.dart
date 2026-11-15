@@ -18,6 +18,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mixtape/data/api/api_client.dart';
 import 'package:mixtape/data/auth/token_store.dart';
 import 'package:mixtape/data/dj/dj_api.dart';
+import 'package:mixtape/presentation/providers/mix_activity_provider.dart';
 import 'package:mixtape/data/dj/dj_models.dart';
 import 'package:mixtape/presentation/providers/auth_provider.dart';
 import 'package:mixtape/presentation/providers/capabilities_provider.dart';
@@ -195,6 +196,50 @@ class FakeDjApi implements DjApi {
 
   @override
   void close() {}
+}
+
+/// [FakeDjApi] whose creates stream: each names its mix as the server's
+/// does (its `session` event first), and stops answer [onStopTurn].
+class StoppableHomeApi extends FakeDjApi
+    implements DjTurnProgressSender, DjTurnStopper {
+  Future<bool> Function(String id)? onStopTurn;
+  final List<String> stops = [];
+
+  /// The id each create is named with as it starts.
+  String namedId = 'new-1';
+
+  @override
+  Future<SessionDetail> createSessionWithProgress(
+    String prompt, {
+    InitialPlaylistSeed? playlistSeed,
+    SessionKind kind = SessionKind.mix,
+    void Function(TurnProgress progress)? onProgress,
+  }) {
+    final created = createSession(prompt, playlistSeed: playlistSeed, kind: kind);
+    onProgress?.call(TurnSessionStarted(namedId));
+    return created;
+  }
+
+  @override
+  Future<TurnResult> sendMessageWithProgress(
+    String id,
+    String text, {
+    void Function(TurnProgress progress)? onProgress,
+  }) => sendMessage(id, text);
+
+  @override
+  Future<TurnResult> sendRemakeWithProgress(
+    String id, {
+    void Function(TurnProgress progress)? onProgress,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<bool> stopTurn(String sessionId) {
+    stops.add(sessionId);
+    final impl = onStopTurn;
+    if (impl == null) throw UnimplementedError('onStopTurn not wired');
+    return impl(sessionId);
+  }
 }
 
 /// authProvider override settled at a stable session status — no real
@@ -463,6 +508,77 @@ void main() {
       },
     );
 
+    testWidgets('stop while a new mix starts: Home is back, prompt and all', (
+      tester,
+    ) async {
+      final api = StoppableHomeApi();
+      api.onListSessions = () async => [];
+      api.onCreateSession = (prompt) => Completer<SessionDetail>().future;
+      final stop = Completer<bool>();
+      api.onStopTurn = (_) => stop.future;
+      final container = _makeContainer(api);
+      await _pump(tester, container);
+
+      await tester.enterText(
+        find.byKey(const Key('prompt-field')),
+        'a slow wind-down',
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('start-session')));
+      await tester.pump();
+      expect(find.byKey(HomeScreen.startingKey), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('stop-turn')));
+      await tester.pump();
+      expect(api.stops, ['new-1']);
+      // Still starting until the server says the stop took.
+      expect(find.byKey(HomeScreen.startingKey), findsOneWidget);
+
+      stop.complete(true);
+      await tester.pumpAndSettle();
+      expect(find.byKey(HomeScreen.startingKey), findsNothing);
+      expect(find.byType(ChatScreen), findsNothing);
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('prompt-field')))
+            .controller!
+            .text,
+        'a slow wind-down',
+      );
+      expect(find.byKey(const Key('start-session')), findsOneWidget);
+      final activity = container.read(mixActivityProvider);
+      expect(activity.pending, isNull);
+      expect(activity.isReady('new-1'), isFalse);
+    });
+
+    testWidgets('a stop too late opens the new mix as usual', (tester) async {
+      final api = StoppableHomeApi();
+      api.onListSessions = () async => [];
+      final create = Completer<SessionDetail>();
+      api.onCreateSession = (prompt) => create.future;
+      api.onStopTurn = (_) async => false;
+      api.onGetSession = (id) async =>
+          SessionDetail(session: _session(id: id), messages: [], queue: []);
+      await _pump(tester, _makeContainer(api));
+
+      await tester.enterText(
+        find.byKey(const Key('prompt-field')),
+        'a slow wind-down',
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('start-session')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('stop-turn')));
+      await tester.pump();
+      expect(find.byKey(HomeScreen.startingKey), findsOneWidget);
+
+      create.complete(
+        SessionDetail(session: _session(id: 'new-1'), messages: [], queue: []),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(ChatScreen), findsOneWidget);
+    });
+
     testWidgets(
       'the start button is disabled while a create is in flight, and a second '
       'tap does not mint a second session',
@@ -491,14 +607,15 @@ void main() {
         await tester.tap(find.byKey(const Key('start-session')));
         await tester.pump();
 
-        // While it starts, the composer is a plain field: no send key, no
-        // spinner (the open space says the mix is being made).
+        // While it starts, the composer stays open with stop in send's
+        // place, and no spinner (the open space says the mix is being made).
         expect(find.byKey(const Key('start-session')), findsNothing);
+        expect(find.byKey(const Key('stop-turn')), findsOneWidget);
         expect(find.byType(CircularProgressIndicator), findsNothing);
         final field = tester.widget<TextField>(
           find.byKey(const Key('prompt-field')),
         );
-        expect(field.readOnly, isTrue);
+        expect(field.readOnly, isFalse);
 
         // The keyboard's send while it starts is a no-op.
         field.onSubmitted!('a prompt');
@@ -847,11 +964,11 @@ void main() {
       expect(find.text(HomeScreen.startingHint), findsOneWidget);
       expect(find.byType(CassetteTile), findsOneWidget);
       expect(find.byKey(HomeScreen.hintKey), findsNothing);
-      // The prompt is still there, and the field is locked.
+      // The prompt is still there, and the field stays open.
       final field = tester.widget<TextField>(
         find.byKey(const Key('prompt-field')),
       );
-      expect(field.readOnly, isTrue);
+      expect(field.readOnly, isFalse);
       expect(field.controller!.text, 'a slow wind-down');
       // Pills go dim and inert.
       expect(

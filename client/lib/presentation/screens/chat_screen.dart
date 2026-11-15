@@ -237,10 +237,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     bool countTap = false,
   }) async {
     final trimmed = text.trim();
+    final chat = ref.read(chatProvider(widget.sessionId)).value;
+    // A stop still undoing the last turn holds the mix's gate; a send then
+    // goes ahead and waits for it (see [ChatNotifier.stop]).
+    final operation = ref.read(mixOperationProvider(widget.sessionId));
+    final heldByStop =
+        operation == MixOperation.sending && (chat?.stopping ?? false);
     if (trimmed.isEmpty ||
-        ref.read(mixOperationProvider(widget.sessionId)) != null ||
+        (operation != null && !heldByStop) ||
         ref.read(sessionPlaylistContextProvider(widget.sessionId)).writing ||
-        ref.read(chatProvider(widget.sessionId)).value?.sending == true ||
+        chat?.sending == true ||
         _askingConsent) {
       return;
     }
@@ -276,6 +282,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     } catch (_) {
       if (!mounted) return;
       _snack('something unexpected happened', kind: FeedbackKind.error);
+    }
+  }
+
+  /// The stop key: the turn goes at once, and what the listener sent goes
+  /// back in the composer unless they have started typing something else
+  /// meanwhile (stop a turn, 2026-11-15).
+  void _stop() {
+    final text = ref.read(chatProvider(widget.sessionId).notifier).stop();
+    if (text == null || !mounted) return;
+    if (_textController.text.isEmpty) {
+      _textController.value = TextEditingValue(
+        text: text,
+        selection: TextSelection.collapsed(offset: text.length),
+      );
     }
   }
 
@@ -1160,6 +1180,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     // indicator. No dock inside a mix, so nothing else to clear.
     final bottom = keyboard > 0 ? keyboard : media.padding.bottom + 8;
     final enabled = state != null && !busy;
+    // The composer is only locked when there is nothing to write to yet or
+    // the inspiration is being changed under it. While the DJ works it stays
+    // open for the next message, with stop in send's place (stop a turn,
+    // 2026-11-15); a turn sent before this conversation was reopened shows
+    // as working too, but this conversation cannot stop it.
+    final working =
+        state != null && (state.sending || _workingSince() != null);
+    final stopping = state?.stopping ?? false;
+    final locked =
+        state == null ||
+        inspiration.writing ||
+        (busy && !working && !stopping);
     final status = _inspirationStatus(inspiration);
     final album = state?.kind == SessionKind.album;
     final attached = inspiration.seed?.playlistId != null;
@@ -1234,7 +1266,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                           key: _composerKey,
                           controller: _textController,
                           focusNode: _promptFocus,
-                          busy: !enabled,
+                          busy: locked,
+                          working: working,
+                          onStop:
+                              state != null &&
+                                  state.sending &&
+                                  state.kind != SessionKind.album
+                              ? _stop
+                              : null,
                           // An album session's composer suggests the
                           // refinements once there is a pick (board A2),
                           // else asks for more; a mix asks for a change once

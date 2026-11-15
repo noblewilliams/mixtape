@@ -43,6 +43,7 @@ class HomePanel extends StatefulWidget {
     this.composerKey,
     this.focusNode,
     this.busy = false,
+    this.onStop,
     this.error,
     this.attachment,
     this.starterPrompts = MixPromptInput.examples,
@@ -94,8 +95,12 @@ class HomePanel extends StatefulWidget {
   /// The field's focus, so a pill can put the caret where it just typed.
   final FocusNode? focusNode;
 
-  /// A mix is being created: the composer locks and the pills go inert.
+  /// A mix is being created: the pills go inert and the composer shows the
+  /// DJ working. Its field stays open (stop a turn, 2026-11-15).
   final bool busy;
+
+  /// The stop key while [busy]; null draws none (an album ask).
+  final VoidCallback? onStop;
 
   /// The start-failure message, shown as the board's alert line.
   final String? error;
@@ -341,7 +346,9 @@ class _HomePanelState extends State<HomePanel> {
                             key: widget.composerKey,
                             controller: widget.controller,
                             focusNode: widget.focusNode,
-                            busy: widget.busy,
+                            busy: false,
+                            working: widget.busy,
+                            onStop: widget.onStop,
                             onSubmit: widget.onSubmit,
                             placeholder: widget.placeholder,
                             sendLabel: widget.sendLabel,

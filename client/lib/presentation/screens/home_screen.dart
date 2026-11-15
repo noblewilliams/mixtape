@@ -144,6 +144,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
   bool _measuring = false;
   bool _starting = false;
 
+  /// The stop for the new mix being made, while one is (stop a turn,
+  /// 2026-11-15); none for an album ask.
+  NewMixStop? _newMixStop;
+
   /// A start waiting on the AI-consent sheet: guards a second start without
   /// drawing the composer busy under the sheet.
   bool _askingConsent = false;
@@ -489,9 +493,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
     final agreed = await confirmAiConsent(context);
     _askingConsent = false;
     if (!agreed || !mounted) return;
+    final stop = kind == SessionKind.album ? null : NewMixStop();
     setState(() {
       _starting = true;
       _error = null;
+      _newMixStop = stop;
     });
     var consentRefused = false;
     try {
@@ -504,12 +510,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
                 excludeSourceTracks: _excludeSourceTracks,
               ),
         kind: kind,
+        stop: stop,
       );
       if (!mounted) return;
-      _promptController.clear();
+      _clearSent(draft);
       _arc = null;
       ref.read(newMixInspirationProvider.notifier).clear();
       _navigateToChat(sessionId);
+    } on NewMixStoppedException {
+      // Stopped, and the server has deleted the mix: Home is as it was, the
+      // prompt back in the field unless something else was typed meanwhile.
+      if (!mounted) return;
+      if (_promptController.text.isEmpty) _promptController.text = draft;
     } on DjApiException catch (e) {
       if (!mounted) return;
       final sessionId = e.sessionId;
@@ -518,7 +530,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
         // is done; ChatScreen owns showing the error/retry affordance
         // (seeded from e.message via initialError, since the failed turn
         // never made it into the transcript itself).
-        _promptController.clear();
+        _clearSent(draft);
         _arc = null;
         ref.read(newMixInspirationProvider.notifier).clear();
         _navigateToChat(sessionId, initialError: e.message);
@@ -549,7 +561,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
       if (!mounted) return;
       setState(() => _error = _genericStartErrorMessage);
     } finally {
-      if (mounted) setState(() => _starting = false);
+      if (mounted) {
+        setState(() {
+          _starting = false;
+          if (identical(_newMixStop, stop)) _newMixStop = null;
+        });
+      }
       _showPendingNotice();
     }
     if (!consentRefused || !mounted) return;
@@ -559,6 +576,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
     _askingConsent = false;
     if (!again || !mounted) return;
     await _start(prompt, draft: draft, arc: arc, kept: kept, kind: kind);
+  }
+
+  /// The field stays open while a mix is made, so it may hold something
+  /// typed meanwhile rather than what went out: only what went out goes.
+  void _clearSent(String draft) {
+    if (_promptController.text.trim() == draft) _promptController.clear();
+  }
+
+  /// The stop key while a mix is being made. Home stays in its starting
+  /// state until the server answers: stopped, the create ends and Home is
+  /// back as it was; too late, the new mix opens as usual.
+  void _stopStart() {
+    final stop = _newMixStop;
+    if (stop == null || stop.requested) return;
+    unawaited(stop());
   }
 
   void _navigateToChat(String sessionId, {String? initialError}) {
@@ -751,6 +783,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
                       controller: _promptController,
                       focusNode: _promptFocus,
                       busy: _starting,
+                      onStop: _newMixStop == null ? null : _stopStart,
                       error: _error,
                       onSubmit: _submit,
                       leading: ComposerPlusButton(

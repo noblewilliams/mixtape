@@ -103,7 +103,8 @@ class _SignedIn extends AuthNotifier {
 }
 
 /// Answers the calls the Mixes tab makes; anything else is not wired.
-class _PreviewApi implements DjApi, DjTurnProgressSender, DjSharedMixes {
+class _PreviewApi
+    implements DjApi, DjTurnProgressSender, DjSharedMixes, DjTurnStopper {
   _PreviewApi() {
     final now = DateTime.now();
     const active = [
@@ -289,6 +290,13 @@ class _PreviewApi implements DjApi, DjTurnProgressSender, DjSharedMixes {
     (Duration(milliseconds: 34200), TurnStep('noting')),
     (Duration(seconds: 35), TurnStep('writing')),
   ];
+
+  /// Every stop takes: the preview's turns write nothing until they land.
+  @override
+  Future<bool> stopTurn(String sessionId) async {
+    await _latency;
+    return true;
+  }
 
   @override
   Future<TurnResult> sendMessageWithProgress(

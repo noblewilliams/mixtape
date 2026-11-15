@@ -65,6 +65,49 @@ DjApi _api({required http.Client inner, Duration timeout = const Duration(second
     );
 
 void main() {
+  group('stopTurn (stop a turn, 2026-11-15)', () {
+    test('POSTs /sessions/:id/turn/stop and reads stopped', () async {
+      Uri? seenUrl;
+      String? seenMethod;
+      final inner = MockClient((req) async {
+        seenUrl = req.url;
+        seenMethod = req.method;
+        return http.Response(jsonEncode({'stopped': true}), 200);
+      });
+
+      expect(await _api(inner: inner).stopTurn('s1'), isTrue);
+      expect(seenMethod, 'POST');
+      expect(seenUrl.toString(), 'http://x/sessions/s1/turn/stop');
+    });
+
+    test('stopped false: the turn had already finished', () async {
+      final inner = MockClient(
+        (_) async => http.Response(jsonEncode({'stopped': false}), 200),
+      );
+      expect(await _api(inner: inner).stopTurn('s1'), isFalse);
+    });
+
+    test('a 404 is a session already gone: nothing of the turn is left', () async {
+      final inner = MockClient(
+        (_) async => http.Response(jsonEncode({'error': 'not_found'}), 404),
+      );
+      expect(await _api(inner: inner).stopTurn('s1'), isTrue);
+    });
+
+    test('a body without stopped is a malformed response', () async {
+      final inner = MockClient((_) async => http.Response('{}', 200));
+      await expectLater(
+        _api(inner: inner).stopTurn('s1'),
+        throwsA(isA<DjApiException>().having((e) => e.kind, 'kind', 'malformed_response')),
+      );
+    });
+
+    test('anything else passes through as an ApiException', () async {
+      final inner = MockClient((_) async => http.Response('nope', 500));
+      await expectLater(_api(inner: inner).stopTurn('s1'), throwsA(isA<ApiException>()));
+    });
+  });
+
   group('createSession', () {
     test('sends exact optional inspiration and preserves legacy unknown state', () async {
       final inner = MockClient((req) async {
