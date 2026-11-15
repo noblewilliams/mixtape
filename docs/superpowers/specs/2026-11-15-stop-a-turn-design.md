@@ -78,3 +78,15 @@ timestamptz`, `turn_stop_requested boolean`.
   clear `music_chip_at` if this turn offered the pill, then clear the claim.
   A first turn deletes the session instead. Funnel rows stay (they record
   what happened).
+
+## As built (2026-11-15)
+
+- Clients treat a `404` from the stop as stopped (the session is gone).
+- Stopped text goes back only for turns typed in the composer; a Remake or
+  suggestion-pill turn puts nothing back. A stop also brings back the
+  suggestion and history pills the send had cleared.
+- Not stoppable yet: a turn sent before a chat was reopened (that screen
+  does not hold the request), the iOS first-run welcome (its making screen
+  covers the composer), and on web the New mix dialog, routine suggestions
+  and kept-prompt re-sends (none stream). Only the Home composer's create
+  and in-chat mix turns have Stop.
