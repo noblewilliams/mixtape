@@ -1,5 +1,31 @@
 # Decision Log
 
+## 2026-11-16 — Propose first: all of music is the pool, no paid data APIs (founder)
+
+Mixes can only use songs in our own `tracks` table, which holds about 15k
+catalogue rows against Apple's 100M+, and enrichment can't keep up with it
+(decisions 2026-10-22). Research found no single API with every song plus
+lyrics meaning, BPM, mood and genre. Spec
+`superpowers/specs/2026-11-16-propose-first-design.md`. Founder decisions:
+
+- Every generate draws from one candidate set: the listener's own music,
+  model proposals verified on Apple, and the catalogue's nearest songs,
+  behind a new `PROPOSE_FIRST` flag. Proposals make up 25% of `comfort`
+  mixes, 50% of `mix` and 75% of `adventurous`; `CORPUS_PROPOSE_SHARE` goes
+  from 0.5 to 0.75. `OUTSIDE_PICKS` retires.
+- **No paid data APIs while there are no paying users.** Soundcharts is
+  rejected. Features come from ReccoBeats, then Deezer tempo by ISRC, then
+  the model's own energy estimate. `track_features` stays measured-only
+  (its rows mark a song enriched); Deezer tempo and estimates go in a new
+  `track_feature_fallbacks` table (corrected while planning). Estimates
+  never count toward the measured energy-journey assessment.
+- Proposed songs get no meaning embedding unless they enter a library or
+  recur, which keeps Neon on the free plan.
+- Spotify-only listeners get proposals as Spotify search links.
+
+**Reopens if:** measured energy covers under 60% of proposed songs and mixes
+audibly lose their shape, a free provider closes, or paying users arrive.
+
 ## 2026-11-10 — Proposed mixes no longer pitch adding music (founder)
 
 Every catalogue or proposed mix now shows the add-your-music line under it
