@@ -24,6 +24,13 @@ both", and start from a much larger pool so trimming still leaves 10 to 17.
 **Reopens if:** refilled songs read as padding in listening checks, or the
 larger pool pushes turns near the 120 s client timeout.
 
+Amended while building (2026-11-16, founder): genre briefs with propose
+first draw from **artists' real songs**. Song titles for niche genres were
+mostly invented (6 of 27 verified in production), so the model names up to
+12 artists in the genre and the mix takes their Apple top songs (3 per
+artist at most), sound-checked once; song proposals remain the fallback.
+Spec: As built (artist pool) in `superpowers/specs/2026-11-16-propose-first-design.md`.
+
 ## 2026-11-16 — Propose first: all of music is the pool, no paid data APIs (founder)
 
 Mixes can only use songs in our own `tracks` table, which holds about 15k

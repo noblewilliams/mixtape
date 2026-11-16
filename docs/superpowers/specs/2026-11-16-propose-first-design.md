@@ -274,6 +274,48 @@ propose first active unless noted:
   notice. One still under the floor keeps it. The turn log gains
   `adjacent`. No new model call.
 
+As built (artist pool, 2026-11-16): song titles for a niche genre were
+mostly invented. For "lofi afro house slow living great instrumentals" 4
+of 19 proposals existed on Apple locally and 6 of 27 in production, and
+the floor then refilled with off-genre verified songs (Max Richter, Philip
+Glass, Nils Frahm). The model knows the genre's artists, not their track
+titles. Founder: for genre briefs the model picks artists and we take
+their real top songs. Only for a personal genre blend with propose first
+active (the floor's gates: personal, outside allowed, not a remake,
+`intent.genres` set); corpus, flag-off, non-genre and edit paths are
+unchanged.
+- **One artist call** (`dj/artist-pool.ts`, `proposeArtists`) replaces the
+  blend's song-proposal call, still beside the library curation, thinking
+  off, static `ARTIST_SYSTEM_PROMPT`: up to `ARTIST_ASK` (12) artists
+  squarely in any one named genre, varied, shaped by mood words, leaning to
+  the listener's top and named artists where they fit, each with a note.
+  Nothing the listener owns is excluded at artist level.
+- **Real songs.** Each artist's Apple top songs (`ARTIST_TOP_SONGS` 10) in
+  the listener's storefront, through `artistTopSongsByName` (the artist-only
+  fill's lookup, now shared), `ARTIST_CONCURRENCY` 4 artists at a time,
+  inside `ARTIST_DEADLINE_MS` (10 s) and `ARTIST_POOL_APPLE` (24) calls,
+  which `WIDE_TURN_APPLE_BUDGET` now includes (61). Album glue, explicit
+  songs on a clean brief, songs the listener owns (by Apple id or ISRC, and
+  by `songKey` against the pool's own songs) and a second release of a
+  song already taken stay out. The pool is taken round-robin across the
+  artists in Apple's order, `ARTIST_PER_MIX` (3) each at most, and inserted
+  like proposals (`PROPOSAL_QUEUE`, meaning deferred).
+- **Selection.** The whole pool (up to 36) goes to the sound check in one
+  call; the mix takes the blend's share, or the library's shortfall when
+  larger, from what passes, in pool order. The floor refills from the
+  pool's rejects (same-genre neighbours now) before the library's. Each
+  song's note is its artist's note; the queue's repeat rule
+  (`dropRepeatedNotes`) leaves an artist's second and third songs without
+  one. Features and the energy-arc order apply as for proposals (no model
+  estimates here: measured or fallback values only).
+- **Fallback.** The call failing, fewer than `ARTIST_MIN` (3) artists
+  named, or Apple giving songs for fewer than 3 artists or fewer than
+  `ARTIST_POOL_MIN_SONGS` (10, or the mix's length) sends the turn to the
+  song-proposal path as before, after the artist call (logged).
+- **Turn log:** `propose.artists {asked, used, songs, apple, appleError?,
+  fallback?}`, counts and codes only. Worst case per turn 61 + 26 + 66 + 6
+  = 159 subrequests, far under 900.
+
 As built (S8, edits): a personal listener's swap or extend goes outside
 their music only when it cannot be covered from it: a named or artist-only
 scope with no songs to draw on (after the existing catalogue and Apple
