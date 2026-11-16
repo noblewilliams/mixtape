@@ -629,7 +629,12 @@ export const queueTracks = pgTable(
       .defaultNow()
       .$onUpdate(() => new Date()),
   },
-  (t) => [index('queue_tracks_session_idx').on(t.sessionId, t.state, t.position)],
+  (t) => [
+    index('queue_tracks_session_idx').on(t.sessionId, t.state, t.position),
+    // How many sessions queued a track (enrich/runner.ts DEFER_MEANING), and
+    // the tracks FK's cascade.
+    index('queue_tracks_track_session_idx').on(t.trackId, t.sessionId),
+  ],
 )
 
 export const userMusicProfiles = pgTable(

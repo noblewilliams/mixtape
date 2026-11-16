@@ -64,6 +64,7 @@ describe('POST /enrich/seed', () => {
     const rows = await db.select().from(tracks)
     expect(rows.map((r) => [r.appleId, r.enrichPriority, r.artistSource, r.appleCatalogStorefront, r.isrc]).sort())
       .toEqual([['a1', 0, 'apple_catalog', 'ng', 'NGA1'], ['a2', 0, 'apple_catalog', 'ng', null]])
+    expect(rows.map((r) => r.meaningDeferred)).toEqual([false, false])
   })
 
   it('takes the overall chart when no genre is given and reports no next at the end', async () => {

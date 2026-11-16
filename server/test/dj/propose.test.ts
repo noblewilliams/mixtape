@@ -513,6 +513,10 @@ describe('verifyProposals', () => {
     expect(fresh.id).toBe(out.verified[0].trackId)
     expect(fresh.enrichPriority).toBeGreaterThanOrEqual(FILL_QUEUE_BOOST)
     expect(rows.find((r) => r.id === held.id)!.enrichPriority).toBeGreaterThanOrEqual(FILL_QUEUE_BOOST)
+    // The new row waits for a library or a recurrence before its lyrics
+    // embedding; the held row keeps the flag it had.
+    expect(fresh.meaningDeferred).toBe(true)
+    expect(rows.find((r) => r.id === held.id)!.meaningDeferred).toBe(false)
     expect(await db.select().from(trackFeatures)).toHaveLength(0)
     expect(await db.select().from(trackMeanings)).toHaveLength(0)
   })

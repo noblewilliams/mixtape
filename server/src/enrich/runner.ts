@@ -13,10 +13,28 @@ const CANDIDATE_FROM: SQL = sql`
   LEFT JOIN enrichment_failures fm ON fm.track_id = t.id AND fm.stage = 'meaning'
 `
 
+// A proposed song (dj/catalogue-fill.ts PROPOSAL_QUEUE) waits for its lyrics
+// embedding until it is in someone's library or has been queued in this many
+// sessions: most proposals are played once, and each embedding is a ~5 KB
+// track_meanings row plus LRCLIB calls. Read live, so neither event needs to
+// clear the flag. Features are not deferred.
+export const MEANING_RECUR_SESSIONS = 3
+
+// Both lookups are index scans: user_tracks_track_idx (track_id) and
+// queue_tracks_track_session_idx (track_id, session_id); the LIMIT stops the
+// session count at the threshold. They run only for a deferred row with no
+// meaning row, the AND short-circuiting on t.meaning_deferred first.
+const DEFER_MEANING: SQL = sql`(t.meaning_deferred
+  AND NOT EXISTS (SELECT 1 FROM user_tracks ut WHERE ut.track_id = t.id AND ut.in_library)
+  AND (SELECT count(*) FROM (
+    SELECT DISTINCT q.session_id FROM queue_tracks q WHERE q.track_id = t.id LIMIT ${MEANING_RECUR_SESSIONS}
+  ) qs) < ${MEANING_RECUR_SESSIONS})`
+
 // A stage is skipped this run when its row exists, or when its failure row is
 // exhausted or still cooling down after a transient failure (failures.ts).
+// Meaning is also skipped while deferred (DEFER_MEANING).
 const SKIP_FEATURES: SQL = sql`(f.track_id IS NOT NULL OR ${failureBlocked('ff')})`
-const SKIP_MEANING: SQL = sql`(m.track_id IS NOT NULL OR ${failureBlocked('fm')})`
+const SKIP_MEANING: SQL = sql`(m.track_id IS NOT NULL OR ${failureBlocked('fm')} OR ${DEFER_MEANING})`
 
 // A track is a candidate for this batch when at least one of its two
 // derived-data stages (features/meaning) is due now. Shared between the
@@ -24,9 +42,11 @@ const SKIP_MEANING: SQL = sql`(m.track_id IS NOT NULL OR ${failureBlocked('fm')}
 const DUE: SQL = sql`(NOT ${SKIP_FEATURES} OR NOT ${SKIP_MEANING})`
 
 // Not due now, but a missing stage will be once its backoff passes. Disjoint
-// from DUE, so no track is counted in both remaining and cooling.
+// from DUE, so no track is counted in both remaining and cooling. A deferred
+// meaning stage is waiting on a library or a recurrence, not a backoff.
 const COOLING: SQL = sql`(NOT ${DUE} AND (
-  (f.track_id IS NULL AND ${failureCooling('ff')}) OR (m.track_id IS NULL AND ${failureCooling('fm')})))`
+  (f.track_id IS NULL AND ${failureCooling('ff')})
+  OR (m.track_id IS NULL AND ${failureCooling('fm')} AND NOT ${DEFER_MEANING})))`
 
 // Raw `db.execute(sql...)` result shape differs by driver: neon-http (prod)
 // and pglite (test, this version) both hand back `{ rows: [...] }`, but

@@ -87,6 +87,16 @@ every verified song would push the Neon free plan's storage. They get one
 only if they later land in someone's library or turn up in mixes again and
 again (Step 4).
 
+As built (S6): `verifyProposals` inserts new rows with
+`tracks.meaning_deferred = true` (`PROPOSAL_QUEUE` in `dj/catalogue-fill.ts`;
+held rows keep their flag). The cron (`enrich/runner.ts`, `DEFER_MEANING`)
+skips their meaning stage while the song is in no library
+(`user_tracks.in_library`) and sits in fewer than `MEANING_RECUR_SESSIONS`
+(3) distinct sessions' queues (any queue state), read live so nothing flips
+the flag. Features still run. Migration 0053 adds
+`queue_tracks_track_session_idx (track_id, session_id)` so the session
+count is an index scan.
+
 `allowOutside: false` ("only my own music", or a saved preference saying so)
 still wins over everything here.
 

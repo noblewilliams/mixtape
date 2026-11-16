@@ -184,12 +184,17 @@ const upperIsrc = (isrc: string | null | undefined): string | null => (isrc ? is
 // How addCatalogueSongs queues what it touches. The fill's default puts new
 // rows ahead of ordinary backlog in the order given and raises held rows to
 // the same boost; the catalogue seed (routes/enrich-seed.ts) inserts at
-// normal priority and leaves held rows alone.
+// normal priority and leaves held rows alone; proposals (dj/propose.ts)
+// queue like the fill but defer the new rows' meaning embedding.
 export type CatalogueQueue = {
   // Priority for the new row at rank (0-based) among total songs.
   priority: (rank: number, total: number) => number
   // Floor raised onto held rows, or null to leave them as they are.
   heldFloor: number | null
+  // Set tracks.meaning_deferred on the rows this call inserts (never on a
+  // held row, never cleared): the cron skips their lyrics embedding until
+  // the song enters a library or recurs (enrich/runner.ts, DEFER_MEANING).
+  meaningDeferred?: boolean
 }
 
 const FILL_QUEUE: CatalogueQueue = {
@@ -197,6 +202,10 @@ const FILL_QUEUE: CatalogueQueue = {
   priority: (rank, total) => FILL_QUEUE_BOOST + (total - rank),
   heldFloor: FILL_QUEUE_BOOST,
 }
+
+// Songs the model proposed and Apple confirmed. Each would otherwise cost a
+// ~5 KB track_meanings row plus LRCLIB calls, most for songs played once.
+export const PROPOSAL_QUEUE: CatalogueQueue = { ...FILL_QUEUE, meaningDeferred: true }
 
 // Inserts the songs the catalogue does not hold yet and queues them (the
 // fill's default: every one of them, new or already held, ahead of
@@ -244,6 +253,7 @@ export async function addCatalogueSongs(
       .values(fresh.map(({ song, rank }) => ({
         ...catalogTrackValue(song, storefront),
         enrichPriority: queue.priority(rank, songs.length),
+        meaningDeferred: queue.meaningDeferred === true,
       })))
       .onConflictDoNothing()
       .returning({ id: tracks.id })

@@ -13,7 +13,9 @@ import {
   userTracks,
 } from '../../src/db/schema'
 import {
+  addCatalogueSongs,
   fillForSeeds,
+  PROPOSAL_QUEUE,
   FILL_BUDGET,
   FILL_DEADLINE_MS,
   FILL_FLOOR,
@@ -330,6 +332,8 @@ describe('fillForSeeds: inserts', () => {
     expect(held.enrichPriority).toBe(FILL_QUEUE_BOOST)
     expect(three.enrichPriority).toBeGreaterThan(FILL_QUEUE_BOOST)
     expect(three.enrichPriority).toBeLessThan(FRONT_OF_QUEUE_PRIORITY)
+    // A fill's rows get their meaning embedding as usual.
+    expect(rows.map((r) => r.meaningDeferred)).toEqual([false, false])
   })
 
   it('a new row with an enriched ISRC twin takes its features and meaning and skips enrichment', async () => {
@@ -380,6 +384,40 @@ describe('fillForSeeds: inserts', () => {
     expect(await db.select().from(tracks).where(eq(tracks.appleId, 'cover'))).toHaveLength(0)
     const [row] = await db.select().from(tracks).where(eq(tracks.appleId, 'll'))
     expect(await db.select().from(trackFeatures).where(eq(trackFeatures.trackId, row.id))).toHaveLength(1)
+  })
+})
+
+describe('addCatalogueSongs: meaning deferral', () => {
+  it('the default queue inserts rows that are not deferred', async () => {
+    const db = await createTestDb()
+    await addCatalogueSongs(db, [song('f-1', 'One', 'Tems')], 'ng')
+    const [row] = await db.select().from(tracks)
+    expect(row.meaningDeferred).toBe(false)
+  })
+
+  it('PROPOSAL_QUEUE defers new rows only, with the fill boost; a held row keeps its flag either way', async () => {
+    const db = await createTestDb()
+    await db.insert(tracks).values([
+      { appleId: 'held-plain', title: 'Plain', artist: 'Tems' },
+      { appleId: 'held-other', isrc: 'NGAAA0000009', title: 'Same recording', artist: 'Tems' },
+      { appleId: 'held-deferred', title: 'Deferred', artist: 'Tems', meaningDeferred: true },
+    ])
+
+    const ids = await addCatalogueSongs(db, [
+      song('p-1', 'New', 'Tems'),
+      song('held-plain', 'Plain', 'Tems'),
+      song('another-id', 'Same recording', 'Tems', 'ngaaa0000009'),
+      song('held-deferred', 'Deferred', 'Tems'),
+    ], 'ng', PROPOSAL_QUEUE)
+
+    expect(ids).toHaveLength(1)
+    const rows = await db.select().from(tracks)
+    const flags = Object.fromEntries(rows.map((r) => [r.appleId, r.meaningDeferred]))
+    expect(flags).toEqual({ 'p-1': true, 'held-plain': false, 'held-other': false, 'held-deferred': true })
+    const fresh = rows.find((r) => r.appleId === 'p-1')!
+    expect(fresh.id).toBe(ids[0])
+    expect(fresh.enrichPriority).toBeGreaterThan(FILL_QUEUE_BOOST)
+    expect(rows.find((r) => r.appleId === 'held-plain')!.enrichPriority).toBe(FILL_QUEUE_BOOST)
   })
 })
 

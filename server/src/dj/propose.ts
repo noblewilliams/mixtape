@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm'
 import type { Db } from '../db/types'
 import { AppleCatalogError, type AppleCatalogSearchClient, type CatalogSong } from '../musickit/catalog'
-import { addCatalogueSongs } from './catalogue-fill'
+import { addCatalogueSongs, PROPOSAL_QUEUE } from './catalogue-fill'
 import { artistKey, creditedArtists, creditedKeys } from './artist-keys'
 import type { Intent, NamedSong } from './contracts'
 import { isAlbumGlue } from './pool'
@@ -381,8 +381,8 @@ const upperIsrc = (isrc: string | null | undefined): string | null => (isrc ? is
 /**
  * One Apple search per proposal, VERIFY_CONCURRENCY at a time in proposal
  * order, until the budget, the deadline or `want` stops it. Confirmed songs are inserted as catalogue rows in one
- * addCatalogueSongs call (ISRC then Apple id dedupe, FILL_QUEUE_BOOST, never
- * enriched here) and returned with their track ids and the model's reasons.
+ * addCatalogueSongs call (ISRC then Apple id dedupe, FILL_QUEUE_BOOST, new
+ * rows meaning-deferred, never enriched here) and returned with their track ids and the model's reasons.
  */
 export async function verifyProposals(db: Db, catalog: AppleCatalogSearchClient, options: VerifyOptions): Promise<VerifyResult> {
   const now = options.now ?? Date.now
@@ -439,7 +439,7 @@ export async function verifyProposals(db: Db, catalog: AppleCatalogSearchClient,
   if (options.want !== undefined) hits.splice(options.want)
   if (hits.length === 0) return result
 
-  await addCatalogueSongs(db, hits.map((h) => h.song), options.storefront)
+  await addCatalogueSongs(db, hits.map((h) => h.song), options.storefront, PROPOSAL_QUEUE)
   // Held rows and new rows alike: by Apple id, else by ISRC on an Apple row.
   const list = (values: string[]) => sql.join(values.map((v) => sql`${v}`), sql`, `)
   const appleIds = hits.map((h) => h.song.appleId)
