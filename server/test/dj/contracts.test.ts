@@ -767,3 +767,12 @@ describe('instrumental', () => {
     expect(matchesJsonSchema(schema, sample)).toBe(intentSchema.safeParse(sample).success)
   })
 })
+
+describe('genres tool description', () => {
+  it('reads a texture word in front of a genre as that genre, not a second one', () => {
+    const generate = DJ_TOOLS.find((t) => t.name === 'generate_queue')!
+    const text = JSON.stringify(generate.input_schema)
+    expect(text).toContain('\\"lofi afro house\\" is [\\"afro house\\"]')
+    expect(text).toContain('\\"chill hip hop\\" is [\\"hip hop\\"]')
+  })
+})

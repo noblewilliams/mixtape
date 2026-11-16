@@ -271,8 +271,10 @@ const intentPropertiesBase: Record<string, unknown> = {
       'Genres the listener names (at most 3), as plain genre names: "soft jazz" is ["jazz"], "90s r&b slow ' +
       'jams" is ["r&b"], "afrobeats and amapiano" is ["afrobeats", "amapiano"]. Every song is then checked ' +
       'against how it sounds, so set it only when they name a genre. Moods, eras and activities are not genres: ' +
-      'leave it out for "chill", "rainy sunday", "90s", "for the gym" or "study music" on their own. Never infer ' +
-      'a genre from an artist; leave it out whenever in doubt.',
+      'leave it out for "chill", "rainy sunday", "90s", "for the gym" or "study music" on their own. A mood or ' +
+      'texture word in front of a genre describes that genre and is not a second one: "lofi afro house" is ' +
+      '["afro house"], "dark techno" is ["techno"], "chill hip hop" is ["hip hop"]; "lofi beats" on its own is ' +
+      '["lofi"]. Never infer a genre from an artist; leave it out whenever in doubt.',
   },
 }
 

@@ -68,6 +68,8 @@ export const ARTIST_SYSTEM_PROMPT = [
     'touched it once.\n' +
     '- Mood and texture words in the request (slow, instrumental, lofi as a sound) choose which artists of the ' +
     'genre fit best; they never replace the genre.\n' +
+    '- When several genres are named, favour artists where they meet, and keep a balance between them so the ' +
+    'loosest one (a texture-like genre such as lofi, chill or ambient) never crowds out the others.\n' +
     '- Favour variety: different corners of the genre, and no two names for the same act.\n' +
     "- Lean to the listener's taste where it fits: the artists they play most or named, when those are in the " +
     'genre, and their close peers. Never bend the genre to fit their taste.\n' +

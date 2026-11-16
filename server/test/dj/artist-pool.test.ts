@@ -536,3 +536,10 @@ describe('everything else is unchanged', () => {
     expect(apple.topSongs).toHaveLength(0)
   })
 })
+
+describe('artist prompt with several genres', () => {
+  it('balances named genres so a texture-like genre never crowds out the others', () => {
+    expect(ARTIST_SYSTEM_PROMPT).toMatch(/where they meet/)
+    expect(ARTIST_SYSTEM_PROMPT).toMatch(/never crowds out the others/)
+  })
+})
