@@ -35,6 +35,8 @@ import 'package:mixtape/presentation/widgets/foundation/cassette_tile.dart';
 import 'package:mixtape/presentation/widgets/foundation/idea_pill.dart';
 import 'package:mixtape/presentation/widgets/foundation/segmented_toggle.dart';
 import 'package:mixtape/presentation/widgets/mix_prompt_input.dart';
+import 'package:mixtape/presentation/widgets/lyric_turn.dart'
+    show DjWorkingLine;
 import 'package:mixtape/presentation/widgets/energy_journey.dart';
 import 'package:mixtape/presentation/widgets/home_panel.dart';
 import 'package:mixtape/presentation/screens/shell/shell_route_observer.dart';
@@ -263,7 +265,11 @@ class StoppableHomeApi extends FakeDjApi
     SessionKind kind = SessionKind.mix,
     void Function(TurnProgress progress)? onProgress,
   }) {
-    final created = createSession(prompt, playlistSeed: playlistSeed, kind: kind);
+    final created = createSession(
+      prompt,
+      playlistSeed: playlistSeed,
+      kind: kind,
+    );
     onProgress?.call(TurnSessionStarted(namedId));
     return created;
   }
@@ -532,8 +538,11 @@ void main() {
           api.prompts.add(prompt);
           return create.future;
         };
-        api.onGetSession = (id) async =>
-            SessionDetail(session: _session(id: id), messages: [], queue: []);
+        api.onGetSession = (id) async => SessionDetail(
+          session: _session(id: id),
+          messages: [],
+          queue: [],
+        );
         final container = _makeContainer(api);
         await _pump(tester, container);
 
@@ -563,7 +572,11 @@ void main() {
         expect(find.text(EnergyArc.fall.label), findsOneWidget);
 
         create.complete(
-          SessionDetail(session: _session(id: 'new-1'), messages: [], queue: []),
+          SessionDetail(
+            session: _session(id: 'new-1'),
+            messages: [],
+            queue: [],
+          ),
         );
         await tester.pumpAndSettle();
         expect(find.byType(ChatScreen), findsOneWidget);
@@ -623,8 +636,11 @@ void main() {
       final create = Completer<SessionDetail>();
       api.onCreateSession = (prompt) => create.future;
       api.onStopTurn = (_) async => false;
-      api.onGetSession = (id) async =>
-          SessionDetail(session: _session(id: id), messages: [], queue: []);
+      api.onGetSession = (id) async => SessionDetail(
+        session: _session(id: id),
+        messages: [],
+        queue: [],
+      );
       await _pump(tester, _makeContainer(api));
 
       await tester.enterText(
@@ -639,7 +655,11 @@ void main() {
       expect(find.byKey(HomeScreen.startingKey), findsOneWidget);
 
       create.complete(
-        SessionDetail(session: _session(id: 'new-1'), messages: [], queue: []),
+        SessionDetail(
+          session: _session(id: 'new-1'),
+          messages: [],
+          queue: [],
+        ),
       );
       await tester.pumpAndSettle();
       expect(find.byType(ChatScreen), findsOneWidget);
@@ -824,10 +844,7 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.byType(ChatScreen), findsNothing);
-        expect(
-          find.text(NetworkCopy.djUnreachable),
-          findsOneWidget,
-        );
+        expect(find.text(NetworkCopy.djUnreachable), findsOneWidget);
         final field = tester.widget<TextField>(
           find.byKey(const Key('prompt-field')),
         );
@@ -1026,6 +1043,14 @@ void main() {
       expect(find.byKey(HomeScreen.startingKey), findsOneWidget);
       expect(find.text(HomeScreen.startingTitle), findsOneWidget);
       expect(find.text(HomeScreen.startingHint), findsOneWidget);
+      // The DJ's working line, shimmering, as in the chat.
+      expect(
+        find.descendant(
+          of: find.byKey(HomeScreen.startingKey),
+          matching: find.byType(DjWorkingLine),
+        ),
+        findsOneWidget,
+      );
       expect(find.byType(CassetteTile), findsOneWidget);
       // Reel loader: the app icon's crop, turning.
       final reel = tester.widget<CassetteTile>(find.byType(CassetteTile));
@@ -1040,6 +1065,8 @@ void main() {
       );
       expect(field.readOnly, isFalse);
       expect(field.controller!.text, 'a slow wind-down');
+      // Sending puts the keyboard away.
+      expect(field.focusNode!.hasFocus, isFalse);
       // Pills go dim and inert.
       expect(
         tester
@@ -1187,11 +1214,14 @@ void main() {
       return api;
     }
 
-    bool selected(WidgetTester tester, Key key) => tester
-        .getSemantics(find.byKey(key))
-        .getSemanticsData()
-        .flagsCollection
-        .isSelected.toBoolOrNull() == true;
+    bool selected(WidgetTester tester, Key key) =>
+        tester
+            .getSemantics(find.byKey(key))
+            .getSemanticsData()
+            .flagsCollection
+            .isSelected
+            .toBoolOrNull() ==
+        true;
 
     String sendLabel(WidgetTester tester) => tester
         .widget<IconButton>(find.byKey(const Key('start-session')))

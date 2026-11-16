@@ -24,6 +24,7 @@ import '../widgets/foundation/square_art.dart';
 import '../widgets/foundation/status_word.dart';
 import '../widgets/energy_journey.dart';
 import '../widgets/composer_plus_button.dart';
+import '../widgets/lyric_turn.dart' show DjWorkingLine, DjWorkingPhrases;
 import '../widgets/foundation/mixtape_menu.dart';
 import '../widgets/home_panel.dart';
 import '../widgets/mix_prompt_input.dart';
@@ -36,6 +37,7 @@ import '../providers/home_mode_provider.dart';
 import '../providers/dj_providers.dart';
 import '../providers/keep_mixes_provider.dart';
 import '../providers/listening_import_provider.dart';
+import '../providers/mix_activity_provider.dart';
 import '../providers/onboarding_provider.dart';
 import '../providers/opened_archive_provider.dart';
 import 'chat_screen.dart';
@@ -143,6 +145,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
   double _panelHeight = 0;
   bool _measuring = false;
   bool _starting = false;
+
+  /// What is being made while [_starting]: picks the working line's words.
+  SessionKind _startingKind = SessionKind.mix;
 
   /// The stop for the new mix being made, while one is (stop a turn,
   /// 2026-11-15); none for an album ask.
@@ -473,6 +478,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
     SessionKind kind = SessionKind.mix,
   }) async {
     if (_starting || _askingConsent) return;
+    // Sent: the keyboard goes, so the starting state has the open space.
+    _promptFocus.unfocus();
     // Nothing reaches the DJ (a mix or an album pick) before the listener
     // has agreed; Not now leaves the composer as it was.
     _askingConsent = true;
@@ -482,6 +489,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
     final stop = kind == SessionKind.album ? null : NewMixStop();
     setState(() {
       _starting = true;
+      _startingKind = kind;
       _error = null;
       _newMixStop = stop;
     });
@@ -872,7 +880,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
     required bool waiting,
     required OnboardingState? onboarding,
   }) {
-    if (_starting) return const _StartingState();
+    if (_starting) return _StartingState(kind: _startingKind);
     if (waiting && onboarding != null) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -908,12 +916,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with RouteAware {
 /// The board's starting state: the hubs turn in the open space (still under
 /// reduced motion, where the text alone carries it), the duration hint says
 /// where the mix will be, and the whole thing announces itself.
-class _StartingState extends StatelessWidget {
-  const _StartingState();
+class _StartingState extends ConsumerWidget {
+  const _StartingState({required this.kind});
+
+  final SessionKind kind;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final tokens = context.tokens;
+    // The new mix's first turn, once its create's stream opens; the clock
+    // until then, as in the chat and the first-run Making screen.
+    final step = ref.watch(mixActivityProvider.select((a) => a.pendingStep));
+    final pendingSince = ref.watch(
+      mixActivityProvider.select((a) => a.pending?.startedAt),
+    );
     return Center(
       child: Semantics(
         key: HomeScreen.startingKey,
@@ -931,6 +947,19 @@ class _StartingState extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             Text(HomeScreen.startingTitle, style: tokens.section),
+            const SizedBox(height: 6),
+            // The live region announces the title once; the line changes
+            // too often to be read.
+            ExcludeSemantics(
+              child: DjWorkingLine(
+                phrases: kind == SessionKind.album
+                    ? DjWorkingPhrases.album
+                    : DjWorkingPhrases.mix,
+                startedAt: pendingSince,
+                step: step,
+                style: tokens.secondary.copyWith(color: tokens.smoke),
+              ),
+            ),
             const SizedBox(height: 10),
             Text(
               HomeScreen.startingHint,
