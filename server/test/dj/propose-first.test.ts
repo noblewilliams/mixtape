@@ -12,7 +12,10 @@ import {
   CORPUS_PROPOSE_SHARE,
   NEW_MARKER_LEGEND,
   PERSONA_PROMPT_WITH_FILL,
-  PERSONA_PROMPT_WITH_OUTSIDE,
+  PERSONA_PROMPT_WITH_PROPOSE_FIRST,
+  PROPOSE_FIRST_PERSONA_LINE,
+  PERSONA_PROMPT,
+  DjError,
   PROPOSE_SHARE,
   type DjDeps,
 } from '../../src/dj/loop'
@@ -174,7 +177,7 @@ describe('PROPOSE_FIRST flag', () => {
   it('a turn resolves the flag for its own listener', async () => {
     const listed = await personalTurn({ input: { targetCount: 10 }, deps: { proposeFirst: undefined, proposeFirstFor: (id) => id === 'u1' } })
     expect(proposalRequests(listed.requests)).toHaveLength(1)
-    expect(listed.requests[0].system).toBe(PERSONA_PROMPT_WITH_OUTSIDE)
+    expect(listed.requests[0].system).toBe(PERSONA_PROMPT_WITH_PROPOSE_FIRST)
 
     const other = await personalTurn({ input: { targetCount: 10 }, deps: { proposeFirst: undefined, proposeFirstFor: (id) => id === 'u2' } })
     expect(proposalRequests(other.requests)).toHaveLength(0)
@@ -250,8 +253,9 @@ describe('a personal mix blends proposals', () => {
     for (const [i, t] of result.queue.entries()) expect(t.newToYou).toBe(proposedAt.includes(i))
     expect(await notPersonal(db, session.id)).toBe(false)
 
-    // The library curates only its own share.
-    expect(curationRequests(requests).map(curationCount)).toEqual([10])
+    // The library curates the whole mix, so it covers any proposal that
+    // does not land.
+    expect(curationRequests(requests).map(curationCount)).toEqual([20])
     // One personal proposal round, leaning to their taste.
     const [proposal] = proposalRequests(requests)
     expect(proposalRequests(requests)).toHaveLength(1)
@@ -271,7 +275,7 @@ describe('a personal mix blends proposals', () => {
     expect(text).toMatch(/Song \d+ — [^\n]+ \| new/)
     expect(text).toContain(NEW_MARKER_LEGEND)
     // The persona and tools that carry allowOutside.
-    expect(requests[0].system).toBe(PERSONA_PROMPT_WITH_OUTSIDE)
+    expect(requests[0].system).toBe(PERSONA_PROMPT_WITH_PROPOSE_FIRST)
     expect(requests[0].tools).toBe(DJ_TOOLS_WITH_OUTSIDE)
   })
 
@@ -293,7 +297,8 @@ describe('a personal mix blends proposals', () => {
     const { result, proposedAt, requests } = await personalTurn({ input: { targetCount: 20, familiarity: 'adventurous' } })
     expect(result.queue).toHaveLength(20)
     expect(proposedAt.length).toBeGreaterThan(10)
-    expect(curationRequests(requests).map(curationCount)).toEqual([20 - Math.floor(20 * PROPOSE_SHARE.adventurous)])
+    expect(proposedAt.length).toBe(Math.floor(20 * PROPOSE_SHARE.adventurous))
+    expect(curationRequests(requests).map(curationCount)).toEqual([20])
   })
 
   it('allowOutside false proposes nothing', async () => {
@@ -312,17 +317,24 @@ describe('a personal mix blends proposals', () => {
     expect(toolResults(requests)[0]).not.toContain('own yet, chosen for this brief')
   })
 
-  it('golden: a library with no jazz and a soft jazz brief comes back full, at least half of it jazz', async () => {
+  it('golden: a library with no jazz and a soft jazz brief comes back full and jazz, with no shortfall', async () => {
+    // The sound check passes none of the library's Soul songs.
+    const checked: string[] = []
+    const titleComplete = async (opts: { prompt: string }) => { checked.push(opts.prompt); return '[]' }
     const { result, requests, proposedAt } = await personalTurn({
-      input: { themes: 'rainy sunday reading, soft jazz', targetCount: 20 },
+      input: { themes: 'rainy sunday reading, soft jazz', genres: ['jazz'], targetCount: 12 },
       brief: 'rainy sunday reading, soft jazz',
       genre: 'Soul',
+      deps: { titleComplete: titleComplete as DjDeps['titleComplete'] },
     })
-    expect(result.queue).toHaveLength(20)
+    // The library really came up short: its songs went to the check and failed.
+    expect(checked.some((p) => /Library \d+/.test(p))).toBe(true)
+    expect(result.queue).toHaveLength(12)
     const [text] = toolResults(requests)
     expect(text).not.toMatch(/this mix is \d+ of the \d+ songs asked for/)
     // Apple labels every verified proposal Jazz (fakeApple); the library none.
-    expect(proposedAt.length).toBeGreaterThanOrEqual(10)
+    expect(proposedAt.length).toBeGreaterThanOrEqual(6)
+    expect(result.queue.filter((t) => t.title.startsWith('Library '))).toHaveLength(0)
   })
 
   it('the feature chain runs on the blended proposals only', async () => {
@@ -343,17 +355,146 @@ describe('a personal mix blends proposals', () => {
     for (const r of rows) expect(r.energy).toBe(0.3)
   })
 
-  it('short proposals are topped up from the same round, the mix stays full', async () => {
+  it('a library short of its share is topped up from the same proposal round, the mix stays full', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    await seedLibrary(db, 3)
+    const session = await seedSession(db)
+    const round = proposals(22)
+    const { fill, searches } = fakeApple(round)
+    const { llm, requests } = scriptedLlm([generate({ targetCount: 12 })], round)
+    const result = await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true, proposeFirst: true }, { id: session.id, userId: 'u1' }, 'tonight')
+    expect(result.queue).toHaveLength(12)
+    // The blend's 6, then 3 more from the round's unsearched songs: one call.
+    expect(result.queue.filter((t) => t.title.startsWith('Song '))).toHaveLength(9)
+    expect(result.queue.filter((t) => t.title.startsWith('Library '))).toHaveLength(3)
+    expect(proposalRequests(requests)).toHaveLength(1)
+    expect(searches).toHaveLength(9)
+    expect(toolResults(requests)[0]).not.toMatch(/this mix is \d+ of the \d+ songs asked for/)
+  })
+
+})
+
+describe('the library covers proposals that do not land', () => {
+  const noShortfall = (requests: LlmRequest[]) => expect(toolResults(requests)[0]).not.toMatch(/this mix is \d+ of the \d+ songs asked for/)
+
+  it('a proposal call that throws leaves a full mix from the library, with no shortfall', async () => {
     const db = await createTestDb()
     await seedUser(db)
     await seedLibrary(db, 30)
     const session = await seedSession(db)
-    // Apple confirms only every other proposal.
-    const round = proposals(22)
-    const { fill } = fakeApple(round.filter((_, i) => i % 2 === 0))
-    const { llm } = scriptedLlm([generate({ targetCount: 12 })], round)
+    const { fill } = fakeApple(proposals(22))
+    const { llm: base, requests } = scriptedLlm([generate({ targetCount: 20 })])
+    const llm: LlmClient = async (req) => {
+      if (isProposal(req)) { requests.push(req); throw new Error('proposal call failed') }
+      return base(req)
+    }
     const result = await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true, proposeFirst: true }, { id: session.id, userId: 'u1' }, 'tonight')
-    expect(result.queue).toHaveLength(12)
-    expect(result.queue.filter((t) => t.title.startsWith('Song ')).length).toBeGreaterThan(0)
+    expect(result.queue).toHaveLength(20)
+    expect(result.queue.every((t) => t.title.startsWith('Library '))).toBe(true)
+    noShortfall(requests)
+  })
+
+  it('Apple confirming nothing leaves a full mix from the library', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    await seedLibrary(db, 30)
+    const session = await seedSession(db)
+    const { fill } = fakeApple([])
+    const { llm, requests } = scriptedLlm([generate({ targetCount: 20 })], proposals(22))
+    const result = await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true, proposeFirst: true }, { id: session.id, userId: 'u1' }, 'tonight')
+    expect(result.queue).toHaveLength(20)
+    expect(result.queue.every((t) => t.title.startsWith('Library '))).toBe(true)
+    noShortfall(requests)
+    expect(toolResults(requests)[0]).not.toContain('own yet, chosen for this brief')
+  })
+
+  it('an adventurous 40-song mix past the turn\'s searches is still 40 songs', async () => {
+    const { result, requests, proposedAt, searches } = await personalTurn({ library: 60, input: { targetCount: 40, familiarity: 'adventurous' } })
+    expect(result.queue).toHaveLength(40)
+    expect(searches.length).toBeLessThanOrEqual(22)
+    expect(proposedAt.length).toBeGreaterThan(0)
+    expect(proposedAt.length).toBeLessThanOrEqual(30)
+    noShortfall(requests)
+  })
+
+  it('a personal blend whose library curation fails fails the turn, as before', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    await seedLibrary(db, 30)
+    const session = await seedSession(db)
+    const { fill } = fakeApple(proposals(22))
+    const { llm: base } = scriptedLlm([generate({ targetCount: 20 })], proposals(22))
+    const llm: LlmClient = async (req) => (req.tools.length === 0 && !isProposal(req) ? textTurn('not json at all') : base(req))
+    const error = await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true, proposeFirst: true }, { id: session.id, userId: 'u1' }, 'tonight').catch((e) => e)
+    expect(error).toBeInstanceOf(DjError)
+    expect((error as DjError).kind).toBe('curation')
+  })
+})
+
+describe('new marks and persona', () => {
+  it('the propose-first persona is today\'s plus its own line, not the outside cap', () => {
+    expect(PERSONA_PROMPT_WITH_PROPOSE_FIRST.replace(`${PROPOSE_FIRST_PERSONA_LINE}\n`, '')).toBe(PERSONA_PROMPT)
+    expect(PROPOSE_FIRST_PERSONA_LINE).not.toMatch(/a few|cap/)
+  })
+
+  it('new songs stay marked on the next turn\'s session context and after an edit', async () => {
+    const { db, session } = await personalTurn({ input: { targetCount: 10 } })
+    const { fill } = fakeApple(proposals(22))
+
+    const chat = scriptedLlm([])
+    await runDjTurn(db, { llm: chat.llm, embed: embedFake, fill, neverRefuse: true, proposeFirst: true }, { id: session.id, userId: 'u1' }, 'nice')
+    expect(JSON.stringify(chat.requests[0].messages)).toMatch(/Song \d+ — [^"\\]+ \| new/)
+
+    const edit = scriptedLlm([{ name: 'edit_queue', input: { ops: [{ op: 'remove', position: 0 }] } }])
+    await runDjTurn(db, { llm: edit.llm, embed: embedFake, fill, neverRefuse: true, proposeFirst: true }, { id: session.id, userId: 'u1' }, 'drop the first')
+    expect(toolResults(edit.requests).at(-1)).toMatch(/Song \d+ — [^\n]+ \| new/)
+  })
+})
+
+describe('remake and outside picks', () => {
+  it('"Remake with my music" never blends proposals', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    await seedLibrary(db, 30)
+    const [session] = await db.insert(djSessions).values({ userId: 'u1', title: 's', notPersonal: true }).returning()
+    const { fill, searches } = fakeApple(proposals(22))
+    const { llm, requests } = scriptedLlm([generate({ targetCount: 20, familiarity: 'adventurous' })], proposals(22))
+    const result = await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true, proposeFirst: true }, { id: session.id, userId: 'u1' }, 'remake', { remake: true })
+    expect(proposalRequests(requests)).toHaveLength(0)
+    expect(searches).toHaveLength(0)
+    expect(result.queue).toHaveLength(20)
+    expect(result.queue.every((t) => t.title.startsWith('Library '))).toBe(true)
+  })
+
+  async function bothFlags(proposeFirst: boolean) {
+    const db = await createTestDb()
+    await seedUser(db)
+    await seedLibrary(db, 30)
+    // Catalogue neighbours the listener does not own: outside-pool rows.
+    await seedUser(db, 'other')
+    for (let i = 0; i < 20; i++) {
+      const [t] = await db.insert(tracks).values({ appleId: `other-${i}`, title: `Other ${i}`, artist: 'Someone Else', genre: 'Soul', durationMs: 200_000 }).returning()
+      await db.insert(trackFeatures).values({ trackId: t.id, tempo: 100, energy: 0.5, valence: 0.5, source: 'reccobeats' })
+      await db.insert(trackMeanings).values({ trackId: t.id, embedding: UNIT, lyricsSource: 'lrclib' })
+      await db.insert(userTracks).values({ userId: 'other', trackId: t.id, inLibrary: true })
+    }
+    const session = await seedSession(db)
+    const { fill } = fakeApple(proposals(22))
+    const { llm, requests } = scriptedLlm([generate({ targetCount: 20, familiarity: 'adventurous' })], proposals(22))
+    const result = await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true, outsidePicks: true, proposeFirst }, { id: session.id, userId: 'u1' }, 'tonight')
+    const curationText = JSON.stringify(curationRequests(requests)[0].messages)
+    return { result, curationText }
+  }
+
+  it('with both flags on, the outside pool is off: new songs are proposals only', async () => {
+    // OUTSIDE_PICKS alone draws on the catalogue neighbours...
+    const outsideOnly = await bothFlags(false)
+    expect(outsideOnly.curationText).toContain('Other ')
+    // ...propose first takes its place.
+    const { result, curationText } = await bothFlags(true)
+    expect(curationText).not.toContain('Other ')
+    expect(result.queue.filter((t) => t.title.startsWith('Other '))).toHaveLength(0)
+    for (const t of result.queue.filter((q) => q.newToYou)) expect(t.title).toMatch(/^Song /)
   })
 })

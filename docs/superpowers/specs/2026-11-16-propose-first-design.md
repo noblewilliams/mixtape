@@ -198,14 +198,19 @@ As built (S7): `proposeFirstEnabled(env, userId)` in `src/index.ts` (exact
 as `DjDeps.proposeFirstFor` and resolved once per turn by `runDjTurn` into
 `DjDeps.proposeFirst`. The personal blend reuses the corpus blend
 (`blendProposals` in `dj/loop.ts`) rather than merging one pool: it runs
-beside the library curation, which is asked for `targetCount` less the
-proposed share (`PROPOSE_SHARE`), and a short curation or blend is topped
-up from the same round (`topUpFromBlend`). Proposals use the personal
+beside the library curation, which is asked for the whole `targetCount`
+so it covers any proposal that fails or misses on Apple; the mix takes up
+to the proposed share (`PROPOSE_SHARE`) of verified songs and the rest from
+the curation in its order. Only a library that itself curates short is
+topped up from the same round (`topUpFromBlend`), and only then can a
+shortfall notice fire. A personal blend whose library curation fails fails
+the turn, as before. A remake ("Remake with my music") never blends, and
+with propose first active the OUTSIDE_PICKS outside pool is off (cap 0). Proposals use the personal
 prompt with top artists, and the pool's own songs (up to 60) as the
 exclude list. The mix stays personal (`not_personal` unset, no
 `CORPUS_NOTICE`); `personalBlendNotice` replaces `blendedNotice`, the
-listing carries the "| new" marks, and the persona is
-`PERSONA_PROMPT_WITH_OUTSIDE`. "New to you" needs no new column: the queue
+listings and session context carry the "| new" marks, and the persona is
+`PERSONA_PROMPT_WITH_PROPOSE_FIRST` (its own line: no "few", no cap). "New to you" needs no new column: the queue
 view derives it from ownership. Open: the gate is `ownMusicBrief`, which
 reads `comfort` as favourites, so `comfort`'s 0.25 share never applies
 until comfort and favourites are told apart.

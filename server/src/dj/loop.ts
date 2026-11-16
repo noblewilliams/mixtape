@@ -100,6 +100,18 @@ function proposeFirstActive(deps: DjDeps): boolean {
   return deps.proposeFirst === true && deps.neverRefuse === true && deps.fill !== undefined
 }
 
+// Whether listings mark the songs a listener does not own ("| new"): with
+// outside picks, or with propose first, which puts such songs in mixes.
+function marksNew(deps: DjDeps): boolean {
+  return deps.outsidePicks === true || proposeFirstActive(deps)
+}
+
+// The catalogue outside pool's cap: OUTSIDE_PICKS only, and never beside
+// propose first, whose proposals take its place (it retires in S10).
+function outsidePoolCap(deps: DjDeps, intent: Pick<Intent, 'familiarity' | 'targetCount'> & { allowOutside?: boolean }): number {
+  return deps.outsidePicks && !proposeFirstActive(deps) ? outsideCap(intent) : 0
+}
+
 // Where a turn's time goes, for the turn log: each model call as
 // "<kind>@<start>+<duration>" in tenths of a second from the turn's start
 // ("curate@41+228" began at 4.1s and took 22.8s). Kinds only, never content.
@@ -662,11 +674,21 @@ export const FILL_PERSONA_LINE =
   'music. Always say which picks are new to them.'
 export const PERSONA_PROMPT_WITH_FILL = [...PERSONA_LINES.slice(0, -2), FILL_PERSONA_LINE, ...PERSONA_LINES.slice(-2)].join('\n')
 
+// PROPOSE_FIRST active (proposeFirstActive): up to three quarters of a mix
+// may be songs the listener does not own, so OUTSIDE_PERSONA_LINE's "a few,
+// up to a cap" would be false. Static, so it caches on its own.
+export const PROPOSE_FIRST_PERSONA_LINE =
+  'Mixes may include songs the listener does not own yet, each checked on Apple Music. Pass allowOutside: false ' +
+  'when the listener, or a saved preference, asks for only their own music. Choose familiarity "adventurous" when ' +
+  'they ask for new things. Always say which picks are new to them.'
+export const PERSONA_PROMPT_WITH_PROPOSE_FIRST = [...PERSONA_LINES.slice(0, -2), PROPOSE_FIRST_PERSONA_LINE, ...PERSONA_LINES.slice(-2)].join('\n')
+
 // The tools and persona a turn sends: OUTSIDE_PICKS's variant when on (it
 // already carries allowOutside), the fill variant when only the shortfall
 // fill can run, today's otherwise.
 function conversationVariant(deps: DjDeps): { system: string; tools: typeof DJ_TOOLS } {
-  if (deps.outsidePicks || proposeFirstActive(deps)) return { system: PERSONA_PROMPT_WITH_OUTSIDE, tools: DJ_TOOLS_WITH_OUTSIDE }
+  if (proposeFirstActive(deps)) return { system: PERSONA_PROMPT_WITH_PROPOSE_FIRST, tools: DJ_TOOLS_WITH_OUTSIDE }
+  if (deps.outsidePicks) return { system: PERSONA_PROMPT_WITH_OUTSIDE, tools: DJ_TOOLS_WITH_OUTSIDE }
   if (deps.neverRefuse === true && deps.fill) return { system: PERSONA_PROMPT_WITH_FILL, tools: DJ_TOOLS_WITH_OUTSIDE }
   return { system: PERSONA_PROMPT, tools: DJ_TOOLS }
 }
@@ -1050,7 +1072,9 @@ type FillTracker = {
   turnStartedAt: number
 }
 
-type TurnFill = { tracker: FillTracker; surface: Surface }
+// remake: a "Remake with my music" turn (DjTurnOptions.remake), an
+// own-music request, so a personal mix blends no proposals.
+type TurnFill = { tracker: FillTracker; surface: Surface; remake?: boolean }
 
 // One ledger for every Apple-facing subrequest a turn makes: the catalogue
 // fills' (fillSpent: artist search, top songs, in-request enrichment) and
@@ -1800,7 +1824,7 @@ async function executeProposedQueue(
       ...(!short && picks.length < intent.targetCount ? [partialVerifiedNotice(picks.length, intent.targetCount)] : []),
       `queue generated: ${picks.length} tracks (now version ${version})`,
       'Updated queue (positions are 0-based):',
-      formatQueueListing(updatedQueue, deps.outsidePicks === true),
+      formatQueueListing(updatedQueue, marksNew(deps)),
     ].join('\n'),
     queueChanged: true,
     newVersion: version,
@@ -1942,7 +1966,7 @@ async function executeOnlyArtistQueue(
       ...(newAt.length > 0 ? [outsidePicksNotice(newAt)] : []),
       `queue generated: ${picks.length} tracks (now version ${version})`,
       'Updated queue (positions are 0-based):',
-      formatQueueListing(updatedQueue, deps.outsidePicks === true),
+      formatQueueListing(updatedQueue, marksNew(deps)),
     ].join('\n'),
     queueChanged: true,
     newVersion: version,
@@ -2000,7 +2024,7 @@ async function generateFromBrief(
   if (seed.status !== 'none' && seed.status !== 'ready') return { resultText: `playlist inspiration is ${seed.status.replace('_', ' ')}; ask the listener to choose another playlist or clear it. The queue is unchanged.`, queueChanged: false, intent }
   const selected = seed.status === 'ready' ? { playlistId: seed.playlistId!, excludeSourceTracks: seed.excludeSourceTracks } : undefined
   // Outside picks: 0 with the flag off, which skips the outside query.
-  const cap = deps.outsidePicks ? outsideCap(intent) : 0
+  const cap = outsidePoolCap(deps, intent)
   deps.step?.({ step: 'digging', scope: poolMode.mode === 'personal' ? 'library' : 'catalogue' })
   const pool = await buildPool(db, deps.embed, session.userId, intent, undefined, { mode: poolMode.mode, playlistSeed: selected, outsideCap: cap })
   if (pool.length === 0) {
@@ -2027,8 +2051,9 @@ async function generateFromBrief(
   const fillShort = outsideAllowed && neverRefuse && deps.fill !== undefined
   // PROPOSE_FIRST (spec 2026-11-16 propose-first, step 2): a personal mix
   // blends proposals like a corpus mix, on the shortfall's own gates, so
-  // never for an own-music brief or allowOutside false.
-  const personalBlend = proposeFirst && poolMode.mode === 'personal' && fillShort && intent.allowOutside !== false
+  // never for an own-music brief or allowOutside false, and never on a
+  // remake ("with my music" is an own-music request, decided 2026-11-16).
+  const personalBlend = proposeFirst && poolMode.mode === 'personal' && fillShort && intent.allowOutside !== false && turn.remake !== true
   const blending = (poolMode.mode === 'corpus' && neverRefuse && deps.fill !== undefined) || personalBlend
   const blendTarget = blending ? blendWant(intent, personalBlend, proposeFirst) : 0
   // The songs the listener owns that fit this brief, told to the blend's
@@ -2036,11 +2061,6 @@ async function generateFromBrief(
   const owned = personalBlend
     ? pool.filter((t) => !t.outside).slice(0, OWNED_EXCLUDE).map((t) => ({ title: t.title, artist: t.artist }))
     : []
-  // The library curates only its own share of a personal blend, so it does
-  // not pad the mix; a short blend is topped up as a corpus one is.
-  const curationIntent = personalBlend && blendTarget > 0
-    ? { ...intent, targetCount: Math.max(1, intent.targetCount - blendTarget) }
-    : intent
   budget.consume()
   const byId = new Map(pool.map((t) => [t.trackId, t]))
   // A named genre's sound check on the curated songs (decision 8) chains
@@ -2066,9 +2086,11 @@ async function generateFromBrief(
   // thinking there took 44 to 95 s); a personal pool's request is as before.
   const thinking = poolMode.mode === 'corpus' ? { thinking: 'off' as const } : {}
   const [curatedCheck, proposedRaw] = await Promise.all([
-    curateFitting(deps.llm, pool, curationIntent, withPlaylistSeedContext(sessionContext, seed), { outsideCap: cap, ...thinking })
+    curateFitting(deps.llm, pool, intent, withPlaylistSeedContext(sessionContext, seed), { outsideCap: cap, ...thinking })
       .catch((e: unknown): CuratedTrack[] => {
-        if ((blending || early) && isCurationFailure(e)) {
+        // Not a personal blend's: its proposals alone would land a short
+        // mix blamed on the library, so its turn fails as before.
+        if (((blending && !personalBlend) || early) && isCurationFailure(e)) {
           curationError = e
           return []
         }
@@ -2187,7 +2209,7 @@ async function generateFromBrief(
         : []),
       `queue generated: ${picks.length} tracks (now version ${version})`,
       'Updated queue (positions are 0-based):',
-      formatQueueListing(updatedQueue, deps.outsidePicks === true || personalBlend),
+      formatQueueListing(updatedQueue, marksNew(deps)),
     ].join('\n'),
     queueChanged: true,
     newVersion: version,
@@ -2465,7 +2487,7 @@ async function executeEditQueue(
     }
     let cap = 0
     let request: ReturnType<typeof planOps>['requests'][number] | undefined
-    if (deps.outsidePicks && poolMode === 'personal') {
+    if (deps.outsidePicks && !proposeFirstActive(deps) && poolMode === 'personal') {
       if (!outsideBudget) {
         const { working, requests } = planOps(activeQueue.map((t) => ({ id: t.trackId, trackId: t.trackId, reason: t.reason })), ops)
         const isNew = await newToListenerTrackIds(db, session.id)
@@ -2544,7 +2566,7 @@ async function executeEditQueue(
         ...(outsideAt.length > 0 ? [outsidePicksNotice(outsideAt)] : []),
         `queue edited — requested ${result.requested}, added ${result.added}, removed ${result.removed} (now version ${result.version})`,
         'Updated queue (positions are 0-based):',
-        formatQueueListing(updatedQueue, deps.outsidePicks === true),
+        formatQueueListing(updatedQueue, marksNew(deps)),
       ].join('\n'),
       queueChanged: true,
       newVersion: result.version,
@@ -2819,7 +2841,7 @@ async function attemptTurn(
   try {
     const [history, sessionContext, startVersion, listenerFirstName] = await Promise.all([
       loadHistory(db, session.id, userRowSeq),
-      buildSessionContext(db, session.id, session.userId, options.energyArc, deps.outsidePicks === true),
+      buildSessionContext(db, session.id, session.userId, options.energyArc, marksNew(deps)),
       getSessionQueueVersion(db, session.id),
       loadFirstName(db, session.userId),
     ])
@@ -2909,7 +2931,7 @@ async function attemptTurn(
         // since nothing else about this design is visible from either
         // function's own signature.
         if (call.name === 'generate_queue') {
-          const outcome = await executeGenerateQueue(db, countedDeps, session, call.input, userText, sessionContext, budget, currentVersion, { tracker: fillTracker, surface: options.surface ?? 'web' }, options.energyArc)
+          const outcome = await executeGenerateQueue(db, countedDeps, session, call.input, userText, sessionContext, budget, currentVersion, { tracker: fillTracker, surface: options.surface ?? 'web', ...(options.remake ? { remake: true } : {}) }, options.energyArc)
           resultText = outcome.resultText
           // Bookkeeping first: the queue write has landed, so a note below
           // that fails must still leave the turn able to describe it.
