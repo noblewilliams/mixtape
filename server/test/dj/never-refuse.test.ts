@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { readFileSync } from 'node:fs'
 import { createTestDb, type TestDb } from '../helpers/db'
-import { djSessions, funnelEvents, trackFeatures, trackMeanings, tracks, user, userArtistSeeds, userTracks } from '../../src/db/schema'
+import { djSessions, funnelEvents, trackFeatureFallbacks, trackFeatures, trackMeanings, tracks, user, userArtistSeeds, userTracks } from '../../src/db/schema'
 import {
   runDjTurn,
   CORPUS_NOTICE,
@@ -14,9 +14,13 @@ import {
   SHORT_VERIFIED_TEXT,
   partialVerifiedNotice,
   TURN_APPLE_BUDGET,
+  TURN_FEATURES_BUDGET,
+  FEATURES_DEADLINE_MS,
+  fillProposalFeatures,
   type DjDeps,
+  type FeaturesTracker,
 } from '../../src/dj/loop'
-import { PROPOSED_NOTICE, PROPOSE_SYSTEM_PROMPT, ROUND_TWO_CUTOFF_MS, VERIFY_CONCURRENCY, VERIFY_MAX } from '../../src/dj/propose'
+import { PROPOSED_NOTICE, PROPOSE_SYSTEM_PROMPT, ROUND_TWO_CUTOFF_MS, VERIFY_CONCURRENCY, VERIFY_MAX, type VerifiedProposal } from '../../src/dj/propose'
 import { FILL_QUEUE_BOOST, type FillDeps } from '../../src/dj/catalogue-fill'
 import { neverRefuseEnabled } from '../../src/index'
 import { AppleCatalogError, type CatalogSong } from '../../src/musickit/catalog'
@@ -60,7 +64,7 @@ function proposals(prefix: string, n: number) {
   return Array.from({ length: n }, (_, i) => ({ title: `${prefix} ${i}`, artist: ARTISTS[i % 3], reason: `${prefix} reason ${i}` }))
 }
 
-type Proposed = { title: string; artist: string; reason: string }
+type Proposed = { title: string; artist: string; reason: string; energy?: number; valence?: number }
 
 // Apple: the three artists are found (the fill inserts their top songs) and
 // every song in `confirmed` answers its own search.
@@ -372,6 +376,26 @@ describe('never refuse: proposed songs verified on Apple', () => {
     expect(logged.propose).toMatchObject({ verified: 3, searches: 3, rounds: 1 })
   })
 
+  it('a corpus mix leaves feature fallbacks for its blended proposals only', async () => {
+    const db = await createTestDb()
+    const session = await seedCorpusListener(db)
+    const round = proposals('Song', 11).map((p) => ({ ...p, energy: 0.65, valence: 0.35 }))
+    const { fill, enrichCalls } = fakeFill(round)
+    fill.deezerTempo = { tempoByIsrc: async () => 120 }
+    const { llm } = scriptedLlm([{ themes: 'x', targetCount: 6 }], [round])
+
+    await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true }, { id: session.id, userId: 'u1' }, 'play')
+
+    const rows = await db.select({ title: tracks.title, energy: trackFeatureFallbacks.energy, valence: trackFeatureFallbacks.valence })
+      .from(trackFeatureFallbacks).innerJoin(tracks, eq(tracks.id, trackFeatureFallbacks.trackId))
+    const queued = (await queueTitles(db, session.id)).map((r) => r.title).filter((t) => t.startsWith('Song '))
+    expect(queued).toHaveLength(CORPUS_PROPOSE_SHARE * 6)
+    expect(rows.map((r) => r.title).sort()).toEqual([...queued].sort())
+    for (const r of rows) expect(r).toMatchObject({ energy: 0.65, valence: 0.35 })
+    // The catalogue's own picks are measured already: no lookup for them.
+    expect(enrichCalls.features).toBe(queued.length)
+  })
+
   it('a corpus listener whose proposals all miss on Apple still gets a full catalogue mix', async () => {
     const db = await createTestDb()
     const session = await seedCorpusListener(db)
@@ -500,6 +524,35 @@ describe('never refuse: proposed songs verified on Apple', () => {
     expect(curations[0]).not.toHaveProperty('thinking')
   })
 
+  it('a proposed mix leaves feature fallbacks for its queued songs when the chain is wired', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    const session = await seedSession(db)
+    const round = proposals('Song', 13).map((p, i) => ({ ...p, energy: 0.7, valence: i === 0 ? 1.5 : 0.4 }))
+    const { fill, enrichCalls } = fakeFill(round)
+    const deezerAsked: string[] = []
+    fill.deezerTempo = { tempoByIsrc: async (isrc) => { deezerAsked.push(isrc); return 120 } }
+    const { llm } = scriptedLlm([brief(5)], [round])
+
+    const { logged } = await withLog(() =>
+      runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true }, { id: session.id, userId: 'u1' }, 'party'))
+
+    const queued = await db.execute(`SELECT q.track_id, t.title FROM queue_tracks q JOIN tracks t ON t.id = q.track_id
+      WHERE q.session_id = '${session.id}' AND q.state = 'active' ORDER BY q.position`)
+    const ids = (queued.rows as Array<{ track_id: string }>).map((r) => r.track_id)
+    expect(ids).toHaveLength(5)
+    const rows = await db.select().from(trackFeatureFallbacks)
+    // The queued songs only: ReccoBeats missed each, no ISRC for Deezer, so
+    // the model's estimate stands, range-checked.
+    expect(rows.map((r) => r.trackId).sort()).toEqual([...ids].sort())
+    for (const r of rows) expect(r).toMatchObject({ energy: 0.7, moodSource: 'model', tempo: null })
+    expect(rows.find((r) => r.trackId === ids[0])!.valence).toBeNull()
+    expect(rows.find((r) => r.trackId === ids[1])!.valence).toBe(0.4)
+    expect(enrichCalls.features).toBe(5)
+    expect(deezerAsked).toHaveLength(0)
+    expect(logged.propose).toMatchObject({ features: { measured: 0, fallback: 5, skipped: 0, subrequests: 10 } })
+  })
+
   it('without the Apple fill wired, the flag on still refuses as before', async () => {
     const db = await createTestDb()
     await seedUser(db)
@@ -620,10 +673,24 @@ describe('never refuse: edits on a proposed mix', () => {
     expect(text).not.toBe(INSUFFICIENT_SEEDS_TEXT)
     expect(text.split('\n')[0]).toBe(PROPOSED_NOTICE)
     const ask = proposalRequests(requests)[0].messages[0].content as string
-    expect(ask).toContain('Propose up to 1 songs.')
+    expect(ask).toContain('Propose up to 3 songs.')
     // The queue and the swapped-out song are never proposed again.
     expect(ask).toContain(`- ${round[0].title} by ${round[0].artist}`)
     expect(ask).toContain(`- ${round[2].title} by ${round[2].artist}`)
+  })
+
+  it('a swap whose first proposal misses on Apple lands a spare', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    const session = await seedSession(db)
+    const { fill } = fakeApple((term) => (term.startsWith('Miss ') ? [] : echo(term)))
+    const round = await proposedMix(db, session.id, fill)
+    const { llm } = editLlm([{ op: 'swap', position: 2 }], [
+      { title: 'Miss', artist: 'Asake', reason: 'x' }, { title: 'Spare In', artist: 'Asake', reason: 'y' },
+    ])
+    await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true }, { id: session.id, userId: 'u1' }, 'swap the third one')
+    const titles = (await queueTitles(db, session.id)).map((r) => r.title)
+    expect(titles).toEqual([round[0].title, round[1].title, 'Spare In', round[3].title, round[4].title])
   })
 
   it('extend by 3 appends three verified songs', async () => {
@@ -640,6 +707,25 @@ describe('never refuse: edits on a proposed mix', () => {
     const titles = (await queueTitles(db, session.id)).map((r) => r.title)
     expect(titles).toEqual([...round.slice(0, 5), ...more].map((s) => s.title))
     expect(toolResults(requests)[0].split('\n')[0]).toBe(PROPOSED_NOTICE)
+  })
+})
+
+describe('never refuse: feature chain on edits', () => {
+  it('a proposed swap leaves a fallback row for the song it brought in', async () => {
+    const db = await createTestDb()
+    await seedUser(db)
+    const session = await seedSession(db)
+    const { fill } = fakeApple(echo)
+    await proposedMix(db, session.id, fill)
+    fill.deezerTempo = { tempoByIsrc: async () => 120 }
+    const { llm } = editLlm([{ op: 'swap', position: 2 }], [{ title: 'Swap In', artist: 'Asake', reason: 'new lift', energy: 0.33 }])
+
+    await runDjTurn(db, { llm, embed: embedFake, fill, neverRefuse: true }, { id: session.id, userId: 'u1' }, 'swap the third one')
+
+    const rows = await db.select({ title: tracks.title, energy: trackFeatureFallbacks.energy })
+      .from(trackFeatureFallbacks).innerJoin(tracks, eq(tracks.id, trackFeatureFallbacks.trackId))
+    // The first mix ran without the chain; the swap's song has its estimate.
+    expect(rows).toEqual([{ title: 'Swap In', energy: 0.33 }])
   })
 })
 
@@ -789,5 +875,64 @@ describe('never refuse: failures, limits and recordings through runDjTurn', () =
     expect(proposalRequests(requests)).toHaveLength(1)
     const rows = await db.select().from(funnelEvents).where(eq(funnelEvents.type, 'proposed_mix'))
     expect(rows).toHaveLength(1)
+  })
+})
+
+describe('feature chain: one time box and allowance per turn', () => {
+  async function verifiedSong(db: TestDb, title: string, estimate = { energy: 0.5 }): Promise<VerifiedProposal> {
+    const [t] = await db.insert(tracks).values({ appleId: `fc-${title}`, title, artist: 'Asake', durationMs: 200_000, isrc: `USUG119${String(++counter).padStart(5, '0')}` }).returning()
+    return { trackId: t.id, title, artist: 'Asake', reason: 'r', estimate } as VerifiedProposal
+  }
+
+  function chainFill(clock: { t: number }, featureMs: number) {
+    const calls = { features: [] as string[], deezer: 0 }
+    const fill: FillDeps = {
+      catalog: { searchArtists: async () => [], artistTopSongs: async () => [], searchSongs: async () => [] },
+      defaultStorefront: 'ng',
+      enrich: {
+        storefront: 'ng', itunes: async () => null, lyrics: async () => null, embed: async () => UNIT,
+        features: async (key) => { calls.features.push(key.title); clock.t += featureMs; return null },
+      },
+      deezerTempo: { tempoByIsrc: async () => { calls.deezer += 1; return 120 } },
+      now: () => clock.t,
+    }
+    return { fill, calls }
+  }
+
+  it('a second call gets only the time left and never looks a handled song up again', async () => {
+    const db = await createTestDb()
+    const clock = { t: 0 }
+    const { fill, calls } = chainFill(clock, FEATURES_DEADLINE_MS + 1_000)
+    const a = await verifiedSong(db, 'A')
+    const b = await verifiedSong(db, 'B', { energy: 0.2 })
+    const tracker: FeaturesTracker = {}
+
+    await fillProposalFeatures(db, fill, tracker, [a])
+    // A's lookup ran the whole time box out.
+    expect(calls.features).toEqual(['A'])
+    expect(tracker.features!.ms).toBeGreaterThanOrEqual(FEATURES_DEADLINE_MS)
+
+    await fillProposalFeatures(db, fill, tracker, [a, b])
+
+    expect(calls.features).toEqual(['A'])
+    expect(calls.deezer).toBe(0)
+    const [row] = await db.select().from(trackFeatureFallbacks).where(eq(trackFeatureFallbacks.trackId, b.trackId))
+    expect(row).toMatchObject({ energy: 0.2, tempo: null })
+    expect(tracker.spend!.log.features).toMatchObject({ fallback: 2 })
+  })
+
+  it('a second call gets only the allowance left', async () => {
+    const db = await createTestDb()
+    const clock = { t: 0 }
+    const { fill, calls } = chainFill(clock, 0)
+    const a = await verifiedSong(db, 'A')
+    const tracker: FeaturesTracker = { features: { spent: TURN_FEATURES_BUDGET - 1, ms: 0, done: new Set() } }
+
+    await fillProposalFeatures(db, fill, tracker, [a])
+
+    // One unit left: room for Deezer, not ReccoBeats.
+    expect(calls.features).toEqual([])
+    expect(calls.deezer).toBe(1)
+    expect(tracker.features!.spent).toBe(TURN_FEATURES_BUDGET)
   })
 })

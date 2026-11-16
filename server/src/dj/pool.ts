@@ -497,12 +497,13 @@ function sharedScoringCtes(userId: string, selectedPlaylistId: string | null): S
   return sql`
     seed_deduped AS (
       SELECT DISTINCT ON (COALESCE(st.isrc, st.id::text))
-        st.*, sf.tempo, sf.energy, sm.embedding,
+        st.*, COALESCE(sf.tempo, sfb.tempo) AS tempo, COALESCE(sf.energy, sfb.energy) AS energy, sm.embedding,
         COALESCE(st.isrc, st.id::text) AS recording_key
       FROM playlist_entries spe
       JOIN user_playlists sup ON sup.id = spe.playlist_id
       JOIN tracks st ON st.id = spe.track_id
       LEFT JOIN track_features sf ON sf.track_id = st.id
+      LEFT JOIN track_feature_fallbacks sfb ON sfb.track_id = st.id
       LEFT JOIN track_meanings sm ON sm.track_id = st.id
       WHERE spe.playlist_id = ${selectedPlaylistId}::uuid
         AND sup.user_id = ${userId}
@@ -640,10 +641,19 @@ function poolWeights(familiarity: Intent['familiarity'], mode: PoolMode, playlis
   return { weights, playlistWeight, seedWeight }
 }
 
+// Feature values every scored query reads: measured (track_features, f)
+// first, then the estimate (track_feature_fallbacks, fb). Each scored query
+// LEFT JOINs both on the track's primary key. Membership never reads these:
+// corpus eligibility and resolvePoolMode test track_features and
+// track_meanings rows only, so an estimate alone never enriches a song.
+const TEMPO = sql`COALESCE(f.tempo, fb.tempo)`
+const ENERGY = sql`COALESCE(f.energy, fb.energy)`
+const VALENCE = sql`COALESCE(f.valence, fb.valence)`
+
 // The score terms every candidate source shares, over the aliases t (tracks),
-// f (track_features), tm (a row carrying `embedding`), at (artist_taste) and
-// sp (seed_profile). Familiarity and the playlist term are per source and
-// live with each query.
+// f and fb (measured and fallback features, read through TEMPO/ENERGY),
+// tm (a row carrying `embedding`), at (artist_taste) and sp (seed_profile).
+// Familiarity and the playlist term are per source and live with each query.
 function scoreTerms(intent: Intent, vecLiteral: string) {
   // Tempo has two distinct shapes, not one:
   //  - TWO bounds (a real window, e.g. "120-140bpm"): a HARD filter below,
@@ -671,7 +681,8 @@ function scoreTerms(intent: Intent, vecLiteral: string) {
   // Feature-fit: a simple, documented v1 (P4 tunes it).
   //  - When the intent gives a tempo target (one or two bounds), this is
   //    proximity-to-centre: 1 - LEAST(1, |tempo - centre| / halfWidth). A
-  //    track with no measured tempo (NULL, via the LEFT JOIN) COALESCEs to 0
+  //    track with no tempo, measured or estimated (NULL, via the LEFT
+  //    JOINs), COALESCEs to 0
   //    — it floors out at the same score as a track sitting right on the
   //    window's edge, which is an acceptable v1 tie rather than a dedicated
   //    "unknown" tier.
@@ -682,7 +693,7 @@ function scoreTerms(intent: Intent, vecLiteral: string) {
   //    successfully re-enriched" must never itself be a ranking thumb.
   const featureFit: SQL =
     tempoCenter !== null && tempoHalfWidth !== null
-      ? sql`COALESCE(1 - LEAST(1, ABS(f.tempo - ${tempoCenter}) / ${tempoHalfWidth}), 0)`
+      ? sql`COALESCE(1 - LEAST(1, ABS(${TEMPO} - ${tempoCenter}) / ${tempoHalfWidth}), 0)`
       : sql`0.5`
 
   // Meaning similarity: `<=>` is cosine DISTANCE, ranging [0, 2] (0 =
@@ -706,8 +717,8 @@ function scoreTerms(intent: Intent, vecLiteral: string) {
   // private title list or high-dimensional vectors cross into Worker memory.
   const seedFit = sql`(
     0.45 * COALESCE(GREATEST(0, 1 - (tm.embedding <=> sp.embedding)), 0.5) +
-    0.20 * COALESCE(1 - LEAST(1, ABS(f.tempo - sp.tempo) / 60.0), 0.5) +
-    0.15 * COALESCE(1 - LEAST(1, ABS(f.energy - sp.energy)), 0.5) +
+    0.20 * COALESCE(1 - LEAST(1, ABS(${TEMPO} - sp.tempo) / 60.0), 0.5) +
+    0.15 * COALESCE(1 - LEAST(1, ABS(${ENERGY} - sp.energy)), 0.5) +
     0.10 * CASE WHEN lower(btrim(t.artist)) = ANY(sp.artists) THEN 1 ELSE 0.5 END +
     0.05 * CASE WHEN lower(btrim(t.genre)) = ANY(sp.genres) THEN 1 ELSE 0.5 END +
     0.05 * COALESCE(1 - LEAST(1, ABS(t.release_year - sp.release_year) / 30.0), 0.5)
@@ -716,7 +727,7 @@ function scoreTerms(intent: Intent, vecLiteral: string) {
 }
 
 // The brief's hard filters plus the queue and playlist-source exclusions,
-// over the aliases t and f. Shared by buildPool and buildOutsidePool so an
+// over the aliases t, f and fb. Shared by buildPool and buildOutsidePool so an
 // outside row passes exactly the rules a personal one does.
 function hardFilters(intent: Intent, excludeTrackIds: string[] | undefined, excludeSeedRecordings: boolean): SQL[] {
   const filters: SQL[] = []
@@ -727,8 +738,8 @@ function hardFilters(intent: Intent, excludeTrackIds: string[] | undefined, excl
   // is not the same as out-of-window, and excluding it would just mean this
   // track never had a chance to compete on its other signals.
   if (hasTempoWindow) {
-    filters.push(sql`(f.tempo IS NULL OR f.tempo >= ${tempoMin})`)
-    filters.push(sql`(f.tempo IS NULL OR f.tempo <= ${tempoMax})`)
+    filters.push(sql`(${TEMPO} IS NULL OR ${TEMPO} >= ${tempoMin})`)
+    filters.push(sql`(${TEMPO} IS NULL OR ${TEMPO} <= ${tempoMax})`)
   }
   if (intent.allowExplicit === false) filters.push(sql`COALESCE(t.explicit, false) = false`)
   // NULL release_year passes an era filter rather than being excluded — most
@@ -1040,9 +1051,9 @@ export async function buildPool(
         t.title AS title,
         t.artist AS artist,
         CASE WHEN fp.observed THEN fp.plays ELSE NULL END AS play_count,
-        f.tempo AS tempo,
-        f.energy AS energy,
-        f.valence AS valence,
+        ${TEMPO} AS tempo,
+        ${ENERGY} AS energy,
+        ${VALENCE} AS valence,
         t.release_year AS release_year,
         t.duration_ms AS duration_ms,
         t.genre AS genre,
@@ -1050,6 +1061,7 @@ export async function buildPool(
       FROM ${candidateSource}
       CROSS JOIN seed_profile sp
       LEFT JOIN track_features f ON f.track_id = t.id
+      LEFT JOIN track_feature_fallbacks fb ON fb.track_id = t.id
       LEFT JOIN track_meanings tm ON tm.track_id = t.id
       LEFT JOIN artist_taste at ON at.artist = t.artist
       LEFT JOIN playback_balance pb ON pb.artist = t.artist
@@ -1257,9 +1269,9 @@ export async function buildOutsidePool(
         t.title AS title,
         t.artist AS artist,
         NULL::int AS play_count,
-        f.tempo AS tempo,
-        f.energy AS energy,
-        f.valence AS valence,
+        ${TEMPO} AS tempo,
+        ${ENERGY} AS energy,
+        ${VALENCE} AS valence,
         t.release_year AS release_year,
         t.duration_ms AS duration_ms,
         t.genre AS genre,
@@ -1269,6 +1281,7 @@ export async function buildOutsidePool(
       JOIN tracks t ON t.id = c.track_id
       CROSS JOIN seed_profile sp
       LEFT JOIN track_features f ON f.track_id = t.id
+      LEFT JOIN track_feature_fallbacks fb ON fb.track_id = t.id
       LEFT JOIN artist_taste at ON at.artist = t.artist
       LEFT JOIN playback_balance pb ON pb.artist = t.artist
       WHERE ${sql.join(filters, sql` AND `)}

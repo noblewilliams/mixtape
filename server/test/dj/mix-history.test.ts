@@ -8,6 +8,7 @@ import {
   queueTracks,
   mixVersions,
   trackFeatures,
+  trackFeatureFallbacks,
 } from '../../src/db/schema'
 import {
   replaceQueue,
@@ -211,3 +212,13 @@ it('snapshots journey intent and assessment, carries it across edits, restores i
   expect((await readMixVersion(db,session.id,'owner',2)).energyJourney?.status).toBe('limited')
   expect((await readMixVersion(db,session.id,'owner',1)).energyJourney).toEqual(first.energyJourney)
  })
+
+// Propose-first S5: the energy journey stays measured-only. A song with only
+// an estimate (track_feature_fallbacks) counts as unknown energy.
+it('treats a fallback-only song as unknown energy in the journey assessment', async () => {
+  const {db, session} = await setup()
+  const songs = await db.insert(tracks).values(Array.from({length:6},(_,i)=>({title:`Estimate ${i}`,artist:'Test',appleId:`estimate-${i}`}))).returning()
+  await db.insert(trackFeatureFallbacks).values(songs.map((s,i)=>({trackId:s.id,energy:[.1,.2,.4,.5,.8,.9][i],moodSource:'model' as const})))
+  await replaceQueue(db,session.id,songs.map(s=>({trackId:s.id,reason:'chosen'})),'dj',undefined,'rise')
+  expect((await readMixVersion(db,session.id,'owner',1)).energyJourney).toMatchObject({status:'limited',known:0,total:6})
+})

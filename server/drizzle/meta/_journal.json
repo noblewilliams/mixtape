@@ -365,6 +365,20 @@
       "when": 1794774069008,
       "tag": "0051_turn_stop",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1794819391342,
+      "tag": "0052_propose_first",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1794822713801,
+      "tag": "0053_queue_tracks_track_idx",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,43 @@
 # Decision Log
 
+## 2026-11-16 — Propose first: all of music is the pool, no paid data APIs (founder)
+
+Mixes can only use songs in our own `tracks` table, which holds about 15k
+catalogue rows against Apple's 100M+, and enrichment can't keep up with it
+(decisions 2026-10-22). Research found no single API with every song plus
+lyrics meaning, BPM, mood and genre. Spec
+`superpowers/specs/2026-11-16-propose-first-design.md`. Founder decisions:
+
+- Every generate draws from one candidate set: the listener's own music,
+  model proposals verified on Apple, and the catalogue's nearest songs,
+  behind a new `PROPOSE_FIRST` flag. Proposals make up 25% of `comfort`
+  mixes, 50% of `mix` and 75% of `adventurous`; `CORPUS_PROPOSE_SHARE` goes
+  from 0.5 to 0.75. `OUTSIDE_PICKS` retires.
+- **No paid data APIs while there are no paying users.** Soundcharts is
+  rejected. Features come from ReccoBeats, then Deezer tempo by ISRC, then
+  the model's own energy estimate. `track_features` stays measured-only
+  (its rows mark a song enriched); Deezer tempo and estimates go in a new
+  `track_feature_fallbacks` table (corrected while planning). Estimates
+  never count toward the measured energy-journey assessment.
+- Proposed songs get no meaning embedding unless they enter a library or
+  recur, which keeps Neon on the free plan.
+- Spotify-only listeners get proposals as Spotify search links.
+
+**Reopens if:** measured energy covers under 60% of proposed songs and mixes
+audibly lose their shape, a free provider closes, or paying users arrive.
+
+Amended while building (2026-11-16):
+- **`comfort` mixes get no proposals.** `comfort` means the listener's
+  most-played songs, and the own-music rule (2026-11-09) already treats it as
+  library-only, so its 25% share does not apply. `mix` covers "mostly mine,
+  some new". Founder may revisit.
+- **"Remake with my music" never blends proposals**, generate or edit.
+- **Corpus swaps get 2 spare proposals** (not behind the flag): a swap that
+  misses on Apple now lands a spare, at up to 2 more Apple searches.
+- Spike (Gate 0): verify rate 88.7%, ReccoBeats energy on 69% of verified
+  proposals, model energy error 0.134; version words now catch "Dub" and
+  "Alt Version".
+
 ## 2026-11-10 — Proposed mixes no longer pitch adding music (founder)
 
 Every catalogue or proposed mix now shows the add-your-music line under it

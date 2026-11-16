@@ -1,0 +1,1 @@
+CREATE INDEX "queue_tracks_track_session_idx" ON "queue_tracks" USING btree ("track_id","session_id");

@@ -31,6 +31,7 @@ import type { MusicKitWiring, ShareRateLimiter, SharesWiring, TranscribeWiring }
 import type { ArtworkDeps } from './artwork/runner'
 import { createSpotifyOEmbedArtworkClient } from './artwork/spotify-oembed'
 import { createDeezerArtworkClient } from './artwork/deezer'
+import { createDeezerTempoClient } from './enrich/deezer-tempo'
 import type { SpotifyArtworkDeps } from './artwork/spotify-fallback'
 import type { PlaylistEditDjDeps } from './playlist-editing/loop'
 import type { AlbumDeps } from './albums/loop'
@@ -63,6 +64,8 @@ type Bindings = {
   OUTSIDE_PICKS?: string
   ALBUM_PICKS?: string
   NEVER_REFUSE?: string
+  PROPOSE_FIRST?: string
+  PROPOSE_FIRST_USERS?: string
   AI_CONSENT?: string
   SHARE_BASE_URL?: string
   SHARE_READ_LIMITER?: ShareRateLimiter
@@ -133,6 +136,17 @@ export function neverRefuseEnabled(env: { NEVER_REFUSE?: string }): boolean {
   return env.NEVER_REFUSE === 'on'
 }
 
+// Propose first (spec 2026-11-16): personal mixes blend songs the DJ
+// proposes from all of music, verified on Apple, and corpus mixes propose
+// more of themselves. Same exact-"on" rule as outside picks. For the gated
+// rollout, PROPOSE_FIRST_USERS (comma-separated user ids, optional) turns it
+// on for those listeners only while PROPOSE_FIRST stays "off".
+export function proposeFirstEnabled(env: { PROPOSE_FIRST?: string; PROPOSE_FIRST_USERS?: string }, userId?: string): boolean {
+  if (env.PROPOSE_FIRST === 'on') return true
+  if (!userId || !env.PROPOSE_FIRST_USERS) return false
+  return env.PROPOSE_FIRST_USERS.split(',').some((id) => id.trim() !== '' && id.trim() === userId)
+}
+
 // The album loop rides the DJ's model clients plus the Apple catalogue, so it
 // exists only when the flag is on and both of those are configured; absent,
 // createApp mounts no Listen later routes and album sessions are refused.
@@ -168,13 +182,16 @@ function buildDjDeps(env: Bindings): DjDeps | undefined {
     titleComplete: anthropicComplete(anthropic),
     outsidePicks: outsidePicksEnabled(env),
     neverRefuse: neverRefuseEnabled(env),
+    // Resolved per turn for its listener (runDjTurn).
+    proposeFirstFor: (userId) => proposeFirstEnabled(env, userId),
   }
 }
 
 // The DJ's catalogue fill (dj/catalogue-fill.ts) needs the Apple catalogue
 // and the enrichment sources. Its ReccoBeats and LRCLIB calls go through a
 // fetch that counts, per request, so the fill charges its subrequest budget
-// what those calls actually fetched.
+// what those calls actually fetched. The same ReccoBeats fetch and a Deezer
+// tempo client serve the per-turn feature chain on verified proposals.
 export function buildFillDeps(
   env: Pick<Bindings, 'AI' | 'ITUNES_STOREFRONT'>,
   musicKit: { catalog: FillDeps['catalog'] } | undefined,
@@ -199,6 +216,9 @@ export function buildFillDeps(
       embed: workersAiEmbedder(env.AI),
     },
     enrichFetches: () => fetches,
+    // The per-turn feature chain's tempo fallback, on the same fetch as the
+    // artwork Deezer client (uncounted: the chain charges its own worst case).
+    deezerTempo: createDeezerTempoClient({ fetchLike }),
   }
 }
 
