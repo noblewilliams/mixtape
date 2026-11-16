@@ -873,7 +873,7 @@ void main() {
 
       expect(find.text('play jazz'), findsOneWidget);
       expect(find.byKey(WorkingCassette.indicatorKey), findsOneWidget);
-      expect(find.text('The DJ is listening…'), findsOneWidget);
+      expect(find.text('The DJ is listening'), findsOneWidget);
       // Before the first mix the cassette wears the default case.
       expect(
         tester
@@ -1125,7 +1125,7 @@ void main() {
       expect(
         find.descendant(
           of: find.byKey(WorkingCassette.captionKey),
-          matching: find.textContaining('for Tems…'),
+          matching: find.textContaining('for Tems'),
         ),
         findsOneWidget,
       );
@@ -1151,7 +1151,7 @@ void main() {
       // The opening line holds its 1.5 s, then the step's.
       await tester.pump(const Duration(milliseconds: 1600));
       await tester.pump(const Duration(milliseconds: 400));
-      expect(find.text('Pressing 12 songs to tape…'), findsOneWidget);
+      expect(find.text('Pressing 12 songs to tape'), findsOneWidget);
 
       reply.complete(
         TurnResult(

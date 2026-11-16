@@ -299,7 +299,7 @@ void main() {
       await making(tester);
       expect(find.text(_headline), findsOneWidget);
       expect(find.text(_line), findsOneWidget);
-      expect(stepLine(tester), 'The DJ is listening…');
+      expect(stepLine(tester), 'The DJ is listening');
       expect(
         tester.getTopLeft(find.byKey(MakingScreen.stepKey)).dy,
         greaterThan(tester.getBottomLeft(find.text(_line)).dy),
@@ -315,7 +315,7 @@ void main() {
       expect(step.maxLines, 1);
 
       await tester.pump(const Duration(seconds: 5));
-      expect(stepLine(tester), isNot('The DJ is listening…'));
+      expect(stepLine(tester), isNot('The DJ is listening'));
       await tester.pumpWidget(const SizedBox());
     });
 
@@ -330,7 +330,7 @@ void main() {
       made.step(WorkingStep.listening(DateTime.now()));
       await tester.pump();
       await tester.pump(const Duration(seconds: 8));
-      expect(stepLine(tester), 'The DJ is listening…');
+      expect(stepLine(tester), 'The DJ is listening');
 
       made.step(
         WorkingStep(
@@ -341,7 +341,7 @@ void main() {
       await tester.pump();
       expect(
         stepLine(tester),
-        isIn(['Digging for Tems…', 'Crate-digging for Tems…']),
+        isIn(['Digging for Tems', 'Crate-digging for Tems']),
       );
       expect(tester.takeAnnouncements(), isEmpty);
       expect(find.bySemanticsLabel(RegExp('Tems')), findsNothing);
