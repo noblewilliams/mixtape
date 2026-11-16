@@ -1203,7 +1203,10 @@ async function proposalEnergies(db: Db, picks: VerifiedProposal[]): Promise<Map<
       .leftJoin(trackFeatureFallbacks, eq(trackFeatureFallbacks.trackId, tracks.id))
       .where(inArray(tracks.id, [...energies.keys()]))
     for (const r of rows) {
-      const value = r.measured ?? r.fallback
+      // A measured value out of range falls through to the fallback, then
+      // the estimate, rather than hiding them as unknown.
+      const inUnit = (v: number | null): v is number => v !== null && v >= 0 && v <= 1
+      const value = inUnit(r.measured) ? r.measured : inUnit(r.fallback) ? r.fallback : null
       if (value !== null) energies.set(r.trackId, value)
     }
   } catch {
