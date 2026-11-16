@@ -215,6 +215,22 @@ view derives it from ownership. Open: the gate is `ownMusicBrief`, which
 reads `comfort` as favourites, so `comfort`'s 0.25 share never applies
 until comfort and favourites are told apart.
 
+As built (S8, edits): a personal listener's swap or extend goes outside
+their music only when it cannot be covered from it: a named or artist-only
+scope with no songs to draw on (after the existing catalogue and Apple
+top-songs fill), or a curation that returns fewer than asked (nothing fits
+the genre or mood). Then one proposal call per request asks for the songs
+still needed plus `EDIT_SPARES` (2), verified on Apple (stopping at the
+songs needed) inside the turn's `VERIFY_MAX`, deadline and curation budget,
+and `fillProposalFeatures` runs on what lands. A scoped request keeps only
+proposals and Apple hits crediting its artists. Same gates as the blend:
+propose first active, an intent the model chose (never the weak fallback
+from the listener's words), never `ownMusicBrief` or `allowOutside: false`.
+Landed songs are marked new (`outsidePicksNotice`); what is still short is
+said by `editOutsideShortNotice`, and a swap with nothing confirmed keeps
+its original song. The machinery is shared with the corpus (NEVER_REFUSE)
+edit path (`proposeEditSongs`), which now asks for 2 spares too.
+
 ## Step 3: sequencing uses the new features (server)
 
 - Once candidates are chosen, the batch feature lookup runs (Step 1) before

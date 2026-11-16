@@ -673,7 +673,7 @@ describe('never refuse: edits on a proposed mix', () => {
     expect(text).not.toBe(INSUFFICIENT_SEEDS_TEXT)
     expect(text.split('\n')[0]).toBe(PROPOSED_NOTICE)
     const ask = proposalRequests(requests)[0].messages[0].content as string
-    expect(ask).toContain('Propose up to 1 songs.')
+    expect(ask).toContain('Propose up to 3 songs.')
     // The queue and the swapped-out song are never proposed again.
     expect(ask).toContain(`- ${round[0].title} by ${round[0].artist}`)
     expect(ask).toContain(`- ${round[2].title} by ${round[2].artist}`)
