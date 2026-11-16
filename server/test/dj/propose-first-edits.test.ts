@@ -267,16 +267,31 @@ describe('propose first edits: budget, spares and dedupe', () => {
     const { result, requests, text } = await editTurn(db, session.id, call,
       { proposed: jazz(6), confirmed: jazz(6), deps: { titleComplete: titleCompleteNone }, brief: 'swap songs 2, 4, 6 and 8 for something jazzier' })
 
-    // Six curations at most: four library curations, two proposal calls.
+    // Swaps sharing an intent cost one curation (main 18cf872), so the four
+    // swaps are one request: one library curation and one proposal call,
+    // well inside the cap, and every swap lands a song of its own.
     expect(requests.filter((r) => r.tools.length === 0).length).toBeLessThanOrEqual(6)
-    expect(proposalRequests(requests)).toHaveLength(2)
+    expect(proposalRequests(requests)).toHaveLength(1)
     const swapped = [2, 4, 6, 8].filter((i) => result.queue[i].trackId !== before[i].trackId)
-    expect(swapped).toHaveLength(2)
+    expect(swapped).toHaveLength(4)
     for (const i of swapped) expect(result.queue[i].title).toMatch(/^Jazz /)
-    // Two distinct songs: the second request did not repeat the first's.
-    expect(new Set(swapped.map((i) => result.queue[i].title)).size).toBe(2)
-    // The two left unswapped are the library's genre-check drops.
-    expect(text).toContain(genreCheckNotice({ dropped: 2, genres: ['jazz'], failed: false }))
+    expect(new Set(swapped.map((i) => result.queue[i].title)).size).toBe(4)
+    expect(text).not.toContain(genreCheckNotice({ dropped: 2, genres: ['jazz'], failed: false }))
+    expect(text).not.toMatch(/could not be found in their music/)
+  })
+
+  it('several short requests with their own intents stay inside the curation cap and the turn never fails', async () => {
+    const { db, session } = await standingMix()
+    const themes = ['jazzier', 'smoky jazz', 'late night jazz', 'cool jazz']
+    const call = { name: 'edit_queue', input: { ops: [2, 4, 6, 8].map((position, k) => ({ op: 'swap', position, intent: { themes: themes[k], genres: ['jazz'] } })) } }
+    const { result, requests, text } = await editTurn(db, session.id, call,
+      { proposed: jazz(6), confirmed: jazz(6), deps: { titleComplete: titleCompleteNone }, brief: 'swap songs 2, 4, 6 and 8 for different kinds of jazz' })
+
+    expect(requests.filter((r) => r.tools.length === 0).length).toBeLessThanOrEqual(6)
+    expect(result.queue).toHaveLength(10)
+    const landed = [2, 4, 6, 8].filter((i) => /^Jazz /.test(result.queue[i].title))
+    expect(landed.length).toBeGreaterThan(0)
+    expect(landed.length).toBeLessThan(4)
     expect(text).not.toMatch(/could not be found in their music/)
   })
 
