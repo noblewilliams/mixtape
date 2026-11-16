@@ -65,6 +65,7 @@ type CandidateRow = {
   isrc_checked_at: string | null
   artist_source: TrackRow['artistSource']
   enrich_priority: number
+  meaning_deferred: boolean
   created_at: string
   skip_features: boolean
   skip_meaning: boolean
@@ -94,6 +95,7 @@ function toTrackRow(r: CandidateRow): TrackRow {
     isrcCheckedAt: r.isrc_checked_at === null ? null : new Date(r.isrc_checked_at),
     artistSource: r.artist_source,
     enrichPriority: r.enrich_priority,
+    meaningDeferred: r.meaning_deferred,
     // Raw SQL hands back created_at as a string, not a Date, despite the
     // schema type — a type-only accommodation. Nothing below does date
     // arithmetic on it, so this cast is safe as long as that stays true.

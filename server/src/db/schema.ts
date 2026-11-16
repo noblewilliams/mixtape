@@ -89,6 +89,9 @@ export const tracks = pgTable(
       .default('sync'),
     // Enrichment runs highest first; an import raises it for pool candidates.
     enrichPriority: integer('enrich_priority').notNull().default(0),
+    // Set when the proposal path first inserts the row: its meaning stage
+    // waits until the song is actually used (spec 2026-11-16 propose-first).
+    meaningDeferred: boolean('meaning_deferred').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -295,6 +298,31 @@ export const trackFeatures = pgTable('track_features', {
   source: text('source').notNull(),
   fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+// Stand-in tempo/energy/valence for songs ReccoBeats hasn't measured: Deezer
+// tempo by ISRC, or the proposal model's estimate. Kept out of track_features
+// on purpose — a track_features row marks a song enriched (it joins the corpus
+// pool, and the cron's SKIP_FEATURES stops retrying ReccoBeats for it). Pools
+// read measured values first, then these. Ranges are checked on write.
+export const trackFeatureFallbacks = pgTable(
+  'track_feature_fallbacks',
+  {
+    trackId: uuid('track_id')
+      .primaryKey()
+      .references(() => tracks.id, { onDelete: 'cascade' }),
+    tempo: doublePrecision('tempo'),
+    energy: doublePrecision('energy'),
+    valence: doublePrecision('valence'),
+    tempoSource: text('tempo_source', { enum: ['deezer', 'model'] }),
+    // Covers energy and valence.
+    moodSource: text('mood_source', { enum: ['model'] }),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check('track_feature_fallbacks_tempo_source_check', sql`${t.tempoSource} IN ('deezer', 'model')`),
+    check('track_feature_fallbacks_mood_source_check', sql`${t.moodSource} IN ('model')`),
+  ],
+)
 
 // Lyric MEANING only — never lyric text (docs/decisions.md → lyrics stance).
 export const trackMeanings = pgTable(
