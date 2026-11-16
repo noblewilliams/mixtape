@@ -343,6 +343,33 @@ describe('pickHit: two passes', () => {
     expect(pickHit([hit(version)], { title: 'Cruel Summer', artist: 'Taylor Swift' })).toBeUndefined()
   })
 
+  // Spike 2026-11-16 (docs/testing/2026-11-16-propose-first-spike.md): a
+  // plain proposal verified to a dub and an alternate take, and "Valerie" to
+  // its "Version Revisited".
+  it.each([
+    ['Baby Doll (Dub)', 'Baby Doll', 'Soft Cell'],
+    ['Love Galore (Alt Version)', 'Love Galore', 'SZA'],
+    ['Love Galore (Alternate Version)', 'Love Galore', 'SZA'],
+    ['Love Galore (Alternative Version)', 'Love Galore', 'SZA'],
+    ['Love Galore (Alternate Take)', 'Love Galore', 'SZA'],
+    ['Valerie (Version Revisited)', 'Valerie', 'Mark Ronson'],
+    ['Valerie (Revisited)', 'Valerie', 'Mark Ronson'],
+    ['Valerie (Reworked)', 'Valerie', 'Mark Ronson'],
+  ])('rejects %s for a proposal of the plain song', (version, title, artist) => {
+    expect(pickHit([hit(version, artist)], { title, artist })).toBeUndefined()
+    expect(pickHit([hit(version, artist), hit(title, artist)], { title, artist })?.title).toBe(title)
+  })
+
+  it('a dub or alternate version the proposal names still verifies', () => {
+    expect(pickHit([hit('Baby Doll (Dub)', 'Soft Cell')], { title: 'Baby Doll (Dub)', artist: 'Soft Cell' })).toBeDefined()
+    expect(pickHit([hit('Love Galore (Alternate Version)', 'SZA')], { title: 'Love Galore (Alt Version)', artist: 'SZA' })).toBeDefined()
+  })
+
+  it('a title word that is only part of another word is no version marker', () => {
+    expect(pickHit([hit('Dubai Nights', 'Wizkid')], { title: 'Dubai Nights', artist: 'Wizkid' })).toBeDefined()
+    expect(pickHit([hit('Alternative Ulster', 'Stiff Little Fingers')], { title: 'Alternative Ulster', artist: 'Stiff Little Fingers' })).toBeDefined()
+  })
+
   it("takes the plain title over \"(Taylor's Version)\" when both are returned", () => {
     const found = [hit("Love Story (Taylor's Version)"), hit('Love Story')]
     expect(pickHit(found, { title: 'Love Story', artist: 'Taylor Swift' })?.title).toBe('Love Story')

@@ -265,12 +265,23 @@ export function titleKey(title: string): string {
 }
 
 // A version the proposal did not ask for: a hit whose title carries one of
-// these words, when the proposed title does not, is another recording.
+// these words, when the proposed title does not, is another recording. Dub,
+// alternate take and "Version Revisited" from the 2026-11-16 spike (plain
+// proposals verified to "Baby Doll (Dub)" and "Valerie (Version Revisited)").
 const VERSION_WORDS =
-  /\b(live|remix|remixed|karaoke|cover|acoustic|instrumental|sped|slowed|reverb|demo|acapella|cappella|mix)\b/giu
+  /\b(live|remix|remixed|karaoke|cover|acoustic|instrumental|sped|slowed|reverb|demo|acapella|cappella|mix|dub|revisited|rework|reworked|alt\.? version|alternat(?:e|ive) (?:version|take))\b/giu
+
+// Spellings of one marker counted as one: "Alt Version" asked for accepts
+// an "Alternate Version" hit.
+function versionWord(word: string): string {
+  if (word.startsWith('alt')) return 'alt'
+  if (word === 'remixed') return 'remix'
+  if (word === 'reworked') return 'rework'
+  return word
+}
 
 function versionWords(title: string): Set<string> {
-  return new Set(Array.from(title.toLowerCase().matchAll(VERSION_WORDS), (m) => (m[1] === 'remixed' ? 'remix' : m[1])))
+  return new Set(Array.from(title.toLowerCase().matchAll(VERSION_WORDS), (m) => versionWord(m[1])))
 }
 
 // The proposed artist's key, and its first credited artist's ("Drake feat.
