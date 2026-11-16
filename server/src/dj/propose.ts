@@ -280,8 +280,15 @@ function versionWord(word: string): string {
   return word
 }
 
+// The canonical release naming for house and electronic on Apple Music,
+// not another version: a plain "Drive" verifies to "Drive (Original Mix)"
+// or "Drive (Extended Mix)". Any other mix (club, dub, radio, a remix)
+// still counts as a version.
+const CANONICAL_MIX = /\b(?:original|extended) mix\b/giu
+
 function versionWords(title: string): Set<string> {
-  return new Set(Array.from(title.toLowerCase().matchAll(VERSION_WORDS), (m) => versionWord(m[1])))
+  const plain = title.toLowerCase().replace(CANONICAL_MIX, ' ')
+  return new Set(Array.from(plain.matchAll(VERSION_WORDS), (m) => versionWord(m[1])))
 }
 
 // The proposed artist's key, and its first credited artist's ("Drake feat.
@@ -313,6 +320,8 @@ function matchesExactly(hit: Pick<CatalogSong, 'title' | 'artist'>, proposal: Pr
  * folds to the proposed title, then one that matches with version segments
  * stripped. "Love Story" takes the plain recording over "Love Story
  * (Taylor's Version)" when Apple returns both, wherever they sit in the list.
+ * In the second pass an "(Original Mix)" goes ahead of an "(Extended Mix)"
+ * the proposal did not name.
  */
 export function pickHit<T extends Pick<CatalogSong, 'title' | 'artist' | 'explicit'>>(
   found: T[],
@@ -320,7 +329,11 @@ export function pickHit<T extends Pick<CatalogSong, 'title' | 'artist' | 'explic
   allowExplicit = true,
 ): T | undefined {
   const allowed = found.filter((s) => allowExplicit || s.explicit !== true)
-  return allowed.find((s) => matchesExactly(s, proposal)) ?? allowed.find((s) => matchesProposal(s, proposal))
+  const exact = allowed.find((s) => matchesExactly(s, proposal))
+  if (exact) return exact
+  const matched = allowed.filter((s) => matchesProposal(s, proposal))
+  const extended = (title: string) => /\bextended mix\b/iu.test(title)
+  return (extended(proposal.title) ? undefined : matched.find((s) => !extended(s.title))) ?? matched[0]
 }
 
 function creditAndVersionMatch(hit: Pick<CatalogSong, 'title' | 'artist'>, proposal: ProposedSong): boolean {

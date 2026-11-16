@@ -384,6 +384,35 @@ describe('pickHit: two passes', () => {
     expect(pickHit([hit('Cruel Summer - Acoustic')], { title: 'Cruel Summer (Acoustic)', artist: 'Taylor Swift' })).toBeDefined()
   })
 
+  // House and electronic releases on Apple are titled "(Original Mix)" or
+  // "(Extended Mix)": the canonical recording, not another version.
+  it.each([
+    ['Drive (Original Mix)'],
+    ['Drive (Extended Mix)'],
+    ['Drive - Original Mix'],
+  ])('a plain proposal verifies to %s', (title) => {
+    expect(matchesProposal({ title, artist: 'Black Coffee' }, { title: 'Drive', artist: 'Black Coffee' })).toBe(true)
+    expect(pickHit([hit(title, 'Black Coffee')], { title: 'Drive', artist: 'Black Coffee' })?.title).toBe(title)
+  })
+
+  it.each([
+    ['Drive (Club Mix)'],
+    ['Drive (Dub Mix)'],
+    ['Drive (Remix)'],
+    ['Drive (Radio Mix)'],
+    ['Drive (Original Club Mix)'],
+  ])('a mix that is another version, %s, is still rejected', (title) => {
+    expect(matchesProposal({ title, artist: 'Black Coffee' }, { title: 'Drive', artist: 'Black Coffee' })).toBe(false)
+    expect(pickHit([hit(title, 'Black Coffee')], { title: 'Drive', artist: 'Black Coffee' })).toBeUndefined()
+  })
+
+  it('the exact title wins, then the original mix over the extended one', () => {
+    const artist = 'Black Coffee'
+    expect(pickHit([hit('Drive (Original Mix)', artist), hit('Drive', artist)], { title: 'Drive', artist })?.title).toBe('Drive')
+    expect(pickHit([hit('Drive (Extended Mix)', artist), hit('Drive (Original Mix)', artist)], { title: 'Drive', artist })?.title).toBe('Drive (Original Mix)')
+    expect(pickHit([hit('Drive (Original Mix)', artist), hit('Drive (Extended Mix)', artist)], { title: 'Drive (Extended Mix)', artist })?.title).toBe('Drive (Extended Mix)')
+  })
+
   it('explicit off skips an explicit hit for a clean one further down', () => {
     const found = [hit('Cruel Summer', 'Taylor Swift', true), hit('Cruel Summer')]
     expect(pickHit(found, { title: 'Cruel Summer', artist: 'Taylor Swift' }, false)).toBe(found[1])

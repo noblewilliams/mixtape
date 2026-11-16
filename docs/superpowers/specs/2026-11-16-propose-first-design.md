@@ -218,6 +218,23 @@ view derives it from ownership. Open: the gate is `ownMusicBrief`, which
 reads `comfort` as favourites, so `comfort`'s 0.25 share never applies
 until comfort and favourites are told apart.
 
+As built (short-mix fix, 2026-11-16): live, "lofi afro house slow living"
+came back 1 to 3 songs: the round was sized to the proposed share, so a
+library that curated next to nothing for the genre left too few unsearched
+proposals to top up from, and proposals the sound check dropped were never
+replaced. A personal blend's one proposal call now asks for the whole mix
+(`proposalCount`: `targetCount + PROPOSE_EXTRA`, at most `VERIFY_MAX`) and
+still verifies only its share up front; the unsearched rest are spares.
+`topUpFromBlend` draws on them when the library is short, and once more
+after the proposals' sound check if the mix is still short (the gap plus
+`genreSpares`, one more check call at most). No second proposal call; the
+corpus blend and flag-off paths are unchanged. The genre notice counts only
+the mix's empty places. Separately, `pickHit` no longer reads "(Original
+Mix)" or "(Extended Mix)" as a version (the canonical naming of house and
+electronic releases on Apple); club, dub, radio mixes and remixes still
+are. An exact title wins, then an original mix over an extended one the
+proposal did not name.
+
 As built (S8, edits): a personal listener's swap or extend goes outside
 their music only when it cannot be covered from it: a named or artist-only
 scope with no songs to draw on (after the existing catalogue and Apple
